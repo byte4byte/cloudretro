@@ -1,6 +1,6 @@
 file://chrome/android/OWNERS
 
-jbudorick@chromium.org
+per-file BUILD.gn=*
 
 # COMPONENT: Test>Android
 # OS: Android

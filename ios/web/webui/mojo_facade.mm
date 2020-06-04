@@ -20,9 +20,9 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
 #include "ios/web/public/thread/web_thread.h"
-#include "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
+#include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/system/core.h"
-#include "services/service_manager/public/mojom/interface_provider.mojom.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,12 +30,8 @@
 
 namespace web {
 
-MojoFacade::MojoFacade(
-    service_manager::mojom::InterfaceProvider* interface_provider,
-    WebState* web_state)
-    : interface_provider_(interface_provider), web_state_(web_state) {
+MojoFacade::MojoFacade(WebState* web_state) : web_state_(web_state) {
   DCHECK_CURRENTLY_ON(WebThread::UI);
-  DCHECK(interface_provider_);
   DCHECK(web_state_);
 }
 
@@ -106,10 +102,8 @@ void MojoFacade::HandleMojoBindInterface(base::Value args) {
 
   mojo::ScopedMessagePipeHandle handle(
       static_cast<mojo::MessagePipeHandle>(*raw_handle));
-
-  // By design interface_provider.getInterface either succeeds or crashes, so
-  // check if interface name is a valid string is intentionally omitted.
-  interface_provider_->GetInterface(*interface_name, std::move(handle));
+  web_state_->GetInterfaceBinderForMainFrame()->BindInterface(
+      mojo::GenericPendingReceiver(*interface_name, std::move(handle)));
 }
 
 void MojoFacade::HandleMojoHandleClose(base::Value args) {
@@ -190,17 +184,14 @@ base::Value MojoFacade::HandleMojoHandleReadMessage(base::Value args) {
   base::Value result(base::Value::Type::DICTIONARY);
   if (mojo_result == MOJO_RESULT_OK) {
     base::Value handles_list(base::Value::Type::LIST);
-    base::Value::ListStorage& handles_list_storage = handles_list.GetList();
     for (uint32_t i = 0; i < handles.size(); i++) {
-      handles_list_storage.emplace_back(
-          static_cast<int>(handles[i].release().value()));
+      handles_list.Append(static_cast<int>(handles[i].release().value()));
     }
     result.SetKey("handles", std::move(handles_list));
 
     base::Value buffer(base::Value::Type::LIST);
-    base::Value::ListStorage& buffer_storage = buffer.GetList();
     for (uint32_t i = 0; i < bytes.size(); i++) {
-      buffer_storage.emplace_back(bytes[i]);
+      buffer.Append(bytes[i]);
     }
     result.SetKey("buffer", std::move(buffer));
   }

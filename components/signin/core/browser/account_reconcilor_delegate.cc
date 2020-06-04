@@ -14,6 +14,10 @@ bool AccountReconcilorDelegate::IsReconcileEnabled() const {
   return false;
 }
 
+bool AccountReconcilorDelegate::IsMultiloginEndpointEnabled() const {
+  return true;
+}
+
 bool AccountReconcilorDelegate::IsAccountConsistencyEnforced() const {
   return false;
 }
@@ -170,8 +174,16 @@ AccountReconcilorDelegate::ShouldRevokeSecondaryTokensBeforeReconcile(
   return RevokeTokenOption::kDoNotRevoke;
 }
 
+bool AccountReconcilorDelegate::ShouldRevokeTokensNotInCookies() const {
+  return false;
+}
+
 bool AccountReconcilorDelegate::ShouldRevokeTokensOnCookieDeleted() {
   return false;
+}
+
+bool AccountReconcilorDelegate::ShouldRevokeTokensIfNoPrimaryAccount() const {
+  return true;
 }
 
 base::TimeDelta AccountReconcilorDelegate::GetReconcileTimeout() const {

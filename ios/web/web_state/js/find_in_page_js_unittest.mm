@@ -10,11 +10,11 @@
 #import "base/test/ios/wait_util.h"
 #import "ios/web/find_in_page/find_in_page_constants.h"
 #import "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/js_messaging/web_frame_util.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/test/web_test_with_web_state.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state.h"
 #include "testing/gtest_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -42,11 +42,13 @@ namespace web {
 class FindInPageJsTest : public WebTestWithWebState {
  protected:
   // Returns WebFramesManager instance.
-  WebFramesManager* frames_manager() {
-    return WebFramesManager::FromWebState(web_state());
+  std::set<WebFrame*> all_web_frames() {
+    return web_state()->GetWebFramesManager()->GetAllWebFrames();
   }
   // Returns main frame for |web_state_|.
-  WebFrame* main_web_frame() { return GetMainWebFrame(web_state()); }
+  WebFrame* main_web_frame() {
+    return web_state()->GetWebFramesManager()->GetMainWebFrame();
+  }
 };
 
 // Tests that FindInPage searches in main frame containing a match and responds
@@ -56,7 +58,7 @@ TEST_F(FindInPageJsTest, FindText) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   __block bool message_received = false;
@@ -85,7 +87,7 @@ TEST_F(FindInPageJsTest, FindTextNoResults) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -114,9 +116,9 @@ TEST_F(FindInPageJsTest, FindIFrameText) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 2;
+    return all_web_frames().size() == 2;
   }));
-  std::set<WebFrame*> all_frames = frames_manager()->GetAllWebFrames();
+  std::set<WebFrame*> all_frames = all_web_frames();
   __block bool message_received = false;
   WebFrame* child_frame = nullptr;
   for (auto* frame : all_frames) {
@@ -149,7 +151,7 @@ TEST_F(FindInPageJsTest, FindWhiteSpace) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -176,7 +178,7 @@ TEST_F(FindInPageJsTest, FindAcrossMultipleNodes) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -196,13 +198,14 @@ TEST_F(FindInPageJsTest, FindAcrossMultipleNodes) {
   }));
 }
 
-// Tests that a FindInPage match can be highlighted.
+// Tests that a FindInPage match can be highlighted and the correct
+// accessibility string is returned.
 TEST_F(FindInPageJsTest, FindHighlightMatch) {
-  ASSERT_TRUE(LoadHtml("<span>foo</span>"));
+  ASSERT_TRUE(LoadHtml("<span>some foo match</span>"));
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   __block bool message_received = false;
@@ -223,12 +226,15 @@ TEST_F(FindInPageJsTest, FindHighlightMatch) {
   }));
 
   __block bool highlight_done = false;
+  __block std::string context_string;
   std::vector<base::Value> highlight_params;
   highlight_params.push_back(base::Value(0));
   main_web_frame()->CallJavaScriptFunction(
       kFindInPageSelectAndScrollToMatch, highlight_params,
       base::BindOnce(^(const base::Value* result) {
         highlight_done = true;
+        context_string =
+            result->FindKey(kSelectAndScrollResultContextString)->GetString();
       }),
       kCallJavascriptFunctionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
@@ -238,16 +244,17 @@ TEST_F(FindInPageJsTest, FindHighlightMatch) {
   EXPECT_NSEQ(@1,
               ExecuteJavaScript(
                   @"document.getElementsByClassName('find_selected').length"));
+  EXPECT_EQ("some foo match", context_string);
 }
 
 // Tests that a FindInPage match can be highlighted and that a previous
 // highlight is removed when another match is highlighted.
 TEST_F(FindInPageJsTest, FindHighlightSeparateMatches) {
-  ASSERT_TRUE(LoadHtml("<span>foo foo</span>"));
+  ASSERT_TRUE(LoadHtml("<span>foo foo match</span>"));
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   __block bool message_received = false;
@@ -268,18 +275,22 @@ TEST_F(FindInPageJsTest, FindHighlightSeparateMatches) {
   }));
 
   __block bool highlight_done = false;
+  __block std::string context_string;
   std::vector<base::Value> highlight_params;
   highlight_params.push_back(base::Value(0));
   main_web_frame()->CallJavaScriptFunction(
       kFindInPageSelectAndScrollToMatch, highlight_params,
       base::BindOnce(^(const base::Value* result) {
         highlight_done = true;
+        context_string =
+            result->FindKey(kSelectAndScrollResultContextString)->GetString();
       }),
       kCallJavascriptFunctionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
     return highlight_done;
   }));
 
+  EXPECT_EQ("foo ", context_string);
   EXPECT_NSEQ(@1,
               ExecuteJavaScript(
                   @"document.getElementsByClassName('find_selected').length"));
@@ -291,12 +302,15 @@ TEST_F(FindInPageJsTest, FindHighlightSeparateMatches) {
       kFindInPageSelectAndScrollToMatch, highlight_second_params,
       base::BindOnce(^(const base::Value* result) {
         highlight_done = true;
+        context_string =
+            result->FindKey(kSelectAndScrollResultContextString)->GetString();
       }),
       kCallJavascriptFunctionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
     return highlight_done;
   }));
 
+  EXPECT_EQ(" foo match", context_string);
   id inner_html = ExecuteJavaScript(@"document.body.innerHTML");
   ASSERT_TRUE([inner_html isKindOfClass:[NSString class]]);
   EXPECT_TRUE([inner_html
@@ -313,7 +327,7 @@ TEST_F(FindInPageJsTest, FindHighlightMatchAtInvalidIndex) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   __block bool message_received = false;
@@ -358,7 +372,7 @@ TEST_F(FindInPageJsTest, SearchForNonAscii) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -391,7 +405,7 @@ TEST_F(FindInPageJsTest, CheckFindInPageScrollsToMatch) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   __block bool message_received = false;
@@ -441,7 +455,7 @@ TEST_F(FindInPageJsTest, StopFindInPage) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
 
   // Do a search to ensure match highlighting is cleared properly.
@@ -500,7 +514,7 @@ TEST_F(FindInPageJsTest, HiddenMatch) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -551,7 +565,7 @@ TEST_F(FindInPageJsTest, HiddenMatchBecomesVisible) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;
@@ -604,7 +618,7 @@ TEST_F(FindInPageJsTest, MatchBecomesInvisible) {
   const base::TimeDelta kCallJavascriptFunctionTimeout =
       base::TimeDelta::FromSeconds(kWaitForJSCompletionTimeout);
   ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return frames_manager()->GetAllWebFrames().size() == 1;
+    return all_web_frames().size() == 1;
   }));
   __block bool message_received = false;
   std::vector<base::Value> params;

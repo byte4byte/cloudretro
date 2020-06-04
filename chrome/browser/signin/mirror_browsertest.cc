@@ -12,7 +12,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/task/post_task.h"
@@ -21,7 +20,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
@@ -33,18 +31,19 @@
 #include "components/signin/core/browser/dice_header_helper.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/public/base/signin_pref_names.h"
-#include "content/public/common/url_loader_throttle.h"
+#include "content/public/common/content_client.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
 
 namespace {
 
 // A delegate to insert a user generated X-Chrome-Connected header
 // to a specifict URL.
-class HeaderModifyingThrottle : public content::URLLoaderThrottle {
+class HeaderModifyingThrottle : public blink::URLLoaderThrottle {
  public:
   HeaderModifyingThrottle() = default;
   ~HeaderModifyingThrottle() override = default;
@@ -65,27 +64,17 @@ class ThrottleContentBrowserClient : public ChromeContentBrowserClient {
   ~ThrottleContentBrowserClient() override = default;
 
   // ContentBrowserClient overrides:
-  std::vector<std::unique_ptr<content::URLLoaderThrottle>>
-  CreateURLLoaderThrottlesOnIO(
-      const network::ResourceRequest& request,
-      content::ResourceContext* resource_context,
-      const base::RepeatingCallback<content::WebContents*()>& wc_getter,
-      content::NavigationUIData* navigation_ui_data,
-      int frame_tree_node_id) override {
-    std::vector<std::unique_ptr<content::URLLoaderThrottle>> throttles;
-    if (request.url == watch_url_)
-      throttles.push_back(std::make_unique<HeaderModifyingThrottle>());
-    return throttles;
-  }
-  std::vector<std::unique_ptr<content::URLLoaderThrottle>>
+  std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
   CreateURLLoaderThrottles(
       const network::ResourceRequest& request,
       content::BrowserContext* browser_context,
       const base::RepeatingCallback<content::WebContents*()>& wc_getter,
       content::NavigationUIData* navigation_ui_data,
       int frame_tree_node_id) override {
-    return CreateURLLoaderThrottlesOnIO(request, nullptr, wc_getter,
-                                        navigation_ui_data, frame_tree_node_id);
+    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
+    if (request.url == watch_url_)
+      throttles.push_back(std::make_unique<HeaderModifyingThrottle>());
+    return throttles;
   }
 
  private:
@@ -112,8 +101,6 @@ class MirrorBrowserTest : public InProcessBrowserTest {
     // load pages from "www.google.com" without an interstitial.
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
   }
-
-  ScopedAccountConsistencyMirror scoped_mirror_;
 };
 
 // Verify the following items:
@@ -125,10 +112,8 @@ class MirrorBrowserTest : public InProcessBrowserTest {
 //    and not because it was on a secure Google domain.
 // This is a regression test for crbug.com/588492.
 IN_PROC_BROWSER_TEST_F(MirrorBrowserTest, MirrorRequestHeader) {
-  browser()->profile()->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                              "user@gmail.com");
-  browser()->profile()->GetPrefs()->SetString(
-      prefs::kGoogleServicesUserAccountId, "account_id");
+  browser()->profile()->GetPrefs()->SetString(prefs::kGoogleServicesAccountId,
+                                              "account_id");
 
   base::Lock lock;
   // Map from the path of the URLs that test server sees to the request header.

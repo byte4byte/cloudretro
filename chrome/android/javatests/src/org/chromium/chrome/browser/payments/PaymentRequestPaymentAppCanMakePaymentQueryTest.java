@@ -4,11 +4,6 @@
 
 package org.chromium.chrome.browser.payments;
 
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.DELAYED_RESPONSE;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.HAVE_INSTRUMENTS;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.IMMEDIATE_RESPONSE;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.NO_INSTRUMENTS;
-
 import android.support.test.filters.MediumTest;
 
 import org.junit.Before;
@@ -19,11 +14,13 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -43,7 +40,7 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
             "payment_request_can_make_payment_query_bobpay_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     @Before
     public void setUp() {
@@ -53,46 +50,14 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
     @Test
     @MediumTest
     @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyNoBobPayInstalled() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyBobPayInstalledLater() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
-
-        Thread.sleep(10000);
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        Thread.sleep(10000);
-        mPaymentRequestTestRule.expectResultContains(new String[] {"true, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("enable-features=PaymentRequestHasEnrolledInstrument")
     public void testBobPayInstalledLater() throws InterruptedException, TimeoutException {
         // hasEnrolledInstrument returns false, since BobPay is not installed.
         mPaymentRequestTestRule.openPageAndClickNodeAndWait("hasEnrolledInstrument",
                 mPaymentRequestTestRule.getHasEnrolledInstrumentQueryResponded());
         mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
 
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
         Thread.sleep(10000);
 
         // hasEnrolledInstrument returns true now for BobPay, but still returns false for AlicePay.
@@ -104,25 +69,9 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
     @Test
     @MediumTest
     @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyNoInstrumentsInFastBobPay()
-            throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, IMMEDIATE_RESPONSE);
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("enable-features=PaymentRequestHasEnrolledInstrument")
-    public void testNoInstrumentsInFastBobPay() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, IMMEDIATE_RESPONSE);
+    public void testNoAppsInFastBobPayFactory() throws TimeoutException {
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.NO_APPS, FactorySpeed.FAST_FACTORY);
 
         // canMakePayment returns true for BobPay and false for AlicePay.
         mPaymentRequestTestRule.openPageAndClickNodeAndWait(
@@ -139,26 +88,10 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
     @Test
     @MediumTest
     @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyNoInstrumentsInSlowBobPay()
-            throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, DELAYED_RESPONSE);
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"false, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("enable-features=PaymentRequestHasEnrolledInstrument")
-    public void testNoInstrumentsInSlowBobPay() throws InterruptedException, TimeoutException {
-        // Install BobPay.
-        mPaymentRequestTestRule.installPaymentApp(NO_INSTRUMENTS, DELAYED_RESPONSE);
+    public void testNoAppsInSlowBobPayFactory() throws TimeoutException {
+        // Add BobPay factory.
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.NO_APPS, FactorySpeed.SLOW_FACTORY);
 
         // canMakePayment returns true for BobPay and false for AlicePay.
         mPaymentRequestTestRule.openPageAndClickNodeAndWait(
@@ -175,25 +108,10 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
     @Test
     @MediumTest
     @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyPayViaFastBobPay() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"true, true"});
-
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"true, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("enable-features=PaymentRequestHasEnrolledInstrument")
-    public void testPayViaFastBobPay() throws InterruptedException, TimeoutException {
+    public void testPayViaFastBobPay() throws TimeoutException {
         // Install BobPay.
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
 
         // canMakePayment returns true for BobPay and false for AlicePay.
         mPaymentRequestTestRule.openPageAndClickNodeAndWait(
@@ -209,25 +127,10 @@ public class PaymentRequestPaymentAppCanMakePaymentQueryTest implements MainActi
     @Test
     @MediumTest
     @Feature({"Payments"})
-    @CommandLineFlags.Add("disable-features=PaymentRequestHasEnrolledInstrument")
-    public void testLegacyPayViaSlowBobPay() throws InterruptedException, TimeoutException {
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, DELAYED_RESPONSE);
-        mPaymentRequestTestRule.openPageAndClickBuyAndWait(
-                mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"true, true"});
-
-        mPaymentRequestTestRule.clickNodeAndWait(
-                "otherBuy", mPaymentRequestTestRule.getCanMakePaymentQueryResponded());
-        mPaymentRequestTestRule.expectResultContains(new String[] {"true, false"});
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Payments"})
-    @CommandLineFlags.Add("enable-features=PaymentRequestHasEnrolledInstrument")
-    public void testPayViaSlowBobPay() throws InterruptedException, TimeoutException {
+    public void testPayViaSlowBobPayFactory() throws TimeoutException {
         // Install BobPay.
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, DELAYED_RESPONSE);
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.HAVE_APPS, FactorySpeed.SLOW_FACTORY);
 
         // canMakePayment returns true for BobPay and false for AlicePay.
         mPaymentRequestTestRule.openPageAndClickNodeAndWait(

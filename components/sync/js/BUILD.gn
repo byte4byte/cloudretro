@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
 import("//build/config/jumbo.gni")
 
@@ -17,9 +16,7 @@ jumbo_static_library("js") {
     "sync_js_controller.h",
   ]
 
-  public_deps = [
-    "//components/sync/base",
-  ]
+  public_deps = [ "//components/sync/base" ]
 }
 
 static_library("test_support") {

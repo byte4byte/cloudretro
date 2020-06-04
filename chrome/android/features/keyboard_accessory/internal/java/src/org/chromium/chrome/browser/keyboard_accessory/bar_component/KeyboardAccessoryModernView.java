@@ -5,15 +5,16 @@
 package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
 import android.content.Context;
-import android.support.annotation.Px;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.content.res.AppCompatResources;
-import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+
+import androidx.annotation.Px;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.view.ViewCompat;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.chrome.browser.keyboard_accessory.R;
 

@@ -20,9 +20,10 @@
 #include "media/base/cdm_promise_adapter.h"
 #include "media/base/cdm_session_tracker.h"
 #include "media/base/content_decryption_module.h"
-#include "media/mojo/interfaces/content_decryption_module.mojom.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "media/mojo/mojom/content_decryption_module.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -33,10 +34,6 @@ class Origin;
 }
 
 namespace media {
-
-namespace mojom {
-class InterfaceFactory;
-}
 
 class MojoDecryptor;
 
@@ -53,13 +50,12 @@ class MojoCdm : public ContentDecryptionModule,
       const std::string& key_system,
       const url::Origin& security_origin,
       const CdmConfig& cdm_config,
-      mojom::ContentDecryptionModulePtr remote_cdm,
-      mojom::InterfaceFactory* interface_factory,
+      mojo::PendingRemote<mojom::ContentDecryptionModule> remote_cdm,
       const SessionMessageCB& session_message_cb,
       const SessionClosedCB& session_closed_cb,
       const SessionKeysChangeCB& session_keys_change_cb,
       const SessionExpirationUpdateCB& session_expiration_update_cb,
-      const CdmCreatedCB& cdm_created_cb);
+      CdmCreatedCB cdm_created_cb);
 
   // ContentDecryptionModule implementation.
   void SetServerCertificate(const std::vector<uint8_t>& certificate,
@@ -89,8 +85,7 @@ class MojoCdm : public ContentDecryptionModule,
   int GetCdmId() const final;
 
  private:
-  MojoCdm(mojom::ContentDecryptionModulePtr remote_cdm,
-          mojom::InterfaceFactory* interface_factory,
+  MojoCdm(mojo::PendingRemote<mojom::ContentDecryptionModule> remote_cdm,
           const SessionMessageCB& session_message_cb,
           const SessionClosedCB& session_closed_cb,
           const SessionKeysChangeCB& session_keys_change_cb,
@@ -121,7 +116,7 @@ class MojoCdm : public ContentDecryptionModule,
   // Callback for InitializeCdm.
   void OnCdmInitialized(mojom::CdmPromiseResultPtr result,
                         int cdm_id,
-                        mojom::DecryptorPtr decryptor);
+                        mojo::PendingRemote<mojom::Decryptor> decryptor);
 
   // Callback when new decryption key is available.
   void OnKeyAdded();
@@ -138,11 +133,11 @@ class MojoCdm : public ContentDecryptionModule,
 
   THREAD_CHECKER(thread_checker_);
 
-  mojom::ContentDecryptionModulePtr remote_cdm_;
-  mojom::InterfaceFactory* interface_factory_;
-  mojo::AssociatedBinding<ContentDecryptionModuleClient> client_binding_;
+  mojo::Remote<mojom::ContentDecryptionModule> remote_cdm_;
+  mojo::AssociatedReceiver<ContentDecryptionModuleClient> client_receiver_{
+      this};
 
-  // Protects |cdm_id_|, |decryptor_ptr_|, |decryptor_| and
+  // Protects |cdm_id_|, |decryptor_remote_|, |decryptor_| and
   // |decryptor_task_runner_| which could be accessed from other threads.
   // See CdmContext implementation above.
   mutable base::Lock lock_;
@@ -151,14 +146,15 @@ class MojoCdm : public ContentDecryptionModule,
   // be invalid if initialization succeeded.
   int cdm_id_;
 
-  // The DecryptorPtrInfo exposed by the remote CDM. Set after initialization
-  // is completed and cleared after |decryptor_| is created. May be invalid
-  // after initialization if the CDM doesn't support a Decryptor.
-  mojom::DecryptorPtrInfo decryptor_ptr_info_;
+  // The mojo::PendingRemote<mojom::Decryptor> exposed by the remote CDM. Set
+  // after initialization is completed and cleared after |decryptor_| is
+  // created. May be invalid after initialization if the CDM doesn't support a
+  // Decryptor.
+  mojo::PendingRemote<mojom::Decryptor> decryptor_remote_;
 
-  // Decryptor based on |decryptor_ptr_|, lazily created in GetDecryptor().
-  // Since GetDecryptor() can be called on a different thread, use
-  // |decryptor_task_runner_| to bind |decryptor_| to that thread.
+  // Decryptor based on |decryptor_remote_|, lazily created in
+  // GetDecryptor(). Since GetDecryptor() can be called on a different thread,
+  // use |decryptor_task_runner_| to bind |decryptor_| to that thread.
   std::unique_ptr<MojoDecryptor> decryptor_;
   scoped_refptr<base::SingleThreadTaskRunner> decryptor_task_runner_;
 

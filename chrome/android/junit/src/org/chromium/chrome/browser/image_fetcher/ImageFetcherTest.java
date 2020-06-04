@@ -15,6 +15,7 @@ import android.graphics.Bitmap;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
@@ -37,6 +38,10 @@ public class ImageFetcherTest {
      * Concrete implementation for testing purposes.
      */
     private class ImageFetcherForTest extends ImageFetcher {
+        ImageFetcherForTest(ImageFetcherBridge imageFetcherBridge) {
+            super(imageFetcherBridge);
+        }
+
         @Override
         public void fetchGif(String url, String clientName, Callback<BaseGifImage> callback) {}
 
@@ -56,41 +61,44 @@ public class ImageFetcherTest {
         public void destroy() {}
     }
 
+    @Mock
+    ImageFetcherBridge mBridge;
+
     private final Bitmap mBitmap =
             Bitmap.createBitmap(WIDTH_PX, HEIGHT_PX, Bitmap.Config.ARGB_8888);
 
     private ImageFetcherForTest mImageFetcher;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
-        mImageFetcher = Mockito.spy(new ImageFetcherForTest());
+        mImageFetcher = Mockito.spy(new ImageFetcherForTest(mBridge));
     }
 
     @Test
-    public void testResize() throws Exception {
-        Bitmap result = ImageFetcher.tryToResizeImage(mBitmap, WIDTH_PX / 2, HEIGHT_PX / 2);
+    public void testResize() {
+        Bitmap result = ImageFetcher.resizeImage(mBitmap, WIDTH_PX / 2, HEIGHT_PX / 2);
         assertNotEquals(result, mBitmap);
     }
 
     @Test
-    public void testResizeBailsOutIfSizeIsZeroOrLess() throws Exception {
-        Bitmap result = ImageFetcher.tryToResizeImage(mBitmap, WIDTH_PX - 1, HEIGHT_PX - 1);
+    public void testResizeBailsOutIfSizeIsZeroOrLess() {
+        Bitmap result = ImageFetcher.resizeImage(mBitmap, WIDTH_PX - 1, HEIGHT_PX - 1);
         assertNotEquals(result, mBitmap);
 
-        result = ImageFetcher.tryToResizeImage(mBitmap, 0, HEIGHT_PX);
+        result = ImageFetcher.resizeImage(mBitmap, 0, HEIGHT_PX);
         assertEquals(result, mBitmap);
 
-        result = ImageFetcher.tryToResizeImage(mBitmap, WIDTH_PX, 0);
+        result = ImageFetcher.resizeImage(mBitmap, WIDTH_PX, 0);
         assertEquals(result, mBitmap);
 
-        result = ImageFetcher.tryToResizeImage(mBitmap, 0, 0);
+        result = ImageFetcher.resizeImage(mBitmap, 0, 0);
         assertEquals(result, mBitmap);
 
-        result = ImageFetcher.tryToResizeImage(mBitmap, -1, HEIGHT_PX);
+        result = ImageFetcher.resizeImage(mBitmap, -1, HEIGHT_PX);
         assertEquals(result, mBitmap);
 
-        result = ImageFetcher.tryToResizeImage(mBitmap, WIDTH_PX, -1);
+        result = ImageFetcher.resizeImage(mBitmap, WIDTH_PX, -1);
         assertEquals(result, mBitmap);
     }
 

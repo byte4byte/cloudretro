@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/buildflag_header.gni")
 import("//testing/test.gni")
 
 component("impl") {
@@ -24,9 +23,7 @@ component("impl") {
     "//mojo/public/cpp/bindings",
   ]
 
-  public_deps = [
-    "//media/learning/mojo/public/cpp",
-  ]
+  public_deps = [ "//media/learning/mojo/public/cpp" ]
 }
 
 # Unit Tests
@@ -34,9 +31,7 @@ component("impl") {
 source_set("unit_tests") {
   testonly = true
 
-  sources = [
-    "mojo_learning_task_controller_service_unittest.cc",
-  ]
+  sources = [ "mojo_learning_task_controller_service_unittest.cc" ]
 
   deps = [
     ":impl",

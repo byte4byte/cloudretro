@@ -4,6 +4,7 @@
 package org.chromium.components.search_engines;
 
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.Locale;
 
@@ -28,7 +29,7 @@ public class TemplateUrl {
      * @return The name of the search engine.
      */
     public String getShortName() {
-        return nativeGetShortName(mTemplateUrlPtr);
+        return TemplateUrlJni.get().getShortName(mTemplateUrlPtr);
     }
 
     /**
@@ -36,21 +37,21 @@ public class TemplateUrl {
      *         non-zero, for custom search engines, it will return 0.
      */
     public int getPrepopulatedId() {
-        return nativeGetPrepopulatedId(mTemplateUrlPtr);
+        return TemplateUrlJni.get().getPrepopulatedId(mTemplateUrlPtr);
     }
 
     /**
      * @return Whether a search engine is prepopulated or created by policy.
      */
     public boolean getIsPrepopulated() {
-        return nativeIsPrepopulatedOrCreatedByPolicy(mTemplateUrlPtr);
+        return TemplateUrlJni.get().isPrepopulatedOrCreatedByPolicy(mTemplateUrlPtr);
     }
 
     /**
      * @return The keyword of the search engine.
      */
     public String getKeyword() {
-        return nativeGetKeyword(mTemplateUrlPtr);
+        return TemplateUrlJni.get().getKeyword(mTemplateUrlPtr);
     }
 
     /**
@@ -58,7 +59,15 @@ public class TemplateUrl {
      *         return 0.
      */
     public long getLastVisitedTime() {
-        return nativeGetLastVisitedTime(mTemplateUrlPtr);
+        return TemplateUrlJni.get().getLastVisitedTime(mTemplateUrlPtr);
+    }
+
+    /**
+     * @return The template URL of the search engine. The format can be looked up in
+     *         prepopulated_engines.json.
+     */
+    public String getURL() {
+        return TemplateUrlJni.get().getURL(mTemplateUrlPtr);
     }
 
     @Override
@@ -76,9 +85,13 @@ public class TemplateUrl {
                 getKeyword(), getShortName(), getIsPrepopulated());
     }
 
-    private static native String nativeGetShortName(long templateUrlPtr);
-    private static native String nativeGetKeyword(long templateUrlPtr);
-    private static native boolean nativeIsPrepopulatedOrCreatedByPolicy(long templateUrlPtr);
-    private static native long nativeGetLastVisitedTime(long templateUrlPtr);
-    private static native int nativeGetPrepopulatedId(long templateUrlPtr);
+    @NativeMethods
+    public interface Natives {
+        String getShortName(long templateUrlPtr);
+        String getKeyword(long templateUrlPtr);
+        boolean isPrepopulatedOrCreatedByPolicy(long templateUrlPtr);
+        long getLastVisitedTime(long templateUrlPtr);
+        int getPrepopulatedId(long templateUrlPtr);
+        String getURL(long templateUrlPtr);
+    }
 }

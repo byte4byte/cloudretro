@@ -17,9 +17,9 @@
 #include "extensions/browser/api/file_handlers/mime_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/file_stream_reader.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "url/gurl.h"
 
 namespace chromeos {
@@ -46,7 +46,7 @@ class URLHelper {
       : callback_(std::move(callback)) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     Lifetime lifetime(this);
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&URLHelper::RunOnUIThread, base::Unretained(this),
                        std::move(lifetime), profile_id, url));
@@ -90,8 +90,8 @@ class URLHelper {
     file_system_context_ = std::move(context);
     extensions::app_file_handler_util::GetMimeTypeForLocalPath(
         profile, isolated_file_system_.url.path(),
-        base::BindRepeating(&URLHelper::OnGotMimeTypeOnUIThread,
-                            base::Unretained(this), base::Passed(&lifetime)));
+        base::BindOnce(&URLHelper::OnGotMimeTypeOnUIThread,
+                       base::Unretained(this), base::Passed(&lifetime)));
   }
 
   void OnGotMimeTypeOnUIThread(Lifetime lifetime,
@@ -108,7 +108,7 @@ class URLHelper {
   void ReplyResult(net::Error error) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(std::move(callback_), error,
                        std::move(file_system_context_),
@@ -126,9 +126,7 @@ class URLHelper {
 }  // namespace
 
 ExternalFileResolver::ExternalFileResolver(void* profile_id)
-    : profile_id_(profile_id),
-      range_parse_result_(net::OK),
-      weak_ptr_factory_(this) {
+    : profile_id_(profile_id), range_parse_result_(net::OK) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
@@ -207,8 +205,8 @@ void ExternalFileResolver::OnHelperResultObtained(
   file_system_context_ = std::move(file_system_context);
   file_system_context_->external_backend()->GetRedirectURLForContents(
       isolated_file_system_.url,
-      base::BindRepeating(&ExternalFileResolver::OnRedirectURLObtained,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ExternalFileResolver::OnRedirectURLObtained,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ExternalFileResolver::OnRedirectURLObtained(const GURL& redirect_url) {

@@ -37,8 +37,8 @@ namespace {
 class TestTabStripModelObserver : public TabStripModelObserver {
  public:
   explicit TestTabStripModelObserver(TabStripModel* model)
-      : model_(model), desired_count_(0), scoped_observer_(this) {
-    scoped_observer_.Add(model);
+      : model_(model), desired_count_(0) {
+    model->AddObserver(this);
   }
   ~TestTabStripModelObserver() override = default;
 
@@ -62,7 +62,6 @@ class TestTabStripModelObserver : public TabStripModelObserver {
   TabStripModel* model_;
   int desired_count_;
   base::RunLoop run_loop_;
-  ScopedObserver<TabStripModel, TabStripModelObserver> scoped_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TestTabStripModelObserver);
 };
@@ -89,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, TestUnload) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), extension->GetResourceURL("page.html"),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   DisableExtension(id);
   // There should only be one remaining web contents - the initial one.
@@ -113,8 +112,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, UnloadWithContentScripts) {
   GURL test_url = embedded_test_server()->GetURL("/title1.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
-  // Sending an XHR with the extension's Origin header should succeed when the
-  // extension is installed.
+  // The content script sends an XHR with the webpage's (rather than
+  // extension's) Origin header - this should succeed (given that
+  // xhr.txt.mock-http-headers says `Access-Control-Allow-Origin: *`).
   const char kSendXhrScript[] = "document.getElementById('xhrButton').click();";
   bool xhr_result = false;
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
@@ -130,12 +130,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, UnloadWithContentScripts) {
       test_url,
       browser()->tab_strip_model()->GetWebContentsAt(0)->GetLastCommittedURL());
 
-  // Sending an XHR with the extension's Origin header should fail but not kill
-  // the tab.
+  // The content script sends an XHR with the webpage's (rather than
+  // extension's) Origin header - this should succeed (given that
+  // xhr.txt.mock-http-headers says `Access-Control-Allow-Origin: *`).
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
       browser()->tab_strip_model()->GetActiveWebContents(), kSendXhrScript,
       &xhr_result));
-  EXPECT_FALSE(xhr_result);
+  EXPECT_TRUE(xhr_result);
 
   // Ensure the process has not been killed.
   EXPECT_TRUE(browser()
@@ -211,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
   const GURL page_url = extension->GetResourceURL("page.html");
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), page_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
 
@@ -224,7 +225,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUnloadBrowserTest, MAYBE_CrashedTabs) {
         active_tab->GetMainFrame()->GetProcess());
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), GURL("chrome://crash"), WindowOpenDisposition::CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   }
 
   // There should still be two open tabs, but the active one is crashed.

@@ -11,17 +11,13 @@ namespace remoting {
 
 IpcMouseCursorMonitor::IpcMouseCursorMonitor(
     scoped_refptr<DesktopSessionProxy> desktop_session_proxy)
-    : callback_(nullptr),
-      desktop_session_proxy_(desktop_session_proxy),
-      weak_factory_(this) {
-}
+    : callback_(nullptr), desktop_session_proxy_(desktop_session_proxy) {}
 
 IpcMouseCursorMonitor::~IpcMouseCursorMonitor() = default;
 
 void IpcMouseCursorMonitor::Init(Callback* callback, Mode mode) {
   DCHECK(!callback_);
   DCHECK(callback);
-  DCHECK_EQ(webrtc::MouseCursorMonitor::SHAPE_ONLY, mode);
   callback_ = callback;
   desktop_session_proxy_->SetMouseCursorMonitor(weak_factory_.GetWeakPtr());
 }

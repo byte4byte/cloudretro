@@ -20,7 +20,7 @@
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
-#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/file_system/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -61,7 +61,7 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute) {
   CreateDirectory create_directory(
       NULL, file_system_info_, base::FilePath(kDirectoryPath),
       true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -95,7 +95,7 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute_NoListener) {
   CreateDirectory create_directory(
       NULL, file_system_info_, base::FilePath(kDirectoryPath),
       true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -115,7 +115,7 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, Execute_ReadOnly) {
   CreateDirectory create_directory(
       NULL, read_only_file_system_info, base::FilePath(kDirectoryPath),
       true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -130,7 +130,7 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, OnSuccess) {
   CreateDirectory create_directory(
       NULL, file_system_info_, base::FilePath(kDirectoryPath),
       true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -151,7 +151,7 @@ TEST_F(FileSystemProviderOperationsCreateDirectoryTest, OnError) {
   CreateDirectory create_directory(
       NULL, file_system_info_, base::FilePath(kDirectoryPath),
       true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_directory.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));

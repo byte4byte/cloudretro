@@ -72,7 +72,7 @@ class LockScreenSessionControllerClient : public TestSessionControllerClient {
     params.parent = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
                                         kShellWindowId_LockScreenContainer);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    lock_screen_widget_->Init(params);
+    lock_screen_widget_->Init(std::move(params));
     lock_screen_widget_->SetContentsView(lock_view);
     lock_screen_widget_->Show();
     lock_screen_widget_->GetNativeView()->SetName("LockView");
@@ -179,10 +179,9 @@ TEST_F(LockScreenAshFocusRulesTest, RegainFocusAfterUnlock) {
   EXPECT_TRUE(normal_window->HasFocus());
   EXPECT_FALSE(always_on_top_window->HasFocus());
 
-  wm::WindowState* normal_window_state =
-      wm::GetWindowState(normal_window.get());
-  wm::WindowState* always_on_top_window_state =
-      wm::GetWindowState(always_on_top_window.get());
+  WindowState* normal_window_state = WindowState::Get(normal_window.get());
+  WindowState* always_on_top_window_state =
+      WindowState::Get(always_on_top_window.get());
 
   EXPECT_TRUE(normal_window_state->CanActivate());
   EXPECT_TRUE(always_on_top_window_state->CanActivate());
@@ -214,7 +213,7 @@ TEST_F(LockScreenAshFocusRulesTest, PreventFocusChangeWithLockScreenPresent) {
   BlockUserSession(BLOCKED_BY_LOCK_SCREEN);
   EXPECT_TRUE(Shell::Get()->session_controller()->IsScreenLocked());
 
-  views::test::TestInitialFocusWidgetDelegate delegate(CurrentContext());
+  views::test::TestInitialFocusWidgetDelegate delegate(GetContext());
   EXPECT_FALSE(delegate.view()->HasFocus());
   delegate.GetWidget()->Show();
   EXPECT_FALSE(delegate.GetWidget()->IsActive());

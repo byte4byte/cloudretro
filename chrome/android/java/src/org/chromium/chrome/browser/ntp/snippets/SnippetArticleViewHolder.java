@@ -4,9 +4,9 @@
 
 package org.chromium.chrome.browser.ntp.snippets;
 
-import android.support.annotation.LayoutRes;
+import androidx.annotation.LayoutRes;
+import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.metrics.ImpressionTracker;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
@@ -22,8 +22,8 @@ import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsOfflineModelObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
-import org.chromium.chrome.browser.widget.displaystyle.DisplayStyleObserverAdapter;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.components.browser_ui.widget.displaystyle.DisplayStyleObserverAdapter;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 import org.chromium.ui.mojom.WindowOpenDisposition;
 
 /**
@@ -33,6 +33,7 @@ public class SnippetArticleViewHolder extends CardViewHolder {
     private final SuggestionsUiDelegate mUiDelegate;
     private final SuggestionsBinder mSuggestionsBinder;
     private final OfflinePageBridge mOfflinePageBridge;
+    private final NewTabPageUma mNewTabPageUma;
     private SuggestionsCategoryInfo mCategoryInfo;
     private SnippetArticle mArticle;
 
@@ -46,11 +47,12 @@ public class SnippetArticleViewHolder extends CardViewHolder {
      * @param uiDelegate The delegate object used to open an article, fetch thumbnails, etc.
      * @param uiConfig The NTP UI configuration object used to adjust the article UI.
      * @param offlinePageBridge used to determine if article is prefetched.
+     * @param uma {@link NewTabPageUma} object recording user metrics.
      */
     public SnippetArticleViewHolder(SuggestionsRecyclerView parent,
             ContextMenuManager contextMenuManager, SuggestionsUiDelegate uiDelegate,
-            UiConfig uiConfig, OfflinePageBridge offlinePageBridge) {
-        this(parent, contextMenuManager, uiDelegate, uiConfig, offlinePageBridge, getLayout());
+            UiConfig uiConfig, OfflinePageBridge offlinePageBridge, NewTabPageUma uma) {
+        this(parent, contextMenuManager, uiDelegate, uiConfig, offlinePageBridge, uma, getLayout());
     }
 
     /**
@@ -60,11 +62,13 @@ public class SnippetArticleViewHolder extends CardViewHolder {
      * @param uiDelegate The delegate object used to open an article, fetch thumbnails, etc.
      * @param uiConfig The NTP UI configuration object used to adjust the article UI.
      * @param offlinePageBridge used to determine if article is prefetched.
+     * @param uma {@link NewTabPageUma} object recording user metrics.
      * @param layoutId The layout resource reference for this card.
      */
     protected SnippetArticleViewHolder(SuggestionsRecyclerView parent,
             ContextMenuManager contextMenuManager, SuggestionsUiDelegate uiDelegate,
-            UiConfig uiConfig, OfflinePageBridge offlinePageBridge, int layoutId) {
+            UiConfig uiConfig, OfflinePageBridge offlinePageBridge, NewTabPageUma uma,
+            int layoutId) {
         super(layoutId, parent, uiConfig, contextMenuManager);
 
         mUiDelegate = uiDelegate;
@@ -76,6 +80,7 @@ public class SnippetArticleViewHolder extends CardViewHolder {
 
         mExposureTracker = new ImpressionTracker(itemView);
         mExposureTracker.setImpressionThreshold(/* impressionThresholdPx */ 1);
+        mNewTabPageUma = uma;
     }
 
     @Override
@@ -237,7 +242,7 @@ public class SnippetArticleViewHolder extends CardViewHolder {
                         if (!SuggestionsOfflineModelObserver.isPrefetchedOfflinePage(item)) {
                             return;
                         }
-                        NewTabPageUma.recordPrefetchedArticleSuggestionImpressionPosition(
+                        mNewTabPageUma.recordPrefetchedArticleSuggestionImpressionPosition(
                                 mArticle.getPerSectionRank());
                     });
         }

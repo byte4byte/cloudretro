@@ -15,6 +15,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
 #include "chromeos/services/secure_channel/secure_channel_base.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace device {
 class BluetoothAdapter;
@@ -34,12 +35,15 @@ class SecureChannelInitializer : public SecureChannelBase {
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<SecureChannelBase> BuildInstance(
+    static std::unique_ptr<SecureChannelBase> Create(
         scoped_refptr<base::TaskRunner> task_runner =
             base::ThreadTaskRunnerHandle::Get());
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<SecureChannelBase> CreateInstance(
+        scoped_refptr<base::TaskRunner> task_runner) = 0;
 
    private:
     static Factory* test_factory_;
@@ -52,19 +56,20 @@ class SecureChannelInitializer : public SecureChannelBase {
       scoped_refptr<base::TaskRunner> task_runner);
 
   struct ConnectionRequestArgs {
-    ConnectionRequestArgs(const multidevice::RemoteDevice& device_to_connect,
-                          const multidevice::RemoteDevice& local_device,
-                          const std::string& feature,
-                          ConnectionPriority connection_priority,
-                          mojom::ConnectionDelegatePtr delegate,
-                          bool is_listen_request);
+    ConnectionRequestArgs(
+        const multidevice::RemoteDevice& device_to_connect,
+        const multidevice::RemoteDevice& local_device,
+        const std::string& feature,
+        ConnectionPriority connection_priority,
+        mojo::PendingRemote<mojom::ConnectionDelegate> delegate,
+        bool is_listen_request);
     ~ConnectionRequestArgs();
 
     multidevice::RemoteDevice device_to_connect;
     multidevice::RemoteDevice local_device;
     std::string feature;
     ConnectionPriority connection_priority;
-    mojom::ConnectionDelegatePtr delegate;
+    mojo::PendingRemote<mojom::ConnectionDelegate> delegate;
     bool is_listen_request;
   };
 
@@ -74,13 +79,13 @@ class SecureChannelInitializer : public SecureChannelBase {
       const multidevice::RemoteDevice& local_device,
       const std::string& feature,
       ConnectionPriority connection_priority,
-      mojom::ConnectionDelegatePtr delegate) override;
+      mojo::PendingRemote<mojom::ConnectionDelegate> delegate) override;
   void InitiateConnectionToDevice(
       const multidevice::RemoteDevice& device_to_connect,
       const multidevice::RemoteDevice& local_device,
       const std::string& feature,
       ConnectionPriority connection_priority,
-      mojom::ConnectionDelegatePtr delegate) override;
+      mojo::PendingRemote<mojom::ConnectionDelegate> delegate) override;
 
   void OnBluetoothAdapterReceived(
       scoped_refptr<device::BluetoothAdapter> bluetooth_adapter);
@@ -88,7 +93,7 @@ class SecureChannelInitializer : public SecureChannelBase {
   std::queue<std::unique_ptr<ConnectionRequestArgs>> pending_args_;
   std::unique_ptr<mojom::SecureChannel> secure_channel_impl_;
 
-  base::WeakPtrFactory<SecureChannelInitializer> weak_ptr_factory_;
+  base::WeakPtrFactory<SecureChannelInitializer> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SecureChannelInitializer);
 };

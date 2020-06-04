@@ -13,6 +13,11 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_export.h"
 
+#if defined(OS_CHROMEOS)
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/data_decoder/public/mojom/ble_scan_parser.mojom-forward.h"
+#endif  // defined(OS_CHROMEOS)
+
 namespace device {
 
 // A factory class for building a Bluetooth adapter on platforms where Bluetooth
@@ -30,9 +35,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   using AdapterCallback =
       base::OnceCallback<void(scoped_refptr<BluetoothAdapter> adapter)>;
 
+#if defined(OS_CHROMEOS)
+  using BleScanParserCallback = base::RepeatingCallback<
+      mojo::PendingRemote<data_decoder::mojom::BleScanParser>()>;
+#endif  // defined(OS_CHROMEOS)
+
   ~BluetoothAdapterFactory();
 
-  static BluetoothAdapterFactory& Get();
+  static BluetoothAdapterFactory* Get();
 
   // Returns true if the platform supports Bluetooth. It does not imply that
   // there is a Bluetooth radio. Use BluetoothAdapter::IsPresent to know
@@ -50,7 +60,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // initializing it if necessary. |callback| is called with the adapter
   // instance passed only once the adapter is fully initialized and ready to
   // use.
-  static void GetAdapter(AdapterCallback callback);
+  void GetAdapter(AdapterCallback callback);
 
   // Returns the shared instance of the classic adapter, creating and
   // initializing it if necessary. |callback| is called with the adapter
@@ -58,7 +68,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // use.
   // For all platforms except Windows this is equivalent to calling
   // GetAdapter(), as the default adapter already supports Bluetooth classic.
-  static void GetClassicAdapter(AdapterCallback callback);
+  void GetClassicAdapter(AdapterCallback callback);
 
 #if defined(OS_LINUX)
   // Calls |BluetoothAdapter::Shutdown| on the adapter if
@@ -74,6 +84,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   // Returns true iff the implementation has a (non-NULL) shared instance of the
   // adapter. Exposed for testing.
   static bool HasSharedInstanceForTesting();
+
+#if defined(OS_CHROMEOS)
+  // Sets the mojo::Remote<BleScanParser> callback used in Get*() below.
+  static void SetBleScanParserCallback(BleScanParserCallback callback);
+  // Returns a reference to a parser for BLE advertisement packets.
+  // This will be an empty callback until something calls Set*() above.
+  static BleScanParserCallback GetBleScanParserCallback();
+#endif  // defined(OS_CHROMEOS)
 
   // ValuestForTesting holds the return values for BluetoothAdapterFactory's
   // functions that have been set for testing.
@@ -91,7 +109,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
    private:
     bool le_supported_ = false;
 
-    base::WeakPtrFactory<GlobalValuesForTesting> weak_ptr_factory_;
+    base::WeakPtrFactory<GlobalValuesForTesting> weak_ptr_factory_{this};
     DISALLOW_COPY_AND_ASSIGN(GlobalValuesForTesting);
   };
 
@@ -116,6 +134,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterFactory {
   BluetoothAdapterFactory();
 
   base::WeakPtr<GlobalValuesForTesting> values_for_testing_;
+
+#if defined(OS_CHROMEOS)
+  BleScanParserCallback ble_scan_parser_;
+#endif  // defined(OS_CHROMEOS)
 };
 
 }  // namespace device

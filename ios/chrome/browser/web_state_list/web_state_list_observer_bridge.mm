@@ -108,7 +108,7 @@ void WebStateListObserverBridge::WebStateActivatedAt(
     web::WebState* old_web_state,
     web::WebState* new_web_state,
     int active_index,
-    int reason) {
+    ActiveWebStateChangeReason reason) {
   const SEL selector = @selector
       (webStateList:didChangeActiveWebState:oldWebState:atIndex:reason:);
   if (![observer_ respondsToSelector:selector])
@@ -119,4 +119,22 @@ void WebStateListObserverBridge::WebStateActivatedAt(
                   oldWebState:old_web_state
                       atIndex:active_index
                        reason:reason];
+}
+
+void WebStateListObserverBridge::WillBeginBatchOperation(
+    WebStateList* web_state_list) {
+  const SEL selector = @selector(webStateListWillBeginBatchOperation:);
+  if (![observer_ respondsToSelector:selector])
+    return;
+
+  [observer_ webStateListWillBeginBatchOperation:web_state_list];
+}
+
+void WebStateListObserverBridge::BatchOperationEnded(
+    WebStateList* web_state_list) {
+  const SEL selector = @selector(webStateListBatchOperationEnded:);
+  if (![observer_ respondsToSelector:selector])
+    return;
+
+  [observer_ webStateListBatchOperationEnded:web_state_list];
 }

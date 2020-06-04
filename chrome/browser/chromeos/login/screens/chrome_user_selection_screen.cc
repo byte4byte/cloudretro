@@ -8,8 +8,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -36,8 +37,7 @@ namespace chromeos {
 
 ChromeUserSelectionScreen::ChromeUserSelectionScreen(
     const std::string& display_type)
-    : UserSelectionScreen(display_type),
-      weak_factory_(this) {
+    : UserSelectionScreen(display_type) {
   device_local_account_policy_service_ =
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()

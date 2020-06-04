@@ -7,16 +7,13 @@
 
 #include "ash/ash_export.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace gfx {
 struct VectorIcon;
 }  // namespace gfx
-
-namespace ui {
-class NativeTheme;
-}  // namespace ui
 
 namespace views {
 class Button;
@@ -48,7 +45,7 @@ class ASH_EXPORT DetailedViewDelegate {
   virtual void CloseBubble();
 
   // Get the background color of the detailed view.
-  virtual SkColor GetBackgroundColor(ui::NativeTheme* native_theme);
+  virtual base::Optional<SkColor> GetBackgroundColor();
 
   // Return true if overflow indicator of ScrollView is enabled.
   virtual bool IsOverflowIndicatorEnabled() const;

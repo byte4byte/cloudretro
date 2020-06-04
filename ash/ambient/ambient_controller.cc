@@ -4,12 +4,22 @@
 
 #include "ash/ambient/ambient_controller.h"
 
+#include <string>
+
+#include "ash/ambient/ambient_constants.h"
 #include "ash/ambient/model/photo_model_observer.h"
 #include "ash/ambient/ui/ambient_container_view.h"
 #include "ash/ambient/util/ambient_util.h"
 #include "ash/login/ui/lock_screen.h"
+#include "ash/public/cpp/ambient/ambient_mode_state.h"
+#include "ash/public/cpp/ambient/ambient_prefs.h"
 #include "ash/public/cpp/ambient/photo_controller.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
+#include "ash/session/session_controller_impl.h"
+#include "ash/shell.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -17,86 +27,179 @@ namespace ash {
 namespace {
 
 bool CanStartAmbientMode() {
-  return chromeos::switches::IsAmbientModeEnabled() && PhotoController::Get() &&
+  return chromeos::features::IsAmbientModeEnabled() && PhotoController::Get() &&
          !ambient::util::IsShowing(LockScreen::ScreenType::kLogin);
+}
+
+void CloseAssistantUi() {
+  DCHECK(AssistantUiController::Get());
+  AssistantUiController::Get()->CloseUi(
+      chromeos::assistant::mojom::AssistantExitPoint::kUnspecified);
 }
 
 }  // namespace
 
-AmbientController::AmbientController() = default;
+// static
+void AmbientController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
+  if (chromeos::features::IsAmbientModeEnabled()) {
+    registry->RegisterStringPref(ash::ambient::prefs::kAmbientBackdropClientId,
+                                 std::string());
+
+    // Do not sync across devices to allow different usages for different
+    // devices.
+    registry->RegisterBooleanPref(ash::ambient::prefs::kAmbientModeEnabled,
+                                  true);
+  }
+}
+
+AmbientController::AmbientController() {
+  ambient_state_.AddObserver(this);
+  // |SessionController| is initialized before |this| in Shell.
+  Shell::Get()->session_controller()->AddObserver(this);
+}
 
 AmbientController::~AmbientController() {
-  DestroyContainerView();
+  // |SessionController| is destroyed after |this| in Shell.
+  Shell::Get()->session_controller()->RemoveObserver(this);
+  ambient_state_.RemoveObserver(this);
+
+  if (container_view_)
+    DestroyContainerView();
 }
 
 void AmbientController::OnWidgetDestroying(views::Widget* widget) {
+  refresh_timer_.Stop();
+  photo_model_.Clear();
+  weak_factory_.InvalidateWeakPtrs();
   container_view_->GetWidget()->RemoveObserver(this);
   container_view_ = nullptr;
+
+  // Call CloseUi() explicitly to sync states to |AssistantUiController|.
+  // This is a no-op if the UI has already been closed before the widget gets
+  // destroyed.
+  CloseAssistantUi();
 }
 
-void AmbientController::Toggle() {
-  if (container_view_)
-    Stop();
-  else
-    Start();
+void AmbientController::OnAmbientModeEnabled(bool enabled) {
+  if (enabled) {
+    CreateContainerView();
+    container_view_->GetWidget()->Show();
+    RefreshImage();
+  } else {
+    DestroyContainerView();
+  }
 }
 
-void AmbientController::AddPhotoModelObserver(PhotoModelObserver* observer) {
-  model_.AddObserver(observer);
+void AmbientController::OnLockStateChanged(bool locked) {
+  if (locked) {
+    // Show ambient mode when entering lock screen.
+    DCHECK(!container_view_);
+    Show();
+  } else {
+    // Destroy ambient mode after user re-login.
+    Destroy();
+  }
 }
 
-void AmbientController::RemovePhotoModelObserver(PhotoModelObserver* observer) {
-  model_.RemoveObserver(observer);
-}
-
-void AmbientController::Start() {
+void AmbientController::Show() {
   if (!CanStartAmbientMode()) {
     // TODO(wutao): Show a toast to indicate that Ambient mode is not ready.
     return;
   }
 
-  CreateContainerView();
-  container_view_->GetWidget()->Show();
-  RefreshImage();
+  // CloseUi to ensure the embedded Assistant UI doesn't exist when entering
+  // Ambient mode to avoid strange behavior caused by the embedded UI was
+  // only hidden at that time. This will be a no-op if UI was already closed.
+  // TODO(meilinw): Handle embedded UI.
+  CloseAssistantUi();
+
+  ambient_state_.SetAmbientModeEnabled(true);
 }
 
-void AmbientController::Stop() {
+void AmbientController::Destroy() {
+  ambient_state_.SetAmbientModeEnabled(false);
+}
+
+void AmbientController::Toggle() {
+  if (container_view_)
+    Destroy();
+  else
+    Show();
+}
+
+void AmbientController::OnBackgroundPhotoEvents() {
   refresh_timer_.Stop();
-  DestroyContainerView();
+
+  // Move the |AmbientModeContainer| beneath the |LockScreenWidget| to show the
+  // lock screen contents on top before the fade-out animation.
+  auto* ambient_window = container_view_->GetWidget()->GetNativeWindow();
+  ambient_window->parent()->StackChildAtBottom(ambient_window);
+
+  // Start fading out the current background photo.
+  StartFadeOutAnimation();
+}
+
+void AmbientController::StartFadeOutAnimation() {
+  // We fade out the |PhotoView| on its own layer instead of using the general
+  // layer of the widget, otherwise it will reveal the color of the lockscreen
+  // wallpaper beneath.
+  container_view_->FadeOutPhotoView();
 }
 
 void AmbientController::CreateContainerView() {
-  container_view_ = new AmbientContainerView(this);
+  DCHECK(!container_view_);
+  container_view_ = new AmbientContainerView(&delegate_);
   container_view_->GetWidget()->AddObserver(this);
 }
 
 void AmbientController::DestroyContainerView() {
   // |container_view_|'s widget is owned by its native widget. After calling
-  // CloseNow(), it will trigger |OnWidgetDestroying|, where it will set the
+  // |CloseNow|, |OnWidgetDestroying| will be triggered immediately to reset
   // |container_view_| to nullptr.
   if (container_view_)
     container_view_->GetWidget()->CloseNow();
 }
 
 void AmbientController::RefreshImage() {
-  if (!PhotoController::Get())
-    return;
+  if (photo_model_.ShouldFetchImmediately()) {
+    // TODO(b/140032139): Defer downloading image if it is animating.
+    base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&AmbientController::GetNextImage,
+                       weak_factory_.GetWeakPtr()),
+        kAnimationDuration);
+  } else {
+    photo_model_.ShowNextImage();
+    ScheduleRefreshImage();
+  }
+}
 
+void AmbientController::ScheduleRefreshImage() {
+  base::TimeDelta refresh_interval;
+  if (!photo_model_.ShouldFetchImmediately()) {
+    // TODO(b/139953713): Change to a correct time interval.
+    refresh_interval = base::TimeDelta::FromSeconds(5);
+  }
+
+  refresh_timer_.Start(FROM_HERE, refresh_interval,
+                       base::BindOnce(&AmbientController::RefreshImage,
+                                      weak_factory_.GetWeakPtr()));
+}
+
+void AmbientController::GetNextImage() {
   PhotoController::Get()->GetNextImage(base::BindOnce(
       &AmbientController::OnPhotoDownloaded, weak_factory_.GetWeakPtr()));
-
-  constexpr base::TimeDelta kTimeOut = base::TimeDelta::FromMilliseconds(1000);
-  refresh_timer_.Start(
-      FROM_HERE, kTimeOut,
-      base::BindOnce(&AmbientController::RefreshImage, base::Unretained(this)));
 }
 
-void AmbientController::OnPhotoDownloaded(const gfx::ImageSkia& image) {
-  model_.AddNextImage(image);
-}
+void AmbientController::OnPhotoDownloaded(bool success,
+                                          const gfx::ImageSkia& image) {
+  // TODO(b/148485116): Implement retry logic.
+  if (!success)
+    return;
 
-AmbientContainerView* AmbientController::GetAmbientContainerViewForTesting() {
-  return container_view_;
+  DCHECK(!image.isNull());
+  photo_model_.AddNextImage(image);
+  ScheduleRefreshImage();
 }
 
 }  // namespace ash

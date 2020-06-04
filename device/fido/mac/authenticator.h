@@ -9,13 +9,13 @@
 #include <string>
 
 #include "base/component_export.h"
-#include "base/mac/availability.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece_forward.h"
 #include "device/fido/fido_authenticator.h"
 #include "device/fido/fido_transport_protocol.h"
+#include "device/fido/mac/credential_store.h"
 #include "device/fido/mac/operation.h"
 
 namespace device {
@@ -39,12 +39,9 @@ class COMPONENT_EXPORT(DEVICE_FIDO) TouchIdAuthenticator
   // off-the-record/incognito context.
   static bool IsAvailable(const AuthenticatorConfig& config);
 
-  // CreateIfAvailable returns a TouchIdAuthenticator if IsAvailable() returns
-  // true and nullptr otherwise.
-  static std::unique_ptr<TouchIdAuthenticator> CreateIfAvailable(
-      AuthenticatorConfig config);
-
-  static std::unique_ptr<TouchIdAuthenticator> CreateForTesting(
+  // CreateIfAvailable returns a TouchIdAuthenticator. Callers must check
+  // IsAvailable() first.
+  static std::unique_ptr<TouchIdAuthenticator> Create(
       AuthenticatorConfig config);
 
   ~TouchIdAuthenticator() override;
@@ -67,6 +64,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) TouchIdAuthenticator
   bool IsInPairingMode() const override;
   bool IsPaired() const override;
   bool RequiresBlePairingPin() const override;
+  bool IsTouchIdAuthenticator() const override;
   void GetTouch(base::OnceClosure callback) override;
   base::WeakPtr<FidoAuthenticator> GetWeakPtr() override;
 
@@ -74,15 +72,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) TouchIdAuthenticator
   TouchIdAuthenticator(std::string keychain_access_group,
                        std::string metadata_secret);
 
-  // The keychain access group under which credentials are stored in the macOS
-  // keychain for access control. The set of all access groups that the
-  // application belongs to is stored in the entitlements file that gets
-  // embedded into the application during code signing. For more information
-  // see
-  // https://developer.apple.com/documentation/security/ksecattraccessgroup?language=objc.
-  std::string keychain_access_group_;
-
-  std::string metadata_secret_;
+  TouchIdCredentialStore credential_store_;
 
   std::unique_ptr<Operation> operation_;
 

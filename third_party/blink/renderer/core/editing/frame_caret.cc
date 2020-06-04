@@ -152,7 +152,7 @@ void FrameCaret::UpdateStyleAndLayoutIfNeeded() {
       caret_visibility_ == CaretVisibility::kVisible &&
       (IsEditablePosition(
            selection_editor_->ComputeVisibleSelectionInDOMTree().Start()) ||
-       frame_->GetSettings()->GetCaretBrowsingEnabled());
+       frame_->IsCaretBrowsingEnabled());
 
   display_item_client_->UpdateStyleAndLayoutIfNeeded(
       should_paint_caret ? CaretPosition() : PositionWithAffinity());
@@ -176,6 +176,10 @@ IntRect FrameCaret::AbsoluteCaretBounds() const {
 void FrameCaret::SetShouldShowBlockCursor(bool should_show_block_cursor) {
   should_show_block_cursor_ = should_show_block_cursor;
   ScheduleVisualUpdateForPaintInvalidationIfNeeded();
+}
+
+bool FrameCaret::CaretIsActive() {
+  return display_item_client_->IsActive();
 }
 
 bool FrameCaret::ShouldPaintCaret(const LayoutBlock& block) const {
@@ -202,7 +206,7 @@ bool FrameCaret::ShouldBlinkCaret() const {
   } else {
     // Caret is not contained in editable content--see if caret browsing is
     // enabled. If it isn't, don't blink the caret.
-    if (!frame_->GetSettings()->GetCaretBrowsingEnabled())
+    if (!frame_->IsCaretBrowsingEnabled())
       return false;
   }
 

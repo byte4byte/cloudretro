@@ -39,16 +39,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_window.h"
+#define CAN_DELETE_PROFILE
 #endif
 
 namespace signin_util {
 namespace {
 
 constexpr char kSignoutSettingKey[] = "signout_setting";
-
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
-#define CAN_DELETE_PROFILE
-#endif
 
 #if defined(CAN_DELETE_PROFILE)
 // Manager that presents the profile will be deleted dialog on the first active
@@ -67,12 +64,12 @@ class DeleteProfileDialogManager : public BrowserListObserver {
                              Delegate* delegate)
       : profile_(profile),
         primary_account_email_(primary_account_email),
-        delegate_(delegate),
-        browser_observer_(this) {}
-  ~DeleteProfileDialogManager() override {}
+        delegate_(delegate) {}
+
+  ~DeleteProfileDialogManager() override { BrowserList::RemoveObserver(this); }
 
   void PresentDialogOnAllBrowserWindows() {
-    browser_observer_.Add(BrowserList::GetInstance());
+    BrowserList::AddObserver(this);
     Browser* active_browser = chrome::FindLastActiveWithProfile(profile_);
     if (active_browser)
       OnBrowserSetLastActive(active_browser);
@@ -91,8 +88,7 @@ class DeleteProfileDialogManager : public BrowserListObserver {
             IDS_PROFILE_WILL_BE_DELETED_DIALOG_DESCRIPTION,
             base::ASCIIToUTF16(primary_account_email_),
             base::ASCIIToUTF16(
-                gaia::ExtractDomainName(primary_account_email_))),
-        /*can_close=*/false);
+                gaia::ExtractDomainName(primary_account_email_))));
 
     webui::DeleteProfileAtPath(
         profile_->GetPath(),
@@ -104,7 +100,6 @@ class DeleteProfileDialogManager : public BrowserListObserver {
   Profile* profile_;
   std::string primary_account_email_;
   Delegate* delegate_;
-  ScopedObserver<BrowserList, DeleteProfileDialogManager> browser_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(DeleteProfileDialogManager);
 };
@@ -222,7 +217,7 @@ void EnsurePrimaryAccountAllowedForProfile(Profile* profile) {
 
   CoreAccountInfo primary_account = identity_manager->GetPrimaryAccountInfo();
   if (profile->GetPrefs()->GetBoolean(prefs::kSigninAllowed) &&
-      identity::IsUsernameAllowedByPatternFromPrefs(
+      signin::IsUsernameAllowedByPatternFromPrefs(
           g_browser_process->local_state(), primary_account.email)) {
     return;
   }
@@ -239,7 +234,7 @@ void EnsurePrimaryAccountAllowedForProfile(Profile* profile) {
       auto* primary_account_mutator =
           identity_manager->GetPrimaryAccountMutator();
       primary_account_mutator->ClearPrimaryAccount(
-          identity::PrimaryAccountMutator::ClearAccountsAction::kDefault,
+          signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
           signin_metrics::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT,
           signin_metrics::SignoutDelete::IGNORE_METRIC);
       break;

@@ -6,7 +6,6 @@
 
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
-#include "components/autofill/core/browser/ui/payments/save_card_bubble_controller.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 
@@ -14,14 +13,10 @@ namespace autofill {
 
 SaveCardFailureBubbleViews::SaveCardFailureBubbleViews(
     views::View* anchor_view,
-    const gfx::Point& anchor_point,
     content::WebContents* web_contents,
     SaveCardBubbleController* controller)
-    : SaveCardBubbleViews(anchor_view, anchor_point, web_contents, controller) {
-}
-
-int SaveCardFailureBubbleViews::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
+    : SaveCardBubbleViews(anchor_view, web_contents, controller) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
 }
 
 std::unique_ptr<views::View>
@@ -36,7 +31,7 @@ SaveCardFailureBubbleViews::CreateMainContentView() {
   base::string16 explanation = controller()->GetExplanatoryMessage();
   if (!explanation.empty()) {
     auto* explanation_label = new views::Label(
-        explanation, CONTEXT_BODY_TEXT_LARGE, ChromeTextStyle::STYLE_SECONDARY);
+        explanation, CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
     explanation_label->SetMultiLine(true);
     explanation_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     main_view->AddChildView(explanation_label);

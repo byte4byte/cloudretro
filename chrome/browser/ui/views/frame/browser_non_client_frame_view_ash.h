@@ -7,22 +7,21 @@
 
 #include <memory>
 
-#include "ash/public/cpp/split_view.h"
+#include "ash/public/cpp/tablet_mode_observer.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/command_observer.h"
-#include "chrome/browser/ui/ash/tablet_mode_client_observer.h"
 #include "chrome/browser/ui/views/frame/browser_frame_header_ash.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 
 namespace {
-class HostedAppNonClientFrameViewAshTest;
+class WebAppNonClientFrameViewAshTest;
 }
 
 class ProfileIndicatorIcon;
@@ -40,10 +39,9 @@ class FrameCaptionButton;
 class BrowserNonClientFrameViewAsh
     : public BrowserNonClientFrameView,
       public BrowserFrameHeaderAsh::AppearanceProvider,
-      public TabletModeClientObserver,
+      public ash::TabletModeObserver,
       public TabIconViewModel,
       public CommandObserver,
-      public ash::SplitViewObserver,
       public aura::WindowObserver,
       public ImmersiveModeController::Observer {
  public:
@@ -59,9 +57,8 @@ class BrowserNonClientFrameViewAsh
   int GetThemeBackgroundXInset() const override;
   void UpdateFrameColor() override;
   void UpdateThrobber(bool running) override;
-  void UpdateMinimumSize() override;
   bool CanUserExitFullscreen() const override;
-  SkColor GetCaptionColor(ActiveState active_state) const override;
+  SkColor GetCaptionColor(BrowserFrameActiveState active_state) const override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -91,8 +88,11 @@ class BrowserNonClientFrameViewAsh
   int GetFrameHeaderImageYInset() override;
   gfx::ImageSkia GetFrameHeaderOverlayImage(bool active) override;
 
-  // TabletModeClientObserver:
-  void OnTabletModeToggled(bool enabled) override;
+  // ash::TabletModeObserver:
+  void OnTabletModeStarted() override;
+  void OnTabletModeEnded() override;
+
+  void OnTabletModeToggled(bool enabled);
 
   // TabIconViewModel:
   bool ShouldTabIconViewAnimate() const override;
@@ -100,10 +100,6 @@ class BrowserNonClientFrameViewAsh
 
   // CommandObserver:
   void EnabledStateChangedForCommand(int id, bool enabled) override;
-
-  // ash::SplitViewObserver:
-  void OnSplitViewStateChanged(ash::SplitViewState previous_state,
-                               ash::SplitViewState new_state) override;
 
   // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
@@ -121,12 +117,15 @@ class BrowserNonClientFrameViewAsh
   void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
+  // TODO(pkasting): Test the public API or create a test helper class, don't
+  // add this many friends
+  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTestNoWebUiTabStrip,
                            NonImmersiveFullscreen);
-  FRIEND_TEST_ALL_PREFIXES(ImmersiveModeBrowserViewTest, ImmersiveFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(ImmersiveModeBrowserViewTestNoWebUiTabStrip,
+                           ImmersiveFullscreen);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            ToggleTabletModeRelayout);
-  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
+  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTestNoWebUiTabStrip,
                            AvatarDisplayOnTeleportedWindow);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            BrowserHeaderVisibilityInTabletModeTest);
@@ -138,24 +137,40 @@ class BrowserNonClientFrameViewAsh
                            V1BackButton);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            ToggleTabletModeOnMinimizedWindow);
-  FRIEND_TEST_ALL_PREFIXES(HostedAppNonClientFrameViewAshTest,
+  FRIEND_TEST_ALL_PREFIXES(WebAppNonClientFrameViewAshTest,
                            ActiveStateOfButtonMatchesWidget);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            RestoreMinimizedBrowserUpdatesCaption);
-  FRIEND_TEST_ALL_PREFIXES(ImmersiveModeControllerAshHostedAppBrowserTest,
+  FRIEND_TEST_ALL_PREFIXES(ImmersiveModeControllerAshWebAppBrowserTest,
                            FrameLayoutToggleTabletMode);
   FRIEND_TEST_ALL_PREFIXES(HomeLauncherBrowserNonClientFrameViewAshTest,
                            TabletModeBrowserCaptionButtonVisibility);
+  FRIEND_TEST_ALL_PREFIXES(
+      HomeLauncherBrowserNonClientFrameViewAshTest,
+      CaptionButtonVisibilityForBrowserLaunchedInTabletMode);
   FRIEND_TEST_ALL_PREFIXES(HomeLauncherBrowserNonClientFrameViewAshTest,
                            TabletModeAppCaptionButtonVisibility);
   FRIEND_TEST_ALL_PREFIXES(NonHomeLauncherBrowserNonClientFrameViewAshTest,
                            HeaderHeightForSnappedBrowserInSplitView);
 
-  friend class HostedAppNonClientFrameViewAshTest;
+  friend class WebAppNonClientFrameViewAshTest;
 
-  // Returns whether the caption buttons should be visible. They are hidden, for
-  // example, in overview mode and tablet mode.
+  // Returns true if |ShouldShowCaptionButtonsWhenNotInOverview| returns true
+  // and this browser window is not showing in overview.
   bool ShouldShowCaptionButtons() const;
+
+  // In tablet mode, to prevent accidental taps of the window controls, and to
+  // give more horizontal space for tabs and the new tab button (especially in
+  // split view), we hide the window controls even when this browser window is
+  // not showing in overview. We only do this when the Home Launcher feature is
+  // enabled, because it gives the user the ability to minimize all windows when
+  // pressing the Launcher button on the shelf. So, this function returns true
+  // if the Home Launcher feature is disabled or we are in clamshell mode.
+  bool ShouldShowCaptionButtonsWhenNotInOverview() const;
+
+  // Distance between the edge of the NonClientFrameView and the web app frame
+  // toolbar.
+  int GetToolbarLeftInset() const;
 
   // Distance between the edges of the NonClientFrameView and the tab strip.
   int GetTabStripLeftInset() const;
@@ -165,19 +180,19 @@ class BrowserNonClientFrameViewAsh
   // not need their frames painted.
   bool ShouldPaint() const;
 
-  // Helps to hide or show the header as needed when overview mode starts or
-  // ends or when split view state changes.
-  void OnOverviewOrSplitviewModeChanged();
+  // Helps to hide or show the header as needed when the window is added to or
+  // removed from overview.
+  void OnAddedToOrRemovedFromOverview();
 
   // Creates the frame header for the browser window.
   std::unique_ptr<ash::FrameHeader> CreateFrameHeader();
 
-  // Creates views and does other setup for a hosted app.
-  void SetUpForHostedApp();
+  // Creates views and does other setup for a web app.
+  void SetUpForWebApp();
 
-  // Triggers the hosted app origin and icon animations, assumes the hosted
-  // app UI elements exist.
-  void StartHostedAppAnimation();
+  // Triggers the web-app origin and icon animations, assumes the web-app UI
+  // elements exist.
+  void StartWebAppAnimation();
 
   // Updates the kTopViewInset window property after a layout.
   void UpdateTopViewInset();
@@ -192,6 +207,9 @@ class BrowserNonClientFrameViewAsh
 
   // Returns whether this window is currently in the overview list.
   bool IsInOverviewMode() const;
+
+  // Called any time the frame color may have changed.
+  void OnUpdateFrameColor();
 
   // Returns the top level aura::Window for this browser window.
   const aura::Window* GetFrameWindow() const;

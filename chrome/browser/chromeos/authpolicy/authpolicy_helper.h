@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chromeos/dbus/auth_policy/auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/authpolicy_client.h"
 
 namespace chromeos {
 
@@ -114,7 +114,7 @@ class AuthPolicyHelper {
   bool service_is_available_ = false;
   RefreshPolicyCallback device_policy_callback_;
 
-  base::WeakPtrFactory<AuthPolicyHelper> weak_factory_;
+  base::WeakPtrFactory<AuthPolicyHelper> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(AuthPolicyHelper);
 };
 

@@ -43,8 +43,7 @@ LocalExtensionCache::LocalExtensionCache(
       min_cache_age_(base::Time::Now() - max_cache_age),
       backend_task_runner_(backend_task_runner),
       state_(kUninitialized),
-      cache_status_polling_delay_(kCacheStatusPollingDelay),
-      weak_ptr_factory_(this) {}
+      cache_status_polling_delay_(kCacheStatusPollingDelay) {}
 
 LocalExtensionCache::~LocalExtensionCache() {
   if (state_ == kReady)
@@ -124,11 +123,14 @@ bool LocalExtensionCache::ShouldRetryDownload(
   if (state_ != kReady)
     return false;
 
+  // Should retry download only if in the previous attempt the extension was
+  // present in the cache and the installer process failed. After the removal,
+  // the extension is freshly downloaded.
   CacheMap::iterator it = FindExtension(cached_extensions_, id, expected_hash);
   if (it == cached_extensions_.end())
     return false;
 
-  return (!expected_hash.empty() && it->second.expected_hash.empty());
+  return true;
 }
 
 // static
@@ -277,10 +279,9 @@ void LocalExtensionCache::BackendCheckCacheStatus(
     }
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&LocalExtensionCache::OnCacheStatusChecked, local_cache,
-                     exists, callback));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&LocalExtensionCache::OnCacheStatusChecked,
+                                local_cache, exists, callback));
 }
 
 void LocalExtensionCache::OnCacheStatusChecked(bool ready,
@@ -293,7 +294,7 @@ void LocalExtensionCache::OnCacheStatusChecked(bool ready,
   if (ready) {
     CheckCacheContents(callback);
   } else {
-    base::PostDelayedTaskWithTraits(
+    base::PostDelayedTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&LocalExtensionCache::CheckCacheStatus,
                        weak_ptr_factory_.GetWeakPtr(), callback),
@@ -316,7 +317,7 @@ void LocalExtensionCache::BackendCheckCacheContents(
     const base::Closure& callback) {
   std::unique_ptr<CacheMap> cache_content(new CacheMap);
   BackendCheckCacheContentsInternal(cache_dir, cache_content.get());
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&LocalExtensionCache::OnCacheContentsChecked, local_cache,
                      std::move(cache_content), callback));
@@ -374,7 +375,7 @@ LocalExtensionCache::CacheMap::iterator LocalExtensionCache::InsertCacheEntry(
     it = cache.insert(std::make_pair(id, info));
   } else {
     if (delete_files) {
-      base::DeleteFile(info.file_path, true /* recursive */);
+      base::DeleteFileRecursively(info.file_path);
       VLOG(1) << "Remove older version " << info.version << " for extension id "
               << id;
     }
@@ -411,7 +412,7 @@ void LocalExtensionCache::BackendCheckCacheContentsInternal(
 
     if (info.IsDirectory() || base::IsLink(info.GetName())) {
       LOG(ERROR) << "Erasing bad file in cache directory: " << basename;
-      base::DeleteFile(path, true /* recursive */);
+      base::DeleteFileRecursively(path);
       continue;
     }
 
@@ -454,7 +455,7 @@ void LocalExtensionCache::BackendCheckCacheContentsInternal(
 
     if (id.empty() || version.empty()) {
       LOG(ERROR) << "Invalid file in cache, erasing: " << basename;
-      base::DeleteFile(path, true /* recursive */);
+      base::DeleteFileRecursively(path);
       continue;
     }
 
@@ -528,7 +529,7 @@ void LocalExtensionCache::BackendInstallCacheEntry(
     }
   }
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&LocalExtensionCache::OnCacheEntryInstalled, local_cache,
                      id,

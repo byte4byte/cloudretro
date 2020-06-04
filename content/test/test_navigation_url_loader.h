@@ -11,13 +11,10 @@
 #include "content/browser/frame_host/navigation_request_info.h"
 #include "content/browser/loader/navigation_url_loader.h"
 #include "content/common/navigation_params.h"
+#include "services/network/public/mojom/url_response_head.mojom-forward.h"
 
 namespace net {
 struct RedirectInfo;
-}
-
-namespace network {
-struct ResourceResponse;
 }
 
 namespace content {
@@ -31,13 +28,13 @@ class TestNavigationURLLoader
       public base::SupportsWeakPtr<TestNavigationURLLoader> {
  public:
   TestNavigationURLLoader(std::unique_ptr<NavigationRequestInfo> request_info,
-                          NavigationURLLoaderDelegate* delegate);
+                          NavigationURLLoaderDelegate* delegate,
+                          bool is_served_from_back_forward_cache);
 
   // NavigationURLLoader implementation.
   void FollowRedirect(const std::vector<std::string>& removed_headers,
                       const net::HttpRequestHeaders& modified_headers,
                       PreviewsState new_previews_state) override;
-  void ProceedWithResponse() override;
 
   NavigationRequestInfo* request_info() const { return request_info_.get(); }
 
@@ -49,13 +46,10 @@ class TestNavigationURLLoader
 
   void CallOnRequestRedirected(
       const net::RedirectInfo& redirect_info,
-      const scoped_refptr<network::ResourceResponse>& response_head);
-  void CallOnResponseStarted(
-      const scoped_refptr<network::ResourceResponse>& response_head);
+      network::mojom::URLResponseHeadPtr response_head);
+  void CallOnResponseStarted(network::mojom::URLResponseHeadPtr response_head);
 
   int redirect_count() { return redirect_count_; }
-
-  bool response_proceeded() { return response_proceeded_; }
 
  private:
   ~TestNavigationURLLoader() override;
@@ -63,7 +57,8 @@ class TestNavigationURLLoader
   std::unique_ptr<NavigationRequestInfo> request_info_;
   NavigationURLLoaderDelegate* delegate_;
   int redirect_count_;
-  bool response_proceeded_;
+
+  bool is_served_from_back_forward_cache_;
 };
 
 }  // namespace content

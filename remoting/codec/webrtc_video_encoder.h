@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 
+#include "base/callback.h"
 #include "base/time/time.h"
 #include "third_party/webrtc/api/video/video_codec_type.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
@@ -77,6 +78,10 @@ class WebrtcVideoEncoder {
       EncodeCallback;
 
   virtual ~WebrtcVideoEncoder() {}
+
+  // Request that the encoder provide lossless encoding, or color, if possible.
+  virtual void SetLosslessEncode(bool want_lossless) {}
+  virtual void SetLosslessColor(bool want_lossless) {}
 
   // Encode an image stored in |frame|. If frame.updated_region() is empty
   // then the encoder may return a frame (e.g. to top-off previously-encoded

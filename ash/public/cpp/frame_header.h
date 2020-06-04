@@ -26,11 +26,14 @@ class Widget;
 }  // namespace views
 
 namespace ash {
+class CaptionButtonModel;
 
 // Helper class for managing the window header.
 class ASH_PUBLIC_EXPORT FrameHeader : public views::AnimationDelegateViews {
  public:
   enum Mode { MODE_ACTIVE, MODE_INACTIVE };
+
+  static FrameHeader* Get(views::Widget* widget);
 
   ~FrameHeader() override;
 
@@ -69,6 +72,7 @@ class ASH_PUBLIC_EXPORT FrameHeader : public views::AnimationDelegateViews {
   void SetLeftHeaderView(views::View* view);
   void SetBackButton(views::FrameCaptionButton* view);
   views::FrameCaptionButton* GetBackButton() const;
+  const CaptionButtonModel* GetCaptionButtonModel() const;
 
   // Updates the frame header painting to reflect a change in frame colors.
   virtual void UpdateFrameColors() = 0;
@@ -79,6 +83,10 @@ class ASH_PUBLIC_EXPORT FrameHeader : public views::AnimationDelegateViews {
 
   // views::AnimationDelegateViews:
   void AnimationProgressed(const gfx::Animation* animation) override;
+
+  void UpdateFrameHeaderKey();
+
+  views::View* view() { return view_; }
 
  protected:
   FrameHeader(views::Widget* target_widget, views::View* view);
@@ -97,8 +105,6 @@ class ASH_PUBLIC_EXPORT FrameHeader : public views::AnimationDelegateViews {
 
   void SetCaptionButtonContainer(
       FrameCaptionButtonContainerView* caption_button_container);
-
-  views::View* view() { return view_; }
 
   FrameCaptionButtonContainerView* caption_button_container() {
     return caption_button_container_;

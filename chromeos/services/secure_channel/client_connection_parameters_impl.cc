@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/no_destructor.h"
 
 namespace chromeos {
 
@@ -17,13 +16,17 @@ ClientConnectionParametersImpl::Factory*
     ClientConnectionParametersImpl::Factory::test_factory_ = nullptr;
 
 // static
-ClientConnectionParametersImpl::Factory*
-ClientConnectionParametersImpl::Factory::Get() {
-  if (test_factory_)
-    return test_factory_;
+std::unique_ptr<ClientConnectionParameters>
+ClientConnectionParametersImpl::Factory::Create(
+    const std::string& feature,
+    mojo::PendingRemote<mojom::ConnectionDelegate> connection_delegate_remote) {
+  if (test_factory_) {
+    return test_factory_->CreateInstance(feature,
+                                         std::move(connection_delegate_remote));
+  }
 
-  static base::NoDestructor<Factory> factory;
-  return factory.get();
+  return base::WrapUnique(new ClientConnectionParametersImpl(
+      feature, std::move(connection_delegate_remote)));
 }
 
 // static
@@ -34,45 +37,37 @@ void ClientConnectionParametersImpl::Factory::SetFactoryForTesting(
 
 ClientConnectionParametersImpl::Factory::~Factory() = default;
 
-std::unique_ptr<ClientConnectionParameters>
-ClientConnectionParametersImpl::Factory::BuildInstance(
-    const std::string& feature,
-    mojom::ConnectionDelegatePtr connection_delegate_ptr) {
-  return base::WrapUnique(new ClientConnectionParametersImpl(
-      feature, std::move(connection_delegate_ptr)));
-}
-
 ClientConnectionParametersImpl::ClientConnectionParametersImpl(
     const std::string& feature,
-    mojom::ConnectionDelegatePtr connection_delegate_ptr)
+    mojo::PendingRemote<mojom::ConnectionDelegate> connection_delegate_remote)
     : ClientConnectionParameters(feature),
-      connection_delegate_ptr_(std::move(connection_delegate_ptr)) {
+      connection_delegate_remote_(std::move(connection_delegate_remote)) {
   // If the client disconnects its delegate, the client is signaling that the
   // connection request has been canceled.
-  connection_delegate_ptr_.set_connection_error_handler(base::BindOnce(
-      &ClientConnectionParametersImpl::OnConnectionDelegatePtrDisconnected,
+  connection_delegate_remote_.set_disconnect_handler(base::BindOnce(
+      &ClientConnectionParametersImpl::OnConnectionDelegateRemoteDisconnected,
       base::Unretained(this)));
 }
 
 ClientConnectionParametersImpl::~ClientConnectionParametersImpl() = default;
 
 bool ClientConnectionParametersImpl::HasClientCanceledRequest() {
-  return connection_delegate_ptr_.encountered_error();
+  return !connection_delegate_remote_.is_connected();
 }
 
 void ClientConnectionParametersImpl::PerformSetConnectionAttemptFailed(
     mojom::ConnectionAttemptFailureReason reason) {
-  connection_delegate_ptr_->OnConnectionAttemptFailure(reason);
+  connection_delegate_remote_->OnConnectionAttemptFailure(reason);
 }
 
 void ClientConnectionParametersImpl::PerformSetConnectionSucceeded(
-    mojom::ChannelPtr channel,
-    mojom::MessageReceiverRequest message_receiver_request) {
-  connection_delegate_ptr_->OnConnection(std::move(channel),
-                                         std::move(message_receiver_request));
+    mojo::PendingRemote<mojom::Channel> channel,
+    mojo::PendingReceiver<mojom::MessageReceiver> message_receiver_receiver) {
+  connection_delegate_remote_->OnConnection(
+      std::move(channel), std::move(message_receiver_receiver));
 }
 
-void ClientConnectionParametersImpl::OnConnectionDelegatePtrDisconnected() {
+void ClientConnectionParametersImpl::OnConnectionDelegateRemoteDisconnected() {
   NotifyConnectionRequestCanceled();
 }
 

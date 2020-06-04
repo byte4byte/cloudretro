@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "base/time/default_tick_clock.h"
-#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -19,6 +18,7 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 
 namespace blink {
 
@@ -173,8 +173,6 @@ void IdlenessDetector::WillProcessTask(base::TimeTicks start_time) {
     probe::LifecycleEvent(
         local_frame_, loader, "networkIdle",
         network_0_quiet_start_time_.since_origin().InSecondsF());
-    FirstMeaningfulPaintDetector::From(*local_frame_->GetDocument())
-        .OnNetwork0Quiet();
     in_network_0_quiet_period_ = false;
     network_0_quiet_ = base::TimeTicks();
   }
@@ -223,7 +221,7 @@ void IdlenessDetector::NetworkQuietTimerFired(TimerBase*) {
   }
 }
 
-void IdlenessDetector::Trace(blink::Visitor* visitor) {
+void IdlenessDetector::Trace(Visitor* visitor) {
   visitor->Trace(local_frame_);
 }
 

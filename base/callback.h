@@ -13,6 +13,7 @@
 
 #include "base/callback_forward.h"
 #include "base/callback_internal.h"
+#include "base/logging.h"
 
 // -----------------------------------------------------------------------------
 // Usage documentation
@@ -140,7 +141,7 @@ class RepeatingCallback<R(Args...)> : public internal::CallbackBaseCopyable {
     RepeatingCallback cb = std::move(*this);
     PolymorphicInvoke f =
         reinterpret_cast<PolymorphicInvoke>(cb.polymorphic_invoke());
-    return f(cb.bind_state_.get(), std::forward<Args>(args)...);
+    return f(std::move(cb).bind_state_.get(), std::forward<Args>(args)...);
   }
 };
 

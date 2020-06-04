@@ -19,11 +19,11 @@
 class AppDistributionProvider;
 class BrandedImageProvider;
 class BrowserURLRewriterProvider;
+class ChromeBrowserState;
 class FullscreenProvider;
 class MailtoHandlerProvider;
 class OmahaServiceProvider;
 class OverridesProvider;
-class SpecialUserProvider;
 class SpotlightProvider;
 class UserFeedbackProvider;
 class VoiceSearchProvider;
@@ -33,20 +33,21 @@ class CommandLine;
 }
 
 namespace web {
+class SerializableUserDataManager;
 class WebState;
 }
 
+class GURL;
 @protocol LogoVendor;
-@protocol TextFieldStyling;
-@class TabModel;
 @class UITextField;
 @class UIView;
+class Browser;
 
 namespace ios {
 
 class ChromeBrowserProvider;
-class ChromeBrowserState;
 class ChromeIdentityService;
+class ChromeTrustedVaultService;
 class GeolocationUpdaterProvider;
 class SigninErrorProvider;
 class SigninResourcesProvider;
@@ -104,20 +105,31 @@ class ChromeBrowserProvider {
       std::unique_ptr<ChromeIdentityService> service);
   // Returns an instance of a Chrome identity service.
   virtual ChromeIdentityService* GetChromeIdentityService();
+  // Returns an instance of a Chrome trusted vault service.
+  virtual ChromeTrustedVaultService* GetChromeTrustedVaultService();
   // Returns an instance of a GeolocationUpdaterProvider.
   virtual GeolocationUpdaterProvider* GetGeolocationUpdaterProvider();
   // Returns risk data used in Wallet requests.
   virtual std::string GetRiskData();
-  // Creates and returns a new styled text field with the given |frame|.
-  virtual UITextField<TextFieldStyling>* CreateStyledTextField(
-      CGRect frame) const NS_RETURNS_RETAINED;
-
-  // Initializes the cast service.  Should be called soon after the given
-  // |main_tab_model| is created.
-  virtual void InitializeCastService(TabModel* main_tab_model) const;
+  // Creates and returns a new styled text field.
+  virtual UITextField* CreateStyledTextField() const NS_RETURNS_RETAINED;
+  // Allow embedders to inject data.
+  virtual void AddSerializableData(
+      web::SerializableUserDataManager* user_data_manager,
+      web::WebState* web_state);
+  // Allow embedders to block a specific URL.
+  virtual bool ShouldBlockUrlDuringRestore(const GURL& url,
+                                           web::WebState* web_state);
 
   // Attaches any embedder-specific tab helpers to the given |web_state|.
   virtual void AttachTabHelpers(web::WebState* web_state) const;
+
+  // Attaches any embedder-specific browser agents to the given |browser|.
+  virtual void AttachBrowserAgents(Browser* browser) const;
+
+  // Schedule any embedder-specific startup tasks.
+  virtual void ScheduleDeferredStartupTasks(
+      ChromeBrowserState* browser_state) const;
 
   // Returns an instance of the voice search provider, if one exists.
   virtual VoiceSearchProvider* GetVoiceSearchProvider() const;
@@ -125,19 +137,15 @@ class ChromeBrowserProvider {
   // Returns an instance of the app distribution provider.
   virtual AppDistributionProvider* GetAppDistributionProvider() const;
 
-  // Creates and returns an object that can fetch and vend search engine logos.
-  // The caller assumes ownership of the returned object.
-  virtual id<LogoVendor> CreateLogoVendor(
-      ios::ChromeBrowserState* browser_state) const NS_RETURNS_RETAINED;
+  virtual id<LogoVendor> CreateLogoVendor(Browser* browser,
+                                          web::WebState* web_state) const
+      NS_RETURNS_RETAINED;
 
   // Returns an instance of the omaha service provider.
   virtual OmahaServiceProvider* GetOmahaServiceProvider() const;
 
   // Returns an instance of the user feedback provider.
   virtual UserFeedbackProvider* GetUserFeedbackProvider() const;
-
-  // Returns an instance of the special user provider.
-  virtual SpecialUserProvider* GetSpecialUserProvider() const;
 
   // Returns an instance of the branded image provider.
   virtual BrandedImageProvider* GetBrandedImageProvider() const;

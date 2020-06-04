@@ -7,12 +7,10 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/child_accounts/child_account_test_utils.h"
 #include "chrome/browser/chromeos/child_accounts/screen_time_controller.h"
 #include "chrome/browser/chromeos/child_accounts/screen_time_controller_factory.h"
 #include "chrome/browser/chromeos/child_accounts/time_limit_override.h"
@@ -22,11 +20,10 @@
 #include "chrome/browser/chromeos/policy/user_policy_test_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/supervised_user/supervised_user_test_base.h"
-#include "chrome/common/chrome_features.h"
+#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/common/pref_names.h"
-#include "components/policy/core/browser/browser_policy_connector.h"
-#include "components/policy/policy_constants.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -60,49 +57,37 @@ class TestScreenTimeControllerObserver : public ScreenTimeController::Observer {
 
 namespace utils = time_limit_test_utils;
 
-// Allows testing ScreenTimeController with UsageTimeStateNotifier enabled
-// (instantiated with |true|) or disabled (instantiated with |false|).
-class ScreenTimeControllerTest : public SupervisedUserTestBase,
-                                 public testing::WithParamInterface<bool> {
+class ScreenTimeControllerTest : public MixinBasedInProcessBrowserTest {
  public:
   ScreenTimeControllerTest() = default;
 
   ~ScreenTimeControllerTest() override = default;
 
-  // policy::LoginPolicyTestBase:
-  void SetUp() override {
-    is_feature_enabled_ = GetParam();
-    base::test::ScopedFeatureList feature_list;
-    if (is_feature_enabled_) {
-      feature_list.InitAndEnableFeature(features::kUsageTimeStateNotifier);
-    } else {
-      feature_list.InitAndDisableFeature(features::kUsageTimeStateNotifier);
-    }
-
-    // Recognize example.com (used by LoginPolicyTestBase) as non-enterprise
-    // account.
-    policy::BrowserPolicyConnector::SetNonEnterpriseDomainForTesting(
-        "example.com");
-
-    SupervisedUserTestBase::SetUp();
+  // MixinBasedInProcessBrowserTest:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    MixinBasedInProcessBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kOobeSkipPostLogin);
   }
 
-  void GetMandatoryPoliciesValue(base::DictionaryValue* policy) const override {
+  // MixinBasedInProcessBrowserTest:
+  void SetUpInProcessBrowserTestFixture() override {
+    MixinBasedInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     // A basic starting policy.
-    std::unique_ptr<base::DictionaryValue> policy_content =
+    base::Value policy_content =
         utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-    policy->SetKey(policy::key::kUsageTimeLimit,
-                   base::Value(utils::PolicyToString(policy_content.get())));
-  }
-
-  std::string GetIdToken() const override {
-    return test::GetChildAccountOAuthIdToken();
+    logged_in_user_mixin_.GetUserPolicyMixin()
+        ->RequestPolicyUpdate()
+        ->policy_payload()
+        ->mutable_usagetimelimit()
+        ->set_value(utils::PolicyToString(policy_content));
   }
 
  protected:
   void LogInChildAndSetupClockWithTime(const char* time) {
     SetupTaskRunnerWithTime(utils::TimeFromString(time));
-    LogInUser(LogInType::kChild);
+    logged_in_user_mixin_.LogInUser(false /*issue_any_scope_token*/,
+                                    true /*wait_for_active_session*/,
+                                    true /*request_policy_update*/);
     MockClockForActiveUser();
   }
 
@@ -127,14 +112,12 @@ class ScreenTimeControllerTest : public SupervisedUserTestBase,
 
   bool IsAuthEnabled() {
     return ScreenLocker::default_screen_locker()->IsAuthEnabledForUser(
-        AccountId::FromUserEmail(kAccountId));
+        logged_in_user_mixin_.GetAccountId());
   }
 
   void MockChildScreenTime(base::TimeDelta used_time) {
-    Profile::FromBrowserContext(child_profile_)
-        ->GetPrefs()
-        ->SetInteger(prefs::kChildScreenTimeMilliseconds,
-                     used_time.InMilliseconds());
+    child_profile_->GetPrefs()->SetInteger(prefs::kChildScreenTimeMilliseconds,
+                                           used_time.InMilliseconds());
   }
 
   bool IsLocked() {
@@ -142,17 +125,35 @@ class ScreenTimeControllerTest : public SupervisedUserTestBase,
     return session_manager::SessionManager::Get()->IsScreenLocked();
   }
 
+  void SetUsageTimeLimitPolicy(const base::Value& policy_content) {
+    logged_in_user_mixin_.GetUserPolicyMixin()
+        ->RequestPolicyUpdate()
+        ->policy_payload()
+        ->mutable_usagetimelimit()
+        ->set_value(utils::PolicyToString(policy_content));
+    logged_in_user_mixin_.GetUserPolicyTestHelper()->RefreshPolicyAndWait(
+        child_profile_);
+  }
+
   scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
 
   Profile* child_profile_ = nullptr;
-  bool is_feature_enabled_;
 
  private:
+  chromeos::LoggedInUserMixin logged_in_user_mixin_{
+      &mixin_host_,
+      LoggedInUserMixin::LogInType::kChild,
+      embedded_test_server(),
+      this,
+      true /*should_launch_browser*/,
+      base::nullopt /*account_id*/,
+      false /*include_initial_user*/};
+
   DISALLOW_COPY_AND_ASSIGN(ScreenTimeControllerTest);
 };
 
 // Tests a simple lock override.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, LockOverride) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, LockOverride) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 GMT");
   ScreenLockerTester().Lock();
 
@@ -164,24 +165,18 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, LockOverride) {
   EXPECT_TRUE(IsAuthEnabled());
 
   // Set new policy.
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddOverride(policy_content.get(),
+  utils::AddOverride(&policy_content,
                      usage_time_limit::TimeLimitOverride::Action::kLock,
                      task_runner_->Now());
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   EXPECT_FALSE(IsAuthEnabled());
 }
 
 // Tests an unlock override on a bedtime.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtime) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, UnlockBedtime) {
   LogInChildAndSetupClockWithTime("5 Jan 2018 22:00:00 BRT");
   ScreenLockerTester().Lock();
 
@@ -190,34 +185,24 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtime) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 BRT");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kFriday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kFriday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kSaturday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kSaturday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  base::DictionaryValue bedtime_policy;
-  bedtime_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      bedtime_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that auth is disabled, since the bedtime has already started.
   EXPECT_FALSE(IsAuthEnabled());
 
   // Create unlock override and update the policy.
-  utils::AddOverride(policy_content.get(),
+  utils::AddOverride(&policy_content,
                      usage_time_limit::TimeLimitOverride::Action::kUnlock,
                      task_runner_->Now());
-  base::DictionaryValue unlock_override_policy;
-  unlock_override_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      unlock_override_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that the unlock worked and auth is enabled.
   EXPECT_TRUE(IsAuthEnabled());
@@ -232,7 +217,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtime) {
 }
 
 // Tests an override with duration on a bedtime before it's locked.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, OverrideBedtimeWithDuration) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, OverrideBedtimeWithDuration) {
   LogInChildAndSetupClockWithTime("5 Jan 2018 20:45:00 PST");
   ScreenLockerTester().Lock();
 
@@ -241,35 +226,24 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, OverrideBedtimeWithDuration) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 PST");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kFriday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kFriday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kSaturday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kSaturday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  base::DictionaryValue bedtime_policy;
-  bedtime_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      bedtime_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that auth is enable, since the bedtime hasn't started.
   EXPECT_TRUE(IsAuthEnabled());
 
   // Create unlock override with a duration of 2 hours and update the policy.
   utils::AddOverrideWithDuration(
-      policy_content.get(),
-      usage_time_limit::TimeLimitOverride::Action::kUnlock, task_runner_->Now(),
-      base::TimeDelta::FromHours(2));
-  base::DictionaryValue unlock_override_policy;
-  unlock_override_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      unlock_override_policy, base::DictionaryValue(), child_profile_);
+      &policy_content, usage_time_limit::TimeLimitOverride::Action::kUnlock,
+      task_runner_->Now(), base::TimeDelta::FromHours(2));
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that the unlock worked and auth is enabled.
   EXPECT_TRUE(IsAuthEnabled());
@@ -301,7 +275,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, OverrideBedtimeWithDuration) {
 }
 
 // Tests an override with duration on a daily limit before it's locked.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest,
                        OverrideDailyLimitWithDuration) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 BRT");
   ScreenLockerTester().Lock();
@@ -311,16 +285,11 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 BRT");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kMonday,
                            base::TimeDelta::FromHours(2), last_updated);
-  base::DictionaryValue daily_limit_policy;
-  daily_limit_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      daily_limit_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that auth is enabled at 10 AM with 0 usage time.
   EXPECT_TRUE(IsAuthEnabled());
@@ -332,15 +301,9 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
 
   // Create unlock override with a duration of 1 hour and update the policy.
   utils::AddOverrideWithDuration(
-      policy_content.get(),
-      usage_time_limit::TimeLimitOverride::Action::kUnlock, task_runner_->Now(),
-      base::TimeDelta::FromHours(1));
-  base::DictionaryValue unlock_override_policy;
-  unlock_override_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      unlock_override_policy, base::DictionaryValue(), child_profile_);
+      &policy_content, usage_time_limit::TimeLimitOverride::Action::kUnlock,
+      task_runner_->Now(), base::TimeDelta::FromHours(1));
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that the unlock worked and auth is enabled.
   EXPECT_TRUE(IsAuthEnabled());
@@ -366,7 +329,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
 }
 
 // Tests an unlock override with duration on a bedtime.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtimeWithDuration) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, UnlockBedtimeWithDuration) {
   LogInChildAndSetupClockWithTime("5 Jan 2018 22:00:00 GMT");
   ScreenLockerTester().Lock();
 
@@ -375,35 +338,24 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtimeWithDuration) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 GMT");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kFriday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kFriday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kSaturday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kSaturday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  base::DictionaryValue bedtime_policy;
-  bedtime_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      bedtime_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that auth is disabled, since the bedtime has already started.
   EXPECT_FALSE(IsAuthEnabled());
 
   // Create unlock override with a duration of 2 hours and update the policy.
   utils::AddOverrideWithDuration(
-      policy_content.get(),
-      usage_time_limit::TimeLimitOverride::Action::kUnlock, task_runner_->Now(),
-      base::TimeDelta::FromHours(2));
-  base::DictionaryValue unlock_override_policy;
-  unlock_override_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      unlock_override_policy, base::DictionaryValue(), child_profile_);
+      &policy_content, usage_time_limit::TimeLimitOverride::Action::kUnlock,
+      task_runner_->Now(), base::TimeDelta::FromHours(2));
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that the unlock worked and auth is enabled.
   EXPECT_TRUE(IsAuthEnabled());
@@ -432,7 +384,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockBedtimeWithDuration) {
 }
 
 // Tests an unlock override with duration on a daily limit.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockDailyLimitWithDuration) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, UnlockDailyLimitWithDuration) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 PST");
   ScreenLockerTester().Lock();
 
@@ -441,16 +393,11 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockDailyLimitWithDuration) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 PST");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kMonday,
                            base::TimeDelta::FromHours(2), last_updated);
-  base::DictionaryValue daily_limit_policy;
-  daily_limit_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      daily_limit_policy, base::DictionaryValue(), child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that auth is enabled at 10 AM with 0 usage time.
   EXPECT_TRUE(IsAuthEnabled());
@@ -462,15 +409,9 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockDailyLimitWithDuration) {
 
   // Create unlock override with a duration of 1 hour and update the policy.
   utils::AddOverrideWithDuration(
-      policy_content.get(),
-      usage_time_limit::TimeLimitOverride::Action::kUnlock, task_runner_->Now(),
-      base::TimeDelta::FromHours(1));
-  base::DictionaryValue unlock_override_policy;
-  unlock_override_policy.SetKey(
-      policy::key::kUsageTimeLimit,
-      base::Value(utils::PolicyToString(policy_content.get())));
-  user_policy_helper()->SetPolicyAndWait(
-      unlock_override_policy, base::DictionaryValue(), child_profile_);
+      &policy_content, usage_time_limit::TimeLimitOverride::Action::kUnlock,
+      task_runner_->Now(), base::TimeDelta::FromHours(1));
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Check that the unlock worked and auth is enabled.
   EXPECT_TRUE(IsAuthEnabled());
@@ -496,7 +437,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, UnlockDailyLimitWithDuration) {
 }
 
 // Tests the default time window limit.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultBedtime) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, DefaultBedtime) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 GMT");
   ScreenLockerTester().Lock();
 
@@ -505,36 +446,30 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultBedtime) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 GMT");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kMonday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kTuesday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kTuesday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kWednesday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kWednesday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kThursday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kThursday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kFriday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kFriday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kSaturday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kSaturday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kSunday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kSunday,
                             utils::CreateTime(21, 0), utils::CreateTime(7, 0),
                             last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Iterate over a week checking that the device is locked properly everyday.
   for (int i = 0; i < 7; i++) {
@@ -558,8 +493,9 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultBedtime) {
   }
 }
 
+// Disabled because of flakiness crbug.com/1021505
 // Tests the default time window limit.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultDailyLimit) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, DISABLED_DefaultDailyLimit) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 GMT");
   ScreenLockerTester().Lock();
 
@@ -568,29 +504,23 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultDailyLimit) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 GMT");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kMonday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kTuesday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kTuesday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kWednesday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kWednesday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kThursday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kThursday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kFriday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kFriday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kSaturday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kSaturday,
                            base::TimeDelta::FromHours(3), last_updated);
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kSunday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kSunday,
                            base::TimeDelta::FromHours(3), last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Iterate over a week checking that the device is locked properly
   // every day.
@@ -624,8 +554,10 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, DefaultDailyLimit) {
   }
 }
 
+// Disabled because of flakiness crbug.com/1021505
 // Tests that the bedtime locks an active session when it is reached.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionBedtime) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest,
+                       DISABLED_ActiveSessionBedtime) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 PST");
 
   system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
@@ -633,18 +565,12 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionBedtime) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 PST");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kMonday,
                             utils::CreateTime(23, 0), utils::CreateTime(8, 0),
                             last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Verify that device is unlocked at 10 AM.
   EXPECT_FALSE(IsLocked());
@@ -662,8 +588,10 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionBedtime) {
   EXPECT_TRUE(IsAuthEnabled());
 }
 
+// Disabled because of flakiness crbug.com/1021505
 // Tests that the daily limit locks the device when it is reached.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionDailyLimit) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest,
+                       DISABLED_ActiveSessionDailyLimit) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 PST");
 
   system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
@@ -671,17 +599,11 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionDailyLimit) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 PST");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kMonday,
                            base::TimeDelta::FromHours(1), last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Verify that device is unlocked at 10 AM.
   EXPECT_FALSE(IsLocked());
@@ -699,7 +621,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, ActiveSessionDailyLimit) {
 }
 
 // Tests bedtime during timezone changes.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, BedtimeOnTimezoneChange) {
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, BedtimeOnTimezoneChange) {
   LogInChildAndSetupClockWithTime("3 Jan 2018 10:00:00 GMT-0600");
   ScreenLockerTester().Lock();
 
@@ -708,18 +630,12 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, BedtimeOnTimezoneChange) {
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("3 Jan 2018 0:00 GMT-0600");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kWednesday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kWednesday,
                             utils::CreateTime(19, 0), utils::CreateTime(7, 0),
                             last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Verify that auth is enabled at 10 AM.
   EXPECT_TRUE(IsAuthEnabled());
@@ -750,7 +666,7 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, BedtimeOnTimezoneChange) {
 }
 
 // Tests bedtime during timezone changes that make the clock go back in time.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest,
                        BedtimeOnEastToWestTimezoneChanges) {
   LogInChildAndSetupClockWithTime("3 Jan 2018 8:00:00 GMT+1300");
   ScreenLockerTester().Lock();
@@ -760,18 +676,12 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
 
   // Set new policy.
   base::Time last_updated = utils::TimeFromString("3 Jan 2018 0:00 GMT+1300");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeWindowLimit(policy_content.get(), utils::kTuesday,
+  utils::AddTimeWindowLimit(&policy_content, utils::kTuesday,
                             utils::CreateTime(20, 0), utils::CreateTime(7, 0),
                             last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   // Verify that auth is disabled at 8 AM.
   EXPECT_TRUE(IsAuthEnabled());
@@ -794,10 +704,9 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest,
   EXPECT_FALSE(IsAuthEnabled());
 }
 
+// Disabled because of flakiness crbug.com/1021505
 // Tests if call the observers for usage time limit warning.
-IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, CallObservers) {
-  if (!is_feature_enabled_)
-    return;
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, DISABLED_CallObservers) {
   LogInChildAndSetupClockWithTime("1 Jan 2018 10:00:00 PST");
 
   system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
@@ -805,17 +714,11 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, CallObservers) {
 
   // Set new policy with 3 hours of time usage limit.
   base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 PST");
-  std::unique_ptr<base::DictionaryValue> policy_content =
+  base::Value policy_content =
       utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
-  utils::AddTimeUsageLimit(policy_content.get(), utils::kMonday,
+  utils::AddTimeUsageLimit(&policy_content, utils::kMonday,
                            base::TimeDelta::FromHours(3), last_updated);
-
-  base::DictionaryValue policy;
-  policy.SetKey(policy::key::kUsageTimeLimit,
-                base::Value(utils::PolicyToString(policy_content.get())));
-
-  user_policy_helper()->SetPolicyAndWait(policy, base::DictionaryValue(),
-                                         child_profile_);
+  SetUsageTimeLimitPolicy(policy_content);
 
   TestScreenTimeControllerObserver observer;
   ScreenTimeControllerFactory::GetForBrowserContext(child_profile_)
@@ -877,12 +780,4 @@ IN_PROC_BROWSER_TEST_P(ScreenTimeControllerTest, CallObservers) {
       ->RemoveObserver(&observer);
 }
 
-// TODO(crbug.com/936407): Most of this suite is flaky.
-#if !defined(NDEBUG) || defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
-// Run all ScreenTimeControllerTest with UsageTimeStateNotifier feature enabled
-// and disabled.
-INSTANTIATE_TEST_SUITE_P(DISABLED_, ScreenTimeControllerTest, testing::Bool());
-#else
-INSTANTIATE_TEST_SUITE_P(, ScreenTimeControllerTest, testing::Bool());
-#endif
 }  // namespace chromeos

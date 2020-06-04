@@ -15,8 +15,8 @@
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_byte_range.h"
-#include "storage/browser/fileapi/file_system_url.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/file_system_url.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -80,7 +80,7 @@ class ExternalFileResolver {
   scoped_refptr<storage::FileSystemContext> file_system_context_;
   file_manager::util::FileSystemURLAndHandle isolated_file_system_;
   std::string mime_type_;
-  base::WeakPtrFactory<ExternalFileResolver> weak_ptr_factory_;
+  base::WeakPtrFactory<ExternalFileResolver> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExternalFileResolver);
 };

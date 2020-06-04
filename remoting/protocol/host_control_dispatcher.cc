@@ -26,40 +26,62 @@ void HostControlDispatcher::SetCapabilities(
     const Capabilities& capabilities) {
   ControlMessage message;
   message.mutable_capabilities()->CopyFrom(capabilities);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void HostControlDispatcher::SetPairingResponse(
     const PairingResponse& pairing_response) {
   ControlMessage message;
   message.mutable_pairing_response()->CopyFrom(pairing_response);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void HostControlDispatcher::DeliverHostMessage(
     const ExtensionMessage& message) {
   ControlMessage control_message;
   control_message.mutable_extension_message()->CopyFrom(message);
-  message_pipe()->Send(&control_message, base::Closure());
+  message_pipe()->Send(&control_message, {});
 }
 
 void HostControlDispatcher::SetVideoLayout(const VideoLayout& layout) {
   ControlMessage message;
   message.mutable_video_layout()->CopyFrom(layout);
-  message_pipe()->Send(&message, base::Closure());
+  message_pipe()->Send(&message, {});
 }
 
 void HostControlDispatcher::InjectClipboardEvent(const ClipboardEvent& event) {
   ControlMessage message;
   message.mutable_clipboard_event()->CopyFrom(event);
-  message_pipe()->Send(&message, base::Closure());
+  std::size_t message_size = message.ByteSizeLong();
+  if (message_size > max_message_size_) {
+    // Better to drop the event than drop the connection, which can happen if
+    // the browser receives a message larger than it can handle.
+    LOG(WARNING) << "Clipboard message dropped because message size "
+                 << message_size << " is larger than " << max_message_size_;
+    return;
+  }
+  message_pipe()->Send(&message, {});
 }
 
 void HostControlDispatcher::SetCursorShape(
     const CursorShapeInfo& cursor_shape) {
   ControlMessage message;
   message.mutable_cursor_shape()->CopyFrom(cursor_shape);
-  message_pipe()->Send(&message, base::Closure());
+  std::size_t message_size = message.ByteSizeLong();
+  if (message_size > max_message_size_) {
+    // Better to drop the event than drop the connection, which can happen if
+    // the browser receives a message larger than it can handle.
+    LOG(WARNING) << "Cursor message dropped because message size "
+                 << message_size << " is larger than " << max_message_size_;
+    return;
+  }
+  message_pipe()->Send(&message, {});
+}
+
+void HostControlDispatcher::SetKeyboardLayout(const KeyboardLayout& layout) {
+  ControlMessage message;
+  message.mutable_keyboard_layout()->CopyFrom(layout);
+  message_pipe()->Send(&message, {});
 }
 
 void HostControlDispatcher::OnIncomingMessage(

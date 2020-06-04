@@ -82,11 +82,11 @@ _COMMANDS = {
     "DeleteCookie": (Method.DELETE, "/session/:sessionId/cookie/:name"),
     "DeleteNetworkConditions":
     (Method.DELETE, "/session/:sessionId/chromium/network_conditions"),
-    "DismissAlert": (Method.POST, "/session/:sessionId/dismiss_alert"),
+    "DismissAlert": command_executor.Command.DISMISS_ALERT,
     "DoubleClick": (Method.POST, "/session/:sessionId/doubleclick"),
     "ElementScreenshot":
     (Method.GET, "/session/:sessionId/element/:id/screenshot"),
-    "ExecuteAsyncScript": (Method.POST, "/session/:sessionId/execute_async"),
+    "ExecuteAsyncScript": command_executor.Command.EXECUTE_ASYNC_SCRIPT,
     "ExecuteCDP": (Method.POST, "/session/:sessionId/goog/cdp/execute"),
     "ExecuteScript": (Method.POST, "/session/:sessionId/execute/sync"),
     "FindChildElement":
@@ -97,7 +97,7 @@ _COMMANDS = {
     "FindElements": (Method.POST, "/session/:sessionId/elements"),
     "Freeze": (Method.POST, "/session/:sessionId/goog/page/freeze"),
     "FullscreenWindow": (Method.POST, "/session/:sessionId/window/fullscreen"),
-    "GetActiveElement": (Method.POST, "/session/:sessionId/element/active"),
+    "GetActiveElement": command_executor.Command.GET_ACTIVE_ELEMENT,
     "GetAlertMessage": (Method.GET, "/session/:sessionId/alert_text"),
     "GetCookies": (Method.GET, "/session/:sessionId/cookie"),
     "GetElementAttribute":
@@ -142,14 +142,14 @@ _COMMANDS = {
     "GetTimeouts": (Method.GET, "/session/:sessionId/timeouts"),
     "GetTitle": (Method.GET, "/session/:sessionId/title"),
     "GetUrl": (Method.GET, "/session/:sessionId/url"),
-    "GetWindow": (Method.GET, "/session/:sessionId/window_handle"),
+    "GetWindow": command_executor.Command.GET_CURRENT_WINDOW_HANDLE,
     "GetWindowPosition":
     (Method.GET, "/session/:sessionId/window/:windowHandle/position"),
     "GetWindowRect":
     (Method.GET, "/session/:sessionId/window/rect"),
     "GetWindowSize":
     (Method.GET, "/session/:sessionId/window/:windowHandle/size"),
-    "GetWindows": (Method.GET, "/session/:sessionId/window_handles"),
+    "GetWindows": command_executor.Command.GET_WINDOW_HANDLES,
     "GoBack": (Method.POST, "/session/:sessionId/back"),
     "GoForward": (Method.POST, "/session/:sessionId/forward"),
     "HeapSnapshot": (Method.GET, "/session/:sessionId/chromium/heap_snapshot"),
@@ -183,7 +183,9 @@ _COMMANDS = {
     "SendCommand": (Method.POST, "/session/:sessionId/chromium/send_command"),
     "SendCommandAndGetResult":
     (Method.POST, "/session/:sessionId/chromium/send_command_and_get_result"),
-    "SetAlertPrompt": (Method.POST, "/session/:sessionId/alert_text"),
+    "SendCommandFromWebSocket":
+    (Method.POST, "session/:sessionId/chromium/send_command_from_websocket"),
+    "SetAlertPrompt": command_executor.Command.SET_ALERT_VALUE,
     "SetGeolocation": (Method.POST, "/session/:sessionId/location"),
     "SetImplicitWait":
     (Method.POST, "/session/:sessionId/timeouts/implicit_wait"),
@@ -280,11 +282,12 @@ def _GetAnyElementIds(payload):
   Returns:
     list of ID strings, in order, in this payload
   """
+  element_tag="element-6066-11e4-a52e-4f735466cecf"
   if isinstance(payload, dict):
-    if "ELEMENT" in payload:
-      return [payload["ELEMENT"]]
+    if element_tag in payload:
+      return [payload[element_tag]]
   elif isinstance(payload, list):
-    elements = [item["ELEMENT"] for item in payload if "ELEMENT" in item]
+    elements = [item[element_tag] for item in payload if element_tag in item]
     windows = [item for item in payload if "CDwindow" in item]
     if not elements and not windows:
       return None
@@ -305,7 +308,7 @@ def _ReplaceWindowAndElementIds(payload, id_map):
     id_map: mapping from old to new IDs that should be replaced.
   """
   if isinstance(payload, dict):
-    for key, value in payload.iteritems():
+    for key, value in payload.items():
       if isinstance(value, basestring) and value in id_map:
         payload[key] = id_map[value]
       else:
@@ -582,6 +585,12 @@ class _Parser(object):
   _CLIENT_PREAMBLE_REGEX = re.compile(
       r"^\[[0-9]{10}\.[0-9]{3}\]\[INFO\]: \[[a-f0-9]*\]")
 
+  # Matches headers for client commands/responses when readable-timestamp
+  #option is selected. Depending on OS, final component may be 3 or 6 digits
+  _CLIENT_PREAMBLE_REGEX_READABLE = re.compile(
+      r"^\[[0-9]{2}-[0-9]{2}-[0-9]{4} "
+      "[0-9]{2}:[0-9]{2}:[0-9]{2}.([0-9]{3}){1,2}\]\[INFO\]: \[[a-f0-9]*\]")
+
   def __init__(self, log_file):
     """Initialize the _Parser instance.
 
@@ -617,6 +626,11 @@ class _Parser(object):
         return None
       if re.match(self._CLIENT_PREAMBLE_REGEX, next_line):
         return next_line
+      if re.match(self._CLIENT_PREAMBLE_REGEX_READABLE, next_line):
+        #Readable timestamp contains a space between date and time,
+        #which breaks other parsing of the header. Replace with underscore
+        next_line = next_line.replace(" ", "_", 1)
+        return next_line
 
   def _GetPayloadString(self, header_line):
     """Gets the payload for the current command in self._logfile.
@@ -633,11 +647,13 @@ class _Parser(object):
     Returns:
       payload of the command as a string
     """
+    min_header = 5
+
     header_segments = header_line.split()
-    if len(header_segments) < 5:
+    if len(header_segments) < min_header:
       return None
-    payload = " ".join(header_segments[4:])
-    opening_char = header_segments[4]
+    payload = " ".join(header_segments[min_header-1:])
+    opening_char = header_segments[min_header-1]
     if opening_char == "{":
       closing_char = "}"
     elif opening_char == "[":
@@ -727,6 +743,7 @@ class CommandSequence(object):
       return command
     if not response.IsResponse():
       raise ReplayException("Command and Response unexpectedly out of order.")
+
     self._IngestLoggedResponse(response)
     return command
 
@@ -748,8 +765,15 @@ class CommandSequence(object):
           self._id_map[id_old] = id_new
         self._staged_logged_ids = None
 
-    if "sessionId" in response and self._staged_logged_session_id:
-      self._id_map[self._staged_logged_session_id] = response["sessionId"]
+    # In W3C format, the http response is a single key dict,
+    # where the value is None, a single value, or another dictionary
+    # sessionId is contained in the nested dictionary
+    if (self._staged_logged_session_id
+        and "value" in response and response["value"]
+        and isinstance(response["value"], dict)
+        and "sessionId" in response["value"]):
+      self._id_map[self._staged_logged_session_id] = (
+        response["value"]["sessionId"])
       self._staged_logged_session_id = None
 
   def _IngestLoggedResponse(self, response):
@@ -807,7 +831,7 @@ class CommandSequence(object):
 
     response = [
         {u"id": key, u"capabilities": val["response"].GetPayloadPrimitive()}
-        for key, val in command_response_pairs.iteritems()
+        for key, val in command_response_pairs.items()
     ]
     self._last_response = _GetSessionsResponseEntry(response)
 
@@ -853,7 +877,8 @@ class Replayer(object):
 def StartChromeDriverServer(chromedriver_binary,
                             output_log_path,
                             devtools_replay_path="",
-                            replayable=False):
+                            replayable=False,
+                            additional_args=None):
   chromedriver = util.GetAbsolutePathOfUserPath(chromedriver_binary)
   if (not os.path.exists(chromedriver) and
       util.GetPlatformName() == "win" and
@@ -865,9 +890,14 @@ def StartChromeDriverServer(chromedriver_binary,
   chromedriver_server = server.Server(chromedriver_binary,
                                       log_path=output_log_path,
                                       devtools_replay_path=devtools_replay_path,
-                                      replayable=replayable)
+                                      replayable=replayable,
+                                      additional_args=additional_args)
 
   return chromedriver_server
+
+
+def _CommandLineError(parser, message):
+  parser.error(message + '\nPlease run "%s --help" for help' % __file__)
 
 
 def _GetCommandLineOptions():
@@ -886,21 +916,26 @@ def _GetCommandLineOptions():
   parser.add_option(
       "", "--devtools-replay", help="Replay DevTools actions in addition\n"
       "to client-side actions")
-  # TODO(crbug.com/chromedriver/2501)
   parser.add_option(
       "", "--replayable", help="Generate logs that do not have truncated\n"
       "strings so that they can be replayed again.")
+  parser.add_option(
+      '', '--additional-args', action='append',
+      help='Additional arguments to add on ChromeDriver command line')
 
   options, args = parser.parse_args()
+  if len(args) < 2:
+    _CommandLineError(parser,
+                      'ChromeDriver binary and/or input log path missing.')
+  if len(args) > 2:
+    _CommandLineError(parser, 'Too many command line arguments.')
   if not os.path.exists(args[0]):
-    parser.error("Path given for chromedriver is invalid.\n"
-                 'Please run "%s --help" for help' % __file__)
+    _CommandLineError(parser, 'Path given for chromedriver is invalid.')
   if options.chrome and not os.path.exists(options.chrome):
-    parser.error("Path given by --chrome is invalid.\n"
-                 'Please run "%s --help" for help' % __file__)
+    _CommandLineError(parser, 'Path given by --chrome is invalid.')
   if options.replayable and not options.output_log_path:
-    parser.error("Replayable log option needs --output-log-path specified. \n"
-                 'Please run "%s --help" for help' % __file__)
+    _CommandLineError(
+        parser, 'Replayable log option needs --output-log-path specified.')
 
   return options, args
 
@@ -909,7 +944,7 @@ def main():
   options, args = _GetCommandLineOptions()
   devtools_replay_path = args[1] if options.devtools_replay else None
   server = StartChromeDriverServer(args[0], options.output_log_path,
-      devtools_replay_path, options.replayable)
+      devtools_replay_path, options.replayable, options.additional_args)
   input_log_path = util.GetAbsolutePathOfUserPath(args[1])
   chrome_binary = (util.GetAbsolutePathOfUserPath(options.chrome)
                    if options.chrome else None)

@@ -4,15 +4,16 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsSessionToken;
 
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.Tab.TabHidingType;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
-import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.chrome.browser.tab.TabHidingType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.components.security_state.SecurityStateModel;
 
 import javax.inject.Inject;
 
@@ -28,8 +29,8 @@ public class CustomTabNavigationEventObserver extends EmptyTabObserver {
     private final CustomTabsConnection mConnection;
 
     @Inject
-    public CustomTabNavigationEventObserver(CustomTabIntentDataProvider intentDataProvider,
-            CustomTabsConnection connection) {
+    public CustomTabNavigationEventObserver(
+            BrowserServicesIntentDataProvider intentDataProvider, CustomTabsConnection connection) {
         mSessionToken = intentDataProvider.getSession();
         mConnection = connection;
     }
@@ -63,7 +64,10 @@ public class CustomTabNavigationEventObserver extends EmptyTabObserver {
 
     @Override
     public void onDidAttachInterstitialPage(Tab tab) {
-        if (tab.getSecurityLevel() != ConnectionSecurityLevel.DANGEROUS) return;
+        boolean isContentDangerous = SecurityStateModel.isContentDangerous(tab.getWebContents());
+        if (isContentDangerous) {
+            return;
+        }
         mConnection.notifyNavigationEvent(mSessionToken, CustomTabsCallback.NAVIGATION_FAILED);
     }
 }

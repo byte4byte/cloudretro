@@ -14,6 +14,7 @@
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
+#include "net/cookies/site_for_cookies.h"
 #include "url/origin.h"
 
 class GURL;
@@ -47,6 +48,13 @@ NET_EXPORT bool GetCookieDomainWithString(const GURL& url,
 // i.e. it doesn't begin with a leading '.' character.
 NET_EXPORT bool DomainIsHostOnly(const std::string& domain_string);
 
+// If |cookie_domain| is nonempty and starts with a "." character, this returns
+// the substring of |cookie_domain| without the leading dot. (Note only one
+// leading dot is stripped, if there are multiple.) Otherwise it returns
+// |cookie_domain|. This is useful for converting from CanonicalCookie's
+// representation of a cookie domain to the RFC's notion of a cookie's domain.
+NET_EXPORT std::string CookieDomainAsHost(const std::string& cookie_domain);
+
 // Parses the string with the cookie expiration time (very forgivingly).
 // Returns the "null" time on failure.
 //
@@ -58,8 +66,16 @@ NET_EXPORT base::Time ParseCookieExpirationTime(const std::string& time_string);
 // Convenience for converting a cookie origin (domain and https pair) to a URL.
 NET_EXPORT GURL CookieOriginToURL(const std::string& domain, bool is_https);
 
-// Returns true if the cookie |domain| matches the given |host| as described
-// in section 5.1.3 of RFC 6265.
+// Returns a URL that could have been the cookie's source.
+// Not guaranteed to actually be the URL that set the cookie. Not guaranteed to
+// be a valid GURL. Intended as a shim for SetCanonicalCookieAsync calls, where
+// a source URL is required but only a source scheme may be available.
+NET_EXPORT GURL SimulatedCookieSource(const CanonicalCookie& cookie,
+                                      const std::string& source_scheme);
+
+// |domain| is the output of cookie.Domain() for some cookie. This returns true
+// if a |domain| indicates that the cookie can be accessed by |host|.
+// See comment on CanonicalCookie::IsDomainMatch().
 NET_EXPORT bool IsDomainMatch(const std::string& domain,
                               const std::string& host);
 
@@ -97,85 +113,97 @@ NET_EXPORT std::string SerializeRequestCookieLine(
 // the user directly interacting with the browser UI, e.g. entering a URL
 // or selecting a bookmark.
 //
+// If |force_ignore_site_for_cookies| is specified, all SameSite cookies will be
+// attached, i.e. this will return SAME_SITE_STRICT. This flag is set to true
+// when the |site_for_cookies| is a chrome:// URL embedding a secure origin,
+// among other scenarios.
+// This is *not* set when the *initiator* is chrome-extension://,
+// which is intentional, since it would be bad to let an extension arbitrarily
+// redirect anywhere and bypass SameSite=Strict rules.
+//
 // See also documentation for corresponding methods on net::URLRequest.
 //
 // |http_method| is used to enforce the requirement that, in a context that's
 // lax same-site but not strict same-site, SameSite=lax cookies be only sent
 // when the method is "safe" in the RFC7231 section 4.2.1 sense.
-//
-// This also applies the net feature |URLRequest::site_for_cookies|, which
-// upgrades SameSite=Lax level access to Strict-level access if on.
 NET_EXPORT CookieOptions::SameSiteCookieContext
 ComputeSameSiteContextForRequest(const std::string& http_method,
                                  const GURL& url,
-                                 const GURL& site_for_cookies,
+                                 const SiteForCookies& site_for_cookies,
                                  const base::Optional<url::Origin>& initiator,
-                                 bool attach_same_site_cookies);
+                                 bool force_ignore_site_for_cookies);
 
 // As above, but applying for scripts. |initiator| here should be the initiator
 // used when fetching the document.
+// If |force_ignore_site_for_cookies| is true, this returns SAME_SITE_STRICT.
 NET_EXPORT CookieOptions::SameSiteCookieContext
-ComputeSameSiteContextForScriptGet(
-    const GURL& url,
-    const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& initiator);
+ComputeSameSiteContextForScriptGet(const GURL& url,
+                                   const SiteForCookies& site_for_cookies,
+                                   const base::Optional<url::Origin>& initiator,
+                                   bool force_ignore_site_for_cookies);
 
 // Determines which of the cookies for |url| can be set from a network response,
 // with respect to the SameSite attribute. This will only return CROSS_SITE or
 // SAME_SITE_LAX (cookie sets of SameSite=strict cookies are permitted in same
 // contexts that sets of SameSite=lax cookies are).
+// If |force_ignore_site_for_cookies| is true, this returns SAME_SITE_LAX.
 NET_EXPORT CookieOptions::SameSiteCookieContext
 ComputeSameSiteContextForResponse(const GURL& url,
-                                  const GURL& site_for_cookies,
-                                  const base::Optional<url::Origin>& initiator);
+                                  const SiteForCookies& site_for_cookies,
+                                  const base::Optional<url::Origin>& initiator,
+                                  bool force_ignore_site_for_cookies);
 
 // Determines which of the cookies for |url| can be set from a script context,
 // with respect to the SameSite attribute. This will only return CROSS_SITE or
 // SAME_SITE_LAX (cookie sets of SameSite=strict cookies are permitted in same
 // contexts that sets of SameSite=lax cookies are).
+// If |force_ignore_site_for_cookies| is true, this returns SAME_SITE_LAX.
 NET_EXPORT CookieOptions::SameSiteCookieContext
 ComputeSameSiteContextForScriptSet(const GURL& url,
-                                   const GURL& site_for_cookies);
+                                   const SiteForCookies& site_for_cookies,
+                                   bool force_ignore_site_for_cookies);
 
-// Checks whether a cookie would be excluded due to SameSite restrictions,
-// assuming SameSiteByDefaultCookies and CookiesWithoutSameSiteMustBeSecure
-// were turned on. This should be called on a cookie that is in fact included,
-// (presumably because SameSiteByDefaultCookies and
-// CookiesWithoutSameSiteMustBeSecure are not actually enabled). If the
-// return value is not INCLUDE, the cookie should be added to the excluded
-// cookies list so that an appropriate warning message can be shown in the
-// console.
-NET_EXPORT CanonicalCookie::CookieInclusionStatus
-CookieWouldBeExcludedDueToSameSite(const CanonicalCookie& cookie,
-                                   const CookieOptions& options);
+// Determines which of the cookies for |url| can be accessed when fetching a
+// subresources. This is either CROSS_SITE or SAME_SITE_STRICT,
+// since the initiator for a subresource is the frame loading it.
+NET_EXPORT CookieOptions::SameSiteCookieContext
+// If |force_ignore_site_for_cookies| is true, this returns SAME_SITE_STRICT.
+ComputeSameSiteContextForSubresource(const GURL& url,
+                                     const SiteForCookies& site_for_cookies,
+                                     bool force_ignore_site_for_cookies);
 
-// Takes a OnceCallback with only a CookieList and binds it to a callback that
-// also accepts a CookieStatusList, making it compatible with
-// CookieStore::GetCookieListCallback.
-//
-// Can be used when the CookieWithStatus list (the list of
-// cookies excluded from being sent) is not needed and therefore isn't in the
-// callback signature. Also useful if you're using
-NET_EXPORT base::OnceCallback<void(const CookieList&, const CookieStatusList&)>
-IgnoreCookieStatusList(base::OnceCallback<void(const CookieList&)> callback);
+// Returns whether the respective SameSite feature is enabled.
+NET_EXPORT bool IsSameSiteByDefaultCookiesEnabled();
+NET_EXPORT bool IsCookiesWithoutSameSiteMustBeSecureEnabled();
+NET_EXPORT bool IsSchemefulSameSiteEnabled();
+bool IsRecentHttpSameSiteAccessGrantsLegacyCookieSemanticsEnabled();
+bool IsRecentCreationTimeGrantsLegacyCookieSemanticsEnabled();
 
-// Takes a CookieStore::GetCookieListCallback and binds a function that only
-// takes a CookieList, sending an empty CookieStatusList.
-//
-// Can be used if you have a callback that's used with both GetCookieList and
-// GetAllCookies and you want to use the excluded cookies list when you have it.
-NET_EXPORT base::OnceCallback<void(const CookieList&)> AddCookieStatusList(
-    base::OnceCallback<void(const CookieList&, const CookieStatusList&)>
-        callback);
+// Determines whether the last same-site access to a cookie should grant legacy
+// access semantics to the current attempted cookies access, based on the state
+// of the feature kRecentSameSiteAccessGrantsLegacyCookieSemantics, the value of
+// the feature param, and the time since the last eligible same-site access.
+bool DoesLastHttpSameSiteAccessGrantLegacySemantics(
+    base::TimeTicks last_http_same_site_access);
+
+// Determines whether the creation time of a cookie should grant legacy
+// access semantics to the current attempted cookies access, based on the state
+// of the feature kRecentCreationTimeGrantsLegacyCookieSemantics, the value of
+// the feature param, and the creation time of the cookie.
+bool DoesCreationTimeGrantLegacySemantics(base::Time creation_date);
 
 // Takes a callback accepting a CookieInclusionStatus and returns a callback
 // that accepts a bool, setting the bool to true if the CookieInclusionStatus
-// was set to INCLUDE, else sending false.
+// was set to "include", else sending false.
 //
 // Can be used with SetCanonicalCookie when you don't need to know why a cookie
-// was blocked, only if it was blocked.
+// was blocked, only whether it was blocked.
 NET_EXPORT base::OnceCallback<void(CanonicalCookie::CookieInclusionStatus)>
 AdaptCookieInclusionStatusToBool(base::OnceCallback<void(bool)> callback);
+
+// Turn a CookieStatusList into a CookieList by stripping out the statuses
+// (for callers who don't care about the statuses).
+NET_EXPORT CookieList StripStatuses(const CookieStatusList& cookie_status_list);
 
 }  // namespace cookie_util
 }  // namespace net

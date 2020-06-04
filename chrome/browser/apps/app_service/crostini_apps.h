@@ -12,11 +12,14 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/apps/app_service/app_icon_factory.h"
 #include "chrome/browser/apps/app_service/icon_key_util.h"
-#include "chrome/browser/chromeos/crostini/crostini_registry_service.h"
+#include "chrome/browser/chromeos/guest_os/guest_os_registry_service.h"
+#include "chrome/services/app_service/public/cpp/publisher_base.h"
 #include "chrome/services/app_service/public/mojom/app_service.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 
 class PrefChangeRegistrar;
 class Profile;
@@ -27,17 +30,16 @@ namespace apps {
 //
 // See chrome/services/app_service/README.md.
 class CrostiniApps : public KeyedService,
-                     public apps::mojom::Publisher,
-                     public crostini::CrostiniRegistryService::Observer {
+                     public apps::PublisherBase,
+                     public guest_os::GuestOsRegistryService::Observer {
  public:
-  CrostiniApps();
+  CrostiniApps(const mojo::Remote<apps::mojom::AppService>& app_service,
+               Profile* profile);
   ~CrostiniApps() override;
 
-  void Initialize(const apps::mojom::AppServicePtr& app_service,
-                  Profile* profile);
-
-  void ReInitializeForTesting(const apps::mojom::AppServicePtr& app_service,
-                              Profile* profile);
+  void ReInitializeForTesting(
+      const mojo::Remote<apps::mojom::AppService>& app_service,
+      Profile* profile);
 
  private:
   enum class PublishAppIDType {
@@ -46,8 +48,10 @@ class CrostiniApps : public KeyedService,
     kUpdate,
   };
 
+  void Initialize(const mojo::Remote<apps::mojom::AppService>& app_service);
+
   // apps::mojom::Publisher overrides.
-  void Connect(apps::mojom::SubscriberPtr subscriber,
+  void Connect(mojo::PendingRemote<apps::mojom::Subscriber> subscriber_remote,
                apps::mojom::ConnectOptionsPtr opts) override;
   void LoadIcon(const std::string& app_id,
                 apps::mojom::IconKeyPtr icon_key,
@@ -59,20 +63,26 @@ class CrostiniApps : public KeyedService,
               int32_t event_flags,
               apps::mojom::LaunchSource launch_source,
               int64_t display_id) override;
-  void SetPermission(const std::string& app_id,
-                     apps::mojom::PermissionPtr permission) override;
-  void Uninstall(const std::string& app_id) override;
-  void OpenNativeSettings(const std::string& app_id) override;
+  void Uninstall(const std::string& app_id,
+                 bool clear_site_data,
+                 bool report_abuse) override;
+  void GetMenuModel(const std::string& app_id,
+                    apps::mojom::MenuType menu_type,
+                    int64_t display_id,
+                    GetMenuModelCallback callback) override;
 
-  // CrostiniRegistryService::Observer overrides.
+  // GuestOsRegistryService::Observer overrides.
   void OnRegistryUpdated(
-      crostini::CrostiniRegistryService* registry_service,
+      guest_os::GuestOsRegistryService* registry_service,
       const std::vector<std::string>& updated_apps,
       const std::vector<std::string>& removed_apps,
       const std::vector<std::string>& inserted_apps) override;
   void OnAppIconUpdated(const std::string& app_id,
                         ui::ScaleFactor scale_factor) override;
 
+  // Registers and unregisters terminal with AppService.
+  // TODO(crbug.com/1028898): Move this code into System Apps
+  // once it can support hiding apps.
   void OnCrostiniEnabledChanged();
 
   void LoadIconFromVM(const std::string app_id,
@@ -85,19 +95,17 @@ class CrostiniApps : public KeyedService,
 
   apps::mojom::AppPtr Convert(
       const std::string& app_id,
-      const crostini::CrostiniRegistryService::Registration& registration,
+      const guest_os::GuestOsRegistryService::Registration& registration,
       bool new_icon_key);
   apps::mojom::IconKeyPtr NewIconKey(const std::string& app_id);
   void PublishAppID(const std::string& app_id, PublishAppIDType type);
-  void Publish(apps::mojom::AppPtr app);
 
-  mojo::Binding<apps::mojom::Publisher> binding_;
-  mojo::InterfacePtrSet<apps::mojom::Subscriber> subscribers_;
+  mojo::RemoteSet<apps::mojom::Subscriber> subscribers_;
 
   Profile* profile_;
 
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
-  crostini::CrostiniRegistryService* registry_;
+  guest_os::GuestOsRegistryService* registry_;
 
   apps_util::IncrementingIconKeyFactory icon_key_factory_;
 

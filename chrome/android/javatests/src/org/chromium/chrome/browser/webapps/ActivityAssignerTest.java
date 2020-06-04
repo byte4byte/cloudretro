@@ -42,7 +42,7 @@ public class ActivityAssignerTest {
 
     @Before
     @SuppressWarnings("unchecked")
-    public void setUp() throws Exception {
+    public void setUp() {
         RecordHistogram.setDisabledForTests(true);
         mContext = new AdvancedMockContext(ContextUtils.getApplicationContext());
         mPreferences = new HashMap[ActivityAssigner.ActivityAssignerNamespace.NUM_ENTRIES];
@@ -54,7 +54,7 @@ public class ActivityAssignerTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         RecordHistogram.setDisabledForTests(false);
     }
 
@@ -163,17 +163,6 @@ public class ActivityAssignerTest {
                 lastAssignedPreviousActivityIndex, lastAssignedCurrentActivityIndex);
 
         checkState(assigner, ActivityAssigner.ActivityAssignerNamespace.WEBAPP_NAMESPACE);
-    }
-
-    @Test
-    @UiThreadTest
-    @SmallTest
-    @Feature({"WebApk"})
-    public void testInstance() {
-        Assert.assertNotSame(ActivityAssigner.instance(
-                                     ActivityAssigner.ActivityAssignerNamespace.WEBAPP_NAMESPACE),
-                ActivityAssigner.instance(
-                        ActivityAssigner.ActivityAssignerNamespace.WEBAPK_NAMESPACE));
     }
 
     /** Saves state indicating that a number of WebappActivities have already been saved out. */

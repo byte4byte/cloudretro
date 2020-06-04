@@ -24,8 +24,7 @@
 #include "ui/views/win/hwnd_util.h"
 
 ChromeNativeAppWindowViewsWin::ChromeNativeAppWindowViewsWin()
-    : glass_frame_view_(NULL), is_translucent_(false), weak_ptr_factory_(this) {
-}
+    : glass_frame_view_(nullptr), is_translucent_(false) {}
 
 ChromeNativeAppWindowViewsWin::~ChromeNativeAppWindowViewsWin() {
 }
@@ -51,8 +50,8 @@ void ChromeNativeAppWindowViewsWin::OnBeforeWidgetInit(
                                                      widget);
   init_params->native_widget = new AppWindowDesktopNativeWidgetAuraWin(this);
 
-  is_translucent_ =
-      init_params->opacity == views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  is_translucent_ = init_params->opacity ==
+                    views::Widget::InitParams::WindowOpacity::kTranslucent;
 }
 
 void ChromeNativeAppWindowViewsWin::InitializeDefaultWindow(

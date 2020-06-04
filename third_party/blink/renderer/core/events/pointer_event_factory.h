@@ -5,8 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_POINTER_EVENT_FACTORY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_POINTER_EVENT_FACTORY_H_
 
-#include "third_party/blink/public/platform/web_pointer_event.h"
-#include "third_party/blink/public/platform/web_pointer_properties.h"
+#include "third_party/blink/public/common/input/web_pointer_event.h"
+#include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -87,10 +87,12 @@ class CORE_EXPORT PointerEventFactory {
   // Otherwise it returns the PositionInScreen of the given events, so we will
   // get movement = 0 when there is no last position.
   FloatPoint GetLastPointerPosition(PointerId pointer_id,
-                                    const WebPointerProperties& event) const;
+                                    const WebPointerProperties& event,
+                                    WebInputEvent::Type event_type) const;
 
   void SetLastPosition(PointerId pointer_id,
-                       const FloatPoint& position_in_screen);
+                       const FloatPoint& position_in_screen,
+                       WebInputEvent::Type event_type);
 
  private:
   // We use int64_t to cover the whole range for PointerId with no
@@ -152,13 +154,13 @@ class CORE_EXPORT PointerEventFactory {
       pointer_incoming_id_mapping_;
   PointerIdKeyMap<PointerAttributes> pointer_id_mapping_;
   int primary_id_[static_cast<int>(
-                      WebPointerProperties::PointerType::kLastEntry) +
+                      WebPointerProperties::PointerType::kMaxValue) +
                   1];
-  int id_count_[static_cast<int>(
-                    WebPointerProperties::PointerType::kLastEntry) +
+  int id_count_[static_cast<int>(WebPointerProperties::PointerType::kMaxValue) +
                 1];
 
   PointerIdKeyMap<FloatPoint> pointer_id_last_position_mapping_;
+  PointerIdKeyMap<FloatPoint> pointerrawupdate_last_position_mapping_;
 };
 
 }  // namespace blink

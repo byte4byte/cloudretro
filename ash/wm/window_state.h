@@ -25,27 +25,15 @@ class Rect;
 }
 
 namespace ash {
+class ClientControlledState;
 class LockWindowState;
 class TabletModeWindowState;
 enum class WindowPinType;
-enum class WindowStateType;
-
-namespace wm {
-class InitialStateTestState;
 class WindowState;
 class WindowStateDelegate;
 class WindowStateObserver;
+enum class WindowStateType;
 class WMEvent;
-class ClientControlledState;
-
-// Returns the WindowState for the active window, null if there is no active
-// window.
-ASH_EXPORT WindowState* GetActiveWindowState();
-
-// Returns the WindowState for |window|. Creates WindowState if it doesn't
-// exist. The returned value is owned by |window| (you should not delete it).
-ASH_EXPORT WindowState* GetWindowState(aura::Window* window);
-ASH_EXPORT const WindowState* GetWindowState(const aura::Window* window);
 
 // WindowState manages and defines ash specific window state and
 // behavior. Ash specific per-window state (such as ones that controls
@@ -54,7 +42,7 @@ ASH_EXPORT const WindowState* GetWindowState(const aura::Window* window);
 // of defining separate functions (like |MaximizeWindow(aura::Window*
 // window)|) or using aura Window property.
 // The WindowState gets created when first accessed by
-// |wm::GetWindowState|, and deleted when the window is deleted.
+// |WindowState::Get()|, and deleted when the window is deleted.
 // Prefer using this class instead of passing aura::Window* around in
 // ash code as this is often what you need to interact with, and
 // accessing the window using |window()| is cheap.
@@ -70,11 +58,6 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // Each subclass defines its own behavior and transition for each WMEvent.
   class State {
    public:
-    // Animation type of updating window bounds for entering current state.
-    // "IMMEDIATE" means update bounds directly without animation. "STEP_END"
-    // means update bounds at the end of the animation.
-    enum EnterAnimationType { DEFAULT, IMMEDIATE, STEP_END };
-
     State() {}
     virtual ~State() {}
 
@@ -99,20 +82,20 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
     // Called when the window is being destroyed.
     virtual void OnWindowDestroying(WindowState* window_state) {}
 
-    EnterAnimationType enter_animation_type() const {
-      return enter_animation_type_;
-    }
-    void set_enter_animation_type(EnterAnimationType type) {
-      enter_animation_type_ = type;
-    }
-
    private:
-    EnterAnimationType enter_animation_type_ = DEFAULT;
-
     DISALLOW_COPY_AND_ASSIGN(State);
   };
 
-  // Call GetWindowState() to instantiate this class.
+  // Returns the WindowState for |window|. Creates WindowState if it doesn't
+  // exist. The returned value is owned by |window| (you should not delete it).
+  static WindowState* Get(aura::Window* window);
+  static const WindowState* Get(const aura::Window* window);
+
+  // Returns the WindowState for the active window, null if there is no active
+  // window.
+  static WindowState* ForActiveWindow();
+
+  // Call WindowState::Get() to instantiate this class.
   ~WindowState() override;
 
   aura::Window* window() { return window_; }
@@ -320,7 +303,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Creates and takes ownership of a pointer to DragDetails when resizing is
   // active. This should be done before a resizer gets created.
-  void CreateDragDetails(const gfx::Point& point_in_parent,
+  void CreateDragDetails(const gfx::PointF& point_in_parent,
                          int window_component,
                          ::wm::WindowMoveSource source);
 
@@ -336,8 +319,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Notifies that the drag operation has been either completed or reverted.
   // |location| is the last position of the pointer device used to drag.
-  void OnCompleteDrag(const gfx::Point& location);
-  void OnRevertDrag(const gfx::Point& location);
+  void OnCompleteDrag(const gfx::PointF& location);
+  void OnRevertDrag(const gfx::PointF& location);
 
   // Notifies that the window lost the activation.
   void OnActivationLost();
@@ -345,6 +328,11 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // Returns a pointer to DragDetails during drag operations.
   const DragDetails* drag_details() const { return drag_details_.get(); }
   DragDetails* drag_details() { return drag_details_.get(); }
+
+  void set_animation_smoothness_histogram_name(
+      base::Optional<std::string> val) {
+    animation_smoothness_histogram_name_ = val;
+  }
 
   // Returns the Display that this WindowState is on.
   display::Display GetDisplay();
@@ -358,21 +346,45 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
  private:
   friend class BaseState;
+  friend class ClientControlledState;
   friend class DefaultState;
-  friend class InitialStateTestState;
-  friend class ash::wm::ClientControlledState;
-  friend class ash::LockWindowState;
-  friend class ash::TabletModeWindowState;
-  friend WindowState* GetWindowState(aura::Window*);
+  friend class LockWindowState;
+  friend class TabletModeWindowState;
+  friend class ScopedBoundsChangeAnimation;
   FRIEND_TEST_ALL_PREFIXES(WindowAnimationsTest, CrossFadeToBounds);
   FRIEND_TEST_ALL_PREFIXES(WindowAnimationsTest,
                            CrossFadeToBoundsFromTransform);
   FRIEND_TEST_ALL_PREFIXES(WindowStateTest, PipWindowMaskRecreated);
   FRIEND_TEST_ALL_PREFIXES(WindowStateTest, PipWindowHasMaskLayer);
 
+  // Animation type of updating window bounds. "IMMEDIATE" means update bounds
+  // directly without animation. "STEP_END" means update bounds at the end of
+  // the animation.
+  enum class BoundsChangeAnimationType { DEFAULT, IMMEDIATE, STEP_END };
+
+  // A class can temporarily change the window bounds change animation type.
+  class ScopedBoundsChangeAnimation : public aura::WindowObserver {
+   public:
+    ScopedBoundsChangeAnimation(aura::Window* window,
+                                BoundsChangeAnimationType animation_type);
+    ~ScopedBoundsChangeAnimation() override;
+
+    // aura::WindowObserver:
+    void OnWindowDestroying(aura::Window* window) override;
+
+   private:
+    aura::Window* window_;
+    BoundsChangeAnimationType previous_bounds_animation_type_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedBoundsChangeAnimation);
+  };
+
   explicit WindowState(aura::Window* window);
 
   WindowStateDelegate* delegate() { return delegate_.get(); }
+  BoundsChangeAnimationType bounds_animation_type() {
+    return bounds_animation_type_;
+  }
 
   bool HasMaximumWidthOrHeight() const;
 
@@ -383,7 +395,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   ui::WindowShowState GetShowState() const;
 
   // Return the window's current pin type.
-  ash::WindowPinType GetPinType() const;
+  WindowPinType GetPinType() const;
 
   // Sets the window's bounds in screen coordinates.
   void SetBoundsInScreen(const gfx::Rect& bounds_in_screen);
@@ -432,12 +444,19 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // keyboard position changes.
   void UpdatePipBounds();
 
+  // Collects PIP enter and exit metrics:
+  void CollectPipEnterExitMetrics(bool enter);
+
   // aura::WindowObserver:
   void OnWindowPropertyChanged(aura::Window* window,
                                const void* key,
                                intptr_t old) override;
   void OnWindowAddedToRootWindow(aura::Window* window) override;
   void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
 
   // The owner of this window settings.
   aura::Window* window_;
@@ -446,6 +465,10 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   bool bounds_changed_by_user_;
   bool can_consume_system_keys_;
   std::unique_ptr<DragDetails> drag_details_;
+
+  // If this has a value when an animation starts, animation smoothness metrics
+  // with this name will be logged for the animation.
+  base::Optional<std::string> animation_smoothness_histogram_name_;
 
   bool unminimize_to_restore_bounds_;
   bool ignore_keyboard_bounds_change_ = false;
@@ -460,12 +483,12 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   base::Optional<float> snapped_width_ratio_;
 
   // A property to remember the window position which was set before the
-  // auto window position manager changed the window bounds, so that it can get
-  // restored when only this one window gets shown.
+  // auto window position manager changed the window bounds, so that it can
+  // get restored when only this one window gets shown.
   base::Optional<gfx::Rect> pre_auto_manage_window_bounds_;
 
-  // A property which resets when bounds is changed by user and sets when it is
-  // nullptr, and window is removing from a workspace.
+  // A property which resets when bounds is changed by user and sets when it
+  // is nullptr, and window is removing from a workspace.
   base::Optional<gfx::Rect> pre_added_to_workspace_window_bounds_;
 
   // A property to remember the persistent window info used in multi-displays
@@ -481,10 +504,16 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   std::unique_ptr<State> current_state_;
 
+  // The animation type for the bounds change.
+  BoundsChangeAnimationType bounds_animation_type_ =
+      BoundsChangeAnimationType::DEFAULT;
+
+  // When the current (or last) PIP session started.
+  base::TimeTicks pip_start_time_;
+
   DISALLOW_COPY_AND_ASSIGN(WindowState);
 };
 
-}  // namespace wm
 }  // namespace ash
 
 #endif  // ASH_WM_WINDOW_STATE_H_

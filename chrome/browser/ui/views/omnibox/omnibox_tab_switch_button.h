@@ -10,10 +10,6 @@
 class OmniboxPopupContentsView;
 class OmniboxResultView;
 
-namespace gfx {
-class SlideAnimation;
-}
-
 class OmniboxTabSwitchButton : public views::MdTextButton {
  public:
   OmniboxTabSwitchButton(OmniboxPopupContentsView* popup_contents_view,
@@ -25,11 +21,9 @@ class OmniboxTabSwitchButton : public views::MdTextButton {
   ~OmniboxTabSwitchButton() override;
 
   // views::MdTextButton:
-  gfx::Size CalculatePreferredSize() const override;
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
-  void AnimationProgressed(const gfx::Animation* animation) override;
   void StateChanged(ButtonState old_state) override;
+  void OnThemeChanged() override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // Called by parent views to change background on external (not mouse related)
   // event (tab key).
@@ -37,32 +31,18 @@ class OmniboxTabSwitchButton : public views::MdTextButton {
 
   // Called by parent view to provide the width of the surrounding area
   // so the button can adjust its size or even presence.
-  void ProvideWidthHint(size_t width);
+  void ProvideWidthHint(int width);
 
   // Called to indicate button has been focused.
   void ProvideFocusHint();
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
  private:
   // Consults the parent views to see if the button is selected.
   bool IsSelected() const;
 
-  // Produces a path custom to this button for the focus ring to follow.
-  SkPath GetFocusRingPath() const;
-
-  // Encapsulates the color look-up, which uses the button state (hovered,
-  // etc.) and consults the parent result view.
-  SkColor GetBackgroundColor() const;
-
-  // Encapsulates changing the color of the button to display being
-  // pressed.
-  void SetPressed();
-
   // Helper function to translate parent width into goal width, and
   // pass back the text at that width.
-  size_t CalculateGoalWidth(size_t parent_width, base::string16* goal_text);
-
-  static constexpr int kButtonHeight = 32;
+  int CalculateGoalWidth(int parent_width, base::string16* goal_text);
 
   // The ancestor views.
   OmniboxPopupContentsView* const popup_contents_view_;
@@ -70,17 +50,9 @@ class OmniboxTabSwitchButton : public views::MdTextButton {
 
   // Only calculate the width of various contents once.
   static bool calculated_widths_;
-  static size_t icon_only_width_;
-  static size_t short_text_width_;
-  static size_t full_text_width_;
-
-  // To distinguish start-up case, where we don't want animation.
-  bool initialized_;
-  // Animation starting width, and final value.
-  size_t start_width_, goal_width_;
-  // The text to be displayed when we reach |goal_width_|.
-  base::string16 goal_text_;
-  std::unique_ptr<gfx::SlideAnimation> animation_;
+  static int icon_only_width_;
+  static int short_text_width_;
+  static int full_text_width_;
 
   // Label strings for hint text and its short version (may be same).
   base::string16 hint_;

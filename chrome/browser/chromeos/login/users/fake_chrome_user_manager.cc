@@ -9,8 +9,10 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/single_thread_task_runner.h"
 #include "base/system/sys_info.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_util.h"
 #include "chrome/browser/chromeos/login/users/fake_supervised_user_manager.h"
@@ -32,7 +34,7 @@
 
 namespace {
 
-class FakeTaskRunner : public base::TaskRunner {
+class FakeTaskRunner : public base::SingleThreadTaskRunner {
  public:
   FakeTaskRunner() = default;
 
@@ -40,12 +42,17 @@ class FakeTaskRunner : public base::TaskRunner {
   ~FakeTaskRunner() override {}
 
  private:
-  // base::TaskRunner overrides.
+  // base::SingleThreadTaskRunner:
   bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
     std::move(task).Run();
     return true;
+  }
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
+                                  base::OnceClosure task,
+                                  base::TimeDelta delay) override {
+    return PostDelayedTask(from_here, std::move(task), delay);
   }
   bool RunsTasksInCurrentSequence() const override { return true; }
 
@@ -68,25 +75,25 @@ FakeChromeUserManager::~FakeChromeUserManager() {
   ProfileHelper::SetProfileToUserForTestingEnabled(false);
 }
 
-const user_manager::User* FakeChromeUserManager::AddUser(
+user_manager::User* FakeChromeUserManager::AddUser(
     const AccountId& account_id) {
   return AddUserWithAffiliation(account_id, false);
 }
 
-const user_manager::User* FakeChromeUserManager::AddChildUser(
+user_manager::User* FakeChromeUserManager::AddChildUser(
     const AccountId& account_id) {
   return AddUserWithAffiliationAndTypeAndProfile(
       account_id, false, user_manager::USER_TYPE_CHILD, nullptr);
 }
 
-const user_manager::User* FakeChromeUserManager::AddUserWithAffiliation(
+user_manager::User* FakeChromeUserManager::AddUserWithAffiliation(
     const AccountId& account_id,
     bool is_affiliated) {
   return AddUserWithAffiliationAndTypeAndProfile(
       account_id, is_affiliated, user_manager::USER_TYPE_REGULAR, nullptr);
 }
 
-const user_manager::User*
+user_manager::User*
 FakeChromeUserManager::AddUserWithAffiliationAndTypeAndProfile(
     const AccountId& account_id,
     bool is_affiliated,
@@ -130,6 +137,16 @@ user_manager::User* FakeChromeUserManager::AddArcKioskAppUser(
   return user;
 }
 
+user_manager::User* FakeChromeUserManager::AddWebKioskAppUser(
+    const AccountId& account_id) {
+  user_manager::User* user =
+      user_manager::User::CreateWebKioskAppUser(account_id);
+  user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
+      account_id.GetUserEmail()));
+  users_.push_back(user);
+  return user;
+}
+
 user_manager::User* FakeChromeUserManager::AddSupervisedUser(
     const AccountId& account_id) {
   user_manager::User* user =
@@ -149,7 +166,7 @@ user_manager::User* FakeChromeUserManager::AddGuestUser() {
   return user;
 }
 
-const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
+user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
     const AccountId& account_id) {
   user_manager::User* user =
       user_manager::User::CreatePublicAccountUser(account_id);
@@ -165,23 +182,31 @@ const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
   return user;
 }
 
+user_manager::User* FakeChromeUserManager::AddActiveDirectoryUser(
+    const AccountId& account_id) {
+  DCHECK(account_id.GetAccountType() == AccountType::ACTIVE_DIRECTORY);
+  return AddUserWithAffiliationAndTypeAndProfile(
+      account_id, /*is_affiliated=*/false,
+      user_manager::USER_TYPE_ACTIVE_DIRECTORY,
+      /*profile=*/nullptr);
+}
+
 bool FakeChromeUserManager::AreEphemeralUsersEnabled() const {
   return fake_ephemeral_users_enabled_;
 }
 
-void FakeChromeUserManager::LoginUser(const AccountId& account_id) {
+void FakeChromeUserManager::LoginUser(const AccountId& account_id,
+                                      bool set_profile_created_flag) {
   UserLoggedIn(
       account_id,
       ProfileHelper::GetUserIdHashByUserIdForTesting(account_id.GetUserEmail()),
       false /* browser_restart */, false /* is_child */);
 
+  if (!set_profile_created_flag)
+    return;
+
   // NOTE: This does not match production. See function comment.
-  for (auto* user : users_) {
-    if (user->GetAccountId() == account_id) {
-      user->SetProfileIsCreated();
-      break;
-    }
-  }
+  SimulateUserProfileLoad(account_id);
 }
 
 MultiProfileUserController*
@@ -387,11 +412,11 @@ const user_manager::UserList& FakeChromeUserManager::GetLoggedInUsers() const {
 
 const user_manager::UserList& FakeChromeUserManager::GetLRULoggedInUsers()
     const {
-  return users_;
+  return logged_in_users_;
 }
 
 user_manager::UserList FakeChromeUserManager::GetUnlockUsers() const {
-  return users_;
+  return logged_in_users_;
 }
 
 void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
@@ -458,10 +483,16 @@ void FakeChromeUserManager::SaveUserOAuthStatus(
 
 void FakeChromeUserManager::SaveForceOnlineSignin(const AccountId& account_id,
                                                   bool force_online_signin) {
-  if (!active_user_ || active_user_->GetAccountId() != account_id)
-    NOTREACHED() << account_id;
-
-  active_user_->set_force_online_signin(force_online_signin);
+  if (!active_user_ || active_user_->GetAccountId() != account_id) {
+    // On the login screen we can update force_online_signin flag for
+    // an arbitrary user.
+    user_manager::User* const user = FindUserAndModify(account_id);
+    if (user) {
+      user->set_force_online_signin(force_online_signin);
+    }
+  } else {
+    active_user_->set_force_online_signin(force_online_signin);
+  }
 }
 
 void FakeChromeUserManager::SaveUserDisplayName(
@@ -484,11 +515,6 @@ void FakeChromeUserManager::SaveUserDisplayEmail(
     const AccountId& account_id,
     const std::string& display_email) {
   NOTREACHED();
-}
-
-std::string FakeChromeUserManager::GetUserDisplayEmail(
-    const AccountId& account_id) const {
-  return account_id.GetUserEmail();
 }
 
 void FakeChromeUserManager::SaveUserType(const user_manager::User* user) {
@@ -518,7 +544,7 @@ bool FakeChromeUserManager::IsCurrentUserCryptohomeDataEphemeral() const {
 }
 
 bool FakeChromeUserManager::CanCurrentUserLock() const {
-  return false;
+  return current_user_can_lock_;
 }
 
 bool FakeChromeUserManager::IsUserLoggedIn() const {
@@ -560,6 +586,18 @@ bool FakeChromeUserManager::IsLoggedInAsArcKioskApp() const {
   return active_user
              ? active_user->GetType() == user_manager::USER_TYPE_ARC_KIOSK_APP
              : false;
+}
+
+bool FakeChromeUserManager::IsLoggedInAsWebKioskApp() const {
+  const user_manager::User* active_user = GetActiveUser();
+  return active_user
+             ? active_user->GetType() == user_manager::USER_TYPE_WEB_KIOSK_APP
+             : false;
+}
+
+bool FakeChromeUserManager::IsLoggedInAsAnyKioskApp() const {
+  const user_manager::User* active_user = GetActiveUser();
+  return active_user && active_user->IsKioskType();
 }
 
 bool FakeChromeUserManager::IsLoggedInAsStub() const {
@@ -609,6 +647,16 @@ bool FakeChromeUserManager::IsUserAllowed(
 void FakeChromeUserManager::CreateLocalState() {
   local_state_ = std::make_unique<TestingPrefServiceSimple>();
   user_manager::known_user::RegisterPrefs(local_state_->registry());
+}
+
+void FakeChromeUserManager::SimulateUserProfileLoad(
+    const AccountId& account_id) {
+  for (auto* user : users_) {
+    if (user->GetAccountId() == account_id) {
+      user->SetProfileIsCreated();
+      break;
+    }
+  }
 }
 
 PrefService* FakeChromeUserManager::GetLocalState() const {
@@ -668,6 +716,8 @@ void FakeChromeUserManager::DemoAccountLoggedIn() {
 void FakeChromeUserManager::KioskAppLoggedIn(user_manager::User* user) {}
 
 void FakeChromeUserManager::ArcKioskAppLoggedIn(user_manager::User* user) {}
+
+void FakeChromeUserManager::WebKioskAppLoggedIn(user_manager::User* user) {}
 
 void FakeChromeUserManager::PublicAccountUserLoggedIn(
     user_manager::User* user) {

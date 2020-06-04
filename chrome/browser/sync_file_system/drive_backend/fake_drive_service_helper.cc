@@ -12,7 +12,7 @@
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "chrome/browser/sync_file_system/sync_status_code.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #define FPL(path) FILE_PATH_LITERAL(path)
@@ -108,7 +108,7 @@ DriveApiErrorCode FakeDriveServiceHelper::AddFile(
   drive_uploader_->UploadNewFile(
       parent_folder_id, temp_file, title, "application/octet-stream",
       drive::UploadNewFileOptions(),
-      base::Bind(&UploadResultCallback, &error, &file),
+      base::BindOnce(&UploadResultCallback, &error, &file),
       google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
@@ -126,7 +126,7 @@ DriveApiErrorCode FakeDriveServiceHelper::UpdateFile(
   drive_uploader_->UploadExistingFile(
       file_id, temp_file, "application/octet-stream",
       drive::UploadExistingFileOptions(),
-      base::Bind(&UploadResultCallback, &error, &file),
+      base::BindOnce(&UploadResultCallback, &error, &file),
       google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
   return error;

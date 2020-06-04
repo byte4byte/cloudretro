@@ -9,7 +9,7 @@
 #include "base/callback.h"
 #include "ui/views/window/dialog_delegate.h"
 
-namespace app_list {
+namespace ash {
 
 // RemoveQueryConfirmationDialog displays the confirmation dialog for removing
 // a recent query suggestion.
@@ -26,7 +26,7 @@ class RemoveQueryConfirmationDialog
 
   RemoveQueryConfirmationDialog(const base::string16& query,
                                 RemovalConfirmationCallback callback,
-                                int event_flgas,
+                                int event_flags,
                                 ContentsView* contents_view);
   ~RemoveQueryConfirmationDialog() override;
 
@@ -41,11 +41,6 @@ class RemoveQueryConfirmationDialog
   base::string16 GetWindowTitle() const override;
   ui::ModalType GetModalType() const override;
   bool ShouldShowCloseButton() const override;
-
-  // views::DialogDelegate:
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  bool Accept() override;
-  bool Cancel() override;
 
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
@@ -63,6 +58,6 @@ class RemoveQueryConfirmationDialog
   DISALLOW_COPY_AND_ASSIGN(RemoveQueryConfirmationDialog);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_REMOVE_QUERY_CONFIRMATION_DIALOG_H_

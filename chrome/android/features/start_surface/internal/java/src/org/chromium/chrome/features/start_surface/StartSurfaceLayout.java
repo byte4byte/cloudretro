@@ -4,24 +4,22 @@
 
 package org.chromium.chrome.features.start_surface;
 
-import static org.chromium.chrome.browser.compositor.animation.CompositorAnimator.FAST_OUT_SLOW_IN_INTERPOLATOR;
-
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.os.Handler;
 import android.os.SystemClock;
-import android.text.TextUtils;
 
-import org.chromium.base.ContextUtils;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
-import org.chromium.base.Supplier;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.MathUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
@@ -36,9 +34,11 @@ import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.TabListSceneLayer;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tasks.tab_management.TabSwitcher;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
+import org.chromium.components.browser_ui.widget.animation.Interpolators;
 import org.chromium.ui.resources.ResourceManager;
-import org.chromium.ui.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,28 +48,26 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * A {@link Layout} that shows all tabs in one grid view.
+ * A {@link Layout} that shows all tabs in one grid or carousel view.
  */
-public class StartSurfaceLayout extends Layout implements StartSurface.GridOverviewModeObserver {
+public class StartSurfaceLayout extends Layout implements StartSurface.OverviewModeObserver {
     private static final String TAG = "SSLayout";
 
     // Duration of the transition animation
     public static final long ZOOMING_DURATION = 300;
     private static final int BACKGROUND_FADING_DURATION_MS = 150;
 
-    // Field trial parameter for whether skipping slow zooming animation.
-    private static final String SKIP_SLOW_ZOOMING_PARAM = "skip-slow-zooming";
-    private static final boolean DEFAULT_SKIP_SLOW_ZOOMING = true;
-
     // The transition animation from a tab to the tab switcher.
     private AnimatorSet mTabToSwitcherAnimation;
     private boolean mIsAnimating;
 
-    private final TabListSceneLayer mSceneLayer = new TabListSceneLayer();
+    private TabListSceneLayer mSceneLayer;
     private final StartSurface mStartSurface;
-    private final StartSurface.GridController mGridController;
+    private final StartSurface.Controller mController;
+    private final TabSwitcher.TabListDelegate mTabListDelegate;
     // To force Toolbar finishes its animation when this Layout finished hiding.
     private final LayoutTab mDummyLayoutTab;
+    private boolean mIsInitialized;
 
     private float mBackgroundAlpha;
 
@@ -78,6 +76,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     private long mLastFrameTime;
     private long mMaxFrameInterval;
     private int mStartFrame;
+    private float mThumbnailAspectRatio;
 
     interface PerfListener {
         void onAnimationDone(
@@ -93,11 +92,26 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         mDummyLayoutTab.setShowToolbar(true);
         mStartSurface = startSurface;
         mStartSurface.setOnTabSelectingListener(this::onTabSelecting);
-        mGridController = startSurface.getGridController();
-        mGridController.addOverviewModeObserver(this);
+        mController = mStartSurface.getController();
+        mController.addOverviewModeObserver(this);
+        mTabListDelegate = mStartSurface.getTabListDelegate();
+        if (TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()) {
+            mThumbnailAspectRatio = (float) TabUiFeatureUtilities.THUMBNAIL_ASPECT_RATIO.getValue();
+            mThumbnailAspectRatio = MathUtils.clamp(mThumbnailAspectRatio, 0.5f, 2.0f);
+        }
     }
 
-    // StartSurface.GridOverviewModeObserver implementation.
+    @Override
+    public void onFinishNativeInitialization() {
+        if (mIsInitialized) return;
+
+        mIsInitialized = true;
+        mStartSurface.initWithNative();
+        mSceneLayer = new TabListSceneLayer();
+        mSceneLayer.setTabModelSelector(mTabModelSelector);
+    }
+
+    // StartSurface.OverviewModeObserver implementation.
     @Override
     public void startedShowing() {}
 
@@ -107,9 +121,13 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         // The Tab-to-GTS animation is done, and it's time to renew the thumbnail without causing
         // janky frames.
         // When animation is off, the thumbnail is already updated when showing the GTS.
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.TAB_TO_GTS_ANIMATION)) {
-            Tab currentTab = mTabModelSelector.getCurrentTab();
-            if (currentTab != null) mTabContentManager.cacheTabThumbnail(currentTab);
+        if (TabUiFeatureUtilities.isTabToGtsAnimationEnabled()) {
+            // Delay thumbnail taking a bit more to make it less likely to happen before the
+            // thumbnail taking triggered by ThumbnailFetcher. See crbug.com/996385 for details.
+            new Handler().postDelayed(() -> {
+                Tab currentTab = mTabModelSelector.getCurrentTab();
+                if (currentTab != null) mTabContentManager.cacheTabThumbnail(currentTab);
+            }, ZOOMING_DURATION);
         }
     }
 
@@ -121,16 +139,24 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         // The Android View version of GTS overview is hidden.
         // If not doing GTS-to-Tab transition animation, we show the fade-out instead, which was
         // already done.
-        if (!FeatureUtilities.isTabToGtsAnimationEnabled()) {
+        if (!TabUiFeatureUtilities.isTabToGtsAnimationEnabled()) {
             postHiding();
             return;
         }
         // If we are doing GTS-to-Tab transition animation, we start showing the Bitmap version of
         // the GTS overview in the background while expanding the thumbnail to the viewport.
-        expandTab(mStartSurface.getThumbnailLocationOfCurrentTab(true));
+        expandTab(mTabListDelegate.getThumbnailLocationOfCurrentTab(true));
     }
 
     // Layout implementation.
+    @Override
+    public void setTabModelSelector(TabModelSelector modelSelector, TabContentManager manager) {
+        super.setTabModelSelector(modelSelector, manager);
+        if (mSceneLayer != null) {
+            mSceneLayer.setTabModelSelector(modelSelector);
+        }
+    }
+
     @Override
     public LayoutTab getLayoutTab(int id) {
         return mDummyLayoutTab;
@@ -138,8 +164,8 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
 
     @Override
     public void destroy() {
-        if (mGridController != null) {
-            mGridController.removeOverviewModeObserver(this);
+        if (mController != null) {
+            mController.removeOverviewModeObserver(this);
         }
     }
 
@@ -147,10 +173,17 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     public void show(long time, boolean animate) {
         super.show(time, animate);
 
-        boolean showShrinkingAnimation = animate && FeatureUtilities.isTabToGtsAnimationEnabled();
-        boolean quick = mStartSurface.prepareOverview();
-        Log.d(TAG, "SkipSlowZooming = " + getSkipSlowZooming());
-        if (getSkipSlowZooming()) {
+        // Lazy initialization if needed.
+        mStartSurface.initialize();
+
+        // Skip shrinking animation when there is no tab in current tab model.
+        boolean isCurrentTabModelEmpty = mTabModelSelector.getCurrentModel().getCount() == 0;
+        boolean showShrinkingAnimation = animate
+                && TabUiFeatureUtilities.isTabToGtsAnimationEnabled() && !isCurrentTabModelEmpty;
+        boolean quick = mTabListDelegate.prepareOverview();
+        boolean skipSlowZooming = TabUiFeatureUtilities.SKIP_SLOW_ZOOMING.getValue();
+        Log.d(TAG, "SkipSlowZooming = " + skipSlowZooming);
+        if (skipSlowZooming) {
             showShrinkingAnimation &= quick;
         }
 
@@ -163,11 +196,11 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         mLayoutTabs = new LayoutTab[] {sourceLayoutTab};
 
         if (!showShrinkingAnimation) {
-            mGridController.showOverview(animate);
+            mController.showOverview(animate);
             return;
         }
 
-        shrinkTab(() -> mStartSurface.getThumbnailLocationOfCurrentTab(false));
+        shrinkTab(() -> mTabListDelegate.getThumbnailLocationOfCurrentTab(false));
     }
 
     @Override
@@ -184,7 +217,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     public void startHiding(int nextId, boolean hintAtTabSelection) {
         super.startHiding(nextId, hintAtTabSelection);
 
-        int sourceTabId = mNextTabId;
+        int sourceTabId = nextId;
         if (sourceTabId == Tab.INVALID_TAB_ID) sourceTabId = mTabModelSelector.getCurrentTabId();
         LayoutTab sourceLayoutTab = createLayoutTab(
                 sourceTabId, mTabModelSelector.isIncognitoSelected(), NO_CLOSE_BUTTON, NO_TITLE);
@@ -199,6 +232,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
             LayoutTab originalTab = createLayoutTab(mTabModelSelector.getCurrentTabId(),
                     mTabModelSelector.isIncognitoSelected(), NO_CLOSE_BUTTON, NO_TITLE);
             originalTab.setScale(0);
+            originalTab.setDecorationAlpha(0);
             layoutTabs.add(originalTab);
         }
         mLayoutTabs = layoutTabs.toArray(new LayoutTab[0]);
@@ -206,7 +240,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         updateCacheVisibleIds(new LinkedList<>(Arrays.asList(sourceTabId)));
 
         mIsAnimating = true;
-        mGridController.hideOverview(!FeatureUtilities.isTabToGtsAnimationEnabled());
+        mController.hideOverview(!TabUiFeatureUtilities.isTabToGtsAnimationEnabled());
     }
 
     @Override
@@ -218,7 +252,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     @Override
     public boolean onBackPressed() {
         if (mTabModelSelector.getCurrentModel().getCount() == 0) return false;
-        return mGridController.onBackPressed();
+        return mController.onBackPressed();
     }
 
     @Override
@@ -269,25 +303,29 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         animationList.add(CompositorAnimator.ofFloatProperty(
                 handler, sourceLayoutTab, LayoutTab.SCALE, () -> 1f, () -> {
                     return target.get().width() / (getWidth() * mDpToPx);
-                }, ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                }, ZOOMING_DURATION, Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         animationList.add(CompositorAnimator.ofFloatProperty(
                 handler, sourceLayoutTab, LayoutTab.X, () -> 0f, () -> {
                     return target.get().left / mDpToPx;
-                }, ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                }, ZOOMING_DURATION, Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         animationList.add(CompositorAnimator.ofFloatProperty(
                 handler, sourceLayoutTab, LayoutTab.Y, () -> 0f, () -> {
                     return target.get().top / mDpToPx;
-                }, ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                }, ZOOMING_DURATION, Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         // TODO(crbug.com/964406): when shrinking to the bottom row, bottom of the tab goes up and
         // down, making the "create group" visible for a while.
         animationList.add(CompositorAnimator.ofFloatProperty(handler, sourceLayoutTab,
                 LayoutTab.MAX_CONTENT_HEIGHT, sourceLayoutTab.getUnclampedOriginalContentHeight(),
-                getWidth(), ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()
+                        ? Math.min(getWidth() / mThumbnailAspectRatio,
+                                sourceLayoutTab.getUnclampedOriginalContentHeight())
+                        : getWidth(),
+                ZOOMING_DURATION, Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
 
         CompositorAnimator backgroundAlpha =
                 CompositorAnimator.ofFloat(handler, 0f, 1f, BACKGROUND_FADING_DURATION_MS,
                         animator -> mBackgroundAlpha = animator.getAnimatedValue());
-        backgroundAlpha.setInterpolator(CompositorAnimator.FAST_OUT_LINEAR_IN_INTERPOLATOR);
+        backgroundAlpha.setInterpolator(Interpolators.FAST_OUT_LINEAR_IN_INTERPOLATOR);
         animationList.add(backgroundAlpha);
 
         mTabToSwitcherAnimation = new AnimatorSet();
@@ -297,7 +335,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
             public void onAnimationEnd(Animator animation) {
                 mTabToSwitcherAnimation = null;
                 // Step 2: fade in the real GTS RecyclerView.
-                mGridController.showOverview(true);
+                mController.showOverview(true);
 
                 reportAnimationPerf(true);
             }
@@ -323,22 +361,28 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         // Zoom in the source tab
         animationList.add(CompositorAnimator.ofFloatProperty(handler, sourceLayoutTab,
                 LayoutTab.SCALE, source.width() / (getWidth() * mDpToPx), 1, ZOOMING_DURATION,
-                FAST_OUT_SLOW_IN_INTERPOLATOR));
+                Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         animationList.add(CompositorAnimator.ofFloatProperty(handler, sourceLayoutTab, LayoutTab.X,
-                source.left / mDpToPx, 0f, ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                source.left / mDpToPx, 0f, ZOOMING_DURATION,
+                Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         animationList.add(CompositorAnimator.ofFloatProperty(handler, sourceLayoutTab, LayoutTab.Y,
-                source.top / mDpToPx, 0f, ZOOMING_DURATION, FAST_OUT_SLOW_IN_INTERPOLATOR));
+                source.top / mDpToPx, 0f, ZOOMING_DURATION,
+                Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
         // TODO(crbug.com/964406): when shrinking to the bottom row, bottom of the tab goes up and
         // down, making the "create group" visible for a while.
         animationList.add(CompositorAnimator.ofFloatProperty(handler, sourceLayoutTab,
-                LayoutTab.MAX_CONTENT_HEIGHT, getWidth(),
+                LayoutTab.MAX_CONTENT_HEIGHT,
+                TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()
+                        ? Math.min(getWidth() / mThumbnailAspectRatio,
+                                sourceLayoutTab.getUnclampedOriginalContentHeight())
+                        : getWidth(),
                 sourceLayoutTab.getUnclampedOriginalContentHeight(), ZOOMING_DURATION,
-                FAST_OUT_SLOW_IN_INTERPOLATOR));
+                Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
 
         CompositorAnimator backgroundAlpha =
                 CompositorAnimator.ofFloat(handler, 1f, 0f, BACKGROUND_FADING_DURATION_MS,
                         animator -> mBackgroundAlpha = animator.getAnimatedValue());
-        backgroundAlpha.setInterpolator(CompositorAnimator.FAST_OUT_LINEAR_IN_INTERPOLATOR);
+        backgroundAlpha.setInterpolator(Interpolators.FAST_OUT_LINEAR_IN_INTERPOLATOR);
         animationList.add(backgroundAlpha);
 
         mTabToSwitcherAnimation = new AnimatorSet();
@@ -360,7 +404,7 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     }
 
     private void postHiding() {
-        mStartSurface.postHiding();
+        mTabListDelegate.postHiding();
         mIsAnimating = false;
         doneHiding();
     }
@@ -371,25 +415,19 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
     }
 
     @VisibleForTesting
-    StartSurface getStartSurfaceForTesting() {
+    public StartSurface getStartSurfaceForTesting() {
         return mStartSurface;
     }
 
     private void reportAnimationPerf(boolean isShrinking) {
         int frameRendered = mFrameCount - mStartFrame;
         long elapsedMs = SystemClock.elapsedRealtime() - mStartTime;
-        long lastDirty = mStartSurface.getLastDirtyTimeForTesting();
+        long lastDirty = mTabListDelegate.getLastDirtyTime();
         int dirtySpan = (int) (lastDirty - mStartTime);
         float fps = 1000.f * frameRendered / elapsedMs;
         String message = String.format(Locale.US,
                 "fps = %.2f (%d / %dms), maxFrameInterval = %d, dirtySpan = %d", fps, frameRendered,
                 elapsedMs, mMaxFrameInterval, dirtySpan);
-
-        // TODO(crbug.com/964406): stop reporting on Canary before enabling in Finch.
-        if (ChromeVersionInfo.isLocalBuild() || ChromeVersionInfo.isCanaryBuild()) {
-            Toast.makeText(ContextUtils.getApplicationContext(), message, Toast.LENGTH_SHORT)
-                    .show();
-        }
 
         // TODO(crbug.com/964406): stop logging it after this feature stabilizes.
         if (!ChromeVersionInfo.isStableBuild()) {
@@ -402,6 +440,8 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         } else {
             suffix = ".Expand";
         }
+
+        // TODO(crbug.com/982018): Separate histograms for carousel tab switcher.
         RecordHistogram.recordCount100Histogram(
                 "GridTabSwitcher.FramePerSecond" + suffix, (int) fps);
         RecordHistogram.recordTimesHistogram(
@@ -414,13 +454,6 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         }
     }
 
-    private boolean getSkipSlowZooming() {
-        String skip = ChromeFeatureList.getFieldTrialParamByFeature(
-                ChromeFeatureList.TAB_TO_GTS_ANIMATION, SKIP_SLOW_ZOOMING_PARAM);
-        if (TextUtils.equals(skip, "")) return DEFAULT_SKIP_SLOW_ZOOMING;
-        return Boolean.valueOf(skip);
-    }
-
     @Override
     protected void updateSceneLayer(RectF viewport, RectF contentViewport,
             LayerTitleCache layerTitleCache, TabContentManager tabContentManager,
@@ -431,9 +464,10 @@ public class StartSurfaceLayout extends Layout implements StartSurface.GridOverv
         // The content viewport is intentionally sent as both params below.
         mSceneLayer.pushLayers(getContext(), contentViewport, contentViewport, this,
                 layerTitleCache, tabContentManager, resourceManager, fullscreenManager,
-                FeatureUtilities.isTabToGtsAnimationEnabled() ? mStartSurface.getResourceId()
-                                                              : 0,
-                mBackgroundAlpha);
+                TabUiFeatureUtilities.isTabToGtsAnimationEnabled()
+                        ? mTabListDelegate.getResourceId()
+                        : 0,
+                mBackgroundAlpha, mStartSurface.getTabListDelegate().getTabListTopOffset());
         mFrameCount++;
         if (mLastFrameTime != 0) {
             long elapsed = SystemClock.elapsedRealtime() - mLastFrameTime;

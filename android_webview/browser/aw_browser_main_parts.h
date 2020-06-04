@@ -13,10 +13,14 @@
 #include "base/task/single_thread_task_executor.h"
 #include "content/public/browser/browser_main_parts.h"
 
+namespace metrics {
+class MemoryMetricsLogger;
+}
+
 namespace android_webview {
 
-class AwContentBrowserClient;
 class AwBrowserProcess;
+class AwContentBrowserClient;
 
 class AwBrowserMainParts : public content::BrowserMainParts {
  public:
@@ -35,6 +39,8 @@ class AwBrowserMainParts : public content::BrowserMainParts {
   std::unique_ptr<base::SingleThreadTaskExecutor> main_task_executor_;
 
   AwContentBrowserClient* browser_client_;
+
+  std::unique_ptr<metrics::MemoryMetricsLogger> metrics_logger_;
 
   std::unique_ptr<AwBrowserProcess> browser_process_;
 

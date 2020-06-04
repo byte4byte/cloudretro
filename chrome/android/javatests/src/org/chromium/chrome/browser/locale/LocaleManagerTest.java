@@ -13,10 +13,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.Callback;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.searchwidget.SearchActivity;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -35,12 +34,11 @@ import java.util.concurrent.TimeoutException;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class LocaleManagerTest {
     @Before
-    public void setUp() throws ExecutionException, ProcessInitException {
+    public void setUp() throws ExecutionException {
         TestThreadUtils.runOnUiThreadBlocking(new Callable<Void>() {
             @Override
-            public Void call() throws ProcessInitException {
-                ChromeBrowserInitializer.getInstance(InstrumentationRegistry.getTargetContext())
-                        .handleSynchronousStartup();
+            public Void call() {
+                ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
                 return null;
             }
         });
@@ -49,8 +47,7 @@ public class LocaleManagerTest {
     @Policies.Add({ @Policies.Item(key = "DefaultSearchProviderEnabled", string = "false") })
     @SmallTest
     @Test
-    public void testShowSearchEnginePromoDseDisabled()
-            throws InterruptedException, TimeoutException {
+    public void testShowSearchEnginePromoDseDisabled() throws TimeoutException {
         final CallbackHelper getShowTypeCallback = new CallbackHelper();
         LocaleManager.setInstanceForTest(new LocaleManager() {
             @Override

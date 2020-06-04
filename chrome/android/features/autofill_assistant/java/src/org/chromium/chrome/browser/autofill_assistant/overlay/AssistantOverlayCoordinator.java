@@ -4,9 +4,17 @@
 
 package org.chromium.chrome.browser.autofill_assistant.overlay;
 
+import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.RectF;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
 
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.compositor.CompositorViewHolder;
+import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
+import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
+import org.chromium.chrome.browser.image_fetcher.ImageFetcherConfig;
+import org.chromium.chrome.browser.image_fetcher.ImageFetcherFactory;
 import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.chrome.browser.widget.ScrimView;
 import org.chromium.chrome.browser.widget.ScrimView.ScrimParams;
@@ -18,20 +26,33 @@ import java.util.List;
  * displayed.
  */
 public class AssistantOverlayCoordinator {
-    private final ChromeActivity mActivity;
     private final AssistantOverlayModel mModel;
     private final AssistantOverlayEventFilter mEventFilter;
     private final AssistantOverlayDrawable mDrawable;
+    private final ChromeFullscreenManager mFullscreenManager;
+    private final CompositorViewHolder mCompositorViewHolder;
     private final ScrimView mScrim;
+    private final ImageFetcher mImageFetcher;
     private boolean mScrimEnabled;
 
-    public AssistantOverlayCoordinator(ChromeActivity activity, AssistantOverlayModel model) {
-        mActivity = activity;
+    public AssistantOverlayCoordinator(Context context, ChromeFullscreenManager fullscreenManager,
+            CompositorViewHolder compositorViewHolder, ScrimView scrim,
+            AssistantOverlayModel model) {
+        this(context, fullscreenManager, compositorViewHolder, scrim, model,
+                ImageFetcherFactory.createImageFetcher(ImageFetcherConfig.DISK_CACHE_ONLY));
+    }
+
+    public AssistantOverlayCoordinator(Context context, ChromeFullscreenManager fullscreenManager,
+            CompositorViewHolder compositorViewHolder, ScrimView scrim, AssistantOverlayModel model,
+            ImageFetcher imageFetcher) {
         mModel = model;
-        mScrim = mActivity.getScrim();
-        mEventFilter = new AssistantOverlayEventFilter(
-                mActivity, mActivity.getFullscreenManager(), mActivity.getCompositorViewHolder());
-        mDrawable = new AssistantOverlayDrawable(mActivity, mActivity.getFullscreenManager());
+        mImageFetcher = imageFetcher;
+        mFullscreenManager = fullscreenManager;
+        mCompositorViewHolder = compositorViewHolder;
+        mScrim = scrim;
+        mEventFilter =
+                new AssistantOverlayEventFilter(context, fullscreenManager, compositorViewHolder);
+        mDrawable = new AssistantOverlayDrawable(context, fullscreenManager);
 
         // Listen for changes in the state.
         // TODO(crbug.com/806868): Bind model to view through a ViewBinder instead.
@@ -59,6 +80,28 @@ public class AssistantOverlayCoordinator {
             } else if (AssistantOverlayModel.HIGHLIGHT_BORDER_COLOR == propertyKey) {
                 mDrawable.setHighlightBorderColor(
                         model.get(AssistantOverlayModel.HIGHLIGHT_BORDER_COLOR));
+            } else if (AssistantOverlayModel.TAP_TRACKING_COUNT == propertyKey) {
+                mEventFilter.setTapTrackingCount(
+                        model.get(AssistantOverlayModel.TAP_TRACKING_COUNT));
+            } else if (AssistantOverlayModel.TAP_TRACKING_DURATION_MS == propertyKey) {
+                mEventFilter.setTapTrackingDurationMs(
+                        model.get(AssistantOverlayModel.TAP_TRACKING_DURATION_MS));
+            } else if (AssistantOverlayModel.OVERLAY_IMAGE == propertyKey) {
+                AssistantOverlayImage image = model.get(AssistantOverlayModel.OVERLAY_IMAGE);
+                if (image != null && !TextUtils.isEmpty(image.mImageUrl)) {
+                    DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
+                    // TODO(b/143517837) Merge autofill assistant image fetcher UMA names.
+                    mImageFetcher.fetchImage(image.mImageUrl,
+                            ImageFetcher.ASSISTANT_DETAILS_UMA_CLIENT_NAME, result -> {
+                                image.mImageBitmap = result != null ? Bitmap.createScaledBitmap(
+                                                             result, image.mImageSizeInPixels,
+                                                             image.mImageSizeInPixels, true)
+                                                                    : null;
+                                mDrawable.setFullOverlayImage(image);
+                            });
+                } else {
+                    mDrawable.setFullOverlayImage(image);
+                }
             }
         });
     }
@@ -105,7 +148,7 @@ public class AssistantOverlayCoordinator {
         if (enabled == mScrimEnabled) return;
 
         if (enabled) {
-            ScrimParams params = new ScrimParams(mActivity.getCompositorViewHolder(),
+            ScrimParams params = new ScrimParams(mCompositorViewHolder,
                     /* showInFrontOfAnchorView= */ true,
                     /* affectsStatusBar = */ false,
                     /* topMargin= */ 0,

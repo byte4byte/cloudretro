@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/url_formatter/url_formatter.h"
+#include "ios/web/common/features.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/navigation/wk_navigation_util.h"
 #import "ios/web/public/web_client.h"
@@ -43,13 +44,22 @@ std::unique_ptr<NavigationItem> NavigationItem::Create() {
 NavigationItemImpl::NavigationItemImpl()
     : unique_id_(GetUniqueIDInConstructor()),
       transition_type_(ui::PAGE_TRANSITION_LINK),
-      user_agent_type_(UserAgentType::MOBILE),
+      user_agent_type_(UserAgentType::NONE),
+      user_agent_type_inheritance_(UserAgentType::NONE),
       is_created_from_push_state_(false),
       has_state_been_replaced_(false),
       is_created_from_hash_change_(false),
       should_skip_repost_form_confirmation_(false),
+      should_skip_serialization_(false),
       navigation_initiation_type_(web::NavigationInitiationType::NONE),
-      is_untrusted_(false) {}
+      is_untrusted_(false) {
+  if (features::UseWebClientDefaultUserAgent()) {
+    // TODO(crbug.com/1025227): Once it is enabled by default, move it to the
+    // default constructor.
+    user_agent_type_ = UserAgentType::AUTOMATIC;
+    user_agent_type_inheritance_ = UserAgentType::AUTOMATIC;
+  }
+}
 
 NavigationItemImpl::~NavigationItemImpl() {
 }
@@ -67,6 +77,7 @@ NavigationItemImpl::NavigationItemImpl(const NavigationItemImpl& item)
       ssl_(item.ssl_),
       timestamp_(item.timestamp_),
       user_agent_type_(item.user_agent_type_),
+      user_agent_type_inheritance_(item.user_agent_type_inheritance_),
       http_request_headers_([item.http_request_headers_ mutableCopy]),
       serialized_state_object_([item.serialized_state_object_ copy]),
       is_created_from_push_state_(item.is_created_from_push_state_),
@@ -74,6 +85,7 @@ NavigationItemImpl::NavigationItemImpl(const NavigationItemImpl& item)
       is_created_from_hash_change_(item.is_created_from_hash_change_),
       should_skip_repost_form_confirmation_(
           item.should_skip_repost_form_confirmation_),
+      should_skip_serialization_(item.should_skip_serialization_),
       post_data_([item.post_data_ copy]),
       error_retry_state_machine_(item.error_retry_state_machine_),
       navigation_initiation_type_(item.navigation_initiation_type_),
@@ -97,9 +109,12 @@ void NavigationItemImpl::SetURL(const GURL& url) {
   cached_display_title_.clear();
   error_retry_state_machine_.SetURL(url);
   if (!wk_navigation_util::URLNeedsUserAgentType(url)) {
-    SetUserAgentType(web::UserAgentType::NONE);
-  } else if (GetUserAgentType() == web::UserAgentType::NONE) {
-    SetUserAgentType(web::UserAgentType::MOBILE);
+    SetUserAgentType(UserAgentType::NONE);
+  } else if (GetUserAgentForInheritance() == web::UserAgentType::NONE) {
+    UserAgentType type = features::UseWebClientDefaultUserAgent()
+                             ? UserAgentType::AUTOMATIC
+                             : UserAgentType::MOBILE;
+    SetUserAgentType(type);
   }
 }
 
@@ -207,7 +222,16 @@ bool NavigationItemImpl::IsUntrusted() {
   return is_untrusted_;
 }
 
-UserAgentType NavigationItemImpl::GetUserAgentType() const {
+UserAgentType NavigationItemImpl::GetUserAgentType(
+    id<UITraitEnvironment> web_view) const {
+  if (user_agent_type_ == UserAgentType::AUTOMATIC) {
+    DCHECK(features::UseWebClientDefaultUserAgent());
+    return GetWebClient()->GetDefaultUserAgent(web_view, url_);
+  }
+  return user_agent_type_;
+}
+
+UserAgentType NavigationItemImpl::GetUserAgentForInheritance() const {
   return user_agent_type_;
 }
 
@@ -281,6 +305,14 @@ bool NavigationItemImpl::ShouldSkipRepostFormConfirmation() const {
   return should_skip_repost_form_confirmation_;
 }
 
+void NavigationItemImpl::SetShouldSkipSerialization(bool skip) {
+  should_skip_serialization_ = skip;
+}
+
+bool NavigationItemImpl::ShouldSkipSerialization() const {
+  return should_skip_serialization_;
+}
+
 void NavigationItemImpl::SetPostData(NSData* post_data) {
   post_data_ = post_data;
 }
@@ -306,7 +338,22 @@ void NavigationItemImpl::ResetForCommit() {
   SetNavigationInitiationType(web::NavigationInitiationType::NONE);
 }
 
+void NavigationItemImpl::RestoreStateFromItem(NavigationItem* other) {
+  // Restore the UserAgent type in any case, as if the URLs are different it
+  // might mean that |this| is a next navigation. The page display state and the
+  // virtual URL only make sense if it is the same item. The other headers might
+  // not make sense after creating a new navigation to the page.
+  if (other->GetUserAgentForInheritance() != UserAgentType::NONE) {
+    SetUserAgentType(other->GetUserAgentForInheritance());
+  }
+  if (url_ == other->GetURL()) {
+    SetPageDisplayState(other->GetPageDisplayState());
+    SetVirtualURL(other->GetVirtualURL());
+  }
+}
+
 ErrorRetryStateMachine& NavigationItemImpl::error_retry_state_machine() {
+  DCHECK(!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage));
   return error_retry_state_machine_;
 }
 
@@ -335,7 +382,8 @@ NSString* NavigationItemImpl::GetDescription() const {
       stringWithFormat:
           @"url:%s virtual_url_:%s originalurl:%s referrer: %s title:%s "
           @"transition:%d "
-           "displayState:%@ userAgentType:%s is_create_from_push_state: %@ "
+           "displayState:%@ userAgent:%s "
+           "is_create_from_push_state: %@ "
            "has_state_been_replaced: %@ is_created_from_hash_change: %@ "
            "navigation_initiation_type: %d",
           url_.spec().c_str(), virtual_url_.spec().c_str(),

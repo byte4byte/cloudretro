@@ -20,14 +20,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CloseableOnMainThread;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.download.DownloadTestRule;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabCreationState;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -51,6 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
         ChromeSwitches.GOOGLE_BASE_URL + "=http://example.com/"})
 @Features.EnableFeatures(ChromeFeatureList.REVAMPED_CONTEXT_MENU)
+@Features.DisableFeatures({ChromeFeatureList.CONTEXT_MENU_SEARCH_WITH_GOOGLE_LENS})
 public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActivityStart {
     // clang-format on
     @Rule
@@ -70,12 +73,12 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
             new String[] {FILENAME_GIF, FILENAME_PNG, FILENAME_WEBM};
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(true));
     }
 
     @Override
-    public void customMainActivityStart() throws InterruptedException {
+    public void customMainActivityStart() {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mTestUrl = mTestServer.getURL(TEST_PATH);
         deleteTestFiles();
@@ -84,7 +87,7 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
         TestThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(false));
         deleteTestFiles();
@@ -94,16 +97,20 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
     @MediumTest
     public void testCopyLinkURL() throws Throwable {
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
-        RevampedContextMenuUtils.selectContextMenuItem(InstrumentationRegistry.getInstrumentation(),
-                mDownloadTestRule.getActivity(), tab, "testLink",
-                R.id.contextmenu_copy_link_address);
+        // Allow DiskWrites temporarily in main thread to avoid
+        // violation during copying under emulator environment.
+        try (CloseableOnMainThread ignored = CloseableOnMainThread.StrictMode.allowDiskWrites()) {
+            RevampedContextMenuUtils.selectContextMenuItem(
+                    InstrumentationRegistry.getInstrumentation(), mDownloadTestRule.getActivity(),
+                    tab, "testLink", R.id.contextmenu_copy_link_address);
+        }
 
         assertStringContains("test_link.html", getClipboardText());
     }
 
     @Test
     @MediumTest
-    public void testLongPressOnImage() throws InterruptedException, TimeoutException {
+    public void testLongPressOnImage() throws TimeoutException {
         final Tab activityTab = mDownloadTestRule.getActivity().getActivityTab();
 
         final CallbackHelper newTabCallback = new CallbackHelper();
@@ -111,8 +118,8 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
         mDownloadTestRule.getActivity().getTabModelSelector().addObserver(
                 new EmptyTabModelSelectorObserver() {
                     @Override
-                    public void onNewTabCreated(Tab tab) {
-                        super.onNewTabCreated(tab);
+                    public void onNewTabCreated(Tab tab, @TabCreationState int creationState) {
+                        super.onNewTabCreated(tab, creationState);
 
                         if (tab.getParentId() != activityTab.getId()) return;
                         newTab.set(tab);
@@ -137,12 +144,13 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
         // Only check for the URL matching as the tab will not be fully created in svelte mode.
         final String expectedUrl =
                 mTestServer.getURL("/chrome/test/data/android/contextmenu/test_image.png");
-        CriteriaHelper.pollUiThread(Criteria.equals(expectedUrl, () -> newTab.get().getUrl()));
+        CriteriaHelper.pollUiThread(
+                Criteria.equals(expectedUrl, () -> newTab.get().getUrlString()));
     }
 
     @Test
     @MediumTest
-    public void testDismissContextMenuOnBack() throws InterruptedException, TimeoutException {
+    public void testDismissContextMenuOnBack() throws TimeoutException {
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
         RevampedContextMenuCoordinator menuCoordinator =
                 RevampedContextMenuUtils.openContextMenu(tab, "testImage");
@@ -165,7 +173,7 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
 
     @Test
     @MediumTest
-    public void testDismissContextMenuOnClick() throws InterruptedException, TimeoutException {
+    public void testDismissContextMenuOnClick() throws TimeoutException {
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
         RevampedContextMenuCoordinator menuCoordinator =
                 RevampedContextMenuUtils.openContextMenu(tab, "testImage");
@@ -177,8 +185,8 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
             }
         });
 
-        TestTouchUtils.singleClickView(
-                InstrumentationRegistry.getInstrumentation(), tab.getView(), 0, 0);
+        TestTouchUtils.singleClickView(InstrumentationRegistry.getInstrumentation(), tab.getView(),
+                tab.getView().getWidth() - 5, tab.getView().getHeight() - 5);
 
         CriteriaHelper.pollUiThread(new Criteria("Activity did not regain focus.") {
             @Override
@@ -192,8 +200,15 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
     @MediumTest
     public void testCopyEmailAddress() throws Throwable {
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
-        RevampedContextMenuUtils.selectContextMenuItem(InstrumentationRegistry.getInstrumentation(),
-                mDownloadTestRule.getActivity(), tab, "testEmail", R.id.contextmenu_copy);
+        // Allow all thread policies temporarily in main thread to avoid
+        // DiskWrite and UnBufferedIo violations during copying under
+        // emulator environment.
+        try (CloseableOnMainThread ignored =
+                        CloseableOnMainThread.StrictMode.allowAllThreadPolicies()) {
+            RevampedContextMenuUtils.selectContextMenuItem(
+                    InstrumentationRegistry.getInstrumentation(), mDownloadTestRule.getActivity(),
+                    tab, "testEmail", R.id.contextmenu_copy);
+        }
 
         Assert.assertEquals("Copied email address is not correct",
                 "someone1@example.com,someone2@example.com", getClipboardText());
@@ -203,30 +218,32 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
     @MediumTest
     public void testCopyTelNumber() throws Throwable {
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
-        RevampedContextMenuUtils.selectContextMenuItem(InstrumentationRegistry.getInstrumentation(),
-                mDownloadTestRule.getActivity(), tab, "testTel", R.id.contextmenu_copy);
+        // Allow DiskWrites temporarily in main thread to avoid
+        // violation during copying under emulator environment.
+        try (CloseableOnMainThread ignored = CloseableOnMainThread.StrictMode.allowDiskWrites()) {
+            RevampedContextMenuUtils.selectContextMenuItem(
+                    InstrumentationRegistry.getInstrumentation(), mDownloadTestRule.getActivity(),
+                    tab, "testTel", R.id.contextmenu_copy);
+        }
 
         Assert.assertEquals("Copied tel number is not correct", "10000000000", getClipboardText());
     }
 
     @Test
     @LargeTest
-    public void testSaveDataUrl()
-            throws InterruptedException, TimeoutException, SecurityException, IOException {
+    public void testSaveDataUrl() throws TimeoutException, SecurityException, IOException {
         saveMediaFromContextMenu("dataUrlIcon", R.id.contextmenu_save_image, FILENAME_GIF);
     }
 
     @Test
     @LargeTest
-    public void testSaveImage()
-            throws InterruptedException, TimeoutException, SecurityException, IOException {
+    public void testSaveImage() throws TimeoutException, SecurityException, IOException {
         saveMediaFromContextMenu("testImage", R.id.contextmenu_save_image, FILENAME_PNG);
     }
 
     @Test
     @LargeTest
-    public void testSaveVideo()
-            throws InterruptedException, TimeoutException, SecurityException, IOException {
+    public void testSaveVideo() throws TimeoutException, SecurityException, IOException {
         saveMediaFromContextMenu("videoDOMElement", R.id.contextmenu_save_video, FILENAME_WEBM);
     }
 
@@ -239,8 +256,7 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
      */
     @Test
     @LargeTest
-    public void testOpenLinksInNewTabsAndVerifyTabIndexOrdering()
-            throws InterruptedException, TimeoutException {
+    public void testOpenLinksInNewTabsAndVerifyTabIndexOrdering() throws TimeoutException {
         TabModel tabModel = mDownloadTestRule.getActivity().getCurrentTabModel();
         int numOpenedTabs = tabModel.getCount();
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
@@ -272,21 +288,21 @@ public class RevampedContextMenuTest implements DownloadTestRule.CustomMainActiv
                 "Number of open tabs does not match", numOpenedTabs, tabModel.getCount());
 
         // Verify the Url is still the same of Parent page.
-        Assert.assertEquals(mTestUrl, mDownloadTestRule.getActivity().getActivityTab().getUrl());
+        Assert.assertEquals(
+                mTestUrl, mDownloadTestRule.getActivity().getActivityTab().getUrlString());
 
         // Verify that the background tabs were opened in the expected order.
         String newTabUrl =
                 mTestServer.getURL("/chrome/test/data/android/contextmenu/test_link.html");
-        Assert.assertEquals(newTabUrl, tabModel.getTabAt(indexOfLinkPage).getUrl());
+        Assert.assertEquals(newTabUrl, tabModel.getTabAt(indexOfLinkPage).getUrlString());
 
         String imageUrl =
                 mTestServer.getURL("/chrome/test/data/android/contextmenu/test_link2.html");
-        Assert.assertEquals(imageUrl, tabModel.getTabAt(indexOfLinkPage2).getUrl());
+        Assert.assertEquals(imageUrl, tabModel.getTabAt(indexOfLinkPage2).getUrlString());
     }
 
-    private void saveMediaFromContextMenu(
-            String mediaDOMElement, int saveMenuID, String expectedFilename)
-            throws InterruptedException, TimeoutException, SecurityException, IOException {
+    private void saveMediaFromContextMenu(String mediaDOMElement, int saveMenuID,
+            String expectedFilename) throws TimeoutException, SecurityException, IOException {
         // Select "save [image/video]" in that menu.
         Tab tab = mDownloadTestRule.getActivity().getActivityTab();
         int callCount = mDownloadTestRule.getChromeDownloadCallCount();

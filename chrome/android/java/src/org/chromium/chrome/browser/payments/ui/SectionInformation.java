@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser.payments.ui;
 
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.widget.prefeditor.EditableOption;
+import org.chromium.chrome.browser.autofill.prefeditor.EditableOption;
 
 import java.util.ArrayList;
 import java.util.Arrays;

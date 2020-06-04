@@ -8,11 +8,13 @@
 #include <memory>
 #include <string>
 
+#include "base/auto_reset.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/ui/webui/chromeos/login/sync_consent_screen_handler.h"
+#include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/user_manager/user.h"
 
@@ -32,6 +34,14 @@ class SyncConsentScreen : public BaseScreen,
   };
 
  public:
+  enum ConsentGiven { CONSENT_NOT_GIVEN, CONSENT_GIVEN };
+
+  enum class Result { NEXT, NOT_APPLICABLE };
+
+  static std::string GetResultString(Result result);
+
+  using ScreenExitCallback = base::RepeatingCallback<void(Result result)>;
+
   class SyncConsentScreenTestDelegate {
    public:
     SyncConsentScreenTestDelegate() = default;
@@ -39,8 +49,9 @@ class SyncConsentScreen : public BaseScreen,
     // This is called from SyncConsentScreen when user consent is passed to
     // consent auditor with resource ids recorder as consent.
     virtual void OnConsentRecordedIds(
+        ConsentGiven consent_given,
         const std::vector<int>& consent_description,
-        const int consent_confirmation) = 0;
+        int consent_confirmation) = 0;
 
     // This is called from SyncConsentScreenHandler when user consent is passed
     // to consent auditor with resource strings recorder as consent.
@@ -57,13 +68,11 @@ class SyncConsentScreen : public BaseScreen,
   static void MaybeLaunchSyncConsentSettings(Profile* profile);
 
   SyncConsentScreen(SyncConsentScreenView* view,
-                    const base::RepeatingClosure& exit_callback);
+                    const ScreenExitCallback& exit_callback);
   ~SyncConsentScreen() override;
 
-  // BaseScreen:
-  void Show() override;
-  void Hide() override;
-  void OnUserAction(const std::string& action_id) override;
+  // Inits |user_|, its |profile_| and |behavior_| before using the screen.
+  void Init();
 
   // syncer::SyncServiceObserver:
   void OnStateChanged(syncer::SyncService* sync) override;
@@ -76,6 +85,15 @@ class SyncConsentScreen : public BaseScreen,
   void OnContinueWithDefaults(const std::vector<int>& consent_description,
                               const int consent_confirmation);
 
+  // Reacts to "Accept and Continue".
+  void OnAcceptAndContinue(const std::vector<int>& consent_description,
+                           int consent_confirmation,
+                           bool enable_os_sync,
+                           bool review_browser_sync);
+
+  static std::unique_ptr<base::AutoReset<bool>> ForceBrandedBuildForTesting(
+      bool value);
+
   // Sets internal condition "Sync disabled by policy" for tests.
   void SetProfileSyncDisabledByPolicyForTesting(bool value);
 
@@ -87,7 +105,20 @@ class SyncConsentScreen : public BaseScreen,
       SyncConsentScreen::SyncConsentScreenTestDelegate* delegate);
   SyncConsentScreenTestDelegate* GetDelegateForTesting() const;
 
+  void set_exit_callback_for_testing(const ScreenExitCallback& exit_callback) {
+    exit_callback_ = exit_callback;
+  }
+
+  const ScreenExitCallback& get_exit_callback_for_testing() {
+    return exit_callback_;
+  }
+
  private:
+  // BaseScreen:
+  bool MaybeSkip() override;
+  void ShowImpl() override;
+  void HideImpl() override;
+
   // Returns new SyncScreenBehavior value.
   SyncScreenBehavior GetSyncScreenBehavior() const;
 
@@ -95,8 +126,9 @@ class SyncConsentScreen : public BaseScreen,
   void UpdateScreen();
 
   // Records user Sync consent.
-  void RecordConsent(const std::vector<int>& consent_description,
-                     const int consent_confirmation);
+  void RecordConsent(ConsentGiven consent_given,
+                     const std::vector<int>& consent_description,
+                     int consent_confirmation);
 
   // Returns true if profile sync is disabled by policy.
   bool IsProfileSyncDisabledByPolicy() const;
@@ -109,7 +141,7 @@ class SyncConsentScreen : public BaseScreen,
   SyncScreenBehavior behavior_ = UNKNOWN;
 
   SyncConsentScreenView* const view_;
-  base::RepeatingClosure exit_callback_;
+  ScreenExitCallback exit_callback_;
 
   // Manages sync service observer lifetime.
   ScopedObserver<syncer::SyncService, syncer::SyncServiceObserver>
@@ -118,9 +150,7 @@ class SyncConsentScreen : public BaseScreen,
   // Primary user ind his Profile (if screen is shown).
   const user_manager::User* user_ = nullptr;
   Profile* profile_ = nullptr;
-
-  // True when screen is shown.
-  bool shown_ = false;
+  bool is_initialized_ = false;
 
   base::Optional<bool> test_sync_disabled_by_policy_;
   base::Optional<bool> test_sync_engine_initialized_;

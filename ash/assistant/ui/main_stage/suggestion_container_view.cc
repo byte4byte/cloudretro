@@ -9,41 +9,96 @@
 #include <utility>
 
 #include "ash/assistant/model/assistant_response.h"
+#include "ash/assistant/model/assistant_suggestions_model.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/assistant_view_ids.h"
+#include "ash/assistant/ui/main_stage/animated_container_view.h"
+#include "ash/assistant/ui/main_stage/element_animator.h"
+#include "ash/assistant/util/animation_util.h"
 #include "ash/assistant/util/assistant_util.h"
-#include "ash/public/cpp/app_list/app_list_features.h"
 #include "base/bind.h"
-#include "base/strings/utf_string_conversions.h"
+#include "ui/compositor/callback_layer_animation_observer.h"
+#include "ui/compositor/layer_animation_element.h"
 #include "ui/views/layout/box_layout.h"
 
 namespace ash {
 
 namespace {
 
+using assistant::util::CreateLayerAnimationSequence;
+using assistant::util::CreateOpacityElement;
+using assistant::util::StartLayerAnimationSequence;
+
+// Animation.
+constexpr base::TimeDelta kChipFadeInDuration =
+    base::TimeDelta::FromMilliseconds(250);
+constexpr base::TimeDelta kChipFadeOutDuration =
+    base::TimeDelta::FromMilliseconds(200);
+
 // Appearance.
 constexpr int kPreferredHeightDip = 48;
 
 }  // namespace
 
+// SuggestionChipAnimator -----------------------------------------------------
+
+class SuggestionChipAnimator : public ElementAnimator {
+ public:
+  SuggestionChipAnimator(SuggestionChipView* chip,
+                         const SuggestionContainerView* parent)
+      : ElementAnimator(chip), parent_(parent) {}
+  ~SuggestionChipAnimator() override = default;
+
+  void AnimateIn(ui::CallbackLayerAnimationObserver* observer) override {
+    StartLayerAnimationSequence(layer()->GetAnimator(),
+                                CreateAnimateInAnimation(), observer);
+  }
+
+  void AnimateOut(ui::CallbackLayerAnimationObserver* observer) override {
+    StartLayerAnimationSequence(layer()->GetAnimator(),
+                                CreateAnimateOutAnimation(), observer);
+  }
+
+  void FadeOut(ui::CallbackLayerAnimationObserver* observer) override {
+    // If the user pressed a chip we do not fade it out.
+    if (!IsSelectedChip())
+      ElementAnimator::FadeOut(observer);
+  }
+
+ private:
+  bool IsSelectedChip() const { return view() == parent_->selected_chip(); }
+
+  ui::LayerAnimationSequence* CreateAnimateInAnimation() const {
+    return CreateLayerAnimationSequence(
+        CreateOpacityElement(1.f, kChipFadeInDuration,
+                             gfx::Tween::Type::FAST_OUT_SLOW_IN));
+  }
+
+  ui::LayerAnimationSequence* CreateAnimateOutAnimation() const {
+    return CreateLayerAnimationSequence(CreateOpacityElement(
+        0.f, kChipFadeOutDuration, gfx::Tween::Type::FAST_OUT_SLOW_IN));
+  }
+
+  const SuggestionContainerView* const parent_;  // |parent_| owns |this|.
+
+  DISALLOW_COPY_AND_ASSIGN(SuggestionChipAnimator);
+};
+
 // SuggestionContainerView -----------------------------------------------------
 
 SuggestionContainerView::SuggestionContainerView(
     AssistantViewDelegate* delegate)
-    : delegate_(delegate), download_request_weak_factory_(this) {
+    : AnimatedContainerView(delegate) {
+  SetID(AssistantViewID::kSuggestionContainer);
   InitLayout();
 
-  // The AssistantViewDelegate should outlive SuggestionContainerView.
-  delegate_->AddCacheModelObserver(this);
-  delegate_->AddInteractionModelObserver(this);
-  delegate_->AddUiModelObserver(this);
+  assistant_suggestions_model_observer_.Add(
+      AssistantSuggestionsController::Get());
+  assistant_ui_model_observer_.Add(AssistantUiController::Get());
 }
 
-SuggestionContainerView::~SuggestionContainerView() {
-  delegate_->RemoveUiModelObserver(this);
-  delegate_->RemoveInteractionModelObserver(this);
-  delegate_->RemoveCacheModelObserver(this);
-}
+SuggestionContainerView::~SuggestionContainerView() = default;
 
 const char* SuggestionContainerView::GetClassName() const {
   return "SuggestionContainerView";
@@ -66,6 +121,23 @@ void SuggestionContainerView::OnContentsPreferredSizeChanged(
   content_view->SetSize(gfx::Size(width, kPreferredHeightDip));
 }
 
+void SuggestionContainerView::OnAssistantControllerDestroying() {
+  AnimatedContainerView::OnAssistantControllerDestroying();
+
+  assistant_ui_model_observer_.Remove(AssistantUiController::Get());
+  assistant_suggestions_model_observer_.Remove(
+      AssistantSuggestionsController::Get());
+}
+
+void SuggestionContainerView::OnCommittedQueryChanged(
+    const AssistantQuery& query) {
+  AnimatedContainerView::OnCommittedQueryChanged(query);
+
+  // Cache the fact that a query has been committed in this Assistant session so
+  // that we know to stop handling conversation starter updates.
+  has_committed_query_ = true;
+}
+
 void SuggestionContainerView::InitLayout() {
   layout_manager_ =
       content_view()->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -73,9 +145,7 @@ void SuggestionContainerView::InitLayout() {
           gfx::Insets(0, kPaddingDip), kSpacingDip));
 
   layout_manager_->set_cross_axis_alignment(
-      app_list_features::IsEmbeddedAssistantUIEnabled()
-          ? views::BoxLayout::CrossAxisAlignment::kCenter
-          : views::BoxLayout::CrossAxisAlignment::kEnd);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   // We center align when showing conversation starters.
   layout_manager_->set_main_axis_alignment(
@@ -83,108 +153,53 @@ void SuggestionContainerView::InitLayout() {
 }
 
 void SuggestionContainerView::OnConversationStartersChanged(
-    const std::map<int, const AssistantSuggestion*>& conversation_starters) {
-  // TODO(dmblack): If UI is visible, we may want to animate this transition.
-  OnSuggestionsCleared();
-  OnSuggestionsChanged(conversation_starters);
+    const std::vector<const AssistantSuggestion*>& conversation_starters) {
+  // If we've committed a query we should ignore changes to the cache of
+  // conversation starters as we are past the state in which they should be
+  // presented. To present them now could incorrectly associate the conversation
+  // starters with a response.
+  if (has_committed_query_)
+    return;
+
+  RemoveAllViews();
+  OnSuggestionsAdded(conversation_starters);
 }
 
-void SuggestionContainerView::OnResponseChanged(
-    const std::shared_ptr<AssistantResponse>& response) {
-  has_received_response_ = true;
-
-  OnSuggestionsCleared();
-
+std::unique_ptr<ElementAnimator> SuggestionContainerView::HandleSuggestion(
+    const AssistantSuggestion* suggestion) {
   // When no longer showing conversation starters, we start align our content.
   layout_manager_->set_main_axis_alignment(
-      views::BoxLayout::MainAxisAlignment::kStart);
+      has_committed_query_ ? views::BoxLayout::MainAxisAlignment::kStart
+                           : views::BoxLayout::MainAxisAlignment::kCenter);
 
-  OnSuggestionsChanged(response->GetSuggestions());
+  return AddSuggestionChip(suggestion);
 }
 
-void SuggestionContainerView::OnResponseCleared() {
-  // Note that we don't reset |has_received_response_| here because that refers
-  // to whether we've received a response during the current Assistant session,
-  // not whether we are currently displaying a response.
-  OnSuggestionsCleared();
+void SuggestionContainerView::OnAllViewsRemoved() {
+  // Clear the selected button.
+  selected_chip_ = nullptr;
 }
 
-void SuggestionContainerView::OnSuggestionsChanged(
-    const std::map<int, const AssistantSuggestion*>& suggestions) {
-  using AssistantSuggestion = chromeos::assistant::mojom::AssistantSuggestion;
-  for (const std::pair<int, const AssistantSuggestion*>& suggestion :
-       suggestions) {
-    // We will use the same identifier by which the Assistant interaction model
-    // uniquely identifies a suggestion to uniquely identify its corresponding
-    // suggestion chip view.
-    const int id = suggestion.first;
+std::unique_ptr<ElementAnimator> SuggestionContainerView::AddSuggestionChip(
+    const AssistantSuggestion* suggestion) {
+  auto suggestion_chip_view = std::make_unique<SuggestionChipView>(
+      delegate(), suggestion, /*listener=*/this);
 
-    SuggestionChipView::Params params;
-    params.text = base::UTF8ToUTF16(suggestion.second->text);
+  // The chip will be animated on its own layer.
+  suggestion_chip_view->SetPaintToLayer();
+  suggestion_chip_view->layer()->SetFillsBoundsOpaquely(false);
+  suggestion_chip_view->layer()->SetOpacity(0.f);
 
-    if (!suggestion.second->icon_url.is_empty()) {
-      // Initiate a request to download the image for the suggestion chip icon.
-      // Note that the request is identified by the suggestion id.
-      delegate_->DownloadImage(
-          suggestion.second->icon_url,
-          base::BindOnce(
-              &SuggestionContainerView::OnSuggestionChipIconDownloaded,
-              download_request_weak_factory_.GetWeakPtr(), id));
-
-      // To reserve layout space until the actual icon can be downloaded, we
-      // supply an empty placeholder image to the suggestion chip view.
-      params.icon = gfx::ImageSkia();
-    }
-
-    SuggestionChipView* suggestion_chip_view =
-        new SuggestionChipView(params, /*listener=*/this);
-    suggestion_chip_view->SetAccessibleName(params.text);
-
-    // Given a suggestion chip view, we need to be able to look up the id of
-    // the underlying suggestion. This is used for handling press events.
-    suggestion_chip_view->SetID(id);
-
-    // Given an id, we also want to be able to look up the corresponding
-    // suggestion chip view. This is used for handling icon download events.
-    suggestion_chip_views_[id] = suggestion_chip_view;
-
-    content_view()->AddChildView(suggestion_chip_view);
-  }
-}
-
-void SuggestionContainerView::OnSuggestionsCleared() {
-  // Abort any download requests in progress.
-  download_request_weak_factory_.InvalidateWeakPtrs();
-
-  // When modifying the view hierarchy, make sure we keep our view cache synced.
-  content_view()->RemoveAllChildViews(/*delete_children=*/true);
-  suggestion_chip_views_.clear();
-}
-
-void SuggestionContainerView::OnSuggestionChipIconDownloaded(
-    int id,
-    const gfx::ImageSkia& icon) {
-  if (!icon.isNull())
-    suggestion_chip_views_[id]->SetIcon(icon);
+  // Add to the view hierarchy and return the animator for the suggestion chip.
+  return std::make_unique<SuggestionChipAnimator>(
+      contents()->AddChildView(std::move(suggestion_chip_view)), this);
 }
 
 void SuggestionContainerView::ButtonPressed(views::Button* sender,
                                             const ui::Event& event) {
-  const AssistantSuggestion* suggestion = nullptr;
-
-  // If we haven't yet received a query response, the suggestion chip that was
-  // pressed was a conversation starter.
-  if (!has_received_response_) {
-    suggestion =
-        delegate_->GetCacheModel()->GetConversationStarterById(sender->GetID());
-  } else {
-    // Otherwise, the suggestion chip belonged to the interaction response.
-    suggestion =
-        delegate_->GetInteractionModel()->response()->GetSuggestionById(
-            sender->GetID());
-  }
-
-  delegate_->OnSuggestionChipPressed(suggestion);
+  // Remember which chip was selected, so we can give it a special animation.
+  selected_chip_ = static_cast<SuggestionChipView*>(sender);
+  delegate()->OnSuggestionChipPressed(selected_chip_->suggestion());
 }
 
 void SuggestionContainerView::OnUiVisibilityChanged(
@@ -196,16 +211,17 @@ void SuggestionContainerView::OnUiVisibilityChanged(
       entry_point.value() != AssistantEntryPoint::kLauncherSearchResult) {
     // Show conversation starters at the start of a new Assistant session except
     // when the user already started a query in Launcher quick search box (QSB).
-    OnConversationStartersChanged(
-        delegate_->GetCacheModel()->GetConversationStarters());
+    OnConversationStartersChanged(AssistantSuggestionsController::Get()
+                                      ->GetModel()
+                                      ->GetConversationStarters());
     return;
   }
 
   if (!assistant::util::IsFinishingSession(new_visibility))
     return;
 
-  // When Assistant is finishing a session, we need to reset view state.
-  has_received_response_ = false;
+  // When Assistant is finishing a session, we need to reset state.
+  has_committed_query_ = false;
 
   // When we start a new session we will be showing conversation starters so
   // we need to center align our content.

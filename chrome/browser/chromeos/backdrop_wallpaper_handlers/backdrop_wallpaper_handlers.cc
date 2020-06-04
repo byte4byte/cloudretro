@@ -12,6 +12,7 @@
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/common/extensions/api/wallpaper_private.h"
 #include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/devicetype.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/load_flags.h"
 #include "url/gurl.h"
@@ -38,6 +39,9 @@ constexpr char kBackdropSurpriseMeImageUrl[] =
 
 // The label used to return exclusive content or filter unwanted images.
 constexpr char kFilteringLabel[] = "chromebook";
+
+// The label used to return exclusive content for Google branded chromebooks.
+constexpr char kGoogleDeviceFilteringLabel[] = "google_branded_chromebook";
 
 // Returns the corresponding test url if |kTestWallpaperServer| is present,
 // otherwise returns |url| as is. See https://crbug.com/914144.
@@ -87,7 +91,7 @@ class BackdropFetcher {
     resource_request->method = "POST";
     resource_request->load_flags =
         net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
-    resource_request->allow_credentials = false;
+    resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
     simple_loader_ = network::SimpleURLLoader::Create(
         std::move(resource_request), traffic_annotation);
@@ -146,6 +150,8 @@ void CollectionInfoFetcher::Start(OnCollectionsInfoFetched callback) {
   // The language field may include the country code (e.g. "en-US").
   request.set_language(g_browser_process->GetApplicationLocale());
   request.add_filtering_label(kFilteringLabel);
+  if (chromeos::IsGoogleBrandedDevice())
+    request.add_filtering_label(kGoogleDeviceFilteringLabel);
   std::string serialized_proto;
   request.SerializeToString(&serialized_proto);
 
@@ -161,7 +167,7 @@ void CollectionInfoFetcher::Start(OnCollectionsInfoFetched callback) {
             "collections is downloaded from the Backdrop wallpaper service."
           trigger:
             "When ChromeOS Wallpaper Picker extension is open, and "
-            "GOOGLE_CHROME_BUILD is defined."
+            "BUILDFLAG(GOOGLE_CHROME_BRANDING) is defined."
           data:
             "The Backdrop protocol buffer messages. No user data is included."
           destination: GOOGLE_OWNED_SERVICE
@@ -217,6 +223,8 @@ void ImageInfoFetcher::Start(OnImagesInfoFetched callback) {
   request.set_language(g_browser_process->GetApplicationLocale());
   request.set_collection_id(collection_id_);
   request.add_filtering_label(kFilteringLabel);
+  if (chromeos::IsGoogleBrandedDevice())
+    request.add_filtering_label(kGoogleDeviceFilteringLabel);
   std::string serialized_proto;
   request.SerializeToString(&serialized_proto);
 
@@ -231,8 +239,8 @@ void ImageInfoFetcher::Start(OnImagesInfoFetched callback) {
             "downloaded from the Backdrop wallpaper service."
           trigger:
             "When ChromeOS Wallpaper Picker extension is open, "
-            "GOOGLE_CHROME_BUILD is defined and user clicks on a particular "
-            "collection."
+            "BUILDFLAG(GOOGLE_CHROME_BRANDING) is defined and user clicks on a "
+            "particular collection."
           data:
             "The Backdrop protocol buffer messages. No user data is included."
           destination: GOOGLE_OWNED_SERVICE
@@ -288,6 +296,8 @@ void SurpriseMeImageFetcher::Start(OnSurpriseMeImageFetched callback) {
   request.set_language(g_browser_process->GetApplicationLocale());
   request.add_collection_ids(collection_id_);
   request.add_filtering_label(kFilteringLabel);
+  if (chromeos::IsGoogleBrandedDevice())
+    request.add_filtering_label(kGoogleDeviceFilteringLabel);
   if (!resume_token_.empty())
     request.set_resume_token(resume_token_);
   std::string serialized_proto;
@@ -306,8 +316,8 @@ void SurpriseMeImageFetcher::Start(OnSurpriseMeImageFetched callback) {
             "Backdrop wallpaper service."
           trigger:
             "When ChromeOS Wallpaper Picker extension is open, "
-            "GOOGLE_CHROME_BUILD is defined and user turns on the surprise me "
-            "feature."
+            "BUILDFLAG(GOOGLE_CHROME_BRANDING) is defined and user turns on "
+            "the surprise me feature."
           data:
             "The Backdrop protocol buffer messages. No user data is included."
           destination: GOOGLE_OWNED_SERVICE

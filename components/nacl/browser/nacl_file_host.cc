@@ -14,6 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "components/nacl/browser/bad_message.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/nacl_browser_delegate.h"
@@ -102,7 +103,7 @@ void DoOpenPnaclFile(
   // Not all PNaCl files are executable. Only register those that are
   // executable in the NaCl file_path cache.
   if (is_executable) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&DoRegisterOpenedNaClExecutableFile,
                        nacl_host_message_filter, std::move(file_to_open),
@@ -126,13 +127,11 @@ void DoOpenNaClExecutableOnThreadPool(
     scoped_refptr<nacl::NaClHostMessageFilter> nacl_host_message_filter,
     const GURL& file_url,
     bool enable_validation_caching,
+    NaClBrowserDelegate::MapUrlToLocalFilePathCallback map_url_callback,
     IPC::Message* reply_msg) {
   base::FilePath file_path;
-  if (!nacl::NaClBrowser::GetDelegate()->MapUrlToLocalFilePath(
-          file_url,
-          true /* use_blocking_api */,
-          nacl_host_message_filter->profile_directory(),
-          &file_path)) {
+  if (!map_url_callback.Run(file_url, true /* use_blocking_api */,
+                            &file_path)) {
     NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
@@ -148,7 +147,7 @@ void DoOpenNaClExecutableOnThreadPool(
     if (enable_validation_caching) {
       // This function is running on the blocking pool, but the path needs to be
       // registered in a structure owned by the IO thread.
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::IO},
           base::BindOnce(
               &DoRegisterOpenedNaClExecutableFile, nacl_host_message_filter,
@@ -178,7 +177,7 @@ void GetReadonlyPnaclFd(
     const std::string& filename,
     bool is_executable,
     IPC::Message* reply_msg) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&DoOpenPnaclFile, nacl_host_message_filter, filename,
                      is_executable, reply_msg));
@@ -224,11 +223,10 @@ void OpenNaClExecutable(
     bool enable_validation_caching,
     IPC::Message* reply_msg) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&OpenNaClExecutable, nacl_host_message_filter,
-                       render_view_id, file_url, enable_validation_caching,
-                       reply_msg));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(&OpenNaClExecutable, nacl_host_message_filter,
+                                  render_view_id, file_url,
+                                  enable_validation_caching, reply_msg));
     return;
   }
 
@@ -250,14 +248,18 @@ void OpenNaClExecutable(
     return;
   }
 
+  auto map_url_callback =
+      nacl::NaClBrowser::GetDelegate()->GetMapUrlToLocalFilePathCallback(
+          nacl_host_message_filter->profile_directory());
+
   // The URL is part of the current app. Now query the extension system for the
   // file path and convert that to a file descriptor. This should be done on a
   // blocking pool thread.
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&DoOpenNaClExecutableOnThreadPool,
                      nacl_host_message_filter, file_url,
-                     enable_validation_caching, reply_msg));
+                     enable_validation_caching, map_url_callback, reply_msg));
 }
 
 }  // namespace nacl_file_host

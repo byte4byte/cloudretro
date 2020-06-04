@@ -13,6 +13,7 @@
 #include "base/sequence_checker.h"
 #include "base/synchronization/lock.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/timer/timer.h"
 #include "base/unguessable_token.h"
 #include "chromeos/components/nearby/library/atomic_boolean.h"
@@ -30,7 +31,7 @@ class ScheduledExecutorImpl : public location::nearby::ScheduledExecutor {
  public:
   ScheduledExecutorImpl(
       scoped_refptr<base::SequencedTaskRunner> timer_task_runner =
-          base::CreateSequencedTaskRunnerWithTraits(base::MayBlock()));
+          base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
   ~ScheduledExecutorImpl() override;
 
  private:
@@ -77,7 +78,7 @@ class ScheduledExecutorImpl : public location::nearby::ScheduledExecutor {
   base::flat_map<base::UnguessableToken, std::unique_ptr<PendingTaskWithTimer>>
       id_to_task_map_;
   SEQUENCE_CHECKER(timer_sequence_checker_);
-  base::WeakPtrFactory<ScheduledExecutorImpl> weak_factory_;
+  base::WeakPtrFactory<ScheduledExecutorImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ScheduledExecutorImpl);
 };

@@ -6,6 +6,7 @@ import contextlib
 import logging
 
 from core import perf_benchmark
+from core import platforms
 
 from telemetry.core import android_platform
 from telemetry.core import util as core_util
@@ -31,16 +32,16 @@ from devil.android.sdk import intent # pylint: disable=import-error
 # 1. Configure for Release Official flavor to get the most representative
 #    results:
 #    shell> gn gen --args='use_goma=true target_os="android" target_cpu="arm" \
-#           is_debug=false is_official_build=true' gn_android/ReleaseOfficial
+#           is_debug=false is_official_build=true' out/AndroidReleaseOfficial
 #
 # 2.1. Build Monochrome:
-#    shell> autoninja -C gn_android/ReleaseOfficial monochrome_apk
+#    shell> autoninja -C out/AndroidReleaseOfficial monochrome_apk
 #
 # 2.2. Build the (pseudo) Maps PWA launcher (it will be auto-installed later):
-#    shell> autoninja -C gn_android/Release/ maps_go_webapk
+#    shell> autoninja -C out/AndroidReleaseOfficial/ maps_go_webapk
 #
 # 3. Invoke Telemetry:
-#    shell> CHROMIUM_OUTPUT_DIR=gn_android/ReleaseOfficial \
+#    shell> CHROMIUM_OUTPUT_DIR=out/AndroidReleaseOfficial \
 #               tools/perf/run_benchmark -v startup.mobile \
 #               --browser=android-chrome \
 #               --output-dir=/tmp/avoid-polluting-chrome-tree \
@@ -59,13 +60,14 @@ from devil.android.sdk import intent # pylint: disable=import-error
 #     unknown.
 #
 # Recording a WPR archive and uploading it:
-# shell> CHROMIUM_OUTPUT_DIR=gn_android/Release tools/perf/record_wpr \
+# shell> CHROMIUM_OUTPUT_DIR=out/AndroidReleaseOfficial tools/perf/record_wpr \
 #            mobile_startup_benchmark --browser=android-chrome \
 #            --also-run-disabled-tests --story-filter=maps_pwa:with_http_cache \
 #            --output-dir=/tmp/maps_pwa_output --upload
 # Note: "startup_mobile_benchmark" instead of "startup.mobile".
 
 _NUMBER_OF_ITERATIONS = 10
+_NUMBER_OF_ITERATIONS_FOR_WEBLAYER = 20
 _MAX_BATTERY_TEMP = 32
 
 class _MobileStartupSharedState(story_module.SharedState):
@@ -98,6 +100,9 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.InstallApplication(maps_webapk)
     wpr_mode = wpr_modes.WPR_REPLAY
     self._number_of_iterations = _NUMBER_OF_ITERATIONS
+    if 'android-weblayer' in self._possible_browser.GetTypExpectationsTags():
+      # As discussed in crbug.com/1032364, use a higher number to reduce noise.
+      self._number_of_iterations = _NUMBER_OF_ITERATIONS_FOR_WEBLAYER
     if finder_options.use_live_sites:
       wpr_mode = wpr_modes.WPR_OFF
     elif finder_options.browser_options.wpr_mode == wpr_modes.WPR_RECORD:
@@ -127,7 +132,8 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.StartActivity(
         intent.Intent(package=self._possible_browser.settings.package,
                       activity=self._possible_browser.settings.activity,
-                      action=None, data=url),
+                      data=url,
+                      action='android.intent.action.VIEW'),
         blocking=True)
 
   def LaunchCCT(self, url):
@@ -140,20 +146,21 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.StartActivity(
         intent.Intent(package=self._possible_browser.settings.package,
                       activity=self._possible_browser.settings.activity,
-                      action=None, data=url, extras=cct_extras),
+                      data=url, extras=cct_extras,
+                      action='android.intent.action.VIEW'),
         blocking=True)
 
   def LaunchMapsPwa(self):
     # Launches a bound webapk. The APK should be installed by the shared state
     # constructor. Upon launch, Chrome extracts the icon and the URL from the
     # APK.
+    self.platform.WaitForBatteryTemperature(_MAX_BATTERY_TEMP)
     self.platform.StartActivity(
         intent.Intent(package='org.chromium.maps_go_webapk',
                       activity='org.chromium.webapk.shell_apk.MainActivity',
                       category='android.intent.category.LAUNCHER',
                       action='android.intent.action.MAIN'),
         blocking=True)
-    self.platform.WaitForBatteryTemperature(_MAX_BATTERY_TEMP)
 
   @contextlib.contextmanager
   def FindBrowser(self):
@@ -271,6 +278,10 @@ class _MobileStartupStorySet(story_module.StorySet):
 class MobileStartupBenchmark(perf_benchmark.PerfBenchmark):
   """Startup benchmark for Chrome on Android."""
 
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.ANDROID_NOT_WEBVIEW]
   SUPPORTED_PLATFORMS = [story_module.expectations.ANDROID_NOT_WEBVIEW]
 
   def CreateCoreTimelineBasedMeasurementOptions(self):

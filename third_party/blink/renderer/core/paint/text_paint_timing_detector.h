@@ -11,11 +11,10 @@
 
 #include "third_party/blink/public/web/web_widget_client.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/text_element_timing.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -59,6 +58,7 @@ class CORE_EXPORT LargestTextPaintManager {
   LargestTextPaintManager(LocalFrameView*, PaintTimingDetector*);
 
   inline void RemoveVisibleRecord(base::WeakPtr<TextRecord> record) {
+    DCHECK(record);
     size_ordered_set_.erase(record);
     if (cached_largest_paint_candidate_.get() == record.get())
       cached_largest_paint_candidate_ = nullptr;
@@ -69,7 +69,7 @@ class CORE_EXPORT LargestTextPaintManager {
 
   void ReportCandidateToTrace(const TextRecord&);
   void ReportNoCandidateToTrace();
-  void UpdateCandidate();
+  base::WeakPtr<TextRecord> UpdateCandidate();
   void PopulateTraceValue(TracedValue&, const TextRecord& first_text_paint);
   inline void SetCachedResultInvalidated(bool value) {
     is_result_invalidated_ = value;
@@ -80,7 +80,7 @@ class CORE_EXPORT LargestTextPaintManager {
     SetCachedResultInvalidated(true);
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   friend class LargestContentfulPaintCalculatorTest;
@@ -109,14 +109,13 @@ class CORE_EXPORT TextRecordsManager {
 
   void RemoveVisibleRecord(const LayoutObject&);
   void RemoveInvisibleRecord(const LayoutObject&);
-  inline void RecordInvisibleObject(const LayoutObject& object) {
-    invisible_objects_.insert(&object);
-  }
   void RecordVisibleObject(const LayoutObject&,
                            const uint64_t& visual_size,
                            const FloatRect& element_timing_rect);
+  void RecordInvisibleObject(const LayoutObject& object);
   bool NeedMeausuringPaintTime() const {
-    return !texts_queued_for_paint_time_.IsEmpty();
+    return !texts_queued_for_paint_time_.IsEmpty() ||
+           !size_zero_texts_queued_for_paint_time_.IsEmpty();
   }
   void AssignPaintTimeToQueuedRecords(const base::TimeTicks&);
 
@@ -124,9 +123,6 @@ class CORE_EXPORT TextRecordsManager {
     return visible_objects_.Contains(&object) ||
            invisible_objects_.Contains(&object);
   }
-
-  size_t CountVisibleObjects() const { return visible_objects_.size(); }
-  size_t CountInvisibleObjects() const { return invisible_objects_.size(); }
 
   inline bool IsKnownVisible(const LayoutObject& object) const {
     return visible_objects_.Contains(&object);
@@ -136,24 +132,23 @@ class CORE_EXPORT TextRecordsManager {
     return invisible_objects_.Contains(&object);
   }
 
-  void CleanUp();
   void CleanUpLargestTextPaint();
-  void StopRecordingLargestTextPaint();
 
   bool HasTextElementTiming() const { return text_element_timing_; }
   void SetTextElementTiming(TextElementTiming* text_element_timing) {
     text_element_timing_ = text_element_timing;
   }
 
-  inline base::Optional<LargestTextPaintManager>& GetLargestTextPaintManager() {
-    return ltp_manager_;
+  inline base::WeakPtr<TextRecord> UpdateCandidate() {
+    DCHECK(ltp_manager_);
+    return ltp_manager_->UpdateCandidate();
   }
 
   inline bool IsRecordingLargestTextPaint() const {
     return ltp_manager_.has_value();
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   friend class LargestContentfulPaintCalculatorTest;
@@ -169,6 +164,11 @@ class CORE_EXPORT TextRecordsManager {
   HashSet<const LayoutObject*> invisible_objects_;
 
   Deque<base::WeakPtr<TextRecord>> texts_queued_for_paint_time_;
+  // These are text records created to notify Element Timing of texts which are
+  // first painted outside of the viewport. These have size 0 for the purpose of
+  // LCP computations, even if the size of the text itself is not 0. They are
+  // considered invisible objects by Largest Contentful Paint.
+  Deque<std::unique_ptr<TextRecord>> size_zero_texts_queued_for_paint_time_;
   base::Optional<LargestTextPaintManager> ltp_manager_;
   Member<TextElementTiming> text_element_timing_;
 
@@ -192,38 +192,44 @@ class CORE_EXPORT TextRecordsManager {
 // See also:
 // https://docs.google.com/document/d/1DRVd4a2VU8-yyWftgOparZF-sf16daf0vfbsHuz2rws/edit#heading=h.lvno2v283uls
 class CORE_EXPORT TextPaintTimingDetector final
-    : public GarbageCollectedFinalized<TextPaintTimingDetector> {
-  using ReportTimeCallback =
-      WTF::CrossThreadOnceFunction<void(WebWidgetClient::SwapResult,
-                                        base::TimeTicks)>;
+    : public GarbageCollected<TextPaintTimingDetector> {
   friend class TextPaintTimingDetectorTest;
 
  public:
-  explicit TextPaintTimingDetector(LocalFrameView*, PaintTimingDetector*);
+  explicit TextPaintTimingDetector(LocalFrameView*,
+                                   PaintTimingDetector*,
+                                   PaintTimingCallbackManager*);
   bool ShouldWalkObject(const LayoutBoxModelObject&) const;
   void RecordAggregatedText(const LayoutBoxModelObject& aggregator,
                             const IntRect& aggregated_visual_rect,
                             const PropertyTreeState&);
   void OnPaintFinished();
   void LayoutObjectWillBeDestroyed(const LayoutObject&);
-  void StopRecordEntries();
   void StopRecordingLargestTextPaint();
-  bool IsRecording() const { return is_recording_; }
-  inline bool FinishedReportingText() const { return !is_recording_; }
-  void Trace(blink::Visitor*);
+  void ResetCallbackManager(PaintTimingCallbackManager* manager) {
+    callback_manager_ = manager;
+  }
+  inline bool IsRecordingLargestTextPaint() const {
+    return records_manager_.IsRecordingLargestTextPaint();
+  }
+  inline base::WeakPtr<TextRecord> UpdateCandidate() {
+    return records_manager_.UpdateCandidate();
+  }
+  void ReportSwapTime(base::TimeTicks timestamp);
+  void Trace(Visitor*);
 
  private:
   friend class LargestContentfulPaintCalculatorTest;
 
-  void ReportSwapTime(WebWidgetClient::SwapResult result,
-                      base::TimeTicks timestamp);
-  void RegisterNotifySwapTime(ReportTimeCallback callback);
+  void RegisterNotifySwapTime(
+      PaintTimingCallbackManager::LocalThreadCallback callback);
 
   TextRecordsManager records_manager_;
 
+  Member<PaintTimingCallbackManager> callback_manager_;
+
   // Make sure that at most one swap promise is ongoing.
   bool awaiting_swap_promise_ = false;
-  bool is_recording_ = true;
 
   bool need_update_timing_at_frame_end_ = false;
 

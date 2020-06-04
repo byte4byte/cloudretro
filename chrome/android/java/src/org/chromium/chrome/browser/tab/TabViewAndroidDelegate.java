@@ -4,22 +4,63 @@
 
 package org.chromium.chrome.browser.tab;
 
-import android.os.Bundle;
 import android.view.ViewGroup;
 
-import org.chromium.chrome.browser.AppHooks;
-import org.chromium.chrome.browser.ChromeActivity;
+import androidx.annotation.Nullable;
+
+import org.chromium.base.Callback;
+import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.content_public.browser.RenderWidgetHostView;
 import org.chromium.ui.base.ViewAndroidDelegate;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Implementation of the abstract class {@link ViewAndroidDelegate} for Chrome.
  */
-class TabViewAndroidDelegate extends ViewAndroidDelegate {
-    private final Tab mTab;
+public class TabViewAndroidDelegate extends ViewAndroidDelegate {
+    private final TabImpl mTab;
+
+    /**
+     * The inset for the bottom of the Visual Viewport in pixels, or 0 for no insetting.
+     * This is the source of truth for the application viewport inset for this embedder.
+     */
+    private int mApplicationViewportInsetBottomPx;
+
+    /** The inset supplier the observer is currently attached to. */
+    private ObservableSupplier<Integer> mCurrentInsetSupplier;
 
     TabViewAndroidDelegate(Tab tab, ViewGroup containerView) {
         super(containerView);
-        mTab = tab;
+        mTab = (TabImpl) tab;
+
+        Callback<Integer> insetObserver = (inset) -> updateInsetViewportBottom();
+        mCurrentInsetSupplier = tab.getWindowAndroid().getApplicationBottomInsetProvider();
+        mCurrentInsetSupplier.addObserver(insetObserver);
+
+        mTab.addObserver(new EmptyTabObserver() {
+            @Override
+            public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
+                if (window != null) {
+                    mCurrentInsetSupplier =
+                            tab.getWindowAndroid().getApplicationBottomInsetProvider();
+                    mCurrentInsetSupplier.addObserver(insetObserver);
+                } else {
+                    mCurrentInsetSupplier.removeObserver(insetObserver);
+                    mCurrentInsetSupplier = null;
+                    updateInsetViewportBottom();
+                }
+            }
+
+            @Override
+            public void onShown(Tab tab, int type) {
+                updateInsetViewportBottom();
+            }
+
+            @Override
+            public void onHidden(Tab tab, int reason) {
+                updateInsetViewportBottom();
+            }
+        });
     }
 
     @Override
@@ -28,26 +69,36 @@ class TabViewAndroidDelegate extends ViewAndroidDelegate {
     }
 
     @Override
-    public void onTopControlsChanged(int topControlsOffsetY, int contentOffsetY) {
-        TabBrowserControlsState.get(mTab).setTopOffset(topControlsOffsetY, contentOffsetY);
+    public void onTopControlsChanged(
+            int topControlsOffsetY, int contentOffsetY, int topControlsMinHeightOffsetY) {
+        TabBrowserControlsOffsetHelper.get(mTab).setTopOffset(
+                topControlsOffsetY, contentOffsetY, topControlsMinHeightOffsetY);
     }
 
     @Override
-    public void onBottomControlsChanged(int bottomControlsOffsetY, int bottomContentOffsetY) {
-        TabBrowserControlsState.get(mTab).setBottomOffset(bottomControlsOffsetY);
+    public void onBottomControlsChanged(
+            int bottomControlsOffsetY, int bottomControlsMinHeightOffsetY) {
+        TabBrowserControlsOffsetHelper.get(mTab).setBottomOffset(
+                bottomControlsOffsetY, bottomControlsMinHeightOffsetY);
+    }
+
+    /** Sets the Visual Viewport bottom inset. */
+    private void updateInsetViewportBottom() {
+        int inset =
+                mTab.isHidden() || mCurrentInsetSupplier == null ? 0 : mCurrentInsetSupplier.get();
+
+        if (inset == mApplicationViewportInsetBottomPx) return;
+
+        mApplicationViewportInsetBottomPx = inset;
+
+        RenderWidgetHostView renderWidgetHostView = mTab.getWebContents().getRenderWidgetHostView();
+        if (renderWidgetHostView == null) return;
+
+        renderWidgetHostView.onViewportInsetBottomChanged();
     }
 
     @Override
-    public int getSystemWindowInsetBottom() {
-        ChromeActivity activity = mTab.getActivity();
-        if (activity != null && activity.getInsetObserverView() != null) {
-            return activity.getInsetObserverView().getSystemWindowInsetsBottom();
-        }
-        return 0;
-    }
-
-    @Override
-    public void performPrivateImeCommand(String action, Bundle data) {
-        AppHooks.get().performPrivateImeCommand(mTab.getWebContents(), action, data);
+    protected int getViewportInsetBottom() {
+        return mApplicationViewportInsetBottomPx;
     }
 }

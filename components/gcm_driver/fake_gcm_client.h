@@ -13,6 +13,7 @@
 #include "base/timer/timer.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/gcm_driver/gcm_stats_recorder_impl.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -46,10 +47,11 @@ class FakeGCMClient : public GCMClient {
   void Initialize(
       const ChromeBuildInfo& chrome_build_info,
       const base::FilePath& store_path,
+      bool remove_account_mappings_with_email_key,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-      base::RepeatingCallback<
-          void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+      base::RepeatingCallback<void(
+          mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
           get_socket_factory_callback,
       const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
       network::NetworkConnectionTracker* network_connection_tracker,
@@ -72,7 +74,7 @@ class FakeGCMClient : public GCMClient {
   void SetAccountTokens(
       const std::vector<AccountTokenInfo>& account_tokens) override;
   void UpdateAccountMapping(const AccountMapping& account_mapping) override;
-  void RemoveAccountMapping(const std::string& account_id) override;
+  void RemoveAccountMapping(const CoreAccountId& account_id) override;
   void SetLastTokenFetchTime(const base::Time& time) override;
   void UpdateHeartbeatTimer(
       std::unique_ptr<base::RetainingOneShotTimer> timer) override;

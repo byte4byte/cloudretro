@@ -16,7 +16,6 @@ source_set("test_support") {
   deps = [
     "//components/content_settings/core/common",
     "//components/gcm_driver:gcm_driver",
-    "//components/signin/core/browser",
     "//mojo/core/embedder",
     "//net",
     "//testing/gtest",
@@ -24,9 +23,7 @@ source_set("test_support") {
     "//ui/resources:ui_test_pak",
   ]
 
-  public_deps = [
-    "//base/test:test_support",
-  ]
+  public_deps = [ "//base/test:test_support" ]
 
   if (is_ios) {
     sources += [
@@ -50,11 +47,7 @@ source_set("test_support") {
 source_set("run_all_unittests") {
   testonly = true
 
-  sources = [
-    "run_all_unittests.cc",
-  ]
+  sources = [ "run_all_unittests.cc" ]
 
-  deps = [
-    ":test_support",
-  ]
+  deps = [ ":test_support" ]
 }

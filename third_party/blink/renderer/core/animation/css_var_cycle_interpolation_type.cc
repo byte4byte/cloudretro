@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/css/property_registration.h"
 #include "third_party/blink/renderer/core/css/resolver/css_variable_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
+#include "third_party/blink/renderer/core/css/resolver/style_cascade.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
@@ -27,12 +28,15 @@ class CycleChecker : public InterpolationType::ConversionChecker {
  private:
   bool IsValid(const InterpolationEnvironment& environment,
                const InterpolationValue&) const final {
-    DCHECK(ToCSSInterpolationEnvironment(environment).HasVariableResolver());
-    CSSVariableResolver& variable_resolver =
-        ToCSSInterpolationEnvironment(environment).VariableResolver();
+    const auto& css_environment = To<CSSInterpolationEnvironment>(environment);
     bool cycle_detected = false;
-    variable_resolver.ResolveCustomPropertyAnimationKeyframe(*declaration_,
-                                                             cycle_detected);
+    if (RuntimeEnabledFeatures::CSSCascadeEnabled()) {
+      cycle_detected = !css_environment.Resolve(
+          PropertyHandle(declaration_->GetName()), declaration_);
+    } else {
+      css_environment.VariableResolver().ResolveCustomPropertyAnimationKeyframe(
+          *declaration_, cycle_detected);
+    }
     return cycle_detected == cycle_detected_;
   }
 
@@ -57,18 +61,24 @@ InterpolationValue CSSVarCycleInterpolationType::MaybeConvertSingle(
     const InterpolationValue& underlying,
     ConversionCheckers& conversion_checkers) const {
   const auto& declaration = *To<CSSCustomPropertyDeclaration>(
-      ToCSSPropertySpecificKeyframe(keyframe).Value());
+      To<CSSPropertySpecificKeyframe>(keyframe).Value());
   DCHECK_EQ(GetProperty().CustomPropertyName(), declaration.GetName());
-  if (!declaration.Value() || !declaration.Value()->NeedsVariableResolution()) {
+  if ((!declaration.Value() ||
+       !declaration.Value()->NeedsVariableResolution()) &&
+      !declaration.IsRevert()) {
     return nullptr;
   }
 
-  DCHECK(ToCSSInterpolationEnvironment(environment).HasVariableResolver());
-  CSSVariableResolver& variable_resolver =
-      ToCSSInterpolationEnvironment(environment).VariableResolver();
+  const auto& css_environment = To<CSSInterpolationEnvironment>(environment);
+
   bool cycle_detected = false;
-  variable_resolver.ResolveCustomPropertyAnimationKeyframe(declaration,
-                                                           cycle_detected);
+  if (RuntimeEnabledFeatures::CSSCascadeEnabled()) {
+    cycle_detected = !css_environment.Resolve(GetProperty(), &declaration);
+  } else {
+    css_environment.VariableResolver().ResolveCustomPropertyAnimationKeyframe(
+        declaration, cycle_detected);
+  }
+
   conversion_checkers.push_back(
       std::make_unique<CycleChecker>(declaration, cycle_detected));
   return cycle_detected ? CreateCycleDetectedValue() : nullptr;
@@ -106,7 +116,7 @@ PairwiseInterpolationValue CSSVarCycleInterpolationType::MaybeConvertPairwise(
 InterpolationValue CSSVarCycleInterpolationType::MaybeConvertUnderlyingValue(
     const InterpolationEnvironment& environment) const {
   const ComputedStyle& style =
-      ToCSSInterpolationEnvironment(environment).Style();
+      To<CSSInterpolationEnvironment>(environment).Style();
   DCHECK(!style.GetVariableData(GetProperty().CustomPropertyName()) ||
          !style.GetVariableData(GetProperty().CustomPropertyName())
               ->NeedsVariableResolution());
@@ -119,7 +129,7 @@ void CSSVarCycleInterpolationType::Apply(
     InterpolationEnvironment& environment) const {
   StyleBuilder::ApplyProperty(
       GetProperty().GetCSSPropertyName(),
-      ToCSSInterpolationEnvironment(environment).GetState(),
+      To<CSSInterpolationEnvironment>(environment).GetState(),
       *MakeGarbageCollected<CSSCustomPropertyDeclaration>(
           GetProperty().CustomPropertyName(), CSSValueID::kUnset));
 }

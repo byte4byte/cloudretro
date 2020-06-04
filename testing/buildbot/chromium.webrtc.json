@@ -37,9 +37,11 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -77,15 +79,16 @@
               ],
               "name": "shard #${SHARD_INDEX} logcats"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       }
     ]
   },
   "WebRTC Chromium Linux Builder": {
     "additional_compile_targets": [
-      "frame_analyzer",
       "jingle_unittests",
       "remoting_unittests"
     ]
@@ -107,11 +110,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests"
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
       },
       {
         "args": [
@@ -127,11 +132,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests_apprtc"
+        "test": "browser_tests_apprtc",
+        "test_target": "//chrome/test:browser_tests_apprtc"
       },
       {
         "args": [
@@ -147,7 +154,8 @@
         "swarming": {
           "can_use_on_swarming_builders": false
         },
-        "test": "capture_unittests"
+        "test": "capture_unittests",
+        "test_target": "//media/capture:capture_unittests"
       },
       {
         "args": [
@@ -161,11 +169,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -182,17 +192,20 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
           "--gtest_filter=WebRtc*MANUAL*:-UsingRealWebcam*",
           "--run-manual",
-          "--ui-test-action-max-timeout=120000"
+          "--ui-test-action-max-timeout=110000",
+          "--test-launcher-timeout=120000"
         ],
         "merge": {
           "args": [],
@@ -203,11 +216,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -221,11 +236,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_unittests"
+        "test": "content_unittests",
+        "test_target": "//content/test:content_unittests"
       },
       {
         "merge": {
@@ -236,11 +253,13 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "jingle_unittests"
+        "test": "jingle_unittests",
+        "test_target": "//jingle:jingle_unittests"
       },
       {
         "args": [
@@ -254,17 +273,18 @@
           "can_use_on_swarming_builders": true,
           "dimension_sets": [
             {
-              "os": "Ubuntu-14.04"
+              "os": "Ubuntu-16.04"
             }
-          ]
+          ],
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "remoting_unittests"
+        "test": "remoting_unittests",
+        "test_target": "//remoting:remoting_unittests"
       }
     ]
   },
   "WebRTC Chromium Mac Builder": {
     "additional_compile_targets": [
-      "frame_analyzer",
       "jingle_unittests",
       "remoting_unittests"
     ]
@@ -283,9 +303,11 @@
         },
         "name": "browser_tests_functional",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests"
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
       },
       {
         "args": [
@@ -298,9 +320,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests_apprtc"
+        "test": "browser_tests_apprtc",
+        "test_target": "//chrome/test:browser_tests_apprtc"
       },
       {
         "args": [
@@ -316,7 +340,8 @@
         "swarming": {
           "can_use_on_swarming_builders": false
         },
-        "test": "capture_unittests"
+        "test": "capture_unittests",
+        "test_target": "//media/capture:capture_unittests"
       },
       {
         "args": [
@@ -327,9 +352,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -343,15 +370,18 @@
         },
         "name": "content_browsertests_sequential",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
           "--gtest_filter=WebRtc*MANUAL*:-UsingRealWebcam*",
           "--run-manual",
-          "--ui-test-action-max-timeout=120000"
+          "--ui-test-action-max-timeout=110000",
+          "--test-launcher-timeout=120000"
         ],
         "merge": {
           "args": [],
@@ -359,9 +389,11 @@
         },
         "name": "content_browsertests_stress",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -372,9 +404,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_unittests"
+        "test": "content_unittests",
+        "test_target": "//content/test:content_unittests"
       },
       {
         "merge": {
@@ -382,9 +416,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "jingle_unittests"
+        "test": "jingle_unittests",
+        "test_target": "//jingle:jingle_unittests"
       },
       {
         "args": [
@@ -395,15 +431,16 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "remoting_unittests"
+        "test": "remoting_unittests",
+        "test_target": "//remoting:remoting_unittests"
       }
     ]
   },
   "WebRTC Chromium Win Builder": {
     "additional_compile_targets": [
-      "frame_analyzer",
       "jingle_unittests",
       "remoting_unittests"
     ]
@@ -422,9 +459,11 @@
         },
         "name": "browser_tests_functional",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests"
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
       },
       {
         "args": [
@@ -437,9 +476,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests_apprtc"
+        "test": "browser_tests_apprtc",
+        "test_target": "//chrome/test:browser_tests_apprtc"
       },
       {
         "args": [
@@ -455,7 +496,8 @@
         "swarming": {
           "can_use_on_swarming_builders": false
         },
-        "test": "capture_unittests"
+        "test": "capture_unittests",
+        "test_target": "//media/capture:capture_unittests"
       },
       {
         "args": [
@@ -466,9 +508,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -482,15 +526,18 @@
         },
         "name": "content_browsertests_sequential",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
           "--gtest_filter=WebRtc*MANUAL*:-UsingRealWebcam*",
           "--run-manual",
-          "--ui-test-action-max-timeout=120000"
+          "--ui-test-action-max-timeout=110000",
+          "--test-launcher-timeout=120000"
         ],
         "merge": {
           "args": [],
@@ -498,9 +545,11 @@
         },
         "name": "content_browsertests_stress",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -511,9 +560,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_unittests"
+        "test": "content_unittests",
+        "test_target": "//content/test:content_unittests"
       },
       {
         "merge": {
@@ -521,9 +572,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "jingle_unittests"
+        "test": "jingle_unittests",
+        "test_target": "//jingle:jingle_unittests"
       },
       {
         "args": [
@@ -534,9 +587,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "remoting_unittests"
+        "test": "remoting_unittests",
+        "test_target": "//remoting:remoting_unittests"
       }
     ]
   },
@@ -554,9 +609,11 @@
         },
         "name": "browser_tests_functional",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests"
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
       },
       {
         "args": [
@@ -569,9 +626,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests_apprtc"
+        "test": "browser_tests_apprtc",
+        "test_target": "//chrome/test:browser_tests_apprtc"
       },
       {
         "args": [
@@ -587,7 +646,8 @@
         "swarming": {
           "can_use_on_swarming_builders": false
         },
-        "test": "capture_unittests"
+        "test": "capture_unittests",
+        "test_target": "//media/capture:capture_unittests"
       },
       {
         "args": [
@@ -598,9 +658,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -614,15 +676,18 @@
         },
         "name": "content_browsertests_sequential",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
           "--gtest_filter=WebRtc*MANUAL*:-UsingRealWebcam*",
           "--run-manual",
-          "--ui-test-action-max-timeout=120000"
+          "--ui-test-action-max-timeout=110000",
+          "--test-launcher-timeout=120000"
         ],
         "merge": {
           "args": [],
@@ -630,9 +695,11 @@
         },
         "name": "content_browsertests_stress",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -643,9 +710,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_unittests"
+        "test": "content_unittests",
+        "test_target": "//content/test:content_unittests"
       },
       {
         "merge": {
@@ -653,9 +722,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "jingle_unittests"
+        "test": "jingle_unittests",
+        "test_target": "//jingle:jingle_unittests"
       },
       {
         "args": [
@@ -666,9 +737,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "remoting_unittests"
+        "test": "remoting_unittests",
+        "test_target": "//remoting:remoting_unittests"
       }
     ]
   },
@@ -686,9 +759,11 @@
         },
         "name": "browser_tests_functional",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests"
+        "test": "browser_tests",
+        "test_target": "//chrome/test:browser_tests"
       },
       {
         "args": [
@@ -701,9 +776,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "browser_tests_apprtc"
+        "test": "browser_tests_apprtc",
+        "test_target": "//chrome/test:browser_tests_apprtc"
       },
       {
         "args": [
@@ -719,7 +796,8 @@
         "swarming": {
           "can_use_on_swarming_builders": false
         },
-        "test": "capture_unittests"
+        "test": "capture_unittests",
+        "test_target": "//media/capture:capture_unittests"
       },
       {
         "args": [
@@ -730,9 +808,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -746,15 +826,18 @@
         },
         "name": "content_browsertests_sequential",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
           "--gtest_filter=WebRtc*MANUAL*:-UsingRealWebcam*",
           "--run-manual",
-          "--ui-test-action-max-timeout=120000"
+          "--ui-test-action-max-timeout=110000",
+          "--test-launcher-timeout=120000"
         ],
         "merge": {
           "args": [],
@@ -762,9 +845,11 @@
         },
         "name": "content_browsertests_stress",
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_browsertests"
+        "test": "content_browsertests",
+        "test_target": "//content/test:content_browsertests"
       },
       {
         "args": [
@@ -775,9 +860,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "content_unittests"
+        "test": "content_unittests",
+        "test_target": "//content/test:content_unittests"
       },
       {
         "merge": {
@@ -785,9 +872,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "jingle_unittests"
+        "test": "jingle_unittests",
+        "test_target": "//jingle:jingle_unittests"
       },
       {
         "args": [
@@ -798,9 +887,11 @@
           "script": "//testing/merge_scripts/standard_gtest_merge.py"
         },
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "service_account": "chromium-tester@chops-service-accounts.iam.gserviceaccount.com"
         },
-        "test": "remoting_unittests"
+        "test": "remoting_unittests",
+        "test_target": "//remoting:remoting_unittests"
       }
     ]
   }

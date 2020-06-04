@@ -15,11 +15,12 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
+#include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "net/url_request/url_request.h"
+#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 
 namespace content {
 
@@ -96,12 +97,8 @@ const char* EventTypeToSuffix(ServiceWorkerMetrics::EventType event_type) {
       return "_FETCH_SUB_RESOURCE";
     case ServiceWorkerMetrics::EventType::UNKNOWN:
       return "_UNKNOWN";
-    case ServiceWorkerMetrics::EventType::FOREIGN_FETCH:
-      return "_FOREIGN_FETCH";
     case ServiceWorkerMetrics::EventType::FETCH_WAITUNTIL:
       return "_FETCH_WAITUNTIL";
-    case ServiceWorkerMetrics::EventType::FOREIGN_FETCH_WAITUNTIL:
-      return "_FOREIGN_FETCH_WAITUNTIL";
     case ServiceWorkerMetrics::EventType::EXTERNAL_REQUEST:
       return "_EXTERNAL_REQUEST";
     case ServiceWorkerMetrics::EventType::PAYMENT_REQUEST:
@@ -120,8 +117,6 @@ const char* EventTypeToSuffix(ServiceWorkerMetrics::EventType event_type) {
       return "_ABORT_PAYMENT";
     case ServiceWorkerMetrics::EventType::COOKIE_CHANGE:
       return "_COOKIE_CHANGE";
-    case ServiceWorkerMetrics::EventType::LONG_RUNNING_MESSAGE:
-      return "_LONG_RUNNING_MESSAGE";
     case ServiceWorkerMetrics::EventType::BACKGROUND_FETCH_SUCCESS:
       return "_BACKGROUND_FETCH_SUCCESS";
     case ServiceWorkerMetrics::EventType::PERIODIC_SYNC:
@@ -130,11 +125,6 @@ const char* EventTypeToSuffix(ServiceWorkerMetrics::EventType event_type) {
       return "_CONTENT_DELETE";
   }
   return "_UNKNOWN";
-}
-
-void RecordURLMetricOnUI(const std::string& metric_name, const GURL& url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  GetContentClient()->browser()->RecordURLMetric(metric_name, url);
 }
 
 }  // namespace
@@ -165,12 +155,8 @@ const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
       return "Fetch Subresource";
     case EventType::UNKNOWN:
       return "Unknown";
-    case EventType::FOREIGN_FETCH:
-      return "Foreign Fetch";
     case EventType::FETCH_WAITUNTIL:
       return "Fetch WaitUntil";
-    case EventType::FOREIGN_FETCH_WAITUNTIL:
-      return "Foreign Fetch WaitUntil";
     case EventType::EXTERNAL_REQUEST:
       return "External Request";
     case EventType::PAYMENT_REQUEST:
@@ -189,8 +175,6 @@ const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
       return "Abort Payment";
     case EventType::COOKIE_CHANGE:
       return "Cookie Change";
-    case EventType::LONG_RUNNING_MESSAGE:
-      return "Long Running Message";
     case EventType::BACKGROUND_FETCH_SUCCESS:
       return "Background Fetch Success";
     case EventType::PERIODIC_SYNC:
@@ -215,7 +199,6 @@ const char* ServiceWorkerMetrics::StartSituationToString(
       return "Existing unready process";
     case StartSituation::EXISTING_READY_PROCESS:
       return "Existing ready process";
-      break;
   }
   NOTREACHED() << "Got unexpected start situation: "
                << static_cast<int>(start_situation);
@@ -252,10 +235,6 @@ ServiceWorkerMetrics::Site ServiceWorkerMetrics::SiteFromURL(const GURL& url) {
   return ServiceWorkerMetrics::Site::OTHER;
 }
 
-bool ServiceWorkerMetrics::ShouldExcludeSiteFromHistogram(Site site) {
-  return site == ServiceWorkerMetrics::Site::NEW_TAB_PAGE;
-}
-
 void ServiceWorkerMetrics::CountInitDiskCacheResult(bool result) {
   UMA_HISTOGRAM_BOOLEAN("ServiceWorker.DiskCache.InitResult", result);
 }
@@ -272,30 +251,6 @@ void ServiceWorkerMetrics::CountWriteResponseResult(
                             result, NUM_WRITE_RESPONSE_RESULT_TYPES);
 }
 
-void ServiceWorkerMetrics::CountOpenDatabaseResult(
-    ServiceWorkerDatabase::Status status) {
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.Database.OpenResult",
-                            status, ServiceWorkerDatabase::STATUS_ERROR_MAX);
-}
-
-void ServiceWorkerMetrics::CountReadDatabaseResult(
-    ServiceWorkerDatabase::Status status) {
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.Database.ReadResult",
-                            status, ServiceWorkerDatabase::STATUS_ERROR_MAX);
-}
-
-void ServiceWorkerMetrics::CountWriteDatabaseResult(
-    ServiceWorkerDatabase::Status status) {
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.Database.WriteResult",
-                            status, ServiceWorkerDatabase::STATUS_ERROR_MAX);
-}
-
-void ServiceWorkerMetrics::RecordDestroyDatabaseResult(
-    ServiceWorkerDatabase::Status status) {
-  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.Database.DestroyDatabaseResult",
-                            status, ServiceWorkerDatabase::STATUS_ERROR_MAX);
-}
-
 void ServiceWorkerMetrics::RecordPurgeResourceResult(int net_error) {
   base::UmaHistogramSparse("ServiceWorker.Storage.PurgeResourceResult",
                            std::abs(net_error));
@@ -308,20 +263,12 @@ void ServiceWorkerMetrics::RecordDeleteAndStartOverResult(
 }
 
 void ServiceWorkerMetrics::CountControlledPageLoad(Site site,
-                                                   const GURL& url,
                                                    bool is_main_frame_load) {
   DCHECK_NE(site, Site::OTHER);
   UMA_HISTOGRAM_ENUMERATION("ServiceWorker.PageLoad", site);
   if (is_main_frame_load) {
     UMA_HISTOGRAM_ENUMERATION("ServiceWorker.MainFramePageLoad", site);
   }
-  if (ShouldExcludeSiteFromHistogram(site))
-    return;
-
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&RecordURLMetricOnUI, "ServiceWorker.ControlledPageUrl",
-                     url));
 }
 
 void ServiceWorkerMetrics::RecordStartInstalledWorkerStatus(
@@ -411,19 +358,6 @@ void ServiceWorkerMetrics::RecordEventDuration(EventType event,
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.FetchEvent.WaitUntil.Time",
                                  time);
       break;
-    case EventType::FOREIGN_FETCH:
-      if (was_handled) {
-        UMA_HISTOGRAM_MEDIUM_TIMES(
-            "ServiceWorker.ForeignFetchEvent.HasResponse.Time", time);
-      } else {
-        UMA_HISTOGRAM_MEDIUM_TIMES(
-            "ServiceWorker.ForeignFetchEvent.Fallback.Time", time);
-      }
-      break;
-    case EventType::FOREIGN_FETCH_WAITUNTIL:
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.ForeignFetchEvent.WaitUntil.Time", time);
-      break;
     case EventType::SYNC:
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundSyncEvent.Time",
                                  time);
@@ -476,10 +410,6 @@ void ServiceWorkerMetrics::RecordEventDuration(EventType event,
     case EventType::COOKIE_CHANGE:
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.CookieChangeEvent.Time", time);
       break;
-    case EventType::LONG_RUNNING_MESSAGE:
-      // Since this event is expected to last indefinitely we don't need to log
-      // how long they actually last.
-      break;
     case EventType::PERIODIC_SYNC:
       UMA_HISTOGRAM_MEDIUM_TIMES(
           "ServiceWorker.PeriodicBackgroundSyncEvent.Time", time);
@@ -515,13 +445,15 @@ void ServiceWorkerMetrics::RecordProcessCreated(bool is_new_process) {
 
 void ServiceWorkerMetrics::RecordStartWorkerTiming(const StartTimes& times,
                                                    StartSituation situation) {
-  // This is in-process timing, so process consistency doesn't matter.
-  constexpr base::TimeDelta kMinTime = base::TimeDelta::FromMicroseconds(1);
-  constexpr base::TimeDelta kMaxTime = base::TimeDelta::FromMilliseconds(100);
-  constexpr int kBuckets = 50;
-  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-      "ServiceWorker.StartTiming.BrowserThreadHopTime", times.thread_hop_time,
-      kMinTime, kMaxTime, kBuckets);
+  if (!ServiceWorkerContext::IsServiceWorkerOnUIEnabled()) {
+    // This is in-process timing, so process consistency doesn't matter.
+    constexpr base::TimeDelta kMinTime = base::TimeDelta::FromMicroseconds(1);
+    constexpr base::TimeDelta kMaxTime = base::TimeDelta::FromMilliseconds(100);
+    constexpr int kBuckets = 50;
+    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+        "ServiceWorker.StartTiming.BrowserThreadHopTime", times.thread_hop_time,
+        kMinTime, kMaxTime, kBuckets);
+  }
 
   // Bail if the timings across processes weren't consistent.
   if (!base::TimeTicks::IsHighResolution() ||
@@ -655,6 +587,17 @@ void ServiceWorkerMetrics::RecordLookupRegistrationTime(
   } else {
     UMA_HISTOGRAM_TIMES(
         "ServiceWorker.LookupRegistration.MainResource.Time.Error", duration);
+  }
+}
+
+void ServiceWorkerMetrics::RecordByteForByteUpdateCheckStatus(
+    blink::ServiceWorkerStatusCode status,
+    bool has_found_update) {
+  DCHECK(blink::ServiceWorkerUtils::IsImportedScriptUpdateCheckEnabled());
+  UMA_HISTOGRAM_ENUMERATION("ServiceWorker.UpdateCheck.Result", status);
+  if (status == blink::ServiceWorkerStatusCode::kOk) {
+    UMA_HISTOGRAM_BOOLEAN("ServiceWorker.UpdateCheck.UpdateFound",
+                          has_found_update);
   }
 }
 

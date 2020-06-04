@@ -5,11 +5,12 @@
 package org.chromium.chrome.browser.suggestions.tile;
 
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
 
-import org.chromium.chrome.browser.favicon.IconType;
+import androidx.annotation.Nullable;
+
 import org.chromium.chrome.browser.suggestions.OfflinableSuggestion;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
+import org.chromium.chrome.browser.ui.favicon.IconType;
 
 /**
  * Holds the details to populate a site suggestion tile.

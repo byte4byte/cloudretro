@@ -26,8 +26,9 @@ typedef InProcessBrowserTest ContentSettingImageModelBrowserTest;
 IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  TabSpecificContentSettings* content_settings =
-      TabSpecificContentSettings::FromWebContents(web_contents);
+  content_settings::TabSpecificContentSettings* content_settings =
+      content_settings::TabSpecificContentSettings::FromWebContents(
+          web_contents);
   content_settings->BlockAllContentForTesting();
 
   // Automatic downloads are handled by DownloadRequestLimiter.
@@ -36,7 +37,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingImageModelBrowserTest, CreateBubbleModel) {
           web_contents, true);
   tab_download_state->set_download_seen();
   tab_download_state->SetDownloadStatusAndNotify(
-      web_contents->GetVisibleURL().GetOrigin(),
+      url::Origin::Create(web_contents->GetVisibleURL()),
       DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
 
   // Test that image models tied to a single content setting create bubbles tied

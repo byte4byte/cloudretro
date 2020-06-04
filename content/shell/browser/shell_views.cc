@@ -13,7 +13,6 @@
 #include "content/public/browser/context_factory.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/shell/browser/shell_platform_data_aura.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -21,6 +20,7 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
+#include "ui/native_theme/native_theme_color_id.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -117,7 +117,8 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
  private:
   // Initialize the UI control contained in shell window
   void InitShellWindow() {
-    SetBackground(views::CreateStandardPanelBackground());
+    SetBackground(CreateThemedSolidBackground(
+        this, ui::NativeTheme::kColorId_WindowBackground));
 
     auto contents_view = std::make_unique<views::View>();
     auto toolbar_view = std::make_unique<views::View>();
@@ -231,7 +232,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
                       const ui::KeyEvent& key_event) override {
     if (key_event.type() == ui::ET_KEY_PRESSED && sender == url_entry_ &&
         key_event.key_code() == ui::VKEY_RETURN) {
-      std::string text = base::UTF16ToUTF8(url_entry_->text());
+      std::string text = base::UTF16ToUTF8(url_entry_->GetText());
       GURL url(text);
       if (!url.has_scheme()) {
         url = GURL(std::string("http://") + std::string(text));
@@ -393,8 +394,9 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
+  content_size_ = gfx::Size(width, height);
+
   if (headless_) {
-    content_size_ = gfx::Size(width, height);
     if (!platform_)
       platform_ = new ShellPlatformDataAura(content_size_);
     else
@@ -402,21 +404,19 @@ void Shell::PlatformCreateWindow(int width, int height) {
     return;
   }
 #if defined(OS_CHROMEOS)
-  window_widget_ = views::Widget::CreateWindowWithContextAndBounds(
+  window_widget_ = views::Widget::CreateWindowWithContext(
       new ShellWindowDelegateView(this),
       wm_test_helper_->GetDefaultParent(nullptr, gfx::Rect()),
-      gfx::Rect(0, 0, width, height));
+      gfx::Rect(content_size_));
 #else
   window_widget_ = new views::Widget;
   views::Widget::InitParams params;
-  params.bounds = gfx::Rect(0, 0, width, height);
+  params.bounds = gfx::Rect(content_size_);
   params.delegate = new ShellWindowDelegateView(this);
   params.wm_class_class = "chromium-content_shell";
   params.wm_class_name = params.wm_class_class;
-  window_widget_->Init(params);
+  window_widget_->Init(std::move(params));
 #endif
-
-  content_size_ = gfx::Size(width, height);
 
   // |window_widget_| is made visible in PlatformSetContents(), so that the
   // platform-window size does not need to change due to layout again.

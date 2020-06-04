@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/layout/svg/transformed_hit_test_location.h"
 #include "third_party/blink/renderer/core/paint/svg_container_painter.h"
 
@@ -48,7 +49,11 @@ void LayoutSVGContainer::UpdateLayout() {
   LayoutAnalyzer::Scope analyzer(*this);
 
   // Update the local transform in subclasses.
-  SVGTransformChange transform_change = CalculateLocalTransform();
+  // At this point our bounding box may be incorrect, so any box relative
+  // transforms will be incorrect. Since descendants only require the scaling
+  // components to be correct, this should be fine. We update the transform
+  // again, if needed, after computing the bounding box below.
+  SVGTransformChange transform_change = CalculateLocalTransform(false);
   did_screen_scale_factor_change_ =
       transform_change == SVGTransformChange::kFull ||
       SVGLayoutSupport::ScreenScaleFactorChanged(Parent());
@@ -70,6 +75,7 @@ void LayoutSVGContainer::UpdateLayout() {
   if (needs_boundaries_update_ ||
       transform_change != SVGTransformChange::kNone) {
     UpdateCachedBoundaries();
+    CalculateLocalTransform(needs_boundaries_update_);
     needs_boundaries_update_ = false;
 
     // If our bounds changed, notify the parents.
@@ -83,7 +89,7 @@ void LayoutSVGContainer::UpdateLayout() {
 void LayoutSVGContainer::AddChild(LayoutObject* child,
                                   LayoutObject* before_child) {
   LayoutSVGModelObject::AddChild(child, before_child);
-  SVGResourcesCache::ClientWasAddedToTree(*child, child->StyleRef());
+  SVGResourcesCache::ClientWasAddedToTree(*child);
 
   bool should_isolate_descendants =
       (child->IsBlendingAllowed() && child->StyleRef().HasBlendMode()) ||
@@ -171,7 +177,6 @@ void LayoutSVGContainer::UpdateCachedBoundaries() {
   SVGLayoutSupport::ComputeContainerBoundingBoxes(
       this, object_bounding_box_, object_bounding_box_valid_,
       stroke_bounding_box_, local_visual_rect_);
-  GetElement()->SetNeedsResizeObserverUpdate();
 }
 
 bool LayoutSVGContainer::NodeAtPoint(HitTestResult& result,
@@ -187,7 +192,7 @@ bool LayoutSVGContainer::NodeAtPoint(HitTestResult& result,
                                             *local_location))
     return false;
 
-  if (!PaintBlockedByDisplayLock(DisplayLockContext::kChildren) &&
+  if (!PaintBlockedByDisplayLock(DisplayLockLifecycleTarget::kChildren) &&
       SVGLayoutSupport::HitTestChildren(LastChild(), result, *local_location,
                                         accumulated_offset, hit_test_action))
     return true;
@@ -212,7 +217,8 @@ bool LayoutSVGContainer::NodeAtPoint(HitTestResult& result,
   return false;
 }
 
-SVGTransformChange LayoutSVGContainer::CalculateLocalTransform() {
+SVGTransformChange LayoutSVGContainer::CalculateLocalTransform(
+    bool bounds_changed) {
   return SVGTransformChange::kNone;
 }
 

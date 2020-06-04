@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
@@ -19,19 +20,21 @@
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
-#include "components/password_manager/core/browser/blacklisted_credentials_cleaner.h"
 #include "components/password_manager/core/browser/credentials_cleaner.h"
 #include "components/password_manager/core/browser/credentials_cleaner_runner.h"
 #include "components/password_manager/core/browser/http_credentials_cleaner.h"
+#include "components/password_manager/core/browser/password_feature_manager.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
+#include "components/password_manager/core/browser/password_manager_features_util.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
 
@@ -40,13 +43,12 @@ using autofill::PasswordForm;
 namespace password_manager_util {
 namespace {
 
-// Return true if
-// 1.|lhs| is non-PSL match, |rhs| is PSL match or
-// 2.|lhs| and |rhs| have the same value of |is_public_suffix_match|, and |lhs|
-// is preferred while |rhs| is not preferred.
+// Return true if 1.|lhs| is non-PSL match, |rhs| is PSL match or 2.|lhs| and
+// |rhs| have the same value of |is_public_suffix_match|, and |lhs| is more
+// recently used than |rhs|.
 bool IsBetterMatch(const PasswordForm* lhs, const PasswordForm* rhs) {
-  return std::make_pair(!lhs->is_public_suffix_match, lhs->preferred) >
-         std::make_pair(!rhs->is_public_suffix_match, rhs->preferred);
+  return std::make_pair(!lhs->is_public_suffix_match, lhs->date_last_used) >
+         std::make_pair(!rhs->is_public_suffix_match, rhs->date_last_used);
 }
 
 }  // namespace
@@ -62,50 +64,28 @@ void UpdateMetadataForUsage(PasswordForm* credential) {
 
 password_manager::SyncState GetPasswordSyncState(
     const syncer::SyncService* sync_service) {
-  if (sync_service && sync_service->GetUserSettings()->IsFirstSetupComplete() &&
-      sync_service->IsSyncFeatureActive() &&
-      sync_service->GetActiveDataTypes().Has(syncer::PASSWORDS)) {
+  if (!sync_service ||
+      !sync_service->GetActiveDataTypes().Has(syncer::PASSWORDS)) {
+    return password_manager::NOT_SYNCING;
+  }
+
+  if (sync_service->IsSyncFeatureActive()) {
     return sync_service->GetUserSettings()->IsUsingSecondaryPassphrase()
                ? password_manager::SYNCING_WITH_CUSTOM_PASSPHRASE
                : password_manager::SYNCING_NORMAL_ENCRYPTION;
   }
-  return password_manager::NOT_SYNCING;
+
+  DCHECK(base::FeatureList::IsEnabled(
+      password_manager::features::kEnablePasswordsAccountStorage));
+  // Account passwords are enabled only for users with normal encryption at
+  // the moment. Data types won't become active for non-sync users with custom
+  // passphrase.
+  return password_manager::ACCOUNT_PASSWORDS_ACTIVE_NORMAL_ENCRYPTION;
 }
 
 bool IsSyncingWithNormalEncryption(const syncer::SyncService* sync_service) {
   return GetPasswordSyncState(sync_service) ==
          password_manager::SYNCING_NORMAL_ENCRYPTION;
-}
-
-void FindDuplicates(std::vector<std::unique_ptr<PasswordForm>>* forms,
-                    std::vector<std::unique_ptr<PasswordForm>>* duplicates,
-                    std::vector<std::vector<PasswordForm*>>* tag_groups) {
-  if (forms->empty())
-    return;
-
-  // Linux backends used to treat the first form as a prime oneamong the
-  // duplicates. Therefore, the caller should try to preserve it.
-  std::stable_sort(forms->begin(), forms->end(), autofill::LessThanUniqueKey());
-
-  std::vector<std::unique_ptr<PasswordForm>> unique_forms;
-  unique_forms.push_back(std::move(forms->front()));
-  if (tag_groups) {
-    tag_groups->clear();
-    tag_groups->push_back(std::vector<PasswordForm*>());
-    tag_groups->front().push_back(unique_forms.front().get());
-  }
-  for (auto it = forms->begin() + 1; it != forms->end(); ++it) {
-    if (ArePasswordFormUniqueKeysEqual(**it, *unique_forms.back())) {
-      if (tag_groups)
-        tag_groups->back().push_back(it->get());
-      duplicates->push_back(std::move(*it));
-    } else {
-      if (tag_groups)
-        tag_groups->push_back(std::vector<PasswordForm*>(1, it->get()));
-      unique_forms.push_back(std::move(*it));
-    }
-  }
-  forms->swap(unique_forms);
 }
 
 void TrimUsernameOnlyCredentials(
@@ -132,11 +112,6 @@ bool IsLoggingActive(const password_manager::PasswordManagerClient* client) {
 
 bool ManualPasswordGenerationEnabled(
     password_manager::PasswordManagerDriver* driver) {
-#if defined(OS_ANDROID)
-  if (!base::FeatureList::IsEnabled(
-          password_manager::features::kManualPasswordGenerationAndroid))
-    return false;
-#endif  // defined(OS_ANDROID)
   password_manager::PasswordGenerationFrameHelper* password_generation_manager =
       driver ? driver->GetPasswordGenerationHelper() : nullptr;
   if (!password_generation_manager ||
@@ -162,17 +137,34 @@ bool ShowAllSavedPasswordsContextMenuEnabled(
     return false;
 
   LogContextOfShowAllSavedPasswordsShown(
-      password_manager::metrics_util::
-          SHOW_ALL_SAVED_PASSWORDS_CONTEXT_CONTEXT_MENU);
+      password_manager::metrics_util::ShowAllSavedPasswordsContext::
+          kContextMenu);
 
   return true;
 }
 
 void UserTriggeredManualGenerationFromContextMenu(
     password_manager::PasswordManagerClient* password_manager_client) {
-  password_manager_client->GeneratePassword();
-  LogPasswordGenerationEvent(
-      autofill::password_generation::PASSWORD_GENERATION_CONTEXT_MENU_PRESSED);
+  if (!password_manager_client->GetPasswordFeatureManager()
+           ->ShouldShowAccountStorageOptIn()) {
+    password_manager_client->GeneratePassword();
+    LogPasswordGenerationEvent(autofill::password_generation::
+                                   PASSWORD_GENERATION_CONTEXT_MENU_PRESSED);
+    return;
+  }
+  // The client ensures the callback won't be run if it is destroyed, so
+  // base::Unretained is safe.
+  password_manager_client->TriggerReauthForPrimaryAccount(base::BindOnce(
+      [](password_manager::PasswordManagerClient* client,
+         password_manager::PasswordManagerClient::ReauthSucceeded succeeded) {
+        if (succeeded) {
+          client->GeneratePassword();
+          LogPasswordGenerationEvent(
+              autofill::password_generation::
+                  PASSWORD_GENERATION_CONTEXT_MENU_PRESSED);
+        }
+      },
+      base::Unretained(password_manager_client)));
 }
 
 // TODO(http://crbug.com/890318): Add unitests to check cleaners are correctly
@@ -194,10 +186,6 @@ void RemoveUselessCredentials(
             store, network_context_getter, prefs));
   }
 #endif  // !defined(OS_IOS)
-
-  cleaning_tasks_runner->MaybeAddCleaningTask(
-      std::make_unique<password_manager::BlacklistedCredentialsCleaner>(store,
-                                                                        prefs));
 
   if (cleaning_tasks_runner->HasPendingTasks()) {
     // The runner will delete itself once the clearing tasks are done, thus we
@@ -226,41 +214,61 @@ base::StringPiece GetSignonRealmWithProtocolExcluded(const PasswordForm& form) {
 }
 
 void FindBestMatches(
-    std::vector<const PasswordForm*> matches,
-    std::map<base::string16, const PasswordForm*>* best_matches,
-    std::vector<const PasswordForm*>* not_best_matches,
+    const std::vector<const PasswordForm*>& non_federated_matches,
+    PasswordForm::Scheme scheme,
+    std::vector<const PasswordForm*>* non_federated_same_scheme,
+    std::vector<const PasswordForm*>* best_matches,
     const PasswordForm** preferred_match) {
   DCHECK(std::all_of(
-      matches.begin(), matches.end(),
+      non_federated_matches.begin(), non_federated_matches.end(),
       [](const PasswordForm* match) { return !match->blacklisted_by_user; }));
+  DCHECK(non_federated_same_scheme);
   DCHECK(best_matches);
-  DCHECK(not_best_matches);
   DCHECK(preferred_match);
 
   *preferred_match = nullptr;
   best_matches->clear();
-  not_best_matches->clear();
+  non_federated_same_scheme->clear();
 
-  if (matches.empty())
-    return;
-
-  // Sort matches using IsBetterMatch predicate.
-  std::sort(matches.begin(), matches.end(), IsBetterMatch);
-  for (const auto* match : matches) {
-    const base::string16& username = match->username_value;
-    // The first match for |username| in the sorted array is best match.
-    if (best_matches->find(username) == best_matches->end())
-      best_matches->insert(std::make_pair(username, match));
-    else
-      not_best_matches->push_back(match);
+  for (auto* match : non_federated_matches) {
+    if (match->scheme == scheme)
+      non_federated_same_scheme->push_back(match);
   }
 
-  *preferred_match = *matches.begin();
+  if (non_federated_same_scheme->empty())
+    return;
+
+  std::sort(non_federated_same_scheme->begin(),
+            non_federated_same_scheme->end(), IsBetterMatch);
+
+  std::set<std::pair<PasswordForm::Store, base::string16>> store_usernames;
+  for (const auto* match : *non_federated_same_scheme) {
+    auto store_username =
+        std::make_pair(match->in_store, match->username_value);
+    // The first match for |store_username| in the sorted array is best
+    // match.
+    if (!base::Contains(store_usernames, store_username)) {
+      store_usernames.insert(store_username);
+      best_matches->push_back(match);
+    }
+  }
+
+  *preferred_match = *non_federated_same_scheme->begin();
+}
+
+const PasswordForm* FindFormByUsername(
+    const std::vector<const PasswordForm*>& forms,
+    const base::string16& username_value) {
+  for (const PasswordForm* form : forms) {
+    if (form->username_value == username_value)
+      return form;
+  }
+  return nullptr;
 }
 
 const PasswordForm* GetMatchForUpdating(
     const PasswordForm& submitted_form,
-    const std::map<base::string16, const PasswordForm*>& credentials) {
+    const std::vector<const PasswordForm*>& credentials) {
   // This is the case for the credential management API. It should not depend on
   // form managers. Once that's the case, this should be turned into a DCHECK.
   // TODO(crbug/947030): turn it into a DCHECK.
@@ -268,10 +276,11 @@ const PasswordForm* GetMatchForUpdating(
     return nullptr;
 
   // Try to return form with matching |username_value|.
-  auto it = credentials.find(submitted_form.username_value);
-  if (it != credentials.end()) {
-    if (!it->second->is_public_suffix_match)
-      return it->second;
+  const PasswordForm* username_match =
+      FindFormByUsername(credentials, submitted_form.username_value);
+  if (username_match) {
+    if (!username_match->is_public_suffix_match)
+      return username_match;
 
     const auto& password_to_save = submitted_form.new_password_value.empty()
                                        ? submitted_form.password_value
@@ -285,24 +294,25 @@ const PasswordForm* GetMatchForUpdating(
     // that the autofilled credentials and |submitted_password_form|
     // actually correspond to two different accounts (see
     // http://crbug.com/385619).
-    return password_to_save == it->second->password_value ? it->second
-                                                          : nullptr;
+    return password_to_save == username_match->password_value ? username_match
+                                                              : nullptr;
   }
 
   // Next attempt is to find a match by password value. It should not be tried
   // when the username was actually detected.
   if (submitted_form.type == PasswordForm::Type::kApi ||
-      !submitted_form.username_value.empty())
+      !submitted_form.username_value.empty()) {
     return nullptr;
+  }
 
-  for (const auto& stored_match : credentials) {
-    if (stored_match.second->password_value == submitted_form.password_value)
-      return stored_match.second;
+  for (const PasswordForm* stored_match : credentials) {
+    if (stored_match->password_value == submitted_form.password_value)
+      return stored_match;
   }
 
   // Last try. The submitted form had no username but a password. Assume that
   // it's an existing credential.
-  return credentials.empty() ? nullptr : credentials.begin()->second;
+  return credentials.empty() ? nullptr : credentials.front();
 }
 
 autofill::PasswordForm MakeNormalizedBlacklistedForm(

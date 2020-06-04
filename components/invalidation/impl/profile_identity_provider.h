@@ -14,9 +14,9 @@ namespace invalidation {
 
 // An identity provider implementation that's backed by IdentityManager
 class ProfileIdentityProvider : public IdentityProvider,
-                                public identity::IdentityManager::Observer {
+                                public signin::IdentityManager::Observer {
  public:
-  ProfileIdentityProvider(identity::IdentityManager* identity_manager);
+  ProfileIdentityProvider(signin::IdentityManager* identity_manager);
   ~ProfileIdentityProvider() override;
 
   // IdentityProvider:
@@ -24,20 +24,20 @@ class ProfileIdentityProvider : public IdentityProvider,
   bool IsActiveAccountWithRefreshToken() override;
   std::unique_ptr<ActiveAccountAccessTokenFetcher> FetchAccessToken(
       const std::string& oauth_consumer_name,
-      const identity::ScopeSet& scopes,
+      const signin::ScopeSet& scopes,
       ActiveAccountAccessTokenCallback callback) override;
-  void InvalidateAccessToken(const identity::ScopeSet& scopes,
+  void InvalidateAccessToken(const signin::ScopeSet& scopes,
                              const std::string& access_token) override;
   void SetActiveAccountId(const CoreAccountId& account_id) override;
 
-  // identity::IdentityManager::Observer:
+  // signin::IdentityManager::Observer:
   void OnRefreshTokenUpdatedForAccount(
       const CoreAccountInfo& account_info) override;
   void OnRefreshTokenRemovedForAccount(
       const CoreAccountId& account_id) override;
 
  private:
-  identity::IdentityManager* const identity_manager_;
+  signin::IdentityManager* const identity_manager_;
 
   CoreAccountId active_account_id_;
 

@@ -5,6 +5,7 @@
 #import "ios/web/navigation/crw_web_view_navigation_observer.h"
 
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/net/http_response_headers_util.h"
 #include "ios/web/common/features.h"
@@ -29,6 +30,7 @@
 using web::NavigationManagerImpl;
 
 using web::wk_navigation_util::IsRestoreSessionUrl;
+// TODO(crbug.com/1038303): This legacy won't be needed anymore.
 using web::wk_navigation_util::IsPlaceholderUrl;
 
 @interface CRWWebViewNavigationObserver ()
@@ -86,7 +88,7 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 }
 
 - (web::WebStateImpl*)webStateImpl {
-  return [self.delegate webStateImplForNavigationObserver:self];
+  return [self.delegate webStateImplForWebViewHandler:self];
 }
 
 - (CRWWKNavigationHandler*)navigationHandler {
@@ -94,7 +96,7 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 }
 
 - (const GURL&)documentURL {
-  return [self.delegate documentURLForNavigationObserver:self];
+  return [self.delegate documentURLForWebViewHandler:self];
 }
 
 #pragma mark - KVO Observation
@@ -103,6 +105,7 @@ using web::wk_navigation_util::IsPlaceholderUrl;
                       ofObject:(id)object
                         change:(NSDictionary*)change
                        context:(void*)context {
+  DCHECK(!self.beingDestroyed);
   NSString* dispatcherSelectorName = self.WKWebViewObservers[keyPath];
   DCHECK(dispatcherSelectorName);
   if (dispatcherSelectorName) {
@@ -129,6 +132,8 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 
 // Called when WKWebView loading state has been changed.
 - (void)webViewLoadingStateDidChange {
+  self.webStateImpl->SetIsLoading(self.webView.loading);
+
   if (self.webView.loading)
     return;
 
@@ -144,19 +149,23 @@ using web::wk_navigation_util::IsPlaceholderUrl;
   // not fire 'pageshow', 'onload', 'popstate' or any of the
   // WKNavigationDelegate callbacks for back/forward navigation from an about:
   // scheme placeholder URL to another entry or if either of the redirect fails
-  // to load (e.g. in airplane mode). Loading state KVO is the only observable
-  // event in this scenario, so force a reload to trigger redirect from
-  // restore_session.html to the restored URL.
+  // to load (e.g. in airplane mode, <iOS13). Loading state KVO is the only
+  // observable event in this scenario, so force a reload to trigger redirect
+  // from restore_session.html to the restored URL.
   bool previousURLHasAboutScheme =
       self.documentURL.SchemeIs(url::kAboutScheme) ||
-      IsPlaceholderUrl(self.documentURL) ||
+      (!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+       IsPlaceholderUrl(self.documentURL)) ||
       web::GetWebClient()->IsAppSpecificURL(self.documentURL);
-  bool is_back_forward_navigation =
+  bool needs_back_forward_navigation_reload =
       existingContext &&
       (existingContext->GetPageTransition() & ui::PAGE_TRANSITION_FORWARD_BACK);
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled() &&
-      IsRestoreSessionUrl(webViewURL)) {
-    if (previousURLHasAboutScheme || is_back_forward_navigation) {
+  // The back-forward workaround isn't need on iOS13.
+  if (@available(iOS 13, *)) {
+    needs_back_forward_navigation_reload = false;
+  }
+  if (IsRestoreSessionUrl(webViewURL)) {
+    if (previousURLHasAboutScheme || needs_back_forward_navigation_reload) {
       [self.webView reload];
       self.navigationHandler.navigationState =
           web::WKNavigationState::REQUESTED;
@@ -193,11 +202,9 @@ using web::wk_navigation_util::IsPlaceholderUrl;
               forSameDocumentNavigation:isSameDocumentNavigation];
     } else {
       // Same document navigation does not contain response headers.
-      net::HttpResponseHeaders* headers =
-          isSameDocumentNavigation
-              ? nullptr
-              : self.webStateImpl->GetHttpResponseHeaders();
-      existingContext->SetResponseHeaders(headers);
+      if (isSameDocumentNavigation) {
+        existingContext->SetResponseHeaders(nullptr);
+      }
       existingContext->SetIsSameDocument(isSameDocumentNavigation);
       existingContext->SetHasCommitted(!isSameDocumentNavigation);
       self.webStateImpl->OnNavigationStarted(existingContext);
@@ -207,15 +214,14 @@ using web::wk_navigation_util::IsPlaceholderUrl;
     }
   }
 
-  [self.delegate navigationObserverDidChangeSSLStatus:self];
-  [self.delegate navigationObserver:self didFinishNavigation:existingContext];
+  [self.delegate webViewHandlerUpdateSSLStatusForCurrentNavigationItem:self];
+  [self.delegate webViewHandler:self didFinishNavigation:existingContext];
 }
 
 // Called when WKWebView canGoForward/canGoBack state has been changed.
 - (void)webViewBackForwardStateDidChange {
   // Don't trigger for LegacyNavigationManager because its back/foward state
   // doesn't always match that of WKWebView.
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled())
     self.webStateImpl->OnBackForwardStateChanged();
 }
 
@@ -223,8 +229,9 @@ using web::wk_navigation_util::IsPlaceholderUrl;
 - (void)webViewURLDidChange {
   // TODO(crbug.com/966412): Determine if there are any cases where this still
   // happens, and if so whether anything should be done when it does.
-  if (!self.webView.URL) {
-    DVLOG(1) << "Received nil URL callback";
+  if (self.webView.URL.absoluteString.length == 0) {
+    DVLOG(1) << "Received nil/empty URL callback";
+    base::UmaHistogramBoolean("IOS.Web.URLDidChangeToEmptyURL", true);
     return;
   }
   GURL URL(net::GURLWithNSURL(self.webView.URL));
@@ -264,9 +271,7 @@ using web::wk_navigation_util::IsPlaceholderUrl;
         return;
 
       self.navigationManagerImpl->DiscardNonCommittedItems();
-      self.webStateImpl->SetIsLoading(false);
       self.navigationHandler.pendingNavigationInfo = nil;
-      if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
         // Right after a history navigation that gets cancelled by a tap on
         // "Go Back", WKWebView's current back/forward list item will still be
         // for the unsafe page; updating this is the responsibility of the
@@ -276,12 +281,6 @@ using web::wk_navigation_util::IsPlaceholderUrl;
         // will be the index of the unsafe page's item. To get back into a
         // consistent state, force a reload.
         [self.webView reload];
-      } else {
-        // Tapping "Go Back" on a SafeBrowsing interstitial can change whether
-        // there are any forward or back items, e.g., by returning to or
-        // moving away from the forward-most or back-most item.
-        self.webStateImpl->OnBackForwardStateChanged();
-      }
       return;
     }
 
@@ -299,29 +298,32 @@ using web::wk_navigation_util::IsPlaceholderUrl;
     // WebStateObserver callbacks will see the updated URL.
     // TODO(crbug.com/809287) use currentItem.URL instead of self.webView.URL to
     // update NavigationItem URL.
-    if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
-      const GURL webViewURL = net::GURLWithNSURL(self.webView.URL);
-      web::NavigationItem* currentItem = nullptr;
-      if (self.webView.backForwardList.currentItem) {
-        currentItem = [[CRWNavigationItemHolder
-            holderForBackForwardListItem:self.webView.backForwardList
-                                             .currentItem] navigationItem];
-      } else {
-        // WKBackForwardList.currentItem may be nil in a corner case when
-        // location.replace is called with about:blank#hash in an empty window
-        // open tab. See crbug.com/866142.
-        DCHECK(self.webStateImpl->HasOpener());
-        DCHECK(!self.navigationManagerImpl->GetTransientItem());
-        DCHECK(!self.navigationManagerImpl->GetPendingItem());
-        currentItem = self.navigationManagerImpl->GetLastCommittedItem();
-      }
-      if (currentItem && webViewURL != currentItem->GetURL())
-        currentItem->SetURL(webViewURL);
+    const GURL webViewURL = net::GURLWithNSURL(self.webView.URL);
+    web::NavigationItem* currentItem = nullptr;
+    if (self.webView.backForwardList.currentItem) {
+      currentItem = [[CRWNavigationItemHolder
+          holderForBackForwardListItem:self.webView.backForwardList.currentItem]
+          navigationItem];
+    } else {
+      // WKBackForwardList.currentItem may be nil in a corner case when
+      // location.replace is called with about:blank#hash in an empty window
+      // open tab. See crbug.com/866142.
+      DCHECK(self.webStateImpl->HasOpener());
+      DCHECK(!self.navigationManagerImpl->GetTransientItem());
+      DCHECK(!self.navigationManagerImpl->GetPendingItem());
+      currentItem = self.navigationManagerImpl->GetLastCommittedItem();
     }
+    if (currentItem && webViewURL != currentItem->GetURL())
+      currentItem->SetURL(webViewURL);
 
     [self.delegate navigationObserver:self
         URLDidChangeWithoutDocumentChange:URL];
   } else if ([self isKVOChangePotentialSameDocumentNavigationToURL:URL]) {
+    if (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage)) {
+      // TODO(crbug.com/991608): When the error page is presented for the first
+      // time, it is performing a same document navigation. This method should
+      // probably return here to avoid performing the following checks.
+    }
     WKNavigation* navigation =
         [self.navigationHandler.navigationStates lastAddedNavigation];
     [self.webView

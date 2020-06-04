@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/context_menus/context_menus_api.h"
 
 #include <string>
+#include <utility>
 
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -20,8 +21,9 @@ using extensions::ErrorUtils;
 
 namespace {
 
-const char kIdRequiredError[] = "Extensions using event pages must pass an "
-    "id parameter to chrome.contextMenus.create";
+const char kIdRequiredError[] =
+    "Extensions using event pages or Service "
+    "Workers must pass an id parameter to chrome.contextMenus.create";
 
 }  // namespace
 
@@ -37,7 +39,7 @@ ExtensionFunction::ResponseAction ContextMenusCreateFunction::Run() {
   if (params->create_properties.id.get()) {
     id.string_uid = *params->create_properties.id;
   } else {
-    if (BackgroundInfo::HasLazyBackgroundPage(extension()))
+    if (context_menus_api_helpers::HasLazyContext(extension()))
       return RespondNow(Error(kIdRequiredError));
 
     // The Generated Id is added by context_menus_custom_bindings.js.
@@ -51,7 +53,7 @@ ExtensionFunction::ResponseAction ContextMenusCreateFunction::Run() {
   if (!extensions::context_menus_api_helpers::CreateMenuItem(
           params->create_properties, browser_context(), extension(), id,
           &error)) {
-    return RespondNow(Error(error));
+    return RespondNow(Error(std::move(error)));
   }
   return RespondNow(NoArguments());
 }
@@ -74,7 +76,7 @@ ExtensionFunction::ResponseAction ContextMenusUpdateFunction::Run() {
   if (!extensions::context_menus_api_helpers::UpdateMenuItem(
           params->update_properties, browser_context(), extension(), item_id,
           &error)) {
-    return RespondNow(Error(error));
+    return RespondNow(Error(std::move(error)));
   }
   return RespondNow(NoArguments());
 }

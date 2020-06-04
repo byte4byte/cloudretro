@@ -23,30 +23,6 @@ const NetworkUI = (function() {
 
   const mojom = chromeos.networkConfig.mojom;
 
-  CrOncStrings = {
-    OncTypeCellular: loadTimeData.getString('OncTypeCellular'),
-    OncTypeEthernet: loadTimeData.getString('OncTypeEthernet'),
-    OncTypeMobile: loadTimeData.getString('OncTypeMobile'),
-    OncTypeTether: loadTimeData.getString('OncTypeTether'),
-    OncTypeVPN: loadTimeData.getString('OncTypeVPN'),
-    OncTypeWiFi: loadTimeData.getString('OncTypeWiFi'),
-    OncTypeWiMAX: loadTimeData.getString('OncTypeWiMAX'),
-    networkListItemConnected:
-        loadTimeData.getString('networkListItemConnected'),
-    networkListItemConnecting:
-        loadTimeData.getString('networkListItemConnecting'),
-    networkListItemConnectingTo:
-        loadTimeData.getString('networkListItemConnectingTo'),
-    networkListItemInitializing:
-        loadTimeData.getString('networkListItemInitializing'),
-    networkListItemScanning: loadTimeData.getString('networkListItemScanning'),
-    networkListItemNotConnected:
-        loadTimeData.getString('networkListItemNotConnected'),
-    networkListItemNoNetwork:
-        loadTimeData.getString('networkListItemNoNetwork'),
-    vpnNameTemplate: loadTimeData.getString('vpnNameTemplate'),
-  };
-
   // Properties to display in the network state table. Each entry can be either
   // a single state field or an array of state fields. If more than one is
   // specified then the first non empty value is used.
@@ -65,9 +41,9 @@ const NetworkUI = (function() {
    * This UI will use both the networkingPrivate extension API and the
    * networkConfig mojo API until we provide all of the required functionality
    * in networkConfig. TODO(stevenjb): Remove use of networkingPrivate api.
-   * @type {?mojom.CrosNetworkConfigProxy}
+   * @type {?mojom.CrosNetworkConfigRemote}
    */
-  let networkConfigProxy = null;
+  let networkConfig = null;
 
   /**
    * Creates and returns a typed HTMLTableCellElement.
@@ -85,6 +61,22 @@ const NetworkUI = (function() {
    */
   const createTableRowElement = function() {
     return /** @type {!HTMLTableRowElement} */ (document.createElement('tr'));
+  };
+
+  /**
+   * @param {string} key
+   * @param {number|string|undefined} value
+   * @return {string}
+   */
+  const getOncTypeString = function(key, value) {
+    if (value === undefined) {
+      return '';
+    }
+    if (key == 'type' && value == 'etherneteap') {
+      // Special case, not in production UI.
+      return 'EthernetEAP';
+    }
+    return /** @type {string}*/ (OncMojo.getTypeString(key, value));
   };
 
   /**
@@ -108,7 +100,7 @@ const NetworkUI = (function() {
         return undefined;
     }
     const k = keys.shift();
-    return OncMojo.getTypeString(k, dict[k]);
+    return getOncTypeString(k, dict[k]);
   };
 
   /**
@@ -141,8 +133,8 @@ const NetworkUI = (function() {
   const createStateTableIcon = function(state) {
     const cell = createTableCellElement();
     cell.className = 'state-table-icon-cell';
-    const icon = /** @type {!CrNetworkIconElement} */ (
-        document.createElement('cr-network-icon'));
+    const icon = /** @type {!NetworkIconElement} */ (
+        document.createElement('network-icon'));
     icon.isListItem = true;
     icon.networkState = OncMojo.getDefaultNetworkState(state.type);
     cell.appendChild(icon);
@@ -237,7 +229,7 @@ const NetworkUI = (function() {
    * @return {string} A valid HTMLElement id.
    */
   const idFromType = function(type) {
-    return idFromTypeString(OncMojo.getNetworkTypeString(type));
+    return idFromTypeString(getOncTypeString('type', type));
   };
 
   /**
@@ -265,6 +257,12 @@ const NetworkUI = (function() {
    */
   const onDeviceStatesReceived = function(states) {
     createStateTable('device-state-table', DEVICE_STATE_FIELDS, states);
+  };
+
+  /** @return {string} */
+  const getSelectedFormat = function() {
+    const formatSelect = $('get-property-format');
+    return formatSelect.options[formatSelect.selectedIndex].value;
   };
 
   /**
@@ -308,12 +306,10 @@ const NetworkUI = (function() {
     detailCell.className = 'state-table-expanded-cell';
     detailCell.colSpan = baseRow.childNodes.length - 1;
     expandedRow.appendChild(detailCell);
-    const selected = $('get-property-format').selectedIndex;
-    const selectedId = $('get-property-format').options[selected].value;
     if (guid)
-      handleNetworkDetail(guid, selectedId, detailCell);
+      handleNetworkDetail(guid, getSelectedFormat(), detailCell);
     else
-      handleDeviceDetail(state, selectedId, detailCell);
+      handleDeviceDetail(state, getSelectedFormat(), detailCell);
     return expandedRow;
   };
 
@@ -327,22 +323,31 @@ const NetworkUI = (function() {
     if (selectedId == 'shill') {
       chrome.send('getShillNetworkProperties', [guid]);
     } else if (selectedId == 'state') {
-      networkConfigProxy.getNetworkState(guid)
+      networkConfig.getNetworkState(guid)
           .then((responseParams) => {
             if (responseParams && responseParams.result) {
               showDetail(detailCell, responseParams.result);
             } else {
               showDetailError(
-                  detailCell, 'GetNetworkState(' + guid + ') failed');
+                  detailCell, 'getNetworkState(' + guid + ') failed');
             }
           })
           .catch((error) => {
             showDetailError(detailCell, 'Mojo service failure: ' + error);
           });
     } else if (selectedId == 'managed') {
-      chrome.networkingPrivate.getManagedProperties(guid, function(properties) {
-        showDetail(detailCell, properties, chrome.runtime.lastError);
-      });
+      networkConfig.getManagedProperties(guid)
+          .then((responseParams) => {
+            if (responseParams && responseParams.result) {
+              showDetail(detailCell, responseParams.result);
+            } else {
+              showDetailError(
+                  detailCell, 'getManagedProperties(' + guid + ') failed');
+            }
+          })
+          .catch((error) => {
+            showDetailError(detailCell, 'Mojo service failure: ' + error);
+          });
     } else {
       chrome.networkingPrivate.getProperties(guid, function(properties) {
         showDetail(detailCell, properties, chrome.runtime.lastError);
@@ -358,7 +363,9 @@ const NetworkUI = (function() {
    */
   const handleDeviceDetail = function(state, selectedId, detailCell) {
     if (selectedId == 'shill') {
-      chrome.send('getShillDeviceProperties', [state.type]);
+      chrome.send(
+          'getShillDeviceProperties',
+          [OncMojo.getNetworkTypeString(state.type)]);
     } else {
       showDetail(detailCell, state);
     }
@@ -367,7 +374,7 @@ const NetworkUI = (function() {
   /**
    * @param {!HTMLTableCellElement} detailCell
    * @param {!networkUI.NetworkStateProperties|!networkUI.DeviceStateProperties|
-   *     !chrome.networkingPrivate.ManagedProperties|
+   *     !chromeos.networkConfig.mojom.ManagedProperties|
    *     !chrome.networkingPrivate.NetworkProperties} state
    * @param {!Object=} error
    */
@@ -440,6 +447,19 @@ const NetworkUI = (function() {
   };
 
   /**
+   * Callback invoked by Chrome after a getShillEthernetEAP call.
+   * @param {?Object} state The requested Shill properties. Will be null if no
+   *     EAP properties exist.
+   */
+  const getShillEthernetEAPResult = function(state) {
+    const states = [];
+    if (state) {
+      states.push(state);
+    }
+    createStateTable('ethernet-eap-state-table', FAVORITE_STATE_FIELDS, states);
+  };
+
+  /**
    * Callback invoked by Chrome after a openCellularActivationUi call.
    * @param {boolean} didOpenActivationUi Whether the activation UI was actually
    *     opened. If this value is false, it means that no cellular network was
@@ -467,54 +487,60 @@ const NetworkUI = (function() {
    * Requests an update of all network info.
    */
   const requestNetworks = function() {
-    networkConfigProxy
+    networkConfig
         .getNetworkStateList({
           filter: mojom.FilterType.kVisible,
           networkType: mojom.NetworkType.kAll,
-          limit: mojom.kNoLimit,
+          limit: mojom.NO_LIMIT,
         })
         .then((responseParams) => {
           onVisibleNetworksReceived(responseParams.result);
         });
 
-    networkConfigProxy
+    networkConfig
         .getNetworkStateList({
           filter: mojom.FilterType.kConfigured,
           networkType: mojom.NetworkType.kAll,
-          limit: mojom.kNoLimit,
+          limit: mojom.NO_LIMIT,
         })
         .then((responseParams) => {
           onFavoriteNetworksReceived(responseParams.result);
         });
 
-    networkConfigProxy.getDeviceStateList().then((responseParams) => {
+    networkConfig.getDeviceStateList().then((responseParams) => {
       onDeviceStatesReceived(responseParams.result);
     });
+
+    // Only request EthernetEAP properties when the 'shill' format is selected.
+    if (getSelectedFormat() == 'shill') {
+      chrome.send('getShillEthernetEAP');
+    }
   };
 
   /**
    * Requests the global policy dictionary and updates the page.
    */
   const requestGlobalPolicy = function() {
-    chrome.networkingPrivate.getGlobalPolicy(function(policy) {
+    networkConfig.getGlobalPolicy().then(result => {
       document.querySelector('#global-policy').textContent =
-          JSON.stringify(policy, null, '\t');
+          JSON.stringify(result.result, null, '\t');
     });
   };
 
   /** Initialize NetworkUI state. */
   const init = function() {
-    networkConfigProxy = network_config.MojoInterfaceProviderImpl.getInstance()
-                             .getMojoServiceProxy();
+    networkConfig = network_config.MojoInterfaceProviderImpl.getInstance()
+                        .getMojoServiceRemote();
 
     /** Set the refresh rate if the interval is found in the url. */
-    const interval = parseQueryParams(window.location)['refresh'];
-    if (interval && interval != '')
+    const interval = new URL(window.location.href).searchParams.get('refresh');
+    if (interval) {
       setInterval(requestNetworks, parseInt(interval, 10) * 1000);
+    }
   };
 
   /**
-   * Handles clicks on network items in the <cr-network-select> element by
+   * Handles clicks on network items in the <network-select> element by
    * attempting a connection to the selected network or requesting a password
    * if the network requires a password.
    * @param {!Event<!OncMojo.NetworkStateProperties>} event
@@ -535,18 +561,13 @@ const NetworkUI = (function() {
     }
 
     // Otherwise, connect.
-    chrome.networkingPrivate.startConnect(networkState.guid, () => {
-      const lastError = chrome.runtime.lastError;
-      if (!lastError)
-        return;
-      const message = lastError.message;
-      if (message == 'connecting' || message == 'connect-canceled' ||
-          message == 'connected' || message == 'Error.InvalidNetworkGuid') {
+    networkConfig.startConnect(networkState.guid).then(response => {
+      if (response.result == mojom.StartConnectResult.kSuccess) {
         return;
       }
       console.error(
-          'networkingPrivate.startConnect error: ' + message +
-          ' For: ' + networkState.guid);
+          'startConnect error for: ' + networkState.guid + ' Result: ' +
+          response.result.toString() + ' Message: ' + response.message);
       chrome.send('showNetworkConfig', [networkState.guid]);
     });
   };
@@ -555,7 +576,7 @@ const NetworkUI = (function() {
    * Gets network information from WebUI and sets custom items.
    */
   document.addEventListener('DOMContentLoaded', function() {
-    const select = document.querySelector('cr-network-select');
+    const select = document.querySelector('network-select');
     select.customItems = [
       {customItemName: 'Add WiFi', polymerIcon: 'cr:add', customData: 'WiFi'},
       {customItemName: 'Add VPN', polymerIcon: 'cr:add', customData: 'VPN'}
@@ -564,6 +585,7 @@ const NetworkUI = (function() {
     $('cellular-activation-button').onclick = openCellularActivationUi;
     $('add-new-wifi-button').onclick = showAddNewWifi;
     $('refresh').onclick = requestNetworks;
+    $('get-property-format').onchange = requestNetworks;
     init();
     requestNetworks();
     requestGlobalPolicy();
@@ -576,6 +598,7 @@ const NetworkUI = (function() {
   return {
     getShillNetworkPropertiesResult: getShillNetworkPropertiesResult,
     getShillDevicePropertiesResult: getShillDevicePropertiesResult,
+    getShillEthernetEAPResult: getShillEthernetEAPResult,
     openCellularActivationUiResult: openCellularActivationUiResult
   };
 })();

@@ -8,17 +8,17 @@ import android.app.Activity;
 import android.content.ComponentName;
 import android.os.Bundle;
 
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.IntentUtils;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.SnackbarActivity;
 import org.chromium.chrome.browser.download.home.DownloadManagerCoordinator;
-import org.chromium.chrome.browser.download.home.DownloadManagerCoordinatorFactory;
+import org.chromium.chrome.browser.download.home.DownloadManagerCoordinatorFactoryHelper;
 import org.chromium.chrome.browser.download.home.DownloadManagerUiConfig;
+import org.chromium.chrome.browser.download.home.DownloadManagerUiConfigHelper;
+import org.chromium.chrome.browser.download.home.filter.Filters;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorNotificationBridgeUiFactory;
-import org.chromium.chrome.browser.download.ui.DownloadManagerUi;
-import org.chromium.chrome.browser.modaldialog.AppModalPresenter;
-import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.ui.base.ActivityAndroidPermissionDelegate;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -59,15 +59,18 @@ public class DownloadActivity extends SnackbarActivity implements ModalDialogMan
                 getIntent(), IntentHandler.EXTRA_PARENT_COMPONENT);
         mPermissionDelegate =
                 new ActivityAndroidPermissionDelegate(new WeakReference<Activity>(this));
-        DownloadManagerUiConfig config = new DownloadManagerUiConfig.Builder()
-                                                 .setIsOffTheRecord(isOffTheRecord)
-                                                 .setIsSeparateActivity(true)
-                                                 .build();
+
+        DownloadManagerUiConfig config =
+                DownloadManagerUiConfigHelper.fromFlags()
+                        .setIsOffTheRecord(isOffTheRecord)
+                        .setIsSeparateActivity(true)
+                        .setShowPaginationHeaders(DownloadUtils.shouldShowPaginationHeaders())
+                        .build();
 
         mModalDialogManager = new ModalDialogManager(
                 new AppModalPresenter(this), ModalDialogManager.ModalDialogType.APP);
-        mDownloadCoordinator = DownloadManagerCoordinatorFactory.create(
-                this, config, getSnackbarManager(), parentComponent, mModalDialogManager);
+        mDownloadCoordinator = DownloadManagerCoordinatorFactoryHelper.create(
+                this, config, getSnackbarManager(), mModalDialogManager);
         setContentView(mDownloadCoordinator.getView());
         mIsOffTheRecord = isOffTheRecord;
         mDownloadCoordinator.addObserver(mUiObserver);
@@ -76,8 +79,8 @@ public class DownloadActivity extends SnackbarActivity implements ModalDialogMan
         mCurrentUrl = savedInstanceState == null
                 ? UrlConstants.DOWNLOADS_URL
                 : savedInstanceState.getString(BUNDLE_KEY_CURRENT_URL);
+        if (showPrefetchContent) mCurrentUrl = Filters.toUrl(Filters.FilterType.PREFETCHED);
         mDownloadCoordinator.updateForUrl(mCurrentUrl);
-        if (showPrefetchContent) mDownloadCoordinator.showPrefetchSection();
     }
 
     @Override
@@ -109,15 +112,6 @@ public class DownloadActivity extends SnackbarActivity implements ModalDialogMan
     @Override
     public ModalDialogManager getModalDialogManager() {
         return mModalDialogManager;
-    }
-
-    @VisibleForTesting
-    DownloadManagerUi getDownloadManagerUiForTests() {
-        // TODO(856383): Generalize/fix download home tests for the new DownloadManagerCoordinator.
-        if (mDownloadCoordinator instanceof DownloadManagerUi) {
-            return (DownloadManagerUi) mDownloadCoordinator;
-        }
-        return null;
     }
 
     public AndroidPermissionDelegate getAndroidPermissionDelegate() {

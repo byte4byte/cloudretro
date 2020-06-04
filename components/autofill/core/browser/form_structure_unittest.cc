@@ -25,7 +25,6 @@
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/signatures_util.h"
-#include "components/variations/entropy_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -131,19 +130,22 @@ class FormStructureTest : public testing::Test {
     return form_structure.ShouldBeUploaded();
   }
 
-  void DisableAutofillMetadataFieldTrial() { field_trial_list_.reset(); }
+  void DisableAutofillMetadataFieldTrial() {
+    field_trial_ = nullptr;
+    scoped_feature_list_.Reset();
+    scoped_feature_list_.Init();
+  }
 
  private:
   void EnableAutofillMetadataFieldTrial() {
-    field_trial_list_.reset();
-    field_trial_list_.reset(new base::FieldTrialList(
-        std::make_unique<variations::SHA1EntropyProvider>("foo")));
+    scoped_feature_list_.Reset();
+    scoped_feature_list_.Init();
     field_trial_ = base::FieldTrialList::CreateFieldTrial(
         "AutofillFieldMetadata", "Enabled");
     field_trial_->group();
   }
 
-  std::unique_ptr<base::FieldTrialList> field_trial_list_;
+  base::test::ScopedFeatureList scoped_feature_list_;
   scoped_refptr<base::FieldTrial> field_trial_;
 };
 
@@ -2592,7 +2594,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithMatchingValidities) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
 
   ASSERT_EQ(form_structure->field_count(), possible_field_types.size());
@@ -2623,7 +2625,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithMatchingValidities) {
   upload.set_autofill_used(false);
   upload.set_data_present("144200030e");
   upload.set_passwords_revealed(false);
-  upload.set_password_has_numeric(true);
+  upload.set_password_has_lowercase_letter(true);
   upload.set_password_length(10u);
   upload.set_action_signature(15724779818122431245U);
   upload.set_submission_event(
@@ -2685,7 +2687,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithMatchingValidities) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
 
   ASSERT_EQ(form_structure->field_count(), possible_field_types.size());
@@ -2787,7 +2789,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithNonMatchingValidities) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
 
   ASSERT_EQ(form_structure->field_count(), possible_field_types.size());
@@ -2818,7 +2820,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithNonMatchingValidities) {
   upload.set_autofill_used(false);
   upload.set_data_present("144200030e");
   upload.set_passwords_revealed(false);
-  upload.set_password_has_numeric(true);
+  upload.set_password_has_lowercase_letter(true);
   upload.set_password_length(10u);
   upload.set_action_signature(15724779818122431245U);
 
@@ -2918,7 +2920,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithMultipleValidities) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
 
   ASSERT_EQ(form_structure->field_count(), possible_field_types.size());
@@ -2949,7 +2951,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest_WithMultipleValidities) {
   upload.set_autofill_used(false);
   upload.set_data_present("144200030e");
   upload.set_passwords_revealed(false);
-  upload.set_password_has_numeric(true);
+  upload.set_password_has_lowercase_letter(true);
   upload.set_password_length(10u);
   upload.set_action_signature(15724779818122431245U);
   upload.set_submission_event(
@@ -3044,7 +3046,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
   form_structure->set_submission_event(
       SubmissionIndicatorEvent::HTML_FORM_SUBMISSION);
@@ -3078,7 +3080,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest) {
   upload.set_autofill_used(false);
   upload.set_data_present("144200030e");
   upload.set_passwords_revealed(false);
-  upload.set_password_has_numeric(true);
+  upload.set_password_has_lowercase_letter(true);
   upload.set_password_length(10u);
   upload.set_action_signature(15724779818122431245U);
   upload.set_has_form_tag(true);
@@ -3130,7 +3132,7 @@ TEST_F(FormStructureTest, EncodeUploadRequest) {
 
   form_structure = std::make_unique<FormStructure>(form);
   form_structure->set_password_attributes_vote(
-      std::make_pair(PasswordAttribute::kHasNumeric, true));
+      std::make_pair(PasswordAttribute::kHasLowercaseLetter, true));
   form_structure->set_password_length_vote(10u);
   form_structure->set_submission_event(
       SubmissionIndicatorEvent::HTML_FORM_SUBMISSION);
@@ -3426,7 +3428,7 @@ TEST_F(FormStructureTest, EncodeUploadRequestWithPropertiesMask) {
   field.id_attribute = ASCIIToUTF16("first_name");
   field.autocomplete_attribute = "given-name";
   field.css_classes = ASCIIToUTF16("class1 class2");
-  field.properties_mask = FieldPropertiesFlags::HAD_FOCUS;
+  field.properties_mask = FieldPropertiesFlags::kHadFocus;
   form.fields.push_back(field);
   test::InitializePossibleTypesAndValidities(
       possible_field_types, possible_field_types_validities, {NAME_FIRST});
@@ -3437,7 +3439,7 @@ TEST_F(FormStructureTest, EncodeUploadRequestWithPropertiesMask) {
   field.autocomplete_attribute = "family-name";
   field.css_classes = ASCIIToUTF16("class1 class2");
   field.properties_mask =
-      FieldPropertiesFlags::HAD_FOCUS | FieldPropertiesFlags::USER_TYPED;
+      FieldPropertiesFlags::kHadFocus | FieldPropertiesFlags::kUserTyped;
   form.fields.push_back(field);
   test::InitializePossibleTypesAndValidities(
       possible_field_types, possible_field_types_validities, {NAME_LAST});
@@ -3449,7 +3451,7 @@ TEST_F(FormStructureTest, EncodeUploadRequestWithPropertiesMask) {
   field.autocomplete_attribute = "email";
   field.css_classes = ASCIIToUTF16("class1 class2");
   field.properties_mask =
-      FieldPropertiesFlags::HAD_FOCUS | FieldPropertiesFlags::USER_TYPED;
+      FieldPropertiesFlags::kHadFocus | FieldPropertiesFlags::kUserTyped;
   form.fields.push_back(field);
   test::InitializePossibleTypesAndValidities(
       possible_field_types, possible_field_types_validities, {EMAIL_ADDRESS});
@@ -3484,15 +3486,15 @@ TEST_F(FormStructureTest, EncodeUploadRequestWithPropertiesMask) {
 
   test::FillUploadField(upload.add_field(), 3763331450U, nullptr, nullptr,
                         nullptr, 3U);
-  upload.mutable_field(0)->set_properties_mask(FieldPropertiesFlags::HAD_FOCUS);
+  upload.mutable_field(0)->set_properties_mask(FieldPropertiesFlags::kHadFocus);
   test::FillUploadField(upload.add_field(), 3494530716U, nullptr, nullptr,
                         nullptr, 5U);
   upload.mutable_field(1)->set_properties_mask(
-      FieldPropertiesFlags::HAD_FOCUS | FieldPropertiesFlags::USER_TYPED);
+      FieldPropertiesFlags::kHadFocus | FieldPropertiesFlags::kUserTyped);
   test::FillUploadField(upload.add_field(), 1029417091U, nullptr, nullptr,
                         nullptr, 9U);
   upload.mutable_field(2)->set_properties_mask(
-      FieldPropertiesFlags::HAD_FOCUS | FieldPropertiesFlags::USER_TYPED);
+      FieldPropertiesFlags::kHadFocus | FieldPropertiesFlags::kUserTyped);
 
   std::string expected_upload_string;
   ASSERT_TRUE(upload.SerializeToString(&expected_upload_string));
@@ -4487,9 +4489,12 @@ TEST_F(FormStructureTest, EncodeUploadRequest_RichMetadata) {
       {"email_id", "email_name", "Email:", "Please enter your email address",
        "Type your email address", "You can type your email address here",
        "blah"},
+      {"id_only", "", "", "", "", "", ""},
+      {"", "name_only", "", "", "", "", ""},
   };
 
   FormData form;
+  form.id_attribute = ASCIIToUTF16("form-id");
   form.url = GURL("http://www.foo.com/");
   for (const auto& f : kFieldMetadata) {
     FormFieldData field;
@@ -4518,49 +4523,91 @@ TEST_F(FormStructureTest, EncodeUploadRequest_RichMetadata) {
       &upload));
 
   const auto form_signature = form_structure.form_signature();
-  EXPECT_EQ(upload.randomized_form_metadata().id().encoded_bits(),
-            encoder.Encode(form_signature, 0, RandomizedEncoder::FORM_ID,
-                           form_structure.id_attribute()));
-  EXPECT_EQ(upload.randomized_form_metadata().name().encoded_bits(),
-            encoder.Encode(form_signature, 0, RandomizedEncoder::FORM_NAME,
-                           form_structure.name_attribute()));
 
+  if (form.id_attribute.empty()) {
+    EXPECT_FALSE(upload.randomized_form_metadata().has_id());
+  } else {
+    EXPECT_EQ(upload.randomized_form_metadata().id().encoded_bits(),
+              encoder.Encode(form_signature, 0, RandomizedEncoder::FORM_ID,
+                             form_structure.id_attribute()));
+  }
+
+  if (form.name_attribute.empty()) {
+    EXPECT_FALSE(upload.randomized_form_metadata().has_name());
+  } else {
+    EXPECT_EQ(upload.randomized_form_metadata().name().encoded_bits(),
+              encoder.Encode(form_signature, 0, RandomizedEncoder::FORM_NAME,
+                             form_structure.name_attribute()));
+  }
   ASSERT_EQ(static_cast<size_t>(upload.field_size()),
             base::size(kFieldMetadata));
   for (int i = 0; i < upload.field_size(); ++i) {
     const auto& metadata = upload.field(i).randomized_field_metadata();
     const auto& field = *form_structure.field(i);
     const auto field_signature = field.GetFieldSignature();
-    EXPECT_EQ(metadata.id().encoded_bits(),
-              encoder.Encode(form_signature, field_signature,
-                             RandomizedEncoder::FIELD_ID, field.id_attribute));
-    EXPECT_EQ(
-        metadata.name().encoded_bits(),
-        encoder.Encode(form_signature, field_signature,
-                       RandomizedEncoder::FIELD_NAME, field.name_attribute));
-    EXPECT_EQ(metadata.type().encoded_bits(),
-              encoder.Encode(form_signature, field_signature,
-                             RandomizedEncoder::FIELD_CONTROL_TYPE,
-                             field.form_control_type));
-    EXPECT_EQ(metadata.label().encoded_bits(),
-              encoder.Encode(form_signature, field_signature,
-                             RandomizedEncoder::FIELD_LABEL, field.label));
-    EXPECT_EQ(
-        metadata.aria_label().encoded_bits(),
-        encoder.Encode(form_signature, field_signature,
-                       RandomizedEncoder::FIELD_ARIA_LABEL, field.aria_label));
-    EXPECT_EQ(metadata.aria_description().encoded_bits(),
-              encoder.Encode(form_signature, field_signature,
-                             RandomizedEncoder::FIELD_ARIA_DESCRIPTION,
-                             field.aria_description));
-    EXPECT_EQ(
-        metadata.css_class().encoded_bits(),
-        encoder.Encode(form_signature, field_signature,
-                       RandomizedEncoder::FIELD_CSS_CLASS, field.css_classes));
-    EXPECT_EQ(metadata.placeholder().encoded_bits(),
-              encoder.Encode(form_signature, field_signature,
-                             RandomizedEncoder::FIELD_PLACEHOLDER,
-                             field.placeholder));
+    if (field.id_attribute.empty()) {
+      EXPECT_FALSE(metadata.has_id());
+    } else {
+      EXPECT_EQ(
+          metadata.id().encoded_bits(),
+          encoder.Encode(form_signature, field_signature,
+                         RandomizedEncoder::FIELD_ID, field.id_attribute));
+    }
+    if (field.name.empty()) {
+      EXPECT_FALSE(metadata.has_name());
+    } else {
+      EXPECT_EQ(
+          metadata.name().encoded_bits(),
+          encoder.Encode(form_signature, field_signature,
+                         RandomizedEncoder::FIELD_NAME, field.name_attribute));
+    }
+    if (field.form_control_type.empty()) {
+      EXPECT_FALSE(metadata.has_type());
+    } else {
+      EXPECT_EQ(metadata.type().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_CONTROL_TYPE,
+                               field.form_control_type));
+    }
+    if (field.label.empty()) {
+      EXPECT_FALSE(metadata.has_label());
+    } else {
+      EXPECT_EQ(metadata.label().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_LABEL, field.label));
+    }
+    if (field.aria_label.empty()) {
+      EXPECT_FALSE(metadata.has_aria_label());
+    } else {
+      EXPECT_EQ(metadata.aria_label().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_ARIA_LABEL,
+                               field.aria_label));
+    }
+    if (field.aria_description.empty()) {
+      EXPECT_FALSE(metadata.has_aria_description());
+    } else {
+      EXPECT_EQ(metadata.aria_description().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_ARIA_DESCRIPTION,
+                               field.aria_description));
+    }
+    if (field.css_classes.empty()) {
+      EXPECT_FALSE(metadata.has_css_class());
+    } else {
+      EXPECT_EQ(metadata.css_class().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_CSS_CLASS,
+                               field.css_classes));
+    }
+    if (field.placeholder.empty()) {
+      EXPECT_FALSE(metadata.has_placeholder());
+    } else {
+      EXPECT_EQ(metadata.placeholder().encoded_bits(),
+                encoder.Encode(form_signature, field_signature,
+                               RandomizedEncoder::FIELD_PLACEHOLDER,
+                               field.placeholder));
+    }
   }
 }
 
@@ -6679,7 +6726,7 @@ TEST_F(FormStructureTest, RationalizeRepreatedFields_LastFieldRationalized) {
   EXPECT_EQ(ADDRESS_HOME_STATE, forms[0]->field(5)->Type().GetStorableType());
 }
 
-INSTANTIATE_TEST_SUITE_P(, ParameterizedFormStructureTest, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(All, ParameterizedFormStructureTest, testing::Bool());
 
 // Tests that, when the flag is off, we will not set the predicted type to
 // unknown for fields that have no server data and autocomplete off, and when
@@ -6906,11 +6953,11 @@ class RationalizationFieldTypeRelationshipsTest
       public testing::WithParamInterface<
           RationalizationTypeRelationshipsTestParams> {};
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          RationalizationFieldTypeFilterTest,
                          testing::Values(PHONE_HOME_COUNTRY_CODE));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          RationalizationFieldTypeRelationshipsTest,
                          testing::Values(
                              RationalizationTypeRelationshipsTestParams{
@@ -7076,6 +7123,21 @@ TEST_F(FormStructureTest, OneFieldPasswordFormShouldNotBeUpload) {
   form.fields.push_back(field);
 
   EXPECT_FALSE(FormStructure(form).ShouldBeUploaded());
+}
+
+// Checks that CreateForPasswordManagerUpload builds FormStructure
+// which is encodable (i.e. ready for uploading).
+TEST_F(FormStructureTest, CreateForPasswordManagerUpload) {
+  std::unique_ptr<FormStructure> form =
+      FormStructure::CreateForPasswordManagerUpload(
+          1234 /* form_signature */, {1, 10, 100} /* field_signatures */);
+  AutofillUploadContents upload;
+  EXPECT_EQ(1234u, form->form_signature());
+  ASSERT_EQ(3u, form->field_count());
+  ASSERT_EQ(100u, form->field(2)->GetFieldSignature());
+  EXPECT_TRUE(form->EncodeUploadRequest(
+      {} /* available_field_types */, false /* form_was_autofilled */,
+      "" /*login_form_signature*/, true /*observed_submission*/, &upload));
 }
 
 }  // namespace autofill

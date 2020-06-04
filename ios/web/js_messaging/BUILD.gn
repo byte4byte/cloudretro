@@ -9,11 +9,11 @@ source_set("js_messaging") {
   deps = [
     "//base",
     "//crypto",
+    "//ios/web/common:features",
     "//ios/web/navigation:wk_navigation_util",
     "//ios/web/public",
     "//ios/web/public/deprecated",
     "//ios/web/public/js_messaging",
-    "//ios/web/web_state:web_state_impl_header",
     "//ios/web/web_view:util",
     "//url",
   ]
@@ -45,6 +45,7 @@ source_set("unittests") {
     "//base",
     "//base/test:test_support",
     "//crypto",
+    "//ios/web/common:web_view_creation_util",
     "//ios/web/public/js_messaging",
     "//ios/web/public/test",
     "//ios/web/public/test/fakes",

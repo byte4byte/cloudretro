@@ -6,15 +6,30 @@ import atexit
 import os
 import socket
 import subprocess
+import threading
 import time
 import urllib2
+
+def terminate_process(proc):
+  """Terminates the process.
+
+  If an error occurs ignore it, just print out a message.
+
+  Args:
+    proc: A subprocess.
+  """
+  try:
+    proc.terminate()
+  except OSError as ex:
+    print 'Error while killing a process: %s' % ex
 
 
 class Server(object):
   """A running ChromeDriver server."""
 
   def __init__(self, exe_path, log_path=None, verbose=True,
-               replayable=False, devtools_replay_path=None):
+               replayable=False, devtools_replay_path=None,
+               additional_args=None):
     """Starts the ChromeDriver server and waits for it to be ready.
 
     Args:
@@ -23,6 +38,7 @@ class Server(object):
       verbose: make the logged data verbose
       replayable: don't truncate strings in log to make the session replayable
       devtools_replay_path: replay devtools events from the log at this path
+      additional_args: list of additional arguments to pass to ChromeDriver
     Raises:
       RuntimeError: if ChromeDriver fails to start
     """
@@ -43,6 +59,12 @@ class Server(object):
 
     if devtools_replay_path:
       chromedriver_args.extend(['--devtools-replay=%s' % devtools_replay_path])
+
+    if additional_args:
+      for arg in additional_args:
+        if not arg.startswith('--'):
+          arg = '--' + arg
+        chromedriver_args.extend([arg])
 
     self._process = subprocess.Popen(chromedriver_args)
     self._host = '127.0.0.1'
@@ -100,5 +122,8 @@ class Server(object):
       urllib2.urlopen(self.GetUrl() + '/shutdown', timeout=10).close()
     except:
       self._process.terminate()
+    timer = threading.Timer(5, terminate_process, [self._process])
+    timer.start()
     self._process.wait()
+    timer.cancel()
     self._process = None

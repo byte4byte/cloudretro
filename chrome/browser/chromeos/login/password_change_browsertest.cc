@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "ash/public/cpp/login_screen_test_api.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
@@ -16,8 +17,8 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
-#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
+#include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/chromeos/login/test/oobe_window_visibility_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -32,11 +33,6 @@
 namespace chromeos {
 
 namespace {
-
-constexpr char kTestUser[] = "test-user1@gmail.com";
-constexpr char kTestUserGaiaId[] = "test-user1@gmail.com";
-constexpr char kPassword[] = "test user password";
-
 
 // Used to wait for session manager to become active.
 class SessionStartWaiter : public session_manager::SessionManagerObserver {
@@ -66,7 +62,8 @@ class SessionStartWaiter : public session_manager::SessionManagerObserver {
 
  private:
   base::OnceClosure session_active_callback_;
-  ScopedObserver<session_manager::SessionManager, SessionStartWaiter>
+  ScopedObserver<session_manager::SessionManager,
+                 session_manager::SessionManagerObserver>
       session_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SessionStartWaiter);
@@ -76,11 +73,9 @@ class SessionStartWaiter : public session_manager::SessionManagerObserver {
 
 class PasswordChangeTest : public LoginManagerTest {
  public:
-  PasswordChangeTest()
-      : LoginManagerTest(false, false),
-        test_account_id_(
-            AccountId::FromUserEmailGaiaId(kTestUser, kTestUserGaiaId)) {
-    set_force_webui_login(false);
+  PasswordChangeTest() : LoginManagerTest() {
+    login_mixin_.AppendRegularUsers(1);
+    test_account_id_ = login_mixin_.users()[0].account_id;
   }
   ~PasswordChangeTest() override = default;
 
@@ -114,10 +109,20 @@ class PasswordChangeTest : public LoginManagerTest {
                                                         SigninSpecifics());
   }
 
+  void WaitForPasswordChangeScreen() {
+    OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
+    OobeWindowVisibilityWaiter(true).Wait();
+
+    EXPECT_FALSE(ash::LoginScreenTestApi::IsShutdownButtonShown());
+    EXPECT_FALSE(ash::LoginScreenTestApi::IsGuestButtonShown());
+    EXPECT_FALSE(ash::LoginScreenTestApi::IsAddUserButtonShown());
+  }
+
  protected:
   AccountId test_account_id_;
   StubAuthenticator::DataRecoveryStatus data_recovery_status_ =
       StubAuthenticator::DataRecoveryStatus::kNone;
+  LoginManagerMixin login_mixin_{&mixin_host_};
 
  private:
   void HandleDataRecoveryStatusChange(
@@ -128,15 +133,10 @@ class PasswordChangeTest : public LoginManagerTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(PasswordChangeTest, PRE_MigrateOldCryptohome) {
-  RegisterUser(test_account_id_);
-  StartupUtils::MarkOobeCompleted();
-}
-
 IN_PROC_BROWSER_TEST_F(PasswordChangeTest, MigrateOldCryptohome) {
   SetUpStubAuthentcatorAndAttemptLogin("old user password");
-  OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
-  OobeWindowVisibilityWaiter(true).Wait();
+  WaitForPasswordChangeScreen();
+
   test::OobeJS()
       .CreateVisibilityWaiter(true,
                               {"gaia-password-changed", "oldPasswordCard"})
@@ -156,15 +156,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeTest, MigrateOldCryptohome) {
   SessionStartWaiter().Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(PasswordChangeTest, PRE_RetryOnWrongPassword) {
-  RegisterUser(test_account_id_);
-  StartupUtils::MarkOobeCompleted();
-}
-
 IN_PROC_BROWSER_TEST_F(PasswordChangeTest, RetryOnWrongPassword) {
   SetUpStubAuthentcatorAndAttemptLogin("old user password");
-  OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
-  OobeWindowVisibilityWaiter(true).Wait();
+  WaitForPasswordChangeScreen();
   test::OobeJS()
       .CreateVisibilityWaiter(true,
                               {"gaia-password-changed", "oldPasswordCard"})
@@ -180,7 +174,7 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeTest, RetryOnWrongPassword) {
   test::OobeJS()
       .CreateWaiter(test::GetOobeElementPath(
                         {"gaia-password-changed", "oldPasswordInput"}) +
-                    ".isInvalid")
+                    ".invalid")
       ->Wait();
   test::OobeJS().ExpectEnabledPath(
       {"gaia-password-changed", "oldPasswordCard"});
@@ -204,15 +198,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeTest, RetryOnWrongPassword) {
   SessionStartWaiter().Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(PasswordChangeTest, PRE_SkipDataRecovery) {
-  RegisterUser(test_account_id_);
-  StartupUtils::MarkOobeCompleted();
-}
-
 IN_PROC_BROWSER_TEST_F(PasswordChangeTest, SkipDataRecovery) {
   SetUpStubAuthentcatorAndAttemptLogin("old user password");
-  OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
-  OobeWindowVisibilityWaiter(true).Wait();
+  WaitForPasswordChangeScreen();
   test::OobeJS()
       .CreateVisibilityWaiter(true,
                               {"gaia-password-changed", "oldPasswordCard"})
@@ -241,15 +229,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeTest, SkipDataRecovery) {
   SessionStartWaiter().Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(PasswordChangeTest, PRE_TryAgainAfterForgetLinkClick) {
-  RegisterUser(test_account_id_);
-  StartupUtils::MarkOobeCompleted();
-}
-
 IN_PROC_BROWSER_TEST_F(PasswordChangeTest, TryAgainAfterForgetLinkClick) {
   SetUpStubAuthentcatorAndAttemptLogin("old user password");
-  OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
-  OobeWindowVisibilityWaiter(true).Wait();
+  WaitForPasswordChangeScreen();
   test::OobeJS()
       .CreateDisplayedWaiter(true, {"gaia-password-changed", "oldPasswordCard"})
       ->Wait();
@@ -287,14 +269,9 @@ IN_PROC_BROWSER_TEST_F(PasswordChangeTest, TryAgainAfterForgetLinkClick) {
   SessionStartWaiter().Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(PasswordChangeTest, PRE_ClosePasswordChangedDialog) {
-  RegisterUser(test_account_id_);
-  StartupUtils::MarkOobeCompleted();
-}
-
 IN_PROC_BROWSER_TEST_F(PasswordChangeTest, ClosePasswordChangedDialog) {
   SetUpStubAuthentcatorAndAttemptLogin("old user password");
-  OobeScreenWaiter(OobeScreen::SCREEN_PASSWORD_CHANGED).Wait();
+  WaitForPasswordChangeScreen();
   test::OobeJS()
       .CreateVisibilityWaiter(true,
                               {"gaia-password-changed", "oldPasswordCard"})

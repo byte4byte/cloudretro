@@ -14,6 +14,8 @@
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/local/canned_syncable_file_system.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_context.h"
@@ -30,9 +32,9 @@
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 
@@ -78,7 +80,7 @@ void AssignValueAndQuit(base::RunLoop* run_loop,
 void VerifyFileError(base::Closure callback,
                      base::File::Error error) {
   EXPECT_EQ(base::File::FILE_OK, error);
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, callback);
+  base::PostTask(FROM_HERE, {BrowserThread::UI}, callback);
 }
 
 }  // namespace
@@ -129,14 +131,14 @@ ACTION(InvokeCompletionClosure) {
 class SyncFileSystemServiceTest : public testing::Test {
  protected:
   SyncFileSystemServiceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
+      : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD) {}
 
   void SetUp() override {
     in_memory_env_ = leveldb_chrome::NewMemEnv("SyncFileSystemServiceTest");
     file_system_.reset(new CannedSyncableFileSystem(
         GURL(kOrigin), in_memory_env_.get(),
-        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}),
-        base::CreateSingleThreadTaskRunnerWithTraits({base::MayBlock()})));
+        base::CreateSingleThreadTaskRunner({BrowserThread::IO}),
+        base::ThreadPool::CreateSingleThreadTaskRunner({base::MayBlock()})));
 
     std::unique_ptr<LocalFileSyncService> local_service =
         LocalFileSyncService::CreateForTesting(&profile_, in_memory_env_.get());
@@ -260,7 +262,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     sync_service_->SetSyncEnabledForTesting(true);
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<leveldb::Env> in_memory_env_;
   TestingProfile profile_;
   std::unique_ptr<CannedSyncableFileSystem> file_system_;
@@ -423,7 +425,7 @@ TEST_F(SyncFileSystemServiceTest, SimpleSyncFlowWithFileBusy) {
 
   // Start a local operation on the same file (to make it BUSY).
   base::RunLoop verify_file_error_run_loop;
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CannedSyncableFileSystem::DoCreateFile,
                      base::Unretained(file_system_.get()), kFile,

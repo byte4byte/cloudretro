@@ -5,7 +5,7 @@
 #ifndef UI_EVENTS_BLINK_FLING_BOOSTER_H_
 #define UI_EVENTS_BLINK_FLING_BOOSTER_H_
 
-#include "third_party/blink/public/platform/web_gesture_event.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
 
 namespace ui {
 
@@ -24,11 +24,11 @@ class FlingBooster {
       const blink::WebGestureEvent& gesture_start);
   void ObserveGestureEvent(const blink::WebGestureEvent& gesture_event);
   void ObserveProgressFling(const gfx::Vector2dF& current_velocity);
+  void Reset();
 
  private:
   bool ShouldBoostFling(const blink::WebGestureEvent& fling_start_event);
 
-  void Reset();
 
   // When non-null, the current gesture stream is being considered for
   // boosting. If a fling hasn't occurred by this time, we won't cause a boost.

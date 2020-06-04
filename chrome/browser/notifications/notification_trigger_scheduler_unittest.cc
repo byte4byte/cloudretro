@@ -5,13 +5,14 @@
 #include <map>
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/notifications/notification_trigger_scheduler.h"
 #include "chrome/browser/notifications/platform_notification_service_factory.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -38,8 +39,7 @@ class MockNotificationTriggerScheduler : public NotificationTriggerScheduler {
 class NotificationTriggerSchedulerTest : public testing::Test {
  protected:
   NotificationTriggerSchedulerTest()
-      : thread_bundle_(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW) {}
+      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   class ProfileTestData {
    public:
@@ -59,7 +59,7 @@ class NotificationTriggerSchedulerTest : public testing::Test {
     MockNotificationTriggerScheduler* scheduler_;
   };
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 TEST_F(NotificationTriggerSchedulerTest,
@@ -93,6 +93,6 @@ TEST_F(NotificationTriggerSchedulerTest,
   EXPECT_CALL(*data2.scheduler_,
               TriggerNotificationsForStoragePartition(partition2));
 
-  thread_bundle_.FastForwardBy(delta);
+  task_environment_.FastForwardBy(delta);
   base::RunLoop().RunUntilIdle();
 }

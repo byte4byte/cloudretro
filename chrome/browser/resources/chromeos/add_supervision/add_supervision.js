@@ -7,12 +7,9 @@
  * @const {!Array<string>}
  */
 const ALLOWED_HOSTS = [
-  'families.google.com',
-  'play.google.com',
   'google.com',
-  'accounts.google.com',
   'gstatic.com',
-  'fonts.gstatic.com',
+  'googleapis.com',
   // FIFE avatar images (lh3-lh6). See http://go/fife-domains
   'lh3.googleusercontent.com',
   'lh4.googleusercontent.com',
@@ -36,19 +33,19 @@ function isAllowedRequest(requestDetails) {
               requestUrl.host.endsWith('.' + allowedHost));
 }
 
-let server = null;
-const proxy = addSupervision.mojom.AddSupervisionHandler.getProxy();
+const addSupervisionHandler =
+    addSupervision.mojom.AddSupervisionHandler.getRemote();
 
 Polymer({
   is: 'add-supervision-ui',
 
   /** Attempts to close the dialog */
-  closeDialog_: function() {
-    server.requestClose();
+  closeDialog_() {
+    this.server.requestClose();
   },
 
   /** @override */
-  ready: function() {
+  ready() {
     // Initialize and listen for online/offline state.
     this.webviewDiv = this.$.webviewDiv;
     this.webviewDiv.hidden = !navigator.onLine;
@@ -57,7 +54,7 @@ Polymer({
     this.offlineContentDiv.hidden = navigator.onLine;
 
     window.addEventListener('online', () => {
-      this.webviewDiv.style.hidden = false;
+      this.webviewDiv.hidden = false;
       this.offlineContentDiv.hidden = true;
     });
 
@@ -66,12 +63,8 @@ Polymer({
       this.offlineContentDiv.hidden = false;
     });
 
-    proxy.getOAuthToken().then((result) => {
+    addSupervisionHandler.getOAuthToken().then((result) => {
       const webviewUrl = loadTimeData.getString('webviewUrl');
-      if (!webviewUrl.startsWith('https://families.google.com')) {
-        console.error('webviewUrl is not from https://families.google.com');
-        return;
-      }
       const eventOriginFilter = loadTimeData.getString('eventOriginFilter');
       const webview =
           /** @type {!WebView} */ (this.$.webview);
@@ -79,11 +72,13 @@ Polymer({
       const accessToken = result.oauthToken;
       const flowType = loadTimeData.getString('flowType');
       const platformVersion = loadTimeData.getString('platformVersion');
+      const languageCode = loadTimeData.getString('languageCode');
 
       const url = new URL(webviewUrl);
       url.searchParams.set('flow_type', flowType);
       url.searchParams.set('platform_version', platformVersion);
       url.searchParams.set('access_token', accessToken);
+      url.searchParams.set('hl', languageCode);
 
       // Allow guest webview content to open links in new windows.
       webview.addEventListener('newwindow', function(e) {
@@ -99,7 +94,8 @@ Polymer({
       webview.src = url.toString();
 
       // Set up the server.
-      server = new AddSupervisionAPIServer(webview, url, eventOriginFilter);
+      this.server =
+          new AddSupervisionAPIServer(webview, url, eventOriginFilter);
     });
   },
 });

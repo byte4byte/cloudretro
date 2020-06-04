@@ -8,13 +8,14 @@ import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.IntDef;
-import android.support.annotation.StringRes;
 import android.util.AttributeSet;
 import android.view.View;
 import android.widget.ImageView;
 
-import org.chromium.chrome.browser.util.MathUtils;
+import androidx.annotation.IntDef;
+import androidx.annotation.StringRes;
+
+import org.chromium.base.MathUtils;
 import org.chromium.chrome.download.R;
 import org.chromium.ui.widget.ChromeImageButton;
 

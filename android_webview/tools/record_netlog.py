@@ -21,12 +21,12 @@ import time
 sys.path.append(
     os.path.join(
         os.path.dirname(__file__), os.pardir, os.pardir, 'build', 'android'))
-import devil_chromium  # pylint: disable=import-error
-from devil.android import device_errors  # pylint: disable=import-error
-from devil.android import flag_changer  # pylint: disable=import-error
-from devil.android import device_utils  # pylint: disable=import-error
-from devil.android.tools import script_common  # pylint: disable=import-error
-from devil.utils import logging_common  # pylint: disable=import-error
+import devil_chromium
+from devil.android import device_errors
+from devil.android import flag_changer
+from devil.android import device_utils
+from devil.android.tools import script_common
+from devil.utils import logging_common
 
 WEBVIEW_COMMAND_LINE = 'webview-command-line'
 
@@ -40,8 +40,8 @@ def _WaitUntilCtrlC():
 
 
 def CheckAppNotRunning(device, package_name, force):
-  processes = device.ListProcesses(package_name)
-  if processes:
+  is_running = bool(device.GetApplicationPids(package_name))
+  if is_running:
     msg = ('Netlog requires setting commandline flags, which only works if the '
            'application ({}) is not already running. Please kill the app and '
            'restart the script.'.format(

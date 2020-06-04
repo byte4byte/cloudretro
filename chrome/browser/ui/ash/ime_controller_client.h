@@ -5,17 +5,16 @@
 #ifndef CHROME_BROWSER_UI_ASH_IME_CONTROLLER_CLIENT_H_
 #define CHROME_BROWSER_UI_ASH_IME_CONTROLLER_CLIENT_H_
 
-#include "ash/public/interfaces/ime_controller.mojom.h"
-#include "ash/public/interfaces/ime_info.mojom.h"
+#include "ash/public/cpp/ime_controller.h"
+#include "ash/public/cpp/ime_info.h"
 #include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/chromeos/ime/input_method_menu_manager.h"
 
 // Connects the ImeController in ash to the InputMethodManagerImpl in chrome.
 class ImeControllerClient
-    : public ash::mojom::ImeControllerClient,
+    : public ash::ImeControllerClient,
       public chromeos::input_method::InputMethodManager::Observer,
       public chromeos::input_method::InputMethodManager::ImeMenuObserver,
       public chromeos::input_method::ImeKeyboard::Observer,
@@ -28,15 +27,15 @@ class ImeControllerClient
   // Initializes and connects to ash.
   void Init();
 
-  // Tests can shim in a mock mojo interface for the ash controller.
-  void InitForTesting(ash::mojom::ImeControllerPtr controller);
+  // Tests can shim in a mock interface for the ash controller.
+  void InitForTesting(ash::ImeController* controller);
 
   static ImeControllerClient* Get();
 
   // Sets whether the list of IMEs is managed by device policy.
   void SetImesManagedByPolicy(bool managed);
 
-  // ash::mojom::ImeControllerClient:
+  // ash::ImeControllerClient:
   void SwitchToNextIme() override;
   void SwitchToLastUsedIme() override;
   void SwitchImeById(const std::string& id, bool show_message) override;
@@ -44,7 +43,7 @@ class ImeControllerClient
   void SetCapsLockEnabled(bool caps_enabled) override;
   void UpdateMirroringState(bool mirroring_enabled) override;
   void UpdateCastingState(bool casting_enabled) override;
-  void OverrideKeyboardKeyset(chromeos::input_method::mojom::ImeKeyset keyset,
+  void OverrideKeyboardKeyset(chromeos::input_method::ImeKeyset keyset,
                               OverrideKeyboardKeysetCallback callback) override;
   void ShowModeIndicator() override;
 
@@ -75,14 +74,11 @@ class ImeControllerClient
                                       bool is_handwriting_enabled,
                                       bool is_voice_enabled) override;
 
-  void FlushMojoForTesting();
-
  private:
-  // Binds this object to its mojo interface and sets it as the ash client.
-  void BindAndSetClient();
+  void InitAndSetClient();
 
-  // Converts IME information from |descriptor| into the ash mojo format.
-  ash::mojom::ImeInfoPtr GetAshImeInfo(
+  // Converts IME information from |descriptor| into the ash format.
+  ash::ImeInfo GetAshImeInfo(
       const chromeos::input_method::InputMethodDescriptor& descriptor) const;
 
   // Sends information about current and available IMEs to ash.
@@ -90,11 +86,8 @@ class ImeControllerClient
 
   chromeos::input_method::InputMethodManager* const input_method_manager_;
 
-  // Binds this object to the mojo interface.
-  mojo::Binding<ash::mojom::ImeControllerClient> binding_;
-
-  // ImeController interface in ash.
-  ash::mojom::ImeControllerPtr ime_controller_ptr_;
+  // ImeController in ash.
+  ash::ImeController* ime_controller_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ImeControllerClient);
 };

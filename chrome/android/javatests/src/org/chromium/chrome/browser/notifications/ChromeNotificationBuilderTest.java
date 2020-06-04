@@ -18,9 +18,13 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.components.browser_ui.notifications.ChromeNotification;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxy;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
 
 /**
  * Tests that ChromeNotificationBuilders created using
@@ -45,7 +49,7 @@ public class ChromeNotificationBuilderTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         // Let's leave things in a clean state.
         mNotificationManager.cancelAll();
     }
@@ -65,7 +69,7 @@ public class ChromeNotificationBuilderTest {
     public void buildNotificationAndNotifyDoesNotCrash() {
         ChromeNotificationBuilder notificationBuilder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(
-                        false, ChannelDefinitions.ChannelId.BROWSER);
+                        false, ChromeChannelDefinitions.ChannelId.BROWSER);
 
         Notification notification = notificationBuilder.setContentTitle("Title")
                                             .setSmallIcon(R.drawable.ic_chrome)
@@ -78,7 +82,7 @@ public class ChromeNotificationBuilderTest {
     public void buildCompatNotificationAndNotifyDoesNotCrash() {
         ChromeNotificationBuilder notificationBuilder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(
-                        true, ChannelDefinitions.ChannelId.BROWSER);
+                        true, ChromeChannelDefinitions.ChannelId.BROWSER);
 
         Notification notification = notificationBuilder.setContentTitle("Title")
                                             .setSmallIcon(R.drawable.ic_chrome)
@@ -92,7 +96,7 @@ public class ChromeNotificationBuilderTest {
     public void buildChromeNotification() {
         ChromeNotificationBuilder builder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(true,
-                        ChannelDefinitions.ChannelId.BROWSER, null,
+                        ChromeChannelDefinitions.ChannelId.BROWSER, null,
                         new NotificationMetadata(
                                 NotificationUmaTracker.SystemNotificationType.BROWSER_ACTIONS, null,
                                 TEST_NOTIFICATION_ID));

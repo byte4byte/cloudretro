@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/ax_tree_id.h"
 
 namespace ui {
 
@@ -25,22 +26,43 @@ struct AXLanguageInfo;
 // One node in an AXTree.
 class AX_EXPORT AXNode final {
  public:
+  // Defines the type used for AXNode IDs.
+  using AXID = int32_t;
+
+  // If a node is not yet or no longer valid, its ID should have a value of
+  // kInvalidAXID.
+  static constexpr AXID kInvalidAXID = 0;
+
   // Interface to the tree class that owns an AXNode. We use this instead
   // of letting AXNode have a pointer to its AXTree directly so that we're
   // forced to think twice before calling an AXTree interface that might not
   // be necessary.
   class OwnerTree {
    public:
-    // See AXTree.
+    struct Selection {
+      bool is_backward;
+      AXID anchor_object_id;
+      int anchor_offset;
+      ax::mojom::TextAffinity anchor_affinity;
+      AXID focus_object_id;
+      int focus_offset;
+      ax::mojom::TextAffinity focus_affinity;
+    };
+
+    // See AXTree::GetAXTreeID.
+    virtual AXTreeID GetAXTreeID() const = 0;
+    // See AXTree::GetTableInfo.
     virtual AXTableInfo* GetTableInfo(const AXNode* table_node) const = 0;
-    // See AXTree.
+    // See AXTree::GetFromId.
     virtual AXNode* GetFromId(int32_t id) const = 0;
 
     virtual int32_t GetPosInSet(const AXNode& node,
                                 const AXNode* ordered_set) = 0;
     virtual int32_t GetSetSize(const AXNode& node,
                                const AXNode* ordered_set) = 0;
+    virtual Selection GetUnignoredSelection() const = 0;
     virtual bool GetTreeUpdateInProgressState() const = 0;
+    virtual bool HasPaginationSupport() const = 0;
   };
 
   template <typename NodeType,
@@ -92,10 +114,15 @@ class AX_EXPORT AXNode final {
   AXNode* GetUnignoredChildAtIndex(size_t index) const;
   AXNode* GetUnignoredParent() const;
   size_t GetUnignoredIndexInParent() const;
+  size_t GetIndexInParent() const;
   AXNode* GetFirstUnignoredChild() const;
   AXNode* GetLastUnignoredChild() const;
+  AXNode* GetDeepestFirstUnignoredChild() const;
+  AXNode* GetDeepestLastUnignoredChild() const;
   AXNode* GetNextUnignoredSibling() const;
   AXNode* GetPreviousUnignoredSibling() const;
+  AXNode* GetNextUnignoredInTreeOrder() const;
+  AXNode* GetPreviousUnignoredInTreeOrder() const;
 
   using UnignoredChildIterator =
       ChildIteratorBase<AXNode,
@@ -104,6 +131,13 @@ class AX_EXPORT AXNode final {
                         &AXNode::GetLastUnignoredChild>;
   UnignoredChildIterator UnignoredChildrenBegin() const;
   UnignoredChildIterator UnignoredChildrenEnd() const;
+
+  // Walking the tree including both ignored and unignored nodes.
+  // These methods consider only the direct children or siblings of a node.
+  AXNode* GetFirstChild() const;
+  AXNode* GetLastChild() const;
+  AXNode* GetPreviousSibling() const;
+  AXNode* GetNextSibling() const;
 
   // Returns true if the node has any of the text related roles.
   bool IsText() const;
@@ -135,7 +169,7 @@ class AX_EXPORT AXNode final {
 
   // Swap the internal children vector with |children|. This instance
   // now owns all of the passed children.
-  void SwapChildren(std::vector<AXNode*>& children);
+  void SwapChildren(std::vector<AXNode*>* children);
 
   // This is called when the AXTree no longer includes this node in the
   // tree. Reference counting is used on some platforms because the
@@ -145,7 +179,7 @@ class AX_EXPORT AXNode final {
   void Destroy();
 
   // Return true if this object is equal to or a descendant of |ancestor|.
-  bool IsDescendantOf(AXNode* ancestor);
+  bool IsDescendantOf(const AXNode* ancestor) const;
 
   // Gets the text offsets where new lines start either from the node's data or
   // by computing them and caching the result.
@@ -237,6 +271,9 @@ class AX_EXPORT AXNode final {
     return data().GetHtmlAttribute(attribute, value);
   }
 
+  // Return the hierarchical level if supported.
+  base::Optional<int> GetHierarchicalLevel() const;
+
   // PosInSet and SetSize public methods.
   bool IsOrderedSetItem() const;
   bool IsOrderedSet() const;
@@ -247,6 +284,10 @@ class AX_EXPORT AXNode final {
   // Returns true if the role of ordered set matches the role of item.
   // Returns false otherwise.
   bool SetRoleMatchesItemRole(const AXNode* ordered_set) const;
+
+  // Container objects that should be ignored for computing PosInSet and SetSize
+  // for ordered sets.
+  bool IsIgnoredContainerForOrderedSet() const;
 
   const std::string& GetInheritedStringAttribute(
       ax::mojom::StringAttribute attribute) const;
@@ -261,7 +302,7 @@ class AX_EXPORT AXNode final {
   // This language code will be BCP 47.
   //
   // Returns empty string if no appropriate language was found.
-  std::string GetLanguage();
+  std::string GetLanguage() const;
 
   //
   // Helper functions for tables, table rows, and table cells.
@@ -288,6 +329,7 @@ class AX_EXPORT AXNode final {
   base::Optional<int> GetTableAriaColCount() const;
   base::Optional<int> GetTableAriaRowCount() const;
   base::Optional<int> GetTableCellCount() const;
+  base::Optional<bool> GetTableHasColumnOrRowHeaderNode() const;
   AXNode* GetTableCaption() const;
   AXNode* GetTableCellFromIndex(int index) const;
   AXNode* GetTableCellFromCoords(int row_index, int col_index) const;
@@ -304,6 +346,8 @@ class AX_EXPORT AXNode final {
   // Table row-like nodes.
   bool IsTableRow() const;
   base::Optional<int> GetTableRowRowIndex() const;
+  // Get the node ids that represent rows in a table.
+  std::vector<AXNode::AXID> GetTableRowNodeIds() const;
 
 #if defined(OS_MACOSX)
   // Table column-like nodes. These nodes are only present on macOS.
@@ -329,18 +373,36 @@ class AX_EXPORT AXNode final {
   bool IsCellOrHeaderOfARIATable() const;
   bool IsCellOrHeaderOfARIAGrid() const;
 
-  // Return an object containing information about the languages used.
+  // Return an object containing information about the languages detected on
+  // this node.
   // Callers should not retain this pointer, instead they should request it
   // every time it is needed.
   //
-  // Clients likely want to use GetLanguage instead.
-  //
   // Returns nullptr if the node has no language info.
-  AXLanguageInfo* GetLanguageInfo();
+  AXLanguageInfo* GetLanguageInfo() const;
 
-  // This should only be called by the LabelLanguageForSubtree and is used as
-  // part of the language detection feature.
+  // This should only be called by LabelLanguageForSubtree and is used as part
+  // of the language detection feature.
   void SetLanguageInfo(std::unique_ptr<AXLanguageInfo> lang_info);
+
+  // Destroy the language info for this node.
+  void ClearLanguageInfo();
+
+  // Returns true if node has ignored state or ignored role.
+  bool IsIgnored() const;
+
+  // Returns true if this current node is a list marker or if it's a descendant
+  // of a list marker node. Returns false otherwise.
+  bool IsInListMarker() const;
+
+  // Returns true if this node is a collapsed popup button that is parent to a
+  // menu list popup.
+  bool IsCollapsedMenuListPopUpButton() const;
+
+  // Returns the popup button ancestor of this current node if any. The popup
+  // button needs to be the parent of a menu list popup and needs to be
+  // collapsed.
+  AXNode* GetCollapsedMenuListPopUpButtonAncestor() const;
 
  private:
   // Computes the text offset where each line starts by traversing all child
@@ -348,7 +410,7 @@ class AX_EXPORT AXNode final {
   void ComputeLineStartOffsets(std::vector<int>* line_offsets,
                                int* start_offset) const;
   AXTableInfo* GetAncestorTableInfo() const;
-  void IdVectorToNodeVector(std::vector<int32_t>& ids,
+  void IdVectorToNodeVector(const std::vector<int32_t>& ids,
                             std::vector<AXNode*>* nodes) const;
 
   int UpdateUnignoredCachedValuesRecursive(int startIndex);
@@ -358,11 +420,11 @@ class AX_EXPORT AXNode final {
   // Finds and returns a pointer to ordered set containing node.
   AXNode* GetOrderedSet() const;
 
-  OwnerTree* tree_;  // Owns this.
+  OwnerTree* const tree_;  // Owns this.
   size_t index_in_parent_;
   size_t unignored_index_in_parent_;
-  size_t unignored_child_count_;
-  AXNode* parent_;
+  size_t unignored_child_count_ = 0;
+  AXNode* const parent_;
   std::vector<AXNode*> children_;
   AXNodeData data_;
 

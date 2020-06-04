@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/arc/arc_optin_uma.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/dm_token_storage.h"
@@ -50,7 +51,7 @@ namespace arc {
 
 ArcActiveDirectoryEnrollmentTokenFetcher::
     ArcActiveDirectoryEnrollmentTokenFetcher(ArcSupportHost* support_host)
-    : support_host_(support_host), weak_ptr_factory_(this) {
+    : support_host_(support_host) {
   DCHECK(support_host_);
   support_host_->SetAuthDelegate(this);
 }
@@ -158,7 +159,8 @@ void ArcActiveDirectoryEnrollmentTokenFetcher::
     case policy::DM_STATUS_SERVICE_ARC_DISABLED:
     case policy::DM_STATUS_SERVICE_POLICY_NOT_FOUND: {
       // POLICY_NOT_FOUND is the first error encountered when the domain is not
-      // set up yet in CPanel, so just treat it the same as ARC_DISABLED.
+      // set up yet in the Admin console, so just treat it the same as
+      // ARC_DISABLED.
       fetch_status = Status::ARC_DISABLED;
       break;
     }

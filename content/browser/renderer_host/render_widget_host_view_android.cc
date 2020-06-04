@@ -15,6 +15,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -23,6 +24,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/base/math_util.h"
@@ -34,8 +36,6 @@
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/surfaces/frame_sink_id_allocator.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
-#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
-#include "components/viz/service/surfaces/surface.h"
 #include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/accessibility/web_contents_accessibility_android.h"
 #include "content/browser/android/content_feature_list.h"
@@ -65,6 +65,7 @@
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/renderer_host/ui_events_helper.h"
 #include "content/common/content_switches_internal.h"
+#include "content/public/android/content_jni_headers/RenderWidgetHostViewImpl_jni.h"
 #include "content/public/browser/android/compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "content/public/browser/browser_thread.h"
@@ -76,7 +77,6 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/use_zoom_for_dsf_policy.h"
-#include "content/public/android/content_jni_headers/RenderWidgetHostViewImpl_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -84,6 +84,8 @@
 #include "ui/android/view_android_observer.h"
 #include "ui/android/window_android.h"
 #include "ui/android/window_android_compositor.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/base/cursor/cursor_lookup.h"
 #include "ui/base/layout.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/events/android/gesture_event_android.h"
@@ -131,9 +133,18 @@ std::unique_ptr<ui::TouchSelectionController> CreateSelectionController(
 }
 
 gfx::RectF GetSelectionRect(const ui::TouchSelectionController& controller) {
-  gfx::RectF rect = controller.GetRectBetweenBounds();
-  if (rect.IsEmpty())
-    return rect;
+  // When the touch handles are on the same line, the rect may become simply a
+  // one-dimensional rect, and still need to union the handle rect to avoid the
+  // context menu covering the touch handle. See detailed comments in
+  // TouchSelectionController::GetRectBetweenBounds(). Ensure that the |rect| is
+  // not empty by adding a pixel width or height to avoid the wrong menu
+  // position.
+  gfx::RectF rect = controller.GetVisibleRectBetweenBounds();
+  if (rect.IsEmpty()) {
+    gfx::SizeF size = rect.size();
+    size.SetToMax(gfx::SizeF(1.0f, 1.0f));
+    rect.set_size(size);
+  }
 
   rect.Union(controller.GetStartHandleRect());
   rect.Union(controller.GetEndHandleRect());
@@ -202,8 +213,6 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
     RenderWidgetHostImpl* widget_host,
     gfx::NativeView parent_native_view)
     : RenderWidgetHostViewBase(widget_host),
-      begin_frame_source_(nullptr),
-      outstanding_begin_frame_requests_(0),
       is_showing_(!widget_host->is_hidden()),
       is_window_visible_(true),
       is_window_activity_started_(true),
@@ -218,10 +227,9 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
                         this),
       stylus_text_selector_(this),
       using_browser_compositor_(CompositorImpl::IsInitialized()),
+      using_viz_for_webview_(features::IsUsingVizForWebView()),
       synchronous_compositor_client_(nullptr),
       observing_root_window_(false),
-      fallback_cursor_mode_enabled_(
-          base::FeatureList::IsEnabled(features::kFallbackCursorMode)),
       prev_top_shown_pix_(0.f),
       prev_top_controls_translate_(0.f),
       prev_bottom_shown_pix_(0.f),
@@ -229,8 +237,7 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
       page_scale_(1.f),
       min_page_scale_(1.f),
       max_page_scale_(1.f),
-      mouse_wheel_phase_handler_(this),
-      weak_ptr_factory_(this) {
+      mouse_wheel_phase_handler_(this) {
   // Set the layer which will hold the content layer for this view. The content
   // layer is managed by the DelegatedFrameHost.
   view_.SetLayer(cc::Layer::Create());
@@ -241,10 +248,9 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
   if (is_showing_)
     local_surface_id_allocator_.GenerateId();
 
-  if (using_browser_compositor_) {
+  if (using_browser_compositor_ || using_viz_for_webview_) {
     delegated_frame_host_client_ =
         std::make_unique<DelegatedFrameHostClientAndroid>(this);
-    DCHECK(features::IsSurfaceSynchronizationEnabled());
     delegated_frame_host_ = std::make_unique<ui::DelegatedFrameHostAndroid>(
         &view_, GetHostFrameSinkManager(), delegated_frame_host_client_.get(),
         host()->GetFrameSinkId());
@@ -392,15 +398,12 @@ void RenderWidgetHostViewAndroid::LostFocus() {
 
 void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
     const cc::RenderFrameMetadata& metadata) {
-  if (!features::IsSurfaceSynchronizationEnabled())
-    return;
-
   bool is_transparent = metadata.has_transparent_background;
   SkColor root_background_color = metadata.root_background_color;
 
   if (!using_browser_compositor_) {
     // DevTools ScreenCast support for Android WebView.
-    last_devtools_frame_metadata_.emplace(metadata);
+    last_render_frame_metadata_ = metadata;
     // Android WebView ignores transparent background.
     is_transparent = false;
   }
@@ -436,10 +439,6 @@ void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
                                           top_shown_pix);
   }
 
-  auto* wcax = GetWebContentsAccessibilityAndroid();
-  if (wcax)
-    wcax->UpdateFrameInfo(metadata.page_scale_factor);
-
   if (!gesture_listener_manager_)
     return;
 
@@ -455,8 +454,10 @@ void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
   view_.UpdateFrameInfo({scrollable_viewport_size_dip, top_content_offset_dip});
   bool controls_changed = UpdateControls(
       view_.GetDipScale(), metadata.top_controls_height,
-      metadata.top_controls_shown_ratio, metadata.bottom_controls_height,
-      metadata.bottom_controls_shown_ratio);
+      metadata.top_controls_shown_ratio,
+      metadata.top_controls_min_height_offset, metadata.bottom_controls_height,
+      metadata.bottom_controls_shown_ratio,
+      metadata.bottom_controls_min_height_offset);
 
   SetContentBackgroundColor(is_transparent ? SK_ColorTRANSPARENT
                                            : root_background_color);
@@ -475,6 +476,11 @@ void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
       metadata.min_page_scale_factor, metadata.max_page_scale_factor,
       root_layer_size_dip, scrollable_viewport_size_dip, top_content_offset_dip,
       top_shown_pix, controls_changed);
+  // This needs to be called after GestureListenerManager::UpdateScrollInfo, as
+  // it depends on frame info being updated during the UpdateScrollInfo call.
+  auto* wcax = GetWebContentsAccessibilityAndroid();
+  if (wcax)
+    wcax->UpdateFrameInfo(metadata.page_scale_factor);
 
   page_scale_ = metadata.page_scale_factor;
   min_page_scale_ = metadata.min_page_scale_factor;
@@ -531,14 +537,11 @@ void RenderWidgetHostViewAndroid::ShowContextMenuAtTouchHandle(
   }
 }
 
-void RenderWidgetHostViewAndroid::InsetViewportBottom(
+void RenderWidgetHostViewAndroid::OnViewportInsetBottomChanged(
     JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& obj,
-    jint bottom_adjust_px) {
-  int pinned_bottom_adjust_dps =
-      std::max(0, (int)(bottom_adjust_px / view_.GetDipScale()));
-  gfx::Insets insets(0, 0, pinned_bottom_adjust_dps, 0);
-  SetInsets(insets);
+    const base::android::JavaParamRef<jobject>& obj) {
+  SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
+                              base::nullopt);
 }
 
 void RenderWidgetHostViewAndroid::WriteContentBitmapToDiskAsync(
@@ -557,6 +560,23 @@ void RenderWidgetHostViewAndroid::WriteContentBitmapToDiskAsync(
 
   CopyFromSurface(gfx::Rect(), gfx::Size(width, height),
                   std::move(result_callback));
+}
+
+void RenderWidgetHostViewAndroid::
+    OnRenderFrameMetadataChangedAfterActivation() {
+  if (ime_adapter_android_) {
+    const cc::RenderFrameMetadata& metadata =
+        host()->render_frame_metadata_provider()->LastRenderFrameMetadata();
+    // We need to first wait for Blink's viewport size to change such that we
+    // can correctly scroll to the currently focused input.
+    // On Clank, only visible viewport size changes and device viewport size or
+    // viewport_size_in_pixels do not change according to the window/view size
+    /// change. Only scrollable viewport size changes both for Chrome and
+    // WebView.
+    ime_adapter_android_->OnRenderFrameMetadataChangedAfterActivation(
+        metadata.scrollable_viewport_size);
+  }
+  RenderWidgetHostViewBase::OnRenderFrameMetadataChangedAfterActivation();
 }
 
 void RenderWidgetHostViewAndroid::Focus() {
@@ -627,17 +647,15 @@ gfx::Rect RenderWidgetHostViewAndroid::GetViewBounds() {
 }
 
 gfx::Size RenderWidgetHostViewAndroid::GetVisibleViewportSize() {
+  int pinned_bottom_adjust_dps =
+      std::max(0, (int)(view_.GetViewportInsetBottom() / view_.GetDipScale()));
   gfx::Rect requested_rect(GetRequestedRendererSize());
-  requested_rect.Inset(insets_);
+  requested_rect.Inset(gfx::Insets(0, 0, pinned_bottom_adjust_dps, 0));
   return requested_rect.size();
 }
 
 void RenderWidgetHostViewAndroid::SetInsets(const gfx::Insets& insets) {
-  if (insets != insets_) {
-    insets_ = insets;
-    SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
-                                base::nullopt);
-  }
+  NOTREACHED();
 }
 
 gfx::Size RenderWidgetHostViewAndroid::GetCompositorViewportPixelSize() {
@@ -664,10 +682,10 @@ int RenderWidgetHostViewAndroid::GetMouseWheelMinimumGranularity() const {
   return window->mouse_wheel_scroll_factor() / view_.GetDipScale();
 }
 
-void RenderWidgetHostViewAndroid::UpdateCursor(const WebCursor& cursor) {
-  const CursorInfo& info = cursor.info();
-  view_.OnCursorChanged(static_cast<int>(info.type), info.custom_image,
-                        info.hotspot);
+void RenderWidgetHostViewAndroid::UpdateCursor(const WebCursor& webcursor) {
+  const ui::Cursor& cursor = webcursor.cursor();
+  view_.OnCursorChanged(static_cast<int>(cursor.type()),
+                        GetCursorBitmap(cursor), GetCursorHotspot(cursor));
 }
 
 void RenderWidgetHostViewAndroid::SetIsLoading(bool is_loading) {
@@ -737,19 +755,6 @@ void RenderWidgetHostViewAndroid::OnTextSelectionChanged(
 
   selection_popup_controller_->OnSelectionChanged(
       base::UTF16ToUTF8(selection.selected_text()));
-}
-
-void RenderWidgetHostViewAndroid::SetNeedsBeginFrames(bool needs_begin_frames) {
-  TRACE_EVENT1("cc", "RenderWidgetHostViewAndroid::SetNeedsBeginFrames",
-               "needs_begin_frames", needs_begin_frames);
-  if (needs_begin_frames)
-    AddBeginFrameRequest(PERSISTENT_BEGIN_FRAME);
-  else
-    ClearBeginFrameRequest(PERSISTENT_BEGIN_FRAME);
-}
-
-void RenderWidgetHostViewAndroid::SetWantsAnimateOnlyBeginFrames() {
-  wants_animate_only_begin_frames_ = true;
 }
 
 viz::FrameSinkId RenderWidgetHostViewAndroid::GetRootFrameSinkId() {
@@ -854,7 +859,7 @@ bool RenderWidgetHostViewAndroid::OnTouchEvent(
   blink::WebTouchEvent web_event = ui::CreateWebTouchEventFromMotionEvent(
       event, result.moved_beyond_slop_region /* may_cause_scrolling */,
       false /* hovering */);
-  if (web_event.GetType() == blink::WebInputEvent::kUndefined)
+  if (web_event.GetType() == blink::WebInputEvent::Type::kUndefined)
     return false;
 
   ui::LatencyInfo latency_info(ui::SourceEventType::TOUCH);
@@ -870,9 +875,10 @@ bool RenderWidgetHostViewAndroid::OnTouchEvent(
   // scroll-inducing touch events. Note that Android's Choreographer ensures
   // that BeginFrame requests made during Action::MOVE dispatch will be honored
   // in the same vsync phase.
-  if (observing_root_window_ && result.moved_beyond_slop_region)
-    AddBeginFrameRequest(BEGIN_FRAME);
-
+  if (observing_root_window_ && result.moved_beyond_slop_region) {
+    if (sync_compositor_)
+      sync_compositor_->RequestOneBeginFrame();
+  }
   return true;
 }
 
@@ -1022,7 +1028,7 @@ void RenderWidgetHostViewAndroid::OnInterstitialPageAttached() {
 }
 
 void RenderWidgetHostViewAndroid::OnInterstitialPageGoingAway() {
-  sync_compositor_.reset();
+  ResetSynchronousCompositor();
 }
 
 std::unique_ptr<SyntheticGestureTarget>
@@ -1035,37 +1041,6 @@ bool RenderWidgetHostViewAndroid::ShouldRouteEvents() const {
   DCHECK(host());
   return using_browser_compositor_ && host()->delegate() &&
          host()->delegate()->GetInputEventRouter();
-}
-
-void RenderWidgetHostViewAndroid::DidReceiveCompositorFrameAck(
-    const std::vector<viz::ReturnedResource>& resources) {
-  renderer_compositor_frame_sink_->DidReceiveCompositorFrameAck(resources);
-}
-
-void RenderWidgetHostViewAndroid::DidPresentCompositorFrames(
-    const viz::FrameTimingDetailsMap& timing_details) {
-  timing_details_ = timing_details;
-  if (!timing_details_.empty())
-    AddBeginFrameRequest(BEGIN_FRAME);
-}
-
-void RenderWidgetHostViewAndroid::ReclaimResources(
-    const std::vector<viz::ReturnedResource>& resources) {
-  renderer_compositor_frame_sink_->ReclaimResources(resources);
-}
-
-void RenderWidgetHostViewAndroid::DidCreateNewRendererCompositorFrameSink(
-    viz::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink) {
-  if (!delegated_frame_host_) {
-    DCHECK(!using_browser_compositor_);
-    // We don't expect RendererCompositorFrameSink on Android WebView.
-    // (crbug.com/721102)
-    bad_message::ReceivedBadMessage(host()->GetProcess(),
-                                    bad_message::RWH_BAD_FRAME_SINK_REQUEST);
-    return;
-  }
-  delegated_frame_host_->CompositorFrameSinkChanged();
-  renderer_compositor_frame_sink_ = renderer_compositor_frame_sink;
 }
 
 void RenderWidgetHostViewAndroid::EvictFrameIfNecessary() {
@@ -1086,37 +1061,13 @@ void RenderWidgetHostViewAndroid::EvictFrameIfNecessary() {
 }
 
 void RenderWidgetHostViewAndroid::UpdateWebViewBackgroundColorIfNecessary() {
-  // Before SurfaceSync, Android WebView had a bug the BG color was always set
-  // to black when fullscreen (see https://crbug.com/961223#c5). As
-  // applications came to rely on this behavior, preserve it here.
-  if (!features::IsSurfaceSynchronizationEnabled())
-    return;
+  // Android WebView had a bug the BG color was always set to black when
+  // fullscreen (see https://crbug.com/961223#c5). As applications came to rely
+  // on this behavior, preserve it here.
   if (!using_browser_compositor_ &&
       host()->delegate()->IsFullscreenForCurrentTab()) {
     SetContentBackgroundColor(SK_ColorBLACK);
   }
-}
-
-void RenderWidgetHostViewAndroid::SubmitCompositorFrame(
-    const viz::LocalSurfaceId& local_surface_id,
-    viz::CompositorFrame frame,
-    base::Optional<viz::HitTestRegionList> hit_test_region_list) {
-  NOTREACHED();
-}
-
-void RenderWidgetHostViewAndroid::OnDidNotProduceFrame(
-    const viz::BeginFrameAck& ack) {
-  if (!delegated_frame_host_) {
-    // We are not using the browser compositor and there's no DisplayScheduler
-    // that needs to be notified about the BeginFrameAck, so we can drop it.
-    DCHECK(!using_browser_compositor_);
-    return;
-  }
-  NOTREACHED();
-}
-
-void RenderWidgetHostViewAndroid::ClearCompositorFrame() {
-  EvictDelegatedFrame();
 }
 
 void RenderWidgetHostViewAndroid::ResetFallbackToFirstNavigationSurface() {
@@ -1129,37 +1080,15 @@ bool RenderWidgetHostViewAndroid::RequestRepaintForTesting() {
                                      base::nullopt);
 }
 
-void RenderWidgetHostViewAndroid::SynchronousFrameMetadata(
-    viz::CompositorFrameMetadata metadata) {
-  // TODO(ericrk): Remove this function once surface synchronization feature is
-  // no longer optional.
-  if (features::IsSurfaceSynchronizationEnabled())
-    return;
-
-  if (!view_.parent())
-    return;
-
-    bool is_mobile_optimized = IsMobileOptimizedFrame(
-        metadata.page_scale_factor, metadata.min_page_scale_factor,
-        metadata.max_page_scale_factor, metadata.scrollable_viewport_size,
-        metadata.root_layer_size);
-
-    if (host() && host()->input_router())
-      host()->input_router()->NotifySiteIsMobileOptimized(is_mobile_optimized);
-
-    // This is a subset of OnSwapCompositorFrame() used in the synchronous
-    // compositor flow.
-    OnFrameMetadataUpdated(metadata.Clone(), false);
-
-    // DevTools ScreenCast support for Android WebView.
-    last_devtools_frame_metadata_.emplace(metadata);
-}
 
 void RenderWidgetHostViewAndroid::FrameTokenChangedForSynchronousCompositor(
     uint32_t frame_token,
     const gfx::ScrollOffset& root_scroll_offset) {
   if (host() && frame_token) {
-    host()->DidProcessFrame(frame_token);
+    if (!using_viz_for_webview_) {
+      // For viz it's reported through FrameSinkManager.
+      host()->DidProcessFrame(frame_token);
+    }
 
     // DevTools ScreenCast support for Android WebView. Don't call this if
     // we're currently in SynchronousCopyContents, as this can lead to
@@ -1167,11 +1096,11 @@ void RenderWidgetHostViewAndroid::FrameTokenChangedForSynchronousCompositor(
     if (!in_sync_copy_contents_) {
       RenderFrameHost* frame_host =
           RenderViewHost::From(host())->GetMainFrame();
-      if (frame_host && last_devtools_frame_metadata_) {
+      if (frame_host && last_render_frame_metadata_) {
         // Update our |root_scroll_offset|, as changes to this value do not
         // trigger a new RenderFrameMetadata, and it may be out of date. This
         // is needed for devtools DOM node selection.
-        DevToolsFrameMetadata updated_metadata = *last_devtools_frame_metadata_;
+        cc::RenderFrameMetadata updated_metadata = *last_render_frame_metadata_;
         updated_metadata.root_scroll_offset =
             gfx::ScrollOffsetToVector2dF(root_scroll_offset);
         RenderFrameDevToolsAgentHost::SignalSynchronousSwapCompositorFrame(
@@ -1184,9 +1113,23 @@ void RenderWidgetHostViewAndroid::FrameTokenChangedForSynchronousCompositor(
 void RenderWidgetHostViewAndroid::SetSynchronousCompositorClient(
       SynchronousCompositorClient* client) {
   synchronous_compositor_client_ = client;
+  MaybeCreateSynchronousCompositor();
+}
+
+void RenderWidgetHostViewAndroid::MaybeCreateSynchronousCompositor() {
   if (!sync_compositor_ && synchronous_compositor_client_) {
-    sync_compositor_ = SynchronousCompositorHost::Create(this);
+    sync_compositor_ =
+        SynchronousCompositorHost::Create(this, host()->GetFrameSinkId());
     view_.SetCopyOutputCallback(sync_compositor_->GetCopyViewCallback());
+    if (render_widget_initialized_)
+      sync_compositor_->InitMojo();
+  }
+}
+
+void RenderWidgetHostViewAndroid::ResetSynchronousCompositor() {
+  if (sync_compositor_) {
+    view_.SetCopyOutputCallback(ui::ViewAndroid::CopyViewCallback());
+    sync_compositor_.reset();
   }
 }
 
@@ -1323,89 +1266,7 @@ void RenderWidgetHostViewAndroid::SynchronousCopyContents(
 
 WebContentsAccessibilityAndroid*
 RenderWidgetHostViewAndroid::GetWebContentsAccessibilityAndroid() const {
-  return static_cast<WebContentsAccessibilityAndroid*>(
-      web_contents_accessibility_);
-}
-
-void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
-    const viz::CompositorFrameMetadata& metadata,
-    bool is_transparent) {
-  if (features::IsSurfaceSynchronizationEnabled())
-    return;
-
-  bool is_mobile_optimized = IsMobileOptimizedFrame(
-      metadata.page_scale_factor, metadata.min_page_scale_factor,
-      metadata.max_page_scale_factor, metadata.scrollable_viewport_size,
-      metadata.root_layer_size);
-
-  gesture_provider_.SetDoubleTapSupportForPageEnabled(!is_mobile_optimized);
-
-  float dip_scale = view_.GetDipScale();
-  gfx::SizeF root_layer_size_dip = metadata.root_layer_size;
-  gfx::SizeF scrollable_viewport_size_dip = metadata.scrollable_viewport_size;
-  gfx::Vector2dF root_scroll_offset_dip = metadata.root_scroll_offset;
-  if (IsUseZoomForDSFEnabled()) {
-    float pix_to_dip = 1 / dip_scale;
-    root_layer_size_dip.Scale(pix_to_dip);
-    scrollable_viewport_size_dip.Scale(pix_to_dip);
-    root_scroll_offset_dip.Scale(pix_to_dip);
-  }
-
-  float to_pix = IsUseZoomForDSFEnabled() ? 1.f : dip_scale;
-  // Note that the height of browser control is not affected by page scale
-  // factor. Thus, |top_content_offset| in CSS pixels is also in DIPs.
-  float top_content_offset =
-      metadata.top_controls_height * metadata.top_controls_shown_ratio;
-  float top_shown_pix = top_content_offset * to_pix;
-
-  if (ime_adapter_android_) {
-    ime_adapter_android_->UpdateFrameInfo(metadata.selection.start, dip_scale,
-                                          top_shown_pix);
-  }
-
-  auto* wcax = GetWebContentsAccessibilityAndroid();
-  if (wcax)
-    wcax->UpdateFrameInfo(metadata.page_scale_factor);
-
-  if (!gesture_listener_manager_)
-    return;
-
-  if (overscroll_controller_) {
-    overscroll_controller_->OnFrameMetadataUpdated(
-        metadata.page_scale_factor, metadata.device_scale_factor,
-        metadata.scrollable_viewport_size, metadata.root_layer_size,
-        metadata.root_scroll_offset, metadata.root_overflow_y_hidden);
-  }
-
-  UpdateTouchSelectionController(metadata.selection, metadata.page_scale_factor,
-                                 metadata.top_controls_height,
-                                 metadata.top_controls_shown_ratio,
-                                 scrollable_viewport_size_dip);
-  // ViewAndroid::content_offset() must be in dip
-  float top_content_offset_dip = IsUseZoomForDSFEnabled()
-                                     ? top_content_offset / dip_scale
-                                     : top_content_offset;
-  view_.UpdateFrameInfo({scrollable_viewport_size_dip, top_content_offset_dip});
-  bool controls_changed = UpdateControls(
-      view_.GetDipScale(), metadata.top_controls_height,
-      metadata.top_controls_shown_ratio, metadata.bottom_controls_height,
-      metadata.bottom_controls_shown_ratio);
-
-  // All offsets and sizes except |top_shown_pix| are in dip.
-  gesture_listener_manager_->UpdateScrollInfo(
-      root_scroll_offset_dip, metadata.page_scale_factor,
-      metadata.min_page_scale_factor, metadata.max_page_scale_factor,
-      root_layer_size_dip, scrollable_viewport_size_dip, top_content_offset_dip,
-      top_shown_pix, controls_changed);
-
-  SetContentBackgroundColor(is_transparent ? SK_ColorTRANSPARENT
-                                           : metadata.root_background_color);
-
-  page_scale_ = metadata.page_scale_factor;
-  min_page_scale_ = metadata.min_page_scale_factor;
-  max_page_scale_ = metadata.max_page_scale_factor;
-
-  EvictFrameIfNecessary();
+  return web_contents_accessibility_;
 }
 
 void RenderWidgetHostViewAndroid::UpdateTouchSelectionController(
@@ -1434,8 +1295,10 @@ bool RenderWidgetHostViewAndroid::UpdateControls(
     float dip_scale,
     float top_controls_height,
     float top_controls_shown_ratio,
+    float top_controls_min_height_offset,
     float bottom_controls_height,
-    float bottom_controls_shown_ratio) {
+    float bottom_controls_shown_ratio,
+    float bottom_controls_min_height_offset) {
   float to_pix = IsUseZoomForDSFEnabled() ? 1.f : dip_scale;
   float top_controls_pix = top_controls_height * to_pix;
   // |top_content_offset| is in physical pixels if --use-zoom-for-dsf is
@@ -1447,8 +1310,14 @@ bool RenderWidgetHostViewAndroid::UpdateControls(
   float top_translate = top_shown_pix - top_controls_pix;
   bool top_changed =
       !cc::MathUtil::IsFloatNearlyTheSame(top_shown_pix, prev_top_shown_pix_);
+
+  float top_min_height_offset_pix = top_controls_min_height_offset * to_pix;
+  top_changed |= !cc::MathUtil::IsFloatNearlyTheSame(
+      top_min_height_offset_pix, prev_top_controls_min_height_offset_pix_);
+
   if (top_changed || !controls_initialized_)
-    view_.OnTopControlsChanged(top_translate, top_shown_pix);
+    view_.OnTopControlsChanged(top_translate, top_shown_pix,
+                               top_min_height_offset_pix);
   prev_top_shown_pix_ = top_shown_pix;
   prev_top_controls_translate_ = top_translate;
 
@@ -1457,8 +1326,16 @@ bool RenderWidgetHostViewAndroid::UpdateControls(
   bool bottom_changed = !cc::MathUtil::IsFloatNearlyTheSame(
       bottom_shown_pix, prev_bottom_shown_pix_);
   float bottom_translate = bottom_controls_pix - bottom_shown_pix;
+
+  float bottom_min_height_offset_pix =
+      bottom_controls_min_height_offset * to_pix;
+  bottom_changed |= !cc::MathUtil::IsFloatNearlyTheSame(
+      bottom_min_height_offset_pix,
+      prev_bottom_controls_min_height_offset_pix_);
+
   if (bottom_changed || !controls_initialized_)
-    view_.OnBottomControlsChanged(bottom_translate, bottom_shown_pix);
+    view_.OnBottomControlsChanged(bottom_translate,
+                                  bottom_min_height_offset_pix);
   prev_bottom_shown_pix_ = bottom_shown_pix;
   prev_bottom_controls_translate_ = bottom_translate;
   controls_initialized_ = true;
@@ -1469,6 +1346,10 @@ void RenderWidgetHostViewAndroid::OnDidUpdateVisualPropertiesComplete(
     const cc::RenderFrameMetadata& metadata) {
   SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
                               metadata.local_surface_id_allocation);
+  if (delegated_frame_host_) {
+    delegated_frame_host_->SetTopControlsVisibleHeight(
+        metadata.top_controls_height * metadata.top_controls_shown_ratio);
+  }
   // We've just processed new RenderFrameMetadata and potentially embedded a
   // new surface for that data. Check if we need to evict it.
   EvictFrameIfNecessary();
@@ -1481,7 +1362,7 @@ void RenderWidgetHostViewAndroid::OnFinishGetContentBitmap(
     const SkBitmap& bitmap) {
   JNIEnv* env = base::android::AttachCurrentThread();
   if (!bitmap.drawsNothing()) {
-    auto task_runner = base::CreateSequencedTaskRunnerWithTraits(
+    auto task_runner = base::ThreadPool::CreateSequencedTaskRunner(
         {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
     base::PostTaskAndReplyWithResult(
         task_runner.get(), FROM_HERE,
@@ -1508,9 +1389,9 @@ void RenderWidgetHostViewAndroid::ShowInternal() {
   if (overscroll_controller_)
     overscroll_controller_->Enable();
 
-  if (delegated_frame_host_ &&
-      (delegated_frame_host_->IsPrimarySurfaceEvicted() ||
-       !local_surface_id_allocator_.HasValidLocalSurfaceIdAllocation())) {
+  if ((delegated_frame_host_ &&
+       delegated_frame_host_->IsPrimarySurfaceEvicted()) ||
+      !local_surface_id_allocator_.HasValidLocalSurfaceIdAllocation()) {
     ui::WindowAndroidCompositor* compositor =
         view_.GetWindowAndroid() ? view_.GetWindowAndroid()->GetCompositor()
                                  : nullptr;
@@ -1521,14 +1402,26 @@ void RenderWidgetHostViewAndroid::ShowInternal() {
             : cc::DeadlinePolicy::UseDefaultDeadline(),
         base::nullopt);
     // If we navigated while hidden, we need to update the fallback surface only
-    // after we've completed navigation, and embedded the new surface.
+    // after we've completed navigation, and embedded the new surface. The
+    // |delegated_frame_host_| is always valid when |navigation_while_hidden_|
+    // is set to true.
     if (navigation_while_hidden_) {
       navigation_while_hidden_ = false;
       delegated_frame_host_->DidNavigate();
     }
   }
 
-  host()->WasShown(base::nullopt /* record_tab_switch_time_request */);
+  auto content_to_visible_start_state = TakeRecordContentToVisibleTimeRequest();
+
+  // Only when page is restored from back-forward cache, record content to
+  // visible time and for this case no need to check for saved frames to
+  // record ContentToVisibleTime.
+  bool show_reason_bfcache_restore =
+      content_to_visible_start_state
+          ? content_to_visible_start_state->show_reason_bfcache_restore
+          : false;
+  host()->WasShown(show_reason_bfcache_restore ? content_to_visible_start_state
+                                               : base::nullopt);
 
   if (delegated_frame_host_) {
     delegated_frame_host_->WasShown(
@@ -1539,7 +1432,8 @@ void RenderWidgetHostViewAndroid::ShowInternal() {
 
   if (view_.parent() && view_.GetWindowAndroid()) {
     StartObservingRootWindow();
-    AddBeginFrameRequest(BEGIN_FRAME);
+    if (sync_compositor_)
+      sync_compositor_->RequestOneBeginFrame();
   }
 }
 
@@ -1579,41 +1473,6 @@ void RenderWidgetHostViewAndroid::HideInternal() {
   host()->WasHidden();
 }
 
-void RenderWidgetHostViewAndroid::SetBeginFrameSource(
-    viz::BeginFrameSource* begin_frame_source) {
-  if (begin_frame_source_ == begin_frame_source)
-    return;
-
-  if (begin_frame_source_ && outstanding_begin_frame_requests_)
-    begin_frame_source_->RemoveObserver(this);
-  begin_frame_source_ = begin_frame_source;
-  if (begin_frame_source_ && outstanding_begin_frame_requests_)
-    begin_frame_source_->AddObserver(this);
-}
-
-void RenderWidgetHostViewAndroid::AddBeginFrameRequest(
-    BeginFrameRequestType request) {
-  uint32_t prior_requests = outstanding_begin_frame_requests_;
-  outstanding_begin_frame_requests_ = prior_requests | request;
-
-  // Note that if we don't currently have a BeginFrameSource, outstanding begin
-  // frame requests will be pushed if/when we get one during
-  // |StartObservingRootWindow()| or when the DelegatedFrameHostAndroid sets it.
-  viz::BeginFrameSource* source = begin_frame_source_;
-  if (source && outstanding_begin_frame_requests_ && !prior_requests)
-    source->AddObserver(this);
-}
-
-void RenderWidgetHostViewAndroid::ClearBeginFrameRequest(
-    BeginFrameRequestType request) {
-  uint32_t prior_requests = outstanding_begin_frame_requests_;
-  outstanding_begin_frame_requests_ = prior_requests & ~request;
-
-  viz::BeginFrameSource* source = begin_frame_source_;
-  if (source && !outstanding_begin_frame_requests_ && prior_requests)
-    source->RemoveObserver(this);
-}
-
 void RenderWidgetHostViewAndroid::StartObservingRootWindow() {
   DCHECK(view_.parent());
   DCHECK(view_.GetWindowAndroid());
@@ -1622,11 +1481,7 @@ void RenderWidgetHostViewAndroid::StartObservingRootWindow() {
     return;
 
   observing_root_window_ = true;
-  SendBeginFramePaused();
   view_.GetWindowAndroid()->AddObserver(this);
-  // When using browser compositor, DelegatedFrameHostAndroid provides the BFS.
-  if (!using_browser_compositor_)
-    SetBeginFrameSource(view_.GetWindowAndroid()->GetBeginFrameSource());
 
   ui::WindowAndroidCompositor* compositor =
       view_.GetWindowAndroid()->GetCompositor();
@@ -1651,34 +1506,11 @@ void RenderWidgetHostViewAndroid::StopObservingRootWindow() {
   is_window_visible_ = true;
   observing_root_window_ = false;
   OnUpdateScopedSelectionHandles();
-  SendBeginFramePaused();
   view_.GetWindowAndroid()->RemoveObserver(this);
-  if (!using_browser_compositor_)
-    SetBeginFrameSource(nullptr);
   // If the DFH has already been destroyed, it will have cleaned itself up.
   // This happens in some WebView cases.
   if (delegated_frame_host_)
     delegated_frame_host_->DetachFromCompositor();
-  DCHECK(!begin_frame_source_);
-}
-
-void RenderWidgetHostViewAndroid::SendBeginFrame(viz::BeginFrameArgs args) {
-  TRACE_EVENT2("cc", "RenderWidgetHostViewAndroid::SendBeginFrame",
-               "frame_number", args.sequence_number, "frame_time_us",
-               args.frame_time.ToInternalValue());
-
-  // Synchronous compositor does not use deadline-based scheduling.
-  // TODO(brianderson): Replace this hardcoded deadline after Android
-  // switches to Surfaces and the Browser's commit isn't in the critical path.
-  args.deadline = sync_compositor_ ? base::TimeTicks()
-  : args.frame_time + (args.interval * 0.6);
-  if (sync_compositor_) {
-    sync_compositor_->BeginFrame(view_.GetWindowAndroid(), args,
-                                 timing_details_);
-  } else if (renderer_compositor_frame_sink_) {
-    renderer_compositor_frame_sink_->OnBeginFrame(args, timing_details_);
-  }
-  timing_details_.clear();
 }
 
 bool RenderWidgetHostViewAndroid::Animate(base::TimeTicks frame_time) {
@@ -1716,11 +1548,13 @@ gfx::Rect RenderWidgetHostViewAndroid::GetBoundsInRootWindow() {
 }
 
 void RenderWidgetHostViewAndroid::ProcessAckedTouchEvent(
-    const TouchEventWithLatencyInfo& touch, InputEventAckState ack_result) {
-  const bool event_consumed = ack_result == INPUT_EVENT_ACK_STATE_CONSUMED;
+    const TouchEventWithLatencyInfo& touch,
+    blink::mojom::InputEventResultState ack_result) {
+  const bool event_consumed =
+      ack_result == blink::mojom::InputEventResultState::kConsumed;
   gesture_provider_.OnTouchEventAck(
       touch.event.unique_touch_event_id, event_consumed,
-      InputEventAckStateIsSetNonBlocking(ack_result));
+      InputEventResultStateIsSetNonBlocking(ack_result));
   if (touch.event.touch_start_or_first_touch_move && event_consumed &&
       host()->delegate() && host()->delegate()->GetInputEventRouter()) {
     host()
@@ -1733,7 +1567,7 @@ void RenderWidgetHostViewAndroid::ProcessAckedTouchEvent(
 
 void RenderWidgetHostViewAndroid::GestureEventAck(
     const blink::WebGestureEvent& event,
-    InputEventAckState ack_result) {
+    blink::mojom::InputEventResultState ack_result) {
   if (overscroll_controller_)
     overscroll_controller_->OnGestureEventAck(event, ack_result);
   mouse_wheel_phase_handler_.GestureEventAck(event, ack_result);
@@ -1744,33 +1578,19 @@ void RenderWidgetHostViewAndroid::GestureEventAck(
   // but not consumed.
   StopFlingingIfNecessary(event, ack_result);
 
-  if (!gesture_listener_manager_)
-    return;
-  gesture_listener_manager_->GestureEventAck(event, ack_result);
+  if (gesture_listener_manager_)
+    gesture_listener_manager_->GestureEventAck(event, ack_result);
 }
 
-bool RenderWidgetHostViewAndroid::OnUnconsumedKeyboardEventAck(
-    const NativeWebKeyboardEventWithLatencyInfo& event) {
-  return fallback_cursor_mode_enabled_ &&
-         event.event.GetType() == blink::WebInputEvent::kKeyDown &&
-         view_.OnUnconsumedKeyboardEventAck(event.event.native_key_code);
+void RenderWidgetHostViewAndroid::ChildDidAckGestureEvent(
+    const blink::WebGestureEvent& event,
+    blink::mojom::InputEventResultState ack_result) {
+  if (gesture_listener_manager_)
+    gesture_listener_manager_->GestureEventAck(event, ack_result);
 }
 
-void RenderWidgetHostViewAndroid::FallbackCursorModeLockCursor(bool left,
-                                                               bool right,
-                                                               bool up,
-                                                               bool down) {
-  DCHECK(fallback_cursor_mode_enabled_);
-  view_.FallbackCursorModeLockCursor(left, right, up, down);
-}
-
-void RenderWidgetHostViewAndroid::FallbackCursorModeSetCursorVisibility(
-    bool visible) {
-  DCHECK(fallback_cursor_mode_enabled_);
-  view_.FallbackCursorModeSetCursorVisibility(visible);
-}
-
-InputEventAckState RenderWidgetHostViewAndroid::FilterInputEvent(
+blink::mojom::InputEventResultState
+RenderWidgetHostViewAndroid::FilterInputEvent(
     const blink::WebInputEvent& input_event) {
   if (overscroll_controller_ &&
       blink::WebInputEvent::IsGestureEventType(input_event.GetType())) {
@@ -1782,54 +1602,55 @@ InputEventAckState RenderWidgetHostViewAndroid::FilterInputEvent(
       // overscrolling mode is not |OVERSCROLL_NONE|. The early fling
       // termination generates a GSE which completes the overscroll action.
       if (gesture_event.GetType() ==
-              blink::WebInputEvent::kGestureScrollUpdate &&
+              blink::WebInputEvent::Type::kGestureScrollUpdate &&
           gesture_event.data.scroll_update.inertial_phase ==
               blink::WebGestureEvent::InertialPhaseState::kMomentum) {
         host_->StopFling();
       }
 
-      return INPUT_EVENT_ACK_STATE_CONSUMED;
+      return blink::mojom::InputEventResultState::kConsumed;
     }
   }
 
   if (gesture_listener_manager_ &&
       gesture_listener_manager_->FilterInputEvent(input_event)) {
-    return INPUT_EVENT_ACK_STATE_CONSUMED;
+    return blink::mojom::InputEventResultState::kConsumed;
   }
 
   if (!host())
-    return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+    return blink::mojom::InputEventResultState::kNotConsumed;
 
-  if (input_event.GetType() == blink::WebInputEvent::kGestureTapDown ||
-      input_event.GetType() == blink::WebInputEvent::kTouchStart) {
+  if (input_event.GetType() == blink::WebInputEvent::Type::kGestureTapDown ||
+      input_event.GetType() == blink::WebInputEvent::Type::kTouchStart) {
     GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED,
-                             false /* force_create */, base::Bind(&WakeUpGpu));
+                             false /* force_create */,
+                             base::BindOnce(&WakeUpGpu));
   }
 
-  return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
-}
-
-InputEventAckState RenderWidgetHostViewAndroid::FilterChildGestureEvent(
-    const blink::WebGestureEvent& gesture_event) {
-  if (overscroll_controller_ &&
-      overscroll_controller_->WillHandleGestureEvent(gesture_event))
-    return INPUT_EVENT_ACK_STATE_CONSUMED;
-  return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+  return blink::mojom::InputEventResultState::kNotConsumed;
 }
 
 BrowserAccessibilityManager*
 RenderWidgetHostViewAndroid::CreateBrowserAccessibilityManager(
     BrowserAccessibilityDelegate* delegate,
     bool for_root_frame) {
+  auto* wcax = GetWebContentsAccessibilityAndroid();
   return new BrowserAccessibilityManagerAndroid(
       BrowserAccessibilityManagerAndroid::GetEmptyDocument(),
-      for_root_frame && host() ? GetWebContentsAccessibilityAndroid() : nullptr,
+      for_root_frame && host() && wcax ? wcax->GetWeakPtr() : nullptr,
       delegate);
 }
 
-bool RenderWidgetHostViewAndroid::LockMouse() {
+blink::mojom::PointerLockResult RenderWidgetHostViewAndroid::LockMouse(
+    bool request_unadjusted_movement) {
   NOTIMPLEMENTED();
-  return false;
+  return blink::mojom::PointerLockResult::kUnsupportedOptions;
+}
+
+blink::mojom::PointerLockResult RenderWidgetHostViewAndroid::ChangeMouseLock(
+    bool request_unadjusted_movement) {
+  NOTIMPLEMENTED();
+  return blink::mojom::PointerLockResult::kUnsupportedOptions;
 }
 
 void RenderWidgetHostViewAndroid::UnlockMouse() {
@@ -1858,8 +1679,8 @@ void RenderWidgetHostViewAndroid::SendKeyEvent(
     text_suggestion_host_->OnKeyEvent();
 
   ui::LatencyInfo latency_info;
-  if (event.GetType() == blink::WebInputEvent::kRawKeyDown ||
-      event.GetType() == blink::WebInputEvent::kChar) {
+  if (event.GetType() == blink::WebInputEvent::Type::kRawKeyDown ||
+      event.GetType() == blink::WebInputEvent::Type::kChar) {
     latency_info.set_source_event_type(ui::SourceEventType::KEY_PRESS);
   }
   latency_info.AddLatencyNumber(ui::INPUT_EVENT_LATENCY_UI_COMPONENT);
@@ -1872,16 +1693,16 @@ void RenderWidgetHostViewAndroid::SendMouseEvent(
   blink::WebInputEvent::Type webMouseEventType =
       ui::ToWebMouseEventType(motion_event.GetAction());
 
-  if (webMouseEventType == blink::WebInputEvent::kUndefined)
+  if (webMouseEventType == blink::WebInputEvent::Type::kUndefined)
     return;
 
-  if (webMouseEventType == blink::WebInputEvent::kMouseDown)
+  if (webMouseEventType == blink::WebInputEvent::Type::kMouseDown)
     UpdateMouseState(action_button, motion_event.GetX(0), motion_event.GetY(0));
 
   int click_count = 0;
 
-  if (webMouseEventType == blink::WebInputEvent::kMouseDown ||
-      webMouseEventType == blink::WebInputEvent::kMouseUp)
+  if (webMouseEventType == blink::WebInputEvent::Type::kMouseDown ||
+      webMouseEventType == blink::WebInputEvent::Type::kMouseUp)
     click_count = (action_button == ui::MotionEventAndroid::BUTTON_PRIMARY)
                       ? left_click_count_
                       : 1;
@@ -1951,7 +1772,7 @@ void RenderWidgetHostViewAndroid::SendGestureEvent(
     overscroll_controller_->Enable();
 
   if (!host() || !host()->delegate() ||
-      event.GetType() == blink::WebInputEvent::kUndefined) {
+      event.GetType() == blink::WebInputEvent::Type::kUndefined) {
     return;
   }
 
@@ -1960,17 +1781,17 @@ void RenderWidgetHostViewAndroid::SendGestureEvent(
   if (touch_selection_controller_ &&
       event.SourceDevice() == blink::WebGestureDevice::kTouchscreen) {
     switch (event.GetType()) {
-      case blink::WebInputEvent::kGestureLongPress:
+      case blink::WebInputEvent::Type::kGestureLongPress:
         touch_selection_controller_->HandleLongPressEvent(
             event.TimeStamp(), event.PositionInWidget());
         break;
 
-      case blink::WebInputEvent::kGestureTap:
+      case blink::WebInputEvent::Type::kGestureTap:
         touch_selection_controller_->HandleTapEvent(event.PositionInWidget(),
                                                     event.data.tap.tap_count);
         break;
 
-      case blink::WebInputEvent::kGestureScrollBegin:
+      case blink::WebInputEvent::Type::kGestureScrollBegin:
         touch_selection_controller_->OnScrollBeginEvent();
         break;
 
@@ -1982,19 +1803,21 @@ void RenderWidgetHostViewAndroid::SendGestureEvent(
   ui::LatencyInfo latency_info =
       ui::WebInputEventTraits::CreateLatencyInfoForWebGestureEvent(event);
   if (event.SourceDevice() == blink::WebGestureDevice::kTouchscreen) {
-    if (event.GetType() == blink::WebInputEvent::kGestureScrollBegin) {
+    if (event.GetType() == blink::WebInputEvent::Type::kGestureScrollBegin) {
       // If there is a current scroll going on and a new scroll that isn't
       // wheel based, send a synthetic wheel event with kPhaseEnded to cancel
       // the current scroll.
       mouse_wheel_phase_handler_.DispatchPendingWheelEndEvent();
-    } else if (event.GetType() == blink::WebInputEvent::kGestureScrollEnd) {
+    } else if (event.GetType() ==
+               blink::WebInputEvent::Type::kGestureScrollEnd) {
       // Make sure that the next wheel event will have phase = |kPhaseBegan|.
       // This is for maintaining the correct phase info when some of the wheel
       // events get ignored while a touchscreen scroll is going on.
       mouse_wheel_phase_handler_.IgnorePendingWheelEndEvent();
     }
 
-  } else if (event.GetType() == blink::WebInputEvent::kGestureFlingStart &&
+  } else if (event.GetType() ==
+                 blink::WebInputEvent::Type::kGestureFlingStart &&
              event.SourceDevice() == blink::WebGestureDevice::kTouchpad) {
     // Ignore the pending wheel end event to avoid sending a wheel event with
     // kPhaseEnded before a GFS.
@@ -2119,9 +1942,13 @@ void RenderWidgetHostViewAndroid::UpdateNativeViewTree(
   }
 
   if (!has_view_tree) {
-    sync_compositor_.reset();
+    ResetSynchronousCompositor();
     return;
   }
+  // Parent native view can become null and then later non-null again, if
+  // WebContents swaps away from this, and then later back to it. Need to
+  // ensure SynchronousCompositor is recreated in this case.
+  MaybeCreateSynchronousCompositor();
 
   if (is_showing_ && view_.GetWindowAndroid())
     StartObservingRootWindow();
@@ -2165,17 +1992,11 @@ RenderWidgetHostViewAndroid::GetTouchSelectionControllerClientManager() {
 
 const viz::LocalSurfaceIdAllocation&
 RenderWidgetHostViewAndroid::GetLocalSurfaceIdAllocation() const {
-  // Don't return an local surface ID for webview unless we're using
-  // SurfaceSynchronization.
-  if (!using_browser_compositor_ &&
-      !features::IsSurfaceSynchronizationEnabled()) {
-    return viz::ParentLocalSurfaceIdAllocator::
-        InvalidLocalSurfaceIdAllocation();
-  }
   return local_surface_id_allocator_.GetCurrentLocalSurfaceIdAllocation();
 }
 
 void RenderWidgetHostViewAndroid::OnRenderWidgetInit() {
+  render_widget_initialized_ = true;
   if (sync_compositor_)
     sync_compositor_->InitMojo();
 }
@@ -2208,7 +2029,7 @@ void RenderWidgetHostViewAndroid::OnGestureEvent(
   // stop providing shift meta values to synthetic MotionEvents. This prevents
   // unintended shift+click interpretation of all accessibility clicks.
   // See crbug.com/443247.
-  if (web_gesture.GetType() == blink::WebInputEvent::kGestureTap &&
+  if (web_gesture.GetType() == blink::WebInputEvent::Type::kGestureTap &&
       web_gesture.GetModifiers() == blink::WebInputEvent::kShiftKey) {
     web_gesture.SetModifiers(blink::WebInputEvent::kNoModifiers);
   }
@@ -2217,11 +2038,6 @@ void RenderWidgetHostViewAndroid::OnGestureEvent(
 
 bool RenderWidgetHostViewAndroid::RequiresDoubleTapGestureEvents() const {
   return true;
-}
-
-void RenderWidgetHostViewAndroid::OnSizeChanged() {
-  if (ime_adapter_android_)
-    ime_adapter_android_->UpdateAfterViewSizeChanged();
 }
 
 void RenderWidgetHostViewAndroid::OnPhysicalBackingSizeChanged() {
@@ -2284,76 +2100,6 @@ void RenderWidgetHostViewAndroid::OnDetachCompositor() {
     delegated_frame_host_->DetachFromCompositor();
 }
 
-void RenderWidgetHostViewAndroid::OnBeginFrame(
-    const viz::BeginFrameArgs& args) {
-  TRACE_EVENT0("cc,benchmark", "RenderWidgetHostViewAndroid::OnBeginFrame");
-  if (!host()) {
-    OnDidNotProduceFrame(
-        viz::BeginFrameAck(args.source_id, args.sequence_number, false));
-    return;
-  }
-
-  // In sync mode, we disregard missed frame args to ensure that
-  // SynchronousCompositorBrowserFilter::SyncStateAfterVSync will be called
-  // during WindowAndroid::WindowBeginFrameSource::OnVSync() observer iteration.
-  if (sync_compositor_ && args.type == viz::BeginFrameArgs::MISSED) {
-    OnDidNotProduceFrame(
-        viz::BeginFrameAck(args.source_id, args.sequence_number, false));
-    return;
-  }
-
-  bool webview_fling = sync_compositor_ && is_currently_scrolling_viewport_;
-  if (!webview_fling) {
-    host_->ProgressFlingIfNeeded(args.frame_time);
-  } else if (sync_compositor_->on_compute_scroll_called()) {
-    // On Android webview progress the fling only when |OnComputeScroll| is
-    // called since in some cases Apps override |OnComputeScroll| to cancel
-    // fling animation.
-    host_->ProgressFlingIfNeeded(args.frame_time);
-  }
-
-  // Update |last_begin_frame_args_| before handling
-  // |outstanding_begin_frame_requests_| to prevent the BeginFrameSource from
-  // sending the same MISSED args in infinite recursion.
-  last_begin_frame_args_ = args;
-
-  if ((outstanding_begin_frame_requests_ & BEGIN_FRAME) ||
-      (outstanding_begin_frame_requests_ & PERSISTENT_BEGIN_FRAME)) {
-    ClearBeginFrameRequest(BEGIN_FRAME);
-    SendBeginFrame(args);
-  } else {
-    OnDidNotProduceFrame(
-        viz::BeginFrameAck(args.source_id, args.sequence_number, false));
-  }
-}
-
-const viz::BeginFrameArgs& RenderWidgetHostViewAndroid::LastUsedBeginFrameArgs()
-    const {
-  return last_begin_frame_args_;
-}
-
-bool RenderWidgetHostViewAndroid::WantsAnimateOnlyBeginFrames() const {
-  return wants_animate_only_begin_frames_;
-}
-
-void RenderWidgetHostViewAndroid::SendBeginFramePaused() {
-  bool paused = begin_frame_paused_ || !observing_root_window_;
-
-  if (!using_browser_compositor_) {
-    if (sync_compositor_)
-      sync_compositor_->SetBeginFramePaused(paused);
-  } else if (renderer_compositor_frame_sink_) {
-    renderer_compositor_frame_sink_->OnBeginFramePausedChanged(paused);
-  }
-}
-
-void RenderWidgetHostViewAndroid::OnBeginFrameSourcePausedChanged(bool paused) {
-  if (paused != begin_frame_paused_) {
-    begin_frame_paused_ = paused;
-    SendBeginFramePaused();
-  }
-}
-
 void RenderWidgetHostViewAndroid::OnAnimate(base::TimeTicks begin_frame_time) {
   if (Animate(begin_frame_time))
     SetNeedsAnimate();
@@ -2371,18 +2117,6 @@ void RenderWidgetHostViewAndroid::OnActivityStarted() {
   DCHECK(observing_root_window_);
   is_window_activity_started_ = true;
   ShowInternal();
-}
-
-void RenderWidgetHostViewAndroid::OnCursorVisibilityChanged(bool visible) {
-  DCHECK(observing_root_window_);
-  if (host())
-    host()->OnCursorVisibilityStateChanged(visible);
-}
-
-void RenderWidgetHostViewAndroid::OnFallbackCursorModeToggled(bool is_on) {
-  DCHECK(observing_root_window_);
-  if (host())
-    host()->OnFallbackCursorModeToggled(is_on);
 }
 
 void RenderWidgetHostViewAndroid::OnLostResources() {
@@ -2434,7 +2168,7 @@ void RenderWidgetHostViewAndroid::OnStylusSelectTap(base::TimeTicks time,
   // Treat the stylus tap as a long press, activating either a word selection or
   // context menu depending on the targetted content.
   blink::WebGestureEvent long_press = WebGestureEventBuilder::Build(
-      blink::WebInputEvent::kGestureLongPress, time, x, y);
+      blink::WebInputEvent::Type::kGestureLongPress, time, x, y);
   SendGestureEvent(long_press);
 }
 
@@ -2511,8 +2245,6 @@ void RenderWidgetHostViewAndroid::TakeFallbackContentFrom(
     RenderWidgetHostView* view) {
   DCHECK(!static_cast<RenderWidgetHostViewBase*>(view)
               ->IsRenderWidgetHostViewChildFrame());
-  DCHECK(!static_cast<RenderWidgetHostViewBase*>(view)
-              ->IsRenderWidgetHostViewGuest());
   base::Optional<SkColor> color = view->GetBackgroundColor();
   if (color)
     SetBackgroundColor(*color);
@@ -2564,9 +2296,6 @@ void RenderWidgetHostViewAndroid::DidNavigate() {
 viz::ScopedSurfaceIdAllocator
 RenderWidgetHostViewAndroid::DidUpdateVisualProperties(
     const cc::RenderFrameMetadata& metadata) {
-  if (!features::IsSurfaceSynchronizationEnabled())
-    return RenderWidgetHostViewBase::DidUpdateVisualProperties(metadata);
-
   base::OnceCallback<void()> allocation_task = base::BindOnce(
       &RenderWidgetHostViewAndroid::OnDidUpdateVisualPropertiesComplete,
       weak_ptr_factory_.GetWeakPtr(), metadata);
@@ -2586,8 +2315,15 @@ void RenderWidgetHostViewAndroid::GetScreenInfo(ScreenInfo* screen_info) {
                                    window->GetDisplayWithWindowColorSpace());
 }
 
-void RenderWidgetHostViewAndroid::CancelActiveTouches() {
+std::vector<std::unique_ptr<ui::TouchEvent>>
+RenderWidgetHostViewAndroid::ExtractAndCancelActiveTouches() {
   ResetGestureDetection();
+  return {};
+}
+
+void RenderWidgetHostViewAndroid::TransferTouches(
+    const std::vector<std::unique_ptr<ui::TouchEvent>>& touches) {
+  // Touch transfer for Android is not implemented in content/.
 }
 
 void RenderWidgetHostViewAndroid::WasEvicted() {
@@ -2632,6 +2368,11 @@ void RenderWidgetHostViewAndroid::SetWebContentsAccessibility(
         ->render_frame_metadata_provider()
         ->ReportAllRootScrollsForAccessibility(!!web_contents_accessibility_);
   }
+}
+
+void RenderWidgetHostViewAndroid::SetNeedsBeginFrameForFlingProgress() {
+  if (sync_compositor_)
+    sync_compositor_->RequestOneBeginFrame();
 }
 
 }  // namespace content

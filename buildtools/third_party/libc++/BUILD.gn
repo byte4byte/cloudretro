@@ -55,8 +55,10 @@ target(_libcxx_target_type, "libc++") {
     "trunk/src/algorithm.cpp",
     "trunk/src/any.cpp",
     "trunk/src/bind.cpp",
+    "trunk/src/charconv.cpp",
     "trunk/src/chrono.cpp",
     "trunk/src/condition_variable.cpp",
+    "trunk/src/condition_variable_destructor.cpp",
     "trunk/src/debug.cpp",
     "trunk/src/exception.cpp",
     "trunk/src/functional.cpp",
@@ -67,6 +69,7 @@ target(_libcxx_target_type, "libc++") {
     "trunk/src/locale.cpp",
     "trunk/src/memory.cpp",
     "trunk/src/mutex.cpp",
+    "trunk/src/mutex_destructor.cpp",
     "trunk/src/new.cpp",
     "trunk/src/optional.cpp",
     "trunk/src/random.cpp",
@@ -91,6 +94,14 @@ target(_libcxx_target_type, "libc++") {
     ]
     configs -= [ "//build/config/win:winver" ]
     configs += [ ":winver" ]
+    if (libcxx_natvis_include) {
+      inputs = [
+        # libc++.natvis listed as an input here instead of in
+        # //build/config/c++:runtime_library to prevent unnecessary size
+        # increase in generated build files.
+        "//build/config/c++/libc++.natvis",
+      ]
+    }
   }
   configs -= [
     "//build/config/compiler:chromium_code",
@@ -162,9 +173,7 @@ target(_libcxx_target_type, "libc++") {
   if (!is_win) {
     defines += [ "LIBCXX_BUILDING_LIBCXXABI" ]
     if (!export_libcxxabi_from_executables) {
-      deps = [
-        "//buildtools/third_party/libc++abi",
-      ]
+      deps = [ "//buildtools/third_party/libc++abi" ]
     }
   }
 }

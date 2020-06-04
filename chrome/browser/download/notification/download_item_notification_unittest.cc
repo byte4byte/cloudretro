@@ -12,6 +12,7 @@
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/notification/download_notification_manager.h"
 #include "chrome/browser/download/offline_item_utils.h"
 #include "chrome/browser/notifications/notification_display_service.h"
@@ -25,8 +26,8 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/download/public/common/mock_download_item.h"
 #include "content/public/browser/download_item_utils.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_download_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -132,7 +133,7 @@ class DownloadItemNotificationTest : public testing::Test {
         *download_item_notification_->notification_, /*metadata=*/nullptr);
   }
 
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   std::unique_ptr<TestingProfileManager> profile_manager_;
   Profile* profile_;
@@ -259,6 +260,60 @@ TEST_F(DownloadItemNotificationTest, DisablePopup) {
 
   // Priority is increased by the download's completion.
   EXPECT_GT(LookUpNotification()->priority(), message_center::LOW_PRIORITY);
+}
+
+TEST_F(DownloadItemNotificationTest, DeepScanning) {
+  // Setup deep scanning in progress.
+  EXPECT_CALL(*download_item_, GetDangerType())
+      .WillRepeatedly(Return(download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING));
+  auto state =
+      std::make_unique<ChromeDownloadManagerDelegate::SafeBrowsingState>();
+  download_item_->SetUserData(&ChromeDownloadManagerDelegate::
+                                  SafeBrowsingState::kSafeBrowsingUserDataKey,
+                              std::move(state));
+  CreateDownloadItemNotification();
+
+  // Can't open while scanning.
+  profile_manager_->local_state()->Get()->SetManagedPref(
+      prefs::kDelayDeliveryUntilVerdict,
+      std::make_unique<base::Value>(safe_browsing::DELAY_DOWNLOADS));
+  EXPECT_CALL(*download_item_, OpenDownload()).Times(0);
+  EXPECT_CALL(*download_item_, SetOpenWhenComplete(true)).Times(1);
+  download_item_notification_->Click(base::nullopt, base::nullopt);
+
+  // Can be opened while scanning.
+  profile_manager_->local_state()->Get()->SetManagedPref(
+      prefs::kDelayDeliveryUntilVerdict,
+      std::make_unique<base::Value>(safe_browsing::DELAY_NONE));
+  EXPECT_CALL(*download_item_, OpenDownload()).Times(1);
+  download_item_notification_->Click(base::nullopt, base::nullopt);
+
+  // Scanning finished, warning.
+  EXPECT_CALL(*download_item_, IsDangerous()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*download_item_, GetDangerType())
+      .WillRepeatedly(
+          Return(download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING));
+  EXPECT_CALL(*download_item_, OpenDownload()).Times(0);
+  EXPECT_CALL(*download_item_, SetOpenWhenComplete(true)).Times(0);
+  download_item_notification_->Click(base::nullopt, base::nullopt);
+
+  // Scanning finished, blocked.
+  EXPECT_CALL(*download_item_, IsDangerous()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*download_item_, GetDangerType())
+      .WillRepeatedly(
+          Return(download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK));
+  EXPECT_CALL(*download_item_, OpenDownload()).Times(0);
+  EXPECT_CALL(*download_item_, SetOpenWhenComplete(true)).Times(0);
+  download_item_notification_->Click(base::nullopt, base::nullopt);
+
+  // Scanning finished, safe.
+  EXPECT_CALL(*download_item_, IsDangerous()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*download_item_, GetDangerType())
+      .WillRepeatedly(Return(download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE));
+  EXPECT_CALL(*download_item_, GetState())
+      .WillRepeatedly(Return(download::DownloadItem::COMPLETE));
+  EXPECT_CALL(*download_item_, OpenDownload()).Times(1);
+  download_item_notification_->Click(base::nullopt, base::nullopt);
 }
 
 }  // namespace test

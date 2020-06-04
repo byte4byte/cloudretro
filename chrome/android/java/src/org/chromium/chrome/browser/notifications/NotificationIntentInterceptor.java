@@ -10,11 +10,13 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -36,6 +38,8 @@ public class NotificationIntentInterceptor {
             "notifications.NotificationIntentInterceptor.EXTRA_ACTION_TYPE";
     private static final String EXTRA_CREATE_TIME =
             "notifications.NotificationIntentInterceptor.EXTRA_CREATE_TIME";
+    public static final String INTENT_ACTION =
+            "notifications.NotificationIntentInterceptor.INTENT_ACTION";
     public static final long INVALID_CREATE_TIME = -1;
 
     /**
@@ -114,6 +118,7 @@ public class NotificationIntentInterceptor {
         }
         Context applicationContext = ContextUtils.getApplicationContext();
         Intent intent = new Intent(applicationContext, Receiver.class);
+        intent.setAction(INTENT_ACTION);
         intent.putExtra(EXTRA_PENDING_INTENT, pendingIntent);
         intent.putExtra(EXTRA_INTENT_TYPE, intentType);
         intent.putExtra(EXTRA_NOTIFICATION_TYPE, metadata.type);

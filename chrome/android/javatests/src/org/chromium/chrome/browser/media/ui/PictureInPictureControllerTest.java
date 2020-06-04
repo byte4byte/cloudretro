@@ -18,9 +18,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -57,7 +59,7 @@ public class PictureInPictureControllerTest {
     private ChromeTabbedActivity mActivity;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(
                 InstrumentationRegistry.getInstrumentation().getContext());
         mActivityTestRule.startMainActivityWithURL(mTestServer.getURL(TEST_PATH));
@@ -93,6 +95,7 @@ public class PictureInPictureControllerTest {
     @Test
     @MediumTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @FlakyTest(message = "see crbug.com/1038151")
     public void testEnterPip() throws Throwable {
         enterFullscreen();
         triggerAutoPiP();
@@ -157,6 +160,7 @@ public class PictureInPictureControllerTest {
     @Test
     @MediumTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @DisabledTest(message = "crbug.com/1034412")
     public void testNoExitOnIframeNavigation() throws Throwable {
         // Add a TabObserver so we know when the iFrame navigation has occurred before we check that
         // we are still in PiP.
@@ -180,6 +184,7 @@ public class PictureInPictureControllerTest {
     @Test
     @MediumTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @DisabledTest(message = "crbug.com/1038151")
     public void testReenterPip() throws Throwable {
         enterFullscreen();
         triggerAutoPiP();
@@ -214,7 +219,8 @@ public class PictureInPictureControllerTest {
         DOMUtils.waitForMediaPlay(getWebContents(), VIDEO_ID);
 
         // Trigger requestFullscreen() via a click on a button.
-        Assert.assertTrue(DOMUtils.clickNode(getWebContents(), "fullscreen"));
+        Assert.assertTrue(DOMUtils.clickNode(getWebContents(), "fullscreen",
+                true /* goThroughRootAndroidView */, false /* shouldScrollIntoView */));
 
         // We use the web contents fullscreen heuristic.
         CriteriaHelper.pollUiThread(

@@ -8,6 +8,7 @@
 #include "base/json/string_escape.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
@@ -19,12 +20,13 @@
 #include "chrome/browser/chromeos/login/test/enrollment_helper_mixin.h"
 #include "chrome/browser/chromeos/login/test/enrollment_ui_mixin.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
+#include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
-#include "chromeos/dbus/auth_policy/fake_auth_policy_client.h"
+#include "chrome/browser/policy/enrollment_status.h"
+#include "chromeos/dbus/authpolicy/fake_authpolicy_client.h"
 #include "chromeos/dbus/constants/dbus_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart/upstart_client.h"
@@ -41,11 +43,12 @@ namespace {
 
 constexpr char kEnrollmentUI[] = "enterprise-enrollment";
 constexpr char kAdDialog[] = "oauth-enroll-ad-join-ui";
-constexpr char kAdErrorCard[] = "oauth-enroll-error-card";
+constexpr char kBackButton[] = "oobe-signin-back-button";
 
 constexpr char kAdUnlockConfigurationStep[] = "unlockStep";
 constexpr char kAdUnlockPasswordInput[] = "unlockPasswordInput";
 constexpr char kAdUnlockButton[] = "unlockButton";
+constexpr char kAdErrorButton[] = "ad-join-error-retry-button";
 constexpr char kSkipButton[] = "skipButton";
 
 constexpr char kAdCredentialsStep[] = "credsStep";
@@ -55,7 +58,6 @@ constexpr char kAdMachineNameInput[] = "machineNameInput";
 constexpr char kAdUsernameInput[] = "userInput";
 constexpr char kAdPasswordInput[] = "passwordInput";
 constexpr char kAdConfigurationSelect[] = "joinConfigSelect";
-constexpr char kSubmitButton[] = "submitButton";
 constexpr char kNextButton[] = "nextButton";
 constexpr char kWebview[] = "oauth-enroll-auth-view";
 constexpr char kPartitionAttribute[] = ".partition";
@@ -138,11 +140,9 @@ class MockAuthPolicyClient : public FakeAuthPolicyClient {
 
 }  // namespace
 
-class EnterpriseEnrollmentTestBase : public LoginManagerTest {
+class EnterpriseEnrollmentTestBase : public OobeBaseTest {
  public:
-  explicit EnterpriseEnrollmentTestBase(bool should_initialize_webui)
-      : LoginManagerTest(true /*should_launch_browser*/,
-                         should_initialize_webui) {}
+  EnterpriseEnrollmentTestBase() = default;
 
   // Submits regular enrollment credentials.
   void SubmitEnrollmentCredentials() {
@@ -174,7 +174,6 @@ class EnterpriseEnrollmentTestBase : public LoginManagerTest {
     OobeScreenWaiter(EnrollmentScreenView::kScreenId).Wait();
     ASSERT_TRUE(enrollment_screen() != nullptr);
     ASSERT_TRUE(WizardController::default_controller() != nullptr);
-    ASSERT_FALSE(StartupUtils::IsOobeCompleted());
   }
 
   // Helper method to return the current EnrollmentScreen instance.
@@ -193,8 +192,7 @@ class EnterpriseEnrollmentTestBase : public LoginManagerTest {
 
 class EnterpriseEnrollmentTest : public EnterpriseEnrollmentTestBase {
  public:
-  EnterpriseEnrollmentTest()
-      : EnterpriseEnrollmentTestBase(true /* should_initialize_webui */) {}
+  EnterpriseEnrollmentTest() = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(EnterpriseEnrollmentTest);
@@ -205,8 +203,8 @@ class ActiveDirectoryJoinTest : public EnterpriseEnrollmentTest {
   ActiveDirectoryJoinTest() = default;
 
   void SetUp() override {
-    mock_auth_policy_client_ = new MockAuthPolicyClient();
-    mock_auth_policy_client()->DisableOperationDelayForTesting();
+    mock_authpolicy_client_ = new MockAuthPolicyClient();
+    mock_authpolicy_client()->DisableOperationDelayForTesting();
 
     EnterpriseEnrollmentTestBase::SetUp();
   }
@@ -295,7 +293,7 @@ class ActiveDirectoryJoinTest : public EnterpriseEnrollmentTest {
             base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS));
     base::DictionaryValue custom_option;
     custom_option.SetKey("name", base::Value("Custom"));
-    options->GetList().emplace_back(std::move(custom_option));
+    options->Append(std::move(custom_option));
     for (size_t i = 0; i < options->GetList().size(); ++i) {
       const base::Value& option = options->GetList()[i];
       // Select configuration value.
@@ -379,11 +377,11 @@ class ActiveDirectoryJoinTest : public EnterpriseEnrollmentTest {
     if (!dm_token.empty())
       request->set_dm_token(dm_token);
     request->set_kerberos_encryption_types(encryption_types);
-    mock_auth_policy_client()->set_expected_request(std::move(request));
+    mock_authpolicy_client()->set_expected_request(std::move(request));
   }
 
-  MockAuthPolicyClient* mock_auth_policy_client() {
-    return mock_auth_policy_client_;
+  MockAuthPolicyClient* mock_authpolicy_client() {
+    return mock_authpolicy_client_;
   }
 
   void SetupActiveDirectoryJSNotifications() {
@@ -429,7 +427,7 @@ class ActiveDirectoryJoinTest : public EnterpriseEnrollmentTest {
 
  private:
   // Owned by the AuthPolicyClient global instance.
-  MockAuthPolicyClient* mock_auth_policy_client_ = nullptr;
+  MockAuthPolicyClient* mock_authpolicy_client_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ActiveDirectoryJoinTest);
 };
@@ -498,33 +496,6 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
   enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepSuccess);
 }
 
-// Shows the enrollment screen and mocks the enrollment helper to show license
-// selection step. Selects an option with non-zero license count, and uses that
-// license for enrollment.
-IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest, TestLicenseSelection) {
-  ShowEnrollmentScreen();
-  enrollment_helper_.ExpectEnrollmentMode(
-      policy::EnrollmentConfig::MODE_MANUAL);
-
-  enrollment_helper_.DisableAttributePromptUpdate();
-  enrollment_helper_.ExpectAvailableLicenseCount(1 /* perpetual */,
-                                                 0 /* annual */, 3 /* kiosk */);
-  enrollment_helper_.ExpectSuccessfulEnrollmentWithLicense(
-      policy::LicenseType::KIOSK);
-
-  SubmitEnrollmentCredentials();
-
-  // Make sure the license selection screen is open.
-  enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepLicenses);
-  // Click on Kiosk option.
-  enrollment_ui_.SelectEnrollmentLicense(test::values::kLicenseTypeKiosk);
-  // Click on second option. As there is 0 annual licenses, it should not be
-  // selected.
-  enrollment_ui_.SelectEnrollmentLicense(test::values::kLicenseTypeAnnual);
-  enrollment_ui_.UseSelectedLicense();
-  enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepSuccess);
-}
-
 // Verifies that the storage partition is updated when the enrollment screen is
 // shown again.
 IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest, StoragePartitionUpdated) {
@@ -535,16 +506,22 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest, StoragePartitionUpdated) {
       test::GetOobeElementPath({kEnrollmentUI, kWebview}) + kPartitionAttribute;
   std::string webview_partition_name_1 =
       test::OobeJS().GetString(webview_partition_path);
+  EXPECT_FALSE(webview_partition_name_1.empty());
 
-  // Simulate navigating over the enrollment screen a second time (without using
-  // 'Back' and 'Next' buttons).
+  // Cancel button is enabled when the authenticator is ready. Do it manually
+  // instead of waiting for it.
+  test::ExecuteOobeJS("$('enterprise-enrollment').isCancelDisabled = false");
+  test::OobeJS().ClickOnPath({kEnrollmentUI, kBackButton});
+
+  // Simulate navigating over the enrollment screen a second time.
   ShowEnrollmentScreen();
   ExecutePendingJavaScript();
-  std::string webview_partition_name_2 =
-      test::OobeJS().GetString(webview_partition_path);
 
-  // Check that the partition was updated.
-  EXPECT_NE(webview_partition_name_1, webview_partition_name_2);
+  // Verify that the partition name changes.
+  const std::string partition_valid_and_changed_condition = base::StringPrintf(
+      "%s && (%s != '%s')", webview_partition_path.c_str(),
+      webview_partition_path.c_str(), webview_partition_name_1.c_str());
+  test::OobeJS().CreateWaiter(partition_valid_and_changed_condition)->Wait();
 }
 
 // Shows the enrollment screen and mocks the enrollment helper to show Active
@@ -676,7 +653,7 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryJoinTest,
                                    "legacy", kAdTestUser, "password");
   WaitForMessage(&message_queue, "\"ShowADJoinError\"");
   enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepError);
-  test::OobeJS().ClickOnPath({kEnrollmentUI, kAdErrorCard, kSubmitButton});
+  test::OobeJS().ClickOnPath({kEnrollmentUI, kAdErrorButton});
   enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepADJoin);
 }
 

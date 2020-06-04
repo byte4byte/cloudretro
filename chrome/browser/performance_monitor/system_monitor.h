@@ -23,7 +23,6 @@
 namespace performance_monitor {
 
 class MetricEvaluatorsHelper;
-class SystemMonitorMetricsLogger;
 
 // Monitors various various system metrics such as free memory, disk idle time,
 // etc.
@@ -76,9 +75,6 @@ class SystemMonitor {
       SamplingFrequency free_phys_memory_mb_frequency =
           SamplingFrequency::kNoSampling;
 
-      SamplingFrequency disk_idle_time_percent_frequency =
-          SamplingFrequency::kNoSampling;
-
       SamplingFrequency system_metrics_sampling_frequency =
           SamplingFrequency::kNoSampling;
 
@@ -90,10 +86,6 @@ class SystemMonitor {
 
     // Reports the amount of free physical memory, in MB.
     virtual void OnFreePhysicalMemoryMbSample(int free_phys_memory_mb);
-
-    // Reports the disk idle time during the last observation interval, in
-    // percent (between 0.0 and 1.0).
-    virtual void OnDiskIdleTimePercent(float disk_idle_time_percent);
 
     // Called when a new |base::SystemMetrics| sample is available.
     virtual void OnSystemMetricsStruct(
@@ -121,6 +113,7 @@ class SystemMonitor {
 
  protected:
   friend class SystemMonitorTest;
+  friend class MetricEvaluatorsHelper;
 
   // Represents a metric. Overridden for each metric tracked by this monitor.
   class MetricEvaluator {
@@ -128,8 +121,6 @@ class SystemMonitor {
     enum class Type : size_t {
       // The amount of free physical memory, in megabytes.
       kFreeMemoryMb,
-      // The percentage of time the disk has been idle since the sample.
-      kDiskIdleTimePercent,
       // A |base::SystemMetrics| instance.
       // TODO(sebmarchand): Split this struct into some smaller ones.
       kSystemMetricsStruct,
@@ -283,9 +274,6 @@ class SystemMonitor {
   // |MetricEvaluator::Type|.
   MetricMetadataArray metric_evaluators_metadata_;
 
-  // The logger responsible of logging the system metrics.
-  std::unique_ptr<SystemMonitorMetricsLogger> metrics_logger_;
-
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<SystemMonitor> weak_factory_{this};
@@ -300,7 +288,6 @@ class SystemMonitor::SystemObserver::MetricRefreshFrequencies::Builder {
   ~Builder() = default;
 
   Builder& SetFreePhysMemoryMbFrequency(SamplingFrequency freq);
-  Builder& SetDiskIdleTimePercentFrequency(SamplingFrequency freq);
   Builder& SetSystemMetricsSamplingFrequency(SamplingFrequency freq);
 
   // Returns the initialized MetricRefreshFrequencies instance.
@@ -321,10 +308,6 @@ class MetricEvaluatorsHelper {
 
   // Returns the free physical memory, in megabytes.
   virtual base::Optional<int> GetFreePhysicalMemoryMb() = 0;
-
-  // Return the disk idle time, in percentage of time since the last call to
-  // this function (returns nullopt on the first call).
-  virtual base::Optional<float> GetDiskIdleTimePercent() = 0;
 
   // Return a |base::SystemMetrics| snapshot.
   //

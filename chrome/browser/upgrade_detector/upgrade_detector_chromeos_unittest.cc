@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/clock.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -67,9 +67,11 @@ class UpgradeDetectorChromeosTest : public ::testing::Test {
  protected:
   UpgradeDetectorChromeosTest()
       : utc_(icu::TimeZone::createTimeZone("Etc/GMT")),
-        scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME),
+        task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         scoped_local_state_(TestingBrowserProcess::GetGlobal()) {
+    // By default, test with the relaunch policy enabled.
+    SetIsRelaunchNotificationPolicyEnabled(true /* enabled */);
+
     // Disable the detector's check to see if autoupdates are inabled.
     // Without this, tests put the detector into an invalid state by detecting
     // upgrades before the detection task completes.
@@ -88,22 +90,31 @@ class UpgradeDetectorChromeosTest : public ::testing::Test {
     FastForwardBy(base::TimeDelta::FromHours(2));
   }
 
-  const base::Clock* GetMockClock() {
-    return scoped_task_environment_.GetMockClock();
-  }
+  const base::Clock* GetMockClock() { return task_environment_.GetMockClock(); }
 
   const base::TickClock* GetMockTickClock() {
-    return scoped_task_environment_.GetMockTickClock();
+    return task_environment_.GetMockTickClock();
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   void NotifyUpdateReadyToInstall() {
-    chromeos::UpdateEngineClient::Status status;
-    status.status =
-        chromeos::UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT;
+    update_engine::StatusResult status;
+    status.set_current_operation(update_engine::Operation::UPDATED_NEED_REBOOT);
     fake_update_engine_client_->set_default_status(status);
     fake_update_engine_client_->NotifyObserversThatStatusChanged(status);
+  }
+
+  // Sets the browser.relaunch_notification preference in Local State to
+  // |value|.
+  void SetIsRelaunchNotificationPolicyEnabled(bool enabled) {
+    constexpr int kChromeMenuOnly = 0;     // Disabled.
+    constexpr int kRecommendedBubble = 1;  // Enabled.
+
+    scoped_local_state_.Get()->SetManagedPref(
+        prefs::kRelaunchNotification,
+        std::make_unique<base::Value>(enabled ? kRecommendedBubble
+                                              : kChromeMenuOnly));
   }
 
   // Sets the browser.relaunch_notification_period preference in Local State to
@@ -136,18 +147,35 @@ class UpgradeDetectorChromeosTest : public ::testing::Test {
 
   // Fast-forwards virtual time by |delta|.
   void FastForwardBy(base::TimeDelta delta) {
-    scoped_task_environment_.FastForwardBy(delta);
+    task_environment_.FastForwardBy(delta);
   }
 
  private:
   std::unique_ptr<icu::TimeZone> utc_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ScopedTestingLocalState scoped_local_state_;
 
   chromeos::FakeUpdateEngineClient* fake_update_engine_client_;  // Not owned.
 
   DISALLOW_COPY_AND_ASSIGN(UpgradeDetectorChromeosTest);
 };
+
+TEST_F(UpgradeDetectorChromeosTest, PolicyNotEnabled) {
+  // Disable the relaunch notification policy as a whole.
+  SetIsRelaunchNotificationPolicyEnabled(false /* enabled */);
+
+  TestUpgradeDetectorChromeos upgrade_detector(GetMockClock(),
+                                               GetMockTickClock());
+  upgrade_detector.Init();
+
+  // The observer is expected to be notified that an upgrade is recommended.
+  ::testing::StrictMock<MockUpgradeObserver> mock_observer(&upgrade_detector);
+  EXPECT_CALL(mock_observer, OnUpgradeRecommended());
+
+  NotifyUpdateReadyToInstall();
+
+  upgrade_detector.Shutdown();
+}
 
 TEST_F(UpgradeDetectorChromeosTest, TestHighAnnoyanceDeadline) {
   TestUpgradeDetectorChromeos upgrade_detector(GetMockClock(),

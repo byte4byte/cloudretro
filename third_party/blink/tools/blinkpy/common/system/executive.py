@@ -39,12 +39,10 @@ import sys
 import threading
 import time
 
-
 _log = logging.getLogger(__name__)
 
 
 class ScriptError(Exception):
-
     def __init__(self,
                  message=None,
                  script_args=None,
@@ -54,7 +52,8 @@ class ScriptError(Exception):
                  output_limit=500):
         shortened_output = output
         if output and output_limit and len(output) > output_limit:
-            shortened_output = 'Last %s characters of output:\n%s' % (output_limit, output[-output_limit:])
+            shortened_output = 'Last %s characters of output:\n%s' % (
+                output_limit, output[-output_limit:])
 
         if not message:
             message = 'Failed to run "%s"' % repr(script_args)
@@ -106,18 +105,13 @@ class Executive(object):
     def cpu_count(self):
         return multiprocessing.cpu_count()
 
-    def kill_process(self, pid):
+    def kill_process(self, pid, kill_tree=True):
         """Attempts to kill the given pid.
+
+        if kill_tree is True, the whole process group will be killed.
 
         Will fail silently if pid does not exist or insufficient permissions.
         """
-        # This method behaves differently on Windows and Linux. On Windows, it
-        # kills the process as well as all of its subprocesses (because of the
-        # '/t' flag). Some call sites depend on this behaviour (e.g. to kill all
-        # worker processes of wptserve on Windows).
-        # TODO(robertma): Replicate the behaviour on POSIX by calling setsid()
-        # in Popen's preexec_fn hook, and perhaps rename the method to
-        # kill_process_tree.
         if sys.platform == 'win32':
             # Workaround for race condition that occurs when the browser is
             # killed as it's launching a process. This sometimes leaves a child
@@ -138,7 +132,10 @@ class Executive(object):
             return
 
         try:
-            os.kill(pid, signal.SIGKILL)
+            if kill_tree:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, os.WNOHANG)
         except OSError as error:
             if error.errno == errno.ESRCH:
@@ -150,10 +147,9 @@ class Executive(object):
             raise
 
     def _win32_check_running_pid(self, pid):
-
         class PROCESSENTRY32(ctypes.Structure):
-            _fields_ = [('dwSize', ctypes.c_ulong),
-                        ('cntUsage', ctypes.c_ulong),
+            _fields_ = [('dwSize', ctypes.c_ulong), ('cntUsage',
+                                                     ctypes.c_ulong),
                         ('th32ProcessID', ctypes.c_ulong),
                         ('th32DefaultHeapID', ctypes.POINTER(ctypes.c_ulong)),
                         ('th32ModuleID', ctypes.c_ulong),
@@ -203,14 +199,16 @@ class Executive(object):
         processes = []
         if sys.platform == 'win32':
             tasklist_process = self.popen(['tasklist', '/fo', 'csv'],
-                                          stdout=self.PIPE, stderr=self.PIPE)
+                                          stdout=self.PIPE,
+                                          stderr=self.PIPE)
             stdout, _ = tasklist_process.communicate()
             stdout_reader = csv.reader(stdout.splitlines())
             for line in stdout_reader:
                 processes.append([column for column in line])
         else:
             ps_process = self.popen(['ps', '-eo', 'pid,comm'],
-                                    stdout=self.PIPE, stderr=self.PIPE)
+                                    stdout=self.PIPE,
+                                    stderr=self.PIPE)
             stdout, _ = ps_process.communicate()
             for line in stdout.splitlines():
                 # In some cases the line can contain one or more
@@ -235,7 +233,10 @@ class Executive(object):
 
         return sorted(running_pids)
 
-    def wait_limited(self, pid, limit_in_seconds=None, check_frequency_in_seconds=None):
+    def wait_limited(self,
+                     pid,
+                     limit_in_seconds=None,
+                     check_frequency_in_seconds=None):
         seconds_left = limit_in_seconds or 10
         sleep_length = check_frequency_in_seconds or 1
         while seconds_left > 0 and self.check_running_pid(pid):
@@ -277,7 +278,8 @@ class Executive(object):
         if not user_input:
             return (None, None)
         if hasattr(user_input, 'read'):  # Check if the user_input is a file.
-            return (user_input, None)  # Assume the file is in the right encoding.
+            # Assume the file is in the right encoding.
+            return (user_input, None)
 
         # Popen in Python 2.5 and before does not automatically encode unicode objects.
         # http://bugs.python.org/issue5290
@@ -302,18 +304,19 @@ class Executive(object):
             escaped_args.append(arg)
         return ' '.join(escaped_args)
 
-    def run_command(self,
-                    args,
-                    cwd=None,
-                    env=None,
-                    input=None,  # pylint: disable=redefined-builtin
-                    timeout_seconds=None,
-                    error_handler=None,
-                    return_exit_code=False,
-                    return_stderr=True,
-                    ignore_stderr=False,
-                    decode_output=True,
-                    debug_logging=True):
+    def run_command(
+            self,
+            args,
+            cwd=None,
+            env=None,
+            input=None,  # pylint: disable=redefined-builtin
+            timeout_seconds=None,
+            error_handler=None,
+            return_exit_code=False,
+            return_stderr=True,
+            ignore_stderr=False,
+            decode_output=True,
+            debug_logging=True):
         """Popen wrapper for convenience and to work around python bugs."""
         assert isinstance(args, list) or isinstance(args, tuple)
         start_time = time.time()
@@ -323,13 +326,14 @@ class Executive(object):
         stderr = self.STDOUT if return_stderr else (
             self.DEVNULL if ignore_stderr else None)
 
-        process = self.popen(args,
-                             stdin=stdin,
-                             stdout=self.PIPE,
-                             stderr=stderr,
-                             cwd=cwd,
-                             env=env,
-                             close_fds=self._should_close_fds())
+        process = self.popen(
+            args,
+            stdin=stdin,
+            stdout=self.PIPE,
+            stderr=stderr,
+            cwd=cwd,
+            env=env,
+            close_fds=self._should_close_fds())
 
         if timeout_seconds:
             timer = threading.Timer(timeout_seconds, process.kill)
@@ -339,7 +343,8 @@ class Executive(object):
 
         # run_command automatically decodes to unicode() unless explicitly told not to.
         if decode_output:
-            output = output.decode(self._child_process_encoding(), errors='replace')
+            output = output.decode(
+                self._child_process_encoding(), errors='replace')
 
         # wait() is not threadsafe and can throw OSError due to:
         # http://bugs.python.org/issue1731717
@@ -349,17 +354,19 @@ class Executive(object):
             timer.cancel()
 
         if debug_logging:
-            _log.debug('"%s" took %.2fs', self.command_for_printing(args), time.time() - start_time)
+            _log.debug('"%s" took %.2fs', self.command_for_printing(args),
+                       time.time() - start_time)
 
         if return_exit_code:
             return exit_code
 
         if exit_code:
-            script_error = ScriptError(script_args=args,
-                                       exit_code=exit_code,
-                                       output=output,
-                                       cwd=cwd,
-                                       output_limit=self.error_output_limit)
+            script_error = ScriptError(
+                script_args=args,
+                exit_code=exit_code,
+                output=output,
+                cwd=cwd,
+                output_limit=self.error_output_limit)
             (error_handler or self.default_error_handler)(script_error)
         return output
 
@@ -403,6 +410,11 @@ class Executive(object):
     def popen(self, args, **kwargs):
         assert not kwargs.get('shell')
         string_args = self._stringify_args(args)
+
+        # os.setpgid is required, otherwise, kill_process function will kill
+        # the parent processes unexpectedly.
+        if sys.platform != 'win32':
+            kwargs['preexec_fn'] = lambda: os.setpgid(0, 0)
         return subprocess.Popen(string_args, **kwargs)
 
     def call(self, args, **kwargs):
@@ -416,7 +428,8 @@ class Executive(object):
     def map(self, thunk, arglist, processes=None):
         if sys.platform == 'win32' or len(arglist) == 1:
             return map(thunk, arglist)
-        pool = multiprocessing.Pool(processes=(processes or multiprocessing.cpu_count()))
+        pool = multiprocessing.Pool(
+            processes=(processes or multiprocessing.cpu_count()))
         try:
             return pool.map(thunk, arglist)
         finally:
@@ -427,6 +440,7 @@ class Executive(object):
 def _run_command_thunk(cmd_line_and_cwd):
     # Note that this needs to be a bare module (and hence Picklable) method to work with multiprocessing.Pool.
     (cmd_line, cwd) = cmd_line_and_cwd
-    proc = subprocess.Popen(cmd_line, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        cmd_line, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
     return (proc.returncode, stdout, stderr)

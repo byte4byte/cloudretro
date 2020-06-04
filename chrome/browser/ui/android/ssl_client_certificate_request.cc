@@ -13,7 +13,6 @@
 #include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
 #include "chrome/android/chrome_jni_headers/SSLClientCertificateRequest_jni.h"
 #include "chrome/browser/ssl/ssl_client_certificate_selector.h"
@@ -51,8 +50,7 @@ class ClientCertRequest {
       std::unique_ptr<content::ClientCertificateDelegate> delegate)
       : pending_requests_(pending_requests),
         cert_request_info_(cert_request_info),
-        delegate_(std::move(delegate)),
-        weak_factory_(this) {}
+        delegate_(std::move(delegate)) {}
 
   base::OnceClosure GetCancellationCallback() {
     return base::BindOnce(&ClientCertRequest::OnCancel,
@@ -72,7 +70,7 @@ class ClientCertRequest {
   base::WeakPtr<SSLClientCertPendingRequests> pending_requests_;
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
   std::unique_ptr<content::ClientCertificateDelegate> delegate_;
-  base::WeakPtrFactory<ClientCertRequest> weak_factory_;
+  base::WeakPtrFactory<ClientCertRequest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ClientCertRequest);
 };
@@ -82,7 +80,7 @@ class SSLClientCertPendingRequests
       public content::WebContentsObserver {
  public:
   explicit SSLClientCertPendingRequests(content::WebContents* web_contents)
-      : content::WebContentsObserver(web_contents), weak_factory_(this) {}
+      : content::WebContentsObserver(web_contents) {}
   ~SSLClientCertPendingRequests() override {}
 
   void AddRequest(std::unique_ptr<ClientCertRequest> request);
@@ -104,20 +102,12 @@ class SSLClientCertPendingRequests
   void ReadyToCommitNavigation(
       content::NavigationHandle* navigation_handle) override;
 
-  void WebContentsDestroyed() override;
-
   class CertificateDialogPolicy {
    public:
     // Has the maximum number of cert dialogs been exceeded?
     bool MaxExceeded() { return count_ >= k_max_displayed_dialogs; }
     // Resets counter. Should be called on navigation.
-    void ResetCount() {
-      // Record sample right before the value is reset. This represents the
-      // maximum number of certificate dialogs displayed by sites in the wild.
-      UMA_HISTOGRAM_COUNTS_10000(
-          "Net.Certificate.ClientCertDialogCount.Android", count_);
-      count_ = 0;
-    }
+    void ResetCount() { count_ = 0; }
     // Increment the counter.
     void IncrementCount() { count_++; }
 
@@ -133,12 +123,29 @@ class SSLClientCertPendingRequests
 
   CertificateDialogPolicy dialog_policy_;
   base::queue<std::unique_ptr<ClientCertRequest>> pending_requests_;
-  base::WeakPtrFactory<SSLClientCertPendingRequests> weak_factory_;
+  base::WeakPtrFactory<SSLClientCertPendingRequests> weak_factory_{this};
 
   friend class content::WebContentsUserData<SSLClientCertPendingRequests>;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
+
+ui::WindowAndroid* GetWindowFromWebContents(
+    content::WebContents* web_contents) {
+  ViewAndroidHelper* view_helper =
+      ViewAndroidHelper::FromWebContents(web_contents);
+  if (view_helper == nullptr) {
+    LOG(ERROR) << "Could not get ViewAndroidHelper";
+    return nullptr;
+  }
+  ui::ViewAndroid* view = view_helper->GetViewAndroid();
+  if (view == nullptr) {
+    LOG(ERROR) << "Could not get ViewAndroid";
+    return nullptr;
+  }
+  // May return nullptr.
+  return view->GetWindowAndroid();
+}
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(SSLClientCertPendingRequests)
 
@@ -147,10 +154,11 @@ static void StartClientCertificateRequest(
     content::WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  ui::WindowAndroid* window = ViewAndroidHelper::FromWebContents(web_contents)
-                                  ->GetViewAndroid()
-                                  ->GetWindowAndroid();
-  DCHECK(window);
+  ui::WindowAndroid* window = GetWindowFromWebContents(web_contents);
+  if (window == nullptr) {
+    LOG(ERROR) << "Could not get Window";
+    return;
+  }
 
   // Build the |key_types| JNI parameter, as a String[]
   std::vector<std::string> key_types;
@@ -161,7 +169,7 @@ static void StartClientCertificateRequest(
         key_types.push_back("RSA");
         break;
       case net::CLIENT_CERT_ECDSA_SIGN:
-        key_types.push_back("ECDSA");
+        key_types.push_back("EC");
         break;
       default:
         // Ignore unknown types.
@@ -284,11 +292,6 @@ void SSLClientCertPendingRequests::ReadyToCommitNavigation(
   }
 }
 
-void SSLClientCertPendingRequests::WebContentsDestroyed() {
-  // Record UMA sample for last page loaded in WebContents.
-  dialog_policy_.ResetCount();
-}
-
 void ClientCertRequest::CertificateSelected(
     scoped_refptr<net::X509Certificate> cert,
     scoped_refptr<net::SSLPrivateKey> key) {
@@ -379,8 +382,8 @@ JNI_SSLClientCertificateRequest_NotifyClientCertificatesChangedOnIOThread(
   if (content::BrowserThread::CurrentlyOn(content::BrowserThread::IO)) {
     NotifyClientCertificatesChanged();
   } else {
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                             base::BindOnce(&NotifyClientCertificatesChanged));
+    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
+                   base::BindOnce(&NotifyClientCertificatesChanged));
   }
 }
 

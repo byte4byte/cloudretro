@@ -106,12 +106,13 @@ void FindInPageManagerImpl::Find(NSString* query, FindInPageOptions options) {
 }
 
 void FindInPageManagerImpl::StartSearch(NSString* query) {
-  std::set<WebFrame*> all_frames = GetAllWebFrames(web_state_);
+  std::set<WebFrame*> all_frames =
+      web_state_->GetWebFramesManager()->GetAllWebFrames();
   last_find_request_.Reset(query, all_frames.size());
   if (all_frames.size() == 0) {
     // No frames to search in.
     // Call asyncronously to match behavior if find was successful in frames.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {WebThread::UI},
         base::BindOnce(&FindInPageManagerImpl::LastFindRequestCompleted,
                        weak_factory_.GetWeakPtr()));
@@ -134,7 +135,7 @@ void FindInPageManagerImpl::StartSearch(NSString* query) {
       last_find_request_.DidReceiveFindResponseFromOneFrame();
       if (last_find_request_.AreAllFindResponsesReturned()) {
         // Call asyncronously to match behavior if find was done in frames.
-        base::PostTaskWithTraits(
+        base::PostTask(
             FROM_HERE, {WebThread::UI},
             base::BindOnce(&FindInPageManagerImpl::LastFindRequestCompleted,
                            weak_factory_.GetWeakPtr()));
@@ -148,7 +149,7 @@ void FindInPageManagerImpl::StopFinding() {
                            /*new_pending_frame_call_count=*/0);
 
   std::vector<base::Value> params;
-  for (WebFrame* frame : GetAllWebFrames(web_state_)) {
+  for (WebFrame* frame : web_state_->GetWebFramesManager()->GetAllWebFrames()) {
     frame->CallJavaScriptFunction(kFindInPageStop, params);
   }
   if (delegate_) {
@@ -225,6 +226,7 @@ void FindInPageManagerImpl::LastFindRequestCompleted() {
 }
 
 void FindInPageManagerImpl::SelectDidFinish(const base::Value* result) {
+  std::string match_context_string;
   if (result && result->is_dict()) {
     // Get updated match count.
     const base::Value* matches = result->FindKey(kSelectAndScrollResultMatches);
@@ -245,10 +247,18 @@ void FindInPageManagerImpl::SelectDidFinish(const base::Value* result) {
       int current_index = static_cast<int>(index->GetDouble());
       last_find_request_.SetCurrentSelectedMatchFrameIndex(current_index);
     }
+    // Get context string.
+    const base::Value* context_string =
+        result->FindKey(kSelectAndScrollResultContextString);
+    if (context_string && context_string->is_string()) {
+      match_context_string =
+          static_cast<std::string>(context_string->GetString());
+    }
   }
   if (delegate_) {
     delegate_->DidSelectMatch(
-        web_state_, last_find_request_.GetCurrentSelectedMatchPageIndex());
+        web_state_, last_find_request_.GetCurrentSelectedMatchPageIndex(),
+        base::SysUTF8ToNSString(match_context_string));
   }
 }
 

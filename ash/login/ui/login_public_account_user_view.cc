@@ -33,7 +33,7 @@ constexpr int kDistanceFromUserViewToArrowButton = 44;
 // Distance from the end of arrow button to the bottom of the big user view.
 constexpr int kDistanceFromArrowButtonToBigUserViewBottom = 20;
 
-constexpr int kArrowButtonSizeDp = 40;
+constexpr int kArrowButtonSizeDp = 48;
 
 // Non-empty width, useful for debugging/visualization.
 constexpr int kNonEmptyWidth = 1;
@@ -49,6 +49,12 @@ LoginPublicAccountUserView::TestApi::~TestApi() = default;
 
 views::View* LoginPublicAccountUserView::TestApi::arrow_button() const {
   return view_->arrow_button_;
+}
+
+void LoginPublicAccountUserView::TestApi::OnArrowTap() const {
+  view_->ButtonPressed(views::Button::AsButton(arrow_button()),
+                       ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::PointF(),
+                                      gfx::PointF(), base::TimeTicks(), 0, 0));
 }
 
 LoginPublicAccountUserView::Callbacks::Callbacks() = default;

@@ -9,16 +9,14 @@
 
 #include "base/bind.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
-#include "chrome/common/chrome_features.h"
+#include "base/test/task_environment.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
 namespace {
 
-// The number of printers in BulkPolicyContentsJson.
+// The number of correct printers in BulkPolicyContentsJson.
 constexpr size_t kNumPrinters = 3;
 
 // An example bulk printer configuration file.
@@ -33,6 +31,18 @@ constexpr char kBulkPolicyContentsJson[] = R"json(
     "uri": "ipp://192.168.1.5",
     "ppd_resource": {
       "effective_model": "MS610de"
+    }
+  }, {
+    "id": "Incorrect uri",
+    "display_name": "aaa",
+    "description": "bbbb",
+    "manufacturer": "cccc",
+    "model":"dddd",
+    "uri":"ipp://:",
+    "uuid":"1c555fdb-1193-2204-3346-44c046e79d12",
+    "ppd_resource":{
+      "effective_manufacturer": "eee",
+      "effective_model": "fff"
     }
   }, {
     "id": "Second",
@@ -92,9 +102,7 @@ class TestObserver : public BulkPrintersCalculator::Observer {
 
 class BulkPrintersCalculatorTest : public testing::Test {
  public:
-  BulkPrintersCalculatorTest() : scoped_task_environment_() {
-    scoped_feature_list_.InitAndEnableFeature(
-        base::Feature(features::kBulkPrinters));
+  BulkPrintersCalculatorTest() : task_environment_() {
     external_printers_ = BulkPrintersCalculator::Create();
   }
   ~BulkPrintersCalculatorTest() override {
@@ -104,10 +112,7 @@ class BulkPrintersCalculatorTest : public testing::Test {
 
  protected:
   std::unique_ptr<BulkPrintersCalculator> external_printers_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 // Verify that we're initiall unset and empty.
@@ -128,7 +133,7 @@ TEST_F(BulkPrintersCalculatorTest, DestructionIsSafe) {
   }
   // printers is out of scope.  Destructor has run.  Pump the message queue to
   // see if anything strange happens.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 // Verifies that IsDataPolicySet returns false until data is set.
@@ -138,7 +143,7 @@ TEST_F(BulkPrintersCalculatorTest, PolicyUnsetWithMissingData) {
   EXPECT_FALSE(external_printers_->IsDataPolicySet());
   external_printers_->SetData(std::move(data));
   EXPECT_TRUE(external_printers_->IsDataPolicySet());
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
 }
 
@@ -150,7 +155,7 @@ TEST_F(BulkPrintersCalculatorTest, AllPoliciesResultInPrinters) {
   external_printers_->SetData(std::move(data));
   EXPECT_TRUE(external_printers_->IsDataPolicySet());
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(kNumPrinters, printers.size());
@@ -167,11 +172,11 @@ TEST_F(BulkPrintersCalculatorTest, PolicyClearedNowUnset) {
   external_printers_->ClearData();
   external_printers_->SetData(std::move(data));
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(external_printers_->IsDataPolicySet());
 
   external_printers_->ClearData();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_FALSE(external_printers_->IsDataPolicySet());
   EXPECT_TRUE(external_printers_->GetPrinters().empty());
 }
@@ -184,12 +189,12 @@ TEST_F(BulkPrintersCalculatorTest, BlacklistPolicySet) {
   external_printers_->ClearData();
   external_printers_->SetData(std::move(data));
   external_printers_->SetAccessMode(BulkPrintersCalculator::BLACKLIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   external_printers_->SetBlacklist({"Second", "Third"});
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(1U, printers.size());
   EXPECT_EQ("LexaPrint", printers.at("First").display_name());
@@ -202,10 +207,10 @@ TEST_F(BulkPrintersCalculatorTest, WhitelistPolicySet) {
   external_printers_->ClearData();
   external_printers_->SetData(std::move(data));
   external_printers_->SetAccessMode(BulkPrintersCalculator::WHITELIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   external_printers_->SetWhitelist({"First"});
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(1U, printers.size());
@@ -218,10 +223,10 @@ TEST_F(BulkPrintersCalculatorTest, EmptyBlacklistAllPrinters) {
   external_printers_->ClearData();
   external_printers_->SetData(std::move(data));
   external_printers_->SetAccessMode(BulkPrintersCalculator::BLACKLIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   external_printers_->SetBlacklist({});
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(kNumPrinters, printers.size());
@@ -233,10 +238,10 @@ TEST_F(BulkPrintersCalculatorTest, EmptyWhitelistNoPrinters) {
   external_printers_->ClearData();
   external_printers_->SetData(std::move(data));
   external_printers_->SetAccessMode(BulkPrintersCalculator::WHITELIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   external_printers_->SetWhitelist({});
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(0U, printers.size());
@@ -254,7 +259,7 @@ TEST_F(BulkPrintersCalculatorTest, BlacklistToWhitelistSwap) {
   // This should result in 2 printers.  But we're switching the mode anyway.
 
   external_printers_->SetAccessMode(BulkPrintersCalculator::WHITELIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsComplete());
   const auto& printers = external_printers_->GetPrinters();
   EXPECT_EQ(1U, printers.size());
@@ -272,7 +277,7 @@ TEST_F(BulkPrintersCalculatorTest, MultipleUpdates) {
 
   auto new_data = std::make_unique<std::string>(kMoreContentsJson);
   external_printers_->SetData(std::move(new_data));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   const auto& printers = external_printers_->GetPrinters();
   ASSERT_EQ(1U, printers.size());
   EXPECT_EQ("ThirdPrime", printers.at("ThirdPrime").id());
@@ -287,13 +292,13 @@ TEST_F(BulkPrintersCalculatorTest, ObserverTest) {
   external_printers_->SetWhitelist(std::vector<std::string>());
   external_printers_->SetBlacklist(std::vector<std::string>());
   external_printers_->ClearData();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(1, obs.called);
 
   external_printers_->SetData(
       std::make_unique<std::string>(kBulkPolicyContentsJson));
 
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(external_printers_->IsDataPolicySet());
   EXPECT_EQ(2, obs.called);
   EXPECT_TRUE(obs.last_valid);  // ready now
@@ -301,17 +306,17 @@ TEST_F(BulkPrintersCalculatorTest, ObserverTest) {
   EXPECT_EQ(kNumPrinters, external_printers_->GetPrinters().size());
 
   external_printers_->SetAccessMode(BulkPrintersCalculator::WHITELIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(3, obs.called);  // effective list changed.  Notified.
   EXPECT_TRUE(obs.last_valid);
 
   external_printers_->SetAccessMode(BulkPrintersCalculator::BLACKLIST_ONLY);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(4, obs.called);  // effective list changed.  Notified.
   EXPECT_TRUE(obs.last_valid);
 
   external_printers_->ClearData();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_EQ(5, obs.called);  // Called for transition to invalid policy.
   EXPECT_TRUE(obs.last_valid);
   EXPECT_TRUE(external_printers_->GetPrinters().empty());

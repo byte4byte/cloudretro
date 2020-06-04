@@ -11,22 +11,19 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/assistant_optin/assistant_optin_ui.h"
 #include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/services/assistant/public/mojom/constants.mojom.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/services/assistant/public/cpp/assistant_service.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_service_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace chromeos {
 namespace settings {
 
-GoogleAssistantHandler::GoogleAssistantHandler(Profile* profile)
-    : profile_(profile), weak_factory_(this) {
+GoogleAssistantHandler::GoogleAssistantHandler() {
   chromeos::CrasAudioHandler::Get()->AddAudioObserver(this);
 }
 
@@ -77,8 +74,7 @@ void GoogleAssistantHandler::RegisterMessages() {
 void GoogleAssistantHandler::HandleShowGoogleAssistantSettings(
     const base::ListValue* args) {
   CHECK_EQ(0U, args->GetSize());
-  if (chromeos::switches::IsAssistantEnabled())
-    ash::OpenAssistantSettings();
+  ash::OpenAssistantSettings();
 }
 
 void GoogleAssistantHandler::HandleRetrainVoiceModel(
@@ -106,9 +102,8 @@ void GoogleAssistantHandler::BindAssistantSettingsManager() {
   DCHECK(!settings_manager_.is_bound());
 
   // Set up settings mojom.
-  service_manager::Connector* connector =
-      content::BrowserContext::GetConnectorFor(profile_);
-  connector->BindInterface(assistant::mojom::kServiceName, &settings_manager_);
+  chromeos::assistant::AssistantService::Get()->BindSettingsManager(
+      settings_manager_.BindNewPipeAndPassReceiver());
 }
 
 }  // namespace settings

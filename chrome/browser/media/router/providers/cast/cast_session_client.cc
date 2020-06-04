@@ -10,11 +10,10 @@
 #include "chrome/browser/media/router/providers/cast/cast_activity_record.h"
 #include "chrome/browser/media/router/providers/cast/cast_internal_message_util.h"
 #include "components/cast_channel/enum_table.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 using blink::mojom::PresentationConnectionCloseReason;
 using blink::mojom::PresentationConnectionMessagePtr;
-using blink::mojom::PresentationConnectionPtrInfo;
 using blink::mojom::PresentationConnectionState;
 
 namespace media_router {
@@ -41,28 +40,28 @@ CastSessionClientImpl::CastSessionClientImpl(const std::string& client_id,
                                              const url::Origin& origin,
                                              int tab_id,
                                              AutoJoinPolicy auto_join_policy,
-                                             DataDecoder* data_decoder,
                                              ActivityRecord* activity)
     : CastSessionClient(client_id, origin, tab_id),
       auto_join_policy_(auto_join_policy),
-      data_decoder_(data_decoder),
-      activity_(activity),
-      connection_binding_(this) {}
+      activity_(activity) {}
 
 CastSessionClientImpl::~CastSessionClientImpl() = default;
 
 mojom::RoutePresentationConnectionPtr CastSessionClientImpl::Init() {
-  PresentationConnectionPtrInfo renderer_connection;
-  connection_binding_.Bind(mojo::MakeRequest(&renderer_connection));
-  auto connection_request = mojo::MakeRequest(&connection_);
-  connection_->DidChangeState(PresentationConnectionState::CONNECTED);
-  return mojom::RoutePresentationConnection::New(std::move(renderer_connection),
-                                                 std::move(connection_request));
+  auto renderer_connection = connection_receiver_.BindNewPipeAndPassRemote();
+  mojo::PendingRemote<blink::mojom::PresentationConnection>
+      pending_connection_remote;
+  auto connection_receiver =
+      pending_connection_remote.InitWithNewPipeAndPassReceiver();
+  connection_remote_.Bind(std::move(pending_connection_remote));
+  connection_remote_->DidChangeState(PresentationConnectionState::CONNECTED);
+  return mojom::RoutePresentationConnection::New(
+      std::move(renderer_connection), std::move(connection_receiver));
 }
 
 void CastSessionClientImpl::SendMessageToClient(
     PresentationConnectionMessagePtr message) {
-  connection_->OnMessage(std::move(message));
+  connection_remote_->OnMessage(std::move(message));
 }
 
 void CastSessionClientImpl::SendMediaStatusToClient(
@@ -103,18 +102,14 @@ void CastSessionClientImpl::OnMessage(
   if (!message->is_message())
     return;
 
-  data_decoder_->ParseJson(
+  GetDataDecoder().ParseJson(
       message->get_message(),
-      base::BindRepeating(&CastSessionClientImpl::HandleParsedClientMessage,
-                          weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&ReportClientMessageParseError,
-                          activity_->route().media_route_id()));
+      base::BindOnce(&CastSessionClientImpl::HandleParsedClientMessage,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void CastSessionClientImpl::DidClose(PresentationConnectionCloseReason reason) {
-  // TODO(https://crbug.com/809249): Implement close connection with this
-  // method once we make sure Blink calls this on navigation and on
-  // PresentationConnection::close().
+  activity_->CloseConnectionOnReceiver(client_id());
 }
 
 void CastSessionClientImpl::SendErrorCodeToClient(
@@ -135,9 +130,16 @@ void CastSessionClientImpl::SendErrorToClient(int sequence_number,
       CreateErrorMessage(client_id(), std::move(error), sequence_number));
 }
 
-void CastSessionClientImpl::HandleParsedClientMessage(base::Value message) {
+void CastSessionClientImpl::HandleParsedClientMessage(
+    data_decoder::DataDecoder::ValueOrError result) {
+  if (!result.value) {
+    ReportClientMessageParseError(activity_->route().media_route_id(),
+                                  *result.error);
+    return;
+  }
+
   std::unique_ptr<CastInternalMessage> cast_message =
-      CastInternalMessage::From(std::move(message));
+      CastInternalMessage::From(std::move(*result.value));
   if (!cast_message) {
     ReportClientMessageParseError(activity_->route().media_route_id(),
                                   "Not a Cast message");
@@ -180,9 +182,13 @@ void CastSessionClientImpl::HandleParsedClientMessage(base::Value message) {
       break;
 
     default:
-      // TODO(jrw): Log string value of type instead of int value.
-      DLOG(ERROR) << "Unhandled message type: "
-                  << static_cast<int>(cast_message->type());
+      auto opt_string = cast_util::EnumToString(cast_message->type());
+      if (opt_string) {
+        DLOG(ERROR) << "Unhandled message type: " << *opt_string;
+      } else {
+        DLOG(ERROR) << "Invalid message type: "
+                    << static_cast<int>(cast_message->type());
+      }
   }
 }
 
@@ -212,13 +218,11 @@ void CastSessionClientImpl::HandleV2ProtocolMessage(
   } else if (type == cast_channel::V2MessageType::kSetVolume) {
     DVLOG(2) << "Got volume command from client";
     DCHECK(cast_message.sequence_number());
-    activity_->SendSetVolumeRequestToReceiver(
-        cast_message, base::BindOnce(&CastSessionClientImpl::SendResultResponse,
-                                     weak_ptr_factory_.GetWeakPtr(),
-                                     *cast_message.sequence_number()));
+    activity_->SendSetVolumeRequestToReceiver(cast_message,
+                                              MakeResultCallback(cast_message));
   } else if (type == cast_channel::V2MessageType::kStop) {
-    // TODO(jrw): implement STOP_SESSION.
-    DVLOG(2) << "Ignoring stop-session (" << type_str << ") message";
+    activity_->StopSessionOnReceiver(cast_message.client_id(),
+                                     MakeResultCallback(cast_message));
   } else {
     DLOG(ERROR) << "Unknown v2 message type: " << type_str;
   }
@@ -242,23 +246,30 @@ void CastSessionClientImpl::SendResultResponse(int sequence_number,
 
 void CastSessionClientImpl::CloseConnection(
     PresentationConnectionCloseReason close_reason) {
-  if (connection_)
-    connection_->DidClose(close_reason);
-
+  if (connection_remote_)
+    connection_remote_->DidClose(close_reason);
   TearDownPresentationConnection();
+  activity_->CloseConnectionOnReceiver(client_id());
 }
 
 void CastSessionClientImpl::TerminateConnection() {
-  if (connection_) {
-    connection_->DidChangeState(PresentationConnectionState::TERMINATED);
-  }
+  if (connection_remote_)
+    connection_remote_->DidChangeState(PresentationConnectionState::TERMINATED);
 
   TearDownPresentationConnection();
 }
 
 void CastSessionClientImpl::TearDownPresentationConnection() {
-  connection_.reset();
-  connection_binding_.Close();
+  connection_remote_.reset();
+  connection_receiver_.reset();
+}
+
+cast_channel::ResultCallback CastSessionClientImpl::MakeResultCallback(
+    const CastInternalMessage& cast_message) {
+  DCHECK(cast_message.sequence_number());
+  return base::BindOnce(&CastSessionClientImpl::SendResultResponse,
+                        weak_ptr_factory_.GetWeakPtr(),
+                        *cast_message.sequence_number());
 }
 
 }  // namespace media_router

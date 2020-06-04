@@ -5,12 +5,14 @@
 #include "chrome/browser/ui/views/passwords/password_items_view.h"
 
 #include <numeric>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
+#include "chrome/browser/ui/passwords/bubble_controllers/items_bubble_controller.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
+#include "chrome/browser/ui/passwords/passwords_model_delegate.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/grit/generated_resources.h"
@@ -24,10 +26,8 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/button/md_text_button.h"
-#include "ui/views/controls/editable_combobox/editable_combobox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
-#include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/style/typography.h"
@@ -80,8 +80,7 @@ std::unique_ptr<views::ImageButton> CreateDeleteButton(
     views::ButtonListener* listener,
     const base::string16& username) {
   std::unique_ptr<views::ImageButton> button(
-      views::CreateVectorImageButton(listener));
-  views::SetImageFromVectorIcon(button.get(), kTrashCanIcon);
+      views::CreateVectorImageButtonWithNativeTheme(listener, kTrashCanIcon));
   button->SetFocusForPlatform();
   button->SetTooltipText(
       l10n_util::GetStringFUTF16(IDS_MANAGE_PASSWORDS_DELETE, username));
@@ -102,39 +101,22 @@ std::unique_ptr<views::LabelButton> CreateUndoButton(
   return undo_button;
 }
 
+std::unique_ptr<views::View> CreateManageButton(
+    views::ButtonListener* listener) {
+  return views::MdTextButton::CreateSecondaryUiButton(
+      listener,
+      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_MANAGE_PASSWORDS_BUTTON));
+}
+
 }  // namespace
 
 std::unique_ptr<views::Label> CreateUsernameLabel(
     const autofill::PasswordForm& form) {
-  auto label = std::make_unique<views::Label>(
-      GetDisplayUsername(form), CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY);
+  auto label = std::make_unique<views::Label>(GetDisplayUsername(form),
+                                              CONTEXT_BODY_TEXT_LARGE,
+                                              views::style::STYLE_SECONDARY);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
-}
-
-std::unique_ptr<views::EditableCombobox> CreateUsernameEditableCombobox(
-    const autofill::PasswordForm& form) {
-  std::vector<base::string16> usernames = {form.username_value};
-  for (const autofill::ValueElementPair& other_possible_username_pair :
-       form.all_possible_usernames) {
-    if (other_possible_username_pair.first != form.username_value)
-      usernames.push_back(other_possible_username_pair.first);
-  }
-  base::EraseIf(usernames, [](const base::string16& username) {
-    return username.empty();
-  });
-  bool display_arrow = !usernames.empty();
-  auto combobox = std::make_unique<views::EditableCombobox>(
-      std::make_unique<ui::SimpleComboboxModel>(usernames),
-      /*filter_on_edit=*/false, /*show_on_empty=*/true,
-      views::EditableCombobox::Type::kRegular, views::style::CONTEXT_BUTTON,
-      views::style::STYLE_PRIMARY, display_arrow);
-  combobox->SetText(form.username_value);
-  combobox->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_USERNAME_LABEL));
-  // In case of long username, ensure that the beginning of value is visible.
-  combobox->SelectRange(gfx::Range(0));
-  return combobox;
 }
 
 std::unique_ptr<views::Label> CreatePasswordLabel(
@@ -146,8 +128,9 @@ std::unique_ptr<views::Label> CreatePasswordLabel(
           ? form.password_value
           : l10n_util::GetStringFUTF16(federation_message_id,
                                        GetDisplayFederation(form));
-  int text_style = form.federation_origin.opaque() ? STYLE_SECONDARY_MONOSPACED
-                                                   : STYLE_SECONDARY;
+  int text_style = form.federation_origin.opaque()
+                       ? STYLE_SECONDARY_MONOSPACED
+                       : views::style::STYLE_SECONDARY;
   auto label =
       std::make_unique<views::Label>(text, CONTEXT_BODY_TEXT_LARGE, text_style);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -226,22 +209,25 @@ void PasswordItemsView::PasswordRow::ButtonPressed(views::Button* sender,
   DCHECK(sender->tag() == kDeleteButtonTag || sender->tag() == kUndoButtonTag);
   deleted_ = sender->tag() == kDeleteButtonTag;
   parent_->NotifyPasswordFormAction(
-      *password_form_, deleted_ ? ManagePasswordsBubbleModel::REMOVE_PASSWORD
-                                : ManagePasswordsBubbleModel::ADD_PASSWORD);
+      *password_form_,
+      deleted_ ? PasswordBubbleControllerBase::PasswordAction::kRemovePassword
+               : PasswordBubbleControllerBase::PasswordAction::kAddPassword);
 }
 
 PasswordItemsView::PasswordItemsView(content::WebContents* web_contents,
-                                     views::View* anchor_view,
-                                     const gfx::Point& anchor_point,
-                                     DisplayReason reason)
-    : PasswordBubbleViewBase(web_contents, anchor_view, anchor_point, reason) {
-  DCHECK_EQ(password_manager::ui::MANAGE_STATE, model()->state());
+                                     views::View* anchor_view)
+    : PasswordBubbleViewBase(web_contents,
+                             anchor_view,
+                             /*easily_dismissable=*/true),
+      controller_(PasswordsModelDelegateFromWebContents(web_contents)) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
+  DialogDelegate::SetExtraView(CreateManageButton(this));
 
-  if (model()->local_credentials().empty()) {
+  if (controller_.local_credentials().empty()) {
     // A LayoutManager is required for GetHeightForWidth() even without content.
     SetLayoutManager(std::make_unique<views::FillLayout>());
   } else {
-    for (auto& password_form : model()->local_credentials()) {
+    for (auto& password_form : controller_.local_credentials()) {
       password_rows_.push_back(
           std::make_unique<PasswordRow>(this, &password_form));
     }
@@ -252,11 +238,19 @@ PasswordItemsView::PasswordItemsView(content::WebContents* web_contents,
 
 PasswordItemsView::~PasswordItemsView() = default;
 
+PasswordBubbleControllerBase* PasswordItemsView::GetController() {
+  return &controller_;
+}
+
+const PasswordBubbleControllerBase* PasswordItemsView::GetController() const {
+  return &controller_;
+}
+
 void PasswordItemsView::RecreateLayout() {
   // This method should only be used when we have password rows, otherwise the
   // dialog should only show the no-passwords title and doesn't need to be
   // recreated.
-  DCHECK(!model()->local_credentials().empty());
+  DCHECK(!controller_.local_credentials().empty());
 
   RemoveAllChildViews(true);
 
@@ -282,22 +276,11 @@ void PasswordItemsView::RecreateLayout() {
 
 void PasswordItemsView::NotifyPasswordFormAction(
     const autofill::PasswordForm& password_form,
-    ManagePasswordsBubbleModel::PasswordAction action) {
+    PasswordBubbleControllerBase::PasswordAction action) {
   RecreateLayout();
   // After the view is consistent, notify the model that the password needs to
   // be updated (either removed or put back into the store, as appropriate.
-  model()->OnPasswordAction(password_form, action);
-}
-
-std::unique_ptr<views::View> PasswordItemsView::CreateExtraView() {
-  auto view = views::MdTextButton::CreateSecondaryUiButton(
-      this,
-      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_MANAGE_PASSWORDS_BUTTON));
-  return view;
-}
-
-int PasswordItemsView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
+  controller_.OnPasswordAction(password_form, action);
 }
 
 bool PasswordItemsView::ShouldShowCloseButton() const {
@@ -313,7 +296,7 @@ gfx::Size PasswordItemsView::CalculatePreferredSize() const {
 
 void PasswordItemsView::ButtonPressed(views::Button* sender,
                                       const ui::Event& event) {
-  model()->OnManageClicked(
+  controller_.OnManageClicked(
       password_manager::ManagePasswordsReferrer::kManagePasswordsBubble);
   CloseBubble();
 }

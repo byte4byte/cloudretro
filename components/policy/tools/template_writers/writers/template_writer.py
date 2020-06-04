@@ -48,6 +48,18 @@ class TemplateWriter(object):
     '''
     return False
 
+  def IsCloudOnlyPolicySupported(self, policy):
+    '''Checks if the given cloud only policy is supported by the writer.
+
+    Args:
+      policy: The dictionary of the policy.
+
+    Returns:
+      True if the writer chooses to include the deprecated 'policy' in its
+      output.
+    '''
+    return False
+
   def IsPolicySupported(self, policy):
     '''Checks if the given policy is supported by the writer.
     In other words, the set of platforms supported by the writer
@@ -68,6 +80,10 @@ class TemplateWriter(object):
         not self.IsFuturePolicySupported(policy)):
       return False
 
+    if (self.IsCloudOnlyPolicy(policy)
+        and not self.IsCloudOnlyPolicySupported(policy)):
+      return False
+
     for supported_on in policy['supported_on']:
       if not self.IsVersionSupported(policy, supported_on):
         continue
@@ -78,26 +94,35 @@ class TemplateWriter(object):
         return True
     return False
 
+  def GetPolicyFeature(self, policy, feature_name, value=None):
+    '''Returns policy feature with |feature_name| if exsits. Otherwise, returns
+    |value|.'''
+    return policy.get('features', {}).get(feature_name, value)
+
   def CanBeRecommended(self, policy):
     '''Checks if the given policy can be recommended.'''
-    return policy.get('features', {}).get('can_be_recommended', False)
+    return self.GetPolicyFeature(policy, 'can_be_recommended', False)
 
   def CanBeMandatory(self, policy):
     '''Checks if the given policy can be mandatory.'''
-    return policy.get('features', {}).get('can_be_mandatory', True)
+    return self.GetPolicyFeature(policy, 'can_be_mandatory', True)
 
-  def IsPolicySupportedOnPlatform(self,
-                                  policy,
-                                  platform,
-                                  product=None,
-                                  management=None):
-    '''Checks if |policy| is supported on |product| for |platform|. If
+  def IsCloudOnlyPolicy(self, policy):
+    '''Checks if the given policy is cloud only'''
+    return self.GetPolicyFeature(policy, 'cloud_only', False)
+
+  def IsPolicyOrItemSupportedOnPlatform(self,
+                                        item,
+                                        platform,
+                                        product=None,
+                                        management=None):
+    '''Checks if |item| is supported on |product| for |platform|. If
     |product| is not specified, only the platform support is checked.
     If |management| is specified, also checks for support for Chrome OS
     management type.
 
     Args:
-      policy: The dictionary of the policy.
+      item: The dictionary of the policy or item.
       platform: The platform to check; one of
         'win', 'mac', 'linux', 'chrome_os', 'android'.
       product: Optional product to check; one of
@@ -105,13 +130,13 @@ class TemplateWriter(object):
       management: Optional Chrome OS management type to check; one of
         'active_directory', 'google_cloud'.
     '''
-    if management and not self.IsCrOSManagementSupported(policy, management):
+    if management and not self.IsCrOSManagementSupported(item, management):
       return False
 
-    for supported_on in policy['supported_on']:
+    for supported_on in item['supported_on']:
       if (platform in supported_on['platforms'] and
           (not product or product in supported_on['product']) and
-          self.IsVersionSupported(policy, supported_on)):
+          self.IsVersionSupported(item, supported_on)):
         return True
     return False
 
@@ -123,8 +148,8 @@ class TemplateWriter(object):
       product: Optional product to check; one of
         'chrome', 'chrome_frame', 'chrome_os', 'webview'
     '''
-    return (self.IsPolicySupportedOnPlatform(policy, 'win', product) or
-            self.IsPolicySupportedOnPlatform(policy, 'win7', product))
+    return (self.IsPolicyOrItemSupportedOnPlatform(policy, 'win', product) or
+            self.IsPolicyOrItemSupportedOnPlatform(policy, 'win7', product))
 
   def IsCrOSManagementSupported(self, policy, management):
     '''Checks whether |policy| supports the Chrome OS |management| type.
@@ -400,6 +425,6 @@ class TemplateWriter(object):
       url = policy['url_schema']
     if (policy['type'] in ('dict', 'external') or
         'validation_schema' in policy or 'description_schema' in policy):
-      url = 'https://www.chromium.org/administrators/policy-list-3#' + policy[
-          'name']
+      url = ('https://cloud.google.com/docs/chrome-enterprise/policies/?policy='
+             + policy['name'])
     return schema_description_link_text.replace('$6', url) if url else ''

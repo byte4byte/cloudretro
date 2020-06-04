@@ -6,15 +6,26 @@
 #define CC_TEST_LAYER_TREE_TEST_H_
 
 #include "base/memory/ref_counted.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "cc/animation/animation_delegate.h"
+#include "cc/test/property_tree_test_utils.h"
 #include "cc/test/test_hooks.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/compositor_mode.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_impl.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
+#include "components/viz/test/test_gpu_service_holder.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+namespace base {
+namespace test {
+class ScopedFeatureList;
+}
+}  // namespace base
 
 namespace viz {
 class BeginFrameSource;
@@ -23,32 +34,14 @@ class TestContextProvider;
 
 namespace cc {
 
+class Animation;
 class AnimationHost;
-class LayerImpl;
 class LayerTreeHost;
 class LayerTreeHostForTesting;
 class LayerTreeTestLayerTreeFrameSinkClient;
 class Proxy;
-class SingleKeyframeEffectAnimation;
 class TestLayerTreeFrameSink;
 class TestTaskGraphRunner;
-
-// Creates the virtual viewport layer hierarchy under the given root_layer.
-// Convenient overload of the method below that creates a scrolling layer as
-// the outer viewport scroll layer.
-void CreateVirtualViewportLayers(Layer* root_layer,
-                                 const gfx::Size& inner_bounds,
-                                 const gfx::Size& outer_bounds,
-                                 const gfx::Size& scroll_bounds,
-                                 LayerTreeHost* host);
-
-// Creates the virtual viewport layer hierarchy under the given root_layer.
-// Uses the given scroll layer as the content "outer viewport scroll layer".
-void CreateVirtualViewportLayers(Layer* root_layer,
-                                 scoped_refptr<Layer> outer_scroll_layer,
-                                 const gfx::Size& outer_bounds,
-                                 const gfx::Size& scroll_bounds,
-                                 LayerTreeHost* host);
 
 class LayerTreeHostClientForTesting;
 
@@ -71,17 +64,22 @@ class LayerTreeTest : public testing::Test, public TestHooks {
     RENDERER_GL,
     RENDERER_SKIA_GL,
     RENDERER_SKIA_VK,
+    // SkiaRenderer with the Dawn backend will be used; on Linux this will
+    // initialize Vulkan, and on Windows this will initialize D3D12.
+    RENDERER_SKIA_DAWN,
     RENDERER_SOFTWARE,
   };
 
-  static std::string TestTypeToString(RendererType renderer_type) {
-    switch (renderer_type) {
+  std::string TestTypeToString() {
+    switch (renderer_type_) {
       case RENDERER_GL:
         return "GL";
       case RENDERER_SKIA_GL:
         return "Skia GL";
       case RENDERER_SKIA_VK:
         return "Skia Vulkan";
+      case RENDERER_SKIA_DAWN:
+        return "Skia Dawn";
       case RENDERER_SOFTWARE:
         return "Software";
     }
@@ -93,13 +91,13 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void EndTestAfterDelayMs(int delay_milliseconds);
 
   void PostAddNoDamageAnimationToMainThread(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation);
+      Animation* animation_to_receive_animation);
   void PostAddOpacityAnimationToMainThread(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation);
+      Animation* animation_to_receive_animation);
   void PostAddOpacityAnimationToMainThreadInstantly(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation);
+      Animation* animation_to_receive_animation);
   void PostAddOpacityAnimationToMainThreadDelayed(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation);
+      Animation* animation_to_receive_animation);
   void PostSetLocalSurfaceIdAllocationToMainThread(
       const viz::LocalSurfaceIdAllocation& local_surface_id_allocation);
   void PostRequestNewLocalSurfaceIdToMainThread();
@@ -123,10 +121,15 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   AnimationHost* animation_host() const { return animation_host_.get(); }
 
-  void SetUseLayerList() { settings_.use_layer_lists = true; }
+  void SetUseLayerLists() { settings_.use_layer_lists = true; }
 
  protected:
-  LayerTreeTest();
+  explicit LayerTreeTest(RendererType renderer_type = RENDERER_GL);
+
+  void SkipAllocateInitialLocalSurfaceId();
+  const viz::LocalSurfaceIdAllocation& GetCurrentLocalSurfaceIdAllocation()
+      const;
+  void GenerateNewLocalSurfaceId();
 
   virtual void InitializeSettings(LayerTreeSettings* settings) {}
 
@@ -138,8 +141,14 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void SetInitialDeviceScaleFactor(float initial_device_scale_factor) {
     initial_device_scale_factor_ = initial_device_scale_factor;
   }
+  // Used when LayerTreeTest::SetupTree() creates the root layer. Not used if
+  // the root layer is created before LayerTreeTest::SetupTree() is called.
+  // The default is 1x1.
+  void SetInitialRootBounds(const gfx::Size& bounds) {
+    initial_root_bounds_ = bounds;
+  }
 
-  virtual void AfterTest() = 0;
+  virtual void AfterTest() {}
   virtual void WillBeginTest();
   virtual void BeginTest() = 0;
   virtual void SetupTree();
@@ -172,6 +181,12 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   // By default, output surface recreation is synchronous.
   void RequestNewLayerTreeFrameSink() override;
+  // Override this to modify the TestContextProviders before they are bound
+  // and used. Override CreateLayerTreeFrameSink() instead if the test does not
+  // want to use TestContextProviders.
+  virtual void SetUpUnboundContextProviders(
+      viz::TestContextProvider* context_provider,
+      viz::TestContextProvider* worker_context_provider);
   // Override this and call the base class to change what viz::ContextProviders
   // will be used (such as for pixel tests). Or override it and create your own
   // TestLayerTreeFrameSink to control how it is created.
@@ -190,8 +205,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   std::unique_ptr<viz::OutputSurface> CreateDisplayOutputSurfaceOnThread(
       scoped_refptr<viz::ContextProvider> compositor_context_provider) override;
 
-  gfx::Vector2dF ScrollDelta(LayerImpl* layer_impl);
-
   base::SingleThreadTaskRunner* image_worker_task_runner() const {
     return image_worker_->task_runner().get();
   }
@@ -200,21 +213,35 @@ class LayerTreeTest : public testing::Test, public TestHooks {
     begin_frame_source_ = begin_frame_source;
   }
 
-  bool use_skia_renderer() {
+  bool use_skia_renderer() const {
     return renderer_type_ == RENDERER_SKIA_GL ||
-           renderer_type_ == RENDERER_SKIA_VK;
+           renderer_type_ == RENDERER_SKIA_VK ||
+           renderer_type_ == RENDERER_SKIA_DAWN;
   }
-  bool use_software_renderer() { return renderer_type_ == RENDERER_SOFTWARE; }
-  bool use_vulkan() { return renderer_type_ == RENDERER_SKIA_VK; }
+  bool use_software_renderer() const {
+    return renderer_type_ == RENDERER_SOFTWARE;
+  }
+  bool use_skia_vulkan() const { return renderer_type_ == RENDERER_SKIA_VK; }
+  bool use_oopr() const {
+    return renderer_type_ == RENDERER_SKIA_VK ||
+           renderer_type_ == RENDERER_SKIA_DAWN;
+  }
+  bool use_d3d12() const {
+#if defined(OS_WIN)
+    return renderer_type_ == RENDERER_SKIA_DAWN;
+#else
+    return false;
+#endif
+  }
 
-  RendererType renderer_type_ = RENDERER_GL;
+  const RendererType renderer_type_;
 
  private:
   virtual void DispatchAddNoDamageAnimation(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation,
+      Animation* animation_to_receive_animation,
       double animation_duration);
   virtual void DispatchAddOpacityAnimation(
-      SingleKeyframeEffectAnimation* animation_to_receive_animation,
+      Animation* animation_to_receive_animation,
       double animation_duration);
   void DispatchSetLocalSurfaceIdAllocation(
       const viz::LocalSurfaceIdAllocation& local_surface_id_allocation);
@@ -235,8 +262,14 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void DispatchCompositeImmediately();
   void DispatchNextCommitWaitsForActivation();
 
+  // |scoped_feature_list_| must be the first member to ensure that it is
+  // destroyed after any member that might be using it.
+  base::test::ScopedFeatureList scoped_feature_list_;
+  viz::TestGpuServiceHolder::ScopedResetter gpu_service_resetter_;
+
   LayerTreeSettings settings_;
   float initial_device_scale_factor_ = 1.f;
+  gfx::Size initial_root_bounds_;
 
   CompositorMode mode_;
 
@@ -267,6 +300,8 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   std::unique_ptr<TestTaskGraphRunner> task_graph_runner_;
   base::CancelableOnceClosure timeout_;
   scoped_refptr<viz::TestContextProvider> compositor_contexts_;
+  bool skip_allocate_initial_local_surface_id_ = false;
+  viz::ParentLocalSurfaceIdAllocator allocator_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;
   base::WeakPtrFactory<LayerTreeTest> weak_factory_{this};
 };

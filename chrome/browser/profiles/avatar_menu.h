@@ -23,6 +23,7 @@
 #include "ui/gfx/image/image.h"
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_observer.h"
 #endif
 
@@ -31,7 +32,6 @@ class AvatarMenuObserver;
 class Browser;
 class ProfileAttributesStorage;
 class ProfileList;
-class SupervisedUserService;
 
 // This class represents the menu-like interface used to select profiles,
 // such as the bubble that appears when the avatar icon is clicked in the
@@ -121,9 +121,7 @@ class AvatarMenu :
   // Opens a Browser with the specified profile in response to the user
   // selecting an item. If |always_create| is true then a new window is created
   // even if a window for that profile already exists.
-  void SwitchToProfile(size_t index,
-                       bool always_create,
-                       ProfileMetrics::ProfileOpen metric);
+  void SwitchToProfile(size_t index, bool always_create);
 
   // Creates a new profile.
   void AddNewProfile(ProfileMetrics::ProfileAdd type);
@@ -197,11 +195,11 @@ class AvatarMenu :
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   // Observes changes to a supervised user's custodian info.
   ScopedObserver<SupervisedUserService, SupervisedUserServiceObserver>
-      supervised_user_observer_;
+      supervised_user_observer_{this};
 #endif
 
-  // The storage that provides the profile attributes. Weak.
-  ProfileAttributesStorage* profile_storage_;
+  // The storage that provides the profile attributes.
+  base::WeakPtr<ProfileAttributesStorage> profile_storage_;
 
   // The observer of this model, which is notified of changes. Weak.
   AvatarMenuObserver* observer_;

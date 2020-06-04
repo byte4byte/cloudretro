@@ -10,20 +10,21 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
 
 class Profile;
 
-namespace extensions {
-class ExtensionRegistry;
-}
-
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-// This class manages the installation of shortcuts for platform apps.
+// This class manages the installation of shortcuts for any extension-based apps
+// (Chrome Apps). Bookmark apps OS shortcut management is handled in
+// web_app::AppShortcutManager and its subclasses.
+//
+// Long term, this class must be deleted together with all extension-based apps.
 class AppShortcutManager : public KeyedService,
                            public extensions::ExtensionRegistryObserver,
                            public ProfileAttributesStorage::Observer {
@@ -60,7 +61,7 @@ class AppShortcutManager : public KeyedService,
 
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
-      extension_registry_observer_;
+      extension_registry_observer_{this};
 
   base::WeakPtrFactory<AppShortcutManager> weak_ptr_factory_{this};
 

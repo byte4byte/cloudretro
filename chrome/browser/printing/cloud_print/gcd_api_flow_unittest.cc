@@ -16,7 +16,7 @@
 #include "base/values.h"
 #include "chrome/browser/printing/cloud_print/gcd_api_flow_impl.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -82,8 +82,8 @@ class GCDApiFlowTest : public testing::Test {
   MockDelegate* mock_delegate_;
 
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
-  identity::IdentityTestEnvironment identity_test_environment_;
+  content::BrowserTaskEnvironment task_environment_;
+  signin::IdentityTestEnvironment identity_test_environment_;
   scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
       test_shared_url_loader_factory_;
 };
@@ -104,7 +104,7 @@ TEST_F(GCDApiFlowTest, SuccessOAuth2) {
 
   gcd_flow_->OnAccessTokenFetchComplete(
       GoogleServiceAuthError::AuthErrorNone(),
-      identity::AccessTokenInfo(
+      signin::AccessTokenInfo(
           "SomeToken", base::Time::Now() + base::TimeDelta::FromHours(1),
           std::string() /* No extra information needed for this test */));
 
@@ -122,7 +122,7 @@ TEST_F(GCDApiFlowTest, BadToken) {
   EXPECT_CALL(*mock_delegate_, OnGCDApiFlowError(GCDApiFlow::ERROR_TOKEN));
   gcd_flow_->OnAccessTokenFetchComplete(
       GoogleServiceAuthError(GoogleServiceAuthError::USER_NOT_SIGNED_UP),
-      identity::AccessTokenInfo());
+      signin::AccessTokenInfo());
 }
 
 TEST_F(GCDApiFlowTest, BadJson) {
@@ -134,7 +134,7 @@ TEST_F(GCDApiFlowTest, BadJson) {
 
   gcd_flow_->OnAccessTokenFetchComplete(
       GoogleServiceAuthError::AuthErrorNone(),
-      identity::AccessTokenInfo(
+      signin::AccessTokenInfo(
           "SomeToken", base::Time::Now() + base::TimeDelta::FromHours(1),
           std::string() /* No extra information needed for this test */));
 

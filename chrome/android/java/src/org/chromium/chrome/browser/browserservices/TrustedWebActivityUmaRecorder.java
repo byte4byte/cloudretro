@@ -4,14 +4,15 @@
 
 package org.chromium.chrome.browser.browserservices;
 
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
+import org.chromium.chrome.browser.metrics.UkmRecorder;
 import org.chromium.chrome.browser.tab.Tab;
 
 import java.lang.annotation.Retention;
@@ -39,6 +40,14 @@ public class TrustedWebActivityUmaRecorder {
         int NUM_ENTRIES = 4;
     }
 
+    @IntDef({ShareRequestMethod.GET, ShareRequestMethod.POST})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface ShareRequestMethod {
+        int GET = 0;
+        int POST = 1;
+        int NUM_ENTRIES = 2;
+    }
+
     private final ChromeBrowserInitializer mBrowserInitializer;
 
     @Inject
@@ -52,7 +61,8 @@ public class TrustedWebActivityUmaRecorder {
     public void recordTwaOpened(@Nullable Tab tab) {
         RecordUserAction.record("BrowserServices.TwaOpened");
         if (tab != null) {
-            new UkmRecorder.Bridge().recordTwaOpened(tab);
+            new UkmRecorder.Bridge().recordEventWithBooleanMetric(
+                    tab.getWebContents(), "TrustedWebActivity.Open", "HasOccurred");
         }
     }
 
@@ -115,7 +125,8 @@ public class TrustedWebActivityUmaRecorder {
      * settings.
      */
     public void recordOpenedSettingsViaManageSpace() {
-        RecordUserAction.record("TrustedWebActivity.OpenedSettingsViaManageSpace");
+        doWhenNativeLoaded(() ->
+            RecordUserAction.record("TrustedWebActivity.OpenedSettingsViaManageSpace"));
     }
 
     /**
@@ -140,7 +151,15 @@ public class TrustedWebActivityUmaRecorder {
                 ));
     }
 
+    /**
+     * Records the fact that data was shared via a TWA.
+     */
+    public void recordShareTargetRequest(@ShareRequestMethod int method) {
+        RecordHistogram.recordEnumeratedHistogram("TrustedWebActivity.ShareTargetRequest",
+                method, ShareRequestMethod.NUM_ENTRIES);
+    }
+
     private void doWhenNativeLoaded(Runnable runnable) {
-        mBrowserInitializer.runNowOrAfterNativeInitialization(runnable);
+        mBrowserInitializer.runNowOrAfterFullBrowserStarted(runnable);
     }
 }

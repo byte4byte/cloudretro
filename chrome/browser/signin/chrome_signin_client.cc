@@ -32,19 +32,19 @@
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/metrics/metrics_service.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/cookie_settings_util.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "services/identity/public/cpp/scope_set.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -131,10 +131,6 @@ ChromeSigninClient::GetURLLoaderFactory() {
 network::mojom::CookieManager* ChromeSigninClient::GetCookieManager() {
   return content::BrowserContext::GetDefaultStoragePartition(profile_)
       ->GetCookieManagerForBrowserProcess();
-}
-
-std::string ChromeSigninClient::GetProductVersion() {
-  return chrome::GetVersionString();
 }
 
 bool ChromeSigninClient::AreSigninCookiesAllowed() {
@@ -234,7 +230,7 @@ void ChromeSigninClient::OnNetworkError(int response_code) {
 
 void ChromeSigninClient::OnAccessTokenAvailable(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   access_token_fetcher_.reset();
 
   // Exchange the access token for a handle that can be used for later
@@ -313,26 +309,30 @@ void ChromeSigninClient::MaybeFetchSigninTokenHandle() {
         !access_token_fetcher_) {
       auto* identity_manager = IdentityManagerFactory::GetForProfile(profile_);
       if (identity_manager->HasPrimaryAccount()) {
-        const identity::ScopeSet scopes{GaiaConstants::kGoogleUserInfoEmail};
+        const signin::ScopeSet scopes{GaiaConstants::kGoogleUserInfoEmail};
         access_token_fetcher_ =
-            std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+            std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
                 "chrome_signin_client", identity_manager, scopes,
                 base::BindOnce(&ChromeSigninClient::OnAccessTokenAvailable,
                                base::Unretained(this)),
-                identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+                signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
       }
     }
   }
 #endif
 }
 
-void ChromeSigninClient::SetReadyForDiceMigration(bool is_ready) {
+void ChromeSigninClient::SetDiceMigrationCompleted() {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   AccountConsistencyModeManager::GetForProfile(profile_)
-      ->SetReadyForDiceMigration(is_ready);
+      ->SetDiceMigrationCompleted();
 #else
   NOTREACHED();
 #endif
+}
+
+bool ChromeSigninClient::IsNonEnterpriseUser(const std::string& username) {
+  return policy::BrowserPolicyConnector::IsNonEnterpriseUser(username);
 }
 
 void ChromeSigninClient::SetURLLoaderFactoryForTest(

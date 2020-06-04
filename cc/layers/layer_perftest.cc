@@ -14,7 +14,7 @@
 #include "cc/test/stub_layer_tree_host_single_thread_client.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace cc {
 namespace {
@@ -45,6 +45,14 @@ class LayerPerfTest : public testing::Test {
     layer_tree_host_ = nullptr;
   }
 
+  perf_test::PerfResultReporter SetUpReporter(
+      const std::string& metric_basename,
+      const std::string& story_name) {
+    perf_test::PerfResultReporter reporter(metric_basename, story_name);
+    reporter.RegisterImportantMetric("", "runs/s");
+    return reporter;
+  }
+
   FakeImplTaskRunnerProvider task_runner_provider_;
   TestTaskGraphRunner task_graph_runner_;
   FakeLayerTreeHostImpl host_impl_;
@@ -66,7 +74,6 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
   float transform_origin_z = 0;
   bool scrollable = true;
   bool contents_opaque = true;
-  bool double_sided = true;
   bool hide_layer_and_subtree = true;
   bool masks_to_bounds = true;
 
@@ -76,7 +83,6 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
     test_layer->SetNeedsDisplayRect(gfx::Rect(5, 5));
     test_layer->SetTransformOrigin(gfx::Point3F(0.f, 0.f, transform_origin_z));
     test_layer->SetContentsOpaque(contents_opaque);
-    test_layer->SetDoubleSided(double_sided);
     test_layer->SetHideLayerAndSubtree(hide_layer_and_subtree);
     test_layer->SetMasksToBounds(masks_to_bounds);
     test_layer->PushPropertiesTo(impl_layer.get());
@@ -84,19 +90,15 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
     transform_origin_z += 0.01f;
     scrollable = !scrollable;
     contents_opaque = !contents_opaque;
-    double_sided = !double_sided;
     hide_layer_and_subtree = !hide_layer_and_subtree;
     masks_to_bounds = !masks_to_bounds;
 
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("push_properties_to",
-                         "",
-                         "props_changed",
-                         timer_.LapsPerSecond(),
-                         "runs/s",
-                         true);
+  perf_test::PerfResultReporter reporter =
+      SetUpReporter("push_properties_to", "props_changed");
+  reporter.AddResult("", timer_.LapsPerSecond());
 
   // Properties didn't change.
   timer_.Reset();
@@ -105,12 +107,8 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("push_properties_to",
-                         "",
-                         "props_didnt_change",
-                         timer_.LapsPerSecond(),
-                         "runs/s",
-                         true);
+  reporter = SetUpReporter("push_properties_to", "props_didnt_change");
+  reporter.AddResult("", timer_.LapsPerSecond());
 }
 
 TEST_F(LayerPerfTest, ImplPushPropertiesTo) {
@@ -132,7 +130,6 @@ TEST_F(LayerPerfTest, ImplPushPropertiesTo) {
     test_layer->SetSafeOpaqueBackgroundColor(background_color);
     test_layer->SetDrawsContent(draws_content);
     test_layer->SetContentsOpaque(contents_opaque);
-    test_layer->SetMasksToBounds(masks_to_bounds);
 
     test_layer->PushPropertiesTo(impl_layer.get());
 
@@ -147,8 +144,9 @@ TEST_F(LayerPerfTest, ImplPushPropertiesTo) {
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("impl_push_properties_to", "", "props_changed",
-                         timer_.LapsPerSecond(), "runs/s", true);
+  perf_test::PerfResultReporter reporter =
+      SetUpReporter("impl_push_properties_to", "props_changed");
+  reporter.AddResult("", timer_.LapsPerSecond());
 
   // Properties didn't change.
   timer_.Reset();
@@ -157,8 +155,8 @@ TEST_F(LayerPerfTest, ImplPushPropertiesTo) {
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("impl_push_properties_to", "", "props_didnt_change",
-                         timer_.LapsPerSecond(), "runs/s", true);
+  reporter = SetUpReporter("impl_push_properties_to", "props_didnt_change");
+  reporter.AddResult("", timer_.LapsPerSecond());
 }
 
 }  // namespace

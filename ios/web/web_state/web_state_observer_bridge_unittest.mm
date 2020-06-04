@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 
 #include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
@@ -10,7 +10,6 @@
 #include "ios/web/public/favicon/favicon_url.h"
 #import "ios/web/public/test/fakes/crw_test_web_state_observer.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
 #include "net/http/http_response_headers.h"
 #include "testing/platform_test.h"
 
@@ -61,17 +60,6 @@ TEST_F(WebStateObserverBridgeTest, WasHidden) {
   observer_bridge_.WasHidden(&test_web_state_);
   ASSERT_TRUE([observer_ wasHiddenInfo]);
   EXPECT_EQ(&test_web_state_, [observer_ wasHiddenInfo]->web_state);
-}
-
-// Tests |webState:didPruneNavigationItemsWithCount:| forwarding.
-TEST_F(WebStateObserverBridgeTest, NavigationItemsPruned) {
-  ASSERT_FALSE([observer_ navigationItemsPrunedInfo]);
-
-  observer_bridge_.NavigationItemsPruned(&test_web_state_, 1);
-
-  ASSERT_TRUE([observer_ navigationItemsPrunedInfo]);
-  EXPECT_EQ(&test_web_state_, [observer_ navigationItemsPrunedInfo]->web_state);
-  EXPECT_EQ(1, [observer_ navigationItemsPrunedInfo]->count);
 }
 
 // Tests |webState:didStartNavigation:| forwarding.

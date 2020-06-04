@@ -11,12 +11,12 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/values.h"
+#include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/proxy/proxy_config_handler.h"
 #include "chromeos/network/proxy/proxy_config_service_impl.h"
 #include "chromeos/network/tether_constants.h"
-#include "components/device_event_log/device_event_log.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "net/proxy_resolution/proxy_config.h"
@@ -31,11 +31,13 @@ namespace {
 bool GetProxyConfig(const PrefService* profile_prefs,
                     const PrefService* local_state_prefs,
                     const NetworkState& network,
+                    const NetworkProfileHandler* network_profile_handler,
                     net::ProxyConfigWithAnnotation* proxy_config,
                     onc::ONCSource* onc_source) {
   std::unique_ptr<ProxyConfigDictionary> proxy_dict =
       proxy_config::GetProxyConfigForNetwork(profile_prefs, local_state_prefs,
-                                             network, onc_source);
+                                             network, network_profile_handler,
+                                             onc_source);
   if (!proxy_dict)
     return false;
   return PrefProxyConfigTrackerImpl::PrefConfigToNetConfig(*proxy_dict,
@@ -113,11 +115,9 @@ base::Value OncValueForManualProxyList(
     const std::string& source,
     const net::ProxyList& for_http,
     const net::ProxyList& for_https,
-    const net::ProxyList& for_ftp,
     const net::ProxyList& fallback,
     const net::ProxyBypassRules& bypass_rules) {
-  if (for_http.IsEmpty() && for_https.IsEmpty() && for_ftp.IsEmpty() &&
-      fallback.IsEmpty()) {
+  if (for_http.IsEmpty() && for_https.IsEmpty() && fallback.IsEmpty()) {
     return base::Value();
   }
   base::Value result = OncValueWithMode(source, ::onc::proxy::kManual);
@@ -126,12 +126,11 @@ base::Value OncValueForManualProxyList(
       ::onc::proxy::kManual, base::Value(base::Value::Type::DICTIONARY));
   SetManualProxy(manual, source, ::onc::proxy::kHttp, for_http);
   SetManualProxy(manual, source, ::onc::proxy::kHttps, for_https);
-  SetManualProxy(manual, source, ::onc::proxy::kFtp, for_ftp);
   SetManualProxy(manual, source, ::onc::proxy::kSocks, fallback);
 
   base::Value exclude_domains(base::Value::Type::LIST);
   for (const auto& rule : bypass_rules.rules())
-    exclude_domains.GetList().emplace_back(rule->ToString());
+    exclude_domains.Append(rule->ToString());
   result.SetKey(::onc::proxy::kExcludeDomains,
                 CreateEffectiveValue(source, std::move(exclude_domains)));
 
@@ -169,13 +168,11 @@ base::Value NetProxyConfigAsOncValue(const net::ProxyConfig& net_config,
                                         net_config.proxy_rules().single_proxies,
                                         net_config.proxy_rules().single_proxies,
                                         net_config.proxy_rules().single_proxies,
-                                        net_config.proxy_rules().single_proxies,
                                         net_config.proxy_rules().bypass_rules);
     case net::ProxyConfig::ProxyRules::Type::PROXY_LIST_PER_SCHEME:
       return OncValueForManualProxyList(
           source, net_config.proxy_rules().proxies_for_http,
           net_config.proxy_rules().proxies_for_https,
-          net_config.proxy_rules().proxies_for_ftp,
           net_config.proxy_rules().fallback_proxies,
           net_config.proxy_rules().bypass_rules);
   }
@@ -184,8 +181,11 @@ base::Value NetProxyConfigAsOncValue(const net::ProxyConfig& net_config,
 
 }  // namespace
 
-UIProxyConfigService::UIProxyConfigService(PrefService* profile_prefs,
-                                           PrefService* local_state_prefs)
+UIProxyConfigService::UIProxyConfigService(
+    PrefService* profile_prefs,
+    PrefService* local_state_prefs,
+    NetworkStateHandler* network_state_handler,
+    NetworkProfileHandler* network_profile_handler)
     : profile_prefs_(profile_prefs), local_state_prefs_(local_state_prefs) {
   if (profile_prefs_) {
     profile_registrar_.Init(profile_prefs_);
@@ -205,6 +205,8 @@ UIProxyConfigService::UIProxyConfigService(PrefService* profile_prefs,
       ::proxy_config::prefs::kProxy,
       base::Bind(&UIProxyConfigService::OnPreferenceChanged,
                  base::Unretained(this)));
+  network_state_handler_ = network_state_handler;
+  network_profile_handler_ = network_profile_handler;
 }
 
 UIProxyConfigService::~UIProxyConfigService() = default;
@@ -216,10 +218,9 @@ bool UIProxyConfigService::MergeEnforcedProxyConfig(
   const NetworkState* network = nullptr;
   DCHECK(!network_guid.empty());
   DCHECK(proxy_settings->is_dict());
+  DCHECK(network_state_handler_);
 
-  network =
-      NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
-          network_guid);
+  network = network_state_handler_->GetNetworkStateFromGuid(network_guid);
   if (!network) {
     NET_LOG(ERROR) << "No NetworkState for guid: " << network_guid;
     current_ui_network_guid_.clear();
@@ -227,7 +228,7 @@ bool UIProxyConfigService::MergeEnforcedProxyConfig(
   }
 
   if (!network->IsNonProfileType() && !network->IsInProfile()) {
-    NET_LOG(ERROR) << "Network not in profile: " << network_guid;
+    NET_LOG(ERROR) << "Network not in profile: " << NetworkId(network);
     current_ui_network_guid_.clear();
     return false;
   }
@@ -235,6 +236,7 @@ bool UIProxyConfigService::MergeEnforcedProxyConfig(
   // The pref service to read proxy settings that apply to all networks.
   // Settings from the profile overrule local state.
   DCHECK(local_state_prefs_);
+  DCHECK(network_profile_handler_);
   PrefService* top_pref_service =
       profile_prefs_ ? profile_prefs_ : local_state_prefs_;
 
@@ -249,11 +251,12 @@ bool UIProxyConfigService::MergeEnforcedProxyConfig(
       net::ProxyConfigService::CONFIG_UNSET;
   onc::ONCSource onc_source = onc::ONC_SOURCE_NONE;
   if (chromeos::GetProxyConfig(profile_prefs_, local_state_prefs_, *network,
-                               &network_config, &onc_source)) {
+                               network_profile_handler_, &network_config,
+                               &onc_source)) {
     // Network is private or shared with user using shared proxies.
     NET_LOG(EVENT) << "UIProxyConfigService for "
                    << (profile_prefs_ ? "user" : "login")
-                   << ": using proxy of network: " << network->path();
+                   << ": using proxy of network: " << NetworkId(network);
     network_availability = net::ProxyConfigService::CONFIG_VALID;
   }
 
@@ -279,8 +282,8 @@ bool UIProxyConfigService::MergeEnforcedProxyConfig(
 }
 
 bool UIProxyConfigService::HasDefaultNetworkProxyConfigured() {
-  const NetworkState* network =
-      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
+  DCHECK(network_profile_handler_);
+  const NetworkState* network = network_state_handler_->DefaultNetwork();
   if (!network)
     return false;
   return ProxyModeForNetwork(network) == ProxyPrefs::MODE_FIXED_SERVERS;
@@ -292,7 +295,8 @@ ProxyPrefs::ProxyMode UIProxyConfigService::ProxyModeForNetwork(
   onc::ONCSource onc_source = onc::ONC_SOURCE_NONE;
   std::unique_ptr<ProxyConfigDictionary> proxy_dict =
       proxy_config::GetProxyConfigForNetwork(nullptr, local_state_prefs_,
-                                             *network, &onc_source);
+                                             *network, network_profile_handler_,
+                                             &onc_source);
   ProxyPrefs::ProxyMode mode;
   if (!proxy_dict || !proxy_dict->GetMode(&mode))
     return ProxyPrefs::MODE_DIRECT;
@@ -300,19 +304,16 @@ ProxyPrefs::ProxyMode UIProxyConfigService::ProxyModeForNetwork(
 }
 
 void UIProxyConfigService::OnPreferenceChanged(const std::string& pref_name) {
+  DCHECK(network_state_handler_);
   // TODO(tbarzic): Send network update notifications for all networks that
   //     might be affected by the proxy pref change, not just the last network
   //     whose properties were fetched.
   if (current_ui_network_guid_.empty())
     return;
   const NetworkState* network =
-      NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
-          current_ui_network_guid_);
-  if (!network)
-    return;
-  NetworkHandler::Get()
-      ->network_state_handler()
-      ->SendUpdateNotificationForNetwork(network->path());
+      network_state_handler_->GetNetworkStateFromGuid(current_ui_network_guid_);
+  if (network)
+    network_state_handler_->SendUpdateNotificationForNetwork(network->path());
 }
 
 }  // namespace chromeos

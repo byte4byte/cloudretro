@@ -78,9 +78,9 @@ extern const OncValueSignature kProxySettingsSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kWiFiSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
-extern const OncValueSignature kWiMAXSignature;
-COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kCertificateSignature;
+COMPONENT_EXPORT(CHROMEOS_NETWORK)
+extern const OncValueSignature kScopeSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kNetworkConfigurationSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
@@ -91,14 +91,16 @@ COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kNetworkConfigurationListSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kToplevelConfigurationSignature;
+COMPONENT_EXPORT(CHROMEOS_NETWORK)
+extern const OncValueSignature kEAPSubjectAlternativeNameMatchListSignature;
+COMPONENT_EXPORT(CHROMEOS_NETWORK)
+extern const OncValueSignature kEAPSubjectAlternativeNameMatchSignature;
 
 // Derived "ONC with State" signatures.
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kNetworkWithStateSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kWiFiWithStateSignature;
-COMPONENT_EXPORT(CHROMEOS_NETWORK)
-extern const OncValueSignature kWiMAXWithStateSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)
 extern const OncValueSignature kCellularSignature;
 COMPONENT_EXPORT(CHROMEOS_NETWORK)

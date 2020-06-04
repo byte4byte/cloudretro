@@ -10,13 +10,14 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "ios/web/public/deprecated/url_verification_constants.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_policy_decider.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
+#import "ios/web/public/web_state.h"
+#include "ios/web/public/web_state_observer.h"
 #include "url/gurl.h"
 
 @class NSURLRequest;
@@ -31,6 +32,8 @@ class TestWebState : public WebState {
   ~TestWebState() override;
 
   // WebState implementation.
+  Getter CreateDefaultGetter() override;
+  OnceGetter CreateDefaultOnceGetter() override;
   WebStateDelegate* GetDelegate() override;
   void SetDelegate(WebStateDelegate* delegate) override;
   bool IsWebUsageEnabled() const override;
@@ -44,6 +47,8 @@ class TestWebState : public WebState {
   void Stop() override {}
   const NavigationManager* GetNavigationManager() const override;
   NavigationManager* GetNavigationManager() override;
+  const WebFramesManager* GetWebFramesManager() const override;
+  WebFramesManager* GetWebFramesManager() override;
   const SessionCertificatePolicyCache* GetSessionCertificatePolicyCache()
       const override;
   SessionCertificatePolicyCache* GetSessionCertificatePolicyCache() override;
@@ -66,10 +71,9 @@ class TestWebState : public WebState {
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
-  void AddScriptCommandCallback(const ScriptCommandCallback& callback,
-                                const std::string& command_prefix) override {}
-  void RemoveScriptCommandCallback(const std::string& command_prefix) override {
-  }
+  std::unique_ptr<ScriptCommandSubscription> AddScriptCommandCallback(
+      const ScriptCommandCallback& callback,
+      const std::string& command_prefix) override;
   CRWWebViewProxyType GetWebViewProxy() const override;
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
@@ -78,9 +82,10 @@ class TestWebState : public WebState {
 
   void RemoveObserver(WebStateObserver* observer) override;
 
+  void CloseWebState() override;
+
   void AddPolicyDecider(WebStatePolicyDecider* decider) override;
   void RemovePolicyDecider(WebStatePolicyDecider* decider) override;
-  WebStateInterfaceProvider* GetWebStateInterfaceProvider() override;
   void DidChangeVisibleSecurityState() override {}
   bool HasOpener() const override;
   void SetHasOpener(bool has_opener) override;
@@ -98,25 +103,28 @@ class TestWebState : public WebState {
   void SetTrustLevel(URLVerificationTrustLevel trust_level);
   void SetNavigationManager(
       std::unique_ptr<NavigationManager> navigation_manager);
+  void SetWebFramesManager(
+      std::unique_ptr<WebFramesManager> web_frames_manager);
   void SetView(UIView* view);
   void SetIsCrashed(bool value);
   void SetIsEvicted(bool value);
   void SetWebViewProxy(CRWWebViewProxyType web_view_proxy);
   void ClearLastExecutedJavascript();
-  void CreateWebFramesManager();
-  void AddWebFrame(std::unique_ptr<web::WebFrame> frame);
-  void RemoveWebFrame(std::string frame_id);
   void SetCanTakeSnapshot(bool can_take_snapshot);
 
   // Getters for test data.
   // Uses |policy_deciders| to return whether the navigation corresponding to
-  // |request| should be allowed. Defaults to true.
-  bool ShouldAllowRequest(
+  // |request| should be allowed. Defaults to PolicyDecision::Allow().
+  WebStatePolicyDecider::PolicyDecision ShouldAllowRequest(
       NSURLRequest* request,
       const WebStatePolicyDecider::RequestInfo& request_info);
-  // Uses |policy_deciders| to return whether the navigation corresponding to
-  // |response| should be allowed. Defaults to true.
-  bool ShouldAllowResponse(NSURLResponse* response, bool for_main_frame);
+  // Uses |policy_deciders| to determine whether the navigation corresponding to
+  // |response| should be allowed. Calls |callback| with the decision. Defaults
+  // to PolicyDecision::Allow().
+  void ShouldAllowResponse(
+      NSURLResponse* response,
+      bool for_main_frame,
+      base::OnceCallback<void(WebStatePolicyDecider::PolicyDecision)> callback);
   base::string16 GetLastExecutedJavascript() const;
   NSData* GetLastLoadedData() const;
 
@@ -127,6 +135,8 @@ class TestWebState : public WebState {
   void OnRenderProcessGone();
   void OnBackForwardStateChanged();
   void OnVisibleSecurityStateChanged();
+  void OnWebFrameDidBecomeAvailable(WebFrame* frame);
+  void OnWebFrameWillBecomeUnavailable(WebFrame* frame);
 
  private:
   BrowserState* browser_state_;
@@ -145,15 +155,19 @@ class TestWebState : public WebState {
   bool content_is_html_;
   std::string mime_type_;
   std::unique_ptr<NavigationManager> navigation_manager_;
+  std::unique_ptr<WebFramesManager> web_frames_manager_;
   UIView* view_;
   CRWWebViewProxyType web_view_proxy_;
   NSData* last_loaded_data_;
+  base::CallbackList<ScriptCommandCallbackSignature> callback_list_;
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true>::Unchecked observers_;
   // All the WebStatePolicyDeciders asked for navigation decision. Weak
   // references.
   base::ObserverList<WebStatePolicyDecider, true>::Unchecked policy_deciders_;
+
+  base::WeakPtrFactory<TestWebState> weak_factory_{this};
 };
 
 }  // namespace web

@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/deferred_sequenced_task_runner.h"
 #include "base/test/gtest_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/sync/base/cancelation_signal.h"
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/fake_model_type_processor.h"
@@ -30,16 +30,15 @@ class ModelTypeRegistryTest : public ::testing::Test {
     test_user_share_.SetUp();
     scoped_refptr<ModelSafeWorker> passive_worker(
         new FakeModelWorker(GROUP_PASSIVE));
-    scoped_refptr<ModelSafeWorker> ui_worker(new FakeModelWorker(GROUP_UI));
-    scoped_refptr<ModelSafeWorker> db_worker(new FakeModelWorker(GROUP_DB));
+    scoped_refptr<ModelSafeWorker> ui_worker(
+        new FakeModelWorker(GROUP_NON_BLOCKING));
     workers_.push_back(passive_worker);
     workers_.push_back(ui_worker);
-    workers_.push_back(db_worker);
 
     registry_ = std::make_unique<ModelTypeRegistry>(
         workers_, test_user_share_.user_share(), &mock_nudge_handler_,
-        base::Bind(&ModelTypeRegistryTest::MigrateDirectory,
-                   base::Unretained(this)),
+        base::BindRepeating(&ModelTypeRegistryTest::MigrateDirectory,
+                            base::Unretained(this)),
         &cancelation_signal_, test_user_share_.keystore_keys_handler());
   }
 
@@ -103,7 +102,7 @@ class ModelTypeRegistryTest : public ::testing::Test {
     return test_user_share_.user_share()->directory.get();
   }
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   TestUserShare test_user_share_;
   CancelationSignal cancelation_signal_;
@@ -112,39 +111,6 @@ class ModelTypeRegistryTest : public ::testing::Test {
   MockNudgeHandler mock_nudge_handler_;
   bool migration_attempted_ = false;
 };
-
-// Tests operations with directory types.
-// Registering/unregistering type should affect enabled types and handlers map.
-// Registering/unregistering type twice should trigger DCHECK.
-// Registering type with unknown ModelSafeGroup should trigger DCHECK.
-TEST_F(ModelTypeRegistryTest, DirectoryTypes) {
-  UpdateHandlerMap* update_handler_map = registry()->update_handler_map();
-  EXPECT_TRUE(registry()->GetEnabledTypes().Empty());
-
-  registry()->RegisterDirectoryType(AUTOFILL, GROUP_DB);
-  EXPECT_EQ(ModelTypeSet(AUTOFILL), registry()->GetEnabledTypes());
-
-  registry()->RegisterDirectoryType(BOOKMARKS, GROUP_UI);
-  EXPECT_EQ(ModelTypeSet(AUTOFILL, BOOKMARKS), registry()->GetEnabledTypes());
-
-  // Try registering already registered type.
-  EXPECT_DCHECK_DEATH(registry()->RegisterDirectoryType(BOOKMARKS, GROUP_UI));
-
-  EXPECT_TRUE(update_handler_map->find(AUTOFILL) != update_handler_map->end());
-  EXPECT_TRUE(update_handler_map->find(BOOKMARKS) != update_handler_map->end());
-
-  registry()->UnregisterDirectoryType(AUTOFILL);
-  EXPECT_EQ(ModelTypeSet(BOOKMARKS), registry()->GetEnabledTypes());
-  EXPECT_TRUE(update_handler_map->find(AUTOFILL) == update_handler_map->end());
-  EXPECT_TRUE(update_handler_map->find(BOOKMARKS) != update_handler_map->end());
-
-  // Try unregistering already unregistered type.
-  EXPECT_DCHECK_DEATH(registry()->UnregisterDirectoryType(AUTOFILL));
-
-  // Try registering type with unknown worker.
-  EXPECT_DCHECK_DEATH(
-      registry()->RegisterDirectoryType(SESSIONS, GROUP_HISTORY));
-}
 
 TEST_F(ModelTypeRegistryTest, NonBlockingTypes) {
   EXPECT_TRUE(registry()->GetEnabledTypes().Empty());

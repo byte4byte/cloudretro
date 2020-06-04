@@ -13,7 +13,7 @@
 #include "chromeos/dbus/shill/shill_manager_client.h"
 #include "chromeos/dbus/shill/shill_profile_client.h"
 #include "chromeos/dbus/shill/shill_service_client.h"
-#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
 
 namespace chromeos {
 
@@ -43,6 +43,12 @@ class NetworkStateTestHelper {
 
   // Clears any fake services.
   void ClearServices();
+
+  // Calls ShillDeviceClient::TestInterface::AddDevice and sets update_received
+  // on the DeviceState.
+  void AddDevice(const std::string& device_path,
+                 const std::string& type,
+                 const std::string& name);
 
   // Configures a new service using Shill properties from |shill_json_string|
   // which must include a GUID and Type. Returns the service path, or "" if the
@@ -94,7 +100,7 @@ class NetworkStateTestHelper {
 
   std::unique_ptr<NetworkStateHandler> network_state_handler_;
 
-  base::WeakPtrFactory<NetworkStateTestHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<NetworkStateTestHelper> weak_ptr_factory_{this};
 };
 
 }  // namespace chromeos

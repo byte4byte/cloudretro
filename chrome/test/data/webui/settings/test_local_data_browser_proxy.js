@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+// clang-format on
+
 /**
  * A test version of LocalDataBrowserProxy. Provides helper methods
  * for allowing tests to know when a method was called, as well as
  * specifying mock responses.
  *
- * @implements {settings.LocalDataBrowserProxy}
+ * @implements {LocalDataBrowserProxy}
  */
-class TestLocalDataBrowserProxy extends TestBrowserProxy {
+export class TestLocalDataBrowserProxy extends TestBrowserProxy {
   constructor() {
     super([
       'getDisplayList',
@@ -20,6 +24,7 @@ class TestLocalDataBrowserProxy extends TestBrowserProxy {
       'getNumCookiesString',
       'reloadCookies',
       'removeCookie',
+      'removeThirdPartyCookies',
     ]);
 
     /** @private {?CookieList} */
@@ -51,7 +56,7 @@ class TestLocalDataBrowserProxy extends TestBrowserProxy {
     if (filter === undefined) {
       filter = '';
     }
-    let output = [];
+    const output = [];
     for (let i = 0; i < this.cookieList_.length; ++i) {
       if (this.cookieList_[i].site.indexOf(filter) >= 0) {
         output.push(this.filteredCookieList_[i]);
@@ -98,5 +103,10 @@ class TestLocalDataBrowserProxy extends TestBrowserProxy {
   /** @override */
   removeCookie(path) {
     this.methodCalled('removeCookie', path);
+  }
+
+  /** @override */
+  removeThirdPartyCookies() {
+    this.methodCalled('removeThirdPartyCookies');
   }
 }

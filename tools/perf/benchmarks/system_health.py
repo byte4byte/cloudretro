@@ -5,6 +5,7 @@
 from benchmarks import loading_metrics_category
 
 from core import perf_benchmark
+from core import platforms
 
 from telemetry import benchmark
 from telemetry import story
@@ -31,6 +32,8 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     cat_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
         filter_string='rail,toplevel')
     cat_filter.AddIncludedCategory('accessibility')
+    # Needed for the metric reported by page.
+    cat_filter.AddIncludedCategory('blink.user_timing')
     # Needed for the console error metric.
     cat_filter.AddIncludedCategory('v8.console')
 
@@ -42,6 +45,7 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
         'consoleErrorMetric',
         'cpuTimeMetric',
         'limitedCpuTimeMetric',
+        'reportedByPageMetric',
         'tracingMetric'
     ])
     loading_metrics_category.AugmentOptionsForLoadingMetrics(options)
@@ -61,21 +65,35 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
 class DesktopCommonSystemHealth(_CommonSystemHealthBenchmark):
   """Desktop Chrome Energy System Health Benchmark."""
   PLATFORM = 'desktop'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.DESKTOP]
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
 
   @classmethod
   def Name(cls):
     return 'system_health.common_desktop'
 
+  def CreateCoreTimelineBasedMeasurementOptions(self):
+    options = super(DesktopCommonSystemHealth,
+                    self).CreateCoreTimelineBasedMeasurementOptions()
+    options.config.chrome_trace_config.SetTraceBufferSizeInKb(300 * 1024)
+    return options
+
 
 @benchmark.Info(emails=['charliea@chromium.org', 'sullivan@chromium.org',
-                        'tdresser@chromium.org', 'perezju@chromium.org',
+                        'tdresser@chromium.org',
                         'chrome-speed-metrics-dev@chromium.org'],
                 component='Speed>Metrics>SystemHealthRegressions',
                 documentation_url='https://bit.ly/system-health-benchmarks')
 class MobileCommonSystemHealth(_CommonSystemHealthBenchmark):
   """Mobile Chrome Energy System Health Benchmark."""
   PLATFORM = 'mobile'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.MOBILE]
   SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
 
   @classmethod
@@ -114,11 +132,16 @@ class _MemorySystemHealthBenchmark(perf_benchmark.PerfBenchmark):
                                           take_memory_measurement=True)
 
 
-@benchmark.Info(emails=['perezju@chromium.org'],
-                documentation_url='https://bit.ly/system-health-benchmarks')
+@benchmark.Info(
+    emails=['pasko@chromium.org', 'chrome-android-perf-status@chromium.org'],
+    documentation_url='https://bit.ly/system-health-benchmarks')
 class DesktopMemorySystemHealth(_MemorySystemHealthBenchmark):
   """Desktop Chrome Memory System Health Benchmark."""
   PLATFORM = 'desktop'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.DESKTOP]
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
 
   @classmethod
@@ -126,11 +149,16 @@ class DesktopMemorySystemHealth(_MemorySystemHealthBenchmark):
     return 'system_health.memory_desktop'
 
 
-@benchmark.Info(emails=['perezju@chromium.org'],
-                documentation_url='https://bit.ly/system-health-benchmarks')
+@benchmark.Info(
+    emails=['pasko@chromium.org', 'chrome-android-perf-status@chromium.org'],
+    documentation_url='https://bit.ly/system-health-benchmarks')
 class MobileMemorySystemHealth(_MemorySystemHealthBenchmark):
   """Mobile Chrome Memory System Health Benchmark."""
   PLATFORM = 'mobile'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.MOBILE]
   SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
 
   def SetExtraBrowserOptions(self, options):
@@ -147,18 +175,20 @@ class MobileMemorySystemHealth(_MemorySystemHealthBenchmark):
     return 'system_health.memory_mobile'
 
 
-@benchmark.Info(emails=['perezju@chromium.org', 'torne@chromium.org',
-                         'changwan@chromium.org'],
-                 component='Mobile>WebView>Perf')
+@benchmark.Info(emails=['oksamyt@chromium.org', 'torne@chromium.org',
+                        'changwan@chromium.org'],
+                component='Mobile>WebView>Perf')
 class WebviewStartupSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
   """Webview startup time benchmark
 
   Benchmark that measures how long WebView takes to start up
-  and load a blank page. Since thie metric only requires the trace
-  markers recorded in atrace, Chrome tracing is not enabled for this
-  benchmark.
+  and load a blank page.
   """
   options = {'pageset_repeat': 20}
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.ANDROID_WEBVIEW]
   SUPPORTED_PLATFORMS = [story.expectations.ANDROID_WEBVIEW]
 
   def CreateStorySet(self, options):
@@ -168,6 +198,9 @@ class WebviewStartupSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     options = timeline_based_measurement.Options()
     options.SetTimelineBasedMetrics(['webviewStartupMetric'])
     options.config.enable_atrace_trace = True
+    # TODO(crbug.com/1028882): Recording a Chrome trace at the same time as
+    # atrace causes events to stack incorrectly. Fix this by recording a
+    # system+Chrome trace via system perfetto on the device instead.
     options.config.enable_chrome_trace = False
     options.config.atrace_config.app_name = 'org.chromium.webview_shell'
     return options

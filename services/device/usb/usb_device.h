@@ -17,6 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "services/device/usb/usb_descriptors.h"
 #include "url/gurl.h"
 
@@ -92,9 +93,7 @@ class UsbDevice : public base::RefCountedThreadSafe<UsbDevice> {
   const std::vector<mojom::UsbConfigurationInfoPtr>& configurations() const {
     return device_info_->configurations;
   }
-  const mojom::UsbConfigurationInfo* active_configuration() const {
-    return active_configuration_;
-  }
+  const mojom::UsbConfigurationInfo* GetActiveConfiguration() const;
 
   // On ChromeOS the permission_broker service must be used to open USB devices.
   // This function asks it to check whether a future Open call will be allowed.
@@ -155,11 +154,6 @@ class UsbDevice : public base::RefCountedThreadSafe<UsbDevice> {
 
   void OnDisconnect();
   void HandleClosed(UsbDeviceHandle* handle);
-
-  // The current device configuration descriptor. May be null if the device is
-  // in an unconfigured state; if not null, it is a pointer to one of the
-  // items in |descriptor_.configurations|.
-  const mojom::UsbConfigurationInfo* active_configuration_ = nullptr;
 
   // Weak pointers to open handles. HandleClosed() will be called before each
   // is freed.

@@ -10,7 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "chromeos/components/multidevice/remote_device_cache.h"
 #include "chromeos/components/multidevice/remote_device_test_util.h"
@@ -28,14 +28,13 @@
 #include "chromeos/services/secure_channel/fake_timer_factory.h"
 #include "chromeos/services/secure_channel/pending_connection_manager_impl.h"
 #include "chromeos/services/secure_channel/public/cpp/shared/connection_priority.h"
-#include "chromeos/services/secure_channel/public/mojom/constants.mojom.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
 #include "chromeos/services/secure_channel/secure_channel_initializer.h"
-#include "chromeos/services/secure_channel/secure_channel_service.h"
 #include "chromeos/services/secure_channel/timer_factory_impl.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -55,7 +54,7 @@ class FakeTimerFactoryFactory : public TimerFactoryImpl::Factory {
 
  private:
   // TimerFactoryImpl::Factory:
-  std::unique_ptr<TimerFactory> BuildInstance() override {
+  std::unique_ptr<TimerFactory> CreateInstance() override {
     EXPECT_FALSE(instance_);
     auto instance = std::make_unique<FakeTimerFactory>();
     instance_ = instance.get();
@@ -77,9 +76,13 @@ class TestRemoteDeviceCacheFactory
 
  private:
   // multidevice::RemoteDeviceCache::Factory:
-  std::unique_ptr<multidevice::RemoteDeviceCache> BuildInstance() override {
+  std::unique_ptr<multidevice::RemoteDeviceCache> CreateInstance() override {
     EXPECT_FALSE(instance_);
-    auto instance = multidevice::RemoteDeviceCache::Factory::BuildInstance();
+    // Silly hack to avoid infinite recursion: this factory really just wants to
+    // save a pointer to the created object.
+    multidevice::RemoteDeviceCache::Factory::SetFactoryForTesting(nullptr);
+    auto instance = multidevice::RemoteDeviceCache::Factory::Create();
+    multidevice::RemoteDeviceCache::Factory::SetFactoryForTesting(this);
     instance_ = instance.get();
     return instance;
   }
@@ -102,7 +105,7 @@ class FakeBleServiceDataHelperFactory
 
  private:
   // BleServiceDataHelperImpl::Factory:
-  std::unique_ptr<BleServiceDataHelper> BuildInstance(
+  std::unique_ptr<BleServiceDataHelper> CreateInstance(
       multidevice::RemoteDeviceCache* remote_device_cache) override {
     EXPECT_FALSE(instance_);
     EXPECT_EQ(test_remote_device_cache_factory_->instance(),
@@ -138,7 +141,7 @@ class FakeBleConnectionManagerFactory
 
  private:
   // BleConnectionManagerImpl::Factory:
-  std::unique_ptr<BleConnectionManager> BuildInstance(
+  std::unique_ptr<BleConnectionManager> CreateInstance(
       scoped_refptr<device::BluetoothAdapter> bluetooth_adapter,
       BleServiceDataHelper* ble_service_data_helper,
       TimerFactory* timer_factory,
@@ -177,7 +180,7 @@ class FakePendingConnectionManagerFactory
 
  private:
   // PendingConnectionManagerImpl::Factory:
-  std::unique_ptr<PendingConnectionManager> BuildInstance(
+  std::unique_ptr<PendingConnectionManager> CreateInstance(
       PendingConnectionManager::Delegate* delegate,
       BleConnectionManager* ble_connection_manager,
       scoped_refptr<device::BluetoothAdapter> bluetooth_adapter) override {
@@ -207,7 +210,7 @@ class FakeActiveConnectionManagerFactory
 
  private:
   // ActiveConnectionManagerImpl::Factory:
-  std::unique_ptr<ActiveConnectionManager> BuildInstance(
+  std::unique_ptr<ActiveConnectionManager> CreateInstance(
       ActiveConnectionManager::Delegate* delegate) override {
     EXPECT_FALSE(instance_);
     auto instance = std::make_unique<FakeActiveConnectionManager>(delegate);
@@ -231,11 +234,15 @@ class TestSecureChannelInitializerFactory
 
  private:
   // SecureChannelInitializer::Factory:
-  std::unique_ptr<SecureChannelBase> BuildInstance(
+  std::unique_ptr<SecureChannelBase> CreateInstance(
       scoped_refptr<base::TaskRunner> task_runner) override {
     EXPECT_FALSE(instance_);
+    // Silly hack to avoid infinite recursion: this factory really just wants to
+    // save a pointer to the created object.
+    SecureChannelInitializer::Factory::SetFactoryForTesting(nullptr);
     auto instance =
-        SecureChannelInitializer::Factory::BuildInstance(test_task_runner_);
+        SecureChannelInitializer::Factory::Create(test_task_runner_);
+    SecureChannelInitializer::Factory::SetFactoryForTesting(this);
     instance_ = instance.get();
     return instance;
   }
@@ -274,9 +281,10 @@ class FakeClientConnectionParametersFactory
 
  private:
   // ClientConnectionParametersImpl::Factory:
-  std::unique_ptr<ClientConnectionParameters> BuildInstance(
+  std::unique_ptr<ClientConnectionParameters> CreateInstance(
       const std::string& feature,
-      mojom::ConnectionDelegatePtr connection_delegate_ptr) override {
+      mojo::PendingRemote<mojom::ConnectionDelegate> connection_delegate_remote)
+      override {
     auto instance = std::make_unique<FakeClientConnectionParameters>(
         feature, base::BindOnce(
                      &FakeClientConnectionParametersFactory::OnInstanceDeleted,
@@ -379,12 +387,9 @@ class SecureChannelServiceTest : public testing::Test {
     ClientConnectionParametersImpl::Factory::SetFactoryForTesting(
         fake_client_connection_parameters_factory_.get());
 
-    service_ = std::make_unique<SecureChannelService>(
-        connector_factory_.RegisterInstance(mojom::kServiceName));
-
-    connector_factory_.GetDefaultConnector()->BindInterface(
-        mojom::kServiceName, &secure_channel_ptr_);
-    secure_channel_ptr_.FlushForTesting();
+    service_ = SecureChannelInitializer::Factory::Create();
+    service_->BindReceiver(secure_channel_remote_.BindNewPipeAndPassReceiver());
+    secure_channel_remote_.FlushForTesting();
   }
 
   void TearDown() override {
@@ -745,13 +750,15 @@ class SecureChannelServiceTest : public testing::Test {
 
     // |device_to_connect| should be in the cache.
     EXPECT_TRUE(multidevice::IsSameDevice(
-        device_to_connect, *remote_device_cache()->GetRemoteDevice(
-                               device_to_connect.GetDeviceId())));
+        device_to_connect,
+        *remote_device_cache()->GetRemoteDevice(
+            device_to_connect.instance_id, device_to_connect.GetDeviceId())));
 
     // |local_device| should also be in the cache.
     EXPECT_TRUE(multidevice::IsSameDevice(
         local_device,
-        *remote_device_cache()->GetRemoteDevice(local_device.GetDeviceId())));
+        *remote_device_cache()->GetRemoteDevice(local_device.instance_id,
+                                                local_device.GetDeviceId())));
 
     return id;
   }
@@ -808,16 +815,16 @@ class SecureChannelServiceTest : public testing::Test {
     FakeConnectionDelegate fake_connection_delegate;
 
     if (is_listener) {
-      secure_channel_ptr_->ListenForConnectionFromDevice(
+      secure_channel_remote_->ListenForConnectionFromDevice(
           device_to_connect, local_device, feature, connection_priority,
-          fake_connection_delegate.GenerateInterfacePtr());
+          fake_connection_delegate.GenerateRemote());
     } else {
-      secure_channel_ptr_->InitiateConnectionToDevice(
+      secure_channel_remote_->InitiateConnectionToDevice(
           device_to_connect, local_device, feature, connection_priority,
-          fake_connection_delegate.GenerateInterfacePtr());
+          fake_connection_delegate.GenerateRemote());
     }
 
-    secure_channel_ptr_.FlushForTesting();
+    secure_channel_remote_.FlushForTesting();
   }
 
   FakeActiveConnectionManager* fake_active_connection_manager() {
@@ -832,7 +839,7 @@ class SecureChannelServiceTest : public testing::Test {
     return test_remote_device_cache_factory_->instance();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   const multidevice::RemoteDeviceList test_devices_;
 
   scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>> mock_adapter_;
@@ -865,13 +872,12 @@ class SecureChannelServiceTest : public testing::Test {
 
   size_t num_queued_requests_before_initialization_ = 0u;
 
-  service_manager::TestConnectorFactory connector_factory_;
-  std::unique_ptr<SecureChannelService> service_;
+  std::unique_ptr<SecureChannelBase> service_;
 
   bool is_adapter_powered_;
   bool is_adapter_present_;
 
-  mojom::SecureChannelPtr secure_channel_ptr_;
+  mojo::Remote<mojom::SecureChannel> secure_channel_remote_;
 
   DISALLOW_COPY_AND_ASSIGN(SecureChannelServiceTest);
 };

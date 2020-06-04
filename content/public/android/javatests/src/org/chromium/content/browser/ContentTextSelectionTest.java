@@ -12,7 +12,6 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
-import android.text.TextUtils;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -105,7 +104,7 @@ public class ContentTextSelectionTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrl(DATA_URL);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
 
@@ -195,8 +194,7 @@ public class ContentTextSelectionTest {
     @Test
     @SmallTest
     @Feature({"TextSelection"})
-    @DisableIf.
-    Build(sdk_is_less_than = Build.VERSION_CODES.N, message = "Drag and drop not enabled pre-N")
+    @DisabledTest(message = "https://crbug.com/980733")
     public void testSelectionPreservedAfterDragAndDrop() throws Throwable {
         DOMUtils.longPressNode(mWebContents, "plain_text_1");
         waitForSelectActionBarVisible(true);
@@ -665,7 +663,7 @@ public class ContentTextSelectionTest {
         return ImeTestUtils.runBlockingOnHandlerNoException(
                 connection.getHandler(), new Callable<CharSequence>() {
                     @Override
-                    public CharSequence call() throws Exception {
+                    public CharSequence call() {
                         return connection.getTextBeforeCursor(length, flags);
                     }
                 });
@@ -829,16 +827,14 @@ public class ContentTextSelectionTest {
     }
 
     private void waitForClipboardContents(final String expectedContents) {
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                Context context = mActivityTestRule.getActivity();
-                ClipboardManager clipboardManager =
-                        (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clip = clipboardManager.getPrimaryClip();
-                return clip != null && clip.getItemCount() == 1
-                        && TextUtils.equals(clip.getItemAt(0).getText(), expectedContents);
-            }
+        CriteriaHelper.pollUiThread(() -> {
+            Context context = mActivityTestRule.getActivity();
+            ClipboardManager clipboardManager =
+                    (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = clipboardManager.getPrimaryClip();
+            Assert.assertNotNull(clip);
+            Assert.assertEquals(1, clip.getItemCount());
+            Assert.assertEquals(expectedContents, clip.getItemAt(0).getText());
         });
     }
 

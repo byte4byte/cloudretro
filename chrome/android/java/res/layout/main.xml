@@ -21,7 +21,7 @@
             android:layout_height="match_parent"
             android:visibility="gone" />
 
-        <org.chromium.chrome.browser.snackbar.BottomContainer
+        <org.chromium.chrome.browser.ui.BottomContainer
             android:id="@+id/bottom_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -90,6 +90,13 @@
             android:id="@+id/control_container_stub"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
+
+        <ViewStub
+            android:id="@+id/status_indicator_stub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inflatedId="@+id/status_indicator"
+            android:layout="@layout/status_indicator_container" />
 
         <ViewStub
             android:id="@+id/empty_container_stub"

@@ -7,6 +7,7 @@
 #include "base/time/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
@@ -64,12 +65,12 @@ class TouchEventTest : public PageTestBase {
   LocalDOMWindow& Window() { return *GetFrame().DomWindow(); }
 
   TouchEvent* EventWithDispatchType(WebInputEvent::DispatchType dispatch_type) {
-    WebTouchEvent web_touch_event(WebInputEvent::kTouchStart, 0,
+    WebTouchEvent web_touch_event(WebInputEvent::Type::kTouchStart, 0,
                                   base::TimeTicks());
     web_touch_event.dispatch_type = dispatch_type;
     return TouchEvent::Create(WebCoalescedInputEvent(web_touch_event), nullptr,
                               nullptr, nullptr, "touchstart", &Window(),
-                              TouchAction::kTouchActionAuto);
+                              TouchAction::kAuto);
   }
 
  private:
@@ -79,8 +80,8 @@ class TouchEventTest : public PageTestBase {
 
 TEST_F(TouchEventTest,
        PreventDefaultPassiveDueToDocumentLevelScrollerIntervention) {
-  TouchEvent* event =
-      EventWithDispatchType(WebInputEvent::kListenersNonBlockingPassive);
+  TouchEvent* event = EventWithDispatchType(
+      WebInputEvent::DispatchType::kListenersNonBlockingPassive);
   event->SetHandlingPassive(Event::PassiveMode::kPassiveForcedDocumentLevel);
 
   EXPECT_THAT(Messages(), ElementsAre());

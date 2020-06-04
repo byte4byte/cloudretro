@@ -5,17 +5,16 @@
 #ifndef CONTENT_SHELL_TEST_RUNNER_WEB_FRAME_TEST_CLIENT_H_
 #define CONTENT_SHELL_TEST_RUNNER_WEB_FRAME_TEST_CLIENT_H_
 
-#include <map>
 #include <string>
 
 #include "base/macros.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 
-namespace test_runner {
-
+namespace content {
+class BlinkTestRunner;
+class SpellCheckClient;
 class TestRunner;
 class WebFrameTestProxy;
-class WebTestDelegate;
 class WebViewTestProxy;
 
 // WebFrameTestClient implements WebLocalFrameClient interface, providing
@@ -25,28 +24,26 @@ class WebViewTestProxy;
 // RenderFrameImpl).
 class WebFrameTestClient : public blink::WebLocalFrameClient {
  public:
-  // Caller has to ensure that all arguments (|delegate|,
-  // |web_view_test_proxy| and so forth) live longer than |this|.
-  WebFrameTestClient(WebTestDelegate* delegate,
-                     WebViewTestProxy* web_view_test_proxy,
+  // Caller has to ensure that all arguments (|web_view_test_proxy| and so
+  // forth) live longer than |this|.
+  WebFrameTestClient(WebViewTestProxy* web_view_test_proxy,
                      WebFrameTestProxy* web_frame_test_proxy);
 
   ~WebFrameTestClient() override;
+
+  // Called when the WebLocalFrame backing the RenderFrame exists and knows its
+  // position in the frame tree.
+  void Initialize();
+
+  // Reset state between tests.
+  void Reset();
+
+  static std::string GetFrameDescription(blink::WebLocalFrame* frame);
+
   bool ShouldContinueNavigation(blink::WebNavigationInfo* info);
 
-  static void PrintFrameDescription(WebTestDelegate* delegate,
-                                    blink::WebLocalFrame* frame);
-
   // WebLocalFrameClient overrides needed by WebFrameTestProxy.
-  void RunModalAlertDialog(const blink::WebString& message) override;
-  bool RunModalConfirmDialog(const blink::WebString& message) override;
-  bool RunModalPromptDialog(const blink::WebString& message,
-                            const blink::WebString& default_value,
-                            blink::WebString* actual_value) override;
-  bool RunModalBeforeUnloadDialog(bool is_reload) override;
-  void PostAccessibilityEvent(const blink::WebAXObject& object,
-                              ax::mojom::Event event,
-                              ax::mojom::EventFrom event_from) override;
+  void PostAccessibilityEvent(const ui::AXEvent& event) override;
   void MarkWebAXObjectDirty(const blink::WebAXObject& obj,
                             bool subtree) override;
   void DidChangeSelection(bool is_selection_empty) override;
@@ -58,15 +55,6 @@ class WebFrameTestClient : public blink::WebLocalFrameClient {
                               const blink::WebString& source_name,
                               unsigned source_line,
                               const blink::WebString& stack_trace) override;
-  void DownloadURL(const blink::WebURLRequest& request,
-                   blink::WebLocalFrameClient::CrossOriginRedirects
-                       cross_origin_redirect_behavior,
-                   mojo::ScopedMessagePipeHandle blob_url_token) override;
-  void DidReceiveTitle(const blink::WebString& title,
-                       blink::WebTextDirection direction) override;
-  void DidChangeIcon(blink::WebIconURL::Type icon_type) override;
-  void DidFailLoad(const blink::WebURLError& error,
-                   blink::WebHistoryCommitType commit_type) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   void DidDispatchPingLoader(const blink::WebURL& url) override;
@@ -79,17 +67,20 @@ class WebFrameTestClient : public blink::WebLocalFrameClient {
 
  private:
   TestRunner* test_runner();
+  BlinkTestRunner* blink_test_runner();
+
   void HandleWebAccessibilityEvent(const blink::WebAXObject& obj,
                                    const char* event_name);
 
   // Borrowed pointers to other parts of web tests state.
-  WebTestDelegate* delegate_;
   WebViewTestProxy* web_view_test_proxy_;
   WebFrameTestProxy* web_frame_test_proxy_;
+
+  std::unique_ptr<SpellCheckClient> spell_check_;
 
   DISALLOW_COPY_AND_ASSIGN(WebFrameTestClient);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_WEB_FRAME_TEST_CLIENT_H_

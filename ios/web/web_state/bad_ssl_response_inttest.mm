@@ -6,15 +6,20 @@
 #import "base/test/ios/wait_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "ios/web/common/features.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/certificate_policy_cache.h"
+#include "ios/web/public/security/security_style.h"
+#include "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/session/crw_session_certificate_policy_cache_storage.h"
 #import "ios/web/public/session/crw_session_storage.h"
 #include "ios/web/public/session/session_certificate_policy_cache.h"
+#import "ios/web/public/test/error_test_util.h"
 #import "ios/web/public/test/fakes/test_web_client.h"
+#include "ios/web/public/test/fakes/test_web_state_observer.h"
 #import "ios/web/public/test/navigation_test_util.h"
 #import "ios/web/public/test/web_test_with_web_state.h"
 #import "ios/web/public/test/web_view_content_test_util.h"
+#import "ios/web/public/web_state.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_info.h"
 #include "net/test/embedded_test_server/default_handlers.h"
@@ -30,33 +35,36 @@ using base::test::ios::WaitUntilConditionOrTimeout;
 
 namespace web {
 
-// BadSslResponseTest is parameterized on this enum to test both
-// LegacyNavigationManagerImpl and WKBasedNavigationManagerImpl.
-enum NavigationManagerChoice {
-  TEST_LEGACY_NAVIGATION_MANAGER,
-  TEST_WK_BASED_NAVIGATION_MANAGER,
+namespace {
+// BadSslResponseTest is parameterized on this enum to test both committed and
+// non-committed interstitials.
+enum class TestParam {
+  COMMITTED_INTERSTITIALS,
+  NON_COMMITTED_INTERSTITIALS,
 };
+}  // namespace
 
 // Test fixture for loading https pages with self signed certificate.
-class BadSslResponseTest
-    : public WebTestWithWebState,
-      public ::testing::WithParamInterface<NavigationManagerChoice> {
+class BadSslResponseTest : public WebTestWithWebState,
+                           public ::testing::WithParamInterface<TestParam> {
  protected:
   BadSslResponseTest()
       : WebTestWithWebState(std::make_unique<TestWebClient>()),
         https_server_(net::test_server::EmbeddedTestServer::TYPE_HTTPS) {
-    if (GetParam() == TEST_LEGACY_NAVIGATION_MANAGER) {
-      scoped_feature_list_.InitAndDisableFeature(
-          features::kSlimNavigationManager);
-    } else {
+    if (GetParam() == TestParam::COMMITTED_INTERSTITIALS) {
       scoped_feature_list_.InitAndEnableFeature(
-          features::kSlimNavigationManager);
+          features::kSSLCommittedInterstitials);
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(
+          features::kSSLCommittedInterstitials);
     }
     RegisterDefaultHandlers(&https_server_);
   }
 
   void SetUp() override {
     WebTestWithWebState::SetUp();
+
+    web_state_observer_ = std::make_unique<TestWebStateObserver>(web_state());
     ASSERT_TRUE(https_server_.Start());
   }
 
@@ -64,8 +72,13 @@ class BadSslResponseTest
     return static_cast<TestWebClient*>(GetWebClient());
   }
 
+  TestDidChangeVisibleSecurityStateInfo* security_state_info() {
+    return web_state_observer_->did_change_visible_security_state_info();
+  }
+
   net::test_server::EmbeddedTestServer https_server_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  std::unique_ptr<TestWebStateObserver> web_state_observer_;
   DISALLOW_COPY_AND_ASSIGN(BadSslResponseTest);
 };
 
@@ -73,6 +86,9 @@ class BadSslResponseTest
 // via WebClient. Test verifies the arguments passed to
 // WebClient::AllowCertificateError.
 TEST_P(BadSslResponseTest, RejectLoad) {
+  if (GetParam() == TestParam::COMMITTED_INTERSTITIALS) {
+    return;
+  }
   web_client()->SetAllowCertificateErrors(false);
   const GURL url = https_server_.GetURL("/");
   test::LoadUrl(web_state(), url);
@@ -96,6 +112,9 @@ TEST_P(BadSslResponseTest, RejectLoad) {
 // Tests navigation to a page with self signed SSL cert and allowing the load
 // via WebClient.
 TEST_P(BadSslResponseTest, AllowLoad) {
+  if (GetParam() == TestParam::COMMITTED_INTERSTITIALS) {
+    return;
+  }
   web_client()->SetAllowCertificateErrors(true);
   GURL url(https_server_.GetURL("/echo"));
   test::LoadUrl(web_state(), url);
@@ -156,6 +175,9 @@ TEST_P(BadSslResponseTest, AllowLoad) {
 // Tests creating WebState with CRWSessionCertificateStorage and populating
 // CertificatePolicyCache.
 TEST_P(BadSslResponseTest, ReadFromSessionCertificateStorage) {
+  if (GetParam() == TestParam::COMMITTED_INTERSTITIALS) {
+    return;
+  }
   // Create WebState with CRWSessionCertificateStorage.
   GURL url(https_server_.GetURL("/echo"));
   scoped_refptr<net::X509Certificate> cert = https_server_.GetCertificate();
@@ -188,11 +210,39 @@ TEST_P(BadSslResponseTest, ReadFromSessionCertificateStorage) {
   EXPECT_EQ(url, web_state->GetLastCommittedURL());
 }
 
+// Tests that an error page is shown for SSL cert errors when committed
+// interstitials are enabled.
+TEST_P(BadSslResponseTest, ShowSSLErrorPageCommittedInterstitial) {
+  if (GetParam() != TestParam::COMMITTED_INTERSTITIALS) {
+    return;
+  }
+  web_client()->SetAllowCertificateErrors(false);
+  const GURL url = https_server_.GetURL("/");
+  test::LoadUrl(web_state(), url);
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
+    base::RunLoop().RunUntilIdle();
+    return !web_state()->IsLoading();
+  }));
+  ASSERT_TRUE(test::WaitForWebViewContainingText(
+      web_state(), testing::GetErrorText(
+                       web_state(), url, "NSURLErrorDomain",
+                       /*error_code=*/NSURLErrorServerCertificateUntrusted,
+                       /*is_post=*/false, /*is_otr=*/false,
+                       /*cert_status=*/net::CERT_STATUS_AUTHORITY_INVALID)));
+  ASSERT_TRUE(security_state_info());
+  ASSERT_TRUE(security_state_info()->visible_ssl_status);
+  EXPECT_EQ(SECURITY_STYLE_AUTHENTICATION_BROKEN,
+            security_state_info()->visible_ssl_status->security_style);
+}
+
 // Tests navigation to a page with self signed SSL cert and allowing the load
 // via WebClient. Subsequent navigation should not call AllowCertificateError
 // but always allow the load.
 // TODO(crbug.com/973635): fix and reenable this test.
 TEST_P(BadSslResponseTest, DISABLED_RememberCertDecision) {
+  if (GetParam() == TestParam::COMMITTED_INTERSTITIALS) {
+    return;
+  }
   // Allow the load via WebClient.
   web_client()->SetAllowCertificateErrors(true);
   GURL url(https_server_.GetURL("/echo"));
@@ -209,10 +259,9 @@ TEST_P(BadSslResponseTest, DISABLED_RememberCertDecision) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ProgrammaticBadSslResponseTest,
+    ,
     BadSslResponseTest,
-    ::testing::Values(
-        NavigationManagerChoice::TEST_LEGACY_NAVIGATION_MANAGER,
-        NavigationManagerChoice::TEST_WK_BASED_NAVIGATION_MANAGER));
+    ::testing::Values(TestParam::COMMITTED_INTERSTITIALS,
+                      TestParam::NON_COMMITTED_INTERSTITIALS));
 
 }  // namespace web {

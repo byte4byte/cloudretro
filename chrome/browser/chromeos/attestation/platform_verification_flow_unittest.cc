@@ -22,7 +22,7 @@
 #include "chromeos/dbus/attestation/attestation.pb.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/settings/cros_settings_names.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -128,8 +128,8 @@ class PlatformVerificationFlowTest : public ::testing::Test {
     // Configure the mock AttestationFlow to call FakeGetCertificate.
     EXPECT_CALL(mock_attestation_flow_,
                 GetCertificate(PROFILE_CONTENT_PROTECTION_CERTIFICATE,
-                               account_id, kTestID, _, _))
-        .WillRepeatedly(WithArgs<4>(
+                               account_id, kTestID, _, _, _))
+        .WillRepeatedly(WithArgs<5>(
             Invoke(this, &PlatformVerificationFlowTest::FakeGetCertificate)));
 
     // Configure the mock AsyncMethodCaller to call FakeSignChallenge.
@@ -143,20 +143,19 @@ class PlatformVerificationFlowTest : public ::testing::Test {
             Invoke(this, &PlatformVerificationFlowTest::FakeSignChallenge)));
   }
 
-  void FakeGetCertificate(
-      const AttestationFlow::CertificateCallback& callback) {
+  void FakeGetCertificate(AttestationFlow::CertificateCallback callback) {
     std::string certificate =
         (fake_certificate_index_ < fake_certificate_list_.size()) ?
             fake_certificate_list_[fake_certificate_index_] : kTestCertificate;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(callback, certificate_status_, certificate));
+        FROM_HERE,
+        base::BindOnce(std::move(callback), certificate_status_, certificate));
     ++fake_certificate_index_;
   }
 
-  void FakeSignChallenge(
-      const cryptohome::AsyncMethodCaller::DataCallback& callback) {
+  void FakeSignChallenge(cryptohome::AsyncMethodCaller::DataCallback callback) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(callback, sign_challenge_success_,
+        FROM_HERE, base::BindOnce(std::move(callback), sign_challenge_success_,
                                   CreateFakeResponseProto()));
   }
 
@@ -180,7 +179,7 @@ class PlatformVerificationFlowTest : public ::testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   StrictMock<MockAttestationFlow> mock_attestation_flow_;
   cryptohome::MockAsyncMethodCaller mock_async_caller_;
   chromeos::FakeCryptohomeClient fake_cryptohome_client_;

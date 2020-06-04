@@ -9,10 +9,12 @@
 #include <iterator>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,10 +23,12 @@
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
+#include "components/omnibox/browser/base_search_provider.h"
 #include "components/omnibox/browser/match_compare.h"
 #include "components/omnibox/browser/omnibox_pedal.h"
 #include "components/omnibox/browser/omnibox_pedal_provider.h"
 #include "components/omnibox/common/omnibox_features.h"
+#include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
@@ -35,6 +39,31 @@ using metrics::OmniboxEventProto;
 
 typedef AutocompleteMatchType ACMatchType;
 
+namespace {
+
+// Rotates |it| and its associated submatches to be in the front of |matches|.
+// |it| must be a valid iterator of |matches| or equal to |matches->end()|.
+void RotateMatchToFront(ACMatches::iterator it, ACMatches* matches) {
+  if (it == matches->end())
+    return;
+
+  const size_t cookie = it->subrelevance;
+  auto next = std::next(it);
+  if (cookie != 0) {
+    // If default match followed by sub-match(es), move them too.
+    while (next != matches->end() &&
+           AutocompleteMatch::IsSameFamily(cookie, next->subrelevance))
+      next = std::next(next);
+  }
+  std::rotate(matches->begin(), it, next);
+}
+
+// This value should be comfortably larger than any max-autocomplete-matches
+// under consideration.
+constexpr size_t kMaxAutocompletePositionValue = 30;
+
+}  // namespace
+
 struct MatchGURLHash {
   // The |bool| is whether the match is a calculator suggestion. We want them
   // compare differently against other matches with the same URL.
@@ -44,34 +73,34 @@ struct MatchGURLHash {
 };
 
 // static
-size_t AutocompleteResult::GetMaxMatches(bool is_zero_suggest) {
+size_t AutocompleteResult::GetMaxMatches() {
 #if (defined(OS_ANDROID))
   constexpr size_t kDefaultMaxAutocompleteMatches = 5;
-  if (is_zero_suggest)
-    return kDefaultMaxAutocompleteMatches;
-#else
+#elif defined(OS_IOS)  // !defined(OS_ANDROID)
   constexpr size_t kDefaultMaxAutocompleteMatches = 6;
-#endif  // defined(OS_ANDROID)
+#else                  // !defined(OS_ANDROID) && !defined(OS_IOS)
+  constexpr size_t kDefaultMaxAutocompleteMatches = 8;
+#endif
+  static_assert(kMaxAutocompletePositionValue > kDefaultMaxAutocompleteMatches,
+                "kMaxAutocompletePositionValue must be larger than the largest "
+                "possible autocomplete result size.");
 
-  return base::GetFieldTrialParamByFeatureAsInt(
+  size_t field_trial_value = base::GetFieldTrialParamByFeatureAsInt(
       omnibox::kUIExperimentMaxAutocompleteMatches,
       OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam,
       kDefaultMaxAutocompleteMatches);
+  DCHECK(kMaxAutocompletePositionValue > field_trial_value);
+  return field_trial_value;
 }
 
 AutocompleteResult::AutocompleteResult() {
   // Reserve space for the max number of matches we'll show.
   matches_.reserve(GetMaxMatches());
-
-  // It's probably safe to do this in the initializer list, but there's little
-  // penalty to doing it here and it ensures our object is fully constructed
-  // before calling member functions.
-  default_match_ = end();
 }
 
 AutocompleteResult::~AutocompleteResult() {}
 
-void AutocompleteResult::CopyOldMatches(
+void AutocompleteResult::TransferOldMatches(
     const AutocompleteInput& input,
     AutocompleteResult* old_matches,
     TemplateURLService* template_url_service) {
@@ -114,8 +143,7 @@ void AutocompleteResult::CopyOldMatches(
   old_matches->BuildProviderToMatchesMove(&old_matches_per_provider);
   for (ProviderToMatches::iterator i = old_matches_per_provider.begin();
        i != old_matches_per_provider.end(); ++i) {
-    MergeMatchesByProvider(input.current_page_classification(), &i->second,
-                           matches_per_provider[i->first]);
+    MergeMatchesByProvider(&i->second, matches_per_provider[i->first]);
   }
 
   SortAndCull(input, template_url_service);
@@ -154,115 +182,181 @@ void AutocompleteResult::AppendMatches(const AutocompleteInput& input,
       matches_.back().swap_contents_and_description = emphasize;
     }
   }
-  default_match_ = end();
-  alternate_nav_url_ = GURL();
 }
 
 void AutocompleteResult::SortAndCull(
     const AutocompleteInput& input,
-    TemplateURLService* template_url_service) {
+    TemplateURLService* template_url_service,
+    const AutocompleteMatch* preserve_default_match) {
   for (auto i(matches_.begin()); i != matches_.end(); ++i)
     i->ComputeStrippedDestinationURL(input, template_url_service);
 
-#if !(defined(OS_ANDROID) || defined(OS_IOS))
-  // Do not cull the tail suggestions for zero prefix query suggetions of
-  // chromeOS launcher case, since there won't be any default match in this
-  // scenario.
-  if (!(input.text().empty() &&
-        input.current_page_classification() ==
-            metrics::OmniboxEventProto::CHROMEOS_APP_LIST)) {
-    // Wipe tail suggestions if not exclusive (minus default match).
-    MaybeCullTailSuggestions(&matches_);
-  }
-#endif
-  SortAndDedupMatches(input.current_page_classification(), &matches_);
+  DemoteOnDeviceSearchSuggestions();
 
-  // Sort and trim to the most relevant GetMaxMatches() matches.
   CompareWithDemoteByType<AutocompleteMatch> comparing_object(
       input.current_page_classification());
+
+#if !(defined(OS_ANDROID) || defined(OS_IOS))
+  // Because tail suggestions are a "last resort", we cull the tail suggestions
+  // if there any non-default non-tail suggestions.
+  MaybeCullTailSuggestions(&matches_, comparing_object);
+#endif
+
+  DeduplicateMatches(&matches_);
+
+  // Sort and trim to the most relevant GetMaxMatches() matches.
   std::sort(matches_.begin(), matches_.end(), comparing_object);
-  // Top match is not allowed to be the default match.  Find the most
-  // relevant legal match and shift it to the front.
-  auto it = FindTopMatch(input.current_page_classification(), &matches_);
-  if (it != matches_.end())
-    std::rotate(matches_.begin(), it, it + 1);
+
+  // Find the best match and rotate it to the front to become the default match.
+  {
+    ACMatches::iterator top_match = matches_.end();
+
+    // If we are trying to keep a default match from a previous pass stable,
+    // search the current results for it, and if found, make it the top match.
+    if (preserve_default_match) {
+      std::pair<GURL, bool> default_match_fields =
+          GetMatchComparisonFields(*preserve_default_match);
+
+      top_match = std::find_if(
+          matches_.begin(), matches_.end(), [&](const AutocompleteMatch& m) {
+            // Find a match that is a duplicate AND has the same fill_into_edit.
+            return default_match_fields == GetMatchComparisonFields(m) &&
+                   preserve_default_match->fill_into_edit == m.fill_into_edit;
+          });
+    }
+
+    // Otherwise, if there's no default match from a previous pass to preserve,
+    // find the top match based on our normal undemoted scoring method.
+    if (top_match == matches_.end())
+      top_match = FindTopMatch(input, &matches_);
+
+    RotateMatchToFront(top_match, &matches_);
+
+    DiscourageTopMatchFromBeingSearchEntity(&matches_);
+  }
 
   size_t max_url_count = 0;
   if (OmniboxFieldTrial::IsMaxURLMatchesFeatureEnabled() &&
       (max_url_count = OmniboxFieldTrial::GetMaxURLMatches()) != 0)
     LimitNumberOfURLsShown(max_url_count, comparing_object);
 
-  // In the process of trimming, drop all matches with a demoted relevance
-  // score of 0.
-  const size_t max_num_matches =
-      std::min(GetMaxMatches(input.from_omnibox_focus()), matches_.size());
-  size_t num_matches;
-  for (num_matches = 0u; (num_matches < max_num_matches) &&
-       (comparing_object.GetDemotedRelevance(*match_at(num_matches)) > 0);
-       ++num_matches) {}
+  const size_t num_matches = CalculateNumMatches(input.from_omnibox_focus(),
+                                                 matches_, comparing_object);
   matches_.resize(num_matches);
 
-  if (OmniboxFieldTrial::IsGroupSuggestionsBySearchVsUrlFeatureEnabled() &&
-      matches_.size() > 2) {
-    // "Bunch" first by search type, then all others.
-    std::stable_sort(std::next(matches_.begin()), matches_.end(),
-                     CompareBySearchVsUrl());
+  if (matches_.size() > 2) {
+    // Skip over default match.
+    auto next = std::next(matches_.begin());
+    // If it has submatches, skip them too.
+    if (matches_.front().subrelevance != 0) {
+      while (next != matches_.end() &&
+             AutocompleteMatch::IsSameFamily(matches_.front().subrelevance,
+                                             next->subrelevance))
+        next = std::next(next);
+    }
+    GroupSuggestionsBySearchVsURL(next, matches_.end());
   }
 
-  // There is no default match for chromeOS launcher zero prefix query
-  // suggestions.
-  if (input.text().empty() && (input.current_page_classification() ==
-                               metrics::OmniboxEventProto::CHROMEOS_APP_LIST)) {
-    default_match_ = end();
-    alternate_nav_url_ = GURL();
-    return;
-  }
-
-  default_match_ = matches_.begin();
-
-  if (default_match_ != matches_.end()) {
+  // If we have a default match, run some sanity checks. Skip these checks if
+  // the default match has no |destination_url|. An example of this is the
+  // default match after the user has tabbed into keyword search mode, but has
+  // not typed a query yet.
+  auto* default_match = this->default_match();
+  if (default_match && default_match->destination_url.is_valid()) {
     const base::string16 debug_info =
-        base::ASCIIToUTF16("fill_into_edit=") + default_match_->fill_into_edit +
+        base::ASCIIToUTF16("fill_into_edit=") + default_match->fill_into_edit +
         base::ASCIIToUTF16(", provider=") +
-        ((default_match_->provider != nullptr)
-             ? base::ASCIIToUTF16(default_match_->provider->GetName())
+        ((default_match->provider != nullptr)
+             ? base::ASCIIToUTF16(default_match->provider->GetName())
              : base::string16()) +
         base::ASCIIToUTF16(", input=") + input.text();
 
-    // We should only get here with an empty omnibox for automatic suggestions
-    // on focus on the NTP; in these cases hitting enter should do nothing, so
-    // there should be no default match.  Otherwise, we're doing automatic
-    // suggestions for the currently visible URL (and hitting enter should
-    // reload it), or the user is typing; in either of these cases, there should
-    // be a default match.
-    DCHECK_NE(input.text().empty(), default_match_->allowed_to_be_default_match)
-        << debug_info;
+    if (AutocompleteMatch::IsSearchType(default_match->type)) {
+      // We shouldn't get query matches for URL inputs.
+      DCHECK_NE(metrics::OmniboxInputType::URL, input.type()) << debug_info;
+    } else {
+      // If the user explicitly typed a scheme, the default match should
+      // have the same scheme.
+      if ((input.type() == metrics::OmniboxInputType::URL) &&
+          input.parts().scheme.is_nonempty()) {
+        const std::string& in_scheme = base::UTF16ToUTF8(input.scheme());
+        const std::string& dest_scheme =
+            default_match->destination_url.scheme();
+        DCHECK(url_formatter::IsEquivalentScheme(in_scheme, dest_scheme))
+            << debug_info;
+      }
+    }
+  }
+}
 
-    // For navigable default matches, make sure the destination type is what the
-    // user would expect given the input.
-    if (default_match_->allowed_to_be_default_match &&
-        default_match_->destination_url.is_valid()) {
-      if (AutocompleteMatch::IsSearchType(default_match_->type)) {
-        // We shouldn't get query matches for URL inputs.
-        DCHECK_NE(metrics::OmniboxInputType::URL, input.type()) << debug_info;
-      } else {
-        // If the user explicitly typed a scheme, the default match should
-        // have the same scheme.
-        if ((input.type() == metrics::OmniboxInputType::URL) &&
-            input.parts().scheme.is_nonempty()) {
-          const std::string& in_scheme = base::UTF16ToUTF8(input.scheme());
-          const std::string& dest_scheme =
-              default_match_->destination_url.scheme();
-          DCHECK(url_formatter::IsEquivalentScheme(in_scheme, dest_scheme))
-              << debug_info;
-        }
+void AutocompleteResult::DemoteOnDeviceSearchSuggestions() {
+  const std::string mode = base::GetFieldTrialParamValueByFeature(
+      omnibox::kOnDeviceHeadProvider,
+      OmniboxFieldTrial::kOnDeviceHeadSuggestDemoteMode);
+  if (mode != "decrease-relevances" && mode != "remove-suggestions")
+    return;
+
+  std::vector<AutocompleteMatch*> on_device_search_suggestions;
+  int search_provider_search_suggestion_min_relevance = -1,
+      on_device_search_suggestion_max_relevance = -1;
+  bool search_provider_search_suggestion_exists = false;
+
+  // Loop through all matches to check the existence of SearchProvider search
+  // suggestions and OnDeviceProvider search suggestions. Also calculate the
+  // maximum OnDeviceProvider search suggestion relevance and the minimum
+  // SearchProvider search suggestion relevance, in preparation to adjust the
+  // relevances for OnDeviceProvider search suggestions next.
+  for (auto& m : matches_) {
+    // The demotion will not be triggered if only trivial suggestions present,
+    // which include type SEARCH_WHAT_YOU_TYPED & SEARCH_OTHER_ENGINE.
+    // Note that we exclude SEARCH_OTHER_ENGINE here, simply because custom
+    // search engine ("keyword search") is not enabled at Android & iOS, where
+    // on device suggestion providers will be enabled. We should revisit this
+    // triggering condition once keyword search is launched at Android & iOS.
+    if (m.IsSearchProviderSearchSuggestion() && !m.IsTrivialAutocompletion()) {
+      search_provider_search_suggestion_exists = true;
+      if (mode == "decrease-relevances") {
+        search_provider_search_suggestion_min_relevance =
+            search_provider_search_suggestion_min_relevance < 0
+                ? m.relevance
+                : std::min(search_provider_search_suggestion_min_relevance,
+                           m.relevance);
+      }
+    } else if (m.IsOnDeviceSearchSuggestion()) {
+      on_device_search_suggestions.push_back(&m);
+      if (mode == "decrease-relevances") {
+        on_device_search_suggestion_max_relevance =
+            std::max(on_device_search_suggestion_max_relevance, m.relevance);
       }
     }
   }
 
-  // Set the alternate nav URL.
-  alternate_nav_url_ = (default_match_ == matches_.end()) ?
-      GURL() : ComputeAlternateNavUrl(input, *default_match_);
+  // If SearchProvider search suggestions present, adjust the relevances for
+  // OnDeviceProvider search suggestions, determined by mode:
+  // 1. decrease-relevances: if any OnDeviceProvider search suggestion has a
+  //    higher relevance than any SearchProvider one, subtract the difference
+  //    b/w the maximum OnDeviceProvider search suggestion relevance and the
+  //    minimum SearchProvider search suggestion relevance from the relevances
+  //    for all OnDeviceProvider ones.
+  // 2. remove-suggestions: set the relevances to 0 for all OnDeviceProvider
+  //    search suggestions.
+  if (search_provider_search_suggestion_exists &&
+      !on_device_search_suggestions.empty()) {
+    if (mode == "decrease-relevances" &&
+        on_device_search_suggestion_max_relevance >=
+            search_provider_search_suggestion_min_relevance) {
+      int relevance_offset =
+          (on_device_search_suggestion_max_relevance -
+           search_provider_search_suggestion_min_relevance + 1);
+      for (auto* m : on_device_search_suggestions)
+        m->relevance = m->relevance > relevance_offset
+                           ? m->relevance - relevance_offset
+                           : 0;
+    } else if (mode == "remove-suggestions") {
+      for (auto* m : on_device_search_suggestions)
+        m->relevance = 0;
+    }
+  }
 }
 
 void AutocompleteResult::AppendDedicatedPedalMatches(
@@ -270,58 +364,79 @@ void AutocompleteResult::AppendDedicatedPedalMatches(
     const AutocompleteInput& input) {
   const OmniboxPedalProvider* provider = client->GetPedalProvider();
   ACMatches pedal_suggestions;
-  // Map from Pedal to a vector and index so that we can update instead of
-  // adding a duplicate.  Existing Pedals are fully indexed before the next
-  // loop that adds|updates because, e.g. the first match may trigger a Pedal
-  // which is already applied on the last.  We should update it, but without the
-  // fully built index the below logic would add new, resulting in a duplicate.
-  std::unordered_map<OmniboxPedal*, std::pair<ACMatches&, size_t>> pedals_found;
-  for (size_t match_index = 0; match_index < matches_.size(); ++match_index) {
-    OmniboxPedal* const pedal = matches_[match_index].pedal;
-    if (pedal) {
-      const auto insertion =
-          pedals_found.insert({pedal, {matches_, match_index}});
-      DCHECK(insertion.second) << "Found existing duplicate Pedal suggestion.";
-    }
-  }
-  for (const auto& match : matches_) {
-    if (match.pedal)
+
+  for (auto& match : matches_) {
+    // We do not want to deal with pedals of pedals, or pedals among
+    // exclusive tail suggestions.
+    if (match.pedal || match.type == ACMatchType::SEARCH_SUGGEST_TAIL)
       continue;
     OmniboxPedal* const pedal = provider->FindPedalMatch(match.contents);
-    if (pedal) {
-      const auto insertion = pedals_found.insert(
-          {pedal, {pedal_suggestions, pedal_suggestions.size()}});
-      if (insertion.second) {
-        // This is the first use of the found pedal; add new suggestion.
-        pedal_suggestions.push_back(match.DerivePedalSuggestion(pedal));
-      } else {
-        // This is a subsequent use of the found pedal; update its suggestion to
-        // ensure that it is derived from the most relevant matching suggestion.
-        const auto& map_value_pair = insertion.first->second;
-        auto& suggestion = map_value_pair.first[map_value_pair.second];
-        if (suggestion.relevance < match.relevance - 1) {
-          suggestion = match.DerivePedalSuggestion(pedal);
-        }
-      }
-    }
+    if (pedal)
+      pedal_suggestions.push_back(match.DerivePedalSuggestion(pedal));
   }
   if (!pedal_suggestions.empty()) {
     AppendMatches(input, pedal_suggestions);
   }
 }
 
+void AutocompleteResult::ConvertInSuggestionPedalMatches(
+    AutocompleteProviderClient* client) {
+  const OmniboxPedalProvider* provider = client->GetPedalProvider();
+  // Used to ensure we keep only one Pedal of each kind.
+  std::unordered_set<OmniboxPedal*> pedals_found;
+  for (auto& match : matches_) {
+    if (OmniboxFieldTrial::IsSuggestionButtonRowEnabled()) {
+      // Skip only matches that have already detected their pedal. With the
+      // button row enabled, a pedal may attach along with tab switch and
+      // associated keyword buttons.
+      if (match.pedal)
+        continue;
+    } else {
+      // Skip matches that will not show Pedal because they already
+      // have a tab match or associated keyword.  Also skip matches
+      // that have already detected their Pedal.
+      if (match.has_tab_match || match.associated_keyword || match.pedal)
+        continue;
+    }
+
+    OmniboxPedal* const pedal = provider->FindPedalMatch(match.contents);
+    if (pedal) {
+      const auto result = pedals_found.insert(pedal);
+      if (result.second)
+        match.pedal = pedal;
+    }
+  }
+}
+
 void AutocompleteResult::ConvertOpenTabMatches(
     AutocompleteProviderClient* client,
     const AutocompleteInput* input) {
+  ACMatches matches_to_add;
   for (auto& match : matches_) {
     // If already converted this match, don't re-search through open tabs and
-    // possibly re-change the description.
-    if (match.has_tab_match)
+    // possibly re-change the description. Also skip submatches.
+    if (match.has_tab_match || match.IsSubMatch())
       continue;
     // If URL is in a tab, remember that.
-    if (client->IsTabOpenWithURL(match.destination_url, input))
+    if (client->IsTabOpenWithURL(match.destination_url, input)) {
       match.has_tab_match = true;
+      // If will have dedicated row, add a match for it.
+      if (OmniboxFieldTrial::IsTabSwitchSuggestionsDedicatedRowEnabled()) {
+        if (match.subrelevance == 0)
+          match.subrelevance = AutocompleteMatch::GetNextFamilyID();
+        AutocompleteMatch tab_switch_match = match;
+        tab_switch_match.SetSubMatch(
+            match.subrelevance + AutocompleteMatch::TAB_SWITCH_FAMILY_ID,
+            match.type);
+        tab_switch_match.contents =
+            l10n_util::GetStringUTF16(IDS_OMNIBOX_TAB_SUGGEST_HINT);
+        tab_switch_match.contents_class = {{0, ACMatchClassification::NONE}};
+        matches_to_add.push_back(tab_switch_match);
+      }
+    }
   }
+  std::copy(matches_to_add.begin(), matches_to_add.end(),
+            std::back_inserter(matches_));
 }
 
 bool AutocompleteResult::HasCopiedMatches() const {
@@ -356,7 +471,6 @@ AutocompleteResult::iterator AutocompleteResult::end() {
   return matches_.end();
 }
 
-// Returns the match at the given index.
 const AutocompleteMatch& AutocompleteResult::match_at(size_t index) const {
   DCHECK_LT(index, matches_.size());
   return matches_[index];
@@ -365,6 +479,13 @@ const AutocompleteMatch& AutocompleteResult::match_at(size_t index) const {
 AutocompleteMatch* AutocompleteResult::match_at(size_t index) {
   DCHECK_LT(index, matches_.size());
   return &matches_[index];
+}
+
+const AutocompleteMatch* AutocompleteResult::default_match() const {
+  if (begin() != end() && begin()->allowed_to_be_default_match)
+    return &(*begin());
+
+  return nullptr;
 }
 
 bool AutocompleteResult::TopMatchIsStandaloneVerbatimMatch() const {
@@ -383,21 +504,33 @@ bool AutocompleteResult::TopMatchIsStandaloneVerbatimMatch() const {
 
 // static
 ACMatches::const_iterator AutocompleteResult::FindTopMatch(
-    OmniboxEventProto::PageClassification page_classification,
+    const AutocompleteInput& input,
     const ACMatches& matches) {
-  return FindTopMatch(page_classification, const_cast<ACMatches*>(&matches));
+  return FindTopMatch(input, const_cast<ACMatches*>(&matches));
 }
 
 // static
 ACMatches::iterator AutocompleteResult::FindTopMatch(
-    OmniboxEventProto::PageClassification page_classification,
+    const AutocompleteInput& input,
     ACMatches* matches) {
-  if (page_classification !=
-          OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS &&
-      OmniboxFieldTrial::IsPreserveDefaultMatchScoreEnabled()) {
+  // The matches may be sorted by type-demoted relevance. We want to choose the
+  // highest-relevance, allowed-to-be-default match while ignoring type demotion
+  // in order to explicitly find the highest relevance match rather than just
+  // accepting the first allowed-to-be-default match in the list.
+  // The goal of this behavior is to ensure that in situations where the user
+  // expects to see a commonly visited URL as the default match, the URL is not
+  // suppressed by type demotion.
+  // However, we don't care about this URL behavior when the user is using the
+  // fakebox/realbox, which is intended to work more like a search-only box.
+  // Unless the user's input is a URL in which case we still want to ensure they
+  // can get a URL as the default match.
+  if ((input.current_page_classification() !=
+           OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS &&
+       input.current_page_classification() != OmniboxEventProto::NTP_REALBOX) ||
+      input.type() == metrics::OmniboxInputType::URL) {
     auto best = matches->end();
     for (auto it = matches->begin(); it != matches->end(); ++it) {
-      if (it->allowed_to_be_default_match &&
+      if (it->allowed_to_be_default_match && !it->IsSubMatch() &&
           (best == matches->end() ||
            AutocompleteMatch::MoreRelevant(*it, *best))) {
         best = it;
@@ -406,38 +539,82 @@ ACMatches::iterator AutocompleteResult::FindTopMatch(
     return best;
   } else {
     return std::find_if(matches->begin(), matches->end(), [](const auto& m) {
-      return m.allowed_to_be_default_match;
+      return m.allowed_to_be_default_match && !m.IsSubMatch();
     });
   }
 }
 
+// static
+void AutocompleteResult::DiscourageTopMatchFromBeingSearchEntity(
+    ACMatches* matches) {
+  if (matches->empty())
+    return;
+
+  auto top_match = matches->begin();
+  if (top_match->type != ACMatchType::SEARCH_SUGGEST_ENTITY)
+    return;
+
+  // Search the duplicates for a equivalent non-entity search suggestion.
+  for (auto it = top_match->duplicate_matches.begin();
+       it != top_match->duplicate_matches.end(); ++it) {
+    // Reject any ineligible duplicates.
+    if (it->type == ACMatchType::SEARCH_SUGGEST_ENTITY ||
+        !AutocompleteMatch::IsSearchType(it->type) ||
+        !it->allowed_to_be_default_match) {
+      continue;
+    }
+
+    // Copy the non-entity match, then erase it from the list of duplicates.
+    // We do this first, because the insertion operation invalidates all
+    // iterators, including |top_match|.
+    AutocompleteMatch non_entity_match_copy = *it;
+    top_match->duplicate_matches.erase(it);
+
+    // Promote the non-entity match to the top, then immediately return, since
+    // all our iterators are invalid after the insertion.
+    matches->insert(matches->begin(), std::move(non_entity_match_copy));
+    return;
+  }
+}
+
+// static
+size_t AutocompleteResult::CalculateNumMatches(
+    bool input_from_omnibox_focus,
+    const ACMatches& matches,
+    const CompareWithDemoteByType<AutocompleteMatch>& comparing_object) {
+  // In the process of trimming, drop all matches with a demoted relevance
+  // score of 0.
+  size_t max_matches_by_policy = GetMaxMatches();
+  size_t num_matches = 0;
+  while (num_matches < matches.size() &&
+         comparing_object.GetDemotedRelevance(matches[num_matches]) > 0) {
+    // If IsLooseMaxLimitOnDedicatedRowsEnabled(), don't count submatches
+    // against configured limit.
+    if (matches[num_matches].IsSubMatch() &&
+        OmniboxFieldTrial::IsLooseMaxLimitOnDedicatedRowsEnabled()) {
+      ++max_matches_by_policy;
+    }
+    // Don't increment if at loose limit.
+    if (num_matches >= max_matches_by_policy)
+      break;
+    ++num_matches;
+  }
+  return num_matches;
+}
+
 void AutocompleteResult::Reset() {
   matches_.clear();
-  default_match_ = end();
 }
 
 void AutocompleteResult::Swap(AutocompleteResult* other) {
-  const size_t default_match_offset = default_match_ - begin();
-  const size_t other_default_match_offset =
-      other->default_match_ - other->begin();
   matches_.swap(other->matches_);
-  default_match_ = begin() + other_default_match_offset;
-  other->default_match_ = other->begin() + default_match_offset;
-  alternate_nav_url_.Swap(&(other->alternate_nav_url_));
 }
 
-void AutocompleteResult::CopyFrom(const AutocompleteResult& rhs) {
-  if (this == &rhs)
+void AutocompleteResult::CopyFrom(const AutocompleteResult& other) {
+  if (this == &other)
     return;
 
-  matches_ = rhs.matches_;
-  // Careful!  You can't just copy iterators from another container, you have to
-  // reconstruct them.
-  default_match_ = (rhs.default_match_ == rhs.end())
-                       ? end()
-                       : (begin() + (rhs.default_match_ - rhs.begin()));
-
-  alternate_nav_url_ = rhs.alternate_nav_url_;
+  matches_ = other.matches_;
 }
 
 #if DCHECK_IS_ON()
@@ -460,11 +637,9 @@ GURL AutocompleteResult::ComputeAlternateNavUrl(
              : GURL();
 }
 
-void AutocompleteResult::SortAndDedupMatches(
-    metrics::OmniboxEventProto::PageClassification page_classification,
-    ACMatches* matches) {
+void AutocompleteResult::DeduplicateMatches(ACMatches* matches) {
   // Group matches by stripped URL and whether it's a calculator suggestion.
-  std::unordered_map<std::pair<GURL, bool>, std::list<ACMatches::iterator>,
+  std::unordered_map<std::pair<GURL, bool>, std::vector<ACMatches::iterator>,
                      MatchGURLHash>
       url_to_matches;
   for (auto i = matches->begin(); i != matches->end(); ++i) {
@@ -476,35 +651,39 @@ void AutocompleteResult::SortAndDedupMatches(
   for (auto& group : url_to_matches) {
     const auto& key = group.first;
     const GURL& gurl = key.first;
-    // The list of matches whose URL are equivalent.
-    std::list<ACMatches::iterator>& duplicate_matches = group.second;
+    // The vector of matches whose URL are equivalent.
+    std::vector<ACMatches::iterator>& duplicate_matches = group.second;
     if (gurl.is_empty() || duplicate_matches.size() == 1)
       continue;
 
-    // Find the best match.
-    auto best_match = duplicate_matches.begin();
-    for (auto i = std::next(best_match); i != duplicate_matches.end(); ++i) {
-      best_match = BetterMatch(i, best_match, page_classification);
-    }
+    // Sort the matches best to worst, according to the deduplication criteria.
+    std::sort(duplicate_matches.begin(), duplicate_matches.end(),
+              &AutocompleteMatch::BetterDuplicateByIterator);
+    AutocompleteMatch& best_match = **duplicate_matches.begin();
 
-    // Rotate the chosen match to be first, if necessary, so we know to keep it.
-    if (best_match != duplicate_matches.begin()) {
-      duplicate_matches.splice(duplicate_matches.begin(), duplicate_matches,
-                               best_match);
-    }
+    // Process all the duplicate matches (from second-best to worst).
+    std::vector<AutocompleteMatch> duplicates_of_duplicates;
+    for (auto i = std::next(duplicate_matches.begin());
+         i != duplicate_matches.end(); ++i) {
+      AutocompleteMatch& duplicate_match = **i;
 
-    // For each duplicate match, append its duplicates to that of the best
-    // match, then append it, before we erase it.
-    for (auto i = std::next(best_match); i != duplicate_matches.end(); ++i) {
-      auto& match = **i;
-      for (auto& dup_match : match.duplicate_matches)
-        (*best_match)->duplicate_matches.push_back(std::move(dup_match));
-      // Erase the duplicates before copying it. We don't need them any more.
-      match.duplicate_matches.erase(match.duplicate_matches.begin(),
-                                    match.duplicate_matches.end());
-      // Copy, don't move, because we need these below.
-      (*best_match)->duplicate_matches.push_back(match);
+      // Each duplicate match may also have its own duplicates. Move those to
+      // a temporary list, which will be eventually added to the end of
+      // |best_match.duplicate_matches|. Clear out the original list too.
+      std::move(duplicate_match.duplicate_matches.begin(),
+                duplicate_match.duplicate_matches.end(),
+                std::back_inserter(duplicates_of_duplicates));
+      duplicate_match.duplicate_matches.clear();
+
+      best_match.UpgradeMatchWithPropertiesFrom(duplicate_match);
+
+      // This should be a copy, not a move, since we don't erase duplicate
+      // matches from the master list until the very end.
+      DCHECK(duplicate_match.duplicate_matches.empty());  // Should be cleared.
+      best_match.duplicate_matches.push_back(duplicate_match);
     }
+    std::move(duplicates_of_duplicates.begin(), duplicates_of_duplicates.end(),
+              std::back_inserter(best_match.duplicate_matches));
   }
 
   // Erase duplicate matches.
@@ -537,100 +716,54 @@ void AutocompleteResult::InlineTailPrefixes() {
 }
 
 size_t AutocompleteResult::EstimateMemoryUsage() const {
-  size_t res = 0;
+  return base::trace_event::EstimateMemoryUsage(matches_);
+}
 
-  res += base::trace_event::EstimateMemoryUsage(matches_);
-  res += base::trace_event::EstimateMemoryUsage(alternate_nav_url_);
+std::vector<AutocompleteResult::MatchDedupComparator>
+AutocompleteResult::GetMatchDedupComparators() const {
+  std::vector<MatchDedupComparator> comparators;
+  for (const auto& match : *this)
+    comparators.push_back(AutocompleteResult::GetMatchComparisonFields(match));
+  return comparators;
+}
 
-  return res;
+base::string16 AutocompleteResult::GetHeaderForGroupId(
+    int suggestion_group_id) const {
+  const auto& it = headers_map_.find(suggestion_group_id);
+  if (it != headers_map_.end())
+    return it->second;
+  return base::string16();
 }
 
 // static
-std::list<ACMatches::iterator>::iterator AutocompleteResult::BetterMatch(
-    std::list<ACMatches::iterator>::iterator first,
-    std::list<ACMatches::iterator>::iterator second,
-    metrics::OmniboxEventProto::PageClassification page_classification) {
-  std::list<ACMatches::iterator>::iterator preferred_match;
-  std::list<ACMatches::iterator>::iterator non_preferred_match;
-  // This object implements greater than.
-  CompareWithDemoteByType<AutocompleteMatch> compare_demote_by_type(
-      page_classification);
+void AutocompleteResult::LogAsynchronousUpdateMetrics(
+    const std::vector<MatchDedupComparator>& old_result,
+    const AutocompleteResult& new_result) {
+  constexpr char kAsyncMatchChangeHistogramName[] =
+      "Omnibox.MatchStability.AsyncMatchChange2";
 
-  // The following logic enforces constraints we care about regarding the
-  // the characteristics of the candidate matches. In order of priority:
-  //
-  // Entity suggestions:
-  //   Entity suggestions are always preferred over non-entity suggestions,
-  //   assuming both candidates have the same fill_into_edit value. In these
-  //   cases, because the fill_into_edit value is the same in both and the
-  //   selection of the entity suggestion appears to the user as simply a
-  //   "promotion" of an equivalent suggestion by adding additional decoration,
-  //   the entity suggestion is allowed to inherit the
-  //   allowed_to_be_default_match and inline_autocompletion values from the
-  //   other suggestion.
-  //
-  // allowed_to_be_default_match:
-  //   A suggestion that is allowed to be the default match is always preferred
-  //   over one that is not.
-  //
-  // Note that together these two constraints enforce an overall constraint,
-  // that if either candidate has allowed_to_be_default_match = true, the match
-  // which is preferred will always have allowed_to_be_default_match = true.
-  //
-  // Document suggestions:
-  //   The icon and display of document suggestions are preferred over
-  //   history, bookmark, etc. items. The actual URLs may be different, but
-  //   logically dedupe to the same entity to which we'll navigate.
-  if ((*first)->type == ACMatchType::SEARCH_SUGGEST_ENTITY &&
-      (*second)->type != ACMatchType::SEARCH_SUGGEST_ENTITY &&
-      (*first)->fill_into_edit == (*second)->fill_into_edit) {
-    preferred_match = first;
-    non_preferred_match = second;
-    if ((*non_preferred_match)->allowed_to_be_default_match) {
-      (*preferred_match)->allowed_to_be_default_match = true;
-      (*preferred_match)->inline_autocompletion =
-          (*non_preferred_match)->inline_autocompletion;
+  bool any_match_changed = false;
+
+  size_t min_size = std::min(old_result.size(), new_result.size());
+  for (size_t i = 0; i < min_size; ++i) {
+    if (old_result[i] != GetMatchComparisonFields(new_result.match_at(i))) {
+      base::UmaHistogramExactLinear(kAsyncMatchChangeHistogramName, i,
+                                    kMaxAutocompletePositionValue);
+      any_match_changed = true;
     }
-  } else if ((*first)->type != ACMatchType::SEARCH_SUGGEST_ENTITY &&
-             (*second)->type == ACMatchType::SEARCH_SUGGEST_ENTITY &&
-             (*first)->fill_into_edit == (*second)->fill_into_edit) {
-    preferred_match = second;
-    non_preferred_match = first;
-    if ((*non_preferred_match)->allowed_to_be_default_match) {
-      (*preferred_match)->allowed_to_be_default_match = true;
-      (*preferred_match)->inline_autocompletion =
-          (*non_preferred_match)->inline_autocompletion;
-    }
-  } else if ((*first)->allowed_to_be_default_match &&
-             !(*second)->allowed_to_be_default_match) {
-    preferred_match = first;
-    non_preferred_match = second;
-  } else if ((*second)->allowed_to_be_default_match &&
-             !(*first)->allowed_to_be_default_match) {
-    preferred_match = second;
-    non_preferred_match = first;
-  } else if ((*first)->type == ACMatchType::DOCUMENT_SUGGESTION &&
-             (*second)->type != ACMatchType::DOCUMENT_SUGGESTION) {
-    preferred_match = first;
-    non_preferred_match = second;
-  } else if ((*first)->type != ACMatchType::DOCUMENT_SUGGESTION &&
-             (*second)->type == ACMatchType::DOCUMENT_SUGGESTION) {
-    preferred_match = second;
-    non_preferred_match = first;
-  } else {
-    // By default, simply prefer the match with the higher type-adjusted score.
-    return compare_demote_by_type(**first, **second) ? first : second;
   }
 
-  // If a match is preferred despite having a lower score, boost its score
-  // to that of the other match.
-  if (compare_demote_by_type(**non_preferred_match, **preferred_match)) {
-    (*preferred_match)
-        ->RecordAdditionalInfo(kACMatchPropertyScoreBoostedFrom,
-                               (*preferred_match)->relevance);
-    (*preferred_match)->relevance = (*non_preferred_match)->relevance;
+  // Also log a change for when the match count decreases. But don't make a log
+  // for appending new matches on the bottom, since that's less disruptive.
+  for (size_t i = new_result.size(); i < old_result.size(); ++i) {
+    base::UmaHistogramExactLinear(kAsyncMatchChangeHistogramName, i,
+                                  kMaxAutocompletePositionValue);
+    any_match_changed = true;
   }
-  return preferred_match;
+
+  base::UmaHistogramBoolean(
+      "Omnibox.MatchStability.AsyncMatchChangedInAnyPosition",
+      any_match_changed);
 }
 
 // static
@@ -644,15 +777,39 @@ bool AutocompleteResult::HasMatchByDestination(const AutocompleteMatch& match,
 }
 
 // static
-void AutocompleteResult::MaybeCullTailSuggestions(ACMatches* matches) {
+void AutocompleteResult::MaybeCullTailSuggestions(
+    ACMatches* matches,
+    const CompareWithDemoteByType<AutocompleteMatch>& comparing_object) {
+  // This function implements the following logic:
+  // ('E' == 'There exists', '!E' == 'There does not exist')
+  // 1) !E default non-tail and E tail default? remove non-tails
+  // 2) !E any tails at all? do nothing
+  // 3) E default non-tail and other non-tails? remove tails
+  // 4) E default non-tail and no other non-tails? mark tails as non-default
+  // 5) E non-default non-tails? remove non-tails
   std::function<bool(const AutocompleteMatch&)> is_tail =
       [](const AutocompleteMatch& match) {
         return match.type == ACMatchType::SEARCH_SUGGEST_TAIL;
       };
-  auto non_tail_default = std::find_if(
-      matches->begin(), matches->end(), [&](const AutocompleteMatch& match) {
-        return match.allowed_to_be_default_match && !is_tail(match);
-      });
+  auto default_non_tail = matches->end();
+  auto default_tail = matches->end();
+  bool other_non_tails = false, any_tails = false;
+  for (auto i = matches->begin(); i != matches->end(); ++i) {
+    if (comparing_object.GetDemotedRelevance(*i) == 0)
+      continue;
+    if (!is_tail(*i)) {
+      // We allow one default non-tail match. For non-default matches,
+      // don't consider if we'd remove them later.
+      if (default_non_tail == matches->end() && i->allowed_to_be_default_match)
+        default_non_tail = i;
+      else
+        other_non_tails = true;
+    } else {
+      any_tails = true;
+      if (default_tail == matches->end() && i->allowed_to_be_default_match)
+        default_tail = i;
+    }
+  }
   // If the only default matches are tail suggestions, let them remain and
   // instead remove the non-tail suggestions.  This is necessary because we do
   // not want to display tail suggestions mixed with other suggestions in the
@@ -661,39 +818,35 @@ void AutocompleteResult::MaybeCullTailSuggestions(ACMatches* matches) {
   // default match--the non-tail ones much go.  This situation though is
   // unlikely, as we normally would expect the search-what-you-typed suggestion
   // as a default match (and that's a non-tail suggestion).
-  if (non_tail_default == matches->end()) {
-    base::EraseIf(*matches, [&is_tail](const AutocompleteMatch& match) {
-      return !is_tail(match);
-    });
+  // 1) above.
+  if (default_tail != matches->end() && default_non_tail == matches->end()) {
+    base::EraseIf(*matches, std::not1(is_tail));
     return;
   }
-  // Determine if there are both tail and non-tail matches, excluding the
-  // non-tail default match.
-  bool any_tail = false, any_non_tail = false;
-  for (auto i = matches->begin();
-       i != matches->end() && !(any_tail && any_non_tail); ++i) {
-    // We allow one default non-tail match.
-    if (i != non_tail_default) {
-      if (is_tail(*i))
-        any_tail = true;
-      else
-        any_non_tail = true;
-    }
-  }
+  // 2) above.
+  if (!any_tails)
+    return;
   // If both tail and non-tail matches, remove tail. Note that this can
   // remove the highest rated suggestions.
-  if (any_tail) {
-    if (any_non_tail) {
+  if (default_non_tail != matches->end()) {
+    // 3) above.
+    if (other_non_tails) {
       base::EraseIf(*matches, is_tail);
     } else {
-      // We want the non-tail default match to be first. Mark tail suggestions
-      // as not a legal default match, so that the default match will be moved
-      // up explicitly.
+      // 4) above.
+      // We want the non-tail default match to be placed first. Mark tail
+      // suggestions as not a legal default match, so that the default match
+      // will be moved up explicitly.
       for (auto& match : *matches) {
         if (is_tail(match))
           match.allowed_to_be_default_match = false;
       }
     }
+  } else if (other_non_tails && default_tail == matches->end()) {
+    // 5) above.
+    // If there are no defaults at all, but non-tail suggestions exist, remove
+    // the tail suggestions.
+    base::EraseIf(*matches, is_tail);
   }
 }
 
@@ -709,10 +862,8 @@ void AutocompleteResult::BuildProviderToMatchesMove(
     (*provider_to_matches)[match.provider].push_back(std::move(match));
 }
 
-void AutocompleteResult::MergeMatchesByProvider(
-    metrics::OmniboxEventProto::PageClassification page_classification,
-    ACMatches* old_matches,
-    const ACMatches& new_matches) {
+void AutocompleteResult::MergeMatchesByProvider(ACMatches* old_matches,
+                                                const ACMatches& new_matches) {
   if (new_matches.size() >= old_matches->size())
     return;
 
@@ -754,7 +905,9 @@ void AutocompleteResult::MergeMatchesByProvider(
 std::pair<GURL, bool> AutocompleteResult::GetMatchComparisonFields(
     const AutocompleteMatch& match) {
   return std::make_pair(match.stripped_destination_url,
-                        match.type == ACMatchType::CALCULATOR);
+                        match.type == ACMatchType::CALCULATOR ||
+                            // Separate sub-matches from their origins.
+                            match.IsSubMatch());
 }
 
 void AutocompleteResult::LimitNumberOfURLsShown(
@@ -762,7 +915,7 @@ void AutocompleteResult::LimitNumberOfURLsShown(
     const CompareWithDemoteByType<AutocompleteMatch>& comparing_object) {
   size_t search_count = std::count_if(
       matches_.begin(), matches_.end(), [&](const AutocompleteMatch& m) {
-        return AutocompleteMatch::IsSearchType(m.type) &&
+        return !m.IsSubMatch() && AutocompleteMatch::IsSearchType(m.type) &&
                // Don't count if would be removed.
                comparing_object.GetDemotedRelevance(m) > 0;
       });
@@ -771,16 +924,31 @@ void AutocompleteResult::LimitNumberOfURLsShown(
   if (GetMaxMatches() > search_count &&
       GetMaxMatches() - search_count > max_url_count)
     max_url_count = GetMaxMatches() - search_count;
-  size_t url_count = 0, total_count = 0;
+  size_t url_count = 0;
   // Erase URL suggestions past the count of allowed ones, or anything past
   // maximum.
   matches_.erase(
       std::remove_if(matches_.begin(), matches_.end(),
-                     [&url_count, max_url_count,
-                      &total_count](const AutocompleteMatch& m) {
-                       return (!AutocompleteMatch::IsSearchType(m.type) &&
-                               ++url_count > max_url_count) ||
-                              ++total_count > GetMaxMatches();
+                     [&url_count, max_url_count](const AutocompleteMatch& m) {
+                       if (!m.IsSubMatch() &&
+                           !AutocompleteMatch::IsSearchType(m.type) &&
+                           ++url_count > max_url_count)
+                         return true;
+                       // Do not count submatches towards URL total, but
+                       // drop them if parent was dropped.
+                       if (m.IsSubMatch() &&
+                           !AutocompleteMatch::IsSearchType(m.parent_type) &&
+                           url_count > max_url_count)
+                         return true;
+                       return false;
                      }),
       matches_.end());
+}
+
+// static
+void AutocompleteResult::GroupSuggestionsBySearchVsURL(iterator begin,
+                                                       iterator end) {
+  std::stable_partition(begin, end, [](const AutocompleteMatch& match) {
+    return match.IsSearchType(match.GetDemotionType());
+  });
 }

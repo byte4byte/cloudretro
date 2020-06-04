@@ -20,6 +20,7 @@
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/media/webrtc/native_desktop_media_list.h"
 #include "chrome/browser/media/webrtc/tab_desktop_media_list.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -27,7 +28,9 @@
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_capture.h"
 #include "content/public/browser/desktop_streams_registry.h"
@@ -49,11 +52,16 @@
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/origin.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
 #include "ui/base/ui_base_features.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/media/webrtc/system_media_capture_permissions_mac.h"
+#endif  // defined(OS_MACOSX)
 
 using content::BrowserThread;
 
@@ -299,6 +307,15 @@ void DesktopCaptureAccessHandler::HandleRequest(
     return;
   }
 
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  if (!profile->GetPrefs()->GetBoolean(prefs::kScreenCaptureAllowed)) {
+    std::move(callback).Run(
+        devices, blink::mojom::MediaStreamRequestResult::PERMISSION_DENIED,
+        std::move(ui));
+    return;
+  }
+
   if (request.request_type == blink::MEDIA_DEVICE_UPDATE) {
     ProcessChangeSourceRequest(web_contents, request, std::move(callback),
                                extension);
@@ -308,6 +325,16 @@ void DesktopCaptureAccessHandler::HandleRequest(
   // If the device id wasn't specified then this is a screen capture request
   // (i.e. chooseDesktopMedia() API wasn't used to generate device id).
   if (request.requested_video_device_id.empty()) {
+#if defined(OS_MACOSX)
+    if (system_media_permissions::CheckSystemScreenCapturePermission() !=
+        system_media_permissions::SystemPermission::kAllowed) {
+      std::move(callback).Run(
+          blink::MediaStreamDevices(),
+          blink::mojom::MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED,
+          nullptr);
+      return;
+    }
+#endif
     ProcessScreenCaptureAccessRequest(web_contents, request,
                                       std::move(callback), extension);
     return;
@@ -329,7 +356,7 @@ void DesktopCaptureAccessHandler::HandleRequest(
         content::DesktopStreamsRegistry::GetInstance()->RequestMediaForStreamId(
             request.requested_video_device_id,
             main_frame->GetProcess()->GetID(), main_frame->GetRoutingID(),
-            request.security_origin, nullptr,
+            url::Origin::Create(request.security_origin), nullptr,
             content::kRegistryStreamTypeDesktop);
   }
 
@@ -340,6 +367,17 @@ void DesktopCaptureAccessHandler::HandleRequest(
         std::move(ui));
     return;
   }
+#if defined(OS_MACOSX)
+  if (media_id.type != content::DesktopMediaID::TYPE_WEB_CONTENTS &&
+      system_media_permissions::CheckSystemScreenCapturePermission() !=
+          system_media_permissions::SystemPermission::kAllowed) {
+    std::move(callback).Run(
+        blink::MediaStreamDevices(),
+        blink::mojom::MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED,
+        nullptr);
+    return;
+  }
+#endif
 
   bool loopback_audio_supported = false;
 #if defined(USE_CRAS) || defined(OS_WIN)
@@ -469,8 +507,8 @@ void DesktopCaptureAccessHandler::ProcessQueuedAccessRequest(
   auto source_lists = picker_factory_->CreateMediaList(media_types);
 
   DesktopMediaPicker::DoneCallback done_callback =
-      base::BindRepeating(&DesktopCaptureAccessHandler::OnPickerDialogResults,
-                          base::Unretained(this), web_contents);
+      base::BindOnce(&DesktopCaptureAccessHandler::OnPickerDialogResults,
+                     base::Unretained(this), web_contents);
   DesktopMediaPicker::Params picker_params;
   picker_params.web_contents = web_contents;
   gfx::NativeWindow parent_window = web_contents->GetTopLevelNativeWindow();
@@ -484,7 +522,7 @@ void DesktopCaptureAccessHandler::ProcessQueuedAccessRequest(
                                     ? false
                                     : true;
   pending_request.picker->Show(picker_params, std::move(source_lists),
-                               done_callback);
+                               std::move(done_callback));
 
   // Focus on the tab with the picker for easy access.
   if (auto* delegate = web_contents->GetDelegate())

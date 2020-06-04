@@ -8,7 +8,7 @@
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
-#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-forward.h"
 
 namespace mojo {
 
@@ -48,8 +48,9 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::MediaStreamDeviceDataView,
     return device.input;
   }
 
-  static int session_id(const blink::MediaStreamDevice& device) {
-    return device.session_id;
+  static const base::Optional<base::UnguessableToken>& session_id(
+      const blink::MediaStreamDevice& device) {
+    return device.serializable_session_id();
   }
 
   static const base::Optional<media::mojom::DisplayMediaInformationPtr>&

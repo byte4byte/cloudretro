@@ -38,8 +38,8 @@ constexpr char kSessionJid[] = "user@domain/rest-of-jid";
 using ::remoting::protocol::MockSession;
 
 It2MeStandaloneHost::It2MeStandaloneHost()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::UI),
+    : task_environment_(
+          base::test::SingleThreadTaskEnvironment::MainThreadType::UI),
       context_(ChromotingHostContext::Create(
           new AutoThreadTaskRunner(base::ThreadTaskRunnerHandle::Get(),
                                    run_loop_.QuitClosure()))),
@@ -79,9 +79,9 @@ void It2MeStandaloneHost::Run() {
 }
 
 void It2MeStandaloneHost::StartOutputTimer() {
-  timer_.Start(
-      FROM_HERE, base::TimeDelta::FromSeconds(1),
-      base::Bind(&OutputFakeConnectionEventLogger, std::cref(event_logger_)));
+  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(1),
+               base::BindRepeating(&OutputFakeConnectionEventLogger,
+                                   std::cref(event_logger_)));
 }
 
 void It2MeStandaloneHost::Connect() {

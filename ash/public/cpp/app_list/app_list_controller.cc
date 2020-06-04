@@ -4,9 +4,9 @@
 
 #include "ash/public/cpp/app_list/app_list_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -29,4 +29,4 @@ AppListController::~AppListController() {
   g_instance = nullptr;
 }
 
-}  // namespace app_list
+}  // namespace ash

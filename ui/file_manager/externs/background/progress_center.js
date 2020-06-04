@@ -8,6 +8,11 @@
  */
 class ProgressCenter {
   /**
+   * Turns off sending updates when a file operation reaches 'completed' state.
+   * Used for testing UI that can be ephemeral otherwise.
+   */
+  neverNotifyCompleted() {}
+  /**
    * Updates the item in the progress center.
    * If the item has a new ID, the item is added to the item list.
    * @param {ProgressCenterItem} item Updated item.
@@ -22,13 +27,13 @@ class ProgressCenter {
 
   /**
    * Adds a panel UI to the notification center.
-   * @param {ProgressCenterPanel} panel Panel UI.
+   * @param {ProgressCenterPanelInterface} panel Panel UI.
    */
   addPanel(panel) {}
 
   /**
    * Removes a panel UI from the notification center.
-   * @param {ProgressCenterPanel} panel Panel UI.
+   * @param {ProgressCenterPanelInterface} panel Panel UI.
    */
   removePanel(panel) {}
 

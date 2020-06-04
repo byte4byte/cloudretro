@@ -7,13 +7,16 @@
 #include <memory>
 
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/finder/find_buffer.h"
+#include "third_party/blink/renderer/core/editing/finder/find_options.h"
 #include "third_party/blink/renderer/core/editing/iterators/character_iterator.h"
 #include "third_party/blink/renderer/core/editing/position.h"
 #include "third_party/blink/renderer/core/page/scrolling/text_fragment_selector.h"
+#include "third_party/blink/renderer/platform/text/text_boundaries.h"
 
 namespace blink {
 
@@ -21,12 +24,54 @@ namespace {
 
 const char kNoContext[] = "";
 
+// Determines whether the start and end positions of |range| are on word
+// boundaries.
+// TODO(crbug/924965): Determine how this should check node boundaries. This
+// treats node boundaries as word boundaries, for example "o" is a whole word
+// match in "f<i>o</i>o".
+bool IsWholeWordMatch(EphemeralRangeInFlatTree range) {
+  wtf_size_t start_position = range.StartPosition().OffsetInContainerNode();
+
+  if (start_position != 0) {
+    String start_text = range.StartPosition().AnchorNode()->textContent();
+    start_text.Ensure16Bit();
+    wtf_size_t word_start = FindWordStartBoundary(
+        start_text.Characters16(), start_text.length(), start_position);
+    if (word_start != start_position)
+      return false;
+  }
+
+  wtf_size_t end_position = range.EndPosition().OffsetInContainerNode();
+  String end_text = range.EndPosition().AnchorNode()->textContent();
+
+  if (end_position != end_text.length()) {
+    end_text.Ensure16Bit();
+    // We expect end_position to be a word boundary, and FindWordEndBoundary
+    // finds the next word boundary, so start from end_position - 1.
+    wtf_size_t word_end = FindWordEndBoundary(
+        end_text.Characters16(), end_text.length(), end_position - 1);
+    if (word_end != end_position)
+      return false;
+  }
+
+  return true;
+}
+
 EphemeralRangeInFlatTree FindMatchInRange(String search_text,
                                           PositionInFlatTree search_start,
                                           PositionInFlatTree search_end) {
-  const EphemeralRangeInFlatTree search_range(search_start, search_end);
-  return FindBuffer::FindMatchInRange(search_range, search_text,
-                                      /*find_options=*/0);
+  while (search_start < search_end) {
+    const EphemeralRangeInFlatTree search_range(search_start, search_end);
+    EphemeralRangeInFlatTree potential_match = FindBuffer::FindMatchInRange(
+        search_range, search_text, kCaseInsensitive);
+
+    if (potential_match.IsNull() || IsWholeWordMatch(potential_match))
+      return potential_match;
+
+    search_start = potential_match.EndPosition();
+  }
+
+  return EphemeralRangeInFlatTree();
 }
 
 PositionInFlatTree NextTextPosition(PositionInFlatTree position,
@@ -57,12 +102,18 @@ EphemeralRangeInFlatTree FindImmediateMatch(String search_text,
 
   FindBuffer buffer(EphemeralRangeInFlatTree(search_start, search_end));
 
-  std::unique_ptr<FindBuffer::Results> match_results =
-      buffer.FindMatches(search_text, /*find_options=*/0);
+  // TODO(nburris): FindBuffer will search the rest of the document for a match,
+  // but we only need to check for an immediate match, so we should stop
+  // searching if there's no immediate match.
+  FindBuffer::Results match_results =
+      buffer.FindMatches(search_text, kCaseInsensitive);
 
-  if (!match_results->IsEmpty() && match_results->front().start == 0u) {
-    FindBuffer::BufferMatchResult match = match_results->front();
-    return buffer.RangeFromBufferIndex(match.start, match.start + match.length);
+  if (!match_results.IsEmpty() && match_results.front().start == 0u) {
+    FindBuffer::BufferMatchResult buffer_match = match_results.front();
+    EphemeralRangeInFlatTree match = buffer.RangeFromBufferIndex(
+        buffer_match.start, buffer_match.start + buffer_match.length);
+    if (IsWholeWordMatch(match))
+      return match;
   }
 
   return EphemeralRangeInFlatTree();
@@ -98,13 +149,15 @@ EphemeralRangeInFlatTree FindMatchInRangeWithContext(
       // No search_text match in remaining range
       if (potential_match.IsNull())
         return EphemeralRangeInFlatTree();
+
+      search_start = potential_match.EndPosition();
     }
 
+    PositionInFlatTree suffix_start = potential_match.EndPosition();
     DCHECK(potential_match.IsNotNull());
-    search_start = potential_match.EndPosition();
     if (!suffix.IsEmpty()) {
       EphemeralRangeInFlatTree suffix_match =
-          FindImmediateMatch(suffix, search_start, search_end);
+          FindImmediateMatch(suffix, suffix_start, search_end);
 
       // No suffix match after current potential_match
       if (suffix_match.IsNull())
@@ -129,6 +182,10 @@ TextFragmentFinder::TextFragmentFinder(Client& client,
 void TextFragmentFinder::FindMatch(Document& document) {
   PositionInFlatTree search_start =
       PositionInFlatTree::FirstPositionInNode(document);
+
+  auto forced_lock_scope =
+      document.GetDisplayLockDocumentState().GetScopedForceActivatableLocks();
+  document.UpdateStyleAndLayout(DocumentUpdateReason::kFindInPage);
 
   EphemeralRangeInFlatTree match =
       FindMatchFromPosition(document, search_start);

@@ -10,10 +10,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -215,7 +216,7 @@ bool TabUnderNavigationThrottle::TabUndersAllowedBySettings() const {
           Profile::FromBrowserContext(contents->GetBrowserContext()));
   DCHECK(settings_map);
   return settings_map->GetContentSetting(contents->GetLastCommittedURL(),
-                                         GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
+                                         GURL(), ContentSettingsType::POPUPS,
                                          std::string()) ==
          CONTENT_SETTING_ALLOW;
 }

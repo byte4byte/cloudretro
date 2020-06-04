@@ -39,6 +39,10 @@ namespace chromeos {
 
 enum class ConnectCallbackMode { ON_STARTED, ON_COMPLETED };
 
+class NetworkStateHandler;
+class NetworkConfigurationHandler;
+class ManagedNetworkConfigurationHandler;
+
 class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
  public:
   // Constants for |error_name| from |error_callback| for Connect.
@@ -111,7 +115,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
     // |error_callback|, passing the relevant error code declared above.
     virtual void ConnectToNetwork(
         const std::string& tether_network_guid,
-        const base::Closure& success_callback,
+        base::OnceClosure success_callback,
         const network_handler::StringResultCallback& error_callback) = 0;
 
     // Disconnects from the Tether network with GUID |tether_network_guid|. On
@@ -119,7 +123,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
     // |error_callback|, passing the relevant error code declared above.
     virtual void DisconnectFromNetwork(
         const std::string& tether_network_guid,
-        const base::Closure& success_callback,
+        base::OnceClosure success_callback,
         const network_handler::StringResultCallback& error_callback) = 0;
 
    protected:
@@ -151,7 +155,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
   //   connect.
   virtual void ConnectToNetwork(
       const std::string& service_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::ErrorCallback& error_callback,
       bool check_error_state,
       ConnectCallbackMode mode) = 0;
@@ -165,7 +169,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
   // |error_message| will contain and additional error string for debugging.
   virtual void DisconnectNetwork(
       const std::string& service_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::ErrorCallback& error_callback) = 0;
 
   virtual void Init(NetworkStateHandler* network_state_handler,
@@ -173,12 +177,19 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
                     ManagedNetworkConfigurationHandler*
                         managed_network_configuration_handler) = 0;
 
+  // Construct and initialize an instance for testing.
+  static std::unique_ptr<NetworkConnectionHandler> InitializeForTesting(
+      NetworkStateHandler* network_state_handler,
+      NetworkConfigurationHandler* network_configuration_handler,
+      ManagedNetworkConfigurationHandler*
+          managed_network_configuration_handler);
+
  protected:
   NetworkConnectionHandler();
 
   // Notify caller and observers that the connect request succeeded.
   void InvokeConnectSuccessCallback(const std::string& service_path,
-                                    const base::Closure& success_callback);
+                                    base::OnceClosure success_callback);
 
   // Notify caller and observers that the connect request failed.
   // |error_name| will be one of the kError* messages defined above.
@@ -190,13 +201,13 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
   // Initiates a connection to a Tether network.
   void InitiateTetherNetworkConnection(
       const std::string& tether_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::ErrorCallback& error_callback);
 
   // Initiates a disconnection from a Tether network.
   void InitiateTetherNetworkDisconnection(
       const std::string& tether_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::ErrorCallback& error_callback);
 
   base::ObserverList<NetworkConnectionObserver, true>::Unchecked observers_;
@@ -207,7 +218,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandler {
  private:
   // Only to be used by NetworkConnectionHandler implementation (and not by
   // derived classes).
-  base::WeakPtrFactory<NetworkConnectionHandler> weak_ptr_factory_;
+  base::WeakPtrFactory<NetworkConnectionHandler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectionHandler);
 };

@@ -6,22 +6,41 @@
 #define COMPONENTS_AUTOFILL_CORE_COMMON_PASSWORD_FORM_FILL_DATA_H_
 
 #include <map>
+#include <vector>
 
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/autofill/core/common/renderer_id.h"
 
 namespace autofill {
 
-struct PasswordAndRealm {
+// Contains renderer ids of password related elements found by the form parser.
+struct ParsingResult {
+  FieldRendererId username_renderer_id;
+  FieldRendererId password_renderer_id;
+  FieldRendererId new_password_renderer_id;
+  FieldRendererId confirm_password_renderer_id;
+};
+
+struct PasswordAndMetadata {
+  PasswordAndMetadata();
+  PasswordAndMetadata(const PasswordAndMetadata&);
+  PasswordAndMetadata(PasswordAndMetadata&&);
+  PasswordAndMetadata& operator=(const PasswordAndMetadata&);
+  PasswordAndMetadata& operator=(PasswordAndMetadata&&);
+  ~PasswordAndMetadata();
+
+  base::string16 username;
   base::string16 password;
   std::string realm;
+  bool uses_account_store = false;
 };
 
 // Structure used for autofilling password forms. Note that the realms in this
 // struct are only set when the password's realm differs from the realm of the
 // form that we are filling.
 struct PasswordFormFillData {
-  using LoginCollection = std::map<base::string16, PasswordAndRealm>;
+  using LoginCollection = std::vector<PasswordAndMetadata>;
 
   PasswordFormFillData();
 
@@ -32,26 +51,26 @@ struct PasswordFormFillData {
   // not autofill anything until the user typed in a valid username and blurred
   // the field. If |enable_possible_usernames| is true, we will populate
   // possible_usernames.
-  PasswordFormFillData(
-      const PasswordForm& form_on_page,
-      const std::map<base::string16, const PasswordForm*>& matches,
-      const PasswordForm& preferred_match,
-      bool wait_for_username);
+  PasswordFormFillData(const PasswordForm& form_on_page,
+                       const std::vector<const PasswordForm*>& matches,
+                       const PasswordForm& preferred_match,
+                       bool wait_for_username);
 
-  PasswordFormFillData(const PasswordFormFillData& other);
-
+  PasswordFormFillData(const PasswordFormFillData&);
+  PasswordFormFillData& operator=(const PasswordFormFillData&);
+  PasswordFormFillData(PasswordFormFillData&&);
+  PasswordFormFillData& operator=(PasswordFormFillData&&);
   ~PasswordFormFillData();
 
   // If |has_renderer_ids| == true then |form_renderer_id| contains the unique
   // renderer form id. No special values for |has_renderer_ids| == false case
   // was introduced because the absent of ids is just temprorary situation while
   // the old form parsing still exists.
-  // If there is no form tag then |form_renderer_id| ==
-  // FormData::kNotSetFormRendererId.
+  // If there is no form tag then |form_renderer_id|.is_null().
   // Username and Password elements renderer ids are in
   // |username_field.unique_renderer_id| and |password_field.unique_renderer_id|
   // correspondingly.
-  uint32_t form_renderer_id = FormData::kNotSetFormRendererId;
+  FormRendererId form_renderer_id;
 
   // The name of the form.
   base::string16 name;
@@ -75,7 +94,11 @@ struct PasswordFormFillData {
   // The signon realm of the preferred user/pass pair.
   std::string preferred_realm;
 
-  // A list of other matching username->PasswordAndRealm pairs for the form.
+  // True iff the password originated from the account store rather than the
+  // local password store.
+  bool uses_account_store = false;
+
+  // A list of other matching username->PasswordAndMetadata pairs for the form.
   LoginCollection additional_logins;
 
   // Tells us whether we need to wait for the user to enter a valid username
@@ -89,7 +112,6 @@ struct PasswordFormFillData {
   // TODO(https://crbug.com/831123): Remove this field when old parsing is
   // removed and filling by renderer ids is by default.
   bool has_renderer_ids = false;
-
 };
 
 // If |data.wait_for_username| is set, the renderer does not need to receive

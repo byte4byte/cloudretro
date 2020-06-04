@@ -4,7 +4,11 @@
 
 #include "extensions/browser/updater/update_service.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -14,6 +18,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -23,7 +28,6 @@
 #include "extensions/browser/updater/update_data_provider.h"
 #include "extensions/browser/updater/update_service_factory.h"
 #include "extensions/common/extension_features.h"
-#include "extensions/common/extension_updater_uma.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_url_handlers.h"
 
@@ -31,42 +35,15 @@ namespace extensions {
 
 namespace {
 
+UpdateService* update_service_override = nullptr;
+
 // 98% of update checks have 22 or less extensions.
 constexpr size_t kMaxExtensionsPerUpdate = 22;
 
+// This set contains all Omaha attributes that is associated with extensions.
+constexpr const char* kOmahaAttributes[] = {"_malware"};
+
 void SendUninstallPingCompleteCallback(update_client::Error error) {}
-
-void ReportUpdateCheckResult(ExtensionUpdaterUpdateResult update_result,
-                             int error_code) {
-  UMA_HISTOGRAM_ENUMERATION("Extensions.ExtensionUpdaterUpdateResults",
-                            update_result,
-                            ExtensionUpdaterUpdateResult::UPDATE_RESULT_COUNT);
-
-  // This UMA histogram measures update check results of the unified extension
-  // updater.
-  UMA_HISTOGRAM_ENUMERATION("Extensions.UnifiedExtensionUpdaterUpdateResults",
-                            update_result,
-                            ExtensionUpdaterUpdateResult::UPDATE_RESULT_COUNT);
-
-  switch (update_result) {
-    case ExtensionUpdaterUpdateResult::UPDATE_CHECK_ERROR:
-      base::UmaHistogramSparse(
-          "Extensions.UnifiedExtensionUpdaterUpdateCheckErrors", error_code);
-      break;
-    case ExtensionUpdaterUpdateResult::UPDATE_DOWNLOAD_ERROR:
-      base::UmaHistogramSparse(
-          "Extensions.UnifiedExtensionUpdaterDownloadErrors", error_code);
-      break;
-    case ExtensionUpdaterUpdateResult::UPDATE_SERVICE_ERROR:
-      UMA_HISTOGRAM_ENUMERATION(
-          "Extensions.UnifiedExtensionUpdaterUpdateServiceErrors",
-          static_cast<update_client::Error>(error_code),
-          update_client::Error::MAX_VALUE);
-      break;
-    default:
-      break;
-  }
-}
 
 }  // namespace
 
@@ -81,8 +58,15 @@ UpdateService::InProgressUpdate& UpdateService::InProgressUpdate::operator=(
     UpdateService::InProgressUpdate&& other) = default;
 
 // static
+void UpdateService::SupplyUpdateServiceForTest(UpdateService* service) {
+  update_service_override = service;
+}
+
+// static
 UpdateService* UpdateService::Get(content::BrowserContext* context) {
-  return UpdateServiceFactory::GetForBrowserContext(context);
+  return update_service_override == nullptr
+             ? UpdateServiceFactory::GetForBrowserContext(context)
+             : update_service_override;
 }
 
 void UpdateService::Shutdown() {
@@ -106,9 +90,6 @@ void UpdateService::SendUninstallPing(const std::string& id,
 }
 
 bool UpdateService::CanUpdate(const std::string& extension_id) const {
-  if (!base::FeatureList::IsEnabled(
-          extensions_features::kNewExtensionUpdaterService))
-    return false;
   // It's possible to change Webstore update URL from command line (through
   // apps-gallery-update-url command line switch). When Webstore update URL is
   // different the default Webstore update URL, we won't support updating
@@ -142,22 +123,27 @@ void UpdateService::OnEvent(Events event, const std::string& extension_id) {
 
   bool complete_event = false;
   bool finish_delayed_installation = false;
+  bool should_perform_action_on_omaha_attributes = false;
   switch (event) {
     case Events::COMPONENT_UPDATED:
       complete_event = true;
-      ReportUpdateCheckResult(ExtensionUpdaterUpdateResult::UPDATE_SUCCESS, 0);
       break;
     case Events::COMPONENT_UPDATE_ERROR:
       complete_event = true;
       finish_delayed_installation = true;
-      HandleComponentUpdateErrorEvent(extension_id);
       break;
     case Events::COMPONENT_NOT_UPDATED:
       complete_event = true;
+      // Attributes is currently only added when no_update is true in the update
+      // client config.
+      should_perform_action_on_omaha_attributes = true;
       finish_delayed_installation = true;
-      ReportUpdateCheckResult(ExtensionUpdaterUpdateResult::NO_UPDATE, 0);
       break;
     case Events::COMPONENT_UPDATE_FOUND:
+      // This flag is set since it makes sense to update attributes when an
+      // update is found even though the server currently doesn not serve
+      // attributes for an extension with an update.
+      should_perform_action_on_omaha_attributes = true;
       HandleComponentUpdateFoundEvent(extension_id);
       break;
     case Events::COMPONENT_CHECKING_FOR_UPDATES:
@@ -167,10 +153,19 @@ void UpdateService::OnEvent(Events event, const std::string& extension_id) {
       break;
   }
 
+  base::Value attributes(base::Value::Type::DICTIONARY);
+  if (should_perform_action_on_omaha_attributes &&
+      base::FeatureList::IsEnabled(
+          extensions_features::kDisableMalwareExtensionsRemotely)) {
+    attributes = GetExtensionOmahaAttributes(extension_id);
+  }
+  ExtensionSystem::Get(browser_context_)
+      ->PerformActionBasedOnOmahaAttributes(extension_id, attributes);
+
   if (complete_event) {
     // The update check for |extension_id| has completed, thus it can be
     // removed from all in-progress update checks.
-    DCHECK(updating_extension_ids_.count(extension_id) > 0);
+    DCHECK_GT(updating_extension_ids_.count(extension_id), 0u);
     updating_extension_ids_.erase(extension_id);
 
     bool install_immediately = false;
@@ -191,12 +186,15 @@ void UpdateService::OnEvent(Events event, const std::string& extension_id) {
   }
 }
 
+bool UpdateService::IsBusy() const {
+  return !updating_extension_ids_.empty();
+}
+
 UpdateService::UpdateService(
     content::BrowserContext* browser_context,
     scoped_refptr<update_client::UpdateClient> update_client)
     : browser_context_(browser_context), update_client_(update_client) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(update_client_);
   update_data_provider_ =
       base::MakeRefCounted<UpdateDataProvider>(browser_context_);
   AddUpdateClientObserver(this);
@@ -267,19 +265,12 @@ void UpdateService::StartUpdateCheck(
       batch_data.emplace(it->first, std::move(it->second));
     }
 
-    UMA_HISTOGRAM_COUNTS_100("Extensions.ExtensionUpdaterUpdateCalls",
-                             batch_size);
-    // This UMA histogram measures update check requests of the unified
-    // extension updater.
-    UMA_HISTOGRAM_COUNTS_100("Extensions.UnifiedExtensionUpdaterUpdateCalls",
-                             batch_size);
-
     update_client_->Update(
         batch_ids,
         base::BindOnce(&UpdateDataProvider::GetData, update_data_provider_,
                        update_params.install_immediately,
                        std::move(batch_data)),
-        update_params.priority == ExtensionUpdateCheckParams::FOREGROUND,
+        {}, update_params.priority == ExtensionUpdateCheckParams::FOREGROUND,
         base::BindOnce(&UpdateService::UpdateCheckComplete,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -324,43 +315,8 @@ void UpdateService::RemoveUpdateClientObserver(
     update_client_->RemoveObserver(observer);
 }
 
-void UpdateService::HandleComponentUpdateErrorEvent(
-    const std::string& extension_id) const {
-  update_client::ErrorCategory error_category =
-      update_client::ErrorCategory::kNone;
-  int error_code = 0;
-  update_client::CrxUpdateItem update_item;
-  if (update_client_->GetCrxUpdateState(extension_id, &update_item)) {
-    error_category = update_item.error_category;
-    error_code = update_item.error_code;
-  }
-
-  switch (error_category) {
-    case update_client::ErrorCategory::kUpdateCheck:
-      ReportUpdateCheckResult(ExtensionUpdaterUpdateResult::UPDATE_CHECK_ERROR,
-                              error_code);
-      break;
-    case update_client::ErrorCategory::kDownload:
-      ReportUpdateCheckResult(
-          ExtensionUpdaterUpdateResult::UPDATE_DOWNLOAD_ERROR, error_code);
-      break;
-    case update_client::ErrorCategory::kUnpack:
-    case update_client::ErrorCategory::kInstall:
-      ReportUpdateCheckResult(
-          ExtensionUpdaterUpdateResult::UPDATE_INSTALL_ERROR, 0);
-      break;
-    case update_client::ErrorCategory::kNone:
-    case update_client::ErrorCategory::kService:
-      ReportUpdateCheckResult(
-          ExtensionUpdaterUpdateResult::UPDATE_SERVICE_ERROR, error_code);
-      break;
-  }
-}
-
 void UpdateService::HandleComponentUpdateFoundEvent(
     const std::string& extension_id) const {
-  UMA_HISTOGRAM_COUNTS_100("Extensions.ExtensionUpdaterUpdateFoundCount", 1);
-
   update_client::CrxUpdateItem update_item;
   if (!update_client_->GetCrxUpdateState(extension_id, &update_item)) {
     return;
@@ -375,4 +331,23 @@ void UpdateService::HandleComponentUpdateFoundEvent(
       content::Details<UpdateDetails>(&update_info));
 }
 
+base::Value UpdateService::GetExtensionOmahaAttributes(
+    const std::string& extension_id) {
+  DCHECK(base::FeatureList::IsEnabled(
+      extensions_features::kDisableMalwareExtensionsRemotely));
+
+  update_client::CrxUpdateItem update_item;
+  base::Value attributes(base::Value::Type::DICTIONARY);
+  if (!update_client_->GetCrxUpdateState(extension_id, &update_item))
+    return attributes;
+
+  for (const char* key : kOmahaAttributes) {
+    auto iter = update_item.custom_updatecheck_data.find(key);
+    // This is assuming that the values of the keys are "true", "false",
+    // or does not exist.
+    if (iter != update_item.custom_updatecheck_data.end())
+      attributes.SetKey(key, base::Value(iter->second == "true"));
+  }
+  return attributes;
+}
 }  // namespace extensions

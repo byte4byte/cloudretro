@@ -4,8 +4,8 @@
 
 'use strict';
 
-const swUrl = '/resources/empty-worker.js';
-const scope = '/resources/';
+const swUrl = 'resources/sw.js';
+const scope = 'resources/';
 
 async function expectTypeErrorWithMessage(promise, message) {
   try {
@@ -21,8 +21,8 @@ async function expectTypeErrorWithMessage(promise, message) {
 
 function createDescription({id = 'id', title = 'title', description = 'description',
                             category = 'homepage', iconUrl = '/resources/square.png',
-                            launchUrl = scope}) {
-  return {id, title, description, category, iconUrl, launchUrl};
+                            url = scope, includeIcons = true}) {
+  return {id, title, description, category, icons: includeIcons ? [{src: iconUrl}] : [], url};
 }
 
 // Creates a Promise test for |func| given the |description|. The |func| will be
@@ -33,4 +33,15 @@ function contentIndexTest(func, description) {
     await wait_for_state(t, registration.installing, 'activated');
     return func(t, registration.index);
   }, description);
+}
+
+async function waitForMessageFromServiceWorker() {
+  return await new Promise(resolve => {
+    const listener = event => {
+      navigator.serviceWorker.removeEventListener('message', listener);
+      resolve(event.data);
+    };
+
+    navigator.serviceWorker.addEventListener('message', listener);
+  });
 }

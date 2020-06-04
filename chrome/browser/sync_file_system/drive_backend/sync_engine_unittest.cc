@@ -13,6 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
 #include "chrome/browser/sync_file_system/drive_backend/fake_sync_worker.h"
@@ -22,7 +23,7 @@
 #include "components/drive/drive_uploader.h"
 #include "components/drive/service/fake_drive_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -45,7 +46,7 @@ class SyncEngineTest : public testing::Test,
 
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
         base::ThreadTaskRunnerHandle::Get();
-    worker_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+    worker_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
         {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
     sync_engine_.reset(new drive_backend::SyncEngine(
@@ -55,6 +56,7 @@ class SyncEngineTest : public testing::Test,
         nullptr,    // task_logger
         nullptr,    // notification_manager
         nullptr,    // extension_service
+        nullptr,    // extension_registry
         nullptr,    // identity_manager
         nullptr,    // url_loader_factory
         nullptr,    // drive_service_factory
@@ -121,7 +123,7 @@ class SyncEngineTest : public testing::Test,
   }
 
  private:
-  content::TestBrowserThreadBundle browser_threads_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir profile_dir_;
   std::unique_ptr<drive_backend::SyncEngine> sync_engine_;
 

@@ -27,7 +27,8 @@ const syncer::SyncUserSettings* FakeSyncService::GetUserSettings() const {
   return nullptr;
 }
 
-int FakeSyncService::GetDisableReasons() const {
+syncer::SyncService::DisableReasonSet FakeSyncService::GetDisableReasons()
+    const {
   return DISABLE_REASON_NOT_SIGNED_IN;
 }
 
@@ -50,6 +51,10 @@ bool FakeSyncService::IsLocalSyncEnabled() const {
 void FakeSyncService::TriggerRefresh(const ModelTypeSet& types) {}
 
 ModelTypeSet FakeSyncService::GetActiveDataTypes() const {
+  return ModelTypeSet();
+}
+
+ModelTypeSet FakeSyncService::GetBackedOffDataTypes() const {
   return ModelTypeSet();
 }
 
@@ -98,7 +103,7 @@ UserShare* FakeSyncService::GetUserShare() const {
   return user_share_.get();
 }
 
-void FakeSyncService::ReadyForStartChanged(ModelType type) {}
+void FakeSyncService::DataTypePreconditionChanged(ModelType type) {}
 
 syncer::SyncTokenStatus FakeSyncService::GetSyncTokenStatusForDebugging()
     const {
@@ -152,9 +157,20 @@ base::WeakPtr<JsController> FakeSyncService::GetJsController() {
 }
 
 void FakeSyncService::GetAllNodesForDebugging(
-    const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {}
+    base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback) {}
 
 void FakeSyncService::SetInvalidationsForSessionsEnabled(bool enabled) {}
+
+void FakeSyncService::AddTrustedVaultDecryptionKeysFromWeb(
+    const std::string& gaia_id,
+    const std::vector<std::vector<uint8_t>>& keys,
+    int last_key_version) {}
+
+UserDemographicsResult FakeSyncService::GetUserNoisedBirthYearAndGender(
+    base::Time now) {
+  return UserDemographicsResult::ForStatus(
+      UserDemographicsStatus::kIneligibleDemographicsData);
+}
 
 void FakeSyncService::Shutdown() {}
 

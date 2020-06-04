@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser.tasks;
 
-import static org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil.TAB_SWITCHER_ON_RETURN_MS;
+import static org.junit.Assert.assertEquals;
 
-import android.app.Activity;
-import android.content.Context;
-import android.os.SystemClock;
+import static org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil.TAB_SWITCHER_ON_RETURN_MS_PARAM;
+
+import android.content.Intent;
 import android.support.test.InstrumentationRegistry;
+import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 
 import org.junit.Assert;
@@ -18,37 +19,55 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ActivityState;
-import org.chromium.base.ApplicationStatus;
-import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-
-import java.util.concurrent.TimeoutException;
+import org.chromium.chrome.test.util.ChromeRenderTestRule;
+import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Tests the functionality of return to chrome features that open overview mode if the timeout
  * has passed.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
+// clang-format off
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        "enable-features=" + ChromeFeatureList.TAB_SWITCHER_ON_RETURN + "<Study",
+        "force-fieldtrials=Study/Group"})
+@Features.EnableFeatures({ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID})
 public class ReturnToChromeTest {
+    // clang-format on
+    private static final String BASE_PARAMS =
+            "force-fieldtrial-params=Study.Group:" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/0";
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
-    private ChromeTabbedActivity mActivity;
+    private String mUrl;
+
+    @Rule
+    public ChromeRenderTestRule mRenderTestRule = new ChromeRenderTestRule();
 
     @Before
-    public void setUp() throws Exception {
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+    public void setUp() {
+        EmbeddedTestServer testServer =
+                EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
+        mUrl = testServer.getURL("/chrome/test/data/android/about.html");
 
-        mActivityTestRule.startMainActivityFromLauncher();
-        mActivity = mActivityTestRule.getActivity();
+        mActivityTestRule.startMainActivityOnBlankPage();
     }
 
     /**
@@ -58,62 +77,220 @@ public class ReturnToChromeTest {
     @Test
     @SmallTest
     @Feature({"ReturnToChrome"})
-    @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-            "enable-features=" + ChromeFeatureList.TAB_SWITCHER_ON_RETURN + "<FakeStudyName",
-            "force-fieldtrials=FakeStudyName/Enabled",
-            "force-fieldtrial-params=FakeStudyName.Enabled:" + TAB_SWITCHER_ON_RETURN_MS
-                    + "/100000"})
-    public void
-    testObserverModeNotTriggeredWithoutDelay() throws Exception {
-        finishActivityCompletely();
+    @CommandLineFlags.Add({BASE_PARAMS + "/" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/100000"})
+    public void testTabSwitcherModeNotTriggeredWithinThreshold() throws Exception {
+        TabUiTestHelper.prepareTabsWithThumbnail(mActivityTestRule, 2, 0, mUrl);
+        TabUiTestHelper.finishActivity(mActivityTestRule.getActivity());
 
         mActivityTestRule.startMainActivityFromLauncher();
-        mActivity = mActivityTestRule.getActivity();
 
-        Assert.assertFalse(mActivity.getLayoutManager().overviewVisible());
+        Assert.assertFalse(mActivityTestRule.getActivity().getLayoutManager().overviewVisible());
+        assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT));
+    }
+
+    /**
+     * Test that overview mode is triggered if the delay is shorter than the interval between
+     * stop and start. Also test the first meaningful paint UMA.
+     */
+    @Test
+    @SmallTest
+    @Feature({"ReturnToChrome"})
+    @CommandLineFlags.Add({BASE_PARAMS + "/" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/0"})
+    @FlakyTest(message = "crbug.com/1040895")
+    public void testTabSwitcherModeTriggeredBeyondThreshold() throws Exception {
+        TabUiTestHelper.prepareTabsWithThumbnail(mActivityTestRule, 2, 0, mUrl);
+        TabUiTestHelper.finishActivity(mActivityTestRule.getActivity());
+
+        assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT));
+
+        mActivityTestRule.startMainActivityFromLauncher();
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            Assert.assertTrue(mActivityTestRule.getActivity().getLayoutManager().overviewVisible());
+        }
+
+        CriteriaHelper.pollUiThread(Criteria.equals(true,
+                mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getTabModelFilterProvider()
+                        .getCurrentTabModelFilter()::isTabModelRestored));
+
+        assertEquals(2, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            CriteriaHelper.pollUiThread(Criteria.equals(1,
+                    ()
+                            -> RecordHistogram.getHistogramTotalCountForTesting(
+                                    ReturnToChromeExperimentsUtil
+                                            .UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(true)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(true)
+                            + ReturnToChromeExperimentsUtil.numThumbnailsBucketName(
+                                    mActivityTestRule.getActivity()
+                                            .getTabModelSelector()
+                                            .getTotalTabCount())));
+        }
+    }
+
+    /**
+     * Test that overview mode is triggered if the delay is shorter than the interval between
+     * stop and start. Also test the first meaningful paint UMA.
+     */
+    @Test
+    @MediumTest
+    @Feature({"ReturnToChrome"})
+    @CommandLineFlags.Add({BASE_PARAMS + "/" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/0"})
+    @FlakyTest(message = "crbug.com/1040896")
+    public void testTabSwitcherModeTriggeredBeyondThreshold_WarmStart() throws Exception {
+        testTabSwitcherModeTriggeredBeyondThreshold();
+
+        // Redo to trigger warm startup UMA.
+        TabUiTestHelper.finishActivity(mActivityTestRule.getActivity());
+        mActivityTestRule.startMainActivityFromLauncher();
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            Assert.assertTrue(mActivityTestRule.getActivity().getLayoutManager().overviewVisible());
+        }
+
+        CriteriaHelper.pollUiThread(Criteria.equals(true,
+                mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getTabModelFilterProvider()
+                        .getCurrentTabModelFilter()::isTabModelRestored));
+
+        assertEquals(2, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            CriteriaHelper.pollUiThread(Criteria.equals(2,
+                    ()
+                            -> RecordHistogram.getHistogramTotalCountForTesting(
+                                    ReturnToChromeExperimentsUtil
+                                            .UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(false)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(false)
+                            + ReturnToChromeExperimentsUtil.numThumbnailsBucketName(
+                                    mActivityTestRule.getActivity()
+                                            .getTabModelSelector()
+                                            .getTotalTabCount())));
+        }
+    }
+
+    /**
+     * Similar to {@link ChromeTabbedActivityTestRule#startMainActivityFromLauncher} but skip
+     * verification and tasks regarding current tab.
+     */
+    private void startMainActivityFromLauncherWithoutCurrentTab() {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        mActivityTestRule.prepareUrlIntent(intent, null);
+        mActivityTestRule.startActivityCompletely(intent);
+        mActivityTestRule.waitForActivityNativeInitializationComplete();
+    }
+
+    /**
+     * Test that overview mode is triggered if the delay is shorter than the interval between
+     * stop and start. Also test the first meaningful paint UMA for the no-tab condition.
+     */
+    @Test
+    @SmallTest
+    @Feature({"ReturnToChrome"})
+    @CommandLineFlags.Add({BASE_PARAMS + "/" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/0"})
+    @DisabledTest(message = "http://crbug.com/1027315")
+    public void testTabSwitcherModeTriggeredBeyondThreshold_NoTabs() throws Exception {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mActivityTestRule.getActivity().getTabModelSelector().closeAllTabs());
+        TabUiTestHelper.finishActivity(mActivityTestRule.getActivity());
+
+        assertEquals(0,
+                RecordHistogram.getHistogramTotalCountForTesting(
+                        ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT));
+
+        // Cannot use ChromeTabbedActivityTestRule.startMainActivityFromLauncher() because
+        // there's no tab.
+        startMainActivityFromLauncherWithoutCurrentTab();
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            Assert.assertTrue(mActivityTestRule.getActivity().getLayoutManager().overviewVisible());
+        }
+
+        CriteriaHelper.pollUiThread(Criteria.equals(true,
+                mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getTabModelFilterProvider()
+                        .getCurrentTabModelFilter()::isTabModelRestored));
+
+        assertEquals(0, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
+
+        if (!mActivityTestRule.getActivity().isTablet()) {
+            CriteriaHelper.pollUiThread(Criteria.equals(1,
+                    ()
+                            -> RecordHistogram.getHistogramTotalCountForTesting(
+                                    ReturnToChromeExperimentsUtil
+                                            .UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(true)));
+            assertEquals(1,
+                    RecordHistogram.getHistogramTotalCountForTesting(
+                            ReturnToChromeExperimentsUtil.UMA_TIME_TO_GTS_FIRST_MEANINGFUL_PAINT
+                            + ReturnToChromeExperimentsUtil.coldStartBucketName(true)
+                            + ReturnToChromeExperimentsUtil.numThumbnailsBucketName(
+                                    mActivityTestRule.getActivity()
+                                            .getTabModelSelector()
+                                            .getTotalTabCount())));
+        }
     }
 
     @Test
     @SmallTest
-    @Feature({"ReturnToChrome"})
-    @DisabledTest(message = "crbug.com/955436")
-    @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-            "enable-features=" + ChromeFeatureList.TAB_SWITCHER_ON_RETURN + "<FakeStudyName",
-            "force-fieldtrials=FakeStudyName/Enabled",
-            "force-fieldtrial-params=FakeStudyName.Enabled:" + TAB_SWITCHER_ON_RETURN_MS + "/1"})
-    public void
-    testObserverModeTriggeredWithDelay() throws Exception {
-        finishActivityCompletely();
+    @Feature({"ReturnToChrome", "RenderTest"})
+    // clang-format off
+    @CommandLineFlags.Add({BASE_PARAMS + "/" + TAB_SWITCHER_ON_RETURN_MS_PARAM + "/0"})
+    @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
+    @DisableIf.Build(hardware_is = "bullhead", message = "https://crbug.com/1025241")
+    public void testInitialScrollIndex() throws Exception {
+        // clang-format on
+        TabUiTestHelper.prepareTabsWithThumbnail(mActivityTestRule, 10, 0, mUrl);
 
-        // Sleep past the timeout.
-        SystemClock.sleep(30);
+        // Trigger thumbnail capturing for the last tab.
+        TabUiTestHelper.enterTabSwitcher(mActivityTestRule.getActivity());
+        TabUiTestHelper.verifyAllTabsHaveThumbnail(
+                mActivityTestRule.getActivity().getCurrentTabModel());
+
+        TabUiTestHelper.finishActivity(mActivityTestRule.getActivity());
 
         mActivityTestRule.startMainActivityFromLauncher();
-        mActivity = mActivityTestRule.getActivity();
 
-        Assert.assertTrue(mActivity.getLayoutManager().overviewVisible());
-    }
+        Assert.assertTrue(mActivityTestRule.getActivity().getLayoutManager().overviewVisible());
 
-    private void finishActivityCompletely() throws InterruptedException, TimeoutException {
-        final CallbackHelper activityCallback = new CallbackHelper();
-        ApplicationStatus.ActivityStateListener stateListener =
-                new ApplicationStatus.ActivityStateListener() {
-                    @Override
-                    public void onActivityStateChange(Activity activity, int newState) {
-                        if (newState == ActivityState.STOPPED) {
-                            activityCallback.notifyCalled();
-                            ApplicationStatus.unregisterActivityStateListener(this);
-                        }
-                    }
-                };
+        CriteriaHelper.pollUiThread(Criteria.equals(true,
+                mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getTabModelFilterProvider()
+                        .getCurrentTabModelFilter()::isTabModelRestored));
 
-        ApplicationStatus.registerStateListenerForAllActivities(stateListener);
-        try {
-            mActivity.finish();
-            activityCallback.waitForCallback("Activity did not stop as expected", 0);
-            mActivityTestRule.setActivity(null);
-        } finally {
-            ApplicationStatus.unregisterActivityStateListener(stateListener);
-        }
+        assertEquals(10, mActivityTestRule.getActivity().getTabModelSelector().getTotalTabCount());
+        assertEquals(9, mActivityTestRule.getActivity().getCurrentTabModel().index());
+        // Make sure the grid tab switcher is scrolled down to show the selected tab.
+        mRenderTestRule.render(mActivityTestRule.getActivity().findViewById(
+                                       org.chromium.chrome.tab_ui.R.id.tab_list_view),
+                "10_web_tabs-select_last");
     }
 }

@@ -10,11 +10,11 @@
 
 #include <assert.h>
 
-#include "chrome/chrome_elf/blacklist/blacklist.h"
 #include "chrome/chrome_elf/crash/crash_helper.h"
 #include "chrome/chrome_elf/hook_util/hook_util.h"
 #include "chrome/chrome_elf/pe_image_safe/pe_image_safe.h"
 #include "chrome/chrome_elf/sha1/sha1.h"
+#include "chrome/chrome_elf/third_party_dlls/hardcoded_blocklist.h"
 #include "chrome/chrome_elf/third_party_dlls/logs.h"
 #include "chrome/chrome_elf/third_party_dlls/main.h"
 #include "chrome/chrome_elf/third_party_dlls/packed_list_file.h"
@@ -326,12 +326,12 @@ NTSTATUS NewNtMapViewOfSectionImpl(
              IsModuleListed(section_basename_hash, fingerprint_hash)) {
     // 2) Third-party DLL blacklist, check for image name from the section.
     block = true;
-  } else if (!image_name.empty() && blacklist::DllMatch(image_name)) {
+  } else if (!image_name.empty() && DllMatch(image_name)) {
     // 3) Hard-coded blacklist with name from PE header (deprecated).
     block = true;
   } else if (!section_basename.empty() &&
              section_basename.compare(image_name) != 0 &&
-             blacklist::DllMatch(section_basename)) {
+             DllMatch(section_basename)) {
     // 4) Hard-coded blacklist with name from the section (deprecated).
     block = true;
   }
@@ -501,12 +501,10 @@ bool GetDataFromImageForTesting(PVOID mapped_image,
 
 }  // namespace third_party_dlls
 
-using namespace third_party_dlls;
-
 void DisableHook() {
-  g_hook_disabled.store(true, std::memory_order_relaxed);
+  third_party_dlls::g_hook_disabled.store(true, std::memory_order_relaxed);
 }
 
 int32_t GetApplyHookResult() {
-  return g_apply_hook_result.load(std::memory_order_relaxed);
+  return third_party_dlls::g_apply_hook_result.load(std::memory_order_relaxed);
 }

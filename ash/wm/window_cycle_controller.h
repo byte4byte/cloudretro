@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/macros.h"
 #include "base/time/time.h"
 
@@ -68,14 +69,16 @@ class ASH_EXPORT WindowCycleController {
 
   std::unique_ptr<WindowCycleList> window_cycle_list_;
 
+  // Tracks the ID of the active desk container before window cycling starts. It
+  // is used to determine whether a desk switch occurred when cycling ends.
+  int active_desk_container_id_before_cycle_ = kShellWindowId_Invalid;
+
   // Tracks what Window was active when starting to cycle and used to determine
   // if the active Window changed in when ending cycling.
   aura::Window* active_window_before_window_cycle_ = nullptr;
 
   // Non-null while actively cycling.
   std::unique_ptr<WindowCycleEventFilter> event_filter_;
-
-  base::Time cycle_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowCycleController);
 };

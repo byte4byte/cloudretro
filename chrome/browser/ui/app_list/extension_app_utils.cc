@@ -5,12 +5,14 @@
 #include "chrome/browser/ui/app_list/extension_app_utils.h"
 
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
+#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -21,7 +23,7 @@ namespace app_list {
 namespace {
 
 constexpr char const* kAppIdsHiddenInLauncher[] = {
-    extension_misc::kChromeCameraAppId};
+    chromeos::default_web_apps::kReleaseNotesAppId};
 
 }  // namespace
 
@@ -52,11 +54,8 @@ void AddMenuItemIconsForSystemApps(const std::string& app_id,
     const int index = start_index + i;
     if (menu_model->GetLabelAt(index) ==
         l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_NEW_WINDOW)) {
-      const views::MenuConfig& menu_config = views::MenuConfig::instance();
       menu_model->SetIcon(
-          index, gfx::Image(gfx::CreateVectorIcon(
-                     views::kNewWindowIcon, menu_config.touchable_icon_size,
-                     menu_config.touchable_icon_color)));
+          index, ui::ImageModel::FromVectorIcon(views::kNewWindowIcon));
     }
   }
 }

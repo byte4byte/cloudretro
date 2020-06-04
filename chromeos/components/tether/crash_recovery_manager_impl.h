@@ -26,18 +26,18 @@ class CrashRecoveryManagerImpl : public CrashRecoveryManager {
  public:
   class Factory {
    public:
-    static std::unique_ptr<CrashRecoveryManager> NewInstance(
+    static std::unique_ptr<CrashRecoveryManager> Create(
         NetworkStateHandler* network_state_handler,
         ActiveHost* active_host,
         HostScanCache* host_scan_cache);
 
-    static void SetInstanceForTesting(Factory* factory);
+    static void SetFactoryForTesting(Factory* factory);
 
    protected:
-    virtual std::unique_ptr<CrashRecoveryManager> BuildInstance(
+    virtual std::unique_ptr<CrashRecoveryManager> CreateInstance(
         NetworkStateHandler* network_state_handler,
         ActiveHost* active_host,
-        HostScanCache* host_scan_cache);
+        HostScanCache* host_scan_cache) = 0;
     virtual ~Factory();
 
    private:
@@ -71,7 +71,7 @@ class CrashRecoveryManagerImpl : public CrashRecoveryManager {
   ActiveHost* active_host_;
   HostScanCache* host_scan_cache_;
 
-  base::WeakPtrFactory<CrashRecoveryManagerImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<CrashRecoveryManagerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CrashRecoveryManagerImpl);
 };

@@ -24,13 +24,13 @@
 
 namespace metrics {
 class UkmBrowserTestBase;
-class UkmEGTestHelper;
 }
 
 namespace ukm {
 class Report;
 class UkmRecorderImplTest;
 class UkmSource;
+class UkmTestHelper;
 class UkmUtilsForTest;
 
 namespace debug {
@@ -67,6 +67,9 @@ class UkmRecorderImpl : public UkmRecorder {
 
   // Deletes stored recordings.
   void Purge();
+
+  // Deletes stored recordings related to Chrome extensions.
+  void PurgeExtensionRecordings();
 
   // Marks a source as no longer needed to be kept alive in memory. The source
   // with given id will be removed from in-memory recordings at the next
@@ -114,7 +117,9 @@ class UkmRecorderImpl : public UkmRecorder {
   // UkmRecorder:
   void AddEntry(mojom::UkmEntryPtr entry) override;
   void UpdateSourceURL(SourceId source_id, const GURL& url) override;
-  void UpdateAppURL(SourceId source_id, const GURL& url) override;
+  void UpdateAppURL(SourceId source_id,
+                    const GURL& url,
+                    const AppType app_type) override;
   void RecordNavigation(
       SourceId source_id,
       const UkmSource::NavigationData& navigation_data) override;
@@ -126,11 +131,14 @@ class UkmRecorderImpl : public UkmRecorder {
 
  private:
   friend ::metrics::UkmBrowserTestBase;
-  friend ::metrics::UkmEGTestHelper;
   friend ::ukm::debug::UkmDebugDataExtractor;
   friend ::ukm::UkmRecorderImplTest;
+  friend ::ukm::UkmTestHelper;
   friend ::ukm::UkmUtilsForTest;
   FRIEND_TEST_ALL_PREFIXES(UkmRecorderImplTest, IsSampledIn);
+  FRIEND_TEST_ALL_PREFIXES(UkmRecorderImplTest, PurgeExtensionRecordings);
+  FRIEND_TEST_ALL_PREFIXES(UkmRecorderImplTest, WebApkSourceUrl);
+  FRIEND_TEST_ALL_PREFIXES(UkmRecorderImplTest, PaymentAppScopeUrl);
 
   struct MetricAggregate {
     uint64_t total_count = 0;
@@ -189,7 +197,7 @@ class UkmRecorderImpl : public UkmRecorder {
   std::set<uint64_t> whitelisted_entry_hashes_;
 
   // Sampling configurations, loaded from a field-trial.
-  int default_sampling_rate_ = 0;
+  int default_sampling_rate_ = -1;  // -1 == not yet loaded
   base::flat_map<uint64_t, int> event_sampling_rates_;
 
   // Contains data from various recordings which periodically get serialized

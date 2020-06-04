@@ -9,7 +9,6 @@
 #include "cc/layers/ui_resource_layer.h"
 #include "cc/resources/scoped_ui_resource.h"
 #include "chrome/browser/android/compositor/resources/toolbar_resource.h"
-#include "content/public/browser/android/compositor.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/android/resources/nine_patch_resource.h"
 #include "ui/android/resources/resource_manager.h"
@@ -33,7 +32,7 @@ void ToolbarLayer::PushResource(int toolbar_resource_id,
                                 int url_bar_background_resource_id,
                                 float url_bar_alpha,
                                 float window_height,
-                                float y_offset,
+                                float content_offset,
                                 bool show_debug,
                                 bool clip_shadow) {
   ToolbarResource* resource =
@@ -111,7 +110,9 @@ void ToolbarLayer::PushResource(int toolbar_resource_id,
   else if (!show_debug && debug_layer_->parent())
     debug_layer_->RemoveFromParent();
 
-  layer_->SetPosition(gfx::PointF(0, y_offset));
+  // Position the toolbar at the bottom of the space available for top controls.
+  layer_->SetPosition(
+      gfx::PointF(0, content_offset - layer_->bounds().height()));
 }
 
 int ToolbarLayer::GetIndexOfLayer(scoped_refptr<cc::Layer> layer) {

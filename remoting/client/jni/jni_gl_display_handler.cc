@@ -43,7 +43,7 @@ class JniGlDisplayHandler::Core : public protocol::CursorShapeStub,
   std::unique_ptr<protocol::FrameConsumer> GrabFrameConsumer();
 
   void OnFrameReceived(std::unique_ptr<webrtc::DesktopFrame> frame,
-                       const base::Closure& done);
+                       base::OnceClosure done);
 
   void SurfaceCreated(base::android::ScopedJavaGlobalRef<jobject> surface);
   void SurfaceChanged(int width, int height);
@@ -74,13 +74,13 @@ class JniGlDisplayHandler::Core : public protocol::CursorShapeStub,
 
   // Used on display thread.
   base::WeakPtr<Core> weak_ptr_;
-  base::WeakPtrFactory<Core> weak_factory_;
+  base::WeakPtrFactory<Core> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 JniGlDisplayHandler::Core::Core(base::WeakPtr<JniGlDisplayHandler> shell)
-    : shell_(shell), weak_factory_(this) {
+    : shell_(shell) {
   runtime_ = ChromotingClientRuntime::GetInstance();
   DCHECK(!runtime_->display_task_runner()->BelongsToCurrentThread());
 
@@ -91,10 +91,11 @@ JniGlDisplayHandler::Core::Core(base::WeakPtr<JniGlDisplayHandler> shell)
                                 base::Unretained(this)));
 
   // Do not bind GlRenderer::OnFrameReceived. |renderer_| is not ready yet.
-  owned_frame_consumer_.reset(new DualBufferFrameConsumer(
-      base::Bind(&JniGlDisplayHandler::Core::OnFrameReceived, weak_ptr_),
+  owned_frame_consumer_ = std::make_unique<DualBufferFrameConsumer>(
+      base::BindRepeating(&JniGlDisplayHandler::Core::OnFrameReceived,
+                          weak_ptr_),
       runtime_->display_task_runner(),
-      protocol::FrameConsumer::PixelFormat::FORMAT_RGBA));
+      protocol::FrameConsumer::PixelFormat::FORMAT_RGBA);
   frame_consumer_ = owned_frame_consumer_->GetWeakPtr();
 }
 
@@ -133,9 +134,9 @@ JniGlDisplayHandler::Core::GrabFrameConsumer() {
 
 void JniGlDisplayHandler::Core::OnFrameReceived(
     std::unique_ptr<webrtc::DesktopFrame> frame,
-    const base::Closure& done) {
+    base::OnceClosure done) {
   DCHECK(runtime_->display_task_runner()->BelongsToCurrentThread());
-  renderer_->OnFrameReceived(std::move(frame), done);
+  renderer_->OnFrameReceived(std::move(frame), std::move(done));
 }
 
 void JniGlDisplayHandler::Core::SurfaceCreated(
@@ -217,8 +218,7 @@ void JniGlDisplayHandler::Core::Initialize() {
 JniGlDisplayHandler::JniGlDisplayHandler(
     const base::android::JavaRef<jobject>& java_client)
     : runtime_(ChromotingClientRuntime::GetInstance()),
-      ui_task_poster_(runtime_->display_task_runner()),
-      weak_factory_(this) {
+      ui_task_poster_(runtime_->display_task_runner()) {
   core_.reset(new Core(weak_factory_.GetWeakPtr()));
   JNIEnv* env = base::android::AttachCurrentThread();
   java_display_.Reset(Java_GlDisplay_createJavaDisplayObject(
@@ -283,7 +283,7 @@ void JniGlDisplayHandler::OnPixelTransformationChanged(
   std::array<float, 9> matrix;
   env->GetFloatArrayRegion(jmatrix.obj(), 0, 9, matrix.data());
   ui_task_poster_.AddTask(
-      base::Bind(&Core::SetTransformation, core_->GetWeakPtr(), matrix));
+      base::BindOnce(&Core::SetTransformation, core_->GetWeakPtr(), matrix));
 }
 
 void JniGlDisplayHandler::OnCursorPixelPositionChanged(
@@ -293,7 +293,7 @@ void JniGlDisplayHandler::OnCursorPixelPositionChanged(
     float y) {
   DCHECK(runtime_->ui_task_runner()->BelongsToCurrentThread());
   ui_task_poster_.AddTask(
-      base::Bind(&Core::MoveCursor, core_->GetWeakPtr(), x, y));
+      base::BindOnce(&Core::MoveCursor, core_->GetWeakPtr(), x, y));
 }
 
 void JniGlDisplayHandler::OnCursorVisibilityChanged(
@@ -302,7 +302,7 @@ void JniGlDisplayHandler::OnCursorVisibilityChanged(
     bool visible) {
   DCHECK(runtime_->ui_task_runner()->BelongsToCurrentThread());
   ui_task_poster_.AddTask(
-      base::Bind(&Core::SetCursorVisibility, core_->GetWeakPtr(), visible));
+      base::BindOnce(&Core::SetCursorVisibility, core_->GetWeakPtr(), visible));
 }
 
 void JniGlDisplayHandler::OnCursorInputFeedback(
@@ -312,8 +312,8 @@ void JniGlDisplayHandler::OnCursorInputFeedback(
     float y,
     float diameter) {
   DCHECK(runtime_->ui_task_runner()->BelongsToCurrentThread());
-  ui_task_poster_.AddTask(base::Bind(&Core::StartInputFeedback,
-                                     core_->GetWeakPtr(), x, y, diameter));
+  ui_task_poster_.AddTask(base::BindOnce(&Core::StartInputFeedback,
+                                         core_->GetWeakPtr(), x, y, diameter));
 }
 
 void JniGlDisplayHandler::OnRenderDone() {

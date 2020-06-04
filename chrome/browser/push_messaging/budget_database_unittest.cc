@@ -19,7 +19,7 @@
 #include "components/leveldb_proto/public/proto_database.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -51,10 +51,11 @@ class BudgetDatabaseTest : public ::testing::Test {
   // Spend budget for the origin.
   bool SpendBudget(double amount) {
     base::RunLoop run_loop;
-    db_.SpendBudget(origin(),
-                    base::Bind(&BudgetDatabaseTest::WriteBudgetComplete,
-                               base::Unretained(this), run_loop.QuitClosure()),
-                    amount);
+    db_.SpendBudget(
+        origin(),
+        base::BindOnce(&BudgetDatabaseTest::WriteBudgetComplete,
+                       base::Unretained(this), run_loop.QuitClosure()),
+        amount);
     run_loop.Run();
     return success_;
   }
@@ -98,7 +99,7 @@ class BudgetDatabaseTest : public ::testing::Test {
   std::vector<BudgetState> prediction_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
   BudgetDatabase db_;
   base::HistogramTester histogram_tester_;

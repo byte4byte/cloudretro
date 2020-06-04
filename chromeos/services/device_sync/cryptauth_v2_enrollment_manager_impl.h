@@ -64,10 +64,7 @@ class CryptAuthV2EnrollmentManagerImpl
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<CryptAuthEnrollmentManager> BuildInstance(
+    static std::unique_ptr<CryptAuthEnrollmentManager> Create(
         ClientAppMetadataProvider* client_app_metadata_provider,
         CryptAuthKeyRegistry* key_registry,
         CryptAuthClientFactory* client_factory,
@@ -77,6 +74,19 @@ class CryptAuthV2EnrollmentManagerImpl
         base::Clock* clock = base::DefaultClock::GetInstance(),
         std::unique_ptr<base::OneShotTimer> timer =
             std::make_unique<base::OneShotTimer>());
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<CryptAuthEnrollmentManager> CreateInstance(
+        ClientAppMetadataProvider* client_app_metadata_provider,
+        CryptAuthKeyRegistry* key_registry,
+        CryptAuthClientFactory* client_factory,
+        CryptAuthGCMManager* gcm_manager,
+        CryptAuthScheduler* scheduler,
+        PrefService* pref_service,
+        base::Clock* clock,
+        std::unique_ptr<base::OneShotTimer> timer) = 0;
 
    private:
     static Factory* test_factory_;
@@ -108,10 +118,6 @@ class CryptAuthV2EnrollmentManagerImpl
   };
 
   friend std::ostream& operator<<(std::ostream& stream, const State& state);
-
-  static base::Optional<base::TimeDelta> GetTimeoutForState(State state);
-  static base::Optional<CryptAuthEnrollmentResult::ResultCode>
-  ResultCodeErrorFromState(State state);
 
   // CryptAuthEnrollmentManager:
   void Start() override;
@@ -150,6 +156,7 @@ class CryptAuthV2EnrollmentManagerImpl
   void OnEnrollmentFinished(const CryptAuthEnrollmentResult& enrollment_result);
 
   void SetState(State state);
+  void OnTimeout();
 
   std::string GetV1UserPublicKey() const;
   std::string GetV1UserPrivateKey() const;
@@ -167,7 +174,13 @@ class CryptAuthV2EnrollmentManagerImpl
   base::Clock* clock_;
   std::unique_ptr<base::OneShotTimer> timer_;
 
+  bool initial_v1_and_v2_user_key_pairs_disagree_ = false;
+
   State state_ = State::kIdle;
+
+  // The time of the last state change. Used for execution time metrics.
+  base::TimeTicks last_state_change_timestamp_;
+
   base::Optional<cryptauthv2::ClientMetadata> current_client_metadata_;
   base::Optional<cryptauthv2::PolicyReference>
       client_directive_policy_reference_;
@@ -178,12 +191,12 @@ class CryptAuthV2EnrollmentManagerImpl
   // when the current enrollment attempt finishes in order to cancel outstanding
   // callbacks.
   base::WeakPtrFactory<CryptAuthV2EnrollmentManagerImpl>
-      callback_weak_ptr_factory_;
+      callback_weak_ptr_factory_{this};
 
   // For sending a weak pointer to the scheduler, whose lifetime exceeds that of
   // CryptAuthV2EnrollmentManagerImpl.
   base::WeakPtrFactory<CryptAuthV2EnrollmentManagerImpl>
-      scheduler_weak_ptr_factory_;
+      scheduler_weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CryptAuthV2EnrollmentManagerImpl);
 };

@@ -4,23 +4,26 @@
 
 #include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_manager.h"
 
+#include <memory>
+
 #include "base/barrier_closure.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/settings/scoped_testing_cros_settings.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/chromeos/wilco_dtc_supportd/testing_wilco_dtc_supportd_bridge_wrapper.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/testing_wilco_dtc_supportd_network_context.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_bridge.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_client.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_network_context.h"
 #include "chrome/services/wilco_dtc_supportd/public/mojom/wilco_dtc_supportd.mojom.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/upstart/fake_upstart_client.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/session_manager/session_manager_types.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_names.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
-#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -77,8 +80,7 @@ class FakeWilcoDtcSupportdManagerDelegate final
     testing_wilco_dtc_supportd_bridge_wrapper_ =
         TestingWilcoDtcSupportdBridgeWrapper::Create(
             mojo_wilco_dtc_supportd_service_,
-            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-                &test_url_loader_factory_),
+            std::make_unique<TestingWilcoDtcSupportdNetworkContext>(),
             &wilco_dtc_supportd_bridge);
     DCHECK(wilco_dtc_supportd_bridge);
     testing_wilco_dtc_supportd_bridge_wrapper_->EstablishFakeMojoConnection();
@@ -86,7 +88,6 @@ class FakeWilcoDtcSupportdManagerDelegate final
   }
 
  private:
-  network::TestURLLoaderFactory test_url_loader_factory_;
   std::unique_ptr<TestingWilcoDtcSupportdBridgeWrapper>
       testing_wilco_dtc_supportd_bridge_wrapper_;
   MockMojoWilcoDtcSupportdService* mojo_wilco_dtc_supportd_service_;
@@ -96,11 +97,13 @@ class FakeWilcoDtcSupportdManagerDelegate final
 class WilcoDtcSupportdManagerTest : public testing::Test {
  protected:
   WilcoDtcSupportdManagerTest() {
-    DBusThreadManager::Initialize();
+    WilcoDtcSupportdClient::InitializeFake();
     upstart_client_ = std::make_unique<TestUpstartClient>();
   }
 
-  ~WilcoDtcSupportdManagerTest() override { DBusThreadManager::Shutdown(); }
+  ~WilcoDtcSupportdManagerTest() override {
+    WilcoDtcSupportdClient::Shutdown();
+  }
 
   std::unique_ptr<WilcoDtcSupportdManager::Delegate> CreateDelegate() {
     return std::make_unique<FakeWilcoDtcSupportdManagerDelegate>(
@@ -129,7 +132,7 @@ class WilcoDtcSupportdManagerTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ScopedTestingCrosSettings scoped_testing_cros_settings_;
   std::unique_ptr<TestUpstartClient> upstart_client_;
   FakeChromeUserManager* fake_user_manager_{new FakeChromeUserManager()};

@@ -4,8 +4,6 @@
 
 #include "net/test/embedded_test_server/default_handlers.h"
 
-#include <stdlib.h>
-
 #include <ctime>
 #include <map>
 #include <memory>
@@ -19,7 +17,6 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/format_macros.h"
 #include "base/hash/md5.h"
 #include "base/macros.h"
 #include "base/path_service.h"
@@ -102,6 +99,7 @@ std::unique_ptr<HttpResponse> HandleEchoHeader(const std::string& url,
   http_response->AddCustomHeader("Vary", vary);
   http_response->set_content(content);
   http_response->set_content_type("text/plain");
+  http_response->AddCustomHeader("Access-Control-Allow-Origin", "*");
   http_response->AddCustomHeader("Cache-Control", cache_control);
   return http_response;
 }
@@ -163,7 +161,7 @@ std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
 
   body +=
       "</pre>"
-      "<h1>Request Headers:</h1><pre>" +
+      "<h1>Request Headers:</h1><pre id='request-headers'>" +
       request.all_headers + "</pre>" +
       "<h1>Response nonce:</h1><pre id='response-nonce'>" +
       base::UnguessableToken::Create().ToString() + "</pre></body></html>";
@@ -206,24 +204,19 @@ std::unique_ptr<HttpResponse> HandleSetCookie(const HttpRequest& request) {
   return http_response;
 }
 
-// /set-many-cookies?N
-// Sets N cookies in the response.
-std::unique_ptr<HttpResponse> HandleSetManyCookies(const HttpRequest& request) {
-  std::string content;
-
-  GURL request_url = request.GetURL();
-  size_t num = 0;
-  if (request_url.has_query())
-    num = std::atoi(request_url.query().c_str());
-
+// /set-invalid-cookie
+// Sets invalid response cookies "\x01" (chosen via fuzzer to not be a parsable
+// cookie).
+std::unique_ptr<HttpResponse> HandleSetInvalidCookie(
+    const HttpRequest& request) {
   auto http_response = std::make_unique<BasicHttpResponse>();
   http_response->set_content_type("text/html");
-  for (size_t i = 0; i < num; ++i) {
-    http_response->AddCustomHeader("Set-Cookie", "a=");
-  }
+  std::string content;
+  GURL request_url = request.GetURL();
 
-  http_response->set_content(
-      base::StringPrintf("%" PRIuS " cookies were sent", num));
+  http_response->AddCustomHeader("Set-Cookie", "\x01");
+
+  http_response->set_content("TEST");
   return http_response;
 }
 
@@ -299,6 +292,25 @@ std::unique_ptr<HttpResponse> HandleSetHeader(const HttpRequest& request) {
   return http_response;
 }
 
+// /iframe?URL
+// Returns a page that iframes the specified URL.
+std::unique_ptr<HttpResponse> HandleIframe(const HttpRequest& request) {
+  GURL request_url = request.GetURL();
+
+  auto http_response = std::make_unique<BasicHttpResponse>();
+  http_response->set_content_type("text/html");
+
+  GURL iframe_url("about:blank");
+  if (request_url.has_query()) {
+    iframe_url = GURL(UnescapeBinaryURLComponent(request_url.query()));
+  }
+
+  http_response->set_content(
+      base::StringPrintf("<html><body><iframe src=\"%s\"></body></html>",
+                         iframe_url.spec().c_str()));
+  return http_response;
+}
+
 // /nocontent
 // Returns a NO_CONTENT response.
 std::unique_ptr<HttpResponse> HandleNoContent(const HttpRequest& request) {
@@ -365,6 +377,9 @@ std::unique_ptr<HttpResponse> HandleAuthBasic(const HttpRequest& request) {
                                    "Basic realm=\"" + realm + "\"");
     if (query.find("set-cookie-if-challenged") != query.end())
       http_response->AddCustomHeader("Set-Cookie", "got_challenged=true");
+    if (query.find("set-secure-cookie-if-challenged") != query.end())
+      http_response->AddCustomHeader("Set-Cookie",
+                                     "got_challenged=true;Secure");
     http_response->set_content(base::StringPrintf(
         "<html><head><title>Denied: %s</title></head>"
         "<body>auth=%s<p>b64str=%s<p>username: %s<p>userpass: %s<p>"
@@ -513,9 +528,19 @@ std::unique_ptr<HttpResponse> HandleServerRedirect(HttpStatusCode redirect_code,
   std::string dest = UnescapeBinaryURLComponent(request_url.query_piece());
   RequestQuery query = ParseQuery(request_url);
 
+  if (request.method == METHOD_OPTIONS) {
+    auto http_response = std::make_unique<BasicHttpResponse>();
+    http_response->set_code(HTTP_OK);
+    http_response->AddCustomHeader("Access-Control-Allow-Origin", "*");
+    http_response->AddCustomHeader("Access-Control-Allow-Methods", "*");
+    http_response->AddCustomHeader("Access-Control-Allow-Headers", "*");
+    return http_response;
+  }
+
   auto http_response = std::make_unique<BasicHttpResponse>();
   http_response->set_code(redirect_code);
   http_response->AddCustomHeader("Location", dest);
+  http_response->AddCustomHeader("Access-Control-Allow-Origin", "*");
   http_response->set_content_type("text/html");
   http_response->set_content(base::StringPrintf(
       "<html><head></head><body>Redirecting to %s</body></html>",
@@ -535,6 +560,27 @@ std::unique_ptr<HttpResponse> HandleServerRedirectWithCookie(
   http_response->set_code(redirect_code);
   http_response->AddCustomHeader("Location", dest);
   http_response->AddCustomHeader("Set-Cookie", "server-redirect=true");
+  http_response->set_content_type("text/html");
+  http_response->set_content(base::StringPrintf(
+      "<html><head></head><body>Redirecting to %s</body></html>",
+      dest.c_str()));
+  return http_response;
+}
+
+// /server-redirect-with-secure-cookie?URL
+// Returns a server redirect to URL, and sets the cookie
+// server-redirect=true;Secure.
+std::unique_ptr<HttpResponse> HandleServerRedirectWithSecureCookie(
+    HttpStatusCode redirect_code,
+    const HttpRequest& request) {
+  GURL request_url = request.GetURL();
+  std::string dest = UnescapeBinaryURLComponent(request_url.query_piece());
+  RequestQuery query = ParseQuery(request_url);
+
+  auto http_response = std::make_unique<BasicHttpResponse>();
+  http_response->set_code(redirect_code);
+  http_response->AddCustomHeader("Location", dest);
+  http_response->AddCustomHeader("Set-Cookie", "server-redirect=true;Secure");
   http_response->set_content_type("text/html");
   http_response->set_content(base::StringPrintf(
       "<html><head></head><body>Redirecting to %s</body></html>",
@@ -619,7 +665,7 @@ class HungHttpResponse : public HttpResponse {
   HungHttpResponse() = default;
 
   void SendResponse(const SendBytesCallback& send,
-                    const SendCompleteCallback& done) override {}
+                    SendCompleteCallback done) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HungHttpResponse);
@@ -637,7 +683,7 @@ class HungAfterHeadersHttpResponse : public HttpResponse {
   HungAfterHeadersHttpResponse() = default;
 
   void SendResponse(const SendBytesCallback& send,
-                    const SendCompleteCallback& done) override {
+                    SendCompleteCallback done) override {
     send.Run("HTTP/1.1 OK\r\n\r\n", base::DoNothing());
   }
 
@@ -654,29 +700,27 @@ std::unique_ptr<HttpResponse> HandleHungAfterHeadersResponse(
 
 // /exabyte_response
 // A HttpResponse that is almost never ending (with an Exabyte content-length).
-class ExabyteResponse : public net::test_server::BasicHttpResponse {
+class ExabyteResponse : public BasicHttpResponse {
  public:
   ExabyteResponse() {}
 
-  void SendResponse(
-      const net::test_server::SendBytesCallback& send,
-      const net::test_server::SendCompleteCallback& done) override {
+  void SendResponse(const SendBytesCallback& send,
+                    SendCompleteCallback done) override {
     // Use 10^18 bytes (exabyte) as the content length so that the client will
     // be expecting data.
     send.Run("HTTP/1.1 200 OK\r\nContent-Length:1000000000000000000\r\n\r\n",
-             base::BindRepeating(&ExabyteResponse::SendExabyte, send));
+             base::BindOnce(&ExabyteResponse::SendExabyte, send));
   }
 
  private:
   // Keeps sending the word "echo" over and over again. It can go further to
   // limit the response to exactly an exabyte, but it shouldn't be necessary
   // for the purpose of testing.
-  static void SendExabyte(const net::test_server::SendBytesCallback& send) {
+  static void SendExabyte(const SendBytesCallback& send) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::BindRepeating(
-            send, "echo",
-            base::BindRepeating(&ExabyteResponse::SendExabyte, send)));
+        base::BindOnce(send, "echo",
+                       base::BindOnce(&ExabyteResponse::SendExabyte, send)));
   }
 
   DISALLOW_COPY_AND_ASSIGN(ExabyteResponse);
@@ -684,8 +728,8 @@ class ExabyteResponse : public net::test_server::BasicHttpResponse {
 
 // /exabyte_response
 // Almost never ending response.
-std::unique_ptr<net::test_server::HttpResponse> HandleExabyteResponse(
-    const net::test_server::HttpRequest& request) {
+std::unique_ptr<HttpResponse> HandleExabyteResponse(
+    const HttpRequest& request) {
   return std::make_unique<ExabyteResponse>();
 }
 
@@ -753,11 +797,12 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/set-cookie", &HandleSetCookie));
   server->RegisterDefaultHandler(
-      PREFIXED_HANDLER("/set-many-cookies", &HandleSetManyCookies));
+      PREFIXED_HANDLER("/set-invalid-cookie", &HandleSetInvalidCookie));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/expect-and-set-cookie", &HandleExpectAndSetCookie));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/set-header", &HandleSetHeader));
+  server->RegisterDefaultHandler(PREFIXED_HANDLER("/iframe", &HandleIframe));
   server->RegisterDefaultHandler(
       PREFIXED_HANDLER("/nocontent", &HandleNoContent));
   server->RegisterDefaultHandler(
@@ -783,6 +828,9 @@ void RegisterDefaultHandlers(EmbeddedTestServer* server) {
   server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
       "/server-redirect-with-cookie", &HandleServerRedirectWithCookie,
       HTTP_MOVED_PERMANENTLY));
+  server->RegisterDefaultHandler(SERVER_REDIRECT_HANDLER(
+      "/server-redirect-with-secure-cookie",
+      &HandleServerRedirectWithSecureCookie, HTTP_MOVED_PERMANENTLY));
 
   server->RegisterDefaultHandler(
       base::BindRepeating(&HandleCrossSiteRedirect, server));

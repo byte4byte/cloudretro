@@ -20,17 +20,13 @@ DeviceEventRouter::DeviceEventRouter()
     : resume_time_delta_(base::TimeDelta::FromSeconds(10)),
       startup_time_delta_(base::TimeDelta::FromSeconds(10)),
       is_starting_up_(false),
-      is_resuming_(false),
-      weak_factory_(this) {
-}
+      is_resuming_(false) {}
 
 DeviceEventRouter::DeviceEventRouter(base::TimeDelta overriding_time_delta)
     : resume_time_delta_(overriding_time_delta),
       startup_time_delta_(overriding_time_delta),
       is_starting_up_(false),
-      is_resuming_(false),
-      weak_factory_(this) {
-}
+      is_resuming_(false) {}
 
 DeviceEventRouter::~DeviceEventRouter() = default;
 
@@ -53,8 +49,8 @@ void DeviceEventRouter::OnDeviceAdded(const std::string& device_path) {
 
   SetDeviceState(device_path, DEVICE_STATE_USUAL);
   if (IsExternalStorageDisabled()) {
-    OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_DISABLED,
-                  device_path);
+    OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_DISABLED, device_path,
+                  "");
     return;
   }
 }
@@ -62,7 +58,8 @@ void DeviceEventRouter::OnDeviceAdded(const std::string& device_path) {
 void DeviceEventRouter::OnDeviceRemoved(const std::string& device_path) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   SetDeviceState(device_path, DEVICE_STATE_USUAL);
-  OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_REMOVED, device_path);
+  OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_REMOVED, device_path,
+                "");
 }
 
 void DeviceEventRouter::OnDiskAdded(const chromeos::disks::Disk& disk,
@@ -80,7 +77,7 @@ void DeviceEventRouter::OnDiskRemoved(const chromeos::disks::Disk& disk) {
   if (!disk.is_read_only() && disk.is_mounted() &&
       GetDeviceState(device_path) != DEVICE_HARD_UNPLUGGED_AND_REPORTED) {
     OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_HARD_UNPLUGGED,
-                  device_path);
+                  device_path, disk.device_label());
     SetDeviceState(device_path, DEVICE_HARD_UNPLUGGED_AND_REPORTED);
   }
 }
@@ -99,43 +96,47 @@ void DeviceEventRouter::OnVolumeUnmounted(chromeos::MountError error_code,
 }
 
 void DeviceEventRouter::OnFormatStarted(const std::string& device_path,
+                                        const std::string& device_label,
                                         bool success) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (success) {
     OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_FORMAT_START,
-                  device_path);
+                  device_path, device_label);
   } else {
     OnDeviceEvent(file_manager_private::DEVICE_EVENT_TYPE_FORMAT_FAIL,
-                  device_path);
+                  device_path, device_label);
   }
 }
 
 void DeviceEventRouter::OnFormatCompleted(const std::string& device_path,
+                                          const std::string& device_label,
                                           bool success) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   OnDeviceEvent(success ? file_manager_private::DEVICE_EVENT_TYPE_FORMAT_SUCCESS
                         : file_manager_private::DEVICE_EVENT_TYPE_FORMAT_FAIL,
-                device_path);
+                device_path, device_label);
 }
 
 void DeviceEventRouter::OnRenameStarted(const std::string& device_path,
+                                        const std::string& device_label,
                                         bool success) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   OnDeviceEvent(success ? file_manager_private::DEVICE_EVENT_TYPE_RENAME_START
                         : file_manager_private::DEVICE_EVENT_TYPE_RENAME_FAIL,
-                device_path);
+                device_path, device_label);
 }
 
 void DeviceEventRouter::OnRenameCompleted(const std::string& device_path,
+                                          const std::string& device_label,
                                           bool success) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   OnDeviceEvent(success ? file_manager_private::DEVICE_EVENT_TYPE_RENAME_SUCCESS
                         : file_manager_private::DEVICE_EVENT_TYPE_RENAME_FAIL,
-                device_path);
+                device_path, device_label);
 }
 
 void DeviceEventRouter::SuspendImminent(

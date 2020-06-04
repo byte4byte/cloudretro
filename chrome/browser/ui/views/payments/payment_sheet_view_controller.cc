@@ -32,7 +32,7 @@
 #include "components/payments/content/payment_request_spec.h"
 #include "components/payments/content/payment_request_state.h"
 #include "components/payments/core/currency_formatter.h"
-#include "components/payments/core/payment_instrument.h"
+#include "components/payments/core/payment_app.h"
 #include "components/payments/core/payment_prefs.h"
 #include "components/payments/core/strings_util.h"
 #include "components/prefs/pref_service.h"
@@ -333,7 +333,7 @@ class PaymentSheetRowBuilder {
     DCHECK(accessible_content_.empty());
     std::unique_ptr<PreviewEliderLabel> content_view =
         std::make_unique<PreviewEliderLabel>(preview_text, format_string, n,
-                                             STYLE_HINT);
+                                             views::style::STYLE_HINT);
     content_view->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     return CreateWithButton(std::move(content_view), button_string,
                             button_enabled);
@@ -369,6 +369,15 @@ class PaymentSheetRowBuilder {
   DISALLOW_COPY_AND_ASSIGN(PaymentSheetRowBuilder);
 };
 
+// The primary button should show "Continue" when the selected payment app is
+// non-autofill.
+base::string16 CalculatePrimaryButtonLabel(const PaymentRequestState* state) {
+  return state->selected_app() &&
+                 state->selected_app()->type() != PaymentApp::Type::AUTOFILL
+             ? l10n_util::GetStringUTF16(IDS_PAYMENTS_CONTINUE_BUTTON)
+             : l10n_util::GetStringUTF16(IDS_PAYMENTS_PAY_BUTTON);
+}
+
 }  // namespace
 
 PaymentSheetViewController::PaymentSheetViewController(
@@ -398,7 +407,7 @@ std::unique_ptr<views::Button>
 PaymentSheetViewController::CreatePrimaryButton() {
   std::unique_ptr<views::Button> button(
       views::MdTextButton::CreateSecondaryUiBlueButton(
-          this, l10n_util::GetStringUTF16(IDS_PAYMENTS_PAY_BUTTON)));
+          this, CalculatePrimaryButtonLabel(state())));
   button->set_tag(static_cast<int>(PaymentRequestCommonTags::PAY_BUTTON_TAG));
   button->SetID(static_cast<int>(DialogViewID::PAY_BUTTON));
   button->SetEnabled(state()->is_ready_to_pay());
@@ -438,7 +447,7 @@ void PaymentSheetViewController::FillContentView(views::View* content_view) {
   layout->StartRow(views::GridLayout::kFixedSize, 0);
   layout->AddView(std::move(summary_row));
 
-  if (spec()->request_shipping()) {
+  if (state()->ShouldShowShippingSection()) {
     std::unique_ptr<PaymentRequestRowView> shipping_row = CreateShippingRow();
     shipping_row->set_previous_row(previous_row->AsWeakPtr());
     previous_row = shipping_row.get();
@@ -462,8 +471,7 @@ void PaymentSheetViewController::FillContentView(views::View* content_view) {
   previous_row = payment_method_row.get();
   layout->StartRow(views::GridLayout::kFixedSize, 0);
   layout->AddView(std::move(payment_method_row));
-  if (spec()->request_payer_name() || spec()->request_payer_email() ||
-      spec()->request_payer_phone()) {
+  if (state()->ShouldShowContactSection()) {
     std::unique_ptr<PaymentRequestRowView> contact_info_row =
         CreateContactInfoRow();
     contact_info_row->set_previous_row(previous_row->AsWeakPtr());
@@ -506,7 +514,7 @@ void PaymentSheetViewController::ButtonPressed(views::Button* sender,
           /*on_edited=*/base::OnceClosure(),  // This is always an add.
           /*on_added=*/
           base::BindOnce(&PaymentRequestState::AddAutofillShippingProfile,
-                         base::Unretained(state()), /*selected=*/true),
+                         state()->AsWeakPtr(), /*selected=*/true),
           nullptr);
       break;
 
@@ -522,8 +530,8 @@ void PaymentSheetViewController::ButtonPressed(views::Button* sender,
           static_cast<int>(PaymentSheetViewControllerTags::MAX_TAG),
           /*on_edited=*/base::OnceClosure(),  // This is always an add.
           /*on_added=*/
-          base::BindOnce(&PaymentRequestState::AddAutofillPaymentInstrument,
-                         base::Unretained(state()), /*selected=*/true),
+          base::BindOnce(&PaymentRequestState::AddAutofillPaymentApp,
+                         state()->AsWeakPtr(), /*selected=*/true),
           /*credit_card=*/nullptr);
 
       break;
@@ -540,7 +548,7 @@ void PaymentSheetViewController::ButtonPressed(views::Button* sender,
           /*on_edited=*/base::OnceClosure(),  // This is always an add.
           /*on_added=*/
           base::BindOnce(&PaymentRequestState::AddAutofillContactProfile,
-                         base::Unretained(state()), /*selected=*/true));
+                         state()->AsWeakPtr(), /*selected=*/true));
       break;
 
     case static_cast<int>(
@@ -576,6 +584,8 @@ void PaymentSheetViewController::StyledLabelLinkClicked(
 
 void PaymentSheetViewController::UpdatePayButtonState(bool enabled) {
   primary_button()->SetEnabled(enabled);
+  static_cast<views::MdTextButton*>(primary_button())
+      ->SetText(CalculatePrimaryButtonLabel(state()));
 }
 
 // Creates the Order Summary row, which contains an "Order Summary" label,
@@ -600,7 +610,7 @@ PaymentSheetViewController::CreatePaymentSheetSummaryRow() {
                      kItemSummaryPriceFixedWidth, kItemSummaryPriceFixedWidth);
 
   const std::vector<const mojom::PaymentItemPtr*>& items =
-      spec()->GetDisplayItems(state()->selected_instrument());
+      spec()->GetDisplayItems(state()->selected_app());
 
   bool is_mixed_currency = spec()->IsMixedCurrency();
   // The inline items section contains the first 2 display items of the
@@ -643,17 +653,17 @@ PaymentSheetViewController::CreatePaymentSheetSummaryRow() {
   }
 
   layout->StartRow(views::GridLayout::kFixedSize, 0);
-  PaymentInstrument* selected_instrument = state()->selected_instrument();
-  const mojom::PaymentItemPtr& total = spec()->GetTotal(selected_instrument);
+  PaymentApp* selected_app = state()->selected_app();
+  const mojom::PaymentItemPtr& total = spec()->GetTotal(selected_app);
   base::string16 total_label_text = base::UTF8ToUTF16(total->label);
   std::unique_ptr<views::Label> total_label = CreateBoldLabel(total_label_text);
   layout->AddView(std::move(total_label));
 
   base::string16 total_currency_code =
       base::UTF8ToUTF16(spec()->GetFormattedCurrencyCode(
-          spec()->GetTotal(state()->selected_instrument())->amount));
+          spec()->GetTotal(state()->selected_app())->amount));
   base::string16 total_amount = spec()->GetFormattedCurrencyAmount(
-      spec()->GetTotal(state()->selected_instrument())->amount);
+      spec()->GetTotal(state()->selected_app())->amount);
   layout->AddView(CreateInlineCurrencyAmountItem(total_currency_code,
                                                  total_amount, false, true));
 
@@ -745,14 +755,14 @@ PaymentSheetViewController::CreateShippingRow() {
 // +----------------------------------------------+
 std::unique_ptr<PaymentRequestRowView>
 PaymentSheetViewController::CreatePaymentMethodRow() {
-  PaymentInstrument* selected_instrument = state()->selected_instrument();
+  PaymentApp* selected_app = state()->selected_app();
 
   PaymentSheetRowBuilder builder(
       this, l10n_util::GetStringUTF16(
                 IDS_PAYMENT_REQUEST_PAYMENT_METHOD_SECTION_NAME));
   builder.Tag(PaymentSheetViewControllerTags::SHOW_PAYMENT_METHOD_BUTTON);
 
-  if (selected_instrument) {
+  if (selected_app) {
     std::unique_ptr<views::View> content_view = std::make_unique<views::View>();
 
     views::GridLayout* layout =
@@ -762,47 +772,45 @@ PaymentSheetViewController::CreatePaymentMethodRow() {
                        1.0, views::GridLayout::USE_PREF, 0, 0);
 
     layout->StartRow(views::GridLayout::kFixedSize, 0);
-    std::unique_ptr<views::Label> selected_instrument_label =
-        std::make_unique<views::Label>(selected_instrument->GetLabel());
-    selected_instrument_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    layout->AddView(std::move(selected_instrument_label));
+    std::unique_ptr<views::Label> selected_app_label =
+        std::make_unique<views::Label>(selected_app->GetLabel());
+    selected_app_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    layout->AddView(std::move(selected_app_label));
 
     layout->StartRow(views::GridLayout::kFixedSize, 0);
-    std::unique_ptr<views::Label> selected_instrument_sublabel =
-        std::make_unique<views::Label>(selected_instrument->GetSublabel());
-    selected_instrument_sublabel->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    layout->AddView(std::move(selected_instrument_sublabel));
+    std::unique_ptr<views::Label> selected_app_sublabel =
+        std::make_unique<views::Label>(selected_app->GetSublabel());
+    selected_app_sublabel->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    layout->AddView(std::move(selected_app_sublabel));
 
-    std::unique_ptr<views::ImageView> icon_view =
-        CreateInstrumentIconView(selected_instrument->icon_resource_id(),
-                                 selected_instrument->icon_image_skia(),
-                                 selected_instrument->GetLabel());
+    std::unique_ptr<views::ImageView> icon_view = CreateAppIconView(
+        selected_app->icon_resource_id(), selected_app->icon_image_skia(),
+        selected_app->GetLabel());
 
-    return builder.AccessibleContent(selected_instrument->GetLabel())
+    return builder.AccessibleContent(selected_app->GetLabel())
         .Id(DialogViewID::PAYMENT_SHEET_PAYMENT_METHOD_SECTION)
         .CreateWithChevron(std::move(content_view), std::move(icon_view));
   } else {
     builder.Id(DialogViewID::PAYMENT_SHEET_PAYMENT_METHOD_SECTION_BUTTON);
-    if (state()->available_instruments().empty()) {
+    if (state()->available_apps().empty()) {
       // If the button is "Add", navigate to the editor directly.
       builder.Tag(PaymentSheetViewControllerTags::ADD_PAYMENT_METHOD_BUTTON);
       return builder.CreateWithButton(base::string16(),
                                       l10n_util::GetStringUTF16(IDS_ADD),
                                       /*button_enabled=*/true);
-    } else if (state()->available_instruments().size() == 1) {
-      return builder.CreateWithButton(
-          state()->available_instruments()[0]->GetLabel(),
-          l10n_util::GetStringUTF16(IDS_CHOOSE),
-          /*button_enabled=*/true);
+    } else if (state()->available_apps().size() == 1) {
+      return builder.CreateWithButton(state()->available_apps()[0]->GetLabel(),
+                                      l10n_util::GetStringUTF16(IDS_CHOOSE),
+                                      /*button_enabled=*/true);
     } else {
       base::string16 format = l10n_util::GetPluralStringFUTF16(
           IDS_PAYMENT_REQUEST_PAYMENT_METHODS_PREVIEW,
-          state()->available_instruments().size() - 1);
-      return builder.CreateWithButton(
-          state()->available_instruments()[0]->GetLabel(), format,
-          state()->available_instruments().size() - 1,
-          l10n_util::GetStringUTF16(IDS_CHOOSE),
-          /*button_enabled=*/true);
+          state()->available_apps().size() - 1);
+      return builder.CreateWithButton(state()->available_apps()[0]->GetLabel(),
+                                      format,
+                                      state()->available_apps().size() - 1,
+                                      l10n_util::GetStringUTF16(IDS_CHOOSE),
+                                      /*button_enabled=*/true);
     }
   }
 }

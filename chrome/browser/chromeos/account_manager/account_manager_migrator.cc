@@ -20,10 +20,11 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/account_manager/account_manager_util.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/auth/arc_auth_service.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
@@ -42,15 +43,15 @@
 #include "components/signin/public/webdata/token_web_data.h"
 #include "components/user_manager/user.h"
 #include "components/webdata/common/web_data_service_consumer.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 
 namespace chromeos {
 
 namespace {
 
-// These names are used in histograms.
+// These names are used in histograms. Values should never be changed.
 constexpr char kDeviceAccountMigration[] = "DeviceAccountMigration";
 constexpr char kContentAreaAccountsMigration[] = "ContentAreaAccountsMigration";
-constexpr char kArcAccountsMigration[] = "ArcAccountsMigration";
 constexpr char kSuccessStorage[] = "SuccessStorage";
 constexpr char kMigrationResultMetricName[] =
     "AccountManager.Migrations.Result";
@@ -88,17 +89,17 @@ class AccountMigrationBaseStep : public AccountMigrationRunner::Step {
  public:
   AccountMigrationBaseStep(const std::string& id,
                            AccountManager* account_manager,
-                           identity::IdentityManager* identity_manager)
+                           signin::IdentityManager* identity_manager)
       : AccountMigrationRunner::Step(id),
         account_manager_(account_manager),
-        identity_manager_(identity_manager),
-        weak_factory_(this) {}
+        identity_manager_(identity_manager) {}
   ~AccountMigrationBaseStep() override = default;
 
  protected:
-  bool IsAccountPresentInAccountManager(
+  bool IsAccountWithNonDummyTokenPresentInAccountManager(
       const AccountManager::AccountKey& account) const {
-    return base::Contains(account_manager_accounts_, account);
+    return base::Contains(account_manager_accounts_, account) &&
+           !account_manager_->HasDummyGaiaToken(account);
   }
 
   bool IsAccountManagerEmpty() const {
@@ -125,7 +126,7 @@ class AccountMigrationBaseStep : public AccountMigrationRunner::Step {
 
   AccountManager* account_manager() { return account_manager_; }
 
-  identity::IdentityManager* identity_manager() { return identity_manager_; }
+  signin::IdentityManager* identity_manager() { return identity_manager_; }
 
  private:
   // Implementations should use this to start their migration flow, instead of
@@ -154,13 +155,13 @@ class AccountMigrationBaseStep : public AccountMigrationRunner::Step {
   AccountManager* const account_manager_;
 
   // Non-owning pointer.
-  identity::IdentityManager* const identity_manager_;
+  signin::IdentityManager* const identity_manager_;
 
   // A temporary cache of accounts in |AccountManager|, guaranteed to be
   // up-to-date when |StartMigration| is called.
   std::vector<AccountManager::AccountKey> account_manager_accounts_;
 
-  base::WeakPtrFactory<AccountMigrationBaseStep> weak_factory_;
+  base::WeakPtrFactory<AccountMigrationBaseStep> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(AccountMigrationBaseStep);
 };
 
@@ -172,7 +173,7 @@ class DeviceAccountMigration : public AccountMigrationBaseStep,
   DeviceAccountMigration(const AccountManager::AccountKey& device_account,
                          const std::string& device_account_raw_email,
                          AccountManager* account_manager,
-                         identity::IdentityManager* identity_manager,
+                         signin::IdentityManager* identity_manager,
                          scoped_refptr<TokenWebData> token_web_data)
       : AccountMigrationBaseStep(kDeviceAccountMigration,
                                  account_manager,
@@ -184,7 +185,7 @@ class DeviceAccountMigration : public AccountMigrationBaseStep,
 
  private:
   void StartMigration() override {
-    if (IsAccountPresentInAccountManager(device_account_)) {
+    if (IsAccountWithNonDummyTokenPresentInAccountManager(device_account_)) {
       FinishWithSuccess();
       return;
     }
@@ -230,10 +231,17 @@ class DeviceAccountMigration : public AccountMigrationBaseStep,
 
     bool is_success = false;
     for (auto it = token_map.begin(); it != token_map.end(); ++it) {
-      const std::string account_id = RemoveAccountIdPrefix(it->first);
-      if (identity_manager()->GetPrimaryAccountId() != account_id) {
+      const std::string token_account_id = RemoveAccountIdPrefix(it->first);
+      if (token_account_id.empty()) {
+        LOG(ERROR) << "Empty account id loaded from token DB.";
         continue;
       }
+      DCHECK(token_account_id.find('@') != std::string::npos)
+          << "Expecting an email as the account ID of a token [actual = "
+          << token_account_id << "]";
+
+      if (!gaia::AreEmailsSame(device_account_raw_email_, token_account_id))
+        continue;
 
       account_manager()->UpsertAccount(
           device_account_, device_account_raw_email_ /* raw_email */,
@@ -269,10 +277,10 @@ class DeviceAccountMigration : public AccountMigrationBaseStep,
 // to |AccountManager|. The objective is to migrate the account names only. We
 // cannot migrate any credentials (cookies).
 class ContentAreaAccountsMigration : public AccountMigrationBaseStep,
-                                     identity::IdentityManager::Observer {
+                                     signin::IdentityManager::Observer {
  public:
   ContentAreaAccountsMigration(AccountManager* account_manager,
-                               identity::IdentityManager* identity_manager)
+                               signin::IdentityManager* identity_manager)
       : AccountMigrationBaseStep(kContentAreaAccountsMigration,
                                  account_manager,
                                  identity_manager),
@@ -286,7 +294,7 @@ class ContentAreaAccountsMigration : public AccountMigrationBaseStep,
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     identity_manager_->AddObserver(this);
-    identity::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
+    signin::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
         identity_manager_->GetAccountsInCookieJar();
     if (accounts_in_cookie_jar_info.accounts_are_fresh) {
       OnAccountsInCookieUpdated(
@@ -296,7 +304,7 @@ class ContentAreaAccountsMigration : public AccountMigrationBaseStep,
   }
 
   void OnAccountsInCookieUpdated(
-      const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+      const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
       const GoogleServiceAuthError& error) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     // We should not have reached here without |OnGetAccounts| having been
@@ -326,7 +334,7 @@ class ContentAreaAccountsMigration : public AccountMigrationBaseStep,
   }
 
   // A non-owning pointer to |IdentityManager|.
-  identity::IdentityManager* const identity_manager_;
+  signin::IdentityManager* const identity_manager_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -343,13 +351,13 @@ class ArcAccountsMigration : public AccountMigrationBaseStep,
                              public arc::ArcSessionManager::Observer {
  public:
   ArcAccountsMigration(AccountManager* account_manager,
-                       identity::IdentityManager* identity_manager,
+                       signin::IdentityManager* identity_manager,
                        arc::ArcAuthService* arc_auth_service)
-      : AccountMigrationBaseStep(kArcAccountsMigration,
-                                 account_manager,
-                                 identity_manager),
-        arc_auth_service_(arc_auth_service),
-        weak_factory_(this) {}
+      : AccountMigrationBaseStep(
+            AccountManagerMigrator::kArcAccountsMigrationId,
+            account_manager,
+            identity_manager),
+        arc_auth_service_(arc_auth_service) {}
   ~ArcAccountsMigration() override { Reset(); }
 
  private:
@@ -428,7 +436,7 @@ class ArcAccountsMigration : public AccountMigrationBaseStep,
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<ArcAccountsMigration> weak_factory_;
+  base::WeakPtrFactory<ArcAccountsMigration> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcAccountsMigration);
 };
@@ -463,8 +471,13 @@ class SuccessStorage : public AccountMigrationRunner::Step {
 
 }  // namespace
 
+// Used in histograms and elsewhere. Never change this value.
+// static
+const char AccountManagerMigrator::kArcAccountsMigrationId[] =
+    "ArcAccountsMigration";
+
 AccountManagerMigrator::AccountManagerMigrator(Profile* profile)
-    : profile_(profile), weak_factory_(this) {}
+    : profile_(profile) {}
 
 AccountManagerMigrator::~AccountManagerMigrator() = default;
 
@@ -473,6 +486,12 @@ void AccountManagerMigrator::Start() {
 
   if (!chromeos::IsAccountManagerAvailable(profile_))
     return;
+
+  if (migration_runner_ && (migration_runner_->GetStatus() ==
+                            AccountMigrationRunner::Status::kRunning)) {
+    return;
+  }
+  migration_runner_ = std::make_unique<AccountMigrationRunner>();
 
   ran_migration_steps_ = false;
   if (ShouldRunMigrations()) {
@@ -483,7 +502,7 @@ void AccountManagerMigrator::Start() {
   // Cleanup tasks (like re-enabling Chrome account reconciliation) rely on the
   // migration being run, even if they were no-op. Check
   // |OnMigrationRunComplete| and |RunCleanupTasks|.
-  migration_runner_.Run(
+  migration_runner_->Run(
       base::BindOnce(&AccountManagerMigrator::OnMigrationRunComplete,
                      weak_factory_.GetWeakPtr()));
 }
@@ -523,10 +542,10 @@ void AccountManagerMigrator::AddMigrationSteps() {
       g_browser_process->platform_part()->GetAccountManagerFactory();
   chromeos::AccountManager* account_manager =
       factory->GetAccountManager(profile_->GetPath().value());
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile_);
 
-  migration_runner_.AddStep(std::make_unique<DeviceAccountMigration>(
+  migration_runner_->AddStep(std::make_unique<DeviceAccountMigration>(
       GetDeviceAccount(profile_),
       ProfileHelper::Get()
           ->GetUserByProfile(profile_)
@@ -540,14 +559,14 @@ void AccountManagerMigrator::AddMigrationSteps() {
           chromeos::prefs::kSecondaryGoogleAccountSigninAllowed);
 
   if (is_secondary_google_account_signin_allowed) {
-    migration_runner_.AddStep(std::make_unique<ContentAreaAccountsMigration>(
+    migration_runner_->AddStep(std::make_unique<ContentAreaAccountsMigration>(
         account_manager, identity_manager));
 
     if (arc::IsArcProvisioned(profile_)) {
       // Add a migration step for ARC only if ARC has been provisioned. If ARC
       // has not been provisioned yet, there cannot be any accounts that need to
       // be migrated.
-      migration_runner_.AddStep(std::make_unique<ArcAccountsMigration>(
+      migration_runner_->AddStep(std::make_unique<ArcAccountsMigration>(
           account_manager, identity_manager,
           arc::ArcAuthService::GetForBrowserContext(
               profile_) /* arc_auth_service */));
@@ -559,22 +578,32 @@ void AccountManagerMigrator::AddMigrationSteps() {
 
   // This MUST be the last step. Check the class level documentation of
   // |SuccessStorage| for the reason.
-  migration_runner_.AddStep(
+  migration_runner_->AddStep(
       std::make_unique<SuccessStorage>(profile_->GetPrefs()));
 
   // TODO(sinhak): Verify Device Account LST state.
 }
 
 AccountMigrationRunner::Status AccountManagerMigrator::GetStatus() const {
-  return migration_runner_.GetStatus();
+  if (!migration_runner_)
+    return AccountMigrationRunner::Status::kNotStarted;
+
+  return migration_runner_->GetStatus();
+}
+
+base::Optional<AccountMigrationRunner::MigrationResult>
+AccountManagerMigrator::GetLastMigrationRunResult() const {
+  return last_migration_run_result_;
 }
 
 void AccountManagerMigrator::OnMigrationRunComplete(
     const AccountMigrationRunner::MigrationResult& result) {
   DCHECK_NE(AccountMigrationRunner::Status::kNotStarted,
-            migration_runner_.GetStatus());
+            migration_runner_->GetStatus());
   DCHECK_NE(AccountMigrationRunner::Status::kRunning,
-            migration_runner_.GetStatus());
+            migration_runner_->GetStatus());
+
+  last_migration_run_result_ = base::make_optional(result);
 
   VLOG(1) << "Account migrations completed with result: "
           << static_cast<int>(result.final_status);

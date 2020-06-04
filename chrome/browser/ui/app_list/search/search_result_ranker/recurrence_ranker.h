@@ -29,7 +29,11 @@ class RecurrenceRankerProto;
 // |RecurrenceRanker| is the public interface of the ranking system.
 class RecurrenceRanker {
  public:
-  RecurrenceRanker(const base::FilePath& filepath,
+  // |model_identifier| is used for UMA metrics reporting. If it is empty,
+  // reporting is disabled. If it is non-empty, an entry should be added to the
+  // RecurrenceRankerModel histogram_suffixes entry in the UMA histograms.xml.
+  RecurrenceRanker(const std::string& model_identifier,
+                   const base::FilePath& filepath,
                    const RecurrenceRankerConfigProto& config,
                    bool is_ephemeral_user);
   ~RecurrenceRanker();
@@ -70,11 +74,18 @@ class RecurrenceRanker {
       int n,
       const std::string& condition = std::string());
 
+  // Returns whether this ranker contains no targets.
+  bool empty() { return targets_->size() == 0; }
+
   // Force saving all model state to disk. If the user is an ephemeral user,
   // this does nothing. This is not necessary in normal operation, as the ranker
   // automatically saves at regular intervals. Example use: syncing to disk
   // after a target or condition is deleted.
   void SaveToDisk();
+
+  // Returns true if the model has been loaded from disk and is ready to use.
+  // Train and rank do nothing when this is false.
+  bool is_initialized() { return load_from_disk_completed_; }
 
   // Return a pointer to the underlying storage of the FrecencyStore for targets
   // or conditions. These should not be used under normal use or ranking.
@@ -120,6 +131,9 @@ class RecurrenceRanker {
   // Storage for condition strings, which maps them to IDs.
   std::unique_ptr<FrecencyStore> conditions_;
 
+  // Name used for histogram suffixes.
+  const std::string model_identifier_;
+
   // Where to save the ranker.
   const base::FilePath proto_filepath_;
   // Hash of client-supplied config, used for associating a serialised ranker
@@ -135,8 +149,10 @@ class RecurrenceRanker {
   const base::TimeDelta min_seconds_between_saves_;
   base::Time time_of_last_save_;
 
+  SEQUENCE_CHECKER(sequence_checker_);
+
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  base::WeakPtrFactory<RecurrenceRanker> weak_factory_;
+  base::WeakPtrFactory<RecurrenceRanker> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RecurrenceRanker);
 };

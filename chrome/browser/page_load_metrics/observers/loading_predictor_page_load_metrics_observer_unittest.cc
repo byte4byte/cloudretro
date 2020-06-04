@@ -7,12 +7,12 @@
 #include <memory>
 
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
-#include "chrome/browser/page_load_metrics/page_load_tracker.h"
 #include "chrome/browser/predictors/loading_data_collector.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
-#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/page_load_metrics/browser/page_load_tracker.h"
+#include "components/page_load_metrics/common/test/page_load_metrics_test_util.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -49,6 +49,7 @@ class LoadingPredictorPageLoadMetricsObserverTest
     collector_ = std::make_unique<LoadingDataCollector>(predictor_.get(),
                                                         nullptr, config);
     timing_.navigation_start = base::Time::FromDoubleT(1);
+    timing_.parse_timing->parse_start = base::TimeDelta::FromMilliseconds(10);
     timing_.paint_timing->first_paint = base::TimeDelta::FromSeconds(2);
     timing_.paint_timing->first_contentful_paint =
         base::TimeDelta::FromSeconds(3);
@@ -69,12 +70,12 @@ class LoadingPredictorPageLoadMetricsObserverTest
         .WillOnce(testing::Return(is_preconnectable));
 
     NavigateAndCommit(main_frame_url);
-    SimulateTimingUpdate(timing_);
+    tester()->SimulateTimingUpdate(timing_);
 
-    histogram_tester().ExpectTotalCount(
+    tester()->histogram_tester().ExpectTotalCount(
         internal::kHistogramLoadingPredictorFirstContentfulPaintPreconnectable,
         is_preconnectable ? 1 : 0);
-    histogram_tester().ExpectTotalCount(
+    tester()->histogram_tester().ExpectTotalCount(
         internal::kHistogramLoadingPredictorFirstMeaningfulPaintPreconnectable,
         is_preconnectable ? 1 : 0);
   }

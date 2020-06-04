@@ -9,7 +9,6 @@
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/ui_resource_layer.h"
 #include "cc/resources/scoped_ui_resource.h"
-#include "content/public/browser/android/compositor.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/android/resources/nine_patch_resource.h"
 #include "ui/android/resources/resource_manager.h"
@@ -78,8 +77,6 @@ void ContextualSearchLayer::SetProperties(
     bool search_caption_visible,
     bool search_bar_border_visible,
     float search_bar_border_height,
-    bool search_bar_shadow_visible,
-    float search_bar_shadow_opacity,
     bool quick_action_icon_visible,
     bool thumbnail_visible,
     float custom_image_visibility_percentage,
@@ -92,7 +89,7 @@ void ContextualSearchLayer::SetProperties(
     bool progress_bar_visible,
     float progress_bar_height,
     float progress_bar_opacity,
-    int progress_bar_completion,
+    float progress_bar_completion,
     float divider_line_visibility_percentage,
     float divider_line_width,
     float divider_line_height,
@@ -100,7 +97,9 @@ void ContextualSearchLayer::SetProperties(
     float divider_line_x_offset,
     bool touch_highlight_visible,
     float touch_highlight_x_offset,
-    float touch_highlight_width) {
+    float touch_highlight_width,
+    int rounded_bar_top_resource_id,
+    int separator_line_color) {
   // Round values to avoid pixel gap between layers.
   search_bar_height = floor(search_bar_height);
 
@@ -111,9 +110,9 @@ void ContextualSearchLayer::SetProperties(
 
   OverlayPanelLayer::SetResourceIds(
       search_term_resource_id, panel_shadow_resource_id,
-      search_bar_shadow_resource_id, search_provider_icon_resource_id,
-      drag_handlebar_resource_id, open_tab_icon_resource_id,
-      close_icon_resource_id);
+      rounded_bar_top_resource_id, search_bar_shadow_resource_id,
+      search_provider_icon_resource_id, drag_handlebar_resource_id,
+      open_tab_icon_resource_id, close_icon_resource_id);
 
   float content_view_top = search_bar_bottom + search_promo_height;
   float should_render_bar_border = search_bar_border_visible
@@ -127,15 +126,25 @@ void ContextualSearchLayer::SetProperties(
       search_panel_width, search_panel_height, search_bar_background_color,
       search_bar_margin_side, search_bar_margin_top, search_bar_height,
       search_bar_top, search_term_opacity, should_render_bar_border,
-      search_bar_border_height, search_bar_shadow_visible,
-      search_bar_shadow_opacity, icon_color, drag_handlebar_color,
-      close_icon_opacity);
+      search_bar_border_height, icon_color, drag_handlebar_color,
+      close_icon_opacity, separator_line_color);
 
+  // -----------------------------------------------------------------
+  // Content setup, to center in space below drag handle (when present).
+  // -----------------------------------------------------------------
   bool is_rtl = l10n_util::IsLayoutRtl();
+  int content_height = search_bar_height;
+  int content_top = search_bar_top;
+  bool is_overlay_new_layout =
+      rounded_bar_top_resource_id != kInvalidResourceID;
+  if (is_overlay_new_layout) {
+    content_top += search_bar_margin_top;
+    content_height -= search_bar_margin_top;
+  }
 
-  // ---------------------------------------------------------------------------
-  // Bar Banner
-  // ---------------------------------------------------------------------------
+  // -----------------------------------------------------------------
+  // Bar Banner -- obsolete.  TODO(donnd): remove.
+  // -----------------------------------------------------------------
   if (search_bar_banner_visible) {
     // Grabs the Bar Banner resource.
     ui::Resource* bar_banner_text_resource = resource_manager_->GetResource(
@@ -224,14 +233,15 @@ void ContextualSearchLayer::SetProperties(
   // ---------------------------------------------------------------------------
   // Search Term, Context and Search Caption
   // ---------------------------------------------------------------------------
-  SetupTextLayer(search_bar_top, search_bar_height,
-                 search_text_layer_min_height, search_caption_resource_id,
-                 search_caption_visible, search_caption_animation_percentage,
-                 search_term_opacity, search_context_resource_id,
-                 search_context_opacity, search_term_caption_spacing);
+  int text_layer_height =
+      SetupTextLayer(content_top, content_height, search_text_layer_min_height,
+                     search_caption_resource_id, search_caption_visible,
+                     search_caption_animation_percentage, search_term_opacity,
+                     search_context_resource_id, search_context_opacity,
+                     search_term_caption_spacing);
 
   // ---------------------------------------------------------------------------
-  // Arrow Icon
+  // Arrow Icon.  Deprecated -- old layout only.
   // ---------------------------------------------------------------------------
   // Grabs the arrow icon resource.
   ui::Resource* arrow_icon_resource =
@@ -320,7 +330,7 @@ void ContextualSearchLayer::SetProperties(
       progress_bar_opacity, progress_bar_completion, search_panel_width);
 
   // ---------------------------------------------------------------------------
-  // Divider Line separator
+  // Divider Line separator.  Deprecated -- old layout only.
   // ---------------------------------------------------------------------------
   if (divider_line_visibility_percentage > 0.f) {
     if (divider_line_->parent() != layer_)
@@ -349,10 +359,16 @@ void ContextualSearchLayer::SetProperties(
   if (touch_highlight_visible) {
     if (touch_highlight_layer_->parent() != layer_)
       layer_->AddChild(touch_highlight_layer_);
-    gfx::Size background_size(touch_highlight_width, search_bar_height);
+    // In the new layout don't highlight the whole bar due to rounded corners.
+    int highlight_height =
+        is_overlay_new_layout ? text_layer_height : search_bar_height;
+    int highlight_top = content_top;
+    highlight_top +=
+        is_overlay_new_layout ? (content_height - text_layer_height) / 2 : 0;
+    gfx::Size background_size(touch_highlight_width, highlight_height);
     touch_highlight_layer_->SetBounds(background_size);
-    touch_highlight_layer_->SetPosition(gfx::PointF(
-        touch_highlight_x_offset, search_bar_top));
+    touch_highlight_layer_->SetPosition(
+        gfx::PointF(touch_highlight_x_offset, highlight_top));
   } else {
     touch_highlight_layer_->RemoveFromParent();
   }
@@ -459,16 +475,16 @@ void ContextualSearchLayer::SetCustomImageProperties(
       gfx::PointF(side_margin, custom_image_y_offset));
 }
 
-void ContextualSearchLayer::SetupTextLayer(float bar_top,
-                                           float bar_height,
-                                           float search_text_layer_min_height,
-                                           int caption_resource_id,
-                                           bool caption_visible,
-                                           float animation_percentage,
-                                           float search_term_opacity,
-                                           int context_resource_id,
-                                           float context_opacity,
-                                           float term_caption_spacing) {
+int ContextualSearchLayer::SetupTextLayer(float content_top,
+                                          float content_height,
+                                          float search_text_layer_min_height,
+                                          int caption_resource_id,
+                                          bool caption_visible,
+                                          float animation_percentage,
+                                          float search_term_opacity,
+                                          int context_resource_id,
+                                          float context_opacity,
+                                          float term_caption_spacing) {
   // ---------------------------------------------------------------------------
   // Setup the Drawing Hierarchy
   // ---------------------------------------------------------------------------
@@ -531,7 +547,7 @@ void ContextualSearchLayer::SetupTextLayer(float bar_top,
   float layer_width =
       std::max(main_text->bounds().width(), search_caption_->bounds().width());
 
-  float layer_top = bar_top + (bar_height - layer_height) / 2;
+  float layer_top = content_top + (content_height - layer_height) / 2;
   text_layer_->SetBounds(gfx::Size(layer_width, layer_height));
   text_layer_->SetPosition(gfx::PointF(0.f, layer_top));
   text_layer_->SetMasksToBounds(true);
@@ -567,7 +583,7 @@ void ContextualSearchLayer::SetupTextLayer(float bar_top,
   if (!caption_visible || animation_percentage == 0.f || !caption_resource) {
     bar_text_->SetPosition(gfx::PointF(0.f, term_top));
     search_context_->SetPosition(gfx::PointF(0.f, term_top));
-    return;
+    return layer_height;
   }
 
   // Calculate the positions for the Term and Caption when the Caption
@@ -592,6 +608,7 @@ void ContextualSearchLayer::SetupTextLayer(float bar_top,
   bar_text_->SetPosition(gfx::PointF(0.f, term_top));
   search_context_->SetPosition(gfx::PointF(0.f, term_top));
   search_caption_->SetPosition(gfx::PointF(0.f, caption_top));
+  return layer_height;
 }
 
 void ContextualSearchLayer::SetThumbnail(const SkBitmap* thumbnail) {

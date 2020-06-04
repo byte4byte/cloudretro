@@ -84,6 +84,7 @@ class ArcImeService : public KeyedService,
   void OnWindowPropertyChanged(aura::Window* window,
                                const void* key,
                                intptr_t old) override;
+  void OnWindowRemoved(aura::Window* removed_window) override;
 
   // Overridden from aura::client::FocusChangeObserver:
   void OnWindowFocused(aura::Window* gained_focus,
@@ -103,7 +104,6 @@ class ArcImeService : public KeyedService,
       const base::string16& text_in_range,
       const gfx::Range& selection_range,
       bool is_screen_coordinates) override;
-  void RequestHideIme() override;
 
   // Overridden from ash::KeyboardControllerObserver.
   void OnKeyboardAppearanceChanged(
@@ -111,7 +111,7 @@ class ArcImeService : public KeyedService,
 
   // Overridden from ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
-  void ConfirmCompositionText() override;
+  void ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(const ui::KeyEvent& event) override;
@@ -169,6 +169,10 @@ class ArcImeService : public KeyedService,
   // Converts |rect| passed from the client to the host's cooridnates and
   // updates |cursor_rect_|. Returns whether or not the stored value changed.
   bool UpdateCursorRect(const gfx::Rect& rect, bool is_screen_coordinates);
+
+  // Returns true if this TextInputClient is active and incoming input state
+  // from Android is valid.
+  bool ShouldSendUpdateToInputMethod() const;
 
   std::unique_ptr<ArcImeBridge> ime_bridge_;
   std::unique_ptr<ArcWindowDelegate> arc_window_delegate_;

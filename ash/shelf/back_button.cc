@@ -4,9 +4,15 @@
 
 #include "ash/shelf/back_button.h"
 
+#include "ash/keyboard/keyboard_util.h"
 #include "ash/resources/vector_icons/vector_icons.h"
-#include "ash/shelf/shelf_button_delegate.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_focus_cycler.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/wm/window_state.h"
+#include "ash/wm/window_util.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,26 +25,11 @@ namespace ash {
 // static
 const char BackButton::kViewClassName[] = "ash/BackButton";
 
-BackButton::BackButton(Shelf* shelf, ShelfButtonDelegate* shelf_button_delegate)
-    : ShelfControlButton(shelf, shelf_button_delegate) {
+BackButton::BackButton(Shelf* shelf) : ShelfControlButton(shelf, this) {
   SetAccessibleName(l10n_util::GetStringUTF16(IDS_ASH_SHELF_BACK_BUTTON_TITLE));
 }
 
-BackButton::~BackButton() = default;
-
-void BackButton::NotifyClick(const ui::Event& event) {
-  Button::NotifyClick(event);
-
-  // Send up event as well as down event as ARC++ clients expect this sequence.
-  // TODO: Investigate if we should be using the current modifiers.
-  aura::Window* root_window = GetWidget()->GetNativeWindow()->GetRootWindow();
-  ui::KeyEvent press_key_event(ui::ET_KEY_PRESSED, ui::VKEY_BROWSER_BACK,
-                               ui::EF_NONE);
-  ignore_result(root_window->GetHost()->SendEventToSink(&press_key_event));
-  ui::KeyEvent release_key_event(ui::ET_KEY_RELEASED, ui::VKEY_BROWSER_BACK,
-                                 ui::EF_NONE);
-  ignore_result(root_window->GetHost()->SendEventToSink(&release_key_event));
-}
+BackButton::~BackButton() {}
 
 void BackButton::PaintButtonContents(gfx::Canvas* canvas) {
   // Use PaintButtonContents instead of SetImage so the icon gets drawn at
@@ -50,6 +41,41 @@ void BackButton::PaintButtonContents(gfx::Canvas* canvas) {
 
 const char* BackButton::GetClassName() const {
   return kViewClassName;
+}
+
+base::string16 BackButton::GetTooltipText(const gfx::Point& p) const {
+  return GetAccessibleName();
+}
+
+void BackButton::OnShelfButtonAboutToRequestFocusFromTabTraversal(
+    ShelfButton* button,
+    bool reverse) {
+  DCHECK_EQ(button, this);
+  if (!reverse) {
+    // We're trying to focus this button by advancing from the last view of
+    // the shelf. Let the focus manager advance to the status area instead.
+    shelf()->shelf_focus_cycler()->FocusOut(reverse,
+                                            SourceView::kShelfNavigationView);
+  }
+}
+
+void BackButton::ButtonPressed(views::Button* sender,
+                               const ui::Event& event,
+                               views::InkDrop* ink_drop) {
+  base::RecordAction(base::UserMetricsAction("AppList_BackButtonPressed"));
+
+  if (keyboard_util::CloseKeyboardIfActive())
+    return;
+
+  if (window_util::ShouldMinimizeTopWindowOnBack()) {
+    auto* top_window = window_util::GetTopWindow();
+    DCHECK(top_window);
+    WindowState::Get(top_window)->Minimize();
+    return;
+  }
+
+  window_util::SendBackKeyEvent(
+      GetWidget()->GetNativeWindow()->GetRootWindow());
 }
 
 }  // namespace ash

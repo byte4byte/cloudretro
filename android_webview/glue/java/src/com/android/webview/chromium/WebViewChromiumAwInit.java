@@ -6,7 +6,6 @@ package com.android.webview.chromium;
 
 import android.Manifest;
 import android.content.Context;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Looper;
@@ -28,18 +27,20 @@ import org.chromium.android_webview.AwFirebaseConfig;
 import org.chromium.android_webview.AwLocaleConfig;
 import org.chromium.android_webview.AwNetworkChangeNotifierRegistrationPolicy;
 import org.chromium.android_webview.AwProxyController;
-import org.chromium.android_webview.AwQuotaManagerBridge;
-import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.AwServiceWorkerController;
 import org.chromium.android_webview.AwTracingController;
 import org.chromium.android_webview.HttpAuthDatabase;
+import org.chromium.android_webview.ProductConfig;
 import org.chromium.android_webview.R;
-import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.android_webview.VariationsSeedLoader;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
+import org.chromium.android_webview.common.AwResource;
+import org.chromium.android_webview.common.AwSwitches;
 import org.chromium.android_webview.gfx.AwDrawFnImpl;
 import org.chromium.base.BuildConfig;
 import org.chromium.base.BuildInfo;
+import org.chromium.base.BundleUtils;
+import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.FieldTrialList;
 import org.chromium.base.JNIUtils;
@@ -47,10 +48,8 @@ import org.chromium.base.PathService;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -70,6 +69,7 @@ public class WebViewChromiumAwInit {
     // TODO(gsennton): store aw-objects instead of adapters here
     // Initialization guarded by mLock.
     private AwBrowserContext mBrowserContext;
+    private AwTracingController mTracingController;
     private SharedStatics mSharedStatics;
     private GeolocationPermissionsAdapter mGeolocationPermissions;
     private CookieManagerAdapter mCookieManager;
@@ -127,6 +127,7 @@ public class WebViewChromiumAwInit {
     protected void startChromiumLocked() {
         try (ScopedSysTraceEvent event =
                         ScopedSysTraceEvent.scoped("WebViewChromiumAwInit.startChromiumLocked")) {
+            TraceEvent.setATraceEnabled(mFactory.getWebViewDelegate().isTraceTagEnabled());
             assert Thread.holdsLock(mLock) && ThreadUtils.runningOnUiThread();
 
             // The post-condition of this method is everything is ready, so notify now to cover all
@@ -146,14 +147,14 @@ public class WebViewChromiumAwInit {
             ResourceBundle.setAvailablePakLocales(
                     new String[] {}, AwLocaleConfig.getWebViewSupportedPakLocales());
 
+            BundleUtils.setIsBundle(ProductConfig.IS_BUNDLE);
+
             // We are rewriting Java resources in the background.
             // NOTE: Any reference to Java resources will cause a crash.
 
             try (ScopedSysTraceEvent e =
                             ScopedSysTraceEvent.scoped("WebViewChromiumAwInit.LibraryLoader")) {
-                LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_WEBVIEW);
-            } catch (ProcessInitException e) {
-                throw new RuntimeException("Error initializing WebView library", e);
+                LibraryLoader.getInstance().ensureInitialized();
             }
 
             PathService.override(PathService.DIR_MODULE, "/system/lib/");
@@ -180,7 +181,6 @@ public class WebViewChromiumAwInit {
                 mSharedStatics.setWebContentsDebuggingEnabledUnconditionally(true);
             }
 
-            TraceEvent.setATraceEnabled(mFactory.getWebViewDelegate().isTraceTagEnabled());
             mFactory.getWebViewDelegate().setOnTraceEnabledChangeListener(
                     new WebViewDelegate.OnTraceEnabledChangeListener() {
                         @Override
@@ -191,10 +191,6 @@ public class WebViewChromiumAwInit {
 
             mStarted = true;
 
-            // Make sure to record any cached metrics, now that we know that the native
-            // library has been loaded and initialized.
-            CachedMetrics.commitCachedMetrics();
-
             RecordHistogram.recordSparseHistogram("Android.WebView.TargetSdkVersion",
                     context.getApplicationInfo().targetSdkVersion);
 
@@ -204,8 +200,9 @@ public class WebViewChromiumAwInit {
                 AwBrowserContext awBrowserContext = getBrowserContextOnUiThread();
                 mGeolocationPermissions = new GeolocationPermissionsAdapter(
                         mFactory, awBrowserContext.getGeolocationPermissions());
-                mWebStorage = new WebStorageAdapter(mFactory, AwQuotaManagerBridge.getInstance());
-                mAwTracingController = awBrowserContext.getTracingController();
+                mWebStorage =
+                        new WebStorageAdapter(mFactory, mBrowserContext.getQuotaManagerBridge());
+                mAwTracingController = getTracingController();
                 mServiceWorkerController = awBrowserContext.getServiceWorkerController();
                 mAwProxyController = new AwProxyController();
             }
@@ -220,7 +217,7 @@ public class WebViewChromiumAwInit {
      * Set up resources on a background thread.
      * @param context The context.
      */
-    public void setUpResourcesOnBackgroundThread(PackageInfo webViewPackageInfo, Context context) {
+    public void setUpResourcesOnBackgroundThread(int packageId, Context context) {
         try (ScopedSysTraceEvent e = ScopedSysTraceEvent.scoped(
                      "WebViewChromiumAwInit.setUpResourcesOnBackgroundThread")) {
             assert mSetUpResourcesThread == null : "This method shouldn't be called twice.";
@@ -230,7 +227,7 @@ public class WebViewChromiumAwInit {
                 @Override
                 public void run() {
                     // Run this in parallel as it takes some time.
-                    setUpResources(webViewPackageInfo, context);
+                    setUpResources(packageId, context);
                 }
             });
             mSetUpResourcesThread.start();
@@ -246,17 +243,10 @@ public class WebViewChromiumAwInit {
         }
     }
 
-    private void setUpResources(PackageInfo webViewPackageInfo, Context context) {
+    private void setUpResources(int packageId, Context context) {
         try (ScopedSysTraceEvent e =
                         ScopedSysTraceEvent.scoped("WebViewChromiumAwInit.setUpResources")) {
-            String packageName = webViewPackageInfo.packageName;
-            if (webViewPackageInfo.applicationInfo.metaData != null) {
-                packageName = webViewPackageInfo.applicationInfo.metaData.getString(
-                        "com.android.webview.WebViewDonorPackage", packageName);
-            }
-
-            R.onResourcesLoaded(mFactory.getWebViewDelegate().getPackageId(
-                    context.getResources(), packageName));
+            R.onResourcesLoaded(packageId);
 
             AwResource.setResources(context.getResources());
             AwResource.setConfigKeySystemUuidMapping(android.R.array.config_keySystemUuidMapping);
@@ -342,6 +332,13 @@ public class WebViewChromiumAwInit {
         }
     }
 
+    public AwTracingController getTracingController() {
+        if (mTracingController == null) {
+            mTracingController = new AwTracingController();
+        }
+        return mTracingController;
+    }
+
     // Only on UI thread.
     AwBrowserContext getBrowserContextOnUiThread() {
         assert mStarted;
@@ -352,8 +349,7 @@ public class WebViewChromiumAwInit {
         }
 
         if (mBrowserContext == null) {
-            mBrowserContext = new AwBrowserContext(
-                mFactory.getWebViewPrefs(), ContextUtils.getApplicationContext());
+            mBrowserContext = AwBrowserContext.getDefault();
         }
         return mBrowserContext;
     }
@@ -463,14 +459,21 @@ public class WebViewChromiumAwInit {
     // purposes. Check for the app asyncronously because PackageManager is slow.
     private static void maybeLogActiveTrials(final Context ctx) {
         PostTask.postTask(TaskTraits.BEST_EFFORT_MAY_BLOCK, () -> {
+            boolean shouldLog =
+                    CommandLine.getInstance().hasSwitch(AwSwitches.WEBVIEW_VERBOSE_LOGGING);
+
+            // TODO(ntfschr): deprecate log verbosifier and remove support in M84. See
+            // https://crbug.com/988200.
             try {
                 // This must match the package name in:
                 // android_webview/tools/webview_log_verbosifier/AndroidManifest.xml
                 ctx.getPackageManager().getPackageInfo(
                         "org.chromium.webview_log_verbosifier", /*flags=*/0);
+                shouldLog = true;
             } catch (PackageManager.NameNotFoundException e) {
-                return;
             }
+
+            if (!shouldLog) return;
 
             PostTask.postTask(UiThreadTaskTraits.BEST_EFFORT, () -> {
                 // TODO(ntfschr): CommandLine can change at any time. For simplicity, only log it

@@ -10,14 +10,12 @@
 
 @class BookmarkEditViewController;
 @class BookmarkFolderViewController;
+@protocol BrowserCommands;
+class Browser;
 
 namespace bookmarks {
 class BookmarkNode;
 }  // namespace bookmarks
-
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
 
 @protocol BookmarkEditViewControllerDelegate
 
@@ -45,7 +43,8 @@ class ChromeBrowserState;
 // This view controller will also monitor bookmark model change events and react
 // accordingly depending on whether the bookmark and folder it is editing
 // changes underneath it.
-@interface BookmarkEditViewController : ChromeTableViewController
+@interface BookmarkEditViewController
+    : ChromeTableViewController <UIAdaptivePresentationControllerDelegate>
 
 @property(nonatomic, weak) id<BookmarkEditViewControllerDelegate> delegate;
 
@@ -53,11 +52,8 @@ class ChromeBrowserState;
 // |bookmark|: mustn't be NULL at initialization time. It also mustn't be a
 //             folder.
 - (instancetype)initWithBookmark:(const bookmarks::BookmarkNode*)bookmark
-                    browserState:(ios::ChromeBrowserState*)browserState
-    NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithTableViewStyle:(UITableViewStyle)style
-                           appBarStyle:(ChromeTableViewControllerStyle)style
-    NS_UNAVAILABLE;
+                         browser:(Browser*)browser NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
 
 // Closes the edit view as if close button was pressed.
 - (void)dismiss;

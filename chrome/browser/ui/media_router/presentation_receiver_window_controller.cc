@@ -7,16 +7,17 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media/router/presentation/receiver_presentation_service_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/ui/media_router/presentation_receiver_window.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/presentation_receiver_flags.h"
 #include "content/public/browser/web_contents.h"
-#include "third_party/blink/public/web/web_presentation_receiver_flags.h"
 #include "ui/views/widget/widget.h"
 
 using content::WebContents;
@@ -25,7 +26,7 @@ namespace {
 
 WebContents::CreateParams CreateWebContentsParams(Profile* profile) {
   WebContents::CreateParams params(profile);
-  params.starting_sandbox_flags = blink::kPresentationReceiverSandboxFlags;
+  params.starting_sandbox_flags = content::kPresentationReceiverSandboxFlags;
   return params;
 }
 
@@ -49,6 +50,11 @@ PresentationReceiverWindowController::CreateFromOriginalProfile(
 PresentationReceiverWindowController::~PresentationReceiverWindowController() {
   DCHECK(!web_contents_);
   DCHECK(!window_);
+
+  if (otr_profile_) {
+    otr_profile_->RemoveObserver(this);
+    ProfileDestroyer::DestroyProfileWhenAppropriate(otr_profile_);
+  }
 }
 
 void PresentationReceiverWindowController::Start(
@@ -107,20 +113,16 @@ PresentationReceiverWindowController::PresentationReceiverWindowController(
     const gfx::Rect& bounds,
     base::OnceClosure termination_callback,
     TitleChangeCallback title_change_callback)
-    : otr_profile_registration_(
-          IndependentOTRProfileManager::GetInstance()
-              ->CreateFromOriginalProfile(
-                  profile,
-                  base::BindOnce(&PresentationReceiverWindowController::
-                                     OriginalProfileDestroyed,
-                                 base::Unretained(this)))),
-      web_contents_(WebContents::Create(
-          CreateWebContentsParams(otr_profile_registration_->profile()))),
+    : otr_profile_(
+          profile->GetOffTheRecordProfile(Profile::OTRProfileID::CreateUnique(
+              "MediaRouter::PresentationReciever"))),
+      web_contents_(WebContents::Create(CreateWebContentsParams(otr_profile_))),
       window_(PresentationReceiverWindow::Create(this, bounds)),
       termination_callback_(std::move(termination_callback)),
       title_change_callback_(std::move(title_change_callback)) {
-  DCHECK(otr_profile_registration_->profile());
-  DCHECK(otr_profile_registration_->profile()->IsOffTheRecord());
+  DCHECK(otr_profile_);
+  DCHECK(otr_profile_->IsOffTheRecord());
+  otr_profile_->AddObserver(this);
   content::WebContentsObserver::Observe(web_contents_.get());
   web_contents_->SetDelegate(this);
 }
@@ -130,11 +132,11 @@ void PresentationReceiverWindowController::WindowClosed() {
   Terminate();
 }
 
-void PresentationReceiverWindowController::OriginalProfileDestroyed(
+void PresentationReceiverWindowController::OnProfileWillBeDestroyed(
     Profile* profile) {
-  DCHECK(profile == otr_profile_registration_->profile());
+  DCHECK(profile == otr_profile_);
   web_contents_.reset();
-  otr_profile_registration_.reset();
+  otr_profile_ = nullptr;
   Terminate();
 }
 
@@ -195,22 +197,14 @@ void PresentationReceiverWindowController::CanDownload(
   std::move(callback).Run(false);
 }
 
-bool PresentationReceiverWindowController::ShouldCreateWebContents(
-    content::WebContents* web_contents,
-    content::RenderFrameHost* opener,
+bool PresentationReceiverWindowController::IsWebContentsCreationOverridden(
     content::SiteInstance* source_site_instance,
-    int32_t route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
     content::mojom::WindowContainerType window_container_type,
     const GURL& opener_url,
     const std::string& frame_name,
-    const GURL& target_url,
-    const std::string& partition_id,
-    content::SessionStorageNamespace* session_storage_namespace) {
-  DCHECK_EQ(web_contents_.get(), web_contents);
+    const GURL& target_url) {
   // Disallow creating separate WebContentses.  The WebContents implementation
   // uses this to spawn new windows/tabs, which is also not allowed for
   // local presentations.
-  return false;
+  return true;
 }

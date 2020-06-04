@@ -7,10 +7,12 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_animator.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_content_adjustment_util.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_observer.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_web_view_resizer.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -36,6 +38,29 @@ void FullscreenMediator::SetWebState(web::WebState* webState) {
   resizer_.webState = webState;
 }
 
+void FullscreenMediator::SetIsBrowserTraitCollectionUpdating(bool updating) {
+  if (updating_browser_trait_collection_ == updating)
+    return;
+  updating_browser_trait_collection_ = updating;
+  if (updating_browser_trait_collection_) {
+    resizer_.compensateFrameChangeByOffset = NO;
+    scrolled_to_top_during_trait_collection_updates_ =
+        model_->is_scrolled_to_top();
+  } else {
+    resizer_.compensateFrameChangeByOffset = YES;
+    if (scrolled_to_top_during_trait_collection_updates_) {
+      // If the content was scrolled to the top when the trait collection began
+      // updating, changes in toolbar heights may cause the top of the page to
+      // become hidden.  Ensure that the page remains scrolled to the top after
+      // the trait collection finishes updating.
+      web::WebState* web_state = resizer_.webState;
+      if (web_state)
+        MoveContentBelowHeader(web_state->GetWebViewProxy(), model_);
+      scrolled_to_top_during_trait_collection_updates_ = false;
+    }
+  }
+}
+
 void FullscreenMediator::EnterFullscreen() {
   if (model_->enabled())
     AnimateWithStyle(FullscreenAnimatorStyle::ENTER_FULLSCREEN);
@@ -48,14 +73,6 @@ void FullscreenMediator::ExitFullscreen() {
   // decelerating.
   model_->IgnoreRemainderOfCurrentScroll();
   AnimateWithStyle(FullscreenAnimatorStyle::EXIT_FULLSCREEN);
-}
-
-void FullscreenMediator::StopFrameChangeCompensation() {
-  resizer_.compensateFrameChangeByOffset = NO;
-}
-
-void FullscreenMediator::StartFrameChangeCompensation() {
-  resizer_.compensateFrameChangeByOffset = YES;
 }
 
 void FullscreenMediator::Disconnect() {
@@ -78,6 +95,9 @@ void FullscreenMediator::FullscreenModelToolbarHeightsUpdated(
                                                  model_->min_toolbar_insets(),
                                                  model_->max_toolbar_insets());
   }
+  // Changes in the toolbar heights modifies the visible viewport so the WebView
+  // needs to be resized as needed.
+  [resizer_ updateForCurrentState];
 }
 
 void FullscreenMediator::FullscreenModelProgressUpdated(
@@ -140,23 +160,29 @@ void FullscreenMediator::AnimateWithStyle(FullscreenAnimatorStyle style) {
   StopAnimating(true);
   DCHECK(!animator_);
 
+  // Early return if there is no progress change.
+  CGFloat start_progress = model_->progress();
+  CGFloat final_progress = GetFinalFullscreenProgressForAnimation(style);
+  if (AreCGFloatsEqual(start_progress, final_progress))
+    return;
+
   // Create the animator and set up its completion block.
-  animator_ =
-      [[FullscreenAnimator alloc] initWithStartProgress:model_->progress()
-                                                  style:style];
-  __weak FullscreenAnimator* weakAnimator = animator_;
-  FullscreenModel** modelPtr = &model_;
+  animator_ = [[FullscreenAnimator alloc] initWithStartProgress:start_progress
+                                                          style:style];
+  base::WeakPtr<FullscreenMediator> weak_mediator = weak_factory_.GetWeakPtr();
   [animator_ addAnimations:^{
     // Updates the WebView frame during the animation to have it animated.
-    [resizer_ forceToUpdateToProgress:animator_.finalProgress];
+    FullscreenMediator* mediator = weak_mediator.get();
+    if (mediator)
+      [mediator->resizer_ forceToUpdateToProgress:final_progress];
   }];
   [animator_ addCompletion:^(UIViewAnimatingPosition finalPosition) {
     DCHECK_EQ(finalPosition, UIViewAnimatingPositionEnd);
-    if (!weakAnimator || !*modelPtr)
+    FullscreenMediator* mediator = weak_mediator.get();
+    if (!mediator)
       return;
-    model_->AnimationEndedWithProgress(
-        [weakAnimator progressForAnimatingPosition:finalPosition]);
-    animator_ = nil;
+    mediator->model_->AnimationEndedWithProgress(final_progress);
+    mediator->animator_ = nil;
   }];
 
   // Notify observers that the animation will occur.
@@ -164,10 +190,8 @@ void FullscreenMediator::AnimateWithStyle(FullscreenAnimatorStyle style) {
     observer.FullscreenWillAnimate(controller_, animator_);
   }
 
-  // Only start the animator if animations have been added and it has a non-zero
-  // progress change.
-  if (animator_.hasAnimations &&
-      !AreCGFloatsEqual(animator_.startProgress, animator_.finalProgress)) {
+  // Only start the animator if animations have been added.
+  if (animator_.hasAnimations) {
     [animator_ startAnimation];
   } else {
     animator_ = nil;

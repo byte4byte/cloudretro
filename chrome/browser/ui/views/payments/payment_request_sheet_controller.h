@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
 #include "ui/views/controls/button/button.h"
 
@@ -60,6 +61,10 @@ class PaymentRequestSheetController : public views::ButtonListener {
 
   // Returns the title to be displayed in this sheet's header.
   virtual base::string16 GetSheetTitle() = 0;
+
+  // Stops the controller from controlling the UI. Used when the UI is being
+  // destroyed.
+  void Stop() { is_active_ = false; }
 
  protected:
   // Clears the content part of the view represented by this view controller and
@@ -164,11 +169,16 @@ class PaymentRequestSheetController : public views::ButtonListener {
 
   views::Button* primary_button() { return primary_button_; }
 
+  // Returns whether the controller should be controlling the UI.
+  bool is_active() const { return is_active_; }
+
  private:
   // Called when the Enter accelerator is pressed. Perform the action associated
-  // with the primary button and returns true if it's enabled, returns false
-  // otherwise.
-  bool PerformPrimaryButtonAction();
+  // with the primary button and sets |is_enabled| to true if it's enabled,
+  // otherwise sets it to false. The |is_enabled| is an out-param to enable
+  // binding the method with a base::WeakPtr, which prohibits non-void return
+  // values.
+  void PerformPrimaryButtonAction(bool* is_enabled);
 
   // Add the primary/secondary buttons to |container|.
   void AddPrimaryButton(views::View* container);
@@ -193,6 +203,11 @@ class PaymentRequestSheetController : public views::ButtonListener {
   views::Button* secondary_button_ = nullptr;
   views::View* header_view_ = nullptr;
   views::View* header_content_separator_container_ = nullptr;
+
+  // Whether the controller should be controlling the UI.
+  bool is_active_ = true;
+
+  base::WeakPtrFactory<PaymentRequestSheetController> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PaymentRequestSheetController);
 };

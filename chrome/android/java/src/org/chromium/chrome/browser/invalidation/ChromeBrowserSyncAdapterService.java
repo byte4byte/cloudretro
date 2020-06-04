@@ -11,13 +11,12 @@ import android.content.Intent;
 import android.os.IBinder;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.chrome.browser.init.ProcessInitializationHandler;
+import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 
 /**
  * A Service that provides access to {@link ChromeBrowserSyncAdapter}.
  */
 public class ChromeBrowserSyncAdapterService extends Service {
-
     @SuppressLint("StaticFieldLeak")
     private static ChromeBrowserSyncAdapter sSyncAdapter;
     private static final Object LOCK = new Object();
@@ -28,7 +27,7 @@ public class ChromeBrowserSyncAdapterService extends Service {
     private ChromeBrowserSyncAdapter getOrCreateSyncAdapter(Context applicationContext) {
         synchronized (LOCK) {
             if (sSyncAdapter == null) {
-                ProcessInitializationHandler.getInstance().initializePreNative();
+                ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
                 sSyncAdapter = new ChromeBrowserSyncAdapter(applicationContext);
             }
         }

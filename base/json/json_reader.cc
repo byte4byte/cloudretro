@@ -13,32 +13,24 @@
 
 namespace base {
 
-// Chosen to support 99.9% of documents found in the wild late 2016.
-// http://crbug.com/673263
-const int JSONReader::kStackMaxDepth = 200;
-
 // Values 1000 and above are used by JSONFileValueSerializer::JsonFileError.
 static_assert(JSONReader::JSON_PARSE_ERROR_COUNT < 1000,
               "JSONReader error out of bounds");
 
-const char JSONReader::kInvalidEscape[] =
-    "Invalid escape sequence.";
-const char JSONReader::kSyntaxError[] =
-    "Syntax error.";
-const char JSONReader::kUnexpectedToken[] =
-    "Unexpected token.";
-const char JSONReader::kTrailingComma[] =
-    "Trailing comma not allowed.";
-const char JSONReader::kTooMuchNesting[] =
-    "Too much nesting.";
+const char JSONReader::kInvalidEscape[] = "Invalid escape sequence.";
+const char JSONReader::kSyntaxError[] = "Syntax error.";
+const char JSONReader::kUnexpectedToken[] = "Unexpected token.";
+const char JSONReader::kTrailingComma[] = "Trailing comma not allowed.";
+const char JSONReader::kTooMuchNesting[] = "Too much nesting.";
 const char JSONReader::kUnexpectedDataAfterRoot[] =
     "Unexpected data after root element.";
 const char JSONReader::kUnsupportedEncoding[] =
     "Unsupported encoding. JSON must be UTF-8.";
 const char JSONReader::kUnquotedDictionaryKey[] =
     "Dictionary keys must be quoted.";
-const char JSONReader::kInputTooLarge[] =
-    "Input string is too large (>2GB).";
+const char JSONReader::kInputTooLarge[] = "Input string is too large (>2GB).";
+const char JSONReader::kUnrepresentableNumber[] =
+    "Number cannot be represented.";
 
 JSONReader::ValueWithError::ValueWithError() = default;
 
@@ -49,20 +41,22 @@ JSONReader::ValueWithError::~ValueWithError() = default;
 JSONReader::ValueWithError& JSONReader::ValueWithError::operator=(
     ValueWithError&& other) = default;
 
-JSONReader::JSONReader(int options, int max_depth)
+JSONReader::JSONReader(int options, size_t max_depth)
     : parser_(new internal::JSONParser(options, max_depth)) {}
 
 JSONReader::~JSONReader() = default;
 
 // static
-Optional<Value> JSONReader::Read(StringPiece json, int options, int max_depth) {
+Optional<Value> JSONReader::Read(StringPiece json,
+                                 int options,
+                                 size_t max_depth) {
   internal::JSONParser parser(options, max_depth);
   return parser.Parse(json);
 }
 
 std::unique_ptr<Value> JSONReader::ReadDeprecated(StringPiece json,
                                                   int options,
-                                                  int max_depth) {
+                                                  size_t max_depth) {
   Optional<Value> value = Read(json, options, max_depth);
   return value ? Value::ToUniquePtrValue(std::move(*value)) : nullptr;
 }
@@ -129,6 +123,8 @@ std::string JSONReader::ErrorCodeToString(JsonParseError error_code) {
       return kUnquotedDictionaryKey;
     case JSON_TOO_LARGE:
       return kInputTooLarge;
+    case JSON_UNREPRESENTABLE_NUMBER:
+      return kUnrepresentableNumber;
     case JSON_PARSE_ERROR_COUNT:
       break;
   }
@@ -143,10 +139,6 @@ Optional<Value> JSONReader::ReadToValue(StringPiece json) {
 std::unique_ptr<Value> JSONReader::ReadToValueDeprecated(StringPiece json) {
   Optional<Value> value = parser_->Parse(json);
   return value ? std::make_unique<Value>(std::move(*value)) : nullptr;
-}
-
-JSONReader::JsonParseError JSONReader::error_code() const {
-  return parser_->error_code();
 }
 
 std::string JSONReader::GetErrorMessage() const {

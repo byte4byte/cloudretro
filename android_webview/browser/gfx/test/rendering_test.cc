@@ -13,9 +13,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/test/compositor_frame_helpers.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/test/test_synchronous_compositor_android.h"
@@ -46,7 +47,8 @@ class TestBrowserViewRenderer : public BrowserViewRenderer {
 };
 }  // namespace
 
-RenderingTest::RenderingTest() : message_loop_(new base::MessageLoop) {
+RenderingTest::RenderingTest()
+    : task_environment_(std::make_unique<base::test::TaskEnvironment>()) {
   ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 }
 
@@ -65,7 +67,7 @@ void RenderingTest::SetUpTestHarness() {
   DCHECK(!functor_.get());
   browser_view_renderer_.reset(
       new TestBrowserViewRenderer(this, base::ThreadTaskRunnerHandle::Get()));
-  browser_view_renderer_->SetActiveCompositorID(CompositorID(0, 0));
+  browser_view_renderer_->SetActiveFrameSinkId(viz::FrameSinkId(0, 0));
   InitializeCompositor();
   std::unique_ptr<FakeWindow> window(
       new FakeWindow(browser_view_renderer_.get(), this, gfx::Rect(100, 100)));
@@ -88,7 +90,8 @@ CompositorFrameProducer* RenderingTest::GetCompositorFrameProducer() {
 void RenderingTest::InitializeCompositor() {
   DCHECK(!compositor_.get());
   DCHECK(browser_view_renderer_.get());
-  compositor_.reset(new content::TestSynchronousCompositor(0, 0));
+  compositor_.reset(
+      new content::TestSynchronousCompositor(viz::FrameSinkId(0, 0)));
   compositor_->SetClient(browser_view_renderer_.get());
 }
 

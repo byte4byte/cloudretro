@@ -16,13 +16,17 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chromeos/arc/arc_web_contents_data.h"
 #include "chrome/browser/chromeos/arc/policy/arc_policy_util.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/login/configuration_keys.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_setup_controller.h"
@@ -36,6 +40,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/grit/generated_resources.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/arc/arc_features.h"
 #include "components/arc/arc_prefs.h"
@@ -44,6 +53,14 @@
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "components/version_info/version_info.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/user_agent.h"
+#include "ui/aura/window.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 namespace arc {
 
@@ -223,6 +240,12 @@ bool IsArcAllowedForProfileInternal(const Profile* profile,
   return true;
 }
 
+void ShowContactAdminDialog() {
+  chrome::ShowWarningMessageBox(
+      nullptr, l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_CONTACT_ADMIN_TITLE),
+      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_CONTACT_ADMIN_CONTEXT));
+}
+
 }  // namespace
 
 bool IsRealUserProfile(const Profile* profile) {
@@ -356,6 +379,12 @@ bool SetArcPlayStoreEnabledForProfile(Profile* profile, bool enabled) {
   if (IsArcPlayStoreEnabledPreferenceManagedForProfile(profile)) {
     if (enabled && !IsArcPlayStoreEnabledForProfile(profile)) {
       LOG(WARNING) << "Attempt to enable disabled by policy ARC.";
+      if (chromeos::switches::IsTabletFormFactor()) {
+        VLOG(1) << "Showing contact admin dialog managed user of tablet form "
+                   "factor devices.";
+        base::ThreadTaskRunnerHandle::Get()->PostTask(
+            FROM_HERE, base::BindOnce(&ShowContactAdminDialog));
+      }
       return false;
     }
     VLOG(1) << "Google-Play-Store-enabled pref is managed. Request to "
@@ -555,7 +584,7 @@ void UpdateArcFileSystemCompatibilityPrefIfNeeded(
   }
 
   // Otherwise, check the underlying filesystem.
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
@@ -600,14 +629,96 @@ bool IsPlayStoreAvailable() {
     return true;
 
   // Demo Mode is the only public session scenario that can launch Play.
-  return chromeos::DemoSession::IsDeviceInDemoMode() &&
-         chromeos::switches::ShouldShowPlayStoreInDemoMode();
+  if (!chromeos::DemoSession::IsDeviceInDemoMode())
+    return false;
+
+  // TODO(b/154290639): Remove check for |IsDemoModeOfflineEnrolled| when fixed
+  //                    in Play Store.
+  return !chromeos::DemoSession::IsDemoModeOfflineEnrolled() &&
+         chromeos::features::ShouldShowPlayStoreInDemoMode();
 }
 
 bool ShouldStartArcSilentlyForManagedProfile(const Profile* profile) {
   return IsArcPlayStoreEnabledPreferenceManagedForProfile(profile) &&
          (AreArcAllOptInPreferencesIgnorableForProfile(profile) ||
           !IsArcOobeOptInActive());
+}
+
+aura::Window* GetArcWindow(int32_t task_id) {
+  for (auto* window : ChromeLauncherController::instance()->GetArcWindows()) {
+    if (arc::GetWindowTaskId(window) == task_id)
+      return window;
+  }
+
+  return nullptr;
+}
+
+std::unique_ptr<content::WebContents> CreateArcCustomTabWebContents(
+    Profile* profile,
+    const GURL& url) {
+  scoped_refptr<content::SiteInstance> site_instance =
+      tab_util::GetSiteInstanceForNewTab(profile, url);
+  content::WebContents::CreateParams create_params(profile, site_instance);
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContents::Create(create_params);
+
+  // Use the same version number as browser_commands.cc
+  // TODO(hashimoto): Get the actual Android version from the container;
+  // also for |structured_ua.platform_version| below.
+  constexpr char kOsOverrideForTabletSite[] = "Linux; Android 9; Chrome tablet";
+  // Override the user agent to request mobile version web sites.
+  const std::string product =
+      version_info::GetProductNameAndVersionForUserAgent();
+  blink::UserAgentOverride ua_override;
+  ua_override.ua_string_override = content::BuildUserAgentFromOSAndProduct(
+      kOsOverrideForTabletSite, product);
+
+  ua_override.ua_metadata_override = ::GetUserAgentMetadata();
+  ua_override.ua_metadata_override->platform = "Android";
+  ua_override.ua_metadata_override->platform_version = "9";
+  ua_override.ua_metadata_override->model = "Chrome tablet";
+  ua_override.ua_metadata_override->mobile = false;
+
+  web_contents->SetUserAgentOverride(ua_override,
+                                     false /*override_in_new_tabs=*/);
+
+  content::NavigationController::LoadURLParams load_url_params(url);
+  load_url_params.source_site_instance = site_instance;
+  load_url_params.override_user_agent =
+      content::NavigationController::UA_OVERRIDE_TRUE;
+  web_contents->GetController().LoadURLWithParams(load_url_params);
+
+  // Add a flag to remember this tab originated in the ARC context.
+  web_contents->SetUserData(&arc::ArcWebContentsData::kArcTransitionFlag,
+                            std::make_unique<arc::ArcWebContentsData>());
+
+  return web_contents;
+}
+
+std::string GetHistogramNameByUserType(const std::string& base_name,
+                                       const Profile* profile) {
+  if (profile == nullptr) {
+    profile = ProfileManager::GetPrimaryUserProfile();
+  }
+  if (IsRobotOrOfflineDemoAccountMode()) {
+    chromeos::DemoSession* demo_session = chromeos::DemoSession::Get();
+    if (demo_session && demo_session->started()) {
+      return demo_session->offline_enrolled() ? base_name + ".OfflineDemoMode"
+                                              : base_name + ".DemoMode";
+    }
+    return base_name + ".RobotAccount";
+  }
+  if (profile->IsChild())
+    return base_name + ".Child";
+  if (IsActiveDirectoryUserForProfile(profile))
+    return base_name + ".ActiveDirectory";
+  return base_name +
+         (policy_util::IsAccountManaged(profile) ? ".Managed" : ".Unmanaged");
+}
+
+std::string GetHistogramNameByUserTypeForPrimaryProfile(
+    const std::string& base_name) {
+  return GetHistogramNameByUserType(base_name, /*profile=*/nullptr);
 }
 
 }  // namespace arc

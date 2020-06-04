@@ -15,12 +15,9 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/time/time.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
-
-namespace ui {
-class LayerOwner;
-}  // namespace ui
 
 namespace views {
 class Widget;
@@ -36,13 +33,14 @@ class UnifiedSystemTrayView;
 // Shows the bubble on the constructor, and closes the bubble on the destructor.
 // It is possible that the bubble widget is closed on deactivation. In such
 // case, this class calls UnifiedSystemTray::CloseBubble() to delete itself.
-class UnifiedSystemTrayBubble : public TrayBubbleBase,
-                                public ash::ScreenLayoutObserver,
-                                public views::WidgetObserver,
-                                public ShelfObserver,
-                                public ::wm::ActivationChangeObserver,
-                                public TimeToClickRecorder::Delegate,
-                                public TabletModeObserver {
+class ASH_EXPORT UnifiedSystemTrayBubble
+    : public TrayBubbleBase,
+      public ScreenLayoutObserver,
+      public views::WidgetObserver,
+      public ShelfObserver,
+      public ::wm::ActivationChangeObserver,
+      public TimeToClickRecorder::Delegate,
+      public TabletModeObserver {
  public:
 
   explicit UnifiedSystemTrayBubble(UnifiedSystemTray* tray, bool show_by_click);
@@ -60,11 +58,26 @@ class UnifiedSystemTrayBubble : public TrayBubbleBase,
   // Close the bubble immediately.
   void CloseNow();
 
+  // Collapse the message center bubble.
+  void CollapseMessageCenter();
+
+  // Expand the message center bubble.
+  void ExpandMessageCenter();
+
+  // Ensure the bubble is collapsed.
+  void EnsureCollapsed();
+
   // Ensure the bubble is expanded.
   void EnsureExpanded();
 
+  // Set the state to collapsed without animation.
+  void CollapseWithoutAnimating();
+
   // Show audio settings detailed view.
   void ShowAudioDetailedView();
+
+  // Show network settings detailed view.
+  void ShowNetworkDetailedView(bool force);
 
   // Update bubble bounds and focus if necessary.
   void UpdateBubble();
@@ -74,6 +87,23 @@ class UnifiedSystemTrayBubble : public TrayBubbleBase,
   // performance bottleneck. This method makes use of layer transform to avoid
   // resizing of the bubble during animation.
   void UpdateTransform();
+
+  // Return the maximum height available for both the system tray and
+  // the message center.
+  int CalculateMaxHeight() const;
+
+  // Return the current visible height of the tray, even when partially
+  // collapsed / expanded.
+  int GetCurrentTrayHeight() const;
+
+  // Relinquish focus and transfer it to the message center widget.
+  bool FocusOut(bool reverse);
+
+  // Inform UnifiedSystemTrayView of focus being acquired.
+  void FocusEntered(bool reverse);
+
+  // Called when the message center widget is activated.
+  void OnMessageCenterActivated();
 
   // TrayBubbleBase:
   TrayBackgroundView* GetTray() const override;
@@ -101,14 +131,19 @@ class UnifiedSystemTrayBubble : public TrayBubbleBase,
   // ShelfObserver:
   void OnAutoHideStateChanged(ShelfAutoHideState new_state) override;
 
+  UnifiedSystemTrayView* unified_view() { return unified_view_; }
+
+  UnifiedSystemTrayController* controller_for_test() {
+    return controller_.get();
+  }
+
  private:
-  friend class UnifiedSystemTrayTestApi;
+  friend class SystemTrayTestApi;
 
   void UpdateBubbleBounds();
 
-  // Create / destroy background blur layer that is used during animation.
-  void CreateBlurLayerForAnimation();
-  void DestroyBlurLayerForAnimation();
+  // Called when the tray animation is finished.
+  void OnAnimationFinished();
 
   // Set visibility of bubble frame border. Used for disabling the border during
   // animation.
@@ -135,14 +170,8 @@ class UnifiedSystemTrayBubble : public TrayBubbleBase,
   // click (|show_by_click| in ctor is false), it is not set.
   base::Optional<base::TimeTicks> time_shown_by_click_;
 
-  // Background blur layer that is used during animation.
-  std::unique_ptr<ui::LayerOwner> blur_layer_;
-
   TrayBubbleView* bubble_view_ = nullptr;
   UnifiedSystemTrayView* unified_view_ = nullptr;
-
- private:
-  int CalculateMaxHeight() const;
 
   DISALLOW_COPY_AND_ASSIGN(UnifiedSystemTrayBubble);
 };

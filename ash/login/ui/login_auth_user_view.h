@@ -14,6 +14,7 @@
 #include "ash/login/ui/non_accessible_view.h"
 #include "ash/public/cpp/login_types.h"
 #include "ash/public/cpp/session/user_info.h"
+#include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/scoped_observer.h"
@@ -42,6 +43,21 @@ class ASH_EXPORT LoginAuthUserView
       public views::ButtonListener,
       public chromeos::PowerManagerClient::Observer {
  public:
+  // Flags which describe the set of currently visible auth methods.
+  enum AuthMethods {
+    AUTH_NONE = 0,                     // No extra auth methods.
+    AUTH_PASSWORD = 1 << 0,            // Display password.
+    AUTH_PIN = 1 << 1,                 // Display PIN keyboard.
+    AUTH_TAP = 1 << 2,                 // Tap to unlock.
+    AUTH_ONLINE_SIGN_IN = 1 << 3,      // Force online sign-in.
+    AUTH_FINGERPRINT = 1 << 4,         // Use fingerprint to unlock.
+    AUTH_EXTERNAL_BINARY = 1 << 5,     // Authenticate via an external binary.
+    AUTH_CHALLENGE_RESPONSE = 1 << 6,  // Authenticate via challenge-response
+                                       // protocol using security token.
+    AUTH_DISABLED = 1 << 7,  // Disable all the auth methods and show a
+                             // message to user.
+  };
+
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
    public:
@@ -55,12 +71,15 @@ class ASH_EXPORT LoginAuthUserView
     views::View* disabled_auth_message() const;
     views::Button* external_binary_auth_button() const;
     views::Button* external_binary_enrollment_button() const;
+    bool HasAuthMethod(AuthMethods auth_method) const;
 
    private:
     LoginAuthUserView* const view_;
   };
 
-  using OnAuthCallback = base::RepeatingCallback<void(bool auth_success)>;
+  using OnAuthCallback =
+      base::RepeatingCallback<void(bool auth_success,
+                                   bool display_error_messages)>;
   using OnEasyUnlockIconTapped = base::RepeatingClosure;
   using OnEasyUnlockIconHovered = base::RepeatingClosure;
 
@@ -83,19 +102,6 @@ class ASH_EXPORT LoginAuthUserView
     OnEasyUnlockIconHovered on_easy_unlock_icon_hovered;
     // Called when the easy unlock icon is tapped.
     OnEasyUnlockIconTapped on_easy_unlock_icon_tapped;
-  };
-
-  // Flags which describe the set of currently visible auth methods.
-  enum AuthMethods {
-    AUTH_NONE = 0,                  // No extra auth methods.
-    AUTH_PASSWORD = 1 << 0,         // Display password.
-    AUTH_PIN = 1 << 1,              // Display PIN keyboard.
-    AUTH_TAP = 1 << 2,              // Tap to unlock.
-    AUTH_ONLINE_SIGN_IN = 1 << 3,   // Force online sign-in.
-    AUTH_FINGERPRINT = 1 << 4,      // Use fingerprint to unlock.
-    AUTH_EXTERNAL_BINARY = 1 << 5,  // Authenticate via an external binary.
-    AUTH_DISABLED = 1 << 6,         // Disable all the auth methods and show a
-                                    // message to user.
   };
 
   LoginAuthUserView(const LoginUserInfo& user, const Callbacks& callbacks);
@@ -150,12 +156,17 @@ class ASH_EXPORT LoginAuthUserView
  private:
   struct AnimationState;
   class FingerprintView;
+  class ChallengeResponseView;
   class DisabledAuthMessageView;
 
   // Called when the user submits an auth method. Runs mojo call.
   void OnAuthSubmit(const base::string16& password);
-  // Called with the result of the request started in |OnAuthSubmit|.
+  // Called with the result of the request started in |OnAuthSubmit| or
+  // |AttemptAuthenticateWithExternalBinary|.
   void OnAuthComplete(base::Optional<bool> auth_success);
+  // Called with the result of the request started in
+  // |AttemptAuthenticateWithChallengeResponse|.
+  void OnChallengeResponseAuthComplete(base::Optional<bool> auth_success);
   // Called with the result of the external binary enrollment request.
   void OnEnrollmentComplete(base::Optional<bool> enrollment_success);
 
@@ -167,6 +178,9 @@ class ASH_EXPORT LoginAuthUserView
   // Called when the online sign-in message is tapped. It opens the Gaia screen.
   void OnOnlineSignInMessageTap();
 
+  // Called when the user presses the back button of the PIN keyboard.
+  void OnPinBack();
+
   // Helper method to check if an auth method is enable. Use it like this:
   // bool has_tap = HasAuthMethod(AUTH_TAP).
   bool HasAuthMethod(AuthMethods auth_method) const;
@@ -175,6 +189,10 @@ class ASH_EXPORT LoginAuthUserView
   // struct instead.
   void AttemptAuthenticateWithExternalBinary();
 
+  // Called when the user triggered the challenge-response authentication. It
+  // starts the asynchronous authentication process against a security token.
+  void AttemptAuthenticateWithChallengeResponse();
+
   AuthMethods auth_methods_ = AUTH_NONE;
   // True if the user's password might be a PIN. PIN is hashed differently from
   // password. The PIN keyboard may not always be visible even when the user
@@ -182,10 +200,12 @@ class ASH_EXPORT LoginAuthUserView
   bool can_use_pin_ = false;
   LoginUserView* user_view_ = nullptr;
   LoginPasswordView* password_view_ = nullptr;
+  NonAccessibleView* password_view_container_ = nullptr;
   LoginPinView* pin_view_ = nullptr;
   views::LabelButton* online_sign_in_message_ = nullptr;
   DisabledAuthMessageView* disabled_auth_message_ = nullptr;
   FingerprintView* fingerprint_view_ = nullptr;
+  ChallengeResponseView* challenge_response_view_ = nullptr;
   views::LabelButton* external_binary_auth_button_ = nullptr;
   views::LabelButton* external_binary_enrollment_button_ = nullptr;
 

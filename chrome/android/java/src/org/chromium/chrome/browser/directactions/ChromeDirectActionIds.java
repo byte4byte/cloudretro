@@ -46,6 +46,12 @@ public class ChromeDirectActionIds {
     // Close all tabs
     public static final String CLOSE_ALL_TABS = "close_all_tabs";
 
+    // Find in page.
+    public static final String FIND_IN_PAGE = "find_in_page";
+
+    // If you add a new action to this list, consider extending ChromeDirectActionUsageHistogram to
+    // track usage of the new action.
+
     private ChromeDirectActionIds() {
         // This is a utility class. It is not meant to be instantiated.
     }

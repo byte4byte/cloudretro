@@ -7,19 +7,18 @@
 
 #include "ash/public/cpp/note_taking_client.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-
-class Profile;
 
 namespace chromeos {
 
 class NoteTakingControllerClient
     : public ash::NoteTakingClient,
       public user_manager::UserManager::UserSessionStateObserver,
-      public content::NotificationObserver {
+      public ProfileObserver {
  public:
   explicit NoteTakingControllerClient(NoteTakingHelper* helper);
   ~NoteTakingControllerClient() override;
@@ -29,27 +28,24 @@ class NoteTakingControllerClient
   void CreateNote() override;
 
   // user_manager::UserManager::UserSessionStateObserver:
-  void ActiveUserChanged(const user_manager::User* active_user) override;
+  void ActiveUserChanged(user_manager::User* active_user) override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override;
 
-  void SetProfileForTesting(Profile* profile) { SetProfile(profile); }
+  void SetProfileForTesting(Profile* profile) { profile_ = profile; }
 
  private:
-  void SetProfile(Profile* profile);
+  void SetProfileByUser(const user_manager::User* user);
 
   // Unowned pointer to the note taking helper.
   NoteTakingHelper* helper_;
 
   // Unowned pointer to the active profile.
   Profile* profile_ = nullptr;
+  ScopedObserver<Profile, ProfileObserver> profile_observer_{this};
 
-  content::NotificationRegistrar registrar_;
-  std::unique_ptr<user_manager::ScopedUserSessionStateObserver>
-      session_state_observer_;
+  base::WeakPtrFactory<NoteTakingControllerClient> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NoteTakingControllerClient);
 };

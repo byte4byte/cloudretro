@@ -4,27 +4,25 @@
 
 #include <string>
 
-#include "ash/public/cpp/ash_switches.h"
 #include "base/base_paths.h"
 #include "base/environment.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/authpolicy/kerberos_files_handler.h"
 #include "chrome/browser/chromeos/login/test/active_directory_login_mixin.h"
 #include "chrome/browser/chromeos/login/test/device_state_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
+#include "chrome/browser/chromeos/login/test/oobe_screens_utils.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chromeos/dbus/auth_policy/fake_auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/fake_authpolicy_client.h"
 #include "components/user_manager/user_names.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/common/network_service_util.h"
-#include "content/public/common/service_names.mojom.h"
-#include "content/public/test/test_utils.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
 #include "services/network/public/mojom/network_service_test.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace chromeos {
 
@@ -40,9 +38,9 @@ void AssertNetworkServiceEnvEquals(const std::string& name,
                                    const std::string& expected_value) {
   std::string value;
   if (content::IsOutOfProcessNetworkService()) {
-    network::mojom::NetworkServiceTestPtr network_service_test;
-    content::GetSystemConnector()->BindInterface(
-        content::mojom::kNetworkServiceName, &network_service_test);
+    mojo::Remote<network::mojom::NetworkServiceTest> network_service_test;
+    content::GetNetworkService()->BindTestInterface(
+        network_service_test.BindNewPipeAndPassReceiver());
     mojo::ScopedAllowSyncCallForTesting allow_sync_call;
     network_service_test->GetEnvironmentVariableValue(name, &value);
   } else {
@@ -65,7 +63,7 @@ class ActiveDirectoryLoginTest : public OobeBaseTest {
   ~ActiveDirectoryLoginTest() override = default;
 
  protected:
-  FakeAuthPolicyClient* fake_auth_policy_client() {
+  FakeAuthPolicyClient* fake_authpolicy_client() {
     return FakeAuthPolicyClient::Get();
   }
 
@@ -89,7 +87,7 @@ class ActiveDirectoryLoginAutocompleteTest : public ActiveDirectoryLoginTest {
     enterprise_management::ChromeDeviceSettingsProto device_settings;
     device_settings.mutable_login_screen_domain_auto_complete()
         ->set_login_screen_domain_auto_complete(kTestUserRealm);
-    fake_auth_policy_client()->set_device_policy(device_settings);
+    fake_authpolicy_client()->set_device_policy(device_settings);
     autocomplete_realm_ = "@" + std::string(kTestUserRealm);
     ad_login_.set_autocomplete_realm(autocomplete_realm_);
   }
@@ -108,11 +106,9 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest, LoginSuccess) {
   ASSERT_TRUE(InstallAttributes::Get()->IsActiveDirectoryManaged());
   ad_login_.TestNoError();
   ad_login_.TestDomainHidden();
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
   ad_login_.SubmitActiveDirectoryCredentials(test_user_, kPassword);
-  session_start_waiter.Wait();
+  test::WaitForLastScreenAndTapGetStarted();
+  test::WaitForPrimaryUserSessionStart();
 }
 
 // Tests that the Kerberos SSO environment variables are set correctly after
@@ -121,11 +117,9 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest, KerberosVarsCopied) {
   OobeBaseTest::WaitForSigninScreen();
   ad_login_.TestNoError();
   ad_login_.TestDomainHidden();
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
   ad_login_.SubmitActiveDirectoryCredentials(test_user_, kPassword);
-  session_start_waiter.Wait();
+  test::WaitForLastScreenAndTapGetStarted();
+  test::WaitForPrimaryUserSessionStart();
 
   base::FilePath dir;
   base::PathService::Get(base::DIR_HOME, &dir);
@@ -158,19 +152,19 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest, LoginErrors) {
   ad_login_.TestUserError();
   ad_login_.TestDomainHidden();
 
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_BAD_USER_NAME);
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_BAD_USER_NAME);
   ad_login_.SubmitActiveDirectoryCredentials(test_user_, kPassword);
   ad_login_.WaitForAuthError();
   ad_login_.TestUserError();
   ad_login_.TestDomainHidden();
 
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
   ad_login_.SubmitActiveDirectoryCredentials(test_user_, kPassword);
   ad_login_.WaitForAuthError();
   ad_login_.TestPasswordError();
   ad_login_.TestDomainHidden();
 
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_UNKNOWN);
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_UNKNOWN);
   ad_login_.SubmitActiveDirectoryCredentials(test_user_, kPassword);
   ad_login_.WaitForAuthError();
   // Inputs are not invalidated for the unknown error.
@@ -188,13 +182,11 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest, PasswordChange_LoginSuccess) {
   ad_login_.TriggerPasswordChangeScreen();
 
   // Password accepted by AuthPolicyClient.
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_NONE);
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_NONE);
   ad_login_.SubmitActiveDirectoryPasswordChangeCredentials(
       kPassword, kNewPassword, kNewPassword);
-  session_start_waiter.Wait();
+  test::WaitForLastScreenAndTapGetStarted();
+  test::WaitForPrimaryUserSessionStart();
 }
 
 // Test different UI errors for Active Directory password change screen.
@@ -225,29 +217,14 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest, PasswordChange_UIErrors) {
   ad_login_.TestPasswordChangeConfirmNewPasswordError();
 
   // Password rejected by AuthPolicyClient.
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
   ad_login_.SubmitActiveDirectoryPasswordChangeCredentials(
       kPassword, kNewPassword, kNewPassword);
   ad_login_.TestPasswordChangeOldPasswordError();
 }
 
-class ActiveDirectoryWebUILoginTest : public ActiveDirectoryLoginTest {
- public:
-  ActiveDirectoryWebUILoginTest() = default;
-  ~ActiveDirectoryWebUILoginTest() override = default;
-
-  // chromeos::ActiveDirectoryLoginTest:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(ash::switches::kShowWebUiLogin);
-    chromeos::ActiveDirectoryLoginTest::SetUpCommandLine(command_line);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ActiveDirectoryWebUILoginTest);
-};
-
 // Test reopening Active Directory password change screen clears errors.
-IN_PROC_BROWSER_TEST_F(ActiveDirectoryWebUILoginTest,
+IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginTest,
                        PasswordChange_ReopenClearErrors) {
   OobeBaseTest::WaitForSigninScreen();
   ASSERT_TRUE(InstallAttributes::Get()->IsActiveDirectoryManaged());
@@ -273,12 +250,10 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginAutocompleteTest, LoginSuccess) {
   ad_login_.TestNoError();
   ad_login_.TestDomainVisible();
 
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
   ad_login_.SubmitActiveDirectoryCredentials(kTestActiveDirectoryUser,
                                              kPassword);
-  session_start_waiter.Wait();
+  test::WaitForLastScreenAndTapGetStarted();
+  test::WaitForPrimaryUserSessionStart();
 }
 
 // Tests that user could override autocomplete domain.
@@ -288,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(ActiveDirectoryLoginAutocompleteTest, TestAutocomplete) {
 
   ad_login_.TestLoginVisible();
   ad_login_.TestDomainVisible();
-  fake_auth_policy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
+  fake_authpolicy_client()->set_auth_error(authpolicy::ERROR_BAD_PASSWORD);
 
   // Submit with a different domain.
   ad_login_.SetUserInput(test_user_);

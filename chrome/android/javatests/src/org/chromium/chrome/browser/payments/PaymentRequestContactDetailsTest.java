@@ -4,9 +4,6 @@
 
 package org.chromium.chrome.browser.payments;
 
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.HAVE_INSTRUMENTS;
-import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.IMMEDIATE_RESPONSE;
-
 import android.support.test.filters.MediumTest;
 
 import org.junit.Assert;
@@ -19,13 +16,15 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -44,7 +43,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
             new PaymentRequestTestRule("payment_request_contact_details_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
         // The user has valid payer name, phone number and email address on disk.
         helper.setProfile(new AutofillProfile("", "https://example.com", true, "Jon Doe", "Google",
@@ -71,14 +70,15 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
                 "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US", "555-555-5555",
                 "jon.doe@google.com", "en-US"));
 
-        mPaymentRequestTestRule.installPaymentApp(HAVE_INSTRUMENTS, IMMEDIATE_RESPONSE);
+        mPaymentRequestTestRule.addPaymentAppFactory(
+                AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
     }
 
     /** Provide the existing valid payer name, phone number and email address to the merchant. */
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPay() throws InterruptedException, TimeoutException {
+    public void testPay() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickAndWait(
                 R.id.button_primary, mPaymentRequestTestRule.getDismissed());
@@ -90,7 +90,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddInvalidContactAndCancel() throws InterruptedException, TimeoutException {
+    public void testAddInvalidContactAndCancel() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -112,7 +112,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddContactAndPay() throws InterruptedException, TimeoutException {
+    public void testAddContactAndPay() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -134,8 +134,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickAddContactAndCloseShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickAddContactAndCloseShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -166,8 +165,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickCloseAndAddContactShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickCloseAndAddContactShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -194,8 +192,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testEditContactAndCancelEditorShouldKeepContactSelected()
-            throws InterruptedException, TimeoutException {
+    public void testEditContactAndCancelEditorShouldKeepContactSelected() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -215,8 +212,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddContactAndCancelEditorShouldKeepContactSelected()
-            throws InterruptedException, TimeoutException {
+    public void testAddContactAndCancelEditorShouldKeepContactSelected() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -236,8 +232,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickAddContactAndCancelShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickAddContactAndCancelShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -268,8 +263,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickCancelAndAddContactShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickCancelAndAddContactShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -299,7 +293,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testSuggestionsDeduped() throws InterruptedException, TimeoutException {
+    public void testSuggestionsDeduped() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInContactInfoAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -313,7 +307,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPaymentRequestEventsMetric() throws InterruptedException, TimeoutException {
+    public void testPaymentRequestEventsMetric() throws TimeoutException {
         // Start and complete the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickAndWait(
@@ -326,7 +320,7 @@ public class PaymentRequestContactDetailsTest implements MainActivityStartCallba
                 | Event.RECEIVED_INSTRUMENT_DETAILS | Event.REQUEST_PAYER_EMAIL
                 | Event.REQUEST_PAYER_PHONE | Event.REQUEST_PAYER_NAME
                 | Event.REQUEST_METHOD_BASIC_CARD | Event.REQUEST_METHOD_OTHER
-                | Event.SELECTED_OTHER;
+                | Event.SELECTED_OTHER | Event.AVAILABLE_METHOD_OTHER;
         Assert.assertEquals(1,
                 RecordHistogram.getHistogramValueCountForTesting(
                         "PaymentRequest.Events", expectedSample));

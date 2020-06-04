@@ -7,8 +7,6 @@
 
 #import <Foundation/Foundation.h>
 
-#import "ios/chrome/browser/ui/commands/browsing_data_commands.h"
-
 @class OpenNewTabCommand;
 @class ShowSigninCommand;
 @class StartVoiceSearchCommand;
@@ -18,17 +16,16 @@
 // may also be forwarded directly to a settings navigation controller.
 @protocol ApplicationSettingsCommands
 
-// Shows the accounts settings UI, presenting from |baseViewController|.
+// TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
+// Shows the accounts settings UI, presenting from |baseViewController|. If
+// |baseViewController| is nil BVC will be used as presenterViewController.
 - (void)showAccountsSettingsFromViewController:
     (UIViewController*)baseViewController;
 
-// Shows the Google services settings UI, presenting from |baseViewController|.
-- (void)showGoogleServicesSettingsFromViewController:
-    (UIViewController*)baseViewController;
-
 // TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
-// Shows the sync settings UI, presenting from |baseViewController|.
-- (void)showSyncSettingsFromViewController:
+// Shows the Google services settings UI, presenting from |baseViewController|.
+// If |baseViewController| is nil BVC will be used as presenterViewController.
+- (void)showGoogleServicesSettingsFromViewController:
     (UIViewController*)baseViewController;
 
 // TODO(crbug.com/779791) : Do not pass baseViewController through dispatcher.
@@ -58,9 +55,7 @@
 // object that implements the methods in this protocol should be able to forward
 // ApplicationSettingsCommands to the settings view controller if necessary.
 
-@protocol ApplicationCommands<NSObject,
-                              ApplicationSettingsCommands,
-                              BrowsingDataCommands>
+@protocol ApplicationCommands <NSObject, ApplicationSettingsCommands>
 
 // Dismisses all modal dialogs.
 - (void)dismissModalDialogs;
@@ -81,6 +76,10 @@
 // changed to present the|FirstRunChromeSigninViewController| and
 //|SigninPromoViewController| and this command should be removed.
 - (void)showAdvancedSigninSettingsFromViewController:
+    (UIViewController*)baseViewController;
+
+// Presents the Trusted Vault reauth dialog.
+- (void)showTrustedVaultReauthenticationFromViewController:
     (UIViewController*)baseViewController;
 
 // Starts a voice search on the current BVC.
@@ -126,6 +125,9 @@
 
 // Sets whether the UI is displaying incognito content.
 - (void)setIncognitoContentVisible:(BOOL)incognitoContentVisible;
+
+// Open a new window with |userActivity|
+- (void)openNewWindowWithActivity:(NSUserActivity*)userActivity;
 
 @end
 

@@ -159,6 +159,8 @@ cr.define('cr.ui', function() {
   Oobe.showUserPods = function() {
     $('pod-row').maybePreselectPod();
     Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
+    if (Oobe.getInstance().showingViewsLogin)
+      return;
     Oobe.resetSigninUI(true);
   };
 
@@ -267,7 +269,7 @@ cr.define('cr.ui', function() {
     }
 
     Oobe.disableSigninUI();
-    chrome.send('skipToLoginForTesting', [username]);
+    chrome.send('skipToLoginForTesting');
 
     if (!enterpriseEnroll) {
       chrome.send('completeLogin', [gaia_id, username, password, false]);
@@ -342,10 +344,13 @@ cr.define('cr.ui', function() {
    * attribute screen if it's present.
    */
   Oobe.isEnrollmentSuccessfulForTest = function() {
-    if ($('enterprise-enrollment').$$('.oauth-enroll-state-attribute-prompt'))
+    const step = $('enterprise-enrollment').currentStep_;
+    if (step === ENROLLMENT_STEP.ATTRIBUTE_PROMPT) {
       chrome.send('oauthEnrollAttributes', ['', '']);
+      return true;
+    }
 
-    return !!$('enterprise-enrollment').$$('.oauth-enroll-state-success');
+    return step === ENROLLMENT_STEP.SUCCESS;
   };
 
   /**
@@ -370,6 +375,22 @@ cr.define('cr.ui', function() {
    */
   Oobe.setClientAreaSize = function(width, height) {
     Oobe.getInstance().setClientAreaSize(width, height);
+  };
+
+  /**
+   * Sets the current height of the shelf area.
+   * @param {number} height current shelf height
+   */
+  Oobe.setShelfHeight = function(height) {
+    Oobe.getInstance().setShelfHeight(height);
+  };
+
+  /**
+   * Sets the hint for calculating OOBE dialog margins.
+   * @param {OobeTypes.DialogPaddingMode} mode.
+   */
+  Oobe.setDialogPaddingMode = function(mode) {
+    Oobe.getInstance().setDialogPaddingMode(mode);
   };
 
   /**

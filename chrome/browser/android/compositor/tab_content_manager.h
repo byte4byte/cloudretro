@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/layers/ui_resource_layer.h"
-#include "chrome/browser/android/thumbnail/thumbnail_cache.h"
+#include "chrome/browser/thumbnail/cc/thumbnail_cache.h"
 #include "content/public/browser/render_widget_host_view.h"
 
 using base::android::ScopedJavaLocalRef;
@@ -50,7 +50,7 @@ class TabContentManager : public ThumbnailCacheObserver {
 
   virtual ~TabContentManager();
 
-  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void Destroy(JNIEnv* env);
 
   void SetUIResourceProvider(ui::UIResourceProvider* ui_resource_provider);
 
@@ -115,6 +115,9 @@ class TabContentManager : public ThumbnailCacheObserver {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jint timeMs);
+  jint GetPendingReadbacksForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   // ThumbnailCacheObserver implementation;
   void OnFinishedThumbnailRead(TabId tab_id) override;
@@ -142,7 +145,7 @@ class TabContentManager : public ThumbnailCacheObserver {
       base::android::ScopedJavaGlobalRef<jobject> j_callback,
       bool need_downsampling,
       bool result,
-      SkBitmap bitmap);
+      const SkBitmap& bitmap);
 
   std::unique_ptr<ThumbnailCache> thumbnail_cache_;
   ThumbnailLayerMap static_layer_cache_;
@@ -150,7 +153,7 @@ class TabContentManager : public ThumbnailCacheObserver {
   TabReadbackRequestMap pending_tab_readbacks_;
 
   JavaObjectWeakGlobalRef weak_java_tab_content_manager_;
-  base::WeakPtrFactory<TabContentManager> weak_factory_;
+  base::WeakPtrFactory<TabContentManager> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TabContentManager);
 };

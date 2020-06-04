@@ -63,7 +63,7 @@
                     android:maxLines="1"
                     android:singleLine="true"
                     android:ellipsize="end"
-                    android:textAppearance="@style/TextAppearance.BlackCaption"
+                    android:textAppearance="@style/TextAppearance.TextSmall.Secondary"
                     android:textDirection="locale"
                     tools:text="chromium.org"/>
                 <TextView
@@ -71,7 +71,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:maxLines="1"
-                    android:textAppearance="@style/TextAppearance.BlackCaption"
+                    android:textAppearance="@style/TextAppearance.TextSmall.Secondary"
                     android:textDirection="locale"
                     tools:text=" - 3 hours ago" />
 
@@ -108,8 +108,7 @@
             android:layout_alignParentEnd="true"
             android:scaleType="centerCrop"
             tools:ignore="ContentDescription"
-            android:src="@null"
-            tools:src="@drawable/ic_snippet_thumbnail_placeholder" />
+            android:src="@null" />
     </RelativeLayout>
 
     <!-- It would have been nice to use RoundedBitmapDrawable on the thumbnail, but with that you

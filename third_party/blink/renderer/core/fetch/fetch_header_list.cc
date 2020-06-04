@@ -35,9 +35,9 @@ void FetchHeaderList::Append(const String& name, const String& value) {
   //    |list|."
   auto header = header_list_.find(name);
   if (header != header_list_.end())
-    header_list_.insert(std::make_pair(header->first, value));
+    header_list_.emplace(header->first, value);
   else
-    header_list_.insert(std::make_pair(name, value));
+    header_list_.emplace(name, value);
 }
 
 void FetchHeaderList::Set(const String& name, const String& value) {
@@ -102,6 +102,23 @@ bool FetchHeaderList::Get(const String& name, String& result) const {
   if (found)
     result = resultBuilder.ToString();
   return found;
+}
+
+String FetchHeaderList::GetAsRawString(int status_code,
+                                       String status_message) const {
+  StringBuilder builder;
+  builder.Append("HTTP/1.1 ");
+  builder.AppendNumber(status_code);
+  builder.Append(" ");
+  builder.Append(status_message);
+  builder.Append("\r\n");
+  for (auto& it : header_list_) {
+    builder.Append(it.first);
+    builder.Append(":");
+    builder.Append(it.second);
+    builder.Append("\r\n");
+  }
+  return builder.ToString();
 }
 
 bool FetchHeaderList::Has(const String& name) const {

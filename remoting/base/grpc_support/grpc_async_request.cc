@@ -4,11 +4,12 @@
 
 #include "remoting/base/grpc_support/grpc_async_request.h"
 
+#include "base/logging.h"
 #include "third_party/grpc/src/include/grpcpp/client_context.h"
 
 namespace remoting {
 
-GrpcAsyncRequest::GrpcAsyncRequest() : grpc_async_request_weak_factory_(this) {}
+GrpcAsyncRequest::GrpcAsyncRequest() = default;
 
 GrpcAsyncRequest::~GrpcAsyncRequest() = default;
 

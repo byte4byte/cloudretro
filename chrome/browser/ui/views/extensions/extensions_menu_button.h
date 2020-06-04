@@ -9,26 +9,36 @@
 
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
-#include "chrome/browser/ui/views/hover_button.h"
+#include "chrome/browser/ui/views/extensions/extension_context_menu_controller.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
+#include "ui/views/controls/button/label_button.h"
+
+class ExtensionsMenuItemView;
 
 namespace views {
 class Button;
-class MenuButton;
-class MenuModelAdapter;
-class MenuRunner;
 }  // namespace views
 
-class ExtensionsMenuButton : public HoverButton,
+// ExtensionsMenuButton is the single extension action button within a row in
+// the extensions menu. This includes the extension icon and name and triggers
+// the extension action.
+class ExtensionsMenuButton : public views::LabelButton,
                              public views::ButtonListener,
                              public ToolbarActionViewDelegateViews {
  public:
   ExtensionsMenuButton(Browser* browser,
-                       std::unique_ptr<ToolbarActionViewController> controller);
+                       ExtensionsMenuItemView* parent,
+                       ToolbarActionViewController* controller);
   ~ExtensionsMenuButton() override;
 
   static const char kClassName[];
+
+  SkColor GetInkDropBaseColor() const override;
+
+  const base::string16& label_text_for_testing() const {
+    return label()->GetText();
+  }
 
  private:
   // views::ButtonListener:
@@ -43,28 +53,13 @@ class ExtensionsMenuButton : public HoverButton,
   void UpdateState() override;
   bool IsMenuRunning() const override;
 
-  void RunExtensionContextMenu(ui::MenuSourceType source_type);
-
-  // Callback for MenuModelAdapter.
-  void OnMenuClosed();
-
-  // Configures the secondary (right-hand-side) view of this HoverButton.
-  void ConfigureSecondaryView();
-
   Browser* const browser_;
-  const std::unique_ptr<ToolbarActionViewController> controller_;
 
-  // TODO(pbos): There's complicated configuration code in place since menus
-  // can't be triggered from ImageButtons. When MenuRunner::RunMenuAt accepts
-  // views::Buttons, turn this into a views::ImageButton and use
-  // image_button_factory.h methods to configure it.
-  views::MenuButton* context_menu_button_ = nullptr;
+  // The container containing this view.
+  ExtensionsMenuItemView* const parent_;
 
-  // Responsible for converting the context menu model into |menu_|.
-  std::unique_ptr<views::MenuModelAdapter> menu_adapter_;
-
-  // Responsible for running the menu.
-  std::unique_ptr<views::MenuRunner> menu_runner_;
+  // Responsible for executing the extension's actions.
+  ToolbarActionViewController* const controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsMenuButton);
 };

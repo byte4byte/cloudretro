@@ -9,18 +9,24 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_dialog_container.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_footer_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_permissions_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_summary_panel.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/web_applications/system_web_app_manager.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
@@ -45,24 +51,16 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/arc_app_info_links_panel.h"
 #endif
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-#include "ui/aura/window.h"
-#endif
-
 namespace {
 
 // The color of the separator used inside the dialog - should match the app
-// list's app_list::kDialogSeparatorColor
+// list's ash::kDialogSeparatorColor
 constexpr SkColor kDialogSeparatorColor = SkColorSetRGB(0xD1, 0xD1, 0xD1);
-
-#if BUILDFLAG(ENABLE_APP_LIST)
-// The elevation used for dialog shadow effect.
-constexpr int kDialogShadowElevation = 24;
-#endif
+constexpr gfx::Size kDialogSize = gfx::Size(380, 490);
 
 }  // namespace
 
-bool CanShowAppInfoDialog() {
+bool CanPlatformShowAppInfoDialog() {
 #if defined(OS_MACOSX)
   return false;
 #else
@@ -70,30 +68,62 @@ bool CanShowAppInfoDialog() {
 #endif
 }
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-void ShowAppInfoInAppList(const gfx::Rect& app_info_bounds,
+bool CanShowAppInfoDialog(Profile* profile, const std::string& extension_id) {
+#if defined(OS_CHROMEOS)
+  bool is_system_web_app = web_app::WebAppProvider::Get(profile)
+                               ->system_web_app_manager()
+                               .IsSystemWebApp(extension_id);
+  if (is_system_web_app) {
+    return false;
+  }
+
+  const extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile);
+  const extensions::Extension* extension =
+      registry->GetInstalledExtension(extension_id);
+
+  if (!extension) {
+    return false;
+  }
+
+  // App Management only displays apps that are displayed in the launcher.
+  if (!extension->ShouldDisplayInAppLauncher()) {
+    return false;
+  }
+#endif
+  return CanPlatformShowAppInfoDialog();
+}
+
+#if defined(OS_CHROMEOS)
+void ShowAppInfoInAppList(gfx::NativeWindow parent,
+                          const gfx::Rect& app_info_bounds,
                           Profile* profile,
                           const extensions::Extension* app) {
   views::DialogDelegate* dialog = CreateAppListContainerForView(
       std::make_unique<AppInfoDialog>(profile, app));
-  views::Widget* dialog_widget = new views::Widget();
-  views::Widget::InitParams params =
-      views::DialogDelegate::GetDialogWidgetInitParams(dialog, nullptr, nullptr,
-                                                       app_info_bounds);
-  params.shadow_type = views::Widget::InitParams::SHADOW_TYPE_DEFAULT;
-  params.shadow_elevation = kDialogShadowElevation;
-  dialog_widget->Init(params);
-  // The title is not shown on the dialog, but it is used for overview mode.
-  dialog_widget->GetNativeWindow()->SetTitle(base::UTF8ToUTF16(app->name()));
+
+  views::Widget* dialog_widget =
+      constrained_window::CreateBrowserModalDialogViews(dialog, parent);
+  dialog_widget->SetBounds(app_info_bounds);
   dialog_widget->Show();
 }
 #endif
+
+void ShowAppInfo(Profile* profile,
+                 const extensions::Extension* app,
+                 const base::Closure& close_callback) {
+  views::DialogDelegate* dialog = CreateDialogContainerForView(
+      std::make_unique<AppInfoDialog>(profile, app), kDialogSize,
+      close_callback);
+  views::Widget* dialog_widget =
+      views::DialogDelegate::CreateDialogWidget(dialog, nullptr, nullptr);
+  dialog_widget->Show();
+}
 
 void ShowAppInfoInNativeDialog(content::WebContents* web_contents,
                                Profile* profile,
                                const extensions::Extension* app,
                                const base::Closure& close_callback) {
-  constexpr gfx::Size kDialogSize = gfx::Size(380, 490);
   views::DialogDelegate* dialog = CreateDialogContainerForView(
       std::make_unique<AppInfoDialog>(profile, app), kDialogSize,
       close_callback);

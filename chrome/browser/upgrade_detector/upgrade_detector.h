@@ -57,6 +57,9 @@ class UpgradeDetector {
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  virtual void Init();
+  virtual void Shutdown();
+
   // Returns the time at which an available upgrade was detected.
   base::Time upgrade_detected_time() const { return upgrade_detected_time_; }
 
@@ -141,6 +144,7 @@ class UpgradeDetector {
   // RelaunchNotificationPeriod policy setting, or a zero delta if unset or out
   // of range.
   static base::TimeDelta GetRelaunchNotificationPeriod();
+  static bool IsRelaunchNotificationPolicyEnabled();
 
   const base::Clock* clock() { return clock_; }
 

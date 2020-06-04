@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.notifications;
 
-import static org.chromium.chrome.browser.util.ViewUtils.dpToPx;
+import static org.chromium.ui.base.ViewUtils.dpToPx;
 
 import android.content.Context;
 import android.content.res.Resources;
@@ -18,10 +18,13 @@ import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.RemoteViews;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.components.browser_ui.notifications.ChromeNotification;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
 import org.chromium.ui.base.LocalizationUtils;
 
 import java.util.Date;
@@ -250,7 +253,7 @@ public class CustomNotificationBuilder extends NotificationBuilderBase {
 
         Drawable inputDrawable = new BitmapDrawable(resources, bitmap);
         Drawable outputDrawable = ApiCompatibilityUtils.getUserBadgedDrawableForDensity(
-                mContext, inputDrawable, null /* badgeLocation */, metrics.densityDpi);
+                inputDrawable, null /* badgeLocation */, metrics.densityDpi);
 
         // The input bitmap is immutable, so the output drawable will be a different instance from
         // the input drawable if the work profile badge was applied.

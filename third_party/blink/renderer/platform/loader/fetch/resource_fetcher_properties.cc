@@ -23,6 +23,8 @@ void DetachableResourceFetcherProperties::Detach() {
   load_complete_ = properties_->IsLoadComplete();
   is_subframe_deprioritization_enabled_ =
       properties_->IsSubframeDeprioritizationEnabled();
+  web_bundle_physical_url_ = properties_->WebBundlePhysicalUrl();
+  outstanding_throttled_limit_ = properties_->GetOutstandingThrottledLimit();
 
   properties_ = nullptr;
 }

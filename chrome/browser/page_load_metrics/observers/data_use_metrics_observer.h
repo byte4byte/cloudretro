@@ -7,9 +7,9 @@
 
 #include "base/macros.h"
 #include "base/sequence_checker.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "chrome/common/page_load_metrics/page_load_metrics.mojom.h"
-#include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom-forward.h"
+#include "components/page_load_metrics/common/page_load_timing.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
 namespace content {

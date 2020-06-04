@@ -10,11 +10,9 @@
 #import "base/ios/block_types.h"
 
 @protocol DialogPresenterDelegate;
+class Browser;
 class GURL;
 @class AlertCoordinator;
-
-// Accessibility identifier added to the text field of JavaScript prompts.
-extern NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier;
 
 namespace web {
 class WebState;
@@ -27,6 +25,8 @@ class WebState;
 // NO, dialogs will be queued and displayed when the DialogPresenter is
 // activated.
 @property(nonatomic, assign, getter=isActive) BOOL active;
+
+@property(nonatomic, assign) Browser* browser;
 
 // Dialogs will be presented from |viewController|.
 - (instancetype)initWithDelegate:(id<DialogPresenterDelegate>)delegate
@@ -89,7 +89,7 @@ class WebState;
 @end
 
 // Delegate protocol for DialogPresenter.
-@protocol DialogPresenterDelegate<NSObject>
+@protocol DialogPresenterDelegate <NSObject>
 
 // Called by |presenter| before showing the queued modal dialog associated with
 // |context|.

@@ -82,7 +82,7 @@ class FakeCryptAuthV2EnrollerFactory : public CryptAuthV2EnrollerImpl::Factory {
 
  private:
   // CryptAuthV2EnrollerImpl::Factory:
-  std::unique_ptr<CryptAuthV2Enroller> BuildInstance(
+  std::unique_ptr<CryptAuthV2Enroller> CreateInstance(
       CryptAuthKeyRegistry* key_registry,
       CryptAuthClientFactory* client_factory,
       std::unique_ptr<base::OneShotTimer> timer =
@@ -123,8 +123,8 @@ class DeviceSyncCryptAuthV2EnrollmentManagerImplTest
         test_pref_service_.registry());
     CryptAuthKeyRegistryImpl::RegisterPrefs(test_pref_service_.registry());
 
-    key_registry_ = CryptAuthKeyRegistryImpl::Factory::Get()->BuildInstance(
-        &test_pref_service_);
+    key_registry_ =
+        CryptAuthKeyRegistryImpl::Factory::Create(&test_pref_service_);
 
     fake_enroller_factory_ = std::make_unique<FakeCryptAuthV2EnrollerFactory>(
         key_registry_.get(), &mock_client_factory_);
@@ -167,12 +167,10 @@ class DeviceSyncCryptAuthV2EnrollmentManagerImplTest
 
     VerifyUserKeyPairStateHistogram(0u /* total_count */);
 
-    enrollment_manager_ =
-        CryptAuthV2EnrollmentManagerImpl::Factory::Get()->BuildInstance(
-            &fake_client_app_metadata_provider_, key_registry_.get(),
-            &mock_client_factory_, &fake_gcm_manager_,
-            &fake_enrollment_scheduler_, &test_pref_service_, &test_clock_,
-            std::move(mock_timer));
+    enrollment_manager_ = CryptAuthV2EnrollmentManagerImpl::Factory::Create(
+        &fake_client_app_metadata_provider_, key_registry_.get(),
+        &mock_client_factory_, &fake_gcm_manager_, &fake_enrollment_scheduler_,
+        &test_pref_service_, &test_clock_, std::move(mock_timer));
 
     VerifyUserKeyPairStateHistogram(1u /* total_count */);
 
@@ -437,24 +435,6 @@ TEST_F(DeviceSyncCryptAuthV2EnrollmentManagerImplTest, GcmRegistrationFailed) {
   VerifyEnrollmentResults({CryptAuthEnrollmentResult(
       CryptAuthEnrollmentResult::ResultCode::kErrorGcmRegistrationFailed,
       base::nullopt /* client_directive */)});
-}
-
-TEST_F(DeviceSyncCryptAuthV2EnrollmentManagerImplTest, GcmRegistrationTimeout) {
-  CreateEnrollmentManager();
-  enrollment_manager()->Start();
-
-  fake_enrollment_scheduler()->RequestEnrollment(
-      cryptauthv2::ClientMetadata::INITIALIZATION /* invocation_reason */,
-      base::nullopt /* session_id */);
-
-  // Timeout waiting for GcmRegistration.
-  EXPECT_TRUE(mock_timer()->IsRunning());
-  mock_timer()->Fire();
-
-  VerifyEnrollmentResults(
-      {CryptAuthEnrollmentResult(CryptAuthEnrollmentResult::ResultCode::
-                                     kErrorTimeoutWaitingForGcmRegistration,
-                                 base::nullopt /* client_directive */)});
 }
 
 TEST_F(DeviceSyncCryptAuthV2EnrollmentManagerImplTest,
@@ -727,6 +707,24 @@ TEST_F(DeviceSyncCryptAuthV2EnrollmentManagerImplTest,
             enrollment_manager()->GetUserPublicKey());
   EXPECT_EQ(expected_user_key_pair_v1.private_key(),
             enrollment_manager()->GetUserPrivateKey());
+
+  // Expect re-enrollment using newly added v1 key.
+  enrollment_manager()->Start();
+  cryptauthv2::ClientMetadata expected_client_metadata =
+      cryptauthv2::BuildClientMetadata(
+          0 /* retry_count */, cryptauthv2::ClientMetadata::INITIALIZATION,
+          base::nullopt /* session_id */);
+  CryptAuthEnrollmentResult expected_enrollment_result(
+      CryptAuthEnrollmentResult::ResultCode::kSuccessNewKeysEnrolled,
+      base::nullopt /* client_directive */);
+  CompleteGcmRegistration(true /* success */);
+  HandleGetClientAppMetadataRequest(true /* success */);
+  FinishEnrollmentAttempt(0u /* expected_enroller_instance_index */,
+                          expected_client_metadata, expected_enrollment_result);
+
+  VerifyInvocationReasonHistogram(
+      {expected_client_metadata.invocation_reason()});
+  VerifyEnrollmentResults({expected_enrollment_result});
 }
 
 TEST_F(DeviceSyncCryptAuthV2EnrollmentManagerImplTest,

@@ -7,6 +7,8 @@
 
 #import <UIKit/UIKit.h>
 
+@protocol EdgeLayoutGuideProvider;
+
 // Struct to track the current keyboard state.
 typedef struct {
   // Is YES if the keyboard is visible or becoming visible.
@@ -28,7 +30,10 @@ typedef struct {
 
 // Indicates that |UIKeyboardWillHideNotification| was posted but the keyboard
 // was not hidden. For example, this can happen when jumping between fields.
-- (void)keyboardDidStayOnScreen;
+// Deprecated. This is not needed on iOS 13 and will be deleted once support for
+// iOS 12 is removed.
+- (void)keyboardDidStayOnScreen API_DEPRECATED("Not needed on iOS >12",
+                                               ios(11.0, 13.0));
 
 // Indicates that the keyboard state changed, at least on one of the
 // |KeyboardState| aspects.
@@ -38,6 +43,17 @@ typedef struct {
 
 // Helper to observe the keyboard and report updates.
 @interface KeyboardObserverHelper : NSObject
+
+// Keyboard's UIView based on some known, undocumented classes. |nil| if the
+// keyboard is not present or found.
+// This can break on any iOS update to keyboard architecture.
+@property(class, readonly, nonatomic) UIView* keyboardView;
+
+// Best layout guide for the keyboard including the prediction part of it. |nil|
+// if the keyboard is not present or found.
+// This can break on any iOS update to keyboard architecture.
+@property(class, readonly, nonatomic) id<EdgeLayoutGuideProvider>
+    keyboardLayoutGuide;
 
 // Flag that indicates if the keyboard is on screen.
 // TODO(crbug.com/974226): look into deprecating keyboardOnScreen for

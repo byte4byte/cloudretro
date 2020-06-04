@@ -149,12 +149,12 @@ class MockWidgetInputHandler : public mojom::WidgetInputHandler {
 
     // Invoke the callback on this object with the passed in |state|.
     // The callback is called with default values for the other fields.
-    void CallCallback(InputEventAckState state);
+    void CallCallback(blink::mojom::InputEventResultState state);
 
     // Invoke a callback with all the arguments provided.
-    void CallCallback(InputEventAckSource source,
+    void CallCallback(blink::mojom::InputEventResultSource source,
                       const ui::LatencyInfo& latency_info,
-                      InputEventAckState state,
+                      blink::mojom::InputEventResultState state,
                       const base::Optional<ui::DidOverscrollParams>& overscroll,
                       const base::Optional<cc::TouchAction>& touch_action);
 
@@ -196,10 +196,10 @@ class MockWidgetInputHandler : public mojom::WidgetInputHandler {
   // mojom::WidgetInputHandler override.
   void SetFocus(bool focused) override;
   void MouseCaptureLost() override;
+  void MouseLockLost() override;
   void SetEditCommandsForNextKeyEvent(
       const std::vector<content::EditCommand>& commands) override;
   void CursorVisibilityChanged(bool visible) override;
-  void FallbackCursorModeToggled(bool is_on) override;
   void ImeSetComposition(const base::string16& text,
                          const std::vector<ui::ImeTextSpan>& ime_text_spans,
                          const gfx::Range& range,

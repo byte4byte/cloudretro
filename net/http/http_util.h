@@ -95,7 +95,9 @@ class NET_EXPORT HttpUtil {
   static bool IsMethodIdempotent(base::StringPiece method);
 
   // Returns true if it is safe to allow users and scripts to specify the header
-  // named |name|.
+  // named |name|. Returns true for headers not in the list at
+  // https://fetch.spec.whatwg.org/#forbidden-header-name. Does not check header
+  // validity.
   static bool IsSafeHeader(base::StringPiece name);
 
   // Returns true if |name| is a valid HTTP header name.
@@ -324,7 +326,7 @@ class NET_EXPORT HttpUtil {
   //
   // This iterator is careful to skip over delimiters found inside an HTTP
   // quoted string.
-  class NET_EXPORT_PRIVATE ValuesIterator {
+  class NET_EXPORT ValuesIterator {
    public:
     ValuesIterator(std::string::const_iterator values_begin,
                    std::string::const_iterator values_end,

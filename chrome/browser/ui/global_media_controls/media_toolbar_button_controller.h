@@ -5,48 +5,41 @@
 #ifndef CHROME_BROWSER_UI_GLOBAL_MEDIA_CONTROLS_MEDIA_TOOLBAR_BUTTON_CONTROLLER_H_
 #define CHROME_BROWSER_UI_GLOBAL_MEDIA_CONTROLS_MEDIA_TOOLBAR_BUTTON_CONTROLLER_H_
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/media_session/public/mojom/media_controller.mojom.h"
+#include "chrome/browser/ui/global_media_controls/media_notification_service_observer.h"
 
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
-
+class MediaNotificationService;
 class MediaToolbarButtonControllerDelegate;
 
 // Controller for the MediaToolbarButtonView that decides when to show or hide
 // the icon from the toolbar.
-class MediaToolbarButtonController
-    : public media_session::mojom::MediaControllerObserver {
+class MediaToolbarButtonController : public MediaNotificationServiceObserver {
  public:
-  MediaToolbarButtonController(service_manager::Connector* connector,
-                               MediaToolbarButtonControllerDelegate* delegate);
+  MediaToolbarButtonController(MediaToolbarButtonControllerDelegate* delegate,
+                               MediaNotificationService* service);
+  MediaToolbarButtonController(const MediaToolbarButtonController&) = delete;
+  MediaToolbarButtonController& operator=(const MediaToolbarButtonController&) =
+      delete;
   ~MediaToolbarButtonController() override;
 
-  // media_session::mojom::MediaControllerObserver implementation.
-  void MediaSessionInfoChanged(
-      media_session::mojom::MediaSessionInfoPtr session_info) override;
-  void MediaSessionMetadataChanged(
-      const base::Optional<media_session::MediaMetadata>& metadata) override {}
-  void MediaSessionActionsChanged(
-      const std::vector<media_session::mojom::MediaSessionAction>& actions)
-      override {}
-  void MediaSessionChanged(
-      const base::Optional<base::UnguessableToken>& request_id) override {}
+  // MediaNotificationServiceObserver implementation.
+  void OnNotificationListChanged() override;
+  void OnMediaDialogOpenedOrClosed() override;
 
  private:
-  service_manager::Connector* const connector_;
+  // Tracks the current display state of the toolbar button delegate.
+  enum class DisplayState {
+    kShown,
+    kDisabled,
+    kHidden,
+  };
+
+  void UpdateToolbarButtonState();
+
   MediaToolbarButtonControllerDelegate* const delegate_;
+  MediaNotificationService* const service_;
 
-  // Tracks current media session state/metadata.
-  media_session::mojom::MediaControllerPtr media_controller_ptr_;
-
-  // Used to receive updates to the active media controller.
-  mojo::Binding<media_session::mojom::MediaControllerObserver>
-      media_controller_observer_binding_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaToolbarButtonController);
+  // The delegate starts hidden and isn't shown until media playback starts.
+  DisplayState delegate_display_state_ = DisplayState::kHidden;
 };
 
 #endif  // CHROME_BROWSER_UI_GLOBAL_MEDIA_CONTROLS_MEDIA_TOOLBAR_BUTTON_CONTROLLER_H_

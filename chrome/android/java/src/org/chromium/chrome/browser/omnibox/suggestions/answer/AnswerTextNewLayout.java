@@ -5,9 +5,10 @@
 package org.chromium.chrome.browser.omnibox.suggestions.answer;
 
 import android.content.Context;
-import android.support.annotation.StyleRes;
 import android.text.style.MetricAffectingSpan;
 import android.text.style.TextAppearanceSpan;
+
+import androidx.annotation.StyleRes;
 
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
@@ -139,7 +140,7 @@ class AnswerTextNewLayout extends AnswerText {
     private MetricAffectingSpan[] getAppearanceForAnswerText(@AnswerTextType int type) {
         if (mAnswerType != AnswerType.DICTIONARY && mAnswerType != AnswerType.FINANCE) {
             return new TextAppearanceSpan[] {
-                    new TextAppearanceSpan(mContext, R.style.TextAppearance_BlackTitle1)};
+                    new TextAppearanceSpan(mContext, R.style.TextAppearance_TextLarge_Primary)};
         }
 
         @StyleRes
@@ -154,7 +155,7 @@ class AnswerTextNewLayout extends AnswerText {
                 break;
 
             case AnswerTextType.SUGGESTION_SECONDARY_TEXT_MEDIUM:
-                res = R.style.TextAppearance_BlackDisabledText2;
+                res = R.style.TextAppearance_TextSmall_Tertiary;
                 break;
 
             case AnswerTextType.SUGGESTION:
@@ -163,12 +164,12 @@ class AnswerTextNewLayout extends AnswerText {
             case AnswerTextType.ANSWER_TEXT_LARGE:
             case AnswerTextType.TOP_ALIGNED:
             case AnswerTextType.SUGGESTION_SECONDARY_TEXT_SMALL:
-                res = R.style.TextAppearance_BlackTitle1;
+                res = R.style.TextAppearance_TextLarge_Primary;
                 break;
 
             default:
                 Log.w(TAG, "Unknown answer type: " + type);
-                res = R.style.TextAppearance_BlackTitle1;
+                res = R.style.TextAppearance_TextLarge_Primary;
                 break;
         }
 
@@ -183,6 +184,6 @@ class AnswerTextNewLayout extends AnswerText {
      */
     private MetricAffectingSpan[] getAppearanceForQueryText(@AnswerTextType int type) {
         return new TextAppearanceSpan[] {
-                new TextAppearanceSpan(mContext, R.style.TextAppearance_BlackHint2)};
+                new TextAppearanceSpan(mContext, R.style.TextAppearance_TextMedium_Secondary)};
     }
 }

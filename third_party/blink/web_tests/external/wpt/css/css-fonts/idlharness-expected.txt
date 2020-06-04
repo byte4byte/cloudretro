@@ -1,7 +1,11 @@
 This is a testharness.js-based test.
+Found 52 tests; 16 PASS, 36 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS idl_test setup
+PASS idl_test validation
 PASS Partial interface CSSRule: original interface defined
+PASS Partial interface CSSRule: member names are unique
 PASS Partial interface CSSRule[2]: original interface defined
+PASS Partial interface CSSRule[2]: member names are unique
 PASS CSSFontFaceRule interface: existence and properties of interface object
 PASS CSSFontFaceRule interface object length
 PASS CSSFontFaceRule interface object name
@@ -33,7 +37,7 @@ FAIL CSSFontFeatureValuesMap interface object name assert_own_property: self doe
 FAIL CSSFontFeatureValuesMap interface: existence and properties of interface prototype object assert_own_property: self does not have own property "CSSFontFeatureValuesMap" expected property "CSSFontFeatureValuesMap" missing
 FAIL CSSFontFeatureValuesMap interface: existence and properties of interface prototype object's "constructor" property assert_own_property: self does not have own property "CSSFontFeatureValuesMap" expected property "CSSFontFeatureValuesMap" missing
 FAIL CSSFontFeatureValuesMap interface: existence and properties of interface prototype object's @@unscopables property assert_own_property: self does not have own property "CSSFontFeatureValuesMap" expected property "CSSFontFeatureValuesMap" missing
-FAIL CSSFontFeatureValuesMap interface: operation set(CSSOMString, [object Object],[object Object]) assert_own_property: self does not have own property "CSSFontFeatureValuesMap" expected property "CSSFontFeatureValuesMap" missing
+FAIL CSSFontFeatureValuesMap interface: operation set(CSSOMString, (unsigned long or sequence<unsigned long>)) assert_own_property: self does not have own property "CSSFontFeatureValuesMap" expected property "CSSFontFeatureValuesMap" missing
 FAIL CSSFontPaletteValuesRule interface: existence and properties of interface object assert_own_property: self does not have own property "CSSFontPaletteValuesRule" expected property "CSSFontPaletteValuesRule" missing
 FAIL CSSFontPaletteValuesRule interface object length assert_own_property: self does not have own property "CSSFontPaletteValuesRule" expected property "CSSFontPaletteValuesRule" missing
 FAIL CSSFontPaletteValuesRule interface object name assert_own_property: self does not have own property "CSSFontPaletteValuesRule" expected property "CSSFontPaletteValuesRule" missing

@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -16,22 +16,19 @@
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/metrics/subprocess_metrics_provider.h"
-#include "chrome/browser/previews/previews_service.h"
-#include "chrome/browser/previews/previews_service_factory.h"
+#include "chrome/browser/previews/previews_test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/optimization_guide/hints_component_info.h"
+#include "components/optimization_guide/hints_component_util.h"
+#include "components/optimization_guide/optimization_guide_constants.h"
 #include "components/optimization_guide/optimization_guide_features.h"
 #include "components/optimization_guide/optimization_guide_service.h"
 #include "components/optimization_guide/proto/hints.pb.h"
 #include "components/optimization_guide/test_hints_component_creator.h"
-#include "components/previews/content/previews_hints.h"
-#include "components/previews/content/previews_optimization_guide.h"
-#include "components/previews/content/previews_ui_service.h"
-#include "components/previews/core/previews_constants.h"
 #include "components/previews/core/previews_features.h"
 #include "components/previews/core/previews_switches.h"
 #include "content/public/test/browser_test.h"
@@ -39,34 +36,12 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "third_party/blink/public/common/features.h"
 
-namespace {
-
-// Retries fetching |histogram_name| until it contains at least |count| samples.
-void RetryForHistogramUntilCountReached(base::HistogramTester* histogram_tester,
-                                        const std::string& histogram_name,
-                                        size_t count) {
-  while (true) {
-    base::ThreadPoolInstance::Get()->FlushForTesting();
-    base::RunLoop().RunUntilIdle();
-
-    content::FetchHistogramsFromChildProcesses();
-    SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
-
-    const std::vector<base::Bucket> buckets =
-        histogram_tester->GetAllSamples(histogram_name);
-    size_t total_count = 0;
-    for (const auto& bucket : buckets) {
-      total_count += bucket.count;
-    }
-    if (total_count >= count) {
-      break;
-    }
-  }
-}
-
-}  // namespace
-
+// The first parameter selects whether the DeferAllScript optimization type is
+// enabled, and the second parameter selects whether
+// OptimizationGuideKeyedService is enabled. (The tests should pass in the same
+// way for all cases).
 class DeferAllScriptPriorityBrowserTest
     : public ::testing::WithParamInterface<bool>,
       public InProcessBrowserTest {
@@ -79,16 +54,14 @@ class DeferAllScriptPriorityBrowserTest
       scoped_feature_list_.InitWithFeatures(
           {previews::features::kPreviews,
            previews::features::kDeferAllScriptPreviews,
-           optimization_guide::features::kOptimizationHints,
-           data_reduction_proxy::features::
-               kDataReductionProxyEnabledWithNetworkService},
+           blink::features::kLowerJavaScriptPriorityWhenForceDeferred,
+           optimization_guide::features::kOptimizationHints},
           {});
     } else {
       scoped_feature_list_.InitWithFeatures(
           {previews::features::kPreviews,
-           optimization_guide::features::kOptimizationHints,
-           data_reduction_proxy::features::
-               kDataReductionProxyEnabledWithNetworkService},
+           blink::features::kLowerJavaScriptPriorityWhenForceDeferred,
+           optimization_guide::features::kOptimizationHints},
           {});
     }
 
@@ -196,21 +169,14 @@ class DeferAllScriptPriorityBrowserTest
   // processed before returning.
   void ProcessHintsComponent(
       const optimization_guide::HintsComponentInfo& component_info) {
-    // Register a QuitClosure for when the next hint update is started below.
-    base::RunLoop run_loop;
-    PreviewsServiceFactory::GetForProfile(
-        Profile::FromBrowserContext(browser()
-                                        ->tab_strip_model()
-                                        ->GetActiveWebContents()
-                                        ->GetBrowserContext()))
-        ->previews_ui_service()
-        ->previews_decider_impl()
-        ->previews_opt_guide()
-        ->ListenForNextUpdateForTesting(run_loop.QuitClosure());
+    base::HistogramTester histogram_tester;
 
     g_browser_process->optimization_guide_service()->MaybeUpdateHintsComponent(
         component_info);
-    run_loop.Run();
+
+    RetryForHistogramUntilCountReached(
+        &histogram_tester,
+        optimization_guide::kComponentHintsUpdatedResultHistogramString, 1);
   }
 
   // Performs a navigation to |url| and waits for the the url's host's hints to
@@ -225,8 +191,7 @@ class DeferAllScriptPriorityBrowserTest
     ui_test_utils::NavigateToURL(browser(), url);
 
     RetryForHistogramUntilCountReached(
-        &histogram_tester,
-        previews::kPreviewsOptimizationGuideOnLoadedHintResultHistogramString,
+        &histogram_tester, optimization_guide::kLoadedHintLocalHistogramString,
         1);
   }
 
@@ -244,6 +209,7 @@ class DeferAllScriptPriorityBrowserTest
 
  protected:
   base::test::ScopedFeatureList scoped_feature_list_;
+  base::test::ScopedFeatureList param_feature_list_;
 
  private:
   void TearDownOnMainThread() override {
@@ -262,16 +228,9 @@ class DeferAllScriptPriorityBrowserTest
 };
 
 // Parameter is true if the test should be run with defer feature enabled.
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          DeferAllScriptPriorityBrowserTest,
-                         ::testing::Values(false, true));
-
-// Avoid flakes and issues on non-applicable platforms.
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-#define DISABLE_ON_WIN_MAC_CHROMESOS(x) DISABLED_##x
-#else
-#define DISABLE_ON_WIN_MAC_CHROMESOS(x) x
-#endif
+                         ::testing::Bool());
 
 // Fetches an HTML weboage that fetches CSS files followed by an external
 // JavaScript file. Verifies that the fetching of the JavaScript files is
@@ -287,7 +246,7 @@ INSTANTIATE_TEST_SUITE_P(,
 // as non-delayale, thus fetching it in parallel with the CSS files.
 IN_PROC_BROWSER_TEST_P(
     DeferAllScriptPriorityBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(DeferAllScriptHttpsWhitelisted)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(DeferAllScriptHttpsWhitelisted)) {
   GURL url = https_url();
 
   if (IsDeferAllScriptFeatureEnabled()) {

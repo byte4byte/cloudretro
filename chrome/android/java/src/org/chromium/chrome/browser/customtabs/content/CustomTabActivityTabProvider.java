@@ -6,8 +6,8 @@
 
 package org.chromium.chrome.browser.customtabs.content;
 
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ObserverList;
 import org.chromium.chrome.browser.ActivityTabProvider;
@@ -32,6 +32,8 @@ public class CustomTabActivityTabProvider {
     private Tab mTab;
     @TabCreationMode
     private int mTabCreationMode = TabCreationMode.NONE;
+    @Nullable
+    private String mSpeculatedUrl;
 
     @Inject
     CustomTabActivityTabProvider() {}
@@ -71,14 +73,29 @@ public class CustomTabActivityTabProvider {
         return mTabCreationMode;
     }
 
-    void setInitialTab(@NonNull Tab tab, @TabCreationMode int creationMode) {
+    /**
+     * Returns speculated url, if there was one.
+     */
+    @Nullable
+    public String getSpeculatedUrl() {
+        return mSpeculatedUrl;
+    }
+
+    public void setInitialTab(@NonNull Tab tab, @TabCreationMode int creationMode) {
         assert mTab == null;
         assert creationMode != TabCreationMode.NONE;
         mTab = tab;
         mTabCreationMode = creationMode;
+        if (creationMode != TabCreationMode.HIDDEN) {
+            mSpeculatedUrl = null;
+        }
         for (Observer observer : mObservers) {
             observer.onInitialTabCreated(tab, creationMode);
         }
+    }
+
+    void setSpeculatedUrl(@Nullable String url) {
+        mSpeculatedUrl = url;
     }
 
     void removeTab() {
@@ -90,7 +107,7 @@ public class CustomTabActivityTabProvider {
         }
     }
 
-    void swapTab(@Nullable Tab tab) {
+    public void swapTab(@Nullable Tab tab) {
         assert mTab != null : "swapTab shouldn't be called before setInitialTab";
         if (mTab == tab) return;
         mTab = tab;
@@ -109,7 +126,7 @@ public class CustomTabActivityTabProvider {
      * Observer that gets notified about changes of the Tab currently managed by Custom Tab
      * activity.
      */
-    public static abstract class Observer {
+    public abstract static class Observer {
         /**
          * Fired when the initial tab has been created.
          */
@@ -131,5 +148,4 @@ public class CustomTabActivityTabProvider {
          */
         public void onAllTabsClosed() {}
     }
-
 }

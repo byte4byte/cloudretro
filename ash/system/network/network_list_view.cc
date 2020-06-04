@@ -12,6 +12,7 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/network/network_icon.h"
 #include "ash/system/network/network_icon_animation.h"
@@ -28,13 +29,13 @@
 #include "base/i18n/number_formatting.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/services/network_config/public/cpp/cros_network_config_util.h"
-#include "chromeos/services/network_config/public/mojom/constants.mojom.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
 #include "components/device_event_log/device_event_log.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/scroll_view.h"
@@ -69,14 +70,24 @@ bool IsSecondaryUser() {
          !session_controller->IsUserPrimary();
 }
 
+SkColor GetIconColor() {
+  return AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kIconPrimary,
+      AshColorProvider::AshColorMode::kDark);
+}
+
+bool IsManagedByPolicy(const NetworkInfo& info) {
+  return info.source == OncSource::kDevicePolicy ||
+         info.source == OncSource::kUserPolicy;
+}
+
 }  // namespace
 
 // NetworkListView:
 
 NetworkListView::NetworkListView(DetailedViewDelegate* delegate,
                                  LoginStatus login)
-    : NetworkStateListDetailedView(delegate, LIST_TYPE_NETWORK, login),
-      model_(Shell::Get()->system_tray_model()->network_state_model()) {}
+    : NetworkStateListDetailedView(delegate, LIST_TYPE_NETWORK, login) {}
 
 NetworkListView::~NetworkListView() {
   network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
@@ -84,7 +95,7 @@ NetworkListView::~NetworkListView() {
 
 void NetworkListView::UpdateNetworkList() {
   CHECK(scroll_content());
-  model_->cros_network_config()->GetNetworkStateList(
+  model()->cros_network_config()->GetNetworkStateList(
       NetworkFilter::New(FilterType::kVisible, NetworkType::kAll,
                          chromeos::network_config::mojom::kNoLimit),
       base::BindOnce(&NetworkListView::OnGetNetworkStateList,
@@ -126,33 +137,45 @@ void NetworkListView::OnGetNetworkStateList(
         vpn_connected_ = true;
       continue;
     }
-    // If cellular is not enabled, skip cellular networks with no service.
-    ActivationStateType activation_state =
-        network->cellular ? network->cellular->activation_state
-                          : ActivationStateType::kUnknown;
-    if (network->type == NetworkType::kCellular &&
-        model_->GetDeviceState(NetworkType::kCellular) !=
-            DeviceStateType::kEnabled &&
-        activation_state == ActivationStateType::kNoService) {
-      continue;
-    }
-    if (network->type == NetworkType::kWiFi)
-      wifi_has_networks_ = true;
-    // Real (non 'default') Cellular networks are always connectable.
-    if (network->type == NetworkType::kCellular && network->connectable)
-      mobile_has_networks_ = true;
-    if (network->type == NetworkType::kTether) {
-      mobile_has_networks_ = true;
-      tether_has_networks_ = true;
-    }
 
     auto info = std::make_unique<NetworkInfo>(network->guid);
+    ActivationStateType activation_state = ActivationStateType::kUnknown;
+    switch (network->type) {
+      case NetworkType::kCellular:
+        activation_state =
+            network->type_state->get_cellular()->activation_state;
+        // If cellular is not enabled, skip cellular networks with no service.
+        if (model()->GetDeviceState(NetworkType::kCellular) !=
+                DeviceStateType::kEnabled &&
+            activation_state == ActivationStateType::kNoService) {
+          continue;
+        }
+        // Real (non 'default') Cellular networks are always connectable.
+        if (network->connectable)
+          mobile_has_networks_ = true;
+        break;
+      case NetworkType::kWiFi:
+        wifi_has_networks_ = true;
+        info->secured = network->type_state->get_wifi()->security !=
+                        chromeos::network_config::mojom::SecurityType::kNone;
+        break;
+      case NetworkType::kTether:
+        mobile_has_networks_ = true;
+        tether_has_networks_ = true;
+        info->battery_percentage =
+            network->type_state->get_tether()->battery_percentage;
+        break;
+      default:
+        break;
+    }
+
     info->label = network_icon::GetLabelForNetworkList(network.get());
     // |network_list_| only contains non virtual networks.
     info->image = network_icon::GetImageForNonVirtualNetwork(
         network.get(), network_icon::ICON_TYPE_LIST, false /* badge_vpn */);
     info->disable = activation_state == ActivationStateType::kActivating ||
                     network->prohibited_by_policy;
+    info->connectable = network->connectable;
     if (network->prohibited_by_policy) {
       info->tooltip =
           l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_NETWORK_PROHIBITED);
@@ -160,8 +183,9 @@ void NetworkListView::OnGetNetworkStateList(
 
     info->connection_state = connection_state;
 
-    if (network->tether)
-      info->battery_percentage = network->tether->battery_percentage;
+    info->signal_strength =
+        chromeos::network_config::GetWirelessSignalStrength(network.get());
+
     if (network->captive_portal_provider) {
       info->captive_portal_provider_name =
           network->captive_portal_provider->name;
@@ -207,7 +231,17 @@ void NetworkListView::UpdateNetworkListInternal() {
 
   views::View* selected_view = nullptr;
   for (const auto& iter : network_guid_map_) {
-    if (iter.second->IsMouseHovered()) {
+    // The within_bounds check is necessary when the network list goes beyond
+    // the visible area (i.e. scrolling) and the mouse is below the tray pop-up.
+    // The items not in view in the tray pop-up keep going down and have
+    // View::GetVisibility() == true but they are masked and not seen by the
+    // user. When the mouse is below the list where the item would be if the
+    // list continued downward, IsMouseHovered() is true and this will trigger
+    // an incorrect programmatic scroll if we don't stop it. The bounds check
+    // ensures the view is actually visible within the tray pop-up.
+    bool within_bounds =
+        this->GetBoundsInScreen().Intersects(iter.second->GetBoundsInScreen());
+    if (within_bounds && iter.second->IsMouseHovered()) {
       selected_view = iter.second;
       break;
     }
@@ -223,7 +257,7 @@ NetworkListView::UpdateNetworkListEntries() {
   // Keep an index where the next child should be inserted.
   int index = 0;
 
-  const NetworkStateProperties* default_network = model_->default_network();
+  const NetworkStateProperties* default_network = model()->default_network();
   bool using_proxy = default_network &&
                      default_network->proxy_mode == ProxyMode::kFixedServers;
   // Show a warning that the connection might be monitored if connected to a VPN
@@ -270,7 +304,7 @@ NetworkListView::UpdateNetworkListEntries() {
     wifi_header_view_ = new WifiSectionHeaderView();
 
   bool wifi_enabled =
-      model_->GetDeviceState(NetworkType::kWiFi) == DeviceStateType::kEnabled;
+      model()->GetDeviceState(NetworkType::kWiFi) == DeviceStateType::kEnabled;
   index = UpdateNetworkSectionHeader(NetworkType::kWiFi, wifi_enabled, index,
                                      wifi_header_view_, &wifi_separator_view_);
 
@@ -308,12 +342,12 @@ NetworkListView::UpdateNetworkListEntries() {
 
 bool NetworkListView::ShouldMobileDataSectionBeShown() {
   // The section should always be shown if Cellular networks are available.
-  if (model_->GetDeviceState(NetworkType::kCellular) !=
+  if (model()->GetDeviceState(NetworkType::kCellular) !=
       DeviceStateType::kUnavailable) {
     return true;
   }
 
-  DeviceStateType tether_state = model_->GetDeviceState(NetworkType::kTether);
+  DeviceStateType tether_state = model()->GetDeviceState(NetworkType::kTether);
   // Hide the section if both Cellular and Tether are UNAVAILABLE.
   if (tether_state == DeviceStateType::kUnavailable)
     return false;
@@ -340,8 +374,7 @@ void NetworkListView::UpdateViewForNetwork(HoverHighlightView* view,
     // "X" icon superimposed so that it is clear that they are disconnected.
     network_image = gfx::ImageSkiaOperations::CreateSuperimposedImage(
         info.image, gfx::CreateVectorIcon(kNetworkMobileNotConnectedXIcon,
-                                          info.image.height(),
-                                          kMobileNotConnectedXIconColor));
+                                          info.image.height(), GetIconColor()));
   } else {
     network_image = info.image;
   }
@@ -367,8 +400,109 @@ void NetworkListView::UpdateViewForNetwork(HoverHighlightView* view,
       view->AddRightView(icon);
   }
 
+  view->SetAccessibleName(GenerateAccessibilityLabel(info));
+  view->GetViewAccessibility().OverrideDescription(
+      GenerateAccessibilityDescription(info));
+
   needs_relayout_ = true;
 }
+
+base::string16 NetworkListView::GenerateAccessibilityLabel(
+    const NetworkInfo& info) {
+  if (CanNetworkConnect(info.connection_state, info.type, info.connectable)) {
+    return l10n_util::GetStringFUTF16(
+        IDS_ASH_STATUS_TRAY_NETWORK_A11Y_LABEL_CONNECT, info.label);
+  }
+  return l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_NETWORK_A11Y_LABEL_OPEN,
+                                    info.label);
+}
+
+base::string16 NetworkListView::GenerateAccessibilityDescription(
+    const NetworkInfo& info) {
+  base::string16 connection_status;
+  if (StateIsConnected(info.connection_state) ||
+      info.connection_state == ConnectionStateType::kConnecting) {
+    connection_status = l10n_util::GetStringUTF16(
+        StateIsConnected(info.connection_state)
+            ? IDS_ASH_STATUS_TRAY_NETWORK_STATUS_CONNECTED
+            : IDS_ASH_STATUS_TRAY_NETWORK_STATUS_CONNECTING);
+  }
+
+  switch (info.type) {
+    case NetworkType::kEthernet:
+      if (!connection_status.empty()) {
+        if (IsManagedByPolicy(info)) {
+          return l10n_util::GetStringFUTF16(
+              IDS_ASH_STATUS_TRAY_ETHERNET_A11Y_DESC_MANAGED_WITH_CONNECTION_STATUS,
+              connection_status);
+        }
+        return connection_status;
+      }
+      if (IsManagedByPolicy(info)) {
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_ETHERNET_A11Y_DESC_MANAGED, info.label,
+            connection_status);
+      }
+      return info.label;
+    case NetworkType::kWiFi: {
+      base::string16 security_label = l10n_util::GetStringUTF16(
+          info.secured ? IDS_ASH_STATUS_TRAY_NETWORK_STATUS_SECURED
+                       : IDS_ASH_STATUS_TRAY_NETWORK_STATUS_UNSECURED);
+      if (!connection_status.empty()) {
+        if (IsManagedByPolicy(info)) {
+          return l10n_util::GetStringFUTF16(
+              IDS_ASH_STATUS_TRAY_WIFI_NETWORK_A11Y_DESC_MANAGED_WITH_CONNECTION_STATUS,
+              security_label, connection_status,
+              base::FormatPercent(info.signal_strength));
+        }
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_WIFI_NETWORK_A11Y_DESC_WITH_CONNECTION_STATUS,
+            security_label, connection_status,
+            base::FormatPercent(info.signal_strength));
+      }
+      if (IsManagedByPolicy(info)) {
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_WIFI_NETWORK_A11Y_DESC_MANAGED, security_label,
+            base::FormatPercent(info.signal_strength));
+      }
+      return l10n_util::GetStringFUTF16(
+          IDS_ASH_STATUS_TRAY_WIFI_NETWORK_A11Y_DESC, security_label,
+          base::FormatPercent(info.signal_strength));
+    }
+    case NetworkType::kCellular:
+      if (!connection_status.empty()) {
+        if (IsManagedByPolicy(info)) {
+          return l10n_util::GetStringFUTF16(
+              IDS_ASH_STATUS_TRAY_CELLULAR_NETWORK_A11Y_DESC_MANAGED_WITH_CONNECTION_STATUS,
+              connection_status, base::FormatPercent(info.signal_strength));
+        }
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_CELLULAR_NETWORK_A11Y_DESC_WITH_CONNECTION_STATUS,
+            connection_status, base::FormatPercent(info.signal_strength));
+      }
+      if (IsManagedByPolicy(info)) {
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_CELLULAR_NETWORK_A11Y_DESC_MANAGED,
+            base::FormatPercent(info.signal_strength));
+      }
+      return l10n_util::GetStringFUTF16(
+          IDS_ASH_STATUS_TRAY_CELLULAR_NETWORK_A11Y_DESC,
+          base::FormatPercent(info.signal_strength));
+    case NetworkType::kTether:
+      if (!connection_status.empty()) {
+        return l10n_util::GetStringFUTF16(
+            IDS_ASH_STATUS_TRAY_TETHER_NETWORK_A11Y_DESC_WITH_CONNECTION_STATUS,
+            connection_status, base::FormatPercent(info.signal_strength),
+            base::FormatPercent(info.battery_percentage));
+      }
+      return l10n_util::GetStringFUTF16(
+          IDS_ASH_STATUS_TRAY_TETHER_NETWORK_A11Y_DESC,
+          base::FormatPercent(info.signal_strength),
+          base::FormatPercent(info.battery_percentage));
+    default:
+      return base::ASCIIToUTF16("");
+  }
+}  // namespace tray
 
 views::View* NetworkListView::CreatePowerStatusView(const NetworkInfo& info) {
   // Mobile can be Cellular or Tether.
@@ -379,12 +513,15 @@ views::View* NetworkListView::CreatePowerStatusView(const NetworkInfo& info) {
   if (info.type != NetworkType::kTether)
     return nullptr;
 
-  views::ImageView* icon = TrayPopupUtils::CreateMoreImageView();
+  views::ImageView* icon = new views::ImageView;
+  const SkColor icon_color = GetIconColor();
+  icon->SetPreferredSize(gfx::Size(kMenuIconSize, kMenuIconSize));
+  icon->EnableCanvasFlippingForRTLUI(true);
   PowerStatus::BatteryImageInfo icon_info;
   icon_info.charge_percent = info.battery_percentage;
-  icon->SetImage(
-      PowerStatus::GetBatteryImage(icon_info, kMobileNetworkBatteryIconSize,
-                                   kMenuIconColorDisabled, kMenuIconColor));
+  icon->SetImage(PowerStatus::GetBatteryImage(
+      icon_info, kMobileNetworkBatteryIconSize,
+      AshColorProvider::GetSecondToneColor(icon_color), icon_color));
 
   // Show the numeric battery percentage on hover.
   icon->set_tooltip_text(base::FormatPercent(info.battery_percentage));
@@ -400,7 +537,7 @@ views::View* NetworkListView::CreatePolicyView(const NetworkInfo& info) {
 
   views::ImageView* controlled_icon = TrayPopupUtils::CreateMainImageView();
   controlled_icon->SetImage(
-      gfx::CreateVectorIcon(kSystemMenuBusinessIcon, kMenuIconColor));
+      gfx::CreateVectorIcon(kSystemMenuBusinessIcon, GetIconColor()));
   return controlled_icon;
 }
 
@@ -411,7 +548,7 @@ views::View* NetworkListView::CreateControlledByExtensionView(
 
   views::ImageView* controlled_icon = TrayPopupUtils::CreateMainImageView();
   controlled_icon->SetImage(
-      gfx::CreateVectorIcon(kCaptivePortalIcon, kMenuIconColor));
+      gfx::CreateVectorIcon(kCaptivePortalIcon, GetIconColor()));
   controlled_icon->set_tooltip_text(l10n_util::GetStringFUTF16(
       IDS_ASH_STATUS_TRAY_EXTENSION_CONTROLLED_WIFI,
       base::UTF8ToUTF16(info.captive_portal_provider_name)));
@@ -533,7 +670,7 @@ TriView* NetworkListView::CreateConnectionWarning() {
   // Set 'info' icon on left side.
   views::ImageView* image_view = TrayPopupUtils::CreateMainImageView();
   image_view->SetImage(
-      gfx::CreateVectorIcon(kSystemMenuInfoIcon, kMenuIconColor));
+      gfx::CreateVectorIcon(kSystemMenuInfoIcon, GetIconColor()));
   image_view->SetBackground(views::CreateSolidBackground(SK_ColorTRANSPARENT));
   connection_warning->AddView(TriView::Container::START, image_view);
 

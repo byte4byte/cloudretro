@@ -7,16 +7,17 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/autofill/address_accessory_controller.h"
 #include "chrome/browser/autofill/credit_card_accessory_controller.h"
+#include "chrome/browser/password_manager/android/password_accessory_controller.h"
+#include "chrome/browser/password_manager/android/password_accessory_metrics_util.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
-#include "chrome/browser/password_manager/password_accessory_controller.h"
-#include "chrome/browser/password_manager/password_accessory_metrics_util.h"
-#include "chrome/browser/password_manager/touch_to_fill_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_util.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/credential_cache.h"
 #include "content/public/browser/web_contents.h"
 
@@ -45,8 +46,7 @@ FillingSource GetSourceForTab(const AccessorySheetData& accessory_sheet) {
     case AccessoryTabType::COUNT:
       break;  // Intentional failure.
   }
-  NOTREACHED() << "Cannot determine filling source for "
-               << accessory_sheet.get_sheet_type();
+  NOTREACHED() << "Cannot determine filling source";
   return FillingSource::PASSWORD_FALLBACKS;
 }
 
@@ -65,6 +65,14 @@ base::WeakPtr<ManualFillingController> ManualFillingController::GetOrCreate(
     mf_controller->Initialize();
   }
   return mf_controller->AsWeakPtr();
+}
+
+// static
+base::WeakPtr<ManualFillingController> ManualFillingController::Get(
+    content::WebContents* contents) {
+  ManualFillingControllerImpl* mf_controller =
+      ManualFillingControllerImpl::FromWebContents(contents);
+  return mf_controller ? mf_controller->AsWeakPtr() : nullptr;
 }
 
 // static
@@ -107,6 +115,11 @@ void ManualFillingControllerImpl::RefreshSuggestions(
 void ManualFillingControllerImpl::NotifyFocusedInputChanged(
     autofill::mojom::FocusedFieldType focused_field_type) {
   focused_field_type_ = focused_field_type;
+
+  // Ensure warnings and filling state is updated according to focused field.
+  if (cc_controller_)
+    cc_controller_->RefreshSuggestions();
+
   // Whenever the focus changes, reset the accessory.
   if (ShouldShowAccessory())
     view_->SwapSheetWithKeyboard();
@@ -164,14 +177,13 @@ void ManualFillingControllerImpl::OnOptionSelected(
   controller->OnOptionSelected(selected_action);
 }
 
-void ManualFillingControllerImpl::GetFavicon(
-    int desired_size_in_pixel,
-    base::OnceCallback<void(const gfx::Image&)> icon_callback) {
-  // TODO(crbug.com/945300): This should request favicons directly.
-  PasswordAccessoryController* controller = GetPasswordController();
+void ManualFillingControllerImpl::OnToggleChanged(
+    AccessoryAction toggled_action,
+    bool enabled) const {
+  AccessoryController* controller = GetControllerForAction(toggled_action);
   if (!controller)
     return;  // Controller not available anymore.
-  controller->GetFavicon(desired_size_in_pixel, std::move(icon_callback));
+  controller->OnToggleChanged(toggled_action, enabled);
 }
 
 gfx::NativeView ManualFillingControllerImpl::container_view() const {
@@ -204,11 +216,6 @@ ManualFillingControllerImpl::ManualFillingControllerImpl(
     cc_controller_ =
         CreditCardAccessoryController::GetOrCreate(web_contents)->AsWeakPtr();
     DCHECK(cc_controller_);
-  }
-  if (TouchToFillController::AllowedForWebContents(web_contents)) {
-    touch_to_fill_controller_ =
-        TouchToFillController::GetOrCreate(web_contents)->AsWeakPtr();
-    DCHECK(touch_to_fill_controller_);
   }
 }
 
@@ -261,10 +268,7 @@ bool ManualFillingControllerImpl::ShouldShowAccessory() const {
 
 void ManualFillingControllerImpl::UpdateVisibility() {
   if (ShouldShowAccessory()) {
-    if (available_sources_.contains(FillingSource::TOUCH_TO_FILL))
-      view_->ShowTouchToFillSheet();
-    else
-      view_->ShowWhenKeyboardIsVisible();
+    view_->ShowWhenKeyboardIsVisible();
   } else {
     view_->Hide();
   }
@@ -280,7 +284,6 @@ AccessoryController* ManualFillingControllerImpl::GetControllerForTab(
     case AccessoryTabType::CREDIT_CARDS:
       return cc_controller_.get();
     case AccessoryTabType::TOUCH_TO_FILL:
-      return touch_to_fill_controller_.get();
     case AccessoryTabType::ALL:
     case AccessoryTabType::COUNT:
       break;  // Intentional failure.
@@ -295,6 +298,7 @@ AccessoryController* ManualFillingControllerImpl::GetControllerForAction(
     case AccessoryAction::GENERATE_PASSWORD_MANUAL:
     case AccessoryAction::MANAGE_PASSWORDS:
     case AccessoryAction::GENERATE_PASSWORD_AUTOMATIC:
+    case AccessoryAction::TOGGLE_SAVE_PASSWORDS:
       return GetPasswordController();
     case AccessoryAction::MANAGE_ADDRESSES:
       return address_controller_.get();

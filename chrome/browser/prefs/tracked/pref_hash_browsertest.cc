@@ -22,7 +22,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -32,6 +31,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/template_url_data.h"
 #include "content/public/test/test_launcher.h"
@@ -128,6 +129,7 @@ int GetTrackedPrefHistogramCount(const char* histogram_name,
   return GetTrackedPrefHistogramCount(histogram_name, "", allowed_buckets);
 }
 
+#if !defined(OS_CHROMEOS)
 std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
     const base::FilePath& pref_file) {
   JSONFileValueDeserializer deserializer(pref_file);
@@ -146,6 +148,7 @@ std::unique_ptr<base::DictionaryValue> ReadPrefsDictionary(
   return std::unique_ptr<base::DictionaryValue>(
       static_cast<base::DictionaryValue*>(prefs.release()));
 }
+#endif
 
 // Returns whether external validation is supported on the platform through
 // storing MACs in the registry.
@@ -172,10 +175,10 @@ bool SupportsRegistryValidation() {
 
 // A base fixture designed such that implementations do two things:
 //  1) Override all three pure-virtual methods below to setup, attack, and
-//     verify preferenes throughout the tests provided by this fixture.
+//     verify preferences throughout the tests provided by this fixture.
 //  2) Instantiate their test via the PREF_HASH_BROWSER_TEST macro above.
 // Based on top of ExtensionBrowserTest to allow easy interaction with the
-// ExtensionService.
+// ExtensionRegistry.
 class PrefHashBrowserTestBase
     : public extensions::ExtensionBrowserTest,
       public testing::WithParamInterface<std::string> {
@@ -226,8 +229,7 @@ class PrefHashBrowserTestBase
     // below).
     EXPECT_EQ(PROTECTION_DISABLED_ON_PLATFORM, protection_level_);
     return true;
-#endif
-
+#else
     base::FilePath profile_dir;
     EXPECT_TRUE(base::PathService::Get(chrome::DIR_USER_DATA, &profile_dir));
     profile_dir = profile_dir.AppendASCII(TestingProfile::kTestUserProfileDir);
@@ -276,6 +278,7 @@ class PrefHashBrowserTestBase
     }
 
     return true;
+#endif
   }
 
   void SetUpInProcessBrowserTestFixture() override {
@@ -431,15 +434,15 @@ class PrefHashBrowserTestBase
 
 #else  // defined(OFFICIAL_BUILD)
 
-    using namespace chrome_prefs::internals;
-    if (trial_group == kSettingsEnforcementGroupNoEnforcement)
+    namespace internals = chrome_prefs::internals;
+    if (trial_group == internals::kSettingsEnforcementGroupNoEnforcement)
       return PROTECTION_DISABLED_FOR_GROUP;
-    if (trial_group == kSettingsEnforcementGroupEnforceAlways)
+    if (trial_group == internals::kSettingsEnforcementGroupEnforceAlways)
       return PROTECTION_ENABLED_BASIC;
-    if (trial_group == kSettingsEnforcementGroupEnforceAlwaysWithDSE)
+    if (trial_group == internals::kSettingsEnforcementGroupEnforceAlwaysWithDSE)
       return PROTECTION_ENABLED_DSE;
     if (trial_group ==
-        kSettingsEnforcementGroupEnforceAlwaysWithExtensionsAndDSE) {
+        internals::kSettingsEnforcementGroupEnforceAlwaysWithExtensionsAndDSE) {
       return PROTECTION_ENABLED_EXTENSIONS;
     }
     ADD_FAILURE();
@@ -540,7 +543,7 @@ class PrefHashBrowserTestUnchangedCustom
     EXPECT_EQ("http://example.com",
               profile()->GetPrefs()->GetString(prefs::kHomePage));
 
-    EXPECT_TRUE(extension_service()->GetExtensionById(kGoodCrxId, false));
+    EXPECT_TRUE(extension_registry()->enabled_extensions().GetByID(kGoodCrxId));
 
     // Reaction should be identical to unattacked default prefs.
     PrefHashBrowserTestUnchangedDefault::VerifyReactionToPrefAttack();
@@ -892,16 +895,10 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
   }
 
   void VerifyReactionToPrefAttack() override {
-    // Expect a single split pref changed report with a count of 2 for tracked
-    // pref #5 (extensions).
     EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM ? 1 : 0,
               GetTrackedPrefHistogramCount(
                   user_prefs::tracked::kTrackedPrefHistogramChanged,
                   BEGIN_ALLOW_SINGLE_BUCKET + 5));
-    EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM ? 1 : 0,
-              GetTrackedPrefHistogramCount(
-                  "Settings.TrackedSplitPreferenceChanged.extensions.settings",
-                  BEGIN_ALLOW_SINGLE_BUCKET + 2));
 
     // Everything else should have remained unchanged.
     EXPECT_EQ(
@@ -923,8 +920,10 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
                   user_prefs::tracked::kTrackedPrefHistogramReset,
                   BEGIN_ALLOW_SINGLE_BUCKET + 5));
 
-    EXPECT_EQ(protection_level_ < PROTECTION_ENABLED_EXTENSIONS,
-              extension_service()->GetExtensionById(kGoodCrxId, true) != NULL);
+    EXPECT_EQ(
+        protection_level_ < PROTECTION_ENABLED_EXTENSIONS,
+        extension_registry()->GetExtensionById(
+            kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING) != nullptr);
 
     // Nothing else should have triggered.
     EXPECT_EQ(

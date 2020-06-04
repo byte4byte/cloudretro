@@ -10,13 +10,17 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/lock_screen_action/lock_screen_action_background_controller.h"
 #include "ash/lock_screen_action/lock_screen_action_background_observer.h"
 #include "ash/login/ui/login_data_dispatcher.h"
 #include "ash/public/cpp/kiosk_app_menu.h"
 #include "ash/public/cpp/login_types.h"
+#include "ash/public/cpp/scoped_guest_button_blocker.h"
 #include "ash/shutdown_controller_impl.h"
 #include "ash/system/locale/locale_update_controller_impl.h"
+#include "ash/tray_action/tray_action.h"
 #include "ash/tray_action/tray_action_observer.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
@@ -31,9 +35,7 @@ enum class SessionState;
 
 namespace ash {
 
-class LockScreenActionBackgroundController;
 enum class LockScreenActionBackgroundState;
-class TrayAction;
 
 class KioskAppsButton;
 
@@ -66,6 +68,7 @@ class ASH_EXPORT LoginShelfView : public views::View,
     virtual void OnUiUpdate() = 0;
   };
 
+ public:
   explicit LoginShelfView(
       LockScreenActionBackgroundController* lock_screen_action_background);
   ~LoginShelfView() override;
@@ -101,11 +104,15 @@ class ASH_EXPORT LoginShelfView : public views::View,
   // Sets whether shutdown button is enabled in the login screen.
   void SetShutdownButtonEnabled(bool enable_shutdown_button);
 
+  // Sets and animates the opacity of login shelf buttons.
+  void SetButtonOpacity(float target_opacity);
+
   // views::View:
   const char* GetClassName() const override;
   void OnFocus() override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void Layout() override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -115,8 +122,7 @@ class ASH_EXPORT LoginShelfView : public views::View,
   // Test API. Returns true if request was successful (i.e. button was
   // clickable).
   bool LaunchAppForTesting(const std::string& app_id);
-  bool SimulateAddUserButtonForTesting();
-  bool SimulateGuestButtonForTesting();
+  bool SimulateButtonPressedForTesting(ButtonId button);
 
   // Adds test delegate. Delegate will become owned by LoginShelfView.
   void InstallTestUiUpdateDelegate(
@@ -125,6 +131,9 @@ class ASH_EXPORT LoginShelfView : public views::View,
   TestUiUpdateDelegate* test_ui_update_delegate() {
     return test_ui_update_delegate_.get();
   }
+
+  // Returns scoped object to temporarily block Browse as Guest login button.
+  std::unique_ptr<ScopedGuestButtonBlocker> GetScopedGuestButtonBlocker();
 
  protected:
   // TrayActionObserver:
@@ -145,6 +154,8 @@ class ASH_EXPORT LoginShelfView : public views::View,
   void OnLocaleChanged() override;
 
  private:
+  class ScopedGuestButtonBlockerImpl;
+
   bool LockScreenActionBackgroundAnimating() const;
 
   // Updates the visibility of buttons based on state changes, e.g. shutdown
@@ -196,6 +207,11 @@ class ASH_EXPORT LoginShelfView : public views::View,
   // letting events that target the "empty space" pass through. These
   // coordinates are local to the view.
   gfx::Rect button_union_bounds_;
+
+  // Number of active scoped Guest button blockers.
+  int scoped_guest_button_blockers_ = 0;
+
+  base::WeakPtrFactory<LoginShelfView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LoginShelfView);
 };

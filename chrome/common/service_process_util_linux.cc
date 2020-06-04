@@ -13,31 +13,26 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/threading/platform_thread.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/auto_start_linux.h"
 #include "chrome/common/multi_process_lock.h"
 #include "chrome/common/service_process_util_posix.h"
 
 namespace {
 
-MultiProcessLock* TakeServiceInitializingLock(bool waiting) {
-  std::string lock_name =
-      GetServiceProcessScopedName("_service_initializing");
-  return TakeNamedLock(lock_name, waiting);
-}
-
 std::string GetBaseDesktopName() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return "google-chrome-service.desktop";
-#else  // CHROMIUM_BUILD
+#else  // BUILDFLAG(CHROMIUM_BRANDING)
   return "chromium-service.desktop";
 #endif
 }
 }  // namespace
 
-MultiProcessLock* TakeServiceRunningLock(bool waiting) {
+std::unique_ptr<MultiProcessLock> TakeServiceRunningLock() {
   std::string lock_name =
       GetServiceProcessScopedName("_service_running");
-  return TakeNamedLock(lock_name, waiting);
+  return TakeNamedLock(lock_name);
 }
 
 bool ForceServiceProcessShutdown(const std::string& version,
@@ -59,20 +54,21 @@ mojo::NamedPlatformChannel::ServerName GetServiceProcessServerName() {
 }
 
 bool CheckServiceProcessReady() {
-  std::unique_ptr<MultiProcessLock> running_lock(TakeServiceRunningLock(false));
-  return running_lock.get() == NULL;
+  std::unique_ptr<MultiProcessLock> running_lock(TakeServiceRunningLock());
+  return !running_lock.get();
 }
 
 bool ServiceProcessState::TakeSingletonLock() {
-  state_->initializing_lock.reset(TakeServiceInitializingLock(true));
+  state_->initializing_lock =
+      TakeNamedLock(GetServiceProcessScopedName("_service_initializing"));
   return state_->initializing_lock.get();
 }
 
 bool ServiceProcessState::AddToAutoRun() {
   DCHECK(autorun_command_line_.get());
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   std::string app_name = "Google Chrome Service";
-#else  // CHROMIUM_BUILD
+#else  // BUILDFLAG(CHROMIUM_BRANDING)
   std::string app_name = "Chromium Service";
 #endif
   return AutoStart::AddApplication(

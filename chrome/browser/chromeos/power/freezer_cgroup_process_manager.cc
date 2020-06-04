@@ -15,6 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -35,8 +36,8 @@ class FreezerCgroupProcessManager::FileWorker {
  public:
   // Called on UI thread.
   explicit FileWorker(scoped_refptr<base::SequencedTaskRunner> file_thread)
-      : ui_thread_(base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::UI})),
+      : ui_thread_(
+            base::CreateSingleThreadTaskRunner({content::BrowserThread::UI})),
         file_thread_(file_thread),
         enabled_(false),
         froze_successfully_(false) {
@@ -157,7 +158,7 @@ class FreezerCgroupProcessManager::FileWorker {
 };
 
 FreezerCgroupProcessManager::FreezerCgroupProcessManager()
-    : file_thread_(base::CreateSequencedTaskRunnerWithTraits(
+    : file_thread_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::TaskPriority::BEST_EFFORT, base::MayBlock()})),
       file_worker_(new FileWorker(file_thread_)) {
   file_thread_->PostTask(

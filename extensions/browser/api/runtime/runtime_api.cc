@@ -27,7 +27,6 @@
 #include "extensions/browser/events/lazy_event_dispatch_util.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -39,7 +38,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
-#include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/file_system/isolated_context.h"
 #include "url/gurl.h"
 
 using content::BrowserContext;
@@ -165,6 +164,9 @@ BrowserContextKeyedAPIFactory<RuntimeAPI>* RuntimeAPI::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
+constexpr int RuntimeAPI::kFastReloadCount;
+constexpr int RuntimeAPI::kUnpackedFastReloadCount;
+
 // static
 void RuntimeAPI::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(kPrefLastRestartWasDueToDelayedRestartApi,
@@ -179,8 +181,6 @@ void BrowserContextKeyedAPIFactory<RuntimeAPI>::DeclareFactoryDependencies() {
 
 RuntimeAPI::RuntimeAPI(content::BrowserContext* context)
     : browser_context_(context),
-      extension_registry_observer_(this),
-      process_manager_observer_(this),
       minimum_duration_between_restarts_(base::TimeDelta::FromHours(
           kMinDurationBetweenSuccessiveRestartsHours)),
       dispatch_chrome_updated_event_(false),
@@ -191,8 +191,8 @@ RuntimeAPI::RuntimeAPI(content::BrowserContext* context)
   DCHECK(!browser_context_->IsOffTheRecord());
 
   ExtensionSystem::Get(context)->ready().Post(
-      FROM_HERE, base::Bind(&RuntimeAPI::OnExtensionsReady,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&RuntimeAPI::OnExtensionsReady,
+                                weak_ptr_factory_.GetWeakPtr()));
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
   process_manager_observer_.Add(ProcessManager::Get(browser_context_));
 
@@ -382,8 +382,8 @@ RuntimeAPI::RestartAfterDelayStatus RuntimeAPI::ScheduleDelayedRestart(
 
   restart_after_delay_timer_.Start(
       FROM_HERE, delay_till_restart,
-      base::Bind(&RuntimeAPI::OnDelayedRestartTimerTimeout,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&RuntimeAPI::OnDelayedRestartTimerTimeout,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   return was_throttled ? RestartAfterDelayStatus::FAILED_THROTTLED
                        : RestartAfterDelayStatus::SUCCESS_RESTART_SCHEDULED;

@@ -8,17 +8,30 @@
 #include "base/observer_list_types.h"
 
 class OverlayPresenter;
+class OverlayRequestSupport;
 class OverlayRequest;
 
 // Observer interface for objects interested in overlay presentation events
 // triggered by OverlayPresenter.
 class OverlayPresenterObserver : public base::CheckedObserver {
  public:
-  OverlayPresenterObserver() = default;
+  OverlayPresenterObserver();
+
+  // The request support for this observer.  Request-specific observer callbacks
+  // will not be executed for unsupported requests.  By default, all requests
+  // are supported.  Subclasses can override to use a more specific request
+  // support.
+  virtual const OverlayRequestSupport* GetRequestSupport(
+      OverlayPresenter* presenter) const;
 
   // Called when |presenter| is about to show the overlay UI for |request|.
   virtual void WillShowOverlay(OverlayPresenter* presenter,
                                OverlayRequest* request) {}
+
+  // Called when |presenter| has finished showing the overlay UI for
+  // |request|.
+  virtual void DidShowOverlay(OverlayPresenter* presenter,
+                              OverlayRequest* request) {}
 
   // Called when |presenter| is finished dismissing its overlay UI.
   virtual void DidHideOverlay(OverlayPresenter* presenter,

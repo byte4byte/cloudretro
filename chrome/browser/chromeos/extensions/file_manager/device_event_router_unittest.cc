@@ -10,7 +10,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chromeos/disks/disk.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,6 +26,7 @@ const char kTestDevicePath[] = "/device/test";
 struct DeviceEvent {
   extensions::api::file_manager_private::DeviceEventType type;
   std::string device_path;
+  std::string device_label;
 };
 
 // DeviceEventRouter implementation for testing.
@@ -38,10 +39,12 @@ class DeviceEventRouterImpl : public DeviceEventRouter {
 
   // DeviceEventRouter overrides.
   void OnDeviceEvent(file_manager_private::DeviceEventType type,
-                     const std::string& device_path) override {
+                     const std::string& device_path,
+                     const std::string& device_label) override {
     DeviceEvent event;
     event.type = type;
     event.device_path = device_path;
+    event.device_label = device_label;
     events.push_back(event);
   }
 
@@ -86,7 +89,7 @@ class DeviceEventRouterTest : public testing::Test {
   std::unique_ptr<DeviceEventRouterImpl> device_event_router;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(DeviceEventRouterTest, AddAndRemoveDevice) {

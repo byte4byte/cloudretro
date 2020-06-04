@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -21,13 +20,6 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace content {
-
-namespace {
-
-const char kPeripheralHeuristicHistogram[] =
-    "Plugin.PowerSaver.PeripheralHeuristicInitialDecision";
-
-}  // namespace
 
 PluginPowerSaverHelper::PeripheralPlugin::PeripheralPlugin(
     const url::Origin& content_origin,
@@ -57,15 +49,15 @@ void PluginPowerSaverHelper::DidCommitProvisionalLoad(
   if (frame->Parent() || is_same_document_navigation)
     return;  // Not a top-level navigation.
 
-  origin_whitelist_.clear();
+  origin_allowlist_.clear();
 }
 
 bool PluginPowerSaverHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginPowerSaverHelper, message)
-  IPC_MESSAGE_HANDLER(FrameMsg_UpdatePluginContentOriginWhitelist,
-                      OnUpdatePluginContentOriginWhitelist)
-  IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_MESSAGE_HANDLER(FrameMsg_UpdatePluginContentOriginAllowlist,
+                        OnUpdatePluginContentOriginAllowlist)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
@@ -74,14 +66,14 @@ void PluginPowerSaverHelper::OnDestruct() {
   delete this;
 }
 
-void PluginPowerSaverHelper::OnUpdatePluginContentOriginWhitelist(
-    const std::set<url::Origin>& origin_whitelist) {
-  origin_whitelist_ = origin_whitelist;
+void PluginPowerSaverHelper::OnUpdatePluginContentOriginAllowlist(
+    const std::set<url::Origin>& origin_allowlist) {
+  origin_allowlist_ = origin_allowlist;
 
   // Check throttled plugin instances to see if any can be unthrottled.
   auto it = peripheral_plugins_.begin();
   while (it != peripheral_plugins_.end()) {
-    if (origin_whitelist.count(it->content_origin)) {
+    if (origin_allowlist.count(it->content_origin)) {
       // Because the unthrottle callback may register another peripheral plugin
       // and invalidate our iterator, we cannot run it synchronously.
       render_frame()
@@ -112,20 +104,13 @@ PluginPowerSaverHelper::GetPeripheralContentStatus(
     return RenderFrame::CONTENT_STATUS_PERIPHERAL;
   }
 
-  auto status = PeripheralContentHeuristic::GetPeripheralStatus(
-      origin_whitelist_, main_frame_origin, content_origin, unobscured_size);
-
-  if (record_decision == RenderFrame::RECORD_DECISION) {
-    UMA_HISTOGRAM_ENUMERATION(kPeripheralHeuristicHistogram, status,
-                              RenderFrame::CONTENT_STATUS_NUM_ITEMS);
-  }
-
-  return status;
+  return PeripheralContentHeuristic::GetPeripheralStatus(
+      origin_allowlist_, main_frame_origin, content_origin, unobscured_size);
 }
 
-void PluginPowerSaverHelper::WhitelistContentOrigin(
+void PluginPowerSaverHelper::AllowlistContentOrigin(
     const url::Origin& content_origin) {
-  if (origin_whitelist_.insert(content_origin).second) {
+  if (origin_allowlist_.insert(content_origin).second) {
     Send(new FrameHostMsg_PluginContentOriginAllowed(
         render_frame()->GetRoutingID(), content_origin));
   }

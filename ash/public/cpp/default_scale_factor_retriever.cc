@@ -3,17 +3,19 @@
 // found in the LICENSE file.
 
 #include "ash/public/cpp/default_scale_factor_retriever.h"
-#include "ash/public/interfaces/constants.mojom.h"
+
+#include <utility>
+
 #include "base/bind.h"
 
 namespace ash {
 
-DefaultScaleFactorRetriever::DefaultScaleFactorRetriever()
-    : weak_ptr_factory_(this) {}
+DefaultScaleFactorRetriever::DefaultScaleFactorRetriever() {}
 
 void DefaultScaleFactorRetriever::Start(
-    ash::mojom::CrosDisplayConfigControllerPtr cros_display_config) {
-  cros_display_config_ = std::move(cros_display_config);
+    mojo::PendingRemote<mojom::CrosDisplayConfigController>
+        cros_display_config) {
+  cros_display_config_.Bind(std::move(cros_display_config));
   auto callback = base::BindOnce(
       &DefaultScaleFactorRetriever::OnDefaultScaleFactorRetrieved,
       weak_ptr_factory_.GetWeakPtr());
@@ -21,10 +23,10 @@ void DefaultScaleFactorRetriever::Start(
       /*single_unified=*/false,
       base::BindOnce(
           [](GetDefaultScaleFactorCallback callback,
-             std::vector<ash::mojom::DisplayUnitInfoPtr> info_list) {
+             std::vector<mojom::DisplayUnitInfoPtr> info_list) {
             // TODO(oshima): This does not return correct value in docked
             // mode.
-            for (const ash::mojom::DisplayUnitInfoPtr& info : info_list) {
+            for (const mojom::DisplayUnitInfoPtr& info : info_list) {
               if (info->is_internal) {
                 DCHECK(info->available_display_modes.size());
                 std::move(callback).Run(

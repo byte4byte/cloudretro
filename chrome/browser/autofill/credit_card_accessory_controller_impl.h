@@ -27,6 +27,7 @@ class CreditCardAccessoryControllerImpl
   // AccessoryController:
   void OnFillingTriggered(const UserInfo::Field& selection) override;
   void OnOptionSelected(AccessoryAction selected_action) override;
+  void OnToggleChanged(AccessoryAction toggled_action, bool enabled) override;
 
   // CreditCardAccessoryController:
   void RefreshSuggestions() override;
@@ -34,10 +35,17 @@ class CreditCardAccessoryControllerImpl
   // PersonalDataManagerObserver:
   void OnPersonalDataChanged() override;
 
+  // CreditCardAccessManager::Accessor:
+  void OnCreditCardFetched(bool did_succeed,
+                           const CreditCard* credit_card,
+                           const base::string16& cvc) override;
+
   static void CreateForWebContentsForTesting(
       content::WebContents* web_contents,
       base::WeakPtr<ManualFillingController> mf_controller,
-      autofill::PersonalDataManager* personal_data_manager);
+      autofill::PersonalDataManager* personal_data_manager,
+      autofill::AutofillManager* af_manager,
+      autofill::AutofillDriver* af_driver);
 
  private:
   friend class content::WebContentsUserData<CreditCardAccessoryControllerImpl>;
@@ -49,16 +57,22 @@ class CreditCardAccessoryControllerImpl
   CreditCardAccessoryControllerImpl(
       content::WebContents* web_contents,
       base::WeakPtr<ManualFillingController> mf_controller,
-      PersonalDataManager* personal_data_manager);
+      PersonalDataManager* personal_data_manager,
+      autofill::AutofillManager* af_manager,
+      autofill::AutofillDriver* af_driver);
 
   void FetchSuggestionsFromPersonalDataManager();
   base::WeakPtr<ManualFillingController> GetManualFillingController();
+  autofill::AutofillDriver* GetDriver();
+  autofill::AutofillManager* GetManager();
 
   // Pointers to cards owned by PersonalDataManager.
   std::vector<CreditCard*> cards_cache_;
   content::WebContents* web_contents_;
   base::WeakPtr<ManualFillingController> mf_controller_;
   PersonalDataManager* const personal_data_manager_;
+  autofill::AutofillManager* af_manager_for_testing_ = nullptr;
+  autofill::AutofillDriver* af_driver_for_testing_ = nullptr;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };

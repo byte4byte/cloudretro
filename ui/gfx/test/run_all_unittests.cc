@@ -7,19 +7,16 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/test/launcher/unit_test_launcher.h"
+#include "base/test/test_discardable_memory_allocator.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/gfx/font_util.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "base/test/mock_chrome_application_mac.h"
-#endif
-
-#if defined(OS_WIN)
-#include <windows.h>
-#include "ui/gfx/win/direct_write.h"
 #endif
 
 #if !defined(OS_IOS)
@@ -51,13 +48,17 @@ class GfxTestSuite : public base::TestSuite {
     ASSERT_TRUE(base::PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
     ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 
-#if defined(OS_WIN)
-    gfx::win::InitializeDirectWrite();
+#if defined(OS_ANDROID)
+    // Android needs a discardable memory allocator when loading fallback fonts.
+    base::DiscardableMemoryAllocator::SetInstance(
+        &discardable_memory_allocator);
 #endif
 
 #if defined(OS_FUCHSIA)
     skia::ConfigureTestFont();
 #endif
+
+    gfx::InitializeFonts();
   }
 
   void Shutdown() override {
@@ -66,6 +67,8 @@ class GfxTestSuite : public base::TestSuite {
   }
 
  private:
+  base::TestDiscardableMemoryAllocator discardable_memory_allocator;
+
   DISALLOW_COPY_AND_ASSIGN(GfxTestSuite);
 };
 

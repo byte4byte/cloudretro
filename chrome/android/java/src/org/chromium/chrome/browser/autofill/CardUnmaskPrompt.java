@@ -7,8 +7,6 @@ package org.chromium.chrome.browser.autofill;
 import android.content.Context;
 import android.content.res.Resources;
 import android.os.Handler;
-import android.support.v4.text.TextUtilsCompat;
-import android.support.v4.view.ViewCompat;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.TextWatcher;
@@ -26,7 +24,10 @@ import android.widget.PopupWindow;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.text.TextUtilsCompat;
+import androidx.core.view.ViewCompat;
+
 import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -60,6 +61,7 @@ public class CardUnmaskPrompt
     private final TextView mNewCardLink;
     private final TextView mErrorMessage;
     private final CheckBox mStoreLocallyCheckbox;
+    private final CheckBox mUseScreenlockCheckbox;
     private final ImageView mStoreLocallyTooltipIcon;
     private PopupWindow mStoreLocallyTooltipPopup;
     private final ViewGroup mControlsContainer;
@@ -99,8 +101,10 @@ public class CardUnmaskPrompt
          * @param month The value the user selected for expiration month, if any.
          * @param year The value the user selected for expiration month, if any.
          * @param shouldStoreLocally The state of the "Save locally?" checkbox at the time.
+         * @param enableFidoAuth The value the user selected for the use lockscreen checkbox.
          */
-        void onUserInput(String cvc, String month, String year, boolean shouldStoreLocally);
+        void onUserInput(String cvc, String month, String year, boolean shouldStoreLocally,
+                boolean enableFidoAuth);
 
         /**
          * Called when the "New card?" link has been clicked.
@@ -142,7 +146,8 @@ public class CardUnmaskPrompt
     public CardUnmaskPrompt(Context context, CardUnmaskPromptDelegate delegate, String title,
             String instructions, String confirmButtonLabel, int drawableId,
             boolean shouldRequestExpirationDate, boolean canStoreLocally,
-            boolean defaultToStoringLocally, long successMessageDurationMilliseconds) {
+            boolean defaultToStoringLocally, boolean shouldOfferWebauthn,
+            boolean defaultUseScreenlockChecked, long successMessageDurationMilliseconds) {
         mDelegate = delegate;
 
         LayoutInflater inflater = LayoutInflater.from(context);
@@ -161,6 +166,12 @@ public class CardUnmaskPrompt
         mErrorMessage = (TextView) v.findViewById(R.id.error_message);
         mStoreLocallyCheckbox = (CheckBox) v.findViewById(R.id.store_locally_checkbox);
         mStoreLocallyCheckbox.setChecked(canStoreLocally && defaultToStoringLocally);
+        mUseScreenlockCheckbox = (CheckBox) v.findViewById(R.id.use_screenlock_checkbox);
+        mUseScreenlockCheckbox.setChecked(defaultUseScreenlockChecked);
+        if (canStoreLocally || !shouldOfferWebauthn) {
+            mUseScreenlockCheckbox.setVisibility(View.GONE);
+            mUseScreenlockCheckbox.setChecked(false);
+        }
         mStoreLocallyTooltipIcon = (ImageView) v.findViewById(R.id.store_locally_tooltip_icon);
         mStoreLocallyTooltipIcon.setOnClickListener(this);
         if (!canStoreLocally) v.findViewById(R.id.store_locally_container).setVisibility(View.GONE);
@@ -184,8 +195,9 @@ public class CardUnmaskPrompt
         mShouldRequestExpirationDate = shouldRequestExpirationDate;
         mThisYear = -1;
         mThisMonth = -1;
-        if (mShouldRequestExpirationDate)
+        if (mShouldRequestExpirationDate) {
             new CalendarTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        }
 
         // Set the max length of the CVC field.
         mCardUnmaskInput.setFilters(
@@ -548,7 +560,8 @@ public class CardUnmaskPrompt
             mDelegate.onUserInput(mCardUnmaskInput.getText().toString(),
                     mMonthInput.getText().toString(),
                     Integer.toString(AutofillUiUtils.getFourDigitYear(mYearInput)),
-                    mStoreLocallyCheckbox != null && mStoreLocallyCheckbox.isChecked());
+                    mStoreLocallyCheckbox != null && mStoreLocallyCheckbox.isChecked(),
+                    mUseScreenlockCheckbox.isChecked());
         } else if (buttonType == ModalDialogProperties.ButtonType.NEGATIVE) {
             mModalDialogManager.dismissDialog(model, DialogDismissalCause.NEGATIVE_BUTTON_CLICKED);
         }

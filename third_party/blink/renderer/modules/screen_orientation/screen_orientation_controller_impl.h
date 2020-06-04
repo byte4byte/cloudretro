@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "services/device/public/mojom/screen_orientation.mojom-blink.h"
 #include "third_party/blink/public/common/screen_orientation/web_screen_orientation_lock_type.h"
 #include "third_party/blink/public/common/screen_orientation/web_screen_orientation_type.h"
@@ -21,12 +22,11 @@ namespace blink {
 
 class ScreenOrientation;
 
-using device::mojom::blink::ScreenOrientationAssociatedPtr;
 using device::mojom::blink::ScreenOrientationLockResult;
 
 class MODULES_EXPORT ScreenOrientationControllerImpl final
     : public ScreenOrientationController,
-      public ContextLifecycleObserver,
+      public ExecutionContextLifecycleObserver,
       public PageVisibilityObserver {
   USING_GARBAGE_COLLECTED_MIXIN(ScreenOrientationControllerImpl);
 
@@ -46,10 +46,10 @@ class MODULES_EXPORT ScreenOrientationControllerImpl final
   static void ProvideTo(LocalFrame&);
   static ScreenOrientationControllerImpl* From(LocalFrame&);
 
-  void SetScreenOrientationAssociatedPtrForTests(
-      ScreenOrientationAssociatedPtr);
+  void SetScreenOrientationAssociatedRemoteForTests(
+      mojo::AssociatedRemote<device::mojom::blink::ScreenOrientation>);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   friend class MediaControlsOrientationLockAndRotateToFullscreenDelegateTest;
@@ -57,8 +57,9 @@ class MODULES_EXPORT ScreenOrientationControllerImpl final
 
   static WebScreenOrientationType ComputeOrientation(const IntRect&, uint16_t);
 
-  // Inherited from ContextLifecycleObserver and PageVisibilityObserver.
-  void ContextDestroyed(ExecutionContext*) override;
+  // Inherited from ExecutionContextLifecycleObserver and
+  // PageVisibilityObserver.
+  void ContextDestroyed() override;
   void PageVisibilityChanged() override;
 
   void UpdateOrientation();
@@ -73,7 +74,8 @@ class MODULES_EXPORT ScreenOrientationControllerImpl final
 
   Member<ScreenOrientation> orientation_;
   bool active_lock_ = false;
-  ScreenOrientationAssociatedPtr screen_orientation_service_;
+  mojo::AssociatedRemote<device::mojom::blink::ScreenOrientation>
+      screen_orientation_service_;
   std::unique_ptr<WebLockOrientationCallback> pending_callback_;
   int request_id_ = 0;
 

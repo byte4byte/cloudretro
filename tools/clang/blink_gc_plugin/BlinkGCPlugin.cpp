@@ -25,7 +25,7 @@ class BlinkGCPluginAction : public PluginASTAction {
   // Overridden from PluginASTAction:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& instance,
                                                  llvm::StringRef ref) override {
-    return llvm::make_unique<BlinkGCPluginConsumer>(instance, options_);
+    return std::make_unique<BlinkGCPluginConsumer>(instance, options_);
   }
 
   bool ParseArgs(const CompilerInstance&,
@@ -33,8 +33,10 @@ class BlinkGCPluginAction : public PluginASTAction {
     for (const auto& arg : args) {
       if (arg == "dump-graph") {
         options_.dump_graph = true;
-      } else if (arg == "warn-unneeded-finalizer") {
-        options_.warn_unneeded_finalizer = true;
+      } else if (arg == "no-members-in-stack-allocated") {
+        // TODO(bikineev): Flag is on by default. Remove after
+        // third_party/blink/renderer/BUILD.gn has been updated.
+        continue;
       } else if (arg == "enable-weak-members-in-unmanaged-classes") {
         options_.enable_weak_members_in_unmanaged_classes = true;
       } else {

@@ -9,11 +9,14 @@
 #include "base/sequenced_task_runner.h"
 #include "third_party/blink/public/mojom/background_sync/background_sync.mojom-blink.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class BackgroundSyncOptions;
+class ExceptionState;
 class ScriptPromise;
 class ScriptPromiseResolver;
 class ScriptState;
@@ -23,31 +26,25 @@ class PeriodicSyncManager final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static PeriodicSyncManager* Create(
-      ServiceWorkerRegistration* registration,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) {
-    return MakeGarbageCollected<PeriodicSyncManager>(registration,
-                                                     std::move(task_runner));
-  }
-
   PeriodicSyncManager(ServiceWorkerRegistration* registration,
                       scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   // IDL exposed interface
   ScriptPromise registerPeriodicSync(ScriptState* script_state,
                                      const String& tag,
-                                     const BackgroundSyncOptions* options);
+                                     const BackgroundSyncOptions* options,
+                                     ExceptionState& exception_state);
   ScriptPromise getTags(ScriptState* script_state);
   ScriptPromise unregister(ScriptState* script_state, const String& tag);
 
-  void Trace(blink::Visitor* visitor) override;
+  void Trace(Visitor* visitor) override;
 
  private:
-  // Returns an initialized PeriodicBackgroundSyncServicePtr. A connection with
-  // the the browser's BackgroundSyncService is created the first time this
+  // Returns an initialized
+  // mojo::Remote<mojom::blink::PeriodicBackgroundSyncService>. A connection
+  // with the the browser's BackgroundSyncService is created the first time this
   // method is called.
-  const mojom::blink::PeriodicBackgroundSyncServicePtr&
-  GetBackgroundSyncServicePtr();
+  mojom::blink::PeriodicBackgroundSyncService* GetBackgroundSyncServiceRemote();
 
   // Callbacks
   void RegisterCallback(ScriptPromiseResolver* resolver,
@@ -62,7 +59,9 @@ class PeriodicSyncManager final : public ScriptWrappable {
 
   Member<ServiceWorkerRegistration> registration_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  mojom::blink::PeriodicBackgroundSyncServicePtr background_sync_service_;
+  HeapMojoRemote<mojom::blink::PeriodicBackgroundSyncService,
+                 HeapMojoWrapperMode::kWithoutContextObserver>
+      background_sync_service_;
 };
 
 }  // namespace blink

@@ -13,7 +13,9 @@
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
+#include "build/branding_buildflags.h"
 #include "chrome/chrome_elf/nt_registry/nt_registry.h"
+#include "chrome/install_static/buildflags.h"
 #include "chrome/install_static/install_constants.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/install_modes.h"
@@ -128,7 +130,7 @@ struct TestData {
   const wchar_t* channel;
 };
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 constexpr TestData kTestData[] = {
     {
         L"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -169,7 +171,7 @@ constexpr TestData kTestData[] = {
         CANARY_INDEX, false, L"canary",
     },
 };
-#else   // GOOGLE_CHROME_BUILD
+#else   // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 constexpr TestData kTestData[] = {
     {
         L"C:\\Program Files (x86)\\Chromium\\Application\\chrome.exe",
@@ -180,7 +182,7 @@ constexpr TestData kTestData[] = {
         CHROMIUM_INDEX, false, L"",
     },
 };
-#endif  // !GOOGLE_CHROME_BUILD
+#endif  // !BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 }  // namespace
 
@@ -227,12 +229,12 @@ class MakeProductDetailsTest : public testing::TestWithParam<TestData> {
   // Returns the registry path for the product's ClientState key.
   std::wstring GetClientStateKeyPath() {
     std::wstring result(L"Software\\");
-    if (kUseGoogleUpdateIntegration) {
-      result.append(L"Google\\Update\\ClientState\\");
-      result.append(kInstallModes[test_data().index].app_guid);
-    } else {
-      result.append(kProductPathName);
-    }
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+    result.append(L"Google\\Update\\ClientState\\");
+    result.append(kInstallModes[test_data().index].app_guid);
+#else
+    result.append(kProductPathName);
+#endif
     return result;
   }
 
@@ -321,9 +323,7 @@ TEST_P(MakeProductDetailsTest, AdditionalParametersChannels) {
 // Test that the "ap" value is cached during initialization.
 TEST_P(MakeProductDetailsTest, UpdateAp) {
   // This test is only valid for brands that integrate with Google Update.
-  if (!kUseGoogleUpdateIntegration)
-    return;
-
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
   // With no value in the registry, the ap value should be empty.
   {
     std::unique_ptr<PrimaryInstallDetails> details(
@@ -339,14 +339,13 @@ TEST_P(MakeProductDetailsTest, UpdateAp) {
         MakeProductDetails(test_data().path));
     EXPECT_THAT(details->update_ap(), StrEq(kCrookedMoon));
   }
+#endif
 }
 
 // Test that the cohort name is cached during initialization.
 TEST_P(MakeProductDetailsTest, UpdateCohortName) {
   // This test is only valid for brands that integrate with Google Update.
-  if (!kUseGoogleUpdateIntegration)
-    return;
-
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
   // With no value in the registry, the cohort name should be empty.
   {
     std::unique_ptr<PrimaryInstallDetails> details(
@@ -362,6 +361,7 @@ TEST_P(MakeProductDetailsTest, UpdateCohortName) {
         MakeProductDetails(test_data().path));
     EXPECT_THAT(details->update_cohort_name(), StrEq(kPhony));
   }
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

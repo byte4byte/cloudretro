@@ -28,18 +28,19 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/events/base_event_utils.h"
+#include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/ozone/public/input_controller.h"
@@ -163,10 +164,7 @@ class CallbackAnimationObserver : public ui::ImplicitAnimationObserver {
 
 KeyboardUIController::KeyboardUIController()
     : input_method_keyboard_controller_(
-          std::make_unique<InputMethodKeyboardController>(this)),
-      ime_observer_(this),
-      weak_factory_report_lingering_state_(this),
-      weak_factory_will_hide_(this) {
+          std::make_unique<InputMethodKeyboardController>(this)) {
   DCHECK_EQ(g_keyboard_controller, nullptr);
   g_keyboard_controller = this;
 }
@@ -304,6 +302,10 @@ void KeyboardUIController::DeactivateKeyboard() {
 
 aura::Window* KeyboardUIController::GetKeyboardWindow() const {
   return ui_ ? ui_->GetKeyboardWindow() : nullptr;
+}
+
+ui::GestureConsumer* KeyboardUIController::GetGestureConsumer() const {
+  return ui_ ? ui_->GetGestureConsumer() : nullptr;
 }
 
 aura::Window* KeyboardUIController::GetRootWindow() const {
@@ -526,6 +528,21 @@ bool KeyboardUIController::IsKeyboardOverscrollEnabled() const {
 void KeyboardUIController::HideKeyboard(HideReason reason) {
   TRACE_EVENT0("vk", "HideKeyboard");
 
+  // Decide whether regaining focus in a web-based text field should cause
+  // the keyboard to come back.
+  switch (reason) {
+    case HIDE_REASON_SYSTEM_IMPLICIT:
+      time_of_last_blur_ = base::Time::Now();
+      break;
+
+    case HIDE_REASON_SYSTEM_TEMPORARY:
+    case HIDE_REASON_SYSTEM_EXPLICIT:
+    case HIDE_REASON_USER_EXPLICIT:
+    case HIDE_REASON_USER_IMPLICIT:
+      time_of_last_blur_ = base::Time::UnixEpoch();
+      break;
+  }
+
   switch (model_.state()) {
     case KeyboardUIState::kUnknown:
     case KeyboardUIState::kInitial:
@@ -549,21 +566,6 @@ void KeyboardUIController::HideKeyboard(HideReason reason) {
         case HIDE_REASON_USER_EXPLICIT:
         case HIDE_REASON_USER_IMPLICIT:
           LogKeyboardControlEvent(KeyboardControlEvent::kHideUser);
-          break;
-      }
-
-      // Decide whether regaining focus in a web-based text field should cause
-      // the keyboard to come back.
-      switch (reason) {
-        case HIDE_REASON_SYSTEM_IMPLICIT:
-          time_of_last_blur_ = base::Time::Now();
-          break;
-
-        case HIDE_REASON_SYSTEM_TEMPORARY:
-        case HIDE_REASON_SYSTEM_EXPLICIT:
-        case HIDE_REASON_USER_EXPLICIT:
-        case HIDE_REASON_USER_IMPLICIT:
-          time_of_last_blur_ = base::Time::UnixEpoch();
           break;
       }
 
@@ -637,9 +639,7 @@ void KeyboardUIController::HideAnimationFinished() {
       // The position of the container window will be adjusted shortly in
       // |PopulateKeyboardContent| before showing animation, so we can set the
       // passed bounds directly.
-      if (queued_container_type_->target_bounds())
-        SetKeyboardWindowBounds(
-            queued_container_type_->target_bounds().value());
+      SetKeyboardWindowBounds(queued_container_type_->target_bounds());
       ShowKeyboard(false /* lock */);
     }
 
@@ -657,7 +657,10 @@ void KeyboardUIController::ShowAnimationFinished() {
 
   // Notify observers after animation finished to prevent reveal desktop
   // background during animation.
-  NotifyKeyboardBoundsChanging(GetKeyboardWindow()->GetBoundsInRootWindow());
+  // If the current state is not SHOWN, it means the state was changed after the
+  // animation started. Do not tell the observers the stale bounds.
+  if (model_.state() == KeyboardUIState::kShown)
+    NotifyKeyboardBoundsChanging(GetKeyboardWindow()->GetBoundsInRootWindow());
 }
 
 // private
@@ -746,6 +749,11 @@ void KeyboardUIController::MoveKeyboardWindowToDisplay(
   queued_display_change_ =
       std::make_unique<QueuedDisplayChange>(display, new_bounds_in_root);
   HideKeyboardTemporarilyForTransition();
+}
+
+void KeyboardUIController::TransferGestureEventToShelf(
+    const ui::GestureEvent& e) {
+  layout_delegate_->TransferGestureEventToShelf(e);
 }
 
 // aura::WindowObserver overrides
@@ -995,6 +1003,40 @@ void KeyboardUIController::SetHitTestBounds(
       std::make_unique<ShapedWindowTargeter>(bounds_in_window));
 }
 
+bool KeyboardUIController::SetAreaToRemainOnScreen(
+    const gfx::Rect& bounds_in_window) {
+  gfx::Rect window_bounds_in_screen = GetKeyboardWindow()->GetBoundsInScreen();
+  gfx::Rect bounds_in_screen =
+      gfx::Rect(window_bounds_in_screen.x() + bounds_in_window.x(),
+                window_bounds_in_screen.y() + bounds_in_window.y(),
+                bounds_in_window.width(), bounds_in_window.height());
+
+  if (!window_bounds_in_screen.Contains(bounds_in_screen))
+    return false;
+
+  container_behavior_->SetAreaToRemainOnScreen(bounds_in_window);
+  return true;
+}
+
+bool KeyboardUIController::SetKeyboardWindowBoundsInScreen(
+    const gfx::Rect& bounds_in_screen) {
+  const display::Display& current_display =
+      display_util_.GetNearestDisplayToWindow(GetRootWindow());
+
+  gfx::Rect display_bounds = current_display.bounds();
+  if (bounds_in_screen.width() > display_bounds.width() ||
+      bounds_in_screen.height() > display_bounds.height()) {
+    return false;
+  }
+
+  gfx::Rect constrained_bounds_in_screen =
+      AdjustSetBoundsRequest(current_display.bounds(), bounds_in_screen);
+
+  GetKeyboardWindow()->SetBoundsInScreen(constrained_bounds_in_screen,
+                                         current_display);
+  return true;
+}
+
 gfx::Rect KeyboardUIController::AdjustSetBoundsRequest(
     const gfx::Rect& display_bounds,
     const gfx::Rect& requested_bounds_in_screen) const {
@@ -1012,9 +1054,13 @@ bool KeyboardUIController::HandlePointerEvent(const ui::LocatedEvent& event) {
   return container_behavior_->HandlePointerEvent(event, current_display);
 }
 
+bool KeyboardUIController::HandleGestureEvent(const ui::GestureEvent& event) {
+  return container_behavior_->HandleGestureEvent(event, GetBoundsInScreen());
+}
+
 void KeyboardUIController::SetContainerType(
     ContainerType type,
-    const base::Optional<gfx::Rect>& target_bounds_in_root,
+    const gfx::Rect& target_bounds_in_root,
     base::OnceCallback<void(bool)> callback) {
   if (container_behavior_->GetType() == type) {
     std::move(callback).Run(false);
@@ -1031,8 +1077,7 @@ void KeyboardUIController::SetContainerType(
     // Keyboard is hidden. Switching the container type immediately and invoking
     // the passed callback now.
     SetContainerBehaviorInternal(type);
-    if (target_bounds_in_root)
-      SetKeyboardWindowBounds(*target_bounds_in_root);
+    SetKeyboardWindowBounds(target_bounds_in_root);
     DCHECK_EQ(GetActiveContainerType(), type);
     std::move(callback).Run(true /* change_successful */);
   }

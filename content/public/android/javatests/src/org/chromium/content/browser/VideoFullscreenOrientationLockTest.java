@@ -49,11 +49,10 @@ public class VideoFullscreenOrientationLockTest {
         CriteriaHelper.pollInstrumentationThread(
                 Criteria.equals(fullscreenValue, new Callable<Boolean>() {
                     @Override
-                    public Boolean call() throws InterruptedException, TimeoutException {
+                    public Boolean call() throws TimeoutException {
                         return DOMUtils.isFullscreen(mActivityTestRule.getWebContents());
                     }
-                })
-        );
+                }));
     }
 
     private boolean isScreenOrientationLocked() {
@@ -61,7 +60,7 @@ public class VideoFullscreenOrientationLockTest {
                 != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     }
 
-    private boolean isScreenOrientationLandscape() throws InterruptedException, TimeoutException {
+    private boolean isScreenOrientationLandscape() throws TimeoutException {
         StringBuilder sb = new StringBuilder();
         sb.append("(function() {");
         sb.append("  return  screen.orientation.type.startsWith('landscape');");
@@ -73,28 +72,20 @@ public class VideoFullscreenOrientationLockTest {
                 .equals("true");
     }
 
-    private void waitUntilLockedToLandscape() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return isScreenOrientationLocked() && isScreenOrientationLandscape();
-                } catch (InterruptedException e) {
-                    return false;
-                } catch (TimeoutException e) {
-                    return false;
-                }
+    private void waitUntilLockedToLandscape() {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Assert.assertTrue(isScreenOrientationLocked());
+                Assert.assertTrue(isScreenOrientationLandscape());
+            } catch (TimeoutException e) {
+                Assert.fail(e.toString());
             }
         });
     }
 
-    private void waitUntilUnlocked() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return !isScreenOrientationLocked();
-            }
-        });
+    private void waitUntilUnlocked() {
+        CriteriaHelper.pollInstrumentationThread(
+                Criteria.equals(false, this::isScreenOrientationLocked));
     }
 
     // TODO(mlamouri): move these constants and bounds  methods to a dedicated helper file for
@@ -121,14 +112,14 @@ public class VideoFullscreenOrientationLockTest {
         return new Rect(left, panel.top, right, panel.bottom);
     }
 
-    private boolean clickFullscreenButton() throws InterruptedException, TimeoutException {
+    private boolean clickFullscreenButton() throws TimeoutException {
         return DOMUtils.clickRect(mActivityTestRule.getWebContents(),
                 fullscreenButtonBounds(
                         DOMUtils.getNodeBounds(mActivityTestRule.getWebContents(), VIDEO_ID)));
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrlSync(TEST_URL);
     }
 

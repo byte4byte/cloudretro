@@ -15,7 +15,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -28,7 +28,6 @@ import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeoutException;
 
 /** Integration tests for the Last 1 feature of Offline Pages. */
 @RunWith(ChromeJUnit4ClassRunner.class)
@@ -61,7 +60,7 @@ public class RecentTabsTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -146,8 +145,7 @@ public class RecentTabsTest {
         waitForPageWithClientId(firstTabClientId);
     }
 
-    private void waitForPageWithClientId(final ClientId clientId)
-            throws TimeoutException, InterruptedException {
+    private void waitForPageWithClientId(final ClientId clientId) {
         CriteriaHelper.pollInstrumentationThread(
                 () -> { return OfflineTestUtil.getPageByClientId(clientId) != null; });
     }

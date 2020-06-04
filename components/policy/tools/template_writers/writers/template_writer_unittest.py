@@ -135,7 +135,7 @@ class TemplateWriterUnittests(unittest.TestCase):
     if platform != '*':
       self.assertEqual(
           tw.IsPolicySupported(policy),
-          tw.IsPolicySupportedOnPlatform(policy, platform))
+          tw.IsPolicyOrItemSupportedOnPlatform(policy, platform))
     return tw.IsPolicySupported(policy)
 
   def testSortingGroupsFirst(self):
@@ -152,6 +152,7 @@ class TemplateWriterUnittests(unittest.TestCase):
     tw = template_writer.TemplateWriter(None, None)
     self.assertFalse(tw.IsPolicySupported({'future': True}))
     self.assertFalse(tw.IsPolicySupported({'deprecated': True}))
+    self.assertFalse(tw.IsPolicySupported({'features': {'cloud_only': True}}))
 
   def testPoliciesIsSupportedOnCertainVersion(self):
     platform = 'win'
@@ -228,7 +229,8 @@ class TemplateWriterUnittests(unittest.TestCase):
     expanded_description = tw.GetExpandedPolicyDescription(policy)
     self.assertEqual(
         expanded_description,
-        'See https://www.chromium.org/administrators/policy-list-3#PolicyName')
+        'See https://cloud.google.com/docs/chrome-enterprise/policies/?policy=PolicyName'
+    )
 
 
 if __name__ == '__main__':

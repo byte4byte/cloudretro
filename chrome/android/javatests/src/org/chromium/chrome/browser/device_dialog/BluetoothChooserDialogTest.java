@@ -9,6 +9,7 @@ import android.app.Dialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
+import android.os.Build;
 import android.support.test.filters.LargeTest;
 import android.view.View;
 import android.widget.Button;
@@ -22,11 +23,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.location.LocationUtils;
@@ -65,57 +67,61 @@ public class BluetoothChooserDialogTest {
     private int mRestartSearchCount;
 
     private class TestBluetoothChooserDialogJni implements BluetoothChooserDialog.Natives {
+        private BluetoothChooserDialog mBluetoothChooserDialog;
+
+        TestBluetoothChooserDialogJni(BluetoothChooserDialog dialog) {
+            mBluetoothChooserDialog = dialog;
+        }
+
         @Override
-        public void onDialogFinished(BluetoothChooserDialog self,
+        public void onDialogFinished(
                 long nativeBluetoothChooserAndroid, int eventType, String deviceId) {
-            Assert.assertEquals(
-                    nativeBluetoothChooserAndroid, self.mNativeBluetoothChooserDialogPtr);
+            Assert.assertEquals(nativeBluetoothChooserAndroid,
+                    mBluetoothChooserDialog.mNativeBluetoothChooserDialogPtr);
             Assert.assertEquals(mFinishedEventType, -1);
             mFinishedEventType = eventType;
             mFinishedDeviceId = deviceId;
             // The native code calls closeDialog() when OnDialogFinished is called.
-            self.closeDialog();
+            mBluetoothChooserDialog.closeDialog();
         }
 
         @Override
-        public void restartSearch(BluetoothChooserDialog self, long nativeBluetoothChooserAndroid) {
-            Assert.assertTrue(self.mNativeBluetoothChooserDialogPtr != 0);
+        public void restartSearch(long nativeBluetoothChooserAndroid) {
+            Assert.assertTrue(mBluetoothChooserDialog.mNativeBluetoothChooserDialogPtr != 0);
             mRestartSearchCount++;
         }
 
         @Override
-        public void showBluetoothOverviewLink(
-                BluetoothChooserDialog self, long nativeBluetoothChooserAndroid) {
+        public void showBluetoothOverviewLink(long nativeBluetoothChooserAndroid) {
             // We shouldn't be running native functions if the native class has been destroyed.
-            Assert.assertTrue(self.mNativeBluetoothChooserDialogPtr != 0);
+            Assert.assertTrue(mBluetoothChooserDialog.mNativeBluetoothChooserDialogPtr != 0);
         }
 
         @Override
-        public void showBluetoothAdapterOffLink(
-                BluetoothChooserDialog self, long nativeBluetoothChooserAndroid) {
+        public void showBluetoothAdapterOffLink(long nativeBluetoothChooserAndroid) {
             // We shouldn't be running native functions if the native class has been destroyed.
-            Assert.assertTrue(self.mNativeBluetoothChooserDialogPtr != 0);
+            Assert.assertTrue(mBluetoothChooserDialog.mNativeBluetoothChooserDialogPtr != 0);
         }
 
         @Override
-        public void showNeedLocationPermissionLink(
-                BluetoothChooserDialog self, long nativeBluetoothChooserAndroid) {
+        public void showNeedLocationPermissionLink(long nativeBluetoothChooserAndroid) {
             // We shouldn't be running native functions if the native class has been destroyed.
-            Assert.assertTrue(self.mNativeBluetoothChooserDialogPtr != 0);
+            Assert.assertTrue(mBluetoothChooserDialog.mNativeBluetoothChooserDialogPtr != 0);
         }
     }
 
     @Before
     public void setUp() throws Exception {
-        mocker.mock(BluetoothChooserDialogJni.TEST_HOOKS, new TestBluetoothChooserDialogJni());
         mActivityTestRule.startMainActivityOnBlankPage();
         mLocationUtils = new FakeLocationUtils();
         LocationUtils.setFactory(() -> mLocationUtils);
         mChooserDialog = createDialog();
+        mocker.mock(BluetoothChooserDialogJni.TEST_HOOKS,
+                new TestBluetoothChooserDialogJni(mChooserDialog));
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         LocationUtils.setFactory(null);
     }
 
@@ -218,6 +224,8 @@ public class BluetoothChooserDialogTest {
 
     @Test
     @LargeTest
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP,
+            message = "https://crbug.com/1042092")
     public void testSelectItem() {
         Dialog dialog = mChooserDialog.mItemChooserDialog.getDialogForTesting();
 
@@ -312,13 +320,14 @@ public class BluetoothChooserDialogTest {
 
         // Permission was requested.
         Assert.assertArrayEquals(permissionDelegate.mPermissionsRequested,
-                new String[] {Manifest.permission.ACCESS_COARSE_LOCATION});
+                new String[] {Manifest.permission.ACCESS_FINE_LOCATION});
         Assert.assertNotNull(permissionDelegate.mCallback);
         // Grant permission.
-        mLocationUtils.mLocationGranted = true;
+        permissionDelegate.mLocationGranted = true;
         TestThreadUtils.runOnUiThreadBlocking(
-                () -> permissionDelegate.mCallback.onRequestPermissionsResult(
-                                new String[] {Manifest.permission.ACCESS_COARSE_LOCATION},
+                ()
+                        -> permissionDelegate.mCallback.onRequestPermissionsResult(
+                                new String[] {Manifest.permission.ACCESS_FINE_LOCATION},
                                 new int[] {PackageManager.PERMISSION_GRANTED}));
 
         Assert.assertEquals(1, mRestartSearchCount);
@@ -348,7 +357,7 @@ public class BluetoothChooserDialogTest {
         mWindowAndroid.setAndroidPermissionDelegate(permissionDelegate);
 
         // Grant permissions, and turn off location services.
-        mLocationUtils.mLocationGranted = true;
+        permissionDelegate.mLocationGranted = true;
         mLocationUtils.mSystemLocationSettingsEnabled = false;
 
         TestThreadUtils.runOnUiThreadBlocking(
@@ -426,14 +435,16 @@ public class BluetoothChooserDialogTest {
         Dialog mDialog;
         PermissionCallback mCallback;
         String[] mPermissionsRequested;
+        public boolean mLocationGranted;
 
         public TestAndroidPermissionDelegate(Dialog dialog) {
+            mLocationGranted = false;
             mDialog = dialog;
         }
 
         @Override
         public boolean hasPermission(String permission) {
-            return false;
+            return mLocationGranted;
         }
 
         @Override
@@ -452,7 +463,7 @@ public class BluetoothChooserDialogTest {
             mDialog.onWindowFocusChanged(false /* hasFocus */);
             mPermissionsRequested = permissions;
             if (permissions.length == 1
-                    && permissions[0].equals(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+                    && permissions[0].equals(Manifest.permission.ACCESS_FINE_LOCATION)) {
                 mCallback = callback;
             }
         }

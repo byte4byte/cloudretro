@@ -82,10 +82,6 @@ const base::string16& TestTaskManager::GetTitle(TaskId task_id) const {
   return title_;
 }
 
-const std::string& TestTaskManager::GetTaskNameForRappor(TaskId task_id) const {
-  return rappor_sample_;
-}
-
 base::string16 TestTaskManager::GetProfileName(TaskId task_id) const {
   return base::string16();
 }
@@ -154,7 +150,7 @@ bool TestTaskManager::GetV8Memory(TaskId task_id,
 
 bool TestTaskManager::GetWebCacheStats(
     TaskId task_id,
-    blink::WebCache::ResourceTypeStats* stats) const {
+    blink::WebCacheResourceTypeStats* stats) const {
   return false;
 }
 

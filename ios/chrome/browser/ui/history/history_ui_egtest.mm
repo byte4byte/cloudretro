@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
@@ -10,34 +9,20 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "components/browsing_data/core/pref_names.h"
-#include "components/prefs/pref_service.h"
-#include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/chrome/browser/ui/authentication/cells/signin_promo_view.h"
-#import "ios/chrome/browser/ui/authentication/signin_earlgrey_utils.h"
 #import "ios/chrome/browser/ui/history/history_ui_constants.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
-#import "ios/chrome/browser/ui/settings/settings_table_view_controller.h"
-#import "ios/chrome/browser/ui/table_view/cells/table_view_url_item.h"
-#import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
-#import "ios/chrome/browser/ui/util/transparent_link_button.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/ui/settings/cells/clear_browsing_data_constants.h"
+#import "ios/chrome/browser/ui/table_view/feature_flags.h"
 #include "ios/chrome/common/string_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
-#import "ios/public/provider/chrome/browser/signin/fake_chrome_identity.h"
-#import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #import "ios/web/public/test/http_server/http_server_util.h"
 #import "net/base/mac/url_conversions.h"
-#include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -45,6 +30,7 @@
 
 using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::ContextMenuCopyButton;
+using chrome_test_util::HistoryEntry;
 using chrome_test_util::NavigationBarDoneButton;
 using chrome_test_util::OpenLinkInNewTabButton;
 
@@ -58,30 +44,6 @@ char kResponse1[] = "Test Page 1 content";
 char kResponse2[] = "Test Page 2 content";
 char kResponse3[] = "Test Page 3 content";
 
-// Matcher for entry in history for URL and title.
-id<GREYMatcher> HistoryEntry(const GURL& url, const std::string& title) {
-  NSString* url_spec_text = nil;
-  NSString* title_text = base::SysUTF8ToNSString(title);
-
-    url_spec_text = base::SysUTF8ToNSString(url.GetOrigin().spec());
-
-    MatchesBlock matches = ^BOOL(TableViewURLCell* cell) {
-      return [cell.titleLabel.text isEqual:title_text] &&
-             [cell.URLLabel.text isEqual:url_spec_text];
-    };
-
-    DescribeToBlock describe = ^(id<GREYDescription> description) {
-      [description appendText:@"view containing URL text: "];
-      [description appendText:url_spec_text];
-      [description appendText:@" title text: "];
-      [description appendText:title_text];
-    };
-    return grey_allOf(
-        grey_kindOfClass([TableViewURLCell class]),
-        [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
-                                             descriptionBlock:describe],
-        grey_sufficientlyVisible(), nil);
-}
 // Matcher for the history button in the tools menu.
 id<GREYMatcher> HistoryButton() {
   return grey_accessibilityID(kToolsMenuHistoryId);
@@ -121,16 +83,27 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 - (void)loadTestURLs;
 // Displays the history UI.
 - (void)openHistoryPanel;
-// Resets which data is selected in the Clear Browsing Data UI.
-- (void)resetBrowsingDataPrefs;
 
 @end
 
 @implementation HistoryUITestCase
 
+#if defined(CHROME_EARL_GREY_2)
++ (void)setUpForTestCase {
+  [super setUpForTestCase];
+  [self setUpHelper];
+}
+#elif defined(CHROME_EARL_GREY_1)
 // Set up called once for the class.
 + (void)setUp {
   [super setUp];
+  [self setUpHelper];
+}
+#else
+#error Not an EarlGrey Test
+#endif
+
++ (void)setUpHelper {
   std::map<GURL, std::string> responses;
   const char kPageFormat[] = "<head><title>%s</title></head><body>%s</body>";
   responses[web::test::HttpServer::MakeUrl(kURL1)] =
@@ -150,7 +123,7 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [ChromeEarlGrey clearBrowsingHistory];
   // Some tests rely on a clean state for the "Clear Browsing Data" settings
   // screen.
-  [self resetBrowsingDataPrefs];
+  [ChromeEarlGrey resetBrowsingDataPrefs];
 }
 
 - (void)tearDown {
@@ -167,7 +140,7 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 
   // Some tests change the default values for the "Clear Browsing Data" settings
   // screen.
-  [self resetBrowsingDataPrefs];
+  [ChromeEarlGrey resetBrowsingDataPrefs];
   [super tearDown];
 }
 
@@ -185,15 +158,19 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [self openHistoryPanel];
 
   // Assert that history displays three entries.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   // Tap a history entry and assert that navigation to that entry's URL occurs.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_tap()];
   [ChromeEarlGrey waitForWebStateContainingText:kResponse1];
 }
@@ -209,9 +186,11 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 
   [self openHistoryPanel];
 
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_notNil()];
 }
 
@@ -244,11 +223,14 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
                                           kHistorySearchScrimIdentifier)]
       assertWithMatcher:grey_nil()];
 
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_nil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       assertWithMatcher:grey_nil()];
 }
 
@@ -261,7 +243,8 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
       performAction:grey_tap()];
 
   // Try long press.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_longPress()];
 
   // Verify context menu is not visible.
@@ -276,11 +259,14 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
       assertWithMatcher:grey_nil()];
 
   // Verifiy we went back to original folder content.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       assertWithMatcher:grey_notNil()];
 }
 
@@ -290,35 +276,44 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [self openHistoryPanel];
 
   // Assert that three history elements are present.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   // Enter edit mode, select a history element, and press delete.
   [[EarlGrey selectElementWithMatcher:NavigationEditButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_tap()];
   [[EarlGrey selectElementWithMatcher:DeleteHistoryEntriesButton()]
       performAction:grey_tap()];
 
   // Assert that the deleted entry is gone and the other two remain.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       assertWithMatcher:grey_nil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   // Enter edit mode, select both remaining entries, and press delete.
   [[EarlGrey selectElementWithMatcher:NavigationEditButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL2, kTitle2)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL2.GetOrigin().spec(), kTitle2)]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3, _URL3.GetContent())]
+  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL3.GetOrigin().spec(),
+                                                   _URL3.GetContent())]
       performAction:grey_tap()];
   [[EarlGrey selectElementWithMatcher:DeleteHistoryEntriesButton()]
       performAction:grey_tap()];
@@ -335,6 +330,42 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [ChromeEarlGreyUI assertHistoryHasNoEntries];
 }
 
+// Tests clear browsing history.
+- (void)testClearBrowsingHistorySwipeDownDismiss {
+  if (!base::ios::IsRunningOnOrLater(13, 0, 0)) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on iOS 12 and lower.");
+  }
+  if (!IsCollectionsCardPresentationStyleEnabled()) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on when feature flag is off.");
+  }
+
+  [self loadTestURLs];
+  [self openHistoryPanel];
+
+  // Open Clear Browsing Data
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::
+                                          HistoryClearBrowsingDataButton()]
+      performAction:grey_tap()];
+
+  // Check that the TableView is presented.
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_accessibilityID(kClearBrowsingDataViewAccessibilityIdentifier)]
+      assertWithMatcher:grey_notNil()];
+
+  // Swipe TableView down.
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_accessibilityID(kClearBrowsingDataViewAccessibilityIdentifier)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that the TableView has been dismissed.
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_accessibilityID(kClearBrowsingDataViewAccessibilityIdentifier)]
+      assertWithMatcher:grey_nil()];
+}
+
 // Tests display and selection of 'Open in New Tab' in a context menu on a
 // history entry.
 - (void)testContextMenuOpenInNewTab {
@@ -342,7 +373,8 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [self openHistoryPanel];
 
   // Long press on the history element.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_longPress()];
 
   // Select "Open in New Tab" and confirm that new tab is opened with selected
@@ -362,7 +394,8 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [self openHistoryPanel];
 
   // Long press on the history element.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_longPress()];
 
   // Select "Open in New Incognito Tab" and confirm that new tab is opened in
@@ -378,7 +411,13 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 
 // Tests display and selection of 'Copy URL' in a context menu on a history
 // entry.
-- (void)testContextMenuCopy {
+// TODO(crbug.com/1067812): Test won't pass on devices.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testContextMenuCopy testContextMenuCopy
+#else
+#define MAYBE_testContextMenuCopy DISABLED_testContextMenuCopy
+#endif
+- (void)MAYBE_testContextMenuCopy {
   ProceduralBlock clearPasteboard = ^{
     [[UIPasteboard generalPasteboard] setURLs:nil];
   };
@@ -389,7 +428,8 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
   [self openHistoryPanel];
 
   // Long press on the history element.
-  [[EarlGrey selectElementWithMatcher:HistoryEntry(_URL1, kTitle1)]
+  [[EarlGrey
+      selectElementWithMatcher:HistoryEntry(_URL1.GetOrigin().spec(), kTitle1)]
       performAction:grey_longPress()];
 
   // Tap "Copy URL" and wait for the URL to be copied to the pasteboard.
@@ -402,6 +442,68 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
       });
   GREYAssertTrue(success, @"Pasteboard URL was not set to %s",
                  _URL1.spec().c_str());
+}
+
+// Tests that the VC can be dismissed by swiping down.
+- (void)testSwipeDownDismiss {
+  if (!base::ios::IsRunningOnOrLater(13, 0, 0)) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on iOS 12 and lower.");
+  }
+  if (!IsCollectionsCardPresentationStyleEnabled()) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on when feature flag is off.");
+  }
+  [self loadTestURLs];
+  [self openHistoryPanel];
+
+  // Check that the TableView is presented.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      assertWithMatcher:grey_notNil()];
+
+  // Swipe TableView down.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that the TableView has been dismissed.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      assertWithMatcher:grey_nil()];
+}
+
+// Tests that the VC can be dismissed by swiping down while its searching.
+- (void)testSwipeDownDismissWhileSearching {
+  if (!base::ios::IsRunningOnOrLater(13, 0, 0)) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on iOS 12 and lower.");
+  }
+  if (!IsCollectionsCardPresentationStyleEnabled()) {
+    EARL_GREY_TEST_SKIPPED(@"Test disabled on when feature flag is off.");
+  }
+  [self loadTestURLs];
+  [self openHistoryPanel];
+
+  // Check that the TableView is presented.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      assertWithMatcher:grey_notNil()];
+
+  // Search for the first URL.
+  [[EarlGrey selectElementWithMatcher:SearchIconButton()]
+      performAction:grey_tap()];
+  NSString* searchString =
+      [NSString stringWithFormat:@"%s", _URL1.path().c_str()];
+  [[EarlGrey selectElementWithMatcher:SearchIconButton()]
+      performAction:grey_typeText(searchString)];
+
+  // Swipe TableView down.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that the TableView has been dismissed.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kHistoryTableViewIdentifier)]
+      assertWithMatcher:grey_nil()];
 }
 
 // Navigates to history and checks elements for accessibility.
@@ -431,15 +533,6 @@ id<GREYMatcher> OpenInNewIncognitoTabButton() {
 - (void)openHistoryPanel {
   [ChromeEarlGreyUI openToolsMenu];
   [ChromeEarlGreyUI tapToolsMenuButton:HistoryButton()];
-}
-
-- (void)resetBrowsingDataPrefs {
-  PrefService* prefs = chrome_test_util::GetOriginalBrowserState()->GetPrefs();
-  prefs->ClearPref(browsing_data::prefs::kDeleteBrowsingHistory);
-  prefs->ClearPref(browsing_data::prefs::kDeleteCookies);
-  prefs->ClearPref(browsing_data::prefs::kDeleteCache);
-  prefs->ClearPref(browsing_data::prefs::kDeletePasswords);
-  prefs->ClearPref(browsing_data::prefs::kDeleteFormData);
 }
 
 @end

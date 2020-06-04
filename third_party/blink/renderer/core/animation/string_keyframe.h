@@ -32,12 +32,12 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
             kHTMLStandardMode)),
         presentation_attribute_map_(
             MakeGarbageCollected<MutableCSSPropertyValueSet>(
-                kHTMLStandardMode)) {}
+                kHTMLStandardMode)),
+        has_missing_properties_(false) {}
   StringKeyframe(const StringKeyframe& copy_from);
 
   MutableCSSPropertyValueSet::SetResult SetCSSPropertyValue(
       const AtomicString& property_name,
-      const PropertyRegistry*,
       const String& value,
       SecureContextMode,
       StyleSheetContents*);
@@ -82,7 +82,11 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
 
   bool HasCssProperty() const;
 
-  void AddKeyframePropertiesToV8Object(V8ObjectBuilder&) const override;
+  void AddKeyframePropertiesToV8Object(V8ObjectBuilder&,
+                                       Element*) const override;
+
+  bool HasMissingProperties() override { return has_missing_properties_; }
+  void SetHasMissingProperties() override { has_missing_properties_ = true; }
 
   void Trace(Visitor*) override;
 
@@ -110,6 +114,7 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
     }
 
     bool IsNeutral() const final { return !value_; }
+    bool IsRevert() const final;
     Keyframe::PropertySpecificKeyframe* NeutralKeyframe(
         double offset,
         scoped_refptr<TimingFunction> easing) const final;
@@ -146,6 +151,7 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
     }
 
     bool IsNeutral() const final { return value_.IsNull(); }
+    bool IsRevert() const final { return false; }
     PropertySpecificKeyframe* NeutralKeyframe(
         double offset,
         scoped_refptr<TimingFunction> easing) const final;
@@ -190,26 +196,33 @@ class CORE_EXPORT StringKeyframe : public Keyframe {
   Member<MutableCSSPropertyValueSet> css_property_map_;
   Member<MutableCSSPropertyValueSet> presentation_attribute_map_;
   HashMap<const QualifiedName*, String> svg_attribute_map_;
+  // If set, getKeyframes will include property-value pairs for missing
+  // properties based on the underlying style. The set of missing properties is
+  // computed based on the full set of animated properties across all keyframes.
+  bool has_missing_properties_;
 };
 
 using CSSPropertySpecificKeyframe = StringKeyframe::CSSPropertySpecificKeyframe;
 using SVGPropertySpecificKeyframe = StringKeyframe::SVGPropertySpecificKeyframe;
 
-DEFINE_TYPE_CASTS(StringKeyframe,
-                  Keyframe,
-                  value,
-                  value->IsStringKeyframe(),
-                  value.IsStringKeyframe());
-DEFINE_TYPE_CASTS(CSSPropertySpecificKeyframe,
-                  Keyframe::PropertySpecificKeyframe,
-                  value,
-                  value->IsCSSPropertySpecificKeyframe(),
-                  value.IsCSSPropertySpecificKeyframe());
-DEFINE_TYPE_CASTS(SVGPropertySpecificKeyframe,
-                  Keyframe::PropertySpecificKeyframe,
-                  value,
-                  value->IsSVGPropertySpecificKeyframe(),
-                  value.IsSVGPropertySpecificKeyframe());
+template <>
+struct DowncastTraits<StringKeyframe> {
+  static bool AllowFrom(const Keyframe& value) {
+    return value.IsStringKeyframe();
+  }
+};
+template <>
+struct DowncastTraits<CSSPropertySpecificKeyframe> {
+  static bool AllowFrom(const Keyframe::PropertySpecificKeyframe& value) {
+    return value.IsCSSPropertySpecificKeyframe();
+  }
+};
+template <>
+struct DowncastTraits<SVGPropertySpecificKeyframe> {
+  static bool AllowFrom(const Keyframe::PropertySpecificKeyframe& value) {
+    return value.IsSVGPropertySpecificKeyframe();
+  }
+};
 
 }  // namespace blink
 

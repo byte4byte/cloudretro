@@ -19,8 +19,10 @@ async function AddContent(id) {
     title: `title ${id}`,
     description: `description ${id} ${Math.random()}`,
     category: 'article',
-    iconUrl: '/anchor_download_test.png',
-    launchUrl: '/content_index/content_index.html?launch',
+    icons: [{
+      src: '/anchor_download_test.png',
+    }],
+    url: '/content_index/content_index.html?launch',
   });
 }
 
@@ -32,6 +34,11 @@ async function DeleteContent(id) {
 async function GetIds() {
   const registration = await navigator.serviceWorker.ready;
 
-  const descriptions = await registration.index.getDescriptions();
+  const descriptions = await registration.index.getAll();
   return descriptions.map(d => d.id);
+}
+
+async function waitForMessageFromServiceWorker() {
+  return await new Promise(r =>
+      navigator.serviceWorker.addEventListener('message', e => r(e.data)));
 }

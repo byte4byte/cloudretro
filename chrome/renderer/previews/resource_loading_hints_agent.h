@@ -11,9 +11,11 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "chrome/renderer/subresource_redirect/subresource_redirect_hints_agent.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "content/public/renderer/render_frame_observer_tracker.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
@@ -29,15 +31,26 @@ namespace previews {
 class ResourceLoadingHintsAgent
     : public content::RenderFrameObserver,
       public blink::mojom::PreviewsResourceLoadingHintsReceiver,
-      public base::SupportsWeakPtr<ResourceLoadingHintsAgent> {
+      public base::SupportsWeakPtr<ResourceLoadingHintsAgent>,
+      public content::RenderFrameObserverTracker<ResourceLoadingHintsAgent> {
  public:
   ResourceLoadingHintsAgent(
       blink::AssociatedInterfaceRegistry* associated_interfaces,
       content::RenderFrame* render_frame);
   ~ResourceLoadingHintsAgent() override;
 
+  subresource_redirect::SubresourceRedirectHintsAgent&
+  subresource_redirect_hints_agent() {
+    return subresource_redirect_hints_agent_;
+  }
+
  private:
   // content::RenderFrameObserver:
+  void DidStartNavigation(
+      const GURL& url,
+      base::Optional<blink::WebNavigationType> navigation_type) override;
+  void ReadyToCommitNavigation(
+      blink::WebDocumentLoader* document_loader) override;
   void DidCreateNewDocument() override;
   void OnDestruct() override;
 
@@ -46,18 +59,23 @@ class ResourceLoadingHintsAgent
   // blink::mojom::PreviewsResourceLoadingHintsReceiver:
   void SetResourceLoadingHints(blink::mojom::PreviewsResourceLoadingHintsPtr
                                    resource_loading_hints) override;
+  void SetCompressPublicImagesHints(
+      blink::mojom::CompressPublicImagesHintsPtr images_hints) override;
 
-  void SetBinding(
-      blink::mojom::PreviewsResourceLoadingHintsReceiverAssociatedRequest
-          request);
+  void SetReceiver(
+      mojo::PendingAssociatedReceiver<
+          blink::mojom::PreviewsResourceLoadingHintsReceiver> receiver);
 
   bool IsMainFrame() const;
 
   std::vector<std::string> subresource_patterns_to_block_;
   base::Optional<int64_t> ukm_source_id_;
 
-  mojo::AssociatedBinding<blink::mojom::PreviewsResourceLoadingHintsReceiver>
-      binding_;
+  mojo::AssociatedReceiver<blink::mojom::PreviewsResourceLoadingHintsReceiver>
+      receiver_{this};
+
+  subresource_redirect::SubresourceRedirectHintsAgent
+      subresource_redirect_hints_agent_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceLoadingHintsAgent);
 };

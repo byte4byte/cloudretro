@@ -31,7 +31,7 @@ public class AwContentsAnchorViewTest {
     private AwViewAndroidDelegate mViewDelegate;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContainerView = new FrameLayout(mActivityTestRule.getActivity());
         mViewDelegate = new AwViewAndroidDelegate(mContainerView, null, null);
     }
@@ -102,7 +102,7 @@ public class AwContentsAnchorViewTest {
 
             // Add anchor view
             View anchorView = addAnchorView();
-            LayoutParams layoutParams = anchorView.getLayoutParams();
+            LayoutParams layoutParams = new LayoutParams(anchorView.getLayoutParams());
 
             // Replace container view
             FrameLayout updatedContainerView = updateContainerView();
@@ -156,7 +156,7 @@ public class AwContentsAnchorViewTest {
 
             // Add anchor view
             View anchorView = addAnchorView();
-            LayoutParams layoutParams = anchorView.getLayoutParams();
+            LayoutParams layoutParams = new LayoutParams(anchorView.getLayoutParams());
 
             // Replace container view
             FrameLayout updatedContainerView = updateContainerView();
@@ -213,7 +213,7 @@ public class AwContentsAnchorViewTest {
         float scaledDimension = (float) dimension * scale;
         mViewDelegate.setViewPosition(
                 anchorView, scaledCoords, scaledCoords, scaledDimension, scaledDimension, 10, 10);
-        return anchorView.getLayoutParams();
+        return new LayoutParams(anchorView.getLayoutParams());
     }
 
     private FrameLayout updateContainerView() {

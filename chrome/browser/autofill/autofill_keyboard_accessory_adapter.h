@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
@@ -24,9 +25,8 @@ namespace autofill {
 class AutofillKeyboardAccessoryAdapter : public AutofillPopupView,
                                          public AutofillPopupController {
  public:
-  AutofillKeyboardAccessoryAdapter(AutofillPopupController* controller,
-                                   unsigned int animation_duration_millis,
-                                   bool should_limit_label_width);
+  AutofillKeyboardAccessoryAdapter(
+      base::WeakPtr<AutofillPopupController> controller);
   ~AutofillKeyboardAccessoryAdapter() override;
 
   // Interface describing the minimal capabilities for the native view.
@@ -34,9 +34,9 @@ class AutofillKeyboardAccessoryAdapter : public AutofillPopupView,
    public:
     virtual ~AccessoryView() = default;
 
-    // Initializes the Java-side of this bridge.
-    virtual void Initialize(unsigned int animation_duration_millis,
-                            bool should_limit_label_width) = 0;
+    // Initializes the Java-side of this bridge. Returns true after a successful
+    // creation and false otherwise.
+    virtual bool Initialize() = 0;
 
     // Requests to dismiss this view.
     virtual void Hide() = 0;
@@ -68,28 +68,23 @@ class AutofillKeyboardAccessoryAdapter : public AutofillPopupView,
   void AcceptSuggestion(int index) override;
   int GetLineCount() const override;
   const autofill::Suggestion& GetSuggestionAt(int row) const override;
-  const base::string16& GetElidedValueAt(int row) const override;
-  const base::string16& GetElidedLabelAt(int row) const override;
+  const base::string16& GetSuggestionValueAt(int row) const override;
+  const base::string16& GetSuggestionLabelAt(int row) const override;
   bool GetRemovalConfirmationText(int index,
                                   base::string16* title,
                                   base::string16* body) override;
   bool RemoveSuggestion(int index) override;
   void SetSelectedLine(base::Optional<int> selected_line) override;
   base::Optional<int> selected_line() const override;
-  const AutofillPopupLayoutModel& layout_model() const override;
+  PopupType GetPopupType() const override;
 
-  // AutofillPopupViewDelegate implementation
-  // Hidden: void Hide() override;
+  void Hide(PopupHidingReason reason) override;
   void ViewDestroyed() override;
-  void SetSelectionAtPoint(const gfx::Point& point) override;
-  bool AcceptSelectedLine() override;
   void SelectionCleared() override;
-  bool HasSelection() const override;
-  gfx::Rect popup_bounds() const override;
   gfx::NativeView container_view() const override;
   const gfx::RectF& element_bounds() const override;
   bool IsRTL() const override;
-  const std::vector<autofill::Suggestion> GetSuggestions() override;
+  std::vector<Suggestion> GetSuggestions() const override;
 
   void OnDeletionConfirmed(int index);
 
@@ -98,23 +93,18 @@ class AutofillKeyboardAccessoryAdapter : public AutofillPopupView,
   // |element_index| is the position of an element as returned by |controller_|.
   int OffsetIndexFor(int element_index) const;
 
-  AutofillPopupController* controller_;  // weak.
+  base::WeakPtr<AutofillPopupController> controller_;
   std::unique_ptr<AutofillKeyboardAccessoryAdapter::AccessoryView> view_;
 
   // The labels to be used for the input chips.
   std::vector<base::string16> labels_;
 
-  // If 0, don't animate suggestion view.
-  const unsigned int animation_duration_millis_;
-
-  // If true, limits label width to 1/2 device's width.
-  const bool should_limit_label_width_;
-
   // Position that the front element has in the suggestion list returned by
   // controller_. It is used to determine the offset suggestions.
   base::Optional<int> front_element_;
 
-  base::WeakPtrFactory<AutofillKeyboardAccessoryAdapter> weak_ptr_factory_;
+  base::WeakPtrFactory<AutofillKeyboardAccessoryAdapter> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(AutofillKeyboardAccessoryAdapter);
 };

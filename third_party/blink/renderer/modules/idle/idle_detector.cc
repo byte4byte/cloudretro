@@ -6,11 +6,16 @@
 
 #include <utility>
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/mojom/idle/idle_manager.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_idle_options.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/modules/idle/idle_options.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/modules/idle/idle_state.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -52,20 +57,19 @@ IdleDetector* IdleDetector::Create(ScriptState* script_state,
 }
 
 IdleDetector::IdleDetector(ExecutionContext* context, base::TimeDelta threshold)
-    : ContextClient(context), threshold_(threshold), binding_(this) {}
+    : ExecutionContextClient(context),
+      threshold_(threshold),
+      receiver_(this, context),
+      service_(context) {}
 
 IdleDetector::~IdleDetector() = default;
-
-void IdleDetector::Dispose() {
-  StopMonitoring();
-}
 
 const AtomicString& IdleDetector::InterfaceName() const {
   return event_target_names::kIdleDetector;
 }
 
 ExecutionContext* IdleDetector::GetExecutionContext() const {
-  return ContextClient::GetExecutionContext();
+  return ExecutionContextClient::GetExecutionContext();
 }
 
 bool IdleDetector::HasPendingActivity() const {
@@ -74,18 +78,17 @@ bool IdleDetector::HasPendingActivity() const {
   return GetExecutionContext() && HasEventListeners();
 }
 
-ScriptPromise IdleDetector::start(ScriptState* script_state) {
+ScriptPromise IdleDetector::start(ScriptState* script_state,
+                                  ExceptionState& exception_state) {
   // Validate options.
   ExecutionContext* context = ExecutionContext::From(script_state);
   DCHECK(context->IsContextThread());
 
-  if (!context->GetSecurityContext().IsFeatureEnabled(
-          mojom::FeaturePolicyFeature::kIdleDetection,
+  if (!context->IsFeatureEnabled(
+          mojom::blink::FeaturePolicyFeature::kIdleDetection,
           ReportOptions::kReportOnFailure)) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state,
-        MakeGarbageCollected<DOMException>(DOMExceptionCode::kSecurityError,
-                                           kFeaturePolicyBlocked));
+    exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
+    return ScriptPromise();
   }
 
   StartMonitoring();
@@ -94,11 +97,11 @@ ScriptPromise IdleDetector::start(ScriptState* script_state) {
 }
 
 void IdleDetector::stop() {
-  StopMonitoring();
+  receiver_.reset();
 }
 
 void IdleDetector::StartMonitoring() {
-  if (binding_.is_bound()) {
+  if (receiver_.is_bound()) {
     return;
   }
 
@@ -106,21 +109,18 @@ void IdleDetector::StartMonitoring() {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI);
 
-  if (!service_) {
-    GetExecutionContext()->GetInterfaceProvider()->GetInterface(
-        mojo::MakeRequest(&service_, task_runner));
+  if (!service_.is_bound()) {
+    GetExecutionContext()->GetBrowserInterfaceBroker().GetInterface(
+        service_.BindNewPipeAndPassReceiver(task_runner));
   }
 
-  mojom::blink::IdleMonitorPtr monitor_ptr;
-  binding_.Bind(mojo::MakeRequest(&monitor_ptr, task_runner), task_runner);
+  mojo::PendingRemote<mojom::blink::IdleMonitor> idle_monitor_remote;
+  receiver_.Bind(idle_monitor_remote.InitWithNewPipeAndPassReceiver(),
+                 task_runner);
 
   service_->AddMonitor(
-      threshold_, std::move(monitor_ptr),
+      threshold_, std::move(idle_monitor_remote),
       WTF::Bind(&IdleDetector::OnAddMonitor, WrapWeakPersistent(this)));
-}
-
-void IdleDetector::StopMonitoring() {
-  binding_.Close();
 }
 
 void IdleDetector::OnAddMonitor(mojom::blink::IdleStatePtr state) {
@@ -132,7 +132,7 @@ blink::IdleState* IdleDetector::state() const {
 }
 
 void IdleDetector::Update(mojom::blink::IdleStatePtr state) {
-  DCHECK(binding_.is_bound());
+  DCHECK(receiver_.is_bound());
   if (!GetExecutionContext() || GetExecutionContext()->IsContextDestroyed())
     return;
 
@@ -144,10 +144,12 @@ void IdleDetector::Update(mojom::blink::IdleStatePtr state) {
   DispatchEvent(*Event::Create(event_type_names::kChange));
 }
 
-void IdleDetector::Trace(blink::Visitor* visitor) {
+void IdleDetector::Trace(Visitor* visitor) {
   visitor->Trace(state_);
+  visitor->Trace(receiver_);
+  visitor->Trace(service_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
   ActiveScriptWrappable::Trace(visitor);
 }
 

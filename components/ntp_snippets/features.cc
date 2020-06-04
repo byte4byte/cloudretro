@@ -34,10 +34,9 @@ const base::Feature kRemoteSuggestionsBackendFeature{
 
 // Keep sorted, and keep nullptr at the end.
 const base::Feature* const kAllFeatures[] = {
-    &kArticleSuggestionsFeature,
-    &kKeepPrefetchedContentSuggestions,
-    &kNotificationsFeature,
-    &kRemoteSuggestionsBackendFeature};
+    &kArticleSuggestionsFeature, &kKeepPrefetchedContentSuggestions,
+    &kNotificationsFeature, &kRemoteSuggestionsBackendFeature,
+    &kOptionalImagesEnabledFeature};
 
 const base::Feature kArticleSuggestionsFeature{
     "NTPArticleSuggestions", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -72,6 +71,9 @@ const char kNotificationsIgnoredLimitParam[] = "ignored_limit";
 const base::Feature kKeepPrefetchedContentSuggestions{
     "KeepPrefetchedContentSuggestions", base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kOptionalImagesEnabledFeature{
+    "NTPRemoteSuggestionsOptionalImages", base::FEATURE_ENABLED_BY_DEFAULT};
+
 std::vector<const base::Feature*> GetAllFeatures() {
   // Skip the last feature as it's a nullptr.
   return std::vector<const base::Feature*>(
@@ -85,7 +87,7 @@ const char kDefaultReferrerUrl[] =
 // Provides ability to customize the referrer URL.
 // When specifying a referrer through a field trial, it must contain a path.
 // In case of default value above the path is empty, but it is specified.
-base::FeatureParam<std::string> kArticleSuggestionsReferrerURLParam{
+const base::FeatureParam<std::string> kArticleSuggestionsReferrerURLParam{
     &kArticleSuggestionsFeature, "referrer_url", kDefaultReferrerUrl};
 
 std::string GetContentSuggestionsReferrerURL() {

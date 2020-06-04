@@ -116,9 +116,9 @@ class BASE_EXPORT WeakReference {
   explicit WeakReference(const scoped_refptr<Flag>& flag);
   ~WeakReference();
 
-  WeakReference(WeakReference&& other);
+  WeakReference(WeakReference&& other) noexcept;
   WeakReference(const WeakReference& other);
-  WeakReference& operator=(WeakReference&& other) = default;
+  WeakReference& operator=(WeakReference&& other) noexcept = default;
   WeakReference& operator=(const WeakReference& other) = default;
 
   bool IsValid() const;
@@ -140,7 +140,7 @@ class BASE_EXPORT WeakReferenceOwner {
   void Invalidate();
 
  private:
-  mutable scoped_refptr<WeakReference::Flag> flag_;
+  scoped_refptr<WeakReference::Flag> flag_;
 };
 
 // This class simplifies the implementation of WeakPtr's type conversion
@@ -153,9 +153,9 @@ class BASE_EXPORT WeakPtrBase {
   ~WeakPtrBase();
 
   WeakPtrBase(const WeakPtrBase& other) = default;
-  WeakPtrBase(WeakPtrBase&& other) = default;
+  WeakPtrBase(WeakPtrBase&& other) noexcept = default;
   WeakPtrBase& operator=(const WeakPtrBase& other) = default;
-  WeakPtrBase& operator=(WeakPtrBase&& other) = default;
+  WeakPtrBase& operator=(WeakPtrBase&& other) noexcept = default;
 
   void reset() {
     ref_ = internal::WeakReference();
@@ -236,7 +236,7 @@ class WeakPtr : public internal::WeakPtrBase {
     ptr_ = reinterpret_cast<uintptr_t>(t);
   }
   template <typename U>
-  WeakPtr(WeakPtr<U>&& other) : WeakPtrBase(std::move(other)) {
+  WeakPtr(WeakPtr<U>&& other) noexcept : WeakPtrBase(std::move(other)) {
     // Need to cast from U* to T* to do pointer adjustment in case of multiple
     // inheritance. This also enforces the "U is a T" rule.
     T* t = reinterpret_cast<U*>(other.ptr_);

@@ -9,11 +9,10 @@ import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ActivityState;
-import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContent;
@@ -23,11 +22,10 @@ import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.Context
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.scene_layer.ContextualSearchSceneLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
-import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.contextualsearch.ResolvedSearchTerm.CardTag;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.browser.widget.ScrimView;
 import org.chromium.chrome.browser.widget.ScrimView.ScrimParams;
 import org.chromium.ui.base.LocalizationUtils;
@@ -37,14 +35,12 @@ import org.chromium.ui.resources.ResourceManager;
  * Controls the Contextual Search Panel.
  */
 public class ContextualSearchPanel extends OverlayPanel {
-    /** The number of times to allow scrolling.  After this limit we'll close. */
-    private static final int SCROLL_COUNT_LIMIT = 3;
+
+    /** Restricts the maximized panel height to the given fraction of a tab. */
+    private static final float MAXIMIZED_HEIGHT_FRACTION = 0.95f;
 
     /** Used for logging state changes. */
     private final ContextualSearchPanelMetrics mPanelMetrics;
-
-    /** The height of the bar shadow, in pixels. */
-    private final float mBarShadowHeightPx;
 
     /** The distance of the divider from the end of the bar, in dp. */
     private final float mEndButtonWidthDp;
@@ -73,9 +69,6 @@ public class ContextualSearchPanel extends OverlayPanel {
      */
     private ScrimParams mScrimParams;
 
-    /** Number of times the panel has been scrolled already. */
-    private int mScrollCount;
-
     // ============================================================================================
     // Constructor
     // ============================================================================================
@@ -91,17 +84,9 @@ public class ContextualSearchPanel extends OverlayPanel {
         mSceneLayer = createNewContextualSearchSceneLayer();
         mPanelMetrics = new ContextualSearchPanelMetrics();
 
-        mBarShadowHeightPx =
-                ApiCompatibilityUtils
-                        .getDrawable(mContext.getResources(), R.drawable.modern_toolbar_shadow)
-                        .getIntrinsicHeight();
-        // We may have 1 or 2 buttons depending on old/new layout.
-        int endButtonsWidthDimension =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)
-                ? R.dimen.contextual_search_end_buttons_width
-                : R.dimen.contextual_search_end_button_width;
-        mEndButtonWidthDp =
-                mPxToDp * mContext.getResources().getDimensionPixelSize(endButtonsWidthDimension);
+        mEndButtonWidthDp = mContext.getResources().getDimensionPixelSize(
+                                    R.dimen.contextual_search_padded_button_width)
+                * mPxToDp;
     }
 
     @Override
@@ -172,7 +157,7 @@ public class ContextualSearchPanel extends OverlayPanel {
         int fromState = getPanelState();
 
         mPanelMetrics.onPanelStateChanged(
-                fromState, toState, reason, Profile.getLastUsedProfile().getOriginalProfile());
+                fromState, toState, reason, Profile.getLastUsedRegularProfile());
 
         if (toState == PanelState.PEEKED
                 && (fromState == PanelState.CLOSED || fromState == PanelState.UNDEFINED)) {
@@ -193,15 +178,6 @@ public class ContextualSearchPanel extends OverlayPanel {
     @Override
     protected boolean isSupportedState(@PanelState int state) {
         return canDisplayContentInPanel() || state != PanelState.MAXIMIZED;
-    }
-
-    @Override
-    protected float getExpandedHeight() {
-        if (canDisplayContentInPanel()) {
-            return super.getExpandedHeight();
-        } else {
-            return getBarHeightPeeking() + getPromoHeightPx() * mPxToDp;
-        }
     }
 
     @Override
@@ -247,7 +223,6 @@ public class ContextualSearchPanel extends OverlayPanel {
         setProgressBarCompletion(0);
         setProgressBarVisible(false);
         getImageControl().hideCustomImage(false);
-        mScrollCount = 0;
 
         super.onClosed(reason);
 
@@ -292,6 +267,8 @@ public class ContextualSearchPanel extends OverlayPanel {
                             || ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)
                                     && isCoordinateInsideOpenTabButton(x))) {
                 mManagementDelegate.promoteToTab();
+            } else {
+                peekPanel(StateChangeReason.UNKNOWN);
             }
         }
     }
@@ -363,6 +340,32 @@ public class ContextualSearchPanel extends OverlayPanel {
     }
 
     @Override
+    public float getOpenTabIconX() {
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
+            return super.getOpenTabIconX();
+        } else {
+            if (LocalizationUtils.isLayoutRtl()) {
+                return getOffsetX() + getBarMarginSide();
+            } else {
+                return getOffsetX() + getWidth() - getBarMarginSide() - getCloseIconDimension();
+            }
+        }
+    }
+
+    @Override
+    protected boolean isCoordinateInsideCloseButton(float x) {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) return false;
+
+        return super.isCoordinateInsideCloseButton(x);
+    }
+
+    @Override
+    protected boolean isCoordinateInsideOpenTabButton(float x) {
+        return getOpenTabIconX() - getButtonPaddingDps() <= x
+                && x <= getOpenTabIconX() + getOpenTabIconDimension() + getButtonPaddingDps();
+    }
+
+    @Override
     public float getContentY() {
         return getOffsetY() + getBarContainerHeight() + getPromoHeightPx() * mPxToDp;
     }
@@ -374,27 +377,17 @@ public class ContextualSearchPanel extends OverlayPanel {
 
     @Override
     protected float getPeekedHeight() {
-        return getBarHeightPeeking() + getBarBannerControl().getHeightPeekingPx() * mPxToDp;
+        return getBarHeight() + getBarBannerControl().getHeightPeekingPx() * mPxToDp;
     }
 
     @Override
-    protected float calculateBarShadowOpacity() {
-        float barShadowOpacity = 0.f;
-        if (getPromoHeightPx() > 0.f) {
-            float threshold = 2 * mBarShadowHeightPx;
-            barShadowOpacity = getPromoHeightPx() > mBarShadowHeightPx ? 1.f
-                    : MathUtils.interpolate(0.f, 1.f, getPromoHeightPx() / threshold);
+    protected float getMaximizedHeight() {
+        // Max height does not cover the entire content screen.
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
+            return getTabHeight() * MAXIMIZED_HEIGHT_FRACTION;
+        } else {
+            return super.getMaximizedHeight();
         }
-        return barShadowOpacity;
-    }
-
-    @Override
-    protected boolean doesMatchFullWidthCriteria(float containerWidth) {
-        if (!mOverrideIsFullWidthSizePanelForTesting && mActivity != null
-                && mActivity.getBottomSheet() != null) {
-            return true;
-        }
-        return super.doesMatchFullWidthCriteria(containerWidth);
     }
 
     // ============================================================================================
@@ -455,28 +448,6 @@ public class ContextualSearchPanel extends OverlayPanel {
     @VisibleForTesting
     public boolean isBarBannerVisible() {
         return getBarBannerControl().isVisible();
-    }
-
-    /**
-     * Makes the panel not visible by either hiding it or closing it completely.
-     * Decides which method is most appropriate, and then makes it not visible based on that
-     * decision.
-     * @param reason The reason we want the panel to not be visible.
-     */
-    public void makePanelNotVisible(@StateChangeReason int reason) {
-        if (++mScrollCount >= SCROLL_COUNT_LIMIT) {
-            closePanel(StateChangeReason.BASE_PAGE_SCROLL, true);
-        } else if (isHideDuringScrollEnabled()) {
-            hidePanel(reason);
-        }
-    }
-
-    /** @return whether hiding during scrolling is enabled for the Longpress-Resolve feature. */
-    private boolean isHideDuringScrollEnabled() {
-        return ContextualSearchFieldTrial.LONGPRESS_RESOLVE_HIDE_ON_SCROLL.equals(
-                ChromeFeatureList.getFieldTrialParamByFeature(
-                        ChromeFeatureList.CONTEXTUAL_SEARCH_LONGPRESS_RESOLVE,
-                        ContextualSearchFieldTrial.LONGPRESS_RESOLVE_PARAM_NAME));
     }
 
     /**
@@ -651,6 +622,11 @@ public class ContextualSearchPanel extends OverlayPanel {
         return new Rect(left, top, right, bottom);
     }
 
+    /** @return The padding used for each side of the button in the Bar. */
+    public float getButtonPaddingDps() {
+        return mButtonPaddingDps;
+    }
+
     // ============================================================================================
     // Panel Metrics
     // ============================================================================================
@@ -777,6 +753,7 @@ public class ContextualSearchPanel extends OverlayPanel {
             // Calculate the offset to center the selection on the available area.
             final float availableHeight = getTabHeight() - getExpandedHeight();
             offset = -selectionY + availableHeight / 2;
+            offset += getLayoutOffsetYDps();
         }
         return offset;
     }
@@ -890,6 +867,7 @@ public class ContextualSearchPanel extends OverlayPanel {
     }
 
     /**
+     * TODO(donnd): get rid of this promo stuff, no longer used.
      * @return An implementation of {@link ContextualSearchPromoHost}.
      */
     private ContextualSearchPromoHost getContextualSearchPromoHost() {
@@ -909,9 +887,7 @@ public class ContextualSearchPanel extends OverlayPanel {
                 }
 
                 @Override
-                public void onUpdatePromoAppearance() {
-                    ContextualSearchPanel.this.updateBarShadow();
-                }
+                public void onUpdatePromoAppearance() {}
             };
         }
 

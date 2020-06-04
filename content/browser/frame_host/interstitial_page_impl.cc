@@ -50,7 +50,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/bindings_policy.h"
@@ -63,22 +62,31 @@ using blink::WebDragOperationsMask;
 
 namespace content {
 
+namespace {
+
+const blink::UserAgentOverride& NoUAOverride() {
+  static const base::NoDestructor<blink::UserAgentOverride> no_ua_override;
+  return *no_ua_override;
+}
+
+}  // namespace
+
 class InterstitialPageImpl::InterstitialPageRVHDelegateView
-  : public RenderViewHostDelegateView {
+    : public RenderViewHostDelegateView {
  public:
   explicit InterstitialPageRVHDelegateView(InterstitialPageImpl* page);
 
   // RenderViewHostDelegateView implementation:
 #if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
   void ShowPopupMenu(RenderFrameHost* render_frame_host,
+                     mojo::PendingRemote<blink::mojom::ExternalPopup> popup,
                      const gfx::Rect& bounds,
                      int item_height,
                      double item_font_size,
                      int selected_item,
-                     const std::vector<MenuItem>& items,
+                     std::vector<blink::mojom::MenuItemPtr> menu_items,
                      bool right_aligned,
                      bool allow_multiple_selection) override;
-  void HidePopupMenu() override;
 #endif
   void StartDragging(const DropData& drop_data,
                      WebDragOperationsMask operations_allowed,
@@ -104,7 +112,6 @@ class InterstitialPageImpl::InterstitialPageRVHDelegateView
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialPageRVHDelegateView);
 };
-
 
 // We keep a map of the various blocking pages shown as the UI tests need to
 // be able to retrieve them.
@@ -185,8 +192,7 @@ InterstitialPageImpl::InterstitialPageImpl(
       rvh_delegate_view_(new InterstitialPageRVHDelegateView(this)),
       create_view_(true),
       pause_throbber_(false),
-      delegate_(delegate),
-      widget_observer_(this) {
+      delegate_(delegate) {
   InitInterstitialPageMap();
 }
 
@@ -265,7 +271,7 @@ void InterstitialPageImpl::Show() {
   frame_tree_->root()->current_frame_host()->UpdateAccessibilityMode();
 
   notification_registrar_.Add(this, NOTIFICATION_NAV_ENTRY_PENDING,
-      Source<NavigationController>(controller_));
+                              Source<NavigationController>(controller_));
 }
 
 void InterstitialPageImpl::Hide() {
@@ -279,10 +285,8 @@ void InterstitialPageImpl::Hide() {
 
   RenderWidgetHostView* old_view =
       controller_->delegate()->GetRenderViewHost()->GetWidget()->GetView();
-  if (controller_->delegate()->GetInterstitialPage() == this &&
-      old_view &&
-      !old_view->IsShowing() &&
-      !controller_->delegate()->IsHidden()) {
+  if (controller_->delegate()->GetInterstitialPage() == this && old_view &&
+      !old_view->IsShowing() && !controller_->delegate()->IsHidden()) {
     // Show the original RVH since we're going away.  Note it might not exist if
     // the renderer crashed while the interstitial was showing.
     // Note that it is important that we don't call Show() if the view is
@@ -332,10 +336,9 @@ void InterstitialPageImpl::RenderWidgetHostDestroyed(
   }
 }
 
-void InterstitialPageImpl::Observe(
-    int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+void InterstitialPageImpl::Observe(int type,
+                                   const NotificationSource& source,
+                                   const NotificationDetails& details) {
   switch (type) {
     case NOTIFICATION_NAV_ENTRY_PENDING:
       // We are navigating away from the interstitial (the user has typed a URL
@@ -448,6 +451,22 @@ void InterstitialPageImpl::ExecuteEditCommand(
   input_handler->ExecuteEditCommand(command, value);
 }
 
+void InterstitialPageImpl::Undo() {
+  auto* input_handler = GetFocusedFrameInputHandler();
+  if (!input_handler)
+    return;
+  input_handler->Undo();
+  RecordAction(base::UserMetricsAction("Undo"));
+}
+
+void InterstitialPageImpl::Redo() {
+  auto* input_handler = GetFocusedFrameInputHandler();
+  if (!input_handler)
+    return;
+  input_handler->Redo();
+  RecordAction(base::UserMetricsAction("Redo"));
+}
+
 void InterstitialPageImpl::Copy() {
   auto* input_handler = GetFocusedFrameInputHandler();
   if (!input_handler)
@@ -462,6 +481,14 @@ void InterstitialPageImpl::Paste() {
     return;
   input_handler->Paste();
   RecordAction(base::UserMetricsAction("Paste"));
+}
+
+void InterstitialPageImpl::PasteAndMatchStyle() {
+  auto* input_handler = GetFocusedFrameInputHandler();
+  if (!input_handler)
+    return;
+  input_handler->PasteAndMatchStyle();
+  RecordAction(base::UserMetricsAction("PasteAndMatchStyle"));
 }
 
 void InterstitialPageImpl::SelectAll() {
@@ -540,16 +567,11 @@ WebContents* InterstitialPageImpl::OpenURL(const OpenURLParams& params) {
   return nullptr;
 }
 
-const std::string& InterstitialPageImpl::GetUserAgentOverride() {
-  return base::EmptyString();
+const blink::UserAgentOverride& InterstitialPageImpl::GetUserAgentOverride() {
+  return NoUAOverride();
 }
 
 bool InterstitialPageImpl::ShouldOverrideUserAgentInNewTabs() {
-  return false;
-}
-
-bool InterstitialPageImpl::ShowingInterstitialPage() {
-  // An interstitial page never shows a second interstitial.
   return false;
 }
 
@@ -606,15 +628,16 @@ RenderViewHostImpl* InterstitialPageImpl::CreateRenderViewHost() {
       SiteInstance::Create(browser_context);
   DOMStorageContextWrapper* dom_storage_context =
       static_cast<DOMStorageContextWrapper*>(
-          BrowserContext::GetStoragePartition(
-              browser_context, site_instance.get())->GetDOMStorageContext());
+          BrowserContext::GetStoragePartition(browser_context,
+                                              site_instance.get())
+              ->GetDOMStorageContext());
   session_storage_namespace_ =
       SessionStorageNamespaceImpl::Create(dom_storage_context);
 
   // Use the RenderViewHost from our FrameTree.
-  frame_tree_->root()->render_manager()->Init(
-      site_instance.get(), MSG_ROUTING_NONE, MSG_ROUTING_NONE, MSG_ROUTING_NONE,
-      false);
+  frame_tree_->root()->render_manager()->InitRoot(
+      site_instance.get(),
+      /*renderer_initiated_creation=*/false);
   return frame_tree_->root()->current_frame_host()->render_view_host();
 }
 
@@ -624,7 +647,7 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
   WebContentsView* wcv =
       static_cast<WebContentsImpl*>(web_contents())->GetView();
   RenderWidgetHostViewBase* view =
-      wcv->CreateViewForWidget(render_view_host_->GetWidget(), false);
+      wcv->CreateViewForWidget(render_view_host_->GetWidget());
   render_view_host_->GetWidget()->SetView(view);
   render_view_host_->GetMainFrame()->AllowBindings(
       BINDINGS_POLICY_DOM_AUTOMATION);
@@ -754,10 +777,10 @@ RenderWidgetHostView* InterstitialPageImpl::GetView() {
   return render_view_host_->GetWidget()->GetView();
 }
 
-RenderFrameHost* InterstitialPageImpl::GetMainFrame() {
+RenderFrameHostImpl* InterstitialPageImpl::GetMainFrame() {
   if (!render_view_host_)
     return nullptr;
-  return render_view_host_->GetMainFrame();
+  return static_cast<RenderFrameHostImpl*>(render_view_host_->GetMainFrame());
 }
 
 InterstitialPageDelegate* InterstitialPageImpl::GetDelegateForTesting() {
@@ -768,15 +791,14 @@ void InterstitialPageImpl::DontCreateViewForTesting() {
   create_view_ = false;
 }
 
-void InterstitialPageImpl::CreateNewWindow(
+RenderFrameHostDelegate* InterstitialPageImpl::CreateNewWindow(
     RenderFrameHost* opener,
-    int32_t render_view_route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
     const mojom::CreateNewWindowParams& params,
+    bool is_new_browsing_instance,
     bool has_user_gesture,
     SessionStorageNamespace* session_storage_namespace) {
   NOTREACHED() << "InterstitialPage does not support showing popups.";
+  return nullptr;
 }
 
 void InterstitialPageImpl::SetFocusedFrame(FrameTreeNode* node,
@@ -794,15 +816,21 @@ Visibility InterstitialPageImpl::GetVisibility() {
   return Visibility::OCCLUDED;
 }
 
-void InterstitialPageImpl::CreateNewWidget(int32_t render_process_id,
-                                           int32_t route_id,
-                                           mojom::WidgetPtr widget) {
+void InterstitialPageImpl::CreateNewWidget(
+    int32_t render_process_id,
+    int32_t route_id,
+    mojo::PendingRemote<mojom::Widget> widget,
+    mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost> blink_widget_host,
+    mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs.";
 }
 
-void InterstitialPageImpl::CreateNewFullscreenWidget(int32_t render_process_id,
-                                                     int32_t route_id,
-                                                     mojom::WidgetPtr widget) {
+void InterstitialPageImpl::CreateNewFullscreenWidget(
+    int32_t render_process_id,
+    int32_t route_id,
+    mojo::PendingRemote<mojom::Widget> widget,
+    mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost> blink_widget_host,
+    mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget) {
   NOTREACHED()
       << "InterstitialPage does not support showing full screen popups.";
 }
@@ -881,8 +909,8 @@ void InterstitialPageImpl::TakeActionOnResourceDispatcher(
   // The tab might not have a render_view_host if it was closed (in which case,
   // we have taken care of the blocked requests when processing
   // NOTIFY_RENDER_WIDGET_HOST_DESTROYED.
-  RenderViewHostImpl* rvh = RenderViewHostImpl::FromID(original_child_id_,
-                                                       original_rvh_id_);
+  RenderViewHostImpl* rvh =
+      RenderViewHostImpl::FromID(original_child_id_, original_rvh_id_);
   if (!rvh)
     return;
 
@@ -922,26 +950,21 @@ void InterstitialPageImpl::OnDomOperationResponse(
   delegate_->CommandReceived(json_string);
 }
 
-
 InterstitialPageImpl::InterstitialPageRVHDelegateView::
     InterstitialPageRVHDelegateView(InterstitialPageImpl* page)
-    : interstitial_page_(page) {
-}
+    : interstitial_page_(page) {}
 
 #if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
 void InterstitialPageImpl::InterstitialPageRVHDelegateView::ShowPopupMenu(
     RenderFrameHost* render_frame_host,
+    mojo::PendingRemote<blink::mojom::ExternalPopup> popup,
     const gfx::Rect& bounds,
     int item_height,
     double item_font_size,
     int selected_item,
-    const std::vector<MenuItem>& items,
+    std::vector<blink::mojom::MenuItemPtr> menu_items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  NOTREACHED() << "InterstitialPage does not support showing popup menus.";
-}
-
-void InterstitialPageImpl::InterstitialPageRVHDelegateView::HidePopupMenu() {
   NOTREACHED() << "InterstitialPage does not support showing popup menus.";
 }
 #endif
@@ -953,8 +976,8 @@ void InterstitialPageImpl::InterstitialPageRVHDelegateView::StartDragging(
     const gfx::Vector2d& image_offset,
     const DragEventSourceInfo& event_info,
     RenderWidgetHostImpl* source_rwh) {
-  interstitial_page_->render_view_host_->GetWidget()->
-      DragSourceSystemDragEnded();
+  interstitial_page_->render_view_host_->GetWidget()
+      ->DragSourceSystemDragEnded();
   DVLOG(1) << "InterstitialPage does not support dragging yet.";
 }
 
@@ -1027,15 +1050,16 @@ bool InterstitialPageImpl::InterstitialPageRVHDelegateView::
 }
 
 void InterstitialPageImpl::InterstitialPageRVHDelegateView::OnFindReply(
-    int request_id, int number_of_matches, const gfx::Rect& selection_rect,
-    int active_match_ordinal, bool final_update) {
-}
+    int request_id,
+    int number_of_matches,
+    const gfx::Rect& selection_rect,
+    int active_match_ordinal,
+    bool final_update) {}
 
 InterstitialPageImpl::UnderlyingContentObserver::UnderlyingContentObserver(
     WebContents* web_contents,
     InterstitialPageImpl* interstitial)
-    : WebContentsObserver(web_contents), interstitial_(interstitial) {
-}
+    : WebContentsObserver(web_contents), interstitial_(interstitial) {}
 
 void InterstitialPageImpl::UnderlyingContentObserver::NavigationEntryCommitted(
     const LoadCommittedDetails& load_details) {
@@ -1047,8 +1071,9 @@ void InterstitialPageImpl::UnderlyingContentObserver::WebContentsDestroyed() {
 }
 
 TextInputManager* InterstitialPageImpl::GetTextInputManager() {
-  return !web_contents_ ? nullptr : static_cast<WebContentsImpl*>(web_contents_)
-                                        ->GetTextInputManager();
+  return !web_contents_ ? nullptr
+                        : static_cast<WebContentsImpl*>(web_contents_)
+                              ->GetTextInputManager();
 }
 
 RenderWidgetHostInputEventRouter* InterstitialPageImpl::GetInputEventRouter() {

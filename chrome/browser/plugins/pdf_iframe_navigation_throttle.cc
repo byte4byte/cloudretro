@@ -8,13 +8,10 @@
 
 #include "base/feature_list.h"
 #include "base/memory/weak_ptr.h"
-#include "base/no_destructor.h"
 #include "base/task/post_task.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pdf_util.h"
-#include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_utils.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -65,12 +62,10 @@ bool IsPDFPluginEnabled(content::NavigationHandle* navigation_handle,
   content::WebContents* web_contents = navigation_handle->GetWebContents();
   int process_id = web_contents->GetMainFrame()->GetProcess()->GetID();
   int routing_id = web_contents->GetMainFrame()->GetRoutingID();
-  content::ResourceContext* resource_context =
-      web_contents->GetBrowserContext()->GetResourceContext();
 
   content::WebPluginInfo plugin_info;
   return content::PluginService::GetInstance()->GetPluginInfo(
-      process_id, routing_id, resource_context, navigation_handle->GetURL(),
+      process_id, routing_id, navigation_handle->GetURL(),
       web_contents->GetMainFrame()->GetLastCommittedOrigin(), kPDFMimeType,
       false /* allow_wildcard */, is_stale, &plugin_info,
       nullptr /* actual_mime_type */);
@@ -161,23 +156,24 @@ void PDFIFrameNavigationThrottle::LoadPlaceholderHTML() {
   // Prepare the params to navigate to the placeholder.
   std::string html = GetPDFPlaceholderHTML(navigation_handle()->GetURL());
   GURL data_url("data:text/html," + net::EscapePath(html));
-  content::OpenURLParams params(data_url, navigation_handle()->GetReferrer(),
-                                navigation_handle()->GetFrameTreeNodeId(),
-                                WindowOpenDisposition::CURRENT_TAB,
-                                ui::PAGE_TRANSITION_AUTO_SUBFRAME,
-                                navigation_handle()->IsRendererInitiated());
-  params.initiator_origin = navigation_handle()->GetInitiatorOrigin();
+  content::OpenURLParams params =
+      content::OpenURLParams::FromNavigationHandle(navigation_handle());
+  params.url = data_url;
+  params.transition = ui::PAGE_TRANSITION_AUTO_SUBFRAME;
 
   // Post a task to navigate to the placeholder HTML. We don't navigate
   // synchronously here, as starting a navigation within a navigation is
   // an antipattern. Use a helper object scoped to the WebContents lifetime to
   // scope the navigation task to the WebContents lifetime.
   content::WebContents* web_contents = navigation_handle()->GetWebContents();
+  if (!web_contents)
+    return;
+
   PdfWebContentsLifetimeHelper::CreateForWebContents(web_contents);
   PdfWebContentsLifetimeHelper* helper =
       PdfWebContentsLifetimeHelper::FromWebContents(web_contents);
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
       base::BindOnce(&PdfWebContentsLifetimeHelper::NavigateIFrameToPlaceholder,
-                     helper->GetWeakPtr(), params));
+                     helper->GetWeakPtr(), std::move(params)));
 }

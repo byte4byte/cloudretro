@@ -2,71 +2,71 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
-#import <EarlGrey/GREYKeyboard.h>
 #import <XCTest/XCTest.h>
 
 #include "base/mac/foundation_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/system_flags.h"
-#import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
+#include "ios/chrome/grit/ios_chromium_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/web/public/web_client.h"
+#include "ios/components/webui/web_ui_url_constants.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/device_form_factor.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "url/scheme_host_port.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
+using base::TrimPositions;
 using chrome_test_util::BackButton;
 using chrome_test_util::ForwardButton;
+using chrome_test_util::OmniboxText;
+using chrome_test_util::OmniboxContainingText;
 
 namespace {
 
-// Loads WebUI page with given |host|.
-void LoadWebUIUrl(const std::string& host) {
-  GURL web_ui_url(url::SchemeHostPort(kChromeUIScheme, host, 0).Serialize());
-  [ChromeEarlGrey loadURL:web_ui_url];
+// Returns the url to the web ui page |host|. |url::SchemeHostPort| can not be
+// used when this test is run using EarlGrey2 because the chrome scheme is not
+// registered in the test process and |url::SchemeHostPort| will not build an
+// invalid URL.
+GURL WebUIPageUrlWithHost(const std::string& host) {
+  return GURL(base::StringPrintf("%s://%s", kChromeUIScheme, host.c_str()));
 }
 
-// Adds wait for omnibox text matcher so that omnibox text can be updated.
-// TODO(crbug.com/642207): This method has to be unified with the omniboxText
-// matcher or resides in the same location with the omniboxText matcher.
-id<GREYMatcher> WaitForOmniboxText(std::string text) {
-  MatchesBlock matches = ^BOOL(UIView* view) {
-    if (![view isKindOfClass:[OmniboxTextFieldIOS class]]) {
-      return NO;
-    }
-    OmniboxTextFieldIOS* omnibox =
-        base::mac::ObjCCast<OmniboxTextFieldIOS>(view);
-    GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(
-                   base::test::ios::kWaitForUIElementTimeout,
-                   ^{
-                     return base::SysNSStringToUTF8(omnibox.text) == text;
-                   }),
-               @"Omnibox did not contain %@", base::SysUTF8ToNSString(text));
-    return YES;
-  };
+// Waits for omnibox text to equal (if |exact_match|) or contain (else) |URL|
+// and returns true if it was found or false on timeout. Strips trailing URL
+// slash if present as the omnibox does not display them.
+bool WaitForOmniboxURLString(std::string URL, bool exact_match = true) {
+  const std::string trimmed_URL =
+      base::TrimString(URL, "/", TrimPositions::TRIM_TRAILING).as_string();
 
-  DescribeToBlock describe = ^(id<GREYDescription> description) {
-    [description appendText:@"omnibox text "];
-    [description appendText:base::SysUTF8ToNSString(text)];
-  };
-
-  return grey_allOf(
-      chrome_test_util::Omnibox(),
-      [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
-                                           descriptionBlock:describe],
-      nil);
+  // TODO(crbug.com/642207): Unify with the omniboxText matcher or move to the
+  // same location with the omniboxText matcher.
+  return base::test::ios::WaitUntilConditionOrTimeout(
+      base::test::ios::kWaitForUIElementTimeout, ^{
+        NSError* error = nil;
+        if (exact_match) {
+          [[EarlGrey selectElementWithMatcher:OmniboxText(trimmed_URL)]
+              assertWithMatcher:grey_notNil()
+                          error:&error];
+        } else {
+          [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
+              assertWithMatcher:OmniboxContainingText(trimmed_URL)
+                          error:&error];
+        }
+        return error == nil;
+      });
 }
 
 }  // namespace
@@ -77,25 +77,42 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
 
 @implementation WebUITestCase
 
+// Tests that the WebUI pages (chrome://version) have the correct User Agent.
+- (void)testUserAgent {
+  [ChromeEarlGrey loadURL:WebUIPageUrlWithHost(kChromeUIVersionHost)];
+
+  NSString* userAgent = [ChromeEarlGrey mobileUserAgentString];
+  // Verify that JavaScript navigator.userAgent returns the mobile User Agent.
+  id result = [ChromeEarlGrey executeJavaScript:@"navigator.userAgent"];
+  NSString* navigatorUserAgent = base::mac::ObjCCast<NSString>(result);
+  GREYAssertEqualObjects(userAgent, navigatorUserAgent,
+                         @"User-Agent strings did not match");
+}
+
 // Tests that chrome://version renders and contains correct version number and
 // user agent string.
 - (void)testVersion {
-  LoadWebUIUrl(kChromeUIVersionHost);
+  [ChromeEarlGrey loadURL:WebUIPageUrlWithHost(kChromeUIVersionHost)];
 
   // Verify that app version is present on the page.
   const std::string version = version_info::GetVersionNumber();
   [ChromeEarlGrey waitForWebStateContainingText:version];
 
-  // Verify that mobile User Agent string is present on the page.
-  const std::string userAgent =
-      web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE);
-  [ChromeEarlGrey waitForWebStateContainingText:userAgent];
+  NSString* userAgent = [ChromeEarlGrey mobileUserAgentString];
+  std::string userAgentString = base::SysNSStringToUTF8(userAgent);
+
+  // Verify that mobile User Agent string is present on the page. Testing for
+  // only a portion of the string is sufficient to ensure the value has been
+  // populated in the UI and it is not blank. However, the exact string value is
+  // not validated as this test does not have access to get the full User Agent
+  // string from the WebClient.
+  [ChromeEarlGrey waitForWebStateContainingText:userAgentString];
 }
 
 // Tests that clicking on a chrome://terms link from chrome://chrome-urls
 // navigates to terms page.
 - (void)testChromeURLNavigateToTerms {
-  LoadWebUIUrl(kChromeUIChromeURLsHost);
+  [ChromeEarlGrey loadURL:WebUIPageUrlWithHost(kChromeUIChromeURLsHost)];
 
   // Tap on chrome://terms link on the page.
   [ChromeEarlGrey
@@ -103,16 +120,16 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
                                    stringWithUTF8String:kChromeUITermsHost]];
 
   // Verify that the resulting page is chrome://terms.
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://terms")]
-      assertWithMatcher:grey_notNil()];
-  const std::string kTermsText = "Google Chrome Terms of Service";
+  GREYAssert(WaitForOmniboxURLString(kChromeUITermsURL),
+             @"Omnibox does not contain URL.");
+  const std::string kTermsText = "Terms of Service";
   [ChromeEarlGrey waitForWebStateContainingText:kTermsText];
 }
 
 // Tests that back navigation functions properly after navigation via anchor
 // click.
 - (void)testChromeURLBackNavigationFromAnchorClick {
-  LoadWebUIUrl(kChromeUIChromeURLsHost);
+  [ChromeEarlGrey loadURL:GURL(kChromeUIChromeURLsURL)];
 
   // Tap on chrome://version link on the page.
   [ChromeEarlGrey
@@ -120,16 +137,17 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
                                    stringWithUTF8String:kChromeUIVersionHost]];
 
   // Verify that the resulting page is chrome://version.
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://version")]
-      assertWithMatcher:grey_notNil()];
-  [ChromeEarlGrey waitForWebStateContainingText:"The Chromium Authors"];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
+  [ChromeEarlGrey
+      waitForWebStateContainingText:l10n_util::GetStringUTF8(
+                                        IDS_IOS_ABOUT_VERSION_COMPANY_NAME)];
 
   // Tap the back button in the toolbar and verify that the resulting page is
   // the previously visited page chrome://chrome-urls.
   [[EarlGrey selectElementWithMatcher:BackButton()] performAction:grey_tap()];
-  [[EarlGrey
-      selectElementWithMatcher:WaitForOmniboxText("chrome://chrome-urls")]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIChromeURLsURL),
+             @"Omnibox did not contain URL.");
   [ChromeEarlGrey waitForWebStateContainingText:"List of Chrome URLs"];
 }
 
@@ -137,42 +155,37 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
 // properly.
 - (void)testChromeURLBackAndForwardAndReloadNavigation {
   // Navigate to the first URL chrome://version.
-  LoadWebUIUrl(kChromeUIVersionHost);
+  [ChromeEarlGrey loadURL:GURL(kChromeUIVersionURL)];
 
-  // Navigate to the second URL chrome://flags.
-  LoadWebUIUrl(kChromeUIFlagsHost);
-
-  // Navigating to chrome://flags should trigger the keyboard, but pre-iOS13
-  // this is broken.
-  if ([GREYKeyboard isKeyboardShown])
-    [EarlGrey dismissKeyboardWithError:nil];
+  // Navigate to the second URL chrome://chrome-urls.
+  [ChromeEarlGrey loadURL:GURL(kChromeUIChromeURLsURL)];
 
   // Tap the back button in the toolbar and verify that the resulting page's URL
   // corresponds to the first URL chrome://version that was loaded.
   [[EarlGrey selectElementWithMatcher:BackButton()] performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://version")]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
 
   // Tap the forward button in the toolbar and verify that the resulting page's
-  // URL corresponds the second URL chrome://flags that was loaded.
+  // URL corresponds the second URL chrome://chrome-urls that was loaded.
   [[EarlGrey selectElementWithMatcher:ForwardButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://flags")]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIChromeURLsURL),
+             @"Omnibox did not contain URL.");
 
   // Tap the back button in the toolbar then reload, and verify that the
   // resulting page corresponds to the first URL.
   [[EarlGrey selectElementWithMatcher:BackButton()] performAction:grey_tap()];
   [ChromeEarlGrey waitForPageToFinishLoading];
   [ChromeEarlGrey reload];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://version")]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
 
   // Make sure forward navigation is still possible.
   [[EarlGrey selectElementWithMatcher:ForwardButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://flags")]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIChromeURLsURL),
+             @"Omnibox did not contain URL.");
 }
 
 // Tests that all URLs on chrome://chrome-urls page load without error.
@@ -180,16 +193,15 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
   // Load WebUI pages and verify they load without any error.
   for (size_t i = 0; i < kNumberOfChromeHostURLs; ++i) {
     const char* host = kChromeHostURLs[i];
-    // Exclude non-WebUI pages, as they do not go through a "loading" phase as
-    // expected in LoadWebUIUrl.
+    // Exclude non-WebUI pages, as they do not go through a "loading" phase.
     if (host == kChromeUINewTabHost) {
       continue;
     }
-    LoadWebUIUrl(host);
-    const std::string chrome_url_path =
-        url::SchemeHostPort(kChromeUIScheme, kChromeHostURLs[i], 0).Serialize();
-    [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(chrome_url_path)]
-        assertWithMatcher:grey_notNil()];
+    GURL URL = WebUIPageUrlWithHost(host);
+    [ChromeEarlGrey loadURL:URL];
+
+    GREYAssert(WaitForOmniboxURLString(URL.spec()),
+               @"Omnibox did not contain URL.");
   }
 }
 
@@ -200,8 +212,8 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
   [ChromeEarlGrey loadURL:GURL(kChromeInvalidURL)];
 
   // Verify that the resulting page is an error page.
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(kChromeInvalidURL)]
-      assertWithMatcher:grey_notNil()];
+  GREYAssert(WaitForOmniboxURLString(kChromeInvalidURL),
+             @"Omnibox did not contain URL.");
   std::string errorMessage = net::ErrorToShortString(net::ERR_INVALID_URL);
   [ChromeEarlGrey waitForWebStateContainingText:errorMessage];
 }
@@ -210,33 +222,101 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
 - (void)testBackForwardFromWebURL {
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
 
-  // Not using kChromeUIVersionURL because it has a final "/" that is not
-  // displayed in Omnibox.
-  const char kChromeVersionURL[] = "chrome://version";
-  const char kChromeVersionWebText[] = "The Chromium Authors";
+  std::string chromeVersionWebText =
+      l10n_util::GetStringUTF8(IDS_IOS_ABOUT_VERSION_COMPANY_NAME);
   const char kWebPageText[] = "pony";
 
-  LoadWebUIUrl(kChromeUIVersionHost);
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(kChromeVersionURL)]
-      assertWithMatcher:grey_notNil()];
-  [ChromeEarlGrey waitForWebStateContainingText:kChromeVersionWebText];
+  [ChromeEarlGrey loadURL:GURL(kChromeUIVersionURL)];
+
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
+  [ChromeEarlGrey waitForWebStateContainingText:chromeVersionWebText];
 
   GURL webURL = self.testServer->GetURL("/pony.html");
   [ChromeEarlGrey loadURL:webURL];
   [ChromeEarlGrey waitForWebStateContainingText:kWebPageText];
 
   [ChromeEarlGrey goBack];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(kChromeVersionURL)]
-      assertWithMatcher:grey_notNil()];
-  [ChromeEarlGrey waitForWebStateContainingText:kChromeVersionWebText];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
+  [ChromeEarlGrey waitForWebStateContainingText:chromeVersionWebText];
 
   [ChromeEarlGrey goForward];
   [ChromeEarlGrey waitForWebStateContainingText:kWebPageText];
 
   [ChromeEarlGrey goBack];
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(kChromeVersionURL)]
-      assertWithMatcher:grey_notNil()];
-  [ChromeEarlGrey waitForWebStateContainingText:kChromeVersionWebText];
+  GREYAssert(WaitForOmniboxURLString(kChromeUIVersionURL),
+             @"Omnibox did not contain URL.");
+  [ChromeEarlGrey waitForWebStateContainingText:chromeVersionWebText];
+}
+
+- (void)testChromeFlagsOnNTP {
+  // Start with NTP and load chrome://flags.
+  [ChromeEarlGrey loadURL:GURL(kChromeUIFlagsURL)];
+
+  GREYAssert(WaitForOmniboxURLString(kChromeUIFlagsURL),
+             @"Omnibox did not contain URL.");
+
+  // Validates that some of the expected text on the page exists.
+  [ChromeEarlGrey waitForWebStateContainingText:"Experiments"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Available"];
+
+  // Validates that the experimental flags container is visible.
+  NSString* flags_page_warning =
+      l10n_util::GetNSString(IDS_FLAGS_UI_PAGE_WARNING);
+  [ChromeEarlGrey waitForWebStateContainingText:base::SysNSStringToUTF8(
+                                                    flags_page_warning)];
+}
+
+- (void)testChromeFlagsOnWebsite {
+  // Starts with loading a website.
+  GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
+
+  const char kWebPageText[] = "pony";
+  GURL webURL = self.testServer->GetURL("/pony.html");
+  [ChromeEarlGrey loadURL:webURL];
+  [ChromeEarlGrey waitForWebStateContainingText:kWebPageText];
+
+  // Then load chrome://flags in the same tab that has loaded a website.
+  [ChromeEarlGrey loadURL:WebUIPageUrlWithHost(kChromeUIFlagsHost)];
+
+  GREYAssert(WaitForOmniboxURLString(kChromeUIFlagsURL),
+             @"Omnibox did not contain URL.");
+
+  // Validates that some of the expected text on the page exists.
+  [ChromeEarlGrey waitForWebStateContainingText:"Experiments"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Available"];
+
+  NSString* flags_page_warning =
+      l10n_util::GetNSString(IDS_FLAGS_UI_PAGE_WARNING);
+  [ChromeEarlGrey waitForWebStateContainingText:base::SysNSStringToUTF8(
+                                                    flags_page_warning)];
+}
+
+- (void)testChromePasswordManagerInternalsSite {
+  GURL URL = WebUIPageUrlWithHost(kChromeUIPasswordManagerInternalsHost);
+  [ChromeEarlGrey loadURL:URL];
+
+  GREYAssert(WaitForOmniboxURLString(URL.spec()),
+             @"Omnibox did not contain URL.");
+
+  // Validates that some of the expected text on the page exists.
+  [ChromeEarlGrey waitForWebStateContainingText:"Variations"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Password Manager Internals"];
+}
+
+- (void)testChromeAutofillInternalsSite {
+  GURL URL = WebUIPageUrlWithHost(kChromeUIAutofillInternalsHost);
+  [ChromeEarlGrey loadURL:URL];
+
+  // Autofill-Internals stores the log filter configuration in the URL's
+  // fragment identifier (after the hash).
+  GREYAssert(WaitForOmniboxURLString(URL.spec(), false),
+             @"Omnibox did not contain URL.");
+
+  // Validates that some of the expected text on the page exists.
+  [ChromeEarlGrey waitForWebStateContainingText:"Variations"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Autofill Internals"];
 }
 
 @end

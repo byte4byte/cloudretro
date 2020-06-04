@@ -16,8 +16,9 @@
 #include "chrome/browser/safe_browsing/telemetry/telemetry_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/keyed_service/core/service_access_type.h"
-#include "components/safe_browsing/db/v4_local_database_manager.h"
-#include "components/safe_browsing/verdict_cache_manager.h"
+#include "components/safe_browsing/buildflags.h"
+#include "components/safe_browsing/core/db/v4_local_database_manager.h"
+#include "components/safe_browsing/core/verdict_cache_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
@@ -42,8 +43,7 @@ std::unique_ptr<ServicesDelegate> ServicesDelegate::CreateForTest(
 ServicesDelegateDesktop::ServicesDelegateDesktop(
     SafeBrowsingService* safe_browsing_service,
     ServicesDelegate::ServicesCreator* services_creator)
-    : safe_browsing_service_(safe_browsing_service),
-      services_creator_(services_creator) {
+    : ServicesDelegate(safe_browsing_service, services_creator) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
@@ -54,12 +54,12 @@ ServicesDelegateDesktop::~ServicesDelegateDesktop() {
 void ServicesDelegateDesktop::InitializeCsdService(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-#if defined(SAFE_BROWSING_CSD)
+#if BUILDFLAG(SAFE_BROWSING_CSD)
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           ::switches::kDisableClientSidePhishingDetection)) {
     csd_service_ = ClientSideDetectionService::Create(url_loader_factory);
   }
-#endif  // defined(SAFE_BROWSING_CSD)
+#endif  // BUILDFLAG(SAFE_BROWSING_CSD)
 }
 
 ExtendedReportingLevel
@@ -108,6 +108,9 @@ void ServicesDelegateDesktop::SetDatabaseManagerForTest(
 
 void ServicesDelegateDesktop::ShutdownServices() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  download_service_.reset();
+
   // The IO thread is going away, so make sure the ClientSideDetectionService
   // dtor executes now since it may call the dtor of URLFetcher which relies
   // on it.
@@ -116,14 +119,7 @@ void ServicesDelegateDesktop::ShutdownServices() {
   resource_request_detector_.reset();
   incident_service_.reset();
 
-  // Delete the VerdictCacheManager instances
-  cache_manager_map_.clear();
-
-  // Delete the ChromePasswordProtectionService instances.
-  password_protection_service_map_.clear();
-
-  // Must shut down last.
-  download_service_.reset();
+  ServicesDelegate::ShutdownServices();
 }
 
 void ServicesDelegateDesktop::RefreshState(bool enable) {
@@ -202,79 +198,6 @@ void ServicesDelegateDesktop::StartOnIOThread(
 
 void ServicesDelegateDesktop::StopOnIOThread(bool shutdown) {
   database_manager_->StopOnIOThread(shutdown);
-}
-
-void ServicesDelegateDesktop::CreatePasswordProtectionService(
-    Profile* profile) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(profile);
-  auto it = password_protection_service_map_.find(profile);
-  DCHECK(it == password_protection_service_map_.end());
-  std::unique_ptr<ChromePasswordProtectionService> service =
-      std::make_unique<ChromePasswordProtectionService>(safe_browsing_service_,
-                                                        profile);
-  password_protection_service_map_[profile] = std::move(service);
-}
-
-void ServicesDelegateDesktop::RemovePasswordProtectionService(
-    Profile* profile) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(profile);
-  auto it = password_protection_service_map_.find(profile);
-  if (it != password_protection_service_map_.end())
-    password_protection_service_map_.erase(it);
-}
-
-PasswordProtectionService*
-ServicesDelegateDesktop::GetPasswordProtectionService(Profile* profile) const {
-  DCHECK(profile);
-  auto it = password_protection_service_map_.find(profile);
-  return it != password_protection_service_map_.end() ? it->second.get()
-                                                      : nullptr;
-}
-
-// Only implemented on Android.
-void ServicesDelegateDesktop::CreateTelemetryService(Profile* profile) {}
-
-// Only implemented on Android.
-void ServicesDelegateDesktop::RemoveTelemetryService() {}
-
-// Only meaningful on Android.
-TelemetryService* ServicesDelegateDesktop::GetTelemetryService() const {
-  return nullptr;
-}
-
-void ServicesDelegateDesktop::CreateVerdictCacheManager(Profile* profile) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(profile);
-  auto it = cache_manager_map_.find(profile);
-  DCHECK(it == cache_manager_map_.end());
-  auto cache_manager = std::make_unique<VerdictCacheManager>(
-      HistoryServiceFactory::GetForProfile(profile,
-                                           ServiceAccessType::EXPLICIT_ACCESS),
-      HostContentSettingsMapFactory::GetForProfile(profile));
-  cache_manager_map_[profile] = std::move(cache_manager);
-}
-
-void ServicesDelegateDesktop::RemoveVerdictCacheManager(Profile* profile) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(profile);
-  auto it = cache_manager_map_.find(profile);
-  if (it != cache_manager_map_.end())
-    cache_manager_map_.erase(it);
-}
-
-VerdictCacheManager* ServicesDelegateDesktop::GetVerdictCacheManager(
-    Profile* profile) const {
-  DCHECK(profile);
-  auto it = cache_manager_map_.find(profile);
-  DCHECK(it != cache_manager_map_.end());
-  return it->second.get();
-}
-
-std::string ServicesDelegateDesktop::GetSafetyNetId() const {
-  NOTREACHED() << "Only implemented on Android";
-  return "";
 }
 
 }  // namespace safe_browsing

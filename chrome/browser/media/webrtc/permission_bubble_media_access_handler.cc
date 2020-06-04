@@ -8,16 +8,23 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/metrics/field_trial.h"
 #include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/media/webrtc/media_stream_device_permissions.h"
-#include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
-#include "chrome/browser/permissions/permission_manager.h"
-#include "chrome/browser/permissions/permission_result.h"
+#include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/content_settings/browser/tab_specific_content_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/permissions/permission_manager.h"
+#include "components/permissions/permission_result.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
+#include "components/webrtc/media_stream_devices_controller.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -27,14 +34,15 @@
 #if defined(OS_ANDROID)
 #include <vector>
 
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/media/webrtc/screen_capture_infobar_delegate_android.h"
-#include "chrome/browser/permissions/permission_uma_util.h"
-#include "chrome/browser/permissions/permission_util.h"
+#include "components/permissions/permission_uma_util.h"
+#include "components/permissions/permission_util.h"
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_MACOSX)
 #include "base/metrics/histogram_macros.h"
+#include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/media/webrtc/system_media_capture_permissions_mac.h"
 #include "chrome/browser/media/webrtc/system_media_capture_permissions_stats_mac.h"
 #endif
@@ -49,6 +57,69 @@ using RepeatingMediaResponseCallback =
 #if defined(OS_MACOSX)
 using system_media_permissions::SystemPermission;
 #endif
+
+namespace {
+
+void UpdateTabSpecificContentSettings(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    ContentSetting audio_setting,
+    ContentSetting video_setting) {
+  if (!web_contents)
+    return;
+
+  auto* content_settings =
+      content_settings::TabSpecificContentSettings::FromWebContents(
+          web_contents);
+  if (!content_settings)
+    return;
+
+  content_settings::TabSpecificContentSettings::MicrophoneCameraState
+      microphone_camera_state = content_settings::TabSpecificContentSettings::
+          MICROPHONE_CAMERA_NOT_ACCESSED;
+  std::string selected_audio_device;
+  std::string selected_video_device;
+  std::string requested_audio_device = request.requested_audio_device_id;
+  std::string requested_video_device = request.requested_video_device_id;
+
+  // TODO(raymes): Why do we use the defaults here for the selected devices?
+  // Shouldn't we just use the devices that were actually selected?
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  if (audio_setting != CONTENT_SETTING_DEFAULT) {
+    selected_audio_device =
+        requested_audio_device.empty()
+            ? profile->GetPrefs()->GetString(prefs::kDefaultAudioCaptureDevice)
+            : requested_audio_device;
+    microphone_camera_state |=
+        content_settings::TabSpecificContentSettings::MICROPHONE_ACCESSED |
+        (audio_setting == CONTENT_SETTING_ALLOW
+             ? 0
+             : content_settings::TabSpecificContentSettings::
+                   MICROPHONE_BLOCKED);
+  }
+
+  if (video_setting != CONTENT_SETTING_DEFAULT) {
+    selected_video_device =
+        requested_video_device.empty()
+            ? profile->GetPrefs()->GetString(prefs::kDefaultVideoCaptureDevice)
+            : requested_video_device;
+    microphone_camera_state |=
+        content_settings::TabSpecificContentSettings::CAMERA_ACCESSED |
+        (video_setting == CONTENT_SETTING_ALLOW
+             ? 0
+             : content_settings::TabSpecificContentSettings::CAMERA_BLOCKED);
+  }
+
+  content_settings->OnMediaStreamPermissionSet(
+      PermissionManagerFactory::GetForProfile(profile)->GetCanonicalOrigin(
+          ContentSettingsType::MEDIASTREAM_CAMERA, request.security_origin,
+          web_contents->GetLastCommittedURL()),
+      microphone_camera_state, selected_audio_device, selected_video_device,
+      requested_audio_device, requested_video_device);
+}
+
+}  // namespace
 
 struct PermissionBubbleMediaAccessHandler::PendingAccessRequest {
   PendingAccessRequest(const content::MediaStreamRequest& request,
@@ -101,12 +172,13 @@ bool PermissionBubbleMediaAccessHandler::CheckMediaAccessPermission(
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   ContentSettingsType content_settings_type =
       type == blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE
-          ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-          : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+          ? ContentSettingsType::MEDIASTREAM_MIC
+          : ContentSettingsType::MEDIASTREAM_CAMERA;
 
   DCHECK(!security_origin.is_empty());
   GURL embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
-  PermissionManager* permission_manager = PermissionManager::Get(profile);
+  permissions::PermissionManager* permission_manager =
+      PermissionManagerFactory::GetForProfile(profile);
   return permission_manager
              ->GetPermissionStatusForFrame(content_settings_type,
                                            render_frame_host, security_origin)
@@ -164,16 +236,18 @@ void PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest(
   if (blink::IsScreenCaptureMediaType(request.video_type)) {
     ScreenCaptureInfoBarDelegateAndroid::Create(
         web_contents, request,
-        base::Bind(&PermissionBubbleMediaAccessHandler::OnAccessRequestResponse,
-                   base::Unretained(this), web_contents, request_id));
+        base::BindOnce(
+            &PermissionBubbleMediaAccessHandler::OnAccessRequestResponse,
+            base::Unretained(this), web_contents, request_id));
     return;
   }
 #endif
 
-  MediaStreamDevicesController::RequestPermissions(
-      request,
-      base::Bind(&PermissionBubbleMediaAccessHandler::OnAccessRequestResponse,
-                 base::Unretained(this), web_contents, request_id));
+  webrtc::MediaStreamDevicesController::RequestPermissions(
+      request, MediaCaptureDevicesDispatcher::GetInstance(),
+      base::BindOnce(
+          &PermissionBubbleMediaAccessHandler::OnMediaStreamRequestResponse,
+          base::Unretained(this), web_contents, request_id, request));
 }
 
 void PermissionBubbleMediaAccessHandler::UpdateMediaRequestState(
@@ -203,6 +277,47 @@ void PermissionBubbleMediaAccessHandler::UpdateMediaRequestState(
     if (found)
       break;
   }
+}
+
+// static
+void PermissionBubbleMediaAccessHandler::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* prefs) {
+  prefs->RegisterBooleanPref(prefs::kVideoCaptureAllowed, true);
+  prefs->RegisterBooleanPref(prefs::kAudioCaptureAllowed, true);
+  prefs->RegisterListPref(prefs::kVideoCaptureAllowedUrls);
+  prefs->RegisterListPref(prefs::kAudioCaptureAllowedUrls);
+}
+
+void PermissionBubbleMediaAccessHandler::OnMediaStreamRequestResponse(
+    content::WebContents* web_contents,
+    int request_id,
+    content::MediaStreamRequest request,
+    const blink::MediaStreamDevices& devices,
+    blink::mojom::MediaStreamRequestResult result,
+    bool blocked_by_feature_policy,
+    ContentSetting audio_setting,
+    ContentSetting video_setting) {
+  if (pending_requests_.find(web_contents) == pending_requests_.end()) {
+    // WebContents has been destroyed. Don't need to do anything.
+    return;
+  }
+
+  // If the kill switch is, or the request was blocked because of feature
+  // policy we don't update the tab context.
+  if (result != blink::mojom::MediaStreamRequestResult::KILL_SWITCH_ON &&
+      !blocked_by_feature_policy) {
+    UpdateTabSpecificContentSettings(web_contents, request, audio_setting,
+                                     video_setting);
+  }
+
+  std::unique_ptr<content::MediaStreamUI> ui;
+  if (!devices.empty()) {
+    ui = MediaCaptureDevicesDispatcher::GetInstance()
+             ->GetMediaStreamCaptureIndicator()
+             ->RegisterMediaStream(web_contents, devices);
+  }
+  OnAccessRequestResponse(web_contents, request_id, devices, result,
+                          std::move(ui));
 }
 
 void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
@@ -254,9 +369,13 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
         return;
       } else if (system_audio_permission == SystemPermission::kRestricted ||
                  system_audio_permission == SystemPermission::kDenied) {
+        content_settings::UpdateLocationBarUiForWebContents(web_contents);
         final_result =
             blink::mojom::MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED;
         system_media_permissions::SystemAudioCapturePermissionBlocked();
+      } else {
+        DCHECK_EQ(system_audio_permission, SystemPermission::kAllowed);
+        content_settings::UpdateLocationBarUiForWebContents(web_contents);
       }
     }
     if (request.video_type ==
@@ -278,9 +397,13 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
         return;
       } else if (system_video_permission == SystemPermission::kRestricted ||
                  system_video_permission == SystemPermission::kDenied) {
+        content_settings::UpdateLocationBarUiForWebContents(web_contents);
         final_result =
             blink::mojom::MediaStreamRequestResult::SYSTEM_PERMISSION_DENIED;
         system_media_permissions::SystemVideoCapturePermissionBlocked();
+      } else {
+        DCHECK_EQ(system_video_permission, SystemPermission::kAllowed);
+        content_settings::UpdateLocationBarUiForWebContents(web_contents);
       }
     }
   }
@@ -294,7 +417,7 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
     // Post a task to process next queued request. It has to be done
     // asynchronously to make sure that calling infobar is not destroyed until
     // after this function returns.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest,

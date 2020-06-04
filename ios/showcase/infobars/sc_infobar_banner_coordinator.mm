@@ -4,66 +4,19 @@
 
 #import "ios/showcase/infobars/sc_infobar_banner_coordinator.h"
 
+#import "base/ios/block_types.h"
 #import "ios/chrome/browser/infobars/infobar_type.h"
 #import "ios/chrome/browser/ui/infobars/banners/infobar_banner_delegate.h"
 #import "ios/chrome/browser/ui/infobars/banners/infobar_banner_view_controller.h"
 #import "ios/chrome/browser/ui/infobars/modals/infobar_modal_delegate.h"
 #import "ios/chrome/browser/ui/infobars/modals/infobar_modal_view_controller.h"
-#import "ios/chrome/browser/ui/infobars/presentation/infobar_banner_positioner.h"
-#import "ios/chrome/browser/ui/infobars/presentation/infobar_banner_transition_driver.h"
-#import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_positioner.h"
 #import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_transition_driver.h"
+#import "ios/showcase/infobars/sc_infobar_constants.h"
+#import "ios/showcase/infobars/sc_infobar_container_view_controller.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-NSString* const kInfobarBannerTitleLabel = @"Test Infobar";
-NSString* const kInfobarBannerSubtitleLabel = @"This a test Infobar.";
-NSString* const kInfobarBannerButtonLabel = @"Accept";
-NSString* const kInfobarBannerPresentedModalLabel = @"Modal Infobar";
-
-#pragma mark - ContainerViewController
-
-@interface ContainerViewController
-    : UIViewController <InfobarBannerPositioner, InfobarModalPositioner>
-@property(nonatomic, strong) InfobarBannerViewController* bannerViewController;
-@property(nonatomic, strong)
-    InfobarBannerTransitionDriver* bannerTransitionDriver;
-@end
-
-@implementation ContainerViewController
-- (void)viewDidAppear:(BOOL)animated {
-  [super viewDidAppear:animated];
-  [self.bannerViewController
-      setModalPresentationStyle:UIModalPresentationCustom];
-  self.bannerTransitionDriver = [[InfobarBannerTransitionDriver alloc] init];
-  self.bannerTransitionDriver.bannerPositioner = self;
-  self.bannerViewController.transitioningDelegate = self.bannerTransitionDriver;
-  [self presentViewController:self.bannerViewController
-                     animated:YES
-                   completion:nil];
-}
-
-#pragma mark InfobarBannerPositioner
-
-- (CGFloat)bannerYPosition {
-  return 100;
-}
-
-- (UIView*)bannerView {
-  return self.bannerViewController.view;
-}
-
-#pragma mark InfobarBannerPositioner
-
-- (CGFloat)modalHeightForWidth:(CGFloat)width {
-  return 200;
-}
-
-@end
-
-#pragma mark - SCInfobarBannerCoordinator
 
 @interface SCInfobarBannerCoordinator () <InfobarBannerDelegate,
                                           InfobarModalDelegate>
@@ -85,9 +38,10 @@ NSString* const kInfobarBannerPresentedModalLabel = @"Modal Infobar";
 
   self.bannerViewController = [[InfobarBannerViewController alloc]
       initWithDelegate:self
+         presentsModal:YES
                   type:InfobarType::kInfobarTypeConfirm];
   self.bannerViewController.titleText = kInfobarBannerTitleLabel;
-  self.bannerViewController.subTitleText = kInfobarBannerSubtitleLabel;
+  self.bannerViewController.subtitleText = kInfobarBannerSubtitleLabel;
   self.bannerViewController.buttonText = kInfobarBannerButtonLabel;
   self.containerViewController.bannerViewController = self.bannerViewController;
 
@@ -96,13 +50,17 @@ NSString* const kInfobarBannerPresentedModalLabel = @"Modal Infobar";
 }
 
 - (void)dealloc {
-  [self dismissInfobarBanner:nil animated:YES completion:nil];
+  [self dismissInfobarBannerForUserInteraction:NO];
 }
 
 #pragma mark InfobarBannerDelegate
 
-- (void)bannerInfobarButtonWasPressed:(id)sender {
-  [self dismissInfobarBanner:nil animated:YES completion:nil];
+- (void)bannerInfobarButtonWasPressed:(UIButton*)sender {
+  [self dismissInfobarBannerForUserInteraction:NO];
+}
+
+- (void)dismissInfobarBannerForUserInteraction:(BOOL)userInitiated {
+  [self.baseViewController dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)presentInfobarModalFromBanner {
@@ -123,31 +81,21 @@ NSString* const kInfobarBannerPresentedModalLabel = @"Modal Infobar";
                                         completion:nil];
 }
 
-- (void)dismissInfobarBanner:(id)sender
-                    animated:(BOOL)animated
-                  completion:(ProceduralBlock)completion {
-  [self.baseViewController dismissViewControllerAnimated:animated
-                                              completion:nil];
-}
-
 - (void)infobarBannerWasDismissed {
   self.bannerViewController = nil;
 }
 
 #pragma mark InfobarModalDelegate
 
-- (void)modalInfobarButtonWasAccepted:(id)sender {
-  [self dismissInfobarModal:sender animated:YES completion:nil];
+- (void)dismissInfobarModal:(id)infobarModal {
+  [self.baseViewController dismissViewControllerAnimated:YES completion:nil];
 }
 
-- (void)dismissInfobarModal:(UIButton*)sender
-                   animated:(BOOL)animated
-                 completion:(ProceduralBlock)completion {
-  [self.baseViewController dismissViewControllerAnimated:animated
-                                              completion:nil];
+- (void)modalInfobarButtonWasAccepted:(id)infobarModal {
+  [self dismissInfobarModal:infobarModal];
 }
 
-- (void)modalInfobarWasDismissed:(id)sender {
+- (void)modalInfobarWasDismissed:(id)infobarModal {
 }
 
 @end

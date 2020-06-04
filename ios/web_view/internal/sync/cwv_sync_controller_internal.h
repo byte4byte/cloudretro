@@ -5,11 +5,6 @@
 #ifndef IOS_WEB_VIEW_INTERNAL_SYNC_CWV_SYNC_CONTROLLER_INTERNAL_H_
 #define IOS_WEB_VIEW_INTERNAL_SYNC_CWV_SYNC_CONTROLLER_INTERNAL_H_
 
-#include <set>
-
-#include "components/signin/public/base/signin_metrics.h"
-#include "google_apis/gaia/google_service_auth_error.h"
-#include "ios/web_view/internal/signin/web_view_device_accounts_provider_impl.h"
 #import "ios/web_view/public/cwv_sync_controller.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -18,29 +13,19 @@ namespace syncer {
 class SyncService;
 }  // namespace syncer
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}
+}  // namespace signin
 
-class SigninErrorController;
+class PrefService;
 
 @interface CWVSyncController ()
 
 // All dependencies must out live this class.
 - (instancetype)initWithSyncService:(syncer::SyncService*)syncService
-                    identityManager:(identity::IdentityManager*)identityManager
-              signinErrorController:
-                  (SigninErrorController*)SigninErrorController
+                    identityManager:(signin::IdentityManager*)identityManager
+                        prefService:(PrefService*)prefService
     NS_DESIGNATED_INITIALIZER;
-
-// Called by WebViewDeviceAccountsProviderImpl to obtain
-// access tokens for |scopes| to be passed back in |callback|.
-- (void)fetchAccessTokenForScopes:(const std::set<std::string>&)scopes
-                         callback:(DeviceAccountsProvider::AccessTokenCallback)
-                                      callback;
-
-// Called by IOSWebViewSigninClient when signing out.
-- (void)didSignoutWithSourceMetric:(signin_metrics::ProfileSignout)metric;
 
 @end
 

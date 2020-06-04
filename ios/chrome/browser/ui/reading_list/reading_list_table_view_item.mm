@@ -16,7 +16,7 @@
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #import "ios/chrome/browser/ui/util/pasteboard_util.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/common/favicon/favicon_view.h"
+#import "ios/chrome/common/ui/favicon/favicon_view.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
@@ -90,15 +90,7 @@ NSString* const kURLAndDistillationDateFormat = @"%s • %@";
   URLCell.metadataLabel.text = self.distillationSizeText;
   URLCell.cellUniqueIdentifier = base::SysUTF8ToNSString(self.entryURL.host());
   URLCell.accessibilityTraits |= UIAccessibilityTraitButton;
-  // If the background color specified by the styler is opaque, use it as the
-  // subview backround colors as well.
-  UIColor* backgroundColor = styler.tableViewBackgroundColor;
-  if (AreCGFloatsEqual(CGColorGetAlpha(backgroundColor.CGColor), 1.0)) {
-    URLCell.faviconContainerView.backgroundColor = backgroundColor;
-    URLCell.titleLabel.backgroundColor = backgroundColor;
-    URLCell.URLLabel.backgroundColor = backgroundColor;
-    URLCell.metadataLabel.backgroundColor = backgroundColor;
-  }
+
   if (styler.cellTitleColor)
     URLCell.titleLabel.textColor = styler.cellTitleColor;
   [URLCell.faviconView configureWithAttributes:self.attributes];

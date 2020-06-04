@@ -14,10 +14,6 @@
 #include "device/fido/fido_discovery_factory.h"
 #include "device/fido/fido_transport_protocol.h"
 
-namespace service_manager {
-class Connector;
-}
-
 namespace device {
 namespace test {
 
@@ -119,19 +115,19 @@ class FakeFidoDiscoveryFactory : public device::FidoDiscoveryFactory {
   FakeFidoDiscovery* ForgeNextBleDiscovery(StartMode mode = StartMode::kManual);
   FakeFidoDiscovery* ForgeNextCableDiscovery(
       StartMode mode = StartMode::kManual);
+  FakeFidoDiscovery* ForgeNextPlatformDiscovery(
+      StartMode mode = StartMode::kManual);
 
   // device::FidoDiscoveryFactory:
   std::unique_ptr<FidoDiscoveryBase> Create(
-      FidoTransportProtocol transport,
-      ::service_manager::Connector* connector) override;
-  std::unique_ptr<FidoDiscoveryBase> CreateCable(
-      std::vector<CableDiscoveryData> cable_data) override;
+      FidoTransportProtocol transport) override;
 
  private:
   std::unique_ptr<FakeFidoDiscovery> next_hid_discovery_;
   std::unique_ptr<FakeFidoDiscovery> next_nfc_discovery_;
   std::unique_ptr<FakeFidoDiscovery> next_ble_discovery_;
   std::unique_ptr<FakeFidoDiscovery> next_cable_discovery_;
+  std::unique_ptr<FakeFidoDiscovery> next_platform_discovery_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeFidoDiscoveryFactory);
 };

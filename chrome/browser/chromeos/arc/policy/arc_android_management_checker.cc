@@ -18,6 +18,7 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace arc {
@@ -35,11 +36,13 @@ policy::DeviceManagementService* GetDeviceManagementService() {
 
 // Returns the Device Account Id. Assumes that |profile| is the only Profile
 // on Chrome OS.
-std::string GetDeviceAccountId(Profile* profile) {
+CoreAccountId GetDeviceAccountId(Profile* profile) {
   const auto* const identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
 
-  return identity_manager->GetPrimaryAccountId();
+  // The account is the same whether or not the user consented to browser sync.
+  return identity_manager->GetPrimaryAccountId(
+      signin::ConsentLevel::kNotRequired);
 }
 
 }  // namespace
@@ -56,8 +59,7 @@ ArcAndroidManagementChecker::ArcAndroidManagementChecker(Profile* profile,
           g_browser_process->system_network_context_manager()
               ->GetSharedURLLoaderFactory(),
           device_account_id_,
-          identity_manager_),
-      weak_ptr_factory_(this) {}
+          identity_manager_) {}
 
 ArcAndroidManagementChecker::~ArcAndroidManagementChecker() {
   identity_manager_->RemoveObserver(this);

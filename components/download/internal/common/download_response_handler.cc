@@ -54,12 +54,12 @@ DownloadResponseHandler::DownloadResponseHandler(
     bool is_parallel_request,
     bool is_transient,
     bool fetch_error_body,
-    bool follow_cross_origin_redirects,
+    network::mojom::RedirectMode cross_origin_redirects,
     const DownloadUrlParameters::RequestHeadersType& request_headers,
     const std::string& request_origin,
     DownloadSource download_source,
-    bool ignore_content_length_mismatch,
-    std::vector<GURL> url_chain)
+    std::vector<GURL> url_chain,
+    bool is_background_mode)
     : delegate_(delegate),
       started_(false),
       save_info_(std::move(save_info)),
@@ -69,15 +69,16 @@ DownloadResponseHandler::DownloadResponseHandler(
       referrer_policy_(resource_request->referrer_policy),
       is_transient_(is_transient),
       fetch_error_body_(fetch_error_body),
-      follow_cross_origin_redirects_(follow_cross_origin_redirects),
+      cross_origin_redirects_(cross_origin_redirects),
       first_origin_(url::Origin::Create(resource_request->url)),
       request_headers_(request_headers),
       request_origin_(request_origin),
       download_source_(download_source),
-      ignore_content_length_mismatch_(ignore_content_length_mismatch),
+      has_strong_validators_(false),
       is_partial_request_(save_info_->offset > 0),
       completed_(false),
-      abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE) {
+      abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      is_background_mode_(is_background_mode) {
   if (!is_parallel_request) {
     RecordDownloadCountWithSource(UNTHROTTLED_COUNT, download_source);
   }
@@ -88,25 +89,17 @@ DownloadResponseHandler::DownloadResponseHandler(
 DownloadResponseHandler::~DownloadResponseHandler() = default;
 
 void DownloadResponseHandler::OnReceiveResponse(
-    const network::ResourceResponseHead& head) {
-  create_info_ = CreateDownloadCreateInfo(head);
-  cert_status_ = head.cert_status;
+    network::mojom::URLResponseHeadPtr head) {
+  create_info_ = CreateDownloadCreateInfo(*head);
+  cert_status_ = head->cert_status;
 
   // TODO(xingliu): Do not use http cache.
   // Sets page transition type correctly and call
   // |RecordDownloadSourcePageTransitionType| here.
-  if (head.headers) {
-    // ERR_CONTENT_LENGTH_MISMATCH can be caused by 1 of the following reasons:
-    // 1. Server or proxy closes the connection too early.
-    // 2. The content-length header is wrong.
-    // If the download has strong validators, we can interrupt the download
-    // and let it resume automatically. Otherwise, resuming the download will
-    // cause it to restart and the download may never complete if the error was
-    // caused by reason 2. As a result, downloads without strong validators are
-    // treated as completed here.
-    ignore_content_length_mismatch_ |= !head.headers->HasStrongValidators();
-    RecordDownloadHttpResponseCode(head.headers->response_code());
-    RecordDownloadContentDisposition(create_info_->content_disposition);
+  if (head->headers) {
+    has_strong_validators_ = head->headers->HasStrongValidators();
+    RecordDownloadHttpResponseCode(head->headers->response_code(),
+                                   is_background_mode_);
   }
 
   // Blink verifies that the requester of this download is allowed to set a
@@ -128,7 +121,7 @@ void DownloadResponseHandler::OnReceiveResponse(
 
 std::unique_ptr<DownloadCreateInfo>
 DownloadResponseHandler::CreateDownloadCreateInfo(
-    const network::ResourceResponseHead& head) {
+    const network::mojom::URLResponseHead& head) {
   auto create_info = std::make_unique<DownloadCreateInfo>(
       base::Time::Now(), std::move(save_info_));
 
@@ -163,30 +156,41 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
 
 void DownloadResponseHandler::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& head) {
-  if (!follow_cross_origin_redirects_ &&
-      !first_origin_.IsSameOriginWith(
-          url::Origin::Create(redirect_info.new_url))) {
-    abort_reason_ = DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT;
-    url_chain_.push_back(redirect_info.new_url);
-    method_ = redirect_info.new_method;
-    referrer_ = GURL(redirect_info.new_referrer);
-    referrer_policy_ = redirect_info.new_referrer_policy;
+    network::mojom::URLResponseHeadPtr head) {
+  // Check if redirect URL is web safe.
+  if (delegate_ && !delegate_->CanRequestURL(redirect_info.new_url)) {
+    abort_reason_ = DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST;
     OnComplete(network::URLLoaderCompletionStatus(net::OK));
     return;
   }
+
+  if (!first_origin_.IsSameOriginWith(
+          url::Origin::Create(redirect_info.new_url))) {
+    // Cross-origin redirect.
+    switch (cross_origin_redirects_) {
+      case network::mojom::RedirectMode::kFollow:
+        // Pretend we didn't notice, and keep going.
+        break;
+      case network::mojom::RedirectMode::kManual:
+        abort_reason_ = DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT;
+        url_chain_.push_back(redirect_info.new_url);
+        method_ = redirect_info.new_method;
+        referrer_ = GURL(redirect_info.new_referrer);
+        referrer_policy_ = redirect_info.new_referrer_policy;
+        OnComplete(network::URLLoaderCompletionStatus(net::OK));
+        return;
+      case network::mojom::RedirectMode::kError:
+        abort_reason_ = DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST;
+        OnComplete(network::URLLoaderCompletionStatus(net::OK));
+        return;
+    }
+  }
+
   if (is_partial_request_) {
     // A redirect while attempting a partial resumption indicates a potential
     // middle box. Trigger another interruption so that the
     // DownloadItem can retry.
     abort_reason_ = DOWNLOAD_INTERRUPT_REASON_SERVER_UNREACHABLE;
-    OnComplete(network::URLLoaderCompletionStatus(net::OK));
-    return;
-  }
-
-  // Check if redirect URL is web safe.
-  if (delegate_ && !delegate_->CanRequestURL(redirect_info.new_url)) {
-    abort_reason_ = DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST;
     OnComplete(network::URLLoaderCompletionStatus(net::OK));
     return;
   }
@@ -220,7 +224,7 @@ void DownloadResponseHandler::OnStartLoadingResponseBody(
   mojom::DownloadStreamHandlePtr stream_handle =
       mojom::DownloadStreamHandle::New();
   stream_handle->stream = std::move(body);
-  stream_handle->client_request = mojo::MakeRequest(&client_ptr_);
+  stream_handle->client_receiver = client_remote_.BindNewPipeAndPassReceiver();
   OnResponseStarted(std::move(stream_handle));
 }
 
@@ -231,18 +235,22 @@ void DownloadResponseHandler::OnComplete(
 
   completed_ = true;
   DownloadInterruptReason reason = HandleRequestCompletionStatus(
-      static_cast<net::Error>(status.error_code),
-      ignore_content_length_mismatch_, cert_status_, is_partial_request_,
-      abort_reason_);
+      static_cast<net::Error>(status.error_code), has_strong_validators_,
+      cert_status_, is_partial_request_, abort_reason_);
 
-  if (client_ptr_) {
-    client_ptr_->OnStreamCompleted(
+  if (client_remote_) {
+    client_remote_->OnStreamCompleted(
         ConvertInterruptReasonToMojoNetworkRequestStatus(reason));
   }
 
   if (reason == DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED) {
     base::UmaHistogramSparse("Download.MapErrorNetworkFailed.NetworkService",
                              std::abs(status.error_code));
+    if (is_background_mode_) {
+      base::UmaHistogramSparse(
+          "Download.MapErrorNetworkFailed.NetworkService.BackgroundDownload",
+          std::abs(status.error_code));
+    }
   }
 
   if (started_) {
@@ -253,7 +261,7 @@ void DownloadResponseHandler::OnComplete(
   // OnComplete() called without OnResponseStarted(). This should only
   // happen when the request was aborted.
   if (!create_info_)
-    create_info_ = CreateDownloadCreateInfo(network::ResourceResponseHead());
+    create_info_ = CreateDownloadCreateInfo(network::mojom::URLResponseHead());
   create_info_->result = reason == DOWNLOAD_INTERRUPT_REASON_NONE
                              ? DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED
                              : reason;

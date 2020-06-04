@@ -10,7 +10,6 @@
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "components/unified_consent/feature.h"
 #include "components/unified_consent/unified_consent_metrics.h"
 #include "components/unified_consent/unified_consent_service.h"
 #include "ios/chrome/browser/application_context.h"
@@ -32,7 +31,7 @@ UnifiedConsentServiceFactory::~UnifiedConsentServiceFactory() = default;
 // static
 unified_consent::UnifiedConsentService*
 UnifiedConsentServiceFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<unified_consent::UnifiedConsentService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -40,7 +39,7 @@ UnifiedConsentServiceFactory::GetForBrowserState(
 // static
 unified_consent::UnifiedConsentService*
 UnifiedConsentServiceFactory::GetForBrowserStateIfExists(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<unified_consent::UnifiedConsentService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, false));
 }
@@ -54,24 +53,18 @@ UnifiedConsentServiceFactory* UnifiedConsentServiceFactory::GetInstance() {
 std::unique_ptr<KeyedService>
 UnifiedConsentServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   sync_preferences::PrefServiceSyncable* user_pref_service =
       browser_state->GetSyncablePrefs();
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state);
   syncer::SyncService* sync_service =
       ProfileSyncServiceFactory::GetForBrowserState(browser_state);
 
   // Record settings for pre- and post-UnifiedConsent users.
   unified_consent::metrics::RecordSettingsHistogram(user_pref_service);
-
-  if (!unified_consent::IsUnifiedConsentFeatureEnabled()) {
-    unified_consent::UnifiedConsentService::RollbackIfNeeded(user_pref_service,
-                                                             sync_service);
-    return nullptr;
-  }
 
   // List of synced prefs that can be configured during the settings opt-in
   // flow.

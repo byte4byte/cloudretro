@@ -79,7 +79,7 @@ void ExtensionAppItem::Reload() {
   if (!icon_) {
     icon_ = extensions::ChromeAppIconService::Get(profile())->CreateIcon(
         this, extension_id(),
-        app_list::AppListConfig::instance().grid_icon_dimension(),
+        ash::AppListConfig::instance().grid_icon_dimension(),
         base::BindRepeating(&app_list::MaybeResizeAndPadIconForMd));
   } else {
     icon_->Reload();
@@ -171,7 +171,7 @@ const char* ExtensionAppItem::GetItemType() const {
 }
 
 bool ExtensionAppItem::IsBadged() const {
-  return icon_ && icon_->icon_is_badged();
+  return icon_ && icon_->has_chrome_badge();
 }
 
 app_list::AppContextMenu* ExtensionAppItem::GetAppContextMenu() {

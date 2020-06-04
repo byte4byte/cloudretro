@@ -9,6 +9,7 @@
 #include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace content {
@@ -27,10 +28,17 @@ class PasswordReuseModalWarningDialog
  public:
   PasswordReuseModalWarningDialog(content::WebContents* web_contents,
                                   ChromePasswordProtectionService* service,
-                                  PasswordType password_type,
+                                  ReusedPasswordAccountType password_type,
                                   OnWarningDone done_callback);
 
   ~PasswordReuseModalWarningDialog() override;
+
+  void CreateSavedPasswordReuseModalWarningDialog(
+      const base::string16 message_body,
+      std::vector<base::string16> placeholders,
+      std::vector<size_t> placeholder_offsets);
+  void CreateGaiaPasswordReuseModalWarningDialog(
+      views::Label* message_body_label);
 
   // views::DialogDelegateView:
   gfx::Size CalculatePreferredSize() const override;
@@ -39,11 +47,6 @@ class PasswordReuseModalWarningDialog
   bool ShouldShowCloseButton() const override;
   gfx::ImageSkia GetWindowIcon() override;
   bool ShouldShowWindowIcon() const override;
-  bool Cancel() override;
-  bool Accept() override;
-  bool Close() override;
-  int GetDefaultDialogButton() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
 
   // ChromePasswordProtectionService::Observer:
   void OnGaiaPasswordChanged() override;
@@ -58,7 +61,10 @@ class PasswordReuseModalWarningDialog
   OnWarningDone done_callback_;
   ChromePasswordProtectionService* service_;
   const GURL url_;
-  PasswordType password_type_;
+  const ReusedPasswordAccountType password_type_;
+
+  // Records the start time when modal warning is constructed.
+  base::TimeTicks modal_construction_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordReuseModalWarningDialog);
 };

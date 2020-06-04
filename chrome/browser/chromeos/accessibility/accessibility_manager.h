@@ -20,19 +20,23 @@
 #include "chrome/browser/chromeos/accessibility/chromevox_panel.h"
 #include "chrome/browser/chromeos/accessibility/switch_access_panel.h"
 #include "chrome/browser/extensions/api/braille_display_private/braille_controller.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/extension_system.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 
 class Browser;
-class Profile;
 class SwitchAccessEventHandlerDelegate;
 
 namespace ash {
@@ -87,6 +91,7 @@ typedef AccessibilityStatusCallbackList::Subscription
     AccessibilityStatusSubscription;
 
 class AccessibilityPanelWidgetObserver;
+class ChromeVoxDeferredLoader;
 
 enum class PlaySoundOption {
   // The sound is always played.
@@ -106,7 +111,8 @@ class AccessibilityManager
       public extensions::ExtensionRegistryObserver,
       public user_manager::UserManager::UserSessionStateObserver,
       public input_method::InputMethodManager::Observer,
-      public CrasAudioHandler::AudioObserver {
+      public CrasAudioHandler::AudioObserver,
+      public ProfileObserver {
  public:
   // Creates an instance of AccessibilityManager, this should be called once,
   // because only one instance should exist at the same time.
@@ -209,10 +215,10 @@ class AccessibilityManager
   // Called when the Select-to-Speak extension state has changed.
   void OnSelectToSpeakStateChanged(ash::SelectToSpeakState state);
 
-  // Invoked to enable or disable switch access.
+  // Invoked to enable or disable Switch Access.
   void SetSwitchAccessEnabled(bool enabled);
 
-  // Returns if switch access is enabled.
+  // Returns if Switch Access is enabled.
   bool IsSwitchAccessEnabled() const;
 
   // Returns true if a braille display is connected to the system, otherwise
@@ -220,7 +226,7 @@ class AccessibilityManager
   bool IsBrailleDisplayConnected() const;
 
   // user_manager::UserManager::UserSessionStateObserver overrides:
-  void ActiveUserChanged(const user_manager::User* active_user) override;
+  void ActiveUserChanged(user_manager::User* active_user) override;
 
   // Initiates play of shutdown sound and returns it's duration.
   base::TimeDelta PlayShutdownSound();
@@ -228,7 +234,7 @@ class AccessibilityManager
   // Register a callback to be notified when the status of an accessibility
   // option changes.
   std::unique_ptr<AccessibilityStatusSubscription> RegisterCallback(
-      const AccessibilityStatusCallback& cb);
+      const AccessibilityStatusCallback& cb) WARN_UNUSED_RESULT;
 
   // Notify registered callbacks of a status change in an accessibility setting.
   void NotifyAccessibilityStatusChanged(
@@ -350,12 +356,15 @@ class AccessibilityManager
       base::RepeatingCallback<void()> observer);
   void SetCaretBoundsObserverForTest(
       base::RepeatingCallback<void(const gfx::Rect&)> observer);
+  void SetSwitchAccessKeysForTest(const std::vector<int>& keys);
 
  protected:
   AccessibilityManager();
   ~AccessibilityManager() override;
 
  private:
+  void LoadChromeVox();
+  void UnloadChromeVox();
   void PostLoadChromeVox();
   void PostUnloadChromeVox();
   void PostSwitchChromeVoxProfile();
@@ -381,8 +390,8 @@ class AccessibilityManager
   void OnFocusHighlightChanged();
   void OnTapDraggingChanged();
   void OnSelectToSpeakChanged();
-  void UpdateSwitchAccessFromPref();
   void OnAutoclickChanged();
+  void OnSwitchAccessChanged();
 
   void CheckBrailleState();
   void ReceiveBrailleDisplayState(
@@ -391,6 +400,8 @@ class AccessibilityManager
   void UpdateBrailleImeState();
 
   void SetProfile(Profile* profile);
+
+  void SetProfileByUser(const user_manager::User* user);
 
   void UpdateChromeOSAccessibilityHistograms();
 
@@ -423,44 +434,46 @@ class AccessibilityManager
   // CrasAudioHandler::AudioObserver:
   void OnActiveOutputNodeChanged() override;
 
+  // ProfileObserver:
+  void OnProfileWillBeDestroyed(Profile* profile) override;
+
   // Profile which has the current a11y context.
-  Profile* profile_;
+  Profile* profile_ = nullptr;
+  ScopedObserver<Profile, ProfileObserver> profile_observer_{this};
 
   content::NotificationRegistrar notification_registrar_;
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
   std::unique_ptr<PrefChangeRegistrar> local_state_pref_change_registrar_;
-  std::unique_ptr<user_manager::ScopedUserSessionStateObserver>
-      session_state_observer_;
 
-  bool spoken_feedback_enabled_;
-  bool select_to_speak_enabled_;
-  bool switch_access_enabled_;
-  bool autoclick_enabled_;
+  bool spoken_feedback_enabled_ = false;
+  bool select_to_speak_enabled_ = false;
+  bool switch_access_enabled_ = false;
+  bool autoclick_enabled_ = false;
 
   AccessibilityStatusCallbackList callback_list_;
 
-  bool braille_display_connected_;
+  bool braille_display_connected_ = false;
   ScopedObserver<extensions::api::braille_display_private::BrailleController,
-                 AccessibilityManager>
-      scoped_braille_observer_;
+                 extensions::api::braille_display_private::BrailleObserver>
+      scoped_braille_observer_{this};
 
-  bool braille_ime_current_;
+  bool braille_ime_current_ = false;
 
-  ChromeVoxPanel* chromevox_panel_;
+  ChromeVoxPanel* chromevox_panel_ = nullptr;
   std::unique_ptr<AccessibilityPanelWidgetObserver>
       chromevox_panel_widget_observer_;
 
-  SwitchAccessPanel* switch_access_panel_;
+  SwitchAccessPanel* switch_access_panel_ = nullptr;
   std::unique_ptr<AccessibilityPanelWidgetObserver>
       switch_access_panel_widget_observer_;
 
   std::string keyboard_listener_extension_id_;
-  bool keyboard_listener_capture_;
+  bool keyboard_listener_capture_ = false;
 
   // Listen to extension unloaded notifications.
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
-      extension_registry_observer_;
+      extension_registry_observer_{this};
 
   std::unique_ptr<AccessibilityExtensionLoader> autoclick_extension_loader_;
 
@@ -489,12 +502,16 @@ class AccessibilityManager
       caret_bounds_observer_for_test_;
 
   // Used to set the audio focus enforcement type for ChromeVox.
-  media_session::mojom::AudioFocusManagerPtr audio_focus_manager_ptr_;
+  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_manager_;
 
-  base::WeakPtrFactory<AccessibilityManager> weak_ptr_factory_;
+  // Handles deferred ChromeVox load.
+  std::unique_ptr<ChromeVoxDeferredLoader> chromevox_deferred_loader_;
+
+  base::WeakPtrFactory<AccessibilityManager> weak_ptr_factory_{this};
 
   friend class DictationTest;
   friend class SwitchAccessTest;
+  friend class ChromeVoxDeferredLoader;
   DISALLOW_COPY_AND_ASSIGN(AccessibilityManager);
 };
 

@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.webapps;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -13,7 +14,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -25,8 +25,8 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.task.test.BackgroundShadowAsyncTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.test.util.browser.webapps.WebApkInfoBuilder;
 
 import java.util.concurrent.TimeUnit;
 
@@ -43,22 +43,8 @@ public class WebappDataStorageTest {
     private SharedPreferences mSharedPreferences;
     private boolean mCallbackCalled;
 
-    private class FetchCallback<T> implements WebappDataStorage.FetchCallback<T> {
-        T mExpected;
-
-        FetchCallback(T expected) {
-            mExpected = expected;
-        }
-
-        @Override
-        public void onDataRetrieved(T readObject) {
-            mCallbackCalled = true;
-            assertEquals(mExpected, readObject);
-        }
-    }
-
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mSharedPreferences = ContextUtils.getApplicationContext().getSharedPreferences(
                 WebappDataStorage.SHARED_PREFS_FILE_PREFIX + "test", Context.MODE_PRIVATE);
 
@@ -66,11 +52,6 @@ public class WebappDataStorageTest {
         mSharedPreferences.edit().putLong(WebappDataStorage.KEY_LAST_USED, 0).apply();
 
         mCallbackCalled = false;
-    }
-
-    @After
-    public void tearDown() {
-        mSharedPreferences.edit().clear().apply();
     }
 
     @Test
@@ -88,14 +69,13 @@ public class WebappDataStorageTest {
         assertEquals("theme_color", WebappDataStorage.KEY_THEME_COLOR);
         assertEquals("background_color", WebappDataStorage.KEY_BACKGROUND_COLOR);
         assertEquals("source", WebappDataStorage.KEY_SOURCE);
-        assertEquals("action", WebappDataStorage.KEY_ACTION);
         assertEquals("is_icon_generated", WebappDataStorage.KEY_IS_ICON_GENERATED);
         assertEquals("version", WebappDataStorage.KEY_VERSION);
     }
 
     @Test
     @Feature({"Webapp"})
-    public void testLastUsedRetrieval() throws Exception {
+    public void testLastUsedRetrieval() {
         long lastUsed = 100;
         mSharedPreferences.edit().putLong(WebappDataStorage.KEY_LAST_USED, lastUsed).apply();
         assertEquals(lastUsed, new WebappDataStorage("test").getLastUsedTimeMs());
@@ -114,11 +94,7 @@ public class WebappDataStorageTest {
                     @Override
                     public void onDataRetrieved(Bitmap actual) {
                         mCallbackCalled = true;
-
-                        // TODO(lalitm) - once the Robolectric bug is fixed change to
-                        // assertTrue(expected.sameAs(actual)).
-                        // See bitmapEquals(Bitmap, Bitmap) for more information.
-                        assertTrue(bitmapEquals(expected, actual));
+                        assertTrue(expected.sameAs(actual));
                     }
                 });
         BackgroundShadowAsyncTask.runBackgroundTasks();
@@ -142,7 +118,7 @@ public class WebappDataStorageTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testScopeRetrieval() throws Exception {
+    public void testScopeRetrieval() {
         String scope = "http://drive.google.com";
         mSharedPreferences.edit().putString(WebappDataStorage.KEY_SCOPE, scope).apply();
         assertEquals(scope, new WebappDataStorage("test").getScope());
@@ -150,7 +126,7 @@ public class WebappDataStorageTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testUrlRetrieval() throws Exception {
+    public void testUrlRetrieval() {
         String url = "https://www.google.com";
         mSharedPreferences.edit().putString(WebappDataStorage.KEY_URL, url).apply();
         assertEquals(url, new WebappDataStorage("test").getUrl());
@@ -158,7 +134,7 @@ public class WebappDataStorageTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testWasLaunchedRecently() throws Exception {
+    public void testWasLaunchedRecently() {
         // Opening a data storage doesn't count as a launch.
         WebappDataStorage storage = WebappDataStorage.open("test");
         assertTrue(!storage.wasUsedRecently());
@@ -203,9 +179,8 @@ public class WebappDataStorageTest {
 
     @Test
     @Feature({"Webapp"})
-    public void testIntentUpdate() throws Exception {
+    public void testWebappInfoUpdate() {
         final String id = "id";
-        final String action = "action";
         final String url = "url";
         final String scope = "scope";
         final String name = "name";
@@ -217,14 +192,15 @@ public class WebappDataStorageTest {
         final long backgroundColor = 3;
         final boolean isIconGenerated = false;
         final boolean isIconAdaptive = false;
-        Intent shortcutIntent = ShortcutHelper.createWebappShortcutIntent(id, action, url, scope,
-                name, shortName, encodedIcon, ShortcutHelper.WEBAPP_SHORTCUT_VERSION, displayMode,
+        Intent shortcutIntent = ShortcutHelper.createWebappShortcutIntent(id, url, scope, name,
+                shortName, encodedIcon, ShortcutHelper.WEBAPP_SHORTCUT_VERSION, displayMode,
                 orientation, themeColor, backgroundColor, isIconGenerated, isIconAdaptive);
+        WebappInfo info = WebappInfo.create(shortcutIntent);
+        assertNotNull(info);
 
         WebappDataStorage storage = WebappDataStorage.open("test");
-        storage.updateFromShortcutIntent(shortcutIntent);
+        storage.updateFromWebappInfo(info);
 
-        assertEquals(action, mSharedPreferences.getString(WebappDataStorage.KEY_ACTION, null));
         assertEquals(url, mSharedPreferences.getString(WebappDataStorage.KEY_URL, null));
         assertEquals(scope, mSharedPreferences.getString(WebappDataStorage.KEY_SCOPE, null));
         assertEquals(name, mSharedPreferences.getString(WebappDataStorage.KEY_NAME, null));
@@ -244,7 +220,6 @@ public class WebappDataStorageTest {
 
         // Wipe out the data and ensure that it is all gone.
         mSharedPreferences.edit()
-                .remove(WebappDataStorage.KEY_ACTION)
                 .remove(WebappDataStorage.KEY_URL)
                 .remove(WebappDataStorage.KEY_SCOPE)
                 .remove(WebappDataStorage.KEY_NAME)
@@ -258,7 +233,6 @@ public class WebappDataStorageTest {
                 .remove(WebappDataStorage.KEY_IS_ICON_ADAPTIVE)
                 .apply();
 
-        assertEquals(null, mSharedPreferences.getString(WebappDataStorage.KEY_ACTION, null));
         assertEquals(null, mSharedPreferences.getString(WebappDataStorage.KEY_URL, null));
         assertEquals(null, mSharedPreferences.getString(WebappDataStorage.KEY_SCOPE, null));
         assertEquals(null, mSharedPreferences.getString(WebappDataStorage.KEY_NAME, null));
@@ -273,10 +247,9 @@ public class WebappDataStorageTest {
         assertEquals(true,
                 mSharedPreferences.getBoolean(WebappDataStorage.KEY_IS_ICON_ADAPTIVE, true));
 
-        // Update again from the intent and ensure that the data is restored.
-        storage.updateFromShortcutIntent(shortcutIntent);
+        // Update again from the WebappInfo and ensure that the data is restored.
+        storage.updateFromWebappInfo(info);
 
-        assertEquals(action, mSharedPreferences.getString(WebappDataStorage.KEY_ACTION, null));
         assertEquals(url, mSharedPreferences.getString(WebappDataStorage.KEY_URL, null));
         assertEquals(scope, mSharedPreferences.getString(WebappDataStorage.KEY_SCOPE, null));
         assertEquals(name, mSharedPreferences.getString(WebappDataStorage.KEY_NAME, null));
@@ -293,6 +266,34 @@ public class WebappDataStorageTest {
                 mSharedPreferences.getBoolean(WebappDataStorage.KEY_IS_ICON_GENERATED, true));
         assertEquals(isIconAdaptive,
                 mSharedPreferences.getBoolean(WebappDataStorage.KEY_IS_ICON_GENERATED, true));
+    }
+
+    /**
+     * Test that the WebAPK's shared preferences are populated as result of calling
+     * {@link WebappDataStorage#updateFromWebappInfo()} when the shared preferences are initiially
+     * unset.
+     */
+    @Test
+    @Feature({"Webapp"})
+    public void testWebApkInfoUpdate() {
+        String webApkPackageName = "org.chromium.webapk.random123";
+        String url = "url";
+        String scopeUrl = "scope";
+        String manifestUrl = "manifest_url";
+        int webApkVersionCode = 5;
+
+        WebApkInfoBuilder webApkInfoBuilder = new WebApkInfoBuilder(webApkPackageName, url);
+        webApkInfoBuilder.setScope(scopeUrl);
+        webApkInfoBuilder.setManifestUrl(manifestUrl);
+        webApkInfoBuilder.setWebApkVersionCode(webApkVersionCode);
+
+        WebappDataStorage storage = WebappDataStorage.open("test");
+        storage.updateFromWebappInfo(webApkInfoBuilder.build());
+
+        assertEquals(webApkPackageName, storage.getWebApkPackageName());
+        assertEquals(scopeUrl, storage.getScope());
+        assertEquals(manifestUrl, storage.getWebApkManifestUrl());
+        assertEquals(webApkVersionCode, storage.getWebApkVersionCode());
     }
 
     /**
@@ -321,43 +322,17 @@ public class WebappDataStorageTest {
     }
 
     /**
-     * Test that if there was no previous WebAPK update attempt that the is-update-needed check is
-     * done after the usual delay (instead of the longer relaxed-update delay).
+     * Test that the is-update-needed check is done the first time that the user launches the WebAPK
+     * after clearing Chrome's storage.
      */
     @Test
-    public void testRegularCheckIntervalIfNoPriorWebApkUpdate() {
-        assertTrue(WebappDataStorage.RELAXED_UPDATE_INTERVAL > WebappDataStorage.UPDATE_INTERVAL);
-
+    public void testCheckUpdateAfterClearChromeStorage() {
         WebappDataStorage storage = getStorage();
-
-        assertFalse(storage.shouldCheckForUpdate());
-        mClockRule.advance(WebappDataStorage.UPDATE_INTERVAL);
         assertTrue(storage.shouldCheckForUpdate());
     }
 
     private WebappDataStorage getStorage() {
-        WebappDataStorage storage = WebappDataStorage.open("test");
-
-        // Done when WebAPK is registered in {@link WebApkActivity}.
-        storage.updateTimeOfLastCheckForUpdatedWebManifest();
-        return storage;
-    }
-
-    // TODO(lalitm) - There seems to be a bug in Robolectric where a Bitmap
-    // produced from a byte stream is hardcoded to be a 100x100 bitmap with
-    // ARGB_8888 pixel format. Because of this, we need to work around the
-    // equality check of bitmaps. Remove this once the bug is fixed.
-    private static boolean bitmapEquals(Bitmap expected, Bitmap actual) {
-        if (actual.getWidth() != 100) return false;
-        if (actual.getHeight() != 100) return false;
-        if (!actual.getConfig().equals(Bitmap.Config.ARGB_8888)) return false;
-
-        for (int i = 0; i < actual.getWidth(); i++) {
-            for (int j = 0; j < actual.getHeight(); j++) {
-                if (actual.getPixel(i, j) != 0) return false;
-            }
-        }
-        return true;
+        return WebappDataStorage.open("test");
     }
 
     private static Bitmap createBitmap() {

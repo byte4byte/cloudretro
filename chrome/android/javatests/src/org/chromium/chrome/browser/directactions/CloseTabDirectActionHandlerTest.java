@@ -21,11 +21,14 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -37,7 +40,8 @@ import java.util.List;
 @MinAndroidSdkLevel(Build.VERSION_CODES.N)
 public class CloseTabDirectActionHandlerTest {
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public ChromeActivityTestRule<? extends ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule(ChromeTabbedActivity.class);
 
     private TabModelSelector mSelector;
     private CloseTabDirectActionHandler mHandler;
@@ -46,7 +50,8 @@ public class CloseTabDirectActionHandlerTest {
     public void setUp() throws Exception {
         // Setup an activity with two blank tabs.
         mActivityTestRule.startMainActivityOnBlankPage();
-        mActivityTestRule.loadUrlInNewTab("about:blank");
+        mActivityTestRule.loadUrlInNewTab(
+                "about:blank", false /* incognito */, TabLaunchType.FROM_CHROME_UI);
 
         mSelector = mActivityTestRule.getActivity().getTabModelSelector();
         mHandler = new CloseTabDirectActionHandler(mSelector);
@@ -55,17 +60,17 @@ public class CloseTabDirectActionHandlerTest {
     @Test
     @MediumTest
     @Feature({"DirectActions"})
-    public void testCloseTabs() throws Exception {
+    public void testCloseTabs() {
         // Actions are available
         assertThat(getDirectActions(), Matchers.containsInAnyOrder("close_tab"));
 
         // Close current tab
         Tab initiallyCurrent = mSelector.getCurrentTab();
         performAction("close_tab");
-        assertEquals(1, mSelector.getTotalTabCount());
         assertThat(
                 mSelector.getCurrentTab(), Matchers.not(Matchers.sameInstance(initiallyCurrent)));
 
+        assertEquals(1, mSelector.getTotalTabCount());
         // Close last tab
         performAction("close_tab");
 

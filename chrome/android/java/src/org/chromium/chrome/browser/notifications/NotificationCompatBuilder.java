@@ -11,12 +11,15 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.app.NotificationCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.widget.RemoteViews;
 
+import androidx.core.app.NotificationCompat;
+
 import org.chromium.base.Log;
-import org.chromium.chrome.browser.notifications.channels.ChannelsInitializer;
+import org.chromium.components.browser_ui.notifications.ChromeNotification;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
+import org.chromium.components.browser_ui.notifications.channels.ChannelsInitializer;
 
 /**
  * Wraps a NotificationCompat.Builder object.
@@ -82,6 +85,12 @@ public class NotificationCompatBuilder implements ChromeNotificationBuilder {
     @Override
     public ChromeNotificationBuilder setSmallIcon(Icon icon) {
         assert false; // unused
+        return this;
+    }
+
+    @Override
+    public ChromeNotificationBuilder setColor(int argb) {
+        mBuilder.setColor(argb);
         return this;
     }
 
@@ -258,8 +267,8 @@ public class NotificationCompatBuilder implements ChromeNotificationBuilder {
     @Override
     public ChromeNotificationBuilder setMediaStyle(MediaSessionCompat session, int[] actions,
             PendingIntent intent, boolean showCancelButton) {
-        android.support.v4.media.app.NotificationCompat.MediaStyle style =
-                new android.support.v4.media.app.NotificationCompat.MediaStyle();
+        androidx.media.app.NotificationCompat.MediaStyle style =
+                new androidx.media.app.NotificationCompat.MediaStyle();
         style.setMediaSession(session.getSessionToken());
         style.setShowActionsInCompactView(actions);
         style.setCancelButtonIntent(intent);

@@ -25,7 +25,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/browser_resources.h"
+#include "chrome/grit/dev_ui_browser_resources.h"
 #include "components/heap_profiling/supervisor.h"
 #include "components/services/heap_profiling/public/cpp/settings.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
@@ -33,14 +33,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/process_type.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_policy.h"
 
@@ -105,8 +103,8 @@ std::string GetMessageString() {
 // Generates one row of the returned process info.
 base::Value MakeProcessInfo(int pid, std::string description) {
   base::Value result(base::Value::Type::LIST);
-  result.GetList().push_back(base::Value(pid));
-  result.GetList().push_back(base::Value(std::move(description)));
+  result.Append(base::Value(pid));
+  result.Append(base::Value(std::move(description)));
   return result;
 }
 
@@ -151,9 +149,12 @@ class MemoryInternalsDOMHandler : public content::WebUIMessageHandler,
   // Hops to the IO thread to enumerate child processes, and back to the UI
   // thread to fill in the renderer processes.
   static void GetChildProcessesOnIOThread(
-      base::WeakPtr<MemoryInternalsDOMHandler> dom_handler);
-  void GetProfiledPids(std::vector<base::Value> children);
-  void ReturnProcessListOnUIThread(std::vector<base::Value> children,
+      base::WeakPtr<MemoryInternalsDOMHandler> dom_handler,
+      const std::string& callback_id);
+  void GetProfiledPids(const std::string& callback_id,
+                       std::vector<base::Value> children);
+  void ReturnProcessListOnUIThread(const std::string& callback_id,
+                                   std::vector<base::Value> children,
                                    std::vector<base::ProcessId> profiled_pids);
 
   // SelectFileDialog::Listener implementation:
@@ -203,22 +204,26 @@ void MemoryInternalsDOMHandler::RegisterMessages() {
 
 void MemoryInternalsDOMHandler::HandleRequestProcessList(
     const base::ListValue* args) {
+  AllowJavascript();
+  std::string callback_id = args->GetList()[0].GetString();
+
   // This is called on the UI thread, the child process iterator must run on
   // the IO thread, while the render process iterator must run on the UI thread.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&MemoryInternalsDOMHandler::GetChildProcessesOnIOThread,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr(), std::move(callback_id)));
 }
 
 void MemoryInternalsDOMHandler::HandleSaveDump(const base::ListValue* args) {
   base::FilePath default_file = base::FilePath().AppendASCII(
       base::StringPrintf("trace_with_heap_dump.json.gz"));
 
+  AllowJavascript();
+
 #if defined(OS_ANDROID)
   base::Value result("Saving...");
-  AllowJavascript();
-  CallJavascriptFunction("setSaveDumpMessage", result);
+  FireWebUIListener("save-dump-progress", result);
 
   // On Android write to the user data dir.
   // TODO(bug 757115) Does it make sense to show the Android file picker here
@@ -269,14 +274,14 @@ void MemoryInternalsDOMHandler::HandleStartProfiling(
     supervisor->StartManualProfiling(pid);
   } else {
     supervisor->Start(
-        content::GetSystemConnector(),
         base::BindOnce(&heap_profiling::Supervisor::StartManualProfiling,
                        base::Unretained(supervisor), pid));
   }
 }
 
 void MemoryInternalsDOMHandler::GetChildProcessesOnIOThread(
-    base::WeakPtr<MemoryInternalsDOMHandler> dom_handler) {
+    base::WeakPtr<MemoryInternalsDOMHandler> dom_handler,
+    const std::string& callback_id) {
   std::vector<base::Value> result;
 
   // The only non-renderer child processes that currently support out-of-process
@@ -292,13 +297,13 @@ void MemoryInternalsDOMHandler::GetChildProcessesOnIOThread(
     }
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&MemoryInternalsDOMHandler::GetProfiledPids, dom_handler,
-                     std::move(result)));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&MemoryInternalsDOMHandler::GetProfiledPids,
+                                dom_handler, callback_id, std::move(result)));
 }
 
 void MemoryInternalsDOMHandler::GetProfiledPids(
+    const std::string& callback_id,
     std::vector<base::Value> children) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   heap_profiling::Supervisor* supervisor =
@@ -306,27 +311,27 @@ void MemoryInternalsDOMHandler::GetProfiledPids(
 
   // The supervisor hasn't started, so return an empty list.
   if (!supervisor->HasStarted()) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&MemoryInternalsDOMHandler::ReturnProcessListOnUIThread,
-                       weak_factory_.GetWeakPtr(), std::move(children),
-                       std::vector<base::ProcessId>()));
+                       weak_factory_.GetWeakPtr(), callback_id,
+                       std::move(children), std::vector<base::ProcessId>()));
     return;
   }
 
-  supervisor->GetProfiledPids(
-      base::BindOnce(&MemoryInternalsDOMHandler::ReturnProcessListOnUIThread,
-                     weak_factory_.GetWeakPtr(), std::move(children)));
+  supervisor->GetProfiledPids(base::BindOnce(
+      &MemoryInternalsDOMHandler::ReturnProcessListOnUIThread,
+      weak_factory_.GetWeakPtr(), callback_id, std::move(children)));
 }
 
 void MemoryInternalsDOMHandler::ReturnProcessListOnUIThread(
+    const std::string& callback_id,
     std::vector<base::Value> children,
     std::vector<base::ProcessId> profiled_pids) {
   // This function will be called with the child processes that are not
   // renderers. It will fill in the browser and renderer processes on the UI
   // thread (RenderProcessHost is UI-thread only) and return the full list.
-  base::Value process_list_value(base::Value::Type::LIST);
-  std::vector<base::Value>& process_list = process_list_value.GetList();
+  std::vector<base::Value> process_list;
 
   // Add browser process.
   process_list.push_back(MakeProcessInfo(base::GetCurrentProcId(), "Browser"));
@@ -355,31 +360,28 @@ void MemoryInternalsDOMHandler::ReturnProcessListOnUIThread(
 
   // Append whether each process is being profiled.
   for (base::Value& value : process_list) {
-    std::vector<base::Value>& value_as_list = value.GetList();
-    DCHECK_EQ(value_as_list.size(), 2u);
+    DCHECK_EQ(value.GetList().size(), 2u);
 
     base::ProcessId pid =
-        static_cast<base::ProcessId>(value_as_list[0].GetInt());
+        static_cast<base::ProcessId>(value.GetList()[0].GetInt());
     bool is_profiled =
         std::binary_search(profiled_pids.begin(), profiled_pids.end(), pid);
-    value_as_list.push_back(base::Value(is_profiled));
+    value.Append(is_profiled);
   }
 
   // Pass the results in a dictionary.
   base::Value result(base::Value::Type::DICTIONARY);
   result.SetKey("message", base::Value(GetMessageString()));
-  result.SetKey("processes", std::move(process_list_value));
+  result.SetKey("processes", base::Value(std::move(process_list)));
 
-  AllowJavascript();
-  CallJavascriptFunction("returnProcessList", result);
+  ResolveJavascriptCallback(base::Value(callback_id), result);
 }
 
 void MemoryInternalsDOMHandler::FileSelected(const base::FilePath& path,
                                              int index,
                                              void* params) {
   base::Value result("Saving...");
-  AllowJavascript();
-  CallJavascriptFunction("setSaveDumpMessage", result);
+  FireWebUIListener("save-dump-progress", result);
 
   ProfilingProcessHost::GetInstance()->SaveTraceWithHeapDumpToFile(
       path,
@@ -395,8 +397,7 @@ void MemoryInternalsDOMHandler::FileSelectionCanceled(void* params) {
 
 void MemoryInternalsDOMHandler::SaveTraceFinished(bool success) {
   base::Value result(success ? "Save successful." : "Save failure.");
-  AllowJavascript();
-  CallJavascriptFunction("setSaveDumpMessage", result);
+  FireWebUIListener("save-dump-progress", result);
 }
 
 }  // namespace

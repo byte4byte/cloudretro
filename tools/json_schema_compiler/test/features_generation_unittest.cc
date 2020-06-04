@@ -185,15 +185,24 @@ TEST(FeaturesGenerationTest, FeaturesTest) {
     comparator.CompareFeature(feature);
   }
   {
+    const SimpleFeature* feature = GetAsSimpleFeature("pi");
+    FeatureComparator comparator("pi");
+    comparator.contexts = {Feature::WEBUI_UNTRUSTED_CONTEXT};
+    comparator.channel = version_info::Channel::STABLE;
+    comparator.matches.AddPattern(
+        URLPattern(URLPattern::SCHEME_ALL, "chrome-untrusted://foo/*"));
+    comparator.CompareFeature(feature);
+  }
+  {
     const SimpleFeature* feature = GetAsSimpleFeature("allEnum");
     FeatureComparator comparator("allEnum");
     comparator.contexts = {Feature::BLESSED_EXTENSION_CONTEXT,
                            Feature::BLESSED_WEB_PAGE_CONTEXT,
                            Feature::CONTENT_SCRIPT_CONTEXT,
                            Feature::LOCK_SCREEN_EXTENSION_CONTEXT,
-                           Feature::SERVICE_WORKER_CONTEXT,
                            Feature::WEB_PAGE_CONTEXT,
                            Feature::WEBUI_CONTEXT,
+                           Feature::WEBUI_UNTRUSTED_CONTEXT,
                            Feature::UNBLESSED_EXTENSION_CONTEXT};
     comparator.extension_types = {Manifest::TYPE_EXTENSION,
                                   Manifest::TYPE_HOSTED_APP,

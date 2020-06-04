@@ -13,6 +13,7 @@
 #include "components/arc/metrics/arc_metrics_constants.h"
 #include "components/exo/notification_surface.h"
 #include "components/exo/surface.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -94,6 +95,7 @@ class ArcNotificationContentView::EventForwarder : public ui::EventHandler {
       if (located_event->type() == ui::ET_MOUSE_ENTERED ||
           located_event->type() == ui::ET_MOUSE_EXITED) {
         owner_->UpdateControlButtonsVisibility();
+        widget->OnMouseEvent(located_event->AsMouseEvent());
         return;
       }
 
@@ -154,6 +156,17 @@ class ArcNotificationContentView::EventForwarder : public ui::EventHandler {
         UMA_HISTOGRAM_ENUMERATION(
             "Arc.UserInteraction",
             arc::UserInteractionType::NOTIFICATION_INTERACTION);
+      }
+
+      // When the ARC notification is slid out, all mouse presses and taps
+      // should go to underlying widget so the swipe control buttons can
+      // pressed. See crbug.com/965603.
+      if (owner_->slide_in_progress()) {
+        if (event->type() == ui::ET_MOUSE_RELEASED ||
+            event->type() == ui::ET_MOUSE_PRESSED)
+          widget->OnMouseEvent(event->AsMouseEvent());
+        else if (event->type() == ui::ET_GESTURE_TAP)
+          widget->OnGestureEvent(event->AsGestureEvent());
       }
     }
 
@@ -304,6 +317,15 @@ ArcNotificationContentView::GetControlButtonsView() {
   return floating_control_buttons_widget_ ? &control_buttons_view_ : nullptr;
 }
 
+void ArcNotificationContentView::VisibilityChanged(View* starting_from,
+                                                   bool is_visible) {
+  // Need to explicitly set visibility for control_buttons_view_ to
+  // make sure they don't capture focus when the notification is not
+  // visible due to the message center being collapsed.
+  control_buttons_view_.SetVisible(is_visible);
+  UpdateControlButtonsVisibility();
+}
+
 void ArcNotificationContentView::UpdateControlButtonsVisibility() {
   if (!control_buttons_view_.parent())
     return;
@@ -316,9 +338,10 @@ void ArcNotificationContentView::UpdateControlButtonsVisibility() {
   DCHECK(floating_control_buttons_widget_);
 
   const bool target_visibility =
-      control_buttons_view_.IsAnyButtonFocused() ||
-      (message_view_->GetMode() != message_center::MessageView::Mode::SETTING &&
-       IsMouseHovered());
+      GetVisible() && (control_buttons_view_.IsAnyButtonFocused() ||
+                       (message_view_->GetMode() !=
+                            message_center::MessageView::Mode::SETTING &&
+                        IsMouseHovered()));
 
   if (target_visibility == floating_control_buttons_widget_->IsVisible())
     return;
@@ -371,12 +394,12 @@ void ArcNotificationContentView::MaybeCreateFloatingControlButtons() {
   DCHECK(!floating_control_buttons_widget_);
 
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = surface_->GetWindow();
 
   floating_control_buttons_widget_.reset(new views::Widget);
-  floating_control_buttons_widget_->Init(params);
+  floating_control_buttons_widget_->Init(std::move(params));
   floating_control_buttons_widget_->SetContentsView(&control_buttons_view_);
   floating_control_buttons_widget_->GetNativeWindow()->AddPreTargetHandler(
       mouse_enter_exit_handler_.get());
@@ -626,9 +649,11 @@ void ArcNotificationContentView::Layout() {
     gfx::Rect control_buttons_bounds(contents_bounds);
     const gfx::Size button_size = control_buttons_view_.GetPreferredSize();
 
-    control_buttons_bounds.set_x(control_buttons_bounds.right() -
-                                 button_size.width() -
-                                 message_center::kControlButtonPadding);
+    const int control_buttons_x = GetMirroredXWithWidthInView(
+        control_buttons_bounds.right() - button_size.width() -
+            message_center::kControlButtonPadding,
+        button_size.width());
+    control_buttons_bounds.set_x(control_buttons_x);
     control_buttons_bounds.set_y(control_buttons_bounds.y() +
                                  message_center::kControlButtonPadding);
     control_buttons_bounds.set_width(button_size.width());
@@ -649,7 +674,7 @@ void ArcNotificationContentView::OnPaint(gfx::Canvas* canvas) {
 
   SkPath path;
   path.addRoundRect(gfx::RectToSkRect(GetLocalBounds()), radii,
-                    SkPath::kCCW_Direction);
+                    SkPathDirection::kCCW);
   canvas->ClipPath(path, false);
 
   if (!surface_ && item_ && !item_->GetSnapshot().isNull()) {
@@ -793,6 +818,13 @@ void ArcNotificationContentView::OnWidgetClosing(views::Widget* widget) {
     attached_widget_->RemoveObserver(this);
     attached_widget_ = nullptr;
   }
+}
+
+void ArcNotificationContentView::OnWidgetActivationChanged(
+    views::Widget* widget,
+    bool active) {
+  if (item_)
+    item_->OnWindowActivated(active);
 }
 
 void ArcNotificationContentView::OnItemDestroying() {

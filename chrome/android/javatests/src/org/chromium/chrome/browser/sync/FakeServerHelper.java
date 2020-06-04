@@ -64,11 +64,7 @@ public class FakeServerHelper {
             @Override
             public Long call() {
                 FakeServerHelper fakeServerHelper = FakeServerHelper.get();
-                long nativeFakeServer = fakeServerHelper.createFakeServer();
-                long resources = fakeServerHelper.createNetworkResources(nativeFakeServer);
-                ProfileSyncService.get().overrideNetworkResourcesForTest(resources);
-
-                return nativeFakeServer;
+                return fakeServerHelper.createFakeServer();
             }
         });
     }
@@ -98,24 +94,8 @@ public class FakeServerHelper {
         return TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<Long>() {
             @Override
             public Long call() {
-                return nativeCreateFakeServer(mNativeFakeServerHelperAndroid);
-            }
-        });
-    }
-
-    /**
-     * Creates a native NetworkResources object. This pointer is owned by the Java caller, but
-     * ownership is transferred as part of ProfileSyncService.overrideNetworkResourcesForTest.
-     *
-     * @param nativeFakeServer pointer to a native FakeServer object.
-     * @return the NetworkResources pointer
-     */
-    public long createNetworkResources(final long nativeFakeServer) {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<Long>() {
-            @Override
-            public Long call() {
-                return nativeCreateNetworkResources(
-                        mNativeFakeServerHelperAndroid, nativeFakeServer);
+                return nativeCreateFakeServer(mNativeFakeServerHelperAndroid,
+                        ProfileSyncService.get().getNativeProfileSyncServiceForTest());
             }
         });
     }
@@ -129,7 +109,8 @@ public class FakeServerHelper {
         TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<Void>() {
             @Override
             public Void call() {
-                nativeDeleteFakeServer(mNativeFakeServerHelperAndroid, nativeFakeServer);
+                nativeDeleteFakeServer(mNativeFakeServerHelperAndroid, nativeFakeServer,
+                        ProfileSyncService.get().getNativeProfileSyncServiceForTest());
                 return null;
             }
         });
@@ -388,6 +369,21 @@ public class FakeServerHelper {
     }
 
     /**
+     * Sets trusted vault nigori with keys derived from trustedVaultKey on the server.
+     */
+    public void setTrustedVaultNigori(byte[] trustedVaultKey) {
+        checkFakeServerInitialized("useFakeServer must be called before access");
+        TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<Void>() {
+            @Override
+            public Void call() {
+                nativeSetTrustedVaultNigori(
+                        mNativeFakeServerHelperAndroid, sNativeFakeServer, trustedVaultKey);
+                return null;
+            }
+        });
+    }
+
+    /**
      * Clear the server data (perform dashboard stop and clear).
      */
     public void clearServerData() {
@@ -405,11 +401,10 @@ public class FakeServerHelper {
 
     // Native methods.
     private native long nativeInit();
-    private native long nativeCreateFakeServer(long nativeFakeServerHelperAndroid);
-    private native long nativeCreateNetworkResources(
-            long nativeFakeServerHelperAndroid, long nativeFakeServer);
-    private native void nativeDeleteFakeServer(
-            long nativeFakeServerHelperAndroid, long nativeFakeServer);
+    private native long nativeCreateFakeServer(
+            long nativeFakeServerHelperAndroid, long nativeProfileSyncService);
+    private native void nativeDeleteFakeServer(long nativeFakeServerHelperAndroid,
+            long nativeFakeServer, long nativeProfileSyncService);
     private native boolean nativeVerifyEntityCountByTypeAndName(long nativeFakeServerHelperAndroid,
             long nativeFakeServer, int count, int modelType, String name);
     private native boolean nativeVerifySessions(
@@ -435,6 +430,8 @@ public class FakeServerHelper {
             long nativeFakeServerHelperAndroid, long nativeFakeServer);
     private native void nativeDeleteEntity(long nativeFakeServerHelperAndroid,
             long nativeFakeServer, String id, String clientDefinedUniqueTag);
+    private native void nativeSetTrustedVaultNigori(
+            long nativeFakeServerHelperAndroid, long nativeFakeServer, byte[] trustedVaultKey);
     private native void nativeClearServerData(
             long nativeFakeServerHelperAndroid, long nativeFakeServer);
 }

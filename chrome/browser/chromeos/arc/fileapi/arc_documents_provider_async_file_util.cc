@@ -8,9 +8,10 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root_map.h"
@@ -20,8 +21,8 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/blob/shareable_file_reference.h"
-#include "storage/browser/fileapi/file_system_operation_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_operation_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 using content::BrowserThread;
 
@@ -34,8 +35,8 @@ void OnGetFileInfoOnUIThread(
     base::File::Error result,
     const base::File::Info& info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(std::move(callback), result, info));
+  base::PostTask(FROM_HERE, {BrowserThread::IO},
+                 base::BindOnce(std::move(callback), result, info));
 }
 
 void OnReadDirectoryOnUIThread(
@@ -53,9 +54,9 @@ void OnReadDirectoryOnUIThread(
                              : filesystem::mojom::FsFileType::REGULAR_FILE);
   }
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(std::move(callback), result, entries,
-                                          false /* has_more */));
+  base::PostTask(FROM_HERE, {BrowserThread::IO},
+                 base::BindOnce(std::move(callback), result, entries,
+                                false /* has_more */));
 }
 
 void OnCreateFileOnUIThread(
@@ -69,7 +70,7 @@ void OnCreateFileOnUIThread(
   } else if (result == base::File::FILE_ERROR_EXISTS) {
     result_to_report = base::File::FILE_OK;
   }
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(std::move(callback), result_to_report, created));
 }
@@ -77,8 +78,8 @@ void OnCreateFileOnUIThread(
 void OnStatusCallbackOnUIThread(storage::AsyncFileUtil::StatusCallback callback,
                                 base::File::Error result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(std::move(callback), result));
+  base::PostTask(FROM_HERE, {BrowserThread::IO},
+                 base::BindOnce(std::move(callback), result));
 }
 
 void GetFileInfoOnUIThread(
@@ -307,7 +308,7 @@ void ArcDocumentsProviderAsyncFileUtil::EnsureFileExists(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, url.type());
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CreateFileOnUIThread, url, std::move(callback)));
 }
@@ -326,7 +327,7 @@ void ArcDocumentsProviderAsyncFileUtil::CreateDirectory(
   // directory already exists at |url| for simpler ArcDocumentsProviderRoot
   // implementation. Chances of this case are small, since Files app
   // de-duplicate the new directory name to avoid conflicting with existing one.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CreateDirectoryOnUIThread, url, std::move(callback)));
 }
@@ -339,7 +340,7 @@ void ArcDocumentsProviderAsyncFileUtil::GetFileInfo(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, url.type());
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&GetFileInfoOnUIThread, url, fields, std::move(callback)));
 }
@@ -351,7 +352,7 @@ void ArcDocumentsProviderAsyncFileUtil::ReadDirectory(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, url.type());
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&ReadDirectoryOnUIThread, url, std::move(callback)));
 }
@@ -392,9 +393,9 @@ void ArcDocumentsProviderAsyncFileUtil::CopyFileLocal(
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, src_url.type());
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, dest_url.type());
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(&CopyFileLocalOnUIThread, src_url,
-                                          dest_url, std::move(callback)));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&CopyFileLocalOnUIThread, src_url, dest_url,
+                                std::move(callback)));
 }
 
 void ArcDocumentsProviderAsyncFileUtil::MoveFileLocal(
@@ -407,9 +408,9 @@ void ArcDocumentsProviderAsyncFileUtil::MoveFileLocal(
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, src_url.type());
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, dest_url.type());
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(&MoveFileLocalOnUIThread, src_url,
-                                          dest_url, std::move(callback)));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&MoveFileLocalOnUIThread, src_url, dest_url,
+                                std::move(callback)));
 }
 
 void ArcDocumentsProviderAsyncFileUtil::CopyInForeignFile(
@@ -430,7 +431,7 @@ void ArcDocumentsProviderAsyncFileUtil::DeleteFile(
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, url.type());
 
   // TODO(fukino): Report an error if the document at |url| is not a file.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&DeleteFileOnUIThread, url, std::move(callback)));
 }
@@ -445,7 +446,7 @@ void ArcDocumentsProviderAsyncFileUtil::DeleteDirectory(
   // TODO(fukino): Report an error if the document at |url| is not a directory.
   // TODO(fukino): Report an error if the document at |url| is a directory which
   // is not empty.
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&DeleteFileOnUIThread, url, std::move(callback)));
 }
@@ -457,7 +458,7 @@ void ArcDocumentsProviderAsyncFileUtil::DeleteRecursively(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(storage::kFileSystemTypeArcDocumentsProvider, url.type());
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&DeleteFileOnUIThread, url, std::move(callback)));
 }

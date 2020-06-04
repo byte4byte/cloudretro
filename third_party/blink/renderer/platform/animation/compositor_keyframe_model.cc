@@ -10,6 +10,7 @@
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/keyframed_animation_curve.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_curve.h"
+#include "third_party/blink/renderer/platform/animation/compositor_color_animation_curve.h"
 #include "third_party/blink/renderer/platform/animation/compositor_float_animation_curve.h"
 
 using cc::KeyframeModel;
@@ -81,13 +82,16 @@ void CompositorKeyframeModel::SetStartTime(double monotonic_time) {
       monotonic_time * base::Time::kMicrosecondsPerSecond));
 }
 
+void CompositorKeyframeModel::SetStartTime(base::TimeTicks monotonic_time) {
+  keyframe_model_->set_start_time(monotonic_time);
+}
+
 double CompositorKeyframeModel::TimeOffset() const {
   return keyframe_model_->time_offset().InSecondsF();
 }
 
-void CompositorKeyframeModel::SetTimeOffset(double monotonic_time) {
-  keyframe_model_->set_time_offset(
-      base::TimeDelta::FromSecondsD(monotonic_time));
+void CompositorKeyframeModel::SetTimeOffset(base::TimeDelta monotonic_time) {
+  keyframe_model_->set_time_offset(monotonic_time);
 }
 
 blink::CompositorKeyframeModel::Direction
@@ -130,6 +134,17 @@ CompositorKeyframeModel::FloatCurveForTesting() const {
   auto keyframed_curve = base::WrapUnique(
       static_cast<cc::KeyframedFloatAnimationCurve*>(curve->Clone().release()));
   return CompositorFloatAnimationCurve::CreateForTesting(
+      std::move(keyframed_curve));
+}
+
+std::unique_ptr<CompositorColorAnimationCurve>
+CompositorKeyframeModel::ColorCurveForTesting() const {
+  const cc::AnimationCurve* curve = keyframe_model_->curve();
+  DCHECK_EQ(cc::AnimationCurve::COLOR, curve->Type());
+
+  auto keyframed_curve = base::WrapUnique(
+      static_cast<cc::KeyframedColorAnimationCurve*>(curve->Clone().release()));
+  return CompositorColorAnimationCurve::CreateForTesting(
       std::move(keyframed_curve));
 }
 

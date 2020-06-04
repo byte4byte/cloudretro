@@ -24,9 +24,7 @@ constexpr base::TimeDelta kPollInterval = base::TimeDelta::FromDays(1);
 
 ServerBackedStateKeysBroker::ServerBackedStateKeysBroker(
     chromeos::SessionManagerClient* session_manager_client)
-    : session_manager_client_(session_manager_client),
-      requested_(false),
-      weak_factory_(this) {}
+    : session_manager_client_(session_manager_client), requested_(false) {}
 
 ServerBackedStateKeysBroker::~ServerBackedStateKeysBroker() {
 }
@@ -59,8 +57,8 @@ void ServerBackedStateKeysBroker::FetchStateKeys() {
   if (!requested_) {
     requested_ = true;
     session_manager_client_->GetServerBackedStateKeys(
-        base::Bind(&ServerBackedStateKeysBroker::StoreStateKeys,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&ServerBackedStateKeysBroker::StoreStateKeys,
+                       weak_factory_.GetWeakPtr()));
   }
 }
 

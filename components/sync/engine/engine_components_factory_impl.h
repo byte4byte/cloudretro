@@ -42,10 +42,8 @@ class EngineComponentsFactoryImpl : public EngineComponentsFactory {
   std::unique_ptr<syncable::DirectoryBackingStore> BuildDirectoryBackingStore(
       StorageOption storage,
       const std::string& dir_name,
-      const base::RepeatingCallback<std::string()>& cache_guid_generator,
+      const std::string& cache_guid,
       const base::FilePath& backing_filepath) override;
-
-  Switches GetSwitches() const override;
 
  private:
   const Switches switches_;

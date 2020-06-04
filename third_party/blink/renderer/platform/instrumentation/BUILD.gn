@@ -6,7 +6,19 @@ import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/platform/platform.gni")
 
 blink_platform_sources("instrumentation") {
+  visibility = []
+  visibility = [
+    "//third_party/blink/renderer/platform",
+    "//third_party/blink/renderer/platform/scheduler",
+  ]
+
   sources = [
+    "histogram.cc",
+    "histogram.h",
+    "instance_counters.cc",
+    "instance_counters.h",
+    "instance_counters_memory_dump_provider.cc",
+    "instance_counters_memory_dump_provider.h",
     "memory_pressure_listener.cc",
     "memory_pressure_listener.h",
     "partition_alloc_memory_dump_provider.cc",
@@ -29,6 +41,7 @@ blink_platform_sources("instrumentation") {
   ]
 
   deps = [
+    "//components/performance_manager/public/mojom:mojom_blink",
     "//services/service_manager/public/cpp",
   ]
 }
@@ -37,6 +50,7 @@ jumbo_source_set("unit_tests") {
   testonly = true
 
   sources = [
+    "histogram_test.cc",
     "tracing/traced_value_test.cc",
     "tracing/web_process_memory_dump_test.cc",
   ]

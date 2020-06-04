@@ -38,19 +38,20 @@ class ChromeImpl : public Chrome {
   Status NewWindow(const std::string& target_id,
                    WindowType type,
                    std::string* window_handle) override;
-  Status GetWindowSize(const std::string& id, int* width, int* height) override;
-  Status SetWindowSize(const std::string& target_id,
-                       int width, int height) override;
+  Status GetWindowRect(const std::string& id, WindowRect* rect) override;
   Status SetWindowRect(const std::string& target_id,
                        const base::DictionaryValue& params) override;
-  Status GetWindowPosition(const std::string& id, int* x, int* y) override;
-  Status SetWindowPosition(const std::string& target_id, int x, int y) override;
   Status MaximizeWindow(const std::string& target_id) override;
   Status MinimizeWindow(const std::string& target_id) override;
   Status FullScreenWindow(const std::string& target_id) override;
   Status CloseWebView(const std::string& id) override;
   Status ActivateWebView(const std::string& id) override;
   Status SetAcceptInsecureCerts() override;
+  Status SetPermission(
+      std::unique_ptr<base::DictionaryValue> permission_descriptor,
+      PermissionState desired_state,
+      bool unused_one_realm,
+      WebView* current_view) override;
   bool IsMobileEmulationEnabled() const override;
   bool HasTouchScreen() const override;
   std::string page_load_strategy() const override;
@@ -80,6 +81,7 @@ class ChromeImpl : public Chrome {
                            Window* window);
   Status GetWindowBounds(int window_id, Window* window);
   Status SetWindowBounds(Window* window,
+                         const std::string& target_id,
                          std::unique_ptr<base::DictionaryValue> bounds);
 
   bool quit_;
@@ -87,6 +89,11 @@ class ChromeImpl : public Chrome {
   std::unique_ptr<DevToolsClient> devtools_websocket_client_;
 
  private:
+  static Status PermissionNameToChromePermissions(
+      const base::DictionaryValue& permission_descriptor,
+      Chrome::PermissionState setting,
+      std::vector<std::string>* chrome_permissions);
+
   void UpdateWebViews(const WebViewsInfo& views_info, bool w3c_compliant);
 
   // Web views in this list are in the same order as they are opened.

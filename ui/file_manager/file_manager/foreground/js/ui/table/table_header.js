@@ -7,48 +7,53 @@
  */
 
 cr.define('cr.ui.table', function() {
-  /** @const */ const TableSplitter = cr.ui.TableSplitter;
-
   /**
    * Creates a new table header.
-   * @param {Object=} opt_propertyBag Optional properties.
-   * @constructor
    * @extends {HTMLDivElement}
    */
-  const TableHeader = cr.ui.define('div');
+  class TableHeader {
+    constructor() {
+      /** @private {cr.ui.Table} */
+      this.table_ = null;
 
-  TableHeader.prototype = {
-    __proto__: HTMLDivElement.prototype,
+      /** @private {number} */
+      this.batchCount_ = 0;
 
-    table_: null,
+      /** @private {Element} */
+      this.headerInner_;
+    }
 
     /**
      * Initializes the element.
+     * @param {Element} el
      */
-    decorate: function() {
-      this.className = 'table-header';
+    static decorate(el) {
+      el.__proto__ = TableHeader.prototype;
+      el = /** @type {cr.ui.table.TableHeader} */ (el);
 
-      this.headerInner_ = this.ownerDocument.createElement('div');
-      this.headerInner_.className = 'table-header-inner';
-      this.appendChild(this.headerInner_);
-      this.addEventListener(
-          'touchstart', this.handleTouchStart_.bind(this), false);
-    },
+      el.className = 'table-header';
+      el.batchCount_ = 0;
+
+      el.headerInner_ = el.ownerDocument.createElement('div');
+      el.headerInner_.className = 'table-header-inner';
+      el.appendChild(el.headerInner_);
+      el.addEventListener('touchstart', el.handleTouchStart_.bind(el), false);
+    }
 
     /**
      * Updates table header width. Header width depends on list having a
      * vertical scrollbar.
      */
-    updateWidth: function() {
+    updateWidth() {
       // Header should not span over the vertical scrollbar of the list.
       const list = this.table_.querySelector('list');
       this.headerInner_.style.width = list.clientWidth + 'px';
-    },
+    }
 
     /**
      * Resizes columns.
      */
-    resize: function() {
+    resize() {
       const headerCells = this.querySelectorAll('.table-header-cell');
       if (this.needsFullRedraw_(headerCells)) {
         this.redraw();
@@ -60,25 +65,23 @@ cr.define('cr.ui.table', function() {
         headerCells[i].style.width = cm.getWidth(i) + 'px';
       }
       this.placeSplitters_(this.querySelectorAll('.table-header-splitter'));
-    },
+    }
 
-    batchCount_: 0,
-
-    startBatchUpdates: function() {
+    startBatchUpdates() {
       this.batchCount_++;
-    },
+    }
 
-    endBatchUpdates: function() {
+    endBatchUpdates() {
       this.batchCount_--;
       if (this.batchCount_ == 0) {
         this.redraw();
       }
-    },
+    }
 
     /**
      * Redraws table header.
      */
-    redraw: function() {
+    redraw() {
       if (this.batchCount_ != 0) {
         return;
       }
@@ -110,12 +113,12 @@ cr.define('cr.ui.table', function() {
         this.headerInner_.appendChild(cell);
       }
       this.appendSplitters_();
-    },
+    }
 
     /**
      * Appends column splitters to the table header.
      */
-    appendSplitters_: function() {
+    appendSplitters_() {
       const cm = this.table_.columnModel;
       const splitters = [];
       for (let i = 0; i < cm.size; i++) {
@@ -133,13 +136,13 @@ cr.define('cr.ui.table', function() {
         splitters.push(splitter);
       }
       this.placeSplitters_(splitters);
-    },
+    }
 
     /**
      * Place splitters to right positions.
      * @param {Array<HTMLElement>|NodeList} splitters Array of splitters.
      */
-    placeSplitters_: function(splitters) {
+    placeSplitters_(splitters) {
       const cm = this.table_.columnModel;
       let place = 0;
       for (let i = 0; i < cm.size; i++) {
@@ -150,18 +153,19 @@ cr.define('cr.ui.table', function() {
         place += cm.getWidth(i);
         splitters[i].style.marginInlineStart = place + 'px';
       }
-    },
+    }
 
     /**
      * Renders column header. Appends text label and sort arrow if needed.
      * @param {number} index Column index.
      */
-    createHeaderLabel_: function(index) {
+    createHeaderLabel_(index) {
       const cm = this.table_.columnModel;
       const dm = this.table_.dataModel;
 
       const labelDiv = this.ownerDocument.createElement('div');
       labelDiv.className = 'table-header-label';
+      labelDiv.classList.add(cm.getId(index));
 
       if (cm.isEndAlign(index)) {
         labelDiv.style.textAlign = 'end';
@@ -170,35 +174,26 @@ cr.define('cr.ui.table', function() {
       span.appendChild(cm.renderHeader(index, this.table_));
       span.style.padding = '0';
 
-      if (dm) {
-        if (dm.sortStatus.field == cm.getId(index)) {
-          if (dm.sortStatus.direction == 'desc') {
-            span.className = 'table-header-sort-image-desc';
-          } else {
-            span.className = 'table-header-sort-image-asc';
-          }
-        }
-      }
       labelDiv.appendChild(span);
       return labelDiv;
-    },
+    }
 
     /**
      * Creates sort function for given column.
      * @param {number} index The index of the column to sort by.
      */
-    createSortFunction_: function(index) {
+    createSortFunction_(index) {
       return function() {
         this.table_.sort(index);
       }.bind(this);
-    },
+    }
 
     /**
      * Handles the touchstart event. If the touch happened close enough
      * to a splitter starts dragging.
      * @param {Event} e The touch event.
      */
-    handleTouchStart_: function(e) {
+    handleTouchStart_(e) {
       e = /** @type {TouchEvent} */ (e);
       if (e.touches.length != 1) {
         return;
@@ -208,7 +203,7 @@ cr.define('cr.ui.table', function() {
       let minDistance = TableHeader.TOUCH_DRAG_AREA_WIDTH;
       let candidate;
 
-      const splitters = /** @type {NodeList<cr.ui.TableSplitter>} */ (
+      const splitters = /** @type {NodeList<TableSplitter>} */ (
           this.querySelectorAll('.table-header-splitter'));
       for (let i = 0; i < splitters.length; i++) {
         const r = splitters[i].getBoundingClientRect();
@@ -226,7 +221,7 @@ cr.define('cr.ui.table', function() {
       }
       // Splitter itself shouldn't handle this event.
       e.stopPropagation();
-    },
+    }
 
     /**
      * Handles the double click on a column separator event.
@@ -234,16 +229,16 @@ cr.define('cr.ui.table', function() {
      * @param {number} index Column index.
      * @param {Event} e The double click event.
      */
-    handleDblClick_: function(index, e) {
+    handleDblClick_(index, e) {
       this.table_.fitColumn(index);
-    },
+    }
 
     /**
      * Determines whether a full redraw is required.
      * @param {!NodeList} headerCells
      * @return {boolean}
      */
-    needsFullRedraw_: function(headerCells) {
+    needsFullRedraw_(headerCells) {
       const cm = this.table_.columnModel;
       // If the number of columns in the model has changed, a full redraw is
       // needed.
@@ -257,8 +252,10 @@ cr.define('cr.ui.table', function() {
         }
       }
       return false;
-    },
-  };
+    }
+  }
+
+  TableHeader.prototype.__proto__ = HTMLDivElement.prototype;
 
   /**
    * The table associated with the header.

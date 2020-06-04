@@ -51,13 +51,13 @@ public class MediaNotificationActionsUpdatedTest extends MediaNotificationManage
         doCallRealMethod()
                 .when(mMockForegroundServiceUtils)
                 .startForegroundService(any(Intent.class));
-        mTabHolder = new MediaNotificationTestTabHolder(TAB_ID_1, "about:blank", "title1");
+        mTabHolder = createMediaNotificationTestTabHolder(TAB_ID_1, "about:blank", "title1");
     }
 
     @Test
     public void testActionsDefaultToNull() {
         mTabHolder.simulateMediaSessionStateChanged(true, false);
-        assertEquals(new HashSet<Integer>(), getDisplayedActions());
+        assertEquals(DEFAULT_ACTIONS, getDisplayedActions());
     }
 
     @Test
@@ -77,8 +77,9 @@ public class MediaNotificationActionsUpdatedTest extends MediaNotificationManage
         assertEquals(buildActions(), getDisplayedActions());
 
         mTabHolder.simulateNavigation("https://example1.com/", false);
+        mTabHolder.simulateMediaSessionActionsChanged(DEFAULT_ACTIONS);
         advanceTimeByMillis(THROTTLE_MILLIS);
-        assertEquals(new HashSet<Integer>(), getDisplayedActions());
+        assertEquals(DEFAULT_ACTIONS, getDisplayedActions());
     }
 
     @Test

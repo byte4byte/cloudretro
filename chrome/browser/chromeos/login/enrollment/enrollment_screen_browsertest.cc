@@ -3,14 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/mock_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/mixin_based_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/enrollment_ui_mixin.h"
@@ -19,6 +17,7 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/test/chromeos_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -116,7 +115,7 @@ IN_PROC_BROWSER_TEST_F(EnrollmentScreenTest, EnrollmentSpinner) {
   view->ShowEnrollmentSpinnerScreen();
   enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepWorking);
 
-  view->ShowAttestationBasedEnrollmentSuccessScreen("fake domain");
+  view->ShowEnrollmentSuccessScreen();
   enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepSuccess);
 }
 

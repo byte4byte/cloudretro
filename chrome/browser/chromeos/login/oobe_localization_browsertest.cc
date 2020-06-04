@@ -14,10 +14,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
-#include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/screens/welcome_screen.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
+#include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -44,9 +44,6 @@ namespace chromeos {
 
 namespace {
 
-// Timeout for RunLoop::Run() in this test.
-const int kTimeoutSeconds = 2;
-
 // OOBE constants.
 const char kLanguageSelect[] = "languageSelect";
 const char kKeyboardSelect[] = "keyboardSelect";
@@ -56,52 +53,12 @@ std::string GetGetSelectStatement(const std::string& selectId) {
 }
 
 const char kUSLayout[] = "xkb:us::eng";
-class TimedRunLoop {
- public:
-  TimedRunLoop(const base::TimeDelta& timeout,
-               const std::string& failure_message)
-      : timeout_(timeout), message_(failure_message) {}
-
-  // Returns true if Run() successfully finished,
-  // Returns false on timeout.
-  bool Run() {
-    base::OneShotTimer timer;
-    timer.Start(FROM_HERE, timeout_,
-                base::Bind(&TimedRunLoop::OnTimeout, base::Unretained(this)));
-    loop_.Run();
-    return result_;
-  }
-
-  void Quit() {
-    result_ = true;
-    loop_.Quit();
-  }
-
-  base::Closure QuitClosure() {
-    return base::Bind(&TimedRunLoop::Quit, base::Unretained(this));
-  }
-
- private:
-  void OnTimeout() {
-    LOG(ERROR) << "Timeout waiting for: " << message_;
-    result_ = false;
-    loop_.Quit();
-  }
-
-  bool result_ = false;
-  const base::TimeDelta timeout_;
-  const std::string message_;
-  base::RunLoop loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(TimedRunLoop);
-};
 
 class LanguageListWaiter : public WelcomeScreen::Observer {
  public:
   LanguageListWaiter()
       : welcome_screen_(WelcomeScreen::Get(
-            WizardController::default_controller()->screen_manager())),
-        loop_(base::TimeDelta::FromSeconds(kTimeoutSeconds), "LanguageList") {
+            WizardController::default_controller()->screen_manager())) {
     welcome_screen_->AddObserver(this);
     CheckLanguageList();
   }
@@ -111,13 +68,8 @@ class LanguageListWaiter : public WelcomeScreen::Observer {
   // WelcomeScreen::Observer implementation:
   void OnLanguageListReloaded() override { CheckLanguageList(); }
 
-  // Returns true on success, false on timeout.
-  bool Wait() {
-    if (LanguageListReady())
-      return true;
-
-    return loop_.Run();
-  }
+  // Run the loop until the list is ready or the default Run() timeout expires.
+  void RunUntilLanguageListReady() { loop_.Run(); }
 
  private:
   bool LanguageListReady() const { return welcome_screen_->language_list(); }
@@ -128,11 +80,13 @@ class LanguageListWaiter : public WelcomeScreen::Observer {
   }
 
   WelcomeScreen* welcome_screen_;
-  TimedRunLoop loop_;
+  base::RunLoop loop_;
 };
 
 }  // namespace
 
+// These test data depend on the IME extension manifest which differs between
+// Chromium OS and Chrome OS.
 struct LocalizationTestParams {
   const char* initial_locale;
   const char* keyboard_layout;
@@ -140,6 +94,51 @@ struct LocalizationTestParams {
   const char* expected_keyboard_layout;
   const char* expected_keyboard_select_control;
 } const oobe_localization_test_parameters[] = {
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+    // ------------------ Non-Latin setup
+    // For a non-Latin keyboard layout like Russian, we expect to see the US
+    // keyboard.
+    {"ru", "xkb:ru::rus", "ru", kUSLayout, "xkb:us::eng"},
+    {"ru", "xkb:us::eng,xkb:ru::rus", "ru", kUSLayout, "xkb:us::eng"},
+
+    // IMEs do not load at OOBE, so we just expect to see the (Latin) Japanese
+    // keyboard.
+    {"ja", "xkb:jp::jpn", "ja", "xkb:jp::jpn", "xkb:jp::jpn,[xkb:us::eng]"},
+
+    // We don't use the Icelandic locale but the Icelandic keyboard layout
+    // should still be selected when specified as the default.
+    {"en-US", "xkb:is::ice", "en-US", "xkb:is::ice",
+     "xkb:is::ice,[xkb:us::eng,xkb:us:intl:eng,xkb:us:intl_pc:eng,"
+     "xkb:us:altgr-intl:eng,xkb:us:dvorak:eng,xkb:us:dvp:eng,"
+     "xkb:us:colemak:eng,xkb:us:workman:eng,xkb:us:workman-intl:eng]"},
+    // ------------------ Full Latin setup
+    // French Swiss keyboard.
+    {"fr", "xkb:ch:fr:fra", "fr", "xkb:ch:fr:fra",
+     "xkb:ch:fr:fra,[xkb:fr::fra,xkb:fr:bepo:fra,xkb:be::fra,xkb:ca::fra,"
+     "xkb:ca:multix:fra,xkb:us::eng]"},
+
+    // German Swiss keyboard.
+    {"de", "xkb:ch::ger", "de", "xkb:ch::ger",
+     "xkb:ch::ger,[xkb:de::ger,xkb:de:neo:ger,xkb:be::ger,xkb:us::eng]"},
+
+    // WelcomeScreenMultipleLocales
+    {"es,en-US,nl", "xkb:be::nld", "es,en-US,nl", "xkb:be::nld",
+     "xkb:be::nld,[xkb:es::spa,xkb:latam::spa,xkb:us::eng]"},
+
+    {"ru,de", "xkb:ru::rus", "ru,de", kUSLayout, "xkb:us::eng"},
+
+    // ------------------ Regional Locales
+    // Synthetic example to test correct merging of different locales.
+    {"fr-CH,it-CH,de-CH", "xkb:fr::fra,xkb:it::ita,xkb:de::ger",
+     "fr-CH,it-CH,de-CH", "xkb:fr::fra",
+     "xkb:fr::fra,xkb:it::ita,xkb:de::ger,"
+     "[xkb:fr:bepo:fra,xkb:be::fra,xkb:ca::fra,"
+     "xkb:ch:fr:fra,xkb:ca:multix:fra,xkb:us::eng]"},
+
+    // Another synthetic example. Check that british keyboard is available.
+    {"en-AU", "xkb:us::eng", "en-AU", "xkb:us::eng",
+     "xkb:us::eng,[xkb:gb:extd:eng,xkb:gb:dvorak:eng]"},
+#else
     // ------------------ Non-Latin setup
     // For a non-Latin keyboard layout like Russian, we expect to see the US
     // keyboard.
@@ -173,24 +172,20 @@ struct LocalizationTestParams {
     {"ru,de", "xkb:ru::rus", "ru,de", kUSLayout, "xkb:us::eng"},
 
     // ------------------ Regional Locales
-    // Syntetic example to test correct merging of different locales.
-    {"fr-CH,it-CH,de-CH",
-     "xkb:fr::fra,xkb:it::ita,xkb:de::ger",
-     "fr-CH,it-CH,de-CH",
-     "xkb:fr::fra",
+    // Synthetic example to test correct merging of different locales.
+    {"fr-CH,it-CH,de-CH", "xkb:fr::fra,xkb:it::ita,xkb:de::ger",
+     "fr-CH,it-CH,de-CH", "xkb:fr::fra",
      "xkb:fr::fra,xkb:it::ita,xkb:de::ger,[xkb:be::fra,xkb:ca::fra,"
-         "xkb:ch:fr:fra,xkb:ca:multix:fra,xkb:us::eng]"},
+     "xkb:ch:fr:fra,xkb:ca:multix:fra,xkb:us::eng]"},
 
-    // Another syntetic example. Check that british keyboard is available.
-    {"en-AU",
-     "xkb:us::eng",
-     "en-AU",
-     "xkb:us::eng",
+    // Another synthetic example. Check that british keyboard is available.
+    {"en-AU", "xkb:us::eng", "en-AU", "xkb:us::eng",
      "xkb:us::eng,[xkb:gb:extd:eng,xkb:gb:dvorak:eng]"},
+#endif
 };
 
 class OobeLocalizationTest
-    : public LoginManagerTest,
+    : public OobeBaseTest,
       public testing::WithParamInterface<const LocalizationTestParams*> {
  public:
   OobeLocalizationTest();
@@ -212,23 +207,17 @@ class OobeLocalizationTest
   // Runs the test for the given locale and keyboard layout.
   void RunLocalizationTest();
 
-  // Returns true on success, false on error.
-  bool WaitUntilJSIsReady() {
+  // Runs until the OOBE UI JS is ready, or the default Run() timeout expires.
+  void RunUntilJSIsReady() {
     LoginDisplayHost* host = LoginDisplayHost::default_host();
-    if (!host)
-      return false;
+    ASSERT_TRUE(host);
 
     OobeUI* oobe_ui = host->GetOobeUI();
-    if (!oobe_ui)
-      return false;
+    ASSERT_TRUE(oobe_ui);
 
-    TimedRunLoop run_loop(base::TimeDelta::FromSeconds(kTimeoutSeconds),
-                          "WaitUntilJSIsReady()");
-    const bool oobe_ui_ready = oobe_ui->IsJSReady(run_loop.QuitClosure());
-    if (oobe_ui_ready)
-      return true;
-
-    return run_loop.Run();
+    base::RunLoop run_loop;
+    if (!oobe_ui->IsJSReady(run_loop.QuitClosure()))
+      run_loop.Run();
   }
 
  private:
@@ -237,7 +226,7 @@ class OobeLocalizationTest
   DISALLOW_COPY_AND_ASSIGN(OobeLocalizationTest);
 };
 
-OobeLocalizationTest::OobeLocalizationTest() : LoginManagerTest(false, true) {
+OobeLocalizationTest::OobeLocalizationTest() : OobeBaseTest() {
   fake_statistics_provider_.SetMachineStatistic("initial_locale",
                                                 GetParam()->initial_locale);
   fake_statistics_provider_.SetMachineStatistic("keyboard_layout",
@@ -359,9 +348,9 @@ void OobeLocalizationTest::RunLocalizationTest() {
   const std::string expected_keyboard_select =
       TranslateXKB2Extension(expected_keyboard_select_control);
 
-  ASSERT_TRUE(LanguageListWaiter().Wait());
+  ASSERT_NO_FATAL_FAILURE(LanguageListWaiter().RunUntilLanguageListReady());
 
-  ASSERT_TRUE(WaitUntilJSIsReady());
+  ASSERT_NO_FATAL_FAILURE(RunUntilJSIsReady());
 
   const std::string first_language =
       expected_locale.substr(0, expected_locale.find(','));

@@ -10,9 +10,12 @@
 
 #include "base/optional.h"
 #include "base/strings/string16.h"
-#include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/autofill/core/common/password_form.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
+#include "components/autofill/core/common/renderer_id.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 class FakeMojoPasswordManagerDriver
     : public autofill::mojom::PasswordManagerDriver {
@@ -21,81 +24,66 @@ class FakeMojoPasswordManagerDriver
 
   ~FakeMojoPasswordManagerDriver() override;
 
-  void BindRequest(
-      autofill::mojom::PasswordManagerDriverAssociatedRequest request);
+  void BindReceiver(
+      mojo::PendingAssociatedReceiver<autofill::mojom::PasswordManagerDriver>
+          receiver);
 
   // Flushes all pending messages from the associated binding.
   void Flush();
 
-  bool called_show_pw_suggestions() const {
-    return called_show_pw_suggestions_;
-  }
+  // mojom::PasswordManagerDriver:
+  // TODO(crbug.com/948062): Migrate the other methods to GMock as well.
+  MOCK_METHOD0(ShowTouchToFill, void());
 
-  const base::Optional<base::string16>& show_pw_suggestions_username() const {
-    return show_pw_suggestions_username_;
-  }
-
-  int show_pw_suggestions_options() const {
-    return show_pw_suggestions_options_;
-  }
-
-  void reset_show_pw_suggestions() {
-    called_show_pw_suggestions_ = false;
-    show_pw_suggestions_username_ = base::nullopt;
-    show_pw_suggestions_options_ = -1;
-  }
+  MOCK_METHOD4(ShowPasswordSuggestions,
+               void(base::i18n::TextDirection,
+                    const base::string16&,
+                    int,
+                    const gfx::RectF&));
 
   bool called_show_not_secure_warning() const {
     return called_show_not_secure_warning_;
   }
 
   bool called_password_form_submitted() const {
-    return called_password_form_submitted_ && password_form_submitted_ &&
-           !password_form_submitted_->only_for_fallback;
+    return called_password_form_submitted_ && form_data_submitted_;
   }
 
-  bool called_password_form_submitted_only_for_fallback() const {
-    return called_password_form_submitted_ && password_form_submitted_ &&
-           password_form_submitted_->only_for_fallback;
-  }
-
-  const base::Optional<autofill::PasswordForm>& password_form_submitted()
-      const {
-    return password_form_submitted_;
+  const base::Optional<autofill::FormData>& form_data_submitted() const {
+    return form_data_submitted_;
   }
 
   bool called_same_document_navigation() const {
     return called_same_document_navigation_;
   }
 
-  const base::Optional<autofill::PasswordForm>&
-  password_form_same_document_navigation() const {
-    return password_form_same_document_navigation_;
+  const base::Optional<autofill::FormData>& form_data_maybe_submitted() const {
+    return form_data_maybe_submitted_;
   }
 
   bool called_password_forms_parsed() const {
     return called_password_forms_parsed_;
   }
 
-  const base::Optional<std::vector<autofill::PasswordForm>>&
-  password_forms_parsed() const {
-    return password_forms_parsed_;
+  const base::Optional<std::vector<autofill::FormData>>& form_data_parsed()
+      const {
+    return form_data_parsed_;
   }
 
   bool called_password_forms_rendered() const {
     return called_password_forms_rendered_;
   }
 
-  const base::Optional<std::vector<autofill::PasswordForm>>&
-  password_forms_rendered() const {
-    return password_forms_rendered_;
+  const base::Optional<std::vector<autofill::FormData>>& form_data_rendered()
+      const {
+    return form_data_rendered_;
   }
 
   void reset_password_forms_calls() {
     called_password_forms_parsed_ = false;
-    password_forms_parsed_ = base::nullopt;
+    form_data_parsed_ = base::nullopt;
     called_password_forms_rendered_ = false;
-    password_forms_rendered_ = base::nullopt;
+    form_data_rendered_ = base::nullopt;
   }
 
   bool called_record_save_progress() const {
@@ -134,65 +122,53 @@ class FakeMojoPasswordManagerDriver
  private:
   // mojom::PasswordManagerDriver:
   void PasswordFormsParsed(
-      const std::vector<autofill::PasswordForm>& forms) override;
+      const std::vector<autofill::FormData>& forms_data) override;
 
   void PasswordFormsRendered(
-      const std::vector<autofill::PasswordForm>& visible_forms,
+      const std::vector<autofill::FormData>& visible_forms_data,
       bool did_stop_loading) override;
 
-  void PasswordFormSubmitted(
-      const autofill::PasswordForm& password_form) override;
+  void PasswordFormSubmitted(const autofill::FormData& form_data) override;
 
-  void SameDocumentNavigation(
-      const autofill::PasswordForm& password_form) override;
-
-  void ShowPasswordSuggestions(base::i18n::TextDirection text_direction,
-                               const base::string16& typed_username,
-                               int options,
-                               const gfx::RectF& bounds) override;
+  void SameDocumentNavigation(autofill::mojom::SubmissionIndicatorEvent
+                                  submission_indication_event) override;
 
   void RecordSavePasswordProgress(const std::string& log) override;
 
   void UserModifiedPasswordField() override;
 
-  void UserModifiedNonPasswordField(uint32_t renderer_id,
+  void UserModifiedNonPasswordField(autofill::FieldRendererId renderer_id,
                                     const base::string16& value) override;
 
   void CheckSafeBrowsingReputation(const GURL& form_action,
                                    const GURL& frame_url) override;
 
   void ShowManualFallbackForSaving(
-      const autofill::PasswordForm& password_form) override;
+      const autofill::FormData& form_data) override;
   void HideManualFallbackForSaving() override;
   void FocusedInputChanged(
       autofill::mojom::FocusedFieldType focused_field_type) override;
-  void LogFirstFillingResult(uint32_t form_renderer_id,
+  void LogFirstFillingResult(autofill::FormRendererId form_renderer_id,
                              int32_t result) override {}
 
-  // Records whether ShowPasswordSuggestions() gets called.
-  bool called_show_pw_suggestions_ = false;
-  // Records data received via ShowPasswordSuggestions() call.
-  base::Optional<base::string16> show_pw_suggestions_username_;
-  int show_pw_suggestions_options_ = -1;
   // Records whether ShowNotSecureWarning() gets called.
   bool called_show_not_secure_warning_ = false;
   // Records whether PasswordFormSubmitted() gets called.
   bool called_password_form_submitted_ = false;
   // Records data received via PasswordFormSubmitted() call.
-  base::Optional<autofill::PasswordForm> password_form_submitted_;
+  base::Optional<autofill::FormData> form_data_submitted_;
+  // Records data received via ShowManualFallbackForSaving() call.
+  base::Optional<autofill::FormData> form_data_maybe_submitted_;
   // Records whether SameDocumentNavigation() gets called.
   bool called_same_document_navigation_ = false;
-  // Records data received via SameDocumentNavigation() call.
-  base::Optional<autofill::PasswordForm>
-      password_form_same_document_navigation_;
   // Records whether PasswordFormsParsed() gets called.
   bool called_password_forms_parsed_ = false;
   // Records if the list received via PasswordFormsParsed() call was empty.
-  base::Optional<std::vector<autofill::PasswordForm>> password_forms_parsed_;
+  base::Optional<std::vector<autofill::FormData>> form_data_parsed_;
   // Records whether PasswordFormsRendered() gets called.
   bool called_password_forms_rendered_ = false;
   // Records data received via PasswordFormsRendered() call.
-  base::Optional<std::vector<autofill::PasswordForm>> password_forms_rendered_;
+  base::Optional<std::vector<autofill::FormData>> form_data_rendered_;
   // Records whether RecordSavePasswordProgress() gets called.
   bool called_record_save_progress_ = false;
   // Records whether UserModifiedPasswordField() gets called.
@@ -214,7 +190,8 @@ class FakeMojoPasswordManagerDriver
   autofill::mojom::FocusedFieldType last_focused_field_type_ =
       autofill::mojom::FocusedFieldType::kUnknown;
 
-  mojo::AssociatedBinding<autofill::mojom::PasswordManagerDriver> binding_;
+  mojo::AssociatedReceiver<autofill::mojom::PasswordManagerDriver> receiver_{
+      this};
 };
 
 #endif  // CHROME_RENDERER_AUTOFILL_FAKE_MOJO_PASSWORD_MANAGER_DRIVER_H_

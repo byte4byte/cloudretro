@@ -33,23 +33,27 @@ class FakeChromeUserManager : public ChromeUserManager {
   user_manager::User* AddGuestUser();
   user_manager::User* AddKioskAppUser(const AccountId& account_id);
   user_manager::User* AddArcKioskAppUser(const AccountId& account_id);
+  user_manager::User* AddWebKioskAppUser(const AccountId& account_id);
   user_manager::User* AddSupervisedUser(const AccountId& account_id);
-  const user_manager::User* AddPublicAccountUser(const AccountId& account_id);
+  user_manager::User* AddPublicAccountUser(const AccountId& account_id);
+  user_manager::User* AddActiveDirectoryUser(const AccountId& account_id);
 
   // Calculates the user name hash and calls UserLoggedIn to login a user.
-  // Sets the user as having its profile created, but does not create a profile.
+  // Sets the user as having its profile created if |set_profile_created_flag|
+  // is true, but does not create a profile.
   // NOTE: This does not match production, which first logs in the user, then
   // creates the profile and updates the user later.
-  void LoginUser(const AccountId& account_id);
+  void LoginUser(const AccountId& account_id,
+                 bool set_profile_created_flag = true);
 
-  const user_manager::User* AddUser(const AccountId& account_id);
-  const user_manager::User* AddChildUser(const AccountId& account_id);
-  const user_manager::User* AddUserWithAffiliation(const AccountId& account_id,
-                                                   bool is_affiliated);
+  user_manager::User* AddUser(const AccountId& account_id);
+  user_manager::User* AddChildUser(const AccountId& account_id);
+  user_manager::User* AddUserWithAffiliation(const AccountId& account_id,
+                                             bool is_affiliated);
 
   // Creates and adds user with specified |account_id| and |user_type|. Sets
   // user affiliation. If |profile| is valid, maps it to the created user.
-  const user_manager::User* AddUserWithAffiliationAndTypeAndProfile(
+  user_manager::User* AddUserWithAffiliationAndTypeAndProfile(
       const AccountId& account_id,
       bool is_affiliated,
       user_manager::UserType user_type,
@@ -58,6 +62,10 @@ class FakeChromeUserManager : public ChromeUserManager {
   // Creates the instance returned by |GetLocalState()| (which returns nullptr
   // by default).
   void CreateLocalState();
+
+  // Sets the user profile created flag to simulate finishing user
+  // profile loading. Note this does not create a profile.
+  void SimulateUserProfileLoad(const AccountId& account_id);
 
   // user_manager::UserManager override.
   void Shutdown() override;
@@ -93,7 +101,6 @@ class FakeChromeUserManager : public ChromeUserManager {
   base::string16 GetUserDisplayName(const AccountId& account_id) const override;
   void SaveUserDisplayEmail(const AccountId& account_id,
                             const std::string& display_email) override;
-  std::string GetUserDisplayEmail(const AccountId& account_id) const override;
   void SaveUserType(const user_manager::User* user) override;
   void UpdateUserAccountData(const AccountId& account_id,
                              const UserAccountData& account_data) override;
@@ -110,6 +117,8 @@ class FakeChromeUserManager : public ChromeUserManager {
   bool IsLoggedInAsSupervisedUser() const override;
   bool IsLoggedInAsKioskApp() const override;
   bool IsLoggedInAsArcKioskApp() const override;
+  bool IsLoggedInAsWebKioskApp() const override;
+  bool IsLoggedInAsAnyKioskApp() const override;
   bool IsLoggedInAsStub() const override;
   bool IsUserNonCryptohomeDataEphemeral(
       const AccountId& account_id) const override;
@@ -151,6 +160,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   void DemoAccountLoggedIn() override;
   void KioskAppLoggedIn(user_manager::User* user) override;
   void ArcKioskAppLoggedIn(user_manager::User* user) override;
+  void WebKioskAppLoggedIn(user_manager::User* user) override;
   void PublicAccountUserLoggedIn(user_manager::User* user) override;
   void SupervisedUserLoggedIn(const AccountId& account_id) override;
   void OnUserRemoved(const AccountId& account_id) override;
@@ -201,6 +211,10 @@ class FakeChromeUserManager : public ChromeUserManager {
     is_enterprise_managed_ = is_enterprise_managed;
   }
 
+  void set_current_user_can_lock(bool current_user_can_lock) {
+    current_user_can_lock_ = current_user_can_lock;
+  }
+
  private:
   // Lazily creates default user flow.
   UserFlow* GetDefaultUserFlow() const;
@@ -233,6 +247,9 @@ class FakeChromeUserManager : public ChromeUserManager {
 
   // Whether the device is enterprise managed.
   bool is_enterprise_managed_ = false;
+
+  // Whether the current user can lock.
+  bool current_user_can_lock_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeChromeUserManager);
 };

@@ -4,26 +4,37 @@
 
 #include "chromeos/services/assistant/service.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include "ash/public/mojom/assistant_state_controller.mojom.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chromeos/audio/cras_audio_handler.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
+#include "chromeos/services/assistant/assistant_state_proxy.h"
 #include "chromeos/services/assistant/fake_assistant_manager_service_impl.h"
-#include "chromeos/services/assistant/public/mojom/constants.mojom.h"
-#include "services/identity/public/mojom/identity_accessor.mojom.h"
+#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/services/assistant/test_support/fully_initialized_assistant_state.h"
+#include "chromeos/services/assistant/test_support/scoped_assistant_client.h"
+#include "chromeos/services/assistant/test_support/scoped_device_actions.h"
+#include "components/prefs/testing_pref_service.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
-#include "services/service_manager/public/cpp/service_binding.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -31,133 +42,52 @@ namespace assistant {
 
 namespace {
 constexpr base::TimeDelta kDefaultTokenExpirationDelay =
-    base::TimeDelta::FromMilliseconds(1000);
+    base::TimeDelta::FromMilliseconds(60000);
+
+#define EXPECT_STATE(_state) EXPECT_EQ(_state, assistant_manager()->GetState())
+
+const char* kAccessToken = "fake access token";
+const char* kGaiaId = "gaia_id_for_user_gmail.com";
+const char* kEmailAddress = "user@gmail.com";
 }  // namespace
 
-class FakeIdentityAccessor : identity::mojom::IdentityAccessor {
+class ScopedFakeAssistantClient : public ScopedAssistantClient {
  public:
-  FakeIdentityAccessor()
-      : binding_(this),
-        access_token_expriation_delay_(kDefaultTokenExpirationDelay) {}
+  explicit ScopedFakeAssistantClient(ash::AssistantState* assistant_state)
+      : assistant_state_(assistant_state),
+        status_(ash::mojom::AssistantState::NOT_READY) {}
 
-  identity::mojom::IdentityAccessorPtr CreateInterfacePtrAndBind() {
-    identity::mojom::IdentityAccessorPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
-  }
-
-  void SetAccessTokenExpirationDelay(base::TimeDelta delay) {
-    access_token_expriation_delay_ = delay;
-  }
-
-  void SetShouldFail(bool fail) { should_fail_ = fail; }
-
-  int get_access_token_count() const { return get_access_token_count_; }
+  ash::mojom::AssistantState status() { return status_; }
 
  private:
-  // identity::mojom::IdentityAccessor:
-  void GetPrimaryAccountInfo(GetPrimaryAccountInfoCallback callback) override {
-    CoreAccountId account_id("account_id");
-    std::string gaia = "fakegaiaid";
-    std::string email = "fake@email";
-
-    identity::AccountState account_state;
-    account_state.has_refresh_token = true;
-    account_state.is_primary_account = true;
-
-    std::move(callback).Run(account_id, gaia, email, account_state);
+  // ScopedAssistantClient:
+  void OnAssistantStatusChanged(ash::mojom::AssistantState new_state) override {
+    status_ = new_state;
   }
 
-  void GetPrimaryAccountWhenAvailable(
-      GetPrimaryAccountWhenAvailableCallback callback) override {}
-  void GetAccessToken(const CoreAccountId& account_id,
-                      const ::identity::ScopeSet& scopes,
-                      const std::string& consumer_id,
-                      GetAccessTokenCallback callback) override {
-    GoogleServiceAuthError auth_error(
-        should_fail_ ? GoogleServiceAuthError::CONNECTION_FAILED
-                     : GoogleServiceAuthError::NONE);
-    std::move(callback).Run(
-        should_fail_ ? base::nullopt
-                     : base::Optional<std::string>("fake access token"),
-        base::Time::Now() + access_token_expriation_delay_, auth_error);
-    ++get_access_token_count_;
+  void RequestAssistantStateController(
+      mojo::PendingReceiver<ash::mojom::AssistantStateController> receiver)
+      override {
+    assistant_state_->BindReceiver(std::move(receiver));
   }
 
-  mojo::Binding<identity::mojom::IdentityAccessor> binding_;
+  ash::AssistantState* const assistant_state_;
+  ash::mojom::AssistantState status_;
 
-  base::TimeDelta access_token_expriation_delay_;
-
-  int get_access_token_count_ = 0;
-
-  bool should_fail_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeIdentityAccessor);
-};
-
-class FakeAssistantClient : mojom::Client {
- public:
-  FakeAssistantClient() : binding_(this) {}
-
-  mojom::ClientPtr CreateInterfacePtrAndBind() {
-    mojom::ClientPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
-  }
-
- private:
-  // mojom::Client:
-  void OnAssistantStatusChanged(bool running) override {}
-  void RequestAssistantStructure(
-      RequestAssistantStructureCallback callback) override {}
-
-  mojo::Binding<mojom::Client> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeAssistantClient);
-};
-
-class FakeDeviceActions : mojom::DeviceActions {
- public:
-  FakeDeviceActions() : binding_(this) {}
-
-  mojom::DeviceActionsPtr CreateInterfacePtrAndBind() {
-    mojom::DeviceActionsPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
-  }
-
- private:
-  // mojom::DeviceActions:
-  void SetWifiEnabled(bool enabled) override {}
-  void SetBluetoothEnabled(bool enabled) override {}
-  void GetScreenBrightnessLevel(
-      GetScreenBrightnessLevelCallback callback) override {
-    std::move(callback).Run(true, 1.0);
-  }
-  void SetScreenBrightnessLevel(double level, bool gradual) override {}
-  void SetNightLightEnabled(bool enabled) override {}
-  void OpenAndroidApp(chromeos::assistant::mojom::AndroidAppInfoPtr app_info,
-                      OpenAndroidAppCallback callback) override {}
-  void VerifyAndroidApp(
-      std::vector<chromeos::assistant::mojom::AndroidAppInfoPtr> apps_info,
-      VerifyAndroidAppCallback callback) override {}
-  void LaunchAndroidIntent(const std::string& intent) override {}
-  void AddAppListEventSubscriber(
-      chromeos::assistant::mojom::AppListEventSubscriberPtr subscriber)
-      override {}
-
-  mojo::Binding<mojom::DeviceActions> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeDeviceActions);
+  DISALLOW_COPY_AND_ASSIGN(ScopedFakeAssistantClient);
 };
 
 class AssistantServiceTest : public testing::Test {
  public:
-  AssistantServiceTest()
-      : connector_(test_connector_factory_.CreateConnector()) {
-    // The assistant service may attempt to connect to a number of services
-    // which are irrelevant for these tests.
-    test_connector_factory_.set_ignore_unknown_service_requests(true);
+  AssistantServiceTest() = default;
+
+  ~AssistantServiceTest() override = default;
+
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(
+        chromeos::features::kAmbientModeFeature);
+
+    chromeos::CrasAudioHandler::InitializeForTesting();
 
     PowerManagerClient::InitializeFake();
     FakePowerManagerClient::Get()->SetTabletMode(
@@ -167,118 +97,251 @@ class AssistantServiceTest : public testing::Test {
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &url_loader_factory_);
 
+    prefs::RegisterProfilePrefs(pref_service_.registry());
+    pref_service_.SetBoolean(prefs::kAssistantEnabled, true);
+    pref_service_.SetBoolean(prefs::kAssistantHotwordEnabled, true);
+
+    // In production the primary account is set before the service is created.
+    identity_test_env_.MakeUnconsentedPrimaryAccountAvailable(kEmailAddress);
+
     service_ = std::make_unique<Service>(
-        test_connector_factory_.RegisterInstance(mojom::kServiceName),
-        shared_url_loader_factory_->Clone());
+        shared_url_loader_factory_->Clone(),
+        identity_test_env_.identity_manager(), &pref_service_);
+    service_->SetAssistantManagerServiceForTesting(
+        std::make_unique<FakeAssistantManagerServiceImpl>());
 
-    mock_task_runner_ = base::MakeRefCounted<base::TestMockTimeTaskRunner>(
-        base::Time::Now(), base::TimeTicks::Now());
-    auto mock_timer = std::make_unique<base::OneShotTimer>(
-        mock_task_runner_->GetMockTickClock());
-    mock_timer->SetTaskRunner(mock_task_runner_);
-    service_->SetTimerForTesting(std::move(mock_timer));
+    service_->Init();
+    // Wait for AssistantManagerService to be set.
+    base::RunLoop().RunUntilIdle();
 
-    service_->SetIdentityAccessorForTesting(
-        fake_identity_accessor_.CreateInterfacePtrAndBind());
+    IssueAccessToken(kAccessToken);
+  }
 
-    auto fake_assistant_manager =
-        std::make_unique<FakeAssistantManagerServiceImpl>();
-    fake_assistant_manager_ = fake_assistant_manager.get();
-    service_->SetAssistantManagerForTesting(std::move(fake_assistant_manager));
+  void TearDown() override {
+    service_.reset();
+    PowerManagerClient::Shutdown();
+    chromeos::CrasAudioHandler::Shutdown();
+  }
 
-    GetPlatform()->Init(fake_assistant_client_.CreateInterfacePtrAndBind(),
-                        fake_device_actions_.CreateInterfacePtrAndBind(),
-                        /*is_test=*/true);
-    platform_.FlushForTesting();
+  void StartAssistantAndWait() {
+    pref_service()->SetBoolean(prefs::kAssistantEnabled, true);
     base::RunLoop().RunUntilIdle();
   }
 
-  ~AssistantServiceTest() override {
-    service_.reset();
-    PowerManagerClient::Shutdown();
+  void StopAssistantAndWait() {
+    pref_service()->SetBoolean(prefs::kAssistantEnabled, false);
+    base::RunLoop().RunUntilIdle();
   }
 
-  mojom::AssistantPlatform* GetPlatform() {
-    if (!platform_)
-      connector_->BindInterface(mojom::kServiceName, &platform_);
-    return platform_.get();
+  void IssueAccessToken(const std::string& access_token) {
+    identity_test_env_.WaitForAccessTokenRequestIfNecessaryAndRespondWithToken(
+        access_token, base::Time::Now() + kDefaultTokenExpirationDelay);
   }
 
-  FakeIdentityAccessor* identity_accessor() { return &fake_identity_accessor_; }
+  Service* service() { return service_.get(); }
 
-  FakeAssistantManagerServiceImpl* assistant_manager_service() {
-    return fake_assistant_manager_;
+  FakeAssistantManagerServiceImpl* assistant_manager() {
+    auto* result = static_cast<FakeAssistantManagerServiceImpl*>(
+        service_->assistant_manager_service_.get());
+    DCHECK(result);
+    return result;
   }
 
-  base::TestMockTimeTaskRunner* mock_task_runner() {
-    return mock_task_runner_.get();
+  void ResetFakeAssistantManager() {
+    assistant_manager()->SetUser(base::nullopt);
   }
+
+  signin::IdentityTestEnvironment* identity_test_env() {
+    return &identity_test_env_;
+  }
+
+  ash::AssistantState* assistant_state() { return &assistant_state_; }
+
+  PrefService* pref_service() { return &pref_service_; }
+
+  ScopedFakeAssistantClient* client() { return &fake_assistant_client_; }
+
+  base::test::TaskEnvironment* task_environment() { return &task_environment_; }
+
+  ash::AmbientModeState* ambient_mode_state() { return &ambient_mode_state_; }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
-  service_manager::TestConnectorFactory test_connector_factory_;
-  std::unique_ptr<service_manager::Connector> connector_;
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::ScopedFeatureList scoped_feature_list_;
 
-  std::unique_ptr<chromeos::assistant::Service> service_;
-  mojom::AssistantPlatformPtr platform_;
+  std::unique_ptr<Service> service_;
 
-  FakeIdentityAccessor fake_identity_accessor_;
-  FakeAssistantClient fake_assistant_client_;
-  FakeDeviceActions fake_device_actions_;
+  FullyInitializedAssistantState assistant_state_;
+  signin::IdentityTestEnvironment identity_test_env_;
+  ScopedFakeAssistantClient fake_assistant_client_{&assistant_state_};
+  ScopedDeviceActions fake_device_actions_;
 
-  FakeAssistantManagerServiceImpl* fake_assistant_manager_;
+  TestingPrefServiceSimple pref_service_;
 
   network::TestURLLoaderFactory url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
 
-  scoped_refptr<base::TestMockTimeTaskRunner> mock_task_runner_;
-  std::unique_ptr<base::OneShotTimer> mock_timer_;
+  ash::AmbientModeState ambient_mode_state_;
 
   DISALLOW_COPY_AND_ASSIGN(AssistantServiceTest);
 };
 
 TEST_F(AssistantServiceTest, RefreshTokenAfterExpire) {
-  auto current_count = identity_accessor()->get_access_token_count();
-  mock_task_runner()->FastForwardBy(kDefaultTokenExpirationDelay / 2);
-  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
+  task_environment()->FastForwardBy(kDefaultTokenExpirationDelay / 2);
 
   // Before token expire, should not request new token.
-  EXPECT_EQ(identity_accessor()->get_access_token_count(), current_count);
+  EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
 
-  mock_task_runner()->FastForwardBy(kDefaultTokenExpirationDelay);
-  base::RunLoop().RunUntilIdle();
+  task_environment()->FastForwardBy(kDefaultTokenExpirationDelay);
 
   // After token expire, should request once.
-  EXPECT_EQ(identity_accessor()->get_access_token_count(), ++current_count);
+  EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
 }
 
 TEST_F(AssistantServiceTest, RetryRefreshTokenAfterFailure) {
-  auto current_count = identity_accessor()->get_access_token_count();
-  identity_accessor()->SetShouldFail(true);
-  mock_task_runner()->FastForwardBy(kDefaultTokenExpirationDelay);
-  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
 
-  // Token request failed.
-  EXPECT_EQ(identity_accessor()->get_access_token_count(), ++current_count);
+  // Let the first token expire. Another will be requested.
+  task_environment()->FastForwardBy(kDefaultTokenExpirationDelay);
+  EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
 
-  base::RunLoop().RunUntilIdle();
+  // Reply with an error.
+  identity_test_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
+      GoogleServiceAuthError(GoogleServiceAuthError::State::CONNECTION_FAILED));
+  EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
 
   // Token request automatically retry.
-  identity_accessor()->SetShouldFail(false);
-  // The failure delay has jitter so fast forward a bit more.
-  mock_task_runner()->FastForwardBy(kDefaultTokenExpirationDelay * 2);
-  base::RunLoop().RunUntilIdle();
+  // The failure delay has jitter so fast forward a bit more, but before
+  // the returned token would expire again.
+  task_environment()->FastForwardBy(kDefaultTokenExpirationDelay / 2);
 
-  EXPECT_EQ(identity_accessor()->get_access_token_count(), ++current_count);
+  EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
 }
 
 TEST_F(AssistantServiceTest, RetryRefreshTokenAfterDeviceWakeup) {
-  auto current_count = identity_accessor()->get_access_token_count();
+  ASSERT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
+
   FakePowerManagerClient::Get()->SendSuspendDone();
+  // Token requested immediately after suspend done.
+  EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
+}
+
+TEST_F(AssistantServiceTest, StopImmediatelyIfAssistantIsRunning) {
+  // Test is set up as |State::STARTED|.
+  assistant_manager()->FinishStart();
+  EXPECT_STATE(AssistantManagerService::State::RUNNING);
+
+  StopAssistantAndWait();
+
+  EXPECT_STATE(AssistantManagerService::State::STOPPED);
+}
+
+TEST_F(AssistantServiceTest, StopDelayedIfAssistantNotFinishedStarting) {
+  EXPECT_STATE(AssistantManagerService::State::STARTING);
+
+  // Turning settings off will trigger logic to try to stop it.
+  StopAssistantAndWait();
+
+  EXPECT_STATE(AssistantManagerService::State::STARTING);
+
+  task_environment()->FastForwardBy(kUpdateAssistantManagerDelay);
+
+  // No change of state because it is still starting.
+  EXPECT_STATE(AssistantManagerService::State::STARTING);
+
+  assistant_manager()->FinishStart();
+
+  task_environment()->FastForwardBy(kUpdateAssistantManagerDelay);
+
+  EXPECT_STATE(AssistantManagerService::State::STOPPED);
+}
+
+TEST_F(AssistantServiceTest, ShouldSendUserInfoWhenStarting) {
+  // First stop the service and reset the AssistantManagerService
+  assistant_manager()->FinishStart();
+  StopAssistantAndWait();
+  ResetFakeAssistantManager();
+
+  // Now start the service
+  StartAssistantAndWait();
+
+  EXPECT_EQ(kAccessToken, assistant_manager()->access_token());
+  EXPECT_EQ(kGaiaId, assistant_manager()->gaia_id());
+}
+
+TEST_F(AssistantServiceTest, ShouldSendUserInfoWhenAccessTokenIsRefreshed) {
+  assistant_manager()->FinishStart();
+
+  // Reset the AssistantManagerService so it forgets the user info sent when
+  // starting the service.
+  ResetFakeAssistantManager();
+
+  // Now force an access token refresh
+  task_environment()->FastForwardBy(kDefaultTokenExpirationDelay);
+  IssueAccessToken("new token");
+
+  EXPECT_EQ("new token", assistant_manager()->access_token());
+  EXPECT_EQ(kGaiaId, assistant_manager()->gaia_id());
+}
+
+TEST_F(AssistantServiceTest, ShouldSetClientStatusToNotReadyWhenStarting) {
+  assistant_manager()->SetStateAndInformObservers(
+      AssistantManagerService::State::STARTING);
   base::RunLoop().RunUntilIdle();
 
-  // Token requested immediately after suspend done.
-  EXPECT_EQ(identity_accessor()->get_access_token_count(), ++current_count);
+  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NOT_READY);
+}
+
+TEST_F(AssistantServiceTest, ShouldSetClientStatusToReadyWhenStarted) {
+  assistant_manager()->SetStateAndInformObservers(
+      AssistantManagerService::State::STARTED);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::READY);
+}
+
+TEST_F(AssistantServiceTest, ShouldSetClientStatusToNewReadyWhenRunning) {
+  assistant_manager()->SetStateAndInformObservers(
+      AssistantManagerService::State::RUNNING);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NEW_READY);
+}
+
+TEST_F(AssistantServiceTest, ShouldSetClientStatusToNotReadyWhenStopped) {
+  assistant_manager()->SetStateAndInformObservers(
+      AssistantManagerService::State::RUNNING);
+  base::RunLoop().RunUntilIdle();
+
+  StopAssistantAndWait();
+
+  EXPECT_EQ(client()->status(), ash::mojom::AssistantState::NOT_READY);
+}
+
+TEST_F(AssistantServiceTest,
+       ShouldResetAccessTokenWhenAmbientModeStateChanged) {
+  assistant_manager()->FinishStart();
+  EXPECT_STATE(AssistantManagerService::State::RUNNING);
+  EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
+  ASSERT_TRUE(assistant_manager()->access_token().has_value());
+  ASSERT_EQ(assistant_manager()->access_token().value(), kAccessToken);
+
+  ambient_mode_state()->SetAmbientModeEnabled(true);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
+  ASSERT_FALSE(assistant_manager()->access_token().has_value());
+
+  // Disabling ambient mode requests a new token.
+  ambient_mode_state()->SetAmbientModeEnabled(false);
+  EXPECT_TRUE(identity_test_env()->IsAccessTokenRequestPending());
+
+  // Assistant manager receives the new token.
+  IssueAccessToken("new token");
+  EXPECT_FALSE(identity_test_env()->IsAccessTokenRequestPending());
+  ASSERT_TRUE(assistant_manager()->access_token().has_value());
+  ASSERT_EQ(assistant_manager()->access_token().value(), "new token");
 }
 
 }  // namespace assistant

@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/events/event.h"
+#include "ui/gfx/image/image_skia.h"
 
 class AppWindowLauncherItemController;
 
@@ -99,7 +100,7 @@ class ASH_PUBLIC_EXPORT ShelfItemDelegate {
   // The context menu model that was last shown for the associated shelf item.
   std::unique_ptr<ui::SimpleMenuModel> context_menu_;
 
-  base::WeakPtrFactory<ShelfItemDelegate> weak_ptr_factory_;
+  base::WeakPtrFactory<ShelfItemDelegate> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ShelfItemDelegate);
 };

@@ -87,5 +87,23 @@ tspan, textPath {
 
 /* TODO(crbug.com/976224): Support zoom on foreignObject */
 foreignObject {
-    -internal-effective-zoom: initial !important;
+    zoom: -internal-reset-effective !important;
+}
+
+/*
+   This is added as to not break SVG content in forced colors mode:
+   https://drafts.csswg.org/css-color-adjust-1/#forced-colors-properties
+*/
+@media forced-colors {
+  svg:root {
+    color: CanvasText;
+  }
+
+  svg {
+      forced-color-adjust: none;
+  }
+
+  foreignObject {
+      forced-color-adjust: auto;
+  }
 }

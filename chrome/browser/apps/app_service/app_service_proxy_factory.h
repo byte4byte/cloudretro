@@ -22,8 +22,6 @@ class AppServiceProxyFactory : public BrowserContextKeyedServiceFactory {
 
   static AppServiceProxyFactory* GetInstance();
 
-  static bool IsEnabled();
-
  private:
   friend struct base::DefaultSingletonTraits<AppServiceProxyFactory>;
 
@@ -32,6 +30,8 @@ class AppServiceProxyFactory : public BrowserContextKeyedServiceFactory {
 
   // BrowserContextKeyedServiceFactory overrides.
   KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override;
   bool ServiceIsCreatedWithBrowserContext() const override;
 

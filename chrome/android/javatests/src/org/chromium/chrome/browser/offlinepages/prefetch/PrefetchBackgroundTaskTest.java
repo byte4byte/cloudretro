@@ -21,7 +21,8 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.background_task_scheduler.ChromeNativeBackgroundTaskDelegate;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.offlinepages.OfflineTestUtil;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ReducedModeNativeTestRule;
@@ -42,7 +43,7 @@ import java.util.concurrent.TimeUnit;
 /** Unit tests for {@link PrefetchBackgroundTask}. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        "enable-features=OfflinePagesPrefetching,NetworkService,InterestFeedContentSuggestions"})
+        "enable-features=OfflinePagesPrefetching,InterestFeedContentSuggestions"})
 public class PrefetchBackgroundTaskTest {
     @Rule
     public ReducedModeNativeTestRule mNativeTestRule = new ReducedModeNativeTestRule();
@@ -57,6 +58,7 @@ public class PrefetchBackgroundTaskTest {
 
         public TestPrefetchBackgroundTask(TaskInfo taskInfo) {
             mTaskInfo = taskInfo;
+            setDelegate(new ChromeNativeBackgroundTaskDelegate());
         }
 
         public void startTask(Context context, final TaskFinishedCallback callback) {
@@ -180,7 +182,7 @@ public class PrefetchBackgroundTaskTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mScheduler = new TestBackgroundTaskScheduler();
             BackgroundTaskSchedulerFactory.setSchedulerForTesting(mScheduler);

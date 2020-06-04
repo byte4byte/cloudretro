@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/test/launcher/unit_test_launcher.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
 
@@ -18,7 +18,6 @@
 #if defined(USE_OZONE)
 #include "base/command_line.h"
 #include "mojo/core/embedder/embedder.h"                  // nogncheck
-#include "services/viz/public/interfaces/constants.mojom.h"  // nogncheck
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -34,13 +33,12 @@ class GlTestSuite : public base::TestSuite {
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
     // This registers a custom NSApplication. It must be done before
-    // ScopedTaskEnvironment registers a regular NSApplication.
+    // TaskEnvironment registers a regular NSApplication.
     mock_cr_app::RegisterMockCrApp();
 #endif
 
-    scoped_task_environment_ =
-        std::make_unique<base::test::ScopedTaskEnvironment>(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI);
+    task_environment_ = std::make_unique<base::test::TaskEnvironment>(
+        base::test::TaskEnvironment::MainThreadType::UI);
 
 #if defined(USE_OZONE)
     // Make Ozone run in single-process mode, where it doesn't expect a GPU
@@ -49,9 +47,8 @@ class GlTestSuite : public base::TestSuite {
     // and GPU components.
     ui::OzonePlatform::InitParams params;
     params.single_process = true;
-    params.using_mojo = true;
 
-    // This initialization must be done after ScopedTaskEnvironment has
+    // This initialization must be done after TaskEnvironment has
     // initialized the UI thread.
     ui::OzonePlatform::InitializeForUI(params);
 #endif
@@ -62,7 +59,7 @@ class GlTestSuite : public base::TestSuite {
   }
 
  private:
-  std::unique_ptr<base::test::ScopedTaskEnvironment> scoped_task_environment_;
+  std::unique_ptr<base::test::TaskEnvironment> task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(GlTestSuite);
 };

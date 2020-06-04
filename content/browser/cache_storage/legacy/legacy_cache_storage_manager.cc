@@ -19,12 +19,15 @@
 #include "base/files/file_util.h"
 #include "base/hash/sha1.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
+#include "components/services/storage/public/cpp/constants.h"
 #include "content/browser/cache_storage/cache_storage.h"
 #include "content/browser/cache_storage/cache_storage.pb.h"
 #include "content/browser/cache_storage/cache_storage_quota_client.h"
@@ -41,7 +44,7 @@ namespace content {
 namespace {
 
 bool DeleteDir(const base::FilePath& path) {
-  return base::DeleteFile(path, true /* recursive */);
+  return base::DeleteFileRecursively(path);
 }
 
 void DeleteOriginDidDeleteDir(storage::QuotaClient::DeletionCallback callback,
@@ -56,15 +59,79 @@ void DeleteOriginDidDeleteDir(storage::QuotaClient::DeletionCallback callback,
 
 // Calculate the sum of all cache sizes in this store, but only if all sizes are
 // known. If one or more sizes are not known then return kSizeUnknown.
-int64_t GetCacheStorageSize(const proto::CacheStorageIndex& index) {
+int64_t GetCacheStorageSize(const base::FilePath& base_path,
+                            const base::Time& base_path_time,
+                            const base::Time& index_time,
+                            const proto::CacheStorageIndex& index) {
+  // If the base path's modified time is newer than the index, then the
+  // contents of a cache must have changed.  The index is stale.
+  if (base_path_time > index_time)
+    return CacheStorage::kSizeUnknown;
+
+  // It should be impossible for the directory containing the index to
+  // have a modified time older than the index's modified time.  Modifying
+  // the index should update the directories time as well.  Therefore we
+  // should be guaranteed that the time is equal here.
+  //
+  // In practice, though, there can be a few microseconds difference on
+  // some operating systems so we can't do an exact DCHECK here.  Instead
+  // we do a fuzzy DCHECK allowing some microseconds difference.
+  DCHECK_LE((index_time - base_path_time).magnitude().InMicroseconds(), 10);
+
   int64_t storage_size = 0;
   for (int i = 0, max = index.cache_size(); i < max; ++i) {
     const proto::CacheStorageIndex::Cache& cache = index.cache(i);
-    if (!cache.has_size() || cache.size() == CacheStorage::kSizeUnknown)
+    if (!cache.has_cache_dir() || !cache.has_size() ||
+        cache.size() == CacheStorage::kSizeUnknown) {
       return CacheStorage::kSizeUnknown;
+    }
+
+    // Check the modified time on each cache directory.  If one of the
+    // directories has the same or newer modified time as the index file, then
+    // its size is most likely not accounted for in the index file.  The
+    // cache can have a newer time here in spite of our base path time check
+    // above since simple disk_cache writes to these directories from a
+    // different thread.
+    base::FilePath path = base_path.AppendASCII(cache.cache_dir());
+    base::File::Info file_info;
+    if (!base::GetFileInfo(path, &file_info) ||
+        file_info.last_modified >= index_time) {
+      return CacheStorage::kSizeUnknown;
+    }
+
     storage_size += cache.size();
   }
+
   return storage_size;
+}
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class IndexResult {
+  kOk = 0,
+  kFailedToParse = 1,
+  kMissingOrigin = 2,
+  kEmptyOriginUrl = 3,
+  kPathMismatch = 4,
+  kPathFileInfoFailed = 5,
+  // Add new enums above
+  kMaxValue = kPathFileInfoFailed,
+};
+
+IndexResult ValidateIndex(proto::CacheStorageIndex index) {
+  if (!index.has_origin())
+    return IndexResult::kMissingOrigin;
+
+  GURL url(index.origin());
+  if (url.is_empty())
+    return IndexResult::kEmptyOriginUrl;
+
+  return IndexResult::kOk;
+}
+
+void RecordIndexValidationResult(IndexResult value) {
+  base::UmaHistogramEnumeration("ServiceWorkerCache.ListOriginsIndexValidity",
+                                value);
 }
 
 // Open the various cache directories' index files and extract their origins,
@@ -87,23 +154,51 @@ void ListOriginsAndLastModifiedOnTaskRunner(
     std::string protobuf;
     base::ReadFileToString(path.AppendASCII(LegacyCacheStorage::kIndexFileName),
                            &protobuf);
+
     proto::CacheStorageIndex index;
-    if (index.ParseFromString(protobuf)) {
-      if (index.has_origin()) {
-        if (path ==
-            LegacyCacheStorageManager::ConstructOriginPath(
-                root_path, url::Origin::Create(GURL(index.origin())), owner)) {
-          if (base::GetFileInfo(path, &file_info)) {
-            int64_t storage_size = CacheStorage::kSizeUnknown;
-            if (file_info.last_modified < index_last_modified)
-              storage_size = GetCacheStorageSize(index);
-            usages->push_back(
-                StorageUsageInfo(url::Origin::Create(GURL(index.origin())),
-                                 storage_size, file_info.last_modified));
-          }
-        }
-      }
+    if (!index.ParseFromString(protobuf)) {
+      RecordIndexValidationResult(IndexResult::kFailedToParse);
+      continue;
     }
+
+    IndexResult rv = ValidateIndex(index);
+    if (rv != IndexResult::kOk) {
+      RecordIndexValidationResult(rv);
+      continue;
+    }
+
+    auto origin = url::Origin::Create(GURL(index.origin()));
+    DCHECK(!origin.GetURL().is_empty());
+
+    auto origin_path = LegacyCacheStorageManager::ConstructOriginPath(
+        root_path, origin, owner);
+    if (path != origin_path) {
+      CacheStorageOwner other_owner = owner == CacheStorageOwner::kCacheAPI
+                                          ? CacheStorageOwner::kBackgroundFetch
+                                          : CacheStorageOwner::kCacheAPI;
+      auto other_owner_path = LegacyCacheStorageManager::ConstructOriginPath(
+          root_path, origin, other_owner);
+      // Some of the paths in the |root_path| directory are for a different
+      // |owner|.  That is valid and expected, but if the path doesn't match
+      // the calculated path for either |owner|, then it is invalid.
+      if (path != other_owner_path)
+        RecordIndexValidationResult(IndexResult::kPathMismatch);
+      continue;
+    }
+
+    if (!base::GetFileInfo(path, &file_info)) {
+      RecordIndexValidationResult(IndexResult::kPathFileInfoFailed);
+      continue;
+    }
+
+    int64_t storage_size = GetCacheStorageSize(path, file_info.last_modified,
+                                               index_last_modified, index);
+    base::UmaHistogramBoolean("ServiceWorkerCache.UsedIndexFileSize",
+                              storage_size != CacheStorage::kSizeUnknown);
+
+    usages->push_back(
+        StorageUsageInfo(origin, storage_size, file_info.last_modified));
+    RecordIndexValidationResult(IndexResult::kOk);
   }
 }
 
@@ -162,7 +257,7 @@ scoped_refptr<LegacyCacheStorageManager> LegacyCacheStorageManager::Create(
     scoped_refptr<CacheStorageContextImpl::ObserverList> observers) {
   base::FilePath root_path = path;
   if (!path.empty()) {
-    root_path = path.Append(ServiceWorkerContextCore::kServiceWorkerDirectory)
+    root_path = path.Append(storage::kServiceWorkerDirectory)
                     .AppendASCII("CacheStorage");
   }
 
@@ -180,7 +275,7 @@ LegacyCacheStorageManager::CreateForTesting(
           old_manager->root_path(), old_manager->cache_task_runner(),
           old_manager->scheduler_task_runner(),
           old_manager->quota_manager_proxy_.get(), old_manager->observers_));
-  manager->SetBlobParametersForCache(old_manager->blob_storage_context());
+  manager->SetBlobParametersForCache(old_manager->blob_storage_context_);
   return manager;
 }
 
@@ -207,7 +302,7 @@ CacheStorageHandle LegacyCacheStorageManager::OpenCacheStorage(
     LegacyCacheStorage* cache_storage = new LegacyCacheStorage(
         ConstructOriginPath(root_path_, origin, owner), IsMemoryBacked(),
         cache_task_runner_.get(), scheduler_task_runner_, quota_manager_proxy_,
-        blob_context_, this, origin, owner);
+        blob_storage_context_, this, origin, owner);
     cache_storage_map_[{origin, owner}] = base::WrapUnique(cache_storage);
     return cache_storage->CreateHandle();
   }
@@ -215,11 +310,12 @@ CacheStorageHandle LegacyCacheStorageManager::OpenCacheStorage(
 }
 
 void LegacyCacheStorageManager::SetBlobParametersForCache(
-    base::WeakPtr<storage::BlobStorageContext> blob_storage_context) {
+    scoped_refptr<BlobStorageContextWrapper> blob_storage_context) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(cache_storage_map_.empty());
-  DCHECK(!blob_context_ || blob_context_.get() == blob_storage_context.get());
-  blob_context_ = blob_storage_context;
+  DCHECK(!blob_storage_context_ ||
+         blob_storage_context_ == blob_storage_context);
+  blob_storage_context_ = std::move(blob_storage_context);
 }
 
 void LegacyCacheStorageManager::NotifyCacheListChanged(

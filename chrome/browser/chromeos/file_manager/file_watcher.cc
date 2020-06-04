@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
@@ -35,11 +36,10 @@ base::FilePathWatcher* CreateAndStartFilePathWatcher(
 }  // namespace
 
 FileWatcher::FileWatcher(const base::FilePath& virtual_path)
-    : sequenced_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+    : sequenced_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
       local_file_watcher_(nullptr),
-      virtual_path_(virtual_path),
-      weak_ptr_factory_(this) {
+      virtual_path_(virtual_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 

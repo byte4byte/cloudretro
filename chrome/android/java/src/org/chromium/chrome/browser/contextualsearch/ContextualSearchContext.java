@@ -4,12 +4,15 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -40,6 +43,7 @@ public abstract class ContextualSearchContext {
     private int mSelectionEndOffset = INVALID_OFFSET;
 
     // The home country, or an empty string if not set.
+    @NonNull
     private String mHomeCountry = "";
 
     // The detected language of the context, or {@code null} if not yet detected, and empty if
@@ -76,8 +80,12 @@ public abstract class ContextualSearchContext {
     private long mPreviousEventId;
     private int mPreviousUserInteractions;
 
+    // Translation members.
+    @NonNull
+    private String mTargetLanguage = "";
+
     /** A {@link ContextualSearchContext} that ignores changes to the selection. */
-    private static class ChangeIgnoringContext extends ContextualSearchContext {
+    static class ChangeIgnoringContext extends ContextualSearchContext {
         @Override
         void onSelectionChanged() {}
     }
@@ -90,7 +98,7 @@ public abstract class ContextualSearchContext {
      * @return A {@link ContextualSearchContext} or {@code null} if the insertion point happens to
      *         miss a word (e.g. it has non-word characters on both sides).
      */
-    static public @Nullable ContextualSearchContext getContextForInsertionPoint(
+    public static @Nullable ContextualSearchContext getContextForInsertionPoint(
             String surroundingText, int insertionPointOffset) {
         ContextualSearchContext context = new ChangeIgnoringContext();
         context.setSurroundingText(
@@ -104,7 +112,7 @@ public abstract class ContextualSearchContext {
         if (context.hasValidSelection() && !TextUtils.isEmpty(context.getInitialSelectedWord())) {
             Log.i(TAG, "identified default query: " + context.getWordTapped());
             // TODO(donnd): figure out which of these parameters should be passed in.
-            context.setResolveProperties("US", true, 0, 0);
+            context.setResolveProperties("US", true, 0, 0, "");
             return context;
         }
 
@@ -116,7 +124,7 @@ public abstract class ContextualSearchContext {
      * Constructs a context that tracks the selection and some amount of page content.
      */
     ContextualSearchContext() {
-        mNativePointer = nativeInit();
+        mNativePointer = ContextualSearchContextJni.get().init(this);
         mHasSetResolveProperties = false;
     }
 
@@ -128,25 +136,28 @@ public abstract class ContextualSearchContext {
      * @param maySendBasePageUrl Whether policy allows sending the base-page URL to the server.
      * @param previousEventId An EventID from the server to send along with the resolve request.
      * @param previousUserInteractions Persisted interaction outcomes to send along with the resolve
-     *         request.
+     *        request.
+     * @param targetLanguage The language to translate into, in case translation might be needed.
      */
-    void setResolveProperties(String homeCountry, boolean maySendBasePageUrl, long previousEventId,
-            int previousUserInteractions) {
+    void setResolveProperties(@NonNull String homeCountry, boolean maySendBasePageUrl,
+            long previousEventId, int previousUserInteractions, @NonNull String targetLanguage) {
         mHasSetResolveProperties = true;
         mHomeCountry = homeCountry;
         mPreviousEventId = previousEventId;
         mPreviousUserInteractions = previousUserInteractions;
-        nativeSetResolveProperties(getNativePointer(), homeCountry, maySendBasePageUrl,
-                previousEventId, previousUserInteractions);
+        ContextualSearchContextJni.get().setResolveProperties(getNativePointer(), this, homeCountry,
+                maySendBasePageUrl, previousEventId, previousUserInteractions);
+        mTargetLanguage = targetLanguage;
     }
 
     /**
      * This method should be called to clean up storage when an instance of this class is
-     * no longer in use.  The nativeDestroy will call the destructor on the native instance.
+     * no longer in use.  The ContextualSearchContextJni.get().destroy will call the destructor on
+     * the native instance.
      */
     public void destroy() {
         assert mNativePointer != 0;
-        nativeDestroy(mNativePointer);
+        ContextualSearchContextJni.get().destroy(mNativePointer, this);
         mNativePointer = 0;
 
         // Also zero out private data that may be sizable.
@@ -190,9 +201,11 @@ public abstract class ContextualSearchContext {
             onSelectionChanged();
         }
         if (setNative) {
-            nativeSetContent(getNativePointer(), mSurroundingText, mSelectionStartOffset,
-                    mSelectionEndOffset);
+            ContextualSearchContextJni.get().setContent(getNativePointer(), this, mSurroundingText,
+                    mSelectionStartOffset, mSelectionEndOffset);
         }
+        // Detect the language of the surroundings or the selection.
+        setTranslationLanguages(getDetectedLanguage(), mTargetLanguage);
     }
 
     /**
@@ -276,13 +289,10 @@ public abstract class ContextualSearchContext {
     }
 
     /**
-     * Specifies that this resolve must return a non-expanding result.
+     * Specifies that this search must be exact so the resolve must return a non-expanding result.
      */
-    void setRestrictedResolve() {
-        mSurroundingText = mInitialSelectedWord;
-        mSelectionStartOffset = 0;
-        mSelectionEndOffset = mSurroundingText.length();
-        nativeRestrictResolve(mNativePointer);
+    void setExactResolve() {
+        ContextualSearchContextJni.get().setExactResolve(mNativePointer, this);
     }
 
     /**
@@ -297,7 +307,8 @@ public abstract class ContextualSearchContext {
         mSelectionStartOffset += startAdjust;
         mSelectionEndOffset += endAdjust;
         updateInitialSelectedWord();
-        nativeAdjustSelection(getNativePointer(), startAdjust, endAdjust);
+        ContextualSearchContextJni.get().adjustSelection(
+                getNativePointer(), this, startAdjust, endAdjust);
         // Notify of changes.
         onSelectionChanged();
     }
@@ -339,9 +350,20 @@ public abstract class ContextualSearchContext {
     String getDetectedLanguage() {
         assert mSurroundingText != null;
         if (mDetectedLanguage == null) {
-            mDetectedLanguage = nativeDetectLanguage(mNativePointer);
+            mDetectedLanguage =
+                    ContextualSearchContextJni.get().detectLanguage(mNativePointer, this);
         }
         return mDetectedLanguage;
+    }
+
+    /**
+     * Pushes the given language down to the native ContextualSearchContext.
+     * @param detectedLanguage An ISO 639 language code string for the language to translate from.
+     * @param targetLanguage An ISO 639 language code string to translation into.
+     */
+    void setTranslationLanguages(String detectedLanguage, String targetLanguage) {
+        ContextualSearchContextJni.get().setTranslationLanguages(
+                mNativePointer, this, detectedLanguage, targetLanguage);
     }
 
     // ============================================================================================
@@ -566,25 +588,20 @@ public abstract class ContextualSearchContext {
         return mNativePointer;
     }
 
-    // ============================================================================================
-    // Native methods.
-    // ============================================================================================
-    @VisibleForTesting
-    protected native long nativeInit();
-    @VisibleForTesting
-    protected native void nativeDestroy(long nativeContextualSearchContext);
-    @VisibleForTesting
-    protected native void nativeSetResolveProperties(long nativeContextualSearchContext,
-            String homeCountry, boolean maySendBasePageUrl, long previousEventId,
-            int previousEventResults);
-    @VisibleForTesting
-    protected native void nativeAdjustSelection(
-            long nativeContextualSearchContext, int startAdjust, int endAdjust);
-    @VisibleForTesting
-    protected native void nativeSetContent(long nativeContextualSearchContext, String content,
-            int selectionStart, int selectionEnd);
-    @VisibleForTesting
-    protected native String nativeDetectLanguage(long nativeContextualSearchContext);
-    @VisibleForTesting
-    protected native void nativeRestrictResolve(long nativeContextualSearchContext);
+    @NativeMethods
+    interface Natives {
+        long init(ContextualSearchContext caller);
+        void destroy(long nativeContextualSearchContext, ContextualSearchContext caller);
+        void setResolveProperties(long nativeContextualSearchContext,
+                ContextualSearchContext caller, String homeCountry, boolean maySendBasePageUrl,
+                long previousEventId, int previousEventResults);
+        void adjustSelection(long nativeContextualSearchContext, ContextualSearchContext caller,
+                int startAdjust, int endAdjust);
+        void setContent(long nativeContextualSearchContext, ContextualSearchContext caller,
+                String content, int selectionStart, int selectionEnd);
+        String detectLanguage(long nativeContextualSearchContext, ContextualSearchContext caller);
+        void setTranslationLanguages(long nativeContextualSearchContext,
+                ContextualSearchContext caller, String detectedLanguage, String targetLanguage);
+        void setExactResolve(long nativeContextualSearchContext, ContextualSearchContext caller);
+    }
 }

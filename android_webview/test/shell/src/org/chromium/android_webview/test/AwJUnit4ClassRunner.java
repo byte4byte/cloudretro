@@ -4,13 +4,13 @@
 
 package org.chromium.android_webview.test;
 
-import android.support.annotation.CallSuper;
+import androidx.annotation.CallSuper;
 
 import org.junit.runner.notification.RunNotifier;
 import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.InitializationError;
 
-import org.chromium.android_webview.AwSwitches;
+import org.chromium.android_webview.common.AwSwitches;
 import org.chromium.android_webview.test.OnlyRunIn.ProcessMode;
 import org.chromium.base.CommandLine;
 import org.chromium.base.test.BaseJUnit4ClassRunner;

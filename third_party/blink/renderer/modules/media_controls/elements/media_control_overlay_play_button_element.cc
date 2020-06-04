@@ -6,10 +6,10 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_size.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
-#include "third_party/blink/renderer/core/html/media/html_media_source.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
@@ -48,9 +48,8 @@ MediaControlOverlayPlayButtonElement::MediaControlOverlayPlayButtonElement(
 void MediaControlOverlayPlayButtonElement::UpdateDisplayType() {
   SetIsWanted(MediaElement().ShouldShowControls());
 
-  WebLocalizedString::Name state =
-      MediaElement().paused() ? WebLocalizedString::kAXMediaPlayButton
-                              : WebLocalizedString::kAXMediaPauseButton;
+  int state = MediaElement().paused() ? IDS_AX_MEDIA_PLAY_BUTTON
+                                      : IDS_AX_MEDIA_PAUSE_BUTTON;
   setAttribute(html_names::kAriaLabelAttr,
                WTF::AtomicString(GetLocale().QueryString(state)));
 
@@ -73,10 +72,8 @@ void MediaControlOverlayPlayButtonElement::MaybePlayPause() {
   // Allow play attempts for plain src= media to force a reload in the error
   // state. This allows potential recovery for transient network and decoder
   // resource issues.
-  const String& url = MediaElement().currentSrc().GetString();
-  if (MediaElement().error() && !HTMLMediaSource::Lookup(url)) {
+  if (MediaElement().error() && !MediaElement().HasMediaSource())
     MediaElement().load();
-  }
 
   MediaElement().TogglePlayState();
 
@@ -117,7 +114,7 @@ void MediaControlOverlayPlayButtonElement::SetIsDisplayed(bool displayed) {
   displayed_ = displayed;
 }
 
-void MediaControlOverlayPlayButtonElement::Trace(blink::Visitor* visitor) {
+void MediaControlOverlayPlayButtonElement::Trace(Visitor* visitor) {
   MediaControlInputElement::Trace(visitor);
   visitor->Trace(internal_button_);
 }

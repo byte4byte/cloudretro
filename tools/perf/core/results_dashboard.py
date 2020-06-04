@@ -22,11 +22,17 @@ import traceback
 import urllib
 import urllib2
 import zlib
+import logging
 
-import httplib2
+# TODO(crbug.com/996778): Figure out how to get httplib2 hermetically.
+import httplib2  # pylint: disable=import-error
 
 from core import path_util
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='(%(levelname)s) %(asctime)s pid=%(process)d'
+    '  %(module)s.%(funcName)s:%(lineno)d  %(message)s')
 
 # The paths in the results dashboard URLs for sending results.
 SEND_RESULTS_PATH = '/add_point'
@@ -45,10 +51,8 @@ class SendResultsFatalException(SendResultException):
   pass
 
 
-def LuciAuthTokenGeneratorCallback(service_account_file):
+def LuciAuthTokenGeneratorCallback():
   args = ['luci-auth', 'token']
-  if service_account_file:
-    args += ['-service-account-json', service_account_file]
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
   if p.wait() == 0:
     return p.stdout.read()
@@ -59,7 +63,6 @@ def LuciAuthTokenGeneratorCallback(service_account_file):
 
 
 def SendResults(data, data_label, url, send_as_histograms=False,
-                service_account_file=None,
                 token_generator_callback=LuciAuthTokenGeneratorCallback,
                 num_retries=4):
   """Sends results to the Chrome Performance Dashboard.
@@ -72,64 +75,47 @@ def SendResults(data, data_label, url, send_as_histograms=False,
     logging purpose.
     url: Performance Dashboard URL (including schema).
     send_as_histograms: True if result is to be sent to /add_histograms.
-    service_account_file: string; path to service account file which is used
-      for authenticating when upload data to perf dashboard. This can be None
-      for the case of LUCI builder, which means the task service account of the
-      builder will be used.
     token_generator_callback: a callback for generating the authentication token
       to upload to perf dashboard.
-      This callback takes |service_account_file| and returns the token
-      string.
       If |token_generator_callback| is not specified, it's default to
       LuciAuthTokenGeneratorCallback.
     num_retries: Number of times to retry uploading to the perf dashboard upon
       recoverable error.
   """
   start = time.time()
-  errors = []
   all_data_uploaded = False
-
   data_type = ('histogram' if send_as_histograms else 'chartjson')
-
   dashboard_data_str = json.dumps(data)
-
   # When perf dashboard is overloaded, it takes sometimes to spin up new
   # instance. So sleep before retrying again. (
   # For more details, see crbug.com/867379.
-  wait_before_next_retry_in_seconds = 30
-
+  wait_before_next_retry_in_seconds = 15
   for i in xrange(1, num_retries + 1):
     try:
-      print 'Sending %s result of %s to dashboard (attempt %i out of %i).' % (
-          data_type, data_label, i, num_retries)
+      logging.info(
+          'Sending %s result of %s to dashboard (attempt %i out of %i).' %
+          (data_type, data_label, i, num_retries))
       if send_as_histograms:
-        _SendHistogramJson(url, dashboard_data_str,
-                           service_account_file, token_generator_callback)
+        _SendHistogramJson(url, dashboard_data_str, token_generator_callback)
       else:
         # TODO(eakuefner): Remove this logic once all bots use histograms.
         _SendResultsJson(url, dashboard_data_str)
       all_data_uploaded = True
       break
     except SendResultsRetryException as e:
-      error = 'Error while uploading %s data: %s' % (data_type, str(e))
-      errors.append(error)
+      logging.error('Error while uploading %s data: %s' % (data_type, str(e)))
       time.sleep(wait_before_next_retry_in_seconds)
       wait_before_next_retry_in_seconds *= 2
     except SendResultsFatalException as e:
-      error = 'Fatal error while uploading %s data: %s' % (data_type, str(e))
-      errors.append(error)
+      logging.error(
+          'Fatal error while uploading %s data: %s' % (data_type, str(e)))
       break
     except Exception:
-      error = 'Unexpected error while uploading %s data: %s' % (
-          data_type, traceback.format_exc())
-      errors.append(error)
+      logging.error('Unexpected error while uploading %s data: %s' %
+                    (data_type, traceback.format_exc()))
       break
-
-  for err in errors:
-    print err
-
-  print 'Time spent sending results to %s: %s' % (url, time.time() - start)
-
+  logging.info(
+      'Time spent sending results to %s: %s' % (url, time.time() - start))
   return all_data_uploaded
 
 
@@ -276,8 +262,8 @@ def MakeDashboardJsonV1(chart_json, revision_dict, test_name, bot, buildername,
     A dictionary in the format accepted by the perf dashboard.
   """
   if not chart_json:
-    print 'Error: No json output from telemetry.'
-    print '@@@STEP_FAILURE@@@'
+    logging.error('Error: No json output from telemetry.')
+    logging.error('@@@STEP_FAILURE@@@')
 
   point_id, versions = _RevisionNumberColumns(revision_dict, prefix='')
 
@@ -365,8 +351,8 @@ def _RevisionNumberColumns(data, prefix):
   Args:
     data: A dict of information from one line of the log file.
     master: The name of the buildbot master.
-    prefix: Prefix for revision type keys. 'r_' for non-telemetry json, '' for
-        telemetry json.
+    prefix: Prefix for revision type keys. 'r_' for non-telemetry JSON, '' for
+    telemetry JSON.
 
   Returns:
     A tuple with the point id (which must be an int), and a dict of
@@ -379,9 +365,9 @@ def _RevisionNumberColumns(data, prefix):
   # that it's a git commit hash and use timestamp as the x-value.
   try:
     revision = int(data['rev'])
-    if revision and revision > 300000 and revision < 1000000:
-      # Revision is the commit pos.
-      # TODO(sullivan,qyearsley): use got_revision_cp when available.
+    if revision and 300000 < revision < 1000000:
+      # Assume that revision is the commit position number for the master
+      # branch in the chromium/src repo.
       revision_supplemental_columns[prefix + 'commit_pos'] = revision
   except ValueError:
     # The dashboard requires ordered integer revision numbers. If the revision
@@ -455,7 +441,7 @@ def _SendResultsJson(url, results_json):
   data = urllib.urlencode({'data': results_json})
   req = urllib2.Request(url + SEND_RESULTS_PATH, data)
   try:
-    urllib2.urlopen(req)
+    urllib2.urlopen(req, timeout=60 * 5)
   except (urllib2.HTTPError, urllib2.URLError, httplib.HTTPException):
     error = traceback.format_exc()
 
@@ -466,8 +452,7 @@ def _SendResultsJson(url, results_json):
     raise SendResultsRetryException(error)
 
 
-def _SendHistogramJson(url, histogramset_json,
-                       service_account_file, token_generator_callback):
+def _SendHistogramJson(url, histogramset_json, token_generator_callback):
   """POST a HistogramSet JSON to the Performance Dashboard.
 
   Args:
@@ -475,14 +460,14 @@ def _SendHistogramJson(url, histogramset_json,
         "https://chromeperf.appspot.com".
     histogramset_json: JSON string that contains a serialized HistogramSet.
 
-    For |service_account_file| and |token_generator_callback|, see SendResults's
+    For |token_generator_callback|, see SendResults's
     documentation.
 
   Returns:
     None if successful, or an error string if there were errors.
   """
   try:
-    oauth_token = token_generator_callback(service_account_file)
+    oauth_token = token_generator_callback()
 
     data = zlib.compress(histogramset_json)
     headers = {

@@ -18,9 +18,7 @@ import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content_public.common.ContentSwitches;
 import org.chromium.net.test.util.TestWebServer;
 
@@ -72,7 +70,7 @@ public class MediaAccessPermissionRequestTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestWebServer.shutdown();
         mTestWebServer = null;
     }
@@ -80,9 +78,7 @@ public class MediaAccessPermissionRequestTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @DisableIf.Build(sdk_is_greater_than = 22, message = "crbug.com/623921")
     @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
-    @RetryOnFailure
     public void testGrantAccess() throws Throwable {
         final OnPermissionRequestHelper helper = new OnPermissionRequestHelper();
         TestAwContentsClient contentsClient =
@@ -106,11 +102,8 @@ public class MediaAccessPermissionRequestTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @DisableIf
-            .Build(sdk_is_greater_than = 22, message = "crbug.com/614347")
-            @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
-            @RetryOnFailure
-            public void testDenyAccess() throws Throwable {
+    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    public void testDenyAccess() throws Throwable {
         final OnPermissionRequestHelper helper = new OnPermissionRequestHelper();
         TestAwContentsClient contentsClient =
                 new TestAwContentsClient() {
@@ -130,8 +123,7 @@ public class MediaAccessPermissionRequestTest {
         pollTitleAs("deny", awContents);
     }
 
-    private void pollTitleAs(final String title, final AwContents awContents)
-            throws Exception {
+    private void pollTitleAs(final String title, final AwContents awContents) {
         AwActivityTestRule.pollInstrumentationThread(
                 () -> title.equals(mActivityTestRule.getTitleOnUiThread(awContents)));
     }
@@ -139,11 +131,8 @@ public class MediaAccessPermissionRequestTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @DisableIf
-            .Build(sdk_is_greater_than = 22, message = "crbug.com/614347")
-            @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
-            @RetryOnFailure
-            public void testDenyAccessByDefault() throws Throwable {
+    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    public void testDenyAccessByDefault() throws Throwable {
         final OnPermissionRequestHelper helper = new OnPermissionRequestHelper();
         TestAwContentsClient contentsClient =
                 new TestAwContentsClient() {
@@ -175,11 +164,8 @@ public class MediaAccessPermissionRequestTest {
     @Test
     @Feature({"AndroidWebView"})
     @SmallTest
-    @DisableIf
-            .Build(sdk_is_greater_than = 22, message = "crbug.com/614347")
-            @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
-            @RetryOnFailure
-            public void testCancelPermission() throws Throwable {
+    @CommandLineFlags.Add(ContentSwitches.USE_FAKE_DEVICE_FOR_MEDIA_STREAM)
+    public void testCancelPermission() throws Throwable {
         final OnPermissionRequestHelper helper = new OnPermissionRequestHelper();
         TestAwContentsClient contentsClient =
                 new TestAwContentsClient() {

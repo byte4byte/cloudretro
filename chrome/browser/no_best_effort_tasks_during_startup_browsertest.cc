@@ -5,6 +5,7 @@
 #include "base/barrier_closure.h"
 #include "base/run_loop.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/test/bind_test_util.h"
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -31,7 +32,7 @@ class NoBestEffortTasksDuringStartupTest : public InProcessBrowserTest {
     auto barrier = base::BarrierClosure(2, run_loop.QuitClosure());
 
     // Thread pool task.
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::TaskPriority::BEST_EFFORT},
         base::BindLambdaForTesting([&]() {
           EXPECT_TRUE(AfterStartupTaskUtils::IsBrowserStartupComplete());
@@ -39,7 +40,7 @@ class NoBestEffortTasksDuringStartupTest : public InProcessBrowserTest {
         }));
 
     // UI thread task.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE,
         {content::BrowserThread::UI, base::TaskPriority::BEST_EFFORT},
         base::BindLambdaForTesting([&]() {

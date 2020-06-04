@@ -20,18 +20,6 @@ class PrefRegistrySyncable;
 
 class Profile;
 
-// Account consistency feature. Only used on platforms where Mirror is not
-// always enabled (ENABLE_MIRROR is false).
-extern const base::Feature kAccountConsistencyFeature;
-
-// The account consistency method feature parameter name.
-extern const char kAccountConsistencyFeatureMethodParameter[];
-
-// Account consistency method feature values.
-extern const char kAccountConsistencyFeatureMethodMirror[];
-extern const char kAccountConsistencyFeatureMethodDiceMigration[];
-extern const char kAccountConsistencyFeatureMethodDice[];
-
 // Manages the account consistency mode for each profile.
 class AccountConsistencyModeManager : public KeyedService {
  public:
@@ -48,8 +36,10 @@ class AccountConsistencyModeManager : public KeyedService {
   static signin::AccountConsistencyMethod GetMethodForProfile(Profile* profile);
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  // Schedules migration to happen at next startup.
-  void SetReadyForDiceMigration(bool is_ready);
+  // Sets migration to Dice as completed.
+  void SetDiceMigrationCompleted();
+  // Returns true if migration to Dice is completed.
+  static bool IsDiceMigrationCompleted(Profile* profile);
 #endif
 
   // If true, then account management is done through Gaia webpages.
@@ -80,16 +70,9 @@ class AccountConsistencyModeManager : public KeyedService {
   FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
                            SigninAllowedChangesDiceState);
   FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
-                           DisallowSigninSwitch);
-
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  // Schedules migration to happen at next startup. Exposed as a static function
-  // for testing.
-  static void SetDiceMigrationOnStartup(PrefService* prefs, bool migrate);
-
-  // Returns true if migration can happen on the next startup.
-  static bool IsReadyForDiceMigration(Profile* profile);
-#endif
+                           AllowBrowserSigninSwitch);
+  FRIEND_TEST_ALL_PREFIXES(AccountConsistencyModeManagerTest,
+                           ForceDiceMigration);
 
   // Returns the account consistency method for the current profile.
   signin::AccountConsistencyMethod GetAccountConsistencyMethod();

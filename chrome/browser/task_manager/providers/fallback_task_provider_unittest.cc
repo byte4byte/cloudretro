@@ -11,7 +11,7 @@
 #include "chrome/browser/task_manager/providers/task.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
 #include "content/public/common/process_type.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +21,6 @@ class FakeTask : public Task {
  public:
   FakeTask(base::ProcessId process_id, Type type, const std::string& title)
       : Task(base::ASCIIToUTF16(title),
-             "FakeTask",
              nullptr,
              base::kNullProcessHandle,
              process_id),
@@ -150,7 +149,7 @@ class FallbackTaskProviderTest : public testing::Test,
   std::vector<Task*> seen_tasks() { return seen_tasks_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<FallbackTaskProvider> task_provider_;
   std::vector<Task*> seen_tasks_;
 

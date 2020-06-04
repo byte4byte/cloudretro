@@ -9,8 +9,7 @@ import android.content.Context;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.DeviceConditions;
-import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
-import org.chromium.components.background_task_scheduler.BackgroundTask.TaskFinishedCallback;
+import org.chromium.components.background_task_scheduler.NativeBackgroundTask;
 import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskParameters;
 import org.chromium.net.ConnectionType;
@@ -28,8 +27,7 @@ public class BackgroundSyncBackgroundTask extends NativeBackgroundTask {
         // Check that we're called with network connectivity.
         @ConnectionType
         int current_network_type = DeviceConditions.getCurrentNetConnectionType(context);
-        if (current_network_type == ConnectionType.CONNECTION_NONE
-                || current_network_type == ConnectionType.CONNECTION_UNKNOWN) {
+        if (current_network_type == ConnectionType.CONNECTION_NONE) {
             return StartBeforeNativeResult.RESCHEDULE;
         }
 

@@ -29,9 +29,11 @@ public interface AutocompleteDelegate extends EditUrlSuggestionProcessor.Locatio
     void onSuggestionsHidden();
 
     /**
-     * Requests the keyboard be hidden.
+     * Requests the keyboard visibility update.
+     *
+     * @param shouldShow When true, keyboard should be made visible.
      */
-    void hideKeyboard();
+    void setKeyboardVisibility(boolean shouldShow);
 
     /**
      * Requests that the given URL be loaded in the current tab.
@@ -41,6 +43,19 @@ public interface AutocompleteDelegate extends EditUrlSuggestionProcessor.Locatio
      * @param inputStart The time the input started for the load request.
      */
     void loadUrl(String url, @PageTransition int transition, long inputStart);
+
+    /**
+     * Requests that the given URL be loaded in the current tab.
+     *
+     * @param url The URL to be loaded.
+     * @param transition The transition type associated with the url load.
+     * @param inputStart The time the input started for the load request.
+     * @param postDataType   postData type.
+     * @param postData       Post-data to include in the tab URL's request body, ex. bitmap when
+     *         image search.
+     */
+    void loadUrlWithPostData(String url, @PageTransition int transition, long inputStart,
+            String postDataType, byte[] postData);
 
     /**
      * @return Whether the omnibox was focused via the NTP fakebox.

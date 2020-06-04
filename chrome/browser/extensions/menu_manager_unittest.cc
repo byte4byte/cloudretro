@@ -25,9 +25,9 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/context_menu_params.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
 #include "extensions/browser/extension_registry.h"
@@ -95,7 +95,7 @@ class MenuManagerTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
 
   MenuManager manager_;
@@ -575,7 +575,7 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
           &profile, base::BindRepeating(&MockEventRouterFactoryFunction)));
 
   content::ContextMenuParams params;
-  params.media_type = blink::WebContextMenuData::kMediaTypeImage;
+  params.media_type = blink::ContextMenuDataMediaType::kImage;
   params.src_url = GURL("http://foo.bar/image.png");
   params.page_url = GURL("http://foo.bar");
   params.selection_text = base::ASCIIToUTF16("Hello World");

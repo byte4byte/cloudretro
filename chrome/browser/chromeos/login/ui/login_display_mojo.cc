@@ -11,6 +11,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/login/challenge_response_auth_keys_loader.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/quick_unlock/pin_backend.h"
 #include "chrome/browser/chromeos/login/screens/chrome_user_selection_screen.h"
@@ -18,7 +20,9 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host_mojo.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/ui/ash/login_screen_client.h"
+#include "chrome/browser/ui/webui/chromeos/login/enable_adb_sideloading_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/enable_debugging_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/kiosk_autolaunch_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/reset_screen_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -32,8 +36,7 @@
 
 namespace chromeos {
 
-LoginDisplayMojo::LoginDisplayMojo(LoginDisplayHostMojo* host)
-    : host_(host), weak_factory_(this) {
+LoginDisplayMojo::LoginDisplayMojo(LoginDisplayHostMojo* host) : host_(host) {
   user_manager::UserManager::Get()->AddObserver(this);
 }
 
@@ -45,6 +48,14 @@ void LoginDisplayMojo::UpdatePinKeyboardState(const AccountId& account_id) {
   quick_unlock::PinBackend::GetInstance()->CanAuthenticate(
       account_id, base::BindOnce(&LoginDisplayMojo::OnPinCanAuthenticate,
                                  weak_factory_.GetWeakPtr(), account_id));
+}
+
+void LoginDisplayMojo::UpdateChallengeResponseAuthAvailability(
+    const AccountId& account_id) {
+  const bool enable_challenge_response =
+      ChallengeResponseAuthKeysLoader::CanAuthenticateUser(account_id);
+  ash::LoginScreen::Get()->GetModel()->SetChallengeResponseAuthEnabledForUser(
+      account_id, enable_challenge_response);
 }
 
 void LoginDisplayMojo::ClearAndEnablePassword() {}
@@ -70,10 +81,12 @@ void LoginDisplayMojo::Init(const user_manager::UserList& filtered_users,
   ash::LoginScreen::Get()->SetAllowLoginAsGuest(show_guest);
   user_selection_screen->SetUsersLoaded(true /*loaded*/);
 
-  // Enable pin for any users who can use it.
   if (user_manager::UserManager::IsInitialized()) {
+    // Enable pin and challenge-response authentication for any users who can
+    // use them.
     for (const user_manager::User* user : filtered_users) {
       UpdatePinKeyboardState(user->GetAccountId());
+      UpdateChallengeResponseAuthAvailability(user->GetAccountId());
     }
   }
 
@@ -104,10 +117,17 @@ void LoginDisplayMojo::Init(const user_manager::UserList& filtered_users,
     // features (TPM firmware update) depend on system services running, which
     // is in turn blocked on the 'login-prompt-visible' signal.
     PrefService* local_state = g_browser_process->local_state();
-    if (local_state->GetBoolean(prefs::kFactoryResetRequested))
+    if (local_state->GetBoolean(prefs::kFactoryResetRequested)) {
       host_->StartWizard(ResetView::kScreenId);
-    else if (local_state->GetBoolean(prefs::kDebuggingFeaturesRequested))
+    } else if (local_state->GetBoolean(prefs::kDebuggingFeaturesRequested)) {
       host_->StartWizard(EnableDebuggingScreenView::kScreenId);
+    } else if (local_state->GetBoolean(prefs::kEnableAdbSideloadingRequested)) {
+      host_->StartWizard(EnableAdbSideloadingScreenView::kScreenId);
+    } else if (!KioskAppManager::Get()->GetAutoLaunchApp().empty() &&
+               KioskAppManager::Get()->IsAutoLaunchRequested()) {
+      VLOG(0) << "Showing auto-launch warning";
+      host_->StartWizard(KioskAutolaunchScreenView::kScreenId);
+    }
   }
 }
 
@@ -149,16 +169,10 @@ void LoginDisplayMojo::ShowError(int error_msg_id,
       error_msg_id != IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_KEY_LOST &&
       error_msg_id != IDS_LOGIN_ERROR_OWNER_REQUIRED &&
-      error_msg_id != IDS_LOGIN_ERROR_GOOGLE_ACCOUNT_NOT_ALLOWED) {
-    // Display a warning if Caps Lock is on.
+      error_msg_id != IDS_LOGIN_ERROR_GOOGLE_ACCOUNT_NOT_ALLOWED &&
+      error_msg_id != IDS_LOGIN_ERROR_TPM_UPDATE_REQUIRED) {
     input_method::InputMethodManager* ime_manager =
         input_method::InputMethodManager::Get();
-    if (ime_manager->GetImeKeyboard()->CapsLockIsEnabled()) {
-      // TODO(ivankr): use a format string instead of concatenation.
-      error_text +=
-          "\n" + l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
-    }
-
     // Display a hint to switch keyboards if there are other active input
     // methods.
     if (ime_manager->GetActiveIMEState()->GetNumActiveInputMethods() > 1) {

@@ -7,46 +7,58 @@
 
 #include <stdint.h>
 
+#include "chrome/grit/generated_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace chrome_colors {
 
 struct ColorInfo {
-  constexpr ColorInfo(int id, SkColor color, const char* label)
-      : ColorInfo(id, color, label, nullptr) {}
+  constexpr ColorInfo(int id, SkColor color, int label_id)
+      : ColorInfo(id, color, label_id, nullptr) {}
   constexpr ColorInfo(int id,
                       SkColor color,
-                      const char* label,
+                      int label_id,
                       const char* icon_data)
-      : id(id), color(color), label(label), icon_data(icon_data) {}
+      : id(id), color(color), label_id(label_id), icon_data(icon_data) {}
   int id;
   SkColor color;
-  const char* label;
+  int label_id;
   const char* icon_data;
 };
 
-// TODO(gayane): Add colors selected by UX.
-// List of preselected colors to show in Chrome Colors menu.
+// List of preselected colors to show in Chrome Colors menu. This array should
+// always be in sync with ChromeColorsInfo in enums.xml.
 constexpr ColorInfo kSelectedColorsInfo[] = {
-    ColorInfo(0, SkColorSetRGB(192, 230, 181), "Pistachio"),
-    ColorInfo(1, SkColorSetRGB(158, 228, 233), "Seafoam"),
-    ColorInfo(2, SkColorSetRGB(219, 237, 254), "Mist"),
-    ColorInfo(3, SkColorSetRGB(255, 174, 189), "Flamingo"),
-    ColorInfo(4, SkColorSetRGB(221, 179, 197), "Wine"),
-    ColorInfo(5, SkColorSetRGB(210, 175, 248), "Lavender"),
-    ColorInfo(6, SkColorSetRGB(217, 213, 213), "Elephant"),
-    ColorInfo(7, SkColorSetRGB(246, 97, 12), "Sunset"),
-    ColorInfo(8, SkColorSetRGB(247, 194, 12), "Banana"),
-    ColorInfo(9, SkColorSetRGB(109, 180, 87), "Kiwi"),
-    ColorInfo(10, SkColorSetRGB(25, 157, 169), "Robins Egg"),
-    ColorInfo(11, SkColorSetRGB(93, 147, 228), "Blue"),
-    ColorInfo(12, SkColorSetRGB(23, 94, 26), "Pine"),
-    ColorInfo(13, SkColorSetRGB(10, 110, 119), "Oceanic"),
-    ColorInfo(14, SkColorSetRGB(126, 24, 39), "Bordeaux"),
-    ColorInfo(15, SkColorSetRGB(91, 55, 137), "Eggplant"),
-    ColorInfo(16, SkColorSetRGB(45, 65, 109), "Navy"),
-    ColorInfo(17, SkColorSetRGB(33, 33, 33), "Midnight"),
-    ColorInfo(18, SkColorSetRGB(189, 22, 82), "Raspberry")};
+    // 0  - reserved for any color not in this set.
+    ColorInfo(1, SkColorSetRGB(239, 235, 233), IDS_NTP_COLORS_WARM_GREY),
+    ColorInfo(2, SkColorSetRGB(120, 127, 145), IDS_NTP_COLORS_COOL_GREY),
+    ColorInfo(3, SkColorSetRGB(55, 71, 79), IDS_NTP_COLORS_MIDNIGHT_BLUE),
+    ColorInfo(4, SkColorSetRGB(0, 0, 0), IDS_NTP_COLORS_BLACK),
+    ColorInfo(5, SkColorSetRGB(252, 219, 201), IDS_NTP_COLORS_BEIGE_AND_WHITE),
+    ColorInfo(6, SkColorSetRGB(255, 249, 228), IDS_NTP_COLORS_YELLOW_AND_WHITE),
+    ColorInfo(7, SkColorSetRGB(203, 233, 191), IDS_NTP_COLORS_GREEN_AND_WHITE),
+    ColorInfo(8,
+              SkColorSetRGB(221, 244, 249),
+              IDS_NTP_COLORS_LIGHT_TEAL_AND_WHITE),
+    ColorInfo(9,
+              SkColorSetRGB(233, 212, 255),
+              IDS_NTP_COLORS_LIGHT_PURPLE_AND_WHITE),
+    ColorInfo(10, SkColorSetRGB(249, 226, 237), IDS_NTP_COLORS_PINK_AND_WHITE),
+    ColorInfo(11, SkColorSetRGB(227, 171, 154), IDS_NTP_COLORS_BEIGE),
+    ColorInfo(12, SkColorSetRGB(255, 171, 64), IDS_NTP_COLORS_ORANGE),
+    ColorInfo(13, SkColorSetRGB(67, 160, 71), IDS_NTP_COLORS_LIGHT_GREEN),
+    ColorInfo(14, SkColorSetRGB(25, 157, 169), IDS_NTP_COLORS_LIGHT_TEAL),
+    ColorInfo(15, SkColorSetRGB(93, 147, 228), IDS_NTP_COLORS_LIGHT_BLUE),
+    ColorInfo(16, SkColorSetRGB(255, 174, 189), IDS_NTP_COLORS_PINK),
+    ColorInfo(17, SkColorSetRGB(189, 22, 92), IDS_NTP_COLORS_DARK_PINK_AND_RED),
+    ColorInfo(18,
+              SkColorSetRGB(183, 28, 28),
+              IDS_NTP_COLORS_DARK_RED_AND_ORANGE),
+    ColorInfo(19, SkColorSetRGB(46, 125, 50), IDS_NTP_COLORS_DARK_GREEN),
+    ColorInfo(20, SkColorSetRGB(0, 110, 120), IDS_NTP_COLORS_DARK_TEAL),
+    ColorInfo(21, SkColorSetRGB(21, 101, 192), IDS_NTP_COLORS_DARK_BLUE),
+    ColorInfo(22, SkColorSetRGB(91, 54, 137), IDS_NTP_COLORS_DARK_PURPLE),
+};
 
 }  // namespace chrome_colors
 

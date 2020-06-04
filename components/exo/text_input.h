@@ -6,7 +6,9 @@
 #define COMPONENTS_EXO_TEXT_INPUT_H_
 
 #include "ash/public/cpp/keyboard/keyboard_controller_observer.h"
+#include "base/macros.h"
 #include "base/optional.h"
+#include "base/strings/string_piece.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/base/ime/text_input_mode.h"
@@ -105,7 +107,7 @@ class TextInput : public ui::TextInputClient,
 
   // ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
-  void ConfirmCompositionText() override;
+  void ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(const ui::KeyEvent& event) override;

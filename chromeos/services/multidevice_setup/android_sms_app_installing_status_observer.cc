@@ -5,7 +5,6 @@
 #include "chromeos/services/multidevice_setup/android_sms_app_installing_status_observer.h"
 
 #include "base/memory/ptr_util.h"
-#include "base/no_destructor.h"
 #include "chromeos/components/multidevice/logging/logging.h"
 #include "chromeos/services/multidevice_setup/host_status_provider.h"
 #include "chromeos/services/multidevice_setup/public/cpp/android_sms_app_helper_delegate.h"
@@ -20,13 +19,18 @@ AndroidSmsAppInstallingStatusObserver::Factory*
     AndroidSmsAppInstallingStatusObserver::Factory::test_factory_ = nullptr;
 
 // static
-AndroidSmsAppInstallingStatusObserver::Factory*
-AndroidSmsAppInstallingStatusObserver::Factory::Get() {
-  if (test_factory_)
-    return test_factory_;
-
-  static base::NoDestructor<Factory> factory;
-  return factory.get();
+std::unique_ptr<AndroidSmsAppInstallingStatusObserver>
+AndroidSmsAppInstallingStatusObserver::Factory::Create(
+    HostStatusProvider* host_status_provider,
+    FeatureStateManager* feature_state_manager,
+    AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate) {
+  if (test_factory_) {
+    test_factory_->CreateInstance(host_status_provider, feature_state_manager,
+                                  std::move(android_sms_app_helper_delegate));
+  }
+  return base::WrapUnique(new AndroidSmsAppInstallingStatusObserver(
+      host_status_provider, feature_state_manager,
+      std::move(android_sms_app_helper_delegate)));
 }
 
 // static
@@ -36,16 +40,6 @@ void AndroidSmsAppInstallingStatusObserver::Factory::SetFactoryForTesting(
 }
 
 AndroidSmsAppInstallingStatusObserver::Factory::~Factory() = default;
-
-std::unique_ptr<AndroidSmsAppInstallingStatusObserver>
-AndroidSmsAppInstallingStatusObserver::Factory::BuildInstance(
-    HostStatusProvider* host_status_provider,
-    FeatureStateManager* feature_state_manager,
-    AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate) {
-  return base::WrapUnique(new AndroidSmsAppInstallingStatusObserver(
-      host_status_provider, feature_state_manager,
-      std::move(android_sms_app_helper_delegate)));
-}
 
 AndroidSmsAppInstallingStatusObserver::
     ~AndroidSmsAppInstallingStatusObserver() {
@@ -62,10 +56,11 @@ AndroidSmsAppInstallingStatusObserver::AndroidSmsAppInstallingStatusObserver(
       android_sms_app_helper_delegate_(android_sms_app_helper_delegate) {
   host_status_provider_->AddObserver(this);
   feature_state_manager_->AddObserver(this);
-  InstallPwaIfNeeded();
+  UpdatePwaInstallationState();
 }
 
-bool AndroidSmsAppInstallingStatusObserver::IsPwaNeeded() {
+bool AndroidSmsAppInstallingStatusObserver::
+    DoesFeatureStateAllowInstallation() {
   mojom::FeatureState feature_state =
       feature_state_manager_->GetFeatureStates()[mojom::Feature::kMessages];
   if (feature_state != mojom::FeatureState::kEnabledByUser &&
@@ -84,11 +79,23 @@ bool AndroidSmsAppInstallingStatusObserver::IsPwaNeeded() {
   return true;
 }
 
-void AndroidSmsAppInstallingStatusObserver::InstallPwaIfNeeded() {
-  // If PWA is not needed, clear default to persist cookie that was set
-  // during the last installation.
-  if (!IsPwaNeeded()) {
+void AndroidSmsAppInstallingStatusObserver::UpdatePwaInstallationState() {
+  if (!DoesFeatureStateAllowInstallation()) {
+    PA_LOG(INFO)
+        << "Feature state does not allow installation, tearing down App.";
+    // The feature is disabled, ensure that the integration cookie is removed.
     android_sms_app_helper_delegate_->TearDownAndroidSmsApp();
+    return;
+  }
+
+  if (android_sms_app_helper_delegate_->HasAppBeenManuallyUninstalledByUser()) {
+    PA_LOG(INFO) << "App was manually uninstalled by user, tearing down App.";
+    feature_state_manager_->SetFeatureEnabledState(mojom::Feature::kMessages,
+                                                   false);
+
+    // The feature is now disabled, clear the cookie and pref.
+    android_sms_app_helper_delegate_->TearDownAndroidSmsApp();
+
     return;
   }
 
@@ -98,12 +105,12 @@ void AndroidSmsAppInstallingStatusObserver::InstallPwaIfNeeded() {
 
 void AndroidSmsAppInstallingStatusObserver::OnHostStatusChange(
     const HostStatusProvider::HostStatusWithDevice& host_status_with_device) {
-  InstallPwaIfNeeded();
+  UpdatePwaInstallationState();
 }
 
 void AndroidSmsAppInstallingStatusObserver::OnFeatureStatesChange(
     const FeatureStateManager::FeatureStatesMap& feature_states_map) {
-  InstallPwaIfNeeded();
+  UpdatePwaInstallationState();
 }
 
 }  // namespace multidevice_setup

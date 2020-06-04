@@ -4,16 +4,17 @@
 
 package org.chromium.native_test;
 
-import android.app.Activity;
 import android.os.Bundle;
+
+import androidx.fragment.app.FragmentActivity;
 
 import java.io.File;
 
 /**
  * An {@link android.app.Activity} for running native browser tests.
  */
-public abstract class NativeBrowserTestActivity extends Activity {
-    private static final String TAG = "cr_NativeTest";
+public abstract class NativeBrowserTestActivity extends FragmentActivity {
+    private static final String TAG = "NativeTest";
 
     private NativeTest mTest = new NativeTest();
     private boolean mStarted;

@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.test.util.browser.sync;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.content.Context;
 import android.util.Pair;
 
@@ -32,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 public final class SyncTestUtil {
     private static final String TAG = "SyncTestUtil";
 
-    public static final long TIMEOUT_MS = scaleTimeout(20000);
+    public static final long TIMEOUT_MS = 20000L;
     public static final int INTERVAL_MS = 250;
 
     private SyncTestUtil() {}
@@ -86,6 +84,20 @@ public final class SyncTestUtil {
     }
 
     /**
+     * Waits for sync machinery to become active.
+     */
+    public static void waitForSyncTransportActive() {
+        CriteriaHelper.pollUiThread(
+                new Criteria("Timed out waiting for sync transport state to become active.") {
+                    @Override
+                    public boolean isSatisfied() {
+                        return ProfileSyncService.get().isTransportStateActive();
+                    }
+                },
+                TIMEOUT_MS, INTERVAL_MS);
+    }
+
+    /**
      * Waits for sync's engine to be initialized.
      */
     public static void waitForEngineInitialized() {
@@ -96,6 +108,16 @@ public final class SyncTestUtil {
                         return ProfileSyncService.get().isEngineInitialized();
                     }
                 },
+                TIMEOUT_MS, INTERVAL_MS);
+    }
+
+    /**
+     * Waits for sync being in the desired TrustedVaultKeyRequired state.
+     */
+    public static void waitForTrustedVaultKeyRequired(boolean desiredValue) {
+        CriteriaHelper.pollUiThread(
+                Criteria.equals(
+                        desiredValue, () -> ProfileSyncService.get().isTrustedVaultKeyRequired()),
                 TIMEOUT_MS, INTERVAL_MS);
     }
 

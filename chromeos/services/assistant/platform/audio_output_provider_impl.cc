@@ -7,15 +7,13 @@
 #include <algorithm>
 #include <utility>
 
-#include "ash/public/interfaces/constants.mojom.h"
 #include "base/bind.h"
 #include "chromeos/services/assistant/media_session/assistant_media_session.h"
 #include "chromeos/services/assistant/platform/audio_stream_handler.h"
+#include "chromeos/services/assistant/public/cpp/assistant_client.h"
 #include "chromeos/services/assistant/public/mojom/assistant_audio_decoder.mojom.h"
-#include "chromeos/services/assistant/public/mojom/constants.mojom.h"
 #include "libassistant/shared/public/platform_audio_buffer.h"
 #include "media/audio/audio_device_description.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace chromeos {
 namespace assistant {
@@ -32,7 +30,7 @@ bool IsEncodedFormat(const assistant_client::OutputStreamFormat& format) {
 class AudioOutputImpl : public assistant_client::AudioOutput {
  public:
   AudioOutputImpl(
-      service_manager::Connector* connector,
+      mojo::PendingRemote<audio::mojom::StreamFactory> stream_factory,
       scoped_refptr<base::SequencedTaskRunner> task_runner,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner,
       mojom::AssistantAudioDecoderFactory* audio_decoder_factory,
@@ -40,7 +38,7 @@ class AudioOutputImpl : public assistant_client::AudioOutput {
       assistant_client::OutputStreamType type,
       assistant_client::OutputStreamFormat format,
       const std::string& device_id)
-      : connector_(connector),
+      : stream_factory_(std::move(stream_factory)),
         main_task_runner_(task_runner),
         background_thread_task_runner_(background_task_runner),
         audio_decoder_factory_(audio_decoder_factory),
@@ -90,12 +88,14 @@ class AudioOutputImpl : public assistant_client::AudioOutput {
               audio_decoder_factory_, delegate,
               base::BindOnce(&AudioDeviceOwner::StartOnMainThread,
                              base::Unretained(device_owner_.get()),
-                             audio_stream_handler_.get(), connector_)));
+                             media_session_, audio_stream_handler_.get(),
+                             std::move(stream_factory_))));
     } else {
       main_task_runner_->PostTask(
-          FROM_HERE, base::BindOnce(&AudioDeviceOwner::StartOnMainThread,
-                                    base::Unretained(device_owner_.get()),
-                                    delegate, connector_, format_));
+          FROM_HERE,
+          base::BindOnce(&AudioDeviceOwner::StartOnMainThread,
+                         base::Unretained(device_owner_.get()), media_session_,
+                         delegate, std::move(stream_factory_), format_));
     }
   }
 
@@ -123,7 +123,7 @@ class AudioOutputImpl : public assistant_client::AudioOutput {
   }
 
  private:
-  service_manager::Connector* connector_;
+  mojo::PendingRemote<audio::mojom::StreamFactory> stream_factory_;
   scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
   scoped_refptr<base::SequencedTaskRunner> background_thread_task_runner_;
   mojom::AssistantAudioDecoderFactory* audio_decoder_factory_;
@@ -142,22 +142,22 @@ class AudioOutputImpl : public assistant_client::AudioOutput {
 }  // namespace
 
 AudioOutputProviderImpl::AudioOutputProviderImpl(
-    service_manager::Connector* connector,
+    PowerManagerClient* power_manager_client,
+    CrasAudioHandler* cras_audio_handler,
     AssistantMediaSession* media_session,
     scoped_refptr<base::SequencedTaskRunner> background_task_runner,
     const std::string& device_id)
-    : loop_back_input_(connector,
-                       media::AudioDeviceDescription::kLoopbackInputDeviceId,
-                       /*hotword_device_id=*/std::string()),
-      volume_control_impl_(connector, media_session),
-      connector_(connector),
+    : loop_back_input_(power_manager_client,
+                       cras_audio_handler,
+                       media::AudioDeviceDescription::kLoopbackInputDeviceId),
+      volume_control_impl_(media_session),
       main_task_runner_(base::SequencedTaskRunnerHandle::Get()),
       background_task_runner_(background_task_runner),
       device_id_(device_id),
       media_session_(media_session) {
-  connector_->BindInterface(mojom::kAudioDecoderServiceName,
-                            mojo::MakeRequest(&audio_decoder_factory_ptr_));
-  audio_decoder_factory_ = audio_decoder_factory_ptr_.get();
+  AssistantClient::Get()->RequestAudioDecoderFactory(
+      audio_decoder_factory_remote_.BindNewPipeAndPassReceiver());
+  audio_decoder_factory_ = audio_decoder_factory_remote_.get();
 }
 
 AudioOutputProviderImpl::~AudioOutputProviderImpl() = default;
@@ -165,9 +165,15 @@ AudioOutputProviderImpl::~AudioOutputProviderImpl() = default;
 assistant_client::AudioOutput* AudioOutputProviderImpl::CreateAudioOutput(
     assistant_client::OutputStreamType type,
     const assistant_client::OutputStreamFormat& stream_format) {
+  mojo::PendingRemote<audio::mojom::StreamFactory> stream_factory;
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&AudioOutputProviderImpl::BindStreamFactory,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     stream_factory.InitWithNewPipeAndPassReceiver()));
   // Owned by one arbitrary thread inside libassistant. It will be destroyed
   // once assistant_client::AudioOutput::Delegate::OnStopped() is called.
-  return new AudioOutputImpl(connector_, main_task_runner_,
+  return new AudioOutputImpl(std::move(stream_factory), main_task_runner_,
                              background_task_runner_, audio_decoder_factory_,
                              media_session_, type, stream_format, device_id_);
 }
@@ -199,6 +205,11 @@ assistant_client::VolumeControl& AudioOutputProviderImpl::GetVolumeControl() {
 void AudioOutputProviderImpl::RegisterAudioEmittingStateCallback(
     AudioEmittingStateCallback callback) {
   // TODO(muyuanli): implement.
+}
+
+void AudioOutputProviderImpl::BindStreamFactory(
+    mojo::PendingReceiver<audio::mojom::StreamFactory> receiver) {
+  AssistantClient::Get()->RequestAudioStreamFactory(std::move(receiver));
 }
 
 }  // namespace assistant

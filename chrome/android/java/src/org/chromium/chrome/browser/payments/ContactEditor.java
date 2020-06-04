@@ -4,20 +4,22 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.support.annotation.Nullable;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.Patterns;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.base.Callback;
+import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PhoneNumberUtil;
-import org.chromium.chrome.browser.widget.prefeditor.EditorBase;
-import org.chromium.chrome.browser.widget.prefeditor.EditorFieldModel;
-import org.chromium.chrome.browser.widget.prefeditor.EditorFieldModel.EditorFieldValidator;
-import org.chromium.chrome.browser.widget.prefeditor.EditorModel;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorBase;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorFieldModel;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorFieldModel.EditorFieldValidator;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorModel;
 import org.chromium.payments.mojom.PayerErrors;
 
 import java.util.HashSet;
@@ -277,9 +279,13 @@ public class ContactEditor extends EditorBase<AutofillContact> {
             mPhoneValidator = new EditorFieldValidator() {
                 @Override
                 public boolean isValid(@Nullable CharSequence value) {
-                    return value != null
-                            && PhoneNumberUtils.isGlobalPhoneNumber(
-                                       PhoneNumberUtils.stripSeparators(value.toString()));
+                    // TODO(crbug.com/999286): PhoneNumberUtils internally trigger disk reads for
+                    //                         certain devices/configurations.
+                    try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+                        return value != null
+                                && PhoneNumberUtils.isGlobalPhoneNumber(
+                                        PhoneNumberUtils.stripSeparators(value.toString()));
+                    }
                 }
 
                 @Override

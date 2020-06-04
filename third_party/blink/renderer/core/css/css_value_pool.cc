@@ -30,8 +30,6 @@
 
 namespace blink {
 
-using namespace cssvalue;
-
 CSSValuePool& CssValuePool() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<Persistent<CSSValuePool>>,
                                   thread_specific_pool, ());
@@ -46,22 +44,26 @@ CSSValuePool& CssValuePool() {
 CSSValuePool::CSSValuePool()
     : inherited_value_(MakeGarbageCollected<CSSInheritedValue>()),
       initial_value_(MakeGarbageCollected<CSSInitialValue>()),
-      unset_value_(MakeGarbageCollected<CSSUnsetValue>()),
+      unset_value_(MakeGarbageCollected<CSSUnsetValue>(PassKey())),
+      revert_value_(MakeGarbageCollected<CSSRevertValue>(PassKey())),
       invalid_variable_value_(MakeGarbageCollected<CSSInvalidVariableValue>()),
       color_transparent_(
-          MakeGarbageCollected<CSSColorValue>(Color::kTransparent)),
-      color_white_(MakeGarbageCollected<CSSColorValue>(Color::kWhite)),
-      color_black_(MakeGarbageCollected<CSSColorValue>(Color::kBlack)) {
+          MakeGarbageCollected<cssvalue::CSSColorValue>(Color::kTransparent)),
+      color_white_(
+          MakeGarbageCollected<cssvalue::CSSColorValue>(Color::kWhite)),
+      color_black_(
+          MakeGarbageCollected<cssvalue::CSSColorValue>(Color::kBlack)) {
   identifier_value_cache_.resize(numCSSValueKeywords);
   pixel_value_cache_.resize(kMaximumCacheableIntegerValue + 1);
   percent_value_cache_.resize(kMaximumCacheableIntegerValue + 1);
   number_value_cache_.resize(kMaximumCacheableIntegerValue + 1);
 }
 
-void CSSValuePool::Trace(blink::Visitor* visitor) {
+void CSSValuePool::Trace(Visitor* visitor) {
   visitor->Trace(inherited_value_);
   visitor->Trace(initial_value_);
   visitor->Trace(unset_value_);
+  visitor->Trace(revert_value_);
   visitor->Trace(invalid_variable_value_);
   visitor->Trace(color_transparent_);
   visitor->Trace(color_white_);

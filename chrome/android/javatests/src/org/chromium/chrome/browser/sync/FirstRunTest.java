@@ -25,18 +25,17 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity.FirstRunActivityObserver;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
 import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
-import org.chromium.chrome.browser.preferences.Preferences;
-import org.chromium.chrome.browser.preferences.sync.AccountManagementFragment;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.settings.SettingsActivity;
+import org.chromium.chrome.browser.sync.settings.AccountManagementFragment;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
-import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
@@ -51,7 +50,7 @@ public class FirstRunTest {
     @Rule
     public SyncTestRule mSyncTestRule = new SyncTestRule() {
         @Override
-        public void startMainActivityForSyncTest() throws Exception {
+        public void startMainActivityForSyncTest() {
             FirstRunActivity.setObserverForTest(mTestObserver);
 
             // Starts up and waits for the FirstRunActivity to be ready.
@@ -120,7 +119,7 @@ public class FirstRunTest {
     private FirstRunActivity mActivity;
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mActivity != null) mActivity.finish();
     }
 
@@ -131,7 +130,7 @@ public class FirstRunTest {
      */
     @Test
     @FlakyTest(message = "https://crbug.com/616456")
-    public void testSignIn() throws Exception {
+    public void testSignIn() {
         Account testAccount = SigninTestUtil.addTestAccount();
         Assert.assertNull(SigninTestUtil.getCurrentAccount());
         Assert.assertFalse(SyncTestUtil.isSyncRequested());
@@ -149,9 +148,10 @@ public class FirstRunTest {
      */
     @Test
     @FlakyTest(message = "https://crbug.com/616456")
-    public void testSignInWithOpenSettings() throws Exception {
+    public void testSignInWithOpenSettings() {
         final Account testAccount = SigninTestUtil.addTestAccount();
-        final Preferences prefActivity = processFirstRun(testAccount.name, true /* ShowSettings */);
+        final SettingsActivity settingsActivity =
+                processFirstRun(testAccount.name, true /* ShowSettings */);
 
         // User should be signed in and the sync backend should initialize, but sync should not
         // become fully active until the settings page is closed.
@@ -161,9 +161,9 @@ public class FirstRunTest {
 
         // Close the settings fragment.
         AccountManagementFragment fragment =
-                (AccountManagementFragment) prefActivity.getMainFragment();
+                (AccountManagementFragment) settingsActivity.getMainFragment();
         Assert.assertNotNull(fragment);
-        prefActivity.getFragmentManager().beginTransaction().remove(fragment).commit();
+        settingsActivity.getSupportFragmentManager().beginTransaction().remove(fragment).commit();
 
         // Sync should immediately become active.
         Assert.assertTrue(SyncTestUtil.isSyncActive());
@@ -174,7 +174,7 @@ public class FirstRunTest {
     @SmallTest
     @Feature({"Sync"})
     @DisabledTest // https://crbug.com/901488
-    public void testNoSignIn() throws Exception {
+    public void testNoSignIn() {
         SigninTestUtil.addTestAccount();
         Assert.assertFalse(SyncTestUtil.isSyncRequested());
         processFirstRun(null, false /* ShowSettings */);
@@ -187,34 +187,30 @@ public class FirstRunTest {
      *
      * @param account The account name to sign in, or null.
      * @param showSettings Whether to show the settings page.
-     * @return The Preferences activity if showSettings was YES; null otherwise.
+     * @return The Settings activity if showSettings was YES; null otherwise.
      */
-    private Preferences processFirstRun(String account, boolean showSettings) {
+    private SettingsActivity processFirstRun(String account, boolean showSettings) {
         FirstRunSignInProcessor.setFirstRunFlowSignInComplete(false);
         FirstRunSignInProcessor.finalizeFirstRunFlowState(account, showSettings);
 
-        Preferences prefActivity = null;
+        SettingsActivity settingsActivity = null;
         if (showSettings) {
-            prefActivity =
+            settingsActivity =
                     ActivityUtils.waitForActivity(InstrumentationRegistry.getInstrumentation(),
-                            Preferences.class, new Runnable() {
+                            SettingsActivity.class, new Runnable() {
                                 @Override
                                 public void run() {
                                     processFirstRunOnUiThread();
                                 }
                             });
-            Assert.assertNotNull("Could not find the preferences activity", prefActivity);
+            Assert.assertNotNull("Could not find the settings activity", settingsActivity);
         } else {
             processFirstRunOnUiThread();
         }
 
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return FirstRunSignInProcessor.getFirstRunFlowSignInComplete();
-            }
-        });
-        return prefActivity;
+        CriteriaHelper.pollInstrumentationThread(
+                () -> FirstRunSignInProcessor.getFirstRunFlowSignInComplete());
+        return settingsActivity;
     }
 
     private void processFirstRunOnUiThread() {

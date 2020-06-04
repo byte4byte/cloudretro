@@ -33,7 +33,7 @@ class LoginTestWidgetDelegate : public views::WidgetDelegate {
   explicit LoginTestWidgetDelegate(views::Widget* widget) : widget_(widget) {}
   ~LoginTestWidgetDelegate() override = default;
 
-  // Overridden from WidgetDelegate:
+  // views::WidgetDelegate:
   void DeleteDelegate() override { delete this; }
   views::Widget* GetWidget() override { return widget_; }
   const views::Widget* GetWidget() const override { return widget_; }
@@ -65,13 +65,13 @@ class LockLayoutManagerTest : public AshTestBase {
                                       bool use_delegate) {
     aura::Window* parent =
         Shell::GetPrimaryRootWindowController()->GetContainer(
-            ash::kShellWindowId_LockScreenContainer);
+            kShellWindowId_LockScreenContainer);
     params.parent = parent;
     views::Widget* widget = new views::Widget;
     if (use_delegate)
       params.delegate = new LoginTestWidgetDelegate(widget);
-    params.context = CurrentContext();
-    widget->Init(params);
+    params.context = GetContext();
+    widget->Init(std::move(params));
     widget->Show();
     aura::Window* window = widget->GetNativeView();
     return window;
@@ -110,8 +110,8 @@ TEST_F(LockLayoutManagerTest, NorwmalWindowBoundsArePreserved) {
       views::Widget::InitParams::TYPE_WINDOW);
   const gfx::Rect bounds = gfx::Rect(10, 10, 300, 300);
   widget_params.bounds = bounds;
-  std::unique_ptr<aura::Window> window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
   EXPECT_EQ(bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   gfx::Rect work_area =
@@ -138,12 +138,12 @@ TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
   // Maximized TYPE_WINDOW_FRAMELESS windows needs a delegate defined otherwise
   // it won't get initial SetBounds event.
   std::unique_ptr<aura::Window> maximized_window(
-      CreateTestLoginWindow(widget_params, true /* use_delegate */));
+      CreateTestLoginWindow(std::move(widget_params), true /* use_delegate */));
 
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
   widget_params.delegate = NULL;
-  std::unique_ptr<aura::Window> fullscreen_window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> fullscreen_window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
 
   EXPECT_EQ(screen_bounds.ToString(),
             maximized_window->GetBoundsInScreen().ToString());
@@ -177,7 +177,7 @@ TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
 }
 
 TEST_F(LockLayoutManagerTest, AccessibilityPanel) {
-  ash::ShelfLayoutManager* shelf_layout_manager =
+  ShelfLayoutManager* shelf_layout_manager =
       GetPrimaryShelf()->shelf_layout_manager();
   ASSERT_TRUE(shelf_layout_manager);
 
@@ -190,8 +190,8 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanel) {
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  std::unique_ptr<aura::Window> window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
 
   display::Display primary_display =
       display::Screen::GetScreen()->GetPrimaryDisplay();
@@ -222,8 +222,8 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  std::unique_ptr<aura::Window> window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
 
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
@@ -274,7 +274,7 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   SetKeyboardOverscrollBehavior(keyboard::KeyboardOverscrollBehavior::kDefault);
 
   keyboard->SetContainerType(keyboard::ContainerType::kFloating,
-                             base::nullopt /* target_bounds */,
+                             gfx::Rect() /* target_bounds */,
                              base::BindOnce([](bool success) {}));
   ShowKeyboard(true);
   primary_display = display::Screen::GetScreen()->GetPrimaryDisplay();
@@ -292,8 +292,8 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  std::unique_ptr<aura::Window> window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
   window->SetProperty(aura::client::kResizeBehaviorKey,
                       aura::client::kResizeBehaviorCanMaximize);
 
@@ -301,7 +301,7 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
 
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   window_state->SetRestoreBoundsInScreen(gfx::Rect(400, 0, 30, 40));
 
   // Maximize the window with as the restore bounds is inside 2nd display but
@@ -335,7 +335,7 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
 TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
   UpdateDisplay("300x400,400x500");
 
-  ash::ShelfLayoutManager* shelf_layout_manager =
+  ShelfLayoutManager* shelf_layout_manager =
       GetPrimaryShelf()->shelf_layout_manager();
   ASSERT_TRUE(shelf_layout_manager);
 
@@ -350,8 +350,8 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
-  std::unique_ptr<aura::Window> window(
-      CreateTestLoginWindow(widget_params, false /* use_delegate */));
+  std::unique_ptr<aura::Window> window(CreateTestLoginWindow(
+      std::move(widget_params), false /* use_delegate */));
   window->SetProperty(aura::client::kResizeBehaviorKey,
                       aura::client::kResizeBehaviorCanMaximize);
 
@@ -362,7 +362,7 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
 
   // Restore window with bounds in the second display, the window should be
   // shown in the primary display.
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   window_state->SetRestoreBoundsInScreen(gfx::Rect(400, 0, 30, 40));
 
   window_state->Restore();
@@ -373,7 +373,7 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
   // for the primary shelf, so it should not influence the screen bounds.
   window->SetBoundsInScreen(gfx::Rect(0, 0, 30, 40), GetSecondaryDisplay());
 
-  target_bounds = gfx::Rect(300, 0, 400, 500);
+  target_bounds = gfx::Rect(600, 0, 400, 500);
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
   EXPECT_EQ(target_bounds, window->GetBoundsInScreen());
 }

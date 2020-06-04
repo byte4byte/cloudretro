@@ -3,9 +3,11 @@ Tests stability of performance metrics list.
 
 Metrics reported:
 AdSubframes
+ArrayBufferContents
 AudioHandlers
 ContextLifecycleStateObservers
 DetachedScriptStates
+DevToolsCommandDuration
 Documents
 DomContentLoaded
 FirstMeaningfulPaint
@@ -26,7 +28,6 @@ RecalcStyleDuration
 ResourceFetchers
 Resources
 ScriptDuration
-ScriptPromises
 TaskDuration
 TaskOtherDuration
 ThreadTime

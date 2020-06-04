@@ -8,7 +8,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/scoped_mock_time_message_loop_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
@@ -58,8 +58,8 @@ class SyncStoppedReporterTest : public testing::Test {
   std::string user_agent() const { return std::string(kTestUserAgent); }
 
   SyncStoppedReporter::ResultCallback callback() {
-    return base::Bind(&SyncStoppedReporterTest::RequestFinishedCallback,
-                      base::Unretained(this));
+    return base::BindOnce(&SyncStoppedReporterTest::RequestFinishedCallback,
+                          base::Unretained(this));
   }
 
   const SyncStoppedReporter::Result& request_result() const {
@@ -75,7 +75,7 @@ class SyncStoppedReporterTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   SyncStoppedReporter::Result request_result_;

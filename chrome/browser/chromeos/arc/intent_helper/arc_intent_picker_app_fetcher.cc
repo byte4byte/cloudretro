@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "chrome/browser/chromeos/apps/intent_helper/chromeos_apps_navigation_throttle.h"
+#include "chrome/browser/chromeos/apps/metrics/intent_handling_metrics.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -192,7 +193,7 @@ ArcIntentPickerAppFetcher::~ArcIntentPickerAppFetcher() = default;
 
 ArcIntentPickerAppFetcher::ArcIntentPickerAppFetcher(
     content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents), weak_ptr_factory_(this) {}
+    : content::WebContentsObserver(web_contents) {}
 
 void ArcIntentPickerAppFetcher::GetArcAppsForNavigation(
     mojom::IntentHelperInstance* instance,
@@ -234,8 +235,8 @@ void ArcIntentPickerAppFetcher::OnAppCandidatesReceivedForNavigation(
     // This scenario shouldn't be accessed as ArcIntentPickerAppFetcher is
     // created iff there are ARC apps which can actually handle the given URL.
     DVLOG(1) << "There are no app candidates for this URL: " << url;
-    chromeos::ChromeOsAppsNavigationThrottle::RecordUma(
-        /*selected_app_package=*/std::string(), apps::mojom::AppType::kUnknown,
+    apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+        /*selected_app_package=*/std::string(), apps::PickerEntryType::kUnknown,
         apps::IntentPickerCloseReason::ERROR_BEFORE_PICKER,
         apps::Source::kHttpOrHttps,
         /*should_persist=*/false);
@@ -294,7 +295,7 @@ apps::PreferredPlatform ArcIntentPickerAppFetcher::DidLaunchPreferredArcApp(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   apps::PreferredPlatform preferred_platform = apps::PreferredPlatform::NONE;
-  apps::mojom::AppType app_type = apps::mojom::AppType::kUnknown;
+  apps::PickerEntryType entry_type = apps::PickerEntryType::kUnknown;
   const size_t index = FindPreferredApp(app_candidates, url);
 
   if (index != app_candidates.size()) {
@@ -318,10 +319,10 @@ apps::PreferredPlatform ArcIntentPickerAppFetcher::DidLaunchPreferredArcApp(
     } else {
       instance->HandleUrl(url.spec(), package_name);
       preferred_platform = apps::PreferredPlatform::ARC;
-      app_type = apps::mojom::AppType::kArc;
+      entry_type = apps::PickerEntryType::kArc;
     }
-    chromeos::ChromeOsAppsNavigationThrottle::RecordUma(
-        package_name, app_type, close_reason, apps::Source::kHttpOrHttps,
+    apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+        package_name, entry_type, close_reason, apps::Source::kHttpOrHttps,
         /*should_persist=*/false);
   }
 
@@ -339,8 +340,8 @@ void ArcIntentPickerAppFetcher::GetArcAppIcons(
       web_contents()->GetBrowserContext());
   if (!intent_helper_bridge) {
     LOG(ERROR) << "Cannot get an instance of ArcIntentHelperBridge";
-    chromeos::ChromeOsAppsNavigationThrottle::RecordUma(
-        /*selected_app_package=*/std::string(), apps::mojom::AppType::kUnknown,
+    apps::IntentHandlingMetrics::RecordIntentPickerUserInteractionMetrics(
+        /*selected_app_package=*/std::string(), apps::PickerEntryType::kUnknown,
         apps::IntentPickerCloseReason::ERROR_BEFORE_PICKER,
         apps::Source::kHttpOrHttps, /*should_persist=*/false);
     std::move(callback).Run({});
@@ -374,7 +375,7 @@ void ArcIntentPickerAppFetcher::OnAppIconsReceived(
         candidate->package_name, candidate->activity_name);
     const auto it = icons->find(activity);
 
-    app_info.emplace_back(apps::mojom::AppType::kArc,
+    app_info.emplace_back(apps::PickerEntryType::kArc,
                           it != icons->end() ? it->second.icon16 : gfx::Image(),
                           candidate->package_name, candidate->name);
   }

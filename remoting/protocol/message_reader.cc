@@ -24,7 +24,7 @@ namespace protocol {
 
 static const int kReadBufferSize = 4096;
 
-MessageReader::MessageReader() : weak_factory_(this) {}
+MessageReader::MessageReader() {}
 MessageReader::~MessageReader() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
@@ -53,9 +53,8 @@ void MessageReader::DoRead() {
   while (read_succeeded && !closed_ && !read_pending_) {
     read_buffer_ = base::MakeRefCounted<net::IOBuffer>(kReadBufferSize);
     int result = socket_->Read(
-        read_buffer_.get(),
-        kReadBufferSize,
-        base::Bind(&MessageReader::OnRead, weak_factory_.GetWeakPtr()));
+        read_buffer_.get(), kReadBufferSize,
+        base::BindOnce(&MessageReader::OnRead, weak_factory_.GetWeakPtr()));
 
     HandleReadResult(result, &read_succeeded);
   }
@@ -109,7 +108,7 @@ void MessageReader::OnDataReceived(net::IOBuffer* data, int data_size) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&MessageReader::RunCallback, weak_factory_.GetWeakPtr(),
-                       base::Passed(base::WrapUnique(buffer))));
+                       base::WrapUnique(buffer)));
   }
 }
 

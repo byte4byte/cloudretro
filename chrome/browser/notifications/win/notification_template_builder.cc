@@ -19,10 +19,11 @@
 #include "base/time/time.h"
 #include "chrome/browser/notifications/win/notification_image_retainer.h"
 #include "chrome/browser/notifications/win/notification_launch_id.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/url_formatter/elide_url.h"
-#include "third_party/libxml/chromium/libxml_utils.h"
+#include "third_party/libxml/chromium/xml_writer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "url/gurl.h"
@@ -48,12 +49,15 @@ const char kBindingElement[] = "binding";
 const char kBindingElementTemplateAttribute[] = "template";
 const char kContent[] = "content";
 const char kContextMenu[] = "contextMenu";
+const char kDuration[] = "duration";
+const char kDurationLong[] = "long";
 const char kForeground[] = "foreground";
 const char kHero[] = "hero";
 const char kHintCrop[] = "hint-crop";
 const char kHintCropNone[] = "none";
 const char kImageElement[] = "image";
 const char kImageUri[] = "imageUri";
+const char kIndeterminate[] = "indeterminate";
 const char kInputElement[] = "input";
 const char kInputId[] = "id";
 const char kInputType[] = "type";
@@ -98,10 +102,16 @@ void StartToastElement(XmlWriter* xml_writer,
   xml_writer->StartElement(kNotificationToastElement);
   xml_writer->AddAttribute(kNotificationLaunchAttribute, launch_id.Serialize());
 
-  // Note: If the notification doesn't include a button, then Windows will
-  // ignore the Reminder flag.
-  if (notification.never_timeout())
-    xml_writer->AddAttribute(kScenario, kReminder);
+  if (notification.never_timeout()) {
+    if (base::FeatureList::IsEnabled(
+            features::kNotificationDurationLongForRequireInteraction)) {
+      xml_writer->AddAttribute(kDuration, kDurationLong);
+    } else {
+      // Note: If the notification doesn't include a button, then Windows will
+      // ignore the Reminder flag. See EnsureReminderHasButton below.
+      xml_writer->AddAttribute(kScenario, kReminder);
+    }
+  }
 
   if (notification.timestamp().is_null())
     return;
@@ -214,9 +224,17 @@ void WriteProgressElement(XmlWriter* xml_writer,
   // valueStringOverride: A string that replaces the percentage on the right.
   xml_writer->StartElement(kProgress);
   // Status is mandatory, without it the progress bar is not shown.
-  xml_writer->AddAttribute(kStatus, std::string());
-  xml_writer->AddAttribute(
-      kValue, base::StringPrintf("%3.2f", 1.0 * notification.progress() / 100));
+  xml_writer->AddAttribute(kStatus,
+                           base::UTF16ToUTF8(notification.progress_status()));
+
+  // Show indeterminate spinner for values outside the [0-100] range.
+  if (notification.progress() < 0 || notification.progress() > 100) {
+    xml_writer->AddAttribute(kValue, kIndeterminate);
+  } else {
+    double value = 1.0 * notification.progress() / 100;
+    xml_writer->AddAttribute(kValue, base::StringPrintf("%3.2f", value));
+  }
+
   xml_writer->EndElement();
 }
 
@@ -315,8 +333,11 @@ void AddContextMenu(XmlWriter* xml_writer,
 void EnsureReminderHasButton(XmlWriter* xml_writer,
                              const message_center::Notification& notification,
                              NotificationLaunchId copied_launch_id) {
-  if (!notification.never_timeout() || !notification.buttons().empty())
+  if (!notification.never_timeout() || !notification.buttons().empty() ||
+      base::FeatureList::IsEnabled(
+          features::kNotificationDurationLongForRequireInteraction)) {
     return;
+  }
 
   xml_writer->StartElement(kActionElement);
   xml_writer->AddAttribute(kActivationType, kBackground);
@@ -390,12 +411,17 @@ base::string16 BuildNotificationTemplate(
   if (!notification.buttons().empty())
     AddActions(&xml_writer, image_retainer, notification, launch_id);
   EnsureReminderHasButton(&xml_writer, notification, launch_id);
-  if (context_menu_label_override) {
-    AddContextMenu(&xml_writer, launch_id, context_menu_label_override);
+  if (notification.should_show_settings_button()) {
+    if (context_menu_label_override) {
+      AddContextMenu(&xml_writer, launch_id, context_menu_label_override);
+    } else {
+      AddContextMenu(&xml_writer, launch_id,
+                     l10n_util::GetStringUTF8(
+                         IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME));
+    }
   } else {
-    AddContextMenu(&xml_writer, launch_id,
-                   l10n_util::GetStringUTF8(
-                       IDS_WIN_NOTIFICATION_SETTINGS_CONTEXT_MENU_ITEM_NAME));
+    DCHECK(!context_menu_label_override)
+        << "Must show custom settings button label";
   }
   EndActionsElement(&xml_writer);
 

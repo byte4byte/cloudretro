@@ -11,7 +11,7 @@ cr.define('multidevice_setup', function() {
     }
 
     /** @override */
-    setHostDevice(hostDeviceId, opt_authToken) {
+    setHostDevice(hostInstanceIdOrLegacyDeviceId, opt_authToken) {
       // An authentication token is required to set the host device post-OOBE.
       assert(!!opt_authToken);
 
@@ -21,8 +21,8 @@ cr.define('multidevice_setup', function() {
       // multidevice_setup.mojom).
       return /** @type {!Promise<{success: boolean}>} */ (
           multidevice_setup.MojoInterfaceProviderImpl.getInstance()
-              .getMojoServiceProxy()
-              .setHostDevice(hostDeviceId, opt_authToken));
+              .getMojoServiceRemote()
+              .setHostDevice(hostInstanceIdOrLegacyDeviceId, opt_authToken));
     }
 
     /** @override */

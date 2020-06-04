@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/autofill/address_normalizer_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
@@ -18,9 +18,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "components/autofill/core/browser/address_normalizer_impl.h"
 #include "components/autofill/core/browser/geo/region_data_loader_impl.h"
@@ -64,7 +64,7 @@ ChromePaymentRequestDelegate::~ChromePaymentRequestDelegate() {}
 
 void ChromePaymentRequestDelegate::ShowDialog(PaymentRequest* request) {
   DCHECK_EQ(nullptr, shown_dialog_);
-  shown_dialog_ = chrome::CreatePaymentRequestDialog(request);
+  shown_dialog_ = new payments::PaymentRequestDialogView(request, nullptr);
   shown_dialog_->ShowDialog();
 }
 
@@ -144,7 +144,7 @@ std::string ChromePaymentRequestDelegate::GetAuthenticatedEmail() const {
   // authenticated.
   Profile* profile =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   if (identity_manager && identity_manager->HasPrimaryAccount())
     return identity_manager->GetPrimaryAccountInfo().email;

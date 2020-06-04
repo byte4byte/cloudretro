@@ -15,10 +15,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -342,7 +343,7 @@ void CloudExternalDataManagerBase::Backend::RunCallback(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   callback_task_runner_->PostTask(
       FROM_HERE,
-      base::BindOnce(std::move(callback), base::Passed(&data), file_path));
+      base::BindOnce(std::move(callback), std::move(data), file_path));
 }
 
 void CloudExternalDataManagerBase::Backend::StartDownload(
@@ -389,7 +390,7 @@ void CloudExternalDataManagerBase::SetExternalDataStore(
   backend_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&Backend::SetExternalDataStore,
                                 base::Unretained(backend_.get()),
-                                base::Passed(&external_data_store)));
+                                std::move(external_data_store)));
 }
 
 void CloudExternalDataManagerBase::SetPolicyStore(
@@ -414,43 +415,38 @@ void CloudExternalDataManagerBase::OnPolicyStoreLoaded() {
     const base::DictionaryValue* dict = NULL;
     std::string url;
     std::string hex_hash;
-    std::vector<uint8_t> hash;
+    std::string hash;
     if (it.second.value && it.second.value->GetAsDictionary(&dict) &&
         dict->GetStringWithoutPathExpansion("url", &url) &&
         dict->GetStringWithoutPathExpansion("hash", &hex_hash) &&
         !url.empty() && !hex_hash.empty() &&
-        base::HexStringToBytes(hex_hash, &hash)) {
+        base::HexStringToString(hex_hash, &hash)) {
       // Add the external data reference to |metadata| if it is valid (URL and
       // hash are not empty, hash can be decoded as a hex string).
-      (*metadata)[it.first] =
-          MetadataEntry(url, std::string(hash.begin(), hash.end()));
+      (*metadata)[it.first] = MetadataEntry(url, hash);
     }
   }
 
   backend_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&Backend::OnMetadataUpdated,
-                                base::Unretained(backend_.get()),
-                                base::Passed(&metadata)));
+      FROM_HERE,
+      base::BindOnce(&Backend::OnMetadataUpdated,
+                     base::Unretained(backend_.get()), std::move(metadata)));
 }
 
 void CloudExternalDataManagerBase::Connect(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!external_policy_data_fetcher_backend_);
 
-  external_policy_data_fetcher_backend_ =
-      std::make_unique<ExternalPolicyDataFetcherBackend>(
-          std::move(url_loader_factory));
   backend_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&Backend::Connect, base::Unretained(backend_.get()),
-                     external_policy_data_fetcher_backend_->CreateFrontend(
-                         backend_task_runner_)));
+                     std::make_unique<ExternalPolicyDataFetcher>(
+                         std::move(url_loader_factory), backend_task_runner_)));
 }
 
 void CloudExternalDataManagerBase::Disconnect() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  external_policy_data_fetcher_backend_.reset();
+
   backend_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&Backend::Disconnect, base::Unretained(backend_.get())));

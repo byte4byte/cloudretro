@@ -8,6 +8,8 @@
 Usage: tools/boilerplate.py path/to/file.{h,cc}
 """
 
+from __future__ import print_function
+
 from datetime import date
 import os
 import os.path
@@ -53,6 +55,16 @@ def _CppHeader(filename):
   ])
 
 
+def _RemoveCurrentDirectoryPrefix(filename):
+  current_dir_prefixes = [os.curdir + os.sep]
+  if os.altsep is not None:
+    current_dir_prefixes.append(os.curdir + os.altsep)
+  for prefix in current_dir_prefixes:
+    if filename.startswith(prefix):
+      return filename[len(prefix):]
+  return filename
+
+
 def _RemoveTestSuffix(filename):
   base, _ = os.path.splitext(filename)
   suffixes = [ '_test', '_unittest', '_browsertest' ]
@@ -92,6 +104,8 @@ def _ObjCppImplementation(filename):
 
 
 def _CreateFile(filename):
+  filename = _RemoveCurrentDirectoryPrefix(filename)
+
   contents = _GetHeader(filename) + '\n'
 
   if filename.endswith('.h'):
@@ -109,18 +123,19 @@ def _CreateFile(filename):
 def Main():
   files = sys.argv[1:]
   if len(files) < 1:
-    print >> sys.stderr, 'Usage: boilerplate.py path/to/file.h path/to/file.cc'
+    print(
+        'Usage: boilerplate.py path/to/file.h path/to/file.cc', file=sys.stderr)
     return 1
 
   # Perform checks first so that the entire operation is atomic.
   for f in files:
     _, ext = os.path.splitext(f)
     if not ext[1:] in EXTENSIONS_TO_COMMENTS:
-      print >> sys.stderr, 'Unknown file type for %s' % f
+      print('Unknown file type for %s' % f, file=sys.stderr)
       return 2
 
     if os.path.exists(f):
-      print >> sys.stderr, 'A file at path %s already exists' % f
+      print('A file at path %s already exists' % f, file=sys.stderr)
       return 2
 
   for f in files:

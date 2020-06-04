@@ -20,10 +20,11 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.safe_browsing.SafeBrowsingApiBridge;
@@ -77,7 +78,7 @@ public class PopupTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
         MockSafeBrowsingApiHandler.clearMockResponses();
     }
@@ -85,7 +86,7 @@ public class PopupTest {
     @Test
     @MediumTest
     @Feature({"Popup"})
-    public void testPopupInfobarAppears() throws Exception {
+    public void testPopupInfobarAppears() {
         mActivityTestRule.loadUrl(mPopupHtmlUrl);
         CriteriaHelper.pollUiThread(Criteria.equals(1, () -> getNumInfobarsShowing()));
     }
@@ -159,7 +160,7 @@ public class PopupTest {
     @Test
     @MediumTest
     @Feature({"Popup"})
-    public void testPopupWindowsAppearWhenAllowed() throws Exception {
+    public void testPopupWindowsAppearWhenAllowed() {
         final TabModelSelector selector = mActivityTestRule.getActivity().getTabModelSelector();
 
         mActivityTestRule.loadUrl(mPopupHtmlUrl);

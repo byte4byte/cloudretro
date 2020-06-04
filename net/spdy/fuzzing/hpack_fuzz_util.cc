@@ -6,11 +6,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #include "base/rand_util.h"
 #include "base/sys_byteorder.h"
 #include "net/third_party/quiche/src/spdy/core/hpack/hpack_constants.h"
-#include "net/third_party/quiche/src/spdy/platform/api/spdy_ptr_util.h"
 
 namespace spdy {
 
@@ -80,7 +80,7 @@ SpdyHeaderBlock HpackFuzzUtil::NextGeneratedHeaderSet(
   for (size_t j = 0; j != header_count; ++j) {
     size_t name_index = SampleExponential(kHeaderIndexMean, kHeaderIndexMax);
     size_t value_index = SampleExponential(kHeaderIndexMean, kHeaderIndexMax);
-    SpdyString name, value;
+    std::string name, value;
     if (name_index >= context->names.size()) {
       context->names.push_back(RandBytesAsString(
           1 + SampleExponential(kNameLengthMean, kNameLengthMax)));
@@ -107,7 +107,8 @@ size_t HpackFuzzUtil::SampleExponential(size_t mean, size_t sanity_bound) {
 }
 
 // static
-bool HpackFuzzUtil::NextHeaderBlock(Input* input, SpdyStringPiece* out) {
+bool HpackFuzzUtil::NextHeaderBlock(Input* input,
+                                    quiche::QuicheStringPiece* out) {
   // ClusterFuzz may truncate input files if the fuzzer ran out of allocated
   // disk space. Be tolerant of these.
   CHECK_LE(input->offset, input->input.size());
@@ -122,29 +123,29 @@ bool HpackFuzzUtil::NextHeaderBlock(Input* input, SpdyStringPiece* out) {
   if (input->remaining() < length) {
     return false;
   }
-  *out = SpdyStringPiece(input->ptr(), length);
+  *out = quiche::QuicheStringPiece(input->ptr(), length);
   input->offset += length;
   return true;
 }
 
 // static
-SpdyString HpackFuzzUtil::HeaderBlockPrefix(size_t block_size) {
+std::string HpackFuzzUtil::HeaderBlockPrefix(size_t block_size) {
   uint32_t length = base::HostToNet32(static_cast<uint32_t>(block_size));
-  return SpdyString(reinterpret_cast<char*>(&length), sizeof(uint32_t));
+  return std::string(reinterpret_cast<char*>(&length), sizeof(uint32_t));
 }
 
 // static
 void HpackFuzzUtil::InitializeFuzzerContext(FuzzerContext* context) {
-  context->first_stage = SpdyMakeUnique<HpackDecoderAdapter>();
+  context->first_stage = std::make_unique<HpackDecoderAdapter>();
   context->second_stage =
-      SpdyMakeUnique<HpackEncoder>(ObtainHpackHuffmanTable());
-  context->third_stage = SpdyMakeUnique<HpackDecoderAdapter>();
+      std::make_unique<HpackEncoder>(ObtainHpackHuffmanTable());
+  context->third_stage = std::make_unique<HpackDecoderAdapter>();
 }
 
 // static
 bool HpackFuzzUtil::RunHeaderBlockThroughFuzzerStages(
     FuzzerContext* context,
-    SpdyStringPiece input_block) {
+    quiche::QuicheStringPiece input_block) {
   // First stage: Decode the input header block. This may fail on invalid input.
   if (!context->first_stage->HandleControlFrameHeadersData(
           input_block.data(), input_block.size())) {
@@ -154,7 +155,7 @@ bool HpackFuzzUtil::RunHeaderBlockThroughFuzzerStages(
     return false;
   }
   // Second stage: Re-encode the decoded header block. This must succeed.
-  SpdyString second_stage_out;
+  std::string second_stage_out;
   CHECK(context->second_stage->EncodeHeaderSet(
       context->first_stage->decoded_block(), &second_stage_out));
 

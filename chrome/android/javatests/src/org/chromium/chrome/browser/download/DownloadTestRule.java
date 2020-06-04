@@ -8,7 +8,6 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.database.Cursor;
 import android.os.Environment;
-import android.os.Handler;
 import android.text.TextUtils;
 
 import org.junit.Assert;
@@ -20,7 +19,6 @@ import org.chromium.base.Log;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.OfflineContentProvider;
@@ -33,6 +31,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -152,7 +151,7 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
 
     private String mLastDownloadFilePath;
     private final CallbackHelper mHttpDownloadFinished = new CallbackHelper();
-    private DownloadManagerService mSavedDownloadManagerService;
+    private TestDownloadManagerServiceObserver mDownloadManagerServiceObserver;
 
     public String getLastDownloadFile() {
         return new File(mLastDownloadFilePath).getName();
@@ -177,7 +176,7 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
         return mHttpDownloadFinished.getCallCount();
     }
 
-    public boolean waitForChromeDownloadToFinish(int currentCallCount) throws InterruptedException {
+    public boolean waitForChromeDownloadToFinish(int currentCallCount) {
         boolean eventReceived = true;
         try {
             mHttpDownloadFinished.waitForCallback(currentCallCount, 1, 5, TimeUnit.SECONDS);
@@ -187,15 +186,26 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
         return eventReceived;
     }
 
-    private class TestDownloadManagerService extends DownloadManagerService {
-        public TestDownloadManagerService(
-                DownloadNotifier downloadNotifier, Handler handler, long updateDelayInMillis) {
-            super(downloadNotifier, handler, updateDelayInMillis);
+    private class TestDownloadManagerServiceObserver
+            implements DownloadManagerService.DownloadObserver {
+        @Override
+        public void onAllDownloadsRetrieved(final List<DownloadItem> list, boolean isOffTheRecord) {
         }
 
         @Override
-        public void broadcastDownloadSuccessful(DownloadInfo downloadInfo) {
-            super.broadcastDownloadSuccessful(downloadInfo);
+        public void onDownloadItemCreated(DownloadItem item) {}
+
+        @Override
+        public void onDownloadItemRemoved(String guid, boolean isOffTheRecord) {}
+
+        @Override
+        public void onAddOrReplaceDownloadSharedPreferenceEntry(ContentId id) {}
+
+        @Override
+        public void onDownloadItemUpdated(DownloadItem item) {}
+
+        @Override
+        public void broadcastDownloadSuccessfulForTesting(DownloadInfo downloadInfo) {
             mLastDownloadFilePath = downloadInfo.getFilePath();
             mHttpDownloadFinished.notifyCalled();
         }
@@ -230,34 +240,27 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     private void setUp() throws Exception {
-        TestThreadUtils.runOnUiThreadBlocking(() -> {
-            DownloadController.enableNewDownloadBackendForTesting(true);
-            mSavedDownloadManagerService =
-                    DownloadManagerService.setDownloadManagerService(new TestDownloadManagerService(
-                            new SystemDownloadNotifier(), new Handler(), UPDATE_DELAY_MILLIS));
-        });
-
         mActivityStart.customMainActivityStart();
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            PrefServiceBridge.getInstance().setPromptForDownloadAndroid(
-                    DownloadPromptStatus.DONT_SHOW);
+            DownloadUtils.setPromptForDownloadAndroid(DownloadPromptStatus.DONT_SHOW);
         });
 
         cleanUpAllDownloads();
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            DownloadController.setDownloadNotificationService(
-                    DownloadManagerService.getDownloadManagerService());
+            mDownloadManagerServiceObserver = new TestDownloadManagerServiceObserver();
+            DownloadManagerService.getDownloadManagerService().addDownloadObserver(
+                    mDownloadManagerServiceObserver);
             OfflineContentAggregatorFactory.get().addObserver(new TestDownloadBackendObserver());
         });
     }
 
-    private void tearDown() throws Exception {
+    private void tearDown() {
         cleanUpAllDownloads();
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            DownloadManagerService.setDownloadManagerService(mSavedDownloadManagerService);
-            DownloadController.setDownloadNotificationService(mSavedDownloadManagerService);
+            DownloadManagerService.getDownloadManagerService().removeDownloadObserver(
+                    mDownloadManagerServiceObserver);
         });
     }
 

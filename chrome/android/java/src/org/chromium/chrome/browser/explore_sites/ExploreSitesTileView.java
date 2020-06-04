@@ -10,11 +10,14 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
+import android.view.View;
+
+import androidx.core.graphics.drawable.RoundedBitmapDrawable;
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.util.ViewUtils;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
-import org.chromium.chrome.browser.widget.tile.TileWithTextView;
+import org.chromium.chrome.browser.suggestions.tile.TileWithTextView;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
 
 /**
  * View for a category name and site tiles.
@@ -29,9 +32,9 @@ public class ExploreSitesTileView extends TileWithTextView {
     public ExploreSitesTileView(Context ctx, AttributeSet attrs) {
         super(ctx, attrs);
         TypedArray styleAttrs = ctx.obtainStyledAttributes(attrs, R.styleable.ExploreSitesTileView);
-        mIconCornerRadius =
-                styleAttrs.getDimensionPixelSize(R.styleable.ExploreSitesTileView_iconCornerRadius,
-                        ViewUtils.DEFAULT_FAVICON_CORNER_RADIUS);
+        mIconCornerRadius = styleAttrs.getDimensionPixelSize(
+                R.styleable.ExploreSitesTileView_iconCornerRadius,
+                getResources().getDimensionPixelSize(R.dimen.default_favicon_corner_radius));
         styleAttrs.recycle();
     }
 
@@ -51,6 +54,20 @@ public class ExploreSitesTileView extends TileWithTextView {
         if (image == null) {
             return new BitmapDrawable(getResources(), mIconGenerator.generateIconForText(text));
         }
-        return ViewUtils.createRoundedBitmapDrawable(image, mIconCornerRadius);
+        // Icon corner radius must be scaled to the current size of the image from the final size,
+        // because an arbitrary sized icon may be passed to the RoundedBitmapDrawableFactory, which
+        // expects the radius to be scaled to the image being passed in, not the final view. This is
+        // why we cannot use ViewUtils.createRoundedBitmapDrawable.
+        float scaledIconCornerRadius;
+        float iconSize = View.MeasureSpec.getSize(mIconView.getLayoutParams().width);
+        if (iconSize == 0) {
+            scaledIconCornerRadius = mIconCornerRadius;
+        } else {
+            scaledIconCornerRadius = image.getWidth() / iconSize * mIconCornerRadius;
+        }
+        RoundedBitmapDrawable roundedIcon =
+                RoundedBitmapDrawableFactory.create(getResources(), image);
+        roundedIcon.setCornerRadius(scaledIconCornerRadius);
+        return roundedIcon;
     }
 }

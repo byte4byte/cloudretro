@@ -5,6 +5,7 @@
 #include "ui/views/test/widget_test.h"
 
 #include "build/build_config.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/test/native_widget_factory.h"
 #include "ui/views/widget/root_view.h"
@@ -17,14 +18,19 @@ void WidgetTest::WidgetCloser::operator()(Widget* widget) const {
 }
 
 WidgetTest::WidgetTest() = default;
+
+WidgetTest::WidgetTest(
+    std::unique_ptr<base::test::TaskEnvironment> task_environment)
+    : ViewsTestBase(std::move(task_environment)) {}
+
 WidgetTest::~WidgetTest() = default;
 
 Widget* WidgetTest::CreateTopLevelPlatformWidget() {
   Widget* widget = new Widget;
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.native_widget =
-      CreatePlatformNativeWidgetImpl(params, widget, kStubCapture, nullptr);
-  widget->Init(params);
+      CreatePlatformNativeWidgetImpl(widget, kStubCapture, nullptr);
+  widget->Init(std::move(params));
   return widget;
 }
 
@@ -33,8 +39,8 @@ Widget* WidgetTest::CreateTopLevelFramelessPlatformWidget() {
   Widget::InitParams params =
       CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.native_widget =
-      CreatePlatformNativeWidgetImpl(params, widget, kStubCapture, nullptr);
-  widget->Init(params);
+      CreatePlatformNativeWidgetImpl(widget, kStubCapture, nullptr);
+  widget->Init(std::move(params));
   return widget;
 }
 
@@ -44,8 +50,8 @@ Widget* WidgetTest::CreateChildPlatformWidget(
   params.parent = parent_native_view;
   Widget* child = new Widget;
   params.native_widget =
-      CreatePlatformNativeWidgetImpl(params, child, kStubCapture, nullptr);
-  child->Init(params);
+      CreatePlatformNativeWidgetImpl(child, kStubCapture, nullptr);
+  child->Init(std::move(params));
   child->SetContentsView(new View);
   return child;
 }
@@ -53,7 +59,7 @@ Widget* WidgetTest::CreateChildPlatformWidget(
 Widget* WidgetTest::CreateTopLevelNativeWidget() {
   Widget* toplevel = new Widget;
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
-  toplevel->Init(params);
+  toplevel->Init(std::move(params));
   return toplevel;
 }
 
@@ -61,13 +67,9 @@ Widget* WidgetTest::CreateChildNativeWidgetWithParent(Widget* parent) {
   Widget* child = new Widget;
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_CONTROL);
   params.parent = parent->GetNativeView();
-  child->Init(params);
+  child->Init(std::move(params));
   child->SetContentsView(new View);
   return child;
-}
-
-Widget* WidgetTest::CreateChildNativeWidget() {
-  return CreateChildNativeWidgetWithParent(nullptr);
 }
 
 View* WidgetTest::GetMousePressedHandler(internal::RootView* root_view) {
@@ -90,6 +92,14 @@ void DesktopWidgetTest::SetUp() {
   WidgetTest::SetUp();
 }
 
+DesktopWidgetTestInteractive::DesktopWidgetTestInteractive() = default;
+DesktopWidgetTestInteractive::~DesktopWidgetTestInteractive() = default;
+
+void DesktopWidgetTestInteractive::SetUp() {
+  SetUpForInteractiveTests();
+  DesktopWidgetTest::SetUp();
+}
+
 TestDesktopWidgetDelegate::TestDesktopWidgetDelegate() : widget_(new Widget) {}
 
 TestDesktopWidgetDelegate::TestDesktopWidgetDelegate(Widget* widget)
@@ -104,7 +114,7 @@ TestDesktopWidgetDelegate::~TestDesktopWidgetDelegate() {
 void TestDesktopWidgetDelegate::InitWidget(Widget::InitParams init_params) {
   init_params.delegate = this;
   init_params.bounds = initial_bounds_;
-  widget_->Init(init_params);
+  widget_->Init(std::move(init_params));
 }
 
 void TestDesktopWidgetDelegate::WindowClosing() {
@@ -142,7 +152,7 @@ TestInitialFocusWidgetDelegate::TestInitialFocusWidgetDelegate(
   Widget::InitParams params(Widget::InitParams::TYPE_WINDOW);
   params.context = context;
   params.delegate = this;
-  GetWidget()->Init(params);
+  GetWidget()->Init(std::move(params));
   GetWidget()->GetContentsView()->AddChildView(view_);
 }
 
@@ -212,6 +222,33 @@ void WidgetDestroyedWaiter::Wait() {
 void WidgetDestroyedWaiter::OnWidgetDestroyed(Widget* widget) {
   widget->RemoveObserver(this);
   run_loop_.Quit();
+}
+
+WidgetVisibleWaiter::WidgetVisibleWaiter(Widget* widget) : widget_(widget) {}
+WidgetVisibleWaiter::~WidgetVisibleWaiter() = default;
+
+void WidgetVisibleWaiter::Wait() {
+  if (!widget_->IsVisible()) {
+    widget_observer_.Add(widget_);
+    run_loop_.Run();
+  }
+}
+
+void WidgetVisibleWaiter::OnWidgetVisibilityChanged(Widget* widget,
+                                                    bool visible) {
+  DCHECK_EQ(widget_, widget);
+  if (visible) {
+    widget_observer_.Remove(widget);
+    run_loop_.Quit();
+  }
+}
+
+void WidgetVisibleWaiter::OnWidgetDestroying(Widget* widget) {
+  DCHECK_EQ(widget_, widget);
+  ADD_FAILURE() << "Widget destroying before it became visible!";
+  // Even though the test failed, be polite and remove the observer so we
+  // don't crash with a UAF in the destructor.
+  widget_observer_.Remove(widget);
 }
 
 }  // namespace test

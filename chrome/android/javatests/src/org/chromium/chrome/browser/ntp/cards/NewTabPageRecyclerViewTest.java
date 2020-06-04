@@ -11,9 +11,10 @@ import static org.junit.Assert.assertTrue;
 import android.content.res.Resources;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.view.View;
+
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.RecyclerView.ViewHolder;
 
 import org.junit.After;
 import org.junit.Before;
@@ -26,8 +27,8 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.NewTabPageView;
@@ -38,7 +39,6 @@ import org.chromium.chrome.browser.ntp.snippets.KnownCategories;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.suggestions.ContentSuggestionsAdditionalAction;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -48,6 +48,7 @@ import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.chrome.test.util.browser.suggestions.mostvisited.FakeMostVisitedSites;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.TestTouchUtils;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -94,8 +95,7 @@ public class NewTabPageRecyclerViewTest {
     private FakeSuggestionsSource mSource;
 
     @Before
-    public void setUp() throws Exception {
-
+    public void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         FakeMostVisitedSites mostVisitedSites = new FakeMostVisitedSites();
@@ -135,15 +135,14 @@ public class NewTabPageRecyclerViewTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
-
     }
 
     @Test
     @MediumTest
     @Feature({"NewTabPage"})
-    public void testClickSuggestion() throws InterruptedException {
+    public void testClickSuggestion() {
         setSuggestionsAndWaitForUpdate(10);
         List<SnippetArticle> suggestions = mSource.getSuggestionsForCategory(TEST_CATEGORY);
 
@@ -155,13 +154,13 @@ public class NewTabPageRecyclerViewTest {
             TestTouchUtils.performClickOnMainSync(
                     InstrumentationRegistry.getInstrumentation(), suggestionView);
         });
-        assertEquals(suggestion.mUrl, mTab.getUrl());
+        assertEquals(suggestion.mUrl, mTab.getUrlString());
     }
 
     @Test
     @MediumTest
     @Feature({"NewTabPage"})
-    public void testAllDismissed() throws InterruptedException, TimeoutException {
+    public void testAllDismissed() throws TimeoutException {
         setSuggestionsAndWaitForUpdate(3);
         assertEquals(3, mSource.getSuggestionsForCategory(TEST_CATEGORY).size());
         assertEquals(1, mSource.getCategories().length);
@@ -321,10 +320,9 @@ public class NewTabPageRecyclerViewTest {
      * Dismiss the item at the given {@code position} and wait until it has been removed from the
      * {@link RecyclerView}.
      * @param position the adapter position to remove.
-     * @throws InterruptedException
      * @throws TimeoutException
      */
-    private void dismissItemAtPosition(int position) throws InterruptedException, TimeoutException {
+    private void dismissItemAtPosition(int position) throws TimeoutException {
         final ViewHolder viewHolder = getViewHolderAtPosition(position);
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { getRecyclerView().dismissItemWithAnimation(viewHolder); });

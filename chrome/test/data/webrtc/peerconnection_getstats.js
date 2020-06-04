@@ -117,13 +117,17 @@ let kRTCInboundRtpStreamStats = new RTCStats(kRTCReceivedRtpStreamStats, {
   remoteId: 'string',
   framesDecoded: 'number',
   keyFramesDecoded: 'number',
+  frameBitDepth: 'number',
   qpSum: 'number',
   totalDecodeTime: 'number',
+  totalInterFrameDelay: 'number',
+  totalSquaredInterFrameDelay: 'number',
   lastPacketReceivedTimestamp: 'number',
   averageRtcpInterval: 'number',
   fecPacketsReceived: 'number',
   fecPacketsDiscarded: 'number',
   bytesReceived: 'number',
+  headerBytesReceived: 'number',
   packetsFailedDecryption: 'number',
   packetsDuplicated: 'number',
   perDscpPacketsReceived: 'object',
@@ -131,7 +135,9 @@ let kRTCInboundRtpStreamStats = new RTCStats(kRTCReceivedRtpStreamStats, {
   firCount: 'number',
   pliCount: 'number',
   sliCount: 'number',
+  estimatedPlayoutTimestamp: 'number',
   fractionLost: 'number',  // Obsolete, moved to RTCRemoteInboundRtpStreamStats.
+  decoderImplementation: 'string',
 });
 addRTCStatsToWhitelist(
     Presence.MANDATORY, 'inbound-rtp', kRTCInboundRtpStreamStats);
@@ -179,8 +185,10 @@ let kRTCOutboundRtpStreamStats = new RTCStats(kRTCSentRtpStreamStats, {
   lastPacketSentTimestamp: 'number',
   retransmittedPacketsSent: 'number',
   retransmittedBytesSent: 'number',
+  headerBytesSent: 'number',
   targetBitrate: 'number',
   totalEncodedBytesTarget: 'number',
+  frameBitDepth: 'number',
   framesEncoded: 'number',
   keyFramesEncoded: 'number',
   qpSum: 'number',
@@ -189,11 +197,19 @@ let kRTCOutboundRtpStreamStats = new RTCStats(kRTCSentRtpStreamStats, {
   averageRtcpInterval: 'number',
   qualityLimitationReason: 'string',
   qualityLimitationDurations: 'object',
+  qualityLimitationResolutionChanges: 'number',
   perDscpPacketsSent: 'object',
   nackCount: 'number',
   firCount: 'number',
   pliCount: 'number',
   sliCount: 'number',
+  encoderImplementation: 'string',
+  rid: 'string',
+  frameWidth: 'number',
+  frameHeight: 'number',
+  framesPerSecond: 'number',
+  framesSent: 'number',
+  hugeFramesSent: 'number',
 });
 addRTCStatsToWhitelist(
     Presence.MANDATORY, 'outbound-rtp', kRTCOutboundRtpStreamStats);
@@ -242,6 +258,7 @@ addRTCStatsToWhitelist(
 const kRTCVideoSourceStats = new RTCStats(kRTCMediaSourceStats, {
   width: 'number',
   height: 'number',
+  bitDepth: 'number',
   frames: 'number',
   framesPerSecond: 'number',
 });
@@ -483,6 +500,10 @@ let kRTCTransportStats = new RTCStats(null, {
   selectedCandidatePairId: 'string',
   localCertificateId: 'string',
   remoteCertificateId: 'string',
+  tlsVersion: 'string',
+  dtlsCipher: 'string',
+  srtpCipher: 'string',
+  selectedCandidatePairChanges: 'number',
 });
 addRTCStatsToWhitelist(Presence.MANDATORY, 'transport', kRTCTransportStats);
 

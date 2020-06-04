@@ -21,7 +21,7 @@ import org.chromium.base.test.util.JniMocker;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
@@ -51,16 +51,15 @@ public class UsbChooserDialogTest {
 
     private class TestUsbChooserDialogJni implements UsbChooserDialog.Natives {
         @Override
-        public void onItemSelected(
-                UsbChooserDialog self, long nativeUsbChooserDialogAndroid, String deviceId) {
+        public void onItemSelected(long nativeUsbChooserDialogAndroid, String deviceId) {
             mSelectedDeviceId = deviceId;
         }
 
         @Override
-        public void onDialogCancelled(UsbChooserDialog self, long nativeUsbChooserDialogAndroid) {}
+        public void onDialogCancelled(long nativeUsbChooserDialogAndroid) {}
 
         @Override
-        public void loadUsbHelpPage(UsbChooserDialog self, long nativeUsbChooserDialogAndroid) {}
+        public void loadUsbHelpPage(long nativeUsbChooserDialogAndroid) {}
     }
 
     @Before
@@ -147,7 +146,7 @@ public class UsbChooserDialogTest {
 
     @Test
     @LargeTest
-    public void testSelectItem() throws InterruptedException {
+    public void testSelectItem() {
         Dialog dialog = mChooserDialog.mItemChooserDialog.getDialogForTesting();
 
         TextViewWithClickableSpans statusView =

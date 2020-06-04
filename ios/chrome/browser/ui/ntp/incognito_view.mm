@@ -7,20 +7,21 @@
 #include "components/google/core/common/google_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/application_context.h"
+#import "ios/chrome/browser/ui/ntp/incognito_cookies_view.h"
+#import "ios/chrome/browser/ui/page_info/features.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
 #include "ios/chrome/browser/ui/util/rtl_geometry.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
-#import "ios/chrome/browser/url_loading/url_loading_service.h"
 #import "ios/chrome/common/string_util.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
-#import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/referrer.h"
+#import "ios/chrome/common/ui/colors/dynamic_color_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/navigation/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -37,8 +38,6 @@ const CGFloat kStackViewDefaultSpacing = 20.0;
 const CGFloat kStackViewImageSpacing = 22.0;
 const CGFloat kLayoutGuideVerticalMargin = 8.0;
 const CGFloat kLayoutGuideMinHeight = 12.0;
-
-const int kLinkColor = 0x3A8FFF;
 
 // The URL for the the Learn More page shown on incognito new tab.
 // Taken from ntp_resource_cache.cc.
@@ -59,7 +58,9 @@ UIFont* TitleFont() {
 
 // Returns the color to use for body text.
 UIColor* BodyTextColor() {
-  return [UIColor colorWithWhite:1.0 alpha:0.7];
+  return color::DarkModeDynamicColor(
+      [UIColor colorNamed:kTextSecondaryColor], true,
+      [UIColor colorNamed:kTextSecondaryDarkColor]);
 }
 
 // Returns a font, scaled to the current dynamic type settings, that is suitable
@@ -139,14 +140,13 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
   NSArray<NSLayoutConstraint*>* _superViewConstraints;
 
   // The UrlLoadingService associated with this view.
-  UrlLoadingService* _urlLoadingService;  // weak
+  UrlLoadingBrowserAgent* _URLLoader;  // weak
 }
-
 - (instancetype)initWithFrame:(CGRect)frame
-            urlLoadingService:(UrlLoadingService*)urlLoadingService {
+                    URLLoader:(UrlLoadingBrowserAgent*)URLLoader {
   self = [super initWithFrame:frame];
   if (self) {
-    _urlLoadingService = urlLoadingService;
+    _URLLoader = URLLoader;
 
     self.alwaysBounceVertical = YES;
     // The bottom safe area is taken care of with the bottomUnsafeArea guides.
@@ -167,13 +167,21 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
     [_containerView addSubview:_stackView];
 
     // Incognito image.
-    UIImageView* incognitoImage = [[UIImageView alloc]
-        initWithImage:[UIImage imageNamed:@"incognito_icon"]];
-    [_stackView addArrangedSubview:incognitoImage];
+    UIImage* incognitoImage = [[UIImage imageNamed:@"incognito_icon"]
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    UIImageView* incognitoImageView =
+        [[UIImageView alloc] initWithImage:incognitoImage];
+    incognitoImageView.tintColor = color::DarkModeDynamicColor(
+        [UIColor colorNamed:kTextPrimaryColor], true,
+        [UIColor colorNamed:kTextPrimaryDarkColor]);
+    [_stackView addArrangedSubview:incognitoImageView];
     [_stackView setCustomSpacing:kStackViewImageSpacing
-                       afterView:incognitoImage];
+                       afterView:incognitoImageView];
 
     [self addTextSections];
+
+    if (base::FeatureList::IsEnabled(kPageInfoChromeGuard))
+      [self addCoockiesViewController];
 
     // |topGuide| and |bottomGuide| exist to vertically position the stackview
     // inside the container scrollview.
@@ -341,7 +349,7 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
   }
 
   if (IsSplitToolbarMode(self)) {
-    _bottomToolbarMarginHeight.constant = kAdaptiveToolbarHeight;
+    _bottomToolbarMarginHeight.constant = kSecondaryToolbarHeight;
   } else {
     _bottomToolbarMarginHeight.constant = 0;
   }
@@ -349,15 +357,19 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
 
 // Triggers a navigation to the help page.
 - (void)learnMoreButtonPressed {
-  _urlLoadingService->Load(UrlLoadParams::InCurrentTab(
+  _URLLoader->Load(UrlLoadParams::InCurrentTab(
       GetUrlWithLang(GURL(kLearnMoreIncognitoUrl))));
 }
 
 // Adds views containing the text of the incognito page to |_stackView|.
 - (void)addTextSections {
-  UIColor* titleTextColor = [UIColor whiteColor];
+  UIColor* titleTextColor =
+      color::DarkModeDynamicColor([UIColor colorNamed:kTextPrimaryColor], true,
+                                  [UIColor colorNamed:kTextPrimaryDarkColor]);
   UIColor* bodyTextColor = BodyTextColor();
-  UIColor* linkTextColor = UIColorFromRGB(kLinkColor);
+  UIColor* linkTextColor =
+      color::DarkModeDynamicColor([UIColor colorNamed:kBlueColor], true,
+                                  [UIColor colorNamed:kBlueDarkColor]);
 
   // Title.
   UILabel* titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -437,6 +449,11 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
          selector:@selector(contentSizeCategoryDidChange)
              name:UIContentSizeCategoryDidChangeNotification
            object:nil];
+}
+
+- (void)addCoockiesViewController {
+  IncognitoCookiesView* cookiesView = [[IncognitoCookiesView alloc] init];
+  [_stackView addArrangedSubview:cookiesView];
 }
 
 @end

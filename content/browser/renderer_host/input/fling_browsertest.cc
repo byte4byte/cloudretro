@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/input/synthetic_smooth_scroll_gesture.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
@@ -14,7 +15,8 @@
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/base_event_utils.h"
 
 using blink::WebInputEvent;
@@ -84,7 +86,7 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
 
   void LoadURL(const std::string& page_data) {
     const GURL data_url("data:text/html," + page_data);
-    NavigateToURL(shell(), data_url);
+    EXPECT_TRUE(NavigateToURL(shell(), data_url));
 
     RenderWidgetHostImpl* host = GetWidgetHost();
     host->GetView()->SetSize(gfx::Size(400, 400));
@@ -116,7 +118,7 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
       deleted_observer.WaitUntilDeleted();
     }
 
-    WaitForHitTestDataOrChildSurfaceReady(iframe_node->current_frame_host());
+    WaitForHitTestData(iframe_node->current_frame_host());
     FrameTreeVisualizer visualizer;
     ASSERT_EQ(
         " Site A ------------ proxies for B\n"
@@ -142,16 +144,16 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
         parent_render_widget_host
             ? std::make_unique<InputMsgWatcher>(
                   parent_render_widget_host,
-                  blink::WebInputEvent::kGestureScrollBegin)
+                  blink::WebInputEvent::Type::kGestureScrollBegin)
             : std::make_unique<InputMsgWatcher>(
                   render_widget_host,
-                  blink::WebInputEvent::kGestureScrollBegin);
+                  blink::WebInputEvent::Type::kGestureScrollBegin);
     blink::WebGestureEvent gesture_scroll_begin(
-        blink::WebGestureEvent::kGestureScrollBegin,
+        blink::WebGestureEvent::Type::kGestureScrollBegin,
         blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow());
     gesture_scroll_begin.SetSourceDevice(blink::WebGestureDevice::kTouchscreen);
     gesture_scroll_begin.data.scroll_begin.delta_hint_units =
-        ui::input_types::ScrollGranularity::kScrollByPrecisePixel;
+        ui::ScrollGranularity::kScrollByPrecisePixel;
     gesture_scroll_begin.data.scroll_begin.delta_x_hint = fling_velocity.x();
     gesture_scroll_begin.data.scroll_begin.delta_y_hint = fling_velocity.y();
     const gfx::PointF scroll_location_in_widget(1, 1);
@@ -170,7 +172,7 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
 
     //  Send a GFS.
     blink::WebGestureEvent gesture_fling_start(
-        blink::WebGestureEvent::kGestureFlingStart,
+        blink::WebGestureEvent::Type::kGestureFlingStart,
         blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow());
     gesture_fling_start.SetSourceDevice(blink::WebGestureDevice::kTouchscreen);
     gesture_fling_start.data.fling_start.velocity_x = fling_velocity.x();
@@ -191,14 +193,14 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
         parent_render_widget_host
             ? std::make_unique<InputMsgWatcher>(
                   parent_render_widget_host,
-                  blink::WebInputEvent::kGestureScrollBegin)
+                  blink::WebInputEvent::Type::kGestureScrollBegin)
             : std::make_unique<InputMsgWatcher>(
                   render_widget_host,
-                  blink::WebInputEvent::kGestureScrollBegin);
+                  blink::WebInputEvent::Type::kGestureScrollBegin);
     blink::WebMouseWheelEvent wheel_event =
         SyntheticWebMouseWheelEventBuilder::Build(
             10, 10, fling_velocity.x() / 1000, fling_velocity.y() / 1000, 0,
-            true);
+            ui::ScrollGranularity::kScrollByPrecisePixel);
     wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
     const gfx::PointF position_in_widget(1, 1);
     const gfx::PointF position_in_root =
@@ -216,7 +218,7 @@ class BrowserSideFlingBrowserTest : public ContentBrowserTest {
 
     //  Send a GFS.
     blink::WebGestureEvent gesture_fling_start(
-        blink::WebGestureEvent::kGestureFlingStart,
+        blink::WebGestureEvent::Type::kGestureFlingStart,
         blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow());
     gesture_fling_start.SetSourceDevice(blink::WebGestureDevice::kTouchpad);
     gesture_fling_start.data.fling_start.velocity_x = fling_velocity.x();
@@ -309,7 +311,7 @@ IN_PROC_BROWSER_TEST_F(
   // Fling upward and wait for the generated GSE to arrive. Then check that the
   // RWHV has stopped the fling.
   auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-      GetWidgetHost(), blink::WebInputEvent::kGestureScrollEnd);
+      GetWidgetHost(), blink::WebInputEvent::Type::kGestureScrollEnd);
   gfx::Vector2d fling_velocity(0, 2000);
   SimulateTouchscreenFling(
       GetWidgetHost(), nullptr /*parent_render_widget_host*/, fling_velocity);
@@ -324,7 +326,7 @@ IN_PROC_BROWSER_TEST_F(
   // Fling upward and wait for the generated GSE to arrive. Then check that the
   // RWHV has stopped the fling.
   auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-      GetWidgetHost(), blink::WebInputEvent::kGestureScrollEnd);
+      GetWidgetHost(), blink::WebInputEvent::Type::kGestureScrollEnd);
   gfx::Vector2d fling_velocity(0, 2000);
   SimulateTouchpadFling(GetWidgetHost(), nullptr /*parent_render_widget_host*/,
                         fling_velocity);
@@ -346,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
   // Navigate to a second page with the same domain.
   GURL second_url(
       embedded_test_server()->GetURL("a.com", "/scrollable_page.html"));
-  NavigateToURL(shell(), second_url);
+  EXPECT_TRUE(NavigateToURL(shell(), second_url));
   SynchronizeThreads();
 
   // Wait for 100ms. Then check that the second page has not scrolled.
@@ -388,7 +390,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
 }
 
 // Touchpad fling only happens on ChromeOS.
-#if defined(CHROMEOS)
+#if defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
                        TouchpadInertialGSUsBubbleFromOOPIF) {
   LoadPageWithOOPIF();
@@ -406,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
   SimulateTouchpadFling(child_view_->host(), GetWidgetHost(), fling_velocity);
   WaitForFrameScroll(GetRootNode(), 15, true /* upward */);
 }
-#endif  // defined(CHROMEOS)
+#endif  // defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
                        InertialGSEGetsBubbledFromOOPIF) {
@@ -428,9 +430,9 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
 
   // Send a GFC to the child and wait for the Generated GSE to get bubbled.
   auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-      GetWidgetHost(), blink::WebInputEvent::kGestureScrollEnd);
+      GetWidgetHost(), blink::WebInputEvent::Type::kGestureScrollEnd);
   blink::WebGestureEvent gesture_fling_cancel(
-      blink::WebGestureEvent::kGestureFlingCancel,
+      blink::WebGestureEvent::Type::kGestureFlingCancel,
       blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow());
   gesture_fling_cancel.SetSourceDevice(blink::WebGestureDevice::kTouchscreen);
 
@@ -468,7 +470,7 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
 
   // Fling and wait for the parent to scroll up.
   auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-      GetWidgetHost(), blink::WebInputEvent::kGestureScrollEnd);
+      GetWidgetHost(), blink::WebInputEvent::Type::kGestureScrollEnd);
   SyntheticSmoothScrollGestureParams params;
   params.gesture_source_type = SyntheticGestureParams::TOUCH_INPUT;
   const gfx::PointF location_in_widget(10, 10);
@@ -501,6 +503,61 @@ IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
   EXPECT_TRUE(
       router->forced_last_fling_start_target_to_stop_flinging_for_test());
 }
+
+// Check that fling controller does not generate fling curve when view is
+// destroyed.
+IN_PROC_BROWSER_TEST_F(BrowserSideFlingBrowserTest,
+                       NoFlingWhenViewIsDestroyed) {
+  LoadURL(kBrowserFlingDataURL);
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  GetWidgetHost()->GetView()->Destroy();
+  SimulateTouchscreenFling(GetWidgetHost());
+
+  // As the view is destroyed, there shouldn't be any active fling.
+  EXPECT_FALSE(static_cast<InputRouterImpl*>(GetWidgetHost()->input_router())
+                   ->IsFlingActiveForTest());
+
+  EXPECT_EQ(
+      0, EvalJs(root->current_frame_host(), "window.scrollY").ExtractDouble());
+}
 #endif  // !defined(OS_MACOSX)
+
+class PhysicsBasedFlingCurveBrowserTest : public BrowserSideFlingBrowserTest {
+ public:
+  PhysicsBasedFlingCurveBrowserTest() {}
+  ~PhysicsBasedFlingCurveBrowserTest() override {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    scoped_feature_list_.InitWithFeatures(
+        {features::kExperimentalFlingAnimation}, {});
+    IsolateAllSitesForTesting(command_line);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  DISALLOW_COPY_AND_ASSIGN(PhysicsBasedFlingCurveBrowserTest);
+};
+
+IN_PROC_BROWSER_TEST_F(PhysicsBasedFlingCurveBrowserTest,
+                       TargetScrollOffsetForFlingAnimation) {
+  LoadPageWithOOPIF();
+
+  // Higher value of fling velocity will make sure that the scroll distance
+  // calculated exceeds the upper bound.
+  gfx::Vector2d fling_velocity(0, -6000.0);
+
+  // Simulate fling on OOPIF
+  SimulateTouchscreenFling(child_view_->host(), nullptr, fling_velocity);
+
+  // If the viewport size required for fling curve generation
+  // (PhysicsBasedFlingCurveBrowser) is based on RenderWidget, test will time
+  // out as upper bound calculated will be 3 * size of iframe window(3 * 100)
+  // and thus it will not scroll beyond it. Viewport size should be based on
+  // root RenderWidgetHost.
+  WaitForFrameScroll(GetChildNode(), 400);
+}
 
 }  // namespace content

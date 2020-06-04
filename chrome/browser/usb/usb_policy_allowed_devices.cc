@@ -10,8 +10,6 @@
 #include "base/bind.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
-#include "chrome/common/pref_names.h"
-#include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
 #include "services/device/public/mojom/usb_manager.mojom.h"
@@ -43,26 +41,17 @@ bool FindMatchInSet(
 
 }  // namespace
 
-UsbPolicyAllowedDevices::UsbPolicyAllowedDevices(
-    PrefService* profile_prefs,
-    PrefService* local_state_prefs) {
-  // Add observers for the prefs managed by user and device policy to call
-  // CreateOrUpdateMap when the value is changed. The lifetimes of the
-  // PrefChangeRegistrars are managed by this class, therefore it is safe to
-  // use base::Unretained here.
-  const base::Closure change_callback = base::BindRepeating(
-      &UsbPolicyAllowedDevices::CreateOrUpdateMap, base::Unretained(this));
-
-  profile_pref_change_registrar_.Init(profile_prefs);
-  profile_pref_change_registrar_.Add(prefs::kManagedWebUsbAllowDevicesForUrls,
-                                     change_callback);
-#if defined(OS_CHROMEOS)
-  if (local_state_prefs) {  // Can be nullptr in tests.
-    local_state_pref_change_registrar_.Init(local_state_prefs);
-    local_state_pref_change_registrar_.Add(
-        prefs::kDeviceWebUsbAllowDevicesForUrls, change_callback);
-  }
-#endif  // defined(OS_CHROMEOS)
+UsbPolicyAllowedDevices::UsbPolicyAllowedDevices(PrefService* pref_service,
+                                                 const char* pref_name)
+    : pref_name_(pref_name) {
+  pref_change_registrar_.Init(pref_service);
+  // Add an observer for |pref_name| to call CreateOrUpdateMap when the value is
+  // changed. The lifetime of |pref_change_registrar_| is managed by this class,
+  // therefore it is safe to use base::Unretained here.
+  pref_change_registrar_.Add(
+      pref_name,
+      base::BindRepeating(&UsbPolicyAllowedDevices::CreateOrUpdateMap,
+                          base::Unretained(this)));
 
   CreateOrUpdateMap();
 }
@@ -103,24 +92,10 @@ bool UsbPolicyAllowedDevices::IsDeviceAllowed(
 }
 
 void UsbPolicyAllowedDevices::CreateOrUpdateMap() {
+  const base::Value* pref_value =
+      pref_change_registrar_.prefs()->Get(pref_name_);
   usb_device_ids_to_urls_.clear();
 
-#if defined(OS_CHROMEOS)
-  if (local_state_pref_change_registrar_.prefs()) {  // Can be nullptr in tests.
-    const base::Value* local_state_pref_value =
-        local_state_pref_change_registrar_.prefs()->Get(
-            prefs::kDeviceWebUsbAllowDevicesForUrls);
-    CreateOrUpdateMapFromPrefValue(local_state_pref_value);
-  }
-#endif  // defined(OS_CHROMEOS)
-  const base::Value* profile_pref_value =
-      profile_pref_change_registrar_.prefs()->Get(
-          prefs::kManagedWebUsbAllowDevicesForUrls);
-  CreateOrUpdateMapFromPrefValue(profile_pref_value);
-}
-
-void UsbPolicyAllowedDevices::CreateOrUpdateMapFromPrefValue(
-    const base::Value* pref_value) {
   // A policy has not been assigned.
   if (!pref_value) {
     return;

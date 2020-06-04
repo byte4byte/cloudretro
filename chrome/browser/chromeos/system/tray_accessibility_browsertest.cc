@@ -32,6 +32,7 @@
 #include "components/user_manager/user_manager.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/accessibility_switches.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/label.h"
@@ -54,8 +55,13 @@ namespace {
 // Changing accessibility settings may change preferences, so these helpers spin
 // the message loop to ensure ash sees the change.
 
-void SetMagnifierEnabled(bool enabled) {
+void SetScreenMagnifierEnabled(bool enabled) {
   MagnificationManager::Get()->SetMagnifierEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void SetDockedMagnifierEnabled(bool enabled) {
+  MagnificationManager::Get()->SetDockedMagnifierEnabled(enabled);
   base::RunLoop().RunUntilIdle();
 }
 
@@ -66,6 +72,19 @@ void EnableSpokenFeedback(bool enabled) {
 
 void EnableSelectToSpeak(bool enabled) {
   AccessibilityManager::Get()->SetSelectToSpeakEnabled(enabled);
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableDictation(bool enabled) {
+  bool already_enabled = AccessibilityManager::Get()->IsDictationEnabled();
+  if (enabled == already_enabled)
+    return;
+  AccessibilityManager::Get()->ToggleDictation();
+  base::RunLoop().RunUntilIdle();
+}
+
+void EnableSwitchAccess(bool enabled) {
+  AccessibilityManager::Get()->SetSwitchAccessEnabled(enabled);
   base::RunLoop().RunUntilIdle();
 }
 
@@ -134,6 +153,8 @@ class TrayAccessibilityTest
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
     tray_test_api_ = ash::SystemTrayTestApi::Create();
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        ::switches::kEnableExperimentalAccessibilitySwitchAccess);
   }
 
   void SetUpInProcessBrowserTestFixture() override {
@@ -191,7 +212,13 @@ class TrayAccessibilityTest
   std::unique_ptr<ash::SystemTrayTestApi> tray_test_api_;
 };
 
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
+// Fails on linux-chromeos-dbg see crbug/1027919.
+#if defined(OS_LINUX)
+#define MAYBE_ShowMenu DISABLED_ShowMenu
+#else
+#define MAYBE_ShowMenu ShowMenu
+#endif
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, MAYBE_ShowMenu) {
   SetShowAccessibilityOptionsInSystemTrayMenu(false);
 
   // Confirms that the menu is hidden.
@@ -210,9 +237,15 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   EXPECT_FALSE(IsMenuButtonVisible());
 
   // Toggling screen magnifier changes the visibility of the menu.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  SetScreenMagnifierEnabled(false);
+  EXPECT_FALSE(IsMenuButtonVisible());
+
+  // Toggling docked magnifier changes the visibility of the menu.
+  SetDockedMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(false);
   EXPECT_FALSE(IsMenuButtonVisible());
 
   // Toggling autoclick changes the visibility of the menu.
@@ -269,14 +302,32 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   EnableSelectToSpeak(false);
   EXPECT_FALSE(IsMenuButtonVisible());
 
+  // Toggling dictation changes the visibility of the menu.
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_FALSE(IsMenuButtonVisible());
+
+  // Toggling switch access changes the visibility of the menu.
+  EnableSwitchAccess(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
+  EXPECT_FALSE(IsMenuButtonVisible());
+
   // Enabling all accessibility features.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSpokenFeedback(true);
   EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
   EnableSelectToSpeak(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableAutoclick(true);
   EXPECT_TRUE(IsMenuButtonVisible());
@@ -302,9 +353,15 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSelectToSpeak(false);
   EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(false);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  SetScreenMagnifierEnabled(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(false);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableLargeCursor(false);
   EXPECT_TRUE(IsMenuButtonVisible());
@@ -320,7 +377,13 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   EXPECT_FALSE(IsMenuButtonVisible());
 }
 
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
+// Fails on linux-chromeos-dbg see crbug/1027919.
+#if defined(OS_LINUX)
+#define MAYBE_ShowMenuWithShowMenuOption DISABLED_ShowMenuWithShowMenuOption
+#else
+#define MAYBE_ShowMenuWithShowMenuOption ShowMenuWithShowMenuOption
+#endif
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, MAYBE_ShowMenuWithShowMenuOption) {
   SetShowAccessibilityOptionsInSystemTrayMenu(true);
 
   // Confirms that the menu is visible.
@@ -339,9 +402,15 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
   EXPECT_TRUE(IsMenuButtonVisible());
 
   // The menu remains visible regardless of toggling screen magnifier.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  SetScreenMagnifierEnabled(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling docked magnifier.
+  SetDockedMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(false);
   EXPECT_TRUE(IsMenuButtonVisible());
 
   // The menu remains visible regardless of toggling autoclick.
@@ -398,14 +467,32 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
   EnableSelectToSpeak(false);
   EXPECT_TRUE(IsMenuButtonVisible());
 
+  // The menu remains visible regardless of toggling dictation.
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling switch access.
+  EnableSwitchAccess(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
   // Enabling all accessibility features.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSpokenFeedback(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSelectToSpeak(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableAutoclick(true);
   EXPECT_TRUE(IsMenuButtonVisible());
@@ -431,9 +518,15 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSelectToSpeak(false);
   EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(false);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  SetScreenMagnifierEnabled(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(false);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableLargeCursor(false);
   EXPECT_TRUE(IsMenuButtonVisible());
@@ -473,7 +566,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
   EXPECT_TRUE(IsMenuButtonVisible());
 }
 
-// Verify that the accessiblity system detailed menu remains open when an item
+// Verify that the accessibility system detailed menu remains open when an item
 // is selected or deselected.
 // Do not use a feature which requires an enable/disable confirmation dialog
 // here, as the dialogs change focus and close the detail menu.
@@ -532,9 +625,33 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityLoginTest,
   EXPECT_TRUE(IsMenuButtonVisible());
 
   // The menu remains visible regardless of toggling screen magnifier.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  SetScreenMagnifierEnabled(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling docked magnifier.
+  SetDockedMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling select-to-speak.
+  EnableSelectToSpeak(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSelectToSpeak(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling dictation.
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+
+  // The menu remains visible regardless of toggling switch access.
+  EnableSwitchAccess(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
   EXPECT_TRUE(IsMenuButtonVisible());
 
   // The menu remains visible regardless of toggling on-screen keyboard.
@@ -580,11 +697,19 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityLoginTest,
   EXPECT_TRUE(IsMenuButtonVisible());
 
   // Enabling all accessibility features.
-  SetMagnifierEnabled(true);
+  SetScreenMagnifierEnabled(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetDockedMagnifierEnabled(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableSpokenFeedback(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSelectToSpeak(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(true);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(true);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableVirtualKeyboard(true);
   EXPECT_TRUE(IsMenuButtonVisible());
@@ -606,7 +731,13 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityLoginTest,
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableHighContrast(false);
   EXPECT_TRUE(IsMenuButtonVisible());
-  SetMagnifierEnabled(false);
+  EnableSelectToSpeak(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableDictation(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  EnableSwitchAccess(false);
+  EXPECT_TRUE(IsMenuButtonVisible());
+  SetScreenMagnifierEnabled(false);
   EXPECT_TRUE(IsMenuButtonVisible());
   EnableLargeCursor(false);
   EXPECT_TRUE(IsMenuButtonVisible());

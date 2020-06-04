@@ -18,11 +18,11 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -57,7 +57,7 @@ public class RecentTabsPageTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         leaveRecentTabsPage();
         RecentTabsManager.setRecentlyClosedTabManagerForTests(null);
     }
@@ -65,7 +65,7 @@ public class RecentTabsPageTest {
     @Test
     @MediumTest
     @Feature({"RecentTabsPage"})
-    public void testRecentlyClosedTabs() throws InterruptedException, ExecutionException {
+    public void testRecentlyClosedTabs() throws ExecutionException {
         // Set a recently closed tab and confirm a view is rendered for it.
         List<RecentlyClosedTab> tabs = setRecentlyClosedTabs(1);
         Assert.assertEquals(1, mManager.getRecentlyClosedTabs(1).size());
@@ -93,7 +93,7 @@ public class RecentTabsPageTest {
         return tabs;
     }
 
-    private RecentTabsPage loadRecentTabsPage() throws InterruptedException {
+    private RecentTabsPage loadRecentTabsPage() {
         mActivityTestRule.loadUrl(UrlConstants.RECENT_TABS_URL);
         CriteriaHelper.pollUiThread(new Criteria("RecentTabsPage never fully loaded") {
             @Override
@@ -108,7 +108,7 @@ public class RecentTabsPageTest {
     /**
      * Leaves and destroys the {@link RecentTabsPage} by navigating the tab to {@code about:blank}.
      */
-    private void leaveRecentTabsPage() throws InterruptedException {
+    private void leaveRecentTabsPage() {
         mActivityTestRule.loadUrl(ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         CriteriaHelper.pollUiThread(new Criteria("RecentTabsPage is still there") {
             @Override

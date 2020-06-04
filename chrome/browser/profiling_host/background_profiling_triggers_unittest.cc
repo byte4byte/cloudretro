@@ -15,8 +15,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "services/resource_coordinator/public/cpp/memory_instrumentation/coordinator.h"
+#include "content/public/test/browser_task_environment.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,25 +66,15 @@ void PopulateMetrics(GlobalMemoryDumpPtr* global_dump,
 class FakeBackgroundProfilingTriggers : public BackgroundProfilingTriggers {
  public:
   explicit FakeBackgroundProfilingTriggers(ProfilingProcessHost* host)
-      : BackgroundProfilingTriggers(host),
-        was_report_triggered_(false),
-        should_trigger_control_report_(false) {}
+      : BackgroundProfilingTriggers(host), was_report_triggered_(false) {}
 
   using BackgroundProfilingTriggers::OnReceivedMemoryDump;
 
   void Reset() {
-    should_trigger_control_report_ = false;
     was_report_triggered_ = false;
     pmf_at_last_upload_.clear();
   }
   bool WasReportTriggered() const { return was_report_triggered_; }
-
-  bool ShouldTriggerControlReport(int content_process_type) const override {
-    return should_trigger_control_report_;
-  }
-  void SetControlTrigger(bool trigger_control_report) {
-    should_trigger_control_report_ = trigger_control_report;
-  }
 
  private:
   void TriggerMemoryReport(std::string trigger_name) override {
@@ -93,7 +82,6 @@ class FakeBackgroundProfilingTriggers : public BackgroundProfilingTriggers {
   }
 
   bool was_report_triggered_;
-  bool should_trigger_control_report_;
 };
 
 class BackgroundProfilingTriggersTest : public testing::Test {
@@ -117,7 +105,7 @@ class BackgroundProfilingTriggersTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager testing_profile_manager_;
 
   ProfilingProcessHost host_;
@@ -206,15 +194,6 @@ TEST_F(BackgroundProfilingTriggersTest, OnReceivedMemoryDump_ProfiledPids) {
   dump = memory_instrumentation::mojom::GlobalMemoryDump::New();
   PopulateMetrics(&dump, 1, ProcessType::GPU, kProcessMallocTriggerKb,
                   kProcessMallocTriggerKb, kProcessMallocTriggerKb);
-  triggers_.OnReceivedMemoryDump(profiled_pids_, true,
-                                 GlobalMemoryDump::MoveFrom(std::move(dump)));
-  EXPECT_TRUE(triggers_.WasReportTriggered());
-
-  // Ensure control trigger work on browser process, no matter memory usage.
-  triggers_.Reset();
-  triggers_.SetControlTrigger(true);
-  dump = memory_instrumentation::mojom::GlobalMemoryDump::New();
-  PopulateMetrics(&dump, 1, ProcessType::BROWSER, 1, 1, 1);
   triggers_.OnReceivedMemoryDump(profiled_pids_, true,
                                  GlobalMemoryDump::MoveFrom(std::move(dump)));
   EXPECT_TRUE(triggers_.WasReportTriggered());

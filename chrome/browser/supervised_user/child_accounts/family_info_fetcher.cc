@@ -14,6 +14,7 @@
 #include "chrome/browser/supervised_user/child_accounts/kids_management_api.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "net/base/load_flags.h"
@@ -83,10 +84,12 @@ FamilyInfoFetcher::FamilyMember::~FamilyMember() {
 
 FamilyInfoFetcher::FamilyInfoFetcher(
     Consumer* consumer,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : consumer_(consumer),
-      primary_account_id_(identity_manager->GetPrimaryAccountId()),
+      // This feature doesn't care about browser sync consent.
+      primary_account_id_(identity_manager->GetPrimaryAccountId(
+          signin::ConsentLevel::kNotRequired)),
       identity_manager_(identity_manager),
       url_loader_factory_(std::move(url_loader_factory)),
       access_token_expired_(false) {}
@@ -123,17 +126,19 @@ void FamilyInfoFetcher::StartGetFamilyMembers() {
 
 void FamilyInfoFetcher::StartFetchingAccessToken() {
   OAuth2AccessTokenManager::ScopeSet scopes{kScope};
-  access_token_fetcher_ = std::make_unique<
-      identity::PrimaryAccountAccessTokenFetcher>(
-      "family_info_fetcher", identity_manager_, scopes,
-      base::BindOnce(&FamilyInfoFetcher::OnAccessTokenFetchComplete,
-                     base::Unretained(this)),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+  access_token_fetcher_ =
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+          "family_info_fetcher", identity_manager_, scopes,
+          base::BindOnce(&FamilyInfoFetcher::OnAccessTokenFetchComplete,
+                         base::Unretained(this)),
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
+          // This feature doesn't care about browser sync consent.
+          signin::ConsentLevel::kNotRequired);
 }
 
 void FamilyInfoFetcher::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   access_token_fetcher_.reset();
   if (error.state() != GoogleServiceAuthError::NONE) {
     DLOG(WARNING) << "Failed to get an access token: " << error.ToString();
@@ -174,8 +179,7 @@ void FamilyInfoFetcher::OnAccessTokenFetchComplete(
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url;
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->headers.SetHeader(
       net::HttpRequestHeaders::kAuthorization,
       base::StringPrintf(supervised_users::kAuthorizationHeaderFormat,

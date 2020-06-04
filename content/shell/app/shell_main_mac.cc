@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> 
 
 #include <memory>
 
@@ -68,6 +69,14 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "dirname %s: %s\n", exec_path.get(), strerror(errno));
     abort();
   }
+  
+  static char cdir[2048];
+  strcpy(cdir, "/Users/patrick/byte4byte/cloudretro/src/out/Default/libeclaunch.dylib");
+  //strcat(cdir, "/../../../");
+  //chdir(cdir);
+  if (! dlopen(cdir, RTLD_NOW | RTLD_GLOBAL)) puts(cdir);
+  //puts(cdir);
+  //chdir(cdir);
 
   const size_t parent_dir_len = strlen(parent_dir);
   const size_t rel_path_len = strlen(rel_path);

@@ -7,7 +7,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "ios/chrome/browser/overlays/public/web_content_area/java_script_dialog_source.h"
-#include "ios/web/public/java_script_dialog_presenter.h"
+#include "ios/web/public/ui/java_script_dialog_presenter.h"
 
 class OverlayResponse;
 
@@ -18,6 +18,9 @@ class OverlayJavaScriptDialogPresenter final
  public:
   OverlayJavaScriptDialogPresenter();
   ~OverlayJavaScriptDialogPresenter() override;
+
+  // Notifies the presenter that the presenter that its tab is being closed.
+  void Close();
 
   // web::JavaScriptDialogPresenter:
   void RunJavaScriptDialog(web::WebState* web_state,
@@ -37,6 +40,7 @@ class OverlayJavaScriptDialogPresenter final
 
   DISALLOW_COPY_AND_ASSIGN(OverlayJavaScriptDialogPresenter);
 
+  bool closing_ = false;
   base::WeakPtrFactory<OverlayJavaScriptDialogPresenter> weak_factory_;
 };
 

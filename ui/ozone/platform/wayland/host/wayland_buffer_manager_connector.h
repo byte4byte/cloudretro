@@ -7,7 +7,9 @@
 
 #include "ui/ozone/public/gpu_platform_support_host.h"
 
-#include "ui/ozone/public/interfaces/wayland/wayland_buffer_manager.mojom.h"
+#include "base/threading/thread_checker.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "ui/ozone/public/mojom/wayland/wayland_buffer_manager.mojom.h"
 
 namespace ui {
 
@@ -19,7 +21,7 @@ class WaylandBufferManagerHost;
 class WaylandBufferManagerConnector : public GpuPlatformSupportHost {
  public:
   explicit WaylandBufferManagerConnector(
-      WaylandBufferManagerHost* buffer_manager);
+      WaylandBufferManagerHost* buffer_manager_host);
   ~WaylandBufferManagerConnector() override;
 
   // GpuPlatformSupportHost:
@@ -38,19 +40,29 @@ class WaylandBufferManagerConnector : public GpuPlatformSupportHost {
       GpuHostTerminateCallback terminate_callback) override;
 
  private:
+  void OnGpuServiceLaunchedOnUI(int host_id,
+                                GpuHostTerminateCallback terminate_callback);
+
   void OnBufferManagerHostPtrBinded(
-      ozone::mojom::WaylandBufferManagerHostPtr buffer_manager_host_ptr) const;
+      mojo::PendingRemote<ozone::mojom::WaylandBufferManagerHost>
+          buffer_manager_host) const;
 
   void OnTerminateGpuProcess(std::string message);
 
-  // Non-owning pointer, which is used to bind a mojo pointer to the
+  // Non-owned pointer, which is used to bind a mojo pointer to the
   // WaylandBufferManagerHost.
-  WaylandBufferManagerHost* const buffer_manager_;
+  WaylandBufferManagerHost* const buffer_manager_host_;
 
   GpuHostBindInterfaceCallback binder_;
   GpuHostTerminateCallback terminate_callback_;
 
   scoped_refptr<base::SingleThreadTaskRunner> io_runner_;
+
+  // Owned by the ui thread.
+  int host_id_ = -1;
+
+  THREAD_CHECKER(ui_thread_checker_);
+  THREAD_CHECKER(io_thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(WaylandBufferManagerConnector);
 };

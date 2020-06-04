@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {AnchorAlignment} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.m.js';
+// #import 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.m.js';
+//
+// #import {eventToPromise, flushTasks} from '../test_util.m.js';
+// #import {getDeepActiveElement} from 'chrome://resources/js/util.m.js';
+// #import {keyDownOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+// #import {isMac, isWindows} from 'chrome://resources/js/cr.m.js';
+// #import {Polymer, html} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// clang-format on
+
 /**
  * @fileoverview Tests for cr-action-menu element. Runs as an interactive UI
  * test, since many of these tests check focus behavior.
@@ -27,8 +38,9 @@ suite('CrActionMenu', function() {
 
   /** @override */
   suiteSetup(() => {
-    return PolymerTest.importHtml(
-        'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.html');
+    /* #ignore */ return PolymerTest.importHtml(
+        /* #ignore */ 'chrome://resources/cr_elements/cr_checkbox/' +
+        /* #ignore */ 'cr_checkbox.html');
   });
 
   setup(function() {
@@ -191,7 +203,7 @@ suite('CrActionMenu', function() {
     item.classList.add('dropdown-item');
     menu.insertBefore(item, items[0]);
     menu.showAt(dots);
-    await PolymerTest.flushTasks();
+    await test_util.flushTasks();
 
     down();
     assertEquals(item, getDeepActiveElement());
@@ -235,10 +247,31 @@ suite('CrActionMenu', function() {
       menu.showAt(dots);
       assertTrue(dialog.open);
 
+      let anchorHasFocus = false;
+      let tabkeyCloseEventFired = false;
+
+      const checkTestDone = () => {
+        assertFalse(dialog.open);
+        if (key !== 'Tab') {
+          resolve();
+        } else if (anchorHasFocus && tabkeyCloseEventFired) {
+          resolve();
+        }
+      };
+
       // Check that focus returns to the anchor element.
-      dots.addEventListener('focus', resolve);
+      dots.addEventListener('focus', () => {
+        anchorHasFocus = true;
+        checkTestDone();
+      });
+
+      // Check that a Tab key close fires a custom event.
+      menu.addEventListener('tabkeyclose', () => {
+        tabkeyCloseEventFired = true;
+        checkTestDone();
+      });
+
       MockInteractions.keyDownOn(menu, key, [], key);
-      assertFalse(dialog.open);
     });
   }
 
@@ -262,7 +295,7 @@ suite('CrActionMenu', function() {
     menu.showAt(dots);
     items[0].focus();
     dispatchMouseoverEvent(menu);
-    assertEquals(dialog, getDeepActiveElement());
+    assertEquals(dialog.querySelector('[role="menu"]'), getDeepActiveElement());
   });
 
   test('moving mouse on a disabled item should focus the menu', () => {
@@ -270,7 +303,7 @@ suite('CrActionMenu', function() {
     items[2].toggleAttribute('disabled', true);
     items[0].focus();
     dispatchMouseoverEvent(items[2]);
-    assertEquals(dialog, getDeepActiveElement());
+    assertEquals(dialog.querySelector('[role="menu"]'), getDeepActiveElement());
   });
 
   test('mouse movements should override keyboard focus', () => {
@@ -289,12 +322,12 @@ suite('CrActionMenu', function() {
     items[1].setAttribute('role', 'checkbox');
     menu.showAt(dots);
 
-    await PolymerTest.flushTasks();
+    await test_util.flushTasks();
     assertEquals('menuitem', items[0].getAttribute('role'));
     assertEquals('checkbox', items[1].getAttribute('role'));
 
     menu.insertBefore(newItem, items[0]);
-    await PolymerTest.flushTasks();
+    await test_util.flushTasks();
     assertEquals('menuitem', newItem.getAttribute('role'));
   });
 
@@ -396,7 +429,7 @@ suite('CrActionMenu', function() {
 
         dots.style.marginLeft = '800px';
 
-        let dotsRect = dots.getBoundingClientRect();
+        const dotsRect = dots.getBoundingClientRect();
 
         // Anchored at right-top by default.
         menu.showAt(dots);
@@ -489,7 +522,7 @@ suite('CrActionMenu', function() {
         </style>
         <test-element></test-element>`;
 
-      testElement = document.querySelector('test-element');
+      const testElement = document.querySelector('test-element');
       menu = testElement.root.querySelector('cr-action-menu');
       dialog = menu.getDialog();
       dots = testElement.root.querySelector('#dots');

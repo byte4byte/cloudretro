@@ -9,13 +9,17 @@
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/property_registration.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
+#include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const Document& document)
-    : CustomProperty(name, PropertyRegistration::From(&document, name)) {}
+    : CustomProperty(
+          name,
+          PropertyRegistration::From(document.GetExecutionContext(), name)) {}
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const PropertyRegistry* registry)
@@ -65,8 +69,17 @@ void CustomProperty::ApplyInherit(StyleResolverState& state) const {
 
 void CustomProperty::ApplyValue(StyleResolverState& state,
                                 const CSSValue& value) const {
+  if (value.IsInvalidVariableValue()) {
+    DCHECK(RuntimeEnabledFeatures::CSSCascadeEnabled());
+    state.Style()->SetVariableData(name_, nullptr, IsInherited());
+    if (registration_)
+      state.Style()->SetVariableValue(name_, nullptr, IsInherited());
+    return;
+  }
+
   const auto& declaration = To<CSSCustomPropertyDeclaration>(value);
 
+  DCHECK(!value.IsRevertValue());
   bool is_inherited_property = IsInherited();
   bool initial = declaration.IsInitial(is_inherited_property);
   bool inherit = declaration.IsInherit(is_inherited_property);
@@ -79,10 +92,45 @@ void CustomProperty::ApplyValue(StyleResolverState& state,
   } else if (inherit) {
     ApplyInherit(state);
   } else {
-    state.Style()->SetVariableData(name_, declaration.Value(),
-                                   is_inherited_property);
+    if (!RuntimeEnabledFeatures::CSSCascadeEnabled()) {
+      state.Style()->SetVariableData(name_, declaration.Value(),
+                                     is_inherited_property);
+      if (registration_)
+        state.Style()->SetVariableValue(name_, nullptr, is_inherited_property);
+      return;
+    }
+
+    scoped_refptr<CSSVariableData> data = declaration.Value();
+    DCHECK(!data->NeedsVariableResolution());
+
+    state.Style()->SetVariableData(name_, data, is_inherited_property);
+
     if (registration_) {
-      state.Style()->SetVariableValue(name_, nullptr, is_inherited_property);
+      // TODO(andruud): Store CSSParserContext on CSSCustomPropertyDeclaration
+      // and use that.
+      const CSSParserContext* context =
+          StrictCSSParserContext(state.GetDocument().GetSecureContextMode());
+      auto mode = CSSParserLocalContext::VariableMode::kTyped;
+      auto local_context = CSSParserLocalContext().WithVariableMode(mode);
+      CSSParserTokenRange range = data->TokenRange();
+      const CSSValue* registered_value =
+          ParseSingleValue(range, *context, local_context);
+      if (!registered_value) {
+        if (is_inherited_property)
+          ApplyInherit(state);
+        else
+          ApplyInitial(state);
+        return;
+      }
+
+      registered_value = &StyleBuilderConverter::ConvertRegisteredPropertyValue(
+          state, *registered_value, data->BaseURL(), data->Charset());
+      data = StyleBuilderConverter::ConvertRegisteredPropertyVariableData(
+          *registered_value, data->IsAnimationTainted());
+
+      state.Style()->SetVariableData(name_, data, is_inherited_property);
+      state.Style()->SetVariableValue(name_, registered_value,
+                                      is_inherited_property);
     }
   }
 }
@@ -109,7 +157,6 @@ const CSSValue* CustomProperty::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
     const SVGComputedStyle&,
     const LayoutObject*,
-    Node* styled_node,
     bool allow_visited_style) const {
   if (registration_) {
     const CSSValue* value = style.GetVariableValue(name_, IsInherited());
@@ -142,7 +189,7 @@ const CSSValue* CustomProperty::ParseTyped(
     const CSSParserLocalContext& local_context) const {
   if (!registration_)
     return ParseUntyped(range, context, local_context);
-  return registration_->Syntax().Parse(range, &context,
+  return registration_->Syntax().Parse(range, context,
                                        local_context.IsAnimationTainted());
 }
 

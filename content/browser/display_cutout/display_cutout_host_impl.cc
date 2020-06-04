@@ -7,19 +7,20 @@
 #include "content/browser/display_cutout/display_cutout_constants.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/navigation_handle.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 
 namespace content {
 
 DisplayCutoutHostImpl::DisplayCutoutHostImpl(WebContentsImpl* web_contents)
-    : bindings_(web_contents, this), web_contents_impl_(web_contents) {}
+    : receivers_(web_contents, this), web_contents_impl_(web_contents) {}
 
 DisplayCutoutHostImpl::~DisplayCutoutHostImpl() = default;
 
 void DisplayCutoutHostImpl::NotifyViewportFitChanged(
     blink::mojom::ViewportFit value) {
-  ViewportFitChangedForFrame(bindings_.GetCurrentTargetFrame(), value);
+  ViewportFitChangedForFrame(receivers_.GetCurrentTargetFrame(), value);
 }
 
 void DisplayCutoutHostImpl::ViewportFitChangedForFrame(
@@ -70,10 +71,8 @@ void DisplayCutoutHostImpl::DidFinishNavigation(
   // If we finish a main frame navigation and the |WebDisplayMode| is
   // fullscreen then we should make the main frame the current
   // |RenderFrameHost|.
-  RenderWidgetHostImpl* rwh =
-      web_contents_impl_->GetRenderViewHost()->GetWidget();
-  blink::WebDisplayMode mode = web_contents_impl_->GetDisplayMode(rwh);
-  if (mode == blink::WebDisplayMode::kWebDisplayModeFullscreen)
+  blink::mojom::DisplayMode mode = web_contents_impl_->GetDisplayMode();
+  if (mode == blink::mojom::DisplayMode::kFullscreen)
     SetCurrentRenderFrameHost(web_contents_impl_->GetMainFrame());
 }
 
@@ -146,8 +145,8 @@ void DisplayCutoutHostImpl::SendSafeAreaToFrame(RenderFrameHost* rfh,
   if (!provider)
     return;
 
-  blink::mojom::DisplayCutoutClientAssociatedPtr client;
-  provider->GetInterface(&client);
+  mojo::AssociatedRemote<blink::mojom::DisplayCutoutClient> client;
+  provider->GetInterface(client.BindNewEndpointAndPassReceiver());
   client->SetSafeArea(blink::mojom::DisplayCutoutSafeArea::New(
       insets.top(), insets.left(), insets.bottom(), insets.right()));
 }
@@ -193,9 +192,12 @@ void DisplayCutoutHostImpl::MaybeQueueUKMEvent(RenderFrameHost* frame) {
 }
 
 void DisplayCutoutHostImpl::RecordPendingUKMEvents() {
+  // TODO(crbug.com/1061899): The code here should take an explicit reference
+  // to the corresponding frame instead of using the current main frame.
+
   for (const auto& event : pending_ukm_events_) {
     ukm::builders::Layout_DisplayCutout_StateChanged builder(
-        web_contents_impl_->GetUkmSourceIdForLastCommittedSource());
+        web_contents_impl_->GetMainFrame()->GetPageUkmSourceId());
     builder.SetIsMainFrame(event.is_main_frame);
     builder.SetViewportFit_Applied(static_cast<int>(event.applied_value));
     builder.SetViewportFit_Supplied(static_cast<int>(event.supplied_value));

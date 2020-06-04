@@ -9,7 +9,8 @@
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/dynamic_color_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -28,79 +29,54 @@
 }
 
 - (UIColor*)NTPBackgroundColor {
-  switch (self.style) {
-    case NORMAL:
-      return ntp_home::kNTPBackgroundColor();
-    case INCOGNITO:
-      return [UIColor colorWithWhite:kNTPBackgroundColorBrightnessIncognito
-                               alpha:1.0];
-  }
+  return color::DarkModeDynamicColor(ntp_home::kNTPBackgroundColor(),
+                                     self.style == INCOGNITO,
+                                     [UIColor colorNamed:kBackgroundDarkColor]);
 }
 
 - (UIColor*)backgroundColor {
-  switch (self.style) {
-    case NORMAL:
-      return [UIColor colorNamed:kBackgroundColor];
-    case INCOGNITO:
-      return UIColorFromRGB(kIncognitoToolbarBackgroundColor);
-    }
+  return color::DarkModeDynamicColor([UIColor colorNamed:kBackgroundColor],
+                                     self.style == INCOGNITO,
+                                     [UIColor colorNamed:kBackgroundDarkColor]);
 }
 
 - (UIColor*)buttonsTintColor {
-  switch (self.style) {
-    case NORMAL:
-      return [UIColor colorNamed:@"tab_toolbar_button_color"];
-    case INCOGNITO:
-      return [UIColor whiteColor];
-  }
+  return color::DarkModeDynamicColor(
+      [UIColor colorNamed:kToolbarButtonColor], self.style == INCOGNITO,
+      [UIColor colorNamed:kToolbarButtonDarkColor]);
 }
 
 - (UIColor*)buttonsTintColorHighlighted {
-  switch (self.style) {
-    case NORMAL:
-      return [UIColor colorNamed:@"tab_toolbar_button_color_highlighted"];
-      break;
-    case INCOGNITO:
-      return [UIColor
-          colorWithWhite:1
-                   alpha:kIncognitoToolbarButtonTintColorAlphaHighlighted];
-      break;
-  }
+  return color::DarkModeDynamicColor(
+      [UIColor colorNamed:@"tab_toolbar_button_color_highlighted"],
+      self.style == INCOGNITO,
+      [UIColor colorNamed:@"tab_toolbar_button_color_highlighted_incognito"]);
 }
 
 - (UIColor*)buttonsSpotlightColor {
-  switch (self.style) {
-    case NORMAL:
-      return [UIColor colorNamed:@"tab_toolbar_button_halo_color"];
-      break;
-    case INCOGNITO:
-      return [UIColor colorWithWhite:1 alpha:kToolbarSpotlightAlpha];
-      break;
-  }
+  return color::DarkModeDynamicColor(
+      [UIColor colorNamed:@"tab_toolbar_button_halo_color"],
+      self.style == INCOGNITO,
+      [UIColor colorNamed:@"tab_toolbar_button_halo_color_incognito"]);
 }
 
 - (UIColor*)dimmedButtonsSpotlightColor {
-  switch (self.style) {
-    case NORMAL:
-      return [UIColor colorNamed:@"tab_toolbar_button_halo_color"];
-      break;
-    case INCOGNITO:
-      return [UIColor colorWithWhite:1 alpha:kDimmedToolbarSpotlightAlpha];
-      break;
-  }
+  return color::DarkModeDynamicColor(
+      [UIColor colorNamed:@"tab_toolbar_button_halo_color"],
+      self.style == INCOGNITO,
+      [UIColor colorNamed:@"tab_toolbar_button_halo_color_incognito"]);
 }
 
 - (UIColor*)locationBarBackgroundColorWithVisibility:(CGFloat)visibilityFactor {
+  // For the omnibox specifically, the background should be different in
+  // incognito compared to dark mode.
   switch (self.style) {
     case NORMAL:
-      return [UIColor colorWithWhite:0
-                               alpha:kAdaptiveLocationBarBackgroundAlpha *
-                                     visibilityFactor];
+      return [[UIColor colorNamed:kTextfieldBackgroundColor]
+          colorWithAlphaComponent:visibilityFactor];
     case INCOGNITO:
-      return
-          [UIColor colorWithWhite:1
-                            alpha:kAdaptiveLocationBarBackgroundAlphaIncognito *
-                                  visibilityFactor];
+      return [[UIColor colorNamed:@"omnibox_incognito_background_color"]
+          colorWithAlphaComponent:visibilityFactor];
   }
 }
 

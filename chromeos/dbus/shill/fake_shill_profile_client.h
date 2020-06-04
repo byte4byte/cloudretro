@@ -32,16 +32,16 @@ class COMPONENT_EXPORT(SHILL_CLIENT) FakeShillProfileClient
       const dbus::ObjectPath& profile_path,
       ShillPropertyChangedObserver* observer) override;
   void GetProperties(const dbus::ObjectPath& profile_path,
-                     const DictionaryValueCallbackWithoutStatus& callback,
-                     const ErrorCallback& error_callback) override;
+                     DictionaryValueCallbackWithoutStatus callback,
+                     ErrorCallback error_callback) override;
   void GetEntry(const dbus::ObjectPath& profile_path,
                 const std::string& entry_path,
-                const DictionaryValueCallbackWithoutStatus& callback,
-                const ErrorCallback& error_callback) override;
+                DictionaryValueCallbackWithoutStatus callback,
+                ErrorCallback error_callback) override;
   void DeleteEntry(const dbus::ObjectPath& profile_path,
                    const std::string& entry_path,
-                   const base::Closure& callback,
-                   const ErrorCallback& error_callback) override;
+                   base::OnceClosure callback,
+                   ErrorCallback error_callback) override;
   ShillProfileClient::TestInterface* GetTestInterface() override;
 
   // ShillProfileClient::TestInterface overrides.
@@ -63,6 +63,7 @@ class COMPONENT_EXPORT(SHILL_CLIENT) FakeShillProfileClient
                   base::DictionaryValue* properties) override;
   bool HasService(const std::string& service_path) override;
   void ClearProfiles() override;
+  void SetSimulateDeleteResult(FakeShillSimulatedResult delete_result) override;
 
  private:
   struct ProfileProperties;
@@ -71,14 +72,16 @@ class COMPONENT_EXPORT(SHILL_CLIENT) FakeShillProfileClient
                               const std::string& service_path,
                               ProfileProperties* profile);
 
-  ProfileProperties* GetProfile(const dbus::ObjectPath& profile_path,
-                                const ErrorCallback& error_callback);
+  ProfileProperties* GetProfile(const dbus::ObjectPath& profile_path);
 
   // List of profiles known to the client in order they were added, and in the
   // reverse order of priority.
   // |AddProfile| will encure that shared profile is never added after a user
   // profile.
   std::vector<std::unique_ptr<ProfileProperties>> profiles_;
+
+  FakeShillSimulatedResult simulate_delete_result_ =
+      FakeShillSimulatedResult::kSuccess;
 
   DISALLOW_COPY_AND_ASSIGN(FakeShillProfileClient);
 };

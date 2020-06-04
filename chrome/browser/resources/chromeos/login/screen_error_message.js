@@ -75,6 +75,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
       'setErrorState',
       'showConnectingIndicator',
       'setErrorStateNetwork',
+      'setIsPersistentError',
     ],
 
     // Error screen initial UI state.
@@ -83,12 +84,18 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     // Error screen initial error state.
     error_state_: ERROR_STATE.UNKNOWN,
 
+    // True if it is forbidden to close the error message.
+    is_persistent_error_: false,
+
     /**
      * Whether the screen can be closed.
+     * |is_persistent_error_| prevents error screen to be closable even
+     * if there are some user pods.
+     * (E.g. out of OOBE process on the sign-in screen).
      * @type {boolean}
      */
     get closable() {
-      return Oobe.getInstance().hasUserPods;
+      return Oobe.getInstance().hasUserPods && !this.is_persistent_error_;
     },
 
     /**
@@ -100,7 +107,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     },
 
     /** @override */
-    decorate: function() {
+    decorate() {
       this.updateLocalizedContent();
 
       var self = this;
@@ -149,7 +156,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     /**
      * Updates localized content of the screen that is not updated via template.
      */
-    updateLocalizedContent: function() {
+    updateLocalizedContent() {
       var self = this;
       $('auto-enrollment-offline-message-text').innerHTML =
           loadTimeData.getStringF(
@@ -235,26 +242,31 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
       $('connecting-indicator').innerHTML =
           loadTimeData.getStringF('connectingIndicatorText', ellipsis);
 
-      $('offline-network-control').setCrOncStrings();
-
       this.onContentChange_();
+    },
+
+    /** Initial UI State for screen */
+    getOobeUIInitialState() {
+      return OOBE_UI_STATE.ERROR;
     },
 
     /**
      * Event handler that is invoked just before the screen is shown.
      * @param {Object} data Screen init payload.
      */
-    onBeforeShow: function(data) {
+    onBeforeShow(data) {
       cr.ui.Oobe.clearErrors();
-      Oobe.getInstance().setSigninUIState(SIGNIN_UI_STATE.ERROR);
+      $('error-message-md').onBeforeShow();
       $('error-message-back-button').disabled = !this.closable;
     },
 
     /**
      * Event handler that is invoked just before the screen is hidden.
      */
-    onBeforeHide: function() {
-      Oobe.getInstance().setSigninUIState(SIGNIN_UI_STATE.HIDDEN);
+    onBeforeHide() {
+      Oobe.getInstance().setOobeUIState(OOBE_UI_STATE.HIDDEN);
+      // Reset property to the default state.
+      this.setIsPersistentError(false);
     },
 
     /**
@@ -262,7 +274,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * @param {string} ui_state New UI state of the screen.
      * @private
      */
-    setUIState_: function(ui_state) {
+    setUIState_(ui_state) {
       this.classList.remove(this.ui_state);
       this.ui_state = ui_state;
       this.classList.add(this.ui_state);
@@ -274,7 +286,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * @param {string} error_state New error state of the screen.
      * @private
      */
-    setErrorState_: function(error_state) {
+    setErrorState_(error_state) {
       this.classList.remove(this.error_state);
       this.error_state = error_state;
       this.classList.add(this.error_state);
@@ -286,7 +298,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * @param {string} network Name of the current network
      * @private
      */
-    setNetwork_: function(network) {
+    setNetwork_(network) {
       var networkNameElems =
           document.getElementsByClassName(CURRENT_NETWORK_NAME_CLASS);
       for (var i = 0; i < networkNameElems.length; ++i)
@@ -297,7 +309,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     /* Method called after content of the screen changed.
      * @private
      */
-    onContentChange_: function() {
+    onContentChange_() {
       if (Oobe.getInstance().currentScreen === this) {
         Oobe.getInstance().updateScreenSize(this);
       }
@@ -307,7 +319,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Event handler for guest session launch.
      * @private
      */
-    launchGuestSession_: function() {
+    launchGuestSession_() {
       if (Oobe.getInstance().isOobeUI()) {
         this.send(
             login.Screen.CALLBACK_USER_ACTED, USER_ACTION_LAUNCH_OOBE_GUEST);
@@ -320,7 +332,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Prepares error screen to show guest signin link.
      * @private
      */
-    allowGuestSignin: function(allowed) {
+    allowGuestSignin(allowed) {
       this.classList.toggle('allow-guest-signin', allowed);
       this.onContentChange_();
     },
@@ -329,7 +341,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Prepares error screen to show offline login link.
      * @private
      */
-    allowOfflineLogin: function(allowed) {
+    allowOfflineLogin(allowed) {
       this.classList.toggle('allow-offline-login', allowed);
       this.onContentChange_();
     },
@@ -339,7 +351,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * @param {number} ui_state New UI state of the screen.
      * @private
      */
-    setUIState: function(ui_state) {
+    setUIState(ui_state) {
       this.setUIState_(UI_STATES[ui_state]);
     },
 
@@ -348,7 +360,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * @param {number} error_state New error state of the screen.
      * @private
      */
-    setErrorState: function(error_state) {
+    setErrorState(error_state) {
       this.setErrorState_(ERROR_STATES[error_state]);
     },
 
@@ -356,7 +368,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Sets current error network state of the screen.
      * @param {string} network Name of the current network
      */
-    setErrorStateNetwork: function(value) {
+    setErrorStateNetwork(value) {
       this.setNetwork_(value);
     },
 
@@ -364,7 +376,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Updates visibility of the label indicating we're reconnecting.
      * @param {boolean} show Whether the label should be shown.
      */
-    showConnectingIndicator: function(show) {
+    showConnectingIndicator(show) {
       this.classList.toggle('show-connecting-indicator', show);
       this.onContentChange_();
     },
@@ -372,9 +384,16 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     /**
      * Cancels error screen and drops to user pods.
      */
-    cancel: function() {
+    cancel() {
       if (this.closable)
         Oobe.showUserPods();
     },
+
+    /**
+     * Makes error message non-closable.
+     */
+    setIsPersistentError(is_persistent) {
+      this.is_persistent_error_ = is_persistent;
+    }
   };
 });

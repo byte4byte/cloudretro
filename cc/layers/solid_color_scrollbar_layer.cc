@@ -13,54 +13,56 @@ namespace cc {
 
 std::unique_ptr<LayerImpl> SolidColorScrollbarLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  const bool kIsOverlayScrollbar = true;
   return SolidColorScrollbarLayerImpl::Create(
-      tree_impl, id(), solid_color_scrollbar_layer_inputs_.orientation,
-      solid_color_scrollbar_layer_inputs_.thumb_thickness,
-      solid_color_scrollbar_layer_inputs_.track_start,
-      solid_color_scrollbar_layer_inputs_.is_left_side_vertical_scrollbar,
-      kIsOverlayScrollbar);
+      tree_impl, id(), orientation(), thumb_thickness_, track_start_,
+      is_left_side_vertical_scrollbar());
+}
+
+scoped_refptr<SolidColorScrollbarLayer> SolidColorScrollbarLayer::CreateOrReuse(
+    scoped_refptr<Scrollbar> scrollbar,
+    SolidColorScrollbarLayer* existing_layer) {
+  DCHECK(scrollbar->IsOverlay());
+  bool is_horizontal = scrollbar->Orientation() == HORIZONTAL;
+  gfx::Rect thumb_rect = scrollbar->ThumbRect();
+  int thumb_thickness =
+      is_horizontal ? thumb_rect.height() : thumb_rect.width();
+  gfx::Rect track_rect = scrollbar->TrackRect();
+  int track_start = is_horizontal ? track_rect.x() : track_rect.y();
+
+  if (existing_layer &&
+      // We don't support change of these fields in a layer.
+      existing_layer->thumb_thickness() == thumb_thickness &&
+      existing_layer->track_start() == track_start) {
+    // These fields have been checked in ScrollbarLayerBase::CreateOrReuse().
+    DCHECK_EQ(scrollbar->Orientation(), existing_layer->orientation());
+    DCHECK_EQ(scrollbar->IsLeftSideVerticalScrollbar(),
+              existing_layer->is_left_side_vertical_scrollbar());
+    return existing_layer;
+  }
+
+  return Create(scrollbar->Orientation(), thumb_thickness, track_start,
+                scrollbar->IsLeftSideVerticalScrollbar());
 }
 
 scoped_refptr<SolidColorScrollbarLayer> SolidColorScrollbarLayer::Create(
     ScrollbarOrientation orientation,
     int thumb_thickness,
     int track_start,
-    bool is_left_side_vertical_scrollbar,
-    ElementId scroll_element_id) {
-  return base::WrapRefCounted(new SolidColorScrollbarLayer(
-      orientation, thumb_thickness, track_start,
-      is_left_side_vertical_scrollbar, scroll_element_id));
+    bool is_left_side_vertical_scrollbar) {
+  return base::WrapRefCounted(
+      new SolidColorScrollbarLayer(orientation, thumb_thickness, track_start,
+                                   is_left_side_vertical_scrollbar));
 }
-
-SolidColorScrollbarLayer::SolidColorScrollbarLayerInputs::
-    SolidColorScrollbarLayerInputs(ScrollbarOrientation orientation,
-                                   int thumb_thickness,
-                                   int track_start,
-                                   bool is_left_side_vertical_scrollbar,
-                                   ElementId scroll_element_id)
-    : scroll_element_id(scroll_element_id),
-      orientation(orientation),
-      thumb_thickness(thumb_thickness),
-      track_start(track_start),
-      is_left_side_vertical_scrollbar(is_left_side_vertical_scrollbar) {}
-
-SolidColorScrollbarLayer::SolidColorScrollbarLayerInputs::
-    ~SolidColorScrollbarLayerInputs() = default;
 
 SolidColorScrollbarLayer::SolidColorScrollbarLayer(
     ScrollbarOrientation orientation,
     int thumb_thickness,
     int track_start,
-    bool is_left_side_vertical_scrollbar,
-    ElementId scroll_element_id)
-    : solid_color_scrollbar_layer_inputs_(orientation,
-                                          thumb_thickness,
-                                          track_start,
-                                          is_left_side_vertical_scrollbar,
-                                          scroll_element_id) {
+    bool is_left_side_vertical_scrollbar)
+    : ScrollbarLayerBase(orientation, is_left_side_vertical_scrollbar),
+      thumb_thickness_(thumb_thickness),
+      track_start_(track_start) {
   Layer::SetOpacity(0.f);
-  SetIsScrollbar(true);
 }
 
 SolidColorScrollbarLayer::~SolidColorScrollbarLayer() = default;
@@ -71,17 +73,6 @@ void SolidColorScrollbarLayer::SetOpacity(float opacity) {
   Layer::SetOpacity(opacity);
 }
 
-void SolidColorScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
-  Layer::PushPropertiesTo(layer);
-  SolidColorScrollbarLayerImpl* scrollbar_layer =
-      static_cast<SolidColorScrollbarLayerImpl*>(layer);
-
-  DCHECK(!scrollbar_layer->HitTestable());
-
-  scrollbar_layer->SetScrollElementId(
-      solid_color_scrollbar_layer_inputs_.scroll_element_id);
-}
-
 void SolidColorScrollbarLayer::SetNeedsDisplayRect(const gfx::Rect& rect) {
   // Never needs repaint.
 }
@@ -90,18 +81,15 @@ bool SolidColorScrollbarLayer::OpacityCanAnimateOnImplThread() const {
   return true;
 }
 
-void SolidColorScrollbarLayer::SetScrollElementId(ElementId element_id) {
-  if (element_id == solid_color_scrollbar_layer_inputs_.scroll_element_id)
-    return;
-
-  solid_color_scrollbar_layer_inputs_.scroll_element_id = element_id;
-  SetNeedsCommit();
-}
-
 bool SolidColorScrollbarLayer::HitTestable() const {
   // Android scrollbars can't be interacted with by user input. They should
   // avoid hit testing so we don't enter any scrollbar scrolling code paths.
   return false;
+}
+
+ScrollbarLayerBase::ScrollbarLayerType
+SolidColorScrollbarLayer::GetScrollbarLayerType() const {
+  return kSolidColor;
 }
 
 }  // namespace cc

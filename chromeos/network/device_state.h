@@ -26,6 +26,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) DeviceState : public ManagedState {
   // ManagedState overrides
   bool PropertyChanged(const std::string& key,
                        const base::Value& value) override;
+  bool IsActive() const override;
 
   void IPConfigPropertiesChanged(const std::string& ip_config_path,
                                  const base::Value& properties);
@@ -64,6 +65,9 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) DeviceState : public ManagedState {
   bool eap_authentication_completed() const {
     return eap_authentication_completed_;
   }
+  bool link_up() const { return link_up_; }
+  const std::string& device_bus_type() const { return device_bus_type_; }
+  const std::string& mac_address_source() const { return mac_address_source_; }
 
   // WiFi specific accessors
   const std::string& available_managed_network_path() const {
@@ -109,6 +113,9 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) DeviceState : public ManagedState {
 
   // Ethernet specific properties
   bool eap_authentication_completed_ = false;
+  bool link_up_ = false;
+  std::string device_bus_type_;
+  std::string mac_address_source_;
 
   // WiFi specific properties
   std::string available_managed_network_path_;

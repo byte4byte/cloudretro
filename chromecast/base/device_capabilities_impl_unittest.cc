@@ -9,8 +9,10 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "chromecast/base/serializers.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -238,7 +240,6 @@ void AssertBasicOperationsSuccessful(const DeviceCapabilities* capabilities) {
 class DeviceCapabilitiesImplTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    message_loop_.reset(new base::MessageLoop(base::MessageLoop::TYPE_IO));
     capabilities_ = DeviceCapabilities::Create();
     mock_capabilities_observer_.reset(new MockCapabilitiesObserver());
     capabilities_->AddCapabilitiesObserver(mock_capabilities_observer_.get());
@@ -256,7 +257,6 @@ class DeviceCapabilitiesImplTest : public ::testing::Test {
         mock_capabilities_observer_.get());
     mock_capabilities_observer_.reset();
     capabilities_.reset();
-    message_loop_.reset();
   }
 
   DeviceCapabilities* capabilities() const { return capabilities_.get(); }
@@ -266,7 +266,7 @@ class DeviceCapabilitiesImplTest : public ::testing::Test {
   }
 
  private:
-  std::unique_ptr<base::MessageLoop> message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<DeviceCapabilities> capabilities_;
   std::unique_ptr<MockCapabilitiesObserver> mock_capabilities_observer_;
 };

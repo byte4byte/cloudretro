@@ -16,10 +16,6 @@
 #include "services/tracing/public/cpp/perfetto/trace_event_data_source.h"
 #include "services/tracing/public/mojom/perfetto_service.mojom.h"
 
-namespace base {
-class RefCountedString;
-}  // namespace base
-
 namespace content {
 
 class BackgroundTracingConfigImpl;
@@ -31,7 +27,6 @@ class BackgroundTracingActiveScenario {
 
   BackgroundTracingActiveScenario(
       std::unique_ptr<BackgroundTracingConfigImpl> config,
-      bool requires_anonymized_data,
       BackgroundTracingManager::ReceiveCallback receive_callback,
       base::OnceClosure on_aborted_callback);
   virtual ~BackgroundTracingActiveScenario();
@@ -39,12 +34,11 @@ class BackgroundTracingActiveScenario {
   void StartTracingIfConfigNeedsIt();
   void AbortScenario();
 
-  const BackgroundTracingConfigImpl* GetConfig() const;
+  CONTENT_EXPORT const BackgroundTracingConfigImpl* GetConfig() const;
   void GenerateMetadataDict(base::DictionaryValue* metadata_dict);
   void GenerateMetadataProto(
       perfetto::protos::pbzero::ChromeMetadataPacket* metadata);
   State state() const { return scenario_state_; }
-  bool requires_anonymized_data() const { return requires_anonymized_data_; }
   base::WeakPtr<BackgroundTracingActiveScenario> GetWeakPtr();
 
   void TriggerNamedEvent(
@@ -56,8 +50,7 @@ class BackgroundTracingActiveScenario {
       BackgroundTracingManager::StartedFinalizingCallback callback);
 
   // Called by LegacyTracingSession when the final trace data is ready.
-  void OnJSONDataComplete(std::unique_ptr<const base::DictionaryValue> metadata,
-                          base::RefCountedString*);
+  void OnJSONDataComplete(std::unique_ptr<std::string>);
   // Called by the PerfettoTracingSession when the proto trace is ready.
   void OnProtoDataComplete(std::unique_ptr<std::string> proto_trace);
 
@@ -69,6 +62,8 @@ class BackgroundTracingActiveScenario {
   CONTENT_EXPORT void FireTimerForTesting();
   CONTENT_EXPORT void SetRuleTriggeredCallbackForTesting(
       const base::RepeatingClosure& callback);
+
+  size_t GetTraceUploadLimitKb() const;
 
  private:
   bool StartTracing();
@@ -84,7 +79,6 @@ class BackgroundTracingActiveScenario {
   std::unique_ptr<BackgroundTracingConfigImpl> config_;
   // Owned by |config_|.
   const BackgroundTracingRule* last_triggered_rule_ = nullptr;
-  const bool requires_anonymized_data_ = false;
   State scenario_state_ = State::kIdle;
   base::RepeatingClosure rule_triggered_callback_for_testing_;
   BackgroundTracingManager::ReceiveCallback receive_callback_;

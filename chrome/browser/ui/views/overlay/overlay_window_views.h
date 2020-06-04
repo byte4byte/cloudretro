@@ -19,7 +19,6 @@
 namespace views {
 class BackToTabImageButton;
 class CloseImageButton;
-class MuteImageButton;
 class PlaybackImageButton;
 class ResizeHandleButton;
 class SkipAdLabelButton;
@@ -32,8 +31,9 @@ class OverlayWindowViews : public content::OverlayWindow,
                            public views::ButtonListener,
                            public views::Widget {
  public:
-  explicit OverlayWindowViews(
+  static std::unique_ptr<content::OverlayWindow> Create(
       content::PictureInPictureWindowController* controller);
+
   ~OverlayWindowViews() override;
 
   enum class WindowQuadrant { kBottomLeft, kBottomRight, kTopLeft, kTopRight };
@@ -49,7 +49,6 @@ class OverlayWindowViews : public content::OverlayWindow,
   void UpdateVideoSize(const gfx::Size& natural_size) override;
   void SetPlaybackState(PlaybackState playback_state) override;
   void SetAlwaysHidePlayPauseButton(bool is_visible) override;
-  void SetMutedState(MutedState muted) override;
   void SetSkipAdButtonVisibility(bool is_visible) override;
   void SetNextTrackButtonVisibility(bool is_visible) override;
   void SetPreviousTrackButtonVisibility(bool is_visible) override;
@@ -74,7 +73,6 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Gets the bounds of the controls.
   gfx::Rect GetBackToTabControlsBounds();
-  gfx::Rect GetMuteControlsBounds();
   gfx::Rect GetSkipAdControlsBounds();
   gfx::Rect GetCloseControlsBounds();
   gfx::Rect GetResizeHandleControlsBounds();
@@ -96,10 +94,8 @@ class OverlayWindowViews : public content::OverlayWindow,
   views::SkipAdLabelButton* skip_ad_controls_view_for_testing() const;
   gfx::Point back_to_tab_image_position_for_testing() const;
   gfx::Point close_image_position_for_testing() const;
-  gfx::Point mute_image_position_for_testing() const;
   gfx::Point resize_handle_position_for_testing() const;
   OverlayWindowViews::PlaybackState playback_state_for_testing() const;
-  OverlayWindowViews::MutedState muted_state_for_testing() const;
   ui::Layer* video_layer_for_testing() const;
   cc::Layer* GetLayerForTesting() override;
 
@@ -110,6 +106,9 @@ class OverlayWindowViews : public content::OverlayWindow,
                           const gfx::Size& window_size);
 
  private:
+  explicit OverlayWindowViews(
+      content::PictureInPictureWindowController* controller);
+
   // Return the work area for the nearest display the widget is on.
   gfx::Rect GetWorkAreaForWindow() const;
 
@@ -121,6 +120,9 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Set up the views::Views that will be shown on the window.
   void SetUpViews();
+
+  // Finish initialization by performing the steps that require the root View.
+  void OnRootViewReady();
 
   // Update the bounds of the layers on the window. This may introduce
   // letterboxing.
@@ -144,7 +146,6 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   ui::Layer* GetControlsScrimLayer();
   ui::Layer* GetBackToTabControlsLayer();
-  ui::Layer* GetMuteControlsLayer();
   ui::Layer* GetCloseControlsLayer();
   ui::Layer* GetResizeHandleLayer();
   ui::Layer* GetControlsParentLayer();
@@ -153,7 +154,7 @@ class OverlayWindowViews : public content::OverlayWindow,
   // numeric values should never be reused.
   enum class OverlayWindowControl {
     kBackToTab = 0,
-    kMute,
+    kMuteDeprecated,
     kSkipAd,
     kClose,
     kPlayPause,
@@ -169,11 +170,6 @@ class OverlayWindowViews : public content::OverlayWindow,
   // state.
   void TogglePlayPause();
 
-  // Toggles the mute control through the |controller_| and updates the
-  // |mute_controls_view_| toggled state to reflect the current muted
-  // state.
-  void ToggleMute();
-
   // Returns the current frame sink id for the surface displayed in the
   // |video_view_]. If |video_view_| is not currently displaying a surface then
   // returns nullptr.
@@ -181,11 +177,6 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Not owned; |controller_| owns |this|.
   content::PictureInPictureWindowController* controller_;
-
-  // Whether or not the components of the window has been set up. This is used
-  // as a check as some event handlers (e.g. focus) is propogated to the window
-  // before its contents is initialized. This is only set once.
-  bool is_initialized_ = false;
 
   // Whether or not the window has been shown before. This is used to determine
   // sizing and placement. This is different from checking whether the window
@@ -213,18 +204,22 @@ class OverlayWindowViews : public content::OverlayWindow,
   // ensuring factors such as aspect ratio is maintained.
   gfx::Size natural_size_;
 
+  // Temporary storage for child Views. Used during the time between
+  // construction and initialization, when the views::View pointer members must
+  // already be initialized, but there is no root view to add them to yet.
+  std::vector<std::unique_ptr<views::View>> view_holder_;
+
   // Views to be shown.
-  std::unique_ptr<views::View> window_background_view_;
-  std::unique_ptr<views::View> video_view_;
-  std::unique_ptr<views::View> controls_scrim_view_;
-  std::unique_ptr<views::CloseImageButton> close_controls_view_;
-  std::unique_ptr<views::BackToTabImageButton> back_to_tab_controls_view_;
-  std::unique_ptr<views::TrackImageButton> previous_track_controls_view_;
-  std::unique_ptr<views::PlaybackImageButton> play_pause_controls_view_;
-  std::unique_ptr<views::TrackImageButton> next_track_controls_view_;
-  std::unique_ptr<views::MuteImageButton> mute_controls_view_;
-  std::unique_ptr<views::SkipAdLabelButton> skip_ad_controls_view_;
-  std::unique_ptr<views::ResizeHandleButton> resize_handle_view_;
+  views::View* window_background_view_ = nullptr;
+  views::View* video_view_ = nullptr;
+  views::View* controls_scrim_view_ = nullptr;
+  views::CloseImageButton* close_controls_view_ = nullptr;
+  views::BackToTabImageButton* back_to_tab_controls_view_ = nullptr;
+  views::TrackImageButton* previous_track_controls_view_ = nullptr;
+  views::PlaybackImageButton* play_pause_controls_view_ = nullptr;
+  views::TrackImageButton* next_track_controls_view_ = nullptr;
+  views::SkipAdLabelButton* skip_ad_controls_view_ = nullptr;
+  views::ResizeHandleButton* resize_handle_view_ = nullptr;
 #if defined(OS_CHROMEOS)
   std::unique_ptr<ash::RoundedCornerDecorator> decorator_;
 #endif
@@ -238,14 +233,6 @@ class OverlayWindowViews : public content::OverlayWindow,
   // Current playback state on the video in Picture-in-Picture window. It is
   // used to toggle play/pause/replay button.
   PlaybackState playback_state_for_testing_ = kEndOfVideo;
-
-  // Current muted state on the video in Picture-in-Picture window. It is
-  // used to toggle mute button.
-  MutedState muted_state_for_testing_ = kNoAudio;
-
-  // Whether or not the mute button will be shown. This is not the case when
-  // there is no audio track.
-  bool show_mute_button_ = false;
 
   // Whether or not the skip ad button will be shown. This is the
   // case when Media Session "skipad" action is handled by the website.

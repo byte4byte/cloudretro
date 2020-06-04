@@ -10,20 +10,17 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "content/shell/test_runner/mock_web_theme_engine.h"
 
 namespace blink {
 class WebLocalFrame;
-class WebThemeEngine;
 class WebURL;
 class WebView;
 }
 
-namespace test_runner {
-
+namespace content {
+class BlinkTestRunner;
 class GamepadController;
 class TestRunner;
-class WebTestDelegate;
 class WebViewTestProxy;
 
 class TestInterfaces {
@@ -32,9 +29,7 @@ class TestInterfaces {
   ~TestInterfaces();
 
   void SetMainView(blink::WebView* web_view);
-  void SetDelegate(WebTestDelegate* delegate);
-  void BindTo(blink::WebLocalFrame* frame);
-  void ResetTestHelperControllers();
+  void Install(blink::WebLocalFrame* frame);
   void ResetAll();
   bool TestIsRunning();
   void SetTestIsRunning(bool running);
@@ -44,24 +39,32 @@ class TestInterfaces {
   void WindowOpened(WebViewTestProxy* proxy);
   void WindowClosed(WebViewTestProxy* proxy);
 
+  // This returns the BlinkTestRunner from the oldest created WebViewTestProxy.
+  // TODO(lukasza): Using the first BlinkTestRunner as the main BlinkTestRunner
+  // is wrong, but it is difficult to change because this behavior has been
+  // baked for a long time into test assumptions (i.e. which PrintMessage gets
+  // delivered to the browser depends on this).
+  BlinkTestRunner* GetFirstBlinkTestRunner();
+
   TestRunner* GetTestRunner();
-  WebTestDelegate* GetDelegate();
+  // TODO(danakj): This is a list of all RenderViews not of all windows. There
+  // will be a RenderView for each frame tree fragment in the process, not just
+  // one per window. We should only return the RenderViews with a local main
+  // frame.
+  // TODO(danakj): Some clients want a list of the main frames (maybe most/all?)
+  // so can we add a GetMainFrameList() or something?
   const std::vector<WebViewTestProxy*>& GetWindowList();
-  blink::WebThemeEngine* GetThemeEngine();
 
  private:
   std::unique_ptr<GamepadController> gamepad_controller_;
   std::unique_ptr<TestRunner> test_runner_;
-  WebTestDelegate* delegate_;
 
   std::vector<WebViewTestProxy*> window_list_;
-  blink::WebView* main_view_;
-
-  std::unique_ptr<MockWebThemeEngine> theme_engine_;
+  blink::WebView* main_view_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(TestInterfaces);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_TEST_INTERFACES_H_

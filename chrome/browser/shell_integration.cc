@@ -12,7 +12,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/lazy_task_runner.h"
+#include "base/task/lazy_thread_pool_task_runner.h"
 #include "base/task/post_task.h"
 #include "base/task/single_thread_task_runner_thread_mode.h"
 #include "base/task/task_traits.h"
@@ -53,14 +53,14 @@ const struct AppModeInfo* gAppModeInfo = nullptr;
 // TODO(crbug.com/773563): Remove |g_sequenced_task_runner| and use an instance
 // field / singleton instead.
 #if defined(OS_WIN)
-base::LazyCOMSTATaskRunner g_sequenced_task_runner =
+base::LazyThreadPoolCOMSTATaskRunner g_sequenced_task_runner =
     LAZY_COM_STA_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(), base::MayBlock()),
+        base::TaskTraits(base::MayBlock()),
         base::SingleThreadTaskRunnerThreadMode::SHARED);
 #else
-base::LazySequencedTaskRunner g_sequenced_task_runner =
-    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(), base::MayBlock()));
+base::LazyThreadPoolSequencedTaskRunner g_sequenced_task_runner =
+    LAZY_THREAD_POOL_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::MayBlock()));
 #endif
 
 }  // namespace
@@ -194,10 +194,9 @@ void DefaultWebClientWorker::CheckIsDefault(bool is_following_set_as_default) {
                                                 base::BlockingType::MAY_BLOCK);
 
   DefaultWebClientState state = CheckIsDefaultImpl();
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&DefaultBrowserWorker::OnCheckIsDefaultComplete, this,
-                     state, is_following_set_as_default));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&DefaultBrowserWorker::OnCheckIsDefaultComplete,
+                                this, state, is_following_set_as_default));
 }
 
 void DefaultWebClientWorker::SetAsDefault() {

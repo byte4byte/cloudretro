@@ -13,14 +13,13 @@
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
 #include "third_party/blink/public/web/web_ax_object.h"
-#include "v8/include/v8-util.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 class WebLocalFrame;
 }
 
-namespace test_runner {
+namespace content {
 
 class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
  public:
@@ -160,7 +159,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   // Bound methods.
   v8::Local<v8::Object> AriaActiveDescendantElement();
   v8::Local<v8::Object> AriaControlsElementAtIndex(unsigned index);
-  v8::Local<v8::Object> AriaDetailsElement();
+  v8::Local<v8::Object> AriaDetailsElementAtIndex(unsigned index);
   v8::Local<v8::Object> AriaErrorMessageElement();
   v8::Local<v8::Object> AriaFlowToElementAtIndex(unsigned index);
   v8::Local<v8::Object> AriaOwnsElementAtIndex(unsigned index);
@@ -253,10 +252,15 @@ class WebAXObjectProxyList : public WebAXObjectProxy::Factory {
   v8::Local<v8::Object> GetOrCreate(const blink::WebAXObject&) override;
 
  private:
-  typedef v8::PersistentValueVector<v8::Object> ElementList;
-  ElementList elements_;
+  // Defines the Persistents as copyable because v8 does not support moving
+  // in non-copyable (default) traits either.
+  using CopyablePersistentObject =
+      v8::Persistent<v8::Object, v8::CopyablePersistentTraits<v8::Object>>;
+  // Because the v8::Persistent in this container uses CopyablePersistentObject
+  // traits, it will not leak on destruction.
+  std::vector<CopyablePersistentObject> elements_;
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_WEB_AX_OBJECT_PROXY_H_

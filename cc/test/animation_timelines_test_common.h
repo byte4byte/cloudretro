@@ -18,8 +18,8 @@
 
 namespace cc {
 
+class Animation;
 class KeyframeEffect;
-class SingleKeyframeEffectAnimation;
 
 class TestLayer {
  public:
@@ -150,6 +150,11 @@ class TestHostClient : public MutatorHostClient {
   void NotifyAnimationWorkletStateChange(AnimationWorkletMutationState state,
                                          ElementListType tree_type) override {}
 
+  void OnCustomPropertyMutated(
+      ElementId element_id,
+      const std::string& custom_property_name,
+      PaintWorkletInput::PropertyValue custom_property_value) override {}
+
   bool mutators_need_commit() const { return mutators_need_commit_; }
   void set_mutators_need_commit(bool need) { mutators_need_commit_ = need; }
 
@@ -237,6 +242,8 @@ class TestAnimationDelegate : public AnimationDelegate {
                                int target_property,
                                base::TimeTicks animation_start_time,
                                std::unique_ptr<AnimationCurve> curve) override;
+  void NotifyLocalTimeUpdated(
+      base::Optional<base::TimeDelta> local_time) override;
 
   bool started() { return started_; }
 
@@ -304,11 +311,11 @@ class AnimationTimelinesTest : public testing::Test {
   int next_test_layer_id_;
 
   scoped_refptr<AnimationTimeline> timeline_;
-  scoped_refptr<SingleKeyframeEffectAnimation> animation_;
+  scoped_refptr<Animation> animation_;
   scoped_refptr<ElementAnimations> element_animations_;
 
   scoped_refptr<AnimationTimeline> timeline_impl_;
-  scoped_refptr<SingleKeyframeEffectAnimation> animation_impl_;
+  scoped_refptr<Animation> animation_impl_;
   scoped_refptr<ElementAnimations> element_animations_impl_;
 };
 

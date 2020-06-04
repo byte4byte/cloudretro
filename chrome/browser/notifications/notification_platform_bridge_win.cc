@@ -23,6 +23,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/win/core_winrt_util.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_hstring.h"
@@ -568,7 +569,7 @@ class NotificationPlatformBridgeWinImpl
       displayed_notifications.insert(launch_id.notification_id());
     }
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(std::move(callback), std::move(displayed_notifications),
                        /*supports_synchronization=*/true));
@@ -612,9 +613,8 @@ class NotificationPlatformBridgeWinImpl
 
     LogSetReadyCallbackStatus(static_cast<SetReadyCallbackStatus>(status));
 
-    bool success =
-        base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                                 base::BindOnce(std::move(callback), enabled));
+    bool success = base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                                  base::BindOnce(std::move(callback), enabled));
     DCHECK(success);
   }
 
@@ -629,7 +629,7 @@ class NotificationPlatformBridgeWinImpl
       return;
     }
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&ForwardNotificationOperationOnUiThread, operation,
                        launch_id.notification_type(), launch_id.origin_url(),
@@ -777,7 +777,7 @@ winui::Notifications::IToastNotifier*
     NotificationPlatformBridgeWinImpl::notifier_for_testing_ = nullptr;
 
 NotificationPlatformBridgeWin::NotificationPlatformBridgeWin() {
-  notification_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+  notification_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   impl_ = base::MakeRefCounted<NotificationPlatformBridgeWinImpl>(

@@ -8,23 +8,32 @@
 #include "base/macros.h"
 #include "chromeos/services/secure_channel/client_connection_parameters.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chromeos {
 
 namespace secure_channel {
 
 // Concrete ClientConnectionParameters implementation, which utilizes a
-// ConnectionDelegatePtr.
+// mojo::Remote<ConnectionDelegate>.
 class ClientConnectionParametersImpl : public ClientConnectionParameters {
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<ClientConnectionParameters> BuildInstance(
+    static std::unique_ptr<ClientConnectionParameters> Create(
         const std::string& feature,
-        mojom::ConnectionDelegatePtr connection_delegate_ptr);
+        mojo::PendingRemote<mojom::ConnectionDelegate>
+            connection_delegate_remote);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<ClientConnectionParameters> CreateInstance(
+        const std::string& feature,
+        mojo::PendingRemote<mojom::ConnectionDelegate>
+            connection_delegate_remote) = 0;
 
    private:
     static Factory* test_factory_;
@@ -33,21 +42,22 @@ class ClientConnectionParametersImpl : public ClientConnectionParameters {
   ~ClientConnectionParametersImpl() override;
 
  private:
-  ClientConnectionParametersImpl(
-      const std::string& feature,
-      mojom::ConnectionDelegatePtr connection_delegate_ptr);
+  ClientConnectionParametersImpl(const std::string& feature,
+                                 mojo::PendingRemote<mojom::ConnectionDelegate>
+                                     connection_delegate_remote);
 
   // ClientConnectionParameters:
   bool HasClientCanceledRequest() override;
   void PerformSetConnectionAttemptFailed(
       mojom::ConnectionAttemptFailureReason reason) override;
   void PerformSetConnectionSucceeded(
-      mojom::ChannelPtr channel,
-      mojom::MessageReceiverRequest message_receiver_request) override;
+      mojo::PendingRemote<mojom::Channel> channel,
+      mojo::PendingReceiver<mojom::MessageReceiver> message_receiver_receiver)
+      override;
 
-  void OnConnectionDelegatePtrDisconnected();
+  void OnConnectionDelegateRemoteDisconnected();
 
-  mojom::ConnectionDelegatePtr connection_delegate_ptr_;
+  mojo::Remote<mojom::ConnectionDelegate> connection_delegate_remote_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientConnectionParametersImpl);
 };

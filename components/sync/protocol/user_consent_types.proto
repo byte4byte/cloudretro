@@ -9,6 +9,9 @@
 
 syntax = "proto2";
 
+option java_multiple_files = true;
+option java_package = "org.chromium.components.sync.protocol";
+
 option optimize_for = LITE_RUNTIME;
 
 package sync_pb;
@@ -49,17 +52,6 @@ message UserConsentTypes {
   // The user consent for the Google Location Service. The consent status is
   // determined by the corresponding setting on the ARC setup dialog.
   message ArcGoogleLocationServiceConsent {
-    // Ids of the strings of the setting text presented to the user.
-    repeated int32 description_grd_ids = 1;
-
-    // Id of the string of the UI element the user clicked when consenting.
-    optional int32 confirmation_grd_id = 2;
-
-    optional ConsentStatus status = 3;
-  }
-
-  // The user consent for Metrics and Usage reporting on Android for Chrome OS.
-  message ArcMetricsAndUsageConsent {
     // Ids of the strings of the setting text presented to the user.
     repeated int32 description_grd_ids = 1;
 

@@ -8,7 +8,6 @@
 #include "ash/shell.h"
 #include "ash/wm/screen_pinning_controller.h"
 #include "ash/wm/work_area_insets.h"
-#include "base/logging.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
@@ -112,20 +111,16 @@ void AccessibilityPanelLayoutManager::UpdateWindowBounds() {
   } else if (panel_state_ == AccessibilityPanelState::FULL_WIDTH) {
     bounds.set_x(0);
     bounds.set_width(root_window->bounds().width());
-
-    // TODO(isandrk, crbug.com/959786): Temporary fix that prevents ChromeVox
-    // panel from showing up in locked fullscreen mode (the panel was enabling
-    // an escape from locked mode crbug.com/957950).  Remove once a more proper
-    // fix exists.
-    if (Shell::Get()->screen_pinning_controller()->IsPinned())
-      bounds.set_height(0);
   }
 
   // If a fullscreen browser window is open, give the panel a height of 0
   // unless it's active or always_visible_ is true.
   if (!always_visible_ && root_controller->GetWindowForFullscreenMode() &&
-      !::wm::IsActiveWindow(panel_window_)) {
+      !wm::IsActiveWindow(panel_window_)) {
     bounds.set_height(0);
+    panel_window_->SetBounds(bounds);
+    UpdateWorkAreaForPanelHeight();
+    return;
   }
 
   // Make sure the accessibility panel is always below the Docked Magnifier

@@ -32,6 +32,8 @@
 #include "content/public/browser/presentation_screen_availability_listener.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "url/gurl.h"
 
 #if !defined(OS_ANDROID)
@@ -40,9 +42,7 @@
 #include "components/prefs/pref_service.h"
 #endif
 
-using blink::mojom::PresentationConnectionPtr;
-using blink::mojom::PresentationConnectionPtrInfo;
-using blink::mojom::PresentationConnectionRequest;
+using blink::mojom::PresentationConnection;
 using blink::mojom::PresentationError;
 using blink::mojom::PresentationErrorType;
 using blink::mojom::PresentationInfo;
@@ -110,9 +110,15 @@ class PresentationFrame {
                        const MediaRoute& route);
   void ConnectToPresentation(
       const PresentationInfo& presentation_info,
-      PresentationConnectionPtr controller_connection_ptr,
-      PresentationConnectionRequest receiver_connection_request);
+      mojo::PendingRemote<PresentationConnection> controller_connection_remote,
+      mojo::PendingReceiver<PresentationConnection>
+          receiver_connection_receiver);
   void RemovePresentation(const std::string& presentation_id);
+
+  const base::small_map<std::map<std::string, MediaRoute>>&
+  presentation_id_to_route() const {
+    return presentation_id_to_route_;
+  }
 
  private:
   base::small_map<std::map<std::string, MediaRoute>> presentation_id_to_route_;
@@ -225,8 +231,9 @@ void PresentationFrame::AddPresentation(
 
 void PresentationFrame::ConnectToPresentation(
     const PresentationInfo& presentation_info,
-    PresentationConnectionPtr controller_connection_ptr,
-    PresentationConnectionRequest receiver_connection_request) {
+    mojo::PendingRemote<PresentationConnection> controller_connection_remote,
+    mojo::PendingReceiver<PresentationConnection>
+        receiver_connection_receiver) {
   const auto pid_route_it =
       presentation_id_to_route_.find(presentation_info.id);
 
@@ -241,8 +248,8 @@ void PresentationFrame::ConnectToPresentation(
             web_contents_);
     local_presentation_manager->RegisterLocalPresentationController(
         presentation_info, render_frame_host_id_,
-        std::move(controller_connection_ptr),
-        std::move(receiver_connection_request), pid_route_it->second);
+        std::move(controller_connection_remote),
+        std::move(receiver_connection_receiver), pid_route_it->second);
   } else {
     DVLOG(2)
         << "Creating BrowserPresentationConnectionProxy for [presentation_id]: "
@@ -256,8 +263,8 @@ void PresentationFrame::ConnectToPresentation(
     }
 
     auto* proxy = new BrowserPresentationConnectionProxy(
-        router_, route_id, std::move(receiver_connection_request),
-        std::move(controller_connection_ptr));
+        router_, route_id, std::move(receiver_connection_receiver),
+        std::move(controller_connection_remote));
     browser_connection_proxies_.emplace(route_id, base::WrapUnique(proxy));
   }
 }
@@ -442,8 +449,7 @@ void PresentationServiceDelegateImpl::SetDefaultPresentationUrls(
   DCHECK(!callback.is_null());
   default_presentation_started_callback_ = std::move(callback);
   default_presentation_request_ = request;
-  for (auto& observer : default_presentation_request_observers_)
-    observer.OnDefaultPresentationChanged(*default_presentation_request_);
+  NotifyDefaultPresentationChanged(&request);
 }
 
 void PresentationServiceDelegateImpl::OnJoinRouteResponse(
@@ -470,8 +476,8 @@ void PresentationServiceDelegateImpl::OnJoinRouteResponse(
                                  &connection);
     std::move(success_cb)
         .Run(blink::mojom::PresentationConnectionResult::New(
-            presentation_info.Clone(), std::move(connection->connection_ptr),
-            std::move(connection->connection_request)));
+            presentation_info.Clone(), std::move(connection->connection_remote),
+            std::move(connection->connection_receiver)));
   }
 }
 
@@ -490,8 +496,9 @@ void PresentationServiceDelegateImpl::OnStartPresentationSucceeded(
                                &connection);
   std::move(success_cb)
       .Run(blink::mojom::PresentationConnectionResult::New(
-          new_presentation_info.Clone(), std::move(connection->connection_ptr),
-          std::move(connection->connection_request)));
+          new_presentation_info.Clone(),
+          std::move(connection->connection_remote),
+          std::move(connection->connection_receiver)));
 }
 
 void PresentationServiceDelegateImpl::AddPresentation(
@@ -500,6 +507,7 @@ void PresentationServiceDelegateImpl::AddPresentation(
     const MediaRoute& route) {
   auto* presentation_frame = GetOrAddPresentationFrame(render_frame_host_id);
   presentation_frame->AddPresentation(presentation_info, route);
+  NotifyMediaRoutesChanged();
 }
 
 void PresentationServiceDelegateImpl::RemovePresentation(
@@ -508,6 +516,7 @@ void PresentationServiceDelegateImpl::RemovePresentation(
   const auto it = presentation_frames_.find(render_frame_host_id);
   if (it != presentation_frames_.end())
     it->second->RemovePresentation(presentation_id);
+  NotifyMediaRoutesChanged();
 }
 
 void PresentationServiceDelegateImpl::StartPresentation(
@@ -532,7 +541,8 @@ void PresentationServiceDelegateImpl::StartPresentation(
       request,
       base::BindOnce(
           &PresentationServiceDelegateImpl::OnStartPresentationSucceeded,
-          GetWeakPtr(), render_frame_host_id, std::move(success_cb)),
+          weak_factory_.GetWeakPtr(), render_frame_host_id,
+          std::move(success_cb)),
       std::move(error_cb));
   if (start_presentation_cb_) {
     start_presentation_cb_.Run(std::move(presentation_context));
@@ -603,8 +613,8 @@ void PresentationServiceDelegateImpl::ReconnectPresentation(
         MediaSource::ForPresentationUrl(presentation_url).id(), presentation_id,
         request.frame_origin, web_contents_,
         base::BindOnce(&PresentationServiceDelegateImpl::OnJoinRouteResponse,
-                       GetWeakPtr(), render_frame_host_id, presentation_url,
-                       presentation_id, std::move(success_cb),
+                       weak_factory_.GetWeakPtr(), render_frame_host_id,
+                       presentation_url, presentation_id, std::move(success_cb),
                        std::move(error_cb)),
         base::TimeDelta(), incognito);
   }
@@ -665,7 +675,27 @@ void PresentationServiceDelegateImpl::ListenForConnectionStateChange(
     it->second->ListenForConnectionStateChange(connection, state_changed_cb);
 }
 
-void PresentationServiceDelegateImpl::OnRouteResponse(
+void PresentationServiceDelegateImpl::AddObserver(
+    WebContentsPresentationManager::Observer* observer) {
+  presentation_observers_.AddObserver(observer);
+}
+
+void PresentationServiceDelegateImpl::RemoveObserver(
+    WebContentsPresentationManager::Observer* observer) {
+  presentation_observers_.RemoveObserver(observer);
+}
+
+bool PresentationServiceDelegateImpl::HasDefaultPresentationRequest() const {
+  return default_presentation_request_.has_value();
+}
+
+const content::PresentationRequest&
+PresentationServiceDelegateImpl::GetDefaultPresentationRequest() const {
+  DCHECK(HasDefaultPresentationRequest());
+  return *default_presentation_request_;
+}
+
+void PresentationServiceDelegateImpl::OnPresentationResponse(
     const content::PresentationRequest& presentation_request,
     mojom::RoutePresentationConnectionPtr connection,
     const RouteRequestResult& result) {
@@ -685,34 +715,14 @@ void PresentationServiceDelegateImpl::OnRouteResponse(
                                  presentation_info, &connection);
     default_presentation_started_callback_.Run(
         blink::mojom::PresentationConnectionResult::New(
-            presentation_info.Clone(), std::move(connection->connection_ptr),
-            std::move(connection->connection_request)));
+            presentation_info.Clone(), std::move(connection->connection_remote),
+            std::move(connection->connection_receiver)));
   } else {
     DCHECK(!connection);
   }
 }
 
-void PresentationServiceDelegateImpl::AddDefaultPresentationRequestObserver(
-    DefaultPresentationRequestObserver* observer) {
-  default_presentation_request_observers_.AddObserver(observer);
-}
-
-void PresentationServiceDelegateImpl::RemoveDefaultPresentationRequestObserver(
-    DefaultPresentationRequestObserver* observer) {
-  default_presentation_request_observers_.RemoveObserver(observer);
-}
-
-const content::PresentationRequest&
-PresentationServiceDelegateImpl::GetDefaultPresentationRequest() const {
-  DCHECK(HasDefaultPresentationRequest());
-  return *default_presentation_request_;
-}
-
-bool PresentationServiceDelegateImpl::HasDefaultPresentationRequest() const {
-  return !!default_presentation_request_;
-}
-
-base::WeakPtr<PresentationServiceDelegateImpl>
+base::WeakPtr<WebContentsPresentationManager>
 PresentationServiceDelegateImpl::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
@@ -734,8 +744,7 @@ void PresentationServiceDelegateImpl::ClearDefaultPresentationRequest() {
     return;
 
   default_presentation_request_.reset();
-  for (auto& observer : default_presentation_request_observers_)
-    observer.OnDefaultPresentationRemoved();
+  NotifyDefaultPresentationChanged(nullptr);
 }
 
 std::unique_ptr<media::FlingingController>
@@ -783,15 +792,34 @@ void PresentationServiceDelegateImpl::EnsurePresentationConnection(
   // directly, we need to provide a BrowserPresentationConnectionProxy here or
   // connect to the LocalPresentationManager, as necessary.
   if (!*connection) {
-    PresentationConnectionPtr controller_ptr;
-    PresentationConnectionPtrInfo receiver_ptr_info;
+    mojo::PendingRemote<PresentationConnection> controller_remote;
+    mojo::PendingRemote<PresentationConnection> receiver_remote;
     *connection = mojom::RoutePresentationConnection::New(
-        std::move(receiver_ptr_info), mojo::MakeRequest(&controller_ptr));
+        std::move(receiver_remote),
+        controller_remote.InitWithNewPipeAndPassReceiver());
     auto* presentation_frame = GetOrAddPresentationFrame(render_frame_host_id);
     presentation_frame->ConnectToPresentation(
-        presentation_info, std::move(controller_ptr),
-        mojo::MakeRequest(&(*connection)->connection_ptr));
+        presentation_info, std::move(controller_remote),
+        (*connection)->connection_remote.InitWithNewPipeAndPassReceiver());
   }
+}
+
+void PresentationServiceDelegateImpl::NotifyDefaultPresentationChanged(
+    const content::PresentationRequest* request) {
+  for (auto& presentation_observer : presentation_observers_)
+    presentation_observer.OnDefaultPresentationChanged(request);
+}
+
+void PresentationServiceDelegateImpl::NotifyMediaRoutesChanged() {
+  std::vector<MediaRoute> routes;
+  for (const auto& presentation_frame : presentation_frames_) {
+    for (const auto& route :
+         presentation_frame.second->presentation_id_to_route()) {
+      routes.push_back(route.second);
+    }
+  }
+  for (auto& presentation_observer : presentation_observers_)
+    presentation_observer.OnMediaRoutesChanged(routes);
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(PresentationServiceDelegateImpl)

@@ -9,34 +9,31 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_device.h"
-#include "device/vr/vr_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "ui/display/display.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace device {
 
 // Represents one of the platform's VR devices. Owned by the respective
 // VRDeviceProvider.
-// TODO(mthiesse, crbug.com/769373): Remove DEVICE_VR_EXPORT.
-class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
+class COMPONENT_EXPORT(DEVICE_VR_BASE) VRDeviceBase : public mojom::XRRuntime {
  public:
   explicit VRDeviceBase(mojom::XRDeviceId id);
   ~VRDeviceBase() override;
 
-  // VRDevice Implementation
+  // XRRuntime implementation
   void ListenToDeviceChanges(
-      mojom::XRRuntimeEventListenerAssociatedPtrInfo listener,
+      mojo::PendingAssociatedRemote<mojom::XRRuntimeEventListener> listener,
       mojom::XRRuntime::ListenToDeviceChangesCallback callback) final;
-  void SetListeningForActivate(bool is_listening) override;
-  void EnsureInitialized(EnsureInitializedCallback callback) override;
   void SetInlinePosesEnabled(bool enable) override;
+  void ShutdownSession(mojom::XRRuntime::ShutdownSessionCallback) override;
 
-  virtual void RequestHitTest(
-      mojom::XRRayPtr ray,
-      mojom::XREnvironmentIntegrationProvider::RequestHitTestCallback callback);
   device::mojom::XRDeviceId GetId() const;
 
   bool HasExclusiveSession();
@@ -48,7 +45,7 @@ class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
   mojom::VRDisplayInfoPtr GetVRDisplayInfo();
 
   // Used by providers to bind devices.
-  mojom::XRRuntimePtr BindXRRuntimePtr();
+  mojo::PendingRemote<mojom::XRRuntime> BindXRRuntime();
 
   // TODO(mthiesse): The browser should handle browser-side exiting of
   // presentation before device/ is even aware presentation is being exited.
@@ -63,24 +60,20 @@ class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
   void OnStartPresenting();
   bool IsPresenting() { return presenting_; }  // Exposed for test.
   void SetVRDisplayInfo(mojom::VRDisplayInfoPtr display_info);
-  void OnActivate(mojom::VRDisplayEventReason reason,
-                  base::Callback<void(bool)> on_handled);
+  void OnVisibilityStateChanged(mojom::XRVisibilityState visibility_state);
 
   mojom::VRDisplayInfoPtr display_info_;
 
   bool inline_poses_enabled_ = true;
 
  private:
-  // TODO(https://crbug.com/842227): Rename methods to HandleOnXXX
-  virtual void OnListeningForActivate(bool listening);
-
-  mojom::XRRuntimeEventListenerAssociatedPtr listener_;
+  mojo::AssociatedRemote<mojom::XRRuntimeEventListener> listener_;
 
   bool presenting_ = false;
 
   device::mojom::XRDeviceId id_;
 
-  mojo::Binding<mojom::XRRuntime> runtime_binding_;
+  mojo::Receiver<mojom::XRRuntime> runtime_receiver_{this};
 
   DISALLOW_COPY_AND_ASSIGN(VRDeviceBase);
 };

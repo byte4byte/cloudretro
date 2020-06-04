@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -24,13 +25,13 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_registry.h"
 #include "storage/browser/blob/shareable_file_reference.h"
-#include "storage/browser/fileapi/async_file_util.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/async_file_util.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/test/test_file_system_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -74,6 +75,7 @@ class EventLogger {
                        storage::AsyncFileUtil::EntryList file_list,
                        bool has_more) {
     result_.reset(new base::File::Error(error));
+    read_directory_list_ = std::move(file_list);
   }
 
   void OnCreateSnapshotFile(
@@ -88,8 +90,13 @@ class EventLogger {
 
   base::File::Error* result() { return result_.get(); }
 
+  const storage::AsyncFileUtil::EntryList& read_directory_list() {
+    return read_directory_list_;
+  }
+
  private:
   std::unique_ptr<base::File::Error> result_;
+  storage::AsyncFileUtil::EntryList read_directory_list_;
   DISALLOW_COPY_AND_ASSIGN(EventLogger);
 };
 
@@ -124,8 +131,8 @@ class FileSystemProviderProviderAsyncFileUtilTest : public testing::Test {
     profile_ = profile_manager_->CreateTestingProfile("testing-profile");
     async_file_util_.reset(new internal::ProviderAsyncFileUtil);
 
-    file_system_context_ =
-        content::CreateFileSystemContextForTesting(NULL, data_dir_.GetPath());
+    file_system_context_ = storage::CreateFileSystemContextForTesting(
+        nullptr, data_dir_.GetPath());
 
     Service* service = Service::Get(profile_);  // Owned by its factory.
     service->RegisterProvider(FakeExtensionProvider::Create(kExtensionId));
@@ -156,7 +163,7 @@ class FileSystemProviderProviderAsyncFileUtilTest : public testing::Test {
         file_system_context_.get());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir data_dir_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* profile_;  // Owned by TestingProfileManager.
@@ -171,10 +178,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateOrOpen_Create) {
   EventLogger logger;
 
   async_file_util_->CreateOrOpen(
-      CreateOperationContext(),
-      file_url_,
-      base::File::FLAG_CREATE,
-      base::Bind(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_, base::File::FLAG_CREATE,
+      base::BindOnce(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -184,10 +189,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateOrOpen_CreateAlways) {
   EventLogger logger;
 
   async_file_util_->CreateOrOpen(
-      CreateOperationContext(),
-      file_url_,
-      base::File::FLAG_CREATE_ALWAYS,
-      base::Bind(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_, base::File::FLAG_CREATE_ALWAYS,
+      base::BindOnce(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -197,10 +200,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateOrOpen_OpenAlways) {
   EventLogger logger;
 
   async_file_util_->CreateOrOpen(
-      CreateOperationContext(),
-      file_url_,
-      base::File::FLAG_OPEN_ALWAYS,
-      base::Bind(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_, base::File::FLAG_OPEN_ALWAYS,
+      base::BindOnce(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -211,10 +212,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest,
   EventLogger logger;
 
   async_file_util_->CreateOrOpen(
-      CreateOperationContext(),
-      file_url_,
-      base::File::FLAG_OPEN_TRUNCATED,
-      base::Bind(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_, base::File::FLAG_OPEN_TRUNCATED,
+      base::BindOnce(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -224,10 +223,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateOrOpen_Open) {
   EventLogger logger;
 
   async_file_util_->CreateOrOpen(
-      CreateOperationContext(),
-      file_url_,
-      base::File::FLAG_OPEN,
-      base::Bind(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_, base::File::FLAG_OPEN,
+      base::BindOnce(&EventLogger::OnCreateOrOpen, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_INVALID_OPERATION, *logger.result());
@@ -237,9 +234,9 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, EnsureFileExists) {
   EventLogger logger;
 
   async_file_util_->EnsureFileExists(
-      CreateOperationContext(),
-      file_url_,
-      base::Bind(&EventLogger::OnEnsureFileExists, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_,
+      base::BindOnce(&EventLogger::OnEnsureFileExists,
+                     base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -250,11 +247,10 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateDirectory) {
   EventLogger logger;
 
   async_file_util_->CreateDirectory(
-      CreateOperationContext(),
-      directory_url_,
+      CreateOperationContext(), directory_url_,
       false,  // exclusive
       false,  // recursive
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -269,7 +265,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, GetFileInfo) {
       storage::FileSystemOperation::GET_METADATA_FIELD_IS_DIRECTORY |
           storage::FileSystemOperation::GET_METADATA_FIELD_SIZE |
           storage::FileSystemOperation::GET_METADATA_FIELD_LAST_MODIFIED,
-      base::Bind(&EventLogger::OnGetFileInfo, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnGetFileInfo, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -289,15 +285,30 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, ReadDirectory) {
   EXPECT_EQ(base::File::FILE_OK, *logger.result());
 }
 
+TEST_F(FileSystemProviderProviderAsyncFileUtilTest,
+       ReadDirectory_SanitiseResultsList) {
+  EventLogger logger;
+
+  async_file_util_->ReadDirectory(
+      CreateOperationContext(), root_url_,
+      base::Bind(&EventLogger::OnReadDirectory, base::Unretained(&logger)));
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_TRUE(logger.result());
+  EXPECT_EQ(base::File::FILE_OK, *logger.result());
+  EXPECT_EQ(1U, logger.read_directory_list().size());
+  EXPECT_EQ(base::FilePath(kFakeFilePath + 1 /* No leading slash. */),
+            logger.read_directory_list()[0].name);
+}
+
 TEST_F(FileSystemProviderProviderAsyncFileUtilTest, Touch) {
   EventLogger logger;
 
   async_file_util_->Touch(
-      CreateOperationContext(),
-      file_url_,
+      CreateOperationContext(), file_url_,
       base::Time(),  // last_modified_time
       base::Time(),  // last_access_time
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -307,10 +318,9 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, Truncate) {
   EventLogger logger;
 
   async_file_util_->Truncate(
-      CreateOperationContext(),
-      file_url_,
+      CreateOperationContext(), file_url_,
       0,  // length
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -326,7 +336,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CopyFileLocal) {
       file_url_,  // dst_url
       storage::FileSystemOperation::OPTION_NONE,
       base::Bind(&EventLogger::OnCopyFileProgress, base::Unretained(&logger)),
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -341,7 +351,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, MoveFileLocal) {
       file_url_,  // src_url
       file_url_,  // dst_url
       storage::FileSystemOperation::OPTION_NONE,
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -355,7 +365,7 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CopyInForeignFile) {
       CreateOperationContext(),
       base::FilePath(),  // src_file_path
       file_url_,         // dst_url
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_ACCESS_DENIED, *logger.result());
@@ -365,9 +375,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, DeleteFile) {
   EventLogger logger;
 
   async_file_util_->DeleteFile(
-      CreateOperationContext(),
-      file_url_,
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      CreateOperationContext(), file_url_,
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -378,9 +387,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, DeleteDirectory) {
   EventLogger logger;
 
   async_file_util_->DeleteDirectory(
-      CreateOperationContext(),
-      directory_url_,
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      CreateOperationContext(), directory_url_,
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -391,9 +399,8 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, DeleteRecursively) {
   EventLogger logger;
 
   async_file_util_->DeleteRecursively(
-      CreateOperationContext(),
-      directory_url_,
-      base::Bind(&EventLogger::OnStatus, base::Unretained(&logger)));
+      CreateOperationContext(), directory_url_,
+      base::BindOnce(&EventLogger::OnStatus, base::Unretained(&logger)));
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(logger.result());
@@ -404,10 +411,9 @@ TEST_F(FileSystemProviderProviderAsyncFileUtilTest, CreateSnapshotFile) {
   EventLogger logger;
 
   async_file_util_->CreateSnapshotFile(
-      CreateOperationContext(),
-      file_url_,
-      base::Bind(&EventLogger::OnCreateSnapshotFile,
-                 base::Unretained(&logger)));
+      CreateOperationContext(), file_url_,
+      base::BindOnce(&EventLogger::OnCreateSnapshotFile,
+                     base::Unretained(&logger)));
 
   ASSERT_TRUE(logger.result());
   EXPECT_EQ(base::File::FILE_ERROR_INVALID_OPERATION, *logger.result());

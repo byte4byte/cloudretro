@@ -10,6 +10,7 @@
 
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/system/sys_info.h"
+#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/client_native_pixmap.h"
 #include "ui/gfx/client_native_pixmap_factory.h"
 #include "ui/gfx/native_pixmap_handle.h"
@@ -20,7 +21,6 @@ class ClientNativePixmapFuchsia : public gfx::ClientNativePixmap {
  public:
   explicit ClientNativePixmapFuchsia(gfx::NativePixmapHandle handle)
       : handle_(std::move(handle)) {
-    DCHECK(!handle_.planes.empty());
   }
 
   ~ClientNativePixmapFuchsia() override {
@@ -32,10 +32,8 @@ class ClientNativePixmapFuchsia : public gfx::ClientNativePixmap {
     if (mapping_)
       return true;
 
-    if (!handle_.planes[0].vmo) {
-      NOTREACHED();
+    if (handle_.planes.empty() || !handle_.planes[0].vmo)
       return false;
-    }
 
     uintptr_t addr;
 
@@ -65,6 +63,15 @@ class ClientNativePixmapFuchsia : public gfx::ClientNativePixmap {
 
   void Unmap() override {
     DCHECK(mapping_);
+
+    // Flush the CPu cache in case the GPU reads the data directly from RAM.
+    if (handle_.ram_coherency) {
+      zx_status_t status =
+          zx_cache_flush(mapping_, mapping_size_,
+                         ZX_CACHE_FLUSH_DATA | ZX_CACHE_FLUSH_INVALIDATE);
+      ZX_DCHECK(status == ZX_OK, status) << "zx_cache_flush";
+    }
+
     zx_status_t status = zx::vmar::root_self()->unmap(
         reinterpret_cast<uintptr_t>(mapping_), mapping_size_);
     ZX_DCHECK(status == ZX_OK, status) << "zx_vmar_unmap";
@@ -101,8 +108,48 @@ class ScenicClientNativePixmapFactory : public gfx::ClientNativePixmapFactory {
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage) override {
+    // |planes| may be empty for non-mappable pixmaps. No need to validate the
+    // handle in that case.
     if (handle.planes.empty())
+      return std::make_unique<ClientNativePixmapFuchsia>(std::move(handle));
+
+    size_t expected_planes = gfx::NumberOfPlanesForLinearBufferFormat(format);
+    if (handle.planes.size() != expected_planes)
       return nullptr;
+
+    base::CheckedNumeric<size_t> vmo_size_checked =
+        base::CheckedNumeric<size_t>(handle.planes.back().offset) +
+        handle.planes.back().size;
+    if (!vmo_size_checked.IsValid()) {
+      return nullptr;
+    }
+    size_t vmo_size = vmo_size_checked.ValueOrDie();
+
+    // Validate plane layout and buffer size.
+    for (size_t i = 0; i < handle.planes.size(); ++i) {
+      size_t min_stride = 0;
+      size_t subsample_factor = SubsamplingFactorForBufferFormat(format, i);
+      base::CheckedNumeric<size_t> plane_height =
+          (base::CheckedNumeric<size_t>(size.height()) + subsample_factor - 1) /
+          subsample_factor;
+      if (!gfx::RowSizeForBufferFormatChecked(size.width(), format, i,
+                                              &min_stride) ||
+          handle.planes[i].stride < min_stride) {
+        return nullptr;
+      }
+
+      base::CheckedNumeric<size_t> min_size =
+          base::CheckedNumeric<size_t>(handle.planes[i].stride) * plane_height;
+      if (!min_size.IsValid() || handle.planes[i].size < min_size.ValueOrDie())
+        return nullptr;
+
+      base::CheckedNumeric<size_t> end_pos =
+          base::CheckedNumeric<size_t>(handle.planes[i].offset) +
+          handle.planes[i].size;
+      if (!end_pos.IsValid() || end_pos.ValueOrDie() > vmo_size)
+        return nullptr;
+    }
+
     return std::make_unique<ClientNativePixmapFuchsia>(std::move(handle));
   }
 

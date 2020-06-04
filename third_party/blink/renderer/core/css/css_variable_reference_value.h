@@ -28,7 +28,8 @@ class CSSVariableReferenceValue : public CSSValue {
 
   CSSVariableData* VariableDataValue() const { return data_.get(); }
   const CSSParserContext* ParserContext() const {
-    DCHECK(parser_context_);
+    // TODO(crbug.com/985028): CSSVariableReferenceValue should always have
+    // a CSSParserContext.
     return parser_context_.Get();
   }
 
@@ -37,7 +38,7 @@ class CSSVariableReferenceValue : public CSSValue {
   }
   String CustomCSSText() const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   scoped_refptr<CSSVariableData> data_;

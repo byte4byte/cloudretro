@@ -47,7 +47,7 @@ bool CanOfferSignin(Profile* profile,
       return false;
 
     // Make sure this username is not prohibited by policy.
-    if (!identity::IsUsernameAllowedByPatternFromPrefs(
+    if (!signin::IsUsernameAllowedByPatternFromPrefs(
             g_browser_process->local_state(), email)) {
       if (error_message) {
         error_message->assign(
@@ -85,6 +85,9 @@ bool CanOfferSignin(Profile* profile,
                 .GetAllProfilesAttributes();
 
         for (const ProfileAttributesEntry* entry : entries) {
+          if (!entry->IsAuthenticated())
+            continue;
+
           // For backward compatibility, need to check also the username of the
           // profile, since the GAIA ID may not have been set yet in the
           // ProfileAttributesStorage.  It will be set once the profile

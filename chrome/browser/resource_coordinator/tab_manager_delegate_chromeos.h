@@ -21,11 +21,11 @@
 #include "chrome/browser/chromeos/arc/process/arc_process.h"
 #include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit.h"
-#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom-forward.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "chromeos/dbus/debug_daemon_client.h"
-#include "components/arc/common/process.mojom.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
+#include "components/arc/mojom/process.mojom.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/wm/public/activation_change_observer.h"
@@ -152,9 +152,12 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
   // |candidates|; sort these lifecycle units based on the TabRanker order; and
   // put these sorted lifecycle unit back to the vacancies of these lifecycle
   // units in the |candidates|.
+  // If TabRanker is disabled, this will log the TabMetrics of these lifecycle
+  // units.
   // All apps in the |candidates| will not be influenced.
-  static void SortLifecycleUnitWithTabRanker(std::vector<Candidate>* candidates,
-                                             LifecycleUnitSorter sorter);
+  static void LogAndMaybeSortLifecycleUnitWithTabRanker(
+      std::vector<Candidate>* candidates,
+      LifecycleUnitSorter sorter);
 
   // Returns the LifecycleUnits in TabManager. Virtual for unit tests.
   virtual LifecycleUnitVector GetLifecycleUnits();
@@ -227,7 +230,7 @@ class TabManagerDelegate : public wm::ActivationChangeObserver,
   std::unique_ptr<TabManagerDelegate::MemoryStat> mem_stat_;
 
   // Weak pointer factory used for posting tasks to other threads.
-  base::WeakPtrFactory<TabManagerDelegate> weak_ptr_factory_;
+  base::WeakPtrFactory<TabManagerDelegate> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TabManagerDelegate);
 };

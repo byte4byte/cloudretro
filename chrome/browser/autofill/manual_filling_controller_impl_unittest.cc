@@ -11,16 +11,23 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/optional.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "chrome/browser/autofill/mock_address_accessory_controller.h"
 #include "chrome/browser/autofill/mock_credit_card_accessory_controller.h"
 #include "chrome/browser/autofill/mock_manual_filling_view.h"
 #include "chrome/browser/autofill/mock_password_accessory_controller.h"
-#include "chrome/browser/password_manager/password_accessory_controller.h"
-#include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "chrome/browser/password_manager/android/password_accessory_controller.h"
+#include "chrome/test/base/testing_profile.h"
+#include "components/autofill/core/browser/ui/accessory_sheet_enums.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/password_manager/core/common/password_manager_features.h"
+#include "content/public/test/browser_task_environment.h"
+#include "content/public/test/test_web_contents_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,9 +40,8 @@ using testing::_;
 using testing::AnyNumber;
 using testing::NiceMock;
 using testing::StrictMock;
+using testing::WithArgs;
 using FillingSource = ManualFillingController::FillingSource;
-
-constexpr char kExampleSite[] = "https://example.com";
 
 AccessorySheetData empty_passwords_sheet() {
   constexpr char kTitle[] = "Example title";
@@ -52,18 +58,15 @@ AccessorySheetData populate_sheet(AccessoryTabType type) {
 
 }  // namespace
 
-class ManualFillingControllerTest : public ChromeRenderViewHostTestHarness {
+class ManualFillingControllerTest : public testing::Test {
  public:
   ManualFillingControllerTest() = default;
 
   void SetUp() override {
-    ChromeRenderViewHostTestHarness::SetUp();
-    NavigateAndCommit(GURL(kExampleSite));
     ManualFillingControllerImpl::CreateForWebContentsForTesting(
         web_contents(), mock_pwd_controller_.AsWeakPtr(),
         mock_address_controller_.AsWeakPtr(), mock_cc_controller_.AsWeakPtr(),
         std::make_unique<NiceMock<MockManualFillingView>>());
-    NavigateAndCommit(GURL(kExampleSite));
   }
 
   void FocusFieldAndClearExpectations(FocusedFieldType fieldType) {
@@ -84,11 +87,19 @@ class ManualFillingControllerTest : public ChromeRenderViewHostTestHarness {
     return ManualFillingControllerImpl::FromWebContents(web_contents());
   }
 
+  content::WebContents* web_contents() { return web_contents_; }
+
   MockManualFillingView* view() {
     return static_cast<MockManualFillingView*>(controller()->view());
   }
 
  protected:
+  content::BrowserTaskEnvironment task_environment_;
+  TestingProfile profile_;
+  content::TestWebContentsFactory web_contents_factory_;
+  content::WebContents* web_contents_ =
+      web_contents_factory_.CreateWebContents(&profile_);
+
   NiceMock<MockPasswordAccessoryController> mock_pwd_controller_;
   NiceMock<MockAddressAccessoryController> mock_address_controller_;
   NiceMock<MockCreditCardAccessoryController> mock_cc_controller_;
@@ -145,15 +156,6 @@ TEST_F(ManualFillingControllerTest, AlwaysShowsAccessoryForPasswordFields) {
   controller()->RefreshSuggestions(empty_passwords_sheet());
 
   EXPECT_CALL(*view(), ShowWhenKeyboardIsVisible());
-  FocusFieldAndClearExpectations(FocusedFieldType::kFillablePasswordField);
-}
-
-TEST_F(ManualFillingControllerTest, TouchToFillSheetHasPreference) {
-  controller()->RefreshSuggestions(
-      populate_sheet(AccessoryTabType::TOUCH_TO_FILL));
-  controller()->RefreshSuggestions(populate_sheet(AccessoryTabType::PASSWORDS));
-
-  EXPECT_CALL(*view(), ShowTouchToFillSheet());
   FocusFieldAndClearExpectations(FocusedFieldType::kFillablePasswordField);
 }
 
@@ -218,6 +220,11 @@ TEST_F(ManualFillingControllerTest, ShowsAndHidesAccessoryForPasswords) {
   EXPECT_CALL(*view(), Hide());
   controller()->UpdateSourceAvailability(FillingSource::PASSWORD_FALLBACKS,
                                          /*has_suggestions=*/false);
+}
+
+TEST_F(ManualFillingControllerTest, UpdatesCreditCardControllerOnFocusChange) {
+  EXPECT_CALL(mock_cc_controller_, RefreshSuggestions);
+  FocusFieldAndClearExpectations(FocusedFieldType::kFillableUsernameField);
 }
 
 TEST_F(ManualFillingControllerTest, HidesAccessoryWithoutAvailableSources) {
@@ -304,10 +311,14 @@ TEST_F(ManualFillingControllerTest, OnManualGenerationRequested) {
   controller()->OnOptionSelected(AccessoryAction::GENERATE_PASSWORD_MANUAL);
 }
 
-TEST_F(ManualFillingControllerTest, GetFavicon) {
-  constexpr int kIconSize = 75;
-  auto icon_callback = base::BindOnce([](const gfx::Image&) {});
+TEST_F(ManualFillingControllerTest, OnSavePasswordsToggledTrue) {
+  EXPECT_CALL(mock_pwd_controller_,
+              OnToggleChanged(AccessoryAction::TOGGLE_SAVE_PASSWORDS, true));
+  controller()->OnToggleChanged(AccessoryAction::TOGGLE_SAVE_PASSWORDS, true);
+}
 
-  EXPECT_CALL(mock_pwd_controller_, GetFavicon(kIconSize, _));
-  controller()->GetFavicon(kIconSize, std::move(icon_callback));
+TEST_F(ManualFillingControllerTest, OnSavePasswordsToggledFalse) {
+  EXPECT_CALL(mock_pwd_controller_,
+              OnToggleChanged(AccessoryAction::TOGGLE_SAVE_PASSWORDS, false));
+  controller()->OnToggleChanged(AccessoryAction::TOGGLE_SAVE_PASSWORDS, false);
 }

@@ -12,10 +12,11 @@ import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.FrameLayout;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.modaldialog.ModalDialogView;
-import org.chromium.chrome.browser.modaldialog.ModalDialogViewBinder;
+import org.chromium.components.browser_ui.modaldialog.ModalDialogView;
+import org.chromium.components.browser_ui.modaldialog.ModalDialogViewBinder;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -40,9 +41,11 @@ public class VrModalPresenter extends ModalDialogManager.Presenter {
                 MarginLayoutParams.MATCH_PARENT, MarginLayoutParams.WRAP_CONTENT, Gravity.CENTER);
 
         mVrDialog = new VrDialog(mContext, mVrDialogManager);
+        int style = model.get(ModalDialogProperties.PRIMARY_BUTTON_FILLED)
+                ? R.style.Theme_Chromium_ModalDialog_FilledPrimaryButton
+                : R.style.Theme_Chromium_ModalDialog_TextPrimaryButton;
         ModalDialogView dialogView =
-                (ModalDialogView) LayoutInflater
-                        .from(new ContextThemeWrapper(mContext, R.style.Theme_Chromium_ModalDialog))
+                (ModalDialogView) LayoutInflater.from(new ContextThemeWrapper(mContext, style))
                         .inflate(R.layout.modal_dialog_view, null);
         mModelChangeProcessor =
                 PropertyModelChangeProcessor.create(model, dialogView, new ModalDialogViewBinder());

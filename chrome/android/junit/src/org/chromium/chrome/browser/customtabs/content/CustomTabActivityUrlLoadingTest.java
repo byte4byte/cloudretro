@@ -11,6 +11,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,15 +19,24 @@ import static org.chromium.chrome.browser.customtabs.content.CustomTabActivityCo
 import static org.chromium.chrome.browser.customtabs.content.CustomTabActivityContentTestEnvironment.OTHER_URL;
 import static org.chromium.chrome.browser.customtabs.content.CustomTabActivityContentTestEnvironment.SPECULATED_URL;
 
+import android.content.Intent;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.test.util.JniMocker;
+import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.test.ShadowUrlUtilities;
+import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.embedder_support.util.UrlUtilitiesJni;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.testing.local.LocalRobolectricTestRunner;
 
@@ -35,22 +45,33 @@ import org.chromium.testing.local.LocalRobolectricTestRunner;
  * properly loaded in Custom Tabs in different conditions.
  */
 @RunWith(LocalRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowUrlUtilities.class})
+@Config(manifest = Config.NONE)
+@Features.DisableFeatures({ChromeFeatureList.CCT_EXTERNAL_LINK_HANDLING})
 public class CustomTabActivityUrlLoadingTest {
-
     @Rule
     public final CustomTabActivityContentTestEnvironment env =
             new CustomTabActivityContentTestEnvironment();
 
+    @Rule
+    public Features.JUnitProcessor processor = new Features.JUnitProcessor();
+
     private CustomTabActivityTabController mTabController;
     private CustomTabActivityNavigationController mNavigationController;
-    private CustomTabActivityInitialPageLoader mInitialPageLoader;
+    private CustomTabIntentHandler mIntentHandler;
+
+    @Rule
+    public JniMocker mocker = new JniMocker();
+
+    @Mock
+    UrlUtilities.Natives mUrlUtilitiesJniMock;
 
     @Before
     public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        mocker.mock(UrlUtilitiesJni.TEST_HOOKS, mUrlUtilitiesJniMock);
         mTabController = env.createTabController();
         mNavigationController = env.createNavigationController(mTabController);
-        mInitialPageLoader = env.createInitialPageLoader(mNavigationController);
+        mIntentHandler = env.createIntentHandler(mNavigationController);
     }
 
     @Test
@@ -126,5 +147,31 @@ public class CustomTabActivityUrlLoadingTest {
         Tab hiddenTab = env.prepareHiddenTab();
         env.reachNativeInit(mTabController);
         verify(hiddenTab).loadUrl(any());
+    }
+
+    @Test
+    public void loadsUrlFromNewIntent() {
+        env.reachNativeInit(mTabController);
+        clearInvocations(env.tabFromFactory);
+
+        mIntentHandler.onNewIntent(createDataProviderForNewIntent(OTHER_URL));
+        verify(env.tabFromFactory).loadUrl(argThat(params -> OTHER_URL.equals(params.getUrl())));
+    }
+
+    @Test
+    public void loadsUrlFromTheLastIntent_IfTwoIntentsArriveBeforeNativeInit() {
+        mIntentHandler.onNewIntent(createDataProviderForNewIntent(OTHER_URL));
+        env.reachNativeInit(mTabController);
+
+        verify(env.tabFromFactory, times(1)).loadUrl(any()); // Check that only one call was made.
+        verify(env.tabFromFactory).loadUrl(argThat(params -> OTHER_URL.equals(params.getUrl())));
+    }
+
+    private CustomTabIntentDataProvider createDataProviderForNewIntent(String url) {
+        CustomTabIntentDataProvider dataProvider = mock(CustomTabIntentDataProvider.class);
+        when(dataProvider.getUrlToLoad()).thenReturn(url);
+        when(dataProvider.getSession()).thenReturn(env.session);
+        when(dataProvider.getIntent()).thenReturn(new Intent().setAction(Intent.ACTION_VIEW));
+        return dataProvider;
     }
 }

@@ -14,6 +14,7 @@
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/crostini/fake_crostini_features.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,7 +30,7 @@ namespace file_manager {
 
 enum GuestMode { NOT_IN_GUEST_MODE, IN_GUEST_MODE, IN_INCOGNITO };
 
-class DriveTestVolume;
+class DriveFsTestVolume;
 class FakeTestVolume;
 class DownloadsTestVolume;
 class CrostiniTestVolume;
@@ -37,6 +38,7 @@ class AndroidFilesTestVolume;
 class RemovableTestVolume;
 class DocumentsProviderTestVolume;
 class MediaViewTestVolume;
+class SmbfsTestVolume;
 
 class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
  protected:
@@ -50,6 +52,7 @@ class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
   void SetUpInProcessBrowserTestFixture() override;
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
+  void TearDown() override;
 
   // Mandatory overrides for each File Manager test extension type.
   virtual GuestMode GetGuestMode() const = 0;
@@ -59,16 +62,17 @@ class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
 
   // Optional overrides for each File Manager test extension type.
   virtual bool GetTabletMode() const;
-  virtual bool GetEnableDriveFs() const;
-  virtual bool GetEnableMyFilesVolume() const;
   virtual bool GetEnableDocumentsProvider() const;
   virtual bool GetEnableArc() const;
-  virtual bool GetEnableFormatDialog() const;
   virtual bool GetRequiresStartupBrowser() const;
   virtual bool GetNeedsZipSupport() const;
   virtual bool GetIsOffline() const;
+  virtual bool GetEnableFilesNg() const;
   virtual bool GetEnableNativeSmb() const;
+  virtual bool GetEnableSmbfs() const;
+  virtual bool GetEnableUnifiedMediaView() const;
   virtual bool GetStartWithNoVolumesMounted() const;
+  virtual bool GetStartWithFileTasksObserver() const;
 
   // Launches the test extension from GetTestExtensionManifestName() and uses
   // it to drive the testing the actual FileManager component extension under
@@ -87,20 +91,11 @@ class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
   // Returns true if the test runs in tablet mode.
   bool IsTabletModeTest() const { return GetTabletMode(); }
 
-  // Returns true if the test requires DriveFS.
-  bool IsDriveFsTest() const { return GetEnableDriveFs(); }
-
   // Returns true if the test requires Android documents providers.
   bool IsDocumentsProviderTest() const { return GetEnableDocumentsProvider(); }
 
-  // Returns true if the test requires the FormatDialog feature enabled.
-  bool IsFormatDialogTest() const { return GetEnableFormatDialog(); }
-
   // Returns true if the test requires ARC++.
   bool IsArcTest() const { return GetEnableArc(); }
-
-  // Returns true if the test MyFilesVolume feature is enabled.
-  bool IsMyFilesVolume() const { return GetEnableMyFilesVolume(); }
 
   // Returns true if the test requires zip/unzip support.
   bool IsZipTest() const { return GetNeedsZipSupport(); }
@@ -108,8 +103,17 @@ class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
   // Returns true if Drive should act as if offline.
   bool IsOfflineTest() const { return GetIsOffline(); }
 
+  // Returns true if the test needs the files-ng feature.
+  bool IsFilesNgTest() const { return GetEnableFilesNg(); }
+
   // Returns true if the test needs a native SMB file system provider.
   bool IsNativeSmbTest() const { return GetEnableNativeSmb(); }
+
+  // Returns true if the test needs smbfs for native SMB integration.
+  bool IsSmbfsTest() const { return GetEnableSmbfs(); }
+
+  // Returns true if the test needs the unified media view feature.
+  bool IsUnifiedMediaViewTest() const { return GetEnableUnifiedMediaView(); }
 
   // Returns true if FilesApp should start with no volumes mounted.
   bool DoesTestStartWithNoVolumesMounted() const {
@@ -149,24 +153,24 @@ class FileManagerBrowserTestBase : public extensions::ExtensionApiTest {
   // Called during tests to determine if SMB file shares is enabled.
   bool IsSmbEnabled() const;
 
-  // Creates ARC services for testing that are keyed to the current |profile()|.
-  void CreateArcServices();
-
-  base::test::ScopedFeatureList feature_list_;
+  std::unique_ptr<base::test::ScopedFeatureList> feature_list_;
+  crostini::FakeCrostiniFeatures crostini_features_;
 
   std::unique_ptr<DownloadsTestVolume> local_volume_;
   std::unique_ptr<CrostiniTestVolume> crostini_volume_;
   std::unique_ptr<AndroidFilesTestVolume> android_files_volume_;
-  std::map<Profile*, std::unique_ptr<DriveTestVolume>> drive_volumes_;
-  DriveTestVolume* drive_volume_ = nullptr;
+  std::map<Profile*, std::unique_ptr<DriveFsTestVolume>> drive_volumes_;
+  DriveFsTestVolume* drive_volume_ = nullptr;
   std::unique_ptr<FakeTestVolume> usb_volume_;
   std::unique_ptr<FakeTestVolume> mtp_volume_;
   std::unique_ptr<RemovableTestVolume> partition_1_;
   std::unique_ptr<RemovableTestVolume> partition_2_;
+  std::unique_ptr<RemovableTestVolume> partition_3_;
   std::unique_ptr<DocumentsProviderTestVolume> documents_provider_volume_;
   std::unique_ptr<MediaViewTestVolume> media_view_images_;
   std::unique_ptr<MediaViewTestVolume> media_view_videos_;
   std::unique_ptr<MediaViewTestVolume> media_view_audio_;
+  std::unique_ptr<SmbfsTestVolume> smbfs_volume_;
 
   drive::DriveIntegrationServiceFactory::FactoryCallback
       create_drive_integration_service_;

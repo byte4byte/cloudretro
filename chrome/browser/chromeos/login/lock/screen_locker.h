@@ -21,12 +21,15 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/challenge_response_auth_keys_loader.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "chrome/browser/chromeos/login/security_token_pin_dialog_host_ash_impl.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chromeos/login/auth/auth_status_consumer.h"
 #include "chromeos/login/auth/challenge_response_key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "components/user_manager/user_manager.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/fingerprint.mojom.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -41,8 +44,10 @@ class ViewsScreenLocker;
 // ScreenLocker displays the lock UI and takes care of authenticating the user
 // and managing a global instance of itself which will be deleted when the
 // system is unlocked.
-class ScreenLocker : public AuthStatusConsumer,
-                     public device::mojom::FingerprintObserver {
+class ScreenLocker
+    : public AuthStatusConsumer,
+      public device::mojom::FingerprintObserver,
+      public user_manager::UserManager::UserSessionStateObserver {
  public:
   // Delegate used to send internal state changes back to the UI.
   class Delegate {
@@ -98,6 +103,11 @@ class ScreenLocker : public AuthStatusConsumer,
   void Authenticate(const UserContext& user_context,
                     AuthenticateCallback callback);
 
+  // Authenticates the user with given |account_id| using the challenge-response
+  // authentication against a security token.
+  void AuthenticateWithChallengeResponse(const AccountId& account_id,
+                                         AuthenticateCallback callback);
+
   // Close message bubble to clear error messages.
   void ClearErrors();
 
@@ -120,13 +130,17 @@ class ScreenLocker : public AuthStatusConsumer,
   // Returns the users to authenticate.
   const user_manager::UserList& users() const { return users_; }
 
+  // Returns the users to show on the lock screen UI. Will be a subset of
+  // |users()|.
+  user_manager::UserList GetUsersToShow() const;
+
   // Allow a AuthStatusConsumer to listen for
   // the same login events that ScreenLocker does.
   void SetLoginStatusConsumer(chromeos::AuthStatusConsumer* consumer);
 
-  // Initialize or uninitialize the ScreenLocker class. It listens to
-  // NOTIFICATION_SESSION_STARTED so that the screen locker accepts lock
-  // requests only after a user has logged in.
+  // Initialize or uninitialize the ScreenLocker class. It observes
+  // SessionManager so that the screen locker accepts lock requests only after a
+  // user has logged in.
   static void InitClass();
   static void ShutDownClass();
 
@@ -165,6 +179,9 @@ class ScreenLocker : public AuthStatusConsumer,
       override;
   void OnSessionFailed() override;
 
+  // user_manager::UserManager::UserSessionStateObserver:
+  void ActiveUserChanged(user_manager::User* active_user) override;
+
  private:
   friend class base::DeleteHelper<ScreenLocker>;
   friend class ViewsScreenLocker;
@@ -179,6 +196,17 @@ class ScreenLocker : public AuthStatusConsumer,
     AUTH_FINGERPRINT = 2,
     AUTH_CHALLENGE_RESPONSE = 3,
     AUTH_COUNT
+  };
+
+  // State associated with a pending authentication attempt.
+  struct AuthState {
+    AuthState(AccountId account_id, base::OnceCallback<void(bool)> callback);
+    ~AuthState();
+
+    // Account that is being authenticated.
+    AccountId account_id;
+    // Callback that should be executed the authentication result is available.
+    base::OnceCallback<void(bool)> callback;
   };
 
   ~ScreenLocker() override;
@@ -202,11 +230,11 @@ class ScreenLocker : public AuthStatusConsumer,
   // lock request is failed.
   void OnStartLockCallback(bool locked);
 
-  // Callback to be invoked when the |cert_provider_based_auth_preparer_|
+  // Callback to be invoked when the |challenge_response_auth_keys_loader_|
   // completes building the currently available challenge-response keys. Used
   // only during the challenge-response unlock.
   void OnChallengeResponseKeysPrepared(
-      const UserContext& user_context,
+      const AccountId& account_id,
       std::vector<ChallengeResponseKey> challenge_response_keys);
 
   void OnPinAttemptDone(const UserContext& user_context, bool success);
@@ -244,6 +272,11 @@ class ScreenLocker : public AuthStatusConsumer,
   // false. Instead, ScreenLocker object gets deleted when unlocked.
   bool locked_ = false;
 
+  // True if the unlock process has started, or false otherwise.  This changes
+  // from false to true, but will never change from true to false. Instead,
+  // ScreenLocker object gets deleted when unlocked.
+  bool unlock_started_ = false;
+
   // Reference to the single instance of the screen locker object.
   // This is used to make sure there is only one screen locker instance.
   static ScreenLocker* screen_locker_;
@@ -263,14 +296,14 @@ class ScreenLocker : public AuthStatusConsumer,
   // Type of the last unlock attempt.
   UnlockType unlock_attempt_type_ = AUTH_PASSWORD;
 
-  // Callback to run, if any, when authentication is done.
-  AuthenticateCallback on_auth_complete_;
+  // State associated with a pending authentication attempt.
+  std::unique_ptr<AuthState> pending_auth_state_;
 
   scoped_refptr<input_method::InputMethodManager::State> saved_ime_state_;
 
-  device::mojom::FingerprintPtr fp_service_;
-  mojo::Binding<device::mojom::FingerprintObserver>
-      fingerprint_observer_binding_;
+  mojo::Remote<device::mojom::Fingerprint> fp_service_;
+  mojo::Receiver<device::mojom::FingerprintObserver>
+      fingerprint_observer_receiver_{this};
 
   // ViewsScreenLocker instance in use.
   std::unique_ptr<ViewsScreenLocker> views_screen_locker_;
@@ -281,7 +314,9 @@ class ScreenLocker : public AuthStatusConsumer,
 
   ChallengeResponseAuthKeysLoader challenge_response_auth_keys_loader_;
 
-  base::WeakPtrFactory<ScreenLocker> weak_factory_;
+  SecurityTokenPinDialogHostAshImpl security_token_pin_dialog_host_ash_impl_;
+
+  base::WeakPtrFactory<ScreenLocker> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLocker);
 };

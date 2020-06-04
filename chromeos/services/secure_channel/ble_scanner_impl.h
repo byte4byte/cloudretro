@@ -33,13 +33,20 @@ class BleScannerImpl : public BleScanner,
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual std::unique_ptr<BleScanner> BuildInstance(
+    static std::unique_ptr<BleScanner> Create(
         Delegate* delegate,
         BleServiceDataHelper* service_data_helper,
         BleSynchronizerBase* ble_synchronizer,
         scoped_refptr<device::BluetoothAdapter> adapter);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<BleScanner> CreateInstance(
+        Delegate* delegate,
+        BleServiceDataHelper* service_data_helper,
+        BleSynchronizerBase* ble_synchronizer,
+        scoped_refptr<device::BluetoothAdapter> adapter) = 0;
 
    private:
     static Factory* test_factory_;
@@ -109,7 +116,7 @@ class BleScannerImpl : public BleScanner,
   std::unique_ptr<base::WeakPtrFactory<device::BluetoothDiscoverySession>>
       discovery_session_weak_ptr_factory_;
 
-  base::WeakPtrFactory<BleScannerImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<BleScannerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BleScannerImpl);
 };

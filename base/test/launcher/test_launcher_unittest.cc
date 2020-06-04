@@ -9,15 +9,21 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
+#include "base/process/launch.h"
+#include "base/strings/string_split.h"
 #include "base/test/launcher/test_launcher.h"
+#include "base/test/launcher/test_launcher_test_utils.h"
 #include "base/test/launcher/unit_test_launcher.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
 
 namespace base {
 namespace {
@@ -50,7 +56,7 @@ TestResultPart GenerateTestResultPart(TestResultPart::Type type,
 }
 
 // Mock TestLauncher to mock CreateAndStartThreadPool,
-// unit test will provide a ScopedTaskEnvironment.
+// unit test will provide a TaskEnvironment.
 class MockTestLauncher : public TestLauncher {
  public:
   MockTestLauncher(TestLauncherDelegate* launcher_delegate,
@@ -59,10 +65,11 @@ class MockTestLauncher : public TestLauncher {
 
   void CreateAndStartThreadPool(int parallel_jobs) override {}
 
-  MOCK_METHOD3(LaunchChildGTestProcess,
+  MOCK_METHOD4(LaunchChildGTestProcess,
                void(scoped_refptr<TaskRunner> task_runner,
                     const std::vector<std::string>& test_names,
-                    const FilePath& temp_dir));
+                    const FilePath& task_temp_dir,
+                    const FilePath& child_temp_dir));
 };
 
 // Simple TestLauncherDelegate mock to test TestLauncher flow.
@@ -72,14 +79,9 @@ class MockTestLauncherDelegate : public TestLauncherDelegate {
   MOCK_METHOD2(WillRunTest,
                bool(const std::string& test_case_name,
                     const std::string& test_name));
-  MOCK_METHOD6(
-      ProcessTestResults,
-      std::vector<TestResult>(const std::vector<std::string>& test_names,
-                              const base::FilePath& output_file,
-                              const std::string& output,
-                              const base::TimeDelta& elapsed_time,
-                              int exit_code,
-                              bool was_timeout));
+  MOCK_METHOD2(ProcessTestResults,
+               void(std::vector<TestResult>& test_names,
+                    TimeDelta elapsed_time));
   MOCK_METHOD3(GetCommandLine,
                CommandLine(const std::vector<std::string>& test_names,
                            const FilePath& temp_dir_,
@@ -98,9 +100,7 @@ class TestLauncherTest : public testing::Test {
   TestLauncherTest()
       : command_line(new CommandLine(CommandLine::NO_PROGRAM)),
         test_launcher(&delegate, 10),
-        scoped_task_environment(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
-
+        task_environment(base::test::TaskEnvironment::MainThreadType::IO) {}
 
   // Adds tests to be returned by the delegate.
   void AddMockedTests(std::string test_case_name,
@@ -123,7 +123,7 @@ class TestLauncherTest : public testing::Test {
                                    testing::Return(true)));
     EXPECT_CALL(delegate, WillRunTest(_, _))
         .WillRepeatedly(testing::Return(true));
-    EXPECT_CALL(delegate, ProcessTestResults(_, _, _, _, _, _)).Times(0);
+    EXPECT_CALL(delegate, ProcessTestResults(_, _)).Times(0);
     EXPECT_CALL(delegate, GetCommandLine(_, _, _))
         .WillRepeatedly(testing::Return(CommandLine(CommandLine::NO_PROGRAM)));
     EXPECT_CALL(delegate, GetWrapper())
@@ -137,20 +137,11 @@ class TestLauncherTest : public testing::Test {
         .WillRepeatedly(testing::Return(batch_size));
   }
 
-  void ReadSummary(FilePath path) {
-    File resultFile(path, File::FLAG_OPEN | File::FLAG_READ);
-    const int size = 2048;
-    std::string json;
-    ASSERT_TRUE(ReadFileToStringWithMaxSize(path, &json, size));
-    root = JSONReader::Read(json);
-  }
-
   std::unique_ptr<CommandLine> command_line;
   MockTestLauncher test_launcher;
   MockTestLauncherDelegate delegate;
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
   ScopedTempDir dir;
-  Optional<Value> root;
 
  private:
   std::vector<TestIdentifier> tests_;
@@ -195,7 +186,7 @@ TEST_F(TestLauncherTest, OrphanePreTest) {
 TEST_F(TestLauncherTest, EmptyTestSetPasses) {
   SetUpExpectCalls();
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _)).Times(0);
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _)).Times(0);
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
 
@@ -211,7 +202,7 @@ TEST_F(TestLauncherTest, FilterDisabledTestByDefault) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(::testing::DoAll(OnTestResult(&test_launcher, "Test.firstTest",
                                               TestResult::TEST_SUCCESS),
                                  OnTestResult(&test_launcher, "Test.secondTest",
@@ -230,7 +221,7 @@ TEST_F(TestLauncherTest, ReorderPreTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .Times(1);
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
@@ -241,14 +232,13 @@ TEST_F(TestLauncherTest, UsingCommandLineFilter) {
                  {"firstTest", "secondTest", "DISABLED_firstTestDisabled"});
   SetUpExpectCalls();
   command_line->AppendSwitchASCII("gtest_filter", "Test*.first*");
-  using ::testing::_;
   std::vector<std::string> tests_names = {"Test.firstTest"};
   using ::testing::_;
   EXPECT_CALL(test_launcher, LaunchChildGTestProcess(
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.firstTest",
                              TestResult::TEST_SUCCESS));
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
@@ -266,7 +256,7 @@ TEST_F(TestLauncherTest, FilterIncludePreTest) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .Times(1);
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
@@ -277,7 +267,7 @@ TEST_F(TestLauncherTest, RunningMultipleIterations) {
   SetUpExpectCalls();
   command_line->AppendSwitchASCII("gtest_repeat", "2");
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _))
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
       .Times(2)
       .WillRepeatedly(OnTestResult(&test_launcher, "Test.firstTest",
                                    TestResult::TEST_SUCCESS));
@@ -288,13 +278,14 @@ TEST_F(TestLauncherTest, RunningMultipleIterations) {
 TEST_F(TestLauncherTest, SuccessOnRetryTests) {
   AddMockedTests("Test", {"firstTest"});
   SetUpExpectCalls();
+  command_line->AppendSwitchASCII("test-launcher-retry-limit", "2");
   using ::testing::_;
   std::vector<std::string> tests_names = {"Test.firstTest"};
   EXPECT_CALL(test_launcher, LaunchChildGTestProcess(
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.firstTest",
                              TestResult::TEST_FAILURE))
       .WillOnce(OnTestResult(&test_launcher, "Test.firstTest",
@@ -302,19 +293,20 @@ TEST_F(TestLauncherTest, SuccessOnRetryTests) {
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
 
-// Test TestLauncher will retry continuing failing test 3 times by default,
+// Test TestLauncher will retry continuing failing test up to retry limit,
 // before eventually failing and returning false.
 TEST_F(TestLauncherTest, FailOnRetryTests) {
   AddMockedTests("Test", {"firstTest"});
   SetUpExpectCalls();
+  command_line->AppendSwitchASCII("test-launcher-retry-limit", "2");
   using ::testing::_;
   std::vector<std::string> tests_names = {"Test.firstTest"};
   EXPECT_CALL(test_launcher, LaunchChildGTestProcess(
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
-      .Times(4)
+                                 _, _))
+      .Times(3)
       .WillRepeatedly(OnTestResult(&test_launcher, "Test.firstTest",
                                    TestResult::TEST_FAILURE));
   EXPECT_FALSE(test_launcher.Run(command_line.get()));
@@ -324,12 +316,13 @@ TEST_F(TestLauncherTest, FailOnRetryTests) {
 TEST_F(TestLauncherTest, RetryPreTests) {
   AddMockedTests("Test", {"firstTest", "PRE_PRE_firstTest", "PRE_firstTest"});
   SetUpExpectCalls();
+  command_line->AppendSwitchASCII("test-launcher-retry-limit", "2");
   std::vector<TestResult> results = {
       GenerateTestResult("Test.PRE_PRE_firstTest", TestResult::TEST_SUCCESS),
       GenerateTestResult("Test.PRE_firstTest", TestResult::TEST_FAILURE),
       GenerateTestResult("Test.firstTest", TestResult::TEST_SUCCESS)};
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _))
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
       .WillOnce(::testing::DoAll(
           OnTestResult(&test_launcher, "Test.PRE_PRE_firstTest",
                        TestResult::TEST_SUCCESS),
@@ -342,7 +335,7 @@ TEST_F(TestLauncherTest, RetryPreTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.PRE_PRE_firstTest",
                              TestResult::TEST_SUCCESS));
   tests_names = {"Test.PRE_firstTest"};
@@ -350,7 +343,7 @@ TEST_F(TestLauncherTest, RetryPreTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.PRE_firstTest",
                              TestResult::TEST_SUCCESS));
   tests_names = {"Test.firstTest"};
@@ -358,7 +351,7 @@ TEST_F(TestLauncherTest, RetryPreTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.firstTest",
                              TestResult::TEST_SUCCESS));
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
@@ -380,7 +373,7 @@ TEST_F(TestLauncherTest, RunDisabledTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .WillOnce(::testing::DoAll(
           OnTestResult(&test_launcher, "Test.firstTest",
                        TestResult::TEST_SUCCESS),
@@ -402,7 +395,7 @@ TEST_F(TestLauncherTest, DisablePreTests) {
                                  _,
                                  testing::ElementsAreArray(tests_names.cbegin(),
                                                            tests_names.cend()),
-                                 _))
+                                 _, _))
       .Times(1);
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
@@ -420,76 +413,93 @@ TEST_F(TestLauncherTest, RedirectStdio) {
   SetUpExpectCalls();
   command_line->AppendSwitchASCII("test-launcher-print-test-stdio", "always");
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _))
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
       .WillOnce(OnTestResult(&test_launcher, "Test.firstTest",
                              TestResult::TEST_SUCCESS));
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 }
 
-void ValidateKeyValue(Value* dict_value,
-                      const std::string& key,
-                      const std::string& expected_value) {
-  const std::string* value = dict_value->FindStringKey(key);
-  ASSERT_TRUE(value);
-  EXPECT_EQ(expected_value, *value);
-}
+// Validate |iteration_data| contains one test result matching |result|.
+bool ValidateTestResultObject(const Value* iteration_data,
+                              TestResult& test_result) {
+  const Value* results = iteration_data->FindListKey(test_result.full_name);
+  if (!results) {
+    ADD_FAILURE() << "Results not found";
+    return false;
+  }
+  if (1u != results->GetList().size()) {
+    ADD_FAILURE() << "Expected one result, actual: "
+                  << results->GetList().size();
+    return false;
+  }
+  const Value& val = results->GetList()[0];
+  if (!val.is_dict()) {
+    ADD_FAILURE() << "Unexpected type";
+    return false;
+  }
 
-// Validate a json child node for a particular test result.
-void ValidateTestResult(Value* root, TestResult& result) {
-  Value* val = root->FindListKey(result.full_name);
-  ASSERT_TRUE(val);
-  ASSERT_EQ(1u, val->GetList().size());
-  val = &val->GetList().at(0);
-  ASSERT_TRUE(val->is_dict());
+  using test_launcher_utils::ValidateKeyValue;
+  bool result = ValidateKeyValue(val, "elapsed_time_ms",
+                                 test_result.elapsed_time.InMilliseconds());
 
-  EXPECT_EQ(result.elapsed_time.InMilliseconds(),
-            val->FindIntKey("elapsed_time_ms").value_or(0));
-  EXPECT_EQ(true, val->FindBoolKey("losless_snippet").value_or(false));
-  ValidateKeyValue(val, "output_snippet", result.output_snippet);
+  if (!val.FindBoolKey("losless_snippet").value_or(false)) {
+    ADD_FAILURE() << "losless_snippet expected to be true";
+    result = false;
+  }
+
+  result &= ValidateKeyValue(val, "output_snippet", test_result.output_snippet);
 
   std::string base64_output_snippet;
-  Base64Encode(result.output_snippet, &base64_output_snippet);
-  ValidateKeyValue(val, "output_snippet_base64", base64_output_snippet);
-  ValidateKeyValue(val, "status", result.StatusAsString());
+  Base64Encode(test_result.output_snippet, &base64_output_snippet);
+  result &=
+      ValidateKeyValue(val, "output_snippet_base64", base64_output_snippet);
 
-  Value* value = val->FindListKey("result_parts");
-  ASSERT_TRUE(value);
-  EXPECT_EQ(result.test_result_parts.size(), value->GetList().size());
-  for (unsigned i = 0; i < result.test_result_parts.size(); i++) {
-    TestResultPart result_part = result.test_result_parts.at(0);
-    Value* part_dict = &(value->GetList().at(i));
-    ASSERT_TRUE(part_dict);
-    ASSERT_TRUE(part_dict->is_dict());
-    ValidateKeyValue(part_dict, "type", result_part.TypeAsString());
-    ValidateKeyValue(part_dict, "file", result_part.file_name);
-    EXPECT_EQ(result_part.line_number,
-              part_dict->FindIntKey("line").value_or(0));
-    ValidateKeyValue(part_dict, "summary", result_part.summary);
-    ValidateKeyValue(part_dict, "message", result_part.message);
+  result &= ValidateKeyValue(val, "status", test_result.StatusAsString());
+
+  const Value* value = val.FindListKey("result_parts");
+  if (test_result.test_result_parts.size() != value->GetList().size()) {
+    ADD_FAILURE() << "test_result_parts count is not valid";
+    return false;
   }
+
+  for (unsigned i = 0; i < test_result.test_result_parts.size(); i++) {
+    TestResultPart result_part = test_result.test_result_parts.at(i);
+    const Value& part_dict = value->GetList()[i];
+
+    result &= ValidateKeyValue(part_dict, "type", result_part.TypeAsString());
+    result &= ValidateKeyValue(part_dict, "file", result_part.file_name);
+    result &= ValidateKeyValue(part_dict, "line", result_part.line_number);
+    result &= ValidateKeyValue(part_dict, "summary", result_part.summary);
+    result &= ValidateKeyValue(part_dict, "message", result_part.message);
+  }
+  return result;
 }
 
-void ValidateStringList(Optional<Value>& root,
+// Validate |root| dictionary value contains a list with |values|
+// at |key| value.
+bool ValidateStringList(const Optional<Value>& root,
                         const std::string& key,
                         std::vector<const char*> values) {
-  Value* val = root->FindListKey(key);
-  ASSERT_TRUE(val);
-  ASSERT_EQ(values.size(), val->GetList().size());
-  for (unsigned i = 0; i < values.size(); i++) {
-    ASSERT_TRUE(val->GetList().at(i).is_string());
-    EXPECT_EQ(values.at(i), val->GetList().at(i).GetString());
+  const Value* val = root->FindListKey(key);
+  if (!val) {
+    ADD_FAILURE() << "|root| has no list_value in key: " << key;
+    return false;
   }
-}
 
-void ValidateTestLocation(Value* root,
-                          const std::string& key,
-                          const std::string& file,
-                          int line) {
-  Value* val = root->FindDictKey(key);
-  ASSERT_TRUE(val);
-  EXPECT_EQ(2u, val->DictSize());
-  ValidateKeyValue(val, "file", file);
-  EXPECT_EQ(line, val->FindIntKey("line").value_or(0));
+  if (values.size() != val->GetList().size()) {
+    ADD_FAILURE() << "expected size: " << values.size()
+                  << ", actual size:" << val->GetList().size();
+    return false;
+  }
+
+  for (unsigned i = 0; i < values.size(); i++) {
+    if (!val->GetList()[i].is_string() &&
+        val->GetList()[i].GetString().compare(values.at(i))) {
+      ADD_FAILURE() << "Expected list values do not match actual list";
+      return false;
+    }
+  }
+  return true;
 }
 
 // Unit tests to validate TestLauncher outputs the correct JSON file.
@@ -515,7 +525,7 @@ TEST_F(TestLauncherTest, JsonSummary) {
                          TimeDelta::FromMilliseconds(50), "output_second");
 
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _))
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
       .Times(2)
       .WillRepeatedly(
           ::testing::DoAll(OnTestResult(&test_launcher, first_result),
@@ -523,29 +533,34 @@ TEST_F(TestLauncherTest, JsonSummary) {
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 
   // Validate the resulting JSON file is the expected output.
-  ReadSummary(path);
-  ValidateStringList(root, "all_tests",
-                     {"Test.firstTest", "Test.firstTestDisabled",
-                      "Test.secondTest", "TestDisabled.firstTest"});
-  ValidateStringList(root, "disabled_tests",
-                     {"Test.firstTestDisabled", "TestDisabled.firstTest"});
+  Optional<Value> root = test_launcher_utils::ReadSummary(path);
+  ASSERT_TRUE(root);
+  EXPECT_TRUE(
+      ValidateStringList(root, "all_tests",
+                         {"Test.firstTest", "Test.firstTestDisabled",
+                          "Test.secondTest", "TestDisabled.firstTest"}));
+  EXPECT_TRUE(
+      ValidateStringList(root, "disabled_tests",
+                         {"Test.firstTestDisabled", "TestDisabled.firstTest"}));
 
-  Value* val = root->FindDictKey("test_locations");
+  const Value* val = root->FindDictKey("test_locations");
   ASSERT_TRUE(val);
   EXPECT_EQ(2u, val->DictSize());
-  ValidateTestLocation(val, "Test.firstTest", "File", 100);
-  ValidateTestLocation(val, "Test.secondTest", "File", 100);
+  ASSERT_TRUE(test_launcher_utils::ValidateTestLocation(val, "Test.firstTest",
+                                                        "File", 100));
+  ASSERT_TRUE(test_launcher_utils::ValidateTestLocation(val, "Test.secondTest",
+                                                        "File", 100));
 
   val = root->FindListKey("per_iteration_data");
   ASSERT_TRUE(val);
   ASSERT_EQ(2u, val->GetList().size());
   for (size_t i = 0; i < val->GetList().size(); i++) {
-    Value* iteration_val = &(val->GetList().at(i));
+    const Value* iteration_val = &(val->GetList()[i]);
     ASSERT_TRUE(iteration_val);
     ASSERT_TRUE(iteration_val->is_dict());
     EXPECT_EQ(2u, iteration_val->DictSize());
-    ValidateTestResult(iteration_val, first_result);
-    ValidateTestResult(iteration_val, second_result);
+    EXPECT_TRUE(ValidateTestResultObject(iteration_val, first_result));
+    EXPECT_TRUE(ValidateTestResultObject(iteration_val, second_result));
   }
 }
 
@@ -566,28 +581,186 @@ TEST_F(TestLauncherTest, JsonSummaryWithDisabledTests) {
                          TimeDelta::FromMilliseconds(50), "output_second");
 
   using ::testing::_;
-  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _))
+  EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
       .WillOnce(OnTestResult(&test_launcher, test_result));
   EXPECT_TRUE(test_launcher.Run(command_line.get()));
 
   // Validate the resulting JSON file is the expected output.
-  ReadSummary(path);
+  Optional<Value> root = test_launcher_utils::ReadSummary(path);
+  ASSERT_TRUE(root);
   Value* val = root->FindDictKey("test_locations");
   ASSERT_TRUE(val);
   EXPECT_EQ(1u, val->DictSize());
-  ValidateTestLocation(val, "Test.DISABLED_Test", "File", 100);
+  EXPECT_TRUE(test_launcher_utils::ValidateTestLocation(
+      val, "Test.DISABLED_Test", "File", 100));
 
   val = root->FindListKey("per_iteration_data");
   ASSERT_TRUE(val);
   ASSERT_EQ(1u, val->GetList().size());
 
-  Value* iteration_val = &(val->GetList().at(0));
+  Value* iteration_val = &(val->GetList()[0]);
   ASSERT_TRUE(iteration_val);
   ASSERT_TRUE(iteration_val->is_dict());
   EXPECT_EQ(1u, iteration_val->DictSize());
   // We expect the result to be stripped of disabled prefix.
   test_result.full_name = "Test.Test";
-  ValidateTestResult(iteration_val, test_result);
+  EXPECT_TRUE(ValidateTestResultObject(iteration_val, test_result));
+}
+
+// Matches a std::tuple<const FilePath&, const FilePath&> where the first
+// item is a parent of the second.
+MATCHER(DirectoryIsParentOf, "") {
+  return std::get<0>(arg).IsParent(std::get<1>(arg));
+}
+
+// Test that the launcher creates a dedicated temp dir for a child proc and
+// cleans it up.
+TEST_F(TestLauncherTest, TestChildTempDir) {
+  using ::testing::_;
+  AddMockedTests("Test", {"firstTest"});
+  SetUpExpectCalls();
+  ON_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, _))
+      .WillByDefault(OnTestResult(&test_launcher, "Test.firstTest",
+                                  TestResult::TEST_SUCCESS));
+
+  FilePath task_temp;
+  if (TestLauncher::SupportsPerChildTempDirs()) {
+    // Platforms that support child proc temp dirs must get a |child_temp_dir|
+    // arg that exists and is within |task_temp_dir|.
+    EXPECT_CALL(
+        test_launcher,
+        LaunchChildGTestProcess(
+            _, _, _, ::testing::ResultOf(DirectoryExists, ::testing::IsTrue())))
+        .With(::testing::Args<2, 3>(DirectoryIsParentOf()))
+        .WillOnce(::testing::SaveArg<2>(&task_temp));
+  } else {
+    // Platforms that don't support child proc temp dirs must get an empty
+    // |child_temp_dir| arg.
+    EXPECT_CALL(test_launcher, LaunchChildGTestProcess(_, _, _, FilePath()))
+        .WillOnce(::testing::SaveArg<2>(&task_temp));
+  }
+
+  EXPECT_TRUE(test_launcher.Run(command_line.get()));
+
+  // The task's temporary directory should have been deleted.
+  EXPECT_FALSE(DirectoryExists(task_temp));
+}
+
+// Unit tests to validate UnitTestLauncherDelegate implementation.
+class UnitTestLauncherDelegateTester : public testing::Test {
+ protected:
+  DefaultUnitTestPlatformDelegate defaultPlatform;
+  ScopedTempDir dir;
+
+ private:
+  base::test::TaskEnvironment task_environment;
+};
+
+// Validate delegate produces correct command line.
+TEST_F(UnitTestLauncherDelegateTester, GetCommandLine) {
+  UnitTestLauncherDelegate launcher_delegate(&defaultPlatform, 10u, true);
+  TestLauncherDelegate* delegate_ptr = &launcher_delegate;
+
+  std::vector<std::string> test_names(5, "Tests");
+  base::FilePath temp_dir;
+  base::FilePath result_file;
+  CreateNewTempDirectory(FilePath::StringType(), &temp_dir);
+
+  CommandLine cmd_line =
+      delegate_ptr->GetCommandLine(test_names, temp_dir, &result_file);
+  EXPECT_TRUE(cmd_line.HasSwitch("single-process-tests"));
+  EXPECT_EQ(cmd_line.GetSwitchValuePath("test-launcher-output"), result_file);
+
+  const int size = 2048;
+  std::string content;
+  ASSERT_TRUE(ReadFileToStringWithMaxSize(
+      cmd_line.GetSwitchValuePath("gtest_flagfile"), &content, size));
+  EXPECT_EQ(content.find("--gtest_filter="), 0u);
+  base::ReplaceSubstringsAfterOffset(&content, 0, "--gtest_filter=", "");
+  std::vector<std::string> gtest_filter_tests =
+      SplitString(content, ":", TRIM_WHITESPACE, SPLIT_WANT_ALL);
+  ASSERT_EQ(gtest_filter_tests.size(), test_names.size());
+  for (unsigned i = 0; i < test_names.size(); i++) {
+    EXPECT_EQ(gtest_filter_tests.at(i), test_names.at(i));
+  }
+}
+
+// Validate delegate sets batch size correctly.
+TEST_F(UnitTestLauncherDelegateTester, BatchSize) {
+  UnitTestLauncherDelegate launcher_delegate(&defaultPlatform, 15u, true);
+  TestLauncherDelegate* delegate_ptr = &launcher_delegate;
+  EXPECT_EQ(delegate_ptr->GetBatchSize(), 15u);
+}
+
+// The following 3 tests are disabled as they are meant to only run from
+// |RunMockTests| to validate tests launcher output for known results.
+
+// Basic test to pass
+TEST(MockUnitTests, DISABLED_PassTest) {
+  ASSERT_TRUE(true);
+}
+// Basic test to fail
+TEST(MockUnitTests, DISABLED_FailTest) {
+  ASSERT_TRUE(false);
+}
+// Basic test to crash
+TEST(MockUnitTests, DISABLED_CrashTest) {
+  IMMEDIATE_CRASH();
+}
+// Basic test will not be reached with default batch size.
+TEST(MockUnitTests, DISABLED_NoRunTest) {
+  ASSERT_TRUE(true);
+}
+
+// Using TestLauncher to launch 3 simple unitests
+// and validate the resulting json file.
+TEST_F(UnitTestLauncherDelegateTester, RunMockTests) {
+  CommandLine command_line(CommandLine::ForCurrentProcess()->GetProgram());
+  command_line.AppendSwitchASCII("gtest_filter", "MockUnitTests.DISABLED_*");
+
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  FilePath path = dir.GetPath().AppendASCII("SaveSummaryResult.json");
+  command_line.AppendSwitchPath("test-launcher-summary-output", path);
+  command_line.AppendSwitch("gtest_also_run_disabled_tests");
+  command_line.AppendSwitchASCII("test-launcher-retry-limit", "0");
+#if defined(OS_WIN)
+  // In Windows versions prior to Windows 8, nested job objects are
+  // not allowed and cause this test to fail.
+  if (win::GetVersion() < win::Version::WIN8) {
+    command_line.AppendSwitch(kDontUseJobObjectFlag);
+  }
+#endif  // defined(OS_WIN)
+
+  std::string output;
+  GetAppOutputAndError(command_line, &output);
+
+  // Validate the resulting JSON file is the expected output.
+  Optional<Value> root = test_launcher_utils::ReadSummary(path);
+  ASSERT_TRUE(root);
+
+  Value* val = root->FindDictKey("test_locations");
+  ASSERT_TRUE(val);
+  EXPECT_EQ(4u, val->DictSize());
+
+  EXPECT_TRUE(test_launcher_utils::ValidateTestLocations(val, "MockUnitTests"));
+
+  val = root->FindListKey("per_iteration_data");
+  ASSERT_TRUE(val);
+  ASSERT_EQ(1u, val->GetList().size());
+
+  Value* iteration_val = &(val->GetList()[0]);
+  ASSERT_TRUE(iteration_val);
+  ASSERT_TRUE(iteration_val->is_dict());
+  EXPECT_EQ(4u, iteration_val->DictSize());
+  // We expect the result to be stripped of disabled prefix.
+  EXPECT_TRUE(test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockUnitTests.PassTest", "SUCCESS", 0u));
+  EXPECT_TRUE(test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockUnitTests.FailTest", "FAILURE", 1u));
+  EXPECT_TRUE(test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockUnitTests.CrashTest", "CRASH", 0u));
+  EXPECT_TRUE(test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockUnitTests.NoRunTest", "NOTRUN", 0u));
 }
 
 }  // namespace

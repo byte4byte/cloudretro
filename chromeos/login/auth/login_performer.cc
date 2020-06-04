@@ -29,15 +29,12 @@ using base::UserMetricsAction;
 
 namespace chromeos {
 
-LoginPerformer::LoginPerformer(scoped_refptr<base::TaskRunner> task_runner,
-                               Delegate* delegate)
+LoginPerformer::LoginPerformer(
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    Delegate* delegate)
     : delegate_(delegate),
-      task_runner_(task_runner),
-      last_login_failure_(AuthFailure::AuthFailureNone()),
-      password_changed_(false),
-      password_changed_callback_count_(0),
-      auth_mode_(AUTH_MODE_INTERNAL),
-      weak_factory_(this) {}
+      task_runner_(std::move(task_runner)),
+      last_login_failure_(AuthFailure::AuthFailureNone()) {}
 
 LoginPerformer::~LoginPerformer() {
   DVLOG(1) << "Deleting LoginPerformer";
@@ -136,10 +133,9 @@ void LoginPerformer::PerformLogin(const UserContext& user_context,
   auth_mode_ = auth_mode;
   user_context_ = user_context;
 
-  if (RunTrustedCheck(base::Bind(&LoginPerformer::DoPerformLogin,
-                                 weak_factory_.GetWeakPtr(),
-                                 user_context_,
-                                 auth_mode))) {
+  if (RunTrustedCheck(base::BindOnce(&LoginPerformer::DoPerformLogin,
+                                     weak_factory_.GetWeakPtr(), user_context_,
+                                     auth_mode))) {
     return;
   }
   DoPerformLogin(user_context_, auth_mode);
@@ -159,16 +155,16 @@ void LoginPerformer::DoPerformLogin(const UserContext& user_context,
     SetupEasyUnlockUserFlow(user_context.GetAccountId());
 
   switch (auth_mode_) {
-    case AUTH_MODE_EXTENSION: {
+    case AuthorizationMode::kExternal: {
       RunOnlineWhitelistCheck(
           account_id, wildcard_match, user_context.GetRefreshToken(),
-          base::Bind(&LoginPerformer::StartLoginCompletion,
-                     weak_factory_.GetWeakPtr()),
-          base::Bind(&LoginPerformer::NotifyWhitelistCheckFailure,
-                     weak_factory_.GetWeakPtr()));
+          base::BindOnce(&LoginPerformer::StartLoginCompletion,
+                         weak_factory_.GetWeakPtr()),
+          base::BindOnce(&LoginPerformer::NotifyWhitelistCheckFailure,
+                         weak_factory_.GetWeakPtr()));
       break;
     }
-    case AUTH_MODE_INTERNAL:
+    case AuthorizationMode::kInternal:
       StartAuthentication();
       break;
   }
@@ -185,9 +181,9 @@ void LoginPerformer::LoginAsSupervisedUser(const UserContext& user_context) {
                << user_context_.GetUserType();
   }
 
-  if (RunTrustedCheck(base::Bind(&LoginPerformer::TrustedLoginAsSupervisedUser,
-                                 weak_factory_.GetWeakPtr(),
-                                 user_context_))) {
+  if (RunTrustedCheck(
+          base::BindOnce(&LoginPerformer::TrustedLoginAsSupervisedUser,
+                         weak_factory_.GetWeakPtr(), user_context_))) {
     return;
   }
   TrustedLoginAsSupervisedUser(user_context_);
@@ -258,6 +254,14 @@ void LoginPerformer::LoginAsArcKioskAccount(
   task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&Authenticator::LoginAsArcKioskAccount,
                                 authenticator_.get(), arc_app_account_id));
+}
+
+void LoginPerformer::LoginAsWebKioskAccount(
+    const AccountId& web_app_account_id) {
+  EnsureAuthenticator();
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&Authenticator::LoginAsWebKioskAccount,
+                                authenticator_.get(), web_app_account_id));
 }
 
 void LoginPerformer::RecoverEncryptedData(const std::string& old_password) {

@@ -4,6 +4,8 @@
 
 #include "ui/base/models/menu_model.h"
 
+#include "ui/base/models/image_model.h"
+
 namespace ui {
 
 MenuModel::MenuModel() : menu_model_delegate_(nullptr) {}
@@ -46,20 +48,16 @@ bool MenuModel::GetModelAndIndexForCommandId(int command_id,
   return false;
 }
 
-base::string16 MenuModel::GetSublabelAt(int index) const {
-  return base::string16();
-}
-
 base::string16 MenuModel::GetMinorTextAt(int index) const {
   return base::string16();
 }
 
-const gfx::VectorIcon* MenuModel::GetMinorIconAt(int index) const {
-  return nullptr;
+ImageModel MenuModel::GetMinorIconAt(int index) const {
+  return ImageModel();
 }
 
 const gfx::FontList* MenuModel::GetLabelFontListAt(int index) const {
-  return NULL;
+  return nullptr;
 }
 
 // Default implementation ignores the event flags.

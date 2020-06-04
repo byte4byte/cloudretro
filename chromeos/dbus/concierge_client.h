@@ -9,7 +9,8 @@
 
 #include "base/component_export.h"
 #include "base/files/scoped_file.h"
-#include "chromeos/dbus/concierge/service.pb.h"
+#include "base/observer_list.h"
+#include "chromeos/dbus/concierge/concierge_service.pb.h"
 #include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "dbus/object_proxy.h"
@@ -20,6 +21,30 @@ namespace chromeos {
 // start and stop VMs, as well as for disk image management.
 class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
  public:
+  // Used for observing Concierge service itself.
+  class Observer : public base::CheckedObserver {
+   public:
+    // Called when Concierge service exits.
+    virtual void ConciergeServiceStopped() = 0;
+    // Called when Concierge service is either started or restarted.
+    virtual void ConciergeServiceRestarted() = 0;
+  };
+
+  // Used for observing VMs starting and stopping.
+  class VmObserver {
+   public:
+    // OnVmStarted is signaled by Concierge when a VM starts.
+    virtual void OnVmStarted(
+        const vm_tools::concierge::VmStartedSignal& signal) = 0;
+
+    // OnVmStopped is signaled by Concierge when a VM stops.
+    virtual void OnVmStopped(
+        const vm_tools::concierge::VmStoppedSignal& signal) = 0;
+
+   protected:
+    virtual ~VmObserver() = default;
+  };
+
   // Used for observing all concierge signals related to running
   // containers (e.g. startup).
   class ContainerObserver {
@@ -48,6 +73,16 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
     virtual ~DiskImageObserver() = default;
   };
 
+  // Adds an observer for monitoring Concierge service.
+  virtual void AddObserver(Observer* observer) = 0;
+  // Removes an observer if added.
+  virtual void RemoveObserver(Observer* observer) = 0;
+
+  // Adds an observer for VM start and stop.
+  virtual void AddVmObserver(VmObserver* observer) = 0;
+  // Removes an observer if added.
+  virtual void RemoveVmObserver(VmObserver* observer) = 0;
+
   // Adds an observer for container startup.
   virtual void AddContainerObserver(ContainerObserver* observer) = 0;
   // Removes an observer if added.
@@ -57,6 +92,11 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
   virtual void AddDiskImageObserver(DiskImageObserver* observer) = 0;
   // Adds an observer for disk image operations.
   virtual void RemoveDiskImageObserver(DiskImageObserver* observer) = 0;
+
+  // IsVmSartedSignalConnected and IsVmStoppedSignalConnected must return true
+  // before RestartCrostini is called.
+  virtual bool IsVmStartedSignalConnected() = 0;
+  virtual bool IsVmStoppedSignalConnected() = 0;
 
   // IsContainerStartupFailedSignalConnected must return true before
   // StartContainer is called.
@@ -73,7 +113,16 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
       DBusMethodCallback<vm_tools::concierge::CreateDiskImageResponse>
           callback) = 0;
 
-  // Destroys a Termina VM and removes its disk image.
+  // Creates a disk image for a VM.
+  // |fd| references the source media (ISO).
+  // |callback| is called after the method call finishes.
+  virtual void CreateDiskImageWithFd(
+      base::ScopedFD fd,
+      const vm_tools::concierge::CreateDiskImageRequest& request,
+      DBusMethodCallback<vm_tools::concierge::CreateDiskImageResponse>
+          callback) = 0;
+
+  // Destroys a VM and removes its disk image.
   // |callback| is called after the method call finishes.
   virtual void DestroyDiskImage(
       const vm_tools::concierge::DestroyDiskImageRequest& request,
@@ -122,6 +171,18 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
       const vm_tools::concierge::StopVmRequest& request,
       DBusMethodCallback<vm_tools::concierge::StopVmResponse> callback) = 0;
 
+  // Suspends the named Termina VM if it is running.
+  // |callback| is called after the method call finishes.
+  virtual void SuspendVm(
+      const vm_tools::concierge::SuspendVmRequest& request,
+      DBusMethodCallback<vm_tools::concierge::SuspendVmResponse> callback) = 0;
+
+  // Resumes the named Termina VM if it is running.
+  // |callback| is called after the method call finishes.
+  virtual void ResumeVm(
+      const vm_tools::concierge::ResumeVmRequest& request,
+      DBusMethodCallback<vm_tools::concierge::ResumeVmResponse> callback) = 0;
+
   // Get VM Info.
   // |callback| is called after the method call finishes.
   virtual void GetVmInfo(
@@ -134,6 +195,13 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
       const vm_tools::concierge::GetVmEnterpriseReportingInfoRequest& request,
       DBusMethodCallback<
           vm_tools::concierge::GetVmEnterpriseReportingInfoResponse>
+          callback) = 0;
+
+  // Set VM's CPU restriction state.
+  // |callback| is called after the method call finishes.
+  virtual void SetVmCpuRestriction(
+      const vm_tools::concierge::SetVmCpuRestrictionRequest& request,
+      DBusMethodCallback<vm_tools::concierge::SetVmCpuRestrictionResponse>
           callback) = 0;
 
   // Registers |callback| to run when the Concierge service becomes available.
@@ -154,7 +222,8 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
 
   // Attaches a USB device to a VM.
   // |callback| is called once the method call has finished.
-  virtual void AttachUsbDevice(base::ScopedFD fd,
+  virtual void AttachUsbDevice(
+      base::ScopedFD fd,
       const vm_tools::concierge::AttachUsbDeviceRequest& request,
       DBusMethodCallback<vm_tools::concierge::AttachUsbDeviceResponse>
           callback) = 0;
@@ -166,18 +235,19 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) ConciergeClient : public DBusClient {
       DBusMethodCallback<vm_tools::concierge::DetachUsbDeviceResponse>
           callback) = 0;
 
-  // Lists all the USB devices currently attached to a given VM.
-  // |callback| is called once the method call has finished.
-  virtual void ListUsbDevices(
-      const vm_tools::concierge::ListUsbDeviceRequest& request,
-      DBusMethodCallback<vm_tools::concierge::ListUsbDeviceResponse>
-          callback) = 0;
-
   // Starts ARCVM if there is not already one running.
   // |callback| is called after the method call finishes.
   virtual void StartArcVm(
       const vm_tools::concierge::StartArcVmRequest& request,
       DBusMethodCallback<vm_tools::concierge::StartVmResponse> callback) = 0;
+
+  // Launches a resize operation for the specified disk image.
+  // |callback| is called after the method call finishes, then you must use
+  // |DiskImageStatus| to poll for task completion.
+  virtual void ResizeDiskImage(
+      const vm_tools::concierge::ResizeDiskImageRequest& request,
+      DBusMethodCallback<vm_tools::concierge::ResizeDiskImageResponse>
+          callback) = 0;
 
   // Creates an instance of ConciergeClient.
   static std::unique_ptr<ConciergeClient> Create();

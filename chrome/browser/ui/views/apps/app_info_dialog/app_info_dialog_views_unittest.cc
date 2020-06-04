@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,12 +59,10 @@ class AppInfoDialogTestApi {
  public:
   explicit AppInfoDialogTestApi(AppInfoDialog* dialog) : dialog_(dialog) {}
 
-  AppInfoHeaderPanel* header_panel() {
-    return static_cast<AppInfoHeaderPanel*>(dialog_->children().front());
-  }
-
-  views::Link* view_in_store_link() {
-    return header_panel()->view_in_store_link_;
+  void ShowAppInWebStore() {
+    auto* header_panel =
+        static_cast<AppInfoHeaderPanel*>(dialog_->children().front());
+    return header_panel->ShowAppInWebStore();
   }
 
  private:
@@ -135,9 +134,9 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
 
   void ShowAppInfoForProfile(const std::string& app_id, Profile* profile) {
     const extensions::Extension* extension =
-        extensions::ExtensionSystem::Get(profile)
-            ->extension_service()
-            ->GetExtensionById(app_id, true);
+        extensions::ExtensionRegistry::Get(profile)
+            ->enabled_extensions()
+            .GetByID(app_id);
     DCHECK(extension);
 
     DCHECK(!widget_);
@@ -263,16 +262,14 @@ TEST_F(AppInfoDialogViewsTest, DestroyedOtherProfileDoesNotCloseDialog) {
 // dialog cleanly.
 TEST_F(AppInfoDialogViewsTest, ViewInStore) {
   ShowAppInfo(kTestExtensionId);
-  EXPECT_TRUE(extension_->from_webstore());  // Otherwise there is no link.
-  views::Link* link = test::AppInfoDialogTestApi(dialog_).view_in_store_link();
-  EXPECT_TRUE(link);
+  ASSERT_TRUE(extension_->from_webstore());
 
   TabStripModel* tabs = browser()->tab_strip_model();
   EXPECT_EQ(0, tabs->count());
 
   ASSERT_TRUE(widget_);
   EXPECT_FALSE(widget_->IsClosed());
-  link->OnKeyPressed(ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_SPACE, 0));
+  test::AppInfoDialogTestApi(dialog_).ShowAppInWebStore();
 
   ASSERT_TRUE(widget_);
   EXPECT_TRUE(widget_->IsClosed());

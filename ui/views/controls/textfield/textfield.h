@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <set>
 #include <string>
 
 #if defined(OS_WIN)
@@ -19,6 +20,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -29,6 +31,7 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/pointer/touch_editing_controller.h"
+#include "ui/events/gesture_event_details.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/insets.h"
@@ -73,6 +76,13 @@ class VIEWS_EXPORT Textfield : public View,
  public:
   METADATA_HEADER(Textfield);
 
+  enum MenuCommands {
+    kUndo = kLastTouchEditableCommandId + 1,
+    kDelete,
+    kSelectAll,
+    kLastCommandId = kSelectAll,
+  };
+
   // Returns the text cursor blink time, or 0 for no blinking.
   static base::TimeDelta GetCaretBlinkInterval();
 
@@ -88,7 +98,7 @@ class VIEWS_EXPORT Textfield : public View,
   }
 
   // Gets/Sets whether or not the Textfield is read-only.
-  bool read_only() const { return read_only_; }
+  bool GetReadOnly() const;
   void SetReadOnly(bool read_only);
 
   // Sets the input type; displays only asterisks for TEXT_INPUT_TYPE_PASSWORD.
@@ -101,7 +111,7 @@ class VIEWS_EXPORT Textfield : public View,
   // Gets the text for the Textfield.
   // NOTE: Call sites should take care to not reveal the text for a password
   // textfield.
-  const base::string16& text() const { return model_->text(); }
+  const base::string16& GetText() const;
 
   // Sets the text currently displayed in the Textfield.  This doesn't
   // change the cursor position if the current cursor is within the
@@ -138,29 +148,21 @@ class VIEWS_EXPORT Textfield : public View,
   bool HasSelection() const;
 
   // Gets/sets the text color to be used when painting the Textfield.
-  // Call UseDefaultTextColor() to restore the default system color.
   SkColor GetTextColor() const;
   void SetTextColor(SkColor color);
-  void UseDefaultTextColor();
 
   // Gets/sets the background color to be used when painting the Textfield.
-  // Call UseDefaultBackgroundColor() to restore the default system color.
   SkColor GetBackgroundColor() const;
   void SetBackgroundColor(SkColor color);
-  void UseDefaultBackgroundColor();
 
   // Gets/sets the selection text color to be used when painting the Textfield.
-  // Call UseDefaultSelectionTextColor() to restore the default system color.
   SkColor GetSelectionTextColor() const;
   void SetSelectionTextColor(SkColor color);
-  void UseDefaultSelectionTextColor();
 
   // Gets/sets the selection background color to be used when painting the
-  // Textfield. Call UseDefaultSelectionBackgroundColor() to restore the default
-  // system color.
+  // Textfield.
   SkColor GetSelectionBackgroundColor() const;
   void SetSelectionBackgroundColor(SkColor color);
-  void UseDefaultSelectionBackgroundColor();
 
   // Gets/Sets whether or not the cursor is enabled.
   bool GetCursorEnabled() const;
@@ -176,11 +178,9 @@ class VIEWS_EXPORT Textfield : public View,
   // Sets the minimum width of the text control. See minimum_width_in_chars_.
   void SetMinimumWidthInChars(int minimum_width);
 
-  // Sets the text to display when empty.
-  void set_placeholder_text(const base::string16& text) {
-    placeholder_text_ = text;
-  }
+  // Gets/Sets the text to display when empty.
   base::string16 GetPlaceholderText() const;
+  void SetPlaceholderText(const base::string16& text);
 
   void set_placeholder_text_color(SkColor color) {
     placeholder_text_color_ = color;
@@ -194,9 +194,9 @@ class VIEWS_EXPORT Textfield : public View,
     placeholder_text_draw_flags_ = flags;
   }
 
-  // Sets whether to indicate the textfield has invalid content.
+  // Gets/Sets whether to indicate the textfield has invalid content.
+  bool GetInvalid() const;
   void SetInvalid(bool invalid);
-  bool invalid() const { return invalid_; }
 
   // Get or set the horizontal alignment used for the button from the underlying
   // RenderText object.
@@ -213,7 +213,7 @@ class VIEWS_EXPORT Textfield : public View,
   const gfx::Range& GetSelectedRange() const;
 
   // Selects the specified logical text range.
-  void SelectRange(const gfx::Range& range);
+  void SetSelectedRange(const gfx::Range& range);
 
   // Gets the text selection model.
   const gfx::SelectionModel& GetSelectionModel() const;
@@ -238,10 +238,10 @@ class VIEWS_EXPORT Textfield : public View,
   // Clears Edit history.
   void ClearEditHistory();
 
-  // Set the accessible name of the text field. If the textfield has a visible
-  // label, use SetAssociatedLabel() instead.
+  // Get/Set the accessible name of the text field. If the textfield has a
+  // visible label, use SetAssociatedLabel() instead.
+  base::string16 GetAccessibleName() const;
   void SetAccessibleName(const base::string16& name);
-  const base::string16& accessible_name() const { return accessible_name_; }
 
   // If the accessible name should be the same as the labelling view's text,
   // use this. It will set the accessible label relationship and copy the
@@ -250,7 +250,7 @@ class VIEWS_EXPORT Textfield : public View,
   void SetAssociatedLabel(View* labelling_view);
 
   // Set extra spacing placed between glyphs; used for obscured text styling.
-  void SetGlyphSpacing(int spacing);
+  void SetObscuredGlyphSpacing(int spacing);
 
   int GetPasswordCharRevealIndex() const { return password_char_reveal_index_; }
 
@@ -341,7 +341,7 @@ class VIEWS_EXPORT Textfield : public View,
 
   // ui::TextInputClient overrides:
   void SetCompositionText(const ui::CompositionText& composition) override;
-  void ConfirmCompositionText() override;
+  void ConfirmCompositionText(bool keep_selection) override;
   void ClearCompositionText() override;
   void InsertText(const base::string16& text) override;
   void InsertChar(const ui::KeyEvent& event) override;
@@ -379,13 +379,16 @@ class VIEWS_EXPORT Textfield : public View,
 #endif
 
 #if defined(OS_WIN)
+  void GetActiveTextInputControlLayoutBounds(
+      base::Optional<gfx::Rect>* control_bounds,
+      base::Optional<gfx::Rect>* selection_bounds) override;
   void SetActiveCompositionForAccessibility(
       const gfx::Range& range,
       const base::string16& active_composition_text,
       bool is_composition_committed) override;
 #endif
 
-  views::PropertyChangedSubscription AddModelChangedCallback(
+  views::PropertyChangedSubscription AddTextChangedCallback(
       views::PropertyChangedCallback callback);
 
  protected:
@@ -418,6 +421,15 @@ class VIEWS_EXPORT Textfield : public View,
   // override this to customize when the placeholder text is shown.
   virtual bool ShouldShowPlaceholderText() const;
 
+ protected:
+  // Like RequestFocus, but explicitly states that the focus is triggered by
+  // a pointer event.
+  void RequestFocusWithPointer(ui::EventPointerType pointer_type);
+
+  // Like RequestFocus, but explicitly states that the focus is triggered by a
+  // gesture event.
+  void RequestFocusForGesture(const ui::GestureEventDetails& details);
+
  private:
   friend class TextfieldTestApi;
 
@@ -448,6 +460,12 @@ class VIEWS_EXPORT Textfield : public View,
 
   // Updates the border per the state of |invalid_|.
   void UpdateBorder();
+
+  // Updates the selection text color.
+  void UpdateSelectionTextColor();
+
+  // Updates the selection background color.
+  void UpdateSelectionBackgroundColor();
 
   // Does necessary updates when the text and/or cursor position changes.
   void UpdateAfterChange(bool text_changed, bool cursor_changed);
@@ -520,10 +538,6 @@ class VIEWS_EXPORT Textfield : public View,
   // Textfield::GetCaretBlinkMs().
   void OnCursorBlinkTimerFired();
 
-  // Like RequestFocus, but explicitly states that the focus is triggered by
-  // a pointer event.
-  void RequestFocusWithPointer(ui::EventPointerType pointer_type);
-
   // Returns the color to use for the FocusRing, if one is present.
   SkColor GetFocusRingColor() const;
 
@@ -557,16 +571,11 @@ class VIEWS_EXPORT Textfield : public View,
   // return View::GetMinimumSize(). Defaults to -1.
   int minimum_width_in_chars_ = -1;
 
-  // Flags indicating whether various system colors should be used, and if not,
-  // what overriding color values should be used instead.
-  bool use_default_text_color_ = true;
-  bool use_default_background_color_ = true;
-  bool use_default_selection_text_color_ = true;
-  bool use_default_selection_background_color_ = true;
-  SkColor text_color_ = SK_ColorBLACK;
-  SkColor background_color_ = SK_ColorWHITE;
-  SkColor selection_text_color_ = SK_ColorWHITE;
-  SkColor selection_background_color_ = SK_ColorBLUE;
+  // Colors which override default system colors.
+  base::Optional<SkColor> text_color_;
+  base::Optional<SkColor> background_color_;
+  base::Optional<SkColor> selection_text_color_;
+  base::Optional<SkColor> selection_background_color_;
 
   // Text to display when empty.
   base::string16 placeholder_text_;

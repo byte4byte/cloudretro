@@ -4,10 +4,19 @@
 
 // https://w3c.github.io/webpayments-payment-apps-api/#idl-def-paymentappmanager
 
+enum PaymentDelegation {
+    "shippingAddress",
+    "payerName",
+    "payerPhone",
+    "payerEmail",
+};
+
 [
+    Exposed=Window,
     RuntimeEnabled=PaymentApp,
     ConstructorCallWith=ExecutionContext
 ] interface PaymentManager {
     [SameObject] readonly attribute PaymentInstruments instruments;
     attribute DOMString userHint;
+    [CallWith=ScriptState, RaisesException, RuntimeEnabled=PaymentHandlerHandlesShippingAndContact] Promise<void> enableDelegations(FrozenArray<PaymentDelegation> delegations);
 };

@@ -27,35 +27,41 @@ class PrinterConfigurer;
 // printing stack dependencies, i.e. PrinterConfigurer & CupsPrintersManager.
 // This class can be created and sequenced anywhere but must be accessed from a
 // sequenced context.
-class CupsProxyServiceDelegateImpl : public printing::CupsProxyServiceDelegate {
+class CupsProxyServiceDelegateImpl
+    : public cups_proxy::CupsProxyServiceDelegate {
  public:
   CupsProxyServiceDelegateImpl();
   ~CupsProxyServiceDelegateImpl() override;
+
+  bool IsPrinterAccessAllowed() const override;
 
   // Look for a printer with the given id in any class.  Returns a copy of the
   // printer if found, nullptr otherwise.
   base::Optional<Printer> GetPrinter(const std::string& id) override;
 
   // Get the currently known list of printers.
-  std::vector<Printer> GetPrinters() override;
+  std::vector<Printer> GetPrinters(PrinterClass printer_class) override;
 
   // Returns whether |printer| is currently installed in CUPS with this config.
   bool IsPrinterInstalled(const Printer& printer) override;
+
+  // Records that |printer| has been installed into CUPS with this config.
+  void PrinterInstalled(const Printer& printer) override;
 
   // Returns an IO-thread task runner.
   scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() override;
 
   // Install |printer| into CUPS.
   void SetupPrinter(const Printer& printer,
-                    printing::PrinterSetupCallback cb) override;
+                    cups_proxy::SetupPrinterCallback cb) override;
 
  private:
   // Conducts SetupPrinter call on UI thread.
   void SetupPrinterOnThread(const Printer& printer,
                             scoped_refptr<base::SequencedTaskRunner> cb_runner,
-                            printing::PrinterSetupCallback cb);
+                            cups_proxy::SetupPrinterCallback cb);
   void OnSetupPrinter(scoped_refptr<base::SequencedTaskRunner> cb_runner,
-                      printing::PrinterSetupCallback cb,
+                      cups_proxy::SetupPrinterCallback cb,
                       PrinterSetupResult result);
 
   // Current/active Profile. Not owned.
@@ -69,7 +75,7 @@ class CupsProxyServiceDelegateImpl : public printing::CupsProxyServiceDelegate {
   std::unique_ptr<PrinterConfigurer> printer_configurer_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-  base::WeakPtrFactory<CupsProxyServiceDelegateImpl> weak_factory_;
+  base::WeakPtrFactory<CupsProxyServiceDelegateImpl> weak_factory_{this};
 };
 
 }  // namespace chromeos

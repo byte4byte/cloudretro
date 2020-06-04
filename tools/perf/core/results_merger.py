@@ -8,6 +8,8 @@
 # This file is responsbile for merging JSON test results in both the simplified
 # JSON format and the Chromium JSON test results format version 3.
 
+from __future__ import print_function
+
 import copy
 import json
 import sys
@@ -118,7 +120,7 @@ def _merge_json_test_result_format(shard_results_list):
   # To make sure that we don't mutate existing shard_results_list.
   shard_results_list = copy.deepcopy(shard_results_list)
   for result_json in shard_results_list:
-    # TODO(tansell): check whether this deepcopy is actually neccessary.
+    # TODO(tansell): check whether this deepcopy is actually necessary.
     result_json = copy.deepcopy(result_json)
 
     # Check the version first
@@ -278,7 +280,7 @@ def main(files):
   for f in files[1:]:
     sys.stderr.write('Merging %s\n' % f)
     result = merge_test_results([result, json.load(open(f))])
-  print json.dumps(result)
+  print(json.dumps(result))
   return 0
 
 

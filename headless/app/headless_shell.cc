@@ -14,6 +14,7 @@
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/i18n/rtl.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
@@ -22,7 +23,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
 #include "components/os_crypt/os_crypt_switches.h"
@@ -32,6 +35,8 @@
 #include "content/public/common/content_switches.h"
 #include "headless/app/headless_shell.h"
 #include "headless/app/headless_shell_switches.h"
+#include "headless/lib/browser/headless_browser_impl.h"
+#include "headless/lib/browser/headless_devtools.h"
 #include "headless/lib/headless_content_main_delegate.h"
 #include "headless/public/headless_devtools_target.h"
 #include "net/base/filename_util.h"
@@ -43,18 +48,12 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
 #include "services/network/public/cpp/network_switches.h"
-#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/geometry/size.h"
 
 #if defined(OS_WIN)
-#include "components/crash/content/app/crash_switches.h"
-#include "components/crash/content/app/run_as_crashpad_handler_win.h"
+#include "components/crash/core/app/crash_switches.h"
+#include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "sandbox/win/src/sandbox_types.h"
-#endif
-
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-#include "headless/lib/browser/headless_browser_impl.h"
-#include "headless/lib/browser/headless_devtools.h"
 #endif
 
 namespace headless {
@@ -100,7 +99,6 @@ bool ParseFontRenderHinting(
   return true;
 }
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 GURL ConvertArgumentToURL(const base::CommandLine::StringType& arg) {
   GURL url(arg);
   if (url.is_valid() && url.has_scheme())
@@ -141,8 +139,6 @@ base::FilePath GetSSLKeyLogFile(const base::CommandLine* command_line) {
 #endif
 }
 
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
-
 int RunContentMain(
     HeadlessBrowser::Options options,
     base::OnceCallback<void(HeadlessBrowser*)> on_browser_start_callback) {
@@ -160,13 +156,9 @@ int RunContentMain(
   // TODO(skyostil): Implement custom message pumps.
   DCHECK(!options.message_pump);
 
-#if defined(CHROME_MULTIPLE_DLL_CHILD)
-  HeadlessContentMainDelegate delegate(std::move(options));
-#else
   auto browser = std::make_unique<HeadlessBrowserImpl>(
       std::move(on_browser_start_callback), std::move(options));
   HeadlessContentMainDelegate delegate(std::move(browser));
-#endif
   params.delegate = &delegate;
   return content::ContentMain(params);
 }
@@ -219,15 +211,14 @@ bool ValidateCommandLine(const base::CommandLine& command_line) {
 
 }  // namespace
 
-HeadlessShell::HeadlessShell() : weak_factory_(this) {}
+HeadlessShell::HeadlessShell() = default;
 
 HeadlessShell::~HeadlessShell() = default;
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 void HeadlessShell::OnStart(HeadlessBrowser* browser) {
   browser_ = browser;
   devtools_client_ = HeadlessDevToolsClient::Create();
-  file_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+  file_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   HeadlessBrowserContext::Builder context_builder =
@@ -241,11 +232,10 @@ void HeadlessShell::OnStart(HeadlessBrowser* browser) {
         std::make_unique<net::SSLKeyLoggerImpl>(ssl_keylog_file));
   }
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kLang)) {
-    context_builder.SetAcceptLanguage(
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            ::switches::kLang));
-  }
+  // Retrieve the locale set by InitApplicationLocale() in
+  // headless_content_main_delegate.cc in a way that is free of side-effects.
+  context_builder.SetAcceptLanguage(base::i18n::GetConfiguredLocale());
+
   browser_context_ = context_builder.Build();
   browser_->SetDefaultBrowserContext(browser_context_);
 
@@ -385,7 +375,6 @@ void HeadlessShell::HeadlessWebContentsDestroyed() {
       FROM_HERE,
       base::BindOnce(&HeadlessShell::Shutdown, weak_factory_.GetWeakPtr()));
 }
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 
 void HeadlessShell::FetchTimeout() {
   LOG(INFO) << "Timeout.";
@@ -546,9 +535,13 @@ void HeadlessShell::OnScreenshotCaptured(
 
 void HeadlessShell::PrintToPDF() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  bool display_header_footer =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kPrintToPDFNoHeader);
   devtools_client_->GetPage()->GetExperimental()->PrintToPDF(
       page::PrintToPDFParams::Builder()
-          .SetDisplayHeaderFooter(true)
+          .SetDisplayHeaderFooter(display_header_footer)
           .SetPrintBackground(true)
           .SetPreferCSSPageSize(true)
           .Build(),
@@ -672,7 +665,7 @@ int HeadlessShellMain(int argc, const char** argv) {
     return EXIT_FAILURE;
 
 // Crash reporting in headless mode is enabled by default in official builds.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   builder.SetCrashReporterEnabled(true);
   base::FilePath dumps_path;
   base::PathService::Get(base::DIR_TEMP, &dumps_path);
@@ -775,7 +768,7 @@ int HeadlessShellMain(int argc, const char** argv) {
 
   if (command_line.HasSwitch(switches::kHideScrollbars)) {
     builder.SetOverrideWebPreferencesCallback(
-        base::Bind([](WebPreferences* preferences) {
+        base::BindRepeating([](WebPreferences* preferences) {
           preferences->hide_scrollbars = true;
         }));
   }

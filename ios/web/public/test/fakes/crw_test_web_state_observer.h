@@ -6,7 +6,7 @@
 #define IOS_WEB_PUBLIC_TEST_FAKES_CRW_TEST_WEB_STATE_OBSERVER_H_
 
 #include "ios/web/public/test/fakes/test_web_state_observer_util.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 
 // Test implementation of CRWWebStateObserver protocol.
 @interface CRWTestWebStateObserver : NSObject<CRWWebStateObserver>
@@ -15,9 +15,6 @@
 @property(nonatomic, readonly) web::TestWasShownInfo* wasShownInfo;
 // Arguments passed to |webStateWasHidden:|.
 @property(nonatomic, readonly) web::TestWasHiddenInfo* wasHiddenInfo;
-// Arguments passed to |webState:didPruneNavigationItemsWithCount:|.
-@property(nonatomic, readonly)
-    web::TestNavigationItemsPrunedInfo* navigationItemsPrunedInfo;
 // Arguments passed to |webState:didStartNavigation:|.
 @property(nonatomic, readonly)
     web::TestDidStartNavigationInfo* didStartNavigationInfo;

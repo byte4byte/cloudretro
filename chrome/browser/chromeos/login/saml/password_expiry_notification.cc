@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/login/saml/password_expiry_notification.h"
 
+#include <memory>
+#include <vector>
+
 #include "ash/public/cpp/notification_utils.h"
 #include "ash/public/cpp/session/session_activation_observer.h"
 #include "ash/public/cpp/session/session_controller.h"
@@ -12,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/saml/in_session_password_change_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -29,6 +33,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/time_format.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_delegate.h"
 
@@ -51,11 +56,6 @@ namespace {
 // Unique ID for this notification.
 const char kNotificationId[] = "saml.password-expiry-notification";
 
-// NotifierId for histogram reporting.
-const base::NoDestructor<NotifierId> kNotifierId(
-    message_center::NotifierType::SYSTEM_COMPONENT,
-    kNotificationId);
-
 // Simplest type of notification UI - no progress bars, images etc.
 const NotificationType kNotificationType =
     message_center::NOTIFICATION_TYPE_SIMPLE;
@@ -67,21 +67,12 @@ const NotificationHandler::Type kNotificationHandlerType =
 // The icon to use for this notification - looks like an office building.
 const gfx::VectorIcon& kIcon = vector_icons::kBusinessIcon;
 
-// Leaving this empty means the notification is attributed to the system -
-// ie "Chromium OS" or similar.
-const base::NoDestructor<base::string16> kEmptyDisplaySource;
-
-// No origin URL is needed since the notification comes from the system.
-const base::NoDestructor<GURL> kEmptyOriginUrl;
-
-// Warning level of WARNING makes the title  orange.
-const SystemNotificationWarningLevel kWarningLevel =
+// Warning level of WARNING makes the title orange.
+constexpr SystemNotificationWarningLevel kWarningLevel =
     SystemNotificationWarningLevel::WARNING;
 
-base::string16 GetTitleText(int less_than_n_days) {
-  return l10n_util::GetPluralStringFUTF16(IDS_PASSWORD_EXPIRY_DAYS_TITLE,
-                                          less_than_n_days);
-}
+// A time-delta of length one minute.
+constexpr base::TimeDelta kOneMinute = base::TimeDelta::FromMinutes(1);
 
 base::string16 GetBodyText() {
   return l10n_util::GetStringUTF16(IDS_PASSWORD_EXPIRY_CALL_TO_ACTION);
@@ -132,10 +123,22 @@ void PasswordExpiryNotificationDelegate::Click(
 }  // namespace
 
 // static
-void PasswordExpiryNotification::Show(Profile* profile, int less_than_n_days) {
+void PasswordExpiryNotification::Show(Profile* profile,
+                                      base::TimeDelta time_until_expiry) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  const base::string16 title = GetTitleText(less_than_n_days);
+  // NotifierId for histogram reporting.
+  static const base::NoDestructor<NotifierId> kNotifierId(
+      message_center::NotifierType::SYSTEM_COMPONENT, kNotificationId);
+
+  // Leaving this empty means the notification is attributed to the system -
+  // ie "Chromium OS" or similar.
+  static const base::NoDestructor<base::string16> kEmptyDisplaySource;
+
+  // No origin URL is needed since the notification comes from the system.
+  static const base::NoDestructor<GURL> kEmptyOriginUrl;
+
+  const base::string16 title = GetTitleText(time_until_expiry);
   const base::string16 body = GetBodyText();
   const RichNotificationData rich_notification_data = GetRichNotificationData();
   const scoped_refptr<PasswordExpiryNotificationDelegate> delegate =
@@ -152,6 +155,19 @@ void PasswordExpiryNotification::Show(Profile* profile, int less_than_n_days) {
   // even if it is already shown.
   nds->Close(kNotificationHandlerType, kNotificationId);
   nds->Display(kNotificationHandlerType, *notification, /*metadata=*/nullptr);
+}
+
+// static
+base::string16 PasswordExpiryNotification::GetTitleText(
+    base::TimeDelta time_until_expiry) {
+  if (time_until_expiry < kOneMinute) {
+    // Don't need to count the seconds - just say its overdue.
+    return l10n_util::GetStringUTF16(IDS_PASSWORD_CHANGE_OVERDUE_TITLE);
+  }
+  return l10n_util::GetStringFUTF16(
+      IDS_PASSWORD_EXPIRES_AFTER_TIME_TITLE,
+      ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_DURATION,
+                             ui::TimeFormat::LENGTH_LONG, time_until_expiry));
 }
 
 // static

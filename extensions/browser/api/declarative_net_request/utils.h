@@ -14,13 +14,17 @@
 #include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "extensions/browser/api/declarative_net_request/flat/extension_ruleset_generated.h"
 #include "extensions/browser/api/declarative_net_request/ruleset_source.h"
+#include "extensions/common/api/declarative_net_request.h"
+#include "third_party/re2/src/re2/re2.h"
 
 namespace base {
 class FilePath;
 }  // namespace base
 
 namespace extensions {
+struct WebRequestInfo;
 
 namespace declarative_net_request {
 
@@ -36,11 +40,21 @@ std::string GetVersionHeaderForTesting();
 int GetIndexedRulesetFormatVersionForTesting();
 
 // Override the ruleset format version for testing.
+// TODO(karandeepb): Introduce a scoped update class for this to ensure tests
+// don't have to manually reset this every time.
 void SetIndexedRulesetFormatVersionForTesting(int version);
 
 // Strips the version header from |ruleset_data|. Returns false on version
 // mismatch.
 bool StripVersionHeaderAndParseVersion(std::string* ruleset_data);
+
+// Returns the checksum of the given serialized |data|. |data| must not include
+// the version header.
+int GetChecksum(base::span<const uint8_t> data);
+
+// Override the result of any calls to GetChecksum() above, so that it returns
+// |checksum|. Note: If |checksum| is -1, no such override is performed.
+void OverrideGetChecksumForTest(int checksum);
 
 // Helper function to persist the indexed ruleset |data| at the given |path|.
 // The ruleset is composed of a version header corresponding to the current
@@ -56,6 +70,19 @@ void ClearRendererCacheOnNavigation();
 
 // Helper to log the |kReadDynamicRulesJSONStatusHistogram| histogram.
 void LogReadDynamicRulesStatus(ReadJSONRulesResult::Status status);
+
+// Constructs an api::declarative_net_request::RequestDetails from a
+// WebRequestInfo.
+api::declarative_net_request::RequestDetails CreateRequestDetails(
+    const WebRequestInfo& request);
+
+// Creates default RE2::Options.
+re2::RE2::Options CreateRE2Options(bool is_case_sensitive,
+                                   bool require_capturing);
+
+// Convert dnr_api::RuleActionType into flat::ActionType.
+flat::ActionType ConvertToFlatActionType(
+    api::declarative_net_request::RuleActionType action_type);
 
 }  // namespace declarative_net_request
 }  // namespace extensions

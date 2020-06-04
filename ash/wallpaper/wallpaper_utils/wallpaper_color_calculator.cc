@@ -111,8 +111,7 @@ WallpaperColorCalculator::WallpaperColorCalculator(
     scoped_refptr<base::TaskRunner> task_runner)
     : image_(image),
       color_profiles_(color_profiles),
-      task_runner_(std::move(task_runner)),
-      weak_ptr_factory_(this) {
+      task_runner_(std::move(task_runner)) {
   prominent_colors_ =
       std::vector<SkColor>(color_profiles_.size(), SK_ColorTRANSPARENT);
 }
@@ -140,9 +139,10 @@ bool WallpaperColorCalculator::StartCalculation() {
   image_.MakeThreadSafe();
   if (base::PostTaskAndReplyWithResult(
           task_runner_.get(), FROM_HERE,
-          base::Bind(&CalculateWallpaperColor, image_, color_profiles_),
-          base::Bind(&WallpaperColorCalculator::OnAsyncCalculationComplete,
-                     weak_ptr_factory_.GetWeakPtr(), base::TimeTicks::Now()))) {
+          base::BindOnce(&CalculateWallpaperColor, image_, color_profiles_),
+          base::BindOnce(&WallpaperColorCalculator::OnAsyncCalculationComplete,
+                         weak_ptr_factory_.GetWeakPtr(),
+                         base::TimeTicks::Now()))) {
     return true;
   }
 

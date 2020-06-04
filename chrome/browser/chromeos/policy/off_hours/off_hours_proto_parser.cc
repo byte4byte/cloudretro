@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/policy/off_hours/off_hours_proto_parser.h"
 
-#include "base/logging.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "chromeos/policy/weekly_time/time_utils.h"
@@ -64,7 +63,7 @@ std::unique_ptr<base::DictionaryValue> ConvertOffHoursProtoToValue(
       ExtractIgnoredPolicyProtoTagsFromProto(container);
   auto ignored_policies_value = std::make_unique<base::ListValue>();
   for (const auto& policy : ignored_policy_proto_tags)
-    ignored_policies_value->GetList().emplace_back(policy);
+    ignored_policies_value->Append(policy);
   off_hours->SetList("ignored_policy_proto_tags",
                      std::move(ignored_policies_value));
   return off_hours;

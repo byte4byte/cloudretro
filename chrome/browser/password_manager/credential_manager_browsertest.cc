@@ -19,6 +19,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/test_password_store.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_features.h"
@@ -28,6 +29,8 @@
 #include "net/dns/mock_host_resolver.h"
 
 namespace {
+
+using password_manager::MatchesFormExceptStore;
 
 class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
  public:
@@ -102,6 +105,9 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
   // the call to store() triggered from the unload handler.
   void TestStoreInUnloadHandlerForSameSiteNavigation(
       bool preestablish_mojo_pipe) {
+    WebContents()->GetController().GetBackForwardCache().DisableForTesting(
+        content::BackForwardCache::TEST_USES_UNLOAD_EVENT);
+
     // Use URLs that differ on subdomains so we can tell which one was used for
     // saving, but they still belong to the same SiteInstance, so they will be
     // renderered in the same RenderFrame (in the same process).
@@ -210,6 +216,9 @@ class CredentialManagerBrowserTest : public PasswordManagerBrowserTestBase {
   // the call to store() triggered from the unload handler.
   void TestStoreInUnloadHandlerForCrossSiteNavigation(
       bool preestablish_mojo_pipe) {
+    WebContents()->GetController().GetBackForwardCache().DisableForTesting(
+        content::BackForwardCache::TEST_USES_UNLOAD_EVENT);
+
     const GURL a_url = https_test_server().GetURL("a.com", "/title1.html");
     const GURL b_url = https_test_server().GetURL("b.com", "/title2.html");
 
@@ -325,7 +334,6 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest,
   form_1.origin = origin;
   form_1.username_value = base::ASCIIToUTF16("user1");
   form_1.password_value = base::ASCIIToUTF16("abcdef");
-  form_1.preferred = true;
 
   autofill::PasswordForm form_2;
   form_2.signon_realm = origin.spec();
@@ -411,7 +419,6 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest,
   form_1.origin = origin;
   form_1.username_value = base::ASCIIToUTF16("user1");
   form_1.password_value = base::ASCIIToUTF16("abcdef");
-  form_1.preferred = true;
 
   autofill::PasswordForm form_2;
   form_2.signon_realm = origin.spec();
@@ -502,7 +509,6 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest,
   form_1.username_element = base::ASCIIToUTF16("user");
   form_1.password_element = base::ASCIIToUTF16("pass");
   form_1.origin = GURL(origin.spec() + "/my/custom/path/");
-  form_1.preferred = true;
 
   autofill::PasswordForm form_2;
   form_2.signon_realm = origin.spec();
@@ -742,7 +748,8 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest,
   scoped_refptr<password_manager::TestPasswordStore> password_store =
       static_cast<password_manager::TestPasswordStore*>(
           PasswordStoreFactory::GetForProfile(
-              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS).get());
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS)
+              .get());
   autofill::PasswordForm signin_form;
   signin_form.signon_realm = embedded_test_server()->base_url().spec();
   signin_form.password_value = base::ASCIIToUTF16("password");
@@ -757,8 +764,8 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest,
 
   NavigateToFile("/password/password_form.html");
   std::string fill_password =
-  "document.getElementById('username_field').value = 'trash';"
-  "document.getElementById('password_field').value = 'trash';";
+      "document.getElementById('username_field').value = 'trash';"
+      "document.getElementById('password_field').value = 'trash';";
   ASSERT_TRUE(content::ExecuteScript(WebContents(), fill_password));
 
   // Call the API to trigger the notification to the client.
@@ -908,7 +915,8 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest, SaveViaAPIAndAutofill) {
       static_cast<password_manager::TestPasswordStore*>(
           PasswordStoreFactory::GetForProfile(
               browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS)
-              .get())->stored_passwords();
+              .get())
+          ->stored_passwords();
   ASSERT_EQ(1u, stored.size());
   autofill::PasswordForm signin_form = stored.begin()->second[0];
   EXPECT_EQ(base::ASCIIToUTF16("user"), signin_form.username_value);
@@ -931,7 +939,8 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest, UpdateViaAPIAndAutofill) {
   signin_form.username_value = base::ASCIIToUTF16("user");
   signin_form.origin = embedded_test_server()->base_url();
   signin_form.skip_zero_click = true;
-  signin_form.preferred = true;
+  // Set an old value for the |date_last_used| to make sure it gets updated.
+  signin_form.date_last_used = base::Time::UnixEpoch();
   password_store->AddLogin(signin_form);
 
   NavigateToFile("/password/password_form.html");
@@ -966,7 +975,15 @@ IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest, UpdateViaAPIAndAutofill) {
   password_manager::TestPasswordStore::PasswordMap stored =
       password_store->stored_passwords();
   ASSERT_EQ(1u, stored.size());
-  EXPECT_EQ(signin_form, stored[signin_form.signon_realm][0]);
+  // Upon an update, the |date_last_used| should be updated to the current
+  // timestamp.
+  EXPECT_GT(stored[signin_form.signon_realm][0].date_last_used,
+            signin_form.date_last_used);
+  // Now make them equal to be able to check the equality of other fields.
+  signin_form.date_last_used =
+      stored[signin_form.signon_realm][0].date_last_used;
+  EXPECT_THAT(signin_form,
+              MatchesFormExceptStore(stored[signin_form.signon_realm][0]));
 }
 
 IN_PROC_BROWSER_TEST_F(CredentialManagerBrowserTest, CredentialsAutofilled) {

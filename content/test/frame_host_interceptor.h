@@ -11,6 +11,8 @@
 #include "base/macros.h"
 #include "content/common/frame.mojom.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace content {
 
@@ -42,11 +44,12 @@ class FrameHostInterceptor : public WebContentsObserver {
   // original messages and just forwards them to the original implementation).
   virtual bool WillDispatchBeginNavigation(
       RenderFrameHost* render_frame_host,
-      CommonNavigationParams* common_params,
+      mojom::CommonNavigationParamsPtr* common_params,
       mojom::BeginNavigationParamsPtr* begin_params,
-      blink::mojom::BlobURLTokenPtr* blob_url_token,
-      mojom::NavigationClientAssociatedPtrInfo* navigation_client,
-      blink::mojom::NavigationInitiatorPtr* navigation_initiator);
+      mojo::PendingRemote<blink::mojom::BlobURLToken>* blob_url_token,
+      mojo::PendingAssociatedRemote<mojom::NavigationClient>* navigation_client,
+      mojo::PendingRemote<blink::mojom::NavigationInitiator>*
+          navigation_initiator);
 
  private:
   class FrameAgent;

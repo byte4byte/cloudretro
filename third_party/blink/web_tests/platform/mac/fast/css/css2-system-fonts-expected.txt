@@ -1,7 +1,7 @@
 This tests platform specific system font styles. If any of the styles appear in monospace the test fails.
-caption: normal normal 400 normal 13px / normal system-ui
-icon: normal normal 400 normal 13px / normal system-ui
-menu: normal normal 400 normal 13px / normal system-ui
-message-box: normal normal 400 normal 13px / normal system-ui
-small-caption: normal normal 400 normal 11px / normal system-ui
-status-bar: normal normal 400 normal 10px / normal system-ui
+caption: 16px Arial
+icon: 16px Arial
+menu: 16px Arial
+message-box: 16px Arial
+small-caption: 16px Arial
+status-bar: 16px Arial

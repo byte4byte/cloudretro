@@ -21,7 +21,7 @@
 #include "media/base/key_systems.h"
 #include "media/base/media_switches.h"
 #include "media/mojo/buildflags.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
 namespace content {
 
@@ -45,7 +45,7 @@ std::vector<T> SetToVector(const base::flat_set<T>& s) {
 // be modified.
 bool IsHardwareSecureCodecsOverriddenFromCommandLine(
     std::vector<media::VideoCodec>* video_codecs,
-    std::vector<media::EncryptionMode>* encryption_schemes) {
+    std::vector<media::EncryptionScheme>* encryption_schemes) {
   DCHECK(video_codecs->empty());
   DCHECK(encryption_schemes->empty());
 
@@ -73,16 +73,15 @@ bool IsHardwareSecureCodecsOverriddenFromCommandLine(
 
   // Codecs enabled from command line assumes CENC support.
   if (!video_codecs->empty())
-    encryption_schemes->push_back(media::EncryptionMode::kCenc);
+    encryption_schemes->push_back(media::EncryptionScheme::kCenc);
 
   return true;
 }
 
 void GetHardwareSecureDecryptionCaps(
     const std::string& key_system,
-    const base::flat_set<media::CdmProxy::Protocol>& cdm_proxy_protocols,
     std::vector<media::VideoCodec>* video_codecs,
-    std::vector<media::EncryptionMode>* encryption_schemes) {
+    std::vector<media::EncryptionScheme>* encryption_schemes) {
   DCHECK(video_codecs->empty());
   DCHECK(encryption_schemes->empty());
 
@@ -95,11 +94,6 @@ void GetHardwareSecureDecryptionCaps(
   if (IsHardwareSecureCodecsOverriddenFromCommandLine(video_codecs,
                                                       encryption_schemes)) {
     DVLOG(1) << "Hardware secure codecs overridden from command line";
-    return;
-  }
-
-  if (cdm_proxy_protocols.empty()) {
-    DVLOG(1) << "CDM does not support any CdmProxy protocols";
     return;
   }
 
@@ -118,29 +112,27 @@ void GetHardwareSecureDecryptionCaps(
 #if !BUILDFLAG(ENABLE_MOJO_VIDEO_DECODER)
   DVLOG(1) << "Hardware secure codecs not supported because mojo video "
               "decode was disabled at buildtime";
-  return;
-#endif
-
+#else
   base::flat_set<media::VideoCodec> video_codec_set;
-  base::flat_set<media::EncryptionMode> encryption_scheme_set;
+  base::flat_set<media::EncryptionScheme> encryption_scheme_set;
 
   GetContentClient()->browser()->GetHardwareSecureDecryptionCaps(
-      key_system, cdm_proxy_protocols, &video_codec_set,
-      &encryption_scheme_set);
+      key_system, &video_codec_set, &encryption_scheme_set);
 
   *video_codecs = SetToVector(video_codec_set);
   *encryption_schemes = SetToVector(encryption_scheme_set);
+#endif
 }
 
 }  // namespace
 
 // static
 void KeySystemSupportImpl::Create(
-    media::mojom::KeySystemSupportRequest request) {
+    mojo::PendingReceiver<media::mojom::KeySystemSupport> receiver) {
   DVLOG(3) << __func__;
   // The created object is bound to (and owned by) |request|.
-  mojo::MakeStrongBinding(std::make_unique<KeySystemSupportImpl>(),
-                          std::move(request));
+  mojo::MakeSelfOwnedReceiver(std::make_unique<KeySystemSupportImpl>(),
+                              std::move(receiver));
 }
 
 // static
@@ -185,7 +177,6 @@ void KeySystemSupportImpl::IsKeySystemSupported(
       SetToVector(cdm_info->capability.encryption_schemes);
 
   GetHardwareSecureDecryptionCaps(key_system,
-                                  cdm_info->capability.cdm_proxy_protocols,
                                   &capability->hw_secure_video_codecs,
                                   &capability->hw_secure_encryption_schemes);
 

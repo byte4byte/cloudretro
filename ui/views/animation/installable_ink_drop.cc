@@ -16,32 +16,47 @@
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/animation/animation_container.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/animation/compositor_animation_runner.h"
 #include "ui/views/animation/ink_drop_host_view.h"
+#include "ui/views/controls/focus_ring.h"
 #include "ui/views/view.h"
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
 
+namespace {
+
+InstallableInkDropConfig GetPlaceholderInstallableInkDropConfig() {
+  InstallableInkDropConfig config{0};
+  config.base_color = gfx::kPlaceholderColor;
+  config.ripple_opacity = 1.0f;
+  config.highlight_opacity = 1.0f;
+  return config;
+}
+
+}  // namespace
+
 const base::Feature kInstallableInkDropFeature{
     "InstallableInkDrop", base::FEATURE_DISABLED_BY_DEFAULT};
 
 InstallableInkDrop::InstallableInkDrop(View* view)
     : view_(view),
+      config_(GetPlaceholderInstallableInkDropConfig()),
       layer_(std::make_unique<ui::Layer>()),
       event_handler_(view_, this),
-      painter_(&visual_state_),
+      painter_(&config_, &visual_state_),
       animation_container_(base::MakeRefCounted<gfx::AnimationContainer>()),
       animator_(layer_->size(),
                 &visual_state_,
                 animation_container_.get(),
-                base::Bind(&InstallableInkDrop::SchedulePaint,
-                           base::Unretained(this))) {
+                base::BindRepeating(&InstallableInkDrop::SchedulePaint,
+                                    base::Unretained(this))) {
   // Catch if |view_| is destroyed out from under us.
   if (DCHECK_IS_ON())
     view_->AddObserver(this);
@@ -61,8 +76,7 @@ InstallableInkDrop::InstallableInkDrop(View* view)
     // Using CompositorAnimationRunner keeps our animation updates in sync with
     // compositor frames and avoids jank.
     animation_container_->SetAnimationRunner(
-        std::make_unique<CompositorAnimationRunner>(
-            view_->GetWidget()->GetCompositor()));
+        std::make_unique<CompositorAnimationRunner>(view_->GetWidget()));
   }
 }
 
@@ -79,6 +93,11 @@ InstallableInkDrop::~InstallableInkDrop() {
     ink_drop_host_view_->set_ink_drop_event_handler_override(nullptr);
   if (DCHECK_IS_ON())
     view_->RemoveObserver(this);
+}
+
+void InstallableInkDrop::SetConfig(InstallableInkDropConfig config) {
+  config_ = config;
+  SchedulePaint();
 }
 
 void InstallableInkDrop::HostSizeChanged(const gfx::Size& new_size) {
@@ -100,7 +119,8 @@ void InstallableInkDrop::AnimateToState(InkDropState ink_drop_state) {
   animator_.AnimateToState(ink_drop_state);
 }
 
-void InstallableInkDrop::SetHoverHighlightFadeDurationMs(int duration_ms) {
+void InstallableInkDrop::SetHoverHighlightFadeDuration(
+    base::TimeDelta duration) {
   NOTREACHED();
 }
 
@@ -162,7 +182,7 @@ void InstallableInkDrop::OnPaintLayer(const ui::PaintContext& context) {
 
   ui::PaintRecorder paint_recorder(context, layer_->size());
   gfx::Canvas* canvas = paint_recorder.canvas();
-  canvas->ClipPath(GetHighlightPathForView(view_), true);
+  canvas->ClipPath(GetHighlightPath(view_), true);
 
   painter_.Paint(canvas, view_->size());
 }
@@ -170,24 +190,6 @@ void InstallableInkDrop::OnPaintLayer(const ui::PaintContext& context) {
 void InstallableInkDrop::OnDeviceScaleFactorChanged(
     float old_device_scale_factor,
     float new_device_scale_factor) {}
-
-// static
-SkPath InstallableInkDrop::GetHighlightPathForView(const View* view) {
-  // Use the provided highlight path if there is one.
-  const SkPath* const path_property = view->GetProperty(kHighlightPathKey);
-  if (path_property)
-    return *path_property;
-
-  // Otherwise, construct a default path. This will be pill shaped, or circular
-  // when |view| is square.
-  SkPath path;
-
-  const float radius =
-      std::min(view->size().width(), view->size().height()) / 2.0f;
-  path.addRoundRect(gfx::RectToSkRect(view->GetLocalBounds()), radius, radius);
-
-  return path;
-}
 
 void InstallableInkDrop::SchedulePaint() {
   layer_->SchedulePaint(gfx::Rect(layer_->size()));

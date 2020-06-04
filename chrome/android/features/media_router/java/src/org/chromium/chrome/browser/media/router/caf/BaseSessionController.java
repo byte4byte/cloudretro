@@ -4,17 +4,11 @@
 
 package org.chromium.chrome.browser.media.router.caf;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import com.google.android.gms.cast.CastDevice;
 import com.google.android.gms.cast.framework.CastSession;
 import com.google.android.gms.cast.framework.media.RemoteMediaClient;
-import com.google.android.gms.common.api.PendingResult;
-import com.google.android.gms.common.api.Status;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import org.chromium.base.Log;
 import org.chromium.chrome.browser.media.router.CastSessionUtil;
@@ -22,11 +16,8 @@ import org.chromium.chrome.browser.media.router.FlingingController;
 import org.chromium.chrome.browser.media.router.MediaSink;
 import org.chromium.chrome.browser.media.router.MediaSource;
 
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
 
 /**
  * A base wrapper for {@link CastSession}, extending its functionality for Chrome MediaRouter.
@@ -51,13 +42,11 @@ public abstract class BaseSessionController {
         void onMetadataUpdated();
     }
 
-    private final Random mRequestIdGenerator = new Random();
     private CastSession mCastSession;
-    private int mLatestMediaSessionId;
     private final CafBaseMediaRouteProvider mProvider;
     private CreateRouteRequestInfo mRouteCreationInfo;
     private final RemoteMediaClient.Callback mRemoteMediaClientCallback;
-    private final List<WeakReference<Callback>> mCallbacks = new ArrayList<>();
+    private final List<Callback> mCallbacks = new ArrayList<>();
 
     public BaseSessionController(CafBaseMediaRouteProvider provider) {
         mProvider = provider;
@@ -65,17 +54,11 @@ public abstract class BaseSessionController {
     }
 
     public void addCallback(Callback callback) {
-        mCallbacks.add(new WeakReference<>(callback));
+        mCallbacks.add(callback);
     }
 
     public void removeCallback(Callback callback) {
-        Iterator<WeakReference<Callback>> iterator = mCallbacks.iterator();
-
-        while (iterator.hasNext()) {
-            if (iterator.next().get() == callback) {
-                iterator.remove();
-            }
-        }
+        mCallbacks.remove(callback);
     }
 
     public void requestSessionLaunch() {
@@ -139,44 +122,6 @@ public abstract class BaseSessionController {
         return mCastSession != null && mCastSession.isConnected();
     }
 
-    /**
-     * Safely seek to a position. This is an workaround for an IllegalStateException in
-     * RemoteMediaClient when a seek command times out. The code should be replaced by a normal
-     * seek() call when the Google Play services SDK gets updated.
-     */
-    public PendingResult<Status> safelySeek(long position) {
-        JSONObject json = new JSONObject();
-        try {
-            json.put("requestId", mRequestIdGenerator.nextInt(10000));
-            json.put("mediaSessionId", mLatestMediaSessionId);
-            json.put("type", "SEEK");
-            json.put("currentTime", position / 1000.0);
-        } catch (JSONException e) {
-            // Ignore.
-        }
-        return getSession().sendMessage(CastSessionUtil.MEDIA_NAMESPACE, json.toString());
-    }
-
-    private void updateMediaSessionId(String message) {
-        try {
-            JSONObject json = new JSONObject(message);
-            JSONArray statusArray = json.optJSONArray("status");
-
-            if (statusArray == null || statusArray.length() == 0) {
-                return;
-            }
-
-            JSONObject status = statusArray.optJSONObject(0);
-            if (status == null) {
-                return;
-            }
-
-            mLatestMediaSessionId = status.optInt("mediaSessionId", mLatestMediaSessionId);
-        } catch (JSONException e) {
-            // Ignore.
-        }
-    }
-
     private void updateRemoteMediaClient(String message) {
         if (!isConnected()) return;
 
@@ -227,7 +172,6 @@ public abstract class BaseSessionController {
                 "Received message from Cast device: namespace=\"" + namespace + "\" message=\""
                         + message + "\"");
         if (CastSessionUtil.MEDIA_NAMESPACE.equals(namespace)) {
-            updateMediaSessionId(message);
             updateRemoteMediaClient(message);
         }
     }
@@ -266,15 +210,8 @@ public abstract class BaseSessionController {
     }
 
     private void notifyCallback(NotifyCallbackAction action) {
-        Iterator<WeakReference<Callback>> iterator = mCallbacks.iterator();
-
-        while (iterator.hasNext()) {
-            Callback callback = iterator.next().get();
-            if (callback == null) {
-                iterator.remove();
-            } else {
-                action.notify(callback);
-            }
+        for (Callback callback : mCallbacks) {
+            action.notify(callback);
         }
     }
 

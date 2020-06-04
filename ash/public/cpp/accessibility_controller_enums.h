@@ -34,10 +34,10 @@ enum class AccessibilityAlert {
   // When the user enters window overview mode.
   WINDOW_OVERVIEW_MODE_ENTERED,
 
-  // When workspace state just changed to WORKSPACE_WINDOW_STATE_FULL_SCREEN.
+  // When workspace state just changed to WorkspaceWindowState::kFullscreen.
   WORKSPACE_FULLSCREEN_STATE_ENTERED,
 
-  // When workspace state just changed from WORKSPACE_WINDOW_STATE_FULL_SCREEN
+  // When workspace state just changed from WorkspaceWindowState::kFullscreen.
   // to others.
   WORKSPACE_FULLSCREEN_STATE_EXITED
 };
@@ -122,10 +122,10 @@ enum class AutoclickEventType {
   kMaxValue = kScroll
 };
 
-// The Automatic Clicks feature's on-screen menu display location. These values
-// are written to prefs so they should not be changed. New values should be
-// added at the end.
-enum class AutoclickMenuPosition {
+// Display location of the on-screen floating menus used by accessibility
+// features(e.g. the Automatic Clicks) . These values are written to prefs so
+// they should not be changed. New values should be added at the end.
+enum class FloatingMenuPosition {
   // The bottom right of the screen.
   kBottomRight,
 

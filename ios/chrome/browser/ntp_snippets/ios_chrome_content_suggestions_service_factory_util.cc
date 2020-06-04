@@ -42,7 +42,6 @@
 #include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/json_parser/in_process_json_parser.h"
-#include "ios/chrome/browser/leveldb_proto/proto_database_provider_factory.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
@@ -85,8 +84,8 @@ CreateChromeContentSuggestionsServiceWithProviders(
 std::unique_ptr<KeyedService> CreateChromeContentSuggestionsService(
     web::BrowserState* browser_state) {
   using State = ContentSuggestionsService::State;
-  ios::ChromeBrowserState* chrome_browser_state =
-      ios::ChromeBrowserState::FromBrowserState(browser_state);
+  ChromeBrowserState* chrome_browser_state =
+      ChromeBrowserState::FromBrowserState(browser_state);
   DCHECK(!browser_state->IsOffTheRecord());
   PrefService* prefs = chrome_browser_state->GetPrefs();
 
@@ -100,7 +99,7 @@ std::unique_ptr<KeyedService> CreateChromeContentSuggestionsService(
       base::DefaultClock::GetInstance());
 
   // Create the ContentSuggestionsService.
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(chrome_browser_state);
   HistoryService* history_service =
       ios::HistoryServiceFactory::GetForBrowserState(
@@ -119,10 +118,10 @@ std::unique_ptr<KeyedService> CreateChromeContentSuggestionsService(
 
 void RegisterRemoteSuggestionsProvider(ContentSuggestionsService* service,
                                        web::BrowserState* browser_state) {
-  ios::ChromeBrowserState* chrome_browser_state =
-      ios::ChromeBrowserState::FromBrowserState(browser_state);
+  ChromeBrowserState* chrome_browser_state =
+      ChromeBrowserState::FromBrowserState(browser_state);
   PrefService* prefs = chrome_browser_state->GetPrefs();
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(chrome_browser_state);
   scoped_refptr<net::URLRequestContextGetter> request_context =
       browser_state->GetRequestContext();
@@ -133,7 +132,7 @@ void RegisterRemoteSuggestionsProvider(ContentSuggestionsService* service,
       browser_state->GetStatePath().Append(ntp_snippets::kDatabaseFolder));
 
   std::string api_key;
-  // This API needs whitelisted API keys. Get the key only if it is not a
+  // This API needs allow-listed API keys. Get the key only if it is not a
   // dummy key.
   if (google_apis::HasAPIKeyConfigured()) {
     bool is_stable_channel = GetChannel() == version_info::Channel::STABLE;
@@ -146,8 +145,7 @@ void RegisterRemoteSuggestionsProvider(ContentSuggestionsService* service,
       api_key, service->user_classifier());
 
   leveldb_proto::ProtoDatabaseProvider* db_provider =
-      leveldb_proto::ProtoDatabaseProviderFactory::GetForBrowserState(
-          chrome_browser_state);
+      chrome_browser_state->GetProtoDatabaseProvider();
 
   // This pref is also used for logging. If it is changed, change it in the
   // other places.

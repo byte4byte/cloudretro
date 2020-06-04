@@ -11,7 +11,7 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/autofill/core/common/password_form.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -29,7 +29,8 @@ class LoginDatabaseIOSTest : public PlatformTest {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath login_db_path =
         temp_dir_.GetPath().AppendASCII("temp_login.db");
-    login_db_.reset(new password_manager::LoginDatabase(login_db_path));
+    login_db_.reset(new password_manager::LoginDatabase(
+        login_db_path, password_manager::IsAccountStore(false)));
     login_db_->Init();
   }
 
@@ -46,7 +47,7 @@ class LoginDatabaseIOSTest : public PlatformTest {
  protected:
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<LoginDatabase> login_db_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 void LoginDatabaseIOSTest::ClearKeychain() {
@@ -100,6 +101,37 @@ TEST_F(LoginDatabaseIOSTest, KeychainStorage) {
     EXPECT_STREQ(UTF16ToUTF8(test_passwords[i]).c_str(),
                  UTF16ToUTF8(decrypted).c_str());
   }
+}
+
+TEST_F(LoginDatabaseIOSTest, AddLogin) {
+  ASSERT_EQ(0U, GetKeychainSize());
+
+  PasswordForm form;
+  form.origin = GURL("http://0.com");
+  form.signon_realm = "http://www.example.com/";
+  form.action = GURL("http://www.example.com/action");
+  form.password_element = base::ASCIIToUTF16("pwd");
+  form.password_value = base::ASCIIToUTF16("example");
+
+  password_manager::PasswordStoreChangeList changes = login_db_->AddLogin(form);
+  std::string encrypted_password = changes[0].form().encrypted_password;
+  ASSERT_FALSE(encrypted_password.empty());
+  ASSERT_EQ(1U, GetKeychainSize());
+
+  CFStringRef cf_encrypted_password = CFStringCreateWithCString(
+      kCFAllocatorDefault, encrypted_password.c_str(), kCFStringEncodingUTF8);
+
+  ScopedCFTypeRef<CFMutableDictionaryRef> query(
+      CFDictionaryCreateMutable(NULL, 4, &kCFTypeDictionaryKeyCallBacks,
+                                &kCFTypeDictionaryValueCallBacks));
+  CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+  CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
+  CFDictionarySetValue(query, kSecAttrAccount, cf_encrypted_password);
+
+  CFTypeRef result;
+  EXPECT_EQ(errSecSuccess, SecItemCopyMatching(query, &result));
+  CFRelease(cf_encrypted_password);
+  CFRelease(result);
 }
 
 TEST_F(LoginDatabaseIOSTest, UpdateLogin) {

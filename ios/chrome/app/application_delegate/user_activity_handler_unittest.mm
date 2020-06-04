@@ -8,7 +8,7 @@
 
 #import <CoreSpotlight/CoreSpotlight.h>
 
-#include "base/mac/scoped_block.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/scoped_command_line.h"
@@ -19,6 +19,7 @@
 #include "ios/chrome/app/application_delegate/startup_information.h"
 #include "ios/chrome/app/application_delegate/tab_opening.h"
 #include "ios/chrome/app/application_mode.h"
+#import "ios/chrome/app/intents/OpenInChromeIntent.h"
 #include "ios/chrome/app/main_controller.h"
 #include "ios/chrome/app/spotlight/actions_spotlight_manager.h"
 #import "ios/chrome/app/spotlight/spotlight_util.h"
@@ -32,7 +33,7 @@
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/chrome/test/base/scoped_block_swizzler.h"
+#import "ios/testing/scoped_block_swizzler.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/test/gtest_util.h"
@@ -45,6 +46,11 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+// Override readonly property for testing.
+@interface NSUserActivity (IntentsTesting)
+@property(readwrite, nullable, NS_NONATOMIC_IOSONLY) INInteraction* interaction;
+@end
 
 // Substitutes U2FTabHelper for testing.
 class FakeU2FTabHelper : public U2FTabHelper {
@@ -374,7 +380,6 @@ TEST_F(UserActivityHandlerTest, ContinueUserActivityBrowsingWeb) {
   // Use an object to capture the startup paramters set by UserActivityHandler.
   FakeStartupInformation* fakeStartupInformation =
       [[FakeStartupInformation alloc] init];
-  [fakeStartupInformation setIsPresentingFirstRunUI:NO];
 
   BOOL result =
       [UserActivityHandler continueUserActivity:userActivity
@@ -385,7 +390,7 @@ TEST_F(UserActivityHandlerTest, ContinueUserActivityBrowsingWeb) {
   GURL newTabURL(kChromeUINewTabURL);
   EXPECT_EQ(newTabURL, tabOpener.urlLoadParams.web_params.url);
   // AppStartupParameters default to opening pages in non-Incognito mode.
-  EXPECT_EQ(ApplicationMode::NORMAL, [tabOpener applicationMode]);
+  EXPECT_EQ(ApplicationModeForTabOpening::NORMAL, [tabOpener applicationMode]);
   EXPECT_TRUE(result);
   // Verifies that a new tab is being requested.
   EXPECT_EQ(newTabURL,
@@ -455,6 +460,85 @@ TEST_F(UserActivityHandlerTest, ContinueUserActivityShortcutActions) {
   }
 }
 
+// Tests that Chrome responds to open intents in the background.
+TEST_F(UserActivityHandlerTest, ContinueUserActivityIntentBackground) {
+  NSUserActivity* userActivity =
+      [[NSUserActivity alloc] initWithActivityType:@"OpenInChromeIntent"];
+  OpenInChromeIntent* intent = [[OpenInChromeIntent alloc] init];
+  NSURL* nsurl = [NSURL URLWithString:@"http://www.google.com"];
+  intent.url = nsurl;
+  INInteraction* interaction = [[INInteraction alloc] initWithIntent:intent
+                                                            response:nil];
+  userActivity.interaction = interaction;
+
+  id startupInformationMock =
+      [OCMockObject niceMockForProtocol:@protocol(StartupInformation)];
+  [[startupInformationMock expect]
+      setStartupParameters:[OCMArg checkWithBlock:^BOOL(id value) {
+        EXPECT_TRUE([value isKindOfClass:[AppStartupParameters class]]);
+
+        AppStartupParameters* startupParameters = (AppStartupParameters*)value;
+        const GURL calledURL = startupParameters.externalURL;
+        return calledURL == net::GURLWithNSURL(nsurl);
+      }]];
+
+  // The test will fail if a method of this object is called.
+  id tabOpenerMock = [OCMockObject mockForProtocol:@protocol(TabOpening)];
+
+  // Action.
+  BOOL result =
+      [UserActivityHandler continueUserActivity:userActivity
+                            applicationIsActive:NO
+                                      tabOpener:tabOpenerMock
+                             startupInformation:startupInformationMock];
+
+  // Test.
+  EXPECT_OCMOCK_VERIFY(startupInformationMock);
+  EXPECT_TRUE(result);
+}
+
+// Tests that Chrome responds to open intents in the foreground.
+TEST_F(UserActivityHandlerTest, ContinueUserActivityIntentForeground) {
+  GURL gurl("http://www.google.com");
+  NSUserActivity* userActivity =
+      [[NSUserActivity alloc] initWithActivityType:@"OpenInChromeIntent"];
+  OpenInChromeIntent* intent = [[OpenInChromeIntent alloc] init];
+  intent.url = net::NSURLWithGURL(gurl);
+  INInteraction* interaction = [[INInteraction alloc] initWithIntent:intent
+                                                            response:nil];
+  userActivity.interaction = interaction;
+
+  id startupInformationMock =
+      [OCMockObject niceMockForProtocol:@protocol(StartupInformation)];
+  [[startupInformationMock expect]
+      setStartupParameters:[OCMArg checkWithBlock:^BOOL(id value) {
+        EXPECT_TRUE([value isKindOfClass:[AppStartupParameters class]]);
+
+        AppStartupParameters* startupParameters = (AppStartupParameters*)value;
+        const GURL calledURL = startupParameters.externalURL;
+        return calledURL == net::GURLWithNSURL(intent.url);
+      }]];
+  [[[startupInformationMock stub] andReturnValue:@NO] isPresentingFirstRunUI];
+
+  MockTabOpener* tabOpener = [[MockTabOpener alloc] init];
+
+  AppStartupParameters* startupParams =
+      [[AppStartupParameters alloc] initWithExternalURL:gurl completeURL:gurl];
+  [[[startupInformationMock stub] andReturn:startupParams] startupParameters];
+
+  // Action.
+  BOOL result =
+      [UserActivityHandler continueUserActivity:userActivity
+                            applicationIsActive:YES
+                                      tabOpener:tabOpener
+                             startupInformation:startupInformationMock];
+
+  // Test.
+  EXPECT_EQ(gurl, tabOpener.urlLoadParams.web_params.url);
+  EXPECT_TRUE(tabOpener.urlLoadParams.web_params.virtual_url.is_empty());
+  EXPECT_TRUE(result);
+}
+
 // Tests that handleStartupParameters with a file url. "external URL" gets
 // rewritten to chrome://URL, while "complete URL" remains full local file URL.
 TEST_F(UserActivityHandlerTest, HandleStartupParamsWithExternalFile) {
@@ -493,7 +577,8 @@ TEST_F(UserActivityHandlerTest, HandleStartupParamsWithExternalFile) {
   // and omnibox shows virtual URL.
   EXPECT_EQ(completeURL, tabOpener.urlLoadParams.web_params.url);
   EXPECT_EQ(externalURL, tabOpener.urlLoadParams.web_params.virtual_url);
-  EXPECT_EQ(ApplicationMode::INCOGNITO, [tabOpener applicationMode]);
+  EXPECT_EQ(ApplicationModeForTabOpening::INCOGNITO,
+            [tabOpener applicationMode]);
 }
 
 // Tests that handleStartupParameters with a non-U2F url opens a new tab.
@@ -528,7 +613,8 @@ TEST_F(UserActivityHandlerTest, HandleStartupParamsNonU2F) {
   EXPECT_OCMOCK_VERIFY(startupInformationMock);
   EXPECT_EQ(gurl, tabOpener.urlLoadParams.web_params.url);
   EXPECT_TRUE(tabOpener.urlLoadParams.web_params.virtual_url.is_empty());
-  EXPECT_EQ(ApplicationMode::INCOGNITO, [tabOpener applicationMode]);
+  EXPECT_EQ(ApplicationModeForTabOpening::INCOGNITO,
+            [tabOpener applicationMode]);
 }
 
 // Tests that handleStartupParameters with a U2F url opens in the correct tab.
@@ -582,11 +668,10 @@ TEST_F(UserActivityHandlerTest, PerformActionForShortcutItemWithRealShortcut) {
 
   FakeStartupInformation* fakeStartupInformation =
       [[FakeStartupInformation alloc] init];
-  [fakeStartupInformation setIsPresentingFirstRunUI:NO];
 
   NSArray* parametersToTest = @[
-    @[ @"OpenNewTab", @NO, @(NO_ACTION) ],
-    @[ @"OpenIncognitoTab", @YES, @(NO_ACTION) ],
+    @[ @"OpenNewSearch", @NO, @(FOCUS_OMNIBOX) ],
+    @[ @"OpenIncognitoSearch", @YES, @(FOCUS_OMNIBOX) ],
     @[ @"OpenVoiceSearch", @NO, @(START_VOICE_SEARCH) ],
     @[ @"OpenQRScanner", @NO, @(START_QR_CODE_SCANNER) ]
   ];
@@ -634,7 +719,7 @@ TEST_F(UserActivityHandlerTest, PerformActionForShortcutItemWithFirstRunUI) {
   [[[startupInformationMock stub] andReturnValue:@YES] isPresentingFirstRunUI];
 
   UIApplicationShortcutItem* shortcut =
-      [[UIApplicationShortcutItem alloc] initWithType:@"OpenNewTab"
+      [[UIApplicationShortcutItem alloc] initWithType:@"OpenNewSearch"
                                        localizedTitle:@""];
 
   swizzleHandleStartupParameters();

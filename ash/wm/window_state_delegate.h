@@ -9,11 +9,11 @@
 #include "base/macros.h"
 
 namespace gfx {
-class Point;
+class PointF;
 }
 
 namespace ash {
-namespace wm {
+
 class WindowState;
 
 class ASH_EXPORT WindowStateDelegate {
@@ -25,7 +25,7 @@ class ASH_EXPORT WindowStateDelegate {
   // state. If the window is not fullscreen and the window supports immersive
   // fullscreen ToggleFullscreen() should put the window into immersive
   // fullscreen instead of the default fullscreen type. The caller
-  // (ash::wm::WindowState) falls backs to the default implementation if this
+  // (ash::WindowState) falls backs to the default implementation if this
   // returns false.
   virtual bool ToggleFullscreen(WindowState* window_state);
 
@@ -37,13 +37,12 @@ class ASH_EXPORT WindowStateDelegate {
 
   // Invoked when the user finished drag operation. |cancel| is true
   // if the drag operation was canceled.
-  virtual void OnDragFinished(bool cancel, const gfx::Point& location) {}
+  virtual void OnDragFinished(bool cancel, const gfx::PointF& location) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WindowStateDelegate);
 };
 
-}  // namespace wm
 }  // namespace ash
 
 #endif  // ASH_WM_WINDOW_STATE_DELEGATE_H_

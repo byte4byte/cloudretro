@@ -4,6 +4,7 @@
 
 #include "components/offline_pages/core/downloads/offline_item_conversions.h"
 
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/offline_items_collection/core/pending_state.h"
 #include "components/offline_pages/core/background/save_page_request.h"
@@ -67,6 +68,7 @@ OfflineItem OfflineItemConversions::CreateOfflineItem(
   item.description = page.snippet;
   item.attribution = page.attribution;
 
+  // TODO(carlosk): Set item.ignore_visuals here to the right thing.
   return item;
 }
 

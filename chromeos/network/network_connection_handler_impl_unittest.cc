@@ -13,7 +13,7 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/network/managed_network_configuration_handler_impl.h"
 #include "chromeos/network/network_cert_loader.h"
 #include "chromeos/network/network_configuration_handler.h"
@@ -96,27 +96,27 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
 
   void ConnectToNetwork(
       const std::string& service_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback) override {
     last_delegate_function_type_ = DelegateFunctionType::CONNECT;
     last_service_path_ = service_path;
-    last_success_callback_ = success_callback;
+    last_success_callback_ = std::move(success_callback);
     last_error_callback_ = error_callback;
   }
 
   void DisconnectFromNetwork(
       const std::string& service_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback) override {
     last_delegate_function_type_ = DelegateFunctionType::DISCONNECT;
     last_service_path_ = service_path;
-    last_success_callback_ = success_callback;
+    last_success_callback_ = std::move(success_callback);
     last_error_callback_ = error_callback;
   }
 
   std::string& last_service_path() { return last_service_path_; }
 
-  base::Closure& last_success_callback() { return last_success_callback_; }
+  base::OnceClosure& last_success_callback() { return last_success_callback_; }
 
   network_handler::StringResultCallback& last_error_callback() {
     return last_error_callback_;
@@ -124,7 +124,7 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
 
  private:
   std::string last_service_path_;
-  base::Closure last_success_callback_;
+  base::OnceClosure last_success_callback_;
   network_handler::StringResultCallback last_error_callback_;
   DelegateFunctionType last_delegate_function_type_;
 };
@@ -134,8 +134,7 @@ class FakeTetherDelegate : public NetworkConnectionHandler::TetherDelegate {
 class NetworkConnectionHandlerImplTest : public testing::Test {
  public:
   NetworkConnectionHandlerImplTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
 
   ~NetworkConnectionHandlerImplTest() override = default;
 
@@ -174,7 +173,7 @@ class NetworkConnectionHandlerImplTest : public testing::Test {
     network_connection_handler_->AddObserver(
         network_connection_observer_.get());
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     fake_tether_delegate_.reset(new FakeTetherDelegate());
   }
@@ -204,22 +203,22 @@ class NetworkConnectionHandlerImplTest : public testing::Test {
   void Connect(const std::string& service_path) {
     network_connection_handler_->ConnectToNetwork(
         service_path,
-        base::Bind(&NetworkConnectionHandlerImplTest::SuccessCallback,
-                   base::Unretained(this)),
+        base::BindOnce(&NetworkConnectionHandlerImplTest::SuccessCallback,
+                       base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerImplTest::ErrorCallback,
                    base::Unretained(this)),
         true /* check_error_state */, ConnectCallbackMode::ON_COMPLETED);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void Disconnect(const std::string& service_path) {
     network_connection_handler_->DisconnectNetwork(
         service_path,
-        base::Bind(&NetworkConnectionHandlerImplTest::SuccessCallback,
-                   base::Unretained(this)),
+        base::BindOnce(&NetworkConnectionHandlerImplTest::SuccessCallback,
+                       base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerImplTest::ErrorCallback,
                    base::Unretained(this)));
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void SuccessCallback() { result_ = kSuccessResult; }
@@ -237,13 +236,13 @@ class NetworkConnectionHandlerImplTest : public testing::Test {
 
   void StartNetworkCertLoader() {
     NetworkCertLoader::Get()->SetUserNSSDB(test_nsscertdb_.get());
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void LoginToRegularUser() {
     LoginState::Get()->SetLoggedInState(LoginState::LOGGED_IN_ACTIVE,
                                         LoginState::LOGGED_IN_USER_REGULAR);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   scoped_refptr<net::X509Certificate> ImportTestClientCert() {
@@ -293,7 +292,7 @@ class NetworkConnectionHandlerImplTest : public testing::Test {
                                          std::string(),  // no username hash
                                          *network_configs, global_config);
     }
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   std::string ConfigureService(const std::string& shill_json_string) {
@@ -319,7 +318,7 @@ class NetworkConnectionHandlerImplTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   NetworkStateTestHelper helper_{false /* use_default_devices_and_services */};
   std::unique_ptr<NetworkConfigurationHandler> network_config_handler_;
   std::unique_ptr<NetworkConnectionHandler> network_connection_handler_;
@@ -565,7 +564,7 @@ TEST_F(NetworkConnectionHandlerImplTest, ConnectToTetherNetwork_Success) {
   EXPECT_EQ(FakeTetherDelegate::DelegateFunctionType::CONNECT,
             fake_tether_delegate()->last_delegate_function_type());
   EXPECT_EQ(kTetherGuid, fake_tether_delegate()->last_service_path());
-  fake_tether_delegate()->last_success_callback().Run();
+  std::move(fake_tether_delegate()->last_success_callback()).Run();
   EXPECT_EQ(kSuccessResult, GetResultAndReset());
   EXPECT_TRUE(network_connection_observer()->GetRequested(kTetherGuid));
   EXPECT_EQ(kSuccessResult,
@@ -631,7 +630,7 @@ TEST_F(NetworkConnectionHandlerImplTest, DisconnectFromTetherNetwork_Success) {
   EXPECT_EQ(FakeTetherDelegate::DelegateFunctionType::DISCONNECT,
             fake_tether_delegate()->last_delegate_function_type());
   EXPECT_EQ(kTetherGuid, fake_tether_delegate()->last_service_path());
-  fake_tether_delegate()->last_success_callback().Run();
+  std::move(fake_tether_delegate()->last_success_callback()).Run();
   EXPECT_EQ(kSuccessResult, GetResultAndReset());
   EXPECT_TRUE(network_connection_observer()->GetRequested(kTetherGuid));
   EXPECT_EQ(kSuccessResult,

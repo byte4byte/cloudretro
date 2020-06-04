@@ -11,24 +11,20 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/weak_ptr.h"
 #include "base/optional.h"
-#include "chrome/browser/sharing/sharing_device_info.h"
+#include "chrome/browser/sharing/click_to_call/click_to_call_metrics.h"
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "url/gurl.h"
 
-namespace gfx {
-class ImageSkia;
-}
+namespace syncer {
+class DeviceInfo;
+}  // namespace syncer
 
 class RenderViewContextMenuProxy;
 
-class SharingService;
+class ClickToCallUiController;
 
-class ClickToCallContextMenuObserver
-    : public RenderViewContextMenuObserver,
-      public base::SupportsWeakPtr<ClickToCallContextMenuObserver> {
+class ClickToCallContextMenuObserver : public RenderViewContextMenuObserver {
  public:
   class SubMenuDelegate : public ui::SimpleMenuModel::Delegate {
    public:
@@ -48,10 +44,13 @@ class ClickToCallContextMenuObserver
   ~ClickToCallContextMenuObserver() override;
 
   // RenderViewContextMenuObserver implementation.
-  void InitMenu(const content::ContextMenuParams& params) override;
   bool IsCommandIdSupported(int command_id) override;
   bool IsCommandIdEnabled(int command_id) override;
   void ExecuteCommand(int command_id) override;
+
+  void BuildMenu(const std::string& phone_number,
+                 const std::string& selection_text,
+                 SharingClickToCallEntryPoint entry_point);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ClickToCallContextMenuObserverTest,
@@ -65,17 +64,17 @@ class ClickToCallContextMenuObserver
 
   void SendClickToCallMessage(int chosen_device_index);
 
-  gfx::ImageSkia GetContextMenuIcon() const;
-
   RenderViewContextMenuProxy* proxy_ = nullptr;
 
-  SharingService* sharing_service_ = nullptr;
+  ClickToCallUiController* controller_ = nullptr;
+
+  std::vector<std::unique_ptr<syncer::DeviceInfo>> devices_;
 
   SubMenuDelegate sub_menu_delegate_{this};
 
-  GURL url_;
-
-  std::vector<SharingDeviceInfo> devices_;
+  std::string phone_number_;
+  std::string selection_text_;
+  base::Optional<SharingClickToCallEntryPoint> entry_point_;
 
   std::unique_ptr<ui::SimpleMenuModel> sub_menu_model_;
 

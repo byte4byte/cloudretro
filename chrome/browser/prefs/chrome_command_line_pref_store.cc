@@ -27,6 +27,8 @@
 #include "components/language/core/browser/pref_names.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safebrowsing_switches.h"
 #include "components/sync/base/pref_names.h"
 #include "content/public/common/content_switches.h"
 #include "services/network/public/cpp/network_switches.h"
@@ -67,12 +69,13 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
          true},
         {switches::kAllowOutdatedPlugins, prefs::kPluginsAllowOutdated, true},
         {switches::kNoPings, prefs::kEnableHyperlinkAuditing, false},
-        {network::switches::kNoReferrers, prefs::kEnableReferrers, false},
         {switches::kAllowRunningInsecureContent,
          prefs::kWebKitAllowRunningInsecureContent, true},
         {switches::kAllowCrossOriginAuthPrompt,
          prefs::kAllowCrossOriginAuthPrompt, true},
         {switches::kDisablePrintPreview, prefs::kPrintPreviewDisabled, true},
+        {safe_browsing::switches::kSbEnableEnhancedProtection,
+         prefs::kSafeBrowsingEnhanced, true},
 #if defined(OS_CHROMEOS)
         {chromeos::switches::kEnableTouchpadThreeFingerClick,
          prefs::kEnableTouchpadThreeFingerClick, true},

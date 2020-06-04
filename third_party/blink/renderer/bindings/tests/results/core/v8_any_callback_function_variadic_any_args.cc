@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 
 namespace blink {
 
@@ -27,7 +28,7 @@ const char* V8AnyCallbackFunctionVariadicAnyArgs::NameInHeapSnapshot() const {
   return "V8AnyCallbackFunctionVariadicAnyArgs";
 }
 
-v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const Vector<ScriptValue>& arguments) {
+v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const HeapVector<ScriptValue>& arguments) {
   ScriptState* callback_relevant_script_state =
       CallbackRelevantScriptStateOrThrowException(
           "AnyCallbackFunctionVariadicAnyArgs",
@@ -132,7 +133,7 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(bindings::V8
   }
 }
 
-v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vector<ScriptValue>& arguments) {
+v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const HeapVector<ScriptValue>& arguments) {
   ScriptState* callback_relevant_script_state =
       CallbackRelevantScriptStateOrThrowException(
           "AnyCallbackFunctionVariadicAnyArgs",

@@ -17,8 +17,7 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
@@ -44,16 +43,16 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
           expected_change_flags_(0) {
     }
 
-    void OnGranted(const GURL& origin, int change_flags) override {
+    void OnGranted(const url::Origin& origin, int change_flags) override {
       EXPECT_EQ(expected_type_, NOTIFICATION_TYPE_GRANT);
-      EXPECT_EQ(expected_origin_, origin);
+      EXPECT_EQ(expected_origin_, origin.GetURL());
       EXPECT_EQ(expected_change_flags_, change_flags);
       expected_type_ = NOTIFICATION_TYPE_NONE;
     }
 
-    void OnRevoked(const GURL& origin, int change_flags) override {
+    void OnRevoked(const url::Origin& origin, int change_flags) override {
       EXPECT_EQ(expected_type_, NOTIFICATION_TYPE_REVOKE);
-      EXPECT_EQ(expected_origin_, origin);
+      EXPECT_EQ(expected_origin_, origin.GetURL());
       EXPECT_EQ(expected_change_flags_, change_flags);
       expected_type_ = NOTIFICATION_TYPE_NONE;
     }
@@ -181,7 +180,7 @@ class ExtensionSpecialStoragePolicyTest : public testing::Test {
     }
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   scoped_refptr<ExtensionSpecialStoragePolicy> policy_;
 };
 
@@ -340,7 +339,7 @@ TEST_F(ExtensionSpecialStoragePolicyTest, IsStorageDurableTest) {
   HostContentSettingsMap* content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(&profile);
   content_settings_map->SetContentSettingDefaultScope(
-      kHttpUrl, GURL(), CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, std::string(),
+      kHttpUrl, GURL(), ContentSettingsType::DURABLE_STORAGE, std::string(),
       CONTENT_SETTING_ALLOW);
 
   EXPECT_TRUE(policy_->IsStorageDurable(kHttpUrl));

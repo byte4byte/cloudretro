@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_METRICS_PROCESS_MEMORY_METRICS_EMITTER_H_
 #define CHROME_BROWSER_METRICS_PROCESS_MEMORY_METRICS_EMITTER_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
-#include "base/feature_list.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/process/process_handle.h"
@@ -23,10 +23,8 @@ class UkmRecorder;
 }
 
 namespace performance_manager {
-class GraphImpl;
+class Graph;
 }
-
-extern const base::Feature kMemoryMetricsOldTiming;
 
 // This class asynchronously fetches memory metrics for each process, and then
 // emits UMA metrics from those metrics.
@@ -89,7 +87,7 @@ class ProcessMemoryMetricsEmitter
   using GetProcessToPageInfoMapCallback =
       base::OnceCallback<void(std::vector<ProcessInfo>)>;
   static void GetProcessToPageInfoMap(GetProcessToPageInfoMapCallback callback,
-                                      performance_manager::GraphImpl* graph);
+                                      performance_manager::Graph* graph);
 
   // The results of each request are cached. When both requests are finished,
   // the results are collated.

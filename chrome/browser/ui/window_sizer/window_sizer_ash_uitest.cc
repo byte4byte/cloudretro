@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_view_test_api.h"
 #include "ash/shell.h"
@@ -63,13 +63,13 @@ void OpenBrowserUsingContextMenuOnRootWindow(aura::Window* root) {
   // Move the cursor up to the "New window" menu option - assumes menu content.
   const int offset =
       // Top half of the button we just clicked on.
-      ash::ShelfConstants::button_size() / 2 +
+      ash::ShelfConfig::Get()->button_size() / 2 +
       // Space between shelf top and menu bottom. Here we get this menu with
       // a right-click but long-pressing yields the same result. All menus
       // here use a touchable layout.
       views::MenuConfig::instance().touchable_anchor_offset +
-      // 2 menu items we don't want, and go over part of the one we want.
-      2.2 * views::MenuConfig::instance().touchable_menu_height;
+      // 3 menu items we don't want, and go over part of the one we want.
+      3.2 * views::MenuConfig::instance().touchable_menu_height;
   generator.MoveMouseBy(0, -offset);
   generator.ReleaseRightButton();
 }
@@ -89,7 +89,8 @@ class WindowSizerTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(WindowSizerTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WindowSizerTest, OpenBrowserUsingShelfItem) {
+// TODO(crbug.com/1038342): Test is flaky.
+IN_PROC_BROWSER_TEST_F(WindowSizerTest, DISABLED_OpenBrowserUsingShelfItem) {
   // Don't shutdown when closing the last browser window.
   ScopedKeepAlive test_keep_alive(KeepAliveOrigin::BROWSER_PROCESS_CHROMEOS,
                                   KeepAliveRestartOption::DISABLED);
@@ -133,7 +134,8 @@ IN_PROC_BROWSER_TEST_F(WindowSizerTest, OpenBrowserUsingShelfItem) {
   EXPECT_EQ(root_windows[0], ash::Shell::GetRootWindowForNewWindows());
 }
 
-IN_PROC_BROWSER_TEST_F(WindowSizerTest, OpenBrowserUsingContextMenu) {
+// TODO(crbug.com/1038342): Test is flaky.
+IN_PROC_BROWSER_TEST_F(WindowSizerTest, DISABLED_OpenBrowserUsingContextMenu) {
   // Don't shutdown when closing the last browser window.
   ScopedKeepAlive test_keep_alive(KeepAliveOrigin::BROWSER_PROCESS_CHROMEOS,
                                   KeepAliveRestartOption::DISABLED);

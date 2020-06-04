@@ -26,6 +26,7 @@ import android.widget.TextView.OnEditorActionListener;
 import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.embedder_support.view.ContentView;
 import org.chromium.components.embedder_support.view.ContentViewRenderView;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
@@ -112,7 +113,7 @@ public class Shell extends LinearLayout {
      */
     public void close() {
         if (mNativeShell == 0) return;
-        nativeCloseShell(mNativeShell);
+        ShellJni.get().closeShell(mNativeShell);
     }
 
     @CalledByNative
@@ -171,7 +172,7 @@ public class Shell extends LinearLayout {
                 mPrevButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 mStopReloadButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mWebContents.getVisibleUrl());
+                    mUrlTextView.setText(mWebContents.getVisibleUrlString());
                 }
             }
         });
@@ -309,8 +310,13 @@ public class Shell extends LinearLayout {
                 .setActionModeCallback(defaultActionCallback());
         mNavigationController = mWebContents.getNavigationController();
         if (getParent() != null) mWebContents.onShow();
+<<<<<<< HEAD
         if (mWebContents.getVisibleUrl() != null) {
            // mUrlTextView.setText(mWebContents.getVisibleUrl());
+=======
+        if (mWebContents.getVisibleUrlString() != null) {
+            mUrlTextView.setText(mWebContents.getVisibleUrlString());
+>>>>>>> 53836640273c3d45b05ad74bdff7323ef0ffc610
         }
         ((FrameLayout) findViewById(R.id.contentview_holder)).addView(cv,
                 new FrameLayout.LayoutParams(
@@ -410,5 +416,8 @@ public class Shell extends LinearLayout {
         }
     }
 
-    private static native void nativeCloseShell(long shellPtr);
+    @NativeMethods
+    interface Natives {
+        void closeShell(long shellPtr);
+    }
 }

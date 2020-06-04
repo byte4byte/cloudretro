@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,9 +19,9 @@
 #include "components/gcm_driver/gcm_profile_service.h"
 #include "components/gcm_driver/instance_id/instance_id_profile_service.h"
 #include "components/invalidation/impl/fcm_invalidation_service.h"
+#include "components/invalidation/impl/fcm_network_handler.h"
 #include "components/invalidation/impl/invalidation_prefs.h"
-#include "components/invalidation/impl/invalidation_state_tracker.h"
-#include "components/invalidation/impl/invalidator_storage.h"
+#include "components/invalidation/impl/per_user_topic_subscription_manager.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/public/invalidation_service.h"
@@ -28,17 +29,15 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/system_connector.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/files/file_path.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/settings/device_identity_provider.h"
-#include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
+#include "chrome/browser/device_identity/device_identity_provider.h"
+#include "chrome/browser/device_identity/device_oauth2_token_service_factory.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -51,16 +50,20 @@ std::unique_ptr<InvalidationService> CreateInvalidationServiceForSenderId(
     const std::string& sender_id) {
   auto service = std::make_unique<FCMInvalidationService>(
       identity_provider,
-      gcm::GCMProfileServiceFactory::GetForProfile(profile)->driver(),
+      base::BindRepeating(
+          &syncer::FCMNetworkHandler::Create,
+          gcm::GCMProfileServiceFactory::GetForProfile(profile)->driver(),
+          instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile)
+              ->driver()),
+      base::BindRepeating(
+          &syncer::PerUserTopicSubscriptionManager::Create, identity_provider,
+          profile->GetPrefs(),
+          base::RetainedRef(
+              content::BrowserContext::GetDefaultStoragePartition(profile)
+                  ->GetURLLoaderFactoryForBrowserProcess())),
       instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile)
           ->driver(),
-      profile->GetPrefs(),
-      base::BindRepeating(&data_decoder::SafeJsonParser::Parse,
-                          content::GetSystemConnector()),
-      content::BrowserContext::GetDefaultStoragePartition(profile)
-          ->GetURLLoaderFactoryForBrowserProcess()
-          .get(),
-      sender_id);
+      profile->GetPrefs(), sender_id);
   service->Init();
   return service;
 }
@@ -122,8 +125,8 @@ KeyedService* ProfileInvalidationProviderFactory::BuildServiceInstanceFor(
   if (user_manager::UserManager::IsInitialized() &&
       user_manager::UserManager::Get()->IsLoggedInAsKioskApp() &&
       connector->IsEnterpriseManaged()) {
-    identity_provider.reset(new chromeos::DeviceIdentityProvider(
-        chromeos::DeviceOAuth2TokenServiceFactory::Get()));
+    identity_provider = std::make_unique<DeviceIdentityProvider>(
+        DeviceOAuth2TokenServiceFactory::Get());
   }
 #endif  // defined(OS_CHROMEOS)
 
@@ -141,6 +144,11 @@ KeyedService* ProfileInvalidationProviderFactory::BuildServiceInstanceFor(
   return new ProfileInvalidationProvider(std::move(service),
                                          std::move(identity_provider),
                                          std::move(custom_sender_id_factory));
+}
+
+void ProfileInvalidationProviderFactory::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  ProfileInvalidationProvider::RegisterProfilePrefs(registry);
 }
 
 }  // namespace invalidation

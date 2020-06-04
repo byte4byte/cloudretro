@@ -9,15 +9,14 @@
 #include "base/bind_helpers.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/services/cellular_setup/cellular_setup_impl.h"
-#include "chromeos/services/cellular_setup/cellular_setup_service.h"
 #include "chromeos/services/cellular_setup/public/cpp/fake_activation_delegate.h"
 #include "chromeos/services/cellular_setup/public/cpp/fake_carrier_portal_handler.h"
 #include "chromeos/services/cellular_setup/public/cpp/fake_cellular_setup.h"
 #include "chromeos/services/cellular_setup/public/mojom/cellular_setup.mojom.h"
-#include "chromeos/services/cellular_setup/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -27,7 +26,8 @@ namespace cellular_setup {
 namespace {
 
 using CarrierPortalHandlerPair =
-    std::pair<mojom::CarrierPortalHandlerPtr, FakeCarrierPortalHandler*>;
+    std::pair<mojo::Remote<mojom::CarrierPortalHandler>,
+              FakeCarrierPortalHandler*>;
 
 const char kTestPaymentUrl[] = "testPaymentUrl";
 const char kTestPaymentPostData[] = "testPaymentPostData";
@@ -35,27 +35,6 @@ const char kTestCarrier[] = "testCarrier";
 const char kTestMeid[] = "testMeid";
 const char kTestImei[] = "testImei";
 const char kTestMdn[] = "testMdn";
-
-class FakeCellularSetupFactory : public CellularSetupImpl::Factory {
- public:
-  FakeCellularSetupFactory() = default;
-  ~FakeCellularSetupFactory() override = default;
-
-  FakeCellularSetup* instance() { return instance_; }
-
- private:
-  // CellularSetupImpl::Factory:
-  std::unique_ptr<CellularSetupBase> BuildInstance() override {
-    EXPECT_FALSE(instance_);
-    auto instance = std::make_unique<FakeCellularSetup>();
-    instance_ = instance.get();
-    return instance;
-  }
-
-  FakeCellularSetup* instance_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeCellularSetupFactory);
-};
 
 }  // namespace
 
@@ -66,24 +45,13 @@ class CellularSetupServiceTest : public testing::Test {
 
   // testing::Test:
   void SetUp() override {
-    fake_cellular_setup_factory_ = std::make_unique<FakeCellularSetupFactory>();
-    CellularSetupImpl::Factory::SetFactoryForTesting(
-        fake_cellular_setup_factory_.get());
-
-    service_ = std::make_unique<CellularSetupService>(
-        connector_factory_.RegisterInstance(mojom::kServiceName));
-
-    connector_factory_.GetDefaultConnector()->BindInterface(
-        mojom::kServiceName, &cellular_setup_ptr_);
-    cellular_setup_ptr_.FlushForTesting();
-  }
-
-  void TearDown() override {
-    CellularSetupImpl::Factory::SetFactoryForTesting(nullptr);
+    service_ = std::make_unique<FakeCellularSetup>();
+    service_->BindReceiver(cellular_setup_remote_.BindNewPipeAndPassReceiver());
+    cellular_setup_remote_.FlushForTesting();
   }
 
   // Calls StartActivation() and returns the fake CarrierPortalHandler and its
-  // associated InterfacePtr.
+  // associated mojo::Remote<>.
   CarrierPortalHandlerPair CallStartActivation(
       FakeActivationDelegate* fake_activation_delegate) {
     std::vector<std::unique_ptr<FakeCellularSetup::StartActivationInvocation>>&
@@ -93,11 +61,11 @@ class CellularSetupServiceTest : public testing::Test {
     base::RunLoop run_loop;
 
     // Make StartActivation() call and propagate it to the service.
-    cellular_setup_ptr_->StartActivation(
-        fake_activation_delegate->GenerateInterfacePtr(),
+    cellular_setup_remote_->StartActivation(
+        fake_activation_delegate->GenerateRemote(),
         base::BindOnce(&CellularSetupServiceTest::OnStartActivationResult,
                        base::Unretained(this), run_loop.QuitClosure()));
-    cellular_setup_ptr_.FlushForTesting();
+    cellular_setup_remote_.FlushForTesting();
 
     // Verify that the call was made successfully.
     EXPECT_EQ(num_args_before_call + 1u, start_activation_invocations.size());
@@ -108,9 +76,8 @@ class CellularSetupServiceTest : public testing::Test {
     run_loop.RunUntilIdle();
 
     EXPECT_TRUE(last_carrier_portal_observer_);
-    CarrierPortalHandlerPair observer_pair =
-        std::make_pair(std::move(*last_carrier_portal_observer_),
-                       fake_carrier_portal_observer);
+    CarrierPortalHandlerPair observer_pair = std::make_pair(
+        std::move(last_carrier_portal_observer_), fake_carrier_portal_observer);
     last_carrier_portal_observer_.reset();
 
     return observer_pair;
@@ -176,34 +143,30 @@ class CellularSetupServiceTest : public testing::Test {
   }
 
  private:
-  void OnStartActivationResult(
-      base::OnceClosure quit_closure,
-      mojom::CarrierPortalHandlerPtr carrier_portal_observer) {
+  void OnStartActivationResult(base::OnceClosure quit_closure,
+                               mojo::PendingRemote<mojom::CarrierPortalHandler>
+                                   carrier_portal_observer) {
     EXPECT_FALSE(last_carrier_portal_observer_);
-    last_carrier_portal_observer_ = std::move(carrier_portal_observer);
+    last_carrier_portal_observer_.Bind(std::move(carrier_portal_observer));
     std::move(quit_closure).Run();
   }
 
-  FakeCellularSetup* fake_cellular_setup() {
-    return fake_cellular_setup_factory_->instance();
-  }
+  FakeCellularSetup* fake_cellular_setup() { return service_.get(); }
 
-  mojom::ActivationDelegatePtr& GetLastActivationDelegate() {
+  mojo::Remote<mojom::ActivationDelegate>& GetLastActivationDelegate() {
     return fake_cellular_setup()
         ->start_activation_invocations()
         .back()
         ->activation_delegate();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
-  std::unique_ptr<FakeCellularSetupFactory> fake_cellular_setup_factory_;
-  service_manager::TestConnectorFactory connector_factory_;
-  std::unique_ptr<CellularSetupService> service_;
+  std::unique_ptr<FakeCellularSetup> service_;
 
-  base::Optional<mojom::CarrierPortalHandlerPtr> last_carrier_portal_observer_;
+  mojo::Remote<mojom::CarrierPortalHandler> last_carrier_portal_observer_;
 
-  mojom::CellularSetupPtr cellular_setup_ptr_;
+  mojo::Remote<mojom::CellularSetup> cellular_setup_remote_;
 
   DISALLOW_COPY_AND_ASSIGN(CellularSetupServiceTest);
 };

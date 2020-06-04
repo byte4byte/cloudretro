@@ -5,16 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 
-#include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/document_shutdown_observer.h"
 #include "third_party/blink/renderer/core/dom/scripted_idle_task_controller.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
-#include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
 namespace blink {
 
 class ColdModeSpellCheckRequester;
-class LocalFrame;
+class Document;
+class LocalDOMWindow;
 class SpellCheckRequester;
 
 #define FOR_EACH_IDLE_SPELL_CHECK_CONTROLLER_STATE(V) \
@@ -28,15 +28,13 @@ class SpellCheckRequester;
 // Main class for the implementation of idle time spell checker.
 // See design doc for details: https://goo.gl/zONC3v
 class CORE_EXPORT IdleSpellCheckController final
-    : public GarbageCollectedFinalized<IdleSpellCheckController>,
-      public DocumentShutdownObserver {
+    : public GarbageCollected<IdleSpellCheckController>,
+      public ExecutionContextLifecycleObserver {
   DISALLOW_COPY_AND_ASSIGN(IdleSpellCheckController);
   USING_GARBAGE_COLLECTED_MIXIN(IdleSpellCheckController);
 
  public:
-  static IdleSpellCheckController* Create(LocalFrame&);
-
-  explicit IdleSpellCheckController(LocalFrame&);
+  explicit IdleSpellCheckController(LocalDOMWindow&);
   ~IdleSpellCheckController();
 
   enum class State {
@@ -55,8 +53,6 @@ class CORE_EXPORT IdleSpellCheckController final
   // document is detached or spellchecking is globally disabled.
   void Deactivate();
 
-  void DidAttachDocument(Document*);
-
   // Exposed for testing only.
   SpellCheckRequester& GetSpellCheckRequester() const;
   void ForceInvocationForTesting();
@@ -69,16 +65,13 @@ class CORE_EXPORT IdleSpellCheckController final
  private:
   class IdleCallback;
 
-  LocalFrame& GetFrame() const { return *frame_; }
+  LocalDOMWindow& GetWindow() const;
 
   // Returns whether there is an active document to work on.
-  bool IsAvailable() const { return LifecycleContext(); }
+  bool IsAvailable() const { return GetExecutionContext(); }
 
   // Return the document to work on. Callable only when IsAvailable() is true.
-  Document& GetDocument() const {
-    DCHECK(IsAvailable());
-    return *LifecycleContext();
-  }
+  Document& GetDocument() const;
 
   // Returns whether spell checking is globally enabled.
   bool IsSpellCheckingEnabled() const;
@@ -94,20 +87,19 @@ class CORE_EXPORT IdleSpellCheckController final
   void SetNeedsColdModeInvocation();
 
   // Functions for cold mode.
-  void ColdModeTimerFired(TimerBase*);
+  void ColdModeTimerFired();
   void ColdModeInvocation(IdleDeadline*);
 
-  // Implements |DocumentShutdownObserver|.
-  void ContextDestroyed(Document*) final;
+  // Implements |ExecutionContextLifecycleObserver|.
+  void ContextDestroyed() final;
 
   void DisposeIdleCallback();
 
   State state_;
   int idle_callback_handle_;
-  const Member<LocalFrame> frame_;
   uint64_t last_processed_undo_step_sequence_;
   const Member<ColdModeSpellCheckRequester> cold_mode_requester_;
-  TaskRunnerTimer<IdleSpellCheckController> cold_mode_timer_;
+  TaskHandle cold_mode_timer_;
 
   friend class IdleSpellCheckControllerTest;
 };

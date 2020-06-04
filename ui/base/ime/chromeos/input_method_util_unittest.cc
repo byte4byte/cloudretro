@@ -50,9 +50,9 @@ class InputMethodUtilTest : public testing::Test {
   InputMethodUtilTest()
       : util_(&delegate_, whitelist_.GetSupportedInputMethods()) {
     delegate_.set_get_localized_string_callback(
-        base::Bind(&l10n_util::GetStringUTF16));
+        base::BindRepeating(&l10n_util::GetStringUTF16));
     delegate_.set_get_display_language_name_callback(
-        base::Bind(&InputMethodUtilTest::GetDisplayLanguageName));
+        base::BindRepeating(&InputMethodUtilTest::GetDisplayLanguageName));
   }
 
   void SetUp() override {
@@ -157,8 +157,8 @@ TEST_F(InputMethodUtilTest, GetInputMethodShortNameTest) {
   }
   {
     InputMethodDescriptor desc =
-        GetDesc("xkb:es:cat:cat", "es(cat)", "ca", "CAS");
-    EXPECT_EQ(ASCIIToUTF16("CAS"), util_.GetInputMethodShortName(desc));
+        GetDesc("xkb:es:cat:cat", "es(cat)", "ca", "CAT");
+    EXPECT_EQ(ASCIIToUTF16("CAT"), util_.GetInputMethodShortName(desc));
   }
   {
     InputMethodDescriptor desc =
@@ -306,10 +306,10 @@ TEST_F(InputMethodUtilTest, TestGetInputMethodDescriptorFromId) {
 
 TEST_F(InputMethodUtilTest, TestGetInputMethodIdsForLanguageCode) {
   std::multimap<std::string, std::string> language_code_to_ids_map;
-  language_code_to_ids_map.insert(std::make_pair("ja", pinyin_ime_id));
-  language_code_to_ids_map.insert(std::make_pair("ja", pinyin_ime_id));
-  language_code_to_ids_map.insert(std::make_pair("ja", "xkb:jp:jpn"));
-  language_code_to_ids_map.insert(std::make_pair("fr", "xkb:fr:fra"));
+  language_code_to_ids_map.emplace("ja", pinyin_ime_id);
+  language_code_to_ids_map.emplace("ja", pinyin_ime_id);
+  language_code_to_ids_map.emplace("ja", "xkb:jp:jpn");
+  language_code_to_ids_map.emplace("fr", "xkb:fr:fra");
 
   std::vector<std::string> result;
   EXPECT_TRUE(util_.GetInputMethodIdsFromLanguageCodeInternal(
@@ -355,7 +355,7 @@ TEST_F(InputMethodUtilTest, TestGetFirstLoginInputMethodIds_Us_And_Zh) {
   util_.GetFirstLoginInputMethodIds("zh-CN", *descriptor, &input_method_ids);
   ASSERT_EQ(2U, input_method_ids.size());
   EXPECT_EQ(Id("xkb:us::eng"), input_method_ids[0]);
-  EXPECT_EQ(Id(pinyin_ime_id), input_method_ids[1]);  // Pinyin for US keybaord.
+  EXPECT_EQ(Id(pinyin_ime_id), input_method_ids[1]);  // Pinyin for US keyboard.
 }
 
 // US keyboard + Russian UI = US keyboard + Russsian keyboard

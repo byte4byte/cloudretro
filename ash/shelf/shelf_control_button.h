@@ -30,17 +30,15 @@ class ASH_EXPORT ShelfControlButton : public ShelfButton {
 
   void set_ideal_bounds(const gfx::Rect& bounds) { ideal_bounds_ = bounds; }
 
-  // views::Button:
-  std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
+  // ShelfButton:
   const char* GetClassName() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
  protected:
-  // views::View
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
-
   void PaintBackground(gfx::Canvas* canvas, const gfx::Rect& bounds);
+
+  // ShelfButton:
   void PaintButtonContents(gfx::Canvas* canvas) override;
 
  private:

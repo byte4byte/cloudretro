@@ -135,7 +135,7 @@ void CollectPositionMetric(const gfx::Rect& bounds_in_screen,
 
 }  // namespace
 
-PipWindowResizer::PipWindowResizer(wm::WindowState* window_state)
+PipWindowResizer::PipWindowResizer(WindowState* window_state)
     : WindowResizer(window_state) {
   window_state->OnDragStarted(details().window_component);
 
@@ -167,16 +167,16 @@ PipWindowResizer::~PipWindowResizer() {
 }
 
 // TODO(edcourtney): Implement swipe-to-dismiss on fling.
-void PipWindowResizer::Drag(const gfx::Point& location_in_parent,
+void PipWindowResizer::Drag(const gfx::PointF& location_in_parent,
                             int event_flags) {
   last_location_in_screen_ = location_in_parent;
   ::wm::ConvertPointToScreen(GetTarget()->parent(), &last_location_in_screen_);
 
-  gfx::Vector2d movement_direction =
+  gfx::Vector2dF movement_direction =
       location_in_parent - details().initial_location_in_parent;
   // If we are not sure if this is a swipe or not yet, don't modify any bounds.
-  int movement_distance2 = movement_direction.x() * movement_direction.x() +
-                           movement_direction.y() * movement_direction.y();
+  float movement_distance2 = movement_direction.x() * movement_direction.x() +
+                             movement_direction.y() * movement_direction.y();
   if ((may_dismiss_horizontally_ || may_dismiss_vertically_) &&
       movement_distance2 <= kPipDismissSlop * kPipDismissSlop) {
     return;
@@ -252,7 +252,8 @@ void PipWindowResizer::Drag(const gfx::Point& location_in_parent,
 }
 
 void PipWindowResizer::CompleteDrag() {
-  if (details().bounds_change & kBoundsChange_Resizes) {
+  const bool is_resize = details().bounds_change & kBoundsChange_Resizes;
+  if (is_resize) {
     CollectFreeResizeAreaMetric(kAshPipFreeResizeFinishAreaHistogramName,
                                 GetTarget());
   } else {
@@ -279,11 +280,11 @@ void PipWindowResizer::CompleteDrag() {
   if (should_dismiss) {
     // Close the widget. This will trigger an animation dismissing the PIP
     // window.
-    wm::CloseWidgetForWindow(window_state()->window());
+    window_util::CloseWidgetForWindow(window_state()->window());
   } else {
     // Animate the PIP window to its resting position.
     gfx::Rect bounds;
-    if (fling_amount > kPipMovementFlingThresholdSquared) {
+    if (!is_resize && fling_amount > kPipMovementFlingThresholdSquared) {
       bounds = ComputeFlungPosition();
     } else {
       bounds = GetTarget()->GetBoundsInScreen();
@@ -297,7 +298,7 @@ void PipWindowResizer::CompleteDrag() {
     base::TimeDelta duration =
         base::TimeDelta::FromMilliseconds(kPipSnapToEdgeAnimationDurationMs);
     ::wm::ConvertRectFromScreen(GetTarget()->parent(), &bounds);
-    wm::SetBoundsEvent event(bounds, /*animate=*/true, duration);
+    SetBoundsWMEvent event(bounds, /*animate=*/true, duration);
     window_state()->OnWMEvent(&event);
 
     // Animate opacity back to normal opacity:
@@ -313,7 +314,7 @@ void PipWindowResizer::CompleteDrag() {
     // TODO(edcourtney): This may not be the best place for this. Consider
     // doing this a different way or saving these bounds at a later point when
     // the work area changes.
-    window_state()->SetRestoreBoundsInParent(bounds);
+    PipPositioner::SaveSnapFraction(window_state(), bounds);
   }
 }
 

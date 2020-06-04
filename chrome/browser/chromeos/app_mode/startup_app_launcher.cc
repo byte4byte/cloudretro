@@ -13,21 +13,23 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_diagnosis_runner.h"
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher_update_checker.h"
 #include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/crx_file/id_util.h"
 #include "components/session_manager/core/session_manager.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -54,10 +56,7 @@ StartupAppLauncher::StartupAppLauncher(Profile* profile,
     : profile_(profile),
       app_id_(app_id),
       diagnostic_mode_(diagnostic_mode),
-      delegate_(delegate),
-      kiosk_app_manager_observer_(this),
-      install_observer_(this),
-      weak_ptr_factory_(this) {
+      delegate_(delegate) {
   DCHECK(profile_);
   DCHECK(crx_file::id_util::IdIsValid(app_id_));
   kiosk_app_manager_observer_.Add(KioskAppManager::Get());
@@ -355,9 +354,8 @@ bool StartupAppLauncher::AreSecondaryAppsInstalled() const {
   DCHECK(extension);
   extensions::KioskModeInfo* info = extensions::KioskModeInfo::Get(extension);
   for (const auto& app : info->secondary_apps) {
-    if (!extensions::ExtensionSystem::Get(profile_)
-             ->extension_service()
-             ->GetInstalledExtension(app.id)) {
+    if (!extensions::ExtensionRegistry::Get(profile_)->GetInstalledExtension(
+            app.id)) {
       return false;
     }
   }
@@ -405,9 +403,8 @@ bool StartupAppLauncher::DidPrimaryOrSecondaryAppFailedToInstall(
 
 const extensions::Extension* StartupAppLauncher::GetPrimaryAppExtension()
     const {
-  return extensions::ExtensionSystem::Get(profile_)
-      ->extension_service()
-      ->GetInstalledExtension(app_id_);
+  return extensions::ExtensionRegistry::Get(profile_)->GetInstalledExtension(
+      app_id_);
 }
 
 void StartupAppLauncher::LaunchApp() {
@@ -427,11 +424,12 @@ void StartupAppLauncher::LaunchApp() {
   SYSLOG(INFO) << "Attempt to launch app.";
 
   // Always open the app in a window.
-  OpenApplication(
-      AppLaunchParams(profile_, extension->id(),
-                      extensions::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      extensions::AppLaunchSource::kSourceKiosk));
+  apps::AppServiceProxyFactory::GetForProfile(profile_)
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(apps::AppLaunchParams(
+          extension->id(), apps::mojom::LaunchContainer::kLaunchContainerWindow,
+          WindowOpenDisposition::NEW_WINDOW,
+          apps::mojom::AppLaunchSource::kSourceKiosk));
 
   KioskAppManager::Get()->InitSession(profile_, app_id_);
   session_manager::SessionManager::Get()->SessionStarted();
@@ -494,8 +492,8 @@ void StartupAppLauncher::MaybeInstallSecondaryApps() {
   if (!AreSecondaryAppsInstalled() && !delegate_->IsNetworkReady()) {
     DelayNetworkCall(
         base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS),
-        base::Bind(&StartupAppLauncher::MaybeInstallSecondaryApps,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&StartupAppLauncher::MaybeInstallSecondaryApps,
+                       weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 

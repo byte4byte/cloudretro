@@ -24,6 +24,7 @@ import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.Acc
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetProperties.TABS;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetProperties.TOP_SHADOW_VISIBLE;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetProperties.VISIBLE;
+import static org.chromium.chrome.test.util.ViewUtils.onViewWaiting;
 import static org.chromium.chrome.test.util.ViewUtils.waitForView;
 
 import android.support.test.filters.MediumTest;
@@ -39,7 +40,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryTabType;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.Tab;
@@ -55,7 +56,6 @@ import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutionException;
 
 /**
  * View tests for the keyboard accessory sheet component.
@@ -96,8 +96,7 @@ public class AccessorySheetViewTest {
 
     @Test
     @MediumTest
-    public void testAccessoryVisibilityChangedByModel()
-            throws ExecutionException, InterruptedException {
+    public void testAccessoryVisibilityChangedByModel() throws InterruptedException {
         // Initially, there shouldn't be a view yet.
         assertNull(mViewPager.poll());
 
@@ -155,7 +154,7 @@ public class AccessorySheetViewTest {
 
         TestThreadUtils.runOnUiThreadBlocking(() -> mModel.set(ACTIVE_TAB_INDEX, 1));
 
-        onView(isRoot()).check((r, e) -> waitForView((ViewGroup) r, withText(kSecondTab)));
+        onViewWaiting(withText(kSecondTab));
     }
 
     @Test
@@ -196,7 +195,7 @@ public class AccessorySheetViewTest {
             mModel.get(TABS).add(createTestTabWithTextView(kSecondTab));
             mModel.set(ACTIVE_TAB_INDEX, 0);
         });
-        onView(isRoot()).check((r, e) -> waitForView((ViewGroup) r, withText(kSecondTab)));
+        onViewWaiting(withText(kSecondTab));
     }
 
     @Test
@@ -205,19 +204,15 @@ public class AccessorySheetViewTest {
         mModel.get(TABS).add(createTestTabWithTextView("SomeTab"));
         mModel.set(TOP_SHADOW_VISIBLE, false);
         TestThreadUtils.runOnUiThreadBlocking(() -> mModel.set(VISIBLE, true)); // Render view.
-        onView(isRoot()).check((r, e) -> {
-            waitForView(
-                    (ViewGroup) r, withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
-        });
+        onView(isRoot()).check(
+                waitForView(withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, true));
         onView(withId(R.id.accessory_sheet_shadow)).check(matches(isDisplayed()));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, false));
-        onView(isRoot()).check((r, e) -> {
-            waitForView(
-                    (ViewGroup) r, withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
-        });
+        onView(isRoot()).check(
+                waitForView(withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE));
     }
 
     private Tab createTestTabWithTextView(String textViewCaption) {

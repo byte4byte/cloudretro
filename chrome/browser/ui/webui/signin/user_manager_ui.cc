@@ -9,6 +9,7 @@
 
 #include "base/feature_list.h"
 #include "base/values.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/browser/ui/webui/signin/user_manager_screen_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
@@ -60,29 +62,26 @@ content::WebUIDataSource* UserManagerUI::CreateUIDataSource(
   source->AddBoolean("isForceSigninEnabled",
                      signin_util::IsForceSigninEnabled());
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
 
-  source->AddResourcePath("control_bar.html", IDR_CONTROL_BAR_HTML);
-  source->AddResourcePath("control_bar.js", IDR_CONTROL_BAR_JS);
-  source->AddResourcePath("create_profile.html", IDR_CREATE_PROFILE_HTML);
-  source->AddResourcePath("create_profile.js", IDR_CREATE_PROFILE_JS);
-  source->AddResourcePath("error_dialog.html", IDR_ERROR_DIALOG_HTML);
-  source->AddResourcePath("error_dialog.js", IDR_ERROR_DIALOG_JS);
-  source->AddResourcePath("profile_browser_proxy.html",
-                          IDR_PROFILE_BROWSER_PROXY_HTML);
-  source->AddResourcePath("profile_browser_proxy.js",
-                          IDR_PROFILE_BROWSER_PROXY_JS);
-  source->AddResourcePath("shared_styles.html",
-                          IDR_USER_MANAGER_SHARED_STYLES_HTML);
-  source->AddResourcePath("strings.html", IDR_USER_MANAGER_STRINGS_HTML);
-  source->AddResourcePath("user_manager.js", IDR_USER_MANAGER_JS);
-  source->AddResourcePath("user_manager_pages.html",
-                          IDR_USER_MANAGER_PAGES_HTML);
-  source->AddResourcePath("user_manager_pages.js", IDR_USER_MANAGER_PAGES_JS);
-  source->AddResourcePath("user_manager_tutorial.html",
-                          IDR_USER_MANAGER_TUTORIAL_HTML);
-  source->AddResourcePath("user_manager_tutorial.js",
-                          IDR_USER_MANAGER_TUTORIAL_JS);
+  static constexpr webui::ResourcePath kResources[] = {
+      {"control_bar.html", IDR_CONTROL_BAR_HTML},
+      {"control_bar.js", IDR_CONTROL_BAR_JS},
+      {"create_profile.html", IDR_CREATE_PROFILE_HTML},
+      {"create_profile.js", IDR_CREATE_PROFILE_JS},
+      {"error_dialog.html", IDR_ERROR_DIALOG_HTML},
+      {"error_dialog.js", IDR_ERROR_DIALOG_JS},
+      {"profile_browser_proxy.html", IDR_PROFILE_BROWSER_PROXY_HTML},
+      {"profile_browser_proxy.js", IDR_PROFILE_BROWSER_PROXY_JS},
+      {"shared_styles.html", IDR_USER_MANAGER_SHARED_STYLES_HTML},
+      {"strings.html", IDR_USER_MANAGER_STRINGS_HTML},
+      {"user_manager.js", IDR_USER_MANAGER_JS},
+      {"user_manager_pages.html", IDR_USER_MANAGER_PAGES_HTML},
+      {"user_manager_pages.js", IDR_USER_MANAGER_PAGES_JS},
+      {"user_manager_tutorial.html", IDR_USER_MANAGER_TUTORIAL_HTML},
+      {"user_manager_tutorial.js", IDR_USER_MANAGER_TUTORIAL_JS},
+  };
+  webui::AddResourcePathsBulk(source, kResources);
 
   source->SetDefaultResource(IDR_USER_MANAGER_HTML);
 
@@ -96,7 +95,7 @@ void UserManagerUI::GetLocalizedStrings(
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
   webui::SetLoadTimeDataDefaults(app_locale, localized_strings);
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   localized_strings->SetString("buildType", "chrome");
 #else
   localized_strings->SetString("buildType", "chromium");

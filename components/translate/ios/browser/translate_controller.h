@@ -11,11 +11,11 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/translate/core/common/translate_errors.h"
-#include "ios/web/public/web_state/web_state_observer.h"
+#import "ios/web/public/web_state.h"
+#include "ios/web/public/web_state_observer.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
 @class JsTranslateManager;
@@ -27,7 +27,6 @@ class DictionaryValue;
 
 namespace web {
 class NavigationContext;
-class WebState;
 }  // namespace web
 
 namespace translate {
@@ -122,8 +121,11 @@ class TranslateController : public web::WebStateObserver {
   // Used to fetch additional scripts needed for translate.
   std::unique_ptr<network::SimpleURLLoader> script_fetcher_;
 
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
+
   Observer* observer_;
-  base::scoped_nsobject<JsTranslateManager> js_manager_;
+  __strong JsTranslateManager* js_manager_;
   base::WeakPtrFactory<TranslateController> weak_method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslateController);

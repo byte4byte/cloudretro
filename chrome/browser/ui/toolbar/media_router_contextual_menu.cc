@@ -7,8 +7,8 @@
 #include <memory>
 #include <string>
 
-#include "base/logging.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/media/router/event_page_request_manager.h"
@@ -31,6 +31,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "extensions/common/constants.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/models/menu_model_delegate.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
@@ -60,10 +61,11 @@ MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser,
   if (shown_by_policy) {
     menu_model_->AddItemWithStringId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY,
                                      IDS_MEDIA_ROUTER_SHOWN_BY_POLICY);
+    // TODO (kylixrd): Review the use of the hard-coded color constant.
     menu_model_->SetIcon(
         menu_model_->GetIndexOfCommandId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY),
-        gfx::Image(gfx::CreateVectorIcon(vector_icons::kBusinessIcon, 16,
-                                         gfx::kChromeIconGrey)));
+        ui::ImageModel::FromVectorIcon(vector_icons::kBusinessIcon,
+                                       gfx::kChromeIconGrey, 16));
   } else {
     menu_model_->AddCheckItemWithStringId(
         IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION,
@@ -124,7 +126,7 @@ bool MediaRouterContextualMenu::IsCommandIdVisible(int command_id) const {
   if (command_id == IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE) {
     // Cloud services preference is not set or used if the user is not signed
     // in.
-    identity::IdentityManager* identity_manager =
+    signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(browser_->profile());
     return identity_manager && identity_manager->HasPrimaryAccount();
   }

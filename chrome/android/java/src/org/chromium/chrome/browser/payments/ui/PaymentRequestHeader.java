@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.payments.ui;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.support.annotation.ColorInt;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.util.AttributeSet;
@@ -14,13 +13,16 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.ColorInt;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
+import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.widget.TintedDrawable;
+import org.chromium.components.browser_ui.widget.TintedDrawable;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.omnibox.OmniboxUrlEmphasizer;
+import org.chromium.ui.util.ColorUtils;
 
 /** This class represents a bar to display at the top of the payment request UI. */
 public class PaymentRequestHeader extends FrameLayout {
@@ -64,9 +66,15 @@ public class PaymentRequestHeader extends FrameLayout {
         Spannable url = new SpannableStringBuilder(origin);
         final boolean useDarkColors =
                 !ColorUtils.shouldUseLightForegroundOnBackground(mBackgroundColor);
+        // TODO(https://crbug.com/1041781): Use the current profile (i.e., regular profile or
+        // incognito profile) instead of always using regular profile. It is wrong and need to be
+        // fixed not to cause data leakage from incognito to regular profile.
+        ChromeAutocompleteSchemeClassifier chromeAutocompleteSchemeClassifier =
+                new ChromeAutocompleteSchemeClassifier(Profile.getLastUsedRegularProfile());
         OmniboxUrlEmphasizer.emphasizeUrl(url, mContext.getResources(),
-                Profile.getLastUsedProfile(), securityLevel, false /* isInternalPage */,
+                chromeAutocompleteSchemeClassifier, securityLevel, false /* isInternalPage */,
                 useDarkColors, true /* emphasizeHttpsScheme */);
+        chromeAutocompleteSchemeClassifier.destroy();
         hostName.setText(url);
 
         if (origin.startsWith(UrlConstants.HTTPS_URL_PREFIX)) {

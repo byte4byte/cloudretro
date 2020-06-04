@@ -19,10 +19,7 @@ namespace {
 int kReadBufferSize = 4096;
 }  // namespace
 
-SocketReader::SocketReader()
-    : socket_(NULL),
-      weak_factory_(this) {
-}
+SocketReader::SocketReader() : socket_(nullptr) {}
 
 SocketReader::~SocketReader() = default;
 
@@ -32,7 +29,7 @@ void SocketReader::Init(net::Socket* socket,
   DCHECK(!socket_);
 
   socket_ = socket;
-  read_result_callback_ = read_result_callback;
+  read_result_callback_ = std::move(read_result_callback);
   DoRead();
 }
 
@@ -40,9 +37,8 @@ void SocketReader::DoRead() {
   while (true) {
     read_buffer_ = base::MakeRefCounted<net::IOBuffer>(kReadBufferSize);
     int result = socket_->Read(
-        read_buffer_.get(),
-        kReadBufferSize,
-        base::Bind(&SocketReader::OnRead, weak_factory_.GetWeakPtr()));
+        read_buffer_.get(), kReadBufferSize,
+        base::BindOnce(&SocketReader::OnRead, weak_factory_.GetWeakPtr()));
     HandleReadResult(result);
     if (result <= 0)
       break;
@@ -58,7 +54,7 @@ void SocketReader::OnRead(int result) {
 void SocketReader::HandleReadResult(int result) {
   if (result != net::ERR_IO_PENDING) {
     if (result < 0)
-      read_buffer_ = NULL;
+      read_buffer_.reset();
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&SocketReader::CallCallback, weak_factory_.GetWeakPtr(),
@@ -67,7 +63,7 @@ void SocketReader::HandleReadResult(int result) {
 }
 
 void SocketReader::CallCallback(scoped_refptr<net::IOBuffer> data, int result) {
-  read_result_callback_.Run(data, result);
+  std::move(read_result_callback_).Run(data, result);
 }
 
 }  // namespace remoting

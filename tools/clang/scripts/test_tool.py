@@ -5,6 +5,8 @@
 
 """Test harness for chromium clang tools."""
 
+from __future__ import print_function
+
 import argparse
 import difflib
 import glob
@@ -102,7 +104,7 @@ def _ApplyTool(tools_clang_scripts_directory,
     for process in processes:
       process.wait()
       if process.returncode != 0:
-        print 'Failure while running the tool.'
+        print('Failure while running the tool.')
         return process.returncode
 
     if apply_edits:
@@ -140,24 +142,27 @@ def main(argv):
   parser.add_argument('tool_name',
                       nargs=1,
                       help='Clang tool to be tested.')
+  parser.add_argument(
+      '--test-filter', default='*', help='optional glob filter for test names')
   args = parser.parse_args(argv)
   tool_to_test = args.tool_name[0]
-  print '\nTesting %s\n' % tool_to_test
+  print('\nTesting %s\n' % tool_to_test)
   tools_clang_scripts_directory = os.path.dirname(os.path.realpath(__file__))
   tools_clang_directory = os.path.dirname(tools_clang_scripts_directory)
   test_directory_for_tool = os.path.join(
       tools_clang_directory, tool_to_test, 'tests')
   compile_database = os.path.join(test_directory_for_tool,
                                   'compile_commands.json')
-  source_files = glob.glob(os.path.join(test_directory_for_tool,
-                                        '*-original.cc'))
+  source_files = glob.glob(
+      os.path.join(test_directory_for_tool,
+                   '%s-original.cc' % args.test_filter))
   ext = 'cc' if args.apply_edits else 'txt'
   actual_files = ['-'.join([source_file.rsplit('-', 1)[0], 'actual.cc'])
                   for source_file in source_files]
   expected_files = ['-'.join([source_file.rsplit('-', 1)[0], 'expected.' + ext])
                     for source_file in source_files]
   if not args.apply_edits and len(actual_files) != 1:
-    print 'Only one test file is expected for testing without apply-edits.'
+    print('Only one test file is expected for testing without apply-edits.')
     return 1
 
   include_paths = []
@@ -175,7 +180,7 @@ def main(argv):
                                     'testing/gmock/include')))
 
   if len(actual_files) == 0:
-    print 'Tool "%s" does not have compatible test files.' % tool_to_test
+    print('Tool "%s" does not have compatible test files.' % tool_to_test)
     return 1
 
   # Set up the test environment.
@@ -198,34 +203,34 @@ def main(argv):
   passed = 0
   failed = 0
   for expected, actual in zip(expected_files, actual_files):
-    print '[ RUN      ] %s' % os.path.relpath(actual)
+    print('[ RUN      ] %s' % os.path.relpath(actual))
     expected_output = actual_output = None
     with open(expected, 'r') as f:
-      expected_output = f.read().splitlines()
+      expected_output = f.readlines()
     with open(actual, 'r') as f:
-      actual_output =  f.read().splitlines()
+      actual_output =  f.readlines()
     if actual_output != expected_output:
       failed += 1
-      for line in difflib.unified_diff(expected_output, actual_output,
-                                       fromfile=os.path.relpath(expected),
-                                       tofile=os.path.relpath(actual)):
-        sys.stdout.write(line)
-      print '[  FAILED  ] %s' % os.path.relpath(actual)
+      lines = difflib.unified_diff(expected_output, actual_output,
+                                   fromfile=os.path.relpath(expected),
+                                   tofile=os.path.relpath(actual))
+      sys.stdout.writelines(lines)
+      print('[  FAILED  ] %s' % os.path.relpath(actual))
       # Don't clean up the file on failure, so the results can be referenced
       # more easily.
       continue
-    print '[       OK ] %s' % os.path.relpath(actual)
+    print('[       OK ] %s' % os.path.relpath(actual))
     passed += 1
     os.remove(actual)
 
   if failed == 0:
     os.remove(compile_database)
 
-  print '[==========] %s ran.' % _NumberOfTestsToString(len(source_files))
+  print('[==========] %s ran.' % _NumberOfTestsToString(len(source_files)))
   if passed > 0:
-    print '[  PASSED  ] %s.' % _NumberOfTestsToString(passed)
+    print('[  PASSED  ] %s.' % _NumberOfTestsToString(passed))
   if failed > 0:
-    print '[  FAILED  ] %s.' % _NumberOfTestsToString(failed)
+    print('[  FAILED  ] %s.' % _NumberOfTestsToString(failed))
     return 1
 
 

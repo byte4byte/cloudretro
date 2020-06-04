@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -31,12 +32,15 @@ std::string ChromeNSSCryptoModuleDelegate::RequestPassword(
   DCHECK(!event_.IsSignaled());
   event_.Reset();
 
-  if (base::PostTaskWithTraits(
+  if (base::PostTask(
           FROM_HERE, {BrowserThread::UI},
           base::BindOnce(&ChromeNSSCryptoModuleDelegate::ShowDialog,
                          // This method blocks on |event_| until the task
                          // completes, so there's no need to ref-count.
                          base::Unretained(this), slot_name, retry))) {
+    // This should always be invoked on a worker sequence with the
+    // base::MayBlock() trait.
+    base::ScopedAllowBaseSyncPrimitives allow_wait;
     event_.Wait();
   }
   *cancelled = cancelled_;

@@ -17,7 +17,7 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/sync/base/hash_util.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/base/time.h"
 #include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/entity_change.h"
@@ -37,9 +37,6 @@ using sync_pb::SessionSpecifics;
 using syncer::MetadataChangeList;
 using syncer::ModelTypeStore;
 using syncer::ModelTypeSyncBridge;
-
-// Maximum number of favicons to sync.
-const int kMaxSyncFavicons = 200;
 
 // Default time without activity after which a session is considered stale and
 // becomes a candidate for garbage collection.
@@ -108,10 +105,7 @@ SessionSyncBridge::SessionSyncBridge(
       notify_foreign_session_updated_cb_(notify_foreign_session_updated_cb),
       sessions_client_(sessions_client),
       local_session_event_router_(
-          sessions_client->GetLocalSessionEventRouter()),
-      favicon_cache_(sessions_client->GetFaviconService(),
-                     sessions_client->GetHistoryService(),
-                     kMaxSyncFavicons) {
+          sessions_client->GetLocalSessionEventRouter()) {
   DCHECK(sessions_client_);
   DCHECK(local_session_event_router_);
 }
@@ -120,10 +114,6 @@ SessionSyncBridge::~SessionSyncBridge() {
   if (syncing_) {
     local_session_event_router_->Stop();
   }
-}
-
-FaviconCache* SessionSyncBridge::GetFaviconCache() {
-  return &favicon_cache_;
 }
 
 SessionsGlobalIdMapper* SessionSyncBridge::GetGlobalIdMapper() {
@@ -169,7 +159,7 @@ void SessionSyncBridge::StartLocalSessionEventHandler() {
           /*delegate=*/this, sessions_client_, store_->mutable_tracker());
 
   syncing_->open_tabs_ui_delegate = std::make_unique<OpenTabsUIDelegateImpl>(
-      sessions_client_, store_->tracker(), &favicon_cache_,
+      sessions_client_, store_->tracker(),
       base::BindRepeating(&SessionSyncBridge::DeleteForeignSessionFromUI,
                           base::Unretained(this)));
 
@@ -235,16 +225,10 @@ base::Optional<syncer::ModelError> SessionSyncBridge::ApplySyncChanges(
 
         // Guaranteed by the processor.
         DCHECK_EQ(change->data().client_tag_hash,
-                  GenerateSyncableHash(syncer::SESSIONS,
-                                       SessionStore::GetClientTag(specifics)));
+                  syncer::ClientTagHash::FromUnhashed(
+                      syncer::SESSIONS, SessionStore::GetClientTag(specifics)));
 
         batch->PutAndUpdateTracker(specifics, change->data().modification_time);
-        // If a favicon or favicon urls are present, load the URLs and visit
-        // times into the in-memory favicon cache.
-        if (specifics.has_tab()) {
-          favicon_cache_.UpdateMappingsFromForeignTab(
-              specifics.tab(), change->data().modification_time);
-        }
         break;
       }
     }
@@ -343,15 +327,6 @@ void SessionSyncBridge::TrackLocalNavigationId(base::Time timestamp,
   global_id_mapper_.TrackNavigationId(timestamp, unique_id);
 }
 
-void SessionSyncBridge::OnPageFaviconUpdated(const GURL& page_url) {
-  favicon_cache_.OnPageFaviconUpdated(page_url, base::Time::Now());
-}
-
-void SessionSyncBridge::OnFaviconVisited(const GURL& page_url,
-                                         const GURL& favicon_url) {
-  favicon_cache_.OnFaviconVisited(page_url, favicon_url);
-}
-
 void SessionSyncBridge::OnSyncStarting(
     const syncer::DataTypeActivationRequest& request) {
   DCHECK(!syncing_);
@@ -370,8 +345,6 @@ void SessionSyncBridge::OnSyncStarting(
   // Open the store and read state from disk if it exists.
   SessionStore::Open(
       request.cache_guid,
-      base::BindRepeating(&FaviconCache::UpdateMappingsFromForeignTab,
-                          favicon_cache_.GetWeakPtr()),
       sessions_client_,
       base::BindOnce(&SessionSyncBridge::OnStoreInitialized,
                      weak_ptr_factory_.GetWeakPtr()));

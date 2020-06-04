@@ -14,13 +14,11 @@
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/assist_ranker/proto/ranker_model.pb.h"
 #include "components/assist_ranker/proto/translate_ranker_model.pb.h"
 #include "components/assist_ranker/ranker_model.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_request_test_util.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,7 +77,7 @@ class TranslateRankerImplTest : public ::testing::Test {
 
  private:
   // Sets up the task scheduling/task-runner environment for each test.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   ukm::TestAutoSetUkmRecorder test_ukm_recorder_;
 

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/policy/rsu/lookup_key_uploader.h"
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/strings/strcat.h"
 #include "base/task/post_task.h"
@@ -29,8 +30,7 @@ LookupKeyUploader::LookupKeyUploader(
       prefs_(pref_service),
       certificate_uploader_(certificate_uploader),
       cryptohome_client_(chromeos::CryptohomeClient::Get()),
-      clock_(base::DefaultClock::GetInstance()),
-      weak_factory_(this) {
+      clock_(base::DefaultClock::GetInstance()) {
   // Can be null in tests.
   if (policy_store_)
     policy_store_->AddObserver(this);
@@ -94,17 +94,23 @@ void LookupKeyUploader::OnRsuDeviceIdReceived(
       result->GetExtension(cryptohome::GetRsuDeviceIdReply::reply)
           .rsu_device_id();
 
+  // Making it printable so we can store it in prefs.
+  std::string encoded_rsu_device_id;
+  base::Base64Encode(rsu_device_id, &encoded_rsu_device_id);
+
   // If this ID was uploaded previously -- we are not uploading it.
   if (rsu_device_id == prefs_->GetString(prefs::kLastRsuDeviceIdUploaded))
     return;
-  certificate_uploader_->ObtainAndUploadCertificate(base::BindOnce(
-      &LookupKeyUploader::Result, weak_factory_.GetWeakPtr(), rsu_device_id));
+  certificate_uploader_->ObtainAndUploadCertificate(
+      base::BindOnce(&LookupKeyUploader::Result, weak_factory_.GetWeakPtr(),
+                     encoded_rsu_device_id));
 }
 
-void LookupKeyUploader::Result(const std::string& uploaded_key, bool success) {
+void LookupKeyUploader::Result(const std::string& encoded_uploaded_key,
+                               bool success) {
   last_upload_time_ = clock_->Now();
   if (success) {
-    prefs_->SetString(prefs::kLastRsuDeviceIdUploaded, uploaded_key);
+    prefs_->SetString(prefs::kLastRsuDeviceIdUploaded, encoded_uploaded_key);
     return;
   }
   // Reschedule upload on fail.

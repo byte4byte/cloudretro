@@ -102,12 +102,6 @@ scoped_refptr<Layer> ParseTreeFromValue(const base::Value& val,
   if (dict->GetBoolean("ContentsOpaque", &contents_opaque))
     new_layer->SetContentsOpaque(contents_opaque);
 
-  bool is_3d_sorted;
-  if (dict->GetBoolean("Is3DSorted", &is_3d_sorted)) {
-    // A non-zero context ID will put the layer into a 3D sorting context
-    new_layer->Set3dSortingContextId(is_3d_sorted ? 1 : 0);
-  }
-
   if (dict->HasKey("TouchRegion")) {
     success &= dict->GetList("TouchRegion", &list);
     TouchActionRegion touch_action_region;
@@ -118,7 +112,8 @@ scoped_refptr<Layer> ParseTreeFromValue(const base::Value& val,
       success &= list->GetInteger(i++, &rect_width);
       success &= list->GetInteger(i++, &rect_height);
       touch_action_region.Union(
-          kTouchActionNone, gfx::Rect(rect_x, rect_y, rect_width, rect_height));
+          TouchAction::kNone,
+          gfx::Rect(rect_x, rect_y, rect_width, rect_height));
     }
     new_layer->SetTouchActionRegion(std::move(touch_action_region));
   }

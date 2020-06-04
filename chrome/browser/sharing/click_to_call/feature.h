@@ -6,11 +6,17 @@
 #define CHROME_BROWSER_SHARING_CLICK_TO_CALL_FEATURE_H_
 
 #include "base/feature_list.h"
+#include "build/build_config.h"
+#include "chrome/common/buildflags.h"
 
-// Feature to allow receiver device receives the click to call message.
+#if defined(OS_ANDROID)
+// Feature to allow devices to receive the click to call message.
 extern const base::Feature kClickToCallReceiver;
+#endif  // defined(OS_ANDROID)
 
+#if BUILDFLAG(ENABLE_CLICK_TO_CALL)
 // Feature to allow click to call gets processed on desktop.
 extern const base::Feature kClickToCallUI;
+#endif  // BUILDFLAG(ENABLE_CLICK_TO_CALL)
 
 #endif  // CHROME_BROWSER_SHARING_CLICK_TO_CALL_FEATURE_H_

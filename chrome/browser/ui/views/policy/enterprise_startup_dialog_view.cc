@@ -10,6 +10,8 @@
 #include "base/i18n/message_formatter.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
@@ -20,6 +22,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/label_button.h"
@@ -27,7 +30,6 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/throbber.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/window/dialog_client_view.h"
 
 #if defined(OS_MACOSX)
 #include "base/message_loop/message_loop_current.h"
@@ -43,7 +45,7 @@ constexpr int kIconSize = 24;      // The size of throbber and error icon.
 constexpr int kLineHeight = 22;    // The height of text line.
 constexpr int kFontSizeDelta = 3;  // The font size of text.
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 constexpr int kLogoHeight = 20;  // The height of Chrome enterprise logo.
 #endif
 
@@ -56,9 +58,33 @@ std::unique_ptr<views::Label> CreateText(const base::string16& message) {
   auto text = std::make_unique<views::Label>(message);
   text->SetFontList(gfx::FontList().Derive(kFontSizeDelta, gfx::Font::NORMAL,
                                            gfx::Font::Weight::MEDIUM));
-  text->SetEnabledColor(gfx::kGoogleGrey700);
+  text->SetEnabledColor(
+      views::style::GetColor(*text, views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
+                             views::style::STYLE_PRIMARY));
   text->SetLineHeight(kLineHeight);
   return text;
+}
+
+std::unique_ptr<views::View> CreateLogoView() {
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Show Google Chrome Enterprise logo only for official build.
+  auto logo_image = std::make_unique<views::ImageView>();
+  logo_image->SetImage(
+      ui::ResourceBundle::GetSharedInstance()
+          .GetImageNamed((logo_image->GetNativeTheme()->ShouldUseDarkColors())
+                             ? IDR_PRODUCT_LOGO_ENTERPRISE_WHITE
+                             : IDR_PRODUCT_LOGO_ENTERPRISE)
+          .AsImageSkia());
+  logo_image->set_tooltip_text(
+      l10n_util::GetStringUTF16(IDS_PRODUCT_LOGO_ENTERPRISE_ALT_TEXT));
+  gfx::Rect logo_bounds = logo_image->GetImageBounds();
+  logo_image->SetImageSize(gfx::Size(
+      logo_bounds.width() * kLogoHeight / logo_bounds.height(), kLogoHeight));
+  logo_image->SetVerticalAlignment(views::ImageView::Alignment::kCenter);
+  return logo_image;
+#else
+  return nullptr;
+#endif
 }
 
 }  // namespace
@@ -66,6 +92,18 @@ std::unique_ptr<views::Label> CreateText(const base::string16& message) {
 EnterpriseStartupDialogView::EnterpriseStartupDialogView(
     EnterpriseStartupDialog::DialogResultCallback callback)
     : callback_(std::move(callback)) {
+  DialogDelegate::set_draggable(true);
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
+  DialogDelegate::SetExtraView(CreateLogoView());
+  DialogDelegate::SetAcceptCallback(
+      base::BindOnce(&EnterpriseStartupDialogView::RunDialogCallback,
+                     base::Unretained(this), true));
+  DialogDelegate::SetCancelCallback(
+      base::BindOnce(&EnterpriseStartupDialogView::RunDialogCallback,
+                     base::Unretained(this), false));
+  DialogDelegate::SetCloseCallback(
+      base::BindOnce(&EnterpriseStartupDialogView::RunDialogCallback,
+                     base::Unretained(this), false));
   SetBorder(views::CreateEmptyBorder(GetDialogInsets()));
   CreateDialogWidget(this, nullptr, nullptr)->Show();
 #if defined(OS_MACOSX)
@@ -96,11 +134,17 @@ void EnterpriseStartupDialogView::DisplayErrorMessage(
   ResetDialog(accept_button.has_value());
   std::unique_ptr<views::Label> text = CreateText(error_message);
   auto error_icon = std::make_unique<views::ImageView>();
-  error_icon->SetImage(gfx::CreateVectorIcon(kBrowserToolsErrorIcon, kIconSize,
-                                             gfx::kGoogleRed700));
+  error_icon->SetImage(
+      gfx::CreateVectorIcon(kBrowserToolsErrorIcon, kIconSize,
+                            GetNativeTheme()->GetSystemColor(
+                                ui::NativeTheme::kColorId_AlertSeverityHigh)));
 
-  if (accept_button)
-    GetDialogClientView()->ok_button()->SetText(*accept_button);
+  if (accept_button) {
+    // TODO(ellyjones): This should use DialogDelegate::SetButtonLabel()
+    // instead of changing the button text directly - this might break the
+    // dialog's layout.
+    GetOkButton()->SetText(*accept_button);
+  }
   SetupLayout(std::move(error_icon), std::move(text));
 }
 
@@ -142,23 +186,6 @@ void EnterpriseStartupDialogView::RunDialogCallback(bool was_accepted) {
 #endif
 }
 
-bool EnterpriseStartupDialogView::Accept() {
-  RunDialogCallback(true);
-  return true;
-}
-bool EnterpriseStartupDialogView::Cancel() {
-  RunDialogCallback(false);
-  return true;
-}
-
-bool EnterpriseStartupDialogView::Close() {
-  return Cancel();
-}
-
-bool EnterpriseStartupDialogView::IsDialogDraggable() const {
-  return true;
-}
-
 bool EnterpriseStartupDialogView::ShouldShowWindowTitle() const {
   return false;
 }
@@ -167,37 +194,14 @@ ui::ModalType EnterpriseStartupDialogView::GetModalType() const {
   return ui::MODAL_TYPE_NONE;
 }
 
-std::unique_ptr<views::View> EnterpriseStartupDialogView::CreateExtraView() {
-#if defined(GOOGLE_CHROME_BUILD)
-  // Show Google Chrome Enterprise logo only for official build.
-  auto logo_image = std::make_unique<views::ImageView>();
-  logo_image->SetImage(ui::ResourceBundle::GetSharedInstance()
-                           .GetImageNamed(IDR_PRODUCT_LOGO_ENTERPRISE)
-                           .AsImageSkia());
-  logo_image->set_tooltip_text(
-      l10n_util::GetStringUTF16(IDS_PRODUCT_LOGO_ENTERPRISE_ALT_TEXT));
-  gfx::Rect logo_bounds = logo_image->GetImageBounds();
-  logo_image->SetImageSize(gfx::Size(
-      logo_bounds.width() * kLogoHeight / logo_bounds.height(), kLogoHeight));
-  logo_image->SetVerticalAlignment(views::ImageView::Alignment::kCenter);
-  return logo_image;
-#else
-  return nullptr;
-#endif
-}
-
-int EnterpriseStartupDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
-}
-
 gfx::Size EnterpriseStartupDialogView::CalculatePreferredSize() const {
   return gfx::Size(kDialogContentWidth, kDialogContentHeight);
 }
 
 void EnterpriseStartupDialogView::ResetDialog(bool show_accept_button) {
-  DCHECK(GetDialogClientView()->ok_button());
+  DCHECK(GetOkButton());
 
-  GetDialogClientView()->ok_button()->SetVisible(show_accept_button);
+  GetOkButton()->SetVisible(show_accept_button);
   RemoveAllChildViews(true);
 }
 
@@ -228,8 +232,9 @@ void EnterpriseStartupDialogView::SetupLayout(
   layout->AddView(std::move(text));
   layout->AddPaddingRow(1.0, 0);
 
-  GetDialogClientView()->Layout();
-  GetDialogClientView()->SchedulePaint();
+  // TODO(ellyjones): Why is this being done here?
+  GetWidget()->GetRootView()->Layout();
+  GetWidget()->GetRootView()->SchedulePaint();
 }
 
 /*

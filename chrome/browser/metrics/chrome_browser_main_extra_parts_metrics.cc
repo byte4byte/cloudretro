@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -18,21 +19,23 @@
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/buildflags.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/metrics/bluetooth_available_utility.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/process_memory_metrics_emitter.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/vr/service/xr_runtime_manager.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/common/content_switches.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "services/resource_coordinator/public/cpp/memory_instrumentation/browser_metrics.h"
 #include "ui/base/pointer/pointer_device.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/screen.h"
@@ -40,7 +43,6 @@
 #if !defined(OS_ANDROID)
 #include "chrome/browser/metrics/first_web_contents_profiler.h"
 #include "chrome/browser/metrics/tab_stats_tracker.h"
-#include "chrome/browser/metrics/tab_usage_recorder.h"
 #endif  // !defined(OS_ANDROID)
 
 #if defined(OS_ANDROID) && defined(__arm__)
@@ -65,30 +67,27 @@
 #endif  // defined(USE_OZONE) || defined(USE_X11)
 
 #if defined(OS_WIN)
+#include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/shell_integration_win.h"
 #endif  // defined(OS_WIN)
 
 namespace {
 
+// Feature flag to  control enabling recording of the IO jank metric. Will be
+// used to ensure recording the metric itself doesn't have adverse side-effects
+// on real performance. Assuming it doesn't, the metric will be recorded on 100%
+// of users.
+const base::Feature kRecordIOJankMetric{"RecordIOJankMetric",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
 void RecordMemoryMetrics();
 
-// Records memory metrics after a delay, with a fixed mean interval but randomly
-// distributed samples using a poisson process.
+// Records memory metrics after a delay.
 void RecordMemoryMetricsAfterDelay() {
-#if defined(OS_ANDROID)
-  base::TimeDelta mean_time = base::TimeDelta::FromMinutes(5);
-#else
-  base::TimeDelta mean_time = base::TimeDelta::FromMinutes(30);
-#endif
-
-  // Compute the actual delay before sampling using a Poisson process.
-  double uniform = base::RandDouble();
-  base::TimeDelta delay = -std::log(uniform) * mean_time;
-
-  base::PostDelayedTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                                  base::BindOnce(&RecordMemoryMetrics), delay);
+  base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                        base::BindOnce(&RecordMemoryMetrics),
+                        memory_instrumentation::GetDelayForNextMemoryLog());
 }
 
 // Records memory metrics, and then triggers memory colleciton after a delay.
@@ -104,55 +103,18 @@ void RecordMemoryMetrics() {
 // enums must never be renumbered or deleted and reused.
 enum UMALinuxDistro {
   UMA_LINUX_DISTRO_UNKNOWN = 0,
-  UMA_LINUX_DISTRO_UBUNTU_OTHER_DEPRECATED = 1,
-  UMA_LINUX_DISTRO_UBUNTU_14_04_DEPRECATED = 2,
-  UMA_LINUX_DISTRO_UBUNTU_16_04_DEPRECATED = 3,
-  UMA_LINUX_DISTRO_UBUNTU_16_10_DEPRECATED = 4,
-  UMA_LINUX_DISTRO_UBUNTU_17_04_DEPRECATED = 5,
-  UMA_LINUX_DISTRO_DEBIAN_OTHER_DEPRECATED = 6,
-  UMA_LINUX_DISTRO_DEBIAN_8_DEPRECATED = 7,
-  UMA_LINUX_DISTRO_OPENSUSE_OTHER_DEPRECATED = 8,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_42_2_DEPRECATED = 9,
-  UMA_LINUX_DISTRO_FEDORA_OTHER_DEPRECATED = 10,
-  UMA_LINUX_DISTRO_FEDORA_24_DEPRECATED = 11,
-  UMA_LINUX_DISTRO_FEDORA_25_DEPRECATED = 12,
-  UMA_LINUX_DISTRO_FEDORA_26_DEPRECATED = 13,
-  UMA_LINUX_DISTRO_DEBIAN_9_DEPRECATED = 14,
-  UMA_LINUX_DISTRO_ARCH = 15,
-  UMA_LINUX_DISTRO_CENTOS = 16,
-  UMA_LINUX_DISTRO_ELEMENTARY = 17,
-  UMA_LINUX_DISTRO_MINT = 18,
-  UMA_LINUX_DISTRO_RHEL = 19,
-  UMA_LINUX_DISTRO_SUSE_ENTERPRISE = 20,
-  // Debian
-  UMA_LINUX_DISTRO_DEBIAN_OTHER = 50,
-  UMA_LINUX_DISTRO_DEBIAN_8 = 51,
-  UMA_LINUX_DISTRO_DEBIAN_9 = 52,
-  UMA_LINUX_DISTRO_DEBIAN_10 = 53,
-  // Fedora
-  UMA_LINUX_DISTRO_FEDORA_OTHER = 100,
-  UMA_LINUX_DISTRO_FEDORA_24 = 101,
-  UMA_LINUX_DISTRO_FEDORA_25 = 102,
-  UMA_LINUX_DISTRO_FEDORA_26 = 103,
-  UMA_LINUX_DISTRO_FEDORA_27 = 104,
-  UMA_LINUX_DISTRO_FEDORA_28 = 105,
-  // openSUSE
-  UMA_LINUX_DISTRO_OPENSUSE_OTHER = 150,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_42_2 = 151,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_42_3 = 152,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_0 = 153,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_1 = 154,
-  UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_2 = 155,
-  // Ubuntu
-  UMA_LINUX_DISTRO_UBUNTU_OTHER = 200,
-  UMA_LINUX_DISTRO_UBUNTU_14_04 = 201,
-  UMA_LINUX_DISTRO_UBUNTU_16_04 = 202,
-  UMA_LINUX_DISTRO_UBUNTU_16_10 = 203,
-  UMA_LINUX_DISTRO_UBUNTU_17_04 = 204,
-  UMA_LINUX_DISTRO_UBUNTU_17_10 = 205,
-  UMA_LINUX_DISTRO_UBUNTU_18_04 = 206,
-  UMA_LINUX_DISTRO_UBUNTU_18_10 = 207,
-  // Note: Add new distros to the list above this line, and update LinuxDistro
+  UMA_LINUX_DISTRO_ARCH = 1,
+  UMA_LINUX_DISTRO_CENTOS = 2,
+  UMA_LINUX_DISTRO_DEBIAN = 3,
+  UMA_LINUX_DISTRO_ELEMENTARY = 4,
+  UMA_LINUX_DISTRO_FEDORA = 5,
+  UMA_LINUX_DISTRO_MINT = 6,
+  UMA_LINUX_DISTRO_OPENSUSE_LEAP = 7,
+  UMA_LINUX_DISTRO_RHEL = 8,
+  UMA_LINUX_DISTRO_SUSE_ENTERPRISE = 9,
+  UMA_LINUX_DISTRO_UBUNTU = 10,
+
+  // Note: Add new distros to the list above this line, and update Linux.Distro2
   // in tools/metrics/histograms/enums.xml accordingly.
   UMA_LINUX_DISTRO_MAX
 };
@@ -217,6 +179,10 @@ void RecordMicroArchitectureStats() {
                            base::SysInfo::NumberOfProcessors());
 }
 
+#if defined(OS_WIN)
+bool IsApplockerRunning();
+#endif  // defined(OS_WIN)
+
 // Called on a background thread, with low priority to avoid slowing down
 // startup with metrics that aren't trivial to compute.
 void RecordStartupMetrics() {
@@ -227,9 +193,26 @@ void RecordStartupMetrics() {
   UMA_HISTOGRAM_ENUMERATION("Windows.Kernel32Version",
                             os_info.Kernel32Version(),
                             base::win::Version::WIN_LAST);
+  int patch = os_info.version_number().patch;
+  int build = os_info.version_number().build;
+  int patch_level = 0;
+
+  if (patch < 65536 && build < 65536)
+    patch_level = MAKELONG(patch, build);
+  DCHECK(patch_level) << "Windows version too high!";
+  base::UmaHistogramSparse("Windows.PatchLevel", patch_level);
+
+  // Record installed UCRT version information. This is of particular interest
+  // on Windows 7 due to Windows 7 crashes - https://crbug.com/920704
+  UMA_HISTOGRAM_ENUMERATION("Windows.UCRTVersion", os_info.UcrtVersion(),
+                            base::win::Version::WIN_LAST);
 
   UMA_HISTOGRAM_BOOLEAN("Windows.HasHighResolutionTimeTicks",
                         base::TimeTicks::IsHighResolution());
+
+  // Determine if Applocker is enabled and running. This does not check if
+  // Applocker rules are being enforced.
+  UMA_HISTOGRAM_BOOLEAN("Windows.ApplockerRunning", IsApplockerRunning());
 #endif  // defined(OS_WIN)
 
   bluetooth_utility::ReportBluetoothAvailability();
@@ -242,6 +225,23 @@ void RecordStartupMetrics() {
 }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+void RecordLinuxDistroSpecific(const std::string& version_string,
+                               size_t parts,
+                               const char* histogram_name) {
+  base::Version version{version_string};
+  if (!version.IsValid() || version.components().size() < parts)
+    return;
+
+  base::CheckedNumeric<int32_t> sample = 0;
+  for (size_t i = 0; i < parts; i++) {
+    sample *= 1000;
+    sample += version.components()[i];
+  }
+
+  if (sample.IsValid())
+    base::UmaHistogramSparse(histogram_name, sample.ValueOrDie());
+}
+
 void RecordLinuxDistro() {
   UMALinuxDistro distro_result = UMA_LINUX_DISTRO_UNKNOWN;
 
@@ -252,101 +252,53 @@ void RecordLinuxDistro() {
     if (distro_tokens[0] == "Ubuntu") {
       // Format: Ubuntu YY.MM.P [LTS]
       // We are only concerned with release (YY.MM) not the patch (P).
-      distro_result = UMA_LINUX_DISTRO_UBUNTU_OTHER;
-      if (distro_tokens.size() >= 2) {
-        base::Version version(distro_tokens[1]);
-        if (version.IsValid()) {
-          if (version.CompareToWildcardString("14.04.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_14_04;
-          } else if (version.CompareToWildcardString("16.04.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_16_04;
-          } else if (version.CompareToWildcardString("16.10.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_16_10;
-          } else if (version.CompareToWildcardString("17.04.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_17_04;
-          } else if (version.CompareToWildcardString("17.10.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_17_10;
-          } else if (version.CompareToWildcardString("18.04.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_18_04;
-          } else if (version.CompareToWildcardString("18.10.*") == 0) {
-            distro_result = UMA_LINUX_DISTRO_UBUNTU_18_10;
-          }
-        }
-      }
+      distro_result = UMA_LINUX_DISTRO_UBUNTU;
+      if (distro_tokens.size() >= 2)
+        RecordLinuxDistroSpecific(distro_tokens[1], 2, "Linux.Distro.Ubuntu");
     } else if (distro_tokens[0] == "openSUSE") {
       // Format: openSUSE Leap RR.R
-      distro_result = UMA_LINUX_DISTRO_OPENSUSE_OTHER;
+      distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP;
       if (distro_tokens.size() >= 3 && distro_tokens[1] == "Leap") {
-        if (distro_tokens[2] == "42.2") {
-          distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP_42_2;
-        } else if (distro_tokens[2] == "42.3") {
-          distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP_42_3;
-        } else if (distro_tokens[2] == "15.0") {
-          distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_0;
-        } else if (distro_tokens[2] == "15.1") {
-          distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_1;
-        } else if (distro_tokens[2] == "15.2") {
-          distro_result = UMA_LINUX_DISTRO_OPENSUSE_LEAP_15_2;
-        }
+        RecordLinuxDistroSpecific(distro_tokens[2], 2,
+                                  "Linux.Distro.OpenSuseLeap");
       }
     } else if (distro_tokens[0] == "Debian") {
       // Format: Debian GNU/Linux R.P (<codename>)
       // We are only concerned with the release (R) not the patch (P).
-      distro_result = UMA_LINUX_DISTRO_DEBIAN_OTHER;
-      if (distro_tokens.size() >= 3) {
-        base::Version version(distro_tokens[2]);
-        if (version.IsValid()) {
-          if (version.CompareToWildcardString("8.*")) {
-            distro_result = UMA_LINUX_DISTRO_DEBIAN_8;
-          } else if (version.CompareToWildcardString("9.*")) {
-            distro_result = UMA_LINUX_DISTRO_DEBIAN_9;
-          } else if (version.CompareToWildcardString("10.*")) {
-            distro_result = UMA_LINUX_DISTRO_DEBIAN_10;
-          }
-        }
-      }
+      distro_result = UMA_LINUX_DISTRO_DEBIAN;
+      if (distro_tokens.size() >= 3)
+        RecordLinuxDistroSpecific(distro_tokens[2], 1, "Linux.Distro.Debian");
     } else if (distro_tokens[0] == "Fedora") {
-      // Format: Fedora release RR (<codename>)
-      distro_result = UMA_LINUX_DISTRO_FEDORA_OTHER;
-      if (distro_tokens.size() >= 3) {
-        if (distro_tokens[2] == "24") {
-          distro_result = UMA_LINUX_DISTRO_FEDORA_24;
-        } else if (distro_tokens[2] == "25") {
-          distro_result = UMA_LINUX_DISTRO_FEDORA_25;
-        } else if (distro_tokens[2] == "26") {
-          distro_result = UMA_LINUX_DISTRO_FEDORA_26;
-        } else if (distro_tokens[2] == "27") {
-          distro_result = UMA_LINUX_DISTRO_FEDORA_27;
-        } else if (distro_tokens[2] == "28") {
-          distro_result = UMA_LINUX_DISTRO_FEDORA_28;
-        }
-      }
+      // Format: Fedora RR (<codename>)
+      distro_result = UMA_LINUX_DISTRO_FEDORA;
+      if (distro_tokens.size() >= 2)
+        RecordLinuxDistroSpecific(distro_tokens[1], 1, "Linux.Distro.Fedora");
     } else if (distro_tokens[0] == "Arch") {
       // Format: Arch Linux
       distro_result = UMA_LINUX_DISTRO_ARCH;
     } else if (distro_tokens[0] == "CentOS") {
-      // Format: CentOS [Linux] release <version> (<codename>)
+      // Format: CentOS [Linux] <version> (<codename>)
       distro_result = UMA_LINUX_DISTRO_CENTOS;
     } else if (distro_tokens[0] == "elementary") {
       // Format: elementary OS <release name>
       distro_result = UMA_LINUX_DISTRO_ELEMENTARY;
     } else if (distro_tokens.size() >= 2 && distro_tokens[1] == "Mint") {
-      // Format: Linux Mint RR <codename>
+      // Format: Linux Mint RR
       distro_result = UMA_LINUX_DISTRO_MINT;
     } else if (distro_tokens.size() >= 4 && distro_tokens[0] == "Red" &&
                distro_tokens[1] == "Hat" && distro_tokens[2] == "Enterprise" &&
                distro_tokens[3] == "Linux") {
-      // Format: Red Hat Enterprise Linux <variant> [release] R.P (<codename>)
+      // Format: Red Hat Enterprise Linux <variant> R.P (<codename>)
       distro_result = UMA_LINUX_DISTRO_RHEL;
     } else if (distro_tokens.size() >= 3 && distro_tokens[0] == "SUSE" &&
                distro_tokens[1] == "Linux" &&
                distro_tokens[2] == "Enterprise") {
-      // Format: SUSE Linux Enterprise <variant> RR (<platform>)
+      // Format: SUSE Linux Enterprise <variant> RR
       distro_result = UMA_LINUX_DISTRO_SUSE_ENTERPRISE;
     }
   }
 
-  base::UmaHistogramSparse("Linux.Distro", distro_result);
+  base::UmaHistogramSparse("Linux.Distro2", distro_result);
 }
 #endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
 
@@ -518,16 +470,54 @@ void OnIsPinnedToTaskbarResult(bool succeeded, bool is_pinned_to_taskbar) {
 // Records the pinned state of the current executable into a histogram. Should
 // be called on a background thread, with low priority, to avoid slowing down
 // startup.
-void RecordIsPinnedToTaskbarHistogram(
-    std::unique_ptr<service_manager::Connector> connector) {
+void RecordIsPinnedToTaskbarHistogram() {
   shell_integration::win::GetIsPinnedToTaskbarState(
-      std::move(connector), base::Bind(&OnShellHandlerConnectionError),
+      base::Bind(&OnShellHandlerConnectionError),
       base::Bind(&OnIsPinnedToTaskbarResult));
 }
 
-void RecordVrStartupHistograms() {
-  vr::XRRuntimeManager::RecordVrStartupHistograms();
+class ScHandleTraits {
+ public:
+  typedef SC_HANDLE Handle;
+
+  ScHandleTraits() = delete;
+  ScHandleTraits(const ScHandleTraits&) = delete;
+  ScHandleTraits& operator=(const ScHandleTraits&) = delete;
+
+  // Closes the handle.
+  static bool CloseHandle(SC_HANDLE handle) {
+    return ::CloseServiceHandle(handle) != FALSE;
+  }
+
+  // Returns true if the handle value is valid.
+  static bool IsHandleValid(SC_HANDLE handle) { return handle != nullptr; }
+
+  // Returns null handle value.
+  static SC_HANDLE NullHandle() { return nullptr; }
+};
+
+typedef base::win::GenericScopedHandle<ScHandleTraits,
+                                       base::win::DummyVerifierTraits>
+    ScopedScHandle;
+
+bool IsApplockerRunning() {
+  ScopedScHandle scm_handle(
+      ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+  if (!scm_handle.IsValid())
+    return false;
+
+  ScopedScHandle service_handle(
+      ::OpenServiceW(scm_handle.Get(), L"appid", SERVICE_QUERY_STATUS));
+  if (!service_handle.IsValid())
+    return false;
+
+  SERVICE_STATUS status;
+  if (!::QueryServiceStatus(service_handle.Get(), &status))
+    return false;
+
+  return status.dwCurrentState == SERVICE_RUNNING;
 }
+
 #endif  // defined(OS_WIN)
 
 }  // namespace
@@ -550,32 +540,30 @@ void ChromeBrowserMainExtraPartsMetrics::PreBrowserStart() {
       g_browser_process->local_state());
   about_flags::RecordUMAStatistics(&flags_storage);
 
-#if defined(OS_WIN)
-  ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial("ChromeWinClang",
-#if defined(__clang__)
+  // Log once here at browser start rather than at each renderer launch.
+  ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial("ClangPGO",
+#if BUILDFLAG(CLANG_PGO)
                                                             "Enabled"
 #else
                                                             "Disabled"
 #endif
-                                                            );
-#endif
+  );
 }
 
 void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
-  if (!base::FeatureList::IsEnabled(kMemoryMetricsOldTiming))
-    RecordMemoryMetricsAfterDelay();
+  RecordMemoryMetricsAfterDelay();
   RecordLinuxGlibcVersion();
 #if defined(USE_X11)
   UMA_HISTOGRAM_ENUMERATION("Linux.WindowManager", GetLinuxWindowManager(),
                             UMA_LINUX_WINDOW_MANAGER_COUNT);
 #endif
 
-  constexpr base::TaskTraits background_task_traits = {
+  constexpr base::TaskTraits kBestEffortTaskTraits = {
       base::MayBlock(), base::TaskPriority::BEST_EFFORT,
       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  base::PostTaskWithTraits(FROM_HERE, background_task_traits,
-                           base::BindOnce(&RecordLinuxDistro));
+  base::ThreadPool::PostTask(FROM_HERE, kBestEffortTaskTraits,
+                             base::BindOnce(&RecordLinuxDistro));
 #endif
 
 #if defined(USE_OZONE) || defined(USE_X11)
@@ -599,31 +587,22 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
 #if defined(OS_WIN)
   // RecordStartupMetrics calls into shell_integration::GetDefaultBrowser(),
   // which requires a COM thread on Windows.
-  base::CreateCOMSTATaskRunnerWithTraits(background_task_traits)
+  base::ThreadPool::CreateCOMSTATaskRunner(kBestEffortTaskTraits)
       ->PostTask(FROM_HERE, base::BindOnce(&RecordStartupMetrics));
 #else
-  base::PostTaskWithTraits(FROM_HERE, background_task_traits,
-                           base::BindOnce(&RecordStartupMetrics));
+  base::ThreadPool::PostTask(FROM_HERE, kBestEffortTaskTraits,
+                             base::BindOnce(&RecordStartupMetrics));
 #endif  // defined(OS_WIN)
 
 #if defined(OS_WIN)
   // TODO(isherman): The delay below is currently needed to avoid (flakily)
   // breaking some tests, including all of the ProcessMemoryMetricsEmitterTest
   // tests. Figure out why there is a dependency and fix the tests.
-  service_manager::Connector* connector = content::GetSystemConnector();
-
   auto background_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(background_task_traits);
+      base::ThreadPool::CreateSequencedTaskRunner(kBestEffortTaskTraits);
 
   background_task_runner->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&RecordIsPinnedToTaskbarHistogram, connector->Clone()),
-      base::TimeDelta::FromSeconds(45));
-
-  // TODO(billorr): This should eventually be done on all platforms that support
-  // VR.
-  background_task_runner->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&RecordVrStartupHistograms),
+      FROM_HERE, base::BindOnce(&RecordIsPinnedToTaskbarHistogram),
       base::TimeDelta::FromSeconds(45));
 #endif  // defined(OS_WIN)
 
@@ -634,7 +613,6 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
 
 #if !defined(OS_ANDROID)
   metrics::BeginFirstWebContentsProfiling();
-  metrics::TabUsageRecorder::InitializeIfNeeded();
   // Only instantiate the tab stats tracker if a local state exists. This is
   // always the case for Chrome but not for the unittests.
   if (g_browser_process != nullptr &&
@@ -644,6 +622,22 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
             g_browser_process->local_state()));
   }
 #endif  // !defined(OS_ANDROID)
+}
+
+void ChromeBrowserMainExtraPartsMetrics::PreMainMessageLoopRun() {
+  if (base::TimeTicks::IsConsistentAcrossProcesses() &&
+      base::FeatureList::IsEnabled(kRecordIOJankMetric)) {
+    // Enable I/O jank monitoring for the browser process.
+    base::EnableIOJankMonitoringForProcess(base::BindRepeating(
+        [](int janky_intervals_per_minute, int total_janks_per_minute) {
+          UMA_HISTOGRAM_COUNTS_100(
+              "Browser.Responsiveness.IOJankyIntervalsPerMinute",
+              janky_intervals_per_minute);
+          UMA_HISTOGRAM_COUNTS_1000(
+              "Browser.Responsiveness.IOJanksTotalPerMinute",
+              total_janks_per_minute);
+        }));
+  }
 }
 
 void ChromeBrowserMainExtraPartsMetrics::OnDisplayAdded(

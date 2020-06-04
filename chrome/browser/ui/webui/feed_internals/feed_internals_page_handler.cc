@@ -12,34 +12,39 @@
 #include "base/time/time.h"
 #include "chrome/browser/android/feed/feed_debugging_bridge.h"
 #include "chrome/browser/android/feed/feed_lifecycle_bridge.h"
+#include "chrome/browser/ui/webui/feed_internals/feed_internals.mojom.h"
 #include "components/feed/content/feed_host_service.h"
 #include "components/feed/content/feed_offline_host.h"
+#include "components/feed/core/common/pref_names.h"
+#include "components/feed/core/common/user_classifier.h"
 #include "components/feed/core/feed_scheduler_host.h"
-#include "components/feed/core/pref_names.h"
-#include "components/feed/core/user_classifier.h"
+#include "components/feed/core/shared_prefs/pref_names.h"
 #include "components/feed/feed_feature_list.h"
 #include "components/offline_pages/core/prefetch/prefetch_prefs.h"
 #include "components/offline_pages/core/prefetch/suggestions_provider.h"
 #include "components/prefs/pref_service.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "url/gurl.h"
 
 namespace {
 
 const char kFeedHistogramPrefix[] = "ContentSuggestions.Feed.";
 
-feed_internals::mojom::TimePtr ToMojoTime(base::Time time) {
-  return time.is_null() ? nullptr
-                        : feed_internals::mojom::Time::New(time.ToJsTime());
+// Converts |t| to a delta from the JS epoch, or 0 if |t| is null.
+base::TimeDelta ToJsTimeDelta(base::Time t) {
+  return t.is_null() ? base::TimeDelta() : t - base::Time::UnixEpoch();
 }
 
-std::string TriggerTypeToString(feed::FeedSchedulerHost::TriggerType* trigger) {
+std::string TriggerTypeToString(feed::TriggerType* trigger) {
   if (trigger == nullptr)
     return "Not set";
   switch (*trigger) {
-    case feed::FeedSchedulerHost::TriggerType::kNtpShown:
+    case feed::TriggerType::kNtpShown:
       return "NTP Shown";
-    case feed::FeedSchedulerHost::TriggerType::kForegrounded:
+    case feed::TriggerType::kForegrounded:
       return "Foregrounded";
-    case feed::FeedSchedulerHost::TriggerType::kFixedTimer:
+    case feed::TriggerType::kFixedTimer:
       return "Fixed Timer";
   }
 }
@@ -47,14 +52,13 @@ std::string TriggerTypeToString(feed::FeedSchedulerHost::TriggerType* trigger) {
 }  // namespace
 
 FeedInternalsPageHandler::FeedInternalsPageHandler(
-    feed_internals::mojom::PageHandlerRequest request,
+    mojo::PendingReceiver<feed_internals::mojom::PageHandler> receiver,
     feed::FeedHostService* feed_host_service,
     PrefService* pref_service)
-    : binding_(this, std::move(request)),
+    : receiver_(this, std::move(receiver)),
       feed_scheduler_host_(feed_host_service->GetSchedulerHost()),
       feed_offline_host_(feed_host_service->GetOfflineHost()),
-      pref_service_(pref_service),
-      weak_ptr_factory_(this) {}
+      pref_service_(pref_service) {}
 
 FeedInternalsPageHandler::~FeedInternalsPageHandler() = default;
 
@@ -100,9 +104,11 @@ void FeedInternalsPageHandler::GetLastFetchProperties(
   properties->last_fetch_trigger = TriggerTypeToString(
       feed_scheduler_host_->GetLastFetchTriggerTypeForDebugging());
   properties->last_fetch_time =
-      ToMojoTime(pref_service_->GetTime(feed::prefs::kLastFetchAttemptTime));
-  properties->refresh_suppress_time =
-      ToMojoTime(feed_scheduler_host_->GetSuppressRefreshesUntilForDebugging());
+      ToJsTimeDelta(pref_service_->GetTime(feed::prefs::kLastFetchAttemptTime));
+  properties->refresh_suppress_time = ToJsTimeDelta(
+      feed_scheduler_host_->GetSuppressRefreshesUntilForDebugging());
+  properties->last_bless_nonce =
+      pref_service_->GetString(feed::prefs::kHostOverrideBlessNonce);
 
   std::move(callback).Run(std::move(properties));
 }
@@ -166,4 +172,10 @@ void FeedInternalsPageHandler::GetFeedHistograms(
   std::string log;
   base::StatisticsRecorder::WriteGraph(kFeedHistogramPrefix, &log);
   std::move(callback).Run(log);
+}
+
+void FeedInternalsPageHandler::OverrideFeedHost(const GURL& host) {
+  return pref_service_->SetString(
+      feed::prefs::kHostOverrideHost,
+      host.is_valid() ? host.spec() : std::string());
 }

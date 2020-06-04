@@ -13,10 +13,12 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
+#include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/util.h"
 #include "chrome/test/chromedriver/chrome/web_view_impl.h"
+#include "chrome/test/chromedriver/net/command_id.h"
 #include "chrome/test/chromedriver/net/sync_websocket.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 
@@ -24,9 +26,14 @@ namespace {
 
 const char kInspectorDefaultContextError[] =
     "Cannot find default execution context";
-const char kInspectorContextError[] =
-    "Cannot find execution context with given id";
+const char kInspectorContextError[] = "Cannot find context with specified id";
 const char kInspectorInvalidURL[] = "Cannot navigate to invalid URL";
+const char kInspectorInsecureContext[] =
+    "Permission can't be granted in current context.";
+const char kInspectorOpaqueOrigins[] =
+    "Permission can't be granted to opaque origins.";
+const char kInspectorPushPermissionError[] =
+    "Push Permission without userVisibleOnly:true isn't supported";
 static constexpr int kInvalidParamsInspectorCode = -32602;
 
 class ScopedIncrementer {
@@ -72,8 +79,8 @@ DevToolsClientImpl::DevToolsClientImpl(const SyncWebSocketFactory& factory,
                                        const std::string& id)
     : socket_(factory.Run()),
       url_(url),
-      parent_(nullptr),
       owner_(nullptr),
+      parent_(nullptr),
       crashed_(false),
       detached_(false),
       id_(id),
@@ -92,8 +99,8 @@ DevToolsClientImpl::DevToolsClientImpl(
     const FrontendCloserFunc& frontend_closer_func)
     : socket_(factory.Run()),
       url_(url),
-      parent_(nullptr),
       owner_(nullptr),
+      parent_(nullptr),
       crashed_(false),
       detached_(false),
       id_(id),
@@ -107,9 +114,9 @@ DevToolsClientImpl::DevToolsClientImpl(
 
 DevToolsClientImpl::DevToolsClientImpl(DevToolsClientImpl* parent,
                                        const std::string& session_id)
-    : parent_(parent),
-      owner_(nullptr),
+    : owner_(nullptr),
       session_id_(session_id),
+      parent_(parent),
       crashed_(false),
       detached_(false),
       id_(session_id),
@@ -129,8 +136,8 @@ DevToolsClientImpl::DevToolsClientImpl(
     const ParserFunc& parser_func)
     : socket_(factory.Run()),
       url_(url),
-      parent_(nullptr),
       owner_(nullptr),
+      parent_(nullptr),
       crashed_(false),
       detached_(false),
       id_(id),
@@ -178,9 +185,31 @@ Status DevToolsClientImpl::ConnectIfNecessary() {
     }
   }
 
+  // These lines must be before the following SendCommandXxx calls
   unnotified_connect_listeners_ = listeners_;
   unnotified_event_listeners_.clear();
   response_info_map_.clear();
+
+  if (id_ != kBrowserwideDevToolsClientId) {
+    base::DictionaryValue params;
+    std::string script =
+        "(function () {"
+        "window.cdc_adoQpoasnfa76pfcZLmcfl_Array = window.Array;"
+        "window.cdc_adoQpoasnfa76pfcZLmcfl_Promise = window.Promise;"
+        "window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol = window.Symbol;"
+        "}) ();";
+    params.SetString("source", script);
+    Status status = SendCommandAndIgnoreResponse(
+        "Page.addScriptToEvaluateOnNewDocument", params);
+    if (status.IsError())
+      return status;
+
+    params.Clear();
+    params.SetString("expression", script);
+    status = SendCommandAndIgnoreResponse("Runtime.evaluate", params);
+    if (status.IsError())
+      return status;
+  }
 
   // Notify all listeners of the new connection. Do this now so that any errors
   // that occur are reported now instead of later during some unrelated call.
@@ -194,19 +223,27 @@ Status DevToolsClientImpl::SendCommand(
   return SendCommandWithTimeout(method, params, nullptr);
 }
 
+Status DevToolsClientImpl::SendCommandFromWebSocket(
+    const std::string& method,
+    const base::DictionaryValue& params,
+    int client_command_id) {
+  return SendCommandInternal(method, params, nullptr, false, false,
+                             client_command_id, nullptr);
+}
+
 Status DevToolsClientImpl::SendCommandWithTimeout(
     const std::string& method,
     const base::DictionaryValue& params,
     const Timeout* timeout) {
   std::unique_ptr<base::DictionaryValue> result;
-  return SendCommandInternal(method, params, &result, true, true, timeout);
+  return SendCommandInternal(method, params, &result, true, true, 0, timeout);
 }
 
 Status DevToolsClientImpl::SendAsyncCommand(
     const std::string& method,
     const base::DictionaryValue& params) {
   std::unique_ptr<base::DictionaryValue> result;
-  return SendCommandInternal(method, params, &result, false, false, nullptr);
+  return SendCommandInternal(method, params, &result, false, false, 0, nullptr);
 }
 
 Status DevToolsClientImpl::SendCommandAndGetResult(
@@ -222,8 +259,8 @@ Status DevToolsClientImpl::SendCommandAndGetResultWithTimeout(
     const Timeout* timeout,
     std::unique_ptr<base::DictionaryValue>* result) {
   std::unique_ptr<base::DictionaryValue> intermediate_result;
-  Status status = SendCommandInternal(
-      method, params, &intermediate_result, true, true, timeout);
+  Status status = SendCommandInternal(method, params, &intermediate_result,
+                                      true, true, 0, timeout);
   if (status.IsError())
     return status;
   if (!intermediate_result)
@@ -235,7 +272,7 @@ Status DevToolsClientImpl::SendCommandAndGetResultWithTimeout(
 Status DevToolsClientImpl::SendCommandAndIgnoreResponse(
     const std::string& method,
     const base::DictionaryValue& params) {
-  return SendCommandInternal(method, params, nullptr, true, false, nullptr);
+  return SendCommandInternal(method, params, nullptr, true, false, 0, nullptr);
 }
 
 void DevToolsClientImpl::AddListener(DevToolsEventListener* listener) {
@@ -244,7 +281,7 @@ void DevToolsClientImpl::AddListener(DevToolsEventListener* listener) {
 }
 
 Status DevToolsClientImpl::HandleReceivedEvents() {
-  return HandleEventsUntil(base::Bind(&ConditionIsMet),
+  return HandleEventsUntil(base::BindRepeating(&ConditionIsMet),
                            Timeout(base::TimeDelta()));
 }
 
@@ -263,9 +300,25 @@ Status DevToolsClientImpl::HandleEventsUntil(
         return Status(kOk);
     }
 
-    Status status = ProcessNextMessage(-1, timeout);
-    if (status.IsError())
+    // Create a small timeout so conditional_func can be retried
+    // when only funcinterval has expired, continue while loop
+    // but return timeout status if primary timeout has expired
+    // This supports cases when loading state is updated by a different client
+    Timeout funcinterval =
+        Timeout(base::TimeDelta::FromMilliseconds(500), &timeout);
+    Status status = ProcessNextMessage(-1, false, funcinterval);
+    if (status.code() == kTimeout) {
+      if (timeout.IsExpired()) {
+        // Build status message based on timeout parameter, not funcinterval
+        std::string err =
+            "Timed out receiving message from renderer: " +
+            base::StringPrintf("%.3lf", timeout.GetDuration().InSecondsF());
+        LOG(ERROR) << err;
+        return Status(kTimeout, err);
+      }
+    } else if (status.IsError()) {
       return status;
+    }
   }
 }
 
@@ -282,21 +335,30 @@ DevToolsClientImpl::ResponseInfo::ResponseInfo(const std::string& method)
 
 DevToolsClientImpl::ResponseInfo::~ResponseInfo() {}
 
+DevToolsClientImpl* DevToolsClientImpl::GetRootClient() {
+  return parent_ ? parent_ : this;
+}
+
 Status DevToolsClientImpl::SendCommandInternal(
     const std::string& method,
     const base::DictionaryValue& params,
     std::unique_ptr<base::DictionaryValue>* result,
     bool expect_response,
     bool wait_for_response,
+    const int client_command_id,
     const Timeout* timeout) {
   if (parent_ == nullptr && !socket_->IsConnected())
     return Status(kDisconnected, "not connected to DevTools");
 
-  int command_id = next_id_++;
+  // |client_command_id| will be 0 for commands sent by ChromeDriver
+  int command_id = client_command_id ? client_command_id : next_id_++;
   base::DictionaryValue command;
   command.SetInteger("id", command_id);
   command.SetString("method", method);
   command.SetKey("params", params.Clone());
+  if (parent_ != nullptr) {
+    command.SetString("sessionId", session_id_);
+  }
   std::string message = SerializeValue(&command);
   if (IsVLogOn(1)) {
     // Note: ChromeDriver log-replay depends on the format of this logging.
@@ -304,15 +366,8 @@ Status DevToolsClientImpl::SendCommandInternal(
     VLOG(1) << "DevTools WebSocket Command: " << method << " (id=" << command_id
             << ") " << id_ << " " << FormatValueForDisplay(params);
   }
-  if (parent_ != nullptr) {
-    base::DictionaryValue params2;
-    params2.SetString("sessionId", session_id_);
-    params2.SetString("message", message);
-    Status status = parent_->SendCommandInternal(
-        "Target.sendMessageToTarget", params2, nullptr, true, false, timeout);
-    if (status.IsError())
-      return status;
-  } else if (!socket_->Send(message)) {
+  SyncWebSocket* socket = GetRootClient()->socket_.get();
+  if (!socket->Send(message)) {
     return Status(kDisconnected, "unable to send message to renderer");
   }
 
@@ -325,8 +380,11 @@ Status DevToolsClientImpl::SendCommandInternal(
 
     if (wait_for_response) {
       while (response_info->state == kWaiting) {
+        // Use a long default timeout if user has not requested one.
         Status status = ProcessNextMessage(
-            command_id, Timeout(base::TimeDelta::FromMinutes(10), timeout));
+            command_id, true,
+            timeout != nullptr ? *timeout
+                               : Timeout(base::TimeDelta::FromMinutes(10)));
         if (status.IsError()) {
           if (response_info->state == kReceived)
             response_info_map_.erase(command_id);
@@ -335,12 +393,22 @@ Status DevToolsClientImpl::SendCommandInternal(
       }
       if (response_info->state == kBlocked) {
         response_info->state = kIgnored;
+        if (owner_) {
+          std::string alert_text;
+          Status status =
+              owner_->GetJavaScriptDialogManager()->GetDialogMessage(
+                  &alert_text);
+          if (status.IsOk())
+            return Status(kUnexpectedAlertOpen,
+                          "{Alert text : " + alert_text + "}");
+        }
         return Status(kUnexpectedAlertOpen);
       }
       CHECK_EQ(response_info->state, kReceived);
       internal::InspectorCommandResponse& response = response_info->response;
-      if (!response.result)
+      if (!response.result) {
         return internal::ParseInspectorError(response.error);
+      }
       *result = std::move(response.result);
     }
   } else {
@@ -349,9 +417,9 @@ Status DevToolsClientImpl::SendCommandInternal(
   return Status(kOk);
 }
 
-Status DevToolsClientImpl::ProcessNextMessage(
-    int expected_id,
-    const Timeout& timeout) {
+Status DevToolsClientImpl::ProcessNextMessage(int expected_id,
+                                              bool log_timeout,
+                                              const Timeout& timeout) {
   ScopedIncrementer increment_stack_count(&stack_count_);
 
   Status status = EnsureListenersNotifiedOfConnect();
@@ -380,7 +448,7 @@ Status DevToolsClientImpl::ProcessNextMessage(
     return Status(kTargetDetached);
 
   if (parent_ != nullptr)
-    return parent_->ProcessNextMessage(-1, timeout);
+    return parent_->ProcessNextMessage(-1, log_timeout, timeout);
 
   std::string message;
   switch (socket_->ReceiveNextMessage(&message, timeout)) {
@@ -395,7 +463,8 @@ Status DevToolsClientImpl::ProcessNextMessage(
       std::string err =
           "Timed out receiving message from renderer: " +
           base::StringPrintf("%.3lf", timeout.GetDuration().InSecondsF());
-      LOG(ERROR) << err;
+      if (log_timeout)
+        LOG(ERROR) << err;
       return Status(kTimeout, err);
     }
     default:
@@ -408,18 +477,33 @@ Status DevToolsClientImpl::ProcessNextMessage(
 
 Status DevToolsClientImpl::HandleMessage(int expected_id,
                                          const std::string& message) {
+  std::string session_id;
   internal::InspectorMessageType type;
   internal::InspectorEvent event;
   internal::InspectorCommandResponse response;
-  if (!parser_func_.Run(message, expected_id, &type, &event, &response)) {
+  if (!parser_func_.Run(message, expected_id, &session_id, &type, &event,
+                        &response)) {
     LOG(ERROR) << "Bad inspector message: " << message;
     return Status(kUnknownError, "bad inspector message: " + message);
   }
-
-  if (type == internal::kEventMessageType)
-    return ProcessEvent(event);
+  DevToolsClientImpl* client = this;
+  if (session_id != session_id_) {
+    auto it = children_.find(session_id);
+    if (it == children_.end()) {
+      // ChromeDriver only cares about iframe targets, but uses
+      // Target.setAutoAttach in FrameTracker. If we don't know about this
+      // sessionId, then it must be of a different target type and should be
+      // ignored.
+      return Status(kOk);
+    }
+    client = it->second;
+  }
+  WebViewImplHolder client_holder(client->owner_);
+  if (type == internal::kEventMessageType) {
+    return client->ProcessEvent(event);
+  }
   CHECK_EQ(type, internal::kCommandResponseMessageType);
-  return ProcessCommandResponse(response);
+  return client->ProcessCommandResponse(response);
 }
 
 Status DevToolsClientImpl::ProcessEvent(const internal::InspectorEvent& event) {
@@ -464,27 +548,6 @@ Status DevToolsClientImpl::ProcessEvent(const internal::InspectorEvent& event) {
     }
     if (enable_status.IsError())
       return status;
-  }
-  if (event.method == "Target.receivedMessageFromTarget") {
-    std::string session_id;
-    if (!event.params->GetString("sessionId", &session_id))
-      return Status(
-          kUnknownError,
-          "missing sessionId in Target.receivedMessageFromTarget event");
-    if (children_.count(session_id) == 0)
-      // ChromeDriver only cares about iframe targets. If we don't know about
-      // this sessionId, then it must be of a different target type and should
-      // be ignored.
-      return Status(kOk);
-    DevToolsClientImpl* child = children_[session_id];
-    std::string message;
-    if (!event.params->GetString("message", &message))
-      return Status(
-          kUnknownError,
-          "missing message in Target.receivedMessageFromTarget event");
-
-    WebViewImplHolder childHolder(child->owner_);
-    return child->HandleMessage(-1, message);
   }
   return Status(kOk);
 }
@@ -574,12 +637,12 @@ Status DevToolsClientImpl::EnsureListenersNotifiedOfCommandResponse() {
 
 namespace internal {
 
-bool ParseInspectorMessage(
-    const std::string& message,
-    int expected_id,
-    InspectorMessageType* type,
-    InspectorEvent* event,
-    InspectorCommandResponse* command_response) {
+bool ParseInspectorMessage(const std::string& message,
+                           int expected_id,
+                           std::string* session_id,
+                           InspectorMessageType* type,
+                           InspectorEvent* event,
+                           InspectorCommandResponse* command_response) {
   // We want to allow invalid characters in case they are valid ECMAScript
   // strings. For example, webplatform tests use this to check string handling
   std::unique_ptr<base::Value> message_value = base::JSONReader::ReadDeprecated(
@@ -587,7 +650,9 @@ bool ParseInspectorMessage(
   base::DictionaryValue* message_dict;
   if (!message_value || !message_value->GetAsDictionary(&message_dict))
     return false;
-
+  session_id->clear();
+  if (message_dict->HasKey("sessionId"))
+    message_dict->GetString("sessionId", session_id);
   int id;
   if (!message_dict->HasKey("id")) {
     std::string method;
@@ -635,9 +700,15 @@ Status ParseInspectorError(const std::string& error_json) {
   if (error_found) {
     if (error_message == kInspectorDefaultContextError ||
         error_message == kInspectorContextError) {
-      return Status(kNoSuchExecutionContext);
+      return Status(kNoSuchWindow);
     } else if (error_message == kInspectorInvalidURL) {
       return Status(kInvalidArgument);
+    } else if (error_message == kInspectorInsecureContext) {
+      return Status(kInvalidArgument,
+                    "feature cannot be used in insecure context");
+    } else if (error_message == kInspectorPushPermissionError ||
+               error_message == kInspectorOpaqueOrigins) {
+      return Status(kInvalidArgument, error_message);
     }
     base::Optional<int> error_code = error_dict->FindIntPath("code");
     if (error_code == kInvalidParamsInspectorCode)

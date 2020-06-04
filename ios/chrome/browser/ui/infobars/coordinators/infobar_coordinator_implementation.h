@@ -17,18 +17,35 @@
 // successfully. If it returns NO no Modal should be presented.
 - (BOOL)configureModalViewController;
 
+// Returns YES if the Infobar Accept action was completed successfully.
+- (BOOL)isInfobarAccepted;
+
+// Returns YES if the Infobar Banner Accept action will present the Infobar
+// Modal and shouldn't be dismissed. e.g. Tapping on Save Card "Save..." Infobar
+// button presents the Infobar Modal and doesn't accept the Infobar.
+- (BOOL)infobarBannerActionWillPresentModal;
+
 // Performs any actions related to an Infobar Banner presentation.
 - (void)infobarBannerWasPresented;
 
 // Performs any actions related to an Infobar Modal presentation.
 - (void)infobarModalPresentedFromBanner:(BOOL)presentedFromBanner;
 
-// Dismisses the InfobarBanner once there's no interaction in progress. An
-// interaction is any user initiated behavior with the Banner.
-- (void)dismissBannerWhenInteractionIsFinished;
+// Dismisses the InfobarBanner if not currently being used. A user could be
+// interacting with the banner or the Infobar may still be using the banner to
+// present information (i.e. infobarActionInProgress is YES).
+- (void)dismissBannerIfReady;
+
+// YES if the infobar action has been started and has not finished yet (i.e.
+// Translate is in progress). If the Infobar action is not async, this should
+// most likely always return NO.
+- (BOOL)infobarActionInProgress;
 
 // Performs the main Infobar action. e.g. "Save Password", "Restore",etc.
 - (void)performInfobarAction;
+
+// Called right before the InfobarBanner will be dismissed.
+- (void)infobarBannerWillBeDismissed:(BOOL)userInitiated;
 
 // Called after the Infobar (either Modal or Banner) has been dismissed.
 // Transitioning from Banner to Modal won't call this method.

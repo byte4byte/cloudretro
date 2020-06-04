@@ -12,27 +12,29 @@ import android.os.Build;
 import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.v4.util.ObjectsCompat;
 import android.util.Base64;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.util.ObjectsCompat;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleCell;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleWifi;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
-import org.chromium.chrome.browser.preferences.website.PermissionInfo;
-import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.site_settings.PermissionInfo;
+import org.chromium.chrome.browser.site_settings.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlUtilitiesJni;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -244,12 +246,12 @@ public class GeolocationHeader {
     }
 
     @HeaderState
-    private static int geoHeaderStateForUrl(String url, boolean isIncognito, boolean recordUma) {
+    private static int geoHeaderStateForUrl(Profile profile, String url, boolean recordUma) {
         // Only send X-Geo in normal mode.
-        if (isIncognito) return HeaderState.INCOGNITO;
+        if (profile.isOffTheRecord()) return HeaderState.INCOGNITO;
 
         // Only send X-Geo header to Google domains.
-        if (!UrlUtilities.nativeIsGoogleSearchUrl(url)) return HeaderState.UNSUITABLE_URL;
+        if (!UrlUtilitiesJni.get().isGoogleSearchUrl(url)) return HeaderState.UNSUITABLE_URL;
 
         Uri uri = Uri.parse(url);
         if (!UrlConstants.HTTPS_SCHEME.equals(uri.getScheme())) return HeaderState.NOT_HTTPS;
@@ -260,7 +262,7 @@ public class GeolocationHeader {
         }
 
         // Only send X-Geo header if the user hasn't disabled geolocation for url.
-        if (isLocationDisabledForUrl(uri, isIncognito)) {
+        if (isLocationDisabledForUrl(profile, uri)) {
             if (recordUma) recordHistogram(UMA_LOCATION_DISABLED_FOR_GOOGLE_DOMAIN);
             return HeaderState.LOCATION_PERMISSION_BLOCKED;
         }
@@ -283,11 +285,12 @@ public class GeolocationHeader {
      */
     public static String getGeoHeader(String url, Tab tab) {
         // TODO(lbargu): Refactor and simplify flow.
-        boolean isIncognito = tab.isIncognito();
+        Profile profile = Profile.fromWebContents(tab.getWebContents());
         Location locationToAttach = null;
         VisibleNetworks visibleNetworksToAttach = null;
         long locationAge = Long.MAX_VALUE;
-        @HeaderState int headerState = geoHeaderStateForUrl(url, isIncognito, true);
+        @HeaderState
+        int headerState = geoHeaderStateForUrl(profile, url, true);
         if (headerState == HeaderState.HEADER_ENABLED) {
             locationToAttach =
                     GeolocationTracker.getLastKnownLocation(ContextUtils.getApplicationContext());
@@ -315,14 +318,14 @@ public class GeolocationHeader {
 
         @LocationSource int locationSource = getLocationSource();
         @Permission int appPermission = getGeolocationPermission(tab);
-        @Permission int domainPermission = getDomainPermission(url, isIncognito);
+        @Permission int domainPermission = getDomainPermission(profile, url);
 
         // Record the permission state with a histogram.
         recordPermissionHistogram(locationSource, appPermission, domainPermission,
                 locationToAttach != null, headerState);
 
         if (locationSource != LocationSource.MASTER_OFF && appPermission != Permission.BLOCKED
-                && domainPermission != Permission.BLOCKED && !isIncognito) {
+                && domainPermission != Permission.BLOCKED && !tab.isIncognito()) {
             // Record the Location Age with a histogram.
             recordLocationAgeHistogram(locationSource, locationAge);
             long duration = sFirstLocationTime == Long.MAX_VALUE
@@ -394,15 +397,14 @@ public class GeolocationHeader {
      * Returns true if the user has disabled sharing their location with url (e.g. via the
      * geolocation infobar).
      */
-    static boolean isLocationDisabledForUrl(Uri uri, boolean isIncognito) {
+    static boolean isLocationDisabledForUrl(Profile profile, Uri uri) {
         boolean enabled =
                 // TODO(raymes): The call to isPermissionControlledByDSE is only needed if this
                 // could be called for an origin that isn't the default search engine. Otherwise
                 // remove this line.
                 WebsitePreferenceBridge.isPermissionControlledByDSE(
-                        ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION, uri.toString(),
-                        isIncognito)
-                && locationContentSettingForUrl(uri, isIncognito) == ContentSettingValues.ALLOW;
+                        profile, ContentSettingsType.GEOLOCATION, uri.toString())
+                && locationContentSettingForUrl(profile, uri) == ContentSettingValues.ALLOW;
         return !enabled;
     }
 
@@ -411,10 +413,10 @@ public class GeolocationHeader {
      * geolocation infobar).
      */
     static @ContentSettingValues @Nullable Integer locationContentSettingForUrl(
-            Uri uri, boolean isIncognito) {
+            Profile profile, Uri uri) {
         PermissionInfo locationSettings = new PermissionInfo(
-                PermissionInfo.Type.GEOLOCATION, uri.toString(), null, isIncognito);
-        return locationSettings.getContentSetting();
+                PermissionInfo.Type.GEOLOCATION, uri.toString(), null, profile.isOffTheRecord());
+        return locationSettings.getContentSetting(profile);
     }
 
     @VisibleForTesting
@@ -476,10 +478,10 @@ public class GeolocationHeader {
      * geolocation infobar).
      */
     @Permission
-    private static int getDomainPermission(String url, boolean isIncognito) {
+    private static int getDomainPermission(Profile profile, String url) {
         @ContentSettingValues
         @Nullable
-        Integer domainPermission = locationContentSettingForUrl(Uri.parse(url), isIncognito);
+        Integer domainPermission = locationContentSettingForUrl(profile, Uri.parse(url));
         switch (domainPermission) {
             case ContentSettingValues.ALLOW:
                 return Permission.GRANTED;

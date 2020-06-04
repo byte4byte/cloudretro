@@ -6,6 +6,7 @@
 
 #include "components/dom_distiller/core/url_constants.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/components/webui/web_ui_url_constants.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -17,16 +18,17 @@ bool CanAddURLToHistory(const GURL& url) {
   if (!url.is_valid())
     return false;
 
+  // TODO(crbug.com/1007192): Don't store the URL as we aren't persiting the
+  // files. Maybe we should start persisting the files and store the URL.
   // TODO: We should allow ChromeUIScheme URLs if they have been explicitly
   // typed.  Right now, however, these are marked as typed even when triggered
   // by a shortcut or menu action.
   if (url.SchemeIs(url::kJavaScriptScheme) ||
       url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
-      url.SchemeIs(kChromeUIScheme))
+      url.SchemeIs(kChromeUIScheme) || url.SchemeIs(url::kFileScheme))
     return false;
 
-  // Allow all about: and chrome: URLs except about:blank|newtab, since the user
-  // may like to see "chrome://version", etc. in their history and autocomplete.
+  // Allow all about: URLs except about:blank|newtab.
   if (url == url::kAboutBlankURL || url == kChromeUIAboutNewTabURL)
     return false;
 

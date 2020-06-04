@@ -78,6 +78,7 @@ class AssociatedRemote {
 
   // Shorthand form of |get()|. See above.
   typename Interface::Proxy_* operator->() const { return get(); }
+  typename Interface::Proxy_& operator*() const { return *get(); }
 
   // Indicates whether this AssociatedRemote is bound and thus can issue
   // Interface method calls via the above accessors.
@@ -274,16 +275,6 @@ class AssociatedRemote {
   mutable State internal_state_;
 
   DISALLOW_COPY_AND_ASSIGN(AssociatedRemote);
-};
-
-// Constructs an invalid PendingAssociatedRemote of any arbitrary interface
-// type. Useful as short-hand for a default constructed value.
-class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) NullAssociatedRemote {
- public:
-  template <typename Interface>
-  operator PendingAssociatedRemote<Interface>() const {
-    return PendingAssociatedRemote<Interface>();
-  }
 };
 
 }  // namespace mojo

@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/offline_page_model.h"
 
 namespace offline_pages {
@@ -54,14 +53,12 @@ class StubOfflinePageModel : public OfflinePageModel {
   void PublishInternalArchive(
       const OfflinePageItem& offline_page,
       PublishPageCallback publish_done_callback) override;
-  const base::FilePath& GetInternalArchiveDirectory(
+  const base::FilePath& GetArchiveDirectory(
       const std::string& name_space) const override;
   bool IsArchiveInInternalDir(const base::FilePath& file_path) const override;
-  ClientPolicyController* GetPolicyController() override;
   OfflineEventLogger* GetLogger() override;
 
  private:
-  ClientPolicyController policy_controller_;
   std::vector<int64_t> offline_ids_;
   base::FilePath archive_directory_;
 };

@@ -39,7 +39,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -88,10 +88,10 @@ std::unique_ptr<UserCloudPolicyManager> BuildCloudPolicyManager() {
 class UserPolicySigninServiceTest : public testing::Test {
  public:
   UserPolicySigninServiceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         test_account_id_(AccountId::FromUserEmailGaiaId(
             kTestUser,
-            identity::GetTestGaiaIdForEmail(kTestUser))),
+            signin::GetTestGaiaIdForEmail(kTestUser))),
         register_completed_(false) {}
 
   MOCK_METHOD1(OnPolicyRefresh, void(bool));
@@ -105,12 +105,12 @@ class UserPolicySigninServiceTest : public testing::Test {
 
   void RegisterPolicyClientWithCallback(UserPolicySigninService* service) {
     UserPolicySigninServiceBase::PolicyRegistrationCallback callback =
-        base::Bind(&UserPolicySigninServiceTest::OnRegisterCompleted,
-                   base::Unretained(this));
+        base::BindOnce(&UserPolicySigninServiceTest::OnRegisterCompleted,
+                       base::Unretained(this));
     AccountInfo account_info =
         identity_test_env()->MakeAccountAvailable(kTestUser);
-    service->RegisterForPolicyWithAccountId(kTestUser, account_info.gaia,
-                                            callback);
+    service->RegisterForPolicyWithAccountId(kTestUser, account_info.account_id,
+                                            std::move(callback));
     ASSERT_TRUE(IsRequestActive());
   }
 
@@ -265,7 +265,7 @@ class UserPolicySigninServiceTest : public testing::Test {
     EXPECT_EQ(dm_token_, expected_dm_token);
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return identity_test_env_adaptor_->identity_test_env();
   }
 
@@ -279,7 +279,7 @@ class UserPolicySigninServiceTest : public testing::Test {
 
   // BrowserPolicyConnector and UrlFetcherFactory want to initialize and free
   // various components asynchronously via tasks, so create fake threads here.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   // Used in conjunction with OnRegisterCompleted() to test client registration
   // callbacks.

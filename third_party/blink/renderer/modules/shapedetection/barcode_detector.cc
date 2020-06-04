@@ -6,16 +6,15 @@
 
 #include <utility>
 
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/shape_detection/public/mojom/barcodedetection_provider.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_barcode_detector_options.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_detected_barcode.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_point_2d.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_image_source.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
-#include "third_party/blink/renderer/modules/imagecapture/point_2d.h"
-#include "third_party/blink/renderer/modules/shapedetection/barcode_detector_options.h"
-#include "third_party/blink/renderer/modules/shapedetection/detected_barcode.h"
+#include "third_party/blink/renderer/modules/shapedetection/barcode_detector_statics.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
@@ -65,7 +64,7 @@ BarcodeDetector* BarcodeDetector::Create(ExecutionContext* context,
 BarcodeDetector::BarcodeDetector(ExecutionContext* context,
                                  const BarcodeDetectorOptions* options,
                                  ExceptionState& exception_state)
-    : ShapeDetector() {
+    : service_(context) {
   auto barcode_detector_options =
       shape_detection::mojom::blink::BarcodeDetectorOptions::New();
 
@@ -86,70 +85,69 @@ BarcodeDetector::BarcodeDetector(ExecutionContext* context,
 
   // See https://bit.ly/2S0zRAS for task types.
   auto task_runner = context->GetTaskRunner(TaskType::kMiscPlatformAPI);
-  auto request = mojo::MakeRequest(&barcode_provider_, task_runner);
-  if (auto* interface_provider = context->GetInterfaceProvider()) {
-    interface_provider->GetInterface(std::move(request));
-  }
 
-  barcode_provider_->CreateBarcodeDetection(
-      mojo::MakeRequest(&barcode_service_, task_runner),
+  BarcodeDetectorStatics::From(context)->CreateBarcodeDetection(
+      service_.BindNewPipeAndPassReceiver(task_runner),
       std::move(barcode_detector_options));
-
-  barcode_service_.set_connection_error_handler(
-      WTF::Bind(&BarcodeDetector::OnBarcodeServiceConnectionError,
-                WrapWeakPersistent(this)));
+  service_.set_disconnect_handler(
+      WTF::Bind(&BarcodeDetector::OnConnectionError, WrapWeakPersistent(this)));
 }
 
+// static
 ScriptPromise BarcodeDetector::getSupportedFormats(ScriptState* script_state) {
   ExecutionContext* context = ExecutionContext::From(script_state);
-  NonThrowableExceptionState exception_state;
-  BarcodeDetector* detector = BarcodeDetector::Create(
-      context, BarcodeDetectorOptions::Create(), exception_state);
-
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-  if (!detector->barcode_service_) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        DOMExceptionCode::kNotSupportedError,
-        "Barcode detection service unavailable."));
-    return promise;
-  }
-
-  detector->barcode_service_requests_.insert(resolver);
-  detector->barcode_provider_->EnumerateSupportedFormats(
-      WTF::Bind(&BarcodeDetector::OnEnumerateSupportedFormats,
-                WrapPersistent(detector), WrapPersistent(resolver)));
-  return promise;
+  return BarcodeDetectorStatics::From(context)->EnumerateSupportedFormats(
+      script_state);
 }
 
-void BarcodeDetector::OnEnumerateSupportedFormats(
-    ScriptPromiseResolver* resolver,
-    const Vector<shape_detection::mojom::blink::BarcodeFormat>&
-        format_results) {
-  DCHECK(barcode_service_requests_.Contains(resolver));
-  barcode_service_requests_.erase(resolver);
-
-  Vector<WTF::String> formats;
-  formats.ReserveInitialCapacity(format_results.size());
-  for (const auto& format : format_results)
-    formats.push_back(DetectedBarcode::BarcodeFormatToString(format));
-  resolver->Resolve(formats);
+// static
+String BarcodeDetector::BarcodeFormatToString(
+    const shape_detection::mojom::BarcodeFormat format) {
+  switch (format) {
+    case shape_detection::mojom::BarcodeFormat::AZTEC:
+      return "aztec";
+    case shape_detection::mojom::BarcodeFormat::CODE_128:
+      return "code_128";
+    case shape_detection::mojom::BarcodeFormat::CODE_39:
+      return "code_39";
+    case shape_detection::mojom::BarcodeFormat::CODE_93:
+      return "code_93";
+    case shape_detection::mojom::BarcodeFormat::CODABAR:
+      return "codabar";
+    case shape_detection::mojom::BarcodeFormat::DATA_MATRIX:
+      return "data_matrix";
+    case shape_detection::mojom::BarcodeFormat::EAN_13:
+      return "ean_13";
+    case shape_detection::mojom::BarcodeFormat::EAN_8:
+      return "ean_8";
+    case shape_detection::mojom::BarcodeFormat::ITF:
+      return "itf";
+    case shape_detection::mojom::BarcodeFormat::PDF417:
+      return "pdf417";
+    case shape_detection::mojom::BarcodeFormat::QR_CODE:
+      return "qr_code";
+    case shape_detection::mojom::BarcodeFormat::UNKNOWN:
+      return "unknown";
+    case shape_detection::mojom::BarcodeFormat::UPC_A:
+      return "upc_a";
+    case shape_detection::mojom::BarcodeFormat::UPC_E:
+      return "upc_e";
+  }
 }
 
 ScriptPromise BarcodeDetector::DoDetect(ScriptPromiseResolver* resolver,
                                         SkBitmap bitmap) {
   ScriptPromise promise = resolver->Promise();
-  if (!barcode_service_) {
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotSupportedError,
         "Barcode detection service unavailable."));
     return promise;
   }
-  barcode_service_requests_.insert(resolver);
-  barcode_service_->Detect(
-      std::move(bitmap),
-      WTF::Bind(&BarcodeDetector::OnDetectBarcodes, WrapPersistent(this),
-                WrapPersistent(resolver)));
+  detect_requests_.insert(resolver);
+  service_->Detect(std::move(bitmap),
+                   WTF::Bind(&BarcodeDetector::OnDetectBarcodes,
+                             WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
@@ -157,43 +155,48 @@ void BarcodeDetector::OnDetectBarcodes(
     ScriptPromiseResolver* resolver,
     Vector<shape_detection::mojom::blink::BarcodeDetectionResultPtr>
         barcode_detection_results) {
-  DCHECK(barcode_service_requests_.Contains(resolver));
-  barcode_service_requests_.erase(resolver);
+  DCHECK(detect_requests_.Contains(resolver));
+  detect_requests_.erase(resolver);
 
   HeapVector<Member<DetectedBarcode>> detected_barcodes;
   for (const auto& barcode : barcode_detection_results) {
     HeapVector<Member<Point2D>> corner_points;
     for (const auto& corner_point : barcode->corner_points) {
       Point2D* point = Point2D::Create();
-      point->setX(corner_point.x);
-      point->setY(corner_point.y);
+      point->setX(corner_point.x());
+      point->setY(corner_point.y());
       corner_points.push_back(point);
     }
-    detected_barcodes.push_back(DetectedBarcode::Create(
-        barcode->raw_value,
-        DOMRectReadOnly::Create(
-            barcode->bounding_box.x, barcode->bounding_box.y,
-            barcode->bounding_box.width, barcode->bounding_box.height),
-        barcode->format, corner_points));
+
+    DetectedBarcode* detected_barcode = DetectedBarcode::Create();
+    detected_barcode->setRawValue(barcode->raw_value);
+    detected_barcode->setBoundingBox(DOMRectReadOnly::Create(
+        barcode->bounding_box.x(), barcode->bounding_box.y(),
+        barcode->bounding_box.width(), barcode->bounding_box.height()));
+    detected_barcode->setFormat(BarcodeFormatToString(barcode->format));
+    detected_barcode->setCornerPoints(corner_points);
+    detected_barcodes.push_back(detected_barcode);
   }
 
   resolver->Resolve(detected_barcodes);
 }
 
-void BarcodeDetector::OnBarcodeServiceConnectionError() {
-  for (const auto& request : barcode_service_requests_) {
-    request->Reject(MakeGarbageCollected<DOMException>(
+void BarcodeDetector::OnConnectionError() {
+  service_.reset();
+
+  HeapHashSet<Member<ScriptPromiseResolver>> resolvers;
+  resolvers.swap(detect_requests_);
+  for (const auto& resolver : resolvers) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotSupportedError,
         "Barcode Detection not implemented."));
   }
-  barcode_service_requests_.clear();
-  barcode_service_.reset();
-  barcode_provider_.reset();
 }
 
-void BarcodeDetector::Trace(blink::Visitor* visitor) {
+void BarcodeDetector::Trace(Visitor* visitor) {
   ShapeDetector::Trace(visitor);
-  visitor->Trace(barcode_service_requests_);
+  visitor->Trace(service_);
+  visitor->Trace(detect_requests_);
 }
 
 }  // namespace blink

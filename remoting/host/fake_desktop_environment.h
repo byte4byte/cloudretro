@@ -61,7 +61,7 @@ class FakeInputInjector : public InputInjector {
   std::vector<protocol::TouchEvent>* touch_events_ = nullptr;
   std::vector<protocol::ClipboardEvent>* clipboard_events_ = nullptr;
 
-  base::WeakPtrFactory<FakeInputInjector> weak_factory_;
+  base::WeakPtrFactory<FakeInputInjector> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeInputInjector);
 };
@@ -86,7 +86,7 @@ class FakeDesktopEnvironment : public DesktopEnvironment {
   // by FakeDesktopEnvironment.
   void set_frame_generator(
       protocol::FakeDesktopCapturer::FrameGenerator frame_generator) {
-    frame_generator_ = frame_generator;
+    frame_generator_ = std::move(frame_generator);
   }
 
   const DesktopEnvironmentOptions& options() const;
@@ -99,10 +99,15 @@ class FakeDesktopEnvironment : public DesktopEnvironment {
   std::unique_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() override;
   std::unique_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor()
       override;
+  std::unique_ptr<KeyboardLayoutMonitor> CreateKeyboardLayoutMonitor(
+      base::RepeatingCallback<void(const protocol::KeyboardLayout&)> callback)
+      override;
   std::unique_ptr<FileOperations> CreateFileOperations() override;
   std::string GetCapabilities() const override;
   void SetCapabilities(const std::string& capabilities) override;
   uint32_t GetDesktopSessionId() const override;
+  std::unique_ptr<DesktopAndCursorConditionalComposer>
+  CreateComposingVideoCapturer() override;
 
   base::WeakPtr<FakeInputInjector> last_input_injector() {
     return last_input_injector_;
@@ -118,7 +123,7 @@ class FakeDesktopEnvironment : public DesktopEnvironment {
 
   const DesktopEnvironmentOptions options_;
 
-  base::WeakPtrFactory<FakeDesktopEnvironment> weak_factory_;
+  base::WeakPtrFactory<FakeDesktopEnvironment> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeDesktopEnvironment);
 };
@@ -133,7 +138,7 @@ class FakeDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
   // by FakeDesktopEnvironment.
   void set_frame_generator(
       protocol::FakeDesktopCapturer::FrameGenerator frame_generator) {
-    frame_generator_ = frame_generator;
+    frame_generator_ = std::move(frame_generator);
   }
 
   // DesktopEnvironmentFactory implementation.

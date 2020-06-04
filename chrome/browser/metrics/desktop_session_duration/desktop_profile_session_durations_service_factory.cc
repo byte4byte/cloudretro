@@ -47,10 +47,10 @@ DesktopProfileSessionDurationsServiceFactory::BuildServiceInstanceFor(
   syncer::SyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile);
   DesktopSessionDurationTracker* tracker = DesktopSessionDurationTracker::Get();
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
-  return new DesktopProfileSessionDurationsService(sync_service,
-                                                   identity_manager, tracker);
+  return new DesktopProfileSessionDurationsService(
+      profile->GetPrefs(), sync_service, identity_manager, tracker);
 }
 
 content::BrowserContext*

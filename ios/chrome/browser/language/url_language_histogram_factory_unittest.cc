@@ -5,7 +5,7 @@
 #include "ios/chrome/browser/language/url_language_histogram_factory.h"
 
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -22,12 +22,12 @@ class UrlLanguageHistogramFactoryTest : public PlatformTest {
 
   ~UrlLanguageHistogramFactoryTest() override { chrome_browser_state_.reset(); }
 
-  ios::ChromeBrowserState* chrome_browser_state() {
+  ChromeBrowserState* chrome_browser_state() {
     return chrome_browser_state_.get();
   }
 
  private:
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
 };
 
@@ -36,7 +36,7 @@ TEST_F(UrlLanguageHistogramFactoryTest, NotCreatedInIncognito) {
       UrlLanguageHistogramFactory::GetForBrowserState(chrome_browser_state()),
       Not(IsNull()));
 
-  ios::ChromeBrowserState* otr_browser_state =
+  ChromeBrowserState* otr_browser_state =
       chrome_browser_state()->GetOffTheRecordChromeBrowserState();
   language::UrlLanguageHistogram* language_histogram =
       UrlLanguageHistogramFactory::GetForBrowserState(otr_browser_state);

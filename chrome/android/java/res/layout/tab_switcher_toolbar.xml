@@ -8,7 +8,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/tab_switcher_toolbar"
     android:layout_width="match_parent"
-    android:layout_height="@dimen/toolbar_height_no_shadow" >
+    android:layout_height="@dimen/toolbar_height_no_shadow"
+    android:clickable="true" >
 
     <LinearLayout
         android:layout_width="wrap_content"
@@ -18,12 +19,13 @@
         android:orientation="horizontal"
         android:visibility="gone">
         <ImageView
-            android:layout_width="@dimen/toolbar_button_width"
+            android:layout_width="wrap_content"
             android:layout_height="56dp"
             android:layout_gravity="start|top"
             android:scaleType="center"
             android:paddingStart="16dp"
             android:paddingEnd="16dp"
+            android:tint="@color/default_icon_color"
             app:srcCompat="@drawable/new_tab_icon"
             android:contentDescription="@string/accessibility_toolbar_btn_new_tab"/>
         <TextView
@@ -32,7 +34,7 @@
             android:paddingEnd="16dp"
             android:gravity="center_vertical"
             android:text="@string/button_new_tab"
-            android:textAppearance="@style/TextAppearance.BlackTitle2" />
+            android:textAppearance="@style/TextAppearance.TextMediumThick.Primary" />
     </LinearLayout>
 
     <org.chromium.chrome.browser.toolbar.NewTabButton
@@ -43,6 +45,16 @@
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
         android:contentDescription="@string/accessibility_toolbar_btn_new_tab" />
+
+    <ImageView
+        android:id="@+id/logo"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:layout_gravity="center"
+        android:scaleType="centerInside"
+        app:srcCompat="@drawable/google_logo"
+        android:visibility="gone"
+        android:contentDescription="@null"/>
 
     <ViewStub
         android:id="@+id/incognito_tabs_stub"
@@ -56,8 +68,8 @@
     <LinearLayout
         android:orientation="horizontal"
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end" >
+        android:layout_height="match_parent"
+        android:layout_gravity="center|end" >
 
         <!-- TODO(crbug.com/912358): Enable touch highlight on this button. -->
         <org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton
@@ -67,6 +79,17 @@
             android:paddingStart="8dp"
             android:layout_gravity="top"
             android:contentDescription="@string/accessibility_toolbar_btn_tabswitcher_toggle_default" />
+
+        <Switch
+            android:id="@+id/incognito_switch"
+            android:layout_gravity="center"
+            android:layout_height="wrap_content"
+            android:layout_width="wrap_content"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:thumb="@drawable/incognito_switch"
+            android:track="@drawable/incognito_switch_track"
+            android:visibility="gone"/>
 
         <include layout="@layout/menu_button" />
 

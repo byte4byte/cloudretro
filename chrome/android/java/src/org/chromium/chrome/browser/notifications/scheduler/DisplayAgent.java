@@ -9,30 +9,30 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.drawable.Icon;
+import android.os.Build;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.Log;
+import org.chromium.base.IntentUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
-import org.chromium.chrome.browser.notifications.ChromeNotification;
 import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
 import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
 import org.chromium.chrome.browser.notifications.NotificationIntentInterceptor;
-import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
-import org.chromium.chrome.browser.notifications.NotificationMetadata;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
 import org.chromium.chrome.browser.notifications.NotificationUmaTracker.SystemNotificationType;
 import org.chromium.chrome.browser.notifications.PendingIntentProvider;
-import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions.ChannelId;
-import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions.ChannelId;
+import org.chromium.components.browser_ui.notifications.ChromeNotification;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 /**
  * Used by notification scheduler to display the notification in Android UI.
@@ -48,8 +48,33 @@ public class DisplayAgent {
             "org.chromium.chrome.browser.notifications.scheduler.EXTRA_GUID";
     private static final String EXTRA_ACTION_BUTTON_TYPE =
             "org.chromium.chrome.browser.notifications.scheduler.EXTRA_ACTION_BUTTON_TYPE";
+    private static final String EXTRA_ACTION_BUTTON_ID =
+            "org.chromium.chrome.browser.notifications.scheduler.EXTRA_ACTION_BUTTON_ID";
     private static final String EXTRA_SCHEDULER_CLIENT_TYPE =
             "org.chromium.chrome.browser.notifications.scheduler.EXTRA_SCHEDULER_CLIENT_TYPE ";
+
+    /**
+     * Contains icon info on the notification.
+     */
+    private static class IconBundle {
+        public final Bitmap bitmap;
+        public final int resourceId;
+
+        public IconBundle() {
+            bitmap = null;
+            resourceId = 0;
+        }
+
+        public IconBundle(Bitmap bitmap) {
+            this.bitmap = bitmap;
+            this.resourceId = 0;
+        }
+
+        public IconBundle(int resourceId) {
+            this.bitmap = null;
+            this.resourceId = resourceId;
+        }
+    }
 
     /**
      * Contains button info on the notification.
@@ -72,26 +97,35 @@ public class DisplayAgent {
     private static class NotificationData {
         public final String title;
         public final String message;
-        public final Bitmap icon;
-        public ArrayList<Button> buttons;
+        public HashMap<Integer /*@IconType*/, IconBundle> icons = new HashMap<>();
+        public ArrayList<Button> buttons = new ArrayList<>();
 
-        private NotificationData(String title, String message, Bitmap icon) {
-            // TODO(xingliu): Populate custom data.
+        private NotificationData(String title, String message) {
             this.title = title;
             this.message = message;
-            this.icon = icon;
-        }
-
-        @CalledByNative
-        private void addButton(String text, @ActionButtonType int type, String id) {
-            buttons.add(new Button(text, type, id));
         }
     }
 
     @CalledByNative
-    private static NotificationData buildNotificationData(
-            String title, String message, Bitmap icon) {
-        return new NotificationData(title, message, icon);
+    private static void addButton(
+            NotificationData notificationData, String text, @ActionButtonType int type, String id) {
+        notificationData.buttons.add(new Button(text, type, id));
+    }
+
+    @CalledByNative
+    private static void addIcon(
+            NotificationData notificationData, @IconType int type, Bitmap bitmap, int resourceId) {
+        assert ((bitmap == null && resourceId != 0) || (bitmap != null && resourceId == 0));
+        if (resourceId != 0) {
+            notificationData.icons.put(type, new IconBundle(resourceId));
+        } else {
+            notificationData.icons.put(type, new IconBundle(bitmap));
+        }
+    }
+
+    @CalledByNative
+    private static NotificationData buildNotificationData(String title, String message) {
+        return new NotificationData(title, message);
     }
 
     /**
@@ -127,13 +161,8 @@ public class DisplayAgent {
             };
 
             // Try to load native.
-            try {
-                ChromeBrowserInitializer.getInstance().handlePreNativeStartup(parts);
-                ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
-            } catch (ProcessInitException e) {
-                Log.e(TAG, "Unable to load native library.", e);
-                ChromeApplication.reportStartupErrorAndExit(e);
-            }
+            ChromeBrowserInitializer.getInstance().handlePreNativeStartup(parts);
+            ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
         }
     }
 
@@ -149,18 +178,28 @@ public class DisplayAgent {
             case NotificationIntentInterceptor.IntentType.UNKNOWN:
                 break;
             case NotificationIntentInterceptor.IntentType.CONTENT_INTENT:
-                nativeOnContentClick(Profile.getLastUsedProfile(), clientType, guid);
+                DisplayAgentJni.get().onUserAction(clientType, UserActionType.CLICK, guid,
+                        ActionButtonType.UNKNOWN_ACTION, null);
+                closeNotification(guid);
                 break;
             case NotificationIntentInterceptor.IntentType.DELETE_INTENT:
-                nativeOnDismiss(Profile.getLastUsedProfile(), clientType, guid);
+                DisplayAgentJni.get().onUserAction(clientType, UserActionType.DISMISS, guid,
+                        ActionButtonType.UNKNOWN_ACTION, null);
                 break;
             case NotificationIntentInterceptor.IntentType.ACTION_INTENT:
                 int actionButtonType = IntentUtils.safeGetIntExtra(
                         intent, EXTRA_ACTION_BUTTON_TYPE, ActionButtonType.UNKNOWN_ACTION);
-                nativeOnActionButton(
-                        Profile.getLastUsedProfile(), clientType, guid, actionButtonType);
+                String buttonId = IntentUtils.safeGetStringExtra(intent, EXTRA_ACTION_BUTTON_ID);
+                DisplayAgentJni.get().onUserAction(
+                        clientType, UserActionType.BUTTON_CLICK, guid, actionButtonType, buttonId);
+                closeNotification(guid);
                 break;
         }
+    }
+
+    private static void closeNotification(String guid) {
+        new NotificationManagerProxyImpl(ContextUtils.getApplicationContext())
+                .cancel(DISPLAY_AGENT_TAG, guid.hashCode());
     }
 
     /**
@@ -194,6 +233,7 @@ public class DisplayAgent {
         // TODO(xingliu): Plumb platform specific data from native.
         // mode and provide correct notification id. Support buttons.
         Context context = ContextUtils.getApplicationContext();
+
         ChromeNotificationBuilder builder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(true /* preferCompat */,
                         platformData.channel, null /* remoteAppPackageName */,
@@ -202,8 +242,27 @@ public class DisplayAgent {
         builder.setContentTitle(notificationData.title);
         builder.setContentText(notificationData.message);
 
-        // TODO(xingliu): Use the icon from native. Support big icon.
-        builder.setSmallIcon(R.drawable.ic_chrome);
+        boolean hasSmallIcon = notificationData.icons.containsKey(IconType.SMALL_ICON);
+
+        if (hasSmallIcon && notificationData.icons.get(IconType.SMALL_ICON).bitmap != null
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Use bitmap as small icon.
+            Icon smallIcon =
+                    Icon.createWithBitmap(notificationData.icons.get(IconType.SMALL_ICON).bitmap);
+            builder.setSmallIcon(smallIcon);
+        } else {
+            // Use resource Id as small icon, if invalid, use default Chrome icon instead.
+            int resourceId = R.drawable.ic_chrome;
+            if (hasSmallIcon && notificationData.icons.get(IconType.SMALL_ICON).resourceId != 0) {
+                resourceId = notificationData.icons.get(IconType.SMALL_ICON).resourceId;
+            }
+            builder.setSmallIcon(resourceId);
+        }
+
+        if (notificationData.icons.containsKey(IconType.LARGE_ICON)
+                && notificationData.icons.get(IconType.LARGE_ICON).bitmap != null) {
+            builder.setLargeIcon(notificationData.icons.get(IconType.LARGE_ICON).bitmap);
+        }
 
         // Default content click behavior.
         Intent contentIntent = buildIntent(
@@ -227,6 +286,7 @@ public class DisplayAgent {
             Intent actionIntent = buildIntent(
                     context, NotificationIntentInterceptor.IntentType.ACTION_INTENT, systemData);
             actionIntent.putExtra(EXTRA_ACTION_BUTTON_TYPE, button.type);
+            actionIntent.putExtra(EXTRA_ACTION_BUTTON_ID, button.id);
 
             // TODO(xingliu): Support button icon. See https://crbug.com/983354
             builder.addAction(0 /*icon_id*/, button.text,
@@ -256,10 +316,9 @@ public class DisplayAgent {
 
     private DisplayAgent() {}
 
-    private static native void nativeOnContentClick(
-            Profile profile, @SchedulerClientType int type, String guid);
-    private static native void nativeOnDismiss(
-            Profile profile, @SchedulerClientType int type, String guid);
-    private static native void nativeOnActionButton(Profile profile,
-            @SchedulerClientType int clientType, String guid, @ActionButtonType int type);
+    @NativeMethods
+    interface Natives {
+        void onUserAction(@SchedulerClientType int clientType, @UserActionType int actionType,
+                String guid, @ActionButtonType int type, String buttonId);
+    }
 }

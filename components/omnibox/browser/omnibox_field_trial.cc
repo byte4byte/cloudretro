@@ -27,7 +27,7 @@
 #include "components/variations/hashing.h"
 #include "components/variations/variations_associated_data.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 
 using metrics::OmniboxEventProto;
 
@@ -224,26 +224,36 @@ base::TimeDelta OmniboxFieldTrial::StopTimerFieldTrialDuration() {
 }
 
 // static
-std::string OmniboxFieldTrial::GetZeroSuggestVariant(
+std::vector<std::string> OmniboxFieldTrial::GetZeroSuggestVariants(
     OmniboxEventProto::PageClassification page_classification) {
-  return internal::GetValueForRuleInContextByFeature(
-      omnibox::kOnFocusSuggestions, kZeroSuggestVariantRule,
-      page_classification);
-}
+  if (!base::FeatureList::IsEnabled(omnibox::kNewSearchFeatures))
+    return {};
 
-// static
-// static
-std::string OmniboxFieldTrial::GetOnFocusSuggestionsCustomEndpointURL() {
-  return base::GetFieldTrialParamValueByFeature(
-      omnibox::kOnFocusSuggestions, kOnFocusSuggestionsEndpointURLParam);
-}
+  // We check all these features for ZeroSuggestVariant because it's not
+  // possible to enable multiple features using Finch Forcing groups
+  // (omnibox::kOnFocusSuggestions as well as another feature). Therefore, in
+  // order to specify the ZeroSuggestVariant parameter in those groups we allow
+  // it to be associated with the feature that is being force enabled.
+  const base::Feature* features_to_check[] = {
+      // kOnFocusSuggestions must be the first checked feature, because it's
+      // used by about:flags to set a variety of ZeroSuggest parameters.
+      // We want it to be first so it overrides server-provided field trials.
+      &omnibox::kOnFocusSuggestions,
 
-// static
-int OmniboxFieldTrial::GetOnFocusSuggestionsCustomEndpointExperimentId() {
-  return base::GetFieldTrialParamByFeatureAsInt(
-      omnibox::kOnFocusSuggestions,
-      kOnFocusSuggestionsEndpointExperimentIdParam,
-      /*default_value=*/-1);
+      &omnibox::kZeroSuggestionsOnNTP,
+      &omnibox::kZeroSuggestionsOnNTPRealbox,
+      &omnibox::kZeroSuggestionsOnSERP,
+  };
+  for (const base::Feature* feature : features_to_check) {
+    auto parameter_value = internal::GetValueForRuleInContextByFeature(
+        *feature, kZeroSuggestVariantRule, page_classification);
+    if (!parameter_value.empty()) {
+      return base::SplitString(parameter_value, ",", base::TRIM_WHITESPACE,
+                               base::SPLIT_WANT_NONEMPTY);
+    }
+  }
+
+  return {};
 }
 
 bool OmniboxFieldTrial::ShortcutsScoringMaxRelevance(
@@ -278,9 +288,19 @@ void OmniboxFieldTrial::GetDemotionsByType(
     OmniboxEventProto::PageClassification current_page_classification,
     DemotionMultipliers* demotions_by_type) {
   demotions_by_type->clear();
+
+  // Explicitly check whether the feature is enabled before calling
+  // |GetValueForRuleInContextByFeature| because it is possible for
+  // |GetValueForRuleInContextByFeature| to return an empty string even if the
+  // feature is enabled, and we don't want to fallback to
+  // |GetValueForRuleInContext| in this case.
   std::string demotion_rule =
-      OmniboxFieldTrial::internal::GetValueForRuleInContext(
-          kDemoteByTypeRule, current_page_classification);
+      base::FeatureList::IsEnabled(omnibox::kOmniboxDemoteByType)
+          ? OmniboxFieldTrial::internal::GetValueForRuleInContextByFeature(
+                omnibox::kOmniboxDemoteByType, kDemoteByTypeRule,
+                current_page_classification)
+          : OmniboxFieldTrial::internal::GetValueForRuleInContext(
+                kDemoteByTypeRule, current_page_classification);
   // If there is no demotion rule for this context, then use the default
   // value for that context.
   if (demotion_rule.empty()) {
@@ -292,15 +312,16 @@ void OmniboxFieldTrial::GetDemotionsByType(
     // enough to be inline autocompleted (1400+), even after demotion it will
     // score above 850 ( 1400 * 0.61 > 850).  850 is the maximum score for
     // queries when the input has been detected as URL-seeking.
-    constexpr char kDemoteURLs[] = "1:61,2:61,3:61,4:61,16:61,24:61";
 #if defined(OS_ANDROID)
     if (current_page_classification == OmniboxEventProto::
         SEARCH_RESULT_PAGE_NO_SEARCH_TERM_REPLACEMENT)
-      demotion_rule = kDemoteURLs;
+      demotion_rule = "1:61,2:61,3:61,4:61,16:61,24:61";
 #endif
     if (current_page_classification ==
-        OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS)
-      demotion_rule = kDemoteURLs;
+            OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS ||
+        current_page_classification == OmniboxEventProto::NTP_REALBOX) {
+      demotion_rule = "1:10,2:10,3:10,4:10,5:10,16:10,17:10,24:10";
+    }
   }
 
   // The value of the DemoteByType rule is a comma-separated list of
@@ -596,7 +617,7 @@ OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(
   }
 
   // Touch-optimized UI always swaps title and URL.
-  if (ui::MaterialDesignController::touch_ui())
+  if (ui::TouchUiController::Get()->touch_ui())
     return EMPHASIZE_WHEN_NONEMPTY;
 
   // Look up the parameter named kEmphasizeTitlesRule + "_" + input.type(),
@@ -622,15 +643,10 @@ OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(
 }
 
 size_t OmniboxFieldTrial::GetMaxURLMatches() {
+  constexpr size_t kDefaultMaxURLMatches = 7;
   return base::GetFieldTrialParamByFeatureAsInt(
       omnibox::kOmniboxMaxURLMatches,
-      OmniboxFieldTrial::kOmniboxMaxURLMatchesParam,
-      0);  // default
-}
-
-bool OmniboxFieldTrial::IsPreserveDefaultMatchScoreEnabled() {
-  return base::FeatureList::IsEnabled(
-      omnibox::kOmniboxPreserveDefaultMatchScore);
+      OmniboxFieldTrial::kOmniboxMaxURLMatchesParam, kDefaultMaxURLMatches);
 }
 
 bool OmniboxFieldTrial::IsReverseAnswersEnabled() {
@@ -639,15 +655,27 @@ bool OmniboxFieldTrial::IsReverseAnswersEnabled() {
 
 bool OmniboxFieldTrial::IsShortBookmarkSuggestionsEnabled() {
   return base::FeatureList::IsEnabled(
-      omnibox::kOmniboxShortBookmarkSuggestions);
+             omnibox::kOmniboxShortBookmarkSuggestions) ||
+         base::FeatureList::IsEnabled(omnibox::kAutocompleteTitles) ||
+         base::FeatureList::IsEnabled(omnibox::kRichAutocompletion);
+}
+
+bool OmniboxFieldTrial::IsSuggestionButtonRowEnabled() {
+  return base::FeatureList::IsEnabled(omnibox::kOmniboxSuggestionButtonRow);
 }
 
 bool OmniboxFieldTrial::IsTabSwitchSuggestionsEnabled() {
   return base::FeatureList::IsEnabled(omnibox::kOmniboxTabSwitchSuggestions);
 }
 
-bool OmniboxFieldTrial::IsTabSwitchLogicReversed() {
-  return base::FeatureList::IsEnabled(omnibox::kOmniboxReverseTabSwitchLogic);
+bool OmniboxFieldTrial::IsTabSwitchSuggestionsDedicatedRowEnabled() {
+  return base::FeatureList::IsEnabled(
+      omnibox::kOmniboxTabSwitchSuggestionsDedicatedRow);
+}
+
+bool OmniboxFieldTrial::IsLooseMaxLimitOnDedicatedRowsEnabled() {
+  return base::FeatureList::IsEnabled(
+      omnibox::kOmniboxLooseMaxLimitOnDedicatedRows);
 }
 
 bool OmniboxFieldTrial::IsPedalSuggestionsEnabled() {
@@ -663,39 +691,39 @@ bool OmniboxFieldTrial::IsHideSteadyStateUrlTrivialSubdomainsEnabled() {
       omnibox::kHideSteadyStateUrlTrivialSubdomains);
 }
 
-base::Optional<int>
-OmniboxFieldTrial::GetSuggestionVerticalMarginFieldTrialOverride() {
-  if (!base::FeatureList::IsEnabled(omnibox::kUIExperimentVerticalMargin))
-    return base::nullopt;
-
-  if (base::FeatureList::IsEnabled(
-          omnibox::kUIExperimentVerticalMarginLimitToNonTouchOnly) &&
-      ui::MaterialDesignController::touch_ui()) {
-    return base::nullopt;
-  }
-
-  // When the vertical margin is set to 2dp, the suggestion height is the
-  // closest to the pre-Refresh height. In fact it's 1dp taller than the
-  // pre-Refresh height on Linux.
-  return base::GetFieldTrialParamByFeatureAsInt(
-      omnibox::kUIExperimentVerticalMargin, kUIVerticalMarginParam, 2);
-}
-
 bool OmniboxFieldTrial::IsExperimentalKeywordModeEnabled() {
   return base::FeatureList::IsEnabled(omnibox::kExperimentalKeywordMode);
-}
-
-bool OmniboxFieldTrial::IsGroupSuggestionsBySearchVsUrlFeatureEnabled() {
-  return base::FeatureList::IsEnabled(
-      omnibox::kOmniboxGroupSuggestionsBySearchVsUrl);
 }
 
 bool OmniboxFieldTrial::IsMaxURLMatchesFeatureEnabled() {
   return base::FeatureList::IsEnabled(omnibox::kOmniboxMaxURLMatches);
 }
 
-bool OmniboxFieldTrial::IsOmniboxWrapPopupPositionEnabled() {
-  return base::FeatureList::IsEnabled(omnibox::kOmniboxWrapPopupPosition);
+bool OmniboxFieldTrial::IsRichAutocompletionEnabled() {
+  return base::FeatureList::IsEnabled(omnibox::kRichAutocompletion);
+}
+
+bool OmniboxFieldTrial::RichAutocompletionAutocompleteTitles() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      omnibox::kRichAutocompletion, kRichAutocompletionAutocompleteTitlesParam,
+      false);
+}
+
+bool OmniboxFieldTrial::RichAutocompletionTwoLineOmnibox() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      omnibox::kRichAutocompletion, kRichAutocompletionTwoLineOmniboxParam,
+      false);
+}
+
+bool OmniboxFieldTrial::RichAutocompletionShowTitles() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      omnibox::kRichAutocompletion, kRichAutocompletionShowTitlesParam, false);
+}
+
+bool OmniboxFieldTrial::RichAutocompletionAutocompleteNonPrefix() {
+  return base::GetFieldTrialParamByFeatureAsBool(
+      omnibox::kRichAutocompletion, kRichAutocompletionAutocompleteNonPrefix,
+      false);
 }
 
 const char OmniboxFieldTrial::kBundledExperimentFieldTrialName[] =
@@ -771,15 +799,29 @@ const char OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam[] =
     "UIMaxAutocompleteMatches";
 const char OmniboxFieldTrial::kUIMaxAutocompleteMatchesByProviderParam[] =
     "UIMaxAutocompleteMatchesByProvider";
-const char OmniboxFieldTrial::kUIVerticalMarginParam[] = "UIVerticalMargin";
 
-const char OmniboxFieldTrial::kOnFocusSuggestionsEndpointExperimentIdParam[] =
-    "CustomEndpointExperimentID";
-const char OmniboxFieldTrial::kOnFocusSuggestionsEndpointURLParam[] =
-    "CustomEndpointURL";
+const char OmniboxFieldTrial::kOnDeviceHeadSuggestIncognitoServeMode[] =
+    "IncognitoServeMode";
+const char OmniboxFieldTrial::kOnDeviceHeadSuggestDelaySuggestRequestMs[] =
+    "DelayOnDeviceHeadSuggestRequestMs";
+const char OmniboxFieldTrial::kOnDeviceHeadSuggestMaxScoreForNonUrlInput[] =
+    "OnDeviceSuggestMaxScoreForNonUrlInput";
+const char
+    OmniboxFieldTrial::kOnDeviceHeadSuggestMaxScoreForNonUrlInputIncognito[] =
+        "OnDeviceSuggestMaxScoreForNonUrlInputIncognito";
+const char OmniboxFieldTrial::kOnDeviceHeadSuggestDemoteMode[] =
+    "DemoteOnDeviceSearchSuggestionsMode";
 
-// static
 int OmniboxFieldTrial::kDefaultMinimumTimeBetweenSuggestQueriesMs = 100;
+
+const char OmniboxFieldTrial::kRichAutocompletionAutocompleteTitlesParam[] =
+    "RichAutocompletionAutocompleteTitles";
+const char OmniboxFieldTrial::kRichAutocompletionTwoLineOmniboxParam[] =
+    "RichAutocompletionTwoLineOmnibox";
+const char OmniboxFieldTrial::kRichAutocompletionShowTitlesParam[] =
+    "RichAutocompletionShowTitles";
+const char OmniboxFieldTrial::kRichAutocompletionAutocompleteNonPrefix[] =
+    "RichAutocompletionAutocompleteNonPrefix";
 
 std::string OmniboxFieldTrial::internal::GetValueForRuleInContext(
     const std::string& rule,

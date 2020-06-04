@@ -4,26 +4,18 @@
 
 package org.chromium.chrome.browser;
 
-import android.app.Activity;
-import android.app.Notification;
-import android.app.Service;
-import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.view.View;
-import android.view.inputmethod.InputConnection;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 
 import org.chromium.base.Callback;
-import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.banners.AppDetailsDelegate;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.directactions.DirectActionCoordinator;
@@ -33,7 +25,6 @@ import org.chromium.chrome.browser.feedback.FeedbackCollector;
 import org.chromium.chrome.browser.feedback.FeedbackReporter;
 import org.chromium.chrome.browser.feedback.FeedbackSource;
 import org.chromium.chrome.browser.feedback.FeedbackSourceProvider;
-import org.chromium.chrome.browser.firstrun.FreIntentCreator;
 import org.chromium.chrome.browser.gsa.GSAHelper;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.historyreport.AppIndexingReporter;
@@ -49,30 +40,21 @@ import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksProviderIter
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.password_manager.GooglePasswordManagerUIProvider;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
-import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.rlz.RevenueStats;
-import org.chromium.chrome.browser.services.AndroidEduOwnerCheckCallback;
 import org.chromium.chrome.browser.signin.GoogleActivityController;
 import org.chromium.chrome.browser.survey.SurveyController;
-import org.chromium.chrome.browser.tab.AuthenticatorNavigationInterceptor;
+import org.chromium.chrome.browser.sync.TrustedVaultClient;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.touchless.TouchlessDelegate;
-import org.chromium.chrome.browser.touchless.TouchlessModelCoordinator;
-import org.chromium.chrome.browser.touchless.TouchlessUiCoordinator;
-import org.chromium.chrome.browser.ui.ImmersiveModeManager;
 import org.chromium.chrome.browser.usage_stats.DigitalWellbeingClient;
 import org.chromium.chrome.browser.webapps.GooglePlayWebApkInstallDelegate;
 import org.chromium.chrome.browser.webauth.Fido2ApiHandler;
-import org.chromium.chrome.browser.widget.FeatureHighlightProvider;
-import org.chromium.components.download.DownloadCollectionBridge;
+import org.chromium.chrome.browser.xsurface.SurfaceDependencyProvider;
+import org.chromium.chrome.browser.xsurface.SurfaceRenderer;
+import org.chromium.components.browser_ui.widget.FeatureHighlightProvider;
 import org.chromium.components.signin.AccountManagerDelegate;
 import org.chromium.components.signin.SystemAccountManagerDelegate;
-import org.chromium.content_public.browser.RenderFrameHost;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
-import org.chromium.content_public.browser.WebContents;
 import org.chromium.policy.AppRestrictionsProvider;
 import org.chromium.policy.CombinedPolicyProvider;
-import org.chromium.services.service_manager.InterfaceRegistry;
 
 import java.util.Collections;
 import java.util.List;
@@ -98,27 +80,6 @@ public abstract class AppHooks {
         if (sInstance == null) sInstance = new AppHooksImpl();
         return sInstance;
     }
-
-    /**
-     * Initiate AndroidEdu device check.
-     * @param callback Callback that should receive the results of the AndroidEdu device check.
-     */
-    public void checkIsAndroidEduDevice(final AndroidEduOwnerCheckCallback callback) {
-        PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> callback.onSchoolCheckDone(false));
-    }
-
-    /**
-     * Perform platform-specific command line initialization.
-     * @param instance CommandLine instance to be updated.
-     */
-    public void initCommandLine(CommandLine instance) {}
-
-    /**
-     * Inform platform of current display mode.
-     * @param displayMode the new display mode (see WebDisplayMode)
-     * @param activity the affected activity.
-     */
-    public void setDisplayModeForActivity(int displayMode, Activity activity) {}
 
     /**
      * Creates a new {@link AccountManagerDelegate}.
@@ -147,8 +108,22 @@ public abstract class AppHooks {
     /**
      * Return a {@link AuthenticatorNavigationInterceptor} for the given {@link Tab}.
      * This can be null if there are no applicable interceptor to be built.
+     * NOTE: This method will be transitioned to talk in terms of the //components-level interface
+     * once downstream has been transitioned.
      */
-    public AuthenticatorNavigationInterceptor createAuthenticatorNavigationInterceptor(Tab tab) {
+    public org.chromium.chrome.browser.tab.AuthenticatorNavigationInterceptor
+    createAuthenticatorNavigationInterceptor(Tab tab) {
+        return null;
+    }
+
+    /**
+     * Return a {@link AuthenticatorNavigationInterceptor} for the given {@link Tab}.
+     * This can be null if there are no applicable interceptor to be built.
+     * NOTE: This method exists only to allow downstream to transition to talking in terms of the
+     * //components-level interface. It will be deleted once the transition is complete.
+     */
+    public org.chromium.components.external_intents.AuthenticatorNavigationInterceptor
+    createAuthenticatorNavigationInterceptorV2(Tab tab) {
         return null;
     }
 
@@ -232,16 +207,6 @@ public abstract class AppHooks {
     }
 
     /**
-     * Returns an instance of LocationSettings to be installed as a singleton.
-     */
-    public LocationSettings createLocationSettings() {
-        // Using an anonymous subclass as the constructor is protected.
-        // This is done to deter instantiation of LocationSettings elsewhere without using the
-        // getInstance() helper method.
-        return new LocationSettings() {};
-    }
-
-    /**
      * @return An instance of MultiWindowUtils to be installed as a singleton.
      */
     public MultiWindowUtils createMultiWindowUtils() {
@@ -294,22 +259,6 @@ public abstract class AppHooks {
     public void registerPolicyProviders(CombinedPolicyProvider combinedProvider) {
         combinedProvider.registerProvider(
                 new AppRestrictionsProvider(ContextUtils.getApplicationContext()));
-    }
-
-    /**
-     * Upgrades a service from background to foreground after calling
-     * {@link Service#startForegroundService(Intent)}.
-     * @param service The service to be foreground.
-     * @param id The notification id.
-     * @param notification The notification attached to the foreground service.
-     * @param foregroundServiceType The type of foreground service. Must be a subset of the
-     *                              foreground service types defined in AndroidManifest.xml.
-     *                              Use 0 if no foregroundServiceType attribute is defined.
-     */
-    public void startForeground(
-            Service service, int id, Notification notification, int foregroundServiceType) {
-        // TODO(xingliu): Add appropriate foregroundServiceType to manifest when we have new sdk.
-        service.startForeground(id, notification);
     }
 
     /**
@@ -366,6 +315,7 @@ public abstract class AppHooks {
      * @return a new {@link Fido2ApiHandler} instance.
      */
     public Fido2ApiHandler createFido2ApiHandler() {
+        // TODO(nsatragno): remove after cleaning up Fido2ApiHandlerInternal.
         return new Fido2ApiHandler();
     }
 
@@ -377,33 +327,10 @@ public abstract class AppHooks {
     }
 
     /**
-     * @return A new {@link DownloadCollectionBridge} instance.
-     */
-    public DownloadCollectionBridge getDownloadCollectionBridge() {
-        return DownloadCollectionBridge.getDownloadCollectionBridge();
-    }
-
-    /**
      * @return A new {@link DigitalWellbeingClient} instance.
      */
     public DigitalWellbeingClient createDigitalWellbeingClient() {
         return new DigitalWellbeingClient();
-    }
-
-    /**
-     * @param activity An activity for access to different features.
-     * @return A new {@link TouchlessModelCoordinator} instance.
-     */
-    public TouchlessModelCoordinator createTouchlessModelCoordinator(Activity activity) {
-        return null;
-    }
-
-    /**
-     * @param activity An activity for access to different features.
-     * @return A new {@link TouchlessUiCoordinator} instance.
-     */
-    public TouchlessUiCoordinator createTouchlessUiCoordinator(ChromeActivity activity) {
-        return TouchlessDelegate.getTouchlessUiCoordinator(activity);
     }
 
     /**
@@ -432,68 +359,25 @@ public abstract class AppHooks {
     }
 
     /**
-     * Returns a new {@link FreIntentCreator} instance.
+     * Returns a new {@link TrustedVaultClient.Backend} instance.
      */
-    public FreIntentCreator createFreIntentCreator() {
-        return new FreIntentCreator();
+    public TrustedVaultClient.Backend createSyncTrustedVaultClientBackend() {
+        return new TrustedVaultClient.EmptyBackend();
     }
 
     /**
-     * @return true if the webAppIntent has been intercepted.
+     * Returns a new {@link SurfaceRenderer} if the xsurface implementation is included in the
+     * apk. Otherwise null is returned.
      */
-    public boolean interceptWebAppIntent(Intent intent, ChromeActivity activity) {
-        return false;
-    }
-
-    /**
-     * @see InputConnection#performPrivateCommand(java.lang.String, android.os.Bundle)
-     * @param webcontents The WebContents receiving the private IME command.
-     */
-    public void performPrivateImeCommand(WebContents webContents, String action, Bundle data) {}
-
-    /**
-     * Called when the Search Context Menu Item is clicked.
-     */
-    public void onSearchContextMenuClick() {}
-
-    /**
-     * @param registry The Chrome interface registry for the RenderFrameHost.
-     * @param renderFrameHost The RenderFrameHost the Interface Registry is for.
-     */
-    public void registerChromeRenderFrameHostInterfaces(
-            InterfaceRegistry registry, RenderFrameHost renderFrameHost) {}
-
-    /**
-     * @param registry The Chrome interface registry for the WebContents.
-     * @param webContents The WebContents the Interface Registry is for.
-     */
-    public void registerChromeWebContentsInterfaces(
-            InterfaceRegistry registry, WebContents webContents) {}
-
-    /**
-     * @param contentView The root content view for the containing activity.
-     * @return A new {@link ImmersiveModeManager} or null if there isn't one.
-     */
-    public @Nullable ImmersiveModeManager createImmersiveModeManager(View contentView) {
+    public @Nullable SurfaceRenderer createExternalSurfaceRenderer(
+            SurfaceDependencyProvider dependencies) {
         return null;
     }
 
     /**
-     * @param view {@link View} to define the area on.
-     * @param left Left The left coordinate of the area.
-     * @param top The top coordinate of the area.
-     * @param right The right coordinate of the area.
-     * @param bottom The bottom coordinate of the area.
-     * @return A {@link Runnable} that sets the input space in which swipe triggers navigation.
+     * Returns the URL to the WebAPK creation/update server.
      */
-    public Runnable createNavigationInputAreaSetter(
-            View view, int left, int top, int right, int bottom) {
-        return () -> {};
+    public String getWebApkServerUrl() {
+        return "";
     }
-
-    /**
-     * Starts the observer for listening to system settings changes. Must be called on
-     * ChromeActivity initialization.
-     */
-    public void startSystemSettingsObserver() {}
 }

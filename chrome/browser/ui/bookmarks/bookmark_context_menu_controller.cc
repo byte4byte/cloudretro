@@ -58,7 +58,6 @@ const UserMetricsAction* GetActionForLocationAndDisposition(
     WindowOpenDisposition disposition) {
   switch (location) {
     case BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR:
-    case BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR:
       switch (disposition) {
         case WindowOpenDisposition::NEW_BACKGROUND_TAB:
           return &kBookmarkBarNewBackgroundTab;
@@ -108,7 +107,7 @@ BookmarkContextMenuController::BookmarkContextMenuController(
       model_(BookmarkModelFactory::GetForBrowserContext(profile)) {
   DCHECK(profile_);
   DCHECK(model_->loaded());
-  menu_model_.reset(new ui::SimpleMenuModel(this));
+  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
   model_->AddObserver(this);
 
   BuildMenu();

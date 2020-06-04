@@ -13,6 +13,8 @@
 #include "chromeos/services/multidevice_setup/host_status_provider.h"
 #include "chromeos/services/multidevice_setup/public/cpp/oobe_completion_tracker.h"
 #include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -37,15 +39,22 @@ class AccountStatusChangeDelegateNotifierImpl
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<AccountStatusChangeDelegateNotifier> BuildInstance(
+    static std::unique_ptr<AccountStatusChangeDelegateNotifier> Create(
         HostStatusProvider* host_status_provider,
         PrefService* pref_service,
         HostDeviceTimestampManager* host_device_timestamp_manager,
         OobeCompletionTracker* oobe_completion_tracker,
         base::Clock* clock);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<AccountStatusChangeDelegateNotifier> CreateInstance(
+        HostStatusProvider* host_status_provider,
+        PrefService* pref_service,
+        HostDeviceTimestampManager* host_device_timestamp_manager,
+        OobeCompletionTracker* oobe_completion_tracker,
+        base::Clock* clock) = 0;
 
    private:
     static Factory* test_factory_;
@@ -55,8 +64,8 @@ class AccountStatusChangeDelegateNotifierImpl
 
   ~AccountStatusChangeDelegateNotifierImpl() override;
 
-  void SetAccountStatusChangeDelegatePtr(
-      mojom::AccountStatusChangeDelegatePtr delegate_ptr);
+  void SetAccountStatusChangeDelegateRemote(
+      mojo::PendingRemote<mojom::AccountStatusChangeDelegate> delegate_remote);
 
  private:
   friend class MultiDeviceSetupAccountStatusChangeDelegateNotifierTest;
@@ -111,7 +120,7 @@ class AccountStatusChangeDelegateNotifierImpl
   // Set to base::nullopt until the first host status update.
   base::Optional<mojom::HostStatus> host_status_from_most_recent_update_;
 
-  mojom::AccountStatusChangeDelegatePtr delegate_ptr_;
+  mojo::Remote<mojom::AccountStatusChangeDelegate> delegate_remote_;
   HostStatusProvider* host_status_provider_;
   PrefService* pref_service_;
   HostDeviceTimestampManager* host_device_timestamp_manager_;

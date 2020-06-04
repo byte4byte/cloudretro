@@ -86,8 +86,8 @@ void RunClassicAdapterCallbacks() {
 BluetoothAdapterFactory::~BluetoothAdapterFactory() = default;
 
 // static
-BluetoothAdapterFactory& BluetoothAdapterFactory::Get() {
-  return g_singleton.Get();
+BluetoothAdapterFactory* BluetoothAdapterFactory::Get() {
+  return &g_singleton.Get();
 }
 
 // static
@@ -126,7 +126,6 @@ bool BluetoothAdapterFactory::IsLowEnergySupported() {
 #endif
 }
 
-// static
 void BluetoothAdapterFactory::GetAdapter(AdapterCallback callback) {
   DCHECK(IsBluetoothSupported());
 
@@ -154,7 +153,6 @@ void BluetoothAdapterFactory::GetAdapter(AdapterCallback callback) {
   }
 }
 
-// static
 void BluetoothAdapterFactory::GetClassicAdapter(AdapterCallback callback) {
 #if defined(OS_WIN)
   if (base::win::GetVersion() < base::win::Version::WIN10) {
@@ -202,8 +200,22 @@ bool BluetoothAdapterFactory::HasSharedInstanceForTesting() {
   return default_adapter.Get() != nullptr;
 }
 
-BluetoothAdapterFactory::GlobalValuesForTesting::GlobalValuesForTesting()
-    : weak_ptr_factory_(this) {}
+#if defined(OS_CHROMEOS)
+// static
+void BluetoothAdapterFactory::SetBleScanParserCallback(
+    BleScanParserCallback callback) {
+  Get()->ble_scan_parser_ = callback;
+}
+
+// static
+BluetoothAdapterFactory::BleScanParserCallback
+BluetoothAdapterFactory::GetBleScanParserCallback() {
+  return Get()->ble_scan_parser_;
+}
+#endif  // defined(OS_CHROMEOS)
+
+BluetoothAdapterFactory::GlobalValuesForTesting::GlobalValuesForTesting() =
+    default;
 
 BluetoothAdapterFactory::GlobalValuesForTesting::~GlobalValuesForTesting() =
     default;

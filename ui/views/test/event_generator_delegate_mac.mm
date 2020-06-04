@@ -252,8 +252,8 @@ class EventGeneratorDelegateMac : public ui::EventTarget,
 
   static EventGeneratorDelegateMac* instance() { return instance_; }
 
-  IMP CurrentEventMethod() {
-    return swizzle_current_event_->GetOriginalImplementation();
+  NSEvent* OriginalCurrentEvent(id receiver, SEL selector) {
+    return swizzle_current_event_->InvokeOriginal<NSEvent*>(receiver, selector);
   }
 
   NSWindow* window() { return window_.get(); }
@@ -397,13 +397,14 @@ EventGeneratorDelegateMac::EventGeneratorDelegateMac(
                       withObject:[window.GetNativeNSWindow() firstResponder]];
 
   if (owner_) {
-    swizzle_pressed_.reset(new base::mac::ScopedObjCClassSwizzler(
-        [NSEvent class], [NSEventDonor class], @selector(pressedMouseButtons)));
-    swizzle_location_.reset(new base::mac::ScopedObjCClassSwizzler(
-        [NSEvent class], [NSEventDonor class], @selector(mouseLocation)));
-    swizzle_current_event_.reset(new base::mac::ScopedObjCClassSwizzler(
-        [NSApplication class], [NSApplicationDonor class],
-        @selector(currentEvent)));
+    swizzle_pressed_ = std::make_unique<base::mac::ScopedObjCClassSwizzler>(
+        [NSEvent class], [NSEventDonor class], @selector(pressedMouseButtons));
+    swizzle_location_ = std::make_unique<base::mac::ScopedObjCClassSwizzler>(
+        [NSEvent class], [NSEventDonor class], @selector(mouseLocation));
+    swizzle_current_event_ =
+        std::make_unique<base::mac::ScopedObjCClassSwizzler>(
+            [NSApplication class], [NSApplicationDonor class],
+            @selector(currentEvent));
   }
 }
 
@@ -633,8 +634,8 @@ CreateEventGeneratorDelegateMac(ui::test::EventGenerator* owner,
     return g_current_event;
 
   // Find the original implementation and invoke it.
-  IMP original = EventGeneratorDelegateMac::instance()->CurrentEventMethod();
-  return original(self, _cmd);
+  return EventGeneratorDelegateMac::instance()->OriginalCurrentEvent(self,
+                                                                     _cmd);
 }
 
 @end

@@ -5,10 +5,18 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_LOGIN_SCREEN_LOGIN_SCREEN_APITEST_BASE_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_LOGIN_SCREEN_LOGIN_SCREEN_APITEST_BASE_H_
 
+#include <memory>
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/policy/signin_profile_extensions_policy_test_base.h"
 #include "components/version_info/version_info.h"
+
+class ExtensionTestMessageListener;
+
+namespace extensions {
+class ResultCatcher;
+}  // namespace extensions
 
 namespace chromeos {
 
@@ -17,21 +25,42 @@ namespace chromeos {
 // screen extension" and is also whitelisted for the following APIs:
 // * loginScreenUi
 // * storage
+// * login
 // The extension's code can be found in
 // chrome/test/data/extensions/api_test/login_screen_apis/
 class LoginScreenApitestBase
     : public policy::SigninProfileExtensionsPolicyTestBase {
  public:
   explicit LoginScreenApitestBase(version_info::Channel channel);
+
+  LoginScreenApitestBase(const LoginScreenApitestBase&) = delete;
+
+  LoginScreenApitestBase& operator=(const LoginScreenApitestBase&) = delete;
+
   ~LoginScreenApitestBase() override;
 
-  void SetUpExtensionAndRunTest(const std::string& testName);
+  void SetUpTestListeners();
+
+  void ClearTestListeners();
+
+  void RunTest(const std::string& test_name);
+  void RunTest(const std::string& test_name, bool assert_test_succeed);
+
+  void SetUpLoginScreenExtensionAndRunTest(const std::string& test_name);
+  void SetUpLoginScreenExtensionAndRunTest(const std::string& test_name,
+                                           bool assert_test_succeed);
+
+  std::string extension_id() { return extension_id_; }
+
+  std::string listener_message() { return listener_message_; }
 
  protected:
   const std::string extension_id_;
   const std::string extension_update_manifest_path_;
-
-  DISALLOW_COPY_AND_ASSIGN(LoginScreenApitestBase);
+  // The message |listener_| is listening for.
+  const std::string listener_message_;
+  std::unique_ptr<extensions::ResultCatcher> catcher_;
+  std::unique_ptr<ExtensionTestMessageListener> listener_;
 };
 
 }  // namespace chromeos

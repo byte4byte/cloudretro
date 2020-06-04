@@ -37,13 +37,11 @@ class SMSReceiveHandler {
  public:
   SMSReceiveHandler(dbus::ObjectProxy* object_proxy,
                     SMSClient::GetAllCallback callback)
-      : callback_(std::move(callback)),
-        sms_received_(false),
-        weak_ptr_factory_(this) {
+      : callback_(std::move(callback)), sms_received_(false) {
     property_set_ = std::make_unique<dbus::PropertySet>(
         object_proxy, modemmanager::kModemManager1SmsInterface,
-        base::Bind(&SMSReceiveHandler::OnPropertyChanged,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindRepeating(&SMSReceiveHandler::OnPropertyChanged,
+                            weak_ptr_factory_.GetWeakPtr()));
     property_set_->RegisterProperty(SMSClient::kSMSPropertyState, &state_);
     property_set_->ConnectSignals();
     property_set_->Get(&state_, dbus::PropertySet::GetCallback());
@@ -94,7 +92,7 @@ class SMSReceiveHandler {
   dbus::Property<std::string> text_;
   dbus::Property<std::string> timestamp_;
   std::unique_ptr<dbus::PropertySet> property_set_;
-  base::WeakPtrFactory<SMSReceiveHandler> weak_ptr_factory_;
+  base::WeakPtrFactory<SMSReceiveHandler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SMSReceiveHandler);
 };
@@ -105,7 +103,7 @@ class SMSReceiveHandler {
 // DBusThreadManager instance.
 class SMSClientImpl : public SMSClient {
  public:
-  explicit SMSClientImpl(dbus::Bus* bus) : bus_(bus), weak_ptr_factory_(this) {}
+  explicit SMSClientImpl(dbus::Bus* bus) : bus_(bus) {}
   ~SMSClientImpl() override = default;
 
   // Calls GetAll method.  |callback| is called after the method call succeeds.
@@ -134,7 +132,7 @@ class SMSClientImpl : public SMSClient {
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<SMSClientImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<SMSClientImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SMSClientImpl);
 };

@@ -1,4 +1,5 @@
 include_rules = [
+    "+base/containers/queue.h",
     "+base/strings/string_piece.h",
     "+base/task_runner_util.h",
     "+base/threading/thread_task_runner_handle.h",
@@ -21,5 +22,6 @@ include_rules = [
 specific_include_rules = {
     ".*_unittest.cc": [
         "+base/run_loop.h",
+        "+ui/gfx/gpu_memory_buffer.h",
     ],
 }

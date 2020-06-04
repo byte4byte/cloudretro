@@ -27,10 +27,10 @@ class FakeServerProxy : public ServerProxy {
   }
 
   void SendEnrollRequest(const std::string& request,
-                         const DataCallback& callback) override;
+                         DataCallback callback) override;
 
   void SendCertificateRequest(const std::string& request,
-                              const DataCallback& callback) override;
+                              DataCallback callback) override;
 
  private:
   bool result_;
@@ -44,10 +44,8 @@ class MockServerProxy : public ServerProxy {
   virtual ~MockServerProxy();
 
   void DeferToFake(bool result);
-  MOCK_METHOD2(SendEnrollRequest,
-               void(const std::string&, const DataCallback&));
-  MOCK_METHOD2(SendCertificateRequest,
-               void(const std::string&, const DataCallback&));
+  MOCK_METHOD2(SendEnrollRequest, void(const std::string&, DataCallback));
+  MOCK_METHOD2(SendCertificateRequest, void(const std::string&, DataCallback));
   MOCK_METHOD0(GetType, PrivacyCAType());
 
  private:
@@ -69,12 +67,13 @@ class MockAttestationFlow : public AttestationFlow {
   MockAttestationFlow();
   virtual ~MockAttestationFlow();
 
-  MOCK_METHOD5(GetCertificate,
+  MOCK_METHOD6(GetCertificate,
                void(AttestationCertificateProfile,
                     const AccountId& account_id,
                     const std::string&,
                     bool,
-                    const CertificateCallback&));
+                    const std::string&, /* key_name */
+                    CertificateCallback));
 };
 
 }  // namespace attestation

@@ -10,7 +10,7 @@ be modified or renamed to support side-by-side channel installs.
 
 import os.path
 
-from . import commands, signing
+from . import commands, parts
 
 _CF_BUNDLE_EXE = 'CFBundleExecutable'
 _CF_BUNDLE_ID = 'CFBundleIdentifier'
@@ -69,17 +69,12 @@ def _modify_plists(paths, dist, config):
 
         # See build/mac/tweak_info_plist.py and
         # chrome/browser/mac/keystone_glue.mm.
-        keys_to_remove = set()
         for key in app_plist.keys():
             if not key.startswith(_KS_CHANNEL_ID + '-'):
                 continue
-            if dist.channel:
-                orig_channel, tag = key.split('-')
-                app_plist[key] = '{}-{}'.format(dist.channel, tag)
-            else:
-                keys_to_remove.add(key)
-        for key in keys_to_remove:
-            del app_plist[key]
+            orig_channel, tag = key.split('-')
+            channel_str = dist.channel if dist.channel else ''
+            app_plist[key] = '{}-{}'.format(channel_str, tag)
 
 
 def _replace_icons(paths, dist, config):
@@ -150,7 +145,7 @@ def _process_entitlements(paths, dist, config):
 
     entitlements_names = [
         part.entitlements
-        for part in signing.get_parts(config).values()
+        for part in parts.get_parts(config).values()
         if part.entitlements
     ]
     for entitlements_name in entitlements_names:

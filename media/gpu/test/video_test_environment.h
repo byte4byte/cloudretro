@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "base/at_exit.h"
 #include "base/files/file_path.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -20,7 +21,7 @@ class OzoneGpuTestHelper;
 
 namespace base {
 namespace test {
-class ScopedTaskEnvironment;
+class TaskEnvironment;
 }  // namespace test
 }  // namespace base
 
@@ -31,20 +32,19 @@ class VideoTestEnvironment : public ::testing::Environment {
  public:
   VideoTestEnvironment();
   virtual ~VideoTestEnvironment();
+
   // ::testing::Environment implementation.
-  // Set up video test environment, called once for entire test run.
-  void SetUp() override;
   // Tear down video test environment, called once for entire test run.
   void TearDown() override;
 
-  // Get the name of the current test.
-  base::FilePath::StringType GetTestName() const;
+  // Get the name of the test output file path (testsuitename/testname).
+  base::FilePath GetTestOutputFilePath() const;
 
  private:
-  // Whether the test environment has been initialized.
-  bool initialized_ = false;
+  // An exit manager is required to run callbacks on shutdown.
+  base::AtExitManager at_exit_manager;
 
-  std::unique_ptr<base::test::ScopedTaskEnvironment> task_environment_;
+  std::unique_ptr<base::test::TaskEnvironment> task_environment_;
 
 #if defined(USE_OZONE)
   std::unique_ptr<ui::OzoneGpuTestHelper> gpu_helper_;

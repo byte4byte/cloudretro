@@ -4,14 +4,18 @@
 
 #include "chromeos/services/assistant/platform/audio_input_impl.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/timer/timer.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/power/power_manager_client.h"
-#include "chromeos/services/assistant/public/features.h"
+#include "chromeos/services/assistant/public/cpp/assistant_client.h"
+#include "chromeos/services/assistant/public/cpp/features.h"
 #include "chromeos/services/assistant/utils.h"
 #include "libassistant/shared/public/platform_audio_buffer.h"
 #include "media/audio/audio_device_description.h"
@@ -19,7 +23,7 @@
 #include "media/base/audio_sample_types.h"
 #include "media/base/channel_layout.h"
 #include "services/audio/public/cpp/device_factory.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "services/audio/public/mojom/stream_factory.mojom.h"
 
 namespace chromeos {
 namespace assistant {
@@ -51,12 +55,14 @@ media::ChannelLayout GetChannelLayout(
 
 class DspHotwordStateManager : public AudioInputImpl::HotwordStateManager {
  public:
-  DspHotwordStateManager(scoped_refptr<base::SequencedTaskRunner> task_runner,
-                         AudioInputImpl* input)
+  DspHotwordStateManager(AudioInputImpl* input,
+                         scoped_refptr<base::SequencedTaskRunner> task_runner,
+                         chromeos::PowerManagerClient* power_manager_client)
       : AudioInputImpl::HotwordStateManager(input),
         task_runner_(task_runner),
-        weak_factory_(this) {
+        power_manager_client_(power_manager_client) {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
+    DCHECK(power_manager_client_);
   }
 
   // HotwordStateManager overrides:
@@ -72,10 +78,11 @@ class DspHotwordStateManager : public AudioInputImpl::HotwordStateManager {
     }
     stream_state_ = StreamState::NORMAL;
 
-    // Inform power manager of the user activity happened every time
-    // Libassistant recognized hotword and started a conversation.
-    chromeos::PowerManagerClient::Get()->NotifyUserActivity(
-        power_manager::USER_ACTIVITY_OTHER);
+    // Inform power manager of a wake notification when Libassistant
+    // recognized hotword and started a conversation. We intentionally
+    // avoid using |NotifyUserActivity| because it is not suitable for
+    // this case according to the Platform team.
+    power_manager_client_->NotifyWakeNotification();
   }
 
   // Runs on main thread.
@@ -142,10 +149,11 @@ class DspHotwordStateManager : public AudioInputImpl::HotwordStateManager {
     base::UmaHistogramEnumeration("Assistant.DspHotwordDetection", status);
   }
 
-  StreamState stream_state_ = StreamState::HOTWORD;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  chromeos::PowerManagerClient* power_manager_client_;
+  StreamState stream_state_ = StreamState::HOTWORD;
   base::OneShotTimer second_phase_timer_;
-  base::WeakPtrFactory<DspHotwordStateManager> weak_factory_;
+  base::WeakPtrFactory<DspHotwordStateManager> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DspHotwordStateManager);
 };
@@ -183,15 +191,21 @@ void AudioInputImpl::HotwordStateManager::RecreateAudioInputStream() {
   input_->RecreateAudioInputStream(/*use_dsp=*/false);
 }
 
-AudioInputImpl::AudioInputImpl(service_manager::Connector* connector,
-                               const std::string& device_id,
-                               const std::string& hotword_device_id)
-    : connector_(connector),
+AudioInputImpl::AudioInputImpl(PowerManagerClient* power_manager_client,
+                               CrasAudioHandler* cras_audio_handler,
+                               const std::string& device_id)
+    : power_manager_client_(power_manager_client),
+      power_manager_client_observer_(this),
+      cras_audio_handler_(cras_audio_handler),
       task_runner_(base::SequencedTaskRunnerHandle::Get()),
-      device_id_(device_id),
-      hotword_device_id_(hotword_device_id),
+      preferred_device_id_(device_id),
       weak_factory_(this) {
   DETACH_FROM_SEQUENCE(observer_sequence_checker_);
+
+  DCHECK(power_manager_client);
+  power_manager_client_observer_.Add(power_manager_client);
+  power_manager_client->GetSwitchStates(base::BindOnce(
+      &AudioInputImpl::OnSwitchStatesReceived, weak_factory_.GetWeakPtr()));
 
   RecreateStateManager();
   if (features::IsStereoAudioInputEnabled())
@@ -207,8 +221,8 @@ AudioInputImpl::~AudioInputImpl() {
 
 void AudioInputImpl::RecreateStateManager() {
   if (IsHotwordAvailable()) {
-    state_manager_ =
-        std::make_unique<DspHotwordStateManager>(task_runner_, this);
+    state_manager_ = std::make_unique<DspHotwordStateManager>(
+        this, task_runner_, power_manager_client_);
   } else {
     state_manager_ = std::make_unique<HotwordStateManager>(this);
   }
@@ -270,15 +284,7 @@ assistant_client::BufferFormat AudioInputImpl::GetFormat() const {
 void AudioInputImpl::AddObserver(
     assistant_client::AudioInput::Observer* observer) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(observer_sequence_checker_);
-  VLOG(1) << device_id_ << " add observer";
-
-  // Feed the observer one frame of empty data to work around crbug/942268
-  std::vector<int16_t> buffer(g_current_format.num_channels);
-  int64_t time = features::IsAudioEraserEnabled()
-                     ? base::TimeTicks::Now().since_origin().InMicroseconds()
-                     : 0;
-  AudioInputBufferImpl input_buffer(buffer.data(), /*frame_count=*/1);
-  observer->OnAudioBufferAvailable(input_buffer, time);
+  VLOG(1) << " add observer";
 
   bool have_first_observer = false;
   {
@@ -320,6 +326,19 @@ void AudioInputImpl::RemoveObserver(
   }
 }
 
+void AudioInputImpl::LidEventReceived(
+    chromeos::PowerManagerClient::LidState state,
+    const base::TimeTicks& timestamp) {
+  // Lid switch event still gets fired during system suspend, which enables
+  // us to stop DSP recording correctly when user closes lid after the device
+  // goes to sleep.
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  if (state != lid_state_) {
+    lid_state_ = state;
+    UpdateRecordingState();
+  }
+}
+
 void AudioInputImpl::SetMicState(bool mic_open) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   if (mic_open_ == mic_open)
@@ -342,18 +361,20 @@ void AudioInputImpl::OnConversationTurnFinished() {
 void AudioInputImpl::OnHotwordEnabled(bool enable) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-  if (default_on_ == enable)
+  if (hotword_enabled_ == enable)
     return;
 
-  default_on_ = enable;
+  hotword_enabled_ = enable;
   UpdateRecordingState();
 }
 
 void AudioInputImpl::SetDeviceId(const std::string& device_id) {
-  if (device_id_ == device_id)
+  if (preferred_device_id_ == device_id)
     return;
 
-  device_id_ = device_id;
+  preferred_device_id_ = device_id;
+
+  UpdateRecordingState();
   if (source_)
     state_manager_->RecreateAudioInputStream();
 }
@@ -387,30 +408,48 @@ void AudioInputImpl::SetDspHotwordLocale(std::string pref_locale) {
     std::string region_code = pref_locale;
     pref_locale.append("_").append(region_code);
   }
+
+  // For locales with language code "en", use "en_all" hotword model.
+  std::vector<std::string> code_strings = base::SplitString(
+      pref_locale, "_", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  if (code_strings.size() > 0 && code_strings[0] == "en")
+    pref_locale = "en_all";
+
   uint64_t dsp_node_id;
   base::StringToUint64(hotword_device_id_, &dsp_node_id);
-  chromeos::CrasAudioHandler::Get()->SetHotwordModel(
+  cras_audio_handler_->SetHotwordModel(
       dsp_node_id, /* hotword_model */ base::ToLowerASCII(pref_locale),
       base::BindOnce(&AudioInputImpl::SetDspHotwordLocaleCallback,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr(), pref_locale));
 }
 
-void AudioInputImpl::SetDspHotwordLocaleCallback(bool success) {
+void AudioInputImpl::SetDspHotwordLocaleCallback(std::string pref_locale,
+                                                 bool success) {
   base::UmaHistogramBoolean("Assistant.SetDspHotwordLocale", success);
   if (success)
     return;
 
+  LOG(ERROR) << "Set " << pref_locale
+             << " hotword model failed, fallback to default locale.";
   // Reset the locale to the default value "en_us" if we failed to sync it to
   // the locale stored in user's pref.
   uint64_t dsp_node_id;
   base::StringToUint64(hotword_device_id_, &dsp_node_id);
-  chromeos::CrasAudioHandler::Get()->SetHotwordModel(
-      dsp_node_id, "en_us", base::BindOnce([](bool success) {}));
+  cras_audio_handler_->SetHotwordModel(
+      dsp_node_id, /* hotword_model */ "en_us",
+      base::BindOnce([](bool success) {
+        if (!success)
+          LOG(ERROR) << "Reset to default hotword model failed.";
+      }));
 }
 
 void AudioInputImpl::RecreateAudioInputStream(bool use_dsp) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   StopRecording();
+
+  device_id_ = preferred_device_id_.empty()
+                   ? media::AudioDeviceDescription::kDefaultDeviceId
+                   : preferred_device_id_;
 
   // AUDIO_PCM_LINEAR and AUDIO_PCM_LOW_LATENCY are the same on CRAS.
   auto param = media::AudioParameters(
@@ -418,20 +457,34 @@ void AudioInputImpl::RecreateAudioInputStream(bool use_dsp) {
       GetChannelLayout(g_current_format), g_current_format.sample_rate,
       g_current_format.sample_rate / 10 /* buffer size for 100 ms */);
 
-  std::string* device_id = &device_id_;
-  if (use_dsp && !hotword_device_id_.empty()) {
-    param.set_effects(media::AudioParameters::PlatformEffectsMask::HOTWORD);
-    device_id = &hotword_device_id_;
-  }
-  source_ = audio::CreateInputDevice(connector_->Clone(), *device_id);
+  // Set the HOTWORD mask so CRAS knows the device is used for HOTWORD purpose
+  // and is able to conduct the tuning specifically for the scenario. Whether
+  // the HOTWORD is conducted by a hotword device or other devices like internal
+  // mic will be determined by the device_id_ passed to CRAS.
+  param.set_effects(media::AudioParameters::PlatformEffectsMask::HOTWORD);
+  if (use_dsp && !hotword_device_id_.empty())
+    device_id_ = hotword_device_id_;
+
+  mojo::PendingRemote<audio::mojom::StreamFactory> stream_factory;
+  AssistantClient::Get()->RequestAudioStreamFactory(
+      stream_factory.InitWithNewPipeAndPassReceiver());
+  source_ = audio::CreateInputDevice(std::move(stream_factory), device_id_);
 
   source_->Initialize(param, this);
   source_->Start();
   VLOG(1) << device_id_ << " start recording";
 }
 
-bool AudioInputImpl::IsHotwordAvailable() {
+bool AudioInputImpl::IsHotwordAvailable() const {
   return features::IsDspHotwordEnabled() && !hotword_device_id_.empty();
+}
+
+bool AudioInputImpl::IsRecordingForTesting() const {
+  return !!source_;
+}
+
+bool AudioInputImpl::IsUsingHotwordDeviceForTesting() const {
+  return device_id_ == hotword_device_id_ && IsHotwordAvailable();
 }
 
 void AudioInputImpl::StartRecording() {
@@ -446,19 +499,36 @@ void AudioInputImpl::StopRecording() {
     VLOG(1) << device_id_ << " stop recording";
     source_->Stop();
     source_.reset();
+    device_id_ = std::string();
     VLOG(1) << device_id_
             << " ending captured frames: " << captured_frames_count_;
+  }
+}
+
+void AudioInputImpl::OnSwitchStatesReceived(
+    base::Optional<chromeos::PowerManagerClient::SwitchStates> switch_states) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  if (switch_states.has_value()) {
+    lid_state_ = switch_states->lid_state;
+    UpdateRecordingState();
   }
 }
 
 void AudioInputImpl::UpdateRecordingState() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-  bool should_start;
+  bool has_observers = false;
   {
     base::AutoLock lock(lock_);
-    should_start = (default_on_ || mic_open_) && observers_.size() > 0;
+    has_observers = observers_.size() > 0;
   }
+
+  bool is_lid_closed =
+      lid_state_ == chromeos::PowerManagerClient::LidState::CLOSED;
+  bool should_enable_hotword =
+      hotword_enabled_ && (!preferred_device_id_.empty());
+  bool should_start =
+      !is_lid_closed && (should_enable_hotword || mic_open_) && has_observers;
 
   if (!source_ && should_start)
     StartRecording();

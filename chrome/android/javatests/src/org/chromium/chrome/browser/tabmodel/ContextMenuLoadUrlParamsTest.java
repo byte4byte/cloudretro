@@ -23,10 +23,11 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabWindowManager.TabModelSelectorFactory;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -81,7 +82,7 @@ public class ContextMenuLoadUrlParamsTest {
         public RecordingTabModelSelector(
                 Activity activity, TabCreatorManager tabCreatorManager, int selectorIndex) {
             super(activity, tabCreatorManager,
-                    new TabbedModeTabPersistencePolicy(selectorIndex, false), false, false);
+                    new TabbedModeTabPersistencePolicy(selectorIndex, false), false, false, false);
         }
     }
 
@@ -118,7 +119,7 @@ public class ContextMenuLoadUrlParamsTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { FirstRunStatus.setFirstRunFlowComplete(false); });
         mTestServer.stopAndDestroyServer();
@@ -130,7 +131,7 @@ public class ContextMenuLoadUrlParamsTest {
     @Test
     @MediumTest
     @Feature({"Browser"})
-    public void testOpenInNewTabReferrer() throws InterruptedException, TimeoutException {
+    public void testOpenInNewTabReferrer() throws TimeoutException {
         triggerContextMenuLoad(mTestServer.getURL(HTML_PATH), "testLink",
                 R.id.contextmenu_open_in_new_tab);
 
@@ -145,7 +146,7 @@ public class ContextMenuLoadUrlParamsTest {
     @Test
     @MediumTest
     @Feature({"Browser"})
-    public void testOpenInIncognitoTabNoReferrer() throws InterruptedException, TimeoutException {
+    public void testOpenInIncognitoTabNoReferrer() throws TimeoutException {
         triggerContextMenuLoad(mTestServer.getURL(HTML_PATH), "testLink",
                 R.id.contextmenu_open_in_incognito_tab);
 
@@ -159,7 +160,7 @@ public class ContextMenuLoadUrlParamsTest {
     @Test
     @MediumTest
     @Feature({"Browser"})
-    public void testOpenInNewTabSanitizeReferrer() throws InterruptedException, TimeoutException {
+    public void testOpenInNewTabSanitizeReferrer() throws TimeoutException {
         String testUrl = mTestServer.getURL(HTML_PATH);
         String[] schemeAndUrl = SCHEME_SEPARATOR_RE.split(testUrl, 2);
         Assert.assertEquals(2, schemeAndUrl.length);
@@ -170,7 +171,7 @@ public class ContextMenuLoadUrlParamsTest {
     }
 
     private void triggerContextMenuLoad(String url, String openerDomId, int menuItemId)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         mActivityTestRule.loadUrl(url);
         mActivityTestRule.assertWaitForPageScaleFactorMatch(0.5f);
         Tab tab = mActivityTestRule.getActivity().getActivityTab();

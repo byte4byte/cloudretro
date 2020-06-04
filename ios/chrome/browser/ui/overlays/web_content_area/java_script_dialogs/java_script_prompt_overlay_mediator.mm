@@ -6,15 +6,18 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
+#include "ios/chrome/browser/overlays/public/overlay_callback_manager.h"
 #import "ios/chrome/browser/overlays/public/overlay_request.h"
 #import "ios/chrome/browser/overlays/public/overlay_response.h"
 #import "ios/chrome/browser/overlays/public/web_content_area/java_script_prompt_overlay.h"
-#import "ios/chrome/browser/ui/alert_view_controller/alert_action.h"
-#import "ios/chrome/browser/ui/alert_view_controller/alert_view_controller.h"
+#import "ios/chrome/browser/ui/alert_view/alert_action.h"
+#import "ios/chrome/browser/ui/alert_view/alert_view_controller.h"
+#import "ios/chrome/browser/ui/dialogs/dialog_constants.h"
 #import "ios/chrome/browser/ui/elements/text_field_configuration.h"
-#import "ios/chrome/browser/ui/overlays/overlay_ui_dismissal_delegate.h"
+#import "ios/chrome/browser/ui/overlays/common/alerts/alert_overlay_mediator+alert_consumer_support.h"
+#import "ios/chrome/browser/ui/overlays/overlay_request_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_dialog_blocking_action.h"
-#import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_dialog_overlay_coordinator+subclassing.h"
+#import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_overlay_mediator_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -22,31 +25,73 @@
 #error "This file requires ARC support."
 #endif
 
-NSString* const kJavaScriptPromptTextFieldAccessibiltyIdentifier =
-    @"JavaScriptPromptTextFieldAccessibiltyIdentifier";
-
 @interface JavaScriptPromptOverlayMediator ()
-// The confirmation config.
+// The config from the request passed on initialization.
 @property(nonatomic, readonly) JavaScriptPromptOverlayRequestConfig* config;
+
+// Sets the OverlayResponse using the user input |textInput| from the prompt UI.
+- (void)setPromptResponse:(NSString*)textInput;
 @end
 
 @implementation JavaScriptPromptOverlayMediator
 
+- (instancetype)initWithRequest:(OverlayRequest*)request {
+  if (self = [super initWithRequest:request]) {
+    // Verify that the request is configured for JavaScript prompts.
+    DCHECK(request->GetConfig<JavaScriptPromptOverlayRequestConfig>());
+  }
+  return self;
+}
+
 #pragma mark - Accessors
 
-- (const JavaScriptDialogSource*)requestSource {
-  return &self.config->source();
-}
-
 - (JavaScriptPromptOverlayRequestConfig*)config {
-  return self.request->GetConfig<JavaScriptPromptOverlayRequestConfig>();
+  return self.request
+             ? self.request->GetConfig<JavaScriptPromptOverlayRequestConfig>()
+             : nullptr;
 }
 
-- (void)setConsumer:(id<AlertConsumer>)consumer {
-  if (self.consumer == consumer)
+#pragma mark - OverlayRequestMediator
+
++ (const OverlayRequestSupport*)requestSupport {
+  return JavaScriptPromptOverlayRequestConfig::RequestSupport();
+}
+
+#pragma mark - Response helpers
+
+- (void)setPromptResponse:(NSString*)textInput {
+  if (!self.request)
     return;
-  [super setConsumer:consumer];
-  [self.consumer setMessage:base::SysUTF8ToNSString(self.config->message())];
+  self.request->GetCallbackManager()->SetCompletionResponse(
+      OverlayResponse::CreateWithInfo<JavaScriptPromptOverlayResponseInfo>(
+          base::SysNSStringToUTF8(textInput)));
+}
+
+@end
+
+@implementation JavaScriptPromptOverlayMediator (AlertConsumerSupport)
+
+- (NSString*)alertTitle {
+  return GetJavaScriptDialogTitle(self.config->source(),
+                                  self.config->message());
+}
+
+- (NSString*)alertMessage {
+  return GetJavaScriptDialogMessage(self.config->source(),
+                                    self.config->message());
+}
+
+- (NSArray<TextFieldConfiguration*>*)alertTextFieldConfigurations {
+  NSString* defaultPromptValue =
+      base::SysUTF8ToNSString(self.config->default_prompt_value());
+  return @[ [[TextFieldConfiguration alloc]
+                 initWithText:defaultPromptValue
+                  placeholder:nil
+      accessibilityIdentifier:kJavaScriptDialogTextFieldAccessibilityIdentifier
+              secureTextEntry:NO] ];
+}
+
+- (NSArray<AlertAction*>*)alertActions {
   __weak __typeof__(self) weakSelf = self;
   NSArray* actions = @[
     [AlertAction actionWithTitle:l10n_util::GetNSString(IDS_OK)
@@ -54,40 +99,27 @@ NSString* const kJavaScriptPromptTextFieldAccessibiltyIdentifier =
                          handler:^(AlertAction* action) {
                            __typeof__(self) strongSelf = weakSelf;
                            NSString* input = [strongSelf.dataSource
-                               promptInputForMediator:strongSelf];
+                               textFieldInputForMediator:strongSelf
+                                          textFieldIndex:0];
                            [strongSelf setPromptResponse:input ? input : @""];
                            [strongSelf.delegate
-                               stopDialogForMediator:strongSelf];
+                               stopOverlayForMediator:strongSelf];
                          }],
     [AlertAction actionWithTitle:l10n_util::GetNSString(IDS_CANCEL)
                            style:UIAlertActionStyleCancel
                          handler:^(AlertAction* action) {
-                           [weakSelf.delegate stopDialogForMediator:weakSelf];
+                           [weakSelf.delegate stopOverlayForMediator:weakSelf];
                          }],
   ];
-  AlertAction* blockingAction = GetBlockingAlertAction(self);
+  AlertAction* blockingAction =
+      GetBlockingAlertAction(self, self.config->source());
   if (blockingAction)
     actions = [actions arrayByAddingObject:blockingAction];
-  [self.consumer setActions:actions];
-
-  NSString* defaultPromptValue =
-      base::SysUTF8ToNSString(self.config->default_prompt_value());
-  [self.consumer setTextFieldConfigurations:@[
-    [[TextFieldConfiguration alloc]
-                   initWithText:defaultPromptValue
-                    placeholder:nil
-        accessibilityIdentifier:kJavaScriptPromptTextFieldAccessibiltyIdentifier
-                secureTextEntry:NO]
-  ]];
+  return actions;
 }
 
-#pragma mark - Response helpers
-
-// Sets the OverlayResponse using the user input from the prompt UI.
-- (void)setPromptResponse:(NSString*)textInput {
-  self.request->set_response(
-      OverlayResponse::CreateWithInfo<JavaScriptPromptOverlayResponseInfo>(
-          base::SysNSStringToUTF8(textInput)));
+- (NSString*)alertAccessibilityIdentifier {
+  return kJavaScriptDialogAccessibilityIdentifier;
 }
 
 @end

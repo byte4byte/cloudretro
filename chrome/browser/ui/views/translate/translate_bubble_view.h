@@ -25,14 +25,14 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
+#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane.h"
 #include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
+#include "ui/views/window/non_client_view.h"
 
 class Browser;
 
@@ -40,16 +40,14 @@ namespace views {
 class Checkbox;
 class LabelButton;
 class View;
-}
+}  // namespace views
 
 class TranslateBubbleView : public LocationBarBubbleDelegateView,
                             public views::ButtonListener,
                             public views::ComboboxListener,
-                            public views::LinkListener,
                             public ui::SimpleMenuModel::Delegate,
                             public views::StyledLabelListener,
-                            public views::TabbedPaneListener,
-                            public views::MenuButtonListener {
+                            public views::TabbedPaneListener {
  public:
   // Item IDs for the option button's menu.
   enum OptionsMenuItem {
@@ -86,40 +84,32 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
 
   TranslateBubbleModel* model() { return model_.get(); }
 
-  // views::BubbleDialogDelegateView methods.
-  int GetDialogButtons() const override;
+  // LocationBarBubbleDelegateView:
   base::string16 GetWindowTitle() const override;
   void Init() override;
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
-  // views::WidgetDelegate methods.
   View* GetInitiallyFocusedView() override;
   bool ShouldShowCloseButton() const override;
   bool ShouldShowWindowTitle() const override;
   void WindowClosing() override;
-
-  // views::View methods.
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
   gfx::Size CalculatePreferredSize() const override;
+  void OnWidgetClosing(views::Widget* widget) override;
 
-  // views::ComboboxListener methods.
+  // views::ButtonListener:
+  void ButtonPressed(views::Button* source, const ui::Event& event) override;
+
+  // views::ComboboxListener:
   void OnPerformAction(views::Combobox* combobox) override;
 
-  // views::LinkListener method.
-  void LinkClicked(views::Link* source, int event_flags) override;
-
-  // ui::SimpleMenuModel::Delegate methods.
+  // ui::SimpleMenuModel::Delegate:
   bool IsCommandIdChecked(int command_id) const override;
   bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
 
-  // views::StyledLabelListener method.
+  // views::StyledLabelListener:
   void StyledLabelLinkClicked(views::StyledLabel* label,
                               const gfx::Range& range,
                               int event_flags) override;
-
-  // Overridden from views::WidgetObserver:
-  void OnWidgetClosing(views::Widget* widget) override;
 
   // Returns the current view state.
   TranslateBubbleModel::ViewState GetViewState() const;
@@ -129,10 +119,6 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   void CloseBubble() override;
 
  private:
-  enum LinkID {
-    LINK_ID_ADVANCED,
-  };
-
   enum ButtonID {
     BUTTON_ID_TRANSLATE,
     BUTTON_ID_DONE,
@@ -168,17 +154,19 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
                            AlwaysTranslateCheckboxAndCancelButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
                            AlwaysTranslateCheckboxAndDoneButton);
+  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
+                           TabUIAlwaysTranslateCheckboxShortcut);
+  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
+                           TabUIAlwaysTranslateCheckboxAndCloseButton);
+  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
+                           TabUIAlwaysTranslateCheckboxAndDoneButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, DoneButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, TabUiSourceDoneButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, TabUiTargetDoneButton);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
                            DoneButtonWithoutTranslating);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
-                           TabUiSourceDoneButtonWithoutTranslating);
-  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
-                           TabUiTargetDoneButtonWithoutTranslating);
-  FRIEND_TEST_ALL_PREFIXES(TabUiSourceTranslateBubbleViewTest,
-                           DoneButtonWithoutTranslating);
+                           TabUiDoneButtonWithoutTranslating);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
                            CancelButtonReturningBeforeTranslate);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
@@ -202,6 +190,8 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
                            TabUiAlwaysTranslateLanguageMenuItem);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
                            TabUiTabSelectedAfterTranslation);
+  FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest,
+                           TabUiAlwaysTranslateTriggerTranslation);
   FRIEND_TEST_ALL_PREFIXES(TranslateLanguageBrowserTest, TranslateAndRevert);
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewBrowserTest,
                            CheckNeverTranslateThisSiteBlacklist);
@@ -214,11 +204,6 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   // views::TabbedPaneListener:
   void TabSelectedAt(int index) override;
 
-  // views::MenuButtonListener:
-  void OnMenuButtonClicked(views::Button* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override;
-
   // Returns the current child view.
   views::View* GetCurrentView() const;
 
@@ -227,9 +212,6 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
 
   // Triggers options menu in TAB UI.
   void ShowOptionsMenuTab(views::Button* source);
-
-  // Handles the event when the user clicks a link.
-  void HandleLinkClicked(LinkID sender_id);
 
   // Handles the event when the user changes an index of a combobox.
   void HandleComboboxPerformAction(ComboboxID sender_id);
@@ -263,42 +245,39 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   std::unique_ptr<views::View> CreateViewErrorNoTitle(
       std::unique_ptr<views::Button> advanced_button);
 
-  // Creates the 'error' view for Tab and Button_GM2 UI.
+  // Creates the 'error' view for Tab UI.
   std::unique_ptr<views::View> CreateViewErrorTab();
-  std::unique_ptr<views::View> CreateViewErrorGM2();
 
   // Creates the 'advanced' view. Caller takes ownership of the returned view.
   // Three options depending on UI selection in kUseButtonTranslateBubbleUI.
   std::unique_ptr<views::View> CreateViewAdvanced();
 
-  // Creates source language label and combobox for Tab Ui advanced view
-  std::unique_ptr<views::View> TabUiCreateViewAdvanedSource();
+  // Creates source language label and combobox for Tab UI advanced view
+  std::unique_ptr<views::View> TabUiCreateViewAdvancedSource();
 
-  // Creates source language label and combobox for Tab Ui advanced view
-  std::unique_ptr<views::View> TabUiCreateViewAdvanedTarget();
+  // Creates source language label and combobox for Tab UI advanced view
+  std::unique_ptr<views::View> TabUiCreateViewAdvancedTarget();
 
-  // Creates the skeleton view for GM2 UI.
-  std::unique_ptr<views::View> GM2CreateView(
-      std::unique_ptr<views::Button> action_button,
-      std::unique_ptr<views::View> status_indicator,
-      bool active_option_button,
-      std::unique_ptr<views::Label> source_language_label,
-      std::unique_ptr<views::Label> target_language_label);
-
-  // Creates the 'before translate' view for Button_GM2 UI.
-  std::unique_ptr<views::View> GM2CreateViewBeforeTranslate();
-
-  // Creates the 'translating' view for Button_GM2 UI.
-  std::unique_ptr<views::View> GM2CreateViewTranslating();
-
-  // Creates the 'after translate' view for Button_GM2 UI.
-  std::unique_ptr<views::View> GM2CreateViewAfterTranslate();
+  // Tab UI present the same view for before/during/after translate state.
+  bool TabUiIsEquivalentState(TranslateBubbleModel::ViewState view_state);
 
   // Creates the 'advanced' view to show source/target language combobox under
   // TAB UI. Caller takes ownership of the returned view.
   std::unique_ptr<views::View> CreateViewAdvancedTabUi(
       std::unique_ptr<views::Combobox> combobox,
-      std::unique_ptr<views::Label> language_title_label);
+      std::unique_ptr<views::Label> language_title_label,
+      std::unique_ptr<views::Button> advance_done_button,
+      std::unique_ptr<views::Checkbox> advanced_always_translate_checkbox);
+
+  // Creates a translate icon for when the bottom branding isn't showing. This
+  // should only be used on non-Chrome-branded builds.
+  std::unique_ptr<views::ImageView> CreateTranslateIcon();
+
+  // Creates a three dot options menu button.
+  std::unique_ptr<views::Button> CreateOptionsMenuButton();
+
+  // Creates a close button.
+  std::unique_ptr<views::Button> CreateCloseButton();
 
   // Get the current always translate checkbox
   views::Checkbox* GetAlwaysTranslateCheckbox();
@@ -328,6 +307,12 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   void UpdateLanguageNames(base::string16* original_language_name,
                            base::string16* target_language_name);
 
+  void UpdateInsets(TranslateBubbleModel::ViewState state);
+
+  // If the page is already translated, revert it. Otherwise decline
+  // translation. Then close the bubble view.
+  void RevertOrDeclineTranslation();
+
   static TranslateBubbleView* translate_bubble_view_;
 
   views::View* before_translate_view_ = nullptr;
@@ -349,13 +334,9 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   views::Checkbox* advanced_always_translate_checkbox_ = nullptr;
   views::TabbedPane* tabbed_pane_ = nullptr;
 
-  // Button_GM2 UI source/target language label class variable to be updated
-  // based on user selction in
-  views::Label* gm2_source_language_label_ = nullptr;
-  views::Label* gm2_target_language_label_ = nullptr;
-
-  views::LabelButton* advanced_cancel_button_ = nullptr;
   views::LabelButton* advanced_done_button_ = nullptr;
+  views::LabelButton* advanced_done_button_source_ = nullptr;
+  views::LabelButton* advanced_done_button_target_ = nullptr;
 
   // Default source/target language without user interaction.
   int previous_source_language_index_;
@@ -379,6 +360,8 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   const language::TranslateUIBubbleModel bubble_ui_model_;
 
   bool should_always_translate_ = false;
+  bool should_never_translate_language_ = false;
+  bool should_never_translate_site_ = false;
 
   std::unique_ptr<WebContentMouseHandler> mouse_handler_;
 

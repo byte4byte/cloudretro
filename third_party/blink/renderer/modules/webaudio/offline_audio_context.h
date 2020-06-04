@@ -57,11 +57,11 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
                       ExceptionState&);
   ~OfflineAudioContext() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   uint32_t length() const { return total_render_frames_; }
 
-  ScriptPromise startOfflineRendering(ScriptState*);
+  ScriptPromise startOfflineRendering(ScriptState*, ExceptionState&);
 
   ScriptPromise suspendContext(ScriptState*, double);
   ScriptPromise resumeContext(ScriptState*);
@@ -69,6 +69,8 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
   void RejectPendingResolvers() override;
 
   bool HasRealtimeConstraint() final { return false; }
+
+  bool IsPullingAudioGraph() const final;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(complete, kComplete)
 

@@ -4,6 +4,7 @@
 
 #include "chrome/common/chrome_constants.h"
 
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_version.h"
 
@@ -11,9 +12,9 @@
 
 #if defined(OS_MACOSX)
 #define CHROMIUM_PRODUCT_STRING "Chromium"
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #define PRODUCT_STRING "Google Chrome"
-#elif defined(CHROMIUM_BUILD)
+#elif BUILDFLAG(CHROMIUM_BRANDING)
 #define PRODUCT_STRING "Chromium"
 #else
 #error Unknown branding
@@ -93,8 +94,8 @@ const base::FilePath::CharType kBrowserProcessExecutablePathChromium[] =
 const base::FilePath::CharType kBrowserProcessExecutablePath[] =
     FPL(PRODUCT_STRING ".app/Contents/MacOS/" PRODUCT_STRING);
 const base::FilePath::CharType kHelperProcessExecutablePathChromium[] =
-    FPL(CHROMIUM_PRODUCT_STRING " Helper.app/Contents/MacOS/"
-        CHROMIUM_PRODUCT_STRING " Helper");
+    FPL(CHROMIUM_PRODUCT_STRING
+        " Helper.app/Contents/MacOS/" CHROMIUM_PRODUCT_STRING " Helper");
 const base::FilePath::CharType kHelperProcessExecutablePath[] =
     FPL(PRODUCT_STRING " Helper.app/Contents/MacOS/" PRODUCT_STRING " Helper");
 #elif defined(OS_ANDROID)
@@ -122,12 +123,13 @@ const base::FilePath::CharType kFrameworkExecutableName[] =
 
 #if defined(OS_WIN)
 const base::FilePath::CharType kBrowserResourcesDll[] = FPL("chrome.dll");
+const base::FilePath::CharType kElfDll[] = FPL("chrome_elf.dll");
 const base::FilePath::CharType kStatusTrayWindowClass[] =
     FPL("Chrome_StatusTrayWindow");
 #endif  // defined(OS_WIN)
 
-const char    kInitialProfile[] = "Default";
-const char    kMultiProfileDirPrefix[] = "Profile ";
+const char kInitialProfile[] = "Default";
+const char kMultiProfileDirPrefix[] = "Profile ";
 const base::FilePath::CharType kGuestProfileDir[] = FPL("Guest Profile");
 const base::FilePath::CharType kSystemProfileDir[] = FPL("System Profile");
 
@@ -148,6 +150,8 @@ const base::FilePath::CharType kFeatureEngagementTrackerStorageDirname[] =
     FPL("Feature Engagement Tracker");
 const base::FilePath::CharType kFirstRunSentinel[] = FPL("First Run");
 const base::FilePath::CharType kGCMStoreDirname[] = FPL("GCM Store");
+const base::FilePath::CharType kHeavyAdInterventionOptOutDBFilename[] =
+    FPL("heavy_ad_intervention_opt_out.db");
 const base::FilePath::CharType kLocalStateFilename[] = FPL("Local State");
 const base::FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const base::FilePath::CharType kNetworkPersistentStateFilename[] =
@@ -162,11 +166,10 @@ const base::FilePath::CharType kOfflinePagePrefetchStoreDirname[] =
     FPL("Offline Pages/prefech_store");
 const base::FilePath::CharType kOfflinePageRequestQueueDirname[] =
     FPL("Offline Pages/request_queue");
-const base::FilePath::CharType kPageLoadCappingOptOutDBFilename[] =
-    FPL("page_load_capping_opt_out.db");
 const base::FilePath::CharType kPreferencesFilename[] = FPL("Preferences");
 const base::FilePath::CharType kPreviewsOptOutDBFilename[] =
     FPL("previews_opt_out.db");
+const base::FilePath::CharType kQueryTileStorageDirname[] = FPL("Query Tiles");
 const base::FilePath::CharType kReadmeFilename[] = FPL("README");
 const base::FilePath::CharType kSecurePreferencesFilename[] =
     FPL("Secure Preferences");
@@ -179,7 +182,11 @@ const base::FilePath::CharType kSingletonSocketFilename[] =
 const base::FilePath::CharType kSupervisedUserSettingsFilename[] =
     FPL("Managed Mode Settings");
 const base::FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
+const base::FilePath::CharType kTrustTokenFilename[] = FPL("Trust Tokens");
 const base::FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
+// Only use if the ENABLE_REPORTING build flag is true
+const base::FilePath::CharType kReportingAndNelStoreFilename[] =
+    FPL("Reporting and NEL");
 
 #if defined(OS_WIN)
 const base::FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
@@ -202,15 +209,11 @@ const wchar_t kUserDataDirname[] = L"User Data";
 
 const float kMaxShareOfExtensionProcesses = 0.30f;
 
-#if defined(OS_LINUX)
-const int kLowestRendererOomScore = 300;
-const int kHighestRendererOomScore = 1000;
-#endif
-
 #if defined(OS_CHROMEOS)
 const char kProfileDirPrefix[] = "u-";
 const char kLegacyProfileDir[] = "user";
 const char kTestUserProfileDir[] = "test-user";
+const char kLockScreenAppProfile[] = "LockScreenAppsProfile";
 #endif
 
 // This GUID is associated with any 'don't ask me again' settings that the

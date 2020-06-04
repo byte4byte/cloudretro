@@ -19,6 +19,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -26,7 +27,7 @@
 #include "base/strings/stringize_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
 #include "components/policy/policy_constants.h"
 #include "ipc/ipc_channel.h"
@@ -60,8 +61,6 @@
 #include "remoting/host/desktop_session_connector.h"
 #include "remoting/host/ftl_host_change_notification_listener.h"
 #include "remoting/host/ftl_signaling_connector.h"
-#include "remoting/host/gcd_rest_client.h"
-#include "remoting/host/gcd_state_updater.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
@@ -99,7 +98,6 @@
 #include "remoting/protocol/transport_context.h"
 #include "remoting/signaling/ftl_host_device_id_provider.h"
 #include "remoting/signaling/ftl_signal_strategy.h"
-#include "remoting/signaling/push_notification_subscriber.h"
 #include "remoting/signaling/remoting_log_to_server.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/webrtc/api/scoped_refptr.h"
@@ -116,6 +114,7 @@
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "remoting/host/desktop_capturer_checker.h"
 #include "remoting/host/mac/permission_utils.h"
 #endif  // defined(OS_MACOSX)
 
@@ -200,6 +199,7 @@ const int kHostOfflineReasonTimeoutSeconds = 10;
 const char kHostOfflineReasonPolicyReadError[] = "POLICY_READ_ERROR";
 const char kHostOfflineReasonPolicyChangeRequiresRestart[] =
     "POLICY_CHANGE_REQUIRES_RESTART";
+const char kHostOfflineReasonRemoteRestartHost[] = "REMOTE_RESTART_HOST";
 
 }  // namespace
 
@@ -207,6 +207,7 @@ namespace remoting {
 
 class HostProcess : public ConfigWatcher::Delegate,
                     public FtlHostChangeNotificationListener::Listener,
+                    public HeartbeatSender::Delegate,
                     public IPC::Listener,
                     public base::RefCountedThreadSafe<HostProcess> {
  public:
@@ -324,12 +325,11 @@ class HostProcess : public ConfigWatcher::Delegate,
   void StartHostIfReady();
   void StartHost();
 
-  // Error handler for HeartbeatSender.
-  void OnHeartbeatSuccessful();
-  void OnUnknownHostIdError();
-
-  // Error handler for FtlSignalingConnector.
-  void OnAuthFailed();
+  // HeartbeatSender::Delegate implementations.
+  void OnFirstHeartbeatSuccessful() override;
+  void OnHostNotFound() override;
+  void OnAuthFailed() override;
+  void OnRemoteRestartHost() override;
 
   void RestartHost(const std::string& host_offline_reason);
   void ShutdownHost(HostExitCodes exit_code);
@@ -379,8 +379,6 @@ class HostProcess : public ConfigWatcher::Delegate,
   std::string robot_account_username_;
   std::string serialized_config_;
   std::string host_owner_;
-  std::string host_owner_email_;
-  bool use_service_account_ = false;
   bool enable_vp9_ = false;
   bool enable_h264_ = false;
 
@@ -406,26 +404,19 @@ class HostProcess : public ConfigWatcher::Delegate,
   // Used to specify which window to stream, if enabled.
   webrtc::WindowId window_id_ = 0;
 
-  // TODO(crbug.com/954566): Clean up GCD code
-  // Must outlive |signal_strategy_|, |gcd_state_updater_| and
-  // |ftl_signaling_connector_|.
+  // Must outlive |signal_strategy_| and |ftl_signaling_connector_|.
   std::unique_ptr<OAuthTokenGetterImpl> oauth_token_getter_;
 
   // Must outlive |heartbeat_sender_| and |host_status_logger_|.
   std::unique_ptr<LogToServer> log_to_server_;
 
-  // Signal strategies must outlive |ftl_signaling_connector_| and
-  // |gcd_subscriber_|.
+  // Signal strategies must outlive |ftl_signaling_connector_|.
   std::unique_ptr<SignalStrategy> signal_strategy_;
 
   std::unique_ptr<FtlSignalingConnector> ftl_signaling_connector_;
   std::unique_ptr<HeartbeatSender> heartbeat_sender_;
   std::unique_ptr<FtlHostChangeNotificationListener>
       ftl_host_change_notification_listener_;
-#if defined(USE_GCD)
-  std::unique_ptr<GcdStateUpdater> gcd_state_updater_;
-  std::unique_ptr<PushNotificationSubscriber> gcd_subscriber_;
-#endif  // defined(USE_GCD)
 
   std::unique_ptr<HostStatusLogger> host_status_logger_;
   std::unique_ptr<HostEventLogger> host_event_logger_;
@@ -454,6 +445,14 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   ShutdownWatchdog* shutdown_watchdog_;
 
+#if defined(OS_MACOSX)
+  // When using the command line option to check the Accessibility or Screen
+  // Recording permission, these track the permission state and indicate that
+  // the host should exit immediately with the result.
+  bool checking_permission_state_ = false;
+  bool permission_granted_ = false;
+#endif  // defined(OS_MACOSX)
+
   DISALLOW_COPY_AND_ASSIGN(HostProcess);
 };
 
@@ -470,8 +469,13 @@ HostProcess::HostProcess(std::unique_ptr<ChromotingHostContext> context,
   //     ->set_use_update_notifications(true);
   // And remove the same line from me2me_desktop_environment.cc.
 
-
   StartOnUiThread();
+
+#if defined(OS_MACOSX)
+  if (checking_permission_state_) {
+    *exit_code_out = (permission_granted_ ? EXIT_SUCCESS : EXIT_FAILURE);
+  }
+#endif
 }
 
 HostProcess::~HostProcess() {
@@ -490,6 +494,26 @@ HostProcess::~HostProcess() {
 }
 
 bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
+#if defined(OS_MACOSX)
+  if (cmd_line->HasSwitch(kCheckAccessibilityPermissionSwitchName)) {
+    checking_permission_state_ = true;
+    permission_granted_ = mac::CanInjectInput();
+    return false;
+  }
+  if (cmd_line->HasSwitch(kCheckScreenRecordingPermissionSwitchName)) {
+    // Trigger screen-capture, even if CanRecordScreen() returns true. It uses a
+    // heuristic that might not be 100% reliable, but it is critically
+    // important to add the host bundle to the list of apps under
+    // Security & Privacy -> Screen Recording.
+    if (base::mac::IsAtLeastOS10_15()) {
+      DesktopCapturerChecker().TriggerSingleCapture();
+    }
+    checking_permission_state_ = true;
+    permission_granted_ = mac::CanRecordScreen();
+    return false;
+  }
+#endif  // defined(OS_MACOSX)
+
 #if defined(REMOTING_MULTI_PROCESS)
   // Mojo keeps the task runner passed to it alive forever, so an
   // AutoThreadTaskRunner should not be passed to it. Otherwise, the process may
@@ -743,8 +767,8 @@ void HostProcess::CreateAuthenticatorFactory() {
     }
 
     factory = protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
-        use_service_account_, host_owner_, host_owner_email_, local_certificate,
-        key_pair_, client_domain_list_, pin_hash_, pairing_registry);
+        host_owner_, local_certificate, key_pair_, client_domain_list_,
+        pin_hash_, pairing_registry);
 
     host_->set_pairing_registry(pairing_registry);
   } else {
@@ -767,8 +791,8 @@ void HostProcess::CreateAuthenticatorFactory() {
         new TokenValidatorFactoryImpl(third_party_auth_config_, key_pair_,
                                       context_->url_request_context_getter());
     factory = protocol::Me2MeHostAuthenticatorFactory::CreateWithThirdPartyAuth(
-        use_service_account_, host_owner_, host_owner_email_, local_certificate,
-        key_pair_, client_domain_list_, token_validator_factory);
+        host_owner_, local_certificate, key_pair_, client_domain_list_,
+        token_validator_factory);
   }
 
 #if defined(OS_POSIX)
@@ -912,12 +936,12 @@ void HostProcess::ShutdownOnUiThread() {
 #endif
 }
 
-void HostProcess::OnUnknownHostIdError() {
+void HostProcess::OnHostNotFound() {
   LOG(ERROR) << "Host ID not found.";
   ShutdownHost(kInvalidHostIdExitCode);
 }
 
-void HostProcess::OnHeartbeatSuccessful() {
+void HostProcess::OnFirstHeartbeatSuccessful() {
   if (state_ != HOST_STARTED) {
     return;
   }
@@ -1012,21 +1036,21 @@ bool HostProcess::ApplyConfig(const base::DictionaryValue& config) {
     return false;
   }
 
-  if (config.GetString(kHostOwnerConfigPath, &host_owner_)) {
-    // Service account configs have a host_owner, different from the xmpp_login.
-    use_service_account_ = true;
-  } else {
-    // User credential configs only have an xmpp_login, which is also the owner.
-    host_owner_ = robot_account_username_;
-    use_service_account_ = false;
+  // Some old host configs have a host_owner field that's set to a JID ending
+  // with @id.talk.google.com, and a host_owner_email field that's set to the
+  // owner's actual email address. Other host configs only have a host_owner
+  // field. We are not generating separate addresses nor using JID any more but
+  // we still read host_owner_email first for compatibility reason.
+  const std::string* host_owner_ptr =
+      config.FindStringPath(kHostOwnerEmailConfigPath);
+  if (!host_owner_ptr) {
+    host_owner_ptr = config.FindStringPath(kHostOwnerConfigPath);
   }
-
-  // For non-Gmail Google accounts, the owner base JID differs from the email.
-  // host_owner_ contains the base JID (used for authenticating clients), while
-  // host_owner_email contains the account's email (used for UI and logs).
-  if (!config.GetString(kHostOwnerEmailConfigPath, &host_owner_email_)) {
-    host_owner_email_ = host_owner_;
+  if (!host_owner_ptr) {
+    LOG(ERROR) << "Host config has no host_owner or host_owner_email fields.";
+    return false;
   }
+  host_owner_ = *host_owner_ptr;
 
   // Allow offering of VP9 encoding to be overridden by the command-line.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableVp9SwitchName)) {
@@ -1115,16 +1139,6 @@ void HostProcess::ApplyHostDomainListPolicy() {
            << base::JoinString(host_domain_list_, ", ");
 
   if (!host_domain_list_.empty()) {
-    // If the user does not have a Google email, their client JID will not be
-    // based on their email. In that case, the username/host domain policies
-    // would be meaningless, since there is no way to check that the JID
-    // trying to connect actually corresponds to the owner email in question.
-    if (host_owner_ != host_owner_email_) {
-      LOG(ERROR) << "The username and host domain policies cannot be enabled "
-                 << "for accounts with a non-Google email.";
-      ShutdownHost(kInvalidHostDomainExitCode);
-    }
-
     bool matched = false;
     for (const std::string& domain : host_domain_list_) {
       if (base::EndsWith(host_owner_, std::string("@") + domain,
@@ -1182,13 +1196,6 @@ void HostProcess::ApplyUsernamePolicy() {
 
   if (host_username_match_required_) {
     HOST_LOG << "Policy requires host username match.";
-
-    // See comment in ApplyHostDomainListPolicy.
-    if (host_owner_ != host_owner_email_) {
-      LOG(ERROR) << "The username and host domain policies cannot be enabled "
-                 << "for accounts with a non-Google email.";
-      ShutdownHost(kUsernameMismatchExitCode);
-    }
 
     std::string username = GetUsername();
     bool shutdown =
@@ -1406,15 +1413,12 @@ void HostProcess::InitializeSignaling() {
   DCHECK(!signal_strategy_);
   DCHECK(!oauth_token_getter_);
   DCHECK(!ftl_signaling_connector_);
-#if defined(USE_GCD)
-  DCHECK(!gcd_state_updater_);
-  DCHECK(!gcd_subscriber_);
-#endif  // defined(USE_GCD)
   DCHECK(!heartbeat_sender_);
 
   auto oauth_credentials =
       std::make_unique<OAuthTokenGetter::OAuthAuthorizationCredentials>(
-          robot_account_username_, oauth_refresh_token_, use_service_account_);
+          robot_account_username_, oauth_refresh_token_,
+          /* is_service_account */ true);
   // Unretained is sound because we own the OAuthTokenGetterImpl, and the
   // callback will never be invoked once it is destroyed.
   oauth_token_getter_ = std::make_unique<OAuthTokenGetterImpl>(
@@ -1435,35 +1439,12 @@ void HostProcess::InitializeSignaling() {
       base::BindOnce(&HostProcess::OnAuthFailed, base::Unretained(this)));
   ftl_signaling_connector_->Start();
   heartbeat_sender_ = std::make_unique<HeartbeatSender>(
-      base::BindOnce(&HostProcess::OnHeartbeatSuccessful,
-                     base::Unretained(this)),
-      base::BindOnce(&HostProcess::OnUnknownHostIdError,
-                     base::Unretained(this)),
-      base::BindOnce(&HostProcess::OnAuthFailed, base::Unretained(this)),
-      host_id_, ftl_signal_strategy.get(), oauth_token_getter_.get(),
+      this, host_id_, ftl_signal_strategy.get(), oauth_token_getter_.get(),
       log_to_server_.get());
   ftl_host_change_notification_listener_ =
       std::make_unique<FtlHostChangeNotificationListener>(
           this, ftl_signal_strategy.get());
   signal_strategy_ = std::move(ftl_signal_strategy);
-
-#if defined(USE_GCD)
-  // Create objects to manage GCD state.
-  ServiceUrls* service_urls = ServiceUrls::GetInstance();
-  std::unique_ptr<GcdRestClient> gcd_rest_client(new GcdRestClient(
-      service_urls->gcd_base_url(), host_id_, context_->url_loader_factory(),
-      oauth_token_getter_.get()));
-  gcd_state_updater_.reset(new GcdStateUpdater(
-      base::Bind(&HostProcess::OnHeartbeatSuccessful, base::Unretained(this)),
-      base::Bind(&HostProcess::OnUnknownHostIdError, base::Unretained(this)),
-      signal_strategy_.get(), std::move(gcd_rest_client)));
-  PushNotificationSubscriber::Subscription sub;
-  sub.channel = "cloud_devices";
-  PushNotificationSubscriber::SubscriptionList subs;
-  subs.push_back(sub);
-  gcd_subscriber_.reset(
-      new PushNotificationSubscriber(signal_strategy_.get(), subs));
-#endif  // defined(USE_GCD)
 }
 
 void HostProcess::StartHostIfReady() {
@@ -1566,19 +1547,17 @@ void HostProcess::StartHost() {
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
 #if defined(OS_MACOSX)
-  // Ensure we are not running as root (i.e. at the login screen).
-  DCHECK_NE(getuid(), 0U);
-
-  // MacOs 10.14+ requires an addition, runtime permission for injecting input
-  // using CGEventPost (we use this in our input injector for Mac).  This method
-  // will request that the user enable this permission for us if they are on an
-  // affected platform and the permission has not already been approved.
-  if (base::mac::IsAtLeastOS10_14()) {
+  // Don't run the permission-checks as root (i.e. at the login screen), as they
+  // are not actionable there.
+  // Also, the permission-checks are not needed on MacOS 10.15+, as they are
+  // always handled by the new permission-wizard (the old shell script is
+  // never used on 10.15+).
+  if (getuid() != 0U && base::mac::IsAtMostOS10_14()) {
     mac::PromptUserToChangeTrustStateIfNeeded(context_->ui_task_runner());
   }
-#endif
+#endif  // defined(OS_MACOSX)
 
-  host_->Start(host_owner_email_);
+  host_->Start(host_owner_);
 
   CreateAuthenticatorFactory();
 
@@ -1588,6 +1567,10 @@ void HostProcess::StartHost() {
 
 void HostProcess::OnAuthFailed() {
   ShutdownHost(kInvalidOauthCredentialsExitCode);
+}
+
+void HostProcess::OnRemoteRestartHost() {
+  RestartHost(kHostOfflineReasonRemoteRestartHost);
 }
 
 void HostProcess::RestartHost(const std::string& host_offline_reason) {
@@ -1650,14 +1633,6 @@ void HostProcess::GoOffline(const std::string& host_offline_reason) {
         host_offline_reason,
         base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds),
         base::BindOnce(&HostProcess::OnHostOfflineReasonAck, this));
-#if defined(USE_GCD)
-    if (gcd_state_updater_) {
-      gcd_state_updater_->SetHostOfflineReason(
-          host_offline_reason,
-          base::TimeDelta::FromSeconds(kHostOfflineReasonTimeoutSeconds),
-          base::Bind(&HostProcess::OnHostOfflineReasonAck, this));
-    }
-#endif  // defined(USE_GCD)
     return;  // Shutdown will resume after OnHostOfflineReasonAck.
   }
 
@@ -1677,10 +1652,6 @@ void HostProcess::OnHostOfflineReasonAck(bool success) {
   oauth_token_getter_.reset();
   ftl_signaling_connector_.reset();
   signal_strategy_.reset();
-#if defined(USE_GCD)
-  gcd_state_updater_.reset();
-  gcd_subscriber_.reset();
-#endif  // defined(USE_GCD)
 
   if (state_ == HOST_GOING_OFFLINE_TO_RESTART) {
     SetState(HOST_STARTING);
@@ -1748,8 +1719,7 @@ int HostProcessMain() {
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("Me2Me");
 
   // Create the main task executor and start helper threads.
-  base::SingleThreadTaskExecutor main_task_executor(
-      base::MessagePump::Type::UI);
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
   base::RunLoop run_loop;
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new AutoThreadTaskRunner(
@@ -1759,7 +1729,7 @@ int HostProcessMain() {
 
   // NetworkChangeNotifier must be initialized after SingleThreadTaskExecutor.
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier(
-      net::NetworkChangeNotifier::Create());
+      net::NetworkChangeNotifier::CreateIfNeeded());
 
   // Create & start the HostProcess using these threads.
   // TODO(wez): The HostProcess holds a reference to itself until Shutdown().

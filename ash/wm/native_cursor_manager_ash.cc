@@ -7,13 +7,14 @@
 #include "ash/display/cursor_window_controller.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/shell.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/image_cursors.h"
 #include "ui/base/layout.h"
+#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/wm/core/native_cursor_manager_delegate.h"
 
 namespace ash {
@@ -77,12 +78,8 @@ void NativeCursorManagerAsh::SetDisplay(
     const display::Display& display,
     ::wm::NativeCursorManagerDelegate* delegate) {
   DCHECK(display.is_valid());
-  // Use the platform's device scale factor instead of the display's, which
-  // might have been adjusted for the UI scale.
-  const float original_scale = Shell::Get()
-                                   ->display_manager()
-                                   ->GetDisplayInfo(display.id())
-                                   .device_scale_factor();
+
+  const float original_scale = display.device_scale_factor();
   // And use the nearest resource scale factor.
   const float cursor_scale =
       ui::GetScaleForScaleFactor(ui::GetSupportedScaleFactor(original_scale));
@@ -102,11 +99,11 @@ void NativeCursorManagerAsh::SetCursor(
   if (native_cursor_enabled_) {
     image_cursors_->SetPlatformCursor(&cursor);
   } else {
-    gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
+    gfx::NativeCursor invisible_cursor(ui::mojom::CursorType::kNone);
     image_cursors_->SetPlatformCursor(&invisible_cursor);
     cursor.SetPlatformCursor(invisible_cursor.platform());
   }
-  cursor.set_device_scale_factor(image_cursors_->GetScale());
+  cursor.set_image_scale_factor(image_cursors_->GetScale());
 
   delegate->CommitCursor(cursor);
 
@@ -138,7 +135,7 @@ void NativeCursorManagerAsh::SetVisibility(
   if (visible) {
     SetCursor(delegate->GetCursor(), delegate);
   } else {
-    gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
+    gfx::NativeCursor invisible_cursor(ui::mojom::CursorType::kNone);
     image_cursors_->SetPlatformCursor(&invisible_cursor);
     SetCursorOnAllRootWindows(invisible_cursor);
   }

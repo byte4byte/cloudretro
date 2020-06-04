@@ -30,6 +30,19 @@ function waitFor(condition, error_message = 'Reaches the maximum frames.') {
   });
 }
 
+// Returns a promise that only gets resolved when the condition is met.
+function waitUntil(condition) {
+  return new Promise((resolve, reject) => {
+    function tick() {
+      if (condition())
+        resolve();
+      else
+        requestAnimationFrame(tick.bind(this));
+    }
+    tick();
+  });
+}
+
 // Returns a promise that resolves when the given condition holds for 10
 // animation frames or rejects if the condition changes to false within 10
 // animation frames.
@@ -50,6 +63,8 @@ function conditionHolds(condition, error_message = 'Condition is not true anymor
   });
 }
 
+// TODO: Frames are animated every 1ms for testing. It may be better to have the
+// timeout based on time rather than frame count.
 function waitForAnimationEnd(getValue, max_frame, max_unchanged_frame) {
   const MAX_FRAME = max_frame;
   const MAX_UNCHANGED_FRAME = max_unchanged_frame;
@@ -71,6 +86,45 @@ function waitForAnimationEnd(getValue, max_frame, max_unchanged_frame) {
       }
     }
     tick(0);
+  })
+}
+
+// TODO(bokan): Replace uses of the above with this one.
+function waitForAnimationEndTimeBased(getValue) {
+  // Give up if the animation still isn't done after this many milliseconds.
+  const TIMEOUT_MS = 1000;
+
+  // If the value is unchanged for this many milliseconds, we consider the
+  // animation ended and return.
+  const END_THRESHOLD_MS = 200;
+
+  const START_TIME = performance.now();
+
+  let last_changed_time = START_TIME;
+  let last_value = getValue();
+  return new Promise((resolve, reject) => {
+    function tick() {
+      let cur_time = performance.now();
+
+      if (cur_time - last_changed_time > END_THRESHOLD_MS) {
+        resolve();
+        return;
+      }
+
+      if (cur_time - START_TIME > TIMEOUT_MS) {
+        reject();
+        return;
+      }
+
+      let current_value = getValue();
+      if (last_value != current_value) {
+        last_changed_time = cur_time;
+        last_value = current_value;
+      }
+
+      requestAnimationFrame(tick);
+    }
+    tick();
   })
 }
 
@@ -103,6 +157,20 @@ const GestureSourceType = (function() {
   }
 })();
 
+// Enums used as input to the |modifier_keys| parameters of methods in this
+// file like smoothScroll and wheelTick.
+const Modifiers = (function() {
+  return {
+    ALT: "Alt",
+    CONTROL: "Control",
+    META: "Meta",
+    SHIFT: "Shift",
+    CAPSLOCK: "CapsLock",
+    NUMLOCK: "NumLock",
+    ALTGRAPH: "AltGraph",
+  }
+})();
+
 // Use this for speed to make gestures (effectively) instant. That is, finish
 // entirely within one Begin|Update|End triplet. This is in physical
 // pixels/second.
@@ -112,24 +180,85 @@ const GestureSourceType = (function() {
 // https://crbug.com/893608
 const SPEED_INSTANT = 400000;
 
-function smoothScroll(pixels_to_scroll, start_x, start_y, gesture_source_type, direction, speed_in_pixels_s, precise_scrolling_deltas, scroll_by_page, cursor_visible) {
+// modifier_keys means the keys pressed while doing the mouse wheel scroll, it
+// should be one of the values in the |Modifiers| or a comma separated string
+// to specify multiple values.
+function smoothScroll(pixels_to_scroll, start_x, start_y, gesture_source_type,
+                      direction, speed_in_pixels_s, precise_scrolling_deltas,
+                      scroll_by_page, cursor_visible, scroll_by_percentage,
+                      modifier_keys) {
+  let pixels_to_scroll_x = 0;
+  let pixels_to_scroll_y = 0;
+  if (direction == "down") {
+    pixels_to_scroll_y = pixels_to_scroll;
+  } else if (direction == "up") {
+    pixels_to_scroll_y = -pixels_to_scroll;
+  } else if (direction == "right") {
+    pixels_to_scroll_x = pixels_to_scroll;
+  } else if (direction == "left") {
+    pixels_to_scroll_x = -pixels_to_scroll;
+  } else if (direction == "upleft") {
+    pixels_to_scroll_x = -pixels_to_scroll;
+    pixels_to_scroll_y = -pixels_to_scroll;
+  } else if (direction == "upright") {
+    pixels_to_scroll_x = pixels_to_scroll;
+    pixels_to_scroll_y = -pixels_to_scroll;
+  } else if (direction == "downleft") {
+    pixels_to_scroll_x = -pixels_to_scroll;
+    pixels_to_scroll_y = pixels_to_scroll;
+  } else if (direction == "downright") {
+    pixels_to_scroll_x = pixels_to_scroll;
+    pixels_to_scroll_y = pixels_to_scroll;
+  }
+  return smoothScrollWithXY(pixels_to_scroll_x, pixels_to_scroll_y, start_x,
+                            start_y, gesture_source_type, speed_in_pixels_s,
+                            precise_scrolling_deltas, scroll_by_page,
+                            cursor_visible, scroll_by_percentage, modifier_keys);
+}
+
+// modifier_keys means the keys pressed while doing the mouse wheel scroll, it
+// should be one of the values in the |Modifiers| or a comma separated string
+// to specify multiple values.
+function smoothScrollWithXY(pixels_to_scroll_x, pixels_to_scroll_y, start_x,
+                            start_y, gesture_source_type, speed_in_pixels_s,
+                            precise_scrolling_deltas, scroll_by_page,
+                            cursor_visible, scroll_by_percentage, modifier_keys) {
   return new Promise((resolve, reject) => {
     if (window.chrome && chrome.gpuBenchmarking) {
-      chrome.gpuBenchmarking.smoothScrollBy(pixels_to_scroll,
-                                            resolve,
-                                            start_x,
-                                            start_y,
-                                            gesture_source_type,
-                                            direction,
-                                            speed_in_pixels_s,
-                                            precise_scrolling_deltas,
-                                            scroll_by_page,
-                                            cursor_visible);
+      chrome.gpuBenchmarking.smoothScrollByXY(pixels_to_scroll_x,
+                                              pixels_to_scroll_y,
+                                              resolve,
+                                              start_x,
+                                              start_y,
+                                              gesture_source_type,
+                                              speed_in_pixels_s,
+                                              precise_scrolling_deltas,
+                                              scroll_by_page,
+                                              cursor_visible,
+                                              scroll_by_percentage,
+                                              modifier_keys);
     } else {
       reject('This test requires chrome.gpuBenchmarking');
     }
   });
 }
+
+// modifier_keys means the keys pressed while doing the mouse wheel scroll, it
+// should be one of the values in the |Modifiers| or a comma separated string
+// to specify multiple values.
+function wheelTick(scroll_tick_x, scroll_tick_y, center, speed_in_pixels_s, modifier_keys) {
+  if (typeof(speed_in_pixels_s) == "undefined")
+    speed_in_pixels_s = SPEED_INSTANT;
+  // Do not allow precise scrolling deltas for tick wheel scroll.
+  return smoothScrollWithXY(scroll_tick_x * pixelsPerTick(),
+                            scroll_tick_y * pixelsPerTick(),
+                            center.x, center.y, GestureSourceType.MOUSE_INPUT,
+                            speed_in_pixels_s, false /* precise_scrolling_deltas */,
+                            false /* scroll_by_page */, true /* cursor_visible */,
+                            false /* precise_scrolling_deltas */, modifier_keys);
+}
+
+const LEGACY_MOUSE_WHEEL_TICK_MULTIPLIER = 120;
 
 // Returns the number of pixels per wheel tick which is a platform specific value.
 function pixelsPerTick() {
@@ -217,7 +346,8 @@ function mouseUpAt(xPosition, yPosition) {
       chrome.gpuBenchmarking.pointerActionSequence([
         {source: 'mouse',
          actions: [
-            { name: 'pointerUp', x: xPosition, y: yPosition },
+            { name: 'pointerMove', x: xPosition, y: yPosition },
+            { name: 'pointerUp' },
       ]}], resolve);
     } else {
       reject('This test requires chrome.gpuBenchmarking');
@@ -226,14 +356,14 @@ function mouseUpAt(xPosition, yPosition) {
 }
 
 // Simulate a mouse click on point.
-function mouseClickOn(x, y, button = 0 /* left */) {
+function mouseClickOn(x, y, button = 0 /* left */, keys = '') {
   return new Promise((resolve, reject) => {
     if (window.chrome && chrome.gpuBenchmarking) {
       let pointerActions = [{
         source: 'mouse',
         actions: [
           { 'name': 'pointerMove', 'x': x, 'y': y },
-          { 'name': 'pointerDown', 'x': x, 'y': y, 'button': button },
+          { 'name': 'pointerDown', 'x': x, 'y': y, 'button': button, 'keys': keys  },
           { 'name': 'pointerUp', 'button': button },
         ]
       }];
@@ -372,6 +502,13 @@ function elementCenter(element) {
     x: rect.x + rect.width / 2,
     y: rect.y + rect.height / 2
   };
+}
+
+// Waits for 'time' ms before resolving the promise.
+function waitForMs(time) {
+  return new Promise((resolve) => {
+    window.setTimeout(function() { resolve(); }, time);
+  });
 }
 
 // Requests an animation frame.

@@ -12,7 +12,7 @@
 #include "chromeos/services/device_sync/public/cpp/device_sync_client.h"
 #include "chromeos/services/multidevice_setup/multidevice_setup_base.h"
 #include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 class PrefService;
 
@@ -38,10 +38,7 @@ class MultiDeviceSetupInitializer
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<MultiDeviceSetupBase> BuildInstance(
+    static std::unique_ptr<MultiDeviceSetupBase> Create(
         PrefService* pref_service,
         device_sync::DeviceSyncClient* device_sync_client,
         AuthTokenValidator* auth_token_validator,
@@ -49,6 +46,18 @@ class MultiDeviceSetupInitializer
         AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate,
         AndroidSmsPairingStateTracker* android_sms_pairing_state_tracker,
         const device_sync::GcmDeviceInfoProvider* gcm_device_info_provider);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<MultiDeviceSetupBase> CreateInstance(
+        PrefService* pref_service,
+        device_sync::DeviceSyncClient* device_sync_client,
+        AuthTokenValidator* auth_token_validator,
+        OobeCompletionTracker* oobe_completion_tracker,
+        AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate,
+        AndroidSmsPairingStateTracker* android_sms_pairing_state_tracker,
+        const device_sync::GcmDeviceInfoProvider* gcm_device_info_provider) = 0;
 
    private:
     static Factory* test_factory_;
@@ -60,18 +69,18 @@ class MultiDeviceSetupInitializer
   // Used for both SetHostDevice() and SetHostDeviceWithoutAuthToken().
   struct SetHostDeviceArgs {
     // For SetHostDevice().
-    SetHostDeviceArgs(const std::string& host_device_id,
+    SetHostDeviceArgs(const std::string& host_instance_id_or_legacy_device_id,
                       const std::string& auth_token,
                       SetHostDeviceCallback callback);
 
     // For SetHostDeviceWithoutAuthToken().
     SetHostDeviceArgs(
-        const std::string& host_device_id,
+        const std::string& host_instance_id_or_legacy_device_id,
         mojom::PrivilegedHostDeviceSetter::SetHostDeviceCallback callback);
 
     ~SetHostDeviceArgs();
 
-    std::string host_device_id;
+    std::string host_instance_id_or_legacy_device_id;
     // Null for SetHostDeviceWithoutAuthToken().
     base::Optional<std::string> auth_token;
     base::OnceCallback<void(bool)> callback;
@@ -88,12 +97,16 @@ class MultiDeviceSetupInitializer
 
   // mojom::MultiDeviceSetup:
   void SetAccountStatusChangeDelegate(
-      mojom::AccountStatusChangeDelegatePtr delegate) override;
-  void AddHostStatusObserver(mojom::HostStatusObserverPtr observer) override;
+      mojo::PendingRemote<mojom::AccountStatusChangeDelegate> delegate)
+      override;
+  void AddHostStatusObserver(
+      mojo::PendingRemote<mojom::HostStatusObserver> observer) override;
   void AddFeatureStateObserver(
-      mojom::FeatureStateObserverPtr observer) override;
+      mojo::PendingRemote<mojom::FeatureStateObserver> observer) override;
   void GetEligibleHostDevices(GetEligibleHostDevicesCallback callback) override;
-  void SetHostDevice(const std::string& host_device_id,
+  void GetEligibleActiveHostDevices(
+      GetEligibleActiveHostDevicesCallback callback) override;
+  void SetHostDevice(const std::string& host_instance_id_or_legacy_device_id,
                      const std::string& auth_token,
                      SetHostDeviceCallback callback) override;
   void RemoveHostDevice() override;
@@ -110,7 +123,7 @@ class MultiDeviceSetupInitializer
 
   // MultiDeviceSetupBase:
   void SetHostDeviceWithoutAuthToken(
-      const std::string& host_device_id,
+      const std::string& host_instance_id_or_legacy_device_id,
       mojom::PrivilegedHostDeviceSetter::SetHostDeviceCallback callback)
       override;
 
@@ -132,10 +145,14 @@ class MultiDeviceSetupInitializer
   // If API functions are called before initialization is complete, their
   // parameters are cached here. Once asynchronous initialization is complete,
   // the parameters are passed to |multidevice_setup_impl_|.
-  mojom::AccountStatusChangeDelegatePtr pending_delegate_;
-  std::vector<mojom::HostStatusObserverPtr> pending_host_status_observers_;
-  std::vector<mojom::FeatureStateObserverPtr> pending_feature_state_observers_;
+  mojo::PendingRemote<mojom::AccountStatusChangeDelegate> pending_delegate_;
+  std::vector<mojo::PendingRemote<mojom::HostStatusObserver>>
+      pending_host_status_observers_;
+  std::vector<mojo::PendingRemote<mojom::FeatureStateObserver>>
+      pending_feature_state_observers_;
   std::vector<GetEligibleHostDevicesCallback> pending_get_eligible_hosts_args_;
+  std::vector<GetEligibleActiveHostDevicesCallback>
+      pending_get_eligible_active_hosts_args_;
   std::vector<GetHostStatusCallback> pending_get_host_args_;
   std::vector<std::tuple<mojom::Feature,
                          bool,

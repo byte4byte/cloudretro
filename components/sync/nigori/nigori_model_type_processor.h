@@ -33,8 +33,10 @@ class NigoriModelTypeProcessor : public ModelTypeProcessor,
   void DisconnectSync() override;
   void GetLocalChanges(size_t max_entries,
                        GetLocalChangesCallback callback) override;
-  void OnCommitCompleted(const sync_pb::ModelTypeState& type_state,
-                         const CommitResponseDataList& response_list) override;
+  void OnCommitCompleted(
+      const sync_pb::ModelTypeState& type_state,
+      const CommitResponseDataList& committed_response_list,
+      const FailedCommitResponseDataList& error_response_list) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
                         UpdateResponseDataList updates) override;
 
@@ -50,15 +52,16 @@ class NigoriModelTypeProcessor : public ModelTypeProcessor,
   void ModelReadyToSync(NigoriSyncBridge* bridge,
                         NigoriMetadataBatch nigori_metadata) override;
   void Put(std::unique_ptr<EntityData> entity_data) override;
+  bool IsEntityUnsynced() override;
   NigoriMetadataBatch GetMetadata() override;
   void ReportError(const ModelError& error) override;
   base::WeakPtr<ModelTypeControllerDelegate> GetControllerDelegate() override;
+  bool IsTrackingMetadata() override;
 
   bool IsConnectedForTest() const;
+  const sync_pb::ModelTypeState& GetModelTypeStateForTest();
 
  private:
-  bool IsTrackingMetadata();
-
   // Returns true if the handshake with sync thread is complete.
   bool IsConnected() const;
 
@@ -67,6 +70,11 @@ class NigoriModelTypeProcessor : public ModelTypeProcessor,
 
   // Nudges worker if there are any local changes to be committed.
   void NudgeForCommitIfNeeded() const;
+
+  // Clears all metadata and directs the bridge to clear the persisted metadata
+  // as well. In addition, it resets the state of the processor and clears
+  // tracking |entity_|.
+  void ClearMetadataAndReset();
 
   // The bridge owns this processor instance so the pointer should never become
   // invalid.

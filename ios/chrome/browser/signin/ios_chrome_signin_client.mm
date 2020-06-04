@@ -23,28 +23,20 @@
 #endif
 
 IOSChromeSigninClient::IOSChromeSigninClient(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     scoped_refptr<content_settings::CookieSettings> cookie_settings,
     scoped_refptr<HostContentSettingsMap> host_content_settings_map)
     : network_callback_helper_(
           std::make_unique<WaitForNetworkCallbackHelper>()),
       browser_state_(browser_state),
       cookie_settings_(cookie_settings),
-      host_content_settings_map_(host_content_settings_map) {
-}
+      host_content_settings_map_(host_content_settings_map) {}
 
 IOSChromeSigninClient::~IOSChromeSigninClient() {
 }
 
 void IOSChromeSigninClient::Shutdown() {
   network_callback_helper_.reset();
-}
-
-// Returns a string describing the chrome version environment. Version format:
-// <Build Info> <OS> <Version number> (<Last change>)<channel or "-devel">
-// If version information is unavailable, returns "invalid."
-std::string IOSChromeSigninClient::GetProductVersion() {
-  return GetVersionString();
 }
 
 PrefService* IOSChromeSigninClient::GetPrefs() {

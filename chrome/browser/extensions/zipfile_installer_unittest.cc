@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -21,18 +22,15 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/services/unzip/public/mojom/constants.mojom.h"
-#include "components/services/unzip/unzip_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/services/unzip/content/unzip_service.h"
+#include "components/services/unzip/in_process_unzipper.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "services/data_decoder/data_decoder_service.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
@@ -98,20 +96,15 @@ struct UnzipFileFilterTestCase {
 class ZipFileInstallerTest : public testing::Test {
  public:
   ZipFileInstallerTest()
-      : browser_threads_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        data_decoder_(test_connector_factory_.RegisterInstance(
-            data_decoder::mojom::kServiceName)),
-        unzip_service_(test_connector_factory_.RegisterInstance(
-            unzip::mojom::kServiceName)),
-        connector_(test_connector_factory_.CreateConnector()) {
-    test_connector_factory_.set_ignore_quit_requests(true);
-  }
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
 
   void SetUp() override {
     extensions::LoadErrorReporter::Init(/*enable_noisy_errors=*/false);
 
     in_process_utility_thread_helper_.reset(
         new content::InProcessUtilityThreadHelper);
+    unzip::SetUnzipperLaunchOverrideForTesting(
+        base::BindRepeating(&unzip::LaunchInProcessUnzipper));
 
     // Create profile for extension service.
     profile_.reset(new TestingProfile());
@@ -126,10 +119,11 @@ class ZipFileInstallerTest : public testing::Test {
   void TearDown() override {
     // Need to destruct ZipFileInstaller before the message loop since
     // it posts a task to it.
-    zipfile_installer_ = NULL;
+    zipfile_installer_.reset();
     ExtensionRegistry* registry(ExtensionRegistry::Get(profile_.get()));
     registry->RemoveObserver(&observer_);
     profile_.reset();
+    unzip::SetUnzipperLaunchOverrideForTesting(base::NullCallback());
     base::RunLoop().RunUntilIdle();
   }
 
@@ -141,7 +135,6 @@ class ZipFileInstallerTest : public testing::Test {
                         .AppendASCII(zip_name);
     ASSERT_TRUE(base::PathExists(original_path)) << original_path.value();
     zipfile_installer_ = ZipFileInstaller::Create(
-        connector_.get(),
         MakeRegisterInExtensionServiceCallback(extension_service_));
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -167,7 +160,7 @@ class ZipFileInstallerTest : public testing::Test {
   std::unique_ptr<TestingProfile> profile_;
   ExtensionService* extension_service_;
 
-  content::TestBrowserThreadBundle browser_threads_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<content::InProcessUtilityThreadHelper>
       in_process_utility_thread_helper_;
   MockExtensionRegistryObserver observer_;
@@ -179,10 +172,7 @@ class ZipFileInstallerTest : public testing::Test {
 #endif
 
  private:
-  service_manager::TestConnectorFactory test_connector_factory_;
-  data_decoder::DataDecoderService data_decoder_;
-  unzip::UnzipService unzip_service_;
-  std::unique_ptr<service_manager::Connector> connector_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
 };
 
 TEST_F(ZipFileInstallerTest, GoodZip) {

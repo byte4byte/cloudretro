@@ -13,16 +13,12 @@
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/paint/box_painter.h"
 #include "third_party/blink/renderer/core/paint/line_box_list_painter.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
-#include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/graphics/paint/scroll_hit_test_display_item.h"
 
 namespace blink {
 
@@ -31,6 +27,10 @@ void BlockPainter::Paint(const PaintInfo& paint_info) {
   ScopedPaintState paint_state(layout_block_, paint_info);
   if (!ShouldPaint(paint_state))
     return;
+
+  DCHECK(!layout_block_.PaintBlockedByDisplayLock(
+             DisplayLockLifecycleTarget::kChildren) ||
+         paint_info.DescendantPaintingBlocked());
 
   auto paint_offset = paint_state.PaintOffset();
   auto& local_paint_info = paint_state.MutablePaintInfo();
@@ -53,11 +53,6 @@ void BlockPainter::Paint(const PaintInfo& paint_info) {
       layout_block_.PaintObject(local_paint_info, paint_offset);
       local_paint_info.SetSkipsBackground(false);
 
-      // Record the scroll hit test after the non-scrolling background so
-      // background squashing is not affected. Hit test order would be
-      // equivalent if this were immediately before the background.
-      PaintScrollHitTestDisplayItem(paint_info);
-
       if (paint_location & kBackgroundPaintInScrollingContents) {
         local_paint_info.SetIsPaintingScrollingBackground(true);
         layout_block_.PaintObject(local_paint_info, paint_offset);
@@ -74,9 +69,10 @@ void BlockPainter::Paint(const PaintInfo& paint_info) {
     layout_block_.PaintObject(local_paint_info, paint_offset);
   } else if (original_phase != PaintPhase::kSelfBlockBackgroundOnly &&
              original_phase != PaintPhase::kSelfOutlineOnly &&
-             // For now all scrollers with overlay scrollbars are self-painting
-             // layers, so we don't need to traverse descendants here.
-             original_phase != PaintPhase::kOverlayScrollbars) {
+             // For now all scrollers with overlay overflow controls are
+             // self-painting layers, so we don't need to traverse descendants
+             // here.
+             original_phase != PaintPhase::kOverlayOverflowControls) {
     ScopedBoxContentsPaintState contents_paint_state(paint_state,
                                                      layout_block_);
     layout_block_.PaintObject(contents_paint_state.GetPaintInfo(),
@@ -120,7 +116,7 @@ void BlockPainter::Paint(const PaintInfo& paint_info) {
 }
 
 void BlockPainter::PaintChildren(const PaintInfo& paint_info) {
-  if (layout_block_.PaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+  if (paint_info.DescendantPaintingBlocked())
     return;
 
   // We may use legacy paint to paint the anonymous fieldset child. The layout
@@ -150,7 +146,7 @@ void BlockPainter::PaintChild(const LayoutBox& child,
   // paints floats in regular tree order (the FloatingObjects list is only used
   // by legacy layout).
   if (paint_info.phase != PaintPhase::kFloat &&
-      paint_info.phase != PaintPhase::kSelection &&
+      paint_info.phase != PaintPhase::kSelectionDragImage &&
       paint_info.phase != PaintPhase::kTextClip)
     return;
 
@@ -166,7 +162,7 @@ void BlockPainter::PaintChild(const LayoutBox& child,
 
 void BlockPainter::PaintChildrenAtomically(const OrderIterator& order_iterator,
                                            const PaintInfo& paint_info) {
-  if (layout_block_.PaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+  if (paint_info.DescendantPaintingBlocked())
     return;
   for (const LayoutBox* child = order_iterator.First(); child;
        child = order_iterator.Next()) {
@@ -176,7 +172,7 @@ void BlockPainter::PaintChildrenAtomically(const OrderIterator& order_iterator,
 
 void BlockPainter::PaintAllChildPhasesAtomically(const LayoutBox& child,
                                                  const PaintInfo& paint_info) {
-  if (layout_block_.PaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+  if (paint_info.DescendantPaintingBlocked())
     return;
   if (!child.HasSelfPaintingLayer() && !child.IsFloating())
     ObjectPainter(child).PaintAllPhasesAtomically(paint_info);
@@ -185,7 +181,8 @@ void BlockPainter::PaintAllChildPhasesAtomically(const LayoutBox& child,
 void BlockPainter::PaintInlineBox(const InlineBox& inline_box,
                                   const PaintInfo& paint_info) {
   if (paint_info.phase != PaintPhase::kForeground &&
-      paint_info.phase != PaintPhase::kSelection)
+      paint_info.phase != PaintPhase::kForcedColorsModeBackplate &&
+      paint_info.phase != PaintPhase::kSelectionDragImage)
     return;
 
   // Text clips are painted only for the direct inline children of the object
@@ -195,36 +192,6 @@ void BlockPainter::PaintInlineBox(const InlineBox& inline_box,
   ObjectPainter(
       *LineLayoutAPIShim::ConstLayoutObjectFrom(inline_box.GetLineLayoutItem()))
       .PaintAllPhasesAtomically(paint_info);
-}
-
-void BlockPainter::PaintScrollHitTestDisplayItem(const PaintInfo& paint_info) {
-  DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
-
-  // Scroll hit test display items are only needed for compositing. This flag is
-  // used for for printing and drag images which do not need hit testing.
-  if (paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers)
-    return;
-
-  // The scroll hit test layer is in the unscrolled and unclipped space so the
-  // scroll hit test layer can be enlarged beyond the clip. This will let us fix
-  // crbug.com/753124 in the future where the scrolling element's border is hit
-  // test differently if composited.
-
-  const auto* fragment = paint_info.FragmentToPaint(layout_block_);
-  const auto* properties = fragment ? fragment->PaintProperties() : nullptr;
-
-  // If there is an associated scroll node, emit a scroll hit test display item.
-  if (properties && properties->Scroll()) {
-    DCHECK(properties->ScrollTranslation());
-    // The local border box properties are used instead of the contents
-    // properties so that the scroll hit test is not clipped or scrolled.
-    ScopedPaintChunkProperties scroll_hit_test_properties(
-        paint_info.context.GetPaintController(),
-        fragment->LocalBorderBoxProperties(), layout_block_,
-        DisplayItem::kScrollHitTest);
-    ScrollHitTestDisplayItem::Record(paint_info.context, layout_block_,
-                                     *properties->ScrollTranslation());
-  }
 }
 
 DISABLE_CFI_PERF
@@ -243,10 +210,18 @@ void BlockPainter::PaintObject(const PaintInfo& paint_info,
   if (layout_block_.IsTruncated())
     return;
 
-  // If we're *printing* the foreground, paint the URL.
-  if (paint_phase == PaintPhase::kForeground && paint_info.IsPrinting()) {
-    ObjectPainter(layout_block_)
-        .AddPDFURLRectIfNeeded(paint_info, paint_offset);
+  ScopedPaintTimingDetectorBlockPaintHook
+      scoped_paint_timing_detector_block_paint_hook;
+  if (paint_info.phase == PaintPhase::kForeground) {
+    scoped_paint_timing_detector_block_paint_hook.EmplaceIfNeeded(
+        layout_block_,
+        paint_info.context.GetPaintController().CurrentPaintChunkProperties());
+  }
+  // If we're *printing or creating a paint preview of* the foreground, paint
+  // the URL.
+  if (paint_phase == PaintPhase::kForeground &&
+      paint_info.ShouldAddUrlMetadata()) {
+    ObjectPainter(layout_block_).AddURLRectIfNeeded(paint_info, paint_offset);
   }
 
   // If we're painting our background (either 1. kBlockBackground - background
@@ -256,12 +231,21 @@ void BlockPainter::PaintObject(const PaintInfo& paint_info,
   if (ShouldPaintSelfBlockBackground(paint_phase))
     layout_block_.PaintBoxDecorationBackground(paint_info, paint_offset);
 
+  // Draw a backplate behind all text if in forced colors mode.
+  if (paint_phase == PaintPhase::kForcedColorsModeBackplate &&
+      layout_block_.GetFrame()->GetDocument()->InForcedColorsMode() &&
+      layout_block_.ChildrenInline()) {
+    LineBoxListPainter(To<LayoutBlockFlow>(layout_block_).LineBoxes())
+        .PaintBackplate(layout_block_, paint_info, paint_offset);
+  }
+
   // If we're in any phase except *just* the self (outline or background) or a
   // mask, paint children now. This is step #5, 7, 8, and 9 of the CSS spec (see
   // above).
   if (paint_phase != PaintPhase::kSelfOutlineOnly &&
       paint_phase != PaintPhase::kSelfBlockBackgroundOnly &&
-      paint_phase != PaintPhase::kMask) {
+      paint_phase != PaintPhase::kMask &&
+      !paint_info.DescendantPaintingBlocked()) {
     // Actually paint the contents.
     if (layout_block_.IsLayoutBlockFlow()) {
       // All floating descendants will be LayoutBlockFlow objects, and will get
@@ -303,7 +287,7 @@ void BlockPainter::PaintBlockFlowContents(const PaintInfo& paint_info,
       To<LayoutBlockFlow>(layout_block_).GetFloatingObjects();
   const PaintPhase paint_phase = paint_info.phase;
   if (!floating_objects || !(paint_phase == PaintPhase::kFloat ||
-                             paint_phase == PaintPhase::kSelection ||
+                             paint_phase == PaintPhase::kSelectionDragImage ||
                              paint_phase == PaintPhase::kTextClip)) {
     return;
   }
@@ -369,7 +353,8 @@ PhysicalRect BlockPainter::OverflowRectForCullRectTesting(
 
   if (include_layout_overflow) {
     overflow_rect.Unite(layout_block_.PhysicalLayoutOverflowRect());
-    overflow_rect.Move(-PhysicalOffset(layout_block_.ScrolledContentOffset()));
+    overflow_rect.Move(
+        -PhysicalOffset(layout_block_.PixelSnappedScrolledContentOffset()));
   }
   return overflow_rect;
 }

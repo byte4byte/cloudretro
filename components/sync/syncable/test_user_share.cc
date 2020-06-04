@@ -58,6 +58,11 @@ bool TestUserShare::Reload() {
   return true;
 }
 
+DirectoryCryptographer* TestUserShare::GetCryptographer(
+    const syncable::BaseTransaction* trans) {
+  return dir_maker_->GetCryptographer(trans);
+}
+
 UserShare* TestUserShare::user_share() {
   return user_share_.get();
 }
@@ -80,11 +85,6 @@ bool TestUserShare::CreateRoot(ModelType model_type, UserShare* user_share) {
   syncable::WriteTransaction wtrans(FROM_HERE, syncable::UNITTEST, directory);
   CreateTypeRoot(&wtrans, directory, model_type);
   return true;
-}
-
-size_t TestUserShare::GetDeleteJournalSize() const {
-  syncable::ReadTransaction trans(FROM_HERE, user_share_->directory.get());
-  return user_share_->directory->delete_journal()->GetDeleteJournalSize(&trans);
 }
 
 }  // namespace syncer

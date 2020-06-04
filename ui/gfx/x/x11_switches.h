@@ -10,9 +10,9 @@
 
 namespace switches {
 
-#if !defined(OS_CHROMEOS)
 GFX_EXPORT extern const char kX11Display[];
-#endif
+
+GFX_EXPORT extern const char kNoXshm[];
 
 }  // namespace switches
 

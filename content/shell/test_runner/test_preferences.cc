@@ -9,7 +9,7 @@
 using blink::WebSettings;
 using blink::WebString;
 
-namespace test_runner {
+namespace content {
 
 TestPreferences::TestPreferences() {
   Reset();
@@ -18,7 +18,6 @@ TestPreferences::TestPreferences() {
 void TestPreferences::Reset() {
   default_font_size = 16;
   minimum_font_size = 0;
-  xss_auditor_enabled = false;
   allow_file_access_from_file_urls = true;
   allow_running_of_insecure_content = true;
   default_text_encoding_name = WebString::FromUTF8("ISO-8859-1");
@@ -48,4 +47,4 @@ void TestPreferences::Reset() {
   spatial_navigation_enabled = false;
 }
 
-}  // namespace test_runner
+}  // namespace content

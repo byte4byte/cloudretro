@@ -24,11 +24,11 @@ class ChromeVariationsServiceClient
   ~ChromeVariationsServiceClient() override;
 
   // variations::VariationsServiceClient:
-  base::Callback<base::Version(void)> GetVersionForSimulationCallback()
-      override;
+  VersionCallback GetVersionForSimulationCallback() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   bool OverridesRestrictParameter(std::string* parameter) override;
+  bool IsEnterprise() override;
 
  private:
   // variations::VariationsServiceClient:

@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import unittest
@@ -24,8 +25,8 @@ import win32api
 from win32com.shell import shell, shellcon
 import _winreg
 
+import property_walker
 from variable_expander import VariableExpander
-import verifier_runner
 
 # Use absolute paths
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -107,7 +108,7 @@ class Config(object):
 class InstallerTest(unittest.TestCase):
   """Tests a test case in the config file."""
 
-  def __init__(self, name, test, config, variable_expander):
+  def __init__(self, name, test, config, variable_expander, output_dir):
     """Constructor.
 
     Args:
@@ -116,14 +117,17 @@ class InstallerTest(unittest.TestCase):
           ending with state names.
       config: The Config object.
       variable_expander: A VariableExpander object.
+      output_dir: An optional directory into which diagnostics may be written
+          in case of failure.
     """
     super(InstallerTest, self).__init__()
     self._name = name
     self._test = test
     self._config = config
     self._variable_expander = variable_expander
-    self._verifier_runner = verifier_runner.VerifierRunner()
+    self._output_dir = output_dir
     self._clean_on_teardown = True
+    self._log_path = None
 
   def __str__(self):
     """Returns a string representing the test case.
@@ -140,6 +144,14 @@ class InstallerTest(unittest.TestCase):
     # test case from the config file in place of the name of this class's test
     # function.
     return unittest.TestCase.id(self).replace(self._testMethodName, self._name)
+
+  def setUp(self):
+    # Create a temp file to contain the installer log(s) for this test.
+    log_file, self._log_path = tempfile.mkstemp()
+    os.close(log_file)
+    self.addCleanup(os.remove, self._log_path)
+    self._variable_expander.SetLogFile(self._log_path)
+    self.addCleanup(self._variable_expander.SetLogFile, None)
 
   def runTest(self):
     """Run the test case."""
@@ -169,7 +181,20 @@ class InstallerTest(unittest.TestCase):
   def tearDown(self):
     """Cleans up the machine if the test case fails."""
     if self._clean_on_teardown:
-      RunCleanCommand(True, self._variable_expander)
+      # The last state in the test's traversal is its "clean" state, so use it
+      # to drive the cleanup operation.
+      clean_state_name = self._test[len(self._test) - 1]
+      RunCleanCommand(True, self._config.states[clean_state_name],
+                      self._variable_expander)
+      # Either copy the log to isolated outdir or dump it to console.
+      if self._output_dir:
+        target = os.path.join(self._output_dir,
+                              os.path.basename(self._log_path))
+        shutil.copyfile(self._log_path, target)
+        logging.error('Saved installer log to %s', target)
+      else:
+        with open(self._log_path) as fh:
+          logging.error(fh.read())
 
   def shortDescription(self):
     """Overridden from unittest.TestCase.
@@ -189,8 +214,8 @@ class InstallerTest(unittest.TestCase):
     """
     logging.info('Verifying state %s' % state)
     try:
-      self._verifier_runner.VerifyAll(self._config.states[state],
-                                      self._variable_expander)
+      property_walker.Verify(self._config.states[state],
+                             self._variable_expander)
     except AssertionError as e:
       # If an AssertionError occurs, we intercept it and add the state name
       # to the error message so that we know where the test fails.
@@ -234,58 +259,32 @@ def RunCommand(command, variable_expander):
         expanded_command, returncode))
 
 
-def DeleteGoogleUpdateRegistration(system_level, registry_subkey,
-                                   variable_expander):
-  """Deletes Chrome's registration with Google Update.
-
-  Args:
-    system_level: True if system-level Chrome is to be deleted.
-    registry_subkey: The pre-expansion registry subkey for the product.
-    variable_expander: A VariableExpander object.
-  """
-  root = (_winreg.HKEY_LOCAL_MACHINE if system_level
-          else _winreg.HKEY_CURRENT_USER)
-  key_name = variable_expander.Expand(registry_subkey)
-  try:
-    key_handle = _winreg.OpenKey(root, key_name, 0,
-                                 _winreg.KEY_SET_VALUE |
-                                 _winreg.KEY_WOW64_32KEY)
-    _winreg.DeleteValue(key_handle, 'pv')
-  except WindowsError:
-    # The key isn't present, so there is no value to delete.
-    pass
-
-
-def RunCleanCommand(force_clean, variable_expander):
+def RunCleanCommand(force_clean, clean_state, variable_expander):
   """Puts the machine in the clean state (e.g. Chrome not installed).
 
   Args:
     force_clean: A boolean indicating whether to force cleaning existing
         installations.
+    clean_state: The state used to verify a clean machine after each test. This
+        state is used to drive the cleanup operation.
     variable_expander: A VariableExpander object.
   """
-  # A list of (system_level, product_name, product_switch, registry_subkey)
-  # tuples for the possible installed products.
+  # A list of (product_name, product_switch) tuples for the possible installed
+  # products.
   data = [
-    (False, '$CHROME_LONG_NAME', '',
-     '$CHROME_UPDATE_REGISTRY_SUBKEY'),
-    (True, '$CHROME_LONG_NAME', '--system-level',
-     '$CHROME_UPDATE_REGISTRY_SUBKEY'),
+      ('$CHROME_LONG_NAME', ''),
+      ('$CHROME_LONG_NAME', '--system-level'),
   ]
   if variable_expander.Expand('$BRAND') == 'Google Chrome':
-    data.extend([(False, '$CHROME_LONG_NAME_BETA', '',
-                  '$CHROME_UPDATE_REGISTRY_SUBKEY_BETA'),
-                 (True, '$CHROME_LONG_NAME_BETA', '--system-level',
-                  '$CHROME_UPDATE_REGISTRY_SUBKEY_BETA'),
-                 (False, '$CHROME_LONG_NAME_DEV', '',
-                  '$CHROME_UPDATE_REGISTRY_SUBKEY_DEV'),
-                 (True, '$CHROME_LONG_NAME_DEV', '--system-level',
-                  '$CHROME_UPDATE_REGISTRY_SUBKEY_DEV'),
-                 (False, '$CHROME_LONG_NAME_SXS', '',
-                  '$CHROME_UPDATE_REGISTRY_SUBKEY_SXS')])
+    data.extend([('$CHROME_LONG_NAME_BETA', ''),
+                 ('$CHROME_LONG_NAME_BETA', '--system-level'),
+                 ('$CHROME_LONG_NAME_DEV', ''),
+                 ('$CHROME_LONG_NAME_DEV', '--system-level'),
+                 ('$CHROME_LONG_NAME_SXS', '')])
 
+  # Attempt to run each installed product's uninstaller.
   interactive_option = '--interactive' if not force_clean else ''
-  for system_level, product_name, product_switch, registry_subkey in data:
+  for product_name, product_switch in data:
     command = ('python uninstall_chrome.py '
                '--chrome-long-name="%s" '
                '--no-error-if-absent %s %s' %
@@ -296,9 +295,11 @@ def RunCleanCommand(force_clean, variable_expander):
       message = traceback.format_exception(*sys.exc_info())
       message.insert(0, 'Error cleaning up an old install with:\n')
       logging.info(''.join(message))
-    if force_clean:
-      DeleteGoogleUpdateRegistration(system_level, registry_subkey,
-                                     variable_expander)
+
+  # Once everything is uninstalled, make a pass to delete any stray tidbits on
+  # the machine.
+  if force_clean:
+    property_walker.Clean(clean_state, variable_expander)
 
 
 def MergePropertyDictionaries(current_property, new_property):
@@ -551,7 +552,13 @@ def DoMain():
                                        args.output_dir)
   config = ParseConfigFile(config_path, variable_expander)
 
-  RunCleanCommand(args.force_clean, variable_expander)
+  # The last state in any test's traversal is the "clean" state, so use it to
+  # drive the initial cleanup operation.
+  a_test = config.tests[0]['traversal']
+  clean_state_name = a_test[len(a_test) - 1]
+  RunCleanCommand(args.force_clean, config.states[clean_state_name],
+                  variable_expander)
+
   for test in config.tests:
     # If tests were specified via |tests|, their names are formatted like so:
     test_name = '%s.%s.%s' % (InstallerTest.__module__,
@@ -559,7 +566,7 @@ def DoMain():
                               test['name'])
     if not tests_to_run or test_name in tests_to_run:
       suite.addTest(InstallerTest(test['name'], test['traversal'], config,
-                                  variable_expander))
+                                  variable_expander, args.output_dir))
 
   verbosity = 2 if not args.quiet else 1
   result = unittest.TextTestRunner(verbosity=verbosity).run(suite)

@@ -21,7 +21,7 @@
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/chrome_cleaner/engines/common/registry_util.h"
 #include "chrome/chrome_cleaner/engines/target/sandboxed_test_helpers.h"
@@ -146,7 +146,7 @@ class CleanerEngineRequestsProxyTestBase : public ::testing::Test {
   scoped_refptr<TestParentProcess> parent_process_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 // CleanerEngineRequestsProxyTest is parameterized with:
@@ -213,7 +213,7 @@ MULTIPROCESS_TEST_MAIN(DeleteTaskNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   TestTaskScheduler test_task_scheduler;
 
@@ -294,7 +294,7 @@ MULTIPROCESS_TEST_MAIN(DeleteFileNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->DeleteFile(
       GetTestFilePath(child_process->command_line(), kTempFileName)));
@@ -332,7 +332,7 @@ MULTIPROCESS_TEST_MAIN(DeleteFilePostRebootNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->DeleteFilePostReboot(
       GetTestFilePath(child_process->command_line(), kTempFileName)));
@@ -440,7 +440,7 @@ MULTIPROCESS_TEST_MAIN(NtDeleteRegistryKeyNoHang) {
 
   EXPECT_FALSE(proxy->NtDeleteRegistryKey(String16EmbeddedNulls(nullptr)));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtDeleteRegistryKey(
       GetTestRegistryKeyPath(child_process->command_line())));
@@ -477,7 +477,7 @@ MULTIPROCESS_TEST_MAIN(NtDeleteRegistryValueNoHang) {
   EXPECT_FALSE(proxy->NtDeleteRegistryValue(String16EmbeddedNulls(nullptr),
                                             GetTestRegistryValueName()));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtDeleteRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
@@ -533,7 +533,7 @@ MULTIPROCESS_TEST_MAIN(NtChangeRegistryValueNoHang) {
       GetTestRegistryKeyPath(child_process->command_line()),
       String16EmbeddedNulls(nullptr), new_value));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_FALSE(proxy->NtChangeRegistryValue(
       GetTestRegistryKeyPath(child_process->command_line()),
@@ -607,7 +607,7 @@ MULTIPROCESS_TEST_MAIN(DeleteServiceNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   base::string16 service_name =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
@@ -756,7 +756,7 @@ MULTIPROCESS_TEST_MAIN(TerminateProcessNoHang) {
 
   scoped_refptr<CleanerEngineRequestsProxy> proxy(
       child_process->GetCleanerEngineRequestsProxy());
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   base::ProcessId pid = GetTestProcessId(child_process->command_line());
   if (!pid) {

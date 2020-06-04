@@ -15,7 +15,7 @@ namespace blink {
 class ExceptionState;
 class ScriptState;
 class StreamAlgorithm;
-class TransformStreamNative;
+class TransformStream;
 class Visitor;
 
 class CORE_EXPORT TransformStreamDefaultController : public ScriptWrappable {
@@ -26,7 +26,7 @@ class CORE_EXPORT TransformStreamDefaultController : public ScriptWrappable {
   ~TransformStreamDefaultController() override;
 
   // https://streams.spec.whatwg.org/#ts-default-controller-desired-size
-  double desiredSize(bool& is_null) const;
+  base::Optional<double> desiredSize() const;
 
   // https://streams.spec.whatwg.org/#ts-default-controller-enqueue
   void enqueue(ScriptState*, ExceptionState&);
@@ -42,12 +42,12 @@ class CORE_EXPORT TransformStreamDefaultController : public ScriptWrappable {
   void Trace(Visitor*) override;
 
  private:
-  friend class TransformStreamNative;
+  friend class TransformStream;
 
   class DefaultTransformAlgorithm;
 
   // https://streams.spec.whatwg.org/#set-up-transform-stream-default-controller
-  static void SetUp(TransformStreamNative*,
+  static void SetUp(TransformStream*,
                     TransformStreamDefaultController*,
                     StreamAlgorithm* transform_algorithm,
                     StreamAlgorithm* flush_algorithm);
@@ -55,7 +55,7 @@ class CORE_EXPORT TransformStreamDefaultController : public ScriptWrappable {
   // https://streams.spec.whatwg.org/#set-up-transform-stream-default-controller-from-transformer
   static v8::Local<v8::Value> SetUpFromTransformer(
       ScriptState*,
-      TransformStreamNative*,
+      TransformStream*,
       v8::Local<v8::Object> transformer,
       ExceptionState&);
 
@@ -82,7 +82,7 @@ class CORE_EXPORT TransformStreamDefaultController : public ScriptWrappable {
   // https://streams.spec.whatwg.org/#transform-stream-default-controller-terminate
   static void Terminate(ScriptState*, TransformStreamDefaultController*);
 
-  Member<TransformStreamNative> controlled_transform_stream_;
+  Member<TransformStream> controlled_transform_stream_;
   Member<StreamAlgorithm> flush_algorithm_;
   Member<StreamAlgorithm> transform_algorithm_;
 };

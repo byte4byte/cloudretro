@@ -6,17 +6,17 @@
 
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/task/post_task.h"
-#include "chrome/browser/performance_manager/performance_manager.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_data_store_factory.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_webcontents_observer.h"
 #include "chrome/browser/resource_coordinator/tab_helper.h"
-#include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "chrome/browser/tab_contents/form_interaction_tab_helper.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
-#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace resource_coordinator {
 namespace testing {
@@ -93,11 +93,6 @@ void NoopLocalSiteCharacteristicsDatabase::GetDatabaseSize(
   std::move(callback).Run(base::nullopt, base::nullopt);
 }
 
-ChromeTestHarnessWithLocalDB::ChromeTestHarnessWithLocalDB() {
-  scoped_feature_list_.InitAndEnableFeature(
-      features::kSiteCharacteristicsDatabase);
-}
-
 ChromeTestHarnessWithLocalDB::~ChromeTestHarnessWithLocalDB() = default;
 
 void ChromeTestHarnessWithLocalDB::SetUp() {
@@ -105,19 +100,28 @@ void ChromeTestHarnessWithLocalDB::SetUp() {
   // ChromeRenderViewHostTestHarness::SetUp(), this will prevent the creation
   // of a non-mock version of a data store when browser_context() gets
   // initialized.
-  performance_manager_ = performance_manager::PerformanceManager::Create();
+  performance_manager_ =
+      performance_manager::PerformanceManagerImpl::Create(base::DoNothing());
+  registry_ = performance_manager::PerformanceManagerRegistry::Create();
+
+  performance_manager::PerformanceManagerImpl::CallOnGraph(
+      FROM_HERE, base::BindOnce([](performance_manager::Graph* graph) {
+        graph->PassToGraph(FormInteractionTabHelper::CreateGraphObserver());
+      }));
 
   LocalSiteCharacteristicsDataStoreFactory::EnableForTesting();
 
   // TODO(siggi): Can this die now?
-  service_manager::mojom::ConnectorRequest connector_request;
+  mojo::PendingReceiver<service_manager::mojom::Connector> connector_receiver;
   content::SetSystemConnectorForTesting(
-      service_manager::Connector::Create(&connector_request));
+      service_manager::Connector::Create(&connector_receiver));
   ChromeRenderViewHostTestHarness::SetUp();
 }
 
 void ChromeTestHarnessWithLocalDB::TearDown() {
-  performance_manager::PerformanceManager::Destroy(
+  registry_->TearDown();
+  registry_.reset();
+  performance_manager::PerformanceManagerImpl::Destroy(
       std::move(performance_manager_));
   content::SetSystemConnectorForTesting(nullptr);
   ChromeRenderViewHostTestHarness::TearDown();

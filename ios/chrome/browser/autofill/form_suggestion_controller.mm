@@ -7,24 +7,22 @@
 #include <memory>
 
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_block.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/ui/autofill_popup_delegate.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
 #include "components/autofill/ios/form_util/form_activity_params.h"
-#import "ios/chrome/browser/autofill/form_input_accessory_view_controller.h"
 #import "ios/chrome/browser/autofill/form_input_navigator.h"
 #import "ios/chrome/browser/autofill/form_input_suggestions_provider.h"
 #import "ios/chrome/browser/autofill/form_suggestion_view.h"
 #import "ios/chrome/browser/passwords/password_generation_utils.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/web/common/url_scheme_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
-#import "ios/web/public/url_scheme_util.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -64,7 +62,7 @@ AutofillSuggestionState::AutofillSuggestionState(
 
 @interface FormSuggestionController () {
   // Callback to update the accessory view.
-  FormSuggestionsReadyCompletion accessoryViewUpdateBlock_;
+  FormSuggestionsReadyCompletion _accessoryViewUpdateBlock;
 
   // Autofill suggestion state.
   std::unique_ptr<AutofillSuggestionState> _suggestionState;
@@ -131,8 +129,7 @@ AutofillSuggestionState::AutofillSuggestionState(
       base::mac::ObjCCast<JsSuggestionManager>(
           [webState->GetJSInjectionReceiver()
               instanceOfClass:[JsSuggestionManager class]]);
-  [jsSuggestionManager
-      setWebFramesManager:web::WebFramesManager::FromWebState(webState)];
+  [jsSuggestionManager setWebFramesManager:webState->GetWebFramesManager()];
   return [self initWithWebState:webState
                       providers:providers
             JsSuggestionManager:jsSuggestionManager];
@@ -262,10 +259,10 @@ AutofillSuggestionState::AutofillSuggestionState(
 
 - (void)onNoSuggestionsAvailable {
   // Check the update block hasn't been reset while waiting for suggestions.
-  if (!accessoryViewUpdateBlock_) {
+  if (!_accessoryViewUpdateBlock) {
     return;
   }
-  accessoryViewUpdateBlock_(@[], self);
+  _accessoryViewUpdateBlock(@[], self);
 }
 
 - (void)onSuggestionsReady:(NSArray<FormSuggestion*>*)suggestions
@@ -300,16 +297,16 @@ AutofillSuggestionState::AutofillSuggestionState(
 
 - (void)updateKeyboard:(AutofillSuggestionState*)suggestionState {
   if (!suggestionState) {
-    if (accessoryViewUpdateBlock_)
-      accessoryViewUpdateBlock_(nil, self);
+    if (_accessoryViewUpdateBlock)
+      _accessoryViewUpdateBlock(nil, self);
   } else {
     [self updateKeyboardWithSuggestions:suggestionState->suggestions];
   }
 }
 
 - (void)updateKeyboardWithSuggestions:(NSArray<FormSuggestion*>*)suggestions {
-  if (accessoryViewUpdateBlock_) {
-    accessoryViewUpdateBlock_(suggestions, self);
+  if (_accessoryViewUpdateBlock) {
+    _accessoryViewUpdateBlock(suggestions, self);
   }
 }
 
@@ -342,12 +339,12 @@ AutofillSuggestionState::AutofillSuggestionState(
   _suggestionState.reset(
       new AutofillSuggestionState(params.form_name, params.field_identifier,
                                   params.frame_id, params.value));
-  accessoryViewUpdateBlock_ = [accessoryViewUpdateBlock copy];
+  _accessoryViewUpdateBlock = [accessoryViewUpdateBlock copy];
   [self retrieveSuggestionsForForm:params webState:webState];
 }
 
 - (void)inputAccessoryViewControllerDidReset {
-  accessoryViewUpdateBlock_ = nil;
+  _accessoryViewUpdateBlock = nil;
   [self resetSuggestionState];
 }
 

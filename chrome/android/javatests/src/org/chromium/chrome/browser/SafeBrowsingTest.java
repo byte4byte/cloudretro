@@ -14,6 +14,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -73,7 +74,7 @@ public final class SafeBrowsingTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         // Create a new temporary instance to ensure the Class is loaded. Otherwise we will get a
         // ClassNotFoundException when trying to instantiate during startup.
         SafeBrowsingApiBridge.setSafeBrowsingHandlerType(
@@ -81,7 +82,7 @@ public final class SafeBrowsingTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mTestServer != null) {
             mTestServer.stopAndDestroyServer();
         }

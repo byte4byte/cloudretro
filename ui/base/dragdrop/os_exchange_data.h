@@ -17,6 +17,7 @@
 #include <objidl.h>
 #endif
 
+#include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "ui/base/dragdrop/download_file_interface.h"
@@ -35,7 +36,7 @@ class Vector2d;
 
 namespace ui {
 
-struct ClipboardFormatType;
+class ClipboardFormatType;
 struct FileInfo;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -75,11 +76,11 @@ class UI_BASE_EXPORT OSExchangeData {
   // Encapsulates the info about a file to be downloaded.
   struct UI_BASE_EXPORT DownloadFileInfo {
     DownloadFileInfo(const base::FilePath& filename,
-                     DownloadFileProvider* downloader);
+                     std::unique_ptr<DownloadFileProvider> downloader);
     ~DownloadFileInfo();
 
     base::FilePath filename;
-    scoped_refptr<DownloadFileProvider> downloader;
+    std::unique_ptr<DownloadFileProvider> downloader;
   };
 
   // Provider defines the platform specific part of OSExchangeData that
@@ -135,7 +136,7 @@ class UI_BASE_EXPORT OSExchangeData {
         const std::vector<std::pair<base::FilePath, std::string>>&
             filenames_and_contents,
         DWORD tymed) = 0;
-    virtual void SetDownloadFileInfo(const DownloadFileInfo& download) = 0;
+    virtual void SetDownloadFileInfo(DownloadFileInfo* download) = 0;
 #endif
 
 #if defined(USE_AURA)
@@ -266,7 +267,7 @@ class UI_BASE_EXPORT OSExchangeData {
       const;
 
   // Adds a download file with full path (CF_HDROP).
-  void SetDownloadFileInfo(const DownloadFileInfo& download);
+  void SetDownloadFileInfo(DownloadFileInfo* download);
 #endif
 
 #if defined(USE_AURA)
@@ -274,6 +275,7 @@ class UI_BASE_EXPORT OSExchangeData {
   // text/html and CF_HTML.
   void SetHtml(const base::string16& html, const GURL& base_url);
   bool GetHtml(base::string16* html, GURL* base_url) const;
+  bool HasHtml() const;
 #endif
 
  private:

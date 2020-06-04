@@ -18,6 +18,7 @@
 #include "media/base/key_systems.h"
 #include "media/mojo/common/media_type_converters.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "url/origin.h"
 
 namespace media {
@@ -51,7 +52,8 @@ MojoCdmService::~MojoCdmService() {
 }
 
 void MojoCdmService::SetClient(
-    mojom::ContentDecryptionModuleClientAssociatedPtrInfo client) {
+    mojo::PendingAssociatedRemote<mojom::ContentDecryptionModuleClient>
+        client) {
   client_.Bind(std::move(client));
 }
 
@@ -60,7 +62,9 @@ void MojoCdmService::Initialize(const std::string& key_system,
                                 const CdmConfig& cdm_config,
                                 InitializeCallback callback) {
   DVLOG(1) << __func__ << ": " << key_system;
-  DCHECK(!cdm_);
+
+  CHECK(!has_initialize_been_called_) << "Initialize should only happen once";
+  has_initialize_been_called_ = true;
 
   auto weak_this = weak_factory_.GetWeakPtr();
   cdm_factory_->Create(
@@ -69,8 +73,8 @@ void MojoCdmService::Initialize(const std::string& key_system,
       base::Bind(&MojoCdmService::OnSessionClosed, weak_this),
       base::Bind(&MojoCdmService::OnSessionKeysChange, weak_this),
       base::Bind(&MojoCdmService::OnSessionExpirationUpdate, weak_this),
-      base::Bind(&MojoCdmService::OnCdmCreated, weak_this,
-                 base::Passed(&callback)));
+      base::BindOnce(&MojoCdmService::OnCdmCreated, weak_this,
+                     std::move(callback)));
 }
 
 void MojoCdmService::SetServerCertificate(
@@ -141,6 +145,7 @@ void MojoCdmService::OnCdmCreated(
     InitializeCallback callback,
     const scoped_refptr<::media::ContentDecryptionModule>& cdm,
     const std::string& error_message) {
+  DVLOG(2) << __func__ << ": error_message=" << error_message;
   mojom::CdmPromiseResultPtr cdm_promise_result(mojom::CdmPromiseResult::New());
 
   // TODO(xhwang): This should not happen when KeySystemInfo is properly
@@ -150,10 +155,13 @@ void MojoCdmService::OnCdmCreated(
     cdm_promise_result->exception = CdmPromise::Exception::NOT_SUPPORTED_ERROR;
     cdm_promise_result->system_code = 0;
     cdm_promise_result->error_message = error_message;
-    std::move(callback).Run(std::move(cdm_promise_result), 0, nullptr);
+    mojo::PendingRemote<mojom::Decryptor> decryptor;
+    std::move(callback).Run(std::move(cdm_promise_result), 0,
+                            std::move(decryptor));
     return;
   }
 
+  CHECK(!cdm_) << "CDM should only be created once.";
   cdm_ = cdm;
 
   if (context_) {
@@ -163,33 +171,26 @@ void MojoCdmService::OnCdmCreated(
 
   // If |cdm| has a decryptor, create the MojoDecryptorService
   // and pass the connection back to the client.
-  mojom::DecryptorPtr decryptor_ptr;
+  mojo::PendingRemote<mojom::Decryptor> decryptor_remote;
   CdmContext* const cdm_context = cdm_->GetCdmContext();
   if (cdm_context && cdm_context->GetDecryptor()) {
+    DVLOG(2) << __func__ << ": CDM supports Decryptor.";
     // Both |cdm_| and |decryptor_| are owned by |this|, so we don't need to
     // pass in a CdmContextRef.
     decryptor_.reset(
         new MojoDecryptorService(cdm_context->GetDecryptor(), nullptr));
-    decryptor_binding_ = std::make_unique<mojo::Binding<mojom::Decryptor>>(
-        decryptor_.get(), MakeRequest(&decryptor_ptr));
-    // base::Unretained is safe because |decryptor_binding_| is owned by |this|.
-    // If |this| is destructed, |decryptor_binding_| will be destructed as well
-    // and the error handler should never be called.
-    decryptor_binding_->set_connection_error_handler(base::BindOnce(
+    decryptor_receiver_ = std::make_unique<mojo::Receiver<mojom::Decryptor>>(
+        decryptor_.get(), decryptor_remote.InitWithNewPipeAndPassReceiver());
+    // base::Unretained is safe because |decryptor_receiver_| is owned by
+    // |this|. If |this| is destructed, |decryptor_receiver_| will be destructed
+    // as well and the error handler should never be called.
+    decryptor_receiver_->set_disconnect_handler(base::BindOnce(
         &MojoCdmService::OnDecryptorConnectionError, base::Unretained(this)));
   }
 
-  // If the |context_| is not null, we should support connecting the |cdm| with
-  // the media player in the same process, which also has access to the
-  // |context_|. Hence pass back the |cdm_id_| obtained from the |context_|.
-  // Otherwise, if the |cdm| has a valid CDM ID by itself, this CDM can proxy
-  // all or parts of its functionalities to another remote CDM or CdmProxy. In
-  // this case, just we pass the remote CDM ID back.
-  int cdm_id = context_ ? cdm_id_ : cdm_context->GetCdmId();
-
   cdm_promise_result->success = true;
-  std::move(callback).Run(std::move(cdm_promise_result), cdm_id,
-                          std::move(decryptor_ptr));
+  std::move(callback).Run(std::move(cdm_promise_result), cdm_id_,
+                          std::move(decryptor_remote));
 }
 
 void MojoCdmService::OnSessionMessage(const std::string& session_id,

@@ -13,8 +13,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
-#include "chrome/browser/ssl/ssl_error_assistant.h"
-#include "chrome/browser/ssl/ssl_error_handler.h"
+#include "base/task/thread_pool.h"
+#include "components/security_interstitials/content/ssl_error_assistant.h"
+#include "components/security_interstitials/content/ssl_error_handler.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -58,7 +59,7 @@ void LoadProtoFromDisk(const base::FilePath& pb_path) {
     proto = std::move(default_proto);
   }
 
-  base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::UI})
+  base::CreateSingleThreadTaskRunner({content::BrowserThread::UI})
       ->PostTask(FROM_HERE,
                  base::BindOnce(&SSLErrorHandler::SetErrorAssistantProto,
                                 std::move(proto)));
@@ -99,7 +100,7 @@ void SSLErrorAssistantComponentInstallerPolicy::ComponentReady(
   DVLOG(1) << "Component ready, version " << version.GetString() << " in "
            << install_dir.value();
 
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&LoadProtoFromDisk, GetInstalledPath(install_dir)));
 }

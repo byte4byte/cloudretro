@@ -6,8 +6,8 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <map>
 #include <memory>
-#include <set>
 #include <utility>
 
 #include "base/bind.h"
@@ -18,6 +18,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
 #include "chromeos/network/certificate_helper.h"
+#include "chromeos/network/onc/certificate_scope.h"
+#include "chromeos/network/policy_certificate_provider.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
 #include "net/cert/cert_database.h"
@@ -45,8 +47,8 @@ NetworkCertType GetNetworkCertType(CERTCertificate* cert) {
   return NetworkCertType::kOther;
 }
 
-// Returns all authority certificats provided by |policy_certificate_provider|
-// as a list of NetworkCerts.
+// Returns all authority certificates with default (not restricted) scope
+// provided by |policy_certificate_provider| as a list of NetworkCerts.
 NetworkCertLoader::NetworkCertList GetPolicyProvidedAuthorities(
     const PolicyCertificateProvider* policy_certificate_provider,
     bool device_wide) {
@@ -54,7 +56,8 @@ NetworkCertLoader::NetworkCertList GetPolicyProvidedAuthorities(
   if (!policy_certificate_provider)
     return result;
   for (const auto& certificate :
-       policy_certificate_provider->GetAllAuthorityCertificates()) {
+       policy_certificate_provider->GetAllAuthorityCertificates(
+           chromeos::onc::CertificateScope::Default())) {
     net::ScopedCERTCertificate x509_cert =
         net::x509_util::CreateCERTCertificateFromX509Certificate(
             certificate.get());
@@ -78,11 +81,22 @@ NetworkCertLoader::NetworkCertList CombineNetworkCertLists(
     total_size += list->size();
   NetworkCertLoader::NetworkCertList result;
   result.reserve(total_size);
-  std::set<const CERTCertificate*> already_added_certs;
+
+  std::map<const CERTCertificate*, size_t> added_cert_to_position;
   for (const NetworkCertLoader::NetworkCertList* list : network_cert_lists) {
     for (const NetworkCertLoader::NetworkCert& network_cert : *list) {
-      if (already_added_certs.insert(network_cert.cert()).second)
+      auto it = added_cert_to_position.find(network_cert.cert());
+      if (it == added_cert_to_position.end()) {
+        // This certificate wasn't added before.
+        // Add it and save its position in the result list.
+        added_cert_to_position.insert({network_cert.cert(), result.size()});
         result.push_back(network_cert.Clone());
+      } else if (network_cert.is_device_wide()) {
+        // Replace the already added certificate with the device-wide one so
+        // that it can be used for shared configurations.
+        size_t position = it->second;
+        result[position] = network_cert.Clone();
+      }
     }
   }
   return result;
@@ -97,8 +111,7 @@ NetworkCertLoader::NetworkCertList CombineNetworkCertLists(
 class NetworkCertLoader::CertCache : public net::CertDatabase::Observer {
  public:
   explicit CertCache(base::RepeatingClosure certificates_updated_callback)
-      : certificates_updated_callback_(certificates_updated_callback),
-        weak_factory_(this) {}
+      : certificates_updated_callback_(certificates_updated_callback) {}
 
   ~CertCache() override {
     net::CertDatabase::GetInstance()->RemoveObserver(this);
@@ -230,7 +243,7 @@ class NetworkCertLoader::CertCache : public net::CertDatabase::Observer {
 
   THREAD_CHECKER(thread_checker_);
 
-  base::WeakPtrFactory<CertCache> weak_factory_;
+  base::WeakPtrFactory<CertCache> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CertCache);
 };
@@ -278,7 +291,7 @@ bool NetworkCertLoader::IsInitialized() {
   return g_cert_loader;
 }
 
-NetworkCertLoader::NetworkCertLoader() : weak_factory_(this) {
+NetworkCertLoader::NetworkCertLoader() {
   system_slot_cert_cache_ = std::make_unique<CertCache>(base::BindRepeating(
       &NetworkCertLoader::OnCertCacheUpdated, base::Unretained(this)));
   user_private_slot_cert_cache_ =
@@ -496,9 +509,7 @@ void NetworkCertLoader::NotifyCertificatesLoaded() {
     observer.OnCertificatesLoaded();
 }
 
-void NetworkCertLoader::OnPolicyProvidedCertsChanged(
-    const net::CertificateList& all_server_and_authority_certs,
-    const net::CertificateList& trust_anchors) {
+void NetworkCertLoader::OnPolicyProvidedCertsChanged() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   UpdateCertificates();
 }

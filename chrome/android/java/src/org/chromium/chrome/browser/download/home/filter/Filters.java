@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.download.home.filter;
 
-import android.support.annotation.IntDef;
 import android.text.TextUtils;
 
-import org.chromium.chrome.browser.util.UrlConstants;
+import androidx.annotation.IntDef;
+
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItemFilter;
 

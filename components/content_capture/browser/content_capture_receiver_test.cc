@@ -9,6 +9,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "build/build_config.h"
 #include "components/content_capture/browser/content_capture_receiver_manager.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents.h"
@@ -132,6 +133,11 @@ class ContentCaptureReceiverManagerHelper
 
   void Reset() { removed_sessions_.clear(); }
 
+  ContentCaptureReceiver* GetContentCaptureReceiver(
+      content::RenderFrameHost* rfh) const {
+    return ContentCaptureReceiverForFrame(rfh);
+  }
+
  private:
   ContentCaptureSession parent_session_;
   ContentCaptureSession updated_parent_session_;
@@ -142,6 +148,8 @@ class ContentCaptureReceiverManagerHelper
   std::vector<ContentCaptureSession> removed_sessions_;
   SessionRemovedTestHelper* session_removed_test_helper_;
 };
+
+}  // namespace
 
 class ContentCaptureReceiverTest : public content::RenderViewHostTestHarness {
  public:
@@ -351,7 +359,14 @@ TEST_F(ContentCaptureReceiverTest, DidCaptureContent) {
             content_capture_receiver_manager_helper()->captured_data());
 }
 
-TEST_F(ContentCaptureReceiverTest, DidCaptureContentWithUpdate) {
+// TODO(https://crbug.com/1010179): Fix flakes on win10_chromium_x64_rel_ng and
+// re-enable this test.
+#if defined(OS_WIN)
+#define MAYBE_DidCaptureContentWithUpdate DISABLED_DidCaptureContentWithUpdate
+#else
+#define MAYBE_DidCaptureContentWithUpdate DidCaptureContentWithUpdate
+#endif
+TEST_F(ContentCaptureReceiverTest, MAYBE_DidCaptureContentWithUpdate) {
   DidCaptureContent(test_data(), true /* first_data */);
   // Verifies to get test_data() with correct frame content id.
   EXPECT_TRUE(
@@ -372,7 +387,14 @@ TEST_F(ContentCaptureReceiverTest, DidCaptureContentWithUpdate) {
             content_capture_receiver_manager_helper()->captured_data());
 }
 
-TEST_F(ContentCaptureReceiverTest, DidUpdateContent) {
+// TODO(https://crbug.com/1011204): Fix flakes on win10_chromium_x64_rel_ng and
+// re-enable this test.
+#if defined(OS_WIN)
+#define MAYBE_DidUpdateContent DISABLED_DidUpdateContent
+#else
+#define MAYBE_DidUpdateContent DidUpdateContent
+#endif
+TEST_F(ContentCaptureReceiverTest, MAYBE_DidUpdateContent) {
   DidCaptureContent(test_data(), true /* first_data */);
   EXPECT_TRUE(
       content_capture_receiver_manager_helper()->parent_session().empty());
@@ -470,7 +492,30 @@ TEST_F(ContentCaptureReceiverTest, ChildFrameDidCaptureContent) {
             content_capture_receiver_manager_helper()->captured_data());
 }
 
-TEST_F(ContentCaptureReceiverTest, ChildFrameCaptureContentFirst) {
+// This test is for issue crbug.com/995121 .
+TEST_F(ContentCaptureReceiverTest, RenderFrameHostGone) {
+  auto* receiver =
+      content_capture_receiver_manager_helper()->GetContentCaptureReceiver(
+          web_contents()->GetMainFrame());
+  // No good way to simulate crbug.com/995121, just set rfh_ to nullptr in
+  // ContentCaptureReceiver, so content::WebContents::FromRenderFrameHost()
+  // won't return WebContents.
+  receiver->rfh_ = nullptr;
+  // Ensure no crash.
+  DidCaptureContent(test_data(), true /* first_data */);
+  DidUpdateContent(test_data());
+  DidRemoveContent(expected_removed_ids());
+}
+
+// TODO(https://crbug.com/1010416): Fix flakes on win10_chromium_x64_rel_ng and
+// re-enable this test.
+#if defined(OS_WIN)
+#define MAYBE_ChildFrameCaptureContentFirst \
+  DISABLED_ChildFrameCaptureContentFirst
+#else
+#define MAYBE_ChildFrameCaptureContentFirst ChildFrameCaptureContentFirst
+#endif
+TEST_F(ContentCaptureReceiverTest, MAYBE_ChildFrameCaptureContentFirst) {
   // Simulate add child frame.
   SetupChildFrame();
   // Simulate to capture the content from child frame.
@@ -613,11 +658,19 @@ class ContentCaptureReceiverMultipleFrameTest
   void TearDown() override { content::RenderViewHostTestHarness::TearDown(); }
 };
 
+// TODO(https://crbug.com/1010417): Fix flakes on win10_chromium_x64_rel_ng and
+// re-enable this test.
+#if defined(OS_WIN)
+#define MAYBE_ReceiverCreatedForExistingFrame \
+  DISABLED_ReceiverCreatedForExistingFrame
+#else
+#define MAYBE_ReceiverCreatedForExistingFrame ReceiverCreatedForExistingFrame
+#endif
 TEST_F(ContentCaptureReceiverMultipleFrameTest,
-       ReceiverCreatedForExistingFrame) {
+       MAYBE_ReceiverCreatedForExistingFrame) {
   EXPECT_EQ(
       2u,
       content_capture_receiver_manager_helper()->GetFrameMapSizeForTesting());
 }
-}  // namespace
+
 }  // namespace content_capture

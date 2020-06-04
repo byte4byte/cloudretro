@@ -123,7 +123,7 @@ class SecurityKeyAuthHandlerPosix : public SecurityKeyAuthHandler {
   // Timeout used for a request.
   base::TimeDelta request_timeout_;
 
-  base::WeakPtrFactory<SecurityKeyAuthHandlerPosix> weak_factory_;
+  base::WeakPtrFactory<SecurityKeyAuthHandlerPosix> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SecurityKeyAuthHandlerPosix);
 };
@@ -147,8 +147,7 @@ SecurityKeyAuthHandlerPosix::SecurityKeyAuthHandlerPosix(
     scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
     : file_task_runner_(file_task_runner),
       request_timeout_(
-          base::TimeDelta::FromSeconds(kDefaultRequestTimeoutSeconds)),
-      weak_factory_(this) {}
+          base::TimeDelta::FromSeconds(kDefaultRequestTimeoutSeconds)) {}
 
 SecurityKeyAuthHandlerPosix::~SecurityKeyAuthHandlerPosix() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -170,11 +169,12 @@ void SecurityKeyAuthHandlerPosix::CreateSecurityKeyConnection() {
   // that task has completed, the main thread will be called back and we will
   // resume setting up our security key auth socket there.
   file_task_runner_->PostTaskAndReply(
-      FROM_HERE, base::Bind(base::IgnoreResult(&base::DeleteFile),
-                            g_security_key_socket_name.Get(),
-                            /*recursive=*/false),
-      base::Bind(&SecurityKeyAuthHandlerPosix::CreateSocket,
-                 weak_factory_.GetWeakPtr()));
+      FROM_HERE,
+      base::BindOnce(base::IgnoreResult(&base::DeleteFile),
+                     g_security_key_socket_name.Get(),
+                     /*recursive=*/false),
+      base::BindOnce(&SecurityKeyAuthHandlerPosix::CreateSocket,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void SecurityKeyAuthHandlerPosix::CreateSocket() {
@@ -239,8 +239,8 @@ void SecurityKeyAuthHandlerPosix::SetRequestTimeoutForTest(
 void SecurityKeyAuthHandlerPosix::DoAccept() {
   DCHECK(thread_checker_.CalledOnValidThread());
   int result = auth_socket_->Accept(
-      &accept_socket_, base::Bind(&SecurityKeyAuthHandlerPosix::OnAccepted,
-                                  base::Unretained(this)));
+      &accept_socket_, base::BindOnce(&SecurityKeyAuthHandlerPosix::OnAccepted,
+                                      base::Unretained(this)));
   if (result != net::ERR_IO_PENDING) {
     OnAccepted(result);
   }

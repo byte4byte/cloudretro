@@ -5,28 +5,37 @@
 package org.chromium.chrome.browser.toolbar;
 
 import android.content.res.ColorStateList;
-import android.support.annotation.ColorRes;
-import android.support.annotation.DrawableRes;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
 
-import org.chromium.chrome.R;
+import androidx.annotation.ColorRes;
+import androidx.annotation.DrawableRes;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
+
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.omnibox.SecurityStatusIcon;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 
 /**
  * Defines the data that is exposed to properly render the Toolbar.
  */
-public interface ToolbarDataProvider {
+// TODO(crbug.com/865801): Refine split between common/generally toolbar properties and
+//                         sub-component properties.
+public interface ToolbarDataProvider extends ToolbarCommonPropertiesModel {
     /**
      * @return The tab that contains the information currently displayed in the toolbar.
      */
     @Nullable
     Tab getTab();
+
+    @Override
+    default boolean isLoading() {
+        Tab tab = getTab();
+        return tab != null && tab.isLoading();
+    }
 
     /**
      * @return Whether ToolbarDataProvider currently has a tab related to it.
@@ -37,16 +46,19 @@ public interface ToolbarDataProvider {
      * @return The current url for the current tab. Returns empty string when there is no tab.
      */
     @NonNull
+    @Override
     String getCurrentUrl();
 
     /**
      * @return The NewTabPage shown for the current Tab or null if one is not being shown.
      */
+    @Override
     NewTabPage getNewTabPageForCurrentTab();
 
     /**
      * @return Whether the toolbar is currently being displayed for incognito.
      */
+    @Override
     boolean isIncognito();
 
     /**
@@ -119,21 +131,8 @@ public interface ToolbarDataProvider {
      * @return The resource ID of the content description for the security icon.
      */
     @StringRes
-    default int getSecurityIconContentDescription() {
-        switch (getSecurityLevel()) {
-            case ConnectionSecurityLevel.NONE:
-            case ConnectionSecurityLevel.HTTP_SHOW_WARNING:
-                return R.string.accessibility_security_btn_warn;
-            case ConnectionSecurityLevel.DANGEROUS:
-                return R.string.accessibility_security_btn_dangerous;
-            case ConnectionSecurityLevel.SECURE_WITH_POLICY_INSTALLED_CERT:
-            case ConnectionSecurityLevel.SECURE:
-            case ConnectionSecurityLevel.EV_SECURE:
-                return R.string.accessibility_security_btn_secure;
-            default:
-                assert false;
-        }
-        return 0;
+    default int getSecurityIconContentDescriptionResourceId() {
+        return SecurityStatusIcon.getSecurityIconContentDescriptionResourceId(getSecurityLevel());
     }
 
     /**
@@ -150,12 +149,8 @@ public interface ToolbarDataProvider {
      *         instead of the URL.
      */
     @Nullable
-    default public String getDisplaySearchTerms() {
+    @Override
+    public default String getDisplaySearchTerms() {
         return null;
     }
-
-    /**
-     * Turn on/off the google logo in the omnibox
-     */
-    void setShouldShowGoogleLogo(boolean shouldShowGoogleLogo);
 }

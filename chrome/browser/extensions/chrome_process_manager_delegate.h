@@ -7,8 +7,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "base/scoped_observer.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager_observer.h"
+#include "chrome/browser/profiles/profile_observer.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "extensions/browser/process_manager_delegate.h"
 
 class Browser;
@@ -19,12 +22,14 @@ namespace extensions {
 // Support for ProcessManager. Controls cases where Chrome wishes to disallow
 // extension background pages or defer their creation.
 class ChromeProcessManagerDelegate : public ProcessManagerDelegate,
-                                     public content::NotificationObserver {
+                                     public BrowserListObserver,
+                                     public ProfileManagerObserver,
+                                     public ProfileObserver {
  public:
   ChromeProcessManagerDelegate();
   ~ChromeProcessManagerDelegate() override;
 
-  // ProcessManagerDelegate implementation:
+  // ProcessManagerDelegate:
   bool AreBackgroundPagesAllowedForContext(
       content::BrowserContext* context) const override;
   bool IsExtensionBackgroundPageAllowed(
@@ -33,18 +38,18 @@ class ChromeProcessManagerDelegate : public ProcessManagerDelegate,
   bool DeferCreatingStartupBackgroundHosts(
       content::BrowserContext* context) const override;
 
-  // content::NotificationObserver implementation:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // BrowserListObserver:
+  void OnBrowserAdded(Browser* browser) override;
+
+  // ProfileManagerObserver:
+  void OnProfileAdded(Profile* profile) override;
+
+  // ProfileObserver:
+  void OnOffTheRecordProfileCreated(Profile* off_the_record_profile) override;
+  void OnProfileWillBeDestroyed(Profile* profile) override;
 
  private:
-  // Notification handlers.
-  void OnBrowserOpened(Browser* browser);
-  void OnProfileCreated(Profile* profile);
-  void OnProfileDestroyed(Profile* profile);
-
-  content::NotificationRegistrar registrar_;
+  ScopedObserver<Profile, ProfileObserver> observed_profiles_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeProcessManagerDelegate);
 };

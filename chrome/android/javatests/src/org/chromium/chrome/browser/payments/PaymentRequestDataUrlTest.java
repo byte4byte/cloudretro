@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
@@ -36,12 +36,12 @@ public class PaymentRequestDataUrlTest implements MainActivityStartCallback {
             this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void test() throws InterruptedException, TimeoutException {
+    public void test() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickNode("buy");
         mPaymentRequestTestRule.expectResultContains(
                 new String[] {"PaymentRequest is not defined"});

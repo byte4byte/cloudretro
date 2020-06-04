@@ -9,30 +9,30 @@
 
 namespace device {
 
-FakeSensorProvider::FakeSensorProvider() : binding_(this) {}
+FakeXRSensorProvider::FakeXRSensorProvider() = default;
 
-FakeSensorProvider::FakeSensorProvider(mojom::SensorProviderRequest request)
-    : binding_(this) {
-  binding_.Bind(std::move(request));
-}
+FakeXRSensorProvider::FakeXRSensorProvider(
+    mojo::PendingReceiver<mojom::SensorProvider> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
-FakeSensorProvider::~FakeSensorProvider() {
+FakeXRSensorProvider::~FakeXRSensorProvider() {
   if (callback_) {
     std::move(callback_).Run(mojom::SensorCreationResult::ERROR_NOT_AVAILABLE,
                              nullptr);
   }
 }
 
-void FakeSensorProvider::Bind(mojo::ScopedMessagePipeHandle handle) {
-  binding_.Bind(mojom::SensorProviderRequest(std::move(handle)));
+void FakeXRSensorProvider::Bind(
+    mojo::PendingReceiver<mojom::SensorProvider> receiver) {
+  receiver_.Bind(std::move(receiver));
 }
 
-void FakeSensorProvider::GetSensor(mojom::SensorType type,
-                                   GetSensorCallback callback) {
+void FakeXRSensorProvider::GetSensor(mojom::SensorType type,
+                                     GetSensorCallback callback) {
   callback_ = std::move(callback);
 }
 
-void FakeSensorProvider::CallCallback(mojom::SensorInitParamsPtr param) {
+void FakeXRSensorProvider::CallCallback(mojom::SensorInitParamsPtr param) {
   std::move(callback_).Run(mojom::SensorCreationResult::SUCCESS,
                            std::move(param));
 }

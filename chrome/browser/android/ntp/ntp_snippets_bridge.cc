@@ -19,16 +19,16 @@
 #include "base/feature_list.h"
 #include "base/time/time.h"
 #include "chrome/android/chrome_jni_headers/SnippetsBridge_jni.h"
-#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/ntp/get_remote_suggestions_scheduler.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
+#include "components/feed/core/shared_prefs/pref_names.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/ntp_snippets/content_suggestion.h"
 #include "components/ntp_snippets/content_suggestions_metrics.h"
-#include "components/ntp_snippets/pref_names.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider.h"
 #include "components/ntp_snippets/remote/remote_suggestions_scheduler.h"
 #include "ui/base/window_open_disposition.h"
@@ -118,9 +118,7 @@ static void JNI_SnippetsBridge_RemoteSuggestionsSchedulerOnBrowserUpgraded(
 NTPSnippetsBridge::NTPSnippetsBridge(JNIEnv* env,
                                      const JavaParamRef<jobject>& j_bridge,
                                      const JavaParamRef<jobject>& j_profile)
-    : content_suggestions_service_observer_(this),
-      bridge_(env, j_bridge),
-      weak_ptr_factory_(this) {
+    : content_suggestions_service_observer_(this), bridge_(env, j_bridge) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
   content_suggestions_service_ =
       ContentSuggestionsServiceFactory::GetForProfile(profile);
@@ -130,7 +128,7 @@ NTPSnippetsBridge::NTPSnippetsBridge(JNIEnv* env,
 
   pref_change_registrar_.Init(profile->GetPrefs());
   pref_change_registrar_.Add(
-      ntp_snippets::prefs::kArticlesListVisible,
+      feed::prefs::kArticlesListVisible,
       base::BindRepeating(
           &NTPSnippetsBridge::OnSuggestionsVisibilityChanged,
           base::Unretained(this),
@@ -201,8 +199,8 @@ void NTPSnippetsBridge::FetchSuggestionImage(
   content_suggestions_service_->FetchSuggestionImage(
       ContentSuggestion::ID(Category::FromIDValue(j_category_id),
                             ConvertJavaStringToUTF8(env, id_within_category)),
-      base::Bind(&NTPSnippetsBridge::OnImageFetched,
-                 weak_ptr_factory_.GetWeakPtr(), callback));
+      base::BindOnce(&NTPSnippetsBridge::OnImageFetched,
+                     weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 void NTPSnippetsBridge::FetchSuggestionFavicon(
@@ -218,8 +216,8 @@ void NTPSnippetsBridge::FetchSuggestionFavicon(
       ContentSuggestion::ID(Category::FromIDValue(j_category_id),
                             ConvertJavaStringToUTF8(env, id_within_category)),
       j_minimum_size_px, j_desired_size_px,
-      base::Bind(&NTPSnippetsBridge::OnImageFetched,
-                 weak_ptr_factory_.GetWeakPtr(), callback));
+      base::BindOnce(&NTPSnippetsBridge::OnImageFetched,
+                     weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 void NTPSnippetsBridge::Fetch(
@@ -240,9 +238,9 @@ void NTPSnippetsBridge::Fetch(
       category,
       std::set<std::string>(known_suggestion_ids.begin(),
                             known_suggestion_ids.end()),
-      base::Bind(&NTPSnippetsBridge::OnSuggestionsFetched,
-                 weak_ptr_factory_.GetWeakPtr(), success_callback,
-                 failure_callback, category));
+      base::BindOnce(&NTPSnippetsBridge::OnSuggestionsFetched,
+                     weak_ptr_factory_.GetWeakPtr(), success_callback,
+                     failure_callback, category));
 }
 
 void NTPSnippetsBridge::ReloadSuggestions(JNIEnv* env,

@@ -51,7 +51,8 @@ class DelayloadsTest : public testing::Test {
     ASSERT_TRUE(module_mmap.Initialize(module_path));
     base::win::PEImageAsData pe_image_data(
         reinterpret_cast<HMODULE>(const_cast<uint8_t*>(module_mmap.data())));
-    pe_image_data.EnumImportChunks(DelayloadsTest::ImportsCallback, imports);
+    pe_image_data.EnumImportChunks(DelayloadsTest::ImportsCallback, imports,
+                                   nullptr);
   }
 };
 
@@ -90,15 +91,28 @@ TEST_F(DelayloadsTest, ChromeDllDelayloadsCheck) {
          "target was built, instead of delayloads_unittests.exe";
 
   static const char* const kValidFilePatterns[] = {
-      "KERNEL32.dll",
-      "chrome_elf.dll",
-      "DWrite.dll",
-      "oneds.dll",
-      "telclient.dll",
-      // On 64 bit the Version API's like VerQueryValue come from VERSION.dll.
-      // It depends on kernel32, advapi32 and api-ms-win-crt*.dll. This should
-      // be ok.
-      "VERSION.dll",
+    "KERNEL32.dll",
+    "chrome_elf.dll",
+    "DWrite.dll",
+    "ADVAPI32.dll",
+    "CRYPT32.dll",
+    "dbghelp.dll",
+    "dhcpcsvc.DLL",
+    "IPHLPAPI.DLL",
+    "ntdll.dll",
+    "OLEAUT32.dll",
+    "Secur32.dll",
+    "UIAutomationCore.DLL",
+    "USERENV.dll",
+    "WINHTTP.dll",
+    "WINMM.dll",
+    "WINSPOOL.DRV",
+    "WINTRUST.dll",
+    "WS2_32.dll",
+    // On 64 bit the Version API's like VerQueryValue come from VERSION.dll.
+    // It depends on kernel32, advapi32 and api-ms-win-crt*.dll. This should
+    // be ok.
+    "VERSION.dll",
   };
 
   // Make sure all of chrome.dll's imports are in the valid imports list.
@@ -114,7 +128,13 @@ TEST_F(DelayloadsTest, ChromeDllDelayloadsCheck) {
   }
 }
 
-TEST_F(DelayloadsTest, ChromeDllLoadSanityTest) {
+// Flaking on ASAN: https://crbug.com/1047723
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ChromeDllLoadSanityTest DISABLED_ChromeDllLoadSanityTest
+#else
+#define MAYBE_ChromeDllLoadSanityTest ChromeDllLoadSanityTest
+#endif
+TEST_F(DelayloadsTest, MAYBE_ChromeDllLoadSanityTest) {
   // As a precaution to avoid affecting other tests, we need to ensure this is
   // executed in its own test process. This "test" will re-launch with custom
   // parameters to accomplish that.
@@ -154,102 +174,8 @@ TEST_F(DelayloadsTest, DISABLED_ChromeDllLoadSanityTestImpl) {
 
   HMODULE chrome_module_handle = ::LoadLibrary(dll.value().c_str());
   ASSERT_TRUE(chrome_module_handle != nullptr);
-  // Loading chrome.dll should not load user32.dll.
-  EXPECT_EQ(nullptr, ::GetModuleHandle(L"user32.dll"));
-}
 
-TEST_F(DelayloadsTest, DISABLED_ChromeChildDllDelayloadsCheck) {
-  base::FilePath dll;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &dll));
-  dll = dll.Append(L"chrome_child.dll");
-  std::vector<std::string> dll_imports;
-  GetImports(dll, &dll_imports);
-
-  // Check that the dll has imports.
-  ASSERT_LT(0u, dll_imports.size())
-      << "Ensure the delayloads_unittests "
-         "target was built, instead of delayloads_unittests.exe";
-
-  static const char* const kValidFilePatterns[] = {
-      "KERNEL32.dll",
-      "chrome_elf.dll",
-      "DWrite.dll",
-      "ADVAPI32.dll",
-      "CRYPT32.dll",
-      "dbghelp.dll",
-      "dhcpcsvc.DLL",
-      "IPHLPAPI.DLL",
-      "ntdll.dll",
-      "OLEAUT32.dll",
-      "Secur32.dll",
-      "UIAutomationCore.DLL",
-      "USERENV.dll",
-      "WINHTTP.dll",
-      "WINMM.dll",
-      "WINSPOOL.DRV",
-      "WINTRUST.dll",
-      "WS2_32.dll",
-      "WTSAPI32.dll",
-      // On 64 bit the Version API's like VerQueryValue come from VERSION.dll.
-      // It depends on kernel32, advapi32 and api-ms-win-crt*.dll. This should
-      // be ok.
-      "VERSION.dll",
-  };
-
-  // Make sure all of chrome_child.dll's imports are in the valid imports list.
-  for (const std::string& dll_import : dll_imports) {
-    bool match = false;
-    for (const char* kValidFilePattern : kValidFilePatterns) {
-      if (base::MatchPattern(dll_import, kValidFilePattern)) {
-        match = true;
-        break;
-      }
-    }
-    EXPECT_TRUE(match) << "Illegal import in chrome_child.dll: " << dll_import;
-  }
-}
-
-TEST_F(DelayloadsTest, DISABLED_ChromeChildDllLoadSanityTest) {
-  // On Win7 we expect this test to result in user32.dll getting loaded. As a
-  // result, we need to ensure it is executed in its own test process. This
-  // "test" will re-launch with custom parameters to accomplish that.
-  base::CommandLine new_test =
-      base::CommandLine(base::CommandLine::ForCurrentProcess()->GetProgram());
-  new_test.AppendSwitchASCII(
-      base::kGTestFilterFlag,
-      "DelayloadsTest.DISABLED_ChromeChildDllLoadSanityTestImpl");
-  new_test.AppendSwitch("gtest_also_run_disabled_tests");
-  new_test.AppendSwitch("single-process-tests");
-
-  std::string output;
-  ASSERT_TRUE(base::GetAppOutput(new_test, &output));
-  std::string crash_string =
-      "OK ] DelayloadsTest.DISABLED_ChromeChildDllLoadSanityTestImpl";
-
-  if (output.find(crash_string) == std::string::npos) {
-    GTEST_FAIL() << "Couldn't find\n"
-                 << crash_string << "\n in output\n " << output;
-  }
-}
-
-// Note: This test is not actually disabled, it's just tagged disabled so that
-// the real run (above, in ChromeChildDllLoadSanityTest) can run it with an
-// argument added to the command line.
-TEST_F(DelayloadsTest, DISABLED_ChromeChildDllLoadSanityTestImpl) {
-  base::FilePath dll;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &dll));
-  dll = dll.Append(L"chrome_child.dll");
-
-  // We don't expect user32 to be loaded in delayloads_unittests. If this
-  // test case fails, then it means that a dependency on user32 has crept into
-  // the delayloads_unittests executable, which needs to be removed.
-  // NOTE: it may be a secondary dependency of another system DLL.  If so,
-  // try adding a "/DELAYLOAD:<blah>.dll" to the build.gn file.
-  ASSERT_EQ(nullptr, ::GetModuleHandle(L"user32.dll"));
-
-  HMODULE chrome_child_module_handle = ::LoadLibrary(dll.value().c_str());
-  ASSERT_TRUE(chrome_child_module_handle != nullptr);
-  // Loading chrome_child.dll should not load user32.dll on Win10.
+  // Loading chrome.dll should not load user32.dll on Win10.
   // On Win7, chains of system dlls and lack of apisets result in it loading.
   if (base::win::GetVersion() >= base::win::Version::WIN10) {
     EXPECT_EQ(nullptr, ::GetModuleHandle(L"user32.dll"));
@@ -272,11 +198,9 @@ TEST_F(DelayloadsTest, ChromeElfDllDelayloadsCheck) {
 
   static const char* const kValidFilePatterns[] = {
     "KERNEL32.dll",
-    "RPCRT4.dll",
 #if defined(ADDRESS_SANITIZER) && defined(COMPONENT_BUILD)
     "clang_rt.asan_dynamic-i386.dll",
 #endif
-    "ADVAPI32.dll",
     // On 64 bit the Version API's like VerQueryValue come from VERSION.dll.
     // It depends on kernel32, advapi32 and api-ms-win-crt*.dll. This should
     // be ok.
@@ -330,9 +254,9 @@ TEST_F(DelayloadsTest, DISABLED_ChromeElfDllLoadSanityTestImpl) {
   ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &dll));
   dll = dll.Append(L"chrome_elf.dll");
 
-  // We don't expect user32 to be loaded in chrome_elf_import_unittests. If this
+  // We don't expect user32 to be loaded in delayloads_unittests. If this
   // test case fails, then it means that a dependency on user32 has crept into
-  // the chrome_elf_imports_unittests executable, which needs to be removed.
+  // the delayloads_unittests executable, which needs to be removed.
   // NOTE: it may be a secondary dependency of another system DLL.  If so,
   // try adding a "/DELAYLOAD:<blah>.dll" to the build.gn file.
   ASSERT_EQ(nullptr, ::GetModuleHandle(L"user32.dll"));

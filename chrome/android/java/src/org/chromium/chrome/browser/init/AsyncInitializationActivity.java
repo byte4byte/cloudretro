@@ -15,8 +15,6 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.provider.Settings.SettingNotFoundException;
-import android.support.annotation.CallSuper;
-import android.support.annotation.Nullable;
 import android.view.Display;
 import android.view.Menu;
 import android.view.View;
@@ -24,15 +22,17 @@ import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnPreDrawListener;
 import android.view.WindowManager;
 
+import androidx.annotation.CallSuper;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.StrictModeContext;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
@@ -42,6 +42,7 @@ import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
@@ -119,19 +120,22 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @Override
     @CallSuper
-    protected boolean applyOverrides(Context baseContext, Configuration overrideConfig) {
-        super.applyOverrides(baseContext, overrideConfig);
-
-        // We override the smallestScreenWidthDp here for two reasons:
-        // 1. To prevent multi-window from hiding the tabstrip when on a tablet.
-        // 2. To ensure mIsTablet only needs to be set once. Since the override lasts for the life
-        //    of the activity, it will never change via onConfigurationUpdated().
-        // See crbug.com/588838, crbug.com/662338, crbug.com/780593.
-        DisplayAndroid display = DisplayAndroid.getNonMultiDisplay(baseContext);
-        int targetSmallestScreenWidthDp =
-                DisplayUtil.pxToDp(display, DisplayUtil.getSmallestWidth(display));
-        overrideConfig.smallestScreenWidthDp = targetSmallestScreenWidthDp;
-        return true;
+    protected void applyConfigurationOverrides(Context baseContext, Configuration overrideConfig) {
+        super.applyConfigurationOverrides(baseContext, overrideConfig);
+        // Before Android M, an IllegalStateException is thrown for trying to access DisplayManager
+        // before attachBaseContext() has been called. Multi-window wasn't added until N, so it is
+        // unlikely for multi-window to be a large issue on Lollipop.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // We override the smallestScreenWidthDp here for two reasons:
+            // 1. To prevent multi-window from hiding the tabstrip when on a tablet.
+            // 2. To ensure mIsTablet only needs to be set once. Since the override lasts for the
+            //    life of the activity, it will never change via onConfigurationUpdated().
+            // See crbug.com/588838, crbug.com/662338, crbug.com/780593.
+            DisplayAndroid display = DisplayAndroid.getNonMultiDisplay(baseContext);
+            int targetSmallestScreenWidthDp =
+                    DisplayUtil.pxToDp(display, DisplayUtil.getSmallestWidth(display));
+            overrideConfig.smallestScreenWidthDp = targetSmallestScreenWidthDp;
+        }
     }
 
     @Override
@@ -154,18 +158,27 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @Override
     public final void setContentViewAndLoadLibrary(Runnable onInflationCompleteCallback) {
-        // Start loading libraries before triggerLayoutInflation(). This "hides" library loading
-        // behind UI inflation and prevents stalling UI thread. See https://crbug.com/796957 for
-        // details. Note that for optimal performance AsyncInitTaskRunner.startBackgroundTasks()
-        // needs to start warmup renderer only after library is loaded.
+        boolean enableInstantStart = TabUiFeatureUtilities.supportInstantStart(isTablet());
+        mOnInflationCompleteCallback = onInflationCompleteCallback;
+        if (enableInstantStart) {
+            triggerLayoutInflation();
+        }
+
+        // Start loading libraries. It happens before triggerLayoutInflation() for regular startup,
+        // but after triggerLayoutInflation() for instant start because we prioritize a Java UI and
+        // not rendering web content. This "hides" library loading behind UI inflation and prevents
+        // stalling UI thread. See https://crbug.com/796957 for details. Note that for optimal
+        // performance AsyncInitTaskRunner.startBackgroundTasks() needs to start warmup renderer
+        // only after library is loaded.
 
         if (!mStartupDelayed) {
             // Kick off long running IO tasks that can be done in parallel.
             mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
         }
 
-        mOnInflationCompleteCallback = onInflationCompleteCallback;
-        triggerLayoutInflation();
+        if (!enableInstantStart) {
+            triggerLayoutInflation();
+        }
         if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
     }
 
@@ -215,8 +228,11 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
             if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
             String url = IntentHandler.getUrlFromIntent(intent);
             if (url == null) return;
+            // TODO(https://crbug.com/1041781): Use the current profile (i.e., regular profile or
+            // incognito profile) instead of always using regular profile. It is wrong and needs to
+            // be fixed.
             WarmupManager.getInstance().maybePreconnectUrlAndSubResources(
-                    Profile.getLastUsedProfile(), url);
+                    Profile.getLastUsedRegularProfile(), url);
         } finally {
             TraceEvent.end("maybePreconnect");
         }
@@ -247,10 +263,8 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
 
     @CallSuper
     @Override
-    public void onStartupFailure() {
-        ProcessInitException e =
-                new ProcessInitException(LoaderErrors.LOADER_ERROR_NATIVE_STARTUP_FAILED);
-        ChromeApplication.reportStartupErrorAndExit(e);
+    public void onStartupFailure(Exception failureCause) {
+        throw new ProcessInitException(LoaderErrors.NATIVE_STARTUP_FAILED, failureCause);
     }
 
     /**
@@ -274,7 +288,8 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
      * @param intent intent to dispatch
      * @return {@link LaunchIntentDispatcher.Action} to take
      */
-    protected @LaunchIntentDispatcher.Action int maybeDispatchLaunchIntent(Intent intent) {
+    protected @LaunchIntentDispatcher.Action int maybeDispatchLaunchIntent(
+            Intent intent, Bundle savedInstanceState) {
         return LaunchIntentDispatcher.Action.CONTINUE;
     }
 
@@ -283,7 +298,7 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         setIntent(validateIntent(getIntent()));
 
         @LaunchIntentDispatcher.Action
-        int dispatchAction = maybeDispatchLaunchIntent(getIntent());
+        int dispatchAction = maybeDispatchLaunchIntent(getIntent(), savedInstanceState);
         if (dispatchAction != LaunchIntentDispatcher.Action.CONTINUE) {
             abortLaunch(dispatchAction);
             return;
@@ -317,7 +332,7 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         mModalDialogManager = createModalDialogManager();
 
         mStartupDelayed = shouldDelayBrowserStartup();
-        ChromeBrowserInitializer.getInstance(this).handlePreNativeStartup(this);
+        ChromeBrowserInitializer.getInstance().handlePreNativeStartup(this);
     }
 
     /**
@@ -362,6 +377,12 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
         mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
 
         if (mFirstDrawComplete) onFirstDrawComplete();
+    }
+
+    @VisibleForTesting
+    public void startDelayedNativeInitializationForTests() {
+        mStartupDelayed = true;
+        startDelayedNativeInitialization();
     }
 
     /**
@@ -498,11 +519,7 @@ public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatAct
     @Override
     public final void onCreateWithNative() {
         mLifecycleDispatcher.onCreateWithNative();
-        try {
-            ChromeBrowserInitializer.getInstance(this).handlePostNativeStartup(true, this);
-        } catch (ProcessInitException e) {
-            ChromeApplication.reportStartupErrorAndExit(e);
-        }
+        ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, this);
     }
 
     @CallSuper

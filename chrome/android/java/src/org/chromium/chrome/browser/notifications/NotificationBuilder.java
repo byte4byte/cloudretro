@@ -15,7 +15,9 @@ import android.os.Bundle;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.widget.RemoteViews;
 
-import org.chromium.chrome.browser.notifications.channels.ChannelsInitializer;
+import org.chromium.components.browser_ui.notifications.ChromeNotification;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
+import org.chromium.components.browser_ui.notifications.channels.ChannelsInitializer;
 
 /**
  * Wraps a Notification.Builder object.
@@ -89,6 +91,14 @@ public class NotificationBuilder implements ChromeNotificationBuilder {
     }
 
     @Override
+    public ChromeNotificationBuilder setColor(int argb) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mBuilder.setColor(argb);
+        }
+        return this;
+    }
+
+    @Override
     public ChromeNotificationBuilder setTicker(CharSequence text) {
         mBuilder.setTicker(text);
         return this;
@@ -142,9 +152,7 @@ public class NotificationBuilder implements ChromeNotificationBuilder {
 
     @Override
     public ChromeNotificationBuilder setShowWhen(boolean showWhen) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            mBuilder.setShowWhen(showWhen);
-        }
+        mBuilder.setShowWhen(showWhen);
         return this;
     }
 

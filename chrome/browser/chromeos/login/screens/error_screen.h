@@ -86,13 +86,16 @@ class ErrorScreen : public BaseScreen,
   void SetParentScreen(OobeScreenId parent_screen);
 
   // Sets callback that is called on hide.
-  void SetHideCallback(const base::Closure& on_hide);
+  void SetHideCallback(base::OnceClosure on_hide);
 
   // Shows captive portal dialog.
   void ShowCaptivePortal();
 
   // Toggles the connection pending indicator.
   void ShowConnectingIndicator(bool show);
+
+  // Makes error persistent (e.g. non-closable).
+  void SetIsPersistentError(bool is_persistent);
 
   // Register a callback to be invoked when the user indicates that an attempt
   // to connect to the network should be made.
@@ -109,9 +112,10 @@ class ErrorScreen : public BaseScreen,
   void DoShow();
   void DoHide();
 
-  // BaseScreen overrides:
-  void Show() override;
-  void Hide() override;
+ protected:
+  // BaseScreen:
+  void ShowImpl() override;
+  void HideImpl() override;
   void OnUserAction(const std::string& action_id) override;
 
  private:
@@ -167,12 +171,12 @@ class ErrorScreen : public BaseScreen,
   OobeScreenId parent_screen_ = OobeScreen::SCREEN_UNKNOWN;
 
   // Optional callback that is called when NetworkError screen is hidden.
-  std::unique_ptr<base::Closure> on_hide_callback_;
+  base::OnceClosure on_hide_callback_;
 
   // Callbacks to be invoked when a connection attempt is requested.
   base::CallbackList<void()> connect_request_callbacks_;
 
-  base::WeakPtrFactory<ErrorScreen> weak_factory_;
+  base::WeakPtrFactory<ErrorScreen> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ErrorScreen);
 };

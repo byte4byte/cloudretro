@@ -13,13 +13,13 @@
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/web/public/navigation_item.h"
+#import "ios/web/public/navigation/navigation_item.h"
 #include "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/test/fakes/fake_navigation_context.h"
 #import "ios/web/public/test/fakes/test_navigation_manager.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 
@@ -32,7 +32,7 @@ namespace {
 class TestWebStateWithProxy : public web::TestWebState {
  public:
   TestWebStateWithProxy() {
-    scroll_view_proxy_ = OCMClassMock([CRWWebViewScrollViewProxy class]);
+    scroll_view_proxy_ = [[CRWWebViewScrollViewProxy alloc] init];
     id web_view_proxy_mock = OCMProtocolMock(@protocol(CRWWebViewProxy));
     [[[web_view_proxy_mock stub] andReturn:scroll_view_proxy_] scrollViewProxy];
     web_view_proxy_ = web_view_proxy_mock;

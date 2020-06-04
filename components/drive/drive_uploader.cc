@@ -17,7 +17,6 @@
 #include "base/task_runner_util.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
 
 using google_apis::CancelCallback;
@@ -92,12 +91,12 @@ class DriveUploader::RefCountedBatchRequest
 struct DriveUploader::UploadFileInfo {
   UploadFileInfo(const base::FilePath& local_path,
                  const std::string& content_type,
-                 const UploadCompletionCallback& callback,
-                 const ProgressCallback& progress_callback,
+                 UploadCompletionCallback callback,
+                 ProgressCallback progress_callback,
                  device::mojom::WakeLockProvider* wake_lock_provider)
       : file_path(local_path),
         content_type(content_type),
-        completion_callback(callback),
+        completion_callback(std::move(callback)),
         progress_callback(progress_callback),
         content_length(0),
         next_start_position(-1),
@@ -106,7 +105,7 @@ struct DriveUploader::UploadFileInfo {
       wake_lock_provider->GetWakeLockWithoutContext(
           device::mojom::WakeLockType::kPreventAppSuspension,
           device::mojom::WakeLockReason::kOther, "Upload in progress",
-          mojo::MakeRequest(&wake_lock));
+          wake_lock.BindNewPipeAndPassReceiver());
       wake_lock->RequestWakeLock();
     }
   }
@@ -132,7 +131,7 @@ struct DriveUploader::UploadFileInfo {
   const std::string content_type;
 
   // Callback to be invoked once the upload has finished.
-  const UploadCompletionCallback completion_callback;
+  UploadCompletionCallback completion_callback;
 
   // Callback to periodically notify the upload progress.
   const ProgressCallback progress_callback;
@@ -147,7 +146,7 @@ struct DriveUploader::UploadFileInfo {
   int64_t next_start_position;
 
   // Blocks system suspend while upload is in progress.
-  device::mojom::WakeLockPtr wake_lock;
+  mojo::Remote<device::mojom::WakeLock> wake_lock;
 
   // Fields for implementing cancellation. |cancel_callback| is non-null if
   // there is an in-flight HTTP request. In that case, |cancell_callback| will
@@ -173,7 +172,7 @@ struct DriveUploader::UploadFileInfo {
 DriveUploader::DriveUploader(
     DriveServiceInterface* drive_service,
     const scoped_refptr<base::TaskRunner>& blocking_task_runner,
-    device::mojom::WakeLockProviderPtr wake_lock_provider)
+    mojo::PendingRemote<device::mojom::WakeLockProvider> wake_lock_provider)
     : drive_service_(drive_service),
       blocking_task_runner_(blocking_task_runner),
       wake_lock_provider_(std::move(wake_lock_provider)) {}
@@ -186,8 +185,8 @@ CancelCallback DriveUploader::UploadNewFile(
     const std::string& title,
     const std::string& content_type,
     const UploadNewFileOptions& options,
-    const UploadCompletionCallback& callback,
-    const ProgressCallback& progress_callback) {
+    UploadCompletionCallback callback,
+    ProgressCallback progress_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!parent_resource_id.empty());
   DCHECK(!local_file_path.empty());
@@ -196,12 +195,12 @@ CancelCallback DriveUploader::UploadNewFile(
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      std::make_unique<UploadFileInfo>(local_file_path, content_type, callback,
-                                       progress_callback,
-                                       wake_lock_provider_.get()),
-      base::Bind(&DriveUploader::CallUploadServiceAPINewFile,
-                 weak_ptr_factory_.GetWeakPtr(), parent_resource_id, title,
-                 options, current_batch_request_));
+      std::make_unique<UploadFileInfo>(local_file_path, content_type,
+                                       std::move(callback), progress_callback,
+                                       GetWakeLockProvider()),
+      base::BindOnce(&DriveUploader::CallUploadServiceAPINewFile,
+                     weak_ptr_factory_.GetWeakPtr(), parent_resource_id, title,
+                     options, current_batch_request_));
 }
 
 void DriveUploader::StartBatchProcessing() {
@@ -219,8 +218,8 @@ CancelCallback DriveUploader::UploadExistingFile(
     const base::FilePath& local_file_path,
     const std::string& content_type,
     const UploadExistingFileOptions& options,
-    const UploadCompletionCallback& callback,
-    const ProgressCallback& progress_callback) {
+    UploadCompletionCallback callback,
+    ProgressCallback progress_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!resource_id.empty());
   DCHECK(!local_file_path.empty());
@@ -228,38 +227,38 @@ CancelCallback DriveUploader::UploadExistingFile(
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      std::make_unique<UploadFileInfo>(local_file_path, content_type, callback,
-                                       progress_callback,
-                                       wake_lock_provider_.get()),
-      base::Bind(&DriveUploader::CallUploadServiceAPIExistingFile,
-                 weak_ptr_factory_.GetWeakPtr(), resource_id, options,
-                 current_batch_request_));
+      std::make_unique<UploadFileInfo>(local_file_path, content_type,
+                                       std::move(callback), progress_callback,
+                                       GetWakeLockProvider()),
+      base::BindOnce(&DriveUploader::CallUploadServiceAPIExistingFile,
+                     weak_ptr_factory_.GetWeakPtr(), resource_id, options,
+                     current_batch_request_));
 }
 
 CancelCallback DriveUploader::ResumeUploadFile(
     const GURL& upload_location,
     const base::FilePath& local_file_path,
     const std::string& content_type,
-    const UploadCompletionCallback& callback,
-    const ProgressCallback& progress_callback) {
+    UploadCompletionCallback callback,
+    ProgressCallback progress_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!local_file_path.empty());
   DCHECK(!content_type.empty());
   DCHECK(!callback.is_null());
 
-  std::unique_ptr<UploadFileInfo> upload_file_info(
-      new UploadFileInfo(local_file_path, content_type, callback,
-                         progress_callback, wake_lock_provider_.get()));
+  auto upload_file_info = std::make_unique<UploadFileInfo>(
+      local_file_path, content_type, std::move(callback), progress_callback,
+      GetWakeLockProvider());
   upload_file_info->upload_location = upload_location;
 
   return StartUploadFile(std::move(upload_file_info),
-                         base::Bind(&DriveUploader::StartGetUploadStatus,
-                                    weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&DriveUploader::StartGetUploadStatus,
+                                        weak_ptr_factory_.GetWeakPtr()));
 }
 
 CancelCallback DriveUploader::StartUploadFile(
     std::unique_ptr<UploadFileInfo> upload_file_info,
-    const StartInitiateUploadCallback& start_initiate_upload_callback) {
+    StartInitiateUploadCallback start_initiate_upload_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "Uploading file: " << upload_file_info->DebugString();
 
@@ -271,13 +270,13 @@ CancelCallback DriveUploader::StartUploadFile(
       base::BindOnce(&DriveUploader::StartUploadFileAfterGetFileSize,
                      weak_ptr_factory_.GetWeakPtr(),
                      std::move(upload_file_info),
-                     start_initiate_upload_callback));
+                     std::move(start_initiate_upload_callback)));
   return info_ptr->GetCancelCallback();
 }
 
 void DriveUploader::StartUploadFileAfterGetFileSize(
     std::unique_ptr<UploadFileInfo> upload_file_info,
-    const StartInitiateUploadCallback& start_initiate_upload_callback,
+    StartInitiateUploadCallback start_initiate_upload_callback,
     bool get_file_size_result) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -291,7 +290,7 @@ void DriveUploader::StartUploadFileAfterGetFileSize(
     UploadFailed(std::move(upload_file_info), DRIVE_CANCELLED);
     return;
   }
-  start_initiate_upload_callback.Run(std::move(upload_file_info));
+  std::move(start_initiate_upload_callback).Run(std::move(upload_file_info));
 }
 
 void DriveUploader::CallUploadServiceAPINewFile(
@@ -316,9 +315,9 @@ void DriveUploader::CallUploadServiceAPINewFile(
     info_ptr->cancel_callback = service->MultipartUploadNewFile(
         info_ptr->content_type, info_ptr->content_length, parent_resource_id,
         title, info_ptr->file_path, options,
-        base::Bind(&DriveUploader::OnMultipartUploadComplete,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(&upload_file_info)),
+        base::BindOnce(&DriveUploader::OnMultipartUploadComplete,
+                       weak_ptr_factory_.GetWeakPtr(),
+                       std::move(upload_file_info)),
         info_ptr->progress_callback);
   } else {
     RecordDriveUploadProtocol(UPLOAD_METHOD_RESUMABLE);
@@ -351,9 +350,9 @@ void DriveUploader::CallUploadServiceAPIExistingFile(
     info_ptr->cancel_callback = service->MultipartUploadExistingFile(
         info_ptr->content_type, info_ptr->content_length, resource_id,
         info_ptr->file_path, options,
-        base::Bind(&DriveUploader::OnMultipartUploadComplete,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::Passed(&upload_file_info)),
+        base::BindOnce(&DriveUploader::OnMultipartUploadComplete,
+                       weak_ptr_factory_.GetWeakPtr(),
+                       std::move(upload_file_info)),
         info_ptr->progress_callback);
   } else {
     RecordDriveUploadProtocol(UPLOAD_METHOD_RESUMABLE);
@@ -393,11 +392,10 @@ void DriveUploader::StartGetUploadStatus(
 
   UploadFileInfo* info_ptr = upload_file_info.get();
   info_ptr->cancel_callback = drive_service_->GetUploadStatus(
-      info_ptr->upload_location,
-      info_ptr->content_length,
-      base::Bind(&DriveUploader::OnUploadRangeResponseReceived,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&upload_file_info)));
+      info_ptr->upload_location, info_ptr->content_length,
+      base::BindOnce(&DriveUploader::OnUploadRangeResponseReceived,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     std::move(upload_file_info)));
 }
 
 void DriveUploader::UploadNextChunk(
@@ -420,20 +418,14 @@ void DriveUploader::UploadNextChunk(
 
   UploadFileInfo* info_ptr = upload_file_info.get();
   info_ptr->cancel_callback = drive_service_->ResumeUpload(
-      info_ptr->upload_location,
-      info_ptr->next_start_position,
-      end_position,
-      info_ptr->content_length,
-      info_ptr->content_type,
-      info_ptr->file_path,
-      base::Bind(&DriveUploader::OnUploadRangeResponseReceived,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&upload_file_info)),
+      info_ptr->upload_location, info_ptr->next_start_position, end_position,
+      info_ptr->content_length, info_ptr->content_type, info_ptr->file_path,
+      base::BindOnce(&DriveUploader::OnUploadRangeResponseReceived,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     std::move(upload_file_info)),
       base::Bind(&DriveUploader::OnUploadProgress,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 info_ptr->progress_callback,
-                 info_ptr->next_start_position,
-                 info_ptr->content_length));
+                 weak_ptr_factory_.GetWeakPtr(), info_ptr->progress_callback,
+                 info_ptr->next_start_position, info_ptr->content_length));
 }
 
 void DriveUploader::OnUploadRangeResponseReceived(
@@ -456,8 +448,8 @@ void DriveUploader::OnUploadRangeResponseReceived(
              << upload_file_info->file_path.value() << "]";
 
     // Done uploading.
-    upload_file_info->completion_callback.Run(HTTP_SUCCESS, GURL(),
-                                              std::move(entry));
+    std::move(upload_file_info->completion_callback)
+        .Run(HTTP_SUCCESS, GURL(), std::move(entry));
     return;
   }
 
@@ -490,7 +482,7 @@ void DriveUploader::OnUploadRangeResponseReceived(
   UploadNextChunk(std::move(upload_file_info));
 }
 
-void DriveUploader::OnUploadProgress(const ProgressCallback& callback,
+void DriveUploader::OnUploadProgress(ProgressCallback callback,
                                      int64_t start_position,
                                      int64_t total_size,
                                      int64_t progress_of_chunk,
@@ -512,9 +504,9 @@ void DriveUploader::UploadFailed(
     upload_file_info->upload_location = GURL();
   }
 
-  upload_file_info->completion_callback.Run(error,
-                                            upload_file_info->upload_location,
-                                            std::unique_ptr<FileResource>());
+  std::move(upload_file_info->completion_callback)
+      .Run(error, upload_file_info->upload_location,
+           std::unique_ptr<FileResource>());
 }
 
 void DriveUploader::OnMultipartUploadComplete(
@@ -527,16 +519,20 @@ void DriveUploader::OnMultipartUploadComplete(
     DVLOG(1) << "Successfully created uploaded file=["
              << upload_file_info->file_path.value() << "]";
     // Done uploading.
-    upload_file_info->completion_callback.Run(
-        HTTP_SUCCESS, upload_file_info->upload_location, std::move(entry));
+    std::move(upload_file_info->completion_callback)
+        .Run(HTTP_SUCCESS, upload_file_info->upload_location, std::move(entry));
   } else {
     DVLOG(1) << "Upload failed " << upload_file_info->DebugString();
     if (error == HTTP_PRECONDITION)
       error = HTTP_CONFLICT;  // ETag mismatch.
-    upload_file_info->completion_callback.Run(error,
-                                              upload_file_info->upload_location,
-                                              std::unique_ptr<FileResource>());
+    std::move(upload_file_info->completion_callback)
+        .Run(error, upload_file_info->upload_location,
+             std::unique_ptr<FileResource>());
   }
+}
+
+device::mojom::WakeLockProvider* DriveUploader::GetWakeLockProvider() {
+  return wake_lock_provider_ ? wake_lock_provider_.get() : nullptr;
 }
 
 }  // namespace drive

@@ -10,7 +10,6 @@
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/web_preferences.h"
@@ -27,9 +26,6 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientChromeOsPartTest,
   const content::WebPreferences kDefaultPrefs;
   const int kDefaultFontSize = kDefaultPrefs.default_font_size;
   const int kDefaultFixedFontSize = kDefaultPrefs.default_fixed_font_size;
-
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(chromeos::features::kSplitSettings);
 
   // Set the browser font sizes to non-default values.
   Profile* profile = browser()->profile();

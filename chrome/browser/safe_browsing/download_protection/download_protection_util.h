@@ -9,7 +9,7 @@
 
 #include "base/callback_list.h"
 #include "components/download/public/common/download_item.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/proto/csd.pb.h"
 #include "net/cert/x509_certificate.h"
 
 namespace safe_browsing {
@@ -24,6 +24,12 @@ enum class DownloadCheckResult {
   WHITELISTED_BY_POLICY,
   ASYNC_SCANNING,
   BLOCKED_PASSWORD_PROTECTED,
+  BLOCKED_TOO_LARGE,
+  SENSITIVE_CONTENT_WARNING,
+  SENSITIVE_CONTENT_BLOCK,
+  DEEP_SCANNED_SAFE,
+  PROMPT_FOR_SCANNING,
+  BLOCKED_UNSUPPORTED_FILE_TYPE,
 };
 
 // Enum to keep track why a particular download verdict was chosen.
@@ -59,6 +65,12 @@ enum DownloadCheckResultReason {
   REASON_VERDICT_UNKNOWN = 27,
   REASON_DOWNLOAD_DESTROYED = 28,
   REASON_BLOCKED_PASSWORD_PROTECTED = 29,
+  REASON_BLOCKED_TOO_LARGE = 30,
+  REASON_SENSITIVE_CONTENT_WARNING = 31,
+  REASON_SENSITIVE_CONTENT_BLOCK = 32,
+  REASON_DEEP_SCANNED_SAFE = 33,
+  REASON_ADVANCED_PROTECTION_PROMPT = 34,
+  REASON_BLOCKED_UNSUPPORTED_FILE_TYPE = 35,
   REASON_MAX  // Always add new values before this one.
 };
 
@@ -86,13 +98,20 @@ enum WhitelistType {
 };
 
 // Callback type which is invoked once the download request is done.
-typedef base::Callback<void(DownloadCheckResult)> CheckDownloadCallback;
+typedef base::OnceCallback<void(DownloadCheckResult)> CheckDownloadCallback;
+
+// Callback type which is invoked once the download request is done. This is
+// used in cases where asynchronous scanning is allowed, so the callback is
+// triggered multiple times (once when asynchronous scanning begins, once when
+// the final result is ready).
+typedef base::RepeatingCallback<void(DownloadCheckResult)>
+    CheckDownloadRepeatingCallback;
 
 // A type of callback run on the main thread when a ClientDownloadRequest has
 // been formed for a download, or when one has not been formed for a supported
 // download.
-typedef base::Callback<void(download::DownloadItem*,
-                            const ClientDownloadRequest*)>
+typedef base::RepeatingCallback<void(download::DownloadItem*,
+                                     const ClientDownloadRequest*)>
     ClientDownloadRequestCallback;
 
 // A list of ClientDownloadRequest callbacks.
@@ -104,9 +123,22 @@ typedef base::CallbackList<void(download::DownloadItem*,
 typedef std::unique_ptr<ClientDownloadRequestCallbackList::Subscription>
     ClientDownloadRequestSubscription;
 
+// A type of callback run on the main thread when a NativeFileSystemWriteRequest
+// has been formed for a write operation.
+typedef base::Callback<void(const ClientDownloadRequest*)>
+    NativeFileSystemWriteRequestCallback;
+
+// A list of NativeFileSystemWriteRequest callbacks.
+typedef base::CallbackList<void(const ClientDownloadRequest*)>
+    NativeFileSystemWriteRequestCallbackList;
+
+// A subscription to a registered NativeFileSystemWriteRequest callback.
+typedef std::unique_ptr<NativeFileSystemWriteRequestCallbackList::Subscription>
+    NativeFileSystemWriteRequestSubscription;
+
 // A type of callback run on the main thread when a PPAPI
 // ClientDownloadRequest has been formed for a download.
-typedef base::Callback<void(const ClientDownloadRequest*)>
+typedef base::RepeatingCallback<void(const ClientDownloadRequest*)>
     PPAPIDownloadRequestCallback;
 
 // A list of PPAPI ClientDownloadRequest callbacks.

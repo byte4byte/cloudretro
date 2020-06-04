@@ -5,8 +5,12 @@
 #ifndef UI_VIEWS_TEST_FOCUS_MANAGER_TEST_H_
 #define UI_VIEWS_TEST_FOCUS_MANAGER_TEST_H_
 
-#include "base/macros.h"
 #include "ui/views/focus/focus_manager.h"
+
+#include <utility>
+#include <vector>
+
+#include "base/macros.h"
 #include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -17,17 +21,19 @@ class FocusChangeListener;
 
 class FocusManagerTest : public ViewsTestBase, public WidgetDelegate {
  public:
+  using FocusChangeReason = FocusManager::FocusChangeReason;
+
   FocusManagerTest();
   ~FocusManagerTest() override;
 
   // Convenience to obtain the focus manager for the test's hosting widget.
   FocusManager* GetFocusManager();
 
-  // Overridden from ViewsTestBase:
+  // ViewsTestBase:
   void SetUp() override;
   void TearDown() override;
 
-  // Overridden from WidgetDelegate:
+  // WidgetDelegate:
   View* GetContentsView() override;
   Widget* GetWidget() override;
   const Widget* GetWidget() const override;
@@ -53,7 +59,7 @@ class FocusManagerTest : public ViewsTestBase, public WidgetDelegate {
   DISALLOW_COPY_AND_ASSIGN(FocusManagerTest);
 };
 
-typedef std::pair<View*, View*> ViewPair;
+using ViewPair = std::pair<View*, View*>;
 
 // Use to record focus change notifications.
 class TestFocusChangeListener : public FocusChangeListener {

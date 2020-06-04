@@ -39,6 +39,8 @@ std::string ErrorToString(
       return "COMPATIBILITY_CHECK_FAILED";
     case component_updater::CrOSComponentManager::Error::NOT_FOUND:
       return "NOT_FOUND";
+    case component_updater::CrOSComponentManager::Error::UPDATE_IN_PROGRESS:
+      return "UPDATE_IN_PROGRESS";
     case component_updater::CrOSComponentManager::Error::ERROR_MAX:
       return "ERROR_MAX";
   }
@@ -48,8 +50,7 @@ std::string ErrorToString(
 }  // namespace
 
 ComponentUpdaterServiceProvider::ComponentUpdaterServiceProvider(
-    component_updater::CrOSComponentManager* cros_component_manager)
-    : weak_ptr_factory_(this) {
+    component_updater::CrOSComponentManager* cros_component_manager) {
   DCHECK(cros_component_manager);
 
   cros_component_manager_ = cros_component_manager;
@@ -67,23 +68,23 @@ void ComponentUpdaterServiceProvider::Start(
       kComponentUpdaterServiceLoadComponentMethod,
       base::Bind(&ComponentUpdaterServiceProvider::LoadComponent,
                  weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&ComponentUpdaterServiceProvider::OnExported,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ComponentUpdaterServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   exported_object->ExportMethod(
       kComponentUpdaterServiceInterface,
       kComponentUpdaterServiceUnloadComponentMethod,
       base::Bind(&ComponentUpdaterServiceProvider::UnloadComponent,
                  weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&ComponentUpdaterServiceProvider::OnExported,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ComponentUpdaterServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   exported_object_ = exported_object;
 }
 
 void ComponentUpdaterServiceProvider::EmitInstalledSignal(
     const std::string& component) {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(
           &ComponentUpdaterServiceProvider::EmitInstalledSignalInternal,
@@ -117,15 +118,15 @@ void ComponentUpdaterServiceProvider::LoadComponent(
             ? component_updater::CrOSComponentManager::MountPolicy::kMount
             : component_updater::CrOSComponentManager::MountPolicy::kDontMount,
         component_updater::CrOSComponentManager::UpdatePolicy::kDontForce,
-        base::Bind(&ComponentUpdaterServiceProvider::OnLoadComponent,
-                   weak_ptr_factory_.GetWeakPtr(), method_call,
-                   response_sender));
+        base::BindOnce(&ComponentUpdaterServiceProvider::OnLoadComponent,
+                       weak_ptr_factory_.GetWeakPtr(), method_call,
+                       std::move(response_sender)));
   } else {
     std::unique_ptr<dbus::ErrorResponse> error_response =
         dbus::ErrorResponse::FromMethodCall(
             method_call, kErrorInvalidArgs,
             "Need a string and a boolean parameter.");
-    response_sender.Run(std::move(error_response));
+    std::move(response_sender).Run(std::move(error_response));
   }
 }
 
@@ -142,7 +143,7 @@ void ComponentUpdaterServiceProvider::OnLoadComponent(
       dbus::Response::FromMethodCall(method_call);
   dbus::MessageWriter writer(response.get());
   writer.AppendString(result.value());
-  response_sender.Run(std::move(response));
+  std::move(response_sender).Run(std::move(response));
 }
 
 void ComponentUpdaterServiceProvider::UnloadComponent(
@@ -152,15 +153,18 @@ void ComponentUpdaterServiceProvider::UnloadComponent(
   std::string component_name;
   if (reader.PopString(&component_name)) {
     if (cros_component_manager_->Unload(component_name)) {
-      response_sender.Run(dbus::Response::FromMethodCall(method_call));
+      std::move(response_sender)
+          .Run(dbus::Response::FromMethodCall(method_call));
     } else {
-      response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-          method_call, kErrorInternalError, "Failed to unload component"));
+      std::move(response_sender)
+          .Run(dbus::ErrorResponse::FromMethodCall(
+              method_call, kErrorInternalError, "Failed to unload component"));
     }
   } else {
-    response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-        method_call, kErrorInvalidArgs,
-        "Missing component name string argument."));
+    std::move(response_sender)
+        .Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, kErrorInvalidArgs,
+            "Missing component name string argument."));
   }
 }
 

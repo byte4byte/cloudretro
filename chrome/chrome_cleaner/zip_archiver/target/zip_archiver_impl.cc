@@ -16,7 +16,6 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "chrome/chrome_cleaner/constants/quarantine_constants.h"
-#include "mojo/public/cpp/system/platform_handle.h"
 #include "third_party/zlib/contrib/minizip/ioapi.h"
 #include "third_party/zlib/contrib/minizip/zip.h"
 #include "third_party/zlib/zlib.h"
@@ -195,16 +194,17 @@ ZipArchiverResultCode AddToArchive(zipFile zip_object,
 
 }  // namespace
 
-ZipArchiverImpl::ZipArchiverImpl(mojom::ZipArchiverRequest request,
-                                 base::OnceClosure connection_error_handler)
-    : binding_(this, std::move(request)) {
-  binding_.set_connection_error_handler(std::move(connection_error_handler));
+ZipArchiverImpl::ZipArchiverImpl(
+    mojo::PendingReceiver<mojom::ZipArchiver> receiver,
+    base::OnceClosure connection_error_handler)
+    : receiver_(this, std::move(receiver)) {
+  receiver_.set_disconnect_handler(std::move(connection_error_handler));
 }
 
 ZipArchiverImpl::~ZipArchiverImpl() = default;
 
-void ZipArchiverImpl::Archive(mojo::ScopedHandle src_file_handle,
-                              mojo::ScopedHandle zip_file_handle,
+void ZipArchiverImpl::Archive(mojo::PlatformHandle src_file_handle,
+                              mojo::PlatformHandle zip_file_handle,
                               const std::string& filename_in_zip,
                               const std::string& password,
                               ArchiveCallback callback) {
@@ -217,28 +217,14 @@ void ZipArchiverImpl::Archive(mojo::ScopedHandle src_file_handle,
     return;
   }
 
-  HANDLE raw_src_file_handle;
-  if (mojo::UnwrapPlatformFile(std::move(src_file_handle),
-                               &raw_src_file_handle) != MOJO_RESULT_OK) {
-    LOG(ERROR) << "Unable to get the source HANDLE from mojo.";
-    std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
-    return;
-  }
-  base::File src_file(raw_src_file_handle);
+  base::File src_file(src_file_handle.TakeHandle());
   if (!src_file.IsValid()) {
     LOG(ERROR) << "Source file is invalid.";
     std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
     return;
   }
 
-  HANDLE raw_zip_file_handle;
-  if (mojo::UnwrapPlatformFile(std::move(zip_file_handle),
-                               &raw_zip_file_handle) != MOJO_RESULT_OK) {
-    LOG(ERROR) << "Unable to get the destination HANDLE from mojo.";
-    std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);
-    return;
-  }
-  base::File zip_file(raw_zip_file_handle);
+  base::File zip_file(zip_file_handle.TakeHandle());
   if (!zip_file.IsValid()) {
     LOG(ERROR) << "Destination file is invalid.";
     std::move(callback).Run(ZipArchiverResultCode::kErrorInvalidParameter);

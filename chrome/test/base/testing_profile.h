@@ -16,12 +16,14 @@
 #include "base/optional.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/buildflags.h"
 #include "components/domain_reliability/clear_mode.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/simple_factory_key.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/buildflags/buildflags.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "net/cookies/cookie_store.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
@@ -34,6 +36,7 @@ class BrowserContextDependencyManager;
 class SimpleDependencyManager;
 class ExtensionSpecialStoragePolicy;
 class HostContentSettingsMap;
+class TestingPrefStore;
 
 namespace content {
 class MockResourceContext;
@@ -44,7 +47,7 @@ class ZoomLevelDelegate;
 }  // namespace content
 
 namespace net {
-class URLRequestContextGetter;
+class CookieStore;
 }
 
 namespace policy {
@@ -53,10 +56,6 @@ class ProfilePolicyConnector;
 class SchemaRegistryService;
 class UserCloudPolicyManager;
 }  // namespace policy
-
-namespace service_manager {
-class Service;
-}
 
 namespace storage {
 class SpecialStoragePolicy;
@@ -106,6 +105,10 @@ class TestingProfile : public Profile {
         BrowserContextKeyedServiceFactory* service_factory,
         BrowserContextKeyedServiceFactory::TestingFactory testing_factory);
 
+    // Add multiple testing factories to the TestingProfile. These testing
+    // factories are applied before the ProfileKeyedServices are created.
+    void AddTestingFactories(const TestingFactories& testing_factories);
+
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     // Sets the ExtensionSpecialStoragePolicy to be returned by
     // GetExtensionSpecialStoragePolicy().
@@ -153,6 +156,9 @@ class TestingProfile : public Profile {
     // Build an incognito profile, owned by |original_profile|. Note: unless you
     // need to customize the Builder, or access TestingProfile member functions,
     // you can use original_profile->GetOffTheRecordProfile().
+    //
+    // TODO(https://crbug.com/1033903): Add BuildOffTheRecord to add possibility
+    // of creating non-primary OTRs.
     TestingProfile* BuildIncognito(TestingProfile* original_profile);
 
    private:
@@ -248,6 +254,11 @@ class TestingProfile : public Profile {
   // This is NOT invoked from CreateHistoryService.
   void BlockUntilHistoryIndexIsRefreshed();
 
+  // Blocks until the HistoryBackend is completely destroyed. This is mostly
+  // useful to ensure the destruction tasks do not outlive this class on which
+  // they depend.
+  void BlockUntilHistoryBackendDestroyed();
+
   // Allow setting a profile as Guest after-the-fact to simplify some tests.
   void SetGuestSession(bool guest);
 
@@ -260,16 +271,17 @@ class TestingProfile : public Profile {
   void SetNetworkContext(
       std::unique_ptr<network::mojom::NetworkContext> network_context);
 
-  // Called on the parent of an incognito |profile|. Usually called from the
-  // constructor of an incognito TestingProfile, but can also be used by tests
-  // to provide an OffTheRecordProfileImpl instance.
-  void SetOffTheRecordProfile(std::unique_ptr<Profile> profile);
+  // Called on the parent of an OffTheRecord |otr_profile|. Usually called from
+  // the constructor of an OffTheRecord TestingProfile, but can also be used by
+  // tests to provide an OffTheRecordProfileImpl instance.
+  void SetOffTheRecordProfile(std::unique_ptr<Profile> otr_profile);
 
   void SetSupervisedUserId(const std::string& id);
 
   // content::BrowserContext
   base::FilePath GetPath() override;
   base::FilePath GetPath() const override;
+  base::Time GetCreationTime() const override;
 #if !defined(OS_ANDROID)
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
@@ -279,11 +291,13 @@ class TestingProfile : public Profile {
   // profile dynamically.
   bool IsOffTheRecord() final;
   bool IsOffTheRecord() const final;
+  const OTRProfileID& GetOTRProfileID() const override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
   content::ResourceContext* GetResourceContext() override;
   content::BrowserPluginGuestManager* GetGuestManager() override;
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
+  content::StorageNotificationService* GetStorageNotificationService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionControllerDelegate* GetPermissionControllerDelegate()
       override;
@@ -293,18 +307,11 @@ class TestingProfile : public Profile {
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
-  net::URLRequestContextGetter* CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) override;
-  net::URLRequestContextGetter* CreateMediaRequestContext() override;
   void SetCorsOriginAccessListForOrigin(
       const url::Origin& source_origin,
       std::vector<network::mojom::CorsOriginPatternPtr> allow_patterns,
       std::vector<network::mojom::CorsOriginPatternPtr> block_patterns,
       base::OnceClosure closure) override;
-  std::unique_ptr<service_manager::Service> HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
 
   TestingProfile* AsTestingProfile() override;
 
@@ -312,15 +319,24 @@ class TestingProfile : public Profile {
   std::string GetProfileUserName() const override;
   ProfileType GetProfileType() const override;
 
-  Profile* GetOffTheRecordProfile() override;
-  void DestroyOffTheRecordProfile() override {}
-  bool HasOffTheRecordProfile() override;
+  // TODO(https://crbug.com/1033903): Remove the default value.
+  Profile* GetOffTheRecordProfile(
+      const OTRProfileID& otr_profile_id = OTRProfileID::PrimaryID()) override;
+  std::vector<Profile*> GetAllOffTheRecordProfiles() override;
+  void DestroyOffTheRecordProfile(Profile* otr_profile) override;
+  // TODO(https://crbug.com/1033903): Remove this function when all the use
+  // cases are migrated to above version. The parameter-less version destroys
+  // the primary off the record profile.
+  void DestroyOffTheRecordProfile();
+  // TODO(https://crbug.com/1033903): Remove the default value.
+  bool HasOffTheRecordProfile(
+      const OTRProfileID& otr_profile_id = OTRProfileID::PrimaryID()) override;
+  bool HasAnyOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
   const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
-  bool IsIndependentOffTheRecordProfile() override;
   bool AllowsBrowserWindows() const override;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   void SetExtensionSpecialStoragePolicy(
@@ -333,7 +349,6 @@ class TestingProfile : public Profile {
 #if !defined(OS_ANDROID)
   ChromeZoomLevelPrefs* GetZoomLevelPrefs() override;
 #endif  // !defined(OS_ANDROID)
-  net::URLRequestContextGetter* GetRequestContext() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
 
   void set_last_session_exited_cleanly(bool value) {
@@ -361,7 +376,7 @@ class TestingProfile : public Profile {
   bool IsNewProfile() override;
   void SetExitType(ExitType exit_type) override {}
   ExitType GetLastSessionExitType() override;
-  network::mojom::NetworkContextPtr CreateNetworkContext(
+  mojo::Remote<network::mojom::NetworkContext> CreateNetworkContext(
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
 
@@ -380,6 +395,9 @@ class TestingProfile : public Profile {
   void BlockUntilHistoryProcessesPendingRequests();
 
   GURL GetHomePage() override;
+
+  void SetCreationTimeForTesting(base::Time creation_time) override;
+  bool ShouldEnableOutOfBlinkCors() override;
 
   PrefService* GetOffTheRecordPrefs() override;
 
@@ -419,9 +437,11 @@ class TestingProfile : public Profile {
   // Creates a TestingPrefService and associates it with the TestingProfile.
   void CreateTestingPrefService();
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   // Creates a pref service that uses SupervisedUserPrefStore and associates
   // it with the TestingProfile.
   void CreatePrefServiceForSupervisedUser();
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
   // Initializes |prefs_| for an incognito profile, derived from
   // |original_profile_|.
@@ -434,7 +454,7 @@ class TestingProfile : public Profile {
       extensions_cookie_store_;
 
   std::unique_ptr<network::mojom::NetworkContext> network_context_;
-  mojo::BindingSet<network::mojom::NetworkContext> network_context_bindings_;
+  mojo::ReceiverSet<network::mojom::NetworkContext> network_context_receivers_;
 
   std::unique_ptr<Profile> incognito_profile_;
   TestingProfile* original_profile_;
@@ -494,6 +514,10 @@ class TestingProfile : public Profile {
 #endif  // defined(OS_CHROMEOS)
 
   std::unique_ptr<policy::PolicyService> policy_service_;
+
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
+  TestingPrefStore* supervised_user_pref_store_ = nullptr;
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 };
 
 #endif  // CHROME_TEST_BASE_TESTING_PROFILE_H_

@@ -2,6 +2,7 @@
 // Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "ui/accessibility/platform/ax_platform_node_win_unittest.h"
 
 #include <oleacc.h>
@@ -9,6 +10,7 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "base/stl_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/win/atl.h"
@@ -18,6 +20,7 @@
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
 #include "ui/accessibility/platform/ax_platform_node_win.h"
@@ -29,6 +32,9 @@ using base::win::ScopedBstr;
 using base::win::ScopedVariant;
 
 namespace ui {
+
+const base::string16 AXPlatformNodeWinTest::kEmbeddedCharacterAsString = {
+    ui::AXPlatformNodeBase::kEmbeddedCharacter};
 
 namespace {
 
@@ -94,7 +100,7 @@ ScopedVariant SELF(CHILDID_SELF);
 
 #define EXPECT_UIA_BOOL_EQ(node, property_id, expected)               \
   {                                                                   \
-    ScopedVariant expectedVariant(expected, VT_BOOL);                 \
+    ScopedVariant expectedVariant(expected);                          \
     ASSERT_EQ(VT_BOOL, expectedVariant.type());                       \
     ScopedVariant actual;                                             \
     ASSERT_HRESULT_SUCCEEDED(                                         \
@@ -129,7 +135,7 @@ ScopedVariant SELF(CHILDID_SELF);
 
 #define EXPECT_UIA_INT_EQ(node, property_id, expected)              \
   {                                                                 \
-    ScopedVariant expectedVariant(expected, VT_I4);                 \
+    ScopedVariant expectedVariant(expected);                        \
     ASSERT_EQ(VT_I4, expectedVariant.type());                       \
     ScopedVariant actual;                                           \
     ASSERT_HRESULT_SUCCEEDED(                                       \
@@ -153,8 +159,9 @@ ScopedVariant SELF(CHILDID_SELF);
     size_t count = array_upper_bound - array_lower_bound + 1;                 \
     ASSERT_EQ(expected_property_values.size(), count);                        \
     for (size_t i = 0; i < count; ++i) {                                      \
-      CComPtr<IRawElementProviderSimple> element;                             \
-      ASSERT_HRESULT_SUCCEEDED(array_data[i]->QueryInterface(&element));      \
+      ComPtr<IRawElementProviderSimple> element;                              \
+      ASSERT_HRESULT_SUCCEEDED(                                               \
+          array_data[i]->QueryInterface(IID_PPV_ARGS(&element)));             \
       EXPECT_UIA_BSTR_EQ(element, element_test_property_id,                   \
                          expected_property_values[i].c_str());                \
     }                                                                         \
@@ -196,8 +203,9 @@ ScopedVariant SELF(CHILDID_SELF);
     ASSERT_EQ(expected_property_values.size(), count);                         \
     std::vector<std::wstring> property_values;                                 \
     for (size_t i = 0; i < count; ++i) {                                       \
-      CComPtr<IRawElementProviderSimple> element;                              \
-      ASSERT_HRESULT_SUCCEEDED(array_data[i]->QueryInterface(&element));       \
+      ComPtr<IRawElementProviderSimple> element;                               \
+      ASSERT_HRESULT_SUCCEEDED(                                                \
+          array_data[i]->QueryInterface(IID_PPV_ARGS(&element)));              \
       ScopedVariant actual;                                                    \
       ASSERT_HRESULT_SUCCEEDED(element->GetPropertyValue(                      \
           element_test_property_id, actual.Receive()));                        \
@@ -221,33 +229,20 @@ void AXPlatformNodeWinTest::SetUp() {
 void AXPlatformNodeWinTest::TearDown() {
   // Destroy the tree and make sure we're not leaking any objects.
   ax_fragment_root_.reset(nullptr);
-  tree_.reset(nullptr);
-  AXNodePosition::SetTreeForTesting(nullptr);
+  DestroyTree();
+  TestAXNodeWrapper::SetGlobalIsWebContent(false);
   ASSERT_EQ(0U, AXPlatformNodeBase::GetInstanceCountForTesting());
 }
 
 AXPlatformNode* AXPlatformNodeWinTest::AXPlatformNodeFromNode(AXNode* node) {
   const TestAXNodeWrapper* wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), node);
-  if (!wrapper)
-    return nullptr;
-
-  return wrapper->ax_platform_node();
+      TestAXNodeWrapper::GetOrCreate(GetTree(), node);
+  return wrapper ? wrapper->ax_platform_node() : nullptr;
 }
 
 template <typename T>
-ComPtr<T> AXPlatformNodeWinTest::QueryInterfaceFromNodeId(int32_t id) {
-  const TestAXNodeWrapper* wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), tree_->GetFromId(id));
-  if (!wrapper)
-    return ComPtr<T>();
-
-  AXPlatformNode* ax_platform_node = wrapper->ax_platform_node();
-  ComPtr<T> result;
-  EXPECT_HRESULT_SUCCEEDED(
-      ax_platform_node->GetNativeViewAccessible()->QueryInterface(__uuidof(T),
-                                                                  &result));
-  return result;
+ComPtr<T> AXPlatformNodeWinTest::QueryInterfaceFromNodeId(AXNode::AXID id) {
+  return QueryInterfaceFromNode<T>(GetNodeFromTree(id));
 }
 
 template <typename T>
@@ -264,24 +259,44 @@ ComPtr<T> AXPlatformNodeWinTest::QueryInterfaceFromNode(AXNode* node) {
 
 ComPtr<IRawElementProviderSimple>
 AXPlatformNodeWinTest::GetRootIRawElementProviderSimple() {
-  return QueryInterfaceFromNode<IRawElementProviderSimple>(GetRootNode());
+  return QueryInterfaceFromNode<IRawElementProviderSimple>(GetRootAsAXNode());
 }
 
 ComPtr<IRawElementProviderSimple>
 AXPlatformNodeWinTest::GetIRawElementProviderSimpleFromChildIndex(
     int child_index) {
-  if (!GetRootNode() || child_index < 0 ||
-      size_t{child_index} >= GetRootNode()->children().size()) {
+  if (!GetRootAsAXNode() || child_index < 0 ||
+      size_t{child_index} >= GetRootAsAXNode()->children().size()) {
     return ComPtr<IRawElementProviderSimple>();
   }
 
   return QueryInterfaceFromNode<IRawElementProviderSimple>(
-      GetRootNode()->children()[size_t{child_index}]);
+      GetRootAsAXNode()->children()[size_t{child_index}]);
+}
+
+Microsoft::WRL::ComPtr<IRawElementProviderSimple>
+AXPlatformNodeWinTest::GetIRawElementProviderSimpleFromTree(
+    const ui::AXTreeID tree_id,
+    const AXNode::AXID node_id) {
+  return QueryInterfaceFromNode<IRawElementProviderSimple>(
+      GetNodeFromTree(tree_id, node_id));
 }
 
 ComPtr<IRawElementProviderFragment>
 AXPlatformNodeWinTest::GetRootIRawElementProviderFragment() {
-  return QueryInterfaceFromNode<IRawElementProviderFragment>(GetRootNode());
+  return QueryInterfaceFromNode<IRawElementProviderFragment>(GetRootAsAXNode());
+}
+
+Microsoft::WRL::ComPtr<IRawElementProviderFragment>
+AXPlatformNodeWinTest::IRawElementProviderFragmentFromNode(AXNode* node) {
+  AXPlatformNode* platform_node = AXPlatformNodeFromNode(node);
+  gfx::NativeViewAccessible native_view =
+      platform_node->GetNativeViewAccessible();
+  ComPtr<IUnknown> unknown_node = native_view;
+  ComPtr<IRawElementProviderFragment> fragment_node;
+  unknown_node.As(&fragment_node);
+
+  return fragment_node;
 }
 
 ComPtr<IAccessible> AXPlatformNodeWinTest::IAccessibleFromNode(AXNode* node) {
@@ -289,7 +304,7 @@ ComPtr<IAccessible> AXPlatformNodeWinTest::IAccessibleFromNode(AXNode* node) {
 }
 
 ComPtr<IAccessible> AXPlatformNodeWinTest::GetRootIAccessible() {
-  return IAccessibleFromNode(GetRootNode());
+  return IAccessibleFromNode(GetRootAsAXNode());
 }
 
 ComPtr<IAccessible2> AXPlatformNodeWinTest::ToIAccessible2(
@@ -333,7 +348,7 @@ void AXPlatformNodeWinTest::CheckVariantHasName(const ScopedVariant& variant,
       V_DISPATCH(variant.ptr())->QueryInterface(IID_PPV_ARGS(&accessible)));
   ScopedBstr name;
   EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-  EXPECT_STREQ(expected_name, name);
+  EXPECT_STREQ(expected_name, name.Get());
 }
 
 void AXPlatformNodeWinTest::CheckIUnknownHasName(ComPtr<IUnknown> unknown,
@@ -343,7 +358,7 @@ void AXPlatformNodeWinTest::CheckIUnknownHasName(ComPtr<IUnknown> unknown,
 
   ScopedBstr name;
   EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-  EXPECT_STREQ(expected_name, name);
+  EXPECT_STREQ(expected_name, name.Get());
 }
 
 ComPtr<IAccessibleTableCell> AXPlatformNodeWinTest::GetCellInTable() {
@@ -366,11 +381,19 @@ ComPtr<IAccessibleTableCell> AXPlatformNodeWinTest::GetCellInTable() {
 
 void AXPlatformNodeWinTest::InitFragmentRoot() {
   test_fragment_root_delegate_ = std::make_unique<TestFragmentRootDelegate>();
-  test_fragment_root_delegate_->child_ =
-      AXPlatformNodeFromNode(GetRootNode())->GetNativeViewAccessible();
+  ax_fragment_root_.reset(InitNodeAsFragmentRoot(
+      GetRootAsAXNode(), test_fragment_root_delegate_.get()));
+}
 
-  ax_fragment_root_ = std::make_unique<ui::AXFragmentRootWin>(
-      gfx::kMockAcceleratedWidget, test_fragment_root_delegate_.get());
+AXFragmentRootWin* AXPlatformNodeWinTest::InitNodeAsFragmentRoot(
+    AXNode* node,
+    TestFragmentRootDelegate* delegate) {
+  delegate->child_ = AXPlatformNodeFromNode(node)->GetNativeViewAccessible();
+  if (node->parent())
+    delegate->parent_ =
+        AXPlatformNodeFromNode(node->parent())->GetNativeViewAccessible();
+
+  return new AXFragmentRootWin(gfx::kMockAcceleratedWidget, delegate);
 }
 
 ComPtr<IRawElementProviderFragmentRoot>
@@ -382,7 +405,7 @@ AXPlatformNodeWinTest::GetFragmentRoot() {
 }
 
 AXPlatformNodeWinTest::PatternSet
-AXPlatformNodeWinTest::GetSupportedPatternsFromNodeId(int32_t id) {
+AXPlatformNodeWinTest::GetSupportedPatternsFromNodeId(AXNode::AXID id) {
   ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
       QueryInterfaceFromNodeId<IRawElementProviderSimple>(id);
   PatternSet supported_patterns;
@@ -398,7 +421,7 @@ AXPlatformNodeWinTest::GetSupportedPatternsFromNodeId(int32_t id) {
       UIA_ValuePatternId,
   };
   for (LONG property_id : all_supported_patterns_) {
-    CComPtr<IUnknown> provider = nullptr;
+    ComPtr<IUnknown> provider;
     if (SUCCEEDED(raw_element_provider_simple->GetPatternProvider(property_id,
                                                                   &provider)) &&
         provider) {
@@ -421,6 +444,10 @@ TestFragmentRootDelegate::GetParentOfAXFragmentRoot() {
   return parent_;
 }
 
+bool TestFragmentRootDelegate::IsAXFragmentRootAControlElement() {
+  return is_control_element_;
+}
+
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleDetachedObject) {
   AXNodeData root;
   root.id = 1;
@@ -430,45 +457,79 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleDetachedObject) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
   ScopedBstr name;
   EXPECT_EQ(S_OK, root_obj->get_accName(SELF, name.Receive()));
-  EXPECT_STREQ(L"Name", name);
+  EXPECT_STREQ(L"Name", name.Get());
 
-  tree_.reset(new AXTree());
+  // Create an empty tree.
+  SetTree(std::make_unique<AXTree>());
   ScopedBstr name2;
   EXPECT_EQ(E_FAIL, root_obj->get_accName(SELF, name2.Receive()));
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleHitTest) {
   AXNodeData root;
-  root.id = 0;
-  root.child_ids.push_back(1);
-  root.child_ids.push_back(2);
-  root.relative_bounds.bounds = gfx::RectF(0, 0, 30, 30);
+  root.id = 1;
+  root.relative_bounds.bounds = gfx::RectF(0, 0, 40, 40);
 
   AXNodeData node1;
-  node1.id = 1;
+  node1.id = 2;
   node1.relative_bounds.bounds = gfx::RectF(0, 0, 10, 10);
   node1.SetName("Name1");
+  root.child_ids.push_back(node1.id);
 
   AXNodeData node2;
-  node2.id = 2;
-  node2.relative_bounds.bounds = gfx::RectF(20, 20, 10, 10);
+  node2.id = 3;
+  node2.relative_bounds.bounds = gfx::RectF(20, 20, 20, 20);
   node2.SetName("Name2");
+  root.child_ids.push_back(node2.id);
 
   Init(root, node1, node2);
 
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
-  ScopedVariant obj;
+  // This is way outside of the root node.
+  ScopedVariant obj_1;
+  EXPECT_EQ(S_FALSE, root_obj->accHitTest(50, 50, obj_1.Receive()));
+  EXPECT_EQ(VT_EMPTY, obj_1.type());
 
-  // This is way outside of the root node
-  EXPECT_EQ(S_FALSE, root_obj->accHitTest(50, 50, obj.Receive()));
-  EXPECT_EQ(VT_EMPTY, obj.type());
+  // This is directly on node 1.
+  EXPECT_EQ(S_OK, root_obj->accHitTest(5, 5, obj_1.Receive()));
+  ASSERT_NE(nullptr, obj_1.ptr());
+  CheckVariantHasName(obj_1, L"Name1");
 
-  // this is directly on node 1.
-  EXPECT_EQ(S_OK, root_obj->accHitTest(5, 5, obj.Receive()));
-  ASSERT_NE(nullptr, obj.ptr());
+  // This is directly on node 2 with a scale factor of 1.5.
+  ScopedVariant obj_2;
+  std::unique_ptr<base::AutoReset<float>> scale_factor_reset =
+      TestAXNodeWrapper::SetScaleFactor(1.5);
+  EXPECT_EQ(S_OK, root_obj->accHitTest(38, 38, obj_2.Receive()));
+  ASSERT_NE(nullptr, obj_2.ptr());
+  CheckVariantHasName(obj_2, L"Name2");
+}
 
-  CheckVariantHasName(obj, L"Name1");
+TEST_F(AXPlatformNodeWinTest, TestIAccessibleHitTestDoesNotLoopForever) {
+  AXNodeData root;
+  root.id = 1;
+  root.relative_bounds.bounds = gfx::RectF(0, 0, 40, 40);
+
+  AXNodeData node1;
+  node1.id = 2;
+  node1.relative_bounds.bounds = gfx::RectF(0, 0, 10, 10);
+  node1.SetName("Name1");
+  root.child_ids.push_back(node1.id);
+
+  Init(root, node1);
+
+  // Set up the endless loop.
+  TestAXNodeWrapper::SetHitTestResult(1, 2);
+  TestAXNodeWrapper::SetHitTestResult(2, 1);
+
+  // Hit testing on the root returns the child. Hit testing on the
+  // child returns the root, but that should be rejected rather than
+  // looping endlessly.
+  ComPtr<IAccessible> root_obj(GetRootIAccessible());
+  ScopedVariant obj_1;
+  EXPECT_EQ(S_OK, root_obj->accHitTest(5, 5, obj_1.Receive()));
+  ASSERT_NE(nullptr, obj_1.ptr());
+  CheckVariantHasName(obj_1, L"Name1");
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleName) {
@@ -480,7 +541,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleName) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
   ScopedBstr name;
   EXPECT_EQ(S_OK, root_obj->get_accName(SELF, name.Receive()));
-  EXPECT_STREQ(L"Name", name);
+  EXPECT_STREQ(L"Name", name.Get());
 
   EXPECT_EQ(E_INVALIDARG, root_obj->get_accName(SELF, nullptr));
   ScopedVariant bad_id(999);
@@ -498,7 +559,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleDescription) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
   ScopedBstr description;
   EXPECT_EQ(S_OK, root_obj->get_accDescription(SELF, description.Receive()));
-  EXPECT_STREQ(L"Description", description);
+  EXPECT_STREQ(L"Description", description.Get());
 
   EXPECT_EQ(E_INVALIDARG, root_obj->get_accDescription(SELF, nullptr));
   ScopedVariant bad_id(999);
@@ -506,16 +567,17 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleDescription) {
   EXPECT_EQ(E_INVALIDARG, root_obj->get_accDescription(bad_id, d2.Receive()));
 }
 
-TEST_F(AXPlatformNodeWinTest, TestIAccessibleValue) {
+TEST_F(AXPlatformNodeWinTest, TestIAccessibleAccValue) {
   AXNodeData root;
   root.id = 1;
+  root.role = ax::mojom::Role::kTextField;
   root.AddStringAttribute(ax::mojom::StringAttribute::kValue, "Value");
   Init(root);
 
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
   ScopedBstr value;
   EXPECT_EQ(S_OK, root_obj->get_accValue(SELF, value.Receive()));
-  EXPECT_STREQ(L"Value", value);
+  EXPECT_STREQ(L"Value", value.Get());
 
   EXPECT_EQ(E_INVALIDARG, root_obj->get_accValue(SELF, nullptr));
   ScopedVariant bad_id(999);
@@ -533,7 +595,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleShortcut) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
   ScopedBstr shortcut;
   EXPECT_EQ(S_OK, root_obj->get_accKeyboardShortcut(SELF, shortcut.Receive()));
-  EXPECT_STREQ(L"Shortcut", shortcut);
+  EXPECT_STREQ(L"Shortcut", shortcut.Get());
 
   EXPECT_EQ(E_INVALIDARG, root_obj->get_accKeyboardShortcut(SELF, nullptr));
   ScopedVariant bad_id(999);
@@ -542,114 +604,19 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleShortcut) {
             root_obj->get_accKeyboardShortcut(bad_id, k2.Receive()));
 }
 
-TEST_F(AXPlatformNodeWinTest, TestIAccessibleHelpText) {
-  AXNodeData root;
-  root.id = 0;
-
-  // Test Placeholder StringAttribute is exposed.
-  AXNodeData node1;
-  node1.id = 1;
-  node1.SetName("name-from-title");
-  node1.AddIntAttribute(ax::mojom::IntAttribute::kNameFrom,
-                        static_cast<int>(ax::mojom::NameFrom::kTitle));
-  node1.AddStringAttribute(ax::mojom::StringAttribute::kPlaceholder,
-                           "placeholder");
-  root.child_ids.push_back(node1.id);
-
-  // Test NameFrom Title is exposed.
-  AXNodeData node2;
-  node2.id = 2;
-  node2.SetName("name-from-title");
-  node2.AddIntAttribute(ax::mojom::IntAttribute::kNameFrom,
-                        static_cast<int>(ax::mojom::NameFrom::kTitle));
-  root.child_ids.push_back(node2.id);
-
-  // Test NameFrom Placeholder is exposed.
-  AXNodeData node3;
-  node3.id = 3;
-  node3.SetName("name-from-placeholder");
-  node3.AddIntAttribute(ax::mojom::IntAttribute::kNameFrom,
-                        static_cast<int>(ax::mojom::NameFrom::kPlaceholder));
-  root.child_ids.push_back(node3.id);
-
-  // Test Tooltip StringAttribute is exposed.
-  AXNodeData node4;
-  node4.id = 4;
-  node4.SetName("name-from-attribute");
-  node4.AddIntAttribute(ax::mojom::IntAttribute::kNameFrom,
-                        static_cast<int>(ax::mojom::NameFrom::kAttribute));
-  node4.AddStringAttribute(ax::mojom::StringAttribute::kTooltip, "tooltip");
-  root.child_ids.push_back(node4.id);
-
-  // Test StringAttribute is not exposed without explicit
-  // Placeholder / Title / Tooltip.
-  AXNodeData node5;
-  node5.id = 5;
-  node5.SetName("name-from-attribute");
-  node5.AddIntAttribute(ax::mojom::IntAttribute::kNameFrom,
-                        static_cast<int>(ax::mojom::NameFrom::kAttribute));
-  root.child_ids.push_back(node5.id);
-
-  Init(root, node1, node2, node3, node4, node5);
-
-  auto* root_node = GetRootNode();
-
-  ScopedBstr helpText1;
-  ComPtr<IAccessible> child_node1(
-      IAccessibleFromNode(root_node->children()[0]));
-  EXPECT_EQ(S_OK, child_node1->get_accHelp(SELF, helpText1.Receive()));
-  EXPECT_STREQ(L"placeholder", helpText1);
-
-  ScopedBstr helpText2;
-  ComPtr<IAccessible> child_node2(
-      IAccessibleFromNode(root_node->children()[1]));
-  EXPECT_EQ(S_OK, child_node2->get_accHelp(SELF, helpText2.Receive()));
-  EXPECT_STREQ(L"name-from-title", helpText2);
-
-  ScopedBstr helpText3;
-  ComPtr<IAccessible> child_node3(
-      IAccessibleFromNode(root_node->children()[2]));
-  EXPECT_EQ(S_OK, child_node3->get_accHelp(SELF, helpText3.Receive()));
-  EXPECT_STREQ(L"name-from-placeholder", helpText3);
-
-  ScopedBstr helpText4;
-  ComPtr<IAccessible> child_node4(
-      IAccessibleFromNode(root_node->children()[3]));
-  EXPECT_EQ(S_OK, child_node4->get_accHelp(SELF, helpText4.Receive()));
-  EXPECT_STREQ(L"tooltip", helpText4);
-
-  ScopedBstr helpText5;
-  ComPtr<IAccessible> child_node5(
-      IAccessibleFromNode(root_node->children()[4]));
-  EXPECT_EQ(S_FALSE, child_node5->get_accHelp(SELF, helpText5.Receive()));
-
-  ScopedBstr helpText6;
-  ScopedVariant root_id(0);
-  EXPECT_EQ(S_OK, child_node4->get_accHelp(root_id, helpText6.Receive()));
-  EXPECT_STREQ(L"tooltip", helpText6);
-
-  EXPECT_EQ(E_INVALIDARG, child_node5->get_accHelp(SELF, nullptr));
-  ScopedVariant var_id(5);
-  EXPECT_EQ(E_INVALIDARG,
-            child_node5->get_accHelp(var_id, helpText5.Receive()));
-  ScopedVariant bad_id(999);
-  EXPECT_EQ(E_INVALIDARG,
-            child_node5->get_accHelp(bad_id, helpText5.Receive()));
-}
-
 TEST_F(AXPlatformNodeWinTest,
        TestIAccessibleSelectionListBoxOptionNothingSelected) {
   AXNodeData list;
-  list.id = 0;
+  list.id = 1;
   list.role = ax::mojom::Role::kListBox;
 
   AXNodeData list_item_1;
-  list_item_1.id = 1;
+  list_item_1.id = 2;
   list_item_1.role = ax::mojom::Role::kListBoxOption;
   list_item_1.SetName("Name1");
 
   AXNodeData list_item_2;
-  list_item_2.id = 2;
+  list_item_2.id = 3;
   list_item_2.role = ax::mojom::Role::kListBoxOption;
   list_item_2.SetName("Name2");
 
@@ -669,17 +636,17 @@ TEST_F(AXPlatformNodeWinTest,
 TEST_F(AXPlatformNodeWinTest,
        TestIAccessibleSelectionListBoxOptionOneSelected) {
   AXNodeData list;
-  list.id = 0;
+  list.id = 1;
   list.role = ax::mojom::Role::kListBox;
 
   AXNodeData list_item_1;
-  list_item_1.id = 1;
+  list_item_1.id = 2;
   list_item_1.role = ax::mojom::Role::kListBoxOption;
   list_item_1.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   list_item_1.SetName("Name1");
 
   AXNodeData list_item_2;
-  list_item_2.id = 2;
+  list_item_2.id = 3;
   list_item_2.role = ax::mojom::Role::kListBoxOption;
   list_item_2.SetName("Name2");
 
@@ -701,23 +668,23 @@ TEST_F(AXPlatformNodeWinTest,
 TEST_F(AXPlatformNodeWinTest,
        TestIAccessibleSelectionListBoxOptionMultipleSelected) {
   AXNodeData list;
-  list.id = 0;
+  list.id = 1;
   list.role = ax::mojom::Role::kListBox;
 
   AXNodeData list_item_1;
-  list_item_1.id = 1;
+  list_item_1.id = 2;
   list_item_1.role = ax::mojom::Role::kListBoxOption;
   list_item_1.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   list_item_1.SetName("Name1");
 
   AXNodeData list_item_2;
-  list_item_2.id = 2;
+  list_item_2.id = 3;
   list_item_2.role = ax::mojom::Role::kListBoxOption;
   list_item_2.AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, true);
   list_item_2.SetName("Name2");
 
   AXNodeData list_item_3;
-  list_item_3.id = 3;
+  list_item_3.id = 4;
   list_item_3.role = ax::mojom::Role::kListBoxOption;
   list_item_3.SetName("Name3");
 
@@ -754,7 +721,7 @@ TEST_F(AXPlatformNodeWinTest,
             ->QueryInterface(IID_PPV_ARGS(accessible.GetAddressOf())));
     ScopedBstr name;
     EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-    EXPECT_STREQ(L"Name1", name);
+    EXPECT_STREQ(L"Name1", name.Get());
   }
 
   // And the second selected element.
@@ -769,7 +736,7 @@ TEST_F(AXPlatformNodeWinTest,
             ->QueryInterface(IID_PPV_ARGS(accessible.GetAddressOf())));
     ScopedBstr name;
     EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-    EXPECT_STREQ(L"Name2", name);
+    EXPECT_STREQ(L"Name2", name.Get());
   }
 
   // There shouldn't be any more selected.
@@ -914,7 +881,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleSelectionTableCellOneSelected) {
 
   ScopedBstr name;
   EXPECT_EQ(S_OK, cell->get_accName(SELF, name.Receive()));
-  EXPECT_STREQ(L"1", name);
+  EXPECT_STREQ(L"1", name.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest,
@@ -961,7 +928,7 @@ TEST_F(AXPlatformNodeWinTest,
             ->QueryInterface(IID_PPV_ARGS(accessible.GetAddressOf())));
     ScopedBstr name;
     EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-    EXPECT_STREQ(L"3", name);
+    EXPECT_STREQ(L"3", name.Get());
   }
 
   // And the second selected cell.
@@ -976,7 +943,7 @@ TEST_F(AXPlatformNodeWinTest,
             ->QueryInterface(IID_PPV_ARGS(accessible.GetAddressOf())));
     ScopedBstr name;
     EXPECT_EQ(S_OK, accessible->get_accName(SELF, name.Receive()));
-    EXPECT_STREQ(L"4", name);
+    EXPECT_STREQ(L"4", name.Get());
   }
 
   // There shouldn't be any more selected.
@@ -996,7 +963,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleRole) {
   child.id = 2;
 
   Init(root, child);
-  AXNode* child_node = GetRootNode()->children()[0];
+  AXNode* child_node = GetRootAsAXNode()->children()[0];
   ComPtr<IAccessible> child_iaccessible(IAccessibleFromNode(child_node));
 
   ScopedVariant role;
@@ -1069,8 +1036,8 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleChildAndParent) {
   checkbox.id = 3;
 
   Init(root, button, checkbox);
-  AXNode* button_node = GetRootNode()->children()[0];
-  AXNode* checkbox_node = GetRootNode()->children()[1];
+  AXNode* button_node = GetRootAsAXNode()->children()[0];
+  AXNode* checkbox_node = GetRootAsAXNode()->children()[1];
   ComPtr<IAccessible> root_iaccessible(GetRootIAccessible());
   ComPtr<IAccessible> button_iaccessible(IAccessibleFromNode(button_node));
   ComPtr<IAccessible> checkbox_iaccessible(IAccessibleFromNode(checkbox_node));
@@ -1175,10 +1142,10 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2IndexInParent) {
   ComPtr<IAccessible> root_iaccessible(GetRootIAccessible());
   ComPtr<IAccessible2> root_iaccessible2 = ToIAccessible2(root_iaccessible);
   ComPtr<IAccessible> left_iaccessible(
-      IAccessibleFromNode(GetRootNode()->children()[0]));
+      IAccessibleFromNode(GetRootAsAXNode()->children()[0]));
   ComPtr<IAccessible2> left_iaccessible2 = ToIAccessible2(left_iaccessible);
   ComPtr<IAccessible> right_iaccessible(
-      IAccessibleFromNode(GetRootNode()->children()[1]));
+      IAccessibleFromNode(GetRootAsAXNode()->children()[1]));
   ComPtr<IAccessible2> right_iaccessible2 = ToIAccessible2(right_iaccessible);
 
   LONG index;
@@ -1209,17 +1176,17 @@ TEST_F(AXPlatformNodeWinTest, TestAccNavigate) {
   Init(root, child1, child2);
   ComPtr<IAccessible> ia_root(GetRootIAccessible());
   ComPtr<IDispatch> disp_root;
-  ASSERT_HRESULT_SUCCEEDED(ia_root.CopyTo(disp_root.GetAddressOf()));
+  ASSERT_HRESULT_SUCCEEDED(ia_root.As(&disp_root));
   ScopedVariant var_root(disp_root.Get());
   ComPtr<IAccessible> ia_child1(
-      IAccessibleFromNode(GetRootNode()->children()[0]));
+      IAccessibleFromNode(GetRootAsAXNode()->children()[0]));
   ComPtr<IDispatch> disp_child1;
-  ASSERT_HRESULT_SUCCEEDED(ia_child1.CopyTo(disp_child1.GetAddressOf()));
+  ASSERT_HRESULT_SUCCEEDED(ia_child1.As(&disp_child1));
   ScopedVariant var_child1(disp_child1.Get());
   ComPtr<IAccessible> ia_child2(
-      IAccessibleFromNode(GetRootNode()->children()[1]));
+      IAccessibleFromNode(GetRootAsAXNode()->children()[1]));
   ComPtr<IDispatch> disp_child2;
-  ASSERT_HRESULT_SUCCEEDED(ia_child2.CopyTo(disp_child2.GetAddressOf()));
+  ASSERT_HRESULT_SUCCEEDED(ia_child2.As(&disp_child2));
   ScopedVariant var_child2(disp_child2.Get());
   ScopedVariant end;
 
@@ -1298,7 +1265,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2TextFieldSetSelection) {
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   EXPECT_HRESULT_SUCCEEDED(text_field->setSelection(0, 0, 1));
@@ -1320,7 +1287,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> content_editable;
-  ia2_text_field.CopyTo(content_editable.GetAddressOf());
+  ia2_text_field.As(&content_editable);
   ASSERT_NE(nullptr, content_editable.Get());
 
   EXPECT_HRESULT_SUCCEEDED(content_editable->setSelection(0, 0, 1));
@@ -1339,7 +1306,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetAccessibilityAt) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   ComPtr<IUnknown> cell_1;
@@ -1366,7 +1333,7 @@ TEST_F(AXPlatformNodeWinTest,
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   {
@@ -1444,7 +1411,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2ScrollToPoint) {
   EXPECT_EQ(S_OK, root_iaccessible->get_accChild(ScopedVariant(1),
                                                  result.GetAddressOf()));
   ComPtr<IAccessible2> ax_child1;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child1.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child1));
   result.Reset();
 
   LONG x_left, y_top, width, height;
@@ -1496,7 +1463,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2ScrollTo) {
   EXPECT_EQ(S_OK, root_iaccessible->get_accChild(ScopedVariant(1),
                                                  result.GetAddressOf()));
   ComPtr<IAccessible2> ax_child1;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child1.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child1));
   result.Reset();
 
   LONG x_left, y_top, width, height;
@@ -1524,7 +1491,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetChildIndex) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG id;
@@ -1552,7 +1519,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetColumnDescription) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   {
@@ -1562,13 +1529,13 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetColumnDescription) {
   {
     ScopedBstr name;
     EXPECT_EQ(S_OK, result->get_columnDescription(1, name.Receive()));
-    EXPECT_STREQ(L"column header 1", name);
+    EXPECT_STREQ(L"column header 1", name.Get());
   }
 
   {
     ScopedBstr name;
     EXPECT_EQ(S_OK, result->get_columnDescription(2, name.Receive()));
-    EXPECT_STREQ(L"column header 2", name);
+    EXPECT_STREQ(L"column header 2", name.Get());
   }
 }
 
@@ -1580,7 +1547,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetColumnExtentAt) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG columns_spanned;
@@ -1596,7 +1563,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetColumnIndex) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG index;
@@ -1614,7 +1581,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNColumns) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG count;
@@ -1628,7 +1595,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNRows) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG count;
@@ -1642,7 +1609,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetRowDescription) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   {
@@ -1653,13 +1620,13 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetRowDescription) {
   {
     ScopedBstr name;
     EXPECT_EQ(S_OK, result->get_rowDescription(1, name.Receive()));
-    EXPECT_STREQ(L"row header 1", name);
+    EXPECT_STREQ(L"row header 1", name.Get());
   }
 
   {
     ScopedBstr name;
     EXPECT_EQ(S_OK, result->get_rowDescription(2, name.Receive()));
-    EXPECT_STREQ(L"row header 2", name);
+    EXPECT_STREQ(L"row header 2", name.Get());
   }
 }
 
@@ -1671,7 +1638,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetRowExtentAt) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG rows_spanned;
@@ -1687,7 +1654,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetRowIndex) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG index;
@@ -1705,7 +1672,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetRowColumnExtentsAtIndex) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG row, column, row_extents, column_extents;
@@ -1731,7 +1698,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetCellAt) {
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
 
   ComPtr<IAccessibleTable2> result;
-  root_obj.CopyTo(result.GetAddressOf());
+  root_obj.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   {
@@ -1844,7 +1811,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableCellGetTable) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   // Check to make sure that this is the right table by checking one cell.
@@ -1861,7 +1828,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
   root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
 
-  std::vector<int32_t> describedby_ids = {1, 2, 3};
+  std::vector<AXNode::AXID> describedby_ids = {1, 2, 3};
   root.AddIntListAttribute(ax::mojom::IntListAttribute::kDescribedbyIds,
                            describedby_ids);
 
@@ -1885,13 +1852,13 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
   EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(1),
                                                   result.GetAddressOf()));
   ComPtr<IAccessible2> ax_child1;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child1.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child1));
   result.Reset();
 
   EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(2),
                                                   result.GetAddressOf()));
   ComPtr<IAccessible2> ax_child2;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child2.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child2));
   result.Reset();
 
   LONG n_relations = 0;
@@ -1909,7 +1876,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
 
   EXPECT_HRESULT_SUCCEEDED(
       describedby_relation->get_relationType(relation_type.Receive()));
-  EXPECT_EQ(L"describedBy", base::string16(relation_type));
+  EXPECT_EQ(L"describedBy", base::string16(relation_type.Get()));
 
   relation_type.Reset();
 
@@ -1934,7 +1901,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
       ax_child1->get_relation(0, description_for_relation.GetAddressOf()));
   EXPECT_HRESULT_SUCCEEDED(
       description_for_relation->get_relationType(relation_type.Receive()));
-  EXPECT_EQ(L"descriptionFor", base::string16(relation_type));
+  EXPECT_EQ(L"descriptionFor", base::string16(relation_type.Get()));
   relation_type.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(description_for_relation->get_nTargets(&n_targets));
@@ -1952,7 +1919,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetNRelations) {
       ax_child2->get_relation(0, description_for_relation.GetAddressOf()));
   EXPECT_HRESULT_SUCCEEDED(
       description_for_relation->get_relationType(relation_type.Receive()));
-  EXPECT_EQ(L"descriptionFor", base::string16(relation_type));
+  EXPECT_EQ(L"descriptionFor", base::string16(relation_type.Get()));
   relation_type.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(description_for_relation->get_nTargets(&n_targets));
@@ -1969,7 +1936,7 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
   AXNodeData root;
   root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
-  root.AddIntAttribute(ax::mojom::IntAttribute::kDetailsId, 2);
+  root.AddIntListAttribute(ax::mojom::IntListAttribute::kDetailsIds, {2});
 
   AXNodeData child1;
   child1.id = 2;
@@ -1980,7 +1947,7 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
   AXNodeData child2;
   child2.id = 3;
   child2.role = ax::mojom::Role::kStaticText;
-  std::vector<int32_t> labelledby_ids = {1, 4};
+  std::vector<AXNode::AXID> labelledby_ids = {1, 4};
   child2.AddIntListAttribute(ax::mojom::IntListAttribute::kLabelledbyIds,
                              labelledby_ids);
 
@@ -1989,7 +1956,7 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
   AXNodeData child3;
   child3.id = 4;
   child3.role = ax::mojom::Role::kStaticText;
-  child3.AddIntAttribute(ax::mojom::IntAttribute::kDetailsId, 2);
+  child3.AddIntListAttribute(ax::mojom::IntListAttribute::kDetailsIds, {2});
 
   root.child_ids.push_back(4);
 
@@ -2001,19 +1968,19 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
   EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(1),
                                                   result.GetAddressOf()));
   ComPtr<IAccessible2_2> ax_child1;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child1.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child1));
   result.Reset();
 
   EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(2),
                                                   result.GetAddressOf()));
   ComPtr<IAccessible2_2> ax_child2;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child2.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child2));
   result.Reset();
 
   EXPECT_EQ(S_OK, root_iaccessible2->get_accChild(ScopedVariant(3),
                                                   result.GetAddressOf()));
   ComPtr<IAccessible2_2> ax_child3;
-  EXPECT_EQ(S_OK, result.CopyTo(ax_child3.GetAddressOf()));
+  EXPECT_EQ(S_OK, result.As(&ax_child3));
   result.Reset();
 
   {
@@ -2021,7 +1988,7 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
     IUnknown** targets;
     LONG n_targets;
     EXPECT_EQ(S_OK, root_iaccessible2->get_relationTargetsOfType(
-                        type, 0, &targets, &n_targets));
+                        type.Get(), 0, &targets, &n_targets));
     ASSERT_EQ(1, n_targets);
     EXPECT_EQ(ax_child1.Get(), targets[0]);
     CoTaskMemFree(targets);
@@ -2031,8 +1998,8 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
     ScopedBstr type(IA2_RELATION_LABELLED_BY);
     IUnknown** targets;
     LONG n_targets;
-    EXPECT_EQ(S_OK, ax_child2->get_relationTargetsOfType(type, 0, &targets,
-                                                         &n_targets));
+    EXPECT_EQ(S_OK, ax_child2->get_relationTargetsOfType(type.Get(), 0,
+                                                         &targets, &n_targets));
     ASSERT_EQ(2, n_targets);
     EXPECT_EQ(root_iaccessible2.Get(), targets[0]);
     EXPECT_EQ(ax_child3.Get(), targets[1]);
@@ -2043,8 +2010,8 @@ TEST_F(AXPlatformNodeWinTest, DISABLED_TestRelationTargetsOfType) {
     ScopedBstr type(L"detailsFor");
     IUnknown** targets;
     LONG n_targets;
-    EXPECT_EQ(S_OK, ax_child1->get_relationTargetsOfType(type, 0, &targets,
-                                                         &n_targets));
+    EXPECT_EQ(S_OK, ax_child1->get_relationTargetsOfType(type.Get(), 0,
+                                                         &targets, &n_targets));
     ASSERT_EQ(2, n_targets);
     EXPECT_EQ(root_iaccessible2.Get(), targets[0]);
     EXPECT_EQ(ax_child3.Get(), targets[1]);
@@ -2062,7 +2029,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedChildrenZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedChildren;
@@ -2084,7 +2051,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedChildrenOne) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedChildren;
@@ -2113,7 +2080,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedChildrenMany) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedChildren;
@@ -2131,7 +2098,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedColumnsZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedColumns;
@@ -2158,7 +2125,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedColumnsOne) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedColumns;
@@ -2192,7 +2159,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedColumnsMany) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedColumns;
@@ -2210,7 +2177,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedRowsZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedRows;
@@ -2237,7 +2204,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedRowsOne) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedRows;
@@ -2271,7 +2238,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetNSelectedRowsMany) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG selectedRows;
@@ -2296,7 +2263,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedChildren) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max = 10;
@@ -2325,7 +2292,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedChildrenZeroMax) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG* indices;
@@ -2350,7 +2317,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedColumnsZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_columns = 10;
@@ -2380,7 +2347,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedColumnsOne) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_columns = 10;
@@ -2418,7 +2385,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedColumnsMany) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_columns = 10;
@@ -2441,7 +2408,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedRowsZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_rows = 10;
@@ -2470,7 +2437,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedRowsOne) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_rows = 10;
@@ -2507,7 +2474,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableGetSelectedRowsMany) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   LONG max_rows = 10;
@@ -2538,7 +2505,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableIsColumnSelected) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   BOOLEAN selected = false;
@@ -2574,7 +2541,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableIsRowSelected) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   BOOLEAN selected;
@@ -2610,7 +2577,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTableIsSelected) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   BOOLEAN selected = false;
@@ -2647,7 +2614,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTable2GetSelectedChildrenZero) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable2> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   IUnknown** cell_accessibles;
@@ -2673,7 +2640,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTable2GetSelectedChildren) {
   EXPECT_EQ(S_OK, cell->get_table(table.GetAddressOf()));
 
   ComPtr<IAccessibleTable2> result;
-  table.CopyTo(result.GetAddressOf());
+  table.As(&result);
   ASSERT_NE(nullptr, result.Get());
 
   IUnknown** cell_accessibles;
@@ -2719,7 +2686,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessible2GetLocalizedExtendedRole) {
   ComPtr<IAccessible2> iaccessible2 = ToIAccessible2(root_obj);
   ScopedBstr role;
   EXPECT_EQ(S_OK, iaccessible2->get_localizedExtendedRole(role.Receive()));
-  EXPECT_STREQ(L"extended role", role);
+  EXPECT_STREQ(L"extended role", role.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest, TestUnlabeledImageRoleDescription) {
@@ -2732,10 +2699,12 @@ TEST_F(AXPlatformNodeWinTest, TestUnlabeledImageRoleDescription) {
   tree.nodes[1].id = 2;
   tree.nodes[1].SetImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+  tree.nodes[1].role = ax::mojom::Role::kImage;
 
   tree.nodes[2].id = 3;
   tree.nodes[2].SetImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus::kSilentlyEligibleForAnnotation);
+  tree.nodes[2].role = ax::mojom::Role::kImage;
 
   Init(tree);
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
@@ -2752,7 +2721,7 @@ TEST_F(AXPlatformNodeWinTest, TestUnlabeledImageRoleDescription) {
     ScopedBstr role_description;
     ASSERT_EQ(S_OK,
               ia2_child->get_localizedExtendedRole(role_description.Receive()));
-    EXPECT_STREQ(L"Unlabeled image", role_description);
+    EXPECT_STREQ(L"Unlabeled image", role_description.Get());
   }
 }
 
@@ -2766,10 +2735,12 @@ TEST_F(AXPlatformNodeWinTest, TestUnlabeledImageAttributes) {
   tree.nodes[1].id = 2;
   tree.nodes[1].SetImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+  tree.nodes[1].role = ax::mojom::Role::kImage;
 
   tree.nodes[2].id = 3;
   tree.nodes[2].SetImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus::kSilentlyEligibleForAnnotation);
+  tree.nodes[2].role = ax::mojom::Role::kImage;
 
   Init(tree);
   ComPtr<IAccessible> root_obj(GetRootIAccessible());
@@ -2785,7 +2756,7 @@ TEST_F(AXPlatformNodeWinTest, TestUnlabeledImageAttributes) {
 
     ScopedBstr attributes_bstr;
     ASSERT_EQ(S_OK, ia2_child->get_attributes(attributes_bstr.Receive()));
-    base::string16 attributes(attributes_bstr);
+    base::string16 attributes(attributes_bstr.Get());
 
     std::vector<base::string16> attribute_vector = base::SplitString(
         attributes, L";", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -2931,29 +2902,29 @@ TEST_F(AXPlatformNodeWinTest, TestAnnotatedImageName) {
 
     ScopedBstr name;
     EXPECT_EQ(S_OK, child->get_accName(SELF, name.Receive()));
-    EXPECT_STREQ(expected_names[child_index], name);
+    EXPECT_STREQ(expected_names[child_index], name.Get());
   }
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextGetNCharacters) {
   AXNodeData root;
-  root.id = 0;
-  root.role = ax::mojom::Role::kStaticText;
-  root.child_ids.push_back(1);
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
 
   AXNodeData node;
-  node.id = 1;
+  node.id = 2;
   node.role = ax::mojom::Role::kStaticText;
   node.SetName("Name");
+  root.child_ids.push_back(node.id);
 
   Init(root, node);
 
-  AXNode* child_node = GetRootNode()->children()[0];
+  AXNode* child_node = GetRootAsAXNode()->children()[0];
   ComPtr<IAccessible> child_iaccessible(IAccessibleFromNode(child_node));
   ASSERT_NE(nullptr, child_iaccessible.Get());
 
   ComPtr<IAccessibleText> text;
-  child_iaccessible.CopyTo(text.GetAddressOf());
+  child_iaccessible.As(&text);
   ASSERT_NE(nullptr, text.Get());
 
   LONG count;
@@ -2961,12 +2932,160 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextGetNCharacters) {
   EXPECT_EQ(4, count);
 }
 
+TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextGetOffsetAtPoint) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kWebArea;
+  root.relative_bounds.bounds = gfx::RectF(0, 0, 300, 200);
+  root.child_ids = {2, 3};
+
+  AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+  button.SetName("button");
+  button.relative_bounds.bounds = gfx::RectF(20, 0, 10, 10);
+
+  AXNodeData static_text1;
+  static_text1.id = 3;
+  static_text1.role = ax::mojom::Role::kStaticText;
+  static_text1.SetName("line 1");
+  static_text1.relative_bounds.bounds = gfx::RectF(0, 20, 30, 10);
+  static_text1.child_ids = {4};
+
+  AXNodeData inline_box1;
+  inline_box1.id = 4;
+  inline_box1.role = ax::mojom::Role::kInlineTextBox;
+  inline_box1.SetName("line 1");
+  inline_box1.relative_bounds.bounds = gfx::RectF(0, 20, 30, 10);
+  std::vector<int32_t> character_offsets1;
+  // The width of each character is 5px, height is 10px.
+  character_offsets1.push_back(5);   // "l" {0, 20, 5x10}
+  character_offsets1.push_back(10);  // "i" {5, 20, 5x10}
+  character_offsets1.push_back(15);  // "n" {10, 20, 5x10}
+  character_offsets1.push_back(20);  // "e" {15, 20, 5x10}
+  character_offsets1.push_back(25);  // " " {20, 20, 5x10}
+  character_offsets1.push_back(30);  // "1" {25, 20, 5x10}
+
+  inline_box1.AddIntListAttribute(
+      ax::mojom::IntListAttribute::kCharacterOffsets, character_offsets1);
+  inline_box1.AddIntListAttribute(ax::mojom::IntListAttribute::kWordStarts,
+                                  std::vector<int32_t>{0, 5});
+  inline_box1.AddIntListAttribute(ax::mojom::IntListAttribute::kWordEnds,
+                                  std::vector<int32_t>{4, 6});
+
+  Init(root, button, static_text1, inline_box1);
+
+  LONG offset_result;
+  ComPtr<IAccessible> root_iaccessible(IAccessibleFromNode(GetRootAsAXNode()));
+  ASSERT_NE(nullptr, root_iaccessible.Get());
+
+  ComPtr<IAccessibleText> root_text;
+  root_iaccessible.As(&root_text);
+  ASSERT_NE(nullptr, root_text.Get());
+
+  // Test point(0, 0) with coordinate parent relative, which is not supported.
+  // Expected result: S_FALSE.
+  EXPECT_EQ(S_FALSE, root_text->get_offsetAtPoint(
+                         0, 0, IA2CoordinateType::IA2_COORDTYPE_PARENT_RELATIVE,
+                         &offset_result));
+  EXPECT_EQ(-1, offset_result);
+
+  // Test point(0, 0) retrieved from IAccessibleText of the root web area is
+  // outside of any text. Expected result: S_FALSE.
+  EXPECT_EQ(S_FALSE, root_text->get_offsetAtPoint(
+                         0, 0, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+                         &offset_result));
+  EXPECT_EQ(-1, offset_result);
+
+  // Test point(25, 5) retrieved from IAccessibleText of the root web area is
+  // on button, and outside of any text. Expected result: S_FALSE.
+  EXPECT_EQ(S_FALSE,
+            root_text->get_offsetAtPoint(
+                25, 5, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+                &offset_result));
+  EXPECT_EQ(-1, offset_result);
+
+  // Test point(0, 20) retrieved from IAccessibleText of the root web area is
+  // on "line 1", character="l". Expected result: S_OK, offset=0.
+  EXPECT_EQ(S_OK, root_text->get_offsetAtPoint(
+                      0, 20, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+                      &offset_result));
+  EXPECT_EQ(0, offset_result);
+
+  AXNode* static_text1_node = GetRootAsAXNode()->children()[1];
+  ComPtr<IAccessible> text1_iaccessible(IAccessibleFromNode(static_text1_node));
+  ASSERT_NE(nullptr, text1_iaccessible.Get());
+
+  ComPtr<IAccessibleText> text1;
+  text1_iaccessible.As(&text1);
+  ASSERT_NE(nullptr, text1.Get());
+
+  // "l" 4 points of bounds {(0, 20), (5, 20), (0, 30), (5, 30)}
+  // "i" 4 points of bounds {(5, 20), (10, 20), (5, 30), (10, 30)}
+  // "n" 4 points of bounds {(10, 20), (15, 20), (10, 30), (15, 30)}
+  // "e" 4 points of bounds {(15, 20), (20, 20), (15, 30), (20, 30)}
+  // " " 4 points of bounds {(20, 20), (25, 20), (20, 30), (25, 30)}
+  // "1" 4 points of bounds {(25, 20), (30, 20), (25, 30), (30, 30)}
+
+  // Test point(0, 0) outside of any character bounds and text.
+  EXPECT_EQ(S_FALSE, text1->get_offsetAtPoint(
+                         0, 0, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+                         &offset_result));
+  EXPECT_EQ(-1, offset_result);
+
+  // Test point(30, 30) outside of any character bounds but on the text.
+  EXPECT_EQ(S_OK, text1->get_offsetAtPoint(
+                      30, 30, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+                      &offset_result));
+  EXPECT_EQ(-1, offset_result);
+
+  // Test point(0, 20) inside bounds of "l", text offset=0
+  // character bounds={(0, 20), (5, 20), (0, 30), (5, 30)}
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      0, 20, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE, &offset_result));
+  EXPECT_EQ(0, offset_result);
+
+  // Test point(9, 20) inside bounds of "i", text offset=1
+  // character bounds={(5, 20), (10, 20), (5, 30), (10, 30)}
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      9, 20, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE, &offset_result));
+  EXPECT_EQ(1, offset_result);
+
+  // Test point(10, 30) inside bounds of "n", text offset=2
+  // character bounds={(10, 20), (15, 20), (10, 30), (15, 30)}
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      10, 29, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+      &offset_result));
+  EXPECT_EQ(2, offset_result);
+
+  // Test point(19, 29) inside bounds of "e", text offset=3
+  // character bounds={(15, 20), (20, 20), (15, 30), (20, 30)
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      19, 29, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+      &offset_result));
+  EXPECT_EQ(3, offset_result);
+
+  // Test point(23, 25) inside bounds of " ", text offset=4
+  // character bounds={(20, 20), (25, 20), (20, 30), (25, 30)}
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      23, 25, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+      &offset_result));
+  EXPECT_EQ(4, offset_result);
+
+  // Test point(25, 20) inside bounds of "1", text offset=5
+  // character bounds={(25, 20), (30, 20), (25, 30), (30, 30)}
+  EXPECT_HRESULT_SUCCEEDED(text1->get_offsetAtPoint(
+      25, 20, IA2CoordinateType::IA2_COORDTYPE_SCREEN_RELATIVE,
+      &offset_result));
+  EXPECT_EQ(5, offset_result);
+}
+
 TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextTextFieldRemoveSelection) {
   Init(BuildTextFieldWithSelectionRange(1, 2));
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -2988,7 +3107,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3009,7 +3128,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextTextFieldGetSelected) {
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3030,7 +3149,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextTextFieldGetSelectedBackward) {
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3045,7 +3164,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleContentEditabledGetSelected) {
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3067,7 +3186,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3081,7 +3200,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextTextFieldAddSelection) {
   Init(BuildTextField());
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3106,7 +3225,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG start_offset, end_offset;
@@ -3127,7 +3246,7 @@ TEST_F(AXPlatformNodeWinTest, TestIAccessibleTextTextFieldGetNSelectionsZero) {
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG selections;
@@ -3141,7 +3260,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG selections;
@@ -3154,7 +3273,7 @@ TEST_F(AXPlatformNodeWinTest,
   Init(BuildContentEditableWithSelectionRange(1, 2));
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG selections;
@@ -3168,7 +3287,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG offset;
@@ -3182,7 +3301,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG offset;
@@ -3196,7 +3315,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG offset;
@@ -3210,7 +3329,7 @@ TEST_F(AXPlatformNodeWinTest,
 
   ComPtr<IAccessible2> ia2_text_field = ToIAccessible2(GetRootIAccessible());
   ComPtr<IAccessibleText> text_field;
-  ia2_text_field.CopyTo(text_field.GetAddressOf());
+  ia2_text_field.As(&text_field);
   ASSERT_NE(nullptr, text_field.Get());
 
   LONG offset;
@@ -3223,19 +3342,19 @@ TEST_F(AXPlatformNodeWinTest, TestIGridProviderGetRowCount) {
 
   // Empty Grid
   ComPtr<IGridProvider> grid1_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[0]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[0]);
 
   // Grid with a cell that defines aria-rowindex (4) and aria-colindex (5)
   ComPtr<IGridProvider> grid2_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[1]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[1]);
 
   // Grid that specifies aria-rowcount (2) and aria-colcount (3)
   ComPtr<IGridProvider> grid3_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[2]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[2]);
 
   // Grid that specifies aria-rowcount and aria-colcount are both (-1)
   ComPtr<IGridProvider> grid4_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[3]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[3]);
 
   int row_count;
 
@@ -3256,19 +3375,19 @@ TEST_F(AXPlatformNodeWinTest, TestIGridProviderGetColumnCount) {
 
   // Empty Grid
   ComPtr<IGridProvider> grid1_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[0]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[0]);
 
   // Grid with a cell that defines aria-rowindex (4) and aria-colindex (5)
   ComPtr<IGridProvider> grid2_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[1]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[1]);
 
   // Grid that specifies aria-rowcount (2) and aria-colcount (3)
   ComPtr<IGridProvider> grid3_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[2]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[2]);
 
   // Grid that specifies aria-rowcount and aria-colcount are both (-1)
   ComPtr<IGridProvider> grid4_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()->children()[3]);
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()->children()[3]);
 
   int column_count;
 
@@ -3304,11 +3423,11 @@ TEST_F(AXPlatformNodeWinTest, TestIGridProviderGetItem) {
   Init(root, row1, cell1);
 
   ComPtr<IGridProvider> root_igridprovider(
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode()));
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode()));
 
   ComPtr<IRawElementProviderSimple> cell1_irawelementprovidersimple(
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[0]->children()[0]));
+          GetRootAsAXNode()->children()[0]->children()[0]));
 
   IRawElementProviderSimple* grid_item = nullptr;
   EXPECT_HRESULT_SUCCEEDED(root_igridprovider->GetItem(0, 0, &grid_item));
@@ -3341,7 +3460,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableProviderGetColumnHeaders) {
   Init(root, row1, column_header, row_header);
 
   ComPtr<ITableProvider> root_itableprovider(
-      QueryInterfaceFromNode<ITableProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ITableProvider>(GetRootAsAXNode()));
 
   base::win::ScopedSafearray safearray;
   EXPECT_HRESULT_SUCCEEDED(
@@ -3355,7 +3474,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableProviderGetColumnHeaders) {
   // Remove column_header's native event target and verify it's no longer
   // returned.
   TestAXNodeWrapper* column_header_wrapper = TestAXNodeWrapper::GetOrCreate(
-      tree_.get(), GetRootNode()->children()[0]->children()[0]);
+      GetTree(), GetRootAsAXNode()->children()[0]->children()[0]);
   column_header_wrapper->ResetNativeEventTarget();
 
   safearray.Release();
@@ -3389,7 +3508,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableProviderGetRowHeaders) {
   Init(root, row1, column_header, row_header);
 
   ComPtr<ITableProvider> root_itableprovider(
-      QueryInterfaceFromNode<ITableProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ITableProvider>(GetRootAsAXNode()));
 
   base::win::ScopedSafearray safearray;
   EXPECT_HRESULT_SUCCEEDED(
@@ -3401,7 +3520,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableProviderGetRowHeaders) {
 
   // Remove row_header's native event target and verify it's no longer returned.
   TestAXNodeWrapper* row_header_wrapper = TestAXNodeWrapper::GetOrCreate(
-      tree_.get(), GetRootNode()->children()[0]->children()[1]);
+      GetTree(), GetRootAsAXNode()->children()[0]->children()[1]);
   row_header_wrapper->ResetNativeEventTarget();
 
   safearray.Release();
@@ -3418,7 +3537,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableProviderGetRowOrColumnMajor) {
   Init(root);
 
   ComPtr<ITableProvider> root_itableprovider(
-      QueryInterfaceFromNode<ITableProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ITableProvider>(GetRootAsAXNode()));
 
   RowOrColumnMajor row_or_column_major;
   EXPECT_HRESULT_SUCCEEDED(
@@ -3461,12 +3580,12 @@ TEST_F(AXPlatformNodeWinTest, TestITableItemProviderGetColumnHeaderItems) {
   Init(root, row1, column_header_1, column_header_2, row2, cell);
 
   TestAXNodeWrapper* root_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode());
-  root_wrapper->BuildAllWrappers(tree_.get(), GetRootNode());
+      TestAXNodeWrapper::GetOrCreate(GetTree(), GetRootAsAXNode());
+  root_wrapper->BuildAllWrappers(GetTree(), GetRootAsAXNode());
 
   ComPtr<ITableItemProvider> cell_itableitemprovider(
       QueryInterfaceFromNode<ITableItemProvider>(
-          GetRootNode()->children()[1]->children()[0]));
+          GetRootAsAXNode()->children()[1]->children()[0]));
 
   base::win::ScopedSafearray safearray;
   EXPECT_HRESULT_SUCCEEDED(
@@ -3480,7 +3599,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableItemProviderGetColumnHeaderItems) {
   // Remove column_header_1's native event target and verify it's no longer
   // returned.
   TestAXNodeWrapper* column_header_wrapper = TestAXNodeWrapper::GetOrCreate(
-      tree_.get(), GetRootNode()->children()[0]->children()[0]);
+      GetTree(), GetRootAsAXNode()->children()[0]->children()[0]);
   column_header_wrapper->ResetNativeEventTarget();
 
   safearray.Release();
@@ -3524,12 +3643,12 @@ TEST_F(AXPlatformNodeWinTest, TestITableItemProviderGetRowHeaderItems) {
   Init(root, row1, row_header_1, cell, row2, row_header_2);
 
   TestAXNodeWrapper* root_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode());
-  root_wrapper->BuildAllWrappers(tree_.get(), GetRootNode());
+      TestAXNodeWrapper::GetOrCreate(GetTree(), GetRootAsAXNode());
+  root_wrapper->BuildAllWrappers(GetTree(), GetRootAsAXNode());
 
   ComPtr<ITableItemProvider> cell_itableitemprovider(
       QueryInterfaceFromNode<ITableItemProvider>(
-          GetRootNode()->children()[0]->children()[1]));
+          GetRootAsAXNode()->children()[0]->children()[1]));
 
   base::win::ScopedSafearray safearray;
   EXPECT_HRESULT_SUCCEEDED(
@@ -3542,7 +3661,7 @@ TEST_F(AXPlatformNodeWinTest, TestITableItemProviderGetRowHeaderItems) {
   // Remove row_header_1's native event target and verify it's no longer
   // returned.
   TestAXNodeWrapper* row_header_wrapper = TestAXNodeWrapper::GetOrCreate(
-      tree_.get(), GetRootNode()->children()[0]->children()[0]);
+      GetTree(), GetRootAsAXNode()->children()[0]->children()[0]);
   row_header_wrapper->ResetNativeEventTarget();
 
   safearray.Release();
@@ -3564,16 +3683,16 @@ TEST_F(AXPlatformNodeWinTest, TestIA2GetAttribute) {
 
   ScopedBstr roledescription(L"roledescription");
   ScopedVariant result;
-  ASSERT_EQ(S_OK,
-            iaccessible2->get_attribute(roledescription, result.Receive()));
+  ASSERT_EQ(S_OK, iaccessible2->get_attribute(roledescription.Get(),
+                                              result.Receive()));
   ScopedBstr expected_bstr(L"Potato");
   ASSERT_EQ(VT_BSTR, result.type());
-  EXPECT_STREQ(expected_bstr, result.ptr()->bstrVal);
+  EXPECT_STREQ(expected_bstr.Get(), result.ptr()->bstrVal);
 
   ScopedBstr smoothness(L"smoothness");
   ScopedVariant result2;
   EXPECT_EQ(S_FALSE,
-            iaccessible2->get_attribute(smoothness, result2.Receive()));
+            iaccessible2->get_attribute(smoothness.Get(), result2.Receive()));
 
   EXPECT_EQ(E_INVALIDARG, iaccessible2->get_attribute(nullptr, nullptr));
 }
@@ -3586,19 +3705,17 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertySimple) {
   root.AddStringAttribute(ax::mojom::StringAttribute::kKeyShortcuts, "Alt+F4");
   root.AddStringAttribute(ax::mojom::StringAttribute::kDescription,
                           "fake description");
-  root.AddStringAttribute(ax::mojom::StringAttribute::kRoleDescription,
-                          "role description");
   root.AddIntAttribute(ax::mojom::IntAttribute::kSetSize, 2);
   root.AddIntAttribute(ax::mojom::IntAttribute::kInvalidState, 1);
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kList;
 
   AXNodeData child1;
-  child1.id = 1;
+  child1.id = 2;
   child1.role = ax::mojom::Role::kListItem;
   child1.AddIntAttribute(ax::mojom::IntAttribute::kPosInSet, 1);
   child1.SetName("child1");
-  root.child_ids.push_back(1);
+  root.child_ids.push_back(child1.id);
 
   Init(root, child1);
 
@@ -3613,8 +3730,6 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertySimple) {
                      uia_id.ptr()->bstrVal);
   EXPECT_UIA_BSTR_EQ(root_node, UIA_FullDescriptionPropertyId,
                      L"fake description");
-  EXPECT_UIA_BSTR_EQ(root_node, UIA_LocalizedControlTypePropertyId,
-                     L"role description");
   EXPECT_UIA_BSTR_EQ(root_node, UIA_AriaRolePropertyId, L"list");
   EXPECT_UIA_BSTR_EQ(root_node, UIA_AriaPropertiesPropertyId,
                      L"readonly=true;expanded=false;multiline=false;"
@@ -3637,13 +3752,13 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertySimple) {
   EXPECT_UIA_BOOL_EQ(root_node, UIA_IsOffscreenPropertyId, false);
   ComPtr<IRawElementProviderSimple> child_node1 =
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[0]);
+          GetRootAsAXNode()->children()[0]);
   EXPECT_UIA_INT_EQ(child_node1, UIA_PositionInSetPropertyId, 1);
 }
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueClickablePoint) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kButton;
   root.relative_bounds.bounds = gfx::RectF(20, 30, 100, 200);
   Init(root);
@@ -3660,7 +3775,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueClickablePoint) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValue_Histogram) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   Init(root);
   ComPtr<IRawElementProviderSimple> root_node =
       GetRootIRawElementProviderSimple();
@@ -3684,6 +3799,30 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValue_Histogram) {
   }
 }
 
+TEST_F(AXPlatformNodeWinTest, UIAGetPropertyValueIsDialog) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+  root.child_ids = {2, 3};
+
+  AXNodeData alert_dialog;
+  alert_dialog.id = 2;
+  alert_dialog.role = ax::mojom::Role::kAlertDialog;
+
+  AXNodeData dialog;
+  dialog.id = 3;
+  dialog.role = ax::mojom::Role::kDialog;
+
+  Init(root, alert_dialog, dialog);
+
+  EXPECT_UIA_BOOL_EQ(GetRootIRawElementProviderSimple(), UIA_IsDialogPropertyId,
+                     false);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromChildIndex(0),
+                     UIA_IsDialogPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromChildIndex(1),
+                     UIA_IsDialogPropertyId, true);
+}
+
 TEST_F(AXPlatformNodeWinTest, TestUIAGetControllerForPropertyId) {
   AXNodeData root;
   root.id = 1;
@@ -3694,7 +3833,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetControllerForPropertyId) {
   tab.id = 2;
   tab.role = ax::mojom::Role::kTab;
   tab.SetName("tab");
-  std::vector<int32_t> controller_ids = {3, 4};
+  std::vector<AXNode::AXID> controller_ids = {3, 4};
   tab.AddIntListAttribute(ax::mojom::IntListAttribute::kControlsIds,
                           controller_ids);
 
@@ -3710,12 +3849,12 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetControllerForPropertyId) {
 
   Init(root, tab, panel1, panel2);
   TestAXNodeWrapper* root_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode());
-  root_wrapper->BuildAllWrappers(tree_.get(), GetRootNode());
+      TestAXNodeWrapper::GetOrCreate(GetTree(), GetRootAsAXNode());
+  root_wrapper->BuildAllWrappers(GetTree(), GetRootAsAXNode());
 
   ComPtr<IRawElementProviderSimple> tab_node =
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[0]);
+          GetRootAsAXNode()->children()[0]);
 
   std::vector<std::wstring> expected_names_1 = {L"panel1", L"panel2"};
   EXPECT_UIA_PROPERTY_ELEMENT_ARRAY_BSTR_EQ(
@@ -3723,8 +3862,8 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetControllerForPropertyId) {
       expected_names_1);
 
   // Remove panel1's native event target and verify it's no longer returned.
-  TestAXNodeWrapper* panel1_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode()->children()[1]);
+  TestAXNodeWrapper* panel1_wrapper = TestAXNodeWrapper::GetOrCreate(
+      GetTree(), GetRootAsAXNode()->children()[1]);
   panel1_wrapper->ResetNativeEventTarget();
   std::vector<std::wstring> expected_names_2 = {L"panel2"};
   EXPECT_UIA_PROPERTY_ELEMENT_ARRAY_BSTR_EQ(
@@ -3734,26 +3873,26 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetControllerForPropertyId) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetDescribedByPropertyId) {
   AXNodeData root;
-  std::vector<int32_t> describedby_ids = {1, 2, 3};
+  std::vector<AXNode::AXID> describedby_ids = {2, 3, 4};
   root.AddIntListAttribute(ax::mojom::IntListAttribute::kDescribedbyIds,
                            describedby_ids);
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kMarquee;
   root.SetName("root");
 
   AXNodeData child1;
-  child1.id = 1;
+  child1.id = 2;
   child1.role = ax::mojom::Role::kStaticText;
   child1.SetName("child1");
 
-  root.child_ids.push_back(1);
+  root.child_ids.push_back(child1.id);
 
   AXNodeData child2;
-  child2.id = 2;
+  child2.id = 3;
   child2.role = ax::mojom::Role::kStaticText;
   child2.SetName("child2");
 
-  root.child_ids.push_back(2);
+  root.child_ids.push_back(child2.id);
 
   Init(root, child1, child2);
 
@@ -3810,7 +3949,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAItemStatusPropertyId) {
 
   Init(root, row1, header1, header2, header3, header4);
 
-  auto* row_node = GetRootNode()->children()[0];
+  auto* row_node = GetRootAsAXNode()->children()[0];
 
   EXPECT_UIA_BSTR_EQ(QueryInterfaceFromNode<IRawElementProviderSimple>(
                          row_node->children()[0]),
@@ -3835,25 +3974,25 @@ TEST_F(AXPlatformNodeWinTest, TestUIAItemStatusPropertyId) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetFlowsToPropertyId) {
   AXNodeData root;
-  std::vector<int32_t> flowto_ids = {1, 2, 3};
+  std::vector<AXNode::AXID> flowto_ids = {2, 3, 4};
   root.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, flowto_ids);
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kMarquee;
   root.SetName("root");
 
   AXNodeData child1;
-  child1.id = 1;
+  child1.id = 2;
   child1.role = ax::mojom::Role::kStaticText;
   child1.SetName("child1");
 
-  root.child_ids.push_back(1);
+  root.child_ids.push_back(child1.id);
 
   AXNodeData child2;
-  child2.id = 2;
+  child2.id = 3;
   child2.role = ax::mojom::Role::kStaticText;
   child2.SetName("child2");
 
-  root.child_ids.push_back(2);
+  root.child_ids.push_back(child2.id);
 
   Init(root, child1, child2);
 
@@ -3866,7 +4005,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetFlowsToPropertyId) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromNone) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.SetName("root");
 
@@ -3884,24 +4023,24 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromNone) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromSingle) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.SetName("root");
-  root.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {1});
+  root.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {2});
 
   AXNodeData child1;
-  child1.id = 1;
+  child1.id = 2;
   child1.role = ax::mojom::Role::kGenericContainer;
   child1.SetName("child1");
-  root.child_ids.push_back(1);
+  root.child_ids.push_back(child1.id);
 
   Init(root, child1);
   ASSERT_NE(nullptr,
-            TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode()));
+            TestAXNodeWrapper::GetOrCreate(GetTree(), GetRootAsAXNode()));
 
   ComPtr<IRawElementProviderSimple> child_node1 =
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[0]);
+          GetRootAsAXNode()->children()[0]);
   std::vector<std::wstring> expected_names = {L"root"};
   EXPECT_UIA_PROPERTY_ELEMENT_ARRAY_BSTR_EQ(
       child_node1, UIA_FlowsFromPropertyId, UIA_NamePropertyId, expected_names);
@@ -3909,41 +4048,41 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromSingle) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromMultiple) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.SetName("root");
-  root.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {1, 2});
+  root.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {2, 3});
 
   AXNodeData child1;
-  child1.id = 1;
+  child1.id = 2;
   child1.role = ax::mojom::Role::kGenericContainer;
   child1.SetName("child1");
-  child1.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {2});
-  root.child_ids.push_back(1);
+  child1.AddIntListAttribute(ax::mojom::IntListAttribute::kFlowtoIds, {3});
+  root.child_ids.push_back(child1.id);
 
   AXNodeData child2;
-  child2.id = 2;
+  child2.id = 3;
   child2.role = ax::mojom::Role::kGenericContainer;
   child2.SetName("child2");
-  root.child_ids.push_back(2);
+  root.child_ids.push_back(child2.id);
 
   Init(root, child1, child2);
   ASSERT_NE(nullptr,
-            TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode()));
+            TestAXNodeWrapper::GetOrCreate(GetTree(), GetRootAsAXNode()));
   ASSERT_NE(nullptr, TestAXNodeWrapper::GetOrCreate(
-                         tree_.get(), GetRootNode()->children()[0]));
+                         GetTree(), GetRootAsAXNode()->children()[0]));
 
   ComPtr<IRawElementProviderSimple> child_node2 =
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[1]);
+          GetRootAsAXNode()->children()[1]);
   std::vector<std::wstring> expected_names_1 = {L"root", L"child1"};
   EXPECT_UIA_PROPERTY_UNORDERED_ELEMENT_ARRAY_BSTR_EQ(
       child_node2, UIA_FlowsFromPropertyId, UIA_NamePropertyId,
       expected_names_1);
 
   // Remove child1's native event target and verify it's no longer returned.
-  TestAXNodeWrapper* child1_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode()->children()[0]);
+  TestAXNodeWrapper* child1_wrapper = TestAXNodeWrapper::GetOrCreate(
+      GetTree(), GetRootAsAXNode()->children()[0]);
   child1_wrapper->ResetNativeEventTarget();
   std::vector<std::wstring> expected_names_2 = {L"root"};
   EXPECT_UIA_PROPERTY_UNORDERED_ELEMENT_ARRAY_BSTR_EQ(
@@ -3953,7 +4092,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFlowsFromMultiple) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetPropertyValueFrameworkId) {
   AXNodeData root_ax_node_data;
-  root_ax_node_data.id = 0;
+  root_ax_node_data.id = 1;
   root_ax_node_data.role = ax::mojom::Role::kRootWebArea;
   Init(root_ax_node_data);
 
@@ -3967,7 +4106,7 @@ TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_LabeledByTest) {
   AXNodeData root;
   root.role = ax::mojom::Role::kListItem;
   root.id = 1;
-  std::vector<int32_t> labeledby_ids = {2};
+  std::vector<AXNode::AXID> labeledby_ids = {2};
   root.AddIntListAttribute(ax::mojom::IntListAttribute::kLabelledbyIds,
                            labeledby_ids);
 
@@ -3992,8 +4131,8 @@ TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_LabeledByTest) {
 
   // Remove referenced_node's native event target and verify it's no longer
   // returned.
-  TestAXNodeWrapper* referenced_node_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), GetRootNode()->children()[0]);
+  TestAXNodeWrapper* referenced_node_wrapper = TestAXNodeWrapper::GetOrCreate(
+      GetTree(), GetRootAsAXNode()->children()[0]);
   referenced_node_wrapper->ResetNativeEventTarget();
 
   propertyValue.Reset();
@@ -4005,7 +4144,7 @@ TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_LabeledByTest) {
 TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_HelpText) {
   AXNodeData root;
   root.id = 1;
-  root.role = ax::mojom::Role::kNone;
+  root.role = ax::mojom::Role::kRootWebArea;
 
   // Test Placeholder StringAttribute is exposed
   AXNodeData input1;
@@ -4058,7 +4197,7 @@ TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_HelpText) {
 
   Init(root, input1, input2, input3, input4, input5);
 
-  auto* root_node = GetRootNode();
+  auto* root_node = GetRootAsAXNode();
   EXPECT_UIA_BSTR_EQ(QueryInterfaceFromNode<IRawElementProviderSimple>(
                          root_node->children()[0]),
                      UIA_HelpTextPropertyId, L"placeholder");
@@ -4076,6 +4215,134 @@ TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_HelpText) {
                       UIA_HelpTextPropertyId, ScopedVariant::kEmptyVariant);
 }
 
+TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_LocalizedControlType) {
+  AXNodeData root;
+  root.role = ax::mojom::Role::kUnknown;
+  root.id = 1;
+  root.AddStringAttribute(ax::mojom::StringAttribute::kRoleDescription,
+                          "root role description");
+
+  AXNodeData child1;
+  child1.id = 2;
+  child1.role = ax::mojom::Role::kSearchBox;
+  child1.AddStringAttribute(ax::mojom::StringAttribute::kRoleDescription,
+                            "child1 role description");
+  root.child_ids.push_back(2);
+
+  AXNodeData child2;
+  child2.id = 3;
+  child2.role = ax::mojom::Role::kSearchBox;
+  root.child_ids.push_back(3);
+
+  Init(root, child1, child2);
+
+  ComPtr<IRawElementProviderSimple> root_node =
+      GetRootIRawElementProviderSimple();
+  EXPECT_UIA_BSTR_EQ(root_node, UIA_LocalizedControlTypePropertyId,
+                     L"root role description");
+  EXPECT_UIA_BSTR_EQ(QueryInterfaceFromNode<IRawElementProviderSimple>(
+                         GetRootAsAXNode()->children()[0]),
+                     UIA_LocalizedControlTypePropertyId,
+                     L"child1 role description");
+  EXPECT_UIA_BSTR_EQ(QueryInterfaceFromNode<IRawElementProviderSimple>(
+                         GetRootAsAXNode()->children()[1]),
+                     UIA_LocalizedControlTypePropertyId, L"search box");
+}
+
+TEST_F(AXPlatformNodeWinTest, TestGetPropertyValue_IsControlElement) {
+  AXTreeUpdate update;
+  ui::AXTreeID tree_id = ui::AXTreeID::CreateNewAXTreeID();
+  update.tree_data.tree_id = tree_id;
+  update.has_tree_data = true;
+  update.root_id = 1;
+  update.nodes.resize(17);
+  update.nodes[0].id = 1;
+  update.nodes[0].role = ax::mojom::Role::kRootWebArea;
+  update.nodes[0].child_ids = {2,  4,  6,  7,  8,  9,  10,
+                               11, 12, 13, 14, 15, 16, 17};
+  update.nodes[1].id = 2;
+  update.nodes[1].role = ax::mojom::Role::kButton;
+  update.nodes[1].child_ids = {3};
+  update.nodes[2].id = 3;
+  update.nodes[2].role = ax::mojom::Role::kStaticText;
+  update.nodes[2].SetName("some text");
+  update.nodes[3].id = 4;
+  update.nodes[3].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[3].child_ids = {5};
+  update.nodes[4].id = 5;
+  update.nodes[4].role = ax::mojom::Role::kStaticText;
+  update.nodes[4].SetName("more text");
+  update.nodes[5].id = 6;
+  update.nodes[5].role = ax::mojom::Role::kTable;
+  update.nodes[6].id = 7;
+  update.nodes[6].role = ax::mojom::Role::kList;
+  update.nodes[7].id = 8;
+  update.nodes[7].role = ax::mojom::Role::kForm;
+  update.nodes[8].id = 9;
+  update.nodes[8].role = ax::mojom::Role::kImage;
+  update.nodes[9].id = 10;
+  update.nodes[9].role = ax::mojom::Role::kImage;
+  update.nodes[9].SetNameExplicitlyEmpty();
+  update.nodes[10].id = 11;
+  update.nodes[10].role = ax::mojom::Role::kArticle;
+  update.nodes[11].id = 12;
+  update.nodes[11].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[11].AddBoolAttribute(ax::mojom::BoolAttribute::kHasAriaAttribute,
+                                    true);
+  update.nodes[12].id = 13;
+  update.nodes[12].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[12].AddBoolAttribute(ax::mojom::BoolAttribute::kEditableRoot,
+                                    true);
+  update.nodes[13].id = 14;
+  update.nodes[13].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[13].SetName("name");
+  update.nodes[14].id = 15;
+  update.nodes[14].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[14].SetDescription("description");
+  update.nodes[15].id = 16;
+  update.nodes[15].role = ax::mojom::Role::kGenericContainer;
+  update.nodes[15].AddState(ax::mojom::State::kFocusable);
+  update.nodes[16].id = 17;
+  update.nodes[16].role = ax::mojom::Role::kForm;
+  update.nodes[16].SetName("name");
+
+  Init(update);
+  TestAXNodeWrapper::SetGlobalIsWebContent(true);
+
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 2),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 3),
+                     UIA_IsControlElementPropertyId, false);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 4),
+                     UIA_IsControlElementPropertyId, false);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 5),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 6),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 7),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 8),
+                     UIA_IsControlElementPropertyId, false);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 9),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 10),
+                     UIA_IsControlElementPropertyId, false);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 11),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 12),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 13),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 14),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 15),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 16),
+                     UIA_IsControlElementPropertyId, true);
+  EXPECT_UIA_BOOL_EQ(GetIRawElementProviderSimpleFromTree(tree_id, 17),
+                     UIA_IsControlElementPropertyId, true);
+}
+
 TEST_F(AXPlatformNodeWinTest, TestUIAGetProviderOptions) {
   AXNodeData root_data;
   Init(root_data);
@@ -4085,9 +4352,11 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetProviderOptions) {
 
   ProviderOptions provider_options = static_cast<ProviderOptions>(0);
   EXPECT_HRESULT_SUCCEEDED(root_node->get_ProviderOptions(&provider_options));
-  EXPECT_EQ(
-      ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading,
-      provider_options);
+  EXPECT_EQ(ProviderOptions_ServerSideProvider |
+                ProviderOptions_UseComThreading |
+                ProviderOptions_RefuseNonClientSupport |
+                ProviderOptions_HasNativeIAccessible,
+            provider_options);
 }
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetHostRawElementProvider) {
@@ -4105,7 +4374,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetHostRawElementProvider) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetBoundingRectangle) {
   AXNodeData root_data;
-  root_data.id = 0;
+  root_data.id = 1;
   root_data.relative_bounds.bounds = gfx::RectF(10, 20, 30, 50);
   Init(root_data);
 
@@ -4125,16 +4394,16 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetFragmentRoot) {
   // This test needs to be run on a child node since AXPlatformRootNodeWin
   // overrides the method.
   AXNodeData root_data;
-  root_data.id = 0;
-  root_data.child_ids.push_back(1);
+  root_data.id = 1;
 
   AXNodeData element1_data;
-  element1_data.id = 1;
+  element1_data.id = 2;
+  root_data.child_ids.push_back(element1_data.id);
 
   Init(root_data, element1_data);
   InitFragmentRoot();
 
-  AXNode* root_node = GetRootNode();
+  AXNode* root_node = GetRootAsAXNode();
   AXNode* element1_node = root_node->children()[0];
 
   ComPtr<IRawElementProviderFragment> element1_provider =
@@ -4155,7 +4424,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetFragmentRoot) {
 
   // Test the case where the widget has gone away.
   TestAXNodeWrapper* element1_wrapper =
-      TestAXNodeWrapper::GetOrCreate(tree_.get(), element1_node);
+      TestAXNodeWrapper::GetOrCreate(GetTree(), element1_node);
   element1_wrapper->ResetNativeEventTarget();
   EXPECT_UIA_ELEMENTNOTAVAILABLE(
       element1_provider->get_FragmentRoot(&actual_fragment_root));
@@ -4163,7 +4432,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetFragmentRoot) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetEmbeddedFragmentRoots) {
   AXNodeData root_data;
-  root_data.id = 0;
+  root_data.id = 1;
   Init(root_data);
 
   ComPtr<IRawElementProviderFragment> root_provider =
@@ -4177,7 +4446,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetEmbeddedFragmentRoots) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAGetRuntimeId) {
   AXNodeData root_data;
-  root_data.id = 0;
+  root_data.id = 1;
   Init(root_data);
 
   ComPtr<IRawElementProviderFragment> root_provider =
@@ -4207,7 +4476,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAGetRuntimeId) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalUnset) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   Init(root);
 
@@ -4221,7 +4490,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalUnset) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalFalse) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.AddBoolAttribute(ax::mojom::BoolAttribute::kModal, false);
   Init(root);
@@ -4240,7 +4509,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalFalse) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalTrue) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.AddBoolAttribute(ax::mojom::BoolAttribute::kModal, true);
   Init(root);
@@ -4259,7 +4528,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderGetIsModalTrue) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderInvalidArgument) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.AddBoolAttribute(ax::mojom::BoolAttribute::kModal, true);
   Init(root);
@@ -4282,7 +4551,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderInvalidArgument) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderNotSupported) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
   root.AddBoolAttribute(ax::mojom::BoolAttribute::kModal, true);
   Init(root);
@@ -4320,23 +4589,23 @@ TEST_F(AXPlatformNodeWinTest, TestUIAIWindowProviderNotSupported) {
 
 TEST_F(AXPlatformNodeWinTest, TestUIANavigate) {
   AXNodeData root_data;
-  root_data.id = 0;
-  root_data.child_ids.push_back(1);
-  root_data.child_ids.push_back(2);
+  root_data.id = 1;
 
   AXNodeData element1_data;
-  element1_data.id = 1;
-  element1_data.child_ids.push_back(3);
+  element1_data.id = 2;
+  root_data.child_ids.push_back(element1_data.id);
 
   AXNodeData element2_data;
-  element2_data.id = 2;
+  element2_data.id = 3;
+  root_data.child_ids.push_back(element2_data.id);
 
   AXNodeData element3_data;
-  element3_data.id = 3;
+  element3_data.id = 4;
+  element1_data.child_ids.push_back(element3_data.id);
 
   Init(root_data, element1_data, element2_data, element3_data);
 
-  AXNode* root_node = GetRootNode();
+  AXNode* root_node = GetRootAsAXNode();
   AXNode* element1_node = root_node->children()[0];
   AXNode* element2_node = root_node->children()[1];
   AXNode* element3_node = element1_node->children()[0];
@@ -4385,10 +4654,10 @@ TEST_F(AXPlatformNodeWinTest, TestUIANavigate) {
 TEST_F(AXPlatformNodeWinTest, TestISelectionProviderCanSelectMultipleDefault) {
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ false,
-                    /*option_3_is_selected*/ false));
+                    /*option_3_is_selected*/ false, {}));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
 
   BOOL multiple = TRUE;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4397,13 +4666,15 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionProviderCanSelectMultipleDefault) {
 }
 
 TEST_F(AXPlatformNodeWinTest, TestISelectionProviderCanSelectMultipleTrue) {
+  const std::vector<ax::mojom::State> state = {
+      ax::mojom::State::kMultiselectable, ax::mojom::State::kFocusable};
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ false,
                     /*option_3_is_selected*/ false,
-                    /*additional_state*/ ax::mojom::State::kMultiselectable));
+                    /*additional_state*/ state));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
 
   BOOL multiple = FALSE;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4415,10 +4686,11 @@ TEST_F(AXPlatformNodeWinTest,
        TestISelectionProviderIsSelectionRequiredDefault) {
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ false,
-                    /*option_3_is_selected*/ false));
+                    /*option_3_is_selected*/ false,
+                    /*additional_state*/ {}));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
 
   BOOL selection_required = TRUE;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4430,10 +4702,10 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionProviderIsSelectionRequiredTrue) {
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ false,
                     /*option_3_is_selected*/ false,
-                    /*additional_state*/ ax::mojom::State::kRequired));
+                    /*additional_state*/ {ax::mojom::State::kRequired}));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
 
   BOOL selection_required = FALSE;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4444,10 +4716,11 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionProviderIsSelectionRequiredTrue) {
 TEST_F(AXPlatformNodeWinTest, TestISelectionProviderGetSelectionNoneSelected) {
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ false,
-                    /*option_3_is_selected*/ false));
+                    /*option_3_is_selected*/ false,
+                    /*additional_state*/ {ax::mojom::State::kFocusable}));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
 
   base::win::ScopedSafearray selected_items;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4469,13 +4742,14 @@ TEST_F(AXPlatformNodeWinTest,
        TestISelectionProviderGetSelectionSingleItemSelected) {
   Init(BuildListBox(/*option_1_is_selected*/ false,
                     /*option_2_is_selected*/ true,
-                    /*option_3_is_selected*/ false));
+                    /*option_3_is_selected*/ false,
+                    /*additional_state*/ {ax::mojom::State::kFocusable}));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
   ComPtr<IRawElementProviderSimple> option2_provider(
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[1]));
+          GetRootAsAXNode()->children()[1]));
 
   base::win::ScopedSafearray selected_items;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4501,21 +4775,24 @@ TEST_F(AXPlatformNodeWinTest,
 
 TEST_F(AXPlatformNodeWinTest,
        TestISelectionProviderGetSelectionMultipleItemsSelected) {
+  const std::vector<ax::mojom::State> state = {
+      ax::mojom::State::kMultiselectable, ax::mojom::State::kFocusable};
   Init(BuildListBox(/*option_1_is_selected*/ true,
                     /*option_2_is_selected*/ true,
-                    /*option_3_is_selected*/ true));
+                    /*option_3_is_selected*/ true,
+                    /*additional_state*/ state));
 
   ComPtr<ISelectionProvider> selection_provider(
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode()));
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode()));
   ComPtr<IRawElementProviderSimple> option1_provider(
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[0]));
+          GetRootAsAXNode()->children()[0]));
   ComPtr<IRawElementProviderSimple> option2_provider(
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[1]));
+          GetRootAsAXNode()->children()[1]));
   ComPtr<IRawElementProviderSimple> option3_provider(
       QueryInterfaceFromNode<IRawElementProviderSimple>(
-          GetRootNode()->children()[2]));
+          GetRootAsAXNode()->children()[2]));
 
   base::win::ScopedSafearray selected_items;
   EXPECT_HRESULT_SUCCEEDED(
@@ -4544,29 +4821,29 @@ TEST_F(AXPlatformNodeWinTest,
 
 TEST_F(AXPlatformNodeWinTest, TestComputeUIAControlType) {
   AXNodeData root;
-  root.id = 0;
+  root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
 
   AXNodeData child1;
-  int32_t child1_id = 1;
+  AXNode::AXID child1_id = 2;
   child1.id = child1_id;
   child1.role = ax::mojom::Role::kTable;
   root.child_ids.push_back(child1_id);
 
   AXNodeData child2;
-  int32_t child2_id = 2;
+  AXNode::AXID child2_id = 3;
   child2.id = child2_id;
   child2.role = ax::mojom::Role::kLayoutTable;
   root.child_ids.push_back(child2_id);
 
   AXNodeData child3;
-  int32_t child3_id = 3;
+  AXNode::AXID child3_id = 4;
   child3.id = child3_id;
   child3.role = ax::mojom::Role::kTextField;
   root.child_ids.push_back(child3_id);
 
   AXNodeData child4;
-  int32_t child4_id = 4;
+  AXNode::AXID child4_id = 5;
   child4.id = child4_id;
   child4.role = ax::mojom::Role::kSearchBox;
   root.child_ids.push_back(child4_id);
@@ -4592,7 +4869,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIALandmarkType) {
                                  base::Optional<LONG> expected_landmark_type,
                                  const std::string& node_name = {}) {
     AXNodeData root_data;
-    root_data.id = 0;
+    root_data.id = 1;
     root_data.role = node_role;
     if (!node_name.empty())
       root_data.SetName(node_name);
@@ -4613,10 +4890,13 @@ TEST_F(AXPlatformNodeWinTest, TestUIALandmarkType) {
   TestLandmarkType(ax::mojom::Role::kComplementary, UIA_CustomLandmarkTypeId);
   TestLandmarkType(ax::mojom::Role::kContentInfo, UIA_CustomLandmarkTypeId);
   TestLandmarkType(ax::mojom::Role::kFooter, UIA_CustomLandmarkTypeId);
-  TestLandmarkType(ax::mojom::Role::kForm, UIA_FormLandmarkTypeId);
   TestLandmarkType(ax::mojom::Role::kMain, UIA_MainLandmarkTypeId);
   TestLandmarkType(ax::mojom::Role::kNavigation, UIA_NavigationLandmarkTypeId);
   TestLandmarkType(ax::mojom::Role::kSearch, UIA_SearchLandmarkTypeId);
+
+  // Only named forms should be exposed as landmarks.
+  TestLandmarkType(ax::mojom::Role::kForm, {});
+  TestLandmarkType(ax::mojom::Role::kForm, UIA_FormLandmarkTypeId, "name");
 
   // Only named regions should be exposed as landmarks.
   TestLandmarkType(ax::mojom::Role::kRegion, {});
@@ -4634,7 +4914,7 @@ TEST_F(AXPlatformNodeWinTest, TestUIALocalizedLandmarkType) {
              const std::wstring& expected_localized_landmark,
              const std::string& node_name = {}) {
         AXNodeData root_data;
-        root_data.id = 0;
+        root_data.id = 1;
         root_data.role = node_role;
         if (!node_name.empty())
           root_data.SetName(node_name);
@@ -4673,19 +4953,19 @@ TEST_F(AXPlatformNodeWinTest, TestUIALocalizedLandmarkType) {
 
 TEST_F(AXPlatformNodeWinTest, TestIRawElementProviderSimple2ShowContextMenu) {
   AXNodeData root_data;
-  root_data.id = 0;
+  root_data.id = 1;
 
   AXNodeData element1_data;
-  element1_data.id = 1;
-  root_data.child_ids.push_back(1);
+  element1_data.id = 2;
+  root_data.child_ids.push_back(element1_data.id);
 
   AXNodeData element2_data;
-  element2_data.id = 2;
-  root_data.child_ids.push_back(2);
+  element2_data.id = 3;
+  root_data.child_ids.push_back(element2_data.id);
 
   Init(root_data, element1_data, element2_data);
 
-  AXNode* root_node = GetRootNode();
+  AXNode* root_node = GetRootAsAXNode();
   AXNode* element1_node = root_node->children()[0];
   AXNode* element2_node = root_node->children()[1];
 
@@ -4711,37 +4991,38 @@ TEST_F(AXPlatformNodeWinTest, TestUIAErrorHandling) {
   ComPtr<IRawElementProviderSimple> simple_provider =
       GetRootIRawElementProviderSimple();
   ComPtr<IRawElementProviderSimple2> simple2_provider =
-      QueryInterfaceFromNode<IRawElementProviderSimple2>(GetRootNode());
+      QueryInterfaceFromNode<IRawElementProviderSimple2>(GetRootAsAXNode());
   ComPtr<IRawElementProviderFragment> fragment_provider =
       GetRootIRawElementProviderFragment();
   ComPtr<IGridItemProvider> grid_item_provider =
-      QueryInterfaceFromNode<IGridItemProvider>(GetRootNode());
+      QueryInterfaceFromNode<IGridItemProvider>(GetRootAsAXNode());
   ComPtr<IGridProvider> grid_provider =
-      QueryInterfaceFromNode<IGridProvider>(GetRootNode());
+      QueryInterfaceFromNode<IGridProvider>(GetRootAsAXNode());
   ComPtr<IScrollItemProvider> scroll_item_provider =
-      QueryInterfaceFromNode<IScrollItemProvider>(GetRootNode());
+      QueryInterfaceFromNode<IScrollItemProvider>(GetRootAsAXNode());
   ComPtr<IScrollProvider> scroll_provider =
-      QueryInterfaceFromNode<IScrollProvider>(GetRootNode());
+      QueryInterfaceFromNode<IScrollProvider>(GetRootAsAXNode());
   ComPtr<ISelectionItemProvider> selection_item_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(GetRootNode());
+      QueryInterfaceFromNode<ISelectionItemProvider>(GetRootAsAXNode());
   ComPtr<ISelectionProvider> selection_provider =
-      QueryInterfaceFromNode<ISelectionProvider>(GetRootNode());
+      QueryInterfaceFromNode<ISelectionProvider>(GetRootAsAXNode());
   ComPtr<ITableItemProvider> table_item_provider =
-      QueryInterfaceFromNode<ITableItemProvider>(GetRootNode());
+      QueryInterfaceFromNode<ITableItemProvider>(GetRootAsAXNode());
   ComPtr<ITableProvider> table_provider =
-      QueryInterfaceFromNode<ITableProvider>(GetRootNode());
+      QueryInterfaceFromNode<ITableProvider>(GetRootAsAXNode());
   ComPtr<IExpandCollapseProvider> expand_collapse_provider =
-      QueryInterfaceFromNode<IExpandCollapseProvider>(GetRootNode());
+      QueryInterfaceFromNode<IExpandCollapseProvider>(GetRootAsAXNode());
   ComPtr<IToggleProvider> toggle_provider =
-      QueryInterfaceFromNode<IToggleProvider>(GetRootNode());
+      QueryInterfaceFromNode<IToggleProvider>(GetRootAsAXNode());
   ComPtr<IValueProvider> value_provider =
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode());
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode());
   ComPtr<IRangeValueProvider> range_value_provider =
-      QueryInterfaceFromNode<IRangeValueProvider>(GetRootNode());
+      QueryInterfaceFromNode<IRangeValueProvider>(GetRootAsAXNode());
   ComPtr<IWindowProvider> window_provider =
-      QueryInterfaceFromNode<IWindowProvider>(GetRootNode());
+      QueryInterfaceFromNode<IWindowProvider>(GetRootAsAXNode());
 
-  tree_.reset(new AXTree());
+  // Create an empty tree.
+  SetTree(std::make_unique<AXTree>());
 
   // IGridItemProvider
   int int_result = 0;
@@ -4921,70 +5202,99 @@ TEST_F(AXPlatformNodeWinTest, TestUIAErrorHandling) {
 }
 
 TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderSupportedPatterns) {
-  ui::AXNodeData root;
-  int32_t root_id = 0;
-  root.id = root_id;
-  root.role = ax::mojom::Role::kRootWebArea;
+  constexpr AXNode::AXID root_id = 1;
+  constexpr AXNode::AXID text_field_with_combo_box_id = 2;
+  constexpr AXNode::AXID meter_id = 3;
+  constexpr AXNode::AXID group_with_scroll_id = 4;
+  constexpr AXNode::AXID checkbox_id = 5;
+  constexpr AXNode::AXID link_id = 6;
+  constexpr AXNode::AXID table_without_header_id = 7;
+  constexpr AXNode::AXID table_without_header_cell_id = 8;
+  constexpr AXNode::AXID table_with_header_id = 9;
+  constexpr AXNode::AXID table_with_header_row_1_id = 10;
+  constexpr AXNode::AXID table_with_header_column_header_id = 11;
+  constexpr AXNode::AXID table_with_header_row_2_id = 12;
+  constexpr AXNode::AXID table_with_header_cell_id = 13;
+  constexpr AXNode::AXID grid_without_header_id = 14;
+  constexpr AXNode::AXID grid_without_header_cell_id = 15;
+  constexpr AXNode::AXID grid_with_header_id = 16;
+  constexpr AXNode::AXID grid_with_header_row_1_id = 17;
+  constexpr AXNode::AXID grid_with_header_column_header_id = 18;
+  constexpr AXNode::AXID grid_with_header_row_2_id = 19;
+  constexpr AXNode::AXID grid_with_header_cell_id = 20;
 
-  ui::AXNodeData text_field_with_combo_box;
-  int32_t text_field_with_combo_box_id = 1;
-  text_field_with_combo_box.id = text_field_with_combo_box_id;
-  text_field_with_combo_box.role = ax::mojom::Role::kTextFieldWithComboBox;
-  root.child_ids.push_back(text_field_with_combo_box_id);
+  AXTreeUpdate update;
+  update.tree_data.tree_id = ui::AXTreeID::CreateNewAXTreeID();
+  update.has_tree_data = true;
+  update.root_id = root_id;
+  update.nodes.resize(20);
+  update.nodes[0].id = root_id;
+  update.nodes[0].role = ax::mojom::Role::kRootWebArea;
+  update.nodes[0].child_ids = {text_field_with_combo_box_id,
+                               meter_id,
+                               group_with_scroll_id,
+                               checkbox_id,
+                               link_id,
+                               table_without_header_id,
+                               table_with_header_id,
+                               grid_without_header_id,
+                               grid_with_header_id};
+  update.nodes[1].id = text_field_with_combo_box_id;
+  update.nodes[1].role = ax::mojom::Role::kTextFieldWithComboBox;
+  update.nodes[2].id = meter_id;
+  update.nodes[2].role = ax::mojom::Role::kMeter;
+  update.nodes[3].id = group_with_scroll_id;
+  update.nodes[3].role = ax::mojom::Role::kGroup;
+  update.nodes[3].AddIntAttribute(ax::mojom::IntAttribute::kScrollXMin, 10);
+  update.nodes[3].AddIntAttribute(ax::mojom::IntAttribute::kScrollXMax, 10);
+  update.nodes[3].AddIntAttribute(ax::mojom::IntAttribute::kScrollX, 10);
+  update.nodes[4].id = checkbox_id;
+  update.nodes[4].role = ax::mojom::Role::kCheckBox;
+  update.nodes[5].id = link_id;
+  update.nodes[5].role = ax::mojom::Role::kLink;
+  update.nodes[6].id = table_without_header_id;
+  update.nodes[6].role = ax::mojom::Role::kTable;
+  update.nodes[6].child_ids = {table_without_header_cell_id};
+  update.nodes[7].id = table_without_header_cell_id;
+  update.nodes[7].role = ax::mojom::Role::kCell;
+  update.nodes[8].id = table_with_header_id;
+  update.nodes[8].role = ax::mojom::Role::kTable;
+  update.nodes[8].child_ids = {table_with_header_row_1_id,
+                               table_with_header_row_2_id};
+  update.nodes[9].id = table_with_header_row_1_id;
+  update.nodes[9].role = ax::mojom::Role::kRow;
+  update.nodes[9].child_ids = {table_with_header_column_header_id};
+  update.nodes[10].id = table_with_header_column_header_id;
+  update.nodes[10].role = ax::mojom::Role::kColumnHeader;
+  update.nodes[11].id = table_with_header_row_2_id;
+  update.nodes[11].role = ax::mojom::Role::kRow;
+  update.nodes[11].child_ids = {table_with_header_cell_id};
+  update.nodes[12].id = table_with_header_cell_id;
+  update.nodes[12].role = ax::mojom::Role::kCell;
+  update.nodes[13].id = grid_without_header_id;
+  update.nodes[13].role = ax::mojom::Role::kGrid;
+  update.nodes[13].child_ids = {grid_without_header_cell_id};
+  update.nodes[14].id = grid_without_header_cell_id;
+  update.nodes[14].role = ax::mojom::Role::kCell;
+  update.nodes[14].AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, false);
+  update.nodes[15].id = grid_with_header_id;
+  update.nodes[15].role = ax::mojom::Role::kGrid;
+  update.nodes[15].child_ids = {grid_with_header_row_1_id,
+                                grid_with_header_row_2_id};
+  update.nodes[16].id = grid_with_header_row_1_id;
+  update.nodes[16].role = ax::mojom::Role::kRow;
+  update.nodes[16].child_ids = {grid_with_header_column_header_id};
+  update.nodes[17].id = grid_with_header_column_header_id;
+  update.nodes[17].role = ax::mojom::Role::kColumnHeader;
+  update.nodes[17].AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, false);
+  update.nodes[18].id = grid_with_header_row_2_id;
+  update.nodes[18].role = ax::mojom::Role::kRow;
+  update.nodes[18].child_ids = {grid_with_header_cell_id};
+  update.nodes[19].id = grid_with_header_cell_id;
+  update.nodes[19].role = ax::mojom::Role::kCell;
+  update.nodes[19].AddBoolAttribute(ax::mojom::BoolAttribute::kSelected, false);
 
-  ui::AXNodeData table;
-  int32_t table_id = 2;
-  table.id = table_id;
-  table.role = ax::mojom::Role::kTable;
-  root.child_ids.push_back(table_id);
-
-  ui::AXNodeData table_cell;
-  int32_t table_cell_id = 3;
-  table_cell.id = table_cell_id;
-  table_cell.role = ax::mojom::Role::kCell;
-  table.child_ids.push_back(table_cell_id);
-
-  ui::AXNodeData meter;
-  int32_t meter_id = 4;
-  meter.id = meter_id;
-  meter.role = ax::mojom::Role::kMeter;
-  root.child_ids.push_back(meter_id);
-
-  ui::AXNodeData group_with_scroll;
-  int32_t group_with_scroll_id = 5;
-  group_with_scroll.id = group_with_scroll_id;
-  group_with_scroll.role = ax::mojom::Role::kGroup;
-  group_with_scroll.AddIntAttribute(ax::mojom::IntAttribute::kScrollXMin, 10);
-  group_with_scroll.AddIntAttribute(ax::mojom::IntAttribute::kScrollXMax, 10);
-  group_with_scroll.AddIntAttribute(ax::mojom::IntAttribute::kScrollX, 10);
-  root.child_ids.push_back(group_with_scroll_id);
-
-  ui::AXNodeData grid;
-  int32_t grid_id = 6;
-  grid.id = grid_id;
-  grid.role = ax::mojom::Role::kGrid;
-  root.child_ids.push_back(grid_id);
-
-  ui::AXNodeData grid_cell;
-  int32_t grid_cell_id = 7;
-  grid_cell.id = grid_cell_id;
-  grid_cell.role = ax::mojom::Role::kCell;
-  grid.child_ids.push_back(grid_cell_id);
-
-  ui::AXNodeData checkbox;
-  int32_t checkbox_id = 8;
-  checkbox.id = checkbox_id;
-  checkbox.role = ax::mojom::Role::kCheckBox;
-  root.child_ids.push_back(checkbox_id);
-
-  ui::AXNodeData link;
-  int32_t link_id = 9;
-  link.id = link_id;
-  link.role = ax::mojom::Role::kLink;
-  root.child_ids.push_back(link_id);
-
-  Init(root, text_field_with_combo_box, table, table_cell, meter,
-       group_with_scroll, grid, grid_cell, checkbox, link);
+  Init(update);
 
   EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_TextEditPatternId,
                         UIA_TextPatternId}),
@@ -4993,14 +5303,6 @@ TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderSupportedPatterns) {
   EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
                         UIA_ExpandCollapsePatternId, UIA_TextChildPatternId}),
             GetSupportedPatternsFromNodeId(text_field_with_combo_box_id));
-
-  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridPatternId,
-                        UIA_TablePatternId, UIA_TextChildPatternId}),
-            GetSupportedPatternsFromNodeId(table_id));
-
-  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridItemPatternId,
-                        UIA_TableItemPatternId, UIA_TextChildPatternId}),
-            GetSupportedPatternsFromNodeId(table_cell_id));
 
   EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
                         UIA_RangeValuePatternId, UIA_TextChildPatternId}),
@@ -5011,27 +5313,62 @@ TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderSupportedPatterns) {
             GetSupportedPatternsFromNodeId(group_with_scroll_id));
 
   EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
-                        UIA_SelectionPatternId, UIA_GridPatternId,
-                        UIA_TablePatternId, UIA_TextChildPatternId}),
-            GetSupportedPatternsFromNodeId(grid_id));
-
-  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
-                        UIA_GridItemPatternId, UIA_TableItemPatternId,
-                        UIA_TextChildPatternId, UIA_SelectionItemPatternId}),
-            GetSupportedPatternsFromNodeId(grid_cell_id));
-
-  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
                         UIA_TextChildPatternId, UIA_TogglePatternId}),
             GetSupportedPatternsFromNodeId(checkbox_id));
 
   EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
                         UIA_InvokePatternId, UIA_TextChildPatternId}),
             GetSupportedPatternsFromNodeId(link_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridPatternId,
+                        UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(table_without_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridItemPatternId,
+                        UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(table_without_header_cell_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridPatternId,
+                        UIA_TablePatternId, UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(table_with_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridItemPatternId,
+                        UIA_TableItemPatternId, UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(table_with_header_column_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_GridItemPatternId,
+                        UIA_TableItemPatternId, UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(table_with_header_cell_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
+                        UIA_SelectionPatternId, UIA_GridPatternId,
+                        UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(grid_without_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
+                        UIA_GridItemPatternId, UIA_TextChildPatternId,
+                        UIA_SelectionItemPatternId}),
+            GetSupportedPatternsFromNodeId(grid_without_header_cell_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
+                        UIA_SelectionPatternId, UIA_GridPatternId,
+                        UIA_TablePatternId, UIA_TextChildPatternId}),
+            GetSupportedPatternsFromNodeId(grid_with_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
+                        UIA_GridItemPatternId, UIA_TableItemPatternId,
+                        UIA_TextChildPatternId, UIA_SelectionItemPatternId}),
+            GetSupportedPatternsFromNodeId(grid_with_header_column_header_id));
+
+  EXPECT_EQ(PatternSet({UIA_ScrollItemPatternId, UIA_ValuePatternId,
+                        UIA_GridItemPatternId, UIA_TableItemPatternId,
+                        UIA_TextChildPatternId, UIA_SelectionItemPatternId}),
+            GetSupportedPatternsFromNodeId(grid_with_header_cell_id));
 }
 
 TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderExpandCollapsePattern) {
   ui::AXNodeData root;
-  root.id = 0;
+  root.id = 1;
 
   ui::AXNodeData list_box;
   ui::AXNodeData list_item;
@@ -5043,25 +5380,25 @@ TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderExpandCollapsePattern) {
   ui::AXNodeData disclosure_triangle;
   ui::AXNodeData text_field_with_combo_box;
 
-  list_box.id = 1;
-  list_item.id = 2;
-  menu_item.id = 3;
-  menu_list_option.id = 4;
-  tree_item.id = 5;
-  combo_box_grouping.id = 6;
-  combo_box_menu_button.id = 7;
-  disclosure_triangle.id = 8;
-  text_field_with_combo_box.id = 9;
+  list_box.id = 2;
+  list_item.id = 3;
+  menu_item.id = 4;
+  menu_list_option.id = 5;
+  tree_item.id = 6;
+  combo_box_grouping.id = 7;
+  combo_box_menu_button.id = 8;
+  disclosure_triangle.id = 9;
+  text_field_with_combo_box.id = 10;
 
-  root.child_ids.push_back(1);
-  root.child_ids.push_back(2);
-  root.child_ids.push_back(3);
-  root.child_ids.push_back(4);
-  root.child_ids.push_back(5);
-  root.child_ids.push_back(6);
-  root.child_ids.push_back(7);
-  root.child_ids.push_back(8);
-  root.child_ids.push_back(9);
+  root.child_ids.push_back(list_box.id);
+  root.child_ids.push_back(list_item.id);
+  root.child_ids.push_back(menu_item.id);
+  root.child_ids.push_back(menu_list_option.id);
+  root.child_ids.push_back(tree_item.id);
+  root.child_ids.push_back(combo_box_grouping.id);
+  root.child_ids.push_back(combo_box_menu_button.id);
+  root.child_ids.push_back(disclosure_triangle.id);
+  root.child_ids.push_back(text_field_with_combo_box.id);
 
   // list_box HasPopup set to false, does not support expand collapse.
   list_box.role = ax::mojom::Role::kListBoxOption;
@@ -5149,22 +5486,22 @@ TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderExpandCollapsePattern) {
 
 TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderInvokePattern) {
   ui::AXNodeData root;
-  root.id = 0;
+  root.id = 1;
 
   ui::AXNodeData link;
   ui::AXNodeData generic_container;
   ui::AXNodeData combo_box_grouping;
   ui::AXNodeData check_box;
 
-  link.id = 1;
-  generic_container.id = 2;
-  combo_box_grouping.id = 3;
-  check_box.id = 4;
+  link.id = 2;
+  generic_container.id = 3;
+  combo_box_grouping.id = 4;
+  check_box.id = 5;
 
-  root.child_ids.push_back(1);
-  root.child_ids.push_back(2);
-  root.child_ids.push_back(3);
-  root.child_ids.push_back(4);
+  root.child_ids.push_back(link.id);
+  root.child_ids.push_back(generic_container.id);
+  root.child_ids.push_back(combo_box_grouping.id);
+  root.child_ids.push_back(check_box.id);
 
   // Role link is clickable and neither supports expand collapse nor supports
   // toggle. It should support invoke pattern.
@@ -5215,22 +5552,31 @@ TEST_F(AXPlatformNodeWinTest, TestGetPatternProviderInvokePattern) {
 
 TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   ui::AXNodeData root;
-  root.id = 0;
+  root.id = 1;
 
   ui::AXNodeData combo_box_grouping_has_popup;
   ui::AXNodeData combo_box_grouping_expanded;
   ui::AXNodeData combo_box_grouping_collapsed;
   ui::AXNodeData combo_box_grouping_disabled;
+  ui::AXNodeData button_has_popup_menu;
+  ui::AXNodeData button_has_popup_menu_pressed;
+  ui::AXNodeData button_has_popup_true;
+  ui::AXNodeData generic_container_has_popup_menu;
 
-  combo_box_grouping_has_popup.id = 1;
-  combo_box_grouping_expanded.id = 2;
-  combo_box_grouping_collapsed.id = 3;
-  combo_box_grouping_disabled.id = 4;
+  combo_box_grouping_has_popup.id = 2;
+  combo_box_grouping_expanded.id = 3;
+  combo_box_grouping_collapsed.id = 4;
+  combo_box_grouping_disabled.id = 5;
+  button_has_popup_menu.id = 6;
+  button_has_popup_menu_pressed.id = 7;
+  button_has_popup_true.id = 8;
+  generic_container_has_popup_menu.id = 9;
 
-  root.child_ids.push_back(1);
-  root.child_ids.push_back(2);
-  root.child_ids.push_back(3);
-  root.child_ids.push_back(4);
+  root.child_ids = {
+      combo_box_grouping_has_popup.id, combo_box_grouping_expanded.id,
+      combo_box_grouping_collapsed.id, combo_box_grouping_disabled.id,
+      button_has_popup_menu.id,        button_has_popup_menu_pressed.id,
+      button_has_popup_true.id,        generic_container_has_popup_menu.id};
 
   // combo_box_grouping HasPopup set to true, can collapse, can expand.
   // state is ExpandCollapseState_LeafNode.
@@ -5252,9 +5598,33 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   combo_box_grouping_disabled.role = ax::mojom::Role::kComboBoxGrouping;
   combo_box_grouping_disabled.SetRestriction(ax::mojom::Restriction::kDisabled);
 
+  // button_has_popup_menu HasPopup set to kMenu and is not STATE_PRESSED.
+  // state is ExpandCollapseState_Collapsed.
+  button_has_popup_menu.role = ax::mojom::Role::kButton;
+  button_has_popup_menu.SetHasPopup(ax::mojom::HasPopup::kMenu);
+
+  // button_has_popup_menu_pressed HasPopup set to kMenu and is STATE_PRESSED.
+  // state is ExpandCollapseState_Expanded.
+  button_has_popup_menu_pressed.role = ax::mojom::Role::kButton;
+  button_has_popup_menu_pressed.SetHasPopup(ax::mojom::HasPopup::kMenu);
+  button_has_popup_menu_pressed.SetCheckedState(ax::mojom::CheckedState::kTrue);
+
+  // button_has_popup_true HasPopup set to true but is not a menu.
+  // state is ExpandCollapseState_LeafNode.
+  button_has_popup_true.role = ax::mojom::Role::kButton;
+  button_has_popup_true.SetHasPopup(ax::mojom::HasPopup::kTrue);
+
+  // generic_container_has_popup_menu HasPopup set to menu but with no expand
+  // state set.
+  // state is ExpandCollapseState_LeafNode.
+  generic_container_has_popup_menu.role = ax::mojom::Role::kGenericContainer;
+  generic_container_has_popup_menu.SetHasPopup(ax::mojom::HasPopup::kMenu);
+
   Init(root, combo_box_grouping_has_popup, combo_box_grouping_disabled,
        combo_box_grouping_expanded, combo_box_grouping_collapsed,
-       combo_box_grouping_disabled);
+       combo_box_grouping_disabled, button_has_popup_menu,
+       button_has_popup_menu_pressed, button_has_popup_true,
+       generic_container_has_popup_menu);
 
   // combo_box_grouping HasPopup set to true, can collapse, can expand.
   // state is ExpandCollapseState_LeafNode.
@@ -5263,7 +5633,7 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   ComPtr<IExpandCollapseProvider> expandcollapse_provider;
   EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
       UIA_ExpandCollapsePatternId, &expandcollapse_provider));
-  EXPECT_NE(nullptr, expandcollapse_provider.Get());
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
   EXPECT_HRESULT_SUCCEEDED(expandcollapse_provider->Collapse());
   EXPECT_HRESULT_SUCCEEDED(expandcollapse_provider->Expand());
   ExpandCollapseState state;
@@ -5276,7 +5646,7 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(1);
   EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
       UIA_ExpandCollapsePatternId, &expandcollapse_provider));
-  EXPECT_NE(nullptr, expandcollapse_provider.Get());
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
   EXPECT_HRESULT_SUCCEEDED(expandcollapse_provider->Collapse());
   EXPECT_HRESULT_FAILED(expandcollapse_provider->Expand());
   EXPECT_HRESULT_SUCCEEDED(
@@ -5288,7 +5658,7 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(2);
   EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
       UIA_ExpandCollapsePatternId, &expandcollapse_provider));
-  EXPECT_NE(nullptr, expandcollapse_provider.Get());
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
   EXPECT_HRESULT_FAILED(expandcollapse_provider->Collapse());
   EXPECT_HRESULT_SUCCEEDED(expandcollapse_provider->Expand());
   EXPECT_HRESULT_SUCCEEDED(
@@ -5300,9 +5670,50 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
   raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(3);
   EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
       UIA_ExpandCollapsePatternId, &expandcollapse_provider));
-  EXPECT_NE(nullptr, expandcollapse_provider.Get());
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
   EXPECT_HRESULT_FAILED(expandcollapse_provider->Collapse());
   EXPECT_HRESULT_FAILED(expandcollapse_provider->Expand());
+  EXPECT_HRESULT_SUCCEEDED(
+      expandcollapse_provider->get_ExpandCollapseState(&state));
+  EXPECT_EQ(ExpandCollapseState_LeafNode, state);
+
+  // button_has_popup_menu HasPopup set to kMenu and is not STATE_PRESSED.
+  // state is ExpandCollapseState_Collapsed.
+  raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(4);
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_ExpandCollapsePatternId, &expandcollapse_provider));
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(
+      expandcollapse_provider->get_ExpandCollapseState(&state));
+  EXPECT_EQ(ExpandCollapseState_Collapsed, state);
+
+  // button_has_popup_menu_pressed HasPopup set to kMenu and is STATE_PRESSED.
+  // state is ExpandCollapseState_Expanded.
+  raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(5);
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_ExpandCollapsePatternId, &expandcollapse_provider));
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(
+      expandcollapse_provider->get_ExpandCollapseState(&state));
+  EXPECT_EQ(ExpandCollapseState_Expanded, state);
+
+  // button_has_popup_true HasPopup set to true but is not a menu.
+  // state is ExpandCollapseState_LeafNode.
+  raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(6);
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_ExpandCollapsePatternId, &expandcollapse_provider));
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
+  EXPECT_HRESULT_SUCCEEDED(
+      expandcollapse_provider->get_ExpandCollapseState(&state));
+  EXPECT_EQ(ExpandCollapseState_LeafNode, state);
+
+  // generic_container_has_popup_menu HasPopup set to menu but with no expand
+  // state set.
+  // state is ExpandCollapseState_LeafNode.
+  raw_element_provider_simple = GetIRawElementProviderSimpleFromChildIndex(7);
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_ExpandCollapsePatternId, &expandcollapse_provider));
+  ASSERT_NE(nullptr, expandcollapse_provider.Get());
   EXPECT_HRESULT_SUCCEEDED(
       expandcollapse_provider->get_ExpandCollapseState(&state));
   EXPECT_EQ(ExpandCollapseState_LeafNode, state);
@@ -5310,16 +5721,16 @@ TEST_F(AXPlatformNodeWinTest, TestIExpandCollapsePatternProviderAction) {
 
 TEST_F(AXPlatformNodeWinTest, TestIInvokeProviderInvoke) {
   ui::AXNodeData root;
-  root.id = 0;
+  root.id = 1;
 
   ui::AXNodeData button;
   ui::AXNodeData button_disabled;
 
-  button.id = 1;
-  button_disabled.id = 2;
+  button.id = 2;
+  button_disabled.id = 3;
 
-  root.child_ids.push_back(1);
-  root.child_ids.push_back(2);
+  root.child_ids.push_back(button.id);
+  root.child_ids.push_back(button_disabled.id);
 
   // generic button can be invoked.
   button.role = ax::mojom::Role::kButton;
@@ -5329,7 +5740,7 @@ TEST_F(AXPlatformNodeWinTest, TestIInvokeProviderInvoke) {
   button_disabled.SetRestriction(ax::mojom::Restriction::kDisabled);
 
   Init(root, button, button_disabled);
-  AXNode* button_node = GetRootNode()->children()[0];
+  AXNode* button_node = GetRootAsAXNode()->children()[0];
 
   // generic button can be invoked.
   ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
@@ -5356,15 +5767,12 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderNotSupported) {
 
   Init(root);
 
-  ComPtr<ISelectionItemProvider> provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(GetRootNode());
-
-  BOOL selected;
-
-  EXPECT_UIA_INVALIDOPERATION(provider->AddToSelection());
-  EXPECT_UIA_INVALIDOPERATION(provider->RemoveFromSelection());
-  EXPECT_UIA_INVALIDOPERATION(provider->Select());
-  EXPECT_UIA_INVALIDOPERATION(provider->get_IsSelected(&selected));
+  ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
+      GetRootIRawElementProviderSimple();
+  ComPtr<ISelectionItemProvider> selection_item_provider;
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_SelectionItemPatternId, &selection_item_provider));
+  ASSERT_EQ(nullptr, selection_item_provider.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderDisabled) {
@@ -5377,15 +5785,19 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderDisabled) {
 
   Init(root);
 
-  ComPtr<ISelectionItemProvider> provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(GetRootNode());
+  ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
+      GetRootIRawElementProviderSimple();
+  ComPtr<ISelectionItemProvider> selection_item_provider;
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_SelectionItemPatternId, &selection_item_provider));
+  ASSERT_NE(nullptr, selection_item_provider.Get());
 
   BOOL selected;
 
-  EXPECT_UIA_ELEMENTNOTENABLED(provider->AddToSelection());
-  EXPECT_UIA_ELEMENTNOTENABLED(provider->RemoveFromSelection());
-  EXPECT_UIA_ELEMENTNOTENABLED(provider->Select());
-  EXPECT_HRESULT_SUCCEEDED(provider->get_IsSelected(&selected));
+  EXPECT_UIA_ELEMENTNOTENABLED(selection_item_provider->AddToSelection());
+  EXPECT_UIA_ELEMENTNOTENABLED(selection_item_provider->RemoveFromSelection());
+  EXPECT_UIA_ELEMENTNOTENABLED(selection_item_provider->Select());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 }
 
@@ -5396,15 +5808,12 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderNotSelectable) {
 
   Init(root);
 
-  ComPtr<ISelectionItemProvider> item_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(GetRootNode());
-
-  BOOL selected;
-
-  EXPECT_UIA_INVALIDOPERATION(item_provider->AddToSelection());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->RemoveFromSelection());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->Select());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->get_IsSelected(&selected));
+  ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
+      GetRootIRawElementProviderSimple();
+  ComPtr<ISelectionItemProvider> selection_item_provider;
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_SelectionItemPatternId, &selection_item_provider));
+  ASSERT_EQ(nullptr, selection_item_provider.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderSimple) {
@@ -5420,9 +5829,12 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderSimple) {
 
   Init(root, option1);
 
-  const auto* root_node = GetRootNode();
-  ComPtr<ISelectionItemProvider> option1_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(root_node->children()[0]);
+  ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
+      GetIRawElementProviderSimpleFromChildIndex(0);
+  ComPtr<ISelectionItemProvider> option1_provider;
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_SelectionItemPatternId, &option1_provider));
+  ASSERT_NE(nullptr, option1_provider.Get());
 
   BOOL selected;
 
@@ -5464,7 +5876,7 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderSimple) {
   EXPECT_TRUE(selected);
 }
 
-TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderRadioButtonIsSelected) {
+TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderRadioButton) {
   AXNodeData root;
   root.id = 1;
   root.role = ax::mojom::Role::kRadioGroup;
@@ -5503,31 +5915,141 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderRadioButtonIsSelected) {
 
   Init(root, option1, option2, option3, option4);
 
-  const auto* root_node = GetRootNode();
-  // CheckedState::kNone
-  ComPtr<ISelectionItemProvider> option1_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(root_node->children()[0]);
-  // CheckedState::kFalse
-  ComPtr<ISelectionItemProvider> option2_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(root_node->children()[1]);
-  // CheckedState::kTrue
-  ComPtr<ISelectionItemProvider> option3_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(root_node->children()[2]);
-  // CheckedState::kMixed
-  ComPtr<ISelectionItemProvider> option4_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(root_node->children()[3]);
-
   BOOL selected;
 
-  EXPECT_UIA_INVALIDOPERATION(option1_provider->get_IsSelected(&selected));
+  // Option 1, CheckedState::kNone, ISelectionItemProvider is not supported.
+  ComPtr<ISelectionItemProvider> option1_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(0)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option1_provider));
+  ASSERT_EQ(nullptr, option1_provider.Get());
+
+  // Option 2, CheckedState::kFalse.
+  ComPtr<ISelectionItemProvider> option2_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(1)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option2_provider));
+  ASSERT_NE(nullptr, option2_provider.Get());
 
   EXPECT_HRESULT_SUCCEEDED(option2_provider->get_IsSelected(&selected));
   EXPECT_FALSE(selected);
 
+  EXPECT_HRESULT_SUCCEEDED(option2_provider->Select());
+  EXPECT_HRESULT_SUCCEEDED(option2_provider->get_IsSelected(&selected));
+  EXPECT_TRUE(selected);
+
+  // Option 3, CheckedState::kTrue.
+  ComPtr<ISelectionItemProvider> option3_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(2)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option3_provider));
+  ASSERT_NE(nullptr, option3_provider.Get());
+
   EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 
-  EXPECT_UIA_INVALIDOPERATION(option4_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->RemoveFromSelection());
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
+  EXPECT_FALSE(selected);
+
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->AddToSelection());
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
+  EXPECT_TRUE(selected);
+
+  // Option 4, CheckedState::kMixed, ISelectionItemProvider is not supported.
+  ComPtr<ISelectionItemProvider> option4_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(3)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option4_provider));
+  ASSERT_EQ(nullptr, option4_provider.Get());
+}
+
+TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderMenuItemRadio) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kMenu;
+
+  // CheckedState::kNone
+  AXNodeData option1;
+  option1.id = 2;
+  option1.AddIntAttribute(ax::mojom::IntAttribute::kCheckedState,
+                          static_cast<int>(ax::mojom::CheckedState::kNone));
+  option1.role = ax::mojom::Role::kMenuItemRadio;
+  root.child_ids.push_back(option1.id);
+
+  // CheckedState::kFalse
+  AXNodeData option2;
+  option2.id = 3;
+  option2.AddIntAttribute(ax::mojom::IntAttribute::kCheckedState,
+                          static_cast<int>(ax::mojom::CheckedState::kFalse));
+  option2.role = ax::mojom::Role::kMenuItemRadio;
+  root.child_ids.push_back(option2.id);
+
+  // CheckedState::kTrue
+  AXNodeData option3;
+  option3.id = 4;
+  option3.AddIntAttribute(ax::mojom::IntAttribute::kCheckedState,
+                          static_cast<int>(ax::mojom::CheckedState::kTrue));
+  option3.role = ax::mojom::Role::kMenuItemRadio;
+  root.child_ids.push_back(option3.id);
+
+  // CheckedState::kMixed
+  AXNodeData option4;
+  option4.id = 5;
+  option4.AddIntAttribute(ax::mojom::IntAttribute::kCheckedState,
+                          static_cast<int>(ax::mojom::CheckedState::kMixed));
+  option4.role = ax::mojom::Role::kMenuItemRadio;
+  root.child_ids.push_back(option4.id);
+
+  Init(root, option1, option2, option3, option4);
+
+  BOOL selected;
+
+  // Option 1, CheckedState::kNone, ISelectionItemProvider is not supported.
+  ComPtr<ISelectionItemProvider> option1_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(0)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option1_provider));
+  ASSERT_EQ(nullptr, option1_provider.Get());
+
+  // Option 2, CheckedState::kFalse.
+  ComPtr<ISelectionItemProvider> option2_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(1)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option2_provider));
+  ASSERT_NE(nullptr, option2_provider.Get());
+
+  EXPECT_HRESULT_SUCCEEDED(option2_provider->get_IsSelected(&selected));
+  EXPECT_FALSE(selected);
+
+  EXPECT_HRESULT_SUCCEEDED(option2_provider->Select());
+  EXPECT_HRESULT_SUCCEEDED(option2_provider->get_IsSelected(&selected));
+  EXPECT_TRUE(selected);
+
+  // Option 3, CheckedState::kTrue.
+  ComPtr<ISelectionItemProvider> option3_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(2)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option3_provider));
+  ASSERT_NE(nullptr, option3_provider.Get());
+
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
+  EXPECT_TRUE(selected);
+
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->RemoveFromSelection());
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
+  EXPECT_FALSE(selected);
+
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->AddToSelection());
+  EXPECT_HRESULT_SUCCEEDED(option3_provider->get_IsSelected(&selected));
+  EXPECT_TRUE(selected);
+
+  // Option 4, CheckedState::kMixed, ISelectionItemProvider is not supported.
+  ComPtr<ISelectionItemProvider> option4_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(3)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &option4_provider));
+  ASSERT_EQ(nullptr, option4_provider.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderTable) {
@@ -5548,16 +6070,11 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderTable) {
 
   Init(root, row1, cell1);
 
-  const auto* row = GetRootNode()->children()[0];
-  ComPtr<ISelectionItemProvider> item_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(row->children()[0]);
-
-  BOOL selected;
-
-  EXPECT_UIA_INVALIDOPERATION(item_provider->AddToSelection());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->RemoveFromSelection());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->Select());
-  EXPECT_UIA_INVALIDOPERATION(item_provider->get_IsSelected(&selected));
+  ComPtr<ISelectionItemProvider> selection_item_provider;
+  EXPECT_HRESULT_SUCCEEDED(
+      GetIRawElementProviderSimpleFromChildIndex(0)->GetPatternProvider(
+          UIA_SelectionItemPatternId, &selection_item_provider));
+  ASSERT_EQ(nullptr, selection_item_provider.Get());
 }
 
 TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderGrid) {
@@ -5578,9 +6095,14 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderGrid) {
 
   Init(root, row1, cell1);
 
-  const auto* row = GetRootNode()->children()[0];
-  ComPtr<ISelectionItemProvider> item_provider =
-      QueryInterfaceFromNode<ISelectionItemProvider>(row->children()[0]);
+  const auto* row = GetRootAsAXNode()->children()[0];
+  ComPtr<IRawElementProviderSimple> raw_element_provider_simple =
+      QueryInterfaceFromNode<IRawElementProviderSimple>(row->children()[0]);
+
+  ComPtr<ISelectionItemProvider> selection_item_provider;
+  EXPECT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPatternProvider(
+      UIA_SelectionItemPatternId, &selection_item_provider));
+  ASSERT_NE(nullptr, selection_item_provider.Get());
 
   BOOL selected;
 
@@ -5588,37 +6110,37 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderGrid) {
   // flip kSelected for kCell when the kDoDefault action is fired.
 
   // Initial State
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_FALSE(selected);
 
   // AddToSelection should fire event when not selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->AddToSelection());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->AddToSelection());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 
   // AddToSelection should not fire event when selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->AddToSelection());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->AddToSelection());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 
   // RemoveFromSelection should fire event when selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->RemoveFromSelection());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->RemoveFromSelection());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_FALSE(selected);
 
   // RemoveFromSelection should not fire event when not selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->RemoveFromSelection());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->RemoveFromSelection());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_FALSE(selected);
 
   // Select should fire event when not selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->Select());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->Select());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 
   // Select should not fire event when selected
-  EXPECT_HRESULT_SUCCEEDED(item_provider->Select());
-  EXPECT_HRESULT_SUCCEEDED(item_provider->get_IsSelected(&selected));
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->Select());
+  EXPECT_HRESULT_SUCCEEDED(selection_item_provider->get_IsSelected(&selected));
   EXPECT_TRUE(selected);
 }
 
@@ -5643,20 +6165,20 @@ TEST_F(AXPlatformNodeWinTest, TestISelectionItemProviderGetSelectionContainer) {
   ComPtr<IRawElementProviderSimple> container_provider =
       GetRootIRawElementProviderSimple();
 
-  const auto* row = GetRootNode()->children()[0];
+  const auto* row = GetRootAsAXNode()->children()[0];
   ComPtr<ISelectionItemProvider> item_provider =
       QueryInterfaceFromNode<ISelectionItemProvider>(row->children()[0]);
 
-  CComPtr<IRawElementProviderSimple> container;
+  ComPtr<IRawElementProviderSimple> container;
   EXPECT_HRESULT_SUCCEEDED(item_provider->get_SelectionContainer(&container));
   EXPECT_NE(nullptr, container);
-  EXPECT_EQ(container, container_provider.Get());
+  EXPECT_EQ(container, container_provider);
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIValueProvider_GetValue) {
   AXNodeData root;
   root.id = 1;
-  root.role = ax::mojom::Role::kNone;
+  root.role = ax::mojom::Role::kRootWebArea;
 
   AXNodeData child1;
   child1.id = 2;
@@ -5667,6 +6189,7 @@ TEST_F(AXPlatformNodeWinTest, TestIValueProvider_GetValue) {
   AXNodeData child2;
   child2.id = 3;
   child2.role = ax::mojom::Role::kTextField;
+  child2.AddState(ax::mojom::State::kEditable);
   child2.AddStringAttribute(ax::mojom::StringAttribute::kValue, "test");
   root.child_ids.push_back(child2.id);
 
@@ -5683,28 +6206,51 @@ TEST_F(AXPlatformNodeWinTest, TestIValueProvider_GetValue) {
   ScopedBstr bstr_value;
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[0])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[0])
           ->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"3", bstr_value);
+  EXPECT_STREQ(L"3", bstr_value.Get());
   bstr_value.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[1])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[1])
           ->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"test", bstr_value);
+  EXPECT_STREQ(L"test", bstr_value.Get());
   bstr_value.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[2])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[2])
           ->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"test", bstr_value);
+  EXPECT_STREQ(L"test", bstr_value.Get());
   bstr_value.Reset();
+}
+
+TEST_F(AXPlatformNodeWinTest, TestIAccessibleValue) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+
+  AXNodeData child;
+  child.id = 2;
+  child.role = ax::mojom::Role::kSlider;
+  child.AddFloatAttribute(ax::mojom::FloatAttribute::kValueForRange, 3.0f);
+  child.AddFloatAttribute(ax::mojom::FloatAttribute::kMinValueForRange, 1.0f);
+  child.AddFloatAttribute(ax::mojom::FloatAttribute::kMaxValueForRange, 9.0f);
+  root.child_ids.push_back(child.id);
+
+  Init(root, child);
+
+  ScopedVariant value;
+  EXPECT_HRESULT_SUCCEEDED(
+      QueryInterfaceFromNode<IAccessibleValue>(GetRootAsAXNode()->children()[0])
+          ->get_currentValue(value.Receive()));
+  ASSERT_EQ(VT_R8, value.type());
+  EXPECT_DOUBLE_EQ(3.0, V_R8(value.ptr()));
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIValueProvider_SetValue) {
   AXNodeData root;
   root.id = 1;
-  root.role = ax::mojom::Role::kNone;
+  root.role = ax::mojom::Role::kRootWebArea;
 
   AXNodeData child1;
   child1.id = 2;
@@ -5729,43 +6275,44 @@ TEST_F(AXPlatformNodeWinTest, TestIValueProvider_SetValue) {
   Init(root, child1, child2, child3);
 
   ComPtr<IValueProvider> root_provider =
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode());
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode());
   ComPtr<IValueProvider> provider1 =
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[0]);
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[0]);
   ComPtr<IValueProvider> provider2 =
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[1]);
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[1]);
   ComPtr<IValueProvider> provider3 =
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[2]);
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[2]);
 
   ScopedBstr bstr_value;
 
   // Note: TestAXNodeWrapper::AccessibilityPerformAction will
   // modify the value when the kSetValue action is fired.
 
-  EXPECT_HRESULT_SUCCEEDED(provider1->SetValue(L"2"));
+  EXPECT_UIA_ELEMENTNOTENABLED(provider1->SetValue(L"2"));
   EXPECT_HRESULT_SUCCEEDED(provider1->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"2", bstr_value);
+  EXPECT_STREQ(L"3", bstr_value.Get());
   bstr_value.Reset();
 
   EXPECT_HRESULT_SUCCEEDED(provider2->SetValue(L"changed"));
   EXPECT_HRESULT_SUCCEEDED(provider2->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"changed", bstr_value);
+  EXPECT_STREQ(L"changed", bstr_value.Get());
   bstr_value.Reset();
 
   EXPECT_UIA_ELEMENTNOTENABLED(provider3->SetValue(L"changed"));
   EXPECT_HRESULT_SUCCEEDED(provider3->get_Value(bstr_value.Receive()));
-  EXPECT_STREQ(L"test", bstr_value);
+  EXPECT_STREQ(L"test", bstr_value.Get());
   bstr_value.Reset();
 }
 
 TEST_F(AXPlatformNodeWinTest, TestIValueProvider_IsReadOnly) {
   AXNodeData root;
   root.id = 1;
-  root.role = ax::mojom::Role::kNone;
+  root.role = ax::mojom::Role::kRootWebArea;
 
   AXNodeData child1;
   child1.id = 2;
   child1.role = ax::mojom::Role::kTextField;
+  child1.AddState(ax::mojom::State::kEditable);
   root.child_ids.push_back(child1.id);
 
   AXNodeData child2;
@@ -5782,24 +6329,111 @@ TEST_F(AXPlatformNodeWinTest, TestIValueProvider_IsReadOnly) {
                          static_cast<int>(ax::mojom::Restriction::kDisabled));
   root.child_ids.push_back(child3.id);
 
-  Init(root, child1, child2, child3);
+  AXNodeData child4;
+  child4.id = 5;
+  child4.role = ax::mojom::Role::kLink;
+  root.child_ids.push_back(child4.id);
+
+  Init(root, child1, child2, child3, child4);
 
   BOOL is_readonly = false;
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[0])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[0])
           ->get_IsReadOnly(&is_readonly));
   EXPECT_FALSE(is_readonly);
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[1])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[1])
           ->get_IsReadOnly(&is_readonly));
   EXPECT_TRUE(is_readonly);
 
   EXPECT_HRESULT_SUCCEEDED(
-      QueryInterfaceFromNode<IValueProvider>(GetRootNode()->children()[2])
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[2])
           ->get_IsReadOnly(&is_readonly));
   EXPECT_TRUE(is_readonly);
+
+  EXPECT_HRESULT_SUCCEEDED(
+      QueryInterfaceFromNode<IValueProvider>(GetRootAsAXNode()->children()[3])
+          ->get_IsReadOnly(&is_readonly));
+  EXPECT_TRUE(is_readonly);
+}
+
+TEST_F(AXPlatformNodeWinTest, IScrollProviderSetScrollPercent) {
+  AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kGenericContainer;
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollX, 0);
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollXMin, 0);
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollXMax, 100);
+
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollY, 60);
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollYMin, 10);
+  root.AddIntAttribute(ax::mojom::IntAttribute::kScrollYMax, 60);
+
+  Init(root);
+
+  ComPtr<IScrollProvider> scroll_provider =
+      QueryInterfaceFromNode<IScrollProvider>(GetRootAsAXNode());
+  double x_scroll_percent;
+  double y_scroll_percent;
+
+  // Set x scroll percent: 0%, y scroll percent: 0%.
+  // Expected x scroll percent: 0%, y scroll percent: 0%.
+  EXPECT_HRESULT_SUCCEEDED(scroll_provider->SetScrollPercent(0, 0));
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_HorizontalScrollPercent(&x_scroll_percent));
+  EXPECT_EQ(x_scroll_percent, 0);
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_VerticalScrollPercent(&y_scroll_percent));
+  EXPECT_EQ(y_scroll_percent, 0);
+
+  // Set x scroll percent: 100%, y scroll percent: 100%.
+  // Expected x scroll percent: 100%, y scroll percent: 100%.
+  EXPECT_HRESULT_SUCCEEDED(scroll_provider->SetScrollPercent(100, 100));
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_HorizontalScrollPercent(&x_scroll_percent));
+  EXPECT_EQ(x_scroll_percent, 100);
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_VerticalScrollPercent(&y_scroll_percent));
+  EXPECT_EQ(y_scroll_percent, 100);
+
+  // Set x scroll percent: 500%, y scroll percent: 600%.
+  // Expected x scroll percent: 100%, y scroll percent: 100%.
+  EXPECT_HRESULT_SUCCEEDED(scroll_provider->SetScrollPercent(500, 600));
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_HorizontalScrollPercent(&x_scroll_percent));
+  EXPECT_EQ(x_scroll_percent, 100);
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_VerticalScrollPercent(&y_scroll_percent));
+  EXPECT_EQ(y_scroll_percent, 100);
+
+  // Set x scroll percent: -100%, y scroll percent: -200%.
+  // Expected x scroll percent: 0%, y scroll percent: 0%.
+  EXPECT_HRESULT_SUCCEEDED(scroll_provider->SetScrollPercent(-100, -200));
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_HorizontalScrollPercent(&x_scroll_percent));
+  EXPECT_EQ(x_scroll_percent, 0);
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_VerticalScrollPercent(&y_scroll_percent));
+  EXPECT_EQ(y_scroll_percent, 0);
+
+  // Set x scroll percent: 12%, y scroll percent: 34%.
+  // Expected x scroll percent: 12%, y scroll percent: 34%.
+  EXPECT_HRESULT_SUCCEEDED(scroll_provider->SetScrollPercent(12, 34));
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_HorizontalScrollPercent(&x_scroll_percent));
+  EXPECT_EQ(x_scroll_percent, 12);
+  EXPECT_HRESULT_SUCCEEDED(
+      scroll_provider->get_VerticalScrollPercent(&y_scroll_percent));
+  EXPECT_EQ(y_scroll_percent, 34);
+}
+
+TEST_F(AXPlatformNodeWinTest, TestSanitizeStringAttributeForIA2) {
+  std::string input("\\:=,;");
+  std::string output;
+  AXPlatformNodeWin::SanitizeStringAttributeForIA2(input, &output);
+  EXPECT_EQ("\\\\\\:\\=\\,\\;", output);
 }
 
 }  // namespace ui

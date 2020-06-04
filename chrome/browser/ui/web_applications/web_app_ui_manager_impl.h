@@ -25,6 +25,8 @@ class WebAppProvider;
 class WebAppDialogManager;
 
 // This KeyedService is a UI counterpart for WebAppProvider.
+// TODO(calamity): Rename this to WebAppProviderDelegate to better reflect that
+// this class serves a wide range of Web Applications <-> Browser purposes.
 class WebAppUiManagerImpl : public BrowserListObserver, public WebAppUiManager {
  public:
   static WebAppUiManagerImpl* Get(Profile* profile);
@@ -32,23 +34,39 @@ class WebAppUiManagerImpl : public BrowserListObserver, public WebAppUiManager {
   explicit WebAppUiManagerImpl(Profile* profile);
   ~WebAppUiManagerImpl() override;
 
+  WebAppDialogManager& dialog_manager();
+
   // WebAppUiManager:
-  WebAppDialogManager& dialog_manager() override;
+  WebAppUiManagerImpl* AsImpl() override;
   size_t GetNumWindowsForApp(const AppId& app_id) override;
   void NotifyOnAllAppWindowsClosed(const AppId& app_id,
                                    base::OnceClosure callback) override;
-  void MigrateOSAttributes(const AppId& from, const AppId& to) override;
+  void UninstallAndReplace(const std::vector<AppId>& from_apps,
+                           const AppId& to_app) override;
+  bool CanAddAppToQuickLaunchBar() const override;
+  void AddAppToQuickLaunchBar(const AppId& app_id) override;
+  bool IsInAppWindow(content::WebContents* web_contents) const override;
+  bool CanReparentAppTabToWindow(const AppId& app_id,
+                                 bool shortcut_created) const override;
+  void ReparentAppTabToWindow(content::WebContents* contents,
+                              const AppId& app_id,
+                              bool shortcut_created) override;
 
   // BrowserListObserver:
   void OnBrowserAdded(Browser* browser) override;
   void OnBrowserRemoved(Browser* browser) override;
 
  private:
-  base::Optional<AppId> GetAppIdForBrowser(Browser* browser);
+  // Returns true if Browser is for an installed App.
+  bool IsBrowserForInstalledApp(Browser* browser);
+
+  // Returns AppId of the Browser's installed App, |IsBrowserForInstalledApp|
+  // must be true.
+  const AppId GetAppIdForBrowser(Browser* browser);
 
   std::unique_ptr<WebAppDialogManager> dialog_manager_;
 
-  Profile* profile_;
+  Profile* const profile_;
 
   std::map<AppId, std::vector<base::OnceClosure>> windows_closed_requests_map_;
   std::map<AppId, size_t> num_windows_for_apps_map_;

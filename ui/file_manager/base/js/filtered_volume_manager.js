@@ -116,10 +116,6 @@ class FilteredVolumeManager extends cr.EventTarget {
       case AllowedPaths.ANY_PATH:
       case AllowedPaths.ANY_PATH_OR_URL:
         return true;
-      case AllowedPaths.NATIVE_OR_DRIVE_PATH:
-        return (
-            VolumeManagerCommon.VolumeType.isNative(volumeType) ||
-            volumeType == VolumeManagerCommon.VolumeType.DRIVE);
       case AllowedPaths.NATIVE_PATH:
         return VolumeManagerCommon.VolumeType.isNative(volumeType);
     }
@@ -286,15 +282,16 @@ class FilteredVolumeManager extends cr.EventTarget {
   }
 
   /**
-   * @return {VolumeManagerCommon.DriveConnectionState} Current drive connection
-   *     state.
+   * @return {chrome.fileManagerPrivate.DriveConnectionState} Current drive
+   *     connection state.
    */
   getDriveConnectionState() {
     if (!this.isAllowedVolumeType_(VolumeManagerCommon.VolumeType.DRIVE) ||
         !this.volumeManager_) {
       return {
-        type: VolumeManagerCommon.DriveConnectionType.OFFLINE,
-        reason: VolumeManagerCommon.DriveConnectionReason.NO_SERVICE
+        type: chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE,
+        reason: chrome.fileManagerPrivate.DriveOfflineReason.NO_SERVICE,
+        hasCellularNetworkAccess: false,
       };
     }
 
@@ -388,31 +385,16 @@ class FilteredVolumeManager extends cr.EventTarget {
     return volumeInfo;
   }
 
-  /**
-   * Requests to mount the archive file.
-   * @param {string} fileUrl The path to the archive file to be mounted.
-   * @param {function(VolumeInfo)} successCallback Called with the VolumeInfo
-   *     instance.
-   * @param {function(VolumeManagerCommon.VolumeError)} errorCallback Called
-   *     when an error occurs.
-   */
-  mountArchive(fileUrl, successCallback, errorCallback) {
-    this.ensureInitialized(() => {
-      this.volumeManager_.mountArchive(fileUrl, successCallback, errorCallback);
-    });
+  /** @override */
+  async mountArchive(fileUrl) {
+    await this.initialized_;
+    return this.volumeManager_.mountArchive(fileUrl);
   }
 
-  /**
-   * Requests unmount the specified volume.
-   * @param {!VolumeInfo} volumeInfo Volume to be unmounted.
-   * @param {function()} successCallback Called on success.
-   * @param {function(VolumeManagerCommon.VolumeError)} errorCallback Called
-   *     when an error occurs.
-   */
-  unmount(volumeInfo, successCallback, errorCallback) {
-    this.ensureInitialized(() => {
-      this.volumeManager_.unmount(volumeInfo, successCallback, errorCallback);
-    });
+  /** @override */
+  async unmount(volumeInfo) {
+    await this.initialized_;
+    return this.volumeManager_.unmount(volumeInfo);
   }
 
   /**

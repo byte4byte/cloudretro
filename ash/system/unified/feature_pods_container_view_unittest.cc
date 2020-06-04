@@ -14,6 +14,8 @@
 #include "ash/system/unified/unified_system_tray_model.h"
 #include "ash/test/ash_test_base.h"
 #include "base/test/scoped_feature_list.h"
+#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/views/view_observer.h"
 
 namespace ash {
@@ -28,7 +30,7 @@ class FeaturePodsContainerViewTest : public NoSessionAshTestBase,
   // AshTestBase:
   void SetUp() override {
     AshTestBase::SetUp();
-    model_ = std::make_unique<UnifiedSystemTrayModel>();
+    model_ = std::make_unique<UnifiedSystemTrayModel>(nullptr);
     controller_ = std::make_unique<UnifiedSystemTrayController>(model_.get());
     container_ = std::make_unique<FeaturePodsContainerView>(
         controller_.get(), true /* initially_expanded */);
@@ -60,7 +62,7 @@ class FeaturePodsContainerViewTest : public NoSessionAshTestBase,
  protected:
   void EnablePagination() {
     scoped_feature_list_->InitAndEnableFeature(
-        features::kSystemTrayFeaturePodsPagination);
+        features::kUnifiedMessageCenterRefactor);
   }
 
   void AddButtons(int count) {
@@ -197,7 +199,7 @@ TEST_F(FeaturePodsContainerViewTest, NumberOfPagesChanged) {
   const int kNumberOfPages = 8;
 
   EnablePagination();
-  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodItemsRows *
+  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodMaxRows *
              kNumberOfPages);
 
   // Adding buttons to fill kNumberOfPages should cause the the same number of
@@ -213,7 +215,7 @@ TEST_F(FeaturePodsContainerViewTest, PaginationTransition) {
   const int kNumberOfPages = 8;
 
   EnablePagination();
-  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodItemsRows *
+  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodMaxRows *
              kNumberOfPages);
 
   // Position of a button should slide to the left during a page
@@ -248,11 +250,50 @@ TEST_F(FeaturePodsContainerViewTest, PaginationTransition) {
   EXPECT_EQ(final_bounds, buttons_[0]->bounds());
 }
 
+TEST_F(FeaturePodsContainerViewTest, PaginationDynamicRows) {
+  const int kNumberOfFeaturePods = kUnifiedFeaturePodItemsInRow * 3;
+  const int padding =
+      kUnifiedFeaturePodTopPadding + kUnifiedFeaturePodBottomPadding;
+  int row_height =
+      kUnifiedFeaturePodSize.height() + kUnifiedFeaturePodVerticalPadding;
+  int min_height_for_three_rows = kUnifiedFeaturePodMaxRows * row_height +
+                                  padding + kMessageCenterCollapseThreshold;
+
+  EnablePagination();
+  AddButtons(kNumberOfFeaturePods);
+
+  // Expect 1 row of feature pods even if there is 0 height.
+  container()->SetMaxHeight(0);
+  int expected_number_of_pages =
+      kNumberOfFeaturePods / kUnifiedFeaturePodItemsInRow;
+  if (kNumberOfFeaturePods % kUnifiedFeaturePodItemsInRow)
+    expected_number_of_pages += 1;
+  EXPECT_EQ(expected_number_of_pages, pagination_model()->total_pages());
+
+  // Expect 2 rows of feature pods when there is enough height to display them
+  // but less than enough to display 3 rows.
+  container()->SetMaxHeight(min_height_for_three_rows - 1);
+  expected_number_of_pages =
+      kNumberOfFeaturePods / (2 * kUnifiedFeaturePodItemsInRow);
+  if (kNumberOfFeaturePods % (2 * kUnifiedFeaturePodItemsInRow))
+    expected_number_of_pages += 1;
+  EXPECT_EQ(expected_number_of_pages, pagination_model()->total_pages());
+
+  // Expect 3 rows of feature pods at max even when the max height is very
+  // large.
+  container()->SetMaxHeight(min_height_for_three_rows + 1);
+  expected_number_of_pages =
+      kNumberOfFeaturePods / (3 * kUnifiedFeaturePodItemsInRow);
+  if (kNumberOfFeaturePods % (3 * kUnifiedFeaturePodItemsInRow))
+    expected_number_of_pages += 1;
+  EXPECT_EQ(expected_number_of_pages, pagination_model()->total_pages());
+}
+
 TEST_F(FeaturePodsContainerViewTest, PaginationGestureHandling) {
   const int kNumberOfPages = 8;
 
   EnablePagination();
-  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodItemsRows *
+  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodMaxRows *
              kNumberOfPages);
 
   gfx::Point container_origin = container()->GetBoundsInScreen().origin();
@@ -320,7 +361,7 @@ TEST_F(FeaturePodsContainerViewTest, PaginationScrollHandling) {
   const int num_fingers = 2;
 
   EnablePagination();
-  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodItemsRows *
+  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodMaxRows *
              kNumberOfPages);
 
   EXPECT_EQ(kNumberOfPages, pagination_model()->total_pages());
@@ -371,7 +412,7 @@ TEST_F(FeaturePodsContainerViewTest, PaginationMouseWheelHandling) {
   const int kNumberOfPages = 8;
 
   EnablePagination();
-  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodItemsRows *
+  AddButtons(kUnifiedFeaturePodItemsInRow * kUnifiedFeaturePodMaxRows *
              kNumberOfPages);
 
   gfx::Point container_origin = container()->GetBoundsInScreen().origin();
@@ -406,6 +447,20 @@ TEST_F(FeaturePodsContainerViewTest, PaginationMouseWheelHandling) {
     EXPECT_EQ(previous_page - 1, current_page);
     previous_page = current_page;
   }
+}
+
+TEST_F(FeaturePodsContainerViewTest, NonTogglableButton) {
+  // Add one togglable and one non-tobblable button.
+  buttons_.push_back(new FeaturePodButton(this, /*is_togglable=*/false));
+  AddButtons(1);
+
+  // Non-togglable buttons should be labelled as a regular button for
+  // accessibility and vice versa.
+  ui::AXNodeData ax_node_data;
+  buttons_[0]->icon_button()->GetAccessibleNodeData(&ax_node_data);
+  EXPECT_EQ(ax_node_data.role, ax::mojom::Role::kButton);
+  buttons_[1]->icon_button()->GetAccessibleNodeData(&ax_node_data);
+  EXPECT_EQ(ax_node_data.role, ax::mojom::Role::kToggleButton);
 }
 
 }  // namespace ash

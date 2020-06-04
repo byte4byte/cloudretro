@@ -5,17 +5,19 @@
 package org.chromium.chrome.browser.photo_picker;
 
 import android.app.Activity;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.net.Uri;
-import android.support.v7.app.AlertDialog;
+
+import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.app.AlertDialog;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.R;
 import org.chromium.ui.PhotoPickerListener;
-import org.chromium.ui.base.WindowAndroid;
 
 import java.util.List;
 
@@ -23,7 +25,8 @@ import java.util.List;
  * UI for the photo chooser that shows on the Android platform as a result of
  * &lt;input type=file accept=image &gt; form element.
  */
-public class PhotoPickerDialog extends AlertDialog {
+public class PhotoPickerDialog
+        extends AlertDialog implements PhotoPickerToolbar.PhotoPickerToolbarDelegate {
     // Our context.
     private Context mContext;
 
@@ -77,21 +80,34 @@ public class PhotoPickerDialog extends AlertDialog {
     /**
      * The PhotoPickerDialog constructor.
      * @param context The context to use.
+     * @param contentResolver The ContentResolver to use to retrieve image metadata from disk.
      * @param listener The listener object that gets notified when an action is taken.
      * @param multiSelectionAllowed Whether the photo picker should allow multiple items to be
      *                              selected.
      * @param mimeTypes A list of mime types to show in the dialog.
      */
-    public PhotoPickerDialog(Context context, PhotoPickerListener listener,
-            boolean multiSelectionAllowed, List<String> mimeTypes) {
+    public PhotoPickerDialog(Context context, ContentResolver contentResolver,
+            PhotoPickerListener listener, boolean multiSelectionAllowed, List<String> mimeTypes) {
         super(context, R.style.Theme_Chromium_Fullscreen);
         mContext = context;
         mListenerWrapper = new PhotoPickerListenerWrapper(listener);
 
         // Initialize the main content view.
-        mCategoryView = new PickerCategoryView(context, multiSelectionAllowed);
+        mCategoryView =
+                new PickerCategoryView(context, contentResolver, multiSelectionAllowed, this);
         mCategoryView.initialize(this, mListenerWrapper, mimeTypes);
         setView(mCategoryView);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Pressing Back when a video is playing, should only end the video playback.
+        boolean videoWasStopped = mCategoryView.closeVideoPlayer();
+        if (videoWasStopped) {
+            return;
+        } else {
+            super.onBackPressed();
+        }
     }
 
     @Override
@@ -115,8 +131,16 @@ public class PhotoPickerDialog extends AlertDialog {
                         dismiss();
                     }
                 }
-            }, WindowAndroid.activityFromContext(mContext));
+            }, ContextUtils.activityFromContext(mContext));
         }
+    }
+
+    /**
+     * Cancels the dialog in response to a back navigation.
+     */
+    @Override
+    public void onNavigationBackCallback() {
+        cancel();
     }
 
     @VisibleForTesting

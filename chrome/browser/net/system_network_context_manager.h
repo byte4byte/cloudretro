@@ -12,14 +12,18 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
+#include "chrome/browser/net/dns_util.h"
 #include "chrome/browser/net/proxy_config_monitor.h"
+#include "chrome/browser/net/stub_resolver_config_reader.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_member.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "net/dns/dns_config.h"
 #include "services/network/public/mojom/host_resolver.mojom-forward.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom-forward.h"
 #include "services/network/public/mojom/ssl_config.mojom-forward.h"
-#include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -34,6 +38,7 @@ class SharedURLLoaderFactory;
 
 namespace net_log {
 class NetExportFileWriter;
+class NetLogProxySource;
 }
 
 // Responsible for creating and managing access to the system NetworkContext.
@@ -76,6 +81,8 @@ class SystemNetworkContextManager {
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  static StubResolverConfigReader* GetStubResolverConfigReader();
+
   // Returns the System NetworkContext. May only be called after SetUp(). Does
   // any initialization of the NetworkService that may be needed when first
   // called.
@@ -99,11 +106,12 @@ class SystemNetworkContextManager {
   // NetworkService, and for those using the network service (if enabled).
   void DisableQuic();
 
-  // Returns an SSLConfigClientRequest that can be passed as a
+  // Returns an mojo::PendingReceiver<SSLConfigClient> that can be passed as a
   // NetorkContextParam.
-  network::mojom::SSLConfigClientRequest GetSSLConfigClientRequest();
+  mojo::PendingReceiver<network::mojom::SSLConfigClient>
+  GetSSLConfigClientReceiver();
 
-  // Populates |initial_ssl_config| and |ssl_config_client_request| members of
+  // Populates |initial_ssl_config| and |ssl_config_client_receiver| members of
   // |network_context_params|. As long as the SystemNetworkContextManager
   // exists, any NetworkContext created with the params will continue to get
   // SSL configuration updates.
@@ -128,16 +136,21 @@ class SystemNetworkContextManager {
   // use only.
   void FlushNetworkInterfaceForTesting();
 
-  // Returns configuration that would be sent to the stub DNS resolver.
-  static void GetStubResolverConfigForTesting(
-      bool* stub_resolver_enabled,
-      base::Optional<std::vector<network::mojom::DnsOverHttpsServerPtr>>*
-          dns_over_https_servers);
-
   static network::mojom::HttpAuthStaticParamsPtr
   GetHttpAuthStaticParamsForTesting();
   static network::mojom::HttpAuthDynamicParamsPtr
   GetHttpAuthDynamicParamsForTesting();
+
+  // Enables Certificate Transparency and enforcing the Chrome Certificate
+  // Transparency Policy. For test use only. Use base::nullopt_t to reset to
+  // the default state.
+  static void SetEnableCertificateTransparencyForTesting(
+      base::Optional<bool> enabled);
+
+  static void set_stub_resolver_config_reader_for_testing(
+      StubResolverConfigReader* reader) {
+    stub_resolver_config_reader_for_testing_ = reader;
+  }
 
  private:
   class URLLoaderFactoryForSystem;
@@ -162,13 +175,13 @@ class SystemNetworkContextManager {
   ProxyConfigMonitor proxy_config_monitor_;
 
   // NetworkContext using the network service, if the network service is
-  // enabled. nullptr, otherwise.
-  network::mojom::NetworkContextPtr network_service_network_context_;
+  // enabled. mojo::NullRemote(), otherwise.
+  mojo::Remote<network::mojom::NetworkContext> network_service_network_context_;
 
   // URLLoaderFactory backed by the NetworkContext returned by GetContext(), so
   // consumers don't all need to create their own factory.
   scoped_refptr<URLLoaderFactoryForSystem> shared_url_loader_factory_;
-  network::mojom::URLLoaderFactoryPtr url_loader_factory_;
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory_;
 
   bool is_quic_allowed_ = true;
 
@@ -176,8 +189,16 @@ class SystemNetworkContextManager {
 
   BooleanPrefMember enable_referrers_;
 
+  // Copies NetLog events from the browser process to the Network Service, if
+  // the network service is running in a separate process. It will be destroyed
+  // and re-created on Network Service crash.
+  std::unique_ptr<net_log::NetLogProxySource> net_log_proxy_source_;
+
   // Initialized on first access.
   std::unique_ptr<net_log::NetExportFileWriter> net_export_file_writer_;
+
+  StubResolverConfigReader stub_resolver_config_reader_;
+  static StubResolverConfigReader* stub_resolver_config_reader_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemNetworkContextManager);
 };

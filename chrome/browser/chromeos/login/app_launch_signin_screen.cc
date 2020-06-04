@@ -39,7 +39,7 @@ void AppLaunchSigninScreen::Show() {
   InitOwnerUserList();
   oobe_ui_->web_ui()->CallJavascriptFunctionUnsafe(
       "login.AccountPickerScreen.setShouldShowApps", base::Value(false));
-  oobe_ui_->ShowSigninScreen(LoginScreenContext(), this, NULL);
+  oobe_ui_->ShowSigninScreen(this, nullptr);
 }
 
 void AppLaunchSigninScreen::InitOwnerUserList() {
@@ -79,9 +79,9 @@ void AppLaunchSigninScreen::Login(const UserContext& user_context,
   // Note: CreateAuthenticator doesn't necessarily create
   // a new Authenticator object, and could reuse an existing one.
   authenticator_ = UserSessionManager::GetInstance()->CreateAuthenticator(this);
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(&Authenticator::AuthenticateToUnlock,
-                                          authenticator_.get(), user_context));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&Authenticator::AuthenticateToUnlock,
+                                authenticator_.get(), user_context));
 }
 
 void AppLaunchSigninScreen::OnSigninScreenReady() {}

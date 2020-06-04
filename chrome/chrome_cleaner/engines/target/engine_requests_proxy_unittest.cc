@@ -15,7 +15,7 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "chrome/chrome_cleaner/engines/common/registry_util.h"
@@ -126,7 +126,7 @@ MULTIPROCESS_TEST_MAIN(GetFileAttributesNoHangs) {
   if (!child_process)
     return 1;
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -187,7 +187,7 @@ MULTIPROCESS_TEST_MAIN(GetKnownFolderPathNoHangs) {
   if (!child_process)
     return 1;
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -229,7 +229,7 @@ MULTIPROCESS_TEST_MAIN(GetProcessesNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -314,7 +314,7 @@ MULTIPROCESS_TEST_MAIN(GetTasksNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -356,7 +356,7 @@ MULTIPROCESS_TEST_MAIN(GetProcessImagePathNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -398,7 +398,7 @@ MULTIPROCESS_TEST_MAIN(GetLoadedModulesNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -437,7 +437,7 @@ MULTIPROCESS_TEST_MAIN(GetProcessCommandLineNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -481,7 +481,7 @@ MULTIPROCESS_TEST_MAIN(GetUserInfoFromSIDNoHangs) {
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
     return 1;
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   scoped_refptr<EngineRequestsProxy> proxy(
       child_process->GetEngineRequestsProxy());
@@ -556,7 +556,7 @@ MULTIPROCESS_TEST_MAIN(OpenReadOnlyRegistryNoHangs) {
       SandboxErrorCode::NULL_ROOT_KEY,
       proxy->OpenReadOnlyRegistry(nullptr, base::string16(), 0, &reg_handle));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_EQ(
       SandboxErrorCode::INTERNAL_ERROR,
@@ -684,7 +684,7 @@ MULTIPROCESS_TEST_MAIN(NtOpenReadOnlyRegistryNoHangs) {
             proxy->NtOpenReadOnlyRegistry(
                 nullptr, String16EmbeddedNulls(too_long), 0, &reg_handle));
 
-  child_process->UnbindRequestsPtrs();
+  child_process->UnbindRequestsRemotes();
 
   EXPECT_EQ(SandboxErrorCode::INTERNAL_ERROR,
             proxy->NtOpenReadOnlyRegistry(nullptr, String16EmbeddedNulls(), 0,
@@ -724,7 +724,7 @@ class EngineRequestsProxyTest
 };
 
 TEST_P(EngineRequestsProxyTest, TestRequest) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   // Create resources that tests running in the sandbox will not have access to
   // create for themselves, even before calling LowerToken.

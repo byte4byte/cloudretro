@@ -10,9 +10,6 @@ import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
-import android.support.annotation.ColorRes;
-import android.support.annotation.Nullable;
-import android.support.annotation.StringRes;
 import android.util.AttributeSet;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -22,34 +19,38 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 
+import androidx.annotation.ColorRes;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ThemeColorProvider;
 import org.chromium.chrome.browser.ThemeColorProvider.ThemeColorObserver;
 import org.chromium.chrome.browser.ThemeColorProvider.TintObserver;
-import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.compositor.Invalidator;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
-import org.chromium.chrome.browser.fullscreen.BrowserStateBrowserControlsVisibilityDelegate;
+import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
+import org.chromium.chrome.browser.findinpage.FindToolbar;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.toolbar.ButtonData;
+import org.chromium.chrome.browser.toolbar.HomeButton;
 import org.chromium.chrome.browser.toolbar.MenuButton;
 import org.chromium.chrome.browser.toolbar.TabCountProvider;
+import org.chromium.chrome.browser.toolbar.ToolbarColors;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
+import org.chromium.chrome.browser.toolbar.ToolbarProgressBar;
 import org.chromium.chrome.browser.toolbar.ToolbarTabController;
 import org.chromium.chrome.browser.toolbar.top.TopToolbarCoordinator.UrlExpansionObserver;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.ViewUtils;
-import org.chromium.chrome.browser.widget.ToolbarProgressBar;
-import org.chromium.chrome.browser.widget.ViewHighlighter;
-import org.chromium.chrome.browser.widget.textbubble.TextBubble;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuButtonHelper;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.ui.UiUtils;
+import org.chromium.ui.base.ViewUtils;
 
 /**
  * Layout class that contains the base shared logic for manipulating the toolbar component. For
@@ -91,7 +92,7 @@ public abstract class ToolbarLayout
      */
     public ToolbarLayout(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mDefaultTint = ColorUtils.getThemedToolbarIconTint(getContext(), false);
+        mDefaultTint = ToolbarColors.getThemedToolbarIconTint(getContext(), false);
         mProgressBar = createProgressBar();
 
         addOnLayoutChangeListener(new OnLayoutChangeListener() {
@@ -315,9 +316,6 @@ public abstract class ToolbarLayout
             public @ColorRes int getSecurityIconColorStateList() {
                 return 0;
             }
-
-            @Override
-            public void setShouldShowGoogleLogo(boolean shouldShowGoogleLogo) {}
         };
 
         // Set menu button background in case it was previously called before inflation
@@ -452,7 +450,7 @@ public abstract class ToolbarLayout
 
     /**
      * Gives inheriting classes the chance to respond to
-     * {@link org.chromium.chrome.browser.widget.findinpage.FindToolbar} state changes.
+     * {@link FindToolbar} state changes.
      * @param showing Whether or not the {@code FindToolbar} will be showing.
      */
     void handleFindLocationBarStateChange(boolean showing) {
@@ -460,16 +458,18 @@ public abstract class ToolbarLayout
     }
 
     /**
-     * Sets the delegate to handle visibility of browser controls.
-     */
-    void setBrowserControlsVisibilityDelegate(
-            BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate) {}
-
-    /**
      * Sets the OnClickListener that will be notified when the TabSwitcher button is pressed.
      * @param listener The callback that will be notified when the TabSwitcher button is pressed.
      */
     void setOnTabSwitcherClickHandler(OnClickListener listener) {}
+
+    /**
+     * Sets the OnLongClickListener that will be notified when the TabSwitcher button is long
+     *         pressed.
+     * @param listener The callback that will be notified when the TabSwitcher button is long
+     *         pressed.
+     */
+    void setOnTabSwitcherLongClickHandler(OnLongClickListener listener) {}
 
     /**
      * Sets the OnClickListener that will be notified when the bookmark button is pressed.
@@ -624,6 +624,8 @@ public abstract class ToolbarLayout
     }
 
     void setLayoutUpdateHost(LayoutUpdateHost layoutUpdateHost) {}
+
+    void setOverviewModeBehavior(OverviewModeBehavior overviewModeBehavior) {}
 
     /**
      * @param attached Whether or not the web content is attached to the view heirarchy.
@@ -791,8 +793,10 @@ public abstract class ToolbarLayout
      * @return Whether or not the current Tab did go back.
      */
     boolean back() {
-        if (getLocationBar() != null) getLocationBar().setUrlBarFocus(false);
-        return mToolbarTabController != null ? mToolbarTabController.back() : false;
+        if (getLocationBar() != null) {
+            getLocationBar().setUrlBarFocus(false, null, LocationBar.OmniboxFocusReason.UNFOCUS);
+        }
+        return mToolbarTabController != null && mToolbarTabController.back();
     }
 
     /**
@@ -800,7 +804,9 @@ public abstract class ToolbarLayout
      * @return Whether or not the current Tab did go forward.
      */
     boolean forward() {
-        if (getLocationBar() != null) getLocationBar().setUrlBarFocus(false);
+        if (getLocationBar() != null) {
+            getLocationBar().setUrlBarFocus(false, null, LocationBar.OmniboxFocusReason.UNFOCUS);
+        }
         return mToolbarTabController != null ? mToolbarTabController.forward() : false;
     }
 
@@ -811,7 +817,9 @@ public abstract class ToolbarLayout
      * <p>The buttons of the toolbar will be updated as a result of making this call.
      */
     void stopOrReloadCurrentTab() {
-        if (getLocationBar() != null) getLocationBar().setUrlBarFocus(false);
+        if (getLocationBar() != null) {
+            getLocationBar().setUrlBarFocus(false, null, LocationBar.OmniboxFocusReason.UNFOCUS);
+        }
         if (mToolbarTabController != null) mToolbarTabController.stopOrReloadCurrentTab();
     }
 
@@ -819,7 +827,9 @@ public abstract class ToolbarLayout
      * Opens hompage in the current tab.
      */
     void openHomepage() {
-        if (getLocationBar() != null) getLocationBar().setUrlBarFocus(false);
+        if (getLocationBar() != null) {
+            getLocationBar().setUrlBarFocus(false, null, LocationBar.OmniboxFocusReason.UNFOCUS);
+        }
         if (mToolbarTabController != null) mToolbarTabController.openHomepage();
     }
 
@@ -849,49 +859,22 @@ public abstract class ToolbarLayout
     }
 
     /**
-     * Enable the experimental toolbar button.
-     * @param onClickListener The {@link OnClickListener} to be called when the button is clicked.
-     * @param image The drawable to display for the button.
-     * @param contentDescriptionResId The resource id of the content description for the button.
+     * Update the optional toolbar button, showing it if currently hidden.
+     * @param buttonData Display data for the button, e.g. the Drawable and content description.
      */
-    void enableExperimentalButton(OnClickListener onClickListener, Drawable image,
-            @StringRes int contentDescriptionResId) {}
+    void updateOptionalButton(ButtonData buttonData) {}
 
     /**
-     * Updates image displayed on experimental button.
+     * Hide the optional toolbar button.
      */
-    void updateExperimentalButtonImage(Drawable image) {}
+    void hideOptionalButton() {}
 
     /**
-     * Disable the experimental toolbar button.
+     * @return Optional button view.
      */
-    void disableExperimentalButton() {}
-
-    /**
-     * @return Experimental button view.
-     */
-    View getExperimentalButtonView() {
+    @VisibleForTesting
+    public View getOptionalButtonView() {
         return null;
-    }
-
-    /**
-     * Displays in-product help for experimental button.
-     * @param stringId The id of the string resource for the text that should be shown.
-     * @param accessibilityStringId The id of the string resource of the accessibility text.
-     * @param dismissedCallback The callback that will be called when in-product help is dismissed.
-     */
-    void showIPHOnExperimentalButton(@StringRes int stringId, @StringRes int accessibilityStringId,
-            Runnable dismissedCallback) {
-        View experimentalButton = getExperimentalButtonView();
-        TextBubble textBubble = new TextBubble(getContext(), experimentalButton, stringId,
-                accessibilityStringId, experimentalButton);
-        textBubble.setDismissOnTouchInteraction(true);
-        ViewHighlighter.turnOnHighlight(experimentalButton, true);
-        textBubble.addOnDismissListener(() -> {
-            ViewHighlighter.turnOffHighlight(experimentalButton);
-            dismissedCallback.run();
-        });
-        textBubble.show();
     }
 
     /**
@@ -908,4 +891,12 @@ public abstract class ToolbarLayout
      * it.
      */
     void setTabModelSelector(TabModelSelector selector) {}
+
+    /**
+     * @return {@link HomeButton} this {@link ToolbarLayout} contains.
+     */
+    @VisibleForTesting
+    public HomeButton getHomeButtonForTesting() {
+        return null;
+    }
 }

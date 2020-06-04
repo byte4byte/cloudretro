@@ -59,6 +59,7 @@ class CastToolbarButton : public ToolbarButton,
   // ToolbarButton:
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -75,7 +76,7 @@ class CastToolbarButton : public ToolbarButton,
 
   MediaRouterActionController* GetActionController() const;
 
-  SkColor GetIconColor(const gfx::VectorIcon* icon_id) const;
+  SkColor GetIconColor(ButtonState state, const gfx::VectorIcon* icon_id) const;
 
   Browser* const browser_;
   Profile* const profile_;

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -42,6 +43,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "net/http/http_response_headers.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
@@ -99,36 +101,12 @@ class PrerenderContents::WebContentsDelegateImpl
     return false;
   }
 
-  void CloseContents(content::WebContents* contents) override {
-    prerender_contents_->Destroy(FINAL_STATUS_CLOSED);
-  }
-
   void CanDownload(const GURL& url,
                    const std::string& request_method,
                    base::OnceCallback<void(bool)> callback) override {
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
     // Cancel the download.
     std::move(callback).Run(false);
-  }
-
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
-      content::RenderFrameHost* opener,
-      content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
-      content::mojom::WindowContainerType window_container_type,
-      const GURL& opener_url,
-      const std::string& frame_name,
-      const GURL& target_url,
-      const std::string& partition_id,
-      SessionStorageNamespace* session_storage_namespace) override {
-    // Since we don't want to permit child windows that would have a
-    // window.opener property, terminate prerendering.
-    prerender_contents_->Destroy(FINAL_STATUS_CREATE_NEW_WINDOW);
-    // Cancel the popup.
-    return false;
   }
 
   bool OnGoToEntryOffset(int offset) override {
@@ -138,24 +116,6 @@ class PrerenderContents::WebContentsDelegateImpl
     // since render-issued offset navigations are not guaranteed,
     // but indicates that the page cares about the history.
     return false;
-  }
-
-  bool ShouldSuppressDialogs(WebContents* source) override {
-    // We still want to show the user the message when they navigate to this
-    // page, so cancel this prerender.
-    prerender_contents_->Destroy(FINAL_STATUS_JAVASCRIPT_ALERT);
-    // Always suppress JavaScript messages if they're triggered by a page being
-    // prerendered.
-    return true;
-  }
-
-  void RegisterProtocolHandler(WebContents* web_contents,
-                               const std::string& protocol,
-                               const GURL& url,
-                               bool user_gesture) override {
-    // TODO(mmenke): Consider supporting this if it is a common case during
-    // prerenders.
-    prerender_contents_->Destroy(FINAL_STATUS_REGISTER_PROTOCOL_HANDLER);
   }
 
   gfx::Size GetSizeForNewRenderView(WebContents* web_contents) override {
@@ -179,7 +139,6 @@ PrerenderContents::PrerenderContents(
     Origin origin)
     : prerender_mode_(DEPRECATED_FULL_PRERENDER),
       prerendering_has_started_(false),
-      prerender_canceler_binding_(this),
       prerender_manager_(prerender_manager),
       prerender_url_(url),
       referrer_(referrer),
@@ -213,8 +172,6 @@ PrerenderContents::PrerenderContents(
   }
 
   DCHECK(prerender_manager);
-  registry_.AddInterface(base::Bind(
-      &PrerenderContents::OnPrerenderCancelerRequest, base::Unretained(this)));
 }
 
 bool PrerenderContents::Init() {
@@ -296,9 +253,9 @@ void PrerenderContents::StartPrerendering(
       this, content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
       content::Source<WebContents>(prerender_contents_.get()));
 
-  // Transfer over the user agent override.
-  prerender_contents_.get()->SetUserAgentOverride(
-      prerender_manager_->config().user_agent_override, false);
+  // Reset UA override.
+  prerender_contents_.get()->SetUserAgentOverride(blink::UserAgentOverride(),
+                                                  false);
 
   content::NavigationController::LoadURLParams load_url_params(
       prerender_url_);
@@ -314,8 +271,6 @@ void PrerenderContents::StartPrerendering(
         ui::PageTransitionFromInt(ui::PAGE_TRANSITION_GENERATED);
   }
   load_url_params.override_user_agent =
-      prerender_manager_->config().is_overriding_user_agent ?
-      content::NavigationController::UA_OVERRIDE_TRUE :
       content::NavigationController::UA_OVERRIDE_FALSE;
   prerender_contents_.get()->GetController().LoadURLWithParams(load_url_params);
 }
@@ -351,22 +306,6 @@ PrerenderContents::~PrerenderContents() {
 
   prerender_manager_->RecordFinalStatus(origin(), final_status());
   prerender_manager_->RecordNetworkBytesConsumed(origin(), network_bytes_);
-
-  if (prerender_mode_ == DEPRECATED_FULL_PRERENDER) {
-    // Broadcast the removal of aliases.
-    for (content::RenderProcessHost::iterator host_iterator =
-             content::RenderProcessHost::AllHostsIterator();
-         !host_iterator.IsAtEnd(); host_iterator.Advance()) {
-      content::RenderProcessHost* host = host_iterator.GetCurrentValue();
-      IPC::ChannelProxy* channel = host->GetChannel();
-      // |channel| might be NULL in tests.
-      if (host->IsInitializedAndNotDead() && channel) {
-        chrome::mojom::PrerenderDispatcherAssociatedPtr prerender_dispatcher;
-        channel->GetRemoteAssociatedInterface(&prerender_dispatcher);
-        prerender_dispatcher->PrerenderRemoveAliases(alias_urls_);
-      }
-    }
-  }
 
   if (!prerender_contents_)
     return;
@@ -475,22 +414,6 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
     return false;
 
   alias_urls_.push_back(url);
-
-  if (prerender_mode_ == DEPRECATED_FULL_PRERENDER) {
-    for (content::RenderProcessHost::iterator host_iterator =
-             content::RenderProcessHost::AllHostsIterator();
-         !host_iterator.IsAtEnd(); host_iterator.Advance()) {
-      content::RenderProcessHost* host = host_iterator.GetCurrentValue();
-      IPC::ChannelProxy* channel = host->GetChannel();
-      // |channel| might be NULL in tests.
-      if (host->IsInitializedAndNotDead() && channel) {
-        chrome::mojom::PrerenderDispatcherAssociatedPtr prerender_dispatcher;
-        channel->GetRemoteAssociatedInterface(&prerender_dispatcher);
-        prerender_dispatcher->PrerenderAddAlias(url);
-      }
-    }
-  }
-
   return true;
 }
 
@@ -515,13 +438,6 @@ void PrerenderContents::RenderProcessGone(base::TerminationStatus status) {
   Destroy(FINAL_STATUS_RENDERER_CRASHED);
 }
 
-void PrerenderContents::OnInterfaceRequestFromFrame(
-    content::RenderFrameHost* render_frame_host,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle* interface_pipe) {
-  registry_.TryBindInterface(interface_name, interface_pipe);
-}
-
 void PrerenderContents::RenderFrameCreated(
     content::RenderFrameHost* render_frame_host) {
   // When a new RenderFrame is created for a prerendering WebContents, tell the
@@ -537,7 +453,7 @@ void PrerenderContents::DidStopLoading() {
   NotifyPrerenderStopLoading();
 }
 
-void PrerenderContents::DocumentLoadedInFrame(
+void PrerenderContents::DOMContentLoaded(
     content::RenderFrameHost* render_frame_host) {
   if (!render_frame_host->GetParent())
     NotifyPrerenderDomContentLoaded();
@@ -599,19 +515,6 @@ void PrerenderContents::DidFinishNavigation(
     // returned, which was reached because the URL for the error page was
     // kUnreachableWebDataURL and that was interpreted as unsupported scheme.
     Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
-    return;
-  }
-
-  // If the prerender made a second navigation entry, abort the prerender. This
-  // avoids having to correctly implement a complex history merging case (this
-  // interacts with location.replace) and correctly synchronize with the
-  // renderer. The final status may be monitored to see we need to revisit this
-  // decision. This does not affect client redirects as those do not push new
-  // history entries. (Calls to location.replace, navigations before onload, and
-  // <meta http-equiv=refresh> with timeouts under 1 second do not create
-  // entries in Blink.)
-  if (prerender_contents_->GetController().GetEntryCount() > 1) {
-    Destroy(FINAL_STATUS_NEW_NAVIGATION_ENTRY);
     return;
   }
 
@@ -746,27 +649,13 @@ void PrerenderContents::PrepareForUse() {
   NotifyPrerenderStop();
 }
 
-void PrerenderContents::CancelPrerenderForPrinting() {
-  Destroy(FINAL_STATUS_WINDOW_PRINT);
-}
-
-void PrerenderContents::CancelPrerenderForUnsupportedMethod() {
-  Destroy(FINAL_STATUS_INVALID_HTTP_METHOD);
-}
-
 void PrerenderContents::CancelPrerenderForUnsupportedScheme(const GURL& url) {
   Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
-  ReportUnsupportedPrerenderScheme(url);
 }
 
-void PrerenderContents::CancelPrerenderForSyncDeferredRedirect() {
-  Destroy(FINAL_STATUS_BAD_DEFERRED_REDIRECT);
-}
-
-void PrerenderContents::OnPrerenderCancelerRequest(
-    chrome::mojom::PrerenderCancelerRequest request) {
-  if (!prerender_canceler_binding_.is_bound())
-    prerender_canceler_binding_.Bind(std::move(request));
+void PrerenderContents::AddPrerenderCancelerReceiver(
+    mojo::PendingReceiver<chrome::mojom::PrerenderCanceler> receiver) {
+  prerender_canceler_receiver_set_.Add(this, std::move(receiver));
 }
 
 void PrerenderContents::AddNetworkBytes(int64_t bytes) {

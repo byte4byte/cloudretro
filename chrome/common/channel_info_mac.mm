@@ -8,12 +8,13 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "components/version_info/version_info.h"
 
 namespace chrome {
 
 std::string GetChannelName() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Use the main Chrome application bundle and not the framework bundle.
   // Keystone keys don't live in the framework.
   NSBundle* bundle = base::mac::OuterBundle();
@@ -42,7 +43,7 @@ std::string GetChannelName() {
 }
 
 version_info::Channel GetChannelByName(const std::string& channel) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (channel.empty())
     return version_info::Channel::STABLE;
   if (channel == "beta")
@@ -53,6 +54,33 @@ version_info::Channel GetChannelByName(const std::string& channel) {
     return version_info::Channel::CANARY;
 #endif
   return version_info::Channel::UNKNOWN;
+}
+
+bool IsSideBySideCapable() {
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Use the main Chrome application bundle and not the framework bundle.
+  // Keystone keys don't live in the framework.
+  NSBundle* bundle = base::mac::OuterBundle();
+  if (![bundle objectForInfoDictionaryKey:@"KSProductID"]) {
+    // This build is not Keystone-enabled, and without a channel assume it is
+    // side-by-side capable.
+    return true;
+  }
+
+  if (![bundle objectForInfoDictionaryKey:@"KSChannelID"]) {
+    // For the stable channel, KSChannelID is not set. Stable Chromes are what
+    // side-by-side capable Chromes are running side-by-side *to* and by
+    // definition are side-by-side capable.
+    return true;
+  }
+
+  // If there is a CrProductDirName key, then the user data dir of this
+  // beta/dev/canary Chrome is separate, and it can run side-by-side to the
+  // stable Chrome.
+  return [bundle objectForInfoDictionaryKey:@"CrProductDirName"];
+#else
+  return true;
+#endif
 }
 
 version_info::Channel GetChannel() {

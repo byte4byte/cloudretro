@@ -25,7 +25,6 @@
 #include "components/sync/model/sync_error_factory.h"
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 
 using crx_file::id_util::GenerateId;
@@ -214,10 +213,6 @@ class AppListSyncableServiceTest : public AppListTestBase {
     TestingBrowserProcess::GetGlobal()->SetProfileManager(
         new ProfileManagerWithoutInit(temp_dir_.GetPath()));
 
-    extensions::ExtensionSystem* extension_system =
-        extensions::ExtensionSystem::Get(profile_.get());
-    DCHECK(extension_system);
-
     model_updater_factory_scope_ = std::make_unique<
         app_list::AppListSyncableService::ScopedModelUpdaterFactoryForTest>(
         base::Bind([]() -> std::unique_ptr<AppListModelUpdater> {
@@ -225,8 +220,7 @@ class AppListSyncableServiceTest : public AppListTestBase {
         }));
 
     app_list_syncable_service_ =
-        std::make_unique<app_list::AppListSyncableService>(profile_.get(),
-                                                           extension_system);
+        std::make_unique<app_list::AppListSyncableService>(profile_.get());
     content::RunAllTasksUntilIdle();
 
     model_updater_test_api_ =
@@ -482,20 +476,20 @@ TEST_F(AppListInternalAppSyncableServiceTest, DefaultPageBreakFirstTimeUser) {
   EXPECT_EQ(page_break_sync_item->item_type,
             sync_pb::AppListSpecifics::TYPE_PAGE_BREAK);
 
-  // Since internal apps are added by default, we'll use the camera and the
-  // settings apps to test the ordering.
-  auto* settings_app_sync_item = GetSyncItem(app_list::kInternalAppIdSettings);
-  auto* camera_app_sync_item = GetSyncItem(app_list::kInternalAppIdCamera);
+  // Since internal apps are added by default, we'll use the settings apps to
+  // test the ordering.
+  auto* settings_app_sync_item = GetSyncItem(ash::kInternalAppIdSettings);
+  auto* hosted_app_sync_item = GetSyncItem(kHostedAppId);
   ASSERT_TRUE(settings_app_sync_item);
-  ASSERT_TRUE(camera_app_sync_item);
+  ASSERT_TRUE(hosted_app_sync_item);
 
-  // The default page break should be between the camera app, and the settings
-  // app; i.e. the camera app is in the first page, and the settings app is in
+  // The default page break should be between the hosted app, and the settings
+  // app; i.e. the hosted app is in the first page, and the settings app is in
   // the second page.
   EXPECT_TRUE(page_break_sync_item->item_ordinal.LessThan(
       settings_app_sync_item->item_ordinal));
   EXPECT_TRUE(page_break_sync_item->item_ordinal.GreaterThan(
-      camera_app_sync_item->item_ordinal));
+      hosted_app_sync_item->item_ordinal));
 }
 
 TEST_F(AppListSyncableServiceTest, InitialMerge_BadData) {
@@ -796,7 +790,7 @@ TEST_F(AppListSyncableServiceTest, FirstAvailablePosition) {
 
   // Populate the first page with items and leave 1 empty slot at the end.
   const int max_items_in_first_page =
-      app_list::AppListConfig::instance().GetMaxNumOfItemsPerPage(0);
+      ash::AppListConfig::instance().GetMaxNumOfItemsPerPage(0);
   syncer::StringOrdinal last_app_position =
       syncer::StringOrdinal::CreateInitialOrdinal();
   for (int i = 0; i < max_items_in_first_page - 1; ++i) {
@@ -844,7 +838,7 @@ TEST_F(AppListSyncableServiceTest, FirstAvailablePositionNotExist) {
 
   // Populate the first page with items and leave 1 empty slot at the end.
   const int max_items_in_first_page =
-      app_list::AppListConfig::instance().GetMaxNumOfItemsPerPage(0);
+      ash::AppListConfig::instance().GetMaxNumOfItemsPerPage(0);
   syncer::StringOrdinal last_app_position =
       syncer::StringOrdinal::CreateInitialOrdinal();
   for (int i = 0; i < max_items_in_first_page - 1; ++i) {
@@ -931,7 +925,7 @@ TEST_F(AppListSyncableServiceTest, TransferItem) {
   EXPECT_FALSE(GetSyncItem(extension_misc::kYoutubeAppId));
   // Attributes transfer from non-existing app fails.
   EXPECT_FALSE(app_list_syncable_service()->TransferItemAttributes(
-      extension_misc::kCameraAppId, extension_misc::kYoutubeAppId));
+      extension_misc::kCameraAppDevId, extension_misc::kYoutubeAppId));
 
   // Now Chrome app attributes match Webstore app.
   EXPECT_TRUE(AreAllAppAtributesEqualInAppList(webstore_item, chrome_item));

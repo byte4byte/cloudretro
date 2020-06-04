@@ -4,21 +4,36 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.CARD_ALPHA;
+
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.InsetDrawable;
 import android.os.Build;
-import android.support.annotation.Nullable;
-import android.support.v4.content.res.ResourcesCompat;
-import android.support.v7.widget.RecyclerView.ViewHolder;
+import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import androidx.annotation.Nullable;
+import androidx.core.content.res.ResourcesCompat;
+import androidx.core.graphics.drawable.DrawableCompat;
+import androidx.core.view.ViewCompat;
+import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
+import org.chromium.base.MathUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.widget.ButtonCompat;
+import org.chromium.ui.widget.ChipView;
+import org.chromium.ui.widget.ChromeImageView;
+import org.chromium.ui.widget.ViewLookupCachingFrameLayout;
 
 /**
  * {@link org.chromium.ui.modelutil.SimpleRecyclerViewMcp.ViewBinder} for tab grid.
@@ -26,145 +41,322 @@ import org.chromium.ui.modelutil.PropertyModel;
  */
 class TabGridViewBinder {
     /**
-     * Partially or fully update the given ViewHolder based on the given model over propertyKey.
-     * @param holder The {@link ViewHolder} to use.
-     * @param item The model to use.
-     * @param propertyKey If present, to be used as the key to partially update. If null, a full
-     *                    bind is done.
+     * Bind a closable tab to a view.
+     * @param model The model to bind.
+     * @param view The view to bind to.
+     * @param propertyKey The property that changed.
      */
-    public static void onBindViewHolder(
-            TabGridViewHolder holder, PropertyModel item, @Nullable PropertyKey propertyKey) {
+    public static void bindClosableTab(
+            PropertyModel model, ViewGroup view, @Nullable PropertyKey propertyKey) {
+        assert view instanceof ViewLookupCachingFrameLayout;
         if (propertyKey == null) {
-            onBindViewHolder(holder, item);
+            onBindAll((ViewLookupCachingFrameLayout) view, model, TabProperties.UiType.CLOSABLE);
             return;
         }
+        bindCommonProperties(model, (ViewLookupCachingFrameLayout) view, propertyKey);
+        bindClosableTabProperties(model, (ViewLookupCachingFrameLayout) view, propertyKey);
+    }
+
+    /**
+     * Bind a selectable tab to a view.
+     * @param model The model to bind.
+     * @param view The view to bind to.
+     * @param propertyKey The property that changed.
+     */
+    public static void bindSelectableTab(
+            PropertyModel model, ViewGroup view, @Nullable PropertyKey propertyKey) {
+        assert view instanceof ViewLookupCachingFrameLayout;
+        if (propertyKey == null) {
+            onBindAll((ViewLookupCachingFrameLayout) view, model, TabProperties.UiType.SELECTABLE);
+            return;
+        }
+        bindCommonProperties(model, (ViewLookupCachingFrameLayout) view, propertyKey);
+        bindSelectableTabProperties(model, (ViewLookupCachingFrameLayout) view, propertyKey);
+    }
+
+    /**
+     * Rebind all properties on a model to the view.
+     * @param view The view to bind to.
+     * @param model The model to bind.
+     * @param viewType The view type to bind.
+     */
+    private static void onBindAll(ViewLookupCachingFrameLayout view, PropertyModel model,
+            @TabProperties.UiType int viewType) {
+        for (PropertyKey propertyKey : TabProperties.ALL_KEYS_TAB_GRID) {
+            bindCommonProperties(model, view, propertyKey);
+            switch (viewType) {
+                case TabProperties.UiType.SELECTABLE:
+                    bindSelectableTabProperties(model, view, propertyKey);
+                    break;
+                case TabProperties.UiType.CLOSABLE:
+                    bindClosableTabProperties(model, view, propertyKey);
+                    break;
+                default:
+                    assert false;
+            }
+        }
+    }
+
+    private static void bindCommonProperties(PropertyModel model, ViewLookupCachingFrameLayout view,
+            @Nullable PropertyKey propertyKey) {
         if (TabProperties.TITLE == propertyKey) {
-            String title = item.get(TabProperties.TITLE);
-            holder.title.setText(title);
+            String title = model.get(TabProperties.TITLE);
+            TextView tabTitleView = (TextView) view.fastFindViewById(R.id.tab_title);
+            tabTitleView.setText(title);
+            tabTitleView.setContentDescription(
+                    view.getResources().getString(R.string.accessibility_tabstrip_tab, title));
         } else if (TabProperties.IS_SELECTED == propertyKey) {
-            Resources res = holder.itemView.getResources();
-            Resources.Theme theme = holder.itemView.getContext().getTheme();
+            int selectedTabBackground =
+                    model.get(TabProperties.SELECTED_TAB_BACKGROUND_DRAWABLE_ID);
+            view.setSelected(model.get(TabProperties.IS_SELECTED));
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                Drawable selectedDrawable = new InsetDrawable(
-                        ResourcesCompat.getDrawable(res, R.drawable.selected_tab_background, theme),
-                        (int) res.getDimension(R.dimen.tab_list_selected_inset_kitkat));
-                Drawable elevationDrawable =
-                        ResourcesCompat.getDrawable(res, R.drawable.popup_bg, theme);
-                holder.backgroundView.setBackground(
-                        item.get(TabProperties.IS_SELECTED) ? selectedDrawable : elevationDrawable);
+                if (model.get(TabProperties.IS_SELECTED)) {
+                    view.fastFindViewById(R.id.selected_view_below_lollipop)
+                            .setBackgroundResource(selectedTabBackground);
+                    view.fastFindViewById(R.id.selected_view_below_lollipop)
+                            .setVisibility(View.VISIBLE);
+                } else {
+                    view.fastFindViewById(R.id.selected_view_below_lollipop)
+                            .setVisibility(View.GONE);
+                }
             } else {
+                Resources res = view.getResources();
+                Resources.Theme theme = view.getContext().getTheme();
                 Drawable drawable = new InsetDrawable(
-                        ResourcesCompat.getDrawable(res, R.drawable.selected_tab_background, theme),
+                        ResourcesCompat.getDrawable(res, selectedTabBackground, theme),
                         (int) res.getDimension(R.dimen.tab_list_selected_inset));
-                holder.itemView.setForeground(
-                        item.get(TabProperties.IS_SELECTED) ? drawable : null);
+                view.setForeground(model.get(TabProperties.IS_SELECTED) ? drawable : null);
+            }
+            if (TabUiFeatureUtilities.ENABLE_SEARCH_CHIP.getValue()) {
+                ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+                searchButton.getPrimaryTextView().setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                searchButton.getPrimaryTextView().setEllipsize(TextUtils.TruncateAt.END);
+                // TODO(crbug.com/1048255): The selected state of ChipView doesn't look elevated.
+                //  Fix the elevation in style instead.
+                searchButton.setSelected(false);
             }
         } else if (TabProperties.FAVICON == propertyKey) {
-            holder.favicon.setImageDrawable(item.get(TabProperties.FAVICON));
+            Drawable favicon = model.get(TabProperties.FAVICON);
+            ImageView faviconView = (ImageView) view.fastFindViewById(R.id.tab_favicon);
+            faviconView.setImageDrawable(favicon);
+            int padding = favicon == null
+                    ? 0
+                    : (int) view.getResources().getDimension(R.dimen.tab_list_card_padding);
+            faviconView.setPadding(padding, padding, padding, padding);
         } else if (TabProperties.THUMBNAIL_FETCHER == propertyKey) {
-            updateThumbnail(holder, item);
-        } else if (TabProperties.TAB_ID == propertyKey) {
-            holder.setTabId(item.get(TabProperties.TAB_ID));
-        }
-
-        if (holder instanceof ClosableTabGridViewHolder) {
-            onBindClosableTab(holder, item, propertyKey);
-        } else {
-            onBindSelectableTab(holder, item, propertyKey);
+            updateThumbnail(view, model);
         }
     }
 
-    private static void onBindViewHolder(TabGridViewHolder holder, PropertyModel item) {
-        for (PropertyKey propertyKey : TabProperties.ALL_KEYS_TAB_GRID) {
-            onBindViewHolder(holder, item, propertyKey);
-        }
-    }
-
-    private static void onBindClosableTab(
-            TabGridViewHolder holder, PropertyModel item, PropertyKey propertyKey) {
-        assert holder instanceof ClosableTabGridViewHolder;
-
+    private static void bindClosableTabProperties(
+            PropertyModel model, ViewLookupCachingFrameLayout view, PropertyKey propertyKey) {
         if (TabProperties.TAB_CLOSED_LISTENER == propertyKey) {
-            holder.actionButton.setOnClickListener(view -> {
-                item.get(TabProperties.TAB_CLOSED_LISTENER).run(holder.getTabId());
-            });
+            if (model.get(TabProperties.TAB_CLOSED_LISTENER) == null) {
+                view.fastFindViewById(R.id.action_button).setOnClickListener(null);
+            } else {
+                view.fastFindViewById(R.id.action_button).setOnClickListener(v -> {
+                    int tabId = model.get(TabProperties.TAB_ID);
+                    model.get(TabProperties.TAB_CLOSED_LISTENER).run(tabId);
+                });
+            }
         } else if (TabProperties.TAB_SELECTED_LISTENER == propertyKey) {
-            holder.itemView.setOnClickListener(view -> {
-                item.get(TabProperties.TAB_SELECTED_LISTENER).run(holder.getTabId());
-            });
+            if (model.get(TabProperties.TAB_SELECTED_LISTENER) == null) {
+                view.setOnClickListener(null);
+            } else {
+                view.setOnClickListener(v -> {
+                    int tabId = model.get(TabProperties.TAB_ID);
+                    model.get(TabProperties.TAB_SELECTED_LISTENER).run(tabId);
+                });
+            }
         } else if (TabProperties.CREATE_GROUP_LISTENER == propertyKey) {
             TabListMediator.TabActionListener listener =
-                    item.get(TabProperties.CREATE_GROUP_LISTENER);
+                    model.get(TabProperties.CREATE_GROUP_LISTENER);
+            ButtonCompat createGroupButton =
+                    (ButtonCompat) view.fastFindViewById(R.id.create_group_button);
             if (listener == null) {
-                holder.createGroupButton.setVisibility(View.GONE);
+                createGroupButton.setVisibility(View.GONE);
+                createGroupButton.setOnClickListener(null);
                 return;
             }
-            holder.createGroupButton.setVisibility(View.VISIBLE);
-            holder.createGroupButton.setOnClickListener(view -> listener.run(holder.getTabId()));
-        } else if (TabProperties.ALPHA == propertyKey) {
-            holder.itemView.setAlpha(item.get(TabProperties.ALPHA));
+            createGroupButton.setVisibility(View.VISIBLE);
+            createGroupButton.setOnClickListener(v -> {
+                int tabId = model.get(TabProperties.TAB_ID);
+                listener.run(tabId);
+            });
+        } else if (CARD_ALPHA == propertyKey) {
+            view.setAlpha(model.get(CARD_ALPHA));
         } else if (TabProperties.TITLE == propertyKey) {
-            String title = item.get(TabProperties.TITLE);
-            holder.actionButton.setContentDescription(holder.itemView.getResources().getString(
-                    R.string.accessibility_tabstrip_btn_close_tab, title));
+            String title = model.get(TabProperties.TITLE);
+            view.fastFindViewById(R.id.action_button)
+                    .setContentDescription(view.getResources().getString(
+                            R.string.accessibility_tabstrip_btn_close_tab, title));
         } else if (TabProperties.IPH_PROVIDER == propertyKey) {
-            TabListMediator.IphProvider provider = item.get(TabProperties.IPH_PROVIDER);
-            if (provider != null) provider.showIPH(holder.thumbnail);
+            TabListMediator.IphProvider provider = model.get(TabProperties.IPH_PROVIDER);
+            if (provider != null) provider.showIPH(view.fastFindViewById(R.id.tab_thumbnail));
         } else if (TabProperties.CARD_ANIMATION_STATUS == propertyKey) {
-            boolean isSelected = item.get(TabProperties.IS_SELECTED);
-            ((ClosableTabGridViewHolder) holder)
+            boolean isSelected = model.get(TabProperties.IS_SELECTED);
+            ((ClosableTabGridView) view)
                     .scaleTabGridCardView(
-                            item.get(TabProperties.CARD_ANIMATION_STATUS), isSelected);
+                            model.get(TabProperties.CARD_ANIMATION_STATUS), isSelected);
+        } else if (TabProperties.IS_INCOGNITO == propertyKey) {
+            updateColor(view, model.get(TabProperties.IS_INCOGNITO), TabProperties.UiType.CLOSABLE);
+        } else if (TabProperties.ACCESSIBILITY_DELEGATE == propertyKey) {
+            view.setAccessibilityDelegate(model.get(TabProperties.ACCESSIBILITY_DELEGATE));
+        } else if (TabProperties.SEARCH_QUERY == propertyKey) {
+            String query = model.get(TabProperties.SEARCH_QUERY);
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            if (TextUtils.isEmpty(query)) {
+                searchButton.setVisibility(View.GONE);
+            } else {
+                searchButton.setVisibility(View.VISIBLE);
+                searchButton.getPrimaryTextView().setText(query);
+            }
+        } else if (TabProperties.SEARCH_LISTENER == propertyKey) {
+            TabListMediator.TabActionListener listener = model.get(TabProperties.SEARCH_LISTENER);
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            if (listener == null) {
+                searchButton.setOnClickListener(null);
+                return;
+            }
+            searchButton.setOnClickListener(v -> {
+                int tabId = model.get(TabProperties.TAB_ID);
+                listener.run(tabId);
+            });
+        } else if (TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID == propertyKey) {
+            ChipView searchButton = (ChipView) view.fastFindViewById(R.id.search_button);
+            int iconDrawableId = model.get(TabProperties.SEARCH_CHIP_ICON_DRAWABLE_ID);
+            boolean shouldTint = iconDrawableId != R.drawable.ic_logo_googleg_24dp;
+            searchButton.setIcon(iconDrawableId, shouldTint);
         }
     }
 
-    private static void onBindSelectableTab(
-            TabGridViewHolder holder, PropertyModel item, PropertyKey propertyKey) {
-        assert holder instanceof SelectableTabGridViewHolder;
+    private static void bindSelectableTabProperties(
+            PropertyModel model, ViewLookupCachingFrameLayout view, PropertyKey propertyKey) {
+        final int defaultLevel = view.getResources().getInteger(R.integer.list_item_level_default);
+        final int selectedLevel =
+                view.getResources().getInteger(R.integer.list_item_level_selected);
+        final int tabId = model.get(TabProperties.TAB_ID);
 
-        SelectableTabGridViewHolder selectionHolder = (SelectableTabGridViewHolder) holder;
         if (TabProperties.IS_SELECTED == propertyKey) {
-            boolean isSelected = item.get(TabProperties.IS_SELECTED);
-            selectionHolder.actionButton.getBackground().setLevel(
-                    isSelected ? selectionHolder.selectedLevel : selectionHolder.defaultLevel);
-            selectionHolder.actionButton.setImageDrawable(
-                    isSelected ? selectionHolder.mCheckDrawable : null);
-            ApiCompatibilityUtils.setImageTintList(selectionHolder.actionButton,
-                    isSelected ? selectionHolder.iconColorList : null);
-            if (isSelected) selectionHolder.mCheckDrawable.start();
+            boolean isSelected = model.get(TabProperties.IS_SELECTED);
+            ImageView actionButton = (ImageView) view.fastFindViewById(R.id.action_button);
+            actionButton.getBackground().setLevel(isSelected ? selectedLevel : defaultLevel);
+            DrawableCompat.setTintList(actionButton.getBackground().mutate(),
+                    isSelected ? model.get(
+                            TabProperties.SELECTABLE_TAB_ACTION_BUTTON_SELECTED_BACKGROUND)
+                               : model.get(TabProperties.SELECTABLE_TAB_ACTION_BUTTON_BACKGROUND));
+
+            // The check should be invisible if not selected.
+            actionButton.getDrawable().setAlpha(isSelected ? 255 : 0);
+            ApiCompatibilityUtils.setImageTintList(actionButton,
+                    isSelected ? model.get(TabProperties.CHECKED_DRAWABLE_STATE_LIST) : null);
+            if (isSelected) {
+                ((AnimatedVectorDrawableCompat) actionButton.getDrawable()).start();
+            }
         } else if (TabProperties.SELECTABLE_TAB_CLICKED_LISTENER == propertyKey) {
-            selectionHolder.itemView.setOnClickListener(view -> {
-                item.get(TabProperties.SELECTABLE_TAB_CLICKED_LISTENER).run(holder.getTabId());
-                selectionHolder.selectableTabGridView.onClick();
+            view.setOnClickListener(v -> {
+                model.get(TabProperties.SELECTABLE_TAB_CLICKED_LISTENER).run(tabId);
+                ((SelectableTabGridView) view).onClick();
+            });
+            view.setOnLongClickListener(v -> {
+                model.get(TabProperties.SELECTABLE_TAB_CLICKED_LISTENER).run(tabId);
+                return ((SelectableTabGridView) view).onLongClick(view);
             });
         } else if (TabProperties.TITLE == propertyKey) {
-            String title = item.get(TabProperties.TITLE);
-            selectionHolder.actionButton.setContentDescription(
-                    holder.itemView.getResources().getString(
+            String title = model.get(TabProperties.TITLE);
+            view.fastFindViewById(R.id.action_button)
+                    .setContentDescription(view.getResources().getString(
                             R.string.accessibility_tabstrip_btn_close_tab, title));
         } else if (TabProperties.TAB_SELECTION_DELEGATE == propertyKey) {
-            assert item.get(TabProperties.TAB_SELECTION_DELEGATE) != null;
+            assert model.get(TabProperties.TAB_SELECTION_DELEGATE) != null;
 
-            selectionHolder.selectableTabGridView.setSelectionDelegate(
-                    item.get(TabProperties.TAB_SELECTION_DELEGATE));
-            selectionHolder.selectableTabGridView.setItem(selectionHolder.getTabId());
+            ((SelectableTabGridView) view)
+                    .setSelectionDelegate(model.get(TabProperties.TAB_SELECTION_DELEGATE));
+            ((SelectableTabGridView) view).setItem(tabId);
+        } else if (TabProperties.IS_INCOGNITO == propertyKey) {
+            updateColor(
+                    view, model.get(TabProperties.IS_INCOGNITO), TabProperties.UiType.SELECTABLE);
         }
     }
 
-    private static void updateThumbnail(TabGridViewHolder holder, PropertyModel item) {
-        TabListMediator.ThumbnailFetcher fetcher = item.get(TabProperties.THUMBNAIL_FETCHER);
+    private static void updateThumbnail(ViewLookupCachingFrameLayout view, PropertyModel model) {
+        TabListMediator.ThumbnailFetcher fetcher = model.get(TabProperties.THUMBNAIL_FETCHER);
+        ImageView thumbnail = (ImageView) view.fastFindViewById(R.id.tab_thumbnail);
         if (fetcher == null) {
-            // Release the thumbnail to save memory.
-            holder.resetThumbnail();
+            releaseThumbnail(thumbnail);
             return;
         }
         Callback<Bitmap> callback = result -> {
             if (result == null) {
-                holder.resetThumbnail();
+                releaseThumbnail(thumbnail);
             } else {
-                holder.thumbnail.setImageBitmap(result);
+                thumbnail.setImageBitmap(result);
             }
         };
         fetcher.fetch(callback);
+    }
+
+    private static void releaseThumbnail(ImageView thumbnail) {
+        if (TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()) {
+            float expectedThumbnailAspectRatio =
+                    (float) ChromeFeatureList.getFieldTrialParamByFeatureAsDouble(
+                            ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID,
+                            TabUiFeatureUtilities.THUMBNAIL_ASPECT_RATIO_PARAM, 1.0);
+            expectedThumbnailAspectRatio =
+                    MathUtils.clamp(expectedThumbnailAspectRatio, 0.5f, 2.0f);
+            int height = (int) (thumbnail.getWidth() * 1.0 / expectedThumbnailAspectRatio);
+            thumbnail.setMinimumHeight(Math.min(thumbnail.getHeight(), height));
+            thumbnail.setImageDrawable(null);
+        } else {
+            thumbnail.setImageDrawable(null);
+            thumbnail.setMinimumHeight(thumbnail.getWidth());
+        }
+    }
+
+    private static void updateColor(ViewLookupCachingFrameLayout rootView, boolean isIncognito,
+            @TabProperties.UiType int viewType) {
+        View cardView = rootView.fastFindViewById(R.id.card_view);
+        View dividerView = rootView.fastFindViewById(R.id.divider_view);
+        ImageView thumbnail = (ImageView) rootView.fastFindViewById(R.id.tab_thumbnail);
+        ImageView actionButton = (ImageView) rootView.fastFindViewById(R.id.action_button);
+        ChromeImageView backgroundView =
+                (ChromeImageView) rootView.fastFindViewById(R.id.background_view);
+
+        // ViewCompat.SetBackgroundTintList does not work here for L devices, because cardView is a
+        // RelativeLayout, and in order for ViewCompat.SetBackgroundTintList to work on any L-
+        // devices, the view has to implement the TintableBackgroundView interface. RelativeLayout
+        // is not a TintableBackgroundView. The work around here is to set different drawable as the
+        // background depends on the incognito mode.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            cardView.setBackground(TabUiColorProvider.getCardViewBackgroundDrawable(
+                    cardView.getContext(), isIncognito));
+        } else {
+            ViewCompat.setBackgroundTintList(cardView,
+                    TabUiColorProvider.getCardViewTintList(cardView.getContext(), isIncognito));
+        }
+
+        dividerView.setBackgroundColor(
+                TabUiColorProvider.getDividerColor(dividerView.getContext(), isIncognito));
+
+        ApiCompatibilityUtils.setTextAppearance(
+                ((TextView) rootView.fastFindViewById(R.id.tab_title)),
+                TabUiColorProvider.getTitleTextAppearance(isIncognito));
+
+        if (thumbnail.getDrawable() == null) {
+            thumbnail.setImageResource(
+                    TabUiColorProvider.getThumbnailPlaceHolderColorResource(isIncognito));
+        }
+
+        if (TabUiFeatureUtilities.isTabGroupsAndroidEnabled()) {
+            ViewCompat.setBackgroundTintList(backgroundView,
+                    TabUiColorProvider.getHoveredCardBackgroundTintList(
+                            backgroundView.getContext(), isIncognito));
+        }
+
+        if (viewType == TabProperties.UiType.CLOSABLE) {
+            ApiCompatibilityUtils.setImageTintList(actionButton,
+                    TabUiColorProvider.getActionButtonTintList(
+                            actionButton.getContext(), isIncognito));
+        }
     }
 }

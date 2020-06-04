@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/supports_user_data.h"
-#include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
 #include "components/autofill/core/browser/autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -63,7 +63,6 @@ class ContentAutofillDriverFactory : public AutofillDriverFactory,
       content::RenderFrameHost* render_frame_host);
 
   // content::WebContentsObserver:
-  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;

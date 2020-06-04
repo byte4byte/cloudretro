@@ -14,8 +14,60 @@
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/usb_tab_helper.h"
 #include "content/public/browser/browser_thread.h"
-#include "media/mojo/interfaces/remoting_common.mojom.h"
+#include "media/mojo/mojom/remoting_common.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "services/device/public/mojom/usb_device.mojom.h"
 #include "services/device/public/mojom/usb_enumeration_options.mojom.h"
+
+// A UsbDeviceClient represents a UsbDevice pipe that has been passed to the
+// renderer process. The UsbDeviceClient pipe allows the browser process to
+// continue to monitor how the device is used and cause the connection to be
+// closed at will.
+class WebUsbServiceImpl::UsbDeviceClient
+    : public device::mojom::UsbDeviceClient {
+ public:
+  UsbDeviceClient(
+      WebUsbServiceImpl* service,
+      const std::string& device_guid,
+      mojo::PendingReceiver<device::mojom::UsbDeviceClient> receiver)
+      : service_(service),
+        device_guid_(device_guid),
+        receiver_(this, std::move(receiver)) {
+    receiver_.set_disconnect_handler(
+        base::BindOnce(&WebUsbServiceImpl::RemoveDeviceClient,
+                       base::Unretained(service_), base::Unretained(this)));
+  }
+
+  ~UsbDeviceClient() override {
+    if (opened_) {
+      // If the connection was opened destroying |receiver_| will cause it to
+      // be closed but that event won't be dispatched here because the receiver
+      // has been destroyed.
+      OnDeviceClosed();
+    }
+  }
+
+  const std::string& device_guid() const { return device_guid_; }
+
+  // device::mojom::UsbDeviceClient implementation:
+  void OnDeviceOpened() override {
+    DCHECK(!opened_);
+    opened_ = true;
+    service_->IncrementConnectionCount();
+  }
+
+  void OnDeviceClosed() override {
+    DCHECK(opened_);
+    opened_ = false;
+    service_->DecrementConnectionCount();
+  }
+
+ private:
+  WebUsbServiceImpl* const service_;
+  const std::string device_guid_;
+  bool opened_ = false;
+  mojo::Receiver<device::mojom::UsbDeviceClient> receiver_;
+};
 
 WebUsbServiceImpl::WebUsbServiceImpl(
     content::RenderFrameHost* render_frame_host,
@@ -36,15 +88,17 @@ WebUsbServiceImpl::WebUsbServiceImpl(
   chooser_context_ = UsbChooserContextFactory::GetForProfile(profile);
   DCHECK(chooser_context_);
 
-  bindings_.set_connection_error_handler(base::BindRepeating(
-      &WebUsbServiceImpl::OnBindingConnectionError, base::Unretained(this)));
+  receivers_.set_disconnect_handler(base::BindRepeating(
+      &WebUsbServiceImpl::OnConnectionError, base::Unretained(this)));
 }
 
-WebUsbServiceImpl::~WebUsbServiceImpl() = default;
+WebUsbServiceImpl::~WebUsbServiceImpl() {
+  LOG(INFO) << "USB service is being destroyed.";
+}
 
-void WebUsbServiceImpl::BindRequest(
-    blink::mojom::WebUsbServiceRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void WebUsbServiceImpl::BindReceiver(
+    mojo::PendingReceiver<blink::mojom::WebUsbService> receiver) {
+  receivers_.Add(this, std::move(receiver));
 
   // Listen to UsbChooserContext for add/remove device events from UsbService.
   // We can't set WebUsbServiceImpl as a UsbDeviceManagerClient because
@@ -69,8 +123,10 @@ bool WebUsbServiceImpl::HasDevicePermission(
 }
 
 void WebUsbServiceImpl::GetDevices(GetDevicesCallback callback) {
-  if (!chooser_context_)
+  if (!chooser_context_) {
     std::move(callback).Run(std::vector<device::mojom::UsbDeviceInfoPtr>());
+    return;
+  }
 
   chooser_context_->GetDevices(base::BindOnce(&WebUsbServiceImpl::OnGetDevices,
                                               weak_factory_.GetWeakPtr(),
@@ -90,7 +146,7 @@ void WebUsbServiceImpl::OnGetDevices(
 
 void WebUsbServiceImpl::GetDevice(
     const std::string& guid,
-    device::mojom::UsbDeviceRequest device_request) {
+    mojo::PendingReceiver<device::mojom::UsbDevice> device_receiver) {
   if (!chooser_context_)
     return;
 
@@ -98,33 +154,33 @@ void WebUsbServiceImpl::GetDevice(
   if (!device_info || !HasDevicePermission(*device_info))
     return;
 
-  // Connect Blink to the native device and keep a binding to this for the
+  // Connect Blink to the native device and keep a receiver to this for the
   // UsbDeviceClient interface so we can receive DeviceOpened/Closed events.
-  // This binding will also be closed to notify the device service to close
+  // This receiver will also be closed to notify the device service to close
   // the connection if permission is revoked.
-  device::mojom::UsbDeviceClientPtr device_client;
-  device_client_bindings_[guid].AddBinding(this,
-                                           mojo::MakeRequest(&device_client));
-  chooser_context_->GetDevice(guid, std::move(device_request),
+  mojo::PendingRemote<device::mojom::UsbDeviceClient> device_client;
+  device_clients_.push_back(std::make_unique<UsbDeviceClient>(
+      this, guid, device_client.InitWithNewPipeAndPassReceiver()));
+  chooser_context_->GetDevice(guid, std::move(device_receiver),
                               std::move(device_client));
 }
 
 void WebUsbServiceImpl::GetPermission(
     std::vector<device::mojom::UsbDeviceFilterPtr> device_filters,
     GetPermissionCallback callback) {
-  if (!usb_chooser_)
+  if (!usb_chooser_) {
     std::move(callback).Run(nullptr);
+    return;
+  }
 
   usb_chooser_->GetPermission(std::move(device_filters), std::move(callback));
 }
 
 void WebUsbServiceImpl::SetClient(
-    device::mojom::UsbDeviceManagerClientAssociatedPtrInfo client) {
+    mojo::PendingAssociatedRemote<device::mojom::UsbDeviceManagerClient>
+        client) {
   DCHECK(client);
-
-  device::mojom::UsbDeviceManagerClientAssociatedPtr client_ptr;
-  client_ptr.Bind(std::move(client));
-  clients_.AddPtr(std::move(client_ptr));
+  clients_.Add(std::move(client));
 }
 
 void WebUsbServiceImpl::OnPermissionRevoked(
@@ -137,8 +193,8 @@ void WebUsbServiceImpl::OnPermissionRevoked(
 
   // Close the connection between Blink and the device if the device lost
   // permission.
-  base::EraseIf(device_client_bindings_, [this](const auto& entry) {
-    auto* device_info = chooser_context_->GetDeviceInfo(entry.first);
+  base::EraseIf(device_clients_, [this](const auto& client) {
+    auto* device_info = chooser_context_->GetDeviceInfo(client->device_guid());
     if (!device_info)
       return true;
 
@@ -151,28 +207,27 @@ void WebUsbServiceImpl::OnDeviceAdded(
   if (!HasDevicePermission(device_info))
     return;
 
-  clients_.ForAllPtrs(
-      [&device_info](device::mojom::UsbDeviceManagerClient* client) {
-        client->OnDeviceAdded(device_info.Clone());
-      });
+  for (auto& client : clients_)
+    client->OnDeviceAdded(device_info.Clone());
 }
 
 void WebUsbServiceImpl::OnDeviceRemoved(
     const device::mojom::UsbDeviceInfo& device_info) {
-  device_client_bindings_.erase(device_info.guid);
+  base::EraseIf(device_clients_, [&device_info](const auto& client) {
+    return device_info.guid == client->device_guid();
+  });
+
   if (!HasDevicePermission(device_info))
     return;
 
-  clients_.ForAllPtrs(
-      [&device_info](device::mojom::UsbDeviceManagerClient* client) {
-        client->OnDeviceRemoved(device_info.Clone());
-      });
+  for (auto& client : clients_)
+    client->OnDeviceRemoved(device_info.Clone());
 }
 
 void WebUsbServiceImpl::OnDeviceManagerConnectionError() {
   // Close the connection with blink.
-  clients_.CloseAll();
-  bindings_.CloseAllBindings();
+  clients_.Clear();
+  receivers_.Clear();
 
   // Remove itself from UsbChooserContext's ObserverList.
   device_observer_.RemoveAll();
@@ -180,24 +235,30 @@ void WebUsbServiceImpl::OnDeviceManagerConnectionError() {
 }
 
 // device::mojom::UsbDeviceClient implementation:
-void WebUsbServiceImpl::OnDeviceOpened() {
+void WebUsbServiceImpl::IncrementConnectionCount() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host_);
   UsbTabHelper* tab_helper = UsbTabHelper::FromWebContents(web_contents);
-  tab_helper->IncrementConnectionCount(render_frame_host_);
+  tab_helper->IncrementConnectionCount();
 }
 
-void WebUsbServiceImpl::OnDeviceClosed() {
+void WebUsbServiceImpl::DecrementConnectionCount() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host_);
   UsbTabHelper* tab_helper = UsbTabHelper::FromWebContents(web_contents);
-  tab_helper->DecrementConnectionCount(render_frame_host_);
+  tab_helper->DecrementConnectionCount();
 }
 
-void WebUsbServiceImpl::OnBindingConnectionError() {
-  if (bindings_.empty()) {
+void WebUsbServiceImpl::RemoveDeviceClient(const UsbDeviceClient* client) {
+  base::EraseIf(device_clients_, [client](const auto& this_client) {
+    return client == this_client.get();
+  });
+}
+
+void WebUsbServiceImpl::OnConnectionError() {
+  if (receivers_.empty()) {
     device_observer_.RemoveAll();
     permission_observer_.RemoveAll();
   }

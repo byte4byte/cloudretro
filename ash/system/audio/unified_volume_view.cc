@@ -4,11 +4,14 @@
 
 #include "ash/system/audio/unified_volume_view.h"
 
+#include "ash/public/cpp/ash_features.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/audio/unified_volume_slider_controller.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "ash/system/unified/unified_system_tray_view.h"
 #include "base/i18n/rtl.h"
 #include "base/stl_util.h"
 #include "components/vector_icons/vector_icons.h"
@@ -20,18 +23,15 @@
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/animation/ink_drop_mask.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/view_class_properties.h"
 
 using chromeos::CrasAudioHandler;
 
 namespace ash {
 
 namespace {
-
-// Threshold to ignore update on the slider value.
-const float kSliderIgnoreUpdateThreshold = 0.01;
 
 // References to the icons that correspond to different volume levels.
 const gfx::VectorIcon* const kVolumeLevelIcons[] = {
@@ -66,41 +66,46 @@ class MoreButton : public views::Button {
                     2),
         2));
 
-    auto* headset = new views::ImageView();
-    headset->set_can_process_events_within_subtree(false);
-    headset->SetImage(
-        CreateVectorIcon(vector_icons::kHeadsetIcon, kUnifiedMenuIconColor));
-    AddChildView(headset);
+    const SkColor icon_color = AshColorProvider::Get()->GetContentLayerColor(
+        AshColorProvider::ContentLayerType::kIconPrimary,
+        AshColorProvider::AshColorMode::kDark);
 
+    if (!features::IsSystemTrayMicGainSettingEnabled()) {
+      auto* headset = new views::ImageView();
+      headset->set_can_process_events_within_subtree(false);
+      headset->SetImage(
+          CreateVectorIcon(vector_icons::kHeadsetIcon, icon_color));
+      AddChildView(headset);
+    }
     auto* more = new views::ImageView();
     more->set_can_process_events_within_subtree(false);
     auto icon_rotation = base::i18n::IsRTL()
                              ? SkBitmapOperations::ROTATION_270_CW
                              : SkBitmapOperations::ROTATION_90_CW;
     more->SetImage(gfx::ImageSkiaOperations::CreateRotatedImage(
-        CreateVectorIcon(kUnifiedMenuExpandIcon, kUnifiedMenuIconColor),
-        icon_rotation));
+        CreateVectorIcon(kUnifiedMenuExpandIcon, icon_color), icon_rotation));
     AddChildView(more);
 
     SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_AUDIO));
     TrayPopupUtils::ConfigureTrayPopupButton(this);
 
-    auto path = std::make_unique<SkPath>();
-    path->addRoundRect(gfx::RectToSkRect(gfx::Rect(CalculatePreferredSize())),
-                       kTrayItemSize / 2, kTrayItemSize / 2);
-    SetProperty(views::kHighlightPathKey, path.release());
+    views::InstallRoundRectHighlightPathGenerator(this, gfx::Insets(),
+                                                  kTrayItemCornerRadius);
+    focus_ring()->SetColor(UnifiedSystemTrayView::GetFocusRingColor());
   }
 
   ~MoreButton() override = default;
 
   // views::Button:
   void PaintButtonContents(gfx::Canvas* canvas) override {
-    gfx::Rect rect(GetContentsBounds());
+    gfx::RectF rect(GetContentsBounds());
     cc::PaintFlags flags;
     flags.setAntiAlias(true);
-    flags.setColor(kUnifiedMenuButtonColor);
+    flags.setColor(AshColorProvider::Get()->DeprecatedGetControlsLayerColor(
+        AshColorProvider::ControlsLayerType::kInactiveControlBackground,
+        kUnifiedMenuButtonColor));
     flags.setStyle(cc::PaintFlags::kFill_Style);
-    canvas->DrawRoundRect(rect, kTrayItemSize / 2, flags);
+    canvas->DrawRoundRect(rect, kTrayItemCornerRadius, flags);
   }
 
   std::unique_ptr<views::InkDrop> CreateInkDrop() override {
@@ -110,18 +115,15 @@ class MoreButton : public views::Button {
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override {
     return TrayPopupUtils::CreateInkDropRipple(
         TrayPopupInkDropStyle::FILL_BOUNDS, this,
-        GetInkDropCenterBasedOnLastEvent(), kUnifiedMenuIconColor);
+        GetInkDropCenterBasedOnLastEvent(),
+        UnifiedSystemTrayView::GetBackgroundColor());
   }
 
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override {
     return TrayPopupUtils::CreateInkDropHighlight(
-        TrayPopupInkDropStyle::FILL_BOUNDS, this, kUnifiedMenuIconColor);
-  }
-
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override {
-    return std::make_unique<views::RoundRectInkDropMask>(size(), gfx::Insets(),
-                                                         kTrayItemSize / 2);
+        TrayPopupInkDropStyle::FILL_BOUNDS, this,
+        UnifiedSystemTrayView::GetBackgroundColor());
   }
 
   const char* GetClassName() const override { return "MoreButton"; }
@@ -135,7 +137,7 @@ class MoreButton : public views::Button {
 UnifiedVolumeView::UnifiedVolumeView(UnifiedVolumeSliderController* controller)
     : UnifiedSliderView(controller,
                         kSystemMenuVolumeHighIcon,
-                        IDS_ASH_STATUS_TRAY_VOLUME),
+                        IDS_ASH_STATUS_TRAY_VOLUME_SLIDER_LABEL),
       more_button_(new MoreButton(controller)) {
   CrasAudioHandler::Get()->AddAudioObserver(this);
   AddChildView(more_button_);
@@ -154,24 +156,36 @@ void UnifiedVolumeView::Update(bool by_user) {
   bool is_muted = CrasAudioHandler::Get()->IsOutputMuted();
   float level = CrasAudioHandler::Get()->GetOutputVolumePercent() / 100.f;
 
-  // Indicate that the slider is inactive when it's muted.
-  slider()->SetIsActive(!is_muted);
+  // To indicate that the volume is muted, set the volume slider to the minimal
+  // visual style.
+  slider()->SetRenderingStyle(
+      is_muted ? views::Slider::RenderingStyle::kMinimalStyle
+               : views::Slider::RenderingStyle::kDefaultStyle);
 
-  // The button should be gray whay muted and colored otherwise.
+  // The button should be gray when muted and colored otherwise.
   button()->SetToggled(!is_muted);
   button()->SetVectorIcon(is_muted ? kUnifiedMenuVolumeMuteIcon
                                    : GetVolumeIconForLevel(level));
+  base::string16 state_tooltip_text = l10n_util::GetStringUTF16(
+      is_muted ? IDS_ASH_STATUS_TRAY_VOLUME_STATE_MUTED
+               : IDS_ASH_STATUS_TRAY_VOLUME_STATE_ON);
+  button()->SetTooltipText(l10n_util::GetStringFUTF16(
+      IDS_ASH_STATUS_TRAY_VOLUME, state_tooltip_text));
 
   more_button_->SetVisible(CrasAudioHandler::Get()->has_alternative_input() ||
-                           CrasAudioHandler::Get()->has_alternative_output());
+                           CrasAudioHandler::Get()->has_alternative_output() ||
+                           features::IsSystemTrayMicGainSettingEnabled());
 
   // Slider's value is in finer granularity than audio volume level(0.01),
   // there will be a small discrepancy between slider's value and volume level
-  // on audio side. To avoid the jittering in slider UI, do not set change
-  // slider value if the change is less than the threshold.
-  if (std::abs(level - slider()->GetValue()) < kSliderIgnoreUpdateThreshold)
-    return;
-
+  // on audio side. To avoid the jittering in slider UI, use the slider's
+  // current value.
+  if (std::abs(level - slider()->GetValue()) <
+      kAudioSliderIgnoreUpdateThreshold) {
+    level = slider()->GetValue();
+  }
+  // Note: even if the value does not change, we still need to call this
+  // function to enable accessibility events (crbug.com/1013251).
   SetSliderValue(level, by_user);
 }
 

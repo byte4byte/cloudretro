@@ -11,7 +11,7 @@
 #include "ios/web/public/test/fakes/fake_download_controller_delegate.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "ios/web/public/test/web_test.h"
 #include "net/url_request/url_fetcher_response_writer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -65,7 +65,7 @@ TEST_F(DownloadControllerImplTest, OnDownloadCreated) {
   NSString* identifier = [NSUUID UUID].UUIDString;
   GURL url("https://download.test");
   download_controller_->CreateDownloadTask(
-      &web_state_, identifier, url, kContentDisposition,
+      &web_state_, identifier, url, @"POST", kContentDisposition,
       /*total_bytes=*/-1, kMimeType, ui::PageTransition::PAGE_TRANSITION_TYPED);
 
   ASSERT_EQ(1U, delegate_.alive_download_tasks().size());
@@ -73,6 +73,7 @@ TEST_F(DownloadControllerImplTest, OnDownloadCreated) {
   EXPECT_EQ(&web_state_, delegate_.alive_download_tasks()[0].first);
   EXPECT_NSEQ(identifier, task->GetIndentifier());
   EXPECT_EQ(url, task->GetOriginalUrl());
+  EXPECT_NSEQ(@"POST", task->GetHttpMethod());
   EXPECT_FALSE(task->IsDone());
   EXPECT_EQ(0, task->GetErrorCode());
   EXPECT_EQ(-1, task->GetTotalBytes());
@@ -90,7 +91,7 @@ TEST_F(DownloadControllerImplTest, NullDelegate) {
   download_controller_->SetDelegate(nullptr);
   GURL url("https://download.test");
   download_controller_->CreateDownloadTask(
-      &web_state_, [NSUUID UUID].UUIDString, url, kContentDisposition,
+      &web_state_, [NSUUID UUID].UUIDString, url, @"GET", kContentDisposition,
       /*total_bytes=*/-1, kMimeType, ui::PageTransition::PAGE_TRANSITION_LINK);
 }
 

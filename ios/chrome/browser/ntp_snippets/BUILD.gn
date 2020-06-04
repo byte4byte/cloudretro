@@ -3,7 +3,10 @@
 # found in the LICENSE file.
 
 source_set("ntp_snippets") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
+    "content_suggestions_scheduler_notifications.h",
+    "content_suggestions_scheduler_notifications.mm",
     "ios_chrome_content_suggestions_service_factory.cc",
     "ios_chrome_content_suggestions_service_factory.h",
     "ios_chrome_content_suggestions_service_factory_util.cc",
@@ -29,7 +32,6 @@ source_set("ntp_snippets") {
     "//ios/chrome/browser/favicon",
     "//ios/chrome/browser/history",
     "//ios/chrome/browser/json_parser",
-    "//ios/chrome/browser/leveldb_proto:factory",
     "//ios/chrome/browser/reading_list",
     "//ios/chrome/browser/signin",
     "//ios/chrome/browser/ui/util",

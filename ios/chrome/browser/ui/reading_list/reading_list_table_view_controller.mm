@@ -12,9 +12,11 @@
 #include "base/metrics/user_metrics_action.h"
 #include "base/stl_util.h"
 #include "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
 #import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/reading_list/empty_reading_list_message_util.h"
+#import "ios/chrome/browser/ui/reading_list/reading_list_constants.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_data_sink.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_data_source.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_list_item_updater.h"
@@ -91,6 +93,7 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 @synthesize delegate = _delegate;
 @synthesize audience = _audience;
 @synthesize dataSource = _dataSource;
+@synthesize browser = _browser;
 @dynamic tableViewModel;
 @synthesize dataSourceModifiedWhileEditing = _dataSourceModifiedWhileEditing;
 @synthesize toolbarManager = _toolbarManager;
@@ -101,8 +104,7 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 @synthesize needsSectionCleanupAfterEditing = _needsSectionCleanupAfterEditing;
 
 - (instancetype)init {
-  self = [super initWithTableViewStyle:UITableViewStylePlain
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:UITableViewStylePlain];
   if (self) {
     _toolbarManager = [[ReadingListToolbarButtonManager alloc] init];
     _toolbarManager.commandHandler = self;
@@ -138,6 +140,7 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
   if (!editing) {
     self.editingWithToolbarButtons = NO;
     if (self.needsSectionCleanupAfterEditing) {
+      [self removeEmptySections];
       self.needsSectionCleanupAfterEditing = NO;
     }
   }
@@ -187,7 +190,7 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 }
 
 + (NSString*)accessibilityIdentifier {
-  return @"ReadingListTableView";
+  return kReadingListViewID;
 }
 
 #pragma mark - UIViewController
@@ -206,9 +209,6 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
   self.tableView.allowsMultipleSelection = YES;
   // Add a tableFooterView in order to disable separators at the bottom of the
   // tableView.
-  // TODO(crbug.com/863606): Remove this workaround when iOS10 is no longer
-  // supported, as it is not necessary in iOS 11.
-  self.tableView.tableFooterView = [[UIView alloc] init];
 
   // Add gesture recognizer for the context menu.
   UILongPressGestureRecognizer* longPressRecognizer =
@@ -241,11 +241,11 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
      forRowAtIndexPath:(NSIndexPath*)indexPath {
   DCHECK_EQ(editingStyle, UITableViewCellEditingStyleDelete);
   base::RecordAction(base::UserMetricsAction("MobileReadingListDeleteEntry"));
-  // The UIKit animation for the swipe-to-delete gesture throws an exception if
-  // the section of the deleted item is removed before the animation is
-  // finished.  To prevent this from happening, record that cleanup is needed
-  // and remove the section when self.tableView.editing is reset to NO when the
-  // animation finishes.
+
+  // On IOS 12, the UIKit animation for the swipe-to-delete gesture throws an
+  // exception if the section of the deleted item is removed before the
+  // animation is finished. This is still needed on IOS 13 to prevent displaying
+  // Cancel and Mark all buttons, see crbug.com/1022763.
   self.needsSectionCleanupAfterEditing = YES;
   [self deleteItemsAtIndexPaths:@[ indexPath ]
                      endEditing:NO
@@ -288,6 +288,16 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 - (BOOL)tableView:(UITableView*)tableView
     canEditRowAtIndexPath:(NSIndexPath*)indexPath {
   return [self.tableViewModel itemAtIndexPath:indexPath].type == ItemTypeItem;
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  base::RecordAction(base::UserMetricsAction("IOSReadingListCloseWithSwipe"));
+  // Call the delegate dismissReadingListListViewController to clean up state
+  // and stop the Coordinator.
+  [self.delegate dismissReadingListListViewController:self];
 }
 
 #pragma mark - ChromeTableViewController
@@ -357,13 +367,6 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 
 - (BOOL)isItemRead:(id<ReadingListListItem>)item {
   return [self.dataSource isItemRead:item];
-}
-
-- (void)deleteItem:(id<ReadingListListItem>)item {
-  TableViewModel* model = self.tableViewModel;
-  TableViewItem* tableViewItem = base::mac::ObjCCastStrict<TableViewItem>(item);
-  if ([model hasItem:tableViewItem])
-    [self deleteItemsAtIndexPaths:@[ [model indexPathForItem:tableViewItem] ]];
 }
 
 - (void)openItemInNewTab:(id<ReadingListListItem>)item {
@@ -523,8 +526,9 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 
 // Creates a confirmation action sheet for the "Mark" toolbar button item.
 - (void)initializeMarkConfirmationSheet {
-  self.markConfirmationSheet =
-      [self.toolbarManager markButtonConfirmationWithBaseViewController:self];
+  self.markConfirmationSheet = [self.toolbarManager
+      markButtonConfirmationWithBaseViewController:self
+                                           browser:_browser];
 
   [self.markConfirmationSheet
       addItemWithTitle:l10n_util::GetNSStringWithFixup(IDS_CANCEL)
@@ -591,6 +595,7 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
       self.selectedUnreadItemCount, self.selectedReadItemCount);
   if (self.toolbarManager.buttonItemsUpdated)
     [self setToolbarItems:[self.toolbarManager buttonItems] animated:YES];
+  [self.toolbarManager updateMarkButtonTitle];
 }
 
 #pragma mark - Item Editing Helpers
@@ -655,6 +660,9 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
                     toSection:(SectionIdentifier)toSection {
   // Reconfigure cells, allowing the custom actions to be updated.
   for (NSIndexPath* indexPath in sortedIndexPaths) {
+    if (![self.tableView cellForRowAtIndexPath:indexPath])
+      continue;
+
     [[self.tableViewModel itemAtIndexPath:indexPath]
         configureCell:[self.tableView cellForRowAtIndexPath:indexPath]
            withStyler:self.styler];
@@ -772,9 +780,9 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
     [self.dataSource removeEntryFromItem:item];
   };
   [self updateItemsAtIndexPaths:indexPaths withItemUpdater:updater];
-  if (endEditing)
+  if (endEditing) {
     [self exitEditingModeAnimated:YES];
-
+  }
   // Update the model and table view for the deleted items.
   UITableView* tableView = self.tableView;
   NSArray* sortedIndexPaths =
@@ -904,10 +912,10 @@ ReadingListSelectionState GetSelectionStateForSelectedCounts(
 
 // Called when the table is empty.
 - (void)tableIsEmpty {
-  [self
-      addEmptyTableViewWithAttributedMessage:GetReadingListEmptyMessage()
-                                       image:[UIImage
-                                                 imageNamed:kEmptyStateImage]];
+  UIImage* emptyImage = [[UIImage imageNamed:kEmptyStateImage]
+      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+  [self addEmptyTableViewWithAttributedMessage:GetReadingListEmptyMessage()
+                                         image:emptyImage];
   [self updateEmptyTableViewMessageAccessibilityLabel:
             GetReadingListEmptyMessageA11yLabel()];
   self.tableView.alwaysBounceVertical = NO;

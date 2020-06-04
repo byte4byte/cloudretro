@@ -264,11 +264,7 @@ void LoadProfileAsync(const base::FilePath& path,
 
 void SwitchToProfile(const base::FilePath& path,
                      bool always_create,
-                     ProfileManager::CreateCallback callback,
-                     ProfileMetrics::ProfileOpen metric) {
-  ProfileMetrics::LogProfileSwitch(metric,
-                                   g_browser_process->profile_manager(),
-                                   path);
+                     ProfileManager::CreateCallback callback) {
   g_browser_process->profile_manager()->CreateProfileAsync(
       path,
       base::Bind(&profiles::OpenBrowserWindowForProfile, callback,
@@ -277,12 +273,8 @@ void SwitchToProfile(const base::FilePath& path,
 }
 
 void SwitchToGuestProfile(ProfileManager::CreateCallback callback) {
-  const base::FilePath& path = ProfileManager::GetGuestProfilePath();
-  ProfileMetrics::LogProfileSwitch(ProfileMetrics::SWITCH_PROFILE_GUEST,
-                                   g_browser_process->profile_manager(),
-                                   path);
   g_browser_process->profile_manager()->CreateProfileAsync(
-      path,
+      ProfileManager::GetGuestProfilePath(),
       base::Bind(&profiles::OpenBrowserWindowForProfile, callback, false, false,
                  false),
       base::string16(), std::string());
@@ -368,11 +360,11 @@ bool IsLockAvailable(Profile* profile) {
   // TODO(mlerman): After one release remove any hosted_domain reference to the
   // pref, since all users will have this in the AccountTrackerService.
   if (hosted_domain.empty()) {
-    identity::IdentityManager* identity_manager =
+    signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(profile);
 
     base::Optional<AccountInfo> primary_account_info =
-        identity_manager->FindExtendedAccountInfoForAccount(
+        identity_manager->FindExtendedAccountInfoForAccountWithRefreshToken(
             identity_manager->GetPrimaryAccountInfo());
 
     if (primary_account_info.has_value())

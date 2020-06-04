@@ -7,17 +7,15 @@
 
 #include "base/containers/flat_set.h"
 #include "media/base/video_codecs.h"
-#include "media/cdm/cdm_proxy.h"
 
 namespace media {
-enum class EncryptionMode;
+enum class EncryptionScheme;
 }
 
 // Get supported Widevine hardware capabilities, including supported
 // |video_codecs| and |encryption_schemes|.
 void GetWidevineHardwareCaps(
-    const base::flat_set<media::CdmProxy::Protocol>& cdm_proxy_protocols,
     base::flat_set<media::VideoCodec>* video_codecs,
-    base::flat_set<media::EncryptionMode>* encryption_schemes);
+    base::flat_set<media::EncryptionScheme>* encryption_schemes);
 
 #endif  // CHROME_BROWSER_MEDIA_WIDEVINE_HARDWARE_CAPS_WIN_H_

@@ -14,11 +14,9 @@
 #include "base/sequenced_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
-#include "base/time/clock.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/power/ml/fake_boot_clock.h"
 #include "chrome/browser/chromeos/power/ml/idle_event_notifier.h"
 #include "chrome/browser/chromeos/power/ml/smart_dim/model.h"
 #include "chrome/browser/chromeos/power/ml/user_activity_event.pb.h"
@@ -39,9 +37,10 @@
 #include "components/ukm/content/source_url_recorder.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/user_activity/user_activity_detector.h"
@@ -171,10 +170,10 @@ class UserActivityManagerTest : public ChromeRenderViewHostTestHarness {
  public:
   UserActivityManagerTest()
       : ChromeRenderViewHostTestHarness(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI,
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME,
-            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED),
-        model_(thread_bundle()->GetMainThreadTaskRunner()) {}
+            base::test::TaskEnvironment::MainThreadType::UI,
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME,
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED),
+        model_(task_environment()->GetMainThreadTaskRunner()) {}
 
   ~UserActivityManagerTest() override = default;
 
@@ -183,15 +182,11 @@ class UserActivityManagerTest : public ChromeRenderViewHostTestHarness {
     ChromeRenderViewHostTestHarness::SetUp();
 
     PowerManagerClient::InitializeFake();
-    viz::mojom::VideoDetectorObserverPtr observer;
+    mojo::PendingRemote<viz::mojom::VideoDetectorObserver> observer;
     activity_logger_ = std::make_unique<UserActivityManager>(
         &delegate_, &user_activity_detector_, PowerManagerClient::Get(),
-        &session_manager_, mojo::MakeRequest(&observer), &fake_user_manager_,
-        &model_);
-    activity_logger_->SetTaskRunnerForTesting(
-        thread_bundle()->GetMainThreadTaskRunner(),
-        std::make_unique<FakeBootClock>(thread_bundle(),
-                                        base::TimeDelta::FromSeconds(10)));
+        &session_manager_, observer.InitWithNewPipeAndPassReceiver(),
+        &fake_user_manager_, &model_);
   }
 
   void TearDown() override {
@@ -253,7 +248,7 @@ class UserActivityManagerTest : public ChromeRenderViewHostTestHarness {
   void ReportSuspend(power_manager::SuspendImminent::Reason reason,
                      base::TimeDelta sleep_duration) {
     FakePowerManagerClient::Get()->SendSuspendImminent(reason);
-    thread_bundle()->FastForwardBy(sleep_duration);
+    task_environment()->FastForwardBy(sleep_duration);
     FakePowerManagerClient::Get()->SendSuspendDone(sleep_duration);
   }
 
@@ -354,7 +349,7 @@ TEST_F(UserActivityManagerTest, LogAfterIdleEvent) {
   // Trigger an idle event.
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(2));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(2));
   ReportUserActivity(nullptr);
 
   const std::vector<UserActivityEvent>& events = delegate_.events();
@@ -429,18 +424,18 @@ TEST_F(UserActivityManagerTest, LogMultipleEvents) {
   // Trigger the 2nd idle event.
   ReportIdleEvent(data);
   // Second user event.
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(2));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(2));
   ReportUserActivity(nullptr);
 
   // Trigger the 3rd idle event.
   ReportIdleEvent(data);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(3));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(3));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(10));
 
   // Trigger the 4th idle event.
   ReportIdleEvent(data);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(4));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(4));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(10));
 
@@ -510,7 +505,7 @@ TEST_F(UserActivityManagerTest, UserCloseLid) {
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
 
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(2));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(2));
   ReportLidEvent(chromeos::PowerManagerClient::LidState::CLOSED);
   const std::vector<UserActivityEvent>& events = delegate_.events();
   EXPECT_TRUE(events.empty());
@@ -573,9 +568,9 @@ TEST_F(UserActivityManagerTest, SystemIdleSuspend) {
   // Trigger an idle event.
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportScreenIdleState(true /* screen_dim */, false /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(30));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(30));
   ReportScreenIdleState(true /* screen_dim */, true /* screen_off */);
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(10));
@@ -602,11 +597,11 @@ TEST_F(UserActivityManagerTest, SystemIdleNotSuspend) {
   // Trigger an idle event.
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportScreenIdleState(true /* screen_dim */, false /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(30));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(30));
   ReportScreenIdleState(true /* screen_dim */, true /* screen_off */);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   const std::vector<UserActivityEvent>& events = delegate_.events();
   ASSERT_EQ(0U, events.size());
@@ -622,14 +617,14 @@ TEST_F(UserActivityManagerTest, SystemIdleInterrupted) {
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
 
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportScreenIdleState(true /* screen_dim */, false /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(30));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(30));
   ReportScreenIdleState(true /* screen_dim */, true /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(1));
 
   ReportUserActivity(nullptr);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   const std::vector<UserActivityEvent>& events = delegate_.events();
   ASSERT_EQ(1U, events.size());
@@ -692,7 +687,7 @@ TEST_F(UserActivityManagerTest, SuspendIdleShortSleepDuration) {
   const IdleEventNotifier::ActivityData data;
   ReportIdleEvent(data);
 
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(1));
   const std::vector<UserActivityEvent>& events = delegate_.events();
@@ -892,7 +887,7 @@ TEST_F(UserActivityManagerTest, InitialScreenOff) {
 
   ReportScreenIdleState(false /* screen_dim */, true /* screen_off */);
 
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(7));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(7));
   ReportUserActivity(nullptr);
 
   const std::vector<UserActivityEvent>& events = delegate_.events();
@@ -923,7 +918,7 @@ TEST_F(UserActivityManagerTest, InitialScreenStateFlipped) {
   ReportIdleEvent(data);
 
   ReportScreenIdleState(false /* screen_dim */, false /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(7));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(7));
   ReportScreenIdleState(true /* screen_dim */, true /* screen_off */);
 
   ReportUserActivity(nullptr);
@@ -955,7 +950,7 @@ TEST_F(UserActivityManagerTest, ScreenOffStateChanged) {
 
   ReportScreenIdleState(true /* screen_dim */, false /* screen_off */);
   ReportScreenIdleState(true /* screen_dim */, true /* screen_off */);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(7));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(7));
   ReportScreenIdleState(false /* screen_dim */, false /* screen_off */);
   ReportUserActivity(nullptr);
 
@@ -989,7 +984,7 @@ TEST_F(UserActivityManagerTest, ScreenDimDeferredWithFinalEvent) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   ReportUserActivity(nullptr);
   EXPECT_TRUE(should_defer);
 
@@ -1030,7 +1025,7 @@ TEST_F(UserActivityManagerTest, ScreenDimDeferredWithoutFinalEvent) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_TRUE(should_defer);
 
   std::string histogram("PowerML.SmartDimModel.RequestCompleteDuration");
@@ -1059,7 +1054,7 @@ TEST_F(UserActivityManagerTest, ScreenDimRequestCanceled) {
   // Report user activity immediately after the idle event, so that
   // the SmartDimModel doesn't get a chance to run.
   ReportUserActivity(nullptr);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(should_defer);
 
   std::string hist_complete("PowerML.SmartDimModel.RequestCompleteDuration");
@@ -1091,7 +1086,7 @@ TEST_F(UserActivityManagerTest, ScreenDimConsecutiveRequests) {
   bool should_defer_2 = false;
   ReportIdleEvent(data, &should_defer_1);
   ReportIdleEvent(data, &should_defer_2);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   ReportUserActivity(nullptr);
   EXPECT_NE(should_defer_1, should_defer_2);
 
@@ -1134,7 +1129,7 @@ TEST_F(UserActivityManagerTest, ScreenDimNotDeferred) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   ReportUserActivity(nullptr);
   EXPECT_FALSE(should_defer);
 
@@ -1168,25 +1163,25 @@ TEST_F(UserActivityManagerTest, TwoScreenDimImminentWithEventInBetween) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_TRUE(should_defer);
 
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(6));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(6));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(3));
 
   // 2nd ScreenDimImminent is not deferred despite model score says so.
   model_.set_inactivity_score(20);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(10));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(10));
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(should_defer);
 
   std::string histogram("PowerML.SmartDimModel.RequestCompleteDuration");
   histogram_tester.ExpectTotalCount(histogram, 2);
 
   // Log when a SuspendImminent is received
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(3));
 
@@ -1243,21 +1238,21 @@ TEST_F(UserActivityManagerTest, TwoScreenDimImminentWithoutEventInBetween) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_TRUE(should_defer);
 
   // 2nd ScreenDimImminent is not deferred despite model score says so.
   model_.set_inactivity_score(20);
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(10));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(10));
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(should_defer);
 
   std::string histogram("PowerML.SmartDimModel.RequestCompleteDuration");
   histogram_tester.ExpectTotalCount(histogram, 2);
 
   // Log when a SuspendImminent is received
-  thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(20));
+  task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(20));
   ReportSuspend(power_manager::SuspendImminent_Reason_IDLE,
                 base::TimeDelta::FromSeconds(3));
 
@@ -1310,7 +1305,7 @@ TEST_F(UserActivityManagerTest, ModelError) {
   const IdleEventNotifier::ActivityData data;
   bool should_defer = false;
   ReportIdleEvent(data, &should_defer);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   ReportUserActivity(nullptr);
   EXPECT_FALSE(should_defer);
 

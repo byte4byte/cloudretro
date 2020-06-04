@@ -10,10 +10,12 @@
 #include "ash/public/cpp/power_utils.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/numerics/ranges.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/dbus/power/power_manager_client.h"
@@ -43,10 +45,6 @@ const int kMinVisualChargeLevel = 1;
 
 // The color of the battery's badge (bolt, unreliable, X).
 const SkColor kBatteryBadgeColor = gfx::kGoogleGrey900;
-
-// The color used for the battery's badge and charged color when the battery
-// charge level is critically low and the device is not plugged in.
-const SkColor kBatteryAlertColor = gfx::kGoogleRedDark600;
 
 class BatteryImageSource : public gfx::CanvasImageSource {
  public:
@@ -100,17 +98,20 @@ class BatteryImageSource : public gfx::CanvasImageSource {
     float charge_level =
         std::floor(info_.charge_percent / 100.0 * icon_bounds.height());
     const float min_charge_level = dsf * kMinVisualChargeLevel;
-    charge_level = std::max(std::min(charge_level, icon_bounds.height()),
-                            min_charge_level);
+    charge_level = base::ClampToRange(charge_level, min_charge_level,
+                                      icon_bounds.height());
 
     const float charge_y = icon_bounds.bottom() - charge_level;
     gfx::RectF clip_rect(0, charge_y, size().width() * dsf,
                          size().height() * dsf);
     canvas->ClipRect(clip_rect);
 
+    const SkColor alert_color = AshColorProvider::Get()->GetContentLayerColor(
+        AshColorProvider::ContentLayerType::kIconRed,
+        AshColorProvider::AshColorMode::kDark);
     const bool use_alert_color =
         charge_level == min_charge_level && info_.alert_if_low;
-    flags.setColor(use_alert_color ? kBatteryAlertColor : fg_color_);
+    flags.setColor(use_alert_color ? alert_color : fg_color_);
     canvas->DrawPath(path, flags);
 
     canvas->Restore();
@@ -118,7 +119,7 @@ class BatteryImageSource : public gfx::CanvasImageSource {
     // Paint the badge over top of the battery, if applicable.
     if (info_.icon_badge) {
       const SkColor badge_color =
-          use_alert_color ? kBatteryAlertColor : kBatteryBadgeColor;
+          use_alert_color ? alert_color : kBatteryBadgeColor;
       PaintVectorIcon(canvas, *info_.icon_badge, badge_color);
     }
   }
@@ -196,7 +197,7 @@ bool PowerStatus::BatteryImageInfo::ApproximatelyEqual(
   }
 
   // Otherwise, consider close values such as 42% and 45% as about the same.
-  return icon_badge == o.icon_badge && o.alert_if_low == o.alert_if_low &&
+  return icon_badge == o.icon_badge && alert_if_low == o.alert_if_low &&
          std::abs(charge_percent - o.charge_percent) < 5;
 }
 

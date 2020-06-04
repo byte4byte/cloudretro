@@ -6,7 +6,6 @@
 
 #import "base/values.h"
 #import "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -20,15 +19,13 @@ namespace web {
 
 JsWindowErrorManager::JsWindowErrorManager(WebState* web_state)
     : web_state_impl_(web_state) {
-  web_state_impl_->AddScriptCommandCallback(
+  subscription_ = web_state_impl_->AddScriptCommandCallback(
       base::BindRepeating(&JsWindowErrorManager::OnJsMessage,
                           base::Unretained(this)),
       kCommandPrefix);
 }
 
-JsWindowErrorManager::~JsWindowErrorManager() {
-  web_state_impl_->RemoveScriptCommandCallback(kCommandPrefix);
-}
+JsWindowErrorManager::~JsWindowErrorManager() {}
 
 void JsWindowErrorManager::OnJsMessage(const base::DictionaryValue& message,
                                        const GURL& page_url,

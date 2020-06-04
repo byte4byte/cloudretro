@@ -25,12 +25,12 @@ class AwVariationsServiceClient : public variations::VariationsServiceClient {
   ~AwVariationsServiceClient() override;
 
  private:
-  base::Callback<base::Version(void)> GetVersionForSimulationCallback()
-      override;
+  VersionCallback GetVersionForSimulationCallback() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   version_info::Channel GetChannel() override;
   bool OverridesRestrictParameter(std::string* parameter) override;
+  bool IsEnterprise() override;
 
   DISALLOW_COPY_AND_ASSIGN(AwVariationsServiceClient);
 };

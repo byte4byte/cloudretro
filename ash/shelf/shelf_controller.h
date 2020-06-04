@@ -14,14 +14,11 @@
 #include "ash/public/cpp/tablet_mode_observer.h"
 #include "ash/session/session_observer.h"
 #include "base/scoped_observer.h"
+#include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_observer.h"
 
 class PrefChangeRegistrar;
 class PrefRegistrySimple;
-
-namespace message_center {
-class MessageCenter;
-}
 
 namespace ash {
 
@@ -57,11 +54,6 @@ class ASH_EXPORT ShelfController : public message_center::MessageCenterObserver,
 
   // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
-  void OnWindowTreeHostReusedForDisplay(
-      AshWindowTreeHost* window_tree_host,
-      const display::Display& display) override;
-  void OnWindowTreeHostsSwappedDisplays(AshWindowTreeHost* host1,
-                                        AshWindowTreeHost* host2) override;
 
   // The shelf model shared by all shelf instances.
   ShelfModel model_;
@@ -71,7 +63,7 @@ class ASH_EXPORT ShelfController : public message_center::MessageCenterObserver,
 
   ScopedObserver<message_center::MessageCenter,
                  message_center::MessageCenterObserver>
-      message_center_observer_;
+      message_center_observer_{this};
 
   // Observes user profile prefs for the shelf.
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;

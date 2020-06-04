@@ -7,12 +7,13 @@
 #include <memory>
 #include <utility>
 
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/platform/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/renderer/bindings/core/v8/callback_promise_adapter.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_capabilities.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_track_constraints.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -22,9 +23,8 @@
 #include "third_party/blink/renderer/modules/imagecapture/media_settings_range.h"
 #include "third_party/blink/renderer/modules/imagecapture/photo_capabilities.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
-#include "third_party/blink/renderer/modules/mediastream/media_track_capabilities.h"
-#include "third_party/blink/renderer/modules/mediastream/media_track_constraints.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -110,14 +110,14 @@ const AtomicString& ImageCapture::InterfaceName() const {
 }
 
 ExecutionContext* ImageCapture::GetExecutionContext() const {
-  return ContextLifecycleObserver::GetExecutionContext();
+  return ExecutionContextLifecycleObserver::GetExecutionContext();
 }
 
 bool ImageCapture::HasPendingActivity() const {
   return GetExecutionContext() && HasEventListeners();
 }
 
-void ImageCapture::ContextDestroyed(ExecutionContext*) {
+void ImageCapture::ContextDestroyed() {
   RemoveAllEventListeners();
   service_requests_.clear();
   DCHECK(!HasEventListeners());
@@ -127,7 +127,7 @@ ScriptPromise ImageCapture::getPhotoCapabilities(ScriptState* script_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  if (!service_) {
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
     return promise;
@@ -153,7 +153,7 @@ ScriptPromise ImageCapture::getPhotoSettings(ScriptState* script_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  if (!service_) {
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
     return promise;
@@ -190,7 +190,7 @@ ScriptPromise ImageCapture::setOptions(ScriptState* script_state,
     return promise;
   }
 
-  if (!service_) {
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
     return promise;
@@ -270,7 +270,7 @@ ScriptPromise ImageCapture::takePhoto(ScriptState* script_state) {
         "The associated Track is in an invalid state."));
     return promise;
   }
-  if (!service_) {
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
     return promise;
@@ -344,13 +344,50 @@ void ImageCapture::SetMediaTrackConstraints(
     ScriptPromiseResolver* resolver,
     const HeapVector<Member<MediaTrackConstraintSet>>& constraints_vector) {
   DCHECK_GT(constraints_vector.size(), 0u);
-  if (!service_) {
+  // TODO(mcasas): add support more than one single advanced constraint.
+  const MediaTrackConstraintSet* constraints = constraints_vector[0];
+
+  ExecutionContext* context = GetExecutionContext();
+  if (constraints->hasWhiteBalanceMode())
+    UseCounter::Count(context, WebFeature::kImageCaptureWhiteBalanceMode);
+  if (constraints->hasExposureMode())
+    UseCounter::Count(context, WebFeature::kImageCaptureExposureMode);
+  if (constraints->hasFocusMode())
+    UseCounter::Count(context, WebFeature::kImageCaptureFocusMode);
+  if (constraints->hasPointsOfInterest())
+    UseCounter::Count(context, WebFeature::kImageCapturePointsOfInterest);
+  if (constraints->hasExposureCompensation())
+    UseCounter::Count(context, WebFeature::kImageCaptureExposureCompensation);
+  if (constraints->hasExposureTime())
+    UseCounter::Count(context, WebFeature::kImageCaptureExposureTime);
+  if (constraints->hasColorTemperature())
+    UseCounter::Count(context, WebFeature::kImageCaptureColorTemperature);
+  if (constraints->hasIso())
+    UseCounter::Count(context, WebFeature::kImageCaptureIso);
+  if (constraints->hasBrightness())
+    UseCounter::Count(context, WebFeature::kImageCaptureBrightness);
+  if (constraints->hasContrast())
+    UseCounter::Count(context, WebFeature::kImageCaptureContrast);
+  if (constraints->hasSaturation())
+    UseCounter::Count(context, WebFeature::kImageCaptureSaturation);
+  if (constraints->hasSharpness())
+    UseCounter::Count(context, WebFeature::kImageCaptureSharpness);
+  if (constraints->hasFocusDistance())
+    UseCounter::Count(context, WebFeature::kImageCaptureFocusDistance);
+  if (constraints->hasPan())
+    UseCounter::Count(context, WebFeature::kImageCapturePan);
+  if (constraints->hasTilt())
+    UseCounter::Count(context, WebFeature::kImageCaptureTilt);
+  if (constraints->hasZoom())
+    UseCounter::Count(context, WebFeature::kImageCaptureZoom);
+  if (constraints->hasTorch())
+    UseCounter::Count(context, WebFeature::kImageCaptureTorch);
+
+  if (!service_.is_bound()) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kNotFoundError, kNoServiceError));
     return;
   }
-  // TODO(mcasas): add support more than one single advanced constraint.
-  const MediaTrackConstraintSet* constraints = constraints_vector[0];
 
   if ((constraints->hasWhiteBalanceMode() &&
        !capabilities_->hasWhiteBalanceMode()) ||
@@ -367,6 +404,8 @@ void ImageCapture::SetMediaTrackConstraints(
       (constraints->hasSaturation() && !capabilities_->hasSaturation()) ||
       (constraints->hasSharpness() && !capabilities_->hasSharpness()) ||
       (constraints->hasFocusDistance() && !capabilities_->hasFocusDistance()) ||
+      (constraints->hasPan() && !capabilities_->hasPan()) ||
+      (constraints->hasTilt() && !capabilities_->hasTilt()) ||
       (constraints->hasZoom() && !capabilities_->hasZoom()) ||
       (constraints->hasTorch() && !capabilities_->hasTorch())) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -566,6 +605,32 @@ void ImageCapture::SetMediaTrackConstraints(
     settings->focus_distance = focus_distance;
   }
 
+  settings->has_pan = constraints->hasPan() && constraints->pan().IsDouble();
+  if (settings->has_pan) {
+    const auto pan = constraints->pan().GetAsDouble();
+    if (pan < capabilities_->pan()->min() ||
+        pan > capabilities_->pan()->max()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNotSupportedError, "pan setting out of range"));
+      return;
+    }
+    temp_constraints->setPan(constraints->pan());
+    settings->pan = pan;
+  }
+
+  settings->has_tilt = constraints->hasTilt() && constraints->tilt().IsDouble();
+  if (settings->has_tilt) {
+    const auto tilt = constraints->tilt().GetAsDouble();
+    if (tilt < capabilities_->tilt()->min() ||
+        tilt > capabilities_->tilt()->max()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNotSupportedError, "tilt setting out of range"));
+      return;
+    }
+    temp_constraints->setTilt(constraints->tilt());
+    settings->tilt = tilt;
+  }
+
   settings->has_zoom = constraints->hasZoom() && constraints->zoom().IsDouble();
   if (settings->has_zoom) {
     const auto zoom = constraints->zoom().GetAsDouble();
@@ -650,6 +715,11 @@ void ImageCapture::GetMediaTrackSettings(MediaTrackSettings* settings) const {
 
   if (settings_->hasFocusDistance())
     settings->setFocusDistance(settings_->focusDistance());
+
+  if (settings_->hasPan())
+    settings->setPan(settings_->pan());
+  if (settings_->hasTilt())
+    settings->setTilt(settings_->tilt());
   if (settings_->hasZoom())
     settings->setZoom(settings_->zoom());
   if (settings_->hasTorch())
@@ -657,8 +727,9 @@ void ImageCapture::GetMediaTrackSettings(MediaTrackSettings* settings) const {
 }
 
 ImageCapture::ImageCapture(ExecutionContext* context, MediaStreamTrack* track)
-    : ContextLifecycleObserver(context),
+    : ExecutionContextLifecycleObserver(context),
       stream_track_(track),
+      service_(context),
       capabilities_(MediaTrackCapabilities::Create()),
       settings_(MediaTrackSettings::Create()),
       current_constraints_(MediaTrackConstraintSet::Create()),
@@ -671,9 +742,11 @@ ImageCapture::ImageCapture(ExecutionContext* context, MediaStreamTrack* track)
   if (!GetFrame())
     return;
 
-  GetFrame()->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
+  GetFrame()->GetBrowserInterfaceBroker().GetInterface(
+      service_.BindNewPipeAndPassReceiver(
+          context->GetTaskRunner(TaskType::kDOMManipulation)));
 
-  service_.set_connection_error_handler(WTF::Bind(
+  service_.set_disconnect_handler(WTF::Bind(
       &ImageCapture::OnServiceConnectionError, WrapWeakPersistent(this)));
 
   // Launch a retrieval of the current photo state, which arrive asynchronously
@@ -877,6 +950,15 @@ void ImageCapture::UpdateMediaTrackCapabilities(
         MediaSettingsRange::Create(*photo_state->focus_distance));
     settings_->setFocusDistance(photo_state->focus_distance->current);
   }
+
+  if (photo_state->pan->max != photo_state->pan->min) {
+    capabilities_->setPan(MediaSettingsRange::Create(*photo_state->pan));
+    settings_->setPan(photo_state->pan->current);
+  }
+  if (photo_state->tilt->max != photo_state->tilt->min) {
+    capabilities_->setTilt(MediaSettingsRange::Create(*photo_state->tilt));
+    settings_->setTilt(photo_state->tilt->current);
+  }
   if (photo_state->zoom->max != photo_state->zoom->min) {
     capabilities_->setZoom(MediaSettingsRange::Create(*photo_state->zoom));
     settings_->setZoom(photo_state->zoom->current);
@@ -913,8 +995,9 @@ void ImageCapture::ResolveWithPhotoCapabilities(
   resolver->Resolve(photo_capabilities_);
 }
 
-void ImageCapture::Trace(blink::Visitor* visitor) {
+void ImageCapture::Trace(Visitor* visitor) {
   visitor->Trace(stream_track_);
+  visitor->Trace(service_);
   visitor->Trace(capabilities_);
   visitor->Trace(settings_);
   visitor->Trace(photo_settings_);
@@ -922,7 +1005,7 @@ void ImageCapture::Trace(blink::Visitor* visitor) {
   visitor->Trace(photo_capabilities_);
   visitor->Trace(service_requests_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

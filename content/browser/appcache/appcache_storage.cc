@@ -9,7 +9,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ptr_util.h"
-#include "content/browser/appcache/appcache_response.h"
+#include "content/browser/appcache/appcache_disk_cache_ops.h"
+#include "content/browser/appcache/appcache_response_info.h"
 #include "content/browser/appcache/appcache_service_impl.h"
 #include "storage/browser/quota/quota_client.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
@@ -133,8 +134,7 @@ void AppCacheStorage::NotifyStorageAccessed(const url::Origin& origin) {
   if (service()->quota_manager_proxy() &&
       usage_map_.find(origin) != usage_map_.end())
     service()->quota_manager_proxy()->NotifyStorageAccessed(
-        storage::QuotaClient::kAppcache, origin,
-        blink::mojom::StorageType::kTemporary);
+        origin, blink::mojom::StorageType::kTemporary);
 }
 
 }  // namespace content

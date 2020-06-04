@@ -71,6 +71,9 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
   // Overridden from aura::WindowObserver.
   void OnWindowDestroyed(aura::Window* window) override;
 
+  void SetDragImage(const gfx::ImageSkia& image,
+                    const gfx::Vector2d& image_offset);
+
  protected:
   // Helper method to create a LinearAnimation object that will run the drag
   // cancel animation. Caller take ownership of the returned object. Protected
@@ -108,11 +111,14 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
   // Helper method to reset everything.
   void Cleanup();
 
+  bool IsChromeTabDrag();
+
   bool enabled_ = false;
   std::unique_ptr<DragImageView> drag_image_;
   gfx::Vector2d drag_image_offset_;
   std::unique_ptr<ui::OSExchangeData> drag_data_;
   int drag_operation_;
+  int current_drag_actions_ = 0;
 
   // Window that is currently under the drag cursor.
   aura::Window* drag_window_;
@@ -122,6 +128,7 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
   gfx::Rect drag_image_final_bounds_for_cancel_animation_;
 
   std::unique_ptr<gfx::LinearAnimation> cancel_animation_;
+  std::unique_ptr<gfx::AnimationDelegate> cancel_animation_notifier_;
 
   // Window that started the drag.
   aura::Window* drag_source_window_;
@@ -131,9 +138,9 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
   bool should_block_during_drag_drop_;
 
   // Closure for quitting nested run loop.
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 
-  std::unique_ptr<ash::DragDropTracker> drag_drop_tracker_;
+  std::unique_ptr<DragDropTracker> drag_drop_tracker_;
   std::unique_ptr<DragDropTrackerDelegate> drag_drop_window_delegate_;
 
   ui::DragDropTypes::DragEventSource current_drag_event_source_;
@@ -142,10 +149,13 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
   // See comment in OnGestureEvent() on why we need this.
   std::unique_ptr<ui::GestureEvent> pending_long_tap_;
 
+  gfx::Point start_location_;
+  gfx::Point current_location_;
+
   base::ObserverList<aura::client::DragDropClientObserver>::Unchecked
       observers_;
 
-  base::WeakPtrFactory<DragDropController> weak_factory_;
+  base::WeakPtrFactory<DragDropController> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DragDropController);
 };

@@ -10,21 +10,22 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
-#include "base/time/time.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/bind_to_current_loop.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_operation_context.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_stream_reader.h"
+#include "storage/browser/file_system/file_stream_writer.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_operation_context.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/quota/quota_manager.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/common/file_system/file_system_types.h"
 
 namespace content {
 
@@ -40,6 +41,10 @@ const int64_t kMaxFileSizeBytes = 512 * 1024;
 
 // Maximum length of a file name.
 const size_t kFileNameMaxLength = 256;
+
+const char kReadTimeUmaName[] = "Media.EME.CdmFileIO.TimeTo.ReadFile";
+const char kWriteTimeUmaName[] = "Media.EME.CdmFileIO.TimeTo.WriteFile";
+const char kDeleteTimeUmaName[] = "Media.EME.CdmFileIO.TimeTo.DeleteFile";
 
 std::string GetTempFileName(const std::string& file_name) {
   DCHECK(!base::StartsWith(file_name, std::string(1, kTemporaryFilePrefix),
@@ -116,30 +121,6 @@ FileLockMap* GetFileLockMap() {
   return file_lock_map;
 }
 
-// Write |data| to |file|. Returns kSuccess if everything works, kFailure
-// otherwise.  This method owns |file| and it will be closed at the end.
-CdmFileImpl::Status WriteFile(base::File file, std::vector<uint8_t> data) {
-  // As the temporary file should have been newly created, it should be empty.
-  CHECK_EQ(0u, file.GetLength()) << "Temporary file is not empty.";
-  int bytes_to_write = base::checked_cast<int>(data.size());
-
-  TRACE_EVENT0("media", "CdmFileWriteFile");
-  base::TimeTicks start = base::TimeTicks::Now();
-  int bytes_written =
-      file.Write(0, reinterpret_cast<const char*>(data.data()), bytes_to_write);
-  base::TimeDelta write_time = base::TimeTicks::Now() - start;
-  if (bytes_written != bytes_to_write) {
-    DLOG(WARNING) << "Failed to write file. Requested " << bytes_to_write
-                  << " bytes, wrote " << bytes_written;
-    return CdmFileImpl::Status::kFailure;
-  }
-
-  // Only report writing time for successful writes.
-  UMA_HISTOGRAM_TIMES("Media.EME.CdmFileIO.WriteTime", write_time);
-
-  return CdmFileImpl::Status::kSuccess;
-}
-
 // File stream operations need an IOBuffer to hold the data. This class stores
 // the data in a std::vector<uint8_t> to match what is used in the
 // mojom::CdmFile API.
@@ -147,6 +128,11 @@ class CdmFileIOBuffer : public net::IOBuffer {
  public:
   // Create an empty buffer of size |size|.
   explicit CdmFileIOBuffer(size_t size) : buffer_(size) {
+    data_ = reinterpret_cast<char*>(buffer_.data());
+  }
+
+  // Create a buffer that contains |data|.
+  explicit CdmFileIOBuffer(const std::vector<uint8_t>& data) : buffer_(data) {
     data_ = reinterpret_cast<char*>(buffer_.data());
   }
 
@@ -238,11 +224,10 @@ class CdmFileImpl::FileReader {
         base::checked_cast<size_t>(bytes_to_read));
 
     // Read the contents of the file into |buffer|.
-    base::TimeTicks start_time = base::TimeTicks::Now();
     result = file_stream_reader_->Read(
         buffer.get(), bytes_to_read,
         base::BindOnce(&FileReader::OnRead, weak_factory_.GetWeakPtr(), buffer,
-                       start_time, bytes_to_read));
+                       bytes_to_read));
     DVLOG(3) << __func__ << " Read(): " << result;
 
     // If Read() is running asynchronously, simply return.
@@ -250,14 +235,13 @@ class CdmFileImpl::FileReader {
       return;
 
     // Read() was synchronous, so pass the result on.
-    OnRead(std::move(buffer), start_time, bytes_to_read, result);
+    OnRead(std::move(buffer), bytes_to_read, result);
   }
 
   // Called when the file has been read and returns the result to the callback
   // provided to Read(). |result| will be the number of bytes read (if >= 0) or
   // a net:: error on failure (if < 0).
   void OnRead(scoped_refptr<CdmFileIOBuffer> buffer,
-              base::TimeTicks start_time,
               int bytes_to_read,
               int result) {
     DVLOG(3) << __func__ << " Requested " << bytes_to_read << " bytes, got "
@@ -274,10 +258,6 @@ class CdmFileImpl::FileReader {
       return;
     }
 
-    // Only report reading time for successful reads.
-    base::TimeDelta read_time = base::TimeTicks::Now() - start_time;
-    UMA_HISTOGRAM_TIMES("Media.EME.CdmFileIO.ReadTime", read_time);
-
     // Successful read. Return the bytes read.
     std::move(callback_).Run(true, std::move(buffer->TakeData()));
   }
@@ -290,6 +270,96 @@ class CdmFileImpl::FileReader {
 
   base::WeakPtrFactory<FileReader> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(FileReader);
+};
+
+class CdmFileImpl::FileWriter {
+ public:
+  // Returns whether the write operation succeeded or not.
+  using WriteDoneCB = base::OnceCallback<void(bool)>;
+
+  FileWriter() {}
+
+  // Writes |buffer| as the contents of |file_url| and calls |callback| with
+  // whether the write succeeded or not.
+  void Write(scoped_refptr<storage::FileSystemContext> file_system_context,
+             const storage::FileSystemURL& file_url,
+             scoped_refptr<net::IOBuffer> buffer,
+             int bytes_to_write,
+             WriteDoneCB callback) {
+    DVLOG(3) << __func__ << " url: " << file_url.DebugString();
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+    callback_ = std::move(callback);
+
+    // Create a writer on |temp_file_name_|. This temp file will be renamed
+    // after a successful write.
+    file_stream_writer_ =
+        file_system_context->CreateFileStreamWriter(file_url, 0);
+    auto result = file_stream_writer_->Write(
+        buffer.get(), bytes_to_write,
+        base::BindOnce(&FileWriter::OnWrite, weak_factory_.GetWeakPtr(), buffer,
+                       bytes_to_write));
+    DVLOG(3) << __func__ << " Write(): " << result;
+
+    // If Write() is running asynchronously, simply return.
+    if (result == net::ERR_IO_PENDING)
+      return;
+
+    // Write() was synchronous, so pass the result on.
+    OnWrite(std::move(buffer), bytes_to_write, result);
+  }
+
+ private:
+  // Called when the file has been written. |result| will be the number of bytes
+  // written (if >= 0) or a net:: error on failure (if < 0).
+  void OnWrite(scoped_refptr<net::IOBuffer> buffer,
+               int bytes_to_write,
+               int result) {
+    DVLOG(3) << __func__ << " Expected to write " << bytes_to_write
+             << " bytes, got " << result;
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+    if (result != bytes_to_write) {
+      // Unable to write the file.
+      DLOG(WARNING) << "Failed to write file. Sent " << bytes_to_write
+                    << " bytes, wrote " << result;
+      std::move(callback_).Run(false);
+      return;
+    }
+
+    result = file_stream_writer_->Flush(
+        base::BindOnce(&FileWriter::OnFlush, weak_factory_.GetWeakPtr()));
+    DVLOG(3) << __func__ << " Flush(): " << result;
+
+    // If Flush() is running asynchronously, simply return.
+    if (result == net::ERR_IO_PENDING)
+      return;
+
+    // Flush() was synchronous, so pass the result on.
+    OnFlush(result);
+  }
+
+  // Called when the file has been flushed. |result| is the net:: error code.
+  void OnFlush(int result) {
+    DVLOG(3) << __func__ << " Result: " << result;
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+    // We are done with |file_stream_writer_|.
+    file_stream_writer_.reset();
+
+    DLOG_IF(WARNING, result != net::OK)
+        << "Failed to flush file, result: " << result;
+    std::move(callback_).Run(result == net::OK);
+  }
+
+  // Called when the write operation is done.
+  WriteDoneCB callback_;
+
+  // Used to write the stream.
+  std::unique_ptr<storage::FileStreamWriter> file_stream_writer_;
+
+  base::WeakPtrFactory<FileWriter> weak_factory_{this};
+  DISALLOW_COPY_AND_ASSIGN(FileWriter);
 };
 
 // static
@@ -335,11 +405,8 @@ CdmFileImpl::~CdmFileImpl() {
   if (read_callback_)
     std::move(read_callback_).Run(Status::kFailure, {});
 
-  if (file_reader_) {
-    // |file_reader_| must be deleted on the IO thread.
-    base::CreateSequencedTaskRunner({BrowserThread::IO})
-        ->DeleteSoon(FROM_HERE, std::move(file_reader_));
-  }
+  if (write_callback_)
+    std::move(write_callback_).Run(Status::kFailure);
 
   if (file_locked_)
     ReleaseFileLock(file_name_);
@@ -368,8 +435,15 @@ void CdmFileImpl::Read(ReadCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
 
+  // Only 1 Read() or Write() is allowed at any time.
+  if (read_callback_ || write_callback_) {
+    std::move(callback).Run(Status::kFailure, {});
+    return;
+  }
+
   // Save |callback| for later use.
   read_callback_ = std::move(callback);
+  start_time_ = base::TimeTicks::Now();
 
   // As reading is done on the IO thread, when it's done ReadDone() needs to be
   // called back on this thread.
@@ -380,12 +454,10 @@ void CdmFileImpl::Read(ReadCallback callback) {
   // the IO thread. Use of base::Unretained() is OK as the reader is owned by
   // |this|, and if |this| is destructed it will destroy the file reader on the
   // IO thread.
-  file_reader_ = std::make_unique<FileReader>();
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&FileReader::Read, base::Unretained(file_reader_.get()),
-                     file_system_context_, CreateFileSystemURL(file_name_),
-                     std::move(read_done_cb)));
+  file_reader_ = base::SequenceBound<FileReader>(
+      base::CreateSequencedTaskRunner({BrowserThread::IO}));
+  file_reader_.Post(FROM_HERE, &FileReader::Read, file_system_context_,
+                    CreateFileSystemURL(file_name_), std::move(read_done_cb));
 }
 
 void CdmFileImpl::ReadDone(bool success, std::vector<uint8_t> data) {
@@ -397,7 +469,7 @@ void CdmFileImpl::ReadDone(bool success, std::vector<uint8_t> data) {
   DCHECK(read_callback_);
 
   // We are done with the reader, so destroy it.
-  file_reader_.reset();
+  file_reader_.Reset();
 
   if (!success) {
     // Unable to read the contents of the file.
@@ -405,27 +477,9 @@ void CdmFileImpl::ReadDone(bool success, std::vector<uint8_t> data) {
     return;
   }
 
+  // Only report reading time for successful reads.
+  ReportFileOperationTimeUMA(kReadTimeUmaName);
   std::move(read_callback_).Run(Status::kSuccess, std::move(data));
-}
-
-void CdmFileImpl::OpenFile(const std::string& file_name,
-                           uint32_t file_flags,
-                           CreateOrOpenCallback callback) {
-  DVLOG(3) << __func__ << " file: " << file_name << ", flags: " << file_flags;
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(file_locked_);
-
-  storage::FileSystemURL file_url = CreateFileSystemURL(file_name);
-  storage::AsyncFileUtil* file_util = file_system_context_->GetAsyncFileUtil(
-      storage::kFileSystemTypePluginPrivate);
-  auto operation_context =
-      std::make_unique<storage::FileSystemOperationContext>(
-          file_system_context_.get());
-  operation_context->set_allowed_bytes_growth(storage::QuotaManager::kNoLimit);
-  DVLOG(3) << "Opening " << file_url.DebugString();
-
-  file_util->CreateOrOpen(std::move(operation_context), file_url, file_flags,
-                          std::move(callback));
 }
 
 void CdmFileImpl::Write(const std::vector<uint8_t>& data,
@@ -434,9 +488,9 @@ void CdmFileImpl::Write(const std::vector<uint8_t>& data,
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
 
-  // If there is no data to write, delete the file to save space.
-  if (data.empty()) {
-    DeleteFile(std::move(callback));
+  // Only 1 Read() or Write() is allowed at any time.
+  if (read_callback_ || write_callback_) {
+    std::move(callback).Run(Status::kFailure);
     return;
   }
 
@@ -449,51 +503,125 @@ void CdmFileImpl::Write(const std::vector<uint8_t>& data,
     return;
   }
 
-  // Open the temporary file for writing. Specifying FLAG_CREATE_ALWAYS which
-  // will overwrite any existing file.
-  OpenFile(
-      temp_file_name_, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE,
-      base::BindOnce(&CdmFileImpl::OnTempFileOpenedForWriting,
-                     weak_factory_.GetWeakPtr(), data, std::move(callback)));
-}
+  // Save |callback| for later use.
+  write_callback_ = std::move(callback);
+  start_time_ = base::TimeTicks::Now();
 
-void CdmFileImpl::OnTempFileOpenedForWriting(
-    std::vector<uint8_t> data,
-    WriteCallback callback,
-    base::File file,
-    base::OnceClosure on_close_callback) {
-  DVLOG(3) << __func__ << " file: " << temp_file_name_
-           << ", bytes_to_write: " << data.size();
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(file_locked_);
-
-  if (!file.IsValid()) {
-    DLOG(WARNING) << "Unable to open file " << temp_file_name_ << ", error: "
-                  << base::File::ErrorToString(file.error_details());
-    std::move(callback).Run(Status::kFailure);
+  // If there is no data to write, delete the file to save space.
+  // |write_callback_| will be called after the file is deleted.
+  if (data.empty()) {
+    DeleteFile();
     return;
   }
 
-  // Writing to |file| must be done on a thread that allows blocking, so post a
-  // task to do the writing on a separate thread. When that completes we need to
-  // rename the file in order to replace any existing contents.
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(&WriteFile, std::move(file), std::move(data)),
-      base::BindOnce(&CdmFileImpl::OnFileWritten, weak_factory_.GetWeakPtr(),
-                     std::move(callback)));
+  // Copy |data| into a net::IOBuffer.
+  int bytes_to_write = base::checked_cast<int>(data.size());
+  auto buffer = base::MakeRefCounted<CdmFileIOBuffer>(data);
+
+  // FileStreamWriter only works on existing files. |temp_file_name_| should not
+  // exist, so create an empty one if necessary.
+  // We can not use AsyncFileUtil::CreateOrOpen() as it does not work with the
+  // incognito filesystem (http://crbug.com/958294).
+  auto url = CreateFileSystemURL(temp_file_name_);
+  auto* file_util = file_system_context_->GetAsyncFileUtil(
+      storage::kFileSystemTypePluginPrivate);
+  auto operation_context =
+      std::make_unique<storage::FileSystemOperationContext>(
+          file_system_context_.get());
+  operation_context->set_allowed_bytes_growth(storage::QuotaManager::kNoLimit);
+  file_util->EnsureFileExists(
+      std::move(operation_context), url,
+      base::BindOnce(&CdmFileImpl::OnEnsureTempFileExists,
+                     weak_factory_.GetWeakPtr(), std::move(buffer),
+                     bytes_to_write));
 }
 
-void CdmFileImpl::OnFileWritten(WriteCallback callback, Status status) {
+void CdmFileImpl::OnEnsureTempFileExists(scoped_refptr<net::IOBuffer> buffer,
+                                         int bytes_to_write,
+                                         base::File::Error result,
+                                         bool created) {
   DVLOG(3) << __func__ << " file: " << temp_file_name_
-           << ", status: " << status;
+           << ", result: " << base::File::ErrorToString(result);
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
+  DCHECK(write_callback_);
+  DCHECK(!file_writer_);
 
-  if (status != Status::kSuccess) {
-    // Write failed, so fail.
-    std::move(callback).Run(status);
+  if (result != base::File::FILE_OK) {
+    // Unable to create the file.
+    DLOG(WARNING) << "Failed to create temporary file, result: "
+                  << base::File::ErrorToString(result);
+    std::move(write_callback_).Run(Status::kFailure);
+    return;
+  }
+
+  // If the temp file has just been created, we know it is empty and can simply
+  // proceed with writing to it. However, if the file exists, truncate it in
+  // case it is longer than the number of bytes we want to write.
+  if (created) {
+    OnTempFileIsEmpty(std::move(buffer), bytes_to_write, result);
+    return;
+  }
+
+  auto url = CreateFileSystemURL(temp_file_name_);
+  auto* file_util = file_system_context_->GetAsyncFileUtil(
+      storage::kFileSystemTypePluginPrivate);
+  auto operation_context =
+      std::make_unique<storage::FileSystemOperationContext>(
+          file_system_context_.get());
+  operation_context->set_allowed_bytes_growth(storage::QuotaManager::kNoLimit);
+  file_util->Truncate(std::move(operation_context), url, 0,
+                      base::BindOnce(&CdmFileImpl::OnTempFileIsEmpty,
+                                     weak_factory_.GetWeakPtr(),
+                                     std::move(buffer), bytes_to_write));
+}
+
+void CdmFileImpl::OnTempFileIsEmpty(scoped_refptr<net::IOBuffer> buffer,
+                                    int bytes_to_write,
+                                    base::File::Error result) {
+  DVLOG(3) << __func__ << " file: " << temp_file_name_
+           << ", result: " << base::File::ErrorToString(result);
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(file_locked_);
+  DCHECK(write_callback_);
+  DCHECK(!file_writer_);
+
+  if (result != base::File::FILE_OK) {
+    DLOG(WARNING) << "Failed to truncate temporary file, result: "
+                  << base::File::ErrorToString(result);
+    std::move(write_callback_).Run(Status::kFailure);
+    return;
+  }
+
+  // As writing is done on the IO thread, when it's done WriteDone() needs to be
+  // called on this thread.
+  auto write_done_cb = media::BindToCurrentLoop(
+      base::BindOnce(&CdmFileImpl::WriteDone, weak_factory_.GetWeakPtr()));
+
+  // Create the file writer that runs on the IO thread, and then call Write()
+  // on the IO thread to write |buffer| into the temporary file. Use of
+  // base::Unretained() is OK as |file_writer_| is owned by |this|, and if
+  // |this| is destructed it will destroy |file_writer_| on the IO thread.
+  file_writer_ = base::SequenceBound<FileWriter>(
+      base::CreateSequencedTaskRunner({BrowserThread::IO}));
+  file_writer_.Post(FROM_HERE, &FileWriter::Write, file_system_context_,
+                    CreateFileSystemURL(temp_file_name_), std::move(buffer),
+                    bytes_to_write, std::move(write_done_cb));
+}
+
+void CdmFileImpl::WriteDone(bool success) {
+  DVLOG(3) << __func__ << " file: " << file_name_
+           << ", success: " << (success ? "yes" : "no");
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(file_locked_);
+  DCHECK(file_writer_);
+  DCHECK(write_callback_);
+
+  // We are done with |file_writer_|.
+  file_writer_.Reset();
+
+  if (!success) {
+    std::move(write_callback_).Run(Status::kFailure);
     return;
   }
 
@@ -510,32 +638,37 @@ void CdmFileImpl::OnFileWritten(WriteCallback callback, Status status) {
   file_util->MoveFileLocal(
       std::move(operation_context), src_file_url, dest_file_url,
       storage::FileSystemOperation::OPTION_NONE,
-      base::BindOnce(&CdmFileImpl::OnFileRenamed, weak_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      base::BindOnce(&CdmFileImpl::OnFileRenamed, weak_factory_.GetWeakPtr()));
 }
 
-void CdmFileImpl::OnFileRenamed(WriteCallback callback,
-                                base::File::Error move_result) {
-  DVLOG(3) << __func__;
+void CdmFileImpl::OnFileRenamed(base::File::Error move_result) {
+  DVLOG(3) << __func__ << " file: " << file_name_
+           << ", result: " << base::File::ErrorToString(move_result);
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
+  DCHECK(!file_writer_);
+  DCHECK(write_callback_);
 
   // Was the rename successful?
   if (move_result != base::File::FILE_OK) {
     DLOG(WARNING) << "Unable to rename file " << temp_file_name_ << " to "
                   << file_name_
                   << ", error: " << base::File::ErrorToString(move_result);
-    std::move(callback).Run(Status::kFailure);
+    std::move(write_callback_).Run(Status::kFailure);
     return;
   }
 
-  std::move(callback).Run(Status::kSuccess);
+  // Only report writing time for successful writes.
+  ReportFileOperationTimeUMA(kWriteTimeUmaName);
+  std::move(write_callback_).Run(Status::kSuccess);
 }
 
-void CdmFileImpl::DeleteFile(WriteCallback callback) {
+void CdmFileImpl::DeleteFile() {
   DVLOG(3) << __func__;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
+  DCHECK(!file_writer_);
+  DCHECK(write_callback_);
 
   storage::FileSystemURL file_url = CreateFileSystemURL(file_name_);
   storage::AsyncFileUtil* file_util = file_system_context_->GetAsyncFileUtil(
@@ -547,25 +680,28 @@ void CdmFileImpl::DeleteFile(WriteCallback callback) {
   DVLOG(3) << "Deleting " << file_url.DebugString();
   file_util->DeleteFile(
       std::move(operation_context), file_url,
-      base::BindOnce(&CdmFileImpl::OnFileDeleted, weak_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      base::BindOnce(&CdmFileImpl::OnFileDeleted, weak_factory_.GetWeakPtr()));
 }
 
-void CdmFileImpl::OnFileDeleted(WriteCallback callback,
-                                base::File::Error result) {
-  DVLOG(3) << __func__;
+void CdmFileImpl::OnFileDeleted(base::File::Error result) {
+  DVLOG(3) << __func__ << " file: " << file_name_
+           << ", result: " << base::File::ErrorToString(result);
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(file_locked_);
+  DCHECK(!file_writer_);
+  DCHECK(write_callback_);
 
   if (result != base::File::FILE_OK &&
       result != base::File::FILE_ERROR_NOT_FOUND) {
     DLOG(WARNING) << "Unable to delete file " << file_name_
                   << ", error: " << base::File::ErrorToString(result);
-    std::move(callback).Run(Status::kFailure);
+    std::move(write_callback_).Run(Status::kFailure);
     return;
   }
 
-  std::move(callback).Run(Status::kSuccess);
+  // Only report time for successful deletes.
+  ReportFileOperationTimeUMA(kDeleteTimeUmaName);
+  std::move(write_callback_).Run(Status::kSuccess);
 }
 
 storage::FileSystemURL CdmFileImpl::CreateFileSystemURL(
@@ -582,6 +718,20 @@ bool CdmFileImpl::AcquireFileLock(const std::string& file_name) {
 void CdmFileImpl::ReleaseFileLock(const std::string& file_name) {
   FileLockKey file_lock_key(file_system_id_, origin_, file_name);
   GetFileLockMap()->ReleaseFileLock(file_lock_key);
+}
+
+void CdmFileImpl::ReportFileOperationTimeUMA(const std::string& uma_name) {
+  static const char kIncognito[] = ".Incognito";
+  static const char kNormal[] = ".Normal";
+
+  // This records the time taken to the base histogram as well as splitting it
+  // out by incognito or normal mode.
+  auto time_taken = base::TimeTicks::Now() - start_time_;
+  base::UmaHistogramTimes(uma_name, time_taken);
+  base::UmaHistogramTimes(
+      base::StrCat({uma_name, file_system_context_->is_incognito() ? kIncognito
+                                                                   : kNormal}),
+      time_taken);
 }
 
 }  // namespace content

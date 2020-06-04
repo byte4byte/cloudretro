@@ -5,14 +5,17 @@
 package org.chromium.chrome.browser.explore_sites;
 
 import android.content.Context;
+import android.graphics.Rect;
 import android.view.View;
 
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.widget.ViewHighlighter;
-import org.chromium.chrome.browser.widget.textbubble.TextBubble;
-import org.chromium.chrome.browser.widget.tile.TileView;
+import org.chromium.chrome.browser.suggestions.tile.TileView;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
+import org.chromium.components.browser_ui.widget.highlight.PulseDrawable;
+import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
+import org.chromium.components.browser_ui.widget.textbubble.TextBubble;
 import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.ui.widget.ViewRectProvider;
@@ -59,11 +62,28 @@ public class ExploreSitesIPH {
 
         ViewRectProvider rectProvider = new ViewRectProvider(tileView);
 
-        TextBubble textBubble = new TextBubble(tileView.getContext(), tileView, contentString,
-                accessibilityString, true, rectProvider);
+        TextBubble textBubble =
+                new TextBubble(tileView.getContext(), tileView, contentString, accessibilityString,
+                        true, rectProvider, AccessibilityUtil.isAccessibilityEnabled());
         textBubble.setDismissOnTouchInteraction(true);
         View foregroundView = tileView.findViewById(org.chromium.chrome.R.id.tile_view_highlight);
-        ViewHighlighter.turnOnHighlight(foregroundView, true);
+        if (foregroundView == null) return;
+
+        PulseDrawable pulseDrawable = PulseDrawable.createCustomCircle(
+                foregroundView.getContext(), new PulseDrawable.Bounds() {
+                    @Override
+                    public float getMaxRadiusPx(Rect bounds) {
+                        return Math.min(bounds.width(), bounds.height()) / 2.f;
+                    }
+                    @Override
+                    public float getMinRadiusPx(Rect bounds) {
+                        // Radius is half of the min of width and height, divided by 1.5.
+                        // This simplifies to min of width and height divided by 3.
+                        return Math.min(bounds.width(), bounds.height()) / 3.f;
+                    }
+                });
+        ViewHighlighter.attachViewAsHighlight(foregroundView, pulseDrawable);
+
         textBubble.addOnDismissListener(() -> {
             ViewHighlighter.turnOffHighlight(foregroundView);
 

@@ -13,7 +13,7 @@
 #include "ios/net/cookies/system_cookie_store_unittest_template.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
 #include "ios/web/public/test/scoped_testing_web_client.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -25,7 +25,7 @@ namespace net {
 
 // Test class that conforms to net::SystemCookieStoreTestDelegate to exercise
 // WKHTTPSystemCookieStore.
-class WKHTTPSystemCookieStoreTestDelegate {
+class API_AVAILABLE(ios(11.0)) WKHTTPSystemCookieStoreTestDelegate {
  public:
   WKHTTPSystemCookieStoreTestDelegate() {
     // Using off the record browser state so it will use non-persistent
@@ -98,15 +98,16 @@ class WKHTTPSystemCookieStoreTestDelegate {
   SystemCookieStore* GetCookieStore() { return store_.get(); }
 
  private:
-  web::TestWebThreadBundle web_thread_;
+  web::WebTaskEnvironment task_environment_;
   web::TestBrowserState browser_state_;
   WKHTTPCookieStore* shared_store_ = nil;
   std::unique_ptr<web::WKHTTPSystemCookieStore> store_;
 };
 
-API_AVAILABLE(ios(11.0))
+#if defined(__IPHONE_11_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0)
 INSTANTIATE_TYPED_TEST_SUITE_P(WKHTTPSystemCookieStore,
                                SystemCookieStoreTest,
                                WKHTTPSystemCookieStoreTestDelegate);
+#endif
 
 }  // namespace net

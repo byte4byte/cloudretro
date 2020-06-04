@@ -9,15 +9,12 @@
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_controller.h"
 
 @class BookmarkFolderEditorViewController;
+class Browser;
 
 namespace bookmarks {
 class BookmarkModel;
 class BookmarkNode;
 }  // namespace bookmarks
-
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
 
 @protocol BookmarkFolderEditorViewControllerDelegate
 // Called when the controller successfully created or edited |folder|.
@@ -40,7 +37,8 @@ class ChromeBrowserState;
 // the title and selecting the parent folder of the bookmark.
 // This controller monitors the state of the bookmark model, so changes to the
 // bookmark model can affect this controller's state.
-@interface BookmarkFolderEditorViewController : ChromeTableViewController
+@interface BookmarkFolderEditorViewController
+    : ChromeTableViewController <UIAdaptivePresentationControllerDelegate>
 
 @property(nonatomic, weak) id<BookmarkFolderEditorViewControllerDelegate>
     delegate;
@@ -51,20 +49,19 @@ class ChromeBrowserState;
 // If |parentFolder| is NULL, a default parent will be set.
 // |bookmarkModel| must not be NULL and must be loaded.
 + (instancetype)
-folderCreatorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
-                  parentFolder:(const bookmarks::BookmarkNode*)parentFolder;
+    folderCreatorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
+                      parentFolder:(const bookmarks::BookmarkNode*)parentFolder
+                           browser:(Browser*)browser;
 
 // |bookmarkModel| must not be null and must be loaded.
 // |folder| must not be NULL and be editable.
-// |browserState| must not be null.
+// |browser| must not be null.
 + (instancetype)
-folderEditorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
-                       folder:(const bookmarks::BookmarkNode*)folder
-                 browserState:(ios::ChromeBrowserState*)browserState;
+    folderEditorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
+                           folder:(const bookmarks::BookmarkNode*)folder
+                          browser:(Browser*)browser;
 
-- (instancetype)initWithTableViewStyle:(UITableViewStyle)style
-                           appBarStyle:(ChromeTableViewControllerStyle)style
-    NS_UNAVAILABLE;
+- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
 
 @end
 

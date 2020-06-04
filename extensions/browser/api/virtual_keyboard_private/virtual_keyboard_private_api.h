@@ -21,7 +21,7 @@ namespace extensions {
 
 class VirtualKeyboardDelegate;
 
-class VirtualKeyboardPrivateFunction : public UIThreadExtensionFunction {
+class VirtualKeyboardPrivateFunction : public ExtensionFunction {
  public:
   bool PreRunValidation(std::string* error) override;
 
@@ -203,6 +203,32 @@ class VirtualKeyboardPrivateSetHitTestBoundsFunction
 
  protected:
   ~VirtualKeyboardPrivateSetHitTestBoundsFunction() override {}
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
+class VirtualKeyboardPrivateSetAreaToRemainOnScreenFunction
+    : public VirtualKeyboardPrivateFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("virtualKeyboardPrivate.setAreaToRemainOnScreen",
+                             VIRTUALKEYBOARDPRIVATE_SETAREATOREMAINONSCREEN)
+
+ protected:
+  ~VirtualKeyboardPrivateSetAreaToRemainOnScreenFunction() override {}
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
+class VirtualKeyboardPrivateSetWindowBoundsInScreenFunction
+    : public VirtualKeyboardPrivateFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("virtualKeyboardPrivate.setWindowBoundsInScreen",
+                             VIRTUALKEYBOARDPRIVATE_SETWINDOWBOUNDSINSCREEN)
+
+ protected:
+  ~VirtualKeyboardPrivateSetWindowBoundsInScreenFunction() override;
 
   // ExtensionFunction:
   ResponseAction Run() override;

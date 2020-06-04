@@ -26,6 +26,7 @@
 
 namespace {
 
+using base::trace_event::MemoryDumpDeterminism;
 using base::trace_event::MemoryDumpManager;
 using base::trace_event::MemoryDumpType;
 using tracing::BeginTracingWithTraceConfig;
@@ -44,7 +45,8 @@ void OnStartTracingDoneCallback(
   memory_instrumentation::MemoryInstrumentation::GetInstance()
       ->RequestGlobalDumpAndAppendToTrace(
           MemoryDumpType::EXPLICITLY_TRIGGERED, explicit_dump_type,
-          Bind(&RequestGlobalDumpCallback, quit_closure));
+          MemoryDumpDeterminism::NONE,
+          BindOnce(&RequestGlobalDumpCallback, quit_closure));
 }
 
 class MemoryTracingBrowserTest : public InProcessBrowserTest {
@@ -71,7 +73,7 @@ class MemoryTracingBrowserTest : public InProcessBrowserTest {
     GURL url1("about:blank");
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url1, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
     // Begin tracing and trigger dump once start is broadcasted to all
@@ -85,7 +87,7 @@ class MemoryTracingBrowserTest : public InProcessBrowserTest {
     GURL url2("chrome://credits");
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url2, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
     // Close the current tab.
@@ -94,7 +96,7 @@ class MemoryTracingBrowserTest : public InProcessBrowserTest {
     GURL url3("chrome://chrome-urls");
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url3, WindowOpenDisposition::CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
     run_loop.Run();

@@ -52,22 +52,12 @@ class MockDeviceManagementService : public DeviceManagementService {
 
   MOCK_METHOD1(StartJob, StartJobFunction);
 
-  // Can be used as an action when mocking the StartJob method.
-  // Will respond with the given data to the network request immediately.
-  // This call behaves the same as calling StartJobSync() with the first
+  // Can be used as an action when mocking the StartJob method. Will respond
+  // with the given data to the network request during the next idle run loop.
+  // This call behaves the same as calling StartJobAsync() with the first
   // arguments set to net::OK and DeviceManagement::kSuccess.
-  // This makes CreateJob() complete the network request before it returns.
-  testing::Action<StartJobFunction> StartJobOKSync(
+  testing::Action<StartJobFunction> StartJobOKAsync(
       const enterprise_management::DeviceManagementResponse& response);
-
-  // Can be used as an action when mocking the StartJob method.
-  // Will respond with the given data to the network request immediately.
-  // This makes CreateJob() complete the network request before it returns.
-  testing::Action<StartJobFunction> StartJobSync(
-      int net_error,
-      int response_code,
-      const enterprise_management::DeviceManagementResponse& response =
-          enterprise_management::DeviceManagementResponse());
 
   // Can be used as an action when mocking the StartJob method.
   // Will respond with the given data to the network request during the next
@@ -75,7 +65,8 @@ class MockDeviceManagementService : public DeviceManagementService {
   testing::Action<StartJobFunction> StartJobAsync(
       int net_error,
       int response_code,
-      const enterprise_management::DeviceManagementResponse& response);
+      const enterprise_management::DeviceManagementResponse& response =
+          enterprise_management::DeviceManagementResponse());
 
   // Can be used as an action when mocking the StartJob method.
   // Will respond with the given data to the network request during the next
@@ -110,6 +101,11 @@ class MockDeviceManagementService : public DeviceManagementService {
   // of the Job passed to StartJob.
   testing::Action<StartJobFunction> CaptureRequest(
       enterprise_management::DeviceManagementRequest* request);
+
+  // Can be used as an action when mocking the StartJob method.
+  // Makes a copy of the payload of the JobConfiguration
+  // of the Job passed to StartJob.
+  testing::Action<StartJobFunction> CapturePayload(std::string* payload);
 
   // Call after using StartJobFullControl() to respond to the network request.
   // If the job completed successfully, |*job| will be nulled to prevent callers
@@ -149,10 +145,10 @@ class MockDeviceManagementService : public DeviceManagementService {
                                   const std::string& payload);
 
  private:
-  JobControl::RetryMethod DoURLCompletionInternal(JobControl* job,
-                                                  int net_error,
-                                                  int response_code,
-                                                  const std::string& payload);
+  Job::RetryMethod DoURLCompletionInternal(JobControl* job,
+                                           int net_error,
+                                           int response_code,
+                                           const std::string& payload);
 
   DISALLOW_COPY_AND_ASSIGN(MockDeviceManagementService);
 };
@@ -167,7 +163,9 @@ class FakeJobConfiguration : public DMServerJobConfiguration {
                                   const std::string&)>
       FakeCallback;
 
-  typedef base::RepeatingCallback<void()> RetryCallback;
+  typedef base::RepeatingCallback<void(int response_code,
+                                       const std::string& response_body)>
+      RetryCallback;
 
   FakeJobConfiguration(
       DeviceManagementService* service,
@@ -178,20 +176,28 @@ class FakeJobConfiguration : public DMServerJobConfiguration {
       base::Optional<std::string> oauth_token,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       FakeCallback callback,
-      RetryCallback retry_callback);
+      RetryCallback retry_callback,
+      RetryCallback should_retry_callback);
   ~FakeJobConfiguration() override;
 
   void SetRequestPayload(const std::string& request_payload);
+  void SetShouldRetryResponse(DeviceManagementService::Job::RetryMethod method);
 
  private:
-  void OnBeforeRetry() override;
+  DeviceManagementService::Job::RetryMethod ShouldRetry(
+      int response_code,
+      const std::string& response_body) override;
+  void OnBeforeRetry(int response_code,
+                     const std::string& response_body) override;
   void OnURLLoadComplete(DeviceManagementService::Job* job,
                          int net_error,
                          int response_code,
                          const std::string& response_body) override;
 
+  DeviceManagementService::Job::RetryMethod should_retry_response_;
   FakeCallback callback_;
   RetryCallback retry_callback_;
+  RetryCallback should_retry_callback_;
 };
 
 }  // namespace policy

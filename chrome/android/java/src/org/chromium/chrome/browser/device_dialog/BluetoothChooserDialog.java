@@ -14,24 +14,25 @@ import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.location.LocationManager;
-import android.support.annotation.IntDef;
-import android.support.graphics.drawable.VectorDrawableCompat;
-import android.support.v4.graphics.drawable.DrawableCompat;
-import android.support.v7.content.res.AppCompatResources;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.view.View;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.graphics.drawable.DrawableCompat;
+import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat;
+
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JCaller;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
-import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
+import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.location.LocationUtils;
+import org.chromium.components.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.ui.base.PermissionCallback;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
@@ -118,7 +119,7 @@ public class BluetoothChooserDialog
             if (checkLocationServicesAndPermission()) {
                 mItemChooserDialog.clear();
                 Natives jni = BluetoothChooserDialogJni.get();
-                jni.restartSearch(BluetoothChooserDialog.this, mNativeBluetoothChooserDialogPtr);
+                jni.restartSearch(mNativeBluetoothChooserDialogPtr);
             }
         }
     };
@@ -187,16 +188,22 @@ public class BluetoothChooserDialog
     @VisibleForTesting
     void show() {
         // Emphasize the origin.
-        Profile profile = Profile.getLastUsedProfile();
+        // TODO (https://crbug.com/1048632): Use the current profile (i.e., regular profile or
+        // incognito profile) instead of always using regular profile. It works correctly now, but
+        // it is not safe.
+        Profile profile = Profile.getLastUsedRegularProfile();
         SpannableString origin = new SpannableString(mOrigin);
 
         assert mActivity instanceof ChromeBaseAppCompatActivity;
         final boolean useDarkColors = !((ChromeBaseAppCompatActivity) mActivity)
                                                .getNightModeStateProvider()
                                                .isInNightMode();
+        ChromeAutocompleteSchemeClassifier chromeAutocompleteSchemeClassifier =
+                new ChromeAutocompleteSchemeClassifier(profile);
 
-        OmniboxUrlEmphasizer.emphasizeUrl(origin, mActivity.getResources(), profile, mSecurityLevel,
-                false, useDarkColors, true);
+        OmniboxUrlEmphasizer.emphasizeUrl(origin, mActivity.getResources(),
+                chromeAutocompleteSchemeClassifier, mSecurityLevel, false, useDarkColors, true);
+        chromeAutocompleteSchemeClassifier.destroy();
         // Construct a full string and replace the origin text with emphasized version.
         SpannableString title =
                 new SpannableString(mActivity.getString(R.string.bluetooth_dialog_title, mOrigin));
@@ -239,7 +246,7 @@ public class BluetoothChooserDialog
 
         if (mNativeBluetoothChooserDialogPtr != 0) {
             Natives jni = BluetoothChooserDialogJni.get();
-            jni.onDialogFinished(this, mNativeBluetoothChooserDialogPtr, resultCode, id);
+            jni.onDialogFinished(mNativeBluetoothChooserDialogPtr, resultCode, id);
         }
     }
 
@@ -258,11 +265,11 @@ public class BluetoothChooserDialog
         if (mNativeBluetoothChooserDialogPtr == 0) return;
 
         for (int i = 0; i < permissions.length; i++) {
-            if (permissions[i].equals(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            if (permissions[i].equals(Manifest.permission.ACCESS_FINE_LOCATION)) {
                 if (checkLocationServicesAndPermission()) {
                     mItemChooserDialog.clear();
                     Natives jni = BluetoothChooserDialogJni.get();
-                    jni.restartSearch(this, mNativeBluetoothChooserDialogPtr);
+                    jni.restartSearch(mNativeBluetoothChooserDialogPtr);
                 }
                 return;
             }
@@ -272,13 +279,13 @@ public class BluetoothChooserDialog
 
     // Returns true if Location Services is on and Chrome has permission to see the user's location.
     private boolean checkLocationServicesAndPermission() {
-        final boolean havePermission = LocationUtils.getInstance().hasAndroidLocationPermission();
+        final boolean havePermission =
+                mWindowAndroid.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
         final boolean locationServicesOn =
                 LocationUtils.getInstance().isSystemLocationSettingEnabled();
 
         if (!havePermission
-                && !mWindowAndroid.canRequestPermission(
-                           Manifest.permission.ACCESS_COARSE_LOCATION)) {
+                && !mWindowAndroid.canRequestPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
             // Immediately close the dialog because the user has asked Chrome not to request the
             // location permission.
             finishDialog(DialogFinished.DENIED_PERMISSION, "");
@@ -336,7 +343,7 @@ public class BluetoothChooserDialog
             case LinkType.EXPLAIN_BLUETOOTH:
                 // No need to close the dialog here because
                 // ShowBluetoothOverviewLink will close it.
-                jni.showBluetoothOverviewLink(this, mNativeBluetoothChooserDialogPtr);
+                jni.showBluetoothOverviewLink(mNativeBluetoothChooserDialogPtr);
                 break;
             case LinkType.ADAPTER_OFF:
                 if (mAdapter != null && mAdapter.enable()) {
@@ -348,12 +355,12 @@ public class BluetoothChooserDialog
                 }
                 break;
             case LinkType.ADAPTER_OFF_HELP:
-                jni.showBluetoothAdapterOffLink(this, mNativeBluetoothChooserDialogPtr);
+                jni.showBluetoothAdapterOffLink(mNativeBluetoothChooserDialogPtr);
                 break;
             case LinkType.REQUEST_LOCATION_PERMISSION:
                 mItemChooserDialog.setIgnorePendingWindowFocusChangeForClose(true);
                 mWindowAndroid.requestPermissions(
-                        new String[] {Manifest.permission.ACCESS_COARSE_LOCATION},
+                        new String[] {Manifest.permission.ACCESS_FINE_LOCATION},
                         BluetoothChooserDialog.this);
                 break;
             case LinkType.REQUEST_LOCATION_SERVICES:
@@ -362,11 +369,11 @@ public class BluetoothChooserDialog
                         LocationUtils.getInstance().getSystemLocationSettingsIntent());
                 break;
             case LinkType.NEED_LOCATION_PERMISSION_HELP:
-                jni.showNeedLocationPermissionLink(this, mNativeBluetoothChooserDialogPtr);
+                jni.showNeedLocationPermissionLink(mNativeBluetoothChooserDialogPtr);
                 break;
             case LinkType.RESTART_SEARCH:
                 mItemChooserDialog.clear();
-                jni.restartSearch(this, mNativeBluetoothChooserDialogPtr);
+                jni.restartSearch(mNativeBluetoothChooserDialogPtr);
                 break;
             default:
                 assert false;
@@ -379,9 +386,8 @@ public class BluetoothChooserDialog
     @CalledByNative
     private static BluetoothChooserDialog create(WindowAndroid windowAndroid, String origin,
             int securityLevel, long nativeBluetoothChooserDialogPtr) {
-        if (!LocationUtils.getInstance().hasAndroidLocationPermission()
-                && !windowAndroid.canRequestPermission(
-                           Manifest.permission.ACCESS_COARSE_LOCATION)) {
+        if (!windowAndroid.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                && !windowAndroid.canRequestPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
             // If we can't even ask for enough permission to scan for Bluetooth devices, don't open
             // the dialog.
             return null;
@@ -457,16 +463,11 @@ public class BluetoothChooserDialog
 
     @NativeMethods
     interface Natives {
-        void onDialogFinished(@JCaller BluetoothChooserDialog self,
-                long nativeBluetoothChooserAndroid, int eventType, String deviceId);
-        void restartSearch(
-                @JCaller BluetoothChooserDialog self, long nativeBluetoothChooserAndroid);
+        void onDialogFinished(long nativeBluetoothChooserAndroid, int eventType, String deviceId);
+        void restartSearch(long nativeBluetoothChooserAndroid);
         // Help links.
-        void showBluetoothOverviewLink(
-                @JCaller BluetoothChooserDialog self, long nativeBluetoothChooserAndroid);
-        void showBluetoothAdapterOffLink(
-                @JCaller BluetoothChooserDialog self, long nativeBluetoothChooserAndroid);
-        void showNeedLocationPermissionLink(
-                @JCaller BluetoothChooserDialog self, long nativeBluetoothChooserAndroid);
+        void showBluetoothOverviewLink(long nativeBluetoothChooserAndroid);
+        void showBluetoothAdapterOffLink(long nativeBluetoothChooserAndroid);
+        void showNeedLocationPermissionLink(long nativeBluetoothChooserAndroid);
     }
 }

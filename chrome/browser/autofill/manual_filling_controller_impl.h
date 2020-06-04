@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_AUTOFILL_MANUAL_FILLING_CONTROLLER_IMPL_H_
 
 #include <memory>
+#include <string>
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
@@ -18,11 +19,11 @@
 namespace autofill {
 class AddressAccessoryController;
 class CreditCardAccessoryController;
-}
+}  // namespace autofill
+
 
 class AccessoryController;
 class PasswordAccessoryController;
-class TouchToFillController;
 
 // Use ManualFillingController::GetOrCreate to obtain instances of this class.
 class ManualFillingControllerImpl
@@ -44,9 +45,8 @@ class ManualFillingControllerImpl
                           const autofill::UserInfo::Field& selection) override;
   void OnOptionSelected(
       autofill::AccessoryAction selected_action) const override;
-  void GetFavicon(
-      int desired_size_in_pixel,
-      base::OnceCallback<void(const gfx::Image&)> icon_callback) override;
+  void OnToggleChanged(autofill::AccessoryAction toggled_action,
+                       bool enabled) const override;
   gfx::NativeView container_view() const override;
 
   // Returns a weak pointer for this object.
@@ -82,7 +82,7 @@ class ManualFillingControllerImpl
   // Required for construction via |CreateForWebContents|:
   explicit ManualFillingControllerImpl(content::WebContents* contents);
 
-  // Constructor that allows to inject a mock or fake view.
+  // Constructor that allows to inject a mock view.
   ManualFillingControllerImpl(
       content::WebContents* web_contents,
       base::WeakPtr<PasswordAccessoryController> pwd_controller,
@@ -107,7 +107,7 @@ class ManualFillingControllerImpl
   PasswordAccessoryController* GetPasswordController() const;
 
   // The tab for which this class is scoped.
-  content::WebContents* web_contents_;
+  content::WebContents* web_contents_ = nullptr;
 
   // This set contains sources to be shown to the user.
   base::flat_set<FillingSource> available_sources_;
@@ -121,7 +121,6 @@ class ManualFillingControllerImpl
   base::WeakPtr<PasswordAccessoryController> pwd_controller_for_testing_;
   base::WeakPtr<autofill::AddressAccessoryController> address_controller_;
   base::WeakPtr<autofill::CreditCardAccessoryController> cc_controller_;
-  base::WeakPtr<TouchToFillController> touch_to_fill_controller_;
 
   // Hold the native instance of the view. Must be last declared and initialized
   // member so the view can be created in the constructor with a fully set up

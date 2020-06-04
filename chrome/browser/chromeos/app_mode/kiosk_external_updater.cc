@@ -57,7 +57,7 @@ ParseExternalUpdateManifest(const base::FilePath& external_update_dir) {
 bool CopyExternalCrxAndDeleteTempDir(const base::FilePath& external_crx_file,
                                      const base::FilePath& temp_crx_file,
                                      const base::FilePath& temp_dir) {
-  base::DeleteFile(temp_dir, true);
+  base::DeleteFileRecursively(temp_dir);
   return base::CopyFile(external_crx_file, temp_crx_file);
 }
 
@@ -93,8 +93,7 @@ KioskExternalUpdater::KioskExternalUpdater(
     const base::FilePath& crx_unpack_dir)
     : backend_task_runner_(backend_task_runner),
       crx_cache_dir_(crx_cache_dir),
-      crx_unpack_dir_(crx_unpack_dir),
-      weak_factory_(this) {
+      crx_unpack_dir_(crx_unpack_dir) {
   // Subscribe to DiskMountManager.
   DCHECK(disks::DiskMountManager::GetInstance());
   disks::DiskMountManager::GetInstance()->AddObserver(this);
@@ -149,17 +148,6 @@ void KioskExternalUpdater::OnMountEvent(
     external_update_path_.clear();
   }
 }
-
-void KioskExternalUpdater::OnFormatEvent(
-    disks::DiskMountManager::FormatEvent event,
-    FormatError error_code,
-    const std::string& device_path) {
-}
-
-void KioskExternalUpdater::OnRenameEvent(
-    disks::DiskMountManager::RenameEvent event,
-    RenameError error_code,
-    const std::string& device_path) {}
 
 void KioskExternalUpdater::OnExternalUpdateUnpackSuccess(
     const std::string& app_id,

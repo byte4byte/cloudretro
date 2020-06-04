@@ -75,6 +75,11 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
   void set_enable_dialogs(bool enable);
   bool enable_dialogs() const { return enable_dialogs_; }
 
+  // Enable, disable, or query whether or not connection notifications are
+  // shown when a remote user has connected.
+  void set_enable_notifications(bool enable);
+  bool enable_notifications() const { return enable_notifications_; }
+
   // Enable or disable whether or not the session should be terminated if local
   // input is detected.
   void set_terminate_upon_input(bool terminate_upon_input);
@@ -94,7 +99,6 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
       base::WeakPtr<It2MeHost::Observer> observer,
       std::unique_ptr<SignalStrategy> signal_strategy,
       const std::string& username,
-      const std::string& directory_bot_jid,
       const protocol::IceConfig& ice_config);
 
   // Disconnects and shuts down the host.
@@ -138,13 +142,12 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
 
   // Processes the result of the confirmation dialog.
   void OnConfirmationResult(
-      const protocol::ValidatingAuthenticator::ResultCallback& result_callback,
+      protocol::ValidatingAuthenticator::ResultCallback result_callback,
       It2MeConfirmationDialog::Result result);
 
   // Task posted to the network thread from Connect().
   void ConnectOnNetworkThread(
       const std::string& username,
-      const std::string& directory_bot_jid,
       const protocol::IceConfig& ice_config,
       std::unique_ptr<RegisterSupportHostRequest> register_request);
 
@@ -166,7 +169,7 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
   // connection should be accepted or rejected.
   void ValidateConnectionDetails(
       const std::string& remote_jid,
-      const protocol::ValidatingAuthenticator::ResultCallback& result_callback);
+      protocol::ValidatingAuthenticator::ResultCallback result_callback);
 
   // Caller supplied fields.
   std::unique_ptr<ChromotingHostContext> host_context_;
@@ -202,6 +205,7 @@ class It2MeHost : public base::RefCountedThreadSafe<It2MeHost>,
   std::string connecting_jid_;
 
   bool enable_dialogs_ = true;
+  bool enable_notifications_ = true;
   bool terminate_upon_input_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(It2MeHost);

@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -21,11 +22,8 @@
 class FastShowPickler;
 
 namespace ash {
+enum class AppListConfigType;
 class AppListControllerImpl;
-}  // namespace ash
-
-namespace app_list {
-
 class AppListItemList;
 class AppListItemListTest;
 class AppListItemObserver;
@@ -40,8 +38,8 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   explicit AppListItem(const std::string& id);
   virtual ~AppListItem();
 
-  void SetIcon(const gfx::ImageSkia& icon);
-  const gfx::ImageSkia& icon() const { return metadata_->icon; }
+  void SetIcon(AppListConfigType config_type, const gfx::ImageSkia& icon);
+  const gfx::ImageSkia& GetIcon(AppListConfigType config_type) const;
 
   const std::string& GetDisplayName() const {
     return short_name_.empty() ? name() : short_name_;
@@ -79,7 +77,7 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   virtual const char* GetItemType() const;
 
   // Returns the item matching |id| contained in this item (e.g. if the item is
-  // a folder), or NULL if the item was not found or this is not a container.
+  // a folder), or nullptr if the item was not found or this is not a container.
   virtual AppListItem* FindChildItem(const std::string& id);
 
   // Returns the number of child items if it has any (e.g. is a folder) or 0.
@@ -99,7 +97,7 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   AppListItemMetadata* metadata() { return metadata_.get(); }
 
   friend class ::FastShowPickler;
-  friend class ash::AppListControllerImpl;
+  friend class AppListControllerImpl;
   friend class AppListItemList;
   friend class AppListItemListTest;
   friend class AppListModel;
@@ -131,6 +129,12 @@ class APP_LIST_MODEL_EXPORT AppListItem {
 
   std::unique_ptr<AppListItemMetadata> metadata_;
 
+  // Contains icons for AppListConfigTypes different than kShared. For kShared
+  // config type, the item will always use the icon provided by |metadata_|.
+  // This is currently used for folder icons only (which are all generated in
+  // ash), when app_list_features::kScalableAppList feature is enabled.
+  std::map<AppListConfigType, gfx::ImageSkia> per_config_icons_;
+
   // A shortened name for the item, used for display.
   std::string short_name_;
 
@@ -142,6 +146,6 @@ class APP_LIST_MODEL_EXPORT AppListItem {
   DISALLOW_COPY_AND_ASSIGN(AppListItem);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_MODEL_APP_LIST_ITEM_H_

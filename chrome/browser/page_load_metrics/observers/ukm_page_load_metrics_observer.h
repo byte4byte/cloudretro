@@ -9,8 +9,8 @@
 #include "base/metrics/ukm_source_id.h"
 #include "base/optional.h"
 #include "base/time/time.h"
-#include "chrome/browser/page_load_metrics/observers/largest_contentful_paint_handler.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/observers/largest_contentful_paint_handler.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "net/http/http_response_info.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "ui/base/page_transition_types.h"
@@ -57,19 +57,17 @@ class UkmPageLoadMetricsObserver
       const std::string& mime_type) const override;
 
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
   ObservePolicy OnHidden(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
   void OnFailedProvisionalLoad(
-      const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+      const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info)
+      override;
 
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
   void OnResourceDataUseObserved(
       content::RenderFrameHost* content,
@@ -81,12 +79,17 @@ class UkmPageLoadMetricsObserver
 
   void OnTimingUpdate(
       content::RenderFrameHost* subframe_rfh,
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
+
+  void OnDidFinishSubFrameNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   void OnCpuTimingUpdate(
       content::RenderFrameHost* subframe_rfh,
       const page_load_metrics::mojom::CpuTiming& timing) override;
+
+  void OnLoadingBehaviorObserved(content::RenderFrameHost* rfh,
+                                 int behavior_flags) override;
 
   // Whether the current page load is an Offline Preview. Must be called from
   // OnCommit. Virtual for testing.
@@ -96,39 +99,42 @@ class UkmPageLoadMetricsObserver
   // Records page load timing related metrics available in PageLoadTiming, such
   // as first contentful paint.
   void RecordTimingMetrics(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info);
+      const page_load_metrics::mojom::PageLoadTiming& timing);
 
-  // Records metrics based on the PageLoadExtraInfo struct, as well as updating
-  // the URL. |app_background_time| should be set to a timestamp if the app was
-  // backgrounded, otherwise it should be set to a null TimeTicks.
-  void RecordPageLoadExtraInfoMetrics(
-      const page_load_metrics::PageLoadExtraInfo& info,
-      base::TimeTicks app_background_time);
+  // Records metrics based on the page load information exposed by the observer
+  // delegate, as well as updating the URL. |app_background_time| should be set
+  // to a timestamp if the app was backgrounded, otherwise it should be set to
+  // a null TimeTicks.
+  void RecordPageLoadMetrics(base::TimeTicks app_background_time);
 
   // Adds main resource timing metrics to |builder|.
   void ReportMainResourceTimingMetrics(
       const page_load_metrics::mojom::PageLoadTiming& timing,
       ukm::builders::PageLoad* builder);
 
-  void ReportLayoutStability(const page_load_metrics::PageLoadExtraInfo& info);
+  void ReportLayoutStability();
 
-  // Captures the site engagement score for the commited URL and
+  void RecordInputTimingMetrics();
+
+  // Captures the site engagement score for the committed URL and
   // returns the score rounded to the nearest 10.
-  base::Optional<int64_t> GetRoundedSiteEngagementScore(
-      const page_load_metrics::PageLoadExtraInfo& info) const;
+  base::Optional<int64_t> GetRoundedSiteEngagementScore() const;
 
   // Returns whether third party cookie blocking is enabled for the committed
   // URL. This is only recorded for users who have prefs::kCookieControlsEnabled
   // set to true.
-  base::Optional<bool> GetThirdPartyCookieBlockingEnabled(
-      const page_load_metrics::PageLoadExtraInfo& info) const;
+  base::Optional<bool> GetThirdPartyCookieBlockingEnabled() const;
 
   // Records the metrics for the nostate prefetch to an event with UKM source ID
   // |source_id|.
   void RecordNoStatePrefetchMetrics(
       content::NavigationHandle* navigation_handle,
       ukm::SourceId source_id);
+
+  // Records the metrics related to Generate URLs (Home page, default search
+  // engine) for starting URL and committed URL.
+  void RecordGeneratedNavigationUKM(ukm::SourceId source_id,
+                                    const GURL& committed_url);
 
   // Guaranteed to be non-null during the lifetime of |this|.
   network::NetworkQualityTracker* network_quality_tracker_;
@@ -137,6 +143,17 @@ class UkmPageLoadMetricsObserver
   // the page.
   int64_t cache_bytes_ = 0;
   int64_t network_bytes_ = 0;
+
+  // Sum of decoded body lengths of JS resources in bytes.
+  int64_t js_decoded_bytes_ = 0;
+
+  // Max decoded body length of JS resources in bytes.
+  int64_t js_max_decoded_bytes_ = 0;
+
+  // Network data use broken down by resource type.
+  int64_t image_total_bytes_ = 0;
+  int64_t image_subframe_bytes_ = 0;
+  int64_t media_bytes_ = 0;
 
   // Network quality estimates.
   net::EffectiveConnectionType effective_connection_type_ =
@@ -164,6 +181,14 @@ class UkmPageLoadMetricsObserver
   // True if the page main resource is inner response of a signed exchange.
   bool is_signed_exchange_inner_response_ = false;
 
+  // Whether the first URL in the redirect chain matches the default search
+  // engine template.
+  bool start_url_is_default_search_ = false;
+
+  // Whether the first URL in the redirect chain matches the user's home page
+  // URL.
+  bool start_url_is_home_page_ = false;
+
   // The number of main frame redirects that occurred before commit.
   uint32_t main_frame_request_redirect_count_ = 0;
 
@@ -185,6 +210,8 @@ class UkmPageLoadMetricsObserver
   // same document.
   // Unique across the lifetime of the browser process.
   int main_document_sequence_number_ = -1;
+
+  bool font_preload_started_before_rendering_observed_ = false;
 
   // The connection info for the committed URL.
   base::Optional<net::HttpResponseInfo::ConnectionInfo> connection_info_;

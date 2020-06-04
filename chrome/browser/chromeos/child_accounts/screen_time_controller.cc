@@ -14,13 +14,12 @@
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/child_accounts/consumer_status_reporting_service.h"
-#include "chrome/browser/chromeos/child_accounts/consumer_status_reporting_service_factory.h"
+#include "chrome/browser/chromeos/child_accounts/child_status_reporting_service.h"
+#include "chrome/browser/chromeos/child_accounts/child_status_reporting_service_factory.h"
 #include "chrome/browser/chromeos/child_accounts/time_limit_override.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/ash/media_client_impl.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
@@ -67,8 +66,8 @@ ash::AuthDisabledReason ConvertLockReason(
 // static
 void ScreenTimeController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kScreenTimeLastState);
-  registry->RegisterDictionaryPref(prefs::kUsageTimeLimit);
   registry->RegisterDictionaryPref(prefs::kTimeLimitLocalOverride);
+  registry->RegisterDictionaryPref(prefs::kUsageTimeLimit);
 }
 
 ScreenTimeController::ScreenTimeController(content::BrowserContext* context)
@@ -81,8 +80,7 @@ ScreenTimeController::ScreenTimeController(content::BrowserContext* context)
                        ->CreateDeepCopy()),
       time_limit_notifier_(context) {
   session_manager::SessionManager::Get()->AddObserver(this);
-  if (base::FeatureList::IsEnabled(features::kUsageTimeStateNotifier))
-    UsageTimeStateNotifier::GetInstance()->AddObserver(this);
+  UsageTimeStateNotifier::GetInstance()->AddObserver(this);
 
   system::TimezoneSettings::GetInstance()->AddObserver(this);
   chromeos::SystemClockClient::Get()->AddObserver(this);
@@ -101,8 +99,7 @@ ScreenTimeController::~ScreenTimeController() {
     parent_access::ParentAccessService::Get().RemoveObserver(this);
 
   session_manager::SessionManager::Get()->RemoveObserver(this);
-  if (base::FeatureList::IsEnabled(features::kUsageTimeStateNotifier))
-    UsageTimeStateNotifier::GetInstance()->RemoveObserver(this);
+  UsageTimeStateNotifier::GetInstance()->RemoveObserver(this);
 
   system::TimezoneSettings::GetInstance()->RemoveObserver(this);
   SystemClockClient::Get()->RemoveObserver(this);
@@ -119,7 +116,7 @@ void ScreenTimeController::RemoveObserver(Observer* observer) {
 }
 
 base::TimeDelta ScreenTimeController::GetScreenTimeDuration() {
-  return ConsumerStatusReportingServiceFactory::GetForBrowserContext(context_)
+  return ChildStatusReportingServiceFactory::GetForBrowserContext(context_)
       ->GetChildScreenTime();
 }
 
@@ -159,8 +156,8 @@ void ScreenTimeController::CheckTimeLimit(const std::string& source) {
 
   // TODO(agawronska): Usage timestamp should be passed instead of second |now|.
   usage_time_limit::State state = usage_time_limit::GetState(
-      time_limit->CreateDeepCopy(), local_override, GetScreenTimeDuration(),
-      now, now, &time_zone, last_state);
+      *time_limit, local_override, GetScreenTimeDuration(), now, now,
+      &time_zone, last_state);
   SaveCurrentStateToPref(state);
 
   VLOG(1) << "Screen should be locked is set to " << state.is_locked;
@@ -173,7 +170,7 @@ void ScreenTimeController::CheckTimeLimit(const std::string& source) {
       // this feature is enabled.
       if (!base::FeatureList::IsEnabled(features::kEventBasedStatusReporting)) {
         VLOG(1) << "Request status report before locking screen.";
-        ConsumerStatusReportingServiceFactory::GetForBrowserContext(context_)
+        ChildStatusReportingServiceFactory::GetForBrowserContext(context_)
             ->RequestImmediateStatusReport();
       }
       ForceScreenLockByPolicy();
@@ -191,13 +188,13 @@ void ScreenTimeController::CheckTimeLimit(const std::string& source) {
           notification_type.value(), remaining_time);
     }
 
-    if (base::FeatureList::IsEnabled(features::kUsageTimeStateNotifier))
-      ScheduleUsageTimeLimitWarning(state);
+    ScheduleUsageTimeLimitWarning(state);
   }
 
   // Trigger policy update notifications.
-  auto updated_policy_types = usage_time_limit::UpdatedPolicyTypes(
-      last_policy_, time_limit->CreateDeepCopy());
+  DCHECK(last_policy_);
+  auto updated_policy_types =
+      usage_time_limit::UpdatedPolicyTypes(*last_policy_, *time_limit);
   for (const auto& policy_type : updated_policy_types) {
     base::Optional<base::Time> lock_time;
     if (policy_type == usage_time_limit::PolicyType::kOverride)
@@ -213,16 +210,16 @@ void ScreenTimeController::CheckTimeLimit(const std::string& source) {
 
   // TODO(agawronska): We are creating UsageTimeLimitProcessor second time in
   // this method. Could expected reset time be returned as a part of the state?
-  base::Time next_get_state_time = std::min(
-      state.next_state_change_time,
-      usage_time_limit::GetExpectedResetTime(time_limit->CreateDeepCopy(),
-                                             local_override, now, &time_zone));
+  base::Time next_get_state_time =
+      std::min(state.next_state_change_time,
+               usage_time_limit::GetExpectedResetTime(
+                   *time_limit, local_override, now, &time_zone));
   if (!next_get_state_time.is_null()) {
     VLOG(1) << "Scheduling state change timer in " << next_get_state_time - now;
     next_state_timer_->Start(
         FROM_HERE, next_get_state_time - now,
-        base::BindRepeating(&ScreenTimeController::CheckTimeLimit,
-                            base::Unretained(this), "next_state_timer_"));
+        base::BindOnce(&ScreenTimeController::CheckTimeLimit,
+                       base::Unretained(this), "next_state_timer_"));
   }
 }
 
@@ -282,14 +279,14 @@ void ScreenTimeController::OnScreenLockByPolicy(
   ScreenLocker::default_screen_locker()->DisableAuthForUser(
       account_id,
       ash::AuthDisabledData(ConvertLockReason(active_policy), next_unlock_time,
-                            GetScreenTimeDuration()));
+                            GetScreenTimeDuration(),
+                            true /*disable_lock_screen_media*/));
 
   // Add parent access code button.
+  // TODO(agawronska): Once feature flag is removed, showing shelf button could
+  // be moved to ash.
   if (base::FeatureList::IsEnabled(features::kParentAccessCode))
     ash::LoginScreen::Get()->ShowParentAccessButton(true);
-
-  // Prevent media from continuing to play after device is locked.
-  MediaClientImpl::Get()->SuspendMediaSessions();
 }
 
 void ScreenTimeController::OnScreenLockByPolicyEnd() {
@@ -301,6 +298,9 @@ void ScreenTimeController::OnScreenLockByPolicyEnd() {
           ->GetUserByProfile(Profile::FromBrowserContext(context_))
           ->GetAccountId();
   ScreenLocker::default_screen_locker()->EnableAuthForUser(account_id);
+
+  // TODO(agawronska): Once feature flag is removed, showing shelf button could
+  // be moved to ash.
   if (base::FeatureList::IsEnabled(features::kParentAccessCode))
     ash::LoginScreen::Get()->ShowParentAccessButton(false);
 }
@@ -341,8 +341,8 @@ void ScreenTimeController::ScheduleUsageTimeLimitWarning(
             << " minutes.";
     usage_time_limit_warning_timer_->Start(
         FROM_HERE, delay,
-        base::BindRepeating(&ScreenTimeController::UsageTimeLimitWarning,
-                            base::Unretained(this)));
+        base::BindOnce(&ScreenTimeController::UsageTimeLimitWarning,
+                       base::Unretained(this)));
   }
 }
 
@@ -464,9 +464,9 @@ void ScreenTimeController::UsageTimeLimitWarning() {
       pref_service_->GetDictionary(prefs::kTimeLimitLocalOverride);
 
   base::Optional<base::TimeDelta> remaining_usage =
-      usage_time_limit::GetRemainingTimeUsage(
-          time_limit->CreateDeepCopy(), local_override, now,
-          GetScreenTimeDuration(), &time_zone);
+      usage_time_limit::GetRemainingTimeUsage(*time_limit, local_override, now,
+                                              GetScreenTimeDuration(),
+                                              &time_zone);
 
   // Remaining time usage can be bigger than |kUsageTimeLimitWarningTime|
   // because it is counted in another class so the timers might be called with
@@ -501,25 +501,11 @@ ScreenTimeController::ConvertPolicyType(
 void ScreenTimeController::OnSessionStateChanged() {
   session_manager::SessionState session_state =
       session_manager::SessionManager::Get()->session_state();
-  if (base::FeatureList::IsEnabled(features::kUsageTimeStateNotifier)) {
-    base::Optional<usage_time_limit::State> last_state = GetLastStateFromPref();
-    if (session_state == session_manager::SessionState::LOCKED && last_state &&
-        last_state->is_locked) {
-      OnScreenLockByPolicy(last_state->active_policy,
-                           last_state->next_unlock_time);
-    }
-    return;
-  }
-
-  if (session_state == session_manager::SessionState::LOCKED) {
-    base::Optional<usage_time_limit::State> last_state = GetLastStateFromPref();
-    if (last_state && last_state->is_locked) {
-      OnScreenLockByPolicy(last_state->active_policy,
-                           last_state->next_unlock_time);
-    }
-    ResetInSessionTimers();
-  } else if (session_state == session_manager::SessionState::ACTIVE) {
-    CheckTimeLimit("OnSessionStateChanged");
+  base::Optional<usage_time_limit::State> last_state = GetLastStateFromPref();
+  if (session_state == session_manager::SessionState::LOCKED && last_state &&
+      last_state->is_locked) {
+    OnScreenLockByPolicy(last_state->active_policy,
+                         last_state->next_unlock_time);
   }
 }
 

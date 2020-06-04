@@ -4,6 +4,7 @@
 
 #include "chrome/installer/setup/setup_main.h"
 
+// Must be before msi.h.
 #include <windows.h>
 
 #include <msi.h>
@@ -22,13 +23,16 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/persistent_histogram_storage.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
 #include "base/process/process.h"
+#include "base/process/process_metrics.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -43,6 +47,7 @@
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -81,11 +86,11 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "components/crash/content/app/crash_switches.h"
-#include "components/crash/content/app/run_as_crashpad_handler_win.h"
+#include "components/crash/core/app/crash_switches.h"
+#include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "content/public/common/content_switches.h"
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/installer/util/google_update_util.h"
 #endif
 
@@ -267,6 +272,25 @@ bool UncompressAndPatchChromeArchive(
   // --- Background (>90%) ---
   //   Full archive: 22s (50%ile) / >3m (99%ile)
   //   Archive patch: ~2s (50%ile) / 1.5m - >3m (99%ile)
+  //
+  // The top unpack failure result with 28 days aggregation (>=0.01%)
+  // Setup.Install.LzmaUnPackResult_CompressedChromeArchive
+  // 13.50% DISK_FULL
+  // 0.67% ERROR_NO_SYSTEM_RESOURCES
+  // 0.12% ERROR_IO_DEVICE
+  // 0.05% INVALID_HANDLE
+  // 0.01% INVALID_LEVEL
+  // 0.01% FILE_NOT_FOUND
+  // 0.01% LOCK_VIOLATION
+  // 0.01% ACCESS_DENIED
+  //
+  // Setup.Install.LzmaUnPackResult_ChromeArchivePatch
+  // 0.09% DISK_FULL
+  // 0.01% FILE_NOT_FOUND
+  //
+  // More information can also be found with metrics:
+  // Setup.Install.LzmaUnPackNTSTATUS_CompressedChromeArchive
+  // Setup.Install.LzmaUnPackNTSTATUS_ChromeArchivePatch
   if (!archive_helper->Uncompress(NULL)) {
     *install_status = installer::UNCOMPRESSION_FAILED;
     installer_state.WriteInstallerResult(*install_status,
@@ -611,7 +635,7 @@ installer::InstallStatus UninstallProducts(
   if (!system_level_cmd.GetProgram().empty())
     base::LaunchProcess(system_level_cmd, base::LaunchOptions());
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Tell Google Update that an uninstall has taken place if this install did
   // not originate from the MSI. Google Update has its own logic relating to
   // MSI-driven uninstalls that conflicts with this. Ignore the return value:
@@ -619,7 +643,7 @@ installer::InstallStatus UninstallProducts(
   // failure of Chrome's uninstallation.
   if (!installer_state.is_msi())
     google_update::UninstallGoogleUpdate(installer_state.system_install());
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   return install_status;
 }
@@ -635,8 +659,7 @@ installer::InstallStatus InstallProducts(
   installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
   installer::ArchiveType archive_type = installer::UNKNOWN_ARCHIVE_TYPE;
   installer_state->SetStage(installer::PRECONDITIONS);
-  // Remove any legacy "-multifail" or "-stage:*" values from the product's
-  // "ap" value.
+  // Remove any legacy "-stage:*" values from the product's "ap" value.
   installer::UpdateInstallStatus(archive_type, install_status);
 
   // Drop to background processing mode if the process was started below the
@@ -808,6 +831,12 @@ bool HandleNonInstallCmdLineOptions(const base::FilePath& setup_exe,
       base::FilePath compressed_archive(cmd_line.GetSwitchValuePath(
           installer::switches::kUpdateSetupExe));
       VLOG(1) << "Opening archive " << compressed_archive.value();
+      // The top unpack failure result with 28 days aggregation (>=0.01%)
+      // Setup.Install.LzmaUnPackResult_SetupExePatch
+      // 0.02% PATH_NOT_FOUND
+      //
+      // More information can also be found with metric:
+      // Setup.Install.LzmaUnPackNTSTATUS_SetupExePatch
       if (installer::ArchivePatchHelper::UncompressAndPatch(
               temp_path.GetPath(), compressed_archive, setup_exe,
               cmd_line.GetSwitchValuePath(installer::switches::kNewSetupExe),
@@ -989,7 +1018,7 @@ bool HandleNonInstallCmdLineOptions(const base::FilePath& setup_exe,
         cmd_line.GetSwitchValueNative(
             installer::switches::kSetDisplayVersionValue));
     *exit_code = OverwriteDisplayVersions(registry_product, registry_value);
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   } else if (cmd_line.HasSwitch(installer::switches::kStoreDMToken)) {
     // Write the specified token to the registry, overwriting any already
     // existing value.
@@ -1095,14 +1124,24 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
   //   <2.7s (50%ile) / 45s (99%ile)
   // --- Background ---
   //   ~14s (50%ile) / >3m (99%ile)
+  //
+  // The top unpack failure result with 28 days aggregation (>=0.01%)
+  // Setup.Install.LzmaUnPackResult_UncompressedChromeArchive
+  // 0.66% DISK_FULL
+  // 0.04% ACCESS_DENIED
+  // 0.01% INVALID_HANDLE
+  // 0.01% ERROR_NO_SYSTEM_RESOURCES
+  // 0.01% PATH_NOT_FOUND
+  // 0.01% ERROR_IO_DEVICE
+  //
+  // More information can also be found with metric:
+  // Setup.Install.LzmaUnPackNTSTATUS_UncompressedChromeArchive
   installer_state.SetStage(UNPACKING);
-  UnPackStatus unpack_status = UNPACK_NO_ERROR;
-  int32_t ntstatus = 0;
-  DWORD lzma_result = UnPackArchive(uncompressed_archive, unpack_path, NULL,
-                                    &unpack_status, &ntstatus);
-  RecordUnPackMetrics(unpack_status, ntstatus, lzma_result,
+  UnPackStatus unpack_status = UnPackArchive(uncompressed_archive, unpack_path,
+                                             /*output_file=*/nullptr);
+  RecordUnPackMetrics(unpack_status,
                       UnPackConsumer::UNCOMPRESSED_CHROME_ARCHIVE);
-  if (lzma_result) {
+  if (unpack_status != UNPACK_NO_ERROR) {
     installer_state.WriteInstallerResult(
         UNPACKING_FAILED,
         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
@@ -1292,9 +1331,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   InstallerState installer_state;
   installer_state.Initialize(cmd_line, prefs, original_state);
 
-  VLOG(1) << "is_migrating_to_single is "
-          << installer_state.is_migrating_to_single();
-
   persistent_histogram_storage.set_storage_base_dir(
       installer_state.target_path());
 
@@ -1448,6 +1484,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
                             base::saturated_cast<base::HistogramBase::Sample>(
                                 pmc.PeakWorkingSetSize / 1024));
   }
+  auto process_metrics = base::ProcessMetrics::CreateCurrentProcessMetrics();
+  auto disk_usage = process_metrics->GetCumulativeDiskUsageInBytes();
+  base::UmaHistogramMemoryMB(
+      "Setup.Install.CumulativeDiskUsage",
+      base::saturated_cast<int>(base::ClampAdd(disk_usage, 1024 * 1024 / 2) /
+                                1024 * 1024));
 
   int return_code = 0;
   // MSI demands that custom actions always return 0 (ERROR_SUCCESS) or it will

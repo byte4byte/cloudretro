@@ -55,6 +55,17 @@ CN = SS B
 [req_punycode_dn]
 CN = xn--wgv71a119e.com
 
+[req_ev_dn]
+C = US
+ST = California
+L = Mountain View
+O = Test Org
+
+[req_ev_state_only_dn]
+C = US
+ST = California
+O = Test Org
+
 [req_extensions]
 subjectAltName = IP:127.0.0.1
 
@@ -105,6 +116,9 @@ subjectAltName = @spdy_pooling
 [req_wildcard]
 subjectAltName = @wildcard
 
+[req_test_names]
+subjectAltName = @test_names
+
 [more_san_sanity]
 CN=127.0.0.3
 
@@ -121,6 +135,16 @@ DNS.3 = blahblahblahblah.com
 
 [wildcard]
 DNS.1 = *.example.org
+
+[test_names]
+DNS.1 = a.test
+DNS.2 = *.a.test
+DNS.3 = b.test
+DNS.4 = *.b.test
+DNS.5 = c.test
+DNS.6 = *.c.test
+DNS.7 = d.test
+DNS.8 = *.d.test
 
 [subj_rsa_no_extension]
 CN = RSA-2048 no keyUsage extension

@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/services/device_sync/network_request_error.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
@@ -172,20 +172,20 @@ class DeviceSyncCryptAuthApiCallFlowTest : public testing::Test {
       base::Optional<int> response_code = base::nullopt,
       const base::Optional<std::string>& response_string = base::nullopt) {
     network::URLLoaderCompletionStatus completion_status(error);
-    network::ResourceResponseHead response_head;
+    auto response_head = network::mojom::URLResponseHead::New();
     std::string content;
     if (error == net::OK) {
-      response_head = network::CreateResourceResponseHead(
+      response_head = network::CreateURLResponseHead(
           static_cast<net::HttpStatusCode>(*response_code));
       content = *response_string;
     }
 
     // Use kUrlMatchPrefix flag to match URL without query parameters.
     EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
-        GURL(kRequestUrl), completion_status, response_head, content,
+        GURL(kRequestUrl), completion_status, std::move(response_head), content,
         network::TestURLLoaderFactory::ResponseMatchFlags::kUrlMatchPrefix));
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     EXPECT_TRUE(result_ || network_error_);
   }
 
@@ -196,20 +196,20 @@ class DeviceSyncCryptAuthApiCallFlowTest : public testing::Test {
       base::Optional<int> response_code = base::nullopt,
       const base::Optional<std::string>& response_string = base::nullopt) {
     network::URLLoaderCompletionStatus completion_status(error);
-    network::ResourceResponseHead response_head;
+    auto response_head = network::mojom::URLResponseHead::New();
     std::string content;
     if (error == net::OK) {
-      response_head = network::CreateResourceResponseHead(
+      response_head = network::CreateURLResponseHead(
           static_cast<net::HttpStatusCode>(*response_code));
       content = *response_string;
     }
 
     // Use kUrlMatchPrefix flag to match URL without query parameters.
     EXPECT_TRUE(test_url_loader_factory_.SimulateResponseForPendingRequest(
-        GURL(kRequestUrl), completion_status, response_head, content,
+        GURL(kRequestUrl), completion_status, std::move(response_head), content,
         network::TestURLLoaderFactory::ResponseMatchFlags::kUrlMatchPrefix));
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     EXPECT_TRUE(result_ || network_error_);
   }
 
@@ -217,7 +217,7 @@ class DeviceSyncCryptAuthApiCallFlowTest : public testing::Test {
   std::unique_ptr<NetworkRequestError> network_error_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_factory_;
 

@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.init;
 
 import android.app.Activity;
-import android.content.Context;
 import android.os.Build;
 import android.os.Process;
 import android.os.StrictMode;
@@ -24,7 +23,6 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryPrefetcher;
 import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.memory.MemoryPressureUma;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
@@ -32,16 +30,18 @@ import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeLocalizationUtils;
 import org.chromium.chrome.browser.ChromeStrictMode;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.FileProviderHelper;
+import org.chromium.chrome.browser.app.flags.ChromeCachedFlags;
 import org.chromium.chrome.browser.crash.LogcatExtractionRunnable;
 import org.chromium.chrome.browser.download.DownloadManagerService;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.services.GoogleServicesManager;
 import org.chromium.chrome.browser.webapps.ActivityAssigner;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
-import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerExternalUma;
+import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
 import org.chromium.components.crash.browser.ChildProcessCrashObserver;
 import org.chromium.components.minidump_uploader.CrashFileManager;
+import org.chromium.components.module_installer.util.ModuleUtil;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.SpeechRecognition;
@@ -65,23 +65,13 @@ public class ChromeBrowserInitializer {
     private static ChromeBrowserInitializer sChromeBrowserInitializer;
     private static BrowserStartupController sBrowserStartupController;
     private final Locale mInitialLocale = Locale.getDefault();
-    private List<Runnable> mTasksToRunWithNative;
+    private List<Runnable> mTasksToRunWithFullBrowser;
 
     private boolean mPreInflationStartupComplete;
     private boolean mPostInflationStartupComplete;
     private boolean mNativeInitializationComplete;
+    private boolean mFullBrowserInitializationComplete;
     private boolean mNetworkChangeNotifierInitializationComplete;
-
-    /**
-     * A callback to be executed when there is a new version available in Play Store.
-     */
-    public interface OnNewVersionAvailableCallback extends Runnable {
-        /**
-         * Set the update url to get the new version available.
-         * @param updateUrl The url to be used.
-         */
-        void setUpdateUrl(String updateUrl);
-    }
 
     /**
      * This class is an application specific object that orchestrates the app initialization.
@@ -95,58 +85,54 @@ public class ChromeBrowserInitializer {
     }
 
     /**
-     * This class is an application specific object that orchestrates the app initialization.
-     * @deprecated Use getInstance with no arguments instead.
-     * @param context The context to get the application context from.
-     * @return The singleton instance of {@link ChromeBrowserInitializer}.
+     * @return whether native (full browser) initialization is complete.
      */
-    public static ChromeBrowserInitializer getInstance(Context context) {
-        return getInstance();
+    public boolean isFullBrowserInitialized() {
+        return mFullBrowserInitializationComplete;
     }
 
     /**
-     * @return whether native initialization is complete.
+     * @deprecated use isFullBrowserInitialized() instead, the name hasNativeInitializationCompleted
+     * is not accurate.
      */
+    @Deprecated
     public boolean hasNativeInitializationCompleted() {
-        return mNativeInitializationComplete;
+        return isFullBrowserInitialized();
     }
 
     /**
-     * Either runs a task now, or queue it until native initialization is done.
+     * Either runs a task now, or queue it until native (full browser) initialization is done.
      *
      * All Runnables added this way will run in a single UI thread task.
      *
      * @param task The task to run.
      */
-    public void runNowOrAfterNativeInitialization(Runnable task) {
-        if (hasNativeInitializationCompleted()) {
+    public void runNowOrAfterFullBrowserStarted(Runnable task) {
+        if (isFullBrowserInitialized()) {
             task.run();
         } else {
-            if (mTasksToRunWithNative == null) {
-                mTasksToRunWithNative = new ArrayList<Runnable>();
+            if (mTasksToRunWithFullBrowser == null) {
+                mTasksToRunWithFullBrowser = new ArrayList<Runnable>();
             }
-            mTasksToRunWithNative.add(task);
+            mTasksToRunWithFullBrowser.add(task);
         }
     }
 
     /**
      * Initializes the Chrome browser process synchronously.
-     *
-     * @throws ProcessInitException if there is a problem with the native library.
      */
-    public void handleSynchronousStartup() throws ProcessInitException {
+    public void handleSynchronousStartup() {
         handleSynchronousStartupInternal(false);
     }
 
     /**
      * Initializes the Chrome browser process synchronously with GPU process warmup.
      */
-    public void handleSynchronousStartupWithGpuWarmUp() throws ProcessInitException {
+    public void handleSynchronousStartupWithGpuWarmUp() {
         handleSynchronousStartupInternal(true);
     }
 
-    private void handleSynchronousStartupInternal(final boolean startGpuProcess)
-            throws ProcessInitException {
+    private void handleSynchronousStartupInternal(final boolean startGpuProcess) {
         ThreadUtils.checkUiThread();
 
         BrowserParts parts = new EmptyBrowserParts() {
@@ -167,6 +153,7 @@ public class ChromeBrowserInitializer {
      */
     public void handlePreNativeStartup(final BrowserParts parts) {
         ThreadUtils.checkUiThread();
+        if (parts.isActivityFinishingOrDestroyed()) return;
         ProcessInitializationHandler.getInstance().initializePreNative();
         try (TraceEvent e = TraceEvent.scoped("ChromeBrowserInitializer.preInflationStartup")) {
             preInflationStartup();
@@ -211,10 +198,12 @@ public class ChromeBrowserInitializer {
             PostTask.postTask(TaskTraits.BEST_EFFORT_MAY_BLOCK, () -> {
                 ActivityAssigner.warmUpSharedPrefs();
                 DownloadManagerService.warmUpSharedPrefs();
+                BackgroundTaskSchedulerFactory.warmUpSharedPrefs();
             });
         } else {
             ActivityAssigner.warmUpSharedPrefs();
             DownloadManagerService.warmUpSharedPrefs();
+            BackgroundTaskSchedulerFactory.warmUpSharedPrefs();
         }
     }
 
@@ -234,8 +223,7 @@ public class ChromeBrowserInitializer {
         warmUpSharedPrefs();
 
         DeviceUtils.addDeviceSpecificUserAgentSwitch();
-        ApplicationStatus.registerStateListenerForAllActivities(
-                createActivityStateListener());
+        ApplicationStatus.registerStateListenerForAllActivities(createActivityStateListener());
 
         mPreInflationStartupComplete = true;
     }
@@ -262,8 +250,7 @@ public class ChromeBrowserInitializer {
      * @param delegate The delegate for the {@link ChromeBrowserInitializer} to communicate
      *                 initialization tasks.
      */
-    public void handlePostNativeStartup(final boolean isAsync, final BrowserParts delegate)
-            throws ProcessInitException {
+    public void handlePostNativeStartup(final boolean isAsync, final BrowserParts delegate) {
         assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
         if (!mPostInflationStartupComplete) {
             throw new IllegalStateException(
@@ -313,12 +300,18 @@ public class ChromeBrowserInitializer {
         });
 
         if (!mNativeInitializationComplete) {
-            tasks.add(UiThreadTaskTraits.DEFAULT, () -> {
-                int startupMode = getBrowserStartupController().getStartupMode(
-                        delegate.startServiceManagerOnly());
-                onFinishNativeInitialization(startupMode);
-            });
+            tasks.add(UiThreadTaskTraits.DEFAULT, this::onFinishNativeInitialization);
         }
+
+        if (!delegate.startServiceManagerOnly()) {
+            tasks.add(UiThreadTaskTraits.DEFAULT, this::onFinishFullBrowserInitialization);
+        }
+
+        int startupMode =
+                getBrowserStartupController().getStartupMode(delegate.startServiceManagerOnly());
+        tasks.add(UiThreadTaskTraits.DEFAULT, () -> {
+            BackgroundTaskSchedulerFactory.getUmaReporter().reportStartupMode(startupMode);
+        });
 
         if (isAsync) {
             // We want to start this queue once the C++ startup tasks have run; allow the
@@ -329,7 +322,7 @@ public class ChromeBrowserInitializer {
                     new BrowserStartupController.StartupCallback() {
                         @Override
                         public void onFailure() {
-                            delegate.onStartupFailure();
+                            delegate.onStartupFailure(null);
                         }
 
                         @Override
@@ -344,26 +337,27 @@ public class ChromeBrowserInitializer {
     }
 
     private void startChromeBrowserProcessesAsync(boolean startGpuProcess,
-            boolean startServiceManagerOnly, BrowserStartupController.StartupCallback callback)
-            throws ProcessInitException {
+            boolean startServiceManagerOnly, BrowserStartupController.StartupCallback callback) {
         try {
             TraceEvent.begin("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
             getBrowserStartupController().startBrowserProcessesAsync(
-                    startGpuProcess, startServiceManagerOnly, callback);
+                    LibraryProcessType.PROCESS_BROWSER, startGpuProcess, startServiceManagerOnly,
+                    callback);
         } finally {
             TraceEvent.end("ChromeBrowserInitializer.startChromeBrowserProcessesAsync");
         }
     }
 
-    private void startChromeBrowserProcessesSync() throws ProcessInitException {
+    private void startChromeBrowserProcessesSync() {
         try {
             TraceEvent.begin("ChromeBrowserInitializer.startChromeBrowserProcessesSync");
             ThreadUtils.assertOnUiThread();
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-            LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+            LibraryLoader.getInstance().ensureInitialized();
             StrictMode.setThreadPolicy(oldPolicy);
             LibraryPrefetcher.asyncPrefetchLibrariesToMemory();
-            getBrowserStartupController().startBrowserProcessesSync(false);
+            getBrowserStartupController().startBrowserProcessesSync(
+                    LibraryProcessType.PROCESS_BROWSER, /*singleProcess=*/false);
             GoogleServicesManager.get();
         } finally {
             TraceEvent.end("ChromeBrowserInitializer.startChromeBrowserProcessesSync");
@@ -372,8 +366,7 @@ public class ChromeBrowserInitializer {
 
     private BrowserStartupController getBrowserStartupController() {
         if (sBrowserStartupController == null) {
-            sBrowserStartupController =
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER);
+            sBrowserStartupController = BrowserStartupController.getInstance();
         }
         return sBrowserStartupController;
     }
@@ -400,7 +393,16 @@ public class ChromeBrowserInitializer {
         SpeechRecognition.initialize();
     }
 
-    private void onFinishNativeInitialization(int startupMode) {
+    private void onFinishFullBrowserInitialization() {
+        mFullBrowserInitializationComplete = true;
+
+        if (mTasksToRunWithFullBrowser != null) {
+            for (Runnable r : mTasksToRunWithFullBrowser) r.run();
+            mTasksToRunWithFullBrowser = null;
+        }
+    }
+
+    private void onFinishNativeInitialization() {
         if (mNativeInitializationComplete) return;
 
         mNativeInitializationComplete = true;
@@ -428,18 +430,11 @@ public class ChromeBrowserInitializer {
                 });
 
         MemoryPressureUma.initializeForBrowser();
-        if (mTasksToRunWithNative != null) {
-            for (Runnable r : mTasksToRunWithNative) r.run();
-            mTasksToRunWithNative = null;
-        }
 
-        // TODO(crbug.com/960767): Remove this in M77.
-        ServiceManagerStartupUtils.cleanupSharedPreferences();
+        // Needed for field trial metrics to be properly collected in ServiceManager only mode.
+        ChromeCachedFlags.getInstance().cacheServiceManagerOnlyFlags();
 
-        BackgroundTaskSchedulerExternalUma.reportStartupMode(startupMode);
-
-        PostTask.postTask(
-                TaskTraits.BEST_EFFORT_MAY_BLOCK, LibraryPrefetcher::maybePinOrderedCodeInMemory);
+        ModuleUtil.recordStartupTime();
     }
 
     private ActivityStateListener createActivityStateListener() {

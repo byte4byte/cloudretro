@@ -23,7 +23,6 @@ import static org.chromium.chrome.browser.keyboard_accessory.ManualFillingTestHe
 import static org.chromium.chrome.browser.keyboard_accessory.ManualFillingTestHelper.whenDisplayed;
 import static org.chromium.chrome.browser.keyboard_accessory.tab_layout_component.KeyboardAccessoryTabTestHelper.isKeyboardAccessoryTabLayout;
 
-import android.os.Build;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 import android.widget.TextView;
@@ -35,13 +34,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeWindow;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.keyboard_accessory.FakeKeyboard;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingTestHelper;
 import org.chromium.chrome.browser.keyboard_accessory.R;
@@ -58,7 +56,6 @@ import java.util.concurrent.TimeoutException;
  * Integration tests for address accessory views.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/958631")
 @RetryOnFailure
 @EnableFeatures({ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY})
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
@@ -75,7 +72,7 @@ public class AddressAccessoryIntegrationTest {
     }
 
     private void loadTestPage(ChromeWindow.KeyboardVisibilityDelegateFactory keyboardDelegate)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         mHelper.loadTestPage("/chrome/test/data/autofill/autofill_test_form.html", false, false,
                 keyboardDelegate);
         new AutofillTestHelper().setProfile(new AutofillProfile("", "https://www.example.com",
@@ -87,7 +84,7 @@ public class AddressAccessoryIntegrationTest {
     @Test
     @SmallTest
     @EnableFeatures({ChromeFeatureList.AUTOFILL_MANUAL_FALLBACK_ANDROID})
-    public void testAddressSheetIsAvailable() throws InterruptedException {
+    public void testAddressSheetIsAvailable() {
         mHelper.loadTestPage(false);
 
         CriteriaHelper.pollUiThread(() -> {
@@ -98,7 +95,7 @@ public class AddressAccessoryIntegrationTest {
     @Test
     @SmallTest
     @DisableFeatures({ChromeFeatureList.AUTOFILL_MANUAL_FALLBACK_ANDROID})
-    public void testAddressSheetUnavailableWithoutFeature() throws InterruptedException {
+    public void testAddressSheetUnavailableWithoutFeature() {
         mHelper.loadTestPage(false);
 
         Assert.assertNull("Address sheet should not have been created.",
@@ -108,8 +105,7 @@ public class AddressAccessoryIntegrationTest {
     @Test
     @SmallTest
     @EnableFeatures({ChromeFeatureList.AUTOFILL_MANUAL_FALLBACK_ANDROID})
-    public void testDisplaysEmptyStateMessageWithoutSavedPasswords()
-            throws InterruptedException, TimeoutException {
+    public void testDisplaysEmptyStateMessageWithoutSavedPasswords() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -128,7 +124,7 @@ public class AddressAccessoryIntegrationTest {
     @Test
     @MediumTest
     @EnableFeatures({ChromeFeatureList.AUTOFILL_MANUAL_FALLBACK_ANDROID})
-    public void testFillsSuggestionOnClick() throws InterruptedException, TimeoutException {
+    public void testFillsSuggestionOnClick() throws TimeoutException {
         loadTestPage(FakeKeyboard::new);
         mHelper.clickNodeAndShowKeyboard("NAME_FIRST");
         mHelper.waitForKeyboardAccessoryToBeShown(true);

@@ -10,9 +10,10 @@
 #include "ash/root_window_settings.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
-#include "ash/wm/root_window_finder.h"
+#include "ash/wm/window_util.h"
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -98,7 +99,7 @@ bool ScreenAsh::IsWindowUnderCursor(gfx::NativeWindow window) {
 }
 
 gfx::NativeWindow ScreenAsh::GetWindowAtScreenPoint(const gfx::Point& point) {
-  aura::Window* root_window = wm::GetRootWindowAt(point);
+  aura::Window* root_window = window_util::GetRootWindowAt(point);
   aura::client::ScreenPositionClient* position_client =
       aura::client::GetScreenPositionClient(root_window);
 
@@ -175,7 +176,7 @@ display::Display ScreenAsh::GetPrimaryDisplay() const {
     // https://crbug.com/866714.
     DCHECK(
         Shell::Get()->window_tree_host_manager()->GetAllRootWindows().empty());
-    return display::Display::GetDefaultDisplay();
+    return display::DisplayManager::GetFakePrimaryDisplay();
   }
 
   return GetDisplayManager()->GetDisplayForId(

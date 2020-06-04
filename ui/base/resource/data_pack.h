@@ -36,13 +36,19 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
   explicit DataPack(ui::ScaleFactor scale_factor);
   ~DataPack() override;
 
-  // Load a pack file from |path|, returning false on error.
+  // Load a pack file from |path|, returning false on error. If the final
+  // extension of |path| is .gz, the file will be uncompressed and stored in
+  // memory owned by |data_source_|. Otherwise the file will be mapped to
+  // memory, with the mapping owned by |data_source_|.
   bool LoadFromPath(const base::FilePath& path);
 
-  // Loads a pack file from |file|, returning false on error.
+  // Invokes LoadFromFileRegion with the entire contents of |file|. Compressed
+  // files are not supported.
   bool LoadFromFile(base::File file);
 
   // Loads a pack file from |region| of |file|, returning false on error.
+  // The file region will be mapped to memory with the mapping owned by
+  // |data_source_|.
   bool LoadFromFileRegion(base::File file,
                           const base::MemoryMappedFile::Region& region);
 
@@ -60,7 +66,6 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
 
   // ResourceHandle implementation:
   bool HasResource(uint16_t resource_id) const override;
-  bool IsGzipped(uint16_t resource_id, bool* is_gzipped) const override;
   bool GetStringPiece(uint16_t resource_id,
                       base::StringPiece* data) const override;
   base::RefCountedStaticMemory* GetStaticMemory(
@@ -88,6 +93,7 @@ class UI_DATA_PACK_EXPORT DataPack : public ResourceHandle {
   class DataSource;
   class BufferDataSource;
   class MemoryMappedDataSource;
+  class StringDataSource;
 
   // Does the actual loading of a pack file.
   // Called by Load and LoadFromFile and LoadFromBuffer.

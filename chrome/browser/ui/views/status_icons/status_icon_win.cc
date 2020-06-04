@@ -12,6 +12,7 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/message_center/public/cpp/notifier_id.h"
 #include "ui/views/controls/menu/menu_runner.h"
 
@@ -22,11 +23,7 @@ StatusIconWin::StatusIconWin(StatusTrayWin* tray,
                              UINT id,
                              HWND window,
                              UINT message)
-    : tray_(tray),
-      icon_id_(id),
-      window_(window),
-      message_id_(message),
-      menu_model_(NULL) {
+    : tray_(tray), icon_id_(id), window_(window), message_id_(message) {
   NOTIFYICONDATA icon_data;
   InitIconData(&icon_data);
   icon_data.uFlags = NIF_MESSAGE;
@@ -61,8 +58,8 @@ void StatusIconWin::HandleClickEvent(const gfx::Point& cursor_pos,
   if (!SetForegroundWindow(window_))
     return;
 
-  menu_runner_.reset(new views::MenuRunner(menu_model_,
-                                           views::MenuRunner::HAS_MNEMONICS));
+  menu_runner_ = std::make_unique<views::MenuRunner>(
+      menu_model_, views::MenuRunner::HAS_MNEMONICS);
   menu_runner_->RunMenuAt(nullptr, nullptr, gfx::Rect(cursor_pos, gfx::Size()),
                           views::MenuAnchorPosition::kTopLeft,
                           ui::MENU_SOURCE_MOUSE);

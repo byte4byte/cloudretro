@@ -10,3 +10,12 @@
   margin-bottom: 25px;
   margin-top: 20px;
 }
+
+.update-error {
+  font-weight: bold;
+}
+
+.update-illustration {
+  height: 264px;
+  width: 264px;
+}

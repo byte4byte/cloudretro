@@ -143,7 +143,7 @@ TEST_F(ShelfWindowWatcherTest, MaximizeAndRestoreWindow) {
   EXPECT_EQ(STATUS_RUNNING, model->items()[index].status);
 
   // Maximize the window.
-  wm::WindowState* window_state = wm::GetWindowState(widget->GetNativeWindow());
+  WindowState* window_state = WindowState::Get(widget->GetNativeWindow());
   EXPECT_FALSE(window_state->IsMaximized());
   window_state->Maximize();
   EXPECT_TRUE(window_state->IsMaximized());
@@ -178,10 +178,10 @@ TEST_F(ShelfWindowWatcherTest, DragWindow) {
 
   // Simulate dragging of the window and check its item is not changed.
   std::unique_ptr<WindowResizer> resizer(
-      CreateWindowResizer(widget->GetNativeWindow(), gfx::Point(), HTCAPTION,
+      CreateWindowResizer(widget->GetNativeWindow(), gfx::PointF(), HTCAPTION,
                           ::wm::WINDOW_MOVE_SOURCE_MOUSE));
   ASSERT_TRUE(resizer.get());
-  resizer->Drag(gfx::Point(50, 50), 0);
+  resizer->Drag(gfx::PointF(50, 50), 0);
   resizer->CompleteDrag();
 
   // Index and id are not changed after dragging the window.

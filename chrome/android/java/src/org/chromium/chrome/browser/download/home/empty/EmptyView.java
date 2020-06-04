@@ -5,15 +5,16 @@
 package org.chromium.chrome.browser.download.home.empty;
 
 import android.content.Context;
-import android.support.annotation.StringRes;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import androidx.annotation.StringRes;
+
 import org.chromium.chrome.browser.download.home.empty.EmptyProperties.State;
-import org.chromium.chrome.browser.widget.LoadingView;
 import org.chromium.chrome.download.R;
+import org.chromium.components.browser_ui.widget.LoadingView;
 
 /** A view that represents the visuals required for the empty state of the download home list. */
 class EmptyView {

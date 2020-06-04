@@ -12,19 +12,21 @@ import android.os.Build;
 
 import org.chromium.chrome.browser.ntp.IncognitoNewTabPage;
 import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.browser.suggestions.tile.TileSectionType;
 import org.chromium.chrome.browser.suggestions.tile.TileSource;
 import org.chromium.chrome.browser.suggestions.tile.TileTitleSource;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.touchless.TouchlessDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.components.signin.AccountManagerFacadeImpl;
+import org.chromium.components.signin.AccountManagerFacadeProvider;
+import org.chromium.components.signin.AccountUtils;
 import org.chromium.components.signin.test.util.AccountHolder;
 import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.ArrayList;
@@ -48,9 +50,6 @@ public class NewTabPageTestUtils {
             @Override
             public boolean isSatisfied() {
                 if (!tab.isIncognito()) {
-                    if (FeatureUtilities.isNoTouchModeEnabled()) {
-                        return TouchlessDelegate.isTouchlessNewTabPage(tab.getNativePage());
-                    }
                     // TODO(tedchoc): Make MostVisitedPage also have a isLoaded() concept.
                     if (tab.getNativePage() instanceof NewTabPage) {
                         return ((NewTabPage) tab.getNativePage()).isLoadedForTests();
@@ -100,11 +99,14 @@ public class NewTabPageTestUtils {
     public static void setUpTestAccount() {
         FakeAccountManagerDelegate fakeAccountManager = new FakeAccountManagerDelegate(
                 FakeAccountManagerDelegate.ENABLE_PROFILE_DATA_SOURCE);
-        AccountManagerFacade.overrideAccountManagerFacadeForTests(fakeAccountManager);
-        Account account = AccountManagerFacade.createAccountFromName("test@gmail.com");
+        AccountManagerFacadeImpl accountManagerFacade =
+                TestThreadUtils.runOnUiThreadBlockingNoException(
+                        () -> new AccountManagerFacadeImpl(fakeAccountManager));
+        AccountManagerFacadeProvider.setInstanceForTests(accountManagerFacade);
+        Account account = AccountUtils.createAccountFromName("test@gmail.com");
         fakeAccountManager.addAccountHolderExplicitly(new AccountHolder.Builder(account).build());
-        assertFalse(AccountManagerFacade.get().isUpdatePending().get());
-        assertFalse(ChromePreferenceManager.getInstance().readBoolean(
-                ChromePreferenceManager.NTP_SIGNIN_PROMO_DISMISSED, false));
+        assertFalse(accountManagerFacade.isUpdatePending().get());
+        assertFalse(SharedPreferencesManager.getInstance().readBoolean(
+                ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_DISMISSED, false));
     }
 }

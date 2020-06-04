@@ -1,5 +1,4 @@
 # Mainly for ML search-ranking purposes, see app_list/OWNERS for other reviews.
-per-file search_controller*=jiameng@chromium.org
-per-file mixer*=jiameng@chromium.org
+jiameng@chromium.org
 
 # COMPONENT: UI>Shell>Launcher

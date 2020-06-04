@@ -6,8 +6,8 @@
 #define IOS_CHROME_BROWSER_WEB_PRINT_TAB_HELPER_H_
 
 #include "base/macros.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 @protocol WebStatePrinter;
 class GURL;
@@ -40,6 +40,9 @@ class PrintTabHelper : public web::WebStateObserver,
                       web::WebFrame* sender_frame);
 
   __weak id<WebStatePrinter> printer_;
+
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
 
   WEB_STATE_USER_DATA_KEY_DECL();
 

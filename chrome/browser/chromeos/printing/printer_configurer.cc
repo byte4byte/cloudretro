@@ -15,16 +15,19 @@
 #include "base/feature_list.h"
 #include "base/hash/md5.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/printing/ppd_provider_factory.h"
 #include "chrome/browser/component_updater/cros_component_installer_chromeos.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/debug_daemon_client.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "chromeos/printing/ppd_provider.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "components/device_event_log/device_event_log.h"
@@ -46,6 +49,9 @@ GetComponentizedFilters() {
 namespace chromeos {
 
 namespace {
+
+// PrinterConfigurer override for testing.
+PrinterConfigurer* g_printer_configurer_for_test = nullptr;
 
 PrinterSetupResult PrinterSetupResultFromDbusResultCode(const Printer& printer,
                                                         int result_code) {
@@ -109,7 +115,7 @@ void RecordValidPpdReference(const Printer& printer) {
 class PrinterConfigurerImpl : public PrinterConfigurer {
  public:
   explicit PrinterConfigurerImpl(Profile* profile)
-      : ppd_provider_(CreatePpdProvider(profile)), weak_factory_(this) {}
+      : ppd_provider_(CreatePpdProvider(profile)) {}
 
   ~PrinterConfigurerImpl() override {}
 
@@ -249,7 +255,7 @@ class PrinterConfigurerImpl : public PrinterConfigurer {
   }
 
   scoped_refptr<PpdProvider> ppd_provider_;
-  base::WeakPtrFactory<PrinterConfigurerImpl> weak_factory_;
+  base::WeakPtrFactory<PrinterConfigurerImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PrinterConfigurerImpl);
 };
@@ -279,7 +285,29 @@ void PrinterConfigurer::RecordUsbPrinterSetupSource(
 
 // static
 std::unique_ptr<PrinterConfigurer> PrinterConfigurer::Create(Profile* profile) {
+  if (g_printer_configurer_for_test) {
+    auto printer_configurer =
+        base::WrapUnique<PrinterConfigurer>(g_printer_configurer_for_test);
+    g_printer_configurer_for_test = nullptr;
+    return printer_configurer;
+  }
   return std::make_unique<PrinterConfigurerImpl>(profile);
+}
+
+// static
+void PrinterConfigurer::SetPrinterConfigurerForTesting(
+    std::unique_ptr<PrinterConfigurer> printer_configurer) {
+  DCHECK(!g_printer_configurer_for_test);
+  g_printer_configurer_for_test = printer_configurer.release();
+}
+
+// static
+GURL PrinterConfigurer::GeneratePrinterEulaUrl(const std::string& license) {
+  GURL eula_url(chrome::kChromeUIOSCreditsURL);
+  // Construct the URL with proper reference fragment.
+  GURL::Replacements replacements;
+  replacements.SetRefStr(license);
+  return eula_url.ReplaceComponents(replacements);
 }
 
 std::ostream& operator<<(std::ostream& out, const PrinterSetupResult& result) {

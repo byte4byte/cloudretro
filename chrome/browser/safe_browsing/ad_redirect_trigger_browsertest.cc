@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
@@ -14,10 +15,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/features.h"
-#include "components/safe_browsing/triggers/ad_redirect_trigger.h"
-#include "components/safe_browsing/triggers/mock_trigger_manager.h"
+#include "components/safe_browsing/content/triggers/ad_redirect_trigger.h"
+#include "components/safe_browsing/content/triggers/mock_trigger_manager.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/features.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -32,12 +33,12 @@ namespace safe_browsing {
 class AdRedirectTriggerBrowserTest : public InProcessBrowserTest,
                                      public UrlListManager::Observer {
  public:
-  AdRedirectTriggerBrowserTest() = default;
+  AdRedirectTriggerBrowserTest() {
+    scoped_feature_list_.InitAndEnableFeature(kAdRedirectTriggerFeature);
+  }
 
   // InProcessBrowserTest:
   void SetUpOnMainThread() override {
-    scoped_feature_list_.InitAndEnableFeature(kAdRedirectTriggerFeature);
-
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->Start());
     current_browser_ = InProcessBrowserTest::browser();

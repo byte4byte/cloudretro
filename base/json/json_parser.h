@@ -14,6 +14,7 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/json/json_common.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/optional.h"
@@ -43,7 +44,7 @@ class JSONParserTest;
 // of the next token.
 class BASE_EXPORT JSONParser {
  public:
-  JSONParser(int options, int max_depth = JSONReader::kStackMaxDepth);
+  JSONParser(int options, size_t max_depth = kAbsoluteMaxDepth);
   ~JSONParser();
 
   // Parses the input string according to the set options and returns the
@@ -215,7 +216,7 @@ class BASE_EXPORT JSONParser {
   const int options_;
 
   // Maximum depth to parse.
-  const int max_depth_;
+  const size_t max_depth_;
 
   // The input stream being parsed. Note: Not guaranteed to NUL-terminated.
   StringPiece input_;
@@ -224,7 +225,7 @@ class BASE_EXPORT JSONParser {
   int index_;
 
   // The number of times the parser has recursed (current stack depth).
-  int stack_depth_;
+  size_t stack_depth_;
 
   // The line number that the parser is at currently.
   int line_number_;
@@ -244,9 +245,8 @@ class BASE_EXPORT JSONParser {
   FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ConsumeString);
   FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ConsumeLiterals);
   FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ConsumeNumbers);
+  FRIEND_TEST_ALL_PREFIXES(JSONParserTest, LineColumnCounting);
   FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ErrorMessages);
-  FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ReplaceInvalidCharacters);
-  FRIEND_TEST_ALL_PREFIXES(JSONParserTest, ReplaceInvalidUTF16EscapeSequence);
 
   DISALLOW_COPY_AND_ASSIGN(JSONParser);
 };

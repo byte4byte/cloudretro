@@ -21,7 +21,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -65,7 +65,7 @@ public class RepostFormWarningTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -194,7 +194,7 @@ public class RepostFormWarningTest {
     }
 
     /** Performs a POST navigation in mTab. */
-    private void postNavigation() throws Throwable {
+    private void postNavigation() {
         final String url = "/chrome/test/data/android/test.html";
         final byte[] postData = new byte[] {42};
 
@@ -205,13 +205,12 @@ public class RepostFormWarningTest {
     }
 
     /** Reloads mTab. */
-    private void reload() throws Throwable {
+    private void reload() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> mTab.reload());
     }
 
     /** Clicks the given button in the given dialog. */
-    private void clickButton(final PropertyModel dialog, final @ButtonType int type)
-            throws Throwable {
+    private void clickButton(final PropertyModel dialog, final @ButtonType int type) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
                 () -> dialog.get(ModalDialogProperties.CONTROLLER).onClick(dialog, type));
     }

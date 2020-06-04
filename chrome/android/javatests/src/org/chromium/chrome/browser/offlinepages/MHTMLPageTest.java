@@ -15,14 +15,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.download.DownloadController;
 import org.chromium.chrome.browser.download.DownloadInfo;
 import org.chromium.chrome.browser.download.DownloadTestRule;
 import org.chromium.chrome.browser.download.DownloadTestRule.CustomMainActivityStart;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.offline_items_collection.ContentId;
@@ -50,8 +51,7 @@ public class MHTMLPageTest implements CustomMainActivityStart {
 
     private EmbeddedTestServer mTestServer;
 
-    private static class TestDownloadNotificationService
-            implements DownloadController.DownloadNotificationService {
+    private static class TestDownloadNotificationService implements DownloadController.Observer {
         private Semaphore mSemaphore;
 
         TestDownloadNotificationService(Semaphore semaphore) {
@@ -99,13 +99,13 @@ public class MHTMLPageTest implements CustomMainActivityStart {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         deleteTestFiles();
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
         deleteTestFiles();
     }
@@ -118,6 +118,7 @@ public class MHTMLPageTest implements CustomMainActivityStart {
     @Test
     @SmallTest
     @RetryOnFailure
+    @DisabledTest(message = "Flaky. crbug.com/1030558")
     public void testDownloadMultipartRelatedPageFromServer() throws Exception {
         // .mhtml file is mapped to "multipart/related" by the test server.
         final String url = mTestServer.getURL("/chrome/test/data/android/hello.mhtml");
@@ -160,7 +161,7 @@ public class MHTMLPageTest implements CustomMainActivityStart {
     @Test
     @SmallTest
     @RetryOnFailure
-    public void testLoadMultipartRelatedPageFromLocalFile() throws Exception {
+    public void testLoadMultipartRelatedPageFromLocalFile() {
         // .mhtml file is mapped to "multipart/related" by the test server.
         String url = UrlUtils.getIsolatedTestFileUrl("chrome/test/data/android/hello.mhtml");
         mDownloadTestRule.loadUrl(url);
@@ -169,7 +170,7 @@ public class MHTMLPageTest implements CustomMainActivityStart {
     @Test
     @SmallTest
     @RetryOnFailure
-    public void testLoadMessageRfc822PageFromLocalFile() throws Exception {
+    public void testLoadMessageRfc822PageFromLocalFile() {
         // .mht file is mapped to "message/rfc822" by the test server.
         String url = UrlUtils.getIsolatedTestFileUrl("chrome/test/data/android/test.mht");
         mDownloadTestRule.loadUrl(url);

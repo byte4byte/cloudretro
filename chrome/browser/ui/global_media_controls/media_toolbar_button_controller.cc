@@ -4,41 +4,50 @@
 
 #include "chrome/browser/ui/global_media_controls/media_toolbar_button_controller.h"
 
+#include "chrome/browser/ui/global_media_controls/media_notification_service.h"
 #include "chrome/browser/ui/global_media_controls/media_toolbar_button_controller_delegate.h"
-#include "services/media_session/public/mojom/constants.mojom.h"
-#include "services/media_session/public/mojom/media_session.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 MediaToolbarButtonController::MediaToolbarButtonController(
-    service_manager::Connector* connector,
-    MediaToolbarButtonControllerDelegate* delegate)
-    : connector_(connector), delegate_(delegate) {
+    MediaToolbarButtonControllerDelegate* delegate,
+    MediaNotificationService* service)
+    : delegate_(delegate), service_(service) {
   DCHECK(delegate_);
-
-  // |connector| can be null in tests.
-  if (!connector_)
-    return;
-
-  // Connect to the MediaControllerManager and create a MediaController that
-  // controls the active session so we can observe it.
-  media_session::mojom::MediaControllerManagerPtr controller_manager_ptr;
-  connector_->BindInterface(media_session::mojom::kServiceName,
-                            mojo::MakeRequest(&controller_manager_ptr));
-  controller_manager_ptr->CreateActiveMediaController(
-      mojo::MakeRequest(&media_controller_ptr_));
-
-  // Observe the active media controller for changes to playback state and
-  // supported actions.
-  media_session::mojom::MediaControllerObserverPtr media_controller_observer;
-  media_controller_observer_binding_.Bind(
-      mojo::MakeRequest(&media_controller_observer));
-  media_controller_ptr_->AddObserver(std::move(media_controller_observer));
+  service_->AddObserver(this);
+  UpdateToolbarButtonState();
 }
 
-MediaToolbarButtonController::~MediaToolbarButtonController() = default;
+MediaToolbarButtonController::~MediaToolbarButtonController() {
+  service_->RemoveObserver(this);
+}
 
-void MediaToolbarButtonController::MediaSessionInfoChanged(
-    media_session::mojom::MediaSessionInfoPtr session_info) {
-  if (session_info && session_info->is_controllable)
-    delegate_->Show();
+void MediaToolbarButtonController::OnNotificationListChanged() {
+  UpdateToolbarButtonState();
+}
+
+void MediaToolbarButtonController::OnMediaDialogOpenedOrClosed() {
+  UpdateToolbarButtonState();
+}
+
+void MediaToolbarButtonController::UpdateToolbarButtonState() {
+  if (service_->HasActiveNotifications()) {
+    if (delegate_display_state_ != DisplayState::kShown) {
+      delegate_->Enable();
+      delegate_->Show();
+    }
+    delegate_display_state_ = DisplayState::kShown;
+    return;
+  }
+
+  if (!service_->HasFrozenNotifications()) {
+    if (delegate_display_state_ != DisplayState::kHidden)
+      delegate_->Hide();
+    delegate_display_state_ = DisplayState::kHidden;
+    return;
+  }
+
+  if (!service_->HasOpenDialog()) {
+    if (delegate_display_state_ != DisplayState::kDisabled)
+      delegate_->Disable();
+    delegate_display_state_ = DisplayState::kDisabled;
+  }
 }

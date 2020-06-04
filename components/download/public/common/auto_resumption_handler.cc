@@ -169,6 +169,7 @@ void AutoResumptionHandler::OnDownloadRemoved(download::DownloadItem* item) {
 }
 
 void AutoResumptionHandler::OnDownloadDestroyed(download::DownloadItem* item) {
+  resumable_downloads_.erase(item->GetGuid());
   downloads_to_retry_.erase(item);
 }
 
@@ -268,7 +269,7 @@ bool AutoResumptionHandler::SatisfiesNetworkRequirements(
 
 bool AutoResumptionHandler::IsAutoResumableDownload(
     download::DownloadItem* item) {
-  if (item->IsDangerous())
+  if (!item || item->IsDangerous())
     return false;
 
   switch (item->GetState()) {

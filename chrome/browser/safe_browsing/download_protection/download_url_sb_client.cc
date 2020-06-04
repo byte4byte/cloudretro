@@ -21,7 +21,7 @@ namespace safe_browsing {
 DownloadUrlSBClient::DownloadUrlSBClient(
     download::DownloadItem* item,
     DownloadProtectionService* service,
-    const CheckDownloadCallback& callback,
+    CheckDownloadCallback callback,
     const scoped_refptr<SafeBrowsingUIManager>& ui_manager,
     const scoped_refptr<SafeBrowsingDatabaseManager>& database_manager)
     : item_(item),
@@ -31,7 +31,7 @@ DownloadUrlSBClient::DownloadUrlSBClient(
       total_type_(DOWNLOAD_URL_CHECKS_TOTAL),
       dangerous_type_(DOWNLOAD_URL_CHECKS_MALWARE),
       service_(service),
-      callback_(callback),
+      callback_(std::move(callback)),
       ui_manager_(ui_manager),
       start_time_(base::TimeTicks::Now()),
       database_manager_(database_manager),
@@ -45,6 +45,8 @@ DownloadUrlSBClient::DownloadUrlSBClient(
   extended_reporting_level_ =
       profile ? GetExtendedReportingLevel(*profile->GetPrefs())
               : SBER_LEVEL_OFF;
+  is_enhanced_protection_ =
+      profile ? IsEnhancedProtectionEnabled(*profile->GetPrefs()) : false;
 }
 
 // Implements DownloadItem::Observer.
@@ -91,18 +93,18 @@ void DownloadUrlSBClient::CheckDone(SBThreatType threat_type) {
   UpdateDownloadCheckStats(total_type_);
   if (threat_type != SB_THREAT_TYPE_SAFE) {
     UpdateDownloadCheckStats(dangerous_type_);
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&DownloadUrlSBClient::ReportMalware, this, threat_type));
   } else {
     // Identify download referrer chain, which will be used in
     // ClientDownloadRequest.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&DownloadUrlSBClient::IdentifyReferrerChain, this));
   }
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(callback_, result));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(std::move(callback_), result));
 }
 
 void DownloadUrlSBClient::ReportMalware(SBThreatType threat_type) {
@@ -124,6 +126,7 @@ void DownloadUrlSBClient::ReportMalware(SBThreatType threat_type) {
   hit_report.threat_source = database_manager_->GetThreatSource();
   hit_report.post_data = post_data;
   hit_report.extended_reporting_level = extended_reporting_level_;
+  hit_report.is_enhanced_protection = is_enhanced_protection_;
   hit_report.is_metrics_reporting_active =
       ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
 

@@ -6,10 +6,12 @@
 
 #include <cmath>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/metrics/user_metrics.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,10 +25,11 @@
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/webplugininfo.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_util.h"
+#include "ppapi/buildflags/buildflags.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -35,6 +38,10 @@
 #include "ui/base/hit_test.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/scoped_canvas.h"
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "content/public/browser/plugin_service.h"
+#endif
 
 namespace {
 
@@ -56,22 +63,24 @@ std::string FindURLMimeType(const GURL& url) {
 }
 
 void OnFindURLMimeType(const GURL& url,
-                       Profile* profile,
+                       int process_id,
+                       int routing_id,
                        FileSupportedCallback callback,
                        const std::string& mime_type) {
   // Check whether the mime type, if given, is known to be supported or whether
   // there is a plugin that supports the mime type (e.g. PDF).
   // TODO(bauerb): This possibly uses stale information, but it's guaranteed not
   // to do disk access.
+  bool result = mime_type.empty() || blink::IsSupportedMimeType(mime_type);
+
+#if BUILDFLAG(ENABLE_PLUGINS)
   content::WebPluginInfo plugin;
-  std::move(callback).Run(
-      url,
-      mime_type.empty() || blink::IsSupportedMimeType(mime_type) ||
-          content::PluginService::GetInstance()->GetPluginInfo(
-              -1,                // process ID
-              MSG_ROUTING_NONE,  // routing ID
-              profile->GetResourceContext(), url, url::Origin(), mime_type,
-              false, nullptr, &plugin, nullptr));
+  result = result || content::PluginService::GetInstance()->GetPluginInfo(
+                         process_id, routing_id, url, url::Origin(), mime_type,
+                         false, nullptr, &plugin, nullptr);
+#endif
+
+  std::move(callback).Run(url, result);
 }
 
 bool GetURLForDrop(const ui::DropTargetEvent& event, GURL* url) {
@@ -107,7 +116,14 @@ BrowserRootView::BrowserRootView(BrowserView* browser_view,
                                  views::Widget* widget)
     : views::internal::RootView(widget), browser_view_(browser_view) {}
 
-BrowserRootView::~BrowserRootView() = default;
+BrowserRootView::~BrowserRootView() {
+  // It's possible to destroy the browser while a drop is active.  In this case,
+  // |drop_info_| will be non-null, but its |target| likely points to an
+  // already-deleted child.  Clear the target so ~DropInfo() will not try and
+  // notify it of the drag ending. http://crbug.com/1001942
+  if (drop_info_)
+    drop_info_->target = nullptr;
+}
 
 bool BrowserRootView::GetDropFormats(
     int* formats,
@@ -147,10 +163,15 @@ void BrowserRootView::OnDragEntered(const ui::DropTargetEvent& event) {
 
     // Check if the file is supported.
     if (url.SchemeIsFile()) {
-      base::PostTaskWithTraitsAndReplyWithResult(
+      content::RenderFrameHost* rfh = browser_view_->browser()
+                                          ->tab_strip_model()
+                                          ->GetActiveWebContents()
+                                          ->GetMainFrame();
+      base::ThreadPool::PostTaskAndReplyWithResult(
           FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
           base::BindOnce(&FindURLMimeType, url),
-          base::BindOnce(&OnFindURLMimeType, url, browser_view_->GetProfile(),
+          base::BindOnce(&OnFindURLMimeType, url, rfh->GetProcess()->GetID(),
+                         rfh->GetRoutingID(),
                          base::BindOnce(&BrowserRootView::OnFileSupported,
                                         weak_ptr_factory_.GetWeakPtr())));
     }

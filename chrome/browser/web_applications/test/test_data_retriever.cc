@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/common/web_application_info.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
 
@@ -34,10 +34,12 @@ void TestDataRetriever::CheckInstallabilityAndRetrieveManifest(
     content::WebContents* web_contents,
     bool bypass_service_worker_check,
     CheckInstallabilityCallback callback) {
-  DCHECK(manifest_);
+  base::Optional<blink::Manifest> opt_manifest;
+  if (manifest_ && !manifest_->IsEmpty())
+    opt_manifest = *manifest_;
 
   completion_callback_ =
-      base::BindOnce(std::move(callback), *manifest_,
+      base::BindOnce(std::move(callback), opt_manifest,
                      /*valid_manifest_for_web_app=*/true, is_installable_);
   ScheduleCompletionCallback();
 }
@@ -45,7 +47,7 @@ void TestDataRetriever::CheckInstallabilityAndRetrieveManifest(
 void TestDataRetriever::GetIcons(content::WebContents* web_contents,
                                  const std::vector<GURL>& icon_urls,
                                  bool skip_page_favicons,
-                                 WebappInstallSource install_source,
+                                 WebAppIconDownloader::Histogram histogram,
                                  GetIconsCallback callback) {
   if (get_icons_delegate_) {
     icons_map_ =
@@ -62,6 +64,10 @@ void TestDataRetriever::GetIcons(content::WebContents* web_contents,
 void TestDataRetriever::SetRendererWebApplicationInfo(
     std::unique_ptr<WebApplicationInfo> web_app_info) {
   web_app_info_ = std::move(web_app_info);
+}
+
+void TestDataRetriever::SetEmptyRendererWebApplicationInfo() {
+  SetRendererWebApplicationInfo(std::make_unique<WebApplicationInfo>());
 }
 
 void TestDataRetriever::SetManifest(std::unique_ptr<blink::Manifest> manifest,
@@ -87,7 +93,7 @@ void TestDataRetriever::SetDestructionCallback(base::OnceClosure callback) {
 
 void TestDataRetriever::BuildDefaultDataToRetrieve(const GURL& url,
                                                    const GURL& scope) {
-  SetRendererWebApplicationInfo(std::make_unique<WebApplicationInfo>());
+  SetEmptyRendererWebApplicationInfo();
 
   auto manifest = std::make_unique<blink::Manifest>();
   manifest->start_url = url;

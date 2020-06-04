@@ -21,13 +21,21 @@
         <li>Push notifications enabled:
           <span id="push-notification-enabled"></span>
         </li>
-        <li>
-          Has refresh token: <span id="has-refresh-token"></span>
-          <button id="button-clear-refresh-token">clear</button>
-        </li>
-        <li>
-          Has access token: <span id="has-access-token"></span>
-          <button id="button-clear-access-token">clear</button>
+      </ul>
+    </section>
+
+    <section id="drive-debug" hidden>
+      <h2>Drive Debug</h2>
+      <div>
+        <button id="button-restart-drive">Restart Drive</button>
+        <button id="button-reset-drive-filesystem">
+          Clear local data
+        </button>
+        <span id="reset-status-text"></span>
+      </div>
+      <ul>
+        <li>Local Free Space:
+          <span id="local-storage-freespace"></span> MB
         </li>
       </ul>
     </section>
@@ -40,21 +48,6 @@
         </li>
         <li>Quota Information: <span id="account-quota-info"></span></li>
         <li>Root Resource Id: <span id="root-resource-id"></span></li>
-      </ul>
-    </section>
-
-    <section id="local-metadata-section" hidden>
-      <h2>Local Metadata</h2>
-      <div>
-        <button id="button-reset-drive-filesystem">
-          Clear local data
-        </button>
-        <span id="reset-status-text"></span>
-      </div>
-      <ul>
-        <li>Local Free Space:
-          <span id="local-storage-freespace"></span> MB
-        </li>
       </ul>
     </section>
 
@@ -87,12 +80,6 @@
           </tr>
         </tbody>
       </table>
-    </section>
-
-    <section id="file-system-contents-section" hidden>
-      <h2>File System Contents</h2>
-      <button id="button-show-file-entries">Show</button>
-      <div id="file-system-contents"></div>
     </section>
 
     <section id="path-configurations-section" hidden>

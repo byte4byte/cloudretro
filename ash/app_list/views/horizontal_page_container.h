@@ -15,19 +15,15 @@
 #include "base/macros.h"
 
 namespace ash {
-class PaginationController;
-}
-
-namespace app_list {
 
 class AppsContainerView;
 class HorizontalPage;
+class PaginationController;
 
 // HorizontalPageContainer contains a list of HorizontalPage that are
 // horizontally laid out. These pages can be switched with gesture scrolling.
-class APP_LIST_EXPORT HorizontalPageContainer
-    : public AppListPage,
-      public ash::PaginationModelObserver {
+class APP_LIST_EXPORT HorizontalPageContainer : public AppListPage,
+                                                public PaginationModelObserver {
  public:
   HorizontalPageContainer(ContentsView* contents_view, AppListModel* model);
   ~HorizontalPageContainer() override;
@@ -40,15 +36,21 @@ class APP_LIST_EXPORT HorizontalPageContainer
 
   // AppListPage overrides:
   void OnWillBeHidden() override;
-  void OnAnimationUpdated(double progress,
-                          ash::AppListState from_state,
-                          ash::AppListState to_state) override;
-  gfx::Rect GetSearchBoxBounds() const override;
-  gfx::Rect GetSearchBoxBoundsForState(ash::AppListState state) const override;
-  gfx::Rect GetPageBoundsForState(ash::AppListState state) const override;
+  void OnAnimationStarted(AppListState from_state,
+                          AppListState to_state) override;
+  gfx::Rect GetPageBoundsForState(
+      AppListState state,
+      const gfx::Rect& contents_bounds,
+      const gfx::Rect& search_box_bounds) const override;
+  void UpdateOpacityForState(AppListState state) override;
   views::View* GetFirstFocusableView() override;
   views::View* GetLastFocusableView() override;
   bool ShouldShowSearchBox() const override;
+  void AnimateOpacity(float current_progress,
+                      AppListViewState target_view_state,
+                      const OpacityAnimator& animator) override;
+  void AnimateYPosition(AppListViewState target_view_state,
+                        const TransformAnimator& animator) override;
 
   AppsContainerView* apps_container_view() { return apps_container_view_; }
 
@@ -56,9 +58,9 @@ class APP_LIST_EXPORT HorizontalPageContainer
 
  private:
   // PaginationModelObserver:
-  void TotalPagesChanged() override;
+  void TotalPagesChanged(int previous_page_count, int new_page_count) override;
   void SelectedPageChanged(int old_selected, int new_selected) override;
-  void TransitionStarted() override;
+  void TransitionStarting() override;
   void TransitionChanged() override;
   void TransitionEnded() override;
 
@@ -77,10 +79,10 @@ class APP_LIST_EXPORT HorizontalPageContainer
   gfx::Vector2d GetOffsetForPageIndex(int index) const;
 
   // Manages the pagination for the horizontal pages.
-  ash::PaginationModel pagination_model_{this};
+  PaginationModel pagination_model_{this};
 
   // Must appear after |pagination_model_|.
-  std::unique_ptr<ash::PaginationController> pagination_controller_;
+  std::unique_ptr<PaginationController> pagination_controller_;
 
   ContentsView* contents_view_;  // Not owned
 
@@ -93,6 +95,6 @@ class APP_LIST_EXPORT HorizontalPageContainer
   DISALLOW_COPY_AND_ASSIGN(HorizontalPageContainer);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_HORIZONTAL_PAGE_CONTAINER_H_

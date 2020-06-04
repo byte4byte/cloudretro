@@ -22,12 +22,34 @@ CWV_EXPORT
 @property(nonatomic, assign, getter=isTranslationEnabled)
     BOOL translationEnabled;
 
+// Whether or not profile autofill is turned on. Defaults to |YES|.
+// If enabled, contents of submitted profiles may be saved and offered as a
+// suggestion in either the same or similar forms.
+@property(nonatomic, assign, getter=isProfileAutofillEnabled)
+    BOOL profileAutofillEnabled;
+
+// Whether or not credit card autofill is turned on. Defaults to |YES|.
+// If enabled, contents of submitted credit cards may be saved and offered as a
+// suggestion in either the same or similar forms.
+@property(nonatomic, assign, getter=isCreditCardAutofillEnabled)
+    BOOL creditCardAutofillEnabled;
+
+// Whether or not CWVWebView allows saving passwords for autofill. Defaults to
+// |YES|. When it is NO, it doesn't ask if you want to save passwords but will
+// continue to fill passwords.
+//
+// TODO(crbug.com/905221): Preference should also control autofill behavior for
+// the passwords.
+@property(nonatomic, assign, getter=isPasswordAutofillEnabled)
+    BOOL passwordAutofillEnabled;
+
 - (instancetype)init NS_UNAVAILABLE;
 
 // Resets all translation settings back to default. In particular, this will
-// change all translation policies back to CWVTranslationPolicyAsk.
-// Because translate settings are shared from incognito to non-incognito, this
-// has no effect if this instance is from an incognito CWVWebViewConfiguration.
+// change all translation policies back to CWVTranslationPolicyAsk, and set
+// |translationEnabled| to YES. Because translate settings are shared from
+// incognito to non-incognito, this has no effect if this instance is from an
+// incognito CWVWebViewConfiguration.
 - (void)resetTranslationSettings;
 
 @end

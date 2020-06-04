@@ -8,7 +8,7 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/web/common/crw_content_view.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
 
 @class CRWWebController;
 
@@ -22,11 +22,6 @@
 
 // Init with a weak reference of web controller, used for passing through calls.
 - (instancetype)initWithWebController:(CRWWebController*)webController;
-
-// Disconnects and reconnects the scroll proxy to prevent extra calls to
-// WKebView.
-- (void)disconnectScrollProxy;
-- (void)reconnectScrollProxy;
 
 @end
 

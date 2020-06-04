@@ -36,7 +36,6 @@
 #include "chromeos/components/proximity_auth/proximity_auth_profile_pref_manager.h"
 #include "chromeos/components/proximity_auth/proximity_auth_system.h"
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
-#include "chromeos/components/proximity_auth/switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/login/auth/user_context.h"
@@ -89,8 +88,7 @@ EasyUnlockService* EasyUnlockService::GetForUser(
 class EasyUnlockService::BluetoothDetector
     : public device::BluetoothAdapter::Observer {
  public:
-  explicit BluetoothDetector(EasyUnlockService* service)
-      : service_(service), weak_ptr_factory_(this) {}
+  explicit BluetoothDetector(EasyUnlockService* service) : service_(service) {}
 
   ~BluetoothDetector() override {
     if (adapter_.get())
@@ -101,7 +99,7 @@ class EasyUnlockService::BluetoothDetector
     if (!device::BluetoothAdapterFactory::IsBluetoothSupported())
       return;
 
-    device::BluetoothAdapterFactory::GetAdapter(
+    device::BluetoothAdapterFactory::Get()->GetAdapter(
         base::BindOnce(&BluetoothDetector::OnAdapterInitialized,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -124,7 +122,7 @@ class EasyUnlockService::BluetoothDetector
   // Owner of this class and should out-live this class.
   EasyUnlockService* service_;
   scoped_refptr<device::BluetoothAdapter> adapter_;
-  base::WeakPtrFactory<BluetoothDetector> weak_ptr_factory_;
+  base::WeakPtrFactory<BluetoothDetector> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothDetector);
 };
@@ -132,7 +130,7 @@ class EasyUnlockService::BluetoothDetector
 class EasyUnlockService::PowerMonitor : public PowerManagerClient::Observer {
  public:
   explicit PowerMonitor(EasyUnlockService* service)
-      : service_(service), waking_up_(false), weak_ptr_factory_(this) {
+      : service_(service), waking_up_(false) {
     PowerManagerClient::Get()->AddObserver(this);
   }
 
@@ -178,7 +176,7 @@ class EasyUnlockService::PowerMonitor : public PowerManagerClient::Observer {
   EasyUnlockService* service_;
   bool waking_up_;
   base::Time wake_up_time_;
-  base::WeakPtrFactory<PowerMonitor> weak_ptr_factory_;
+  base::WeakPtrFactory<PowerMonitor> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PowerMonitor);
 };
@@ -191,10 +189,9 @@ EasyUnlockService::EasyUnlockService(
       proximity_auth_client_(profile),
       bluetooth_detector_(new BluetoothDetector(this)),
       shut_down_(false),
-      tpm_key_checked_(false),
-      weak_ptr_factory_(this) {}
+      tpm_key_checked_(false) {}
 
-EasyUnlockService::~EasyUnlockService() {}
+EasyUnlockService::~EasyUnlockService() = default;
 
 // static
 void EasyUnlockService::RegisterProfilePrefs(
@@ -308,7 +305,8 @@ EasyUnlockService::GetScreenlockStateHandler() {
   if (!screenlock_state_handler_) {
     screenlock_state_handler_.reset(new EasyUnlockScreenlockStateHandler(
         GetAccountId(), GetHardlockState(),
-        proximity_auth::ScreenlockBridge::Get()));
+        proximity_auth::ScreenlockBridge::Get(),
+        GetProximityAuthPrefManager()));
   }
   return screenlock_state_handler_.get();
 }
@@ -344,6 +342,8 @@ void EasyUnlockService::AttemptAuth(const AccountId& account_id) {
   const EasyUnlockAuthAttempt::Type auth_attempt_type =
       GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
                                 : EasyUnlockAuthAttempt::TYPE_SIGNIN;
+  PA_LOG(VERBOSE) << "User began auth attempt (unlock or sign in attempt).";
+
   if (auth_attempt_) {
     PA_LOG(VERBOSE) << "Already attempting auth, skipping this request.";
     return;
@@ -376,13 +376,14 @@ void EasyUnlockService::AttemptAuth(const AccountId& account_id) {
         SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
             kAuthAttemptCannotStart);
     auth_attempt_.reset();
+    return;
   }
 
   // TODO(tengs): We notify ProximityAuthSystem whenever unlock attempts are
   // attempted. However, we ideally should refactor the auth attempt logic to
   // the proximity_auth component.
   if (proximity_auth_system_)
-    proximity_auth_system_->OnAuthAttempted(account_id);
+    proximity_auth_system_->OnAuthAttempted();
 }
 
 void EasyUnlockService::FinalizeUnlock(bool success) {
@@ -679,8 +680,6 @@ EasyUnlockAuthEvent EasyUnlockService::GetPasswordAuthEvent() const {
         return PASSWORD_ENTRY_PHONE_LOCKED;
       case ScreenlockState::PHONE_NOT_LOCKABLE:
         return PASSWORD_ENTRY_PHONE_NOT_LOCKABLE;
-      case ScreenlockState::PHONE_UNSUPPORTED:
-        return PASSWORD_ENTRY_PHONE_UNSUPPORTED;
       case ScreenlockState::RSSI_TOO_LOW:
         return PASSWORD_ENTRY_RSSI_TOO_LOW;
       case ScreenlockState::PHONE_LOCKED_AND_RSSI_TOO_LOW:

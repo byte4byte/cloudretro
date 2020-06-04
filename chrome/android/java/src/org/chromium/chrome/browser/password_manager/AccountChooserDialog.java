@@ -10,8 +10,6 @@ import android.content.DialogInterface;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
-import android.support.v7.app.AlertDialog;
-import android.support.v7.content.res.AppCompatResources;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -28,7 +26,11 @@ import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.content.res.AppCompatResources;
+
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.signin.ProfileDataCache;
 import org.chromium.components.url_formatter.UrlFormatter;
@@ -177,7 +179,8 @@ public class AccountChooserDialog
             spanableTitle.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View view) {
-                    nativeOnLinkClicked(mNativeAccountChooserDialog);
+                    AccountChooserDialogJni.get().onLinkClicked(
+                            mNativeAccountChooserDialog, AccountChooserDialog.this);
                     mDialog.dismiss();
                 }
             }, mTitleLinkStart, mTitleLinkEnd, Spanned.SPAN_INCLUSIVE_INCLUSIVE);
@@ -213,12 +216,6 @@ public class AccountChooserDialog
         TextView text = (TextView) inflater.inflate(layoutId, null);
         text.setText(message);
         text.announceForAccessibility(message);
-
-        // This is a work-around for a bug on Android versions KitKat and below
-        // (http://crbug.com/693076). The tooltip wouldn't be shown otherwise.
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.LOLLIPOP) {
-            text.setSingleLine(false);
-        }
 
         // The tooltip should be shown above and to the left (right for RTL) of the info button.
         // In order to do so the tooltip's location on the screen is determined. This location is
@@ -287,7 +284,8 @@ public class AccountChooserDialog
         assert mNativeAccountChooserDialog != 0;
         assert !mIsDestroyed;
         mIsDestroyed = true;
-        nativeDestroy(mNativeAccountChooserDialog);
+        AccountChooserDialogJni.get().destroy(
+                mNativeAccountChooserDialog, AccountChooserDialog.this);
         mNativeAccountChooserDialog = 0;
         mDialog = null;
     }
@@ -311,18 +309,22 @@ public class AccountChooserDialog
     public void onDismiss(DialogInterface dialog) {
         if (!mWasDismissedByNative) {
             if (mCredential != null) {
-                nativeOnCredentialClicked(mNativeAccountChooserDialog, mCredential.getIndex(),
-                        mSigninButtonClicked);
+                AccountChooserDialogJni.get().onCredentialClicked(mNativeAccountChooserDialog,
+                        AccountChooserDialog.this, mCredential.getIndex(), mSigninButtonClicked);
             } else {
-                nativeCancelDialog(mNativeAccountChooserDialog);
+                AccountChooserDialogJni.get().cancelDialog(
+                        mNativeAccountChooserDialog, AccountChooserDialog.this);
             }
         }
         destroy();
     }
 
-    private native void nativeOnCredentialClicked(long nativeAccountChooserDialogAndroid,
-            int credentialId, boolean signinButtonClicked);
-    private native void nativeCancelDialog(long nativeAccountChooserDialogAndroid);
-    private native void nativeDestroy(long nativeAccountChooserDialogAndroid);
-    private native void nativeOnLinkClicked(long nativeAccountChooserDialogAndroid);
+    @NativeMethods
+    interface Natives {
+        void onCredentialClicked(long nativeAccountChooserDialogAndroid,
+                AccountChooserDialog caller, int credentialId, boolean signinButtonClicked);
+        void cancelDialog(long nativeAccountChooserDialogAndroid, AccountChooserDialog caller);
+        void destroy(long nativeAccountChooserDialogAndroid, AccountChooserDialog caller);
+        void onLinkClicked(long nativeAccountChooserDialogAndroid, AccountChooserDialog caller);
+    }
 }

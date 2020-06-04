@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/autofill/payments/local_card_migration_error_dialog_view.h"
 
 #include "base/macros.h"
+#include "build/branding_buildflags.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_dialog_factory.h"
 #include "chrome/browser/ui/autofill/payments/payments_ui_constants.h"
@@ -17,17 +18,16 @@
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace autofill {
 
@@ -35,6 +35,10 @@ LocalCardMigrationErrorDialogView::LocalCardMigrationErrorDialogView(
     LocalCardMigrationDialogController* controller,
     content::WebContents* web_contents)
     : controller_(controller), web_contents_(web_contents) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_CANCEL);
+  DialogDelegate::SetCancelCallback(
+      base::BindOnce(&LocalCardMigrationDialogController::OnDoneButtonClicked,
+                     base::Unretained(controller_)));
   set_close_on_deactivate(false);
   set_margins(gfx::Insets());
 }
@@ -71,25 +75,11 @@ bool LocalCardMigrationErrorDialogView::ShouldShowCloseButton() const {
   return false;
 }
 
-int LocalCardMigrationErrorDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_CANCEL;
-}
-
 void LocalCardMigrationErrorDialogView::WindowClosing() {
   if (controller_) {
     controller_->OnDialogClosed();
     controller_ = nullptr;
   }
-}
-
-bool LocalCardMigrationErrorDialogView::Cancel() {
-  controller_->OnDoneButtonClicked();
-  return true;
-}
-
-bool LocalCardMigrationErrorDialogView::Close() {
-  // Close the dialog if the user exits the browser when dialog is visible.
-  return true;
 }
 
 void LocalCardMigrationErrorDialogView::Init() {
@@ -101,17 +91,17 @@ void LocalCardMigrationErrorDialogView::Init() {
       views::BoxLayout::Orientation::kVertical, gfx::Insets(),
       kMigrationDialogMainContainerChildSpacing));
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   auto* image = new views::ImageView();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   image->SetImage(
-      rb.GetImageSkiaNamed(GetNativeTheme()->SystemDarkModeEnabled()
+      rb.GetImageSkiaNamed(GetNativeTheme()->ShouldUseDarkColors()
                                ? IDR_AUTOFILL_MIGRATION_DIALOG_HEADER_DARK
                                : IDR_AUTOFILL_MIGRATION_DIALOG_HEADER));
   image->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_GOOGLE_PAY_LOGO_ACCESSIBLE_NAME));
   AddChildView(image);
-#endif  // GOOGLE_CHROME_BUILD
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   auto* error_view = new views::View();
   auto* horizontal_layout =
@@ -124,7 +114,9 @@ void LocalCardMigrationErrorDialogView::Init() {
   error_view->SetBorder(views::CreateEmptyBorder(kMigrationDialogInsets));
   auto* error_image = new views::ImageView();
   error_image->SetImage(
-      gfx::CreateVectorIcon(kBrowserToolsErrorIcon, gfx::kGoogleRed700));
+      gfx::CreateVectorIcon(kBrowserToolsErrorIcon,
+                            GetNativeTheme()->GetSystemColor(
+                                ui::NativeTheme::kColorId_AlertSeverityHigh)));
   error_view->AddChildView(error_image);
 
   auto* error_message = new views::Label(

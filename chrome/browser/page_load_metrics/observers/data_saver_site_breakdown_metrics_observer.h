@@ -10,8 +10,8 @@
 
 #include "base/macros.h"
 #include "base/sequence_checker.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "chrome/common/page_load_metrics/page_load_metrics.mojom.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom-forward.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
 namespace content {
@@ -42,6 +42,7 @@ class DataSaverSiteBreakdownMetricsObserver
       const std::string& mime_type) const override;
 
   std::string committed_host_;
+  std::string committed_origin_;
 
   // The browser context this navigation is operating in.
   content::BrowserContext* browser_context_ = nullptr;

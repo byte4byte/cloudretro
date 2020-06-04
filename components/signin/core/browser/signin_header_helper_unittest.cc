@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/prefs/pref_member.h"
@@ -43,17 +43,17 @@ class SigninHeaderHelperTest : public testing::Test {
     settings_map_ = new HostContentSettingsMap(
         &prefs_, false /* is_off_the_record */, false /* store_last_modified */,
         false /* migrate_requesting_and_top_level_origin_settings */);
-    cookie_settings_ =
-        new content_settings::CookieSettings(settings_map_.get(), &prefs_, "");
+    cookie_settings_ = new content_settings::CookieSettings(settings_map_.get(),
+                                                            &prefs_, false, "");
   }
 
   void TearDown() override { settings_map_->ShutdownOnUIThread(); }
 
   void CheckMirrorCookieRequest(const GURL& url,
-                                const std::string& account_id,
+                                const std::string& gaia_id,
                                 const std::string& expected_request) {
     EXPECT_EQ(BuildMirrorRequestCookieIfPossible(
-                  url, account_id, account_consistency_, cookie_settings_.get(),
+                  url, gaia_id, account_consistency_, cookie_settings_.get(),
                   PROFILE_MODE_DEFAULT),
               expected_request);
   }
@@ -112,7 +112,7 @@ class SigninHeaderHelperTest : public testing::Test {
   }
 #endif
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   bool sync_enabled_ = false;
   std::string device_id_ = kTestDeviceId;
@@ -139,31 +139,27 @@ TEST_F(SigninHeaderHelperTest, TestMirrorRequestNoAccountIdChromeOS) {
                            "consistency_enabled_by_default=false");
 }
 #else  // !defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+// Tests that Mirror request is returned on Android for Public Sessions (no
+// account id), when the Mobile Identity Consistency feature is enabled.
+TEST_F(SigninHeaderHelperTest, TestMirrorRequestNoAccountIdAndroid) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(kMobileIdentityConsistency);
+
+  account_consistency_ = AccountConsistencyMethod::kMirror;
+  CheckMirrorHeaderRequest(GURL("https://docs.google.com"), "",
+                           "eligible_for_consistency=true");
+  CheckMirrorCookieRequest(GURL("https://docs.google.com"), "",
+                           "eligible_for_consistency=true");
+}
+#endif  // defined(OS_ANDROID)
+
 // Tests that no Mirror request is returned when the user is not signed in (no
 // account id), for non Chrome OS platforms.
 TEST_F(SigninHeaderHelperTest, TestNoMirrorRequestNoAccountId) {
-#if defined(OS_ANDROID)
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(kMiceFeature);
-#endif
   account_consistency_ = AccountConsistencyMethod::kMirror;
   CheckMirrorHeaderRequest(GURL("https://docs.google.com"), "", "");
   CheckMirrorCookieRequest(GURL("https://docs.google.com"), "", "");
-}
-#endif
-
-#if defined(OS_ANDROID)
-// Tests that Mirror request is returned on Android with Mice.
-TEST_F(SigninHeaderHelperTest, TestMirrorRequestNoAccountIdMice) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kMiceFeature);
-  account_consistency_ = AccountConsistencyMethod::kMirror;
-  CheckMirrorHeaderRequest(GURL("https://docs.google.com"), "",
-                           "mode=0,enable_account_consistency=true,"
-                           "consistency_enabled_by_default=true");
-  CheckMirrorCookieRequest(GURL("https://docs.google.com"), "",
-                           "mode=0:enable_account_consistency=true:"
-                           "consistency_enabled_by_default=true");
 }
 #endif
 
@@ -319,7 +315,7 @@ TEST_F(SigninHeaderHelperTest, TestNoDiceRequestWhenDisabled) {
 }
 
 TEST_F(SigninHeaderHelperTest, TestDiceEmptyDeviceID) {
-  account_consistency_ = AccountConsistencyMethod::kDiceMigration;
+  account_consistency_ = AccountConsistencyMethod::kDice;
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
   ASSERT_FALSE(client_id.empty());
 
@@ -330,29 +326,16 @@ TEST_F(SigninHeaderHelperTest, TestDiceEmptyDeviceID) {
       "mode=0,enable_account_consistency=false,"
       "consistency_enabled_by_default=false",
       base::StringPrintf("version=%s,client_id=%s,signin_mode=all_accounts,"
-                         "signout_mode=no_confirmation",
+                         "signout_mode=show_confirmation",
                          kDiceProtocolVersion, client_id.c_str()));
 }
 
-// Tests that the signout confirmation is requested iff the Dice migration is
-// complete.
-TEST_F(SigninHeaderHelperTest, TestDiceMigration) {
-  account_consistency_ = AccountConsistencyMethod::kDiceMigration;
+// Tests that the signout confirmation is requested.
+TEST_F(SigninHeaderHelperTest, TestSignoutConfirmation) {
+  account_consistency_ = AccountConsistencyMethod::kDice;
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
   ASSERT_FALSE(client_id.empty());
 
-  // No signout confirmation by default.
-  CheckDiceHeaderRequest(
-      GURL("https://accounts.google.com"), "0123456789",
-      "mode=0,enable_account_consistency=false,"
-      "consistency_enabled_by_default=false",
-      base::StringPrintf(
-          "version=%s,client_id=%s,device_id=DeviceID,signin_mode=all_accounts,"
-          "signout_mode=no_confirmation",
-          kDiceProtocolVersion, client_id.c_str()));
-
-  // Signout confirmation after the migration is complete.
-  account_consistency_ = AccountConsistencyMethod::kDice;
   CheckDiceHeaderRequest(
       GURL("https://accounts.google.com"), "0123456789",
       "mode=0,enable_account_consistency=false,"
@@ -563,15 +546,23 @@ TEST_F(SigninHeaderHelperTest, TestBuildManageAccountsParams) {
   const char kContinueURL[] = "https://www.example.com/continue";
   const char kEmail[] = "foo@example.com";
 
-  ManageAccountsParams params = BuildManageAccountsParams(
-      base::StringPrintf("action=ADDSESSION,email=%s,is_saml=true,is_same_tab="
-                         "true,continue_url=%s",
-                         kEmail, kContinueURL));
+  std::string header = base::StringPrintf(
+      "action=ADDSESSION,email=%s,is_saml=true,"
+      "is_same_tab=true,continue_url=%s",
+      kEmail, kContinueURL);
+#if defined(OS_ANDROID)
+  header += ",show_consistency_promo=true";
+#endif
+
+  ManageAccountsParams params = BuildManageAccountsParams(header);
   EXPECT_EQ(GAIA_SERVICE_TYPE_ADDSESSION, params.service_type);
   EXPECT_EQ(kEmail, params.email);
   EXPECT_EQ(true, params.is_saml);
   EXPECT_EQ(true, params.is_same_tab);
   EXPECT_EQ(GURL(kContinueURL), params.continue_url);
+#if defined(OS_ANDROID)
+  EXPECT_EQ(true, params.show_consistency_promo);
+#endif
 }
 
 }  // namespace signin

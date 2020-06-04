@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_RESET_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_RESET_SCREEN_H_
 
+#include <memory>
 #include <set>
 #include <string>
 
@@ -21,10 +22,15 @@
 
 class PrefRegistrySimple;
 
+namespace ash {
+class ScopedGuestButtonBlocker;
+}
+
 namespace chromeos {
 
 class ErrorScreen;
 class ResetView;
+class ScopedGuestButtonBlocker;
 
 // Representation independent class that controls screen showing reset to users.
 // It run exit callback only if the user cancels the reset. Other user actions
@@ -62,12 +68,12 @@ class ResetScreen : public BaseScreen, public UpdateEngineClient::Observer {
 
  private:
   // BaseScreen implementation:
-  void Show() override;
-  void Hide() override;
+  void ShowImpl() override;
+  void HideImpl() override;
   void OnUserAction(const std::string& action_id) override;
 
   // UpdateEngineClient::Observer implementation:
-  void UpdateStatusChanged(const UpdateEngineClient::Status& status) override;
+  void UpdateStatusChanged(const update_engine::StatusResult& status) override;
 
   void OnRollbackCheck(bool can_rollback);
   void OnTPMFirmwareUpdateAvailableCheck(
@@ -92,7 +98,9 @@ class ResetScreen : public BaseScreen, public UpdateEngineClient::Observer {
   // Callback used to check whether a TPM firnware update is available.
   TpmFirmwareUpdateAvailabilityChecker tpm_firmware_update_checker_;
 
-  base::WeakPtrFactory<ResetScreen> weak_ptr_factory_;
+  std::unique_ptr<ash::ScopedGuestButtonBlocker> scoped_guest_button_blocker_;
+
+  base::WeakPtrFactory<ResetScreen> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ResetScreen);
 };

@@ -10,6 +10,8 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/chromeos/ime/candidate_view.h"
 #include "ui/chromeos/ime/candidate_window_constants.h"
 #include "ui/display/display.h"
@@ -144,13 +146,12 @@ class InformationTextArea : public views::View {
   DISALLOW_COPY_AND_ASSIGN(InformationTextArea);
 };
 
-CandidateWindowView::CandidateWindowView(gfx::NativeView parent,
-                                         int window_shell_id)
+CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
     : selected_candidate_index_in_page_(-1),
       should_show_at_composition_head_(false),
       should_show_upper_side_(false),
-      was_candidate_window_open_(false),
-      window_shell_id_(window_shell_id) {
+      was_candidate_window_open_(false) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
   SetCanActivate(false);
   DCHECK(parent);
   set_parent_window(parent);
@@ -401,10 +402,6 @@ const char* CandidateWindowView::GetClassName() const {
   return "CandidateWindowView";
 }
 
-int CandidateWindowView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
-}
-
 void CandidateWindowView::ButtonPressed(views::Button* sender,
                                         const ui::Event& event) {
   for (size_t i = 0; i < candidate_views_.size(); ++i) {
@@ -414,6 +411,10 @@ void CandidateWindowView::ButtonPressed(views::Button* sender,
       return;
     }
   }
+}
+
+void CandidateWindowView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  node_data->role = ax::mojom::Role::kMenu;
 }
 
 }  // namespace ime

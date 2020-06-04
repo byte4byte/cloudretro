@@ -9,6 +9,8 @@ This shows some statistics about two orderfiles, possibly extracted from an
 updating commit made by the orderfile bot.
 """
 
+from __future__ import print_function
+
 import argparse
 import collections
 import logging
@@ -88,8 +90,8 @@ def Compare(first_filename, second_filename):
   """
   first_symbols = ParseOrderfile(first_filename)
   second_symbols = ParseOrderfile(second_filename)
-  print 'Symbols count:\n\tfirst:\t%d\n\tsecond:\t%d' % (
-      len(first_symbols), len(second_symbols))
+  print('Symbols count:\n\tfirst:\t%d\n\tsecond:\t%d' % (len(first_symbols),
+                                                         len(second_symbols)))
   first_symbols = set(first_symbols)
   second_symbols = set(second_symbols)
   new_symbols = second_symbols - first_symbols
@@ -103,10 +105,10 @@ def Compare(first_filename, second_filename):
   # Each distance is in [0, len(common_symbols)] and there are
   # len(common_symbols) entries, hence the normalization.
   average_fractional_distance = float(total_distance) / (len(common_symbols)**2)
-  print 'New symbols = %d' % len(new_symbols)
-  print 'Removed symbols = %d' % len(removed_symbols)
-  print 'Average fractional distance = %.2f%%' % (
-      100. * average_fractional_distance)
+  print('New symbols = %d' % len(new_symbols))
+  print('Removed symbols = %d' % len(removed_symbols))
+  print('Average fractional distance = %.2f%%' %
+        (100. * average_fractional_distance))
   return CompareResult(len(first_symbols), len(second_symbols),
                        len(new_symbols), len(removed_symbols),
                        average_fractional_distance)
@@ -119,12 +121,13 @@ def CheckOrderfileCommit(commit_hash, clank_path):
     commit_hash: (str) Git hash of the orderfile roll commit.
     clank_path: (str) Path to the clank repository.
   """
-  output = subprocess.check_output(
-      ['git', 'show', r'--format=%an %s', commit_hash], cwd=clank_path)
+  output = subprocess.check_output(['git', 'show', r'--format=%s', commit_hash],
+                                   cwd=clank_path)
   first_line = output.split('\n')[0]
-  # Capitalization changed at some point.
-  assert first_line.upper() == 'clank-autoroller Update Orderfile.'.upper(), (
-      'Not an orderfile commit')
+  # Capitalization changed at some point. Not checking the bot name because it
+  # changed too.
+  assert first_line.upper().endswith(
+      'Update Orderfile.'.upper()), ('Not an orderfile commit')
 
 
 def GetBeforeAfterOrderfileHashes(commit_hash, clank_path):

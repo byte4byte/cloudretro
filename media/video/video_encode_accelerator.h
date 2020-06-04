@@ -22,6 +22,7 @@
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
 #include "media/video/h264_parser.h"
+#include "media/video/video_encoder_info.h"
 
 namespace media {
 
@@ -38,9 +39,6 @@ class VideoFrame;
 //                  temporal_idx > 0.
 struct MEDIA_EXPORT Vp8Metadata final {
   Vp8Metadata();
-  Vp8Metadata(const Vp8Metadata& other);
-  Vp8Metadata(Vp8Metadata&& other);
-  ~Vp8Metadata();
   bool non_reference;
   uint8_t temporal_idx;
   bool layer_sync;
@@ -77,6 +75,7 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
                      uint32_t max_framerate_denominator = 1u);
     ~SupportedProfile();
     VideoCodecProfile profile;
+    gfx::Size min_resolution;
     gfx::Size max_resolution;
     uint32_t max_framerate_numerator;
     uint32_t max_framerate_denominator;
@@ -98,11 +97,8 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     kErrorMax = kPlatformFailureError
   };
 
-  // Unified default values for all VEA implementations.
-  enum {
-    kDefaultFramerate = 30,
-    kDefaultH264Level = H264SPS::kLevelIDC4p0,
-  };
+  // A default framerate for all VEA implementations.
+  enum { kDefaultFramerate = 30 };
 
   // Parameters required for VEA initialization.
   struct MEDIA_EXPORT Config {
@@ -113,6 +109,22 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // kShmem if a video frame is mapped in user space.
     // kDmabuf if a video frame is referred by dmabuf.
     enum class StorageType { kShmem, kDmabuf };
+
+    struct MEDIA_EXPORT SpatialLayer {
+      // The encoder dimension of the spatial layer.
+      int32_t width = 0;
+      int32_t height = 0;
+      // The bitrate of encoded output stream of the spatial layer in bits per
+      // second.
+      uint32_t bitrate_bps = 0u;
+      uint32_t framerate = 0u;
+      // The recommended maximum qp value of the spatial layer. VEA can ignore
+      // this value.
+      uint8_t max_qp = 0u;
+      // The number of temporal layers of the spatial layer. The detail of
+      // the temporal layer structure is up to VideoEncodeAccelerator.
+      uint8_t num_of_temporal_layers = 0u;
+    };
 
     Config();
     Config(const Config& config);
@@ -125,11 +137,15 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
            base::Optional<uint32_t> gop_length = base::nullopt,
            base::Optional<uint8_t> h264_output_level = base::nullopt,
            base::Optional<StorageType> storage_type = base::nullopt,
-           ContentType content_type = ContentType::kCamera);
+           ContentType content_type = ContentType::kCamera,
+           const std::vector<SpatialLayer>& spatial_layers = {});
 
     ~Config();
 
     std::string AsHumanReadableString() const;
+
+    bool HasTemporalLayer() const;
+    bool HasSpatialLayer() const;
 
     // Frame format of input stream (as would be reported by
     // VideoFrame::format() for frames passed to Encode()).
@@ -154,11 +170,9 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     base::Optional<uint32_t> gop_length;
 
     // Codec level of encoded output stream for H264 only. This value should
-    // be aligned to the H264 standard definition of SPS.level_idc. The only
-    // exception is in Main and Baseline profile we still use
-    // |h264_output_level|=9 for Level 1b, which should set level_idc to 11 and
-    // constraint_set3_flag to 1 (Spec A.3.1 and A.3.2). This is optional and
-    // use |kDefaultH264Level| if not given.
+    // be aligned to the H264 standard definition of SPS.level_idc.
+    // If this is not given, VideoEncodeAccelerator selects one of proper H.264
+    // levels for |input_visible_size| and |initial_framerate|.
     base::Optional<uint8_t> h264_output_level;
 
     // The storage type of video frame provided on Encode().
@@ -174,6 +188,12 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // bright colors. With this content hint the encoder may choose to optimize
     // for the given use case.
     ContentType content_type;
+
+    // The configuration for spatial layers. This is not empty if and only if
+    // either spatial or temporal layer encoding is configured. When this is not
+    // empty, VideoEncodeAccelerator should refer the width, height, bitrate and
+    // etc. of |spatial_layers|.
+    std::vector<SpatialLayer> spatial_layers;
   };
 
   // Interface for clients that use VideoEncodeAccelerator. These callbacks will
@@ -212,6 +232,9 @@ class MEDIA_EXPORT VideoEncodeAccelerator {
     // reported here, but will instead be indicated by a false return value
     // there.
     virtual void NotifyError(Error error) = 0;
+
+    // Call VideoEncoderInfo of the VEA is changed.
+    virtual void NotifyEncoderInfoChange(const VideoEncoderInfo& info);
 
    protected:
     // Clients are not owned by VEA instances and should not be deleted through

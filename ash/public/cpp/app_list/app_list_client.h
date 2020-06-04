@@ -19,7 +19,7 @@
 #include "services/content/public/mojom/navigable_contents_factory.mojom.h"
 #include "ui/base/models/simple_menu_model.h"
 
-namespace app_list {
+namespace ash {
 
 class AppListController;
 
@@ -51,11 +51,14 @@ class ASH_PUBLIC_EXPORT AppListClient {
   // |suggestion_index|: the position of the result as a suggestion chip in
   // the AppsGridView or the position of the result in the zero state search
   // page.
+  // |launch_as_default|: True if the result is launched as the default result
+  // by user pressing ENTER key.
   virtual void OpenSearchResult(const std::string& result_id,
                                 int event_flags,
-                                ash::AppListLaunchedFrom launched_from,
-                                ash::AppListLaunchType launch_type,
-                                int suggestion_index) = 0;
+                                AppListLaunchedFrom launched_from,
+                                AppListLaunchType launch_type,
+                                int suggestion_index,
+                                bool launch_as_default) = 0;
   // Invokes a custom action on a result with |result_id|.
   // |action_index| corresponds to the index of an action on the search result,
   // for example, installing. They are stored in SearchResult::actions_.
@@ -77,7 +80,7 @@ class ASH_PUBLIC_EXPORT AppListClient {
   // Invoked when the app list is closed.
   virtual void ViewClosing() = 0;
   // Notifies target visibility changes of the app list.
-  virtual void OnAppListTargetVisibilityChanged(bool visible) = 0;
+  virtual void OnAppListVisibilityWillChange(bool visible) = 0;
   // Notifies visibility changes of the app list.
   virtual void OnAppListVisibilityChanged(bool visible) = 0;
 
@@ -97,17 +100,14 @@ class ASH_PUBLIC_EXPORT AppListClient {
                                    const std::string& id,
                                    GetContextMenuModelCallback callback) = 0;
   // Invoked when a folder is created in Ash (e.g. merge items into a folder).
-  virtual void OnFolderCreated(
-      int profile_id,
-      std::unique_ptr<ash::AppListItemMetadata> folder) = 0;
+  virtual void OnFolderCreated(int profile_id,
+                               std::unique_ptr<AppListItemMetadata> folder) = 0;
   // Invoked when a folder has only one item left and so gets removed.
-  virtual void OnFolderDeleted(
-      int profile_id,
-      std::unique_ptr<ash::AppListItemMetadata> folder) = 0;
+  virtual void OnFolderDeleted(int profile_id,
+                               std::unique_ptr<AppListItemMetadata> folder) = 0;
   // Invoked when user changes a folder's name or an item's position.
-  virtual void OnItemUpdated(
-      int profile_id,
-      std::unique_ptr<ash::AppListItemMetadata> folder) = 0;
+  virtual void OnItemUpdated(int profile_id,
+                             std::unique_ptr<AppListItemMetadata> folder) = 0;
   // Invoked when a "page break" item is added with |id| and |position|.
   virtual void OnPageBreakItemAdded(int profile_id,
                                     const std::string& id,
@@ -115,7 +115,10 @@ class ASH_PUBLIC_EXPORT AppListClient {
   // Invoked when a "page break" item with |id| is deleted.
   virtual void OnPageBreakItemDeleted(int profile_id,
                                       const std::string& id) = 0;
-
+  // Invoked when a "quick setting" is changed.
+  virtual void OnQuickSettingsChanged(
+      const std::string& setting_name,
+      const std::vector<std::pair<std::string, int>>& values) = 0;
   // Updated when item with |id| is set to |visible|. Only sent if
   // |notify_visibility_change| was set on the SearchResultMetadata.
   virtual void OnSearchResultVisibilityChanged(const std::string& id,
@@ -128,10 +131,15 @@ class ASH_PUBLIC_EXPORT AppListClient {
       mojo::PendingReceiver<content::mojom::NavigableContentsFactory>
           receiver) = 0;
 
+  virtual void NotifySearchResultsForLogging(
+      const base::string16& trimmed_query,
+      const SearchResultIdWithPositionIndices& results,
+      int position_index) = 0;
+
  protected:
   virtual ~AppListClient() = default;
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_PUBLIC_CPP_APP_LIST_APP_LIST_CLIENT_H_

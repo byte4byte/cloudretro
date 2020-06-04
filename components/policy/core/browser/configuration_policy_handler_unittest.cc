@@ -115,11 +115,9 @@ class StringListPolicyHandler : public ListPolicyHandler {
       : ListPolicyHandler(kPolicyName, base::Value::Type::STRING) {}
 
  protected:
-  void ApplyList(std::unique_ptr<base::ListValue> filtered_list,
-                 PrefValueMap* prefs) override {
-    DCHECK(filtered_list);
-    prefs->SetValue(kTestPref,
-                    base::Value::FromUniquePtrValue(std::move(filtered_list)));
+  void ApplyList(base::Value filtered_list, PrefValueMap* prefs) override {
+    DCHECK(filtered_list.is_list());
+    prefs->SetValue(kTestPref, std::move(filtered_list));
   }
 };
 
@@ -227,9 +225,7 @@ TEST(StringToIntEnumListPolicyHandlerTest, CheckPolicySettings) {
   PolicyMap policy_map;
   PolicyErrorMap errors;
   StringMappingListPolicyHandler handler(
-      kTestPolicy,
-      kTestPref,
-      base::Bind(GetIntegerTypeMap));
+      kTestPolicy, kTestPref, base::BindRepeating(GetIntegerTypeMap));
 
   policy_map.Set(kTestPolicy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                  POLICY_SOURCE_CLOUD, list.CreateDeepCopy(), nullptr);
@@ -268,9 +264,7 @@ TEST(StringMappingListPolicyHandlerTest, ApplyPolicySettings) {
   PrefValueMap prefs;
   base::Value* value;
   StringMappingListPolicyHandler handler(
-      kTestPolicy,
-      kTestPref,
-      base::Bind(GetIntegerTypeMap));
+      kTestPolicy, kTestPref, base::BindRepeating(GetIntegerTypeMap));
 
   policy_map.Set(kTestPolicy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                  POLICY_SOURCE_CLOUD, list.CreateDeepCopy(), nullptr);
@@ -718,7 +712,7 @@ TEST(IntPercentageToDoublePolicyHandler, ApplyPolicySettingsDontClamp) {
   EXPECT_EQ(*expected, *value);
 }
 
-TEST(SchemaValidatingPolicyHandlerTest, CheckAndGetValue) {
+TEST(SchemaValidatingPolicyHandlerTest, CheckAndGetValueInvalid) {
   std::string error;
   static const char kSchemaJson[] =
       "{"
@@ -757,7 +751,51 @@ TEST(SchemaValidatingPolicyHandlerTest, CheckAndGetValue) {
   policy_map.LoadFrom(policy_map_dict, POLICY_LEVEL_RECOMMENDED,
                       POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD);
 
-  TestSchemaValidatingPolicyHandler handler(schema, SCHEMA_ALLOW_INVALID);
+  TestSchemaValidatingPolicyHandler handler(schema, SCHEMA_ALLOW_UNKNOWN);
+  std::unique_ptr<base::Value> output_value;
+  EXPECT_FALSE(handler.CheckAndGetValueForTest(policy_map, &output_value));
+}
+
+TEST(SchemaValidatingPolicyHandlerTest, CheckAndGetValueUnknown) {
+  std::string error;
+  static const char kSchemaJson[] =
+      "{"
+      "  \"type\": \"object\","
+      "  \"properties\": {"
+      "    \"OneToThree\": {"
+      "      \"type\": \"integer\","
+      "      \"minimum\": 1,"
+      "      \"maximum\": 3"
+      "    },"
+      "    \"Colors\": {"
+      "      \"type\": \"string\","
+      "      \"enum\": [ \"Red\", \"Green\", \"Blue\" ]"
+      "    }"
+      "  }"
+      "}";
+  Schema schema = Schema::Parse(kSchemaJson, &error);
+  ASSERT_TRUE(schema.valid()) << error;
+
+  static const char kPolicyMapJson[] =
+      "{"
+      "  \"PolicyForTesting\": {"
+      "    \"OneToThree\": 2,"
+      "    \"Apples\": \"Red\""
+      "  }"
+      "}";
+  std::unique_ptr<base::Value> policy_map_value =
+      base::JSONReader::ReadAndReturnErrorDeprecated(
+          kPolicyMapJson, base::JSON_ALLOW_TRAILING_COMMAS, nullptr, &error);
+  ASSERT_TRUE(policy_map_value) << error;
+
+  const base::DictionaryValue* policy_map_dict = nullptr;
+  ASSERT_TRUE(policy_map_value->GetAsDictionary(&policy_map_dict));
+
+  PolicyMap policy_map;
+  policy_map.LoadFrom(policy_map_dict, POLICY_LEVEL_RECOMMENDED,
+                      POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD);
+
+  TestSchemaValidatingPolicyHandler handler(schema, SCHEMA_ALLOW_UNKNOWN);
   std::unique_ptr<base::Value> output_value;
   ASSERT_TRUE(handler.CheckAndGetValueForTest(policy_map, &output_value));
   ASSERT_TRUE(output_value);
@@ -765,11 +803,11 @@ TEST(SchemaValidatingPolicyHandlerTest, CheckAndGetValue) {
   base::DictionaryValue* dict = nullptr;
   ASSERT_TRUE(output_value->GetAsDictionary(&dict));
 
-  // Test that CheckAndGetValue() actually dropped invalid properties.
+  // Test that CheckAndGetValue() actually dropped unknown properties.
   int int_value = -1;
   EXPECT_TRUE(dict->GetInteger("OneToThree", &int_value));
   EXPECT_EQ(2, int_value);
-  EXPECT_FALSE(dict->HasKey("Colors"));
+  EXPECT_FALSE(dict->HasKey("Apples"));
 }
 
 TEST(SimpleSchemaValidatingPolicyHandlerTest, CheckAndGetValue) {

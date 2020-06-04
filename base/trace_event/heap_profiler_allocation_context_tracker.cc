@@ -4,6 +4,8 @@
 
 #include "base/trace_event/heap_profiler_allocation_context_tracker.h"
 
+#include <string.h>
+
 #include <algorithm>
 #include <iterator>
 
@@ -11,6 +13,7 @@
 #include "base/debug/debugging_buildflags.h"
 #include "base/debug/leak_annotations.h"
 #include "base/debug/stack_trace.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "base/threading/platform_thread.h"

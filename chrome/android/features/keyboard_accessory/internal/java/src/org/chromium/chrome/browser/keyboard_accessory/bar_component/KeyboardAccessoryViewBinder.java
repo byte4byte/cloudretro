@@ -6,20 +6,21 @@ package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BAR_ITEMS;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BOTTOM_OFFSET_PX;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.DISABLE_ANIMATIONS_FOR_TESTING;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.KEYBOARD_TOGGLE_VISIBLE;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHEET_TITLE;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHOW_KEYBOARD_CALLBACK;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.TAB_LAYOUT_ITEM;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.os.Build;
-import android.support.annotation.LayoutRes;
-import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.widget.TextView;
+
+import androidx.annotation.LayoutRes;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BarItem;
@@ -45,7 +46,7 @@ class KeyboardAccessoryViewBinder {
         return null;
     }
 
-    static abstract class BarItemViewHolder<T extends BarItem, V extends View>
+    abstract static class BarItemViewHolder<T extends BarItem, V extends View>
             extends RecyclerView.ViewHolder {
         BarItemViewHolder(ViewGroup parent, @LayoutRes int layout) {
             super(LayoutInflater.from(parent.getContext()).inflate(layout, parent, false));
@@ -86,7 +87,6 @@ class KeyboardAccessoryViewBinder {
     static void bind(PropertyModel model, KeyboardAccessoryView view, PropertyKey propertyKey) {
         boolean wasBound = bindInternal(model, view, propertyKey);
         assert wasBound : "Every possible property update needs to be handled!";
-        requestLayoutPreKitkat(view);
     }
 
     /**
@@ -101,8 +101,13 @@ class KeyboardAccessoryViewBinder {
         if (propertyKey == BAR_ITEMS) {
             view.setBarItemsAdapter(
                     KeyboardAccessoryCoordinator.createBarItemsAdapter(model.get(BAR_ITEMS)));
+        } else if (propertyKey == DISABLE_ANIMATIONS_FOR_TESTING) {
+            if (model.get(DISABLE_ANIMATIONS_FOR_TESTING)) view.disableAnimationsForTesting();
         } else if (propertyKey == VISIBLE) {
             view.setVisible(model.get(VISIBLE));
+        } else if (propertyKey == SKIP_CLOSING_ANIMATION) {
+            view.setSkipClosingAnimation(model.get(SKIP_CLOSING_ANIMATION));
+            if (!model.get(VISIBLE)) view.setVisible(false); // Update to cancel any animation.
         } else if (propertyKey == BOTTOM_OFFSET_PX) {
             view.setBottomOffset(model.get(BOTTOM_OFFSET_PX));
         } else if (propertyKey == SHOW_KEYBOARD_CALLBACK || propertyKey == KEYBOARD_TOGGLE_VISIBLE
@@ -112,17 +117,5 @@ class KeyboardAccessoryViewBinder {
             return false;
         }
         return true;
-    }
-
-    protected static void requestLayoutPreKitkat(View view) {
-        // Layout requests happen automatically since Kitkat and redundant requests cause warnings.
-        if (view != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            view.post(() -> {
-                ViewParent parent = view.getParent();
-                if (parent != null) {
-                    parent.requestLayout();
-                }
-            });
-        }
     }
 }

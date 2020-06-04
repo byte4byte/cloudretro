@@ -10,7 +10,7 @@
 #include "base/values.h"
 #import "ios/chrome/browser/web/web_state_printer.h"
 #include "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -23,7 +23,7 @@ const char kPrintCommandPrefix[] = "print";
 
 PrintTabHelper::PrintTabHelper(web::WebState* web_state) {
   web_state->AddObserver(this);
-  web_state->AddScriptCommandCallback(
+  subscription_ = web_state->AddScriptCommandCallback(
       base::Bind(&PrintTabHelper::OnPrintCommand, base::Unretained(this),
                  base::Unretained(web_state)),
       kPrintCommandPrefix);
@@ -37,7 +37,6 @@ void PrintTabHelper::set_printer(id<WebStatePrinter> printer) {
 
 void PrintTabHelper::WebStateDestroyed(web::WebState* web_state) {
   // Stops handling print requests from the web page.
-  web_state->RemoveScriptCommandCallback(kPrintCommandPrefix);
   web_state->RemoveObserver(this);
 }
 

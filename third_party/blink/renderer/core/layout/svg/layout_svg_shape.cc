@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/layout/svg/transformed_hit_test_location.h"
 #include "third_party/blink/renderer/core/paint/svg_shape_painter.h"
 #include "third_party/blink/renderer/core/svg/svg_geometry_element.h"
@@ -58,16 +59,29 @@ LayoutSVGShape::LayoutSVGShape(SVGGeometryElement* node,
       // Default is true, so we grab a AffineTransform object once from
       // SVGGeometryElement.
       needs_transform_update_(true),
-      // Default to false, since |needs_transform_update_| is true this will be
-      // updated the first time transforms are updated.
       transform_uses_reference_box_(false) {}
 
 LayoutSVGShape::~LayoutSVGShape() = default;
 
 void LayoutSVGShape::StyleDidChange(StyleDifference diff,
                                     const ComputedStyle* old_style) {
+  transform_uses_reference_box_ =
+      TransformHelper::DependsOnReferenceBox(StyleRef());
   LayoutSVGModelObject::StyleDidChange(diff, old_style);
   SVGResources::UpdatePaints(*GetElement(), old_style, StyleRef());
+
+  // Most of the stroke attributes (caps, joins, miters, width, etc.) will cause
+  // a re-layout which will clear the stroke-path cache; however, there are a
+  // couple of additional properties that *won't* cause a layout, but are
+  // significant enough to require invalidating the cache.
+  if (!diff.NeedsFullLayout() && old_style && stroke_path_cache_) {
+    const auto& old_svg_style = old_style->SvgStyle();
+    const auto& svg_style = StyleRef().SvgStyle();
+    if (old_svg_style.StrokeDashOffset() != svg_style.StrokeDashOffset() ||
+        *old_svg_style.StrokeDashArray() != *svg_style.StrokeDashArray()) {
+      stroke_path_cache_.reset();
+    }
+  }
 }
 
 void LayoutSVGShape::WillBeDestroyed() {
@@ -75,16 +89,26 @@ void LayoutSVGShape::WillBeDestroyed() {
   LayoutSVGModelObject::WillBeDestroyed();
 }
 
+void LayoutSVGShape::ClearPath() {
+  path_.reset();
+  stroke_path_cache_.reset();
+}
+
 void LayoutSVGShape::CreatePath() {
   if (!path_)
     path_ = std::make_unique<Path>();
-  *path_ = ToSVGGeometryElement(GetElement())->AsPath();
+  *path_ = To<SVGGeometryElement>(GetElement())->AsPath();
+
+  // When the path changes, we need to ensure the stale stroke path cache is
+  // cleared. Because this is done in all callsites, we can just DCHECK that it
+  // has been cleared here.
+  DCHECK(!stroke_path_cache_);
 }
 
 float LayoutSVGShape::DashScaleFactor() const {
   if (StyleRef().SvgStyle().StrokeDashArray()->data.IsEmpty())
     return 1;
-  return ToSVGGeometryElement(*GetElement()).PathLengthScaleFactor();
+  return To<SVGGeometryElement>(*GetElement()).PathLengthScaleFactor();
 }
 
 void LayoutSVGShape::UpdateShapeFromElement() {
@@ -94,7 +118,7 @@ void LayoutSVGShape::UpdateShapeFromElement() {
   if (HasNonScalingStroke()) {
     // NonScalingStrokeTransform may depend on LocalTransform which in turn may
     // depend on ObjectBoundingBox, thus we need to call them in this order.
-    UpdateLocalTransform();
+    local_transform_ = CalculateLocalTransform();
     UpdateNonScalingStrokeData();
   }
 
@@ -149,24 +173,40 @@ FloatRect LayoutSVGShape::HitTestStrokeBoundingBox() const {
 
 bool LayoutSVGShape::ShapeDependentStrokeContains(
     const HitTestLocation& location) {
-  // In case the subclass didn't create path during UpdateShapeFromElement()
-  // for optimization but still calls this method.
-  if (!HasPath())
-    CreatePath();
+  if (!stroke_path_cache_) {
+    // In case the subclass didn't create path during UpdateShapeFromElement()
+    // for optimization but still calls this method.
+    if (!HasPath())
+      CreatePath();
 
-  StrokeData stroke_data;
-  SVGLayoutSupport::ApplyStrokeStyleToStrokeData(stroke_data, StyleRef(), *this,
-                                                 DashScaleFactor());
+    StrokeData stroke_data;
+    SVGLayoutSupport::ApplyStrokeStyleToStrokeData(stroke_data, StyleRef(),
+                                                   *this, DashScaleFactor());
 
-  if (HasNonScalingStroke()) {
-    // The reason is similar to the above code about HasPath().
-    if (!rare_data_)
-      UpdateNonScalingStrokeData();
-    return NonScalingStrokePath().StrokeContains(
-        NonScalingStrokeTransform().MapPoint(location.TransformedPoint()),
-        stroke_data);
+    if (HasNonScalingStroke()) {
+      // The reason is similar to the above code about HasPath().
+      if (!rare_data_)
+        UpdateNonScalingStrokeData();
+
+      // Un-scale to get back to the root-transform (cheaper than re-computing
+      // the root transform from scratch).
+      AffineTransform root_transform;
+      root_transform.Scale(StyleRef().EffectiveZoom())
+          .Multiply(NonScalingStrokeTransform());
+
+      stroke_path_cache_ = std::make_unique<Path>(
+          NonScalingStrokePath().StrokePath(stroke_data, root_transform));
+    } else {
+      stroke_path_cache_ = std::make_unique<Path>(
+          path_->StrokePath(stroke_data, ComputeRootTransform()));
+    }
   }
-  return path_->StrokeContains(location.TransformedPoint(), stroke_data);
+
+  DCHECK(stroke_path_cache_);
+  auto point = location.TransformedPoint();
+  if (HasNonScalingStroke())
+    point = NonScalingStrokeTransform().MapPoint(point);
+  return stroke_path_cache_->Contains(point);
 }
 
 bool LayoutSVGShape::ShapeDependentFillContains(
@@ -209,48 +249,16 @@ bool LayoutSVGShape::StrokeContains(const HitTestLocation& location,
   return ShapeDependentStrokeContains(location);
 }
 
-static inline bool TransformOriginIsFixed(const ComputedStyle& style) {
-  // If the transform box is view-box and the transform origin is absolute, then
-  // is does not depend on the reference box. For fill-box, the origin will
-  // always move with the bounding box.
-  return style.TransformBox() == ETransformBox::kViewBox &&
-         style.TransformOriginX().IsFixed() &&
-         style.TransformOriginY().IsFixed();
-}
-
-static inline bool TransformDependsOnReferenceBox(const ComputedStyle& style) {
-  // We're passing kExcludeMotionPath here because we're checking that
-  // explicitly later.
-  if (!TransformOriginIsFixed(style) &&
-      style.RequireTransformOrigin(ComputedStyle::kIncludeTransformOrigin,
-                                   ComputedStyle::kExcludeMotionPath))
-    return true;
-  if (style.Transform().DependsOnBoxSize())
-    return true;
-  if (style.Translate() && style.Translate()->DependsOnBoxSize())
-    return true;
-  if (style.HasOffset())
-    return true;
-  return false;
-}
-
-bool LayoutSVGShape::UpdateLocalTransform() {
-  SVGGraphicsElement* graphics_element = ToSVGGraphicsElement(GetElement());
-  if (graphics_element->HasTransform(SVGElement::kIncludeMotionTransform)) {
-    local_transform_.SetTransform(graphics_element->CalculateTransform(
-        SVGElement::kIncludeMotionTransform));
-    return TransformDependsOnReferenceBox(StyleRef());
-  }
-  local_transform_ = AffineTransform();
-  return false;
-}
-
 void LayoutSVGShape::UpdateLayout() {
   LayoutAnalyzer::Scope analyzer(*this);
 
   // Invalidate all resources of this client if our layout changed.
   if (EverHadLayout() && SelfNeedsLayout())
     SVGResourcesCache::ClientLayoutChanged(*this);
+
+  // The cached stroke may be affected by the ancestor transform, and so needs
+  // to be cleared regardless of whether the shape or bounds have changed.
+  stroke_path_cache_.reset();
 
   bool update_parent_boundaries = false;
   bool bbox_changed = false;
@@ -264,7 +272,6 @@ void LayoutSVGShape::UpdateLayout() {
     FloatRect old_object_bounding_box = ObjectBoundingBox();
     UpdateShapeFromElement();
     if (old_object_bounding_box != ObjectBoundingBox()) {
-      GetElement()->SetNeedsResizeObserverUpdate();
       SetShouldDoFullPaintInvalidation();
       bbox_changed = true;
     }
@@ -278,24 +285,14 @@ void LayoutSVGShape::UpdateLayout() {
     update_parent_boundaries = true;
   }
 
-  // If the transform is relative to the reference box, check relevant
-  // conditions to see if we need to recompute the transform.
   if (!needs_transform_update_ && transform_uses_reference_box_) {
-    switch (StyleRef().TransformBox()) {
-      case ETransformBox::kViewBox:
-        needs_transform_update_ =
-            SVGLayoutSupport::LayoutSizeOfNearestViewportChanged(this);
-        break;
-      case ETransformBox::kFillBox:
-        needs_transform_update_ = bbox_changed;
-        break;
-    }
+    needs_transform_update_ = CheckForImplicitTransformChange(bbox_changed);
     if (needs_transform_update_)
       SetNeedsPaintPropertyUpdate();
   }
 
   if (needs_transform_update_) {
-    transform_uses_reference_box_ = UpdateLocalTransform();
+    local_transform_ = CalculateLocalTransform();
     needs_transform_update_ = false;
     update_parent_boundaries = true;
   }
@@ -310,19 +307,23 @@ void LayoutSVGShape::UpdateLayout() {
   ClearNeedsLayout();
 }
 
+AffineTransform LayoutSVGShape::ComputeRootTransform() const {
+  const LayoutObject* root = this;
+  while (root && !root->IsSVGRoot())
+    root = root->Parent();
+  return LocalToAncestorTransform(ToLayoutSVGRoot(root)).ToAffineTransform();
+}
+
 AffineTransform LayoutSVGShape::ComputeNonScalingStrokeTransform() const {
   // Compute the CTM to the SVG root. This should probably be the CTM all the
   // way to the "canvas" of the page ("host" coordinate system), but with our
   // current approach of applying/painting non-scaling-stroke, that can break in
   // unpleasant ways (see crbug.com/747708 for an example.) Maybe it would be
   // better to apply this effect during rasterization?
-  const LayoutObject* root = this;
-  while (root && !root->IsSVGRoot())
-    root = root->Parent();
   AffineTransform host_transform;
   host_transform.Scale(1 / StyleRef().EffectiveZoom())
-      .Multiply(
-          LocalToAncestorTransform(ToLayoutSVGRoot(root)).ToAffineTransform());
+      .Multiply(ComputeRootTransform());
+
   // Width of non-scaling stroke is independent of translation, so zero it out
   // here.
   host_transform.SetE(0);
@@ -436,6 +437,21 @@ FloatRect LayoutSVGShape::CalculateNonScalingStrokeBoundingBox() const {
 float LayoutSVGShape::StrokeWidth() const {
   SVGLengthContext length_context(GetElement());
   return length_context.ValueForLength(StyleRef().SvgStyle().StrokeWidth());
+}
+
+float LayoutSVGShape::StrokeWidthForMarkerUnits() const {
+  float stroke_width = StrokeWidth();
+  if (HasNonScalingStroke()) {
+    const auto& non_scaling_transform = NonScalingStrokeTransform();
+    if (!non_scaling_transform.IsInvertible())
+      return 0;
+    float scale_factor =
+        clampTo<float>(sqrt((non_scaling_transform.XScaleSquared() +
+                             non_scaling_transform.YScaleSquared()) /
+                            2));
+    stroke_width /= scale_factor;
+  }
+  return stroke_width;
 }
 
 LayoutSVGShapeRareData& LayoutSVGShape::EnsureRareData() const {

@@ -36,7 +36,6 @@ class MessengerImpl : public Messenger,
   // Messenger:
   void AddObserver(MessengerObserver* observer) override;
   void RemoveObserver(MessengerObserver* observer) override;
-  bool SupportsSignIn() const override;
   void DispatchUnlockEvent() override;
   void RequestDecryption(const std::string& challenge) override;
   void RequestUnlock() override;
@@ -102,7 +101,7 @@ class MessengerImpl : public Messenger,
   // response. Null if there is no message currently in this state.
   std::unique_ptr<PendingMessage> pending_message_;
 
-  base::WeakPtrFactory<MessengerImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<MessengerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MessengerImpl);
 };

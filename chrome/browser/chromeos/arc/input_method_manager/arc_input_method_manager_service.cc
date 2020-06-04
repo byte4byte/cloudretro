@@ -9,6 +9,8 @@
 
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
+#include "ash/public/cpp/tablet_mode.h"
+#include "ash/public/cpp/tablet_mode_observer.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -20,13 +22,12 @@
 #include "chrome/browser/chromeos/arc/input_method_manager/arc_input_method_manager_bridge_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
-#include "chrome/browser/ui/ash/tablet_mode_client_observer.h"
 #include "chrome/common/pref_names.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
-#include "components/arc/common/ime_struct_traits.h"
+#include "components/arc/mojom/ime_mojom_traits.h"
 #include "components/crx_file/id_util.h"
 #include "components/prefs/pref_service.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
@@ -142,9 +143,8 @@ class ArcInputMethodManagerService::InputMethodEngineObserver
   }
   void OnCompositionBoundsChanged(
       const std::vector<gfx::Rect>& bounds) override {}
-  bool IsInterestedInKeyEvent() const override { return true; }
   void OnSurroundingTextChanged(const std::string& engine_id,
-                                const std::string& text,
+                                const base::string16& text,
                                 int cursor_pos,
                                 int anchor_pos,
                                 int offset_pos) override {
@@ -194,18 +194,22 @@ class ArcInputMethodManagerService::InputMethodObserver
 };
 
 class ArcInputMethodManagerService::TabletModeObserver
-    : public TabletModeClientObserver {
+    : public ash::TabletModeObserver {
  public:
   explicit TabletModeObserver(ArcInputMethodManagerService* owner)
       : owner_(owner) {}
   ~TabletModeObserver() override = default;
 
-  void OnTabletModeToggled(bool enabled) override {
+  // ash::TabletModeObserver overrides:
+  void OnTabletModeStarted() override { OnTabletModeToggled(true); }
+  void OnTabletModeEnded() override { OnTabletModeToggled(false); }
+
+ private:
+  void OnTabletModeToggled(bool enabled) {
     owner_->UpdateArcIMEAllowed();
     owner_->NotifyInputMethodManagerObservers(enabled);
   }
 
- private:
   ArcInputMethodManagerService* owner_;
 
   DISALLOW_COPY_AND_ASSIGN(TabletModeObserver);
@@ -253,10 +257,7 @@ ArcInputMethodManagerService::ArcInputMethodManagerService(
       std::make_unique<InputMethodEngineObserver>(this),
       proxy_ime_extension_id_.c_str(), profile_);
 
-  // TabletModeClient should be already created here because it's created in
-  // PreProfileInit() and this service is created in PostProfileInit().
-  DCHECK(TabletModeClient::Get());
-  TabletModeClient::Get()->AddObserver(tablet_mode_observer_.get());
+  ash::TabletMode::Get()->AddObserver(tablet_mode_observer_.get());
 
   chromeos::AccessibilityManager* accessibility_manager =
       chromeos::AccessibilityManager::Get();
@@ -304,8 +305,8 @@ void ArcInputMethodManagerService::Shutdown() {
   if (ui::IMEBridge::Get())
     ui::IMEBridge::Get()->RemoveObserver(this);
 
-  if (TabletModeClient::Get())
-    TabletModeClient::Get()->RemoveObserver(tablet_mode_observer_.get());
+  if (ash::TabletMode::Get())
+    ash::TabletMode::Get()->RemoveObserver(tablet_mode_observer_.get());
 
   auto* imm = chromeos::input_method::InputMethodManager::Get();
   imm->RemoveImeMenuObserver(this);
@@ -335,7 +336,6 @@ void ArcInputMethodManagerService::OnActiveImeChanged(
 }
 
 void ArcInputMethodManagerService::OnImeDisabled(const std::string& ime_id) {
-
   const std::string component_id =
       chromeos::extension_ime_util::GetArcInputMethodID(proxy_ime_extension_id_,
                                                         ime_id);
@@ -358,9 +358,14 @@ void ArcInputMethodManagerService::OnImeInfoChanged(
   using chromeos::input_method::InputMethodDescriptors;
   using chromeos::input_method::InputMethodManager;
 
+  InputMethodManager* imm = InputMethodManager::Get();
+  if (!imm || !imm->GetActiveIMEState()) {
+    LOG(WARNING) << "InputMethodManager is not ready yet.";
+    return;
+  }
+
   base::AutoReset<bool> in_updating(&is_updating_imm_entry_, true);
-  scoped_refptr<InputMethodManager::State> state =
-      InputMethodManager::Get()->GetActiveIMEState();
+  scoped_refptr<InputMethodManager::State> state = imm->GetActiveIMEState();
   const std::string active_ime_id = state->GetCurrentInputMethod().id();
 
   // Remove the old registered entry.
@@ -441,6 +446,11 @@ void ArcInputMethodManagerService::ImeMenuListChanged() {
     return;
 
   auto* manager = chromeos::input_method::InputMethodManager::Get();
+  if (!manager || !manager->GetActiveIMEState()) {
+    LOG(WARNING) << "InputMethodManager is not ready yet";
+    return;
+  }
+
   auto new_active_ime_ids =
       manager->GetActiveIMEState()->GetActiveInputMethodIds();
 
@@ -586,10 +596,10 @@ void ArcInputMethodManagerService::Focus(int context_id) {
   DCHECK(!active_connection_);
   active_connection_ = std::make_unique<InputConnectionImpl>(
       proxy_ime_engine_.get(), imm_bridge_.get(), context_id);
-  mojom::InputConnectionPtr connection_ptr;
-  active_connection_->Bind(&connection_ptr);
+  mojo::PendingRemote<mojom::InputConnection> connection_remote;
+  active_connection_->Bind(&connection_remote);
 
-  imm_bridge_->SendFocus(std::move(connection_ptr),
+  imm_bridge_->SendFocus(std::move(connection_remote),
                          active_connection_->GetTextInputState(false));
 }
 
@@ -743,7 +753,7 @@ bool ArcInputMethodManagerService::ShouldArcIMEAllowed() const {
   const bool is_normal_vk_enabled =
       !profile_->GetPrefs()->GetBoolean(
           ash::prefs::kAccessibilityVirtualKeyboardEnabled) &&
-      TabletModeClient::Get()->tablet_mode_enabled();
+      ash::TabletMode::Get()->InTabletMode();
   return is_command_line_flag_enabled || is_normal_vk_enabled;
 }
 

@@ -5,13 +5,13 @@
 #ifndef CHROME_BROWSER_UPGRADE_DETECTOR_UPGRADE_DETECTOR_CHROMEOS_H_
 #define CHROME_BROWSER_UPGRADE_DETECTOR_UPGRADE_DETECTOR_CHROMEOS_H_
 
-#include <string>
-
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/upgrade_detector/build_state_observer.h"
+#include "chrome/browser/upgrade_detector/installed_version_updater_chromeos.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chromeos/dbus/update_engine_client.h"
 
@@ -24,6 +24,7 @@ class TickClock;
 }  // namespace base
 
 class UpgradeDetectorChromeos : public UpgradeDetector,
+                                public BuildStateObserver,
                                 public chromeos::UpdateEngineClient::Observer {
  public:
   ~UpgradeDetectorChromeos() override;
@@ -33,17 +34,14 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
 
   static UpgradeDetectorChromeos* GetInstance();
 
-  // Initializes the object. Starts observing changes from the update
-  // engine.
-  void Init();
-
-  // Shuts down the object. Stops observing observe changes from the
-  // update engine.
-  void Shutdown();
-
   // UpgradeDetector:
+  void Init() override;
+  void Shutdown() override;
   base::TimeDelta GetHighAnnoyanceLevelDelta() override;
   base::Time GetHighAnnoyanceDeadline() override;
+
+  // BuildStateObserver:
+  void OnUpdate(const BuildState* build_state) override;
 
  protected:
   UpgradeDetectorChromeos(const base::Clock* clock,
@@ -68,16 +66,16 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
   // Calculates |elevated_deadline_| and |high_deadline_|.
   void CalculateDeadlines();
 
-  // Handles a change to the browser.relaunch_heads_up_period Local State
-  // preference. Calls NotifyUpgrade if an upgrade is available.
-  void OnRelaunchHeadsUpPeriodPrefChanged();
+  // Handles a change to the browser.relaunch_heads_up_period or
+  // browser.relaunch_notification Local State preferences. Calls
+  // NotifyUpgrade() if an upgrade is available.
+  void OnRelaunchPrefChanged();
 
   // UpgradeDetector:
   void OnRelaunchNotificationPeriodPrefChanged() override;
 
   // chromeos::UpdateEngineClient::Observer implementation.
-  void UpdateStatusChanged(
-      const chromeos::UpdateEngineClient::Status& status) override;
+  void UpdateStatusChanged(const update_engine::StatusResult& status) override;
   void OnUpdateOverCellularOneTimePermissionGranted() override;
 
   // Triggers NotifyOnUpgrade if thresholds have been changed.
@@ -88,8 +86,7 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
   // user that a new version is available.
   void NotifyOnUpgrade();
 
-  void OnChannelsReceived(std::string current_channel,
-                          std::string target_channel);
+  base::Optional<InstalledVersionUpdater> installed_version_updater_;
 
   // The time when elevated annoyance deadline is reached.
   base::Time elevated_deadline_;
@@ -106,7 +103,7 @@ class UpgradeDetectorChromeos : public UpgradeDetector,
   base::OneShotTimer upgrade_notification_timer_;
   bool initialized_;
 
-  base::WeakPtrFactory<UpgradeDetectorChromeos> weak_factory_;
+  base::WeakPtrFactory<UpgradeDetectorChromeos> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UpgradeDetectorChromeos);
 };

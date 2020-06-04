@@ -8,18 +8,20 @@
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/model/locale_model.h"
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/tray/actionable_view.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "base/check.h"
 #include "base/i18n/case_conversion.h"
-#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -50,7 +52,10 @@ class LocaleItem : public ActionableView {
     SetLayoutManager(std::make_unique<views::FillLayout>());
 
     views::Label* iso_code_label = TrayPopupUtils::CreateDefaultLabel();
-    iso_code_label->SetEnabledColor(kUnifiedMenuTextColor);
+    iso_code_label->SetEnabledColor(
+        AshColorProvider::Get()->GetContentLayerColor(
+            AshColorProvider::ContentLayerType::kTextPrimary,
+            AshColorProvider::AshColorMode::kDark));
     iso_code_label->SetAutoColorReadabilityEnabled(false);
     iso_code_label->SetText(base::i18n::ToUpper(
         base::UTF8ToUTF16(l10n_util::GetLanguage(iso_code))));
@@ -72,7 +77,10 @@ class LocaleItem : public ActionableView {
     if (checked_) {
       views::ImageView* checked_image = TrayPopupUtils::CreateMainImageView();
       checked_image->SetImage(gfx::CreateVectorIcon(
-          kCheckCircleIcon, kMenuIconSize, gfx::kGoogleGreen700));
+          kCheckCircleIcon, kMenuIconSize,
+          AshColorProvider::Get()->DeprecatedGetContentLayerColor(
+              AshColorProvider::ContentLayerType::kProminentIconButton,
+              kProminentIconButtonColor)));
       tri_view->AddView(TriView::Container::END, checked_image);
     }
     SetAccessibleName(display_name_view->GetText());

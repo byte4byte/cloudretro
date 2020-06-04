@@ -4,10 +4,11 @@
 
 #include "chrome/installer/mini_installer/configuration.h"
 
-#include <windows.h>
 #include <shellapi.h>  // NOLINT
 #include <stddef.h>
+#include <windows.h>
 
+#include "build/branding_buildflags.h"
 #include "chrome/installer/mini_installer/appid.h"
 #include "chrome/installer/mini_installer/mini_installer_constants.h"
 #include "chrome/installer/mini_installer/mini_installer_resource.h"
@@ -57,7 +58,6 @@ void Configuration::Clear() {
   operation_ = INSTALL_PRODUCT;
   argument_count_ = 0;
   is_system_level_ = false;
-  is_updating_multi_chrome_ = false;
   has_invalid_switch_ = false;
   previous_version_ = NULL;
 }
@@ -74,7 +74,7 @@ bool Configuration::ParseCommandLine(const wchar_t* command_line) {
   for (int i = 1; i < argument_count_; ++i) {
     if (0 == ::lstrcmpi(args_[i], L"--system-level"))
       is_system_level_ = true;
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     else if (0 == ::lstrcmpi(args_[i], L"--chrome-beta"))
       chrome_app_guid_ = google_update::kBetaAppGuid;
     else if (0 == ::lstrcmpi(args_[i], L"--chrome-dev"))
@@ -90,8 +90,6 @@ bool Configuration::ParseCommandLine(const wchar_t* command_line) {
 
   if (!is_system_level_)
     is_system_level_ = GetGoogleUpdateIsMachineEnvVar();
-
-  is_updating_multi_chrome_ = IsUpdatingMultiChrome();
 
   return true;
 }
@@ -123,31 +121,6 @@ void Configuration::ReadResources(HMODULE module) {
     return;
 
   previous_version_ = version_string;
-}
-
-bool Configuration::IsUpdatingMultiChrome() const {
-#if defined(GOOGLE_CHROME_BUILD)
-  // Only primary Chrome installs supported multi-install (not canary/SxS).
-  if (chrome_app_guid_ != google_update::kAppGuid)
-    return false;
-
-  // Is Chrome already installed as multi-install?
-  const HKEY root = is_system_level_ ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-  StackString<128> value;
-  RegKey key;
-  return (OpenClientsKey(root, chrome_app_guid_, KEY_QUERY_VALUE, &key) ==
-              ERROR_SUCCESS &&
-          key.ReadSZValue(kPvRegistryValue, value.get(), value.capacity()) ==
-              ERROR_SUCCESS &&
-          value.length() != 0 &&
-          OpenClientStateKey(root, chrome_app_guid_, KEY_QUERY_VALUE, &key) ==
-              ERROR_SUCCESS &&
-          key.ReadSZValue(kUninstallArgumentsRegistryValue, value.get(),
-                          value.capacity()) == ERROR_SUCCESS &&
-          value.findi(L"--multi-install") != nullptr);
-#else
-  return false;
-#endif
 }
 
 }  // namespace mini_installer

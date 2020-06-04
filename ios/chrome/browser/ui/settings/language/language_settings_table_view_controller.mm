@@ -7,6 +7,8 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
@@ -18,11 +20,14 @@
 #import "ios/chrome/browser/ui/settings/language/language_settings_data_source.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_histograms.h"
 #import "ios/chrome/browser/ui/settings/language/language_settings_ui_constants.h"
+#import "ios/chrome/browser/ui/settings/settings_table_view_controller_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_link_header_footer_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -78,8 +83,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:style];
   if (self) {
     _dataSource = dataSource;
     _commandHandler = commandHandler;
@@ -154,6 +158,11 @@ typedef NS_ENUM(NSInteger, ItemType) {
 }
 
 #pragma mark - SettingsControllerProtocol
+
+- (void)reportDismissalUserAction {
+  // Language Settings screen does not have Done button.
+  NOTREACHED();
+}
 
 - (void)settingsWillBeDismissed {
   [self.dataSource stopObservingModel];
@@ -423,8 +432,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
   self.addLanguageItem = addLanguageItem;
   addLanguageItem.text = l10n_util::GetNSString(
       IDS_IOS_LANGUAGE_SETTINGS_ADD_LANGUAGE_BUTTON_TITLE);
-  addLanguageItem.textColor = UIColorFromRGB(kTableViewTextLabelColorBlue);
+  addLanguageItem.textColor = [UIColor colorNamed:kBlueColor];
   addLanguageItem.accessibilityTraits |= UIAccessibilityTraitButton;
+  addLanguageItem.accessibilityIdentifier = kSettingsAddLanguageCellId;
   [self.tableViewModel addItem:addLanguageItem
        toSectionWithIdentifier:SectionIdentifierLanguages];
 }
@@ -445,9 +455,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (void)setAddLanguageItemEnabled:(BOOL)enabled {
   // Update the model.
   self.addLanguageItem.enabled = enabled;
-  self.addLanguageItem.textColor =
-      self.isEditing ? UIColorFromRGB(kSettingsCellsDetailTextColor)
-                     : UIColorFromRGB(kTableViewTextLabelColorBlue);
+  self.addLanguageItem.textColor = self.isEditing
+                                       ? UIColor.cr_secondaryLabelColor
+                                       : [UIColor colorNamed:kBlueColor];
 
   // Update the table view.
   [self reconfigureCellsForItems:@[ self.addLanguageItem ]];
@@ -509,6 +519,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
   // Update the model and the table view.
   [self translateEnabled:switchView.isOn];
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (void)presentationControllerDidDismiss:
+    (UIPresentationController*)presentationController {
+  base::RecordAction(
+      base::UserMetricsAction("IOSLanguagesSettingsCloseWithSwipe"));
 }
 
 @end

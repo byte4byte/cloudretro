@@ -4,55 +4,46 @@
 
 package org.chromium.chrome.browser.gesturenav;
 
-import android.content.Context;
-
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.base.supplier.Supplier;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 
 /**
- * Provides navigation-related configuration for pages using {@link HistoryNavigationLayout}.
+ * Provides navigation-related configuration.
  */
-public abstract class HistoryNavigationDelegate {
-    private final boolean mIsEnabled;
-
-    private HistoryNavigationDelegate(Context context) {
-        mIsEnabled = ChromeFeatureList.isEnabled(ChromeFeatureList.OVERSCROLL_HISTORY_NAVIGATION)
-                && (context instanceof ChromeActivity);
-    }
-
-    /**
-     * @return {@code true} if history navigation is enabled.
-     */
-    public boolean isEnabled() {
-        return mIsEnabled;
-    }
-
+public interface HistoryNavigationDelegate {
     /**
      * @return {@link NavigationHandler#ActionDelegate} object.
      */
-    public abstract NavigationHandler.ActionDelegate createActionDelegate();
+    NavigationHandler.ActionDelegate createActionDelegate();
 
-    // Implementation for native pages with TabbedActionDelegate that uses Tab.goForward/goBack
-    // to implement history navigation.
-    private static class NativePageDelegate extends HistoryNavigationDelegate {
-        private final Tab mTab;
+    /**
+     * @return {@link NavigationSheet#Delegate} object.
+     */
+    NavigationSheet.Delegate createSheetDelegate();
 
-        private NativePageDelegate(Tab tab) {
-            super(tab.getActivity());
-            mTab = tab;
+    /**
+     * @return {@link BottomSheetController} object.
+     */
+    Supplier<BottomSheetController> getBottomSheetController();
+
+    /**
+     * Default {@link HistoryNavigationDelegate} that does not support navigation.
+     */
+    public static final HistoryNavigationDelegate DEFAULT = new HistoryNavigationDelegate() {
+        @Override
+        public NavigationHandler.ActionDelegate createActionDelegate() {
+            return null;
         }
 
         @Override
-        public NavigationHandler.ActionDelegate createActionDelegate() {
-            return new TabbedActionDelegate(mTab);
+        public NavigationSheet.Delegate createSheetDelegate() {
+            return null;
         }
-    }
 
-    /**
-     * Creates {@link HistoryNavigationDelegate} for a native page.
-     */
-    public static HistoryNavigationDelegate createForNativePage(Tab tab) {
-        return new NativePageDelegate(tab);
-    }
+        @Override
+        public Supplier<BottomSheetController> getBottomSheetController() {
+            assert false : "Should never be called";
+            return null;
+        }
+    };
 }

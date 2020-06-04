@@ -16,6 +16,8 @@
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "components/prefs/pref_service.h"
+#include "components/services/patch/content/patch_service.h"
+#include "components/services/unzip/content/unzip_service.h"
 #include "components/update_client/activity_data_service.h"
 #include "components/update_client/net/network_chromium.h"
 #include "components/update_client/patch/patch_impl.h"
@@ -27,9 +29,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/system_connector.h"
 #include "extensions/browser/extension_prefs.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace extensions {
 
@@ -47,7 +47,7 @@ class ExtensionActivityDataService final
     : public update_client::ActivityDataService {
  public:
   explicit ExtensionActivityDataService(ExtensionPrefs* extension_prefs);
-  ~ExtensionActivityDataService() override {}
+  ~ExtensionActivityDataService() override = default;
 
   // update_client::ActivityDataService:
   bool GetActiveBit(const std::string& id) const override;
@@ -176,7 +176,13 @@ ChromeUpdateClientConfig::GetNetworkFetcherFactory() {
     network_fetcher_factory_ =
         base::MakeRefCounted<update_client::NetworkFetcherChromiumFactory>(
             content::BrowserContext::GetDefaultStoragePartition(context_)
-                ->GetURLLoaderFactoryForBrowserProcess());
+                ->GetURLLoaderFactoryForBrowserProcess(),
+            // Only extension updates that require authentication are served
+            // from chrome.google.com, so send cookies if and only if that is
+            // the download domain.
+            base::BindRepeating([](const GURL& url) {
+              return url.DomainIs("chrome.google.com");
+            }));
   }
   return network_fetcher_factory_;
 }
@@ -186,7 +192,7 @@ ChromeUpdateClientConfig::GetUnzipperFactory() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!unzip_factory_) {
     unzip_factory_ = base::MakeRefCounted<update_client::UnzipChromiumFactory>(
-        content::GetSystemConnector()->Clone());
+        base::BindRepeating(&unzip::LaunchUnzipper));
   }
   return unzip_factory_;
 }
@@ -196,7 +202,7 @@ ChromeUpdateClientConfig::GetPatcherFactory() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!patch_factory_) {
     patch_factory_ = base::MakeRefCounted<update_client::PatchChromiumFactory>(
-        content::GetSystemConnector()->Clone());
+        base::BindRepeating(&patch::LaunchFilePatcher));
   }
   return patch_factory_;
 }
@@ -230,25 +236,12 @@ bool ChromeUpdateClientConfig::IsPerUserInstall() const {
   return component_updater::IsPerUserInstall();
 }
 
-std::vector<uint8_t> ChromeUpdateClientConfig::GetRunActionKeyHash() const {
-  return impl_.GetRunActionKeyHash();
-}
-
-std::string ChromeUpdateClientConfig::GetAppGuid() const {
-  return impl_.GetAppGuid();
-}
-
 std::unique_ptr<update_client::ProtocolHandlerFactory>
 ChromeUpdateClientConfig::GetProtocolHandlerFactory() const {
   return impl_.GetProtocolHandlerFactory();
 }
 
-update_client::RecoveryCRXElevator
-ChromeUpdateClientConfig::GetRecoveryCRXElevator() const {
-  return impl_.GetRecoveryCRXElevator();
-}
-
-ChromeUpdateClientConfig::~ChromeUpdateClientConfig() {}
+ChromeUpdateClientConfig::~ChromeUpdateClientConfig() = default;
 
 // static
 scoped_refptr<ChromeUpdateClientConfig> ChromeUpdateClientConfig::Create(

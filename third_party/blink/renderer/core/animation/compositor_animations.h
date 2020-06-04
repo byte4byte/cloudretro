@@ -90,12 +90,13 @@ class CORE_EXPORT CompositorAnimations {
     kFilterRelatedPropertyMayMovePixels = 1 << 12,
     kUnsupportedCSSProperty = 1 << 13,
     kMultipleTransformAnimationsOnSameTarget = 1 << 14,
+    kMixedKeyframeValueTypes = 1 << 15,
 
     // The maximum number of flags in this enum (excluding itself). New flags
     // should increment this number but it should never be decremented because
     // the values are used in UMA histograms. It should also be noted that it
     // excludes the kNoFailure value.
-    kFailureReasonCount = 15,
+    kFailureReasonCount = 16,
   };
 
   static FailureReasons CheckCanStartAnimationOnCompositor(
@@ -112,7 +113,7 @@ class CORE_EXPORT CompositorAnimations {
       const Element&,
       int group,
       base::Optional<double> start_time,
-      double time_offset,
+      base::TimeDelta time_offset,
       const Timing&,
       const Animation*,
       CompositorAnimation&,
@@ -125,14 +126,14 @@ class CORE_EXPORT CompositorAnimations {
   static void PauseAnimationForTestingOnCompositor(const Element&,
                                                    const Animation&,
                                                    int id,
-                                                   double pause_time);
+                                                   base::TimeDelta pause_time);
 
   static void AttachCompositedLayers(Element&, CompositorAnimation*);
 
   struct CompositorTiming {
     Timing::PlaybackDirection direction;
     AnimationTimeDelta scaled_duration;
-    double scaled_time_offset;
+    base::TimeDelta scaled_time_offset;
     double adjusted_iteration_count;
     double playback_rate;
     Timing::FillMode fill_mode;
@@ -140,7 +141,7 @@ class CORE_EXPORT CompositorAnimations {
   };
 
   static bool ConvertTimingForCompositor(const Timing&,
-                                         double time_offset,
+                                         base::TimeDelta time_offset,
                                          CompositorTiming& out,
                                          double animation_playback_rate);
 
@@ -149,10 +150,13 @@ class CORE_EXPORT CompositorAnimations {
       const Timing&,
       int group,
       base::Optional<double> start_time,
-      double time_offset,
+      base::TimeDelta time_offset,
       const KeyframeEffectModelBase&,
       Vector<std::unique_ptr<CompositorKeyframeModel>>& animations,
       double animation_playback_rate);
+
+  static CompositorElementIdNamespace CompositorElementNamespaceForProperty(
+      CSSPropertyID property);
 
  private:
   static FailureReasons CheckCanStartEffectOnCompositor(

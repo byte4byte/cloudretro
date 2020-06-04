@@ -9,7 +9,7 @@
 #import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/table_view/table_view_presentation_controller_delegate.h"
 #include "ios/chrome/browser/ui/util/rtl_geometry.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -194,6 +194,11 @@ const CGFloat kTableViewMaxWidth = 414.0;
 - (void)containerViewWillLayoutSubviews {
   self.dimmingShield.frame = self.containerView.bounds;
   self.shadowContainer.frame = [self frameOfPresentedViewInContainerView];
+
+  // The TableView will be presented modally, make sure the container A11y is
+  // marked as so in order to prevent voice over focusing the presenter VC
+  // instead of the presented VC (TableView).
+  self.containerView.accessibilityViewIsModal = YES;
 
   // Force the presented VC's view to fill the tableViewContainer.  Otherwise
   // there are cases (switching size classes while another VC is presented over

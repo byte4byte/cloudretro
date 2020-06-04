@@ -2,15 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <limits>
+
 #include "base/command_line.h"
-#include "base/test/launcher/unit_test_launcher.h"
-#include "base/test/test_suite.h"
+#include "base/files/file_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "media/base/test_data_util.h"
+#include "media/gpu/test/video.h"
 #include "media/gpu/test/video_frame_file_writer.h"
 #include "media/gpu/test/video_frame_validator.h"
 #include "media/gpu/test/video_player/frame_renderer_dummy.h"
 #include "media/gpu/test/video_player/frame_renderer_thumbnail.h"
-#include "media/gpu/test/video_player/video.h"
 #include "media/gpu/test/video_player/video_decoder_client.h"
 #include "media/gpu/test/video_player/video_player.h"
 #include "media/gpu/test/video_player/video_player_test_environment.h"
@@ -26,8 +28,10 @@ namespace {
 constexpr const char* usage_msg =
     "usage: video_decode_accelerator_tests\n"
     "           [-v=<level>] [--vmodule=<config>] [--disable_validator]\n"
-    "           [--output_frames] [output_folder] [--use_vd] [--gtest_help]\n"
-    "           [--help] [<video path>] [<video metadata path>]\n";
+    "           [--output_frames=(all|corrupt)] [--output_format=(png|yuv)]\n"
+    "           [--output_limit=<number>] [--output_folder=<folder>]\n"
+    "           ([--use_vd]|[--use_vd_vda]) [--gtest_help] [--help]\n"
+    "           [<video path>] [<video metadata path>]\n";
 
 // Video decoder tests help message.
 constexpr const char* help_msg =
@@ -40,14 +44,21 @@ constexpr const char* help_msg =
     "\nThe following arguments are supported:\n"
     "   -v                  enable verbose mode, e.g. -v=2.\n"
     "  --vmodule            enable verbose mode for the specified module,\n"
-    "                       e.g. --vmodule=*media/gpu*=2.\n"
+    "                       e.g. --vmodule=*media/gpu*=2.\n\n"
     "  --disable_validator  disable frame validation.\n"
-    "  --output_frames      write all decoded video frames to the\n"
-    "                       \"<testname>\" folder.\n"
-    "  --output_folder      overwrite the default output folder used when\n"
-    "                       \"--output_frames\" is specified.\n"
     "  --use_vd             use the new VD-based video decoders, instead of\n"
-    "                       the default VDA-based video decoders.\n"
+    "                       the default VDA-based video decoders.\n\n"
+    "  --use_vd_vda         use the new VD-based video decoders with a wrapper"
+    "                       that translates to the VDA interface, used to test"
+    "                       interaction with older components expecting the VDA"
+    "                       interface.\n"
+    "  --output_frames      write the selected video frames to disk, possible\n"
+    "                       values are \"all|corrupt\".\n"
+    "  --output_format      set the format of frames saved to disk, supported\n"
+    "                       formats are \"png\" (default) and \"yuv\".\n"
+    "  --output_limit       limit the number of frames saved to disk.\n"
+    "  --output_folder      set the folder used to store frames, defaults to\n"
+    "                       \"<testname>\".\n\n"
     "  --gtest_help         display the gtest help and exit.\n"
     "  --help               display this help and exit.\n";
 
@@ -68,28 +79,50 @@ class VideoDecoderTest : public ::testing::Test {
     if (!g_env->ImportSupported())
       config.allocation_mode = AllocationMode::kAllocate;
 
-    // Use the video frame validator to validate decoded video frames if import
-    // mode is supported and enabled.
-    if (g_env->IsValidatorEnabled() &&
-        config.allocation_mode == AllocationMode::kImport) {
-      frame_processors.push_back(
-          media::test::VideoFrameValidator::Create(video->FrameChecksums()));
-    }
+    base::FilePath output_folder = base::FilePath(g_env->OutputFolder())
+                                       .Append(g_env->GetTestOutputFilePath());
 
-    // Write decoded video frames to the '<testname>' folder.
-    if (g_env->IsFramesOutputEnabled()) {
-      base::FilePath output_folder =
-          base::FilePath(g_env->OutputFolder())
-              .Append(base::FilePath(g_env->GetTestName()));
-      frame_processors.push_back(VideoFrameFileWriter::Create(output_folder));
+    // Write all video frames to the '<testname>' folder if the frame output
+    // mode is 'all'. Only supported if import mode is supported and enabled.
+    if (g_env->GetFrameOutputMode() == FrameOutputMode::kAll &&
+        config.allocation_mode == AllocationMode::kImport) {
+      frame_processors.push_back(VideoFrameFileWriter::Create(
+          output_folder, g_env->GetFrameOutputFormat(),
+          g_env->GetFrameOutputLimit()));
       VLOG(0) << "Writing video frames to: " << output_folder;
     }
 
-    // Use the new VD-based video decoders if requested.
-    config.use_vd = g_env->UseVD();
+    // Use the video frame validator to validate decoded video frames if
+    // enabled. If the frame output mode is 'corrupt', a frame writer will be
+    // attached to forward corrupted frames to. Only supported if import mode
+    // is supported and enabled.
+    if (g_env->IsValidatorEnabled() &&
+        config.allocation_mode == AllocationMode::kImport) {
+      std::unique_ptr<VideoFrameFileWriter> frame_writer;
+      if (g_env->GetFrameOutputMode() == FrameOutputMode::kCorrupt) {
+        frame_writer = VideoFrameFileWriter::Create(
+            output_folder, g_env->GetFrameOutputFormat(),
+            g_env->GetFrameOutputLimit());
+      }
 
-    return VideoPlayer::Create(video, std::move(frame_renderer),
-                               std::move(frame_processors), config);
+      frame_processors.push_back(media::test::MD5VideoFrameValidator::Create(
+          video->FrameChecksums(), PIXEL_FORMAT_I420, std::move(frame_writer)));
+    }
+
+    config.implementation = g_env->GetDecoderImplementation();
+
+    auto video_player = VideoPlayer::Create(
+        config, g_env->GetGpuMemoryBufferFactory(), std::move(frame_renderer),
+        std::move(frame_processors));
+    LOG_ASSERT(video_player);
+    LOG_ASSERT(video_player->Initialize(video));
+
+    // Increase event timeout when outputting video frames.
+    if (g_env->GetFrameOutputMode() != FrameOutputMode::kNone) {
+      video_player->SetEventWaitTimeout(std::max(
+          kDefaultEventWaitTimeout, g_env->Video()->GetDuration() * 10));
+    }
+    return video_player;
   }
 };
 
@@ -270,10 +303,8 @@ TEST_F(VideoDecoderTest, FlushAtEndOfStream_RenderThumbnails) {
     GTEST_SKIP();
   }
 
-  base::FilePath output_folder =
-      base::FilePath(g_env->OutputFolder())
-          .Append(base::FilePath(g_env->GetTestName()));
-
+  base::FilePath output_folder = base::FilePath(g_env->OutputFolder())
+                                     .Append(g_env->GetTestOutputFilePath());
   VideoDecoderClientConfig config;
   config.allocation_mode = AllocationMode::kAllocate;
   auto tvp = CreateVideoPlayer(
@@ -297,8 +328,10 @@ TEST_F(VideoDecoderTest, FlushAtEndOfStream_RenderThumbnails) {
 // specified as the new video decoders only support import mode.
 // TODO(dstaessens): Deprecate after switching to new VD-based video decoders.
 TEST_F(VideoDecoderTest, FlushAtEndOfStream_Allocate) {
-  if (!g_env->ImportSupported() || g_env->UseVD())
+  if (!g_env->ImportSupported() ||
+      g_env->GetDecoderImplementation() != DecoderImplementation::kVDA) {
     GTEST_SKIP();
+  }
 
   VideoDecoderClientConfig config;
   config.allocation_mode = AllocationMode::kAllocate;
@@ -310,6 +343,54 @@ TEST_F(VideoDecoderTest, FlushAtEndOfStream_Allocate) {
   EXPECT_EQ(tvp->GetFlushDoneCount(), 1u);
   EXPECT_EQ(tvp->GetFrameDecodedCount(), g_env->Video()->NumFrames());
   EXPECT_TRUE(tvp->WaitForFrameProcessors());
+}
+
+// Test initializing the video decoder for the specified video. Initialization
+// will be successful if the video decoder is capable of decoding the test
+// video's configuration (e.g. codec and resolution). The test only verifies
+// initialization and doesn't decode the video.
+TEST_F(VideoDecoderTest, Initialize) {
+  auto tvp = CreateVideoPlayer(g_env->Video());
+  EXPECT_EQ(tvp->GetEventCount(VideoPlayerEvent::kInitialized), 1u);
+}
+
+// Test video decoder re-initialization. Re-initialization is only supported by
+// the media::VideoDecoder interface, so the test will be skipped if --use_vd
+// is not specified.
+TEST_F(VideoDecoderTest, Reinitialize) {
+  if (g_env->GetDecoderImplementation() != DecoderImplementation::kVD)
+    GTEST_SKIP();
+
+  // Create and initialize the video decoder.
+  auto tvp = CreateVideoPlayer(g_env->Video());
+  EXPECT_EQ(tvp->GetEventCount(VideoPlayerEvent::kInitialized), 1u);
+
+  // Re-initialize the video decoder, without having played the video.
+  EXPECT_TRUE(tvp->Initialize(g_env->Video()));
+  EXPECT_EQ(tvp->GetEventCount(VideoPlayerEvent::kInitialized), 2u);
+
+  // Play the video from start to end.
+  tvp->Play();
+  EXPECT_TRUE(tvp->WaitForFlushDone());
+  EXPECT_EQ(tvp->GetFlushDoneCount(), 1u);
+  EXPECT_EQ(tvp->GetFrameDecodedCount(), g_env->Video()->NumFrames());
+  EXPECT_TRUE(tvp->WaitForFrameProcessors());
+
+  // Try re-initializing the video decoder again.
+  EXPECT_TRUE(tvp->Initialize(g_env->Video()));
+  EXPECT_EQ(tvp->GetEventCount(VideoPlayerEvent::kInitialized), 3u);
+}
+
+// Create a video decoder and immediately destroy it without initializing. The
+// video decoder will be automatically destroyed when the video player goes out
+// of scope at the end of the test. The test will pass if no asserts or crashes
+// are triggered upon destroying.
+TEST_F(VideoDecoderTest, DestroyBeforeInitialize) {
+  VideoDecoderClientConfig config = VideoDecoderClientConfig();
+  config.implementation = g_env->GetDecoderImplementation();
+  auto tvp = VideoPlayer::Create(config, g_env->GetGpuMemoryBufferFactory(),
+                                 FrameRendererDummy::Create());
+  EXPECT_NE(tvp, nullptr);
 }
 
 }  // namespace test
@@ -326,7 +407,7 @@ int main(int argc, char** argv) {
   LOG_ASSERT(cmd_line);
   if (cmd_line->HasSwitch("help")) {
     std::cout << media::test::usage_msg << "\n" << media::test::help_msg;
-    return EXIT_SUCCESS;
+    return 0;
   }
 
   // Check if a video was specified on the command line.
@@ -338,28 +419,59 @@ int main(int argc, char** argv) {
 
   // Parse command line arguments.
   bool enable_validator = true;
-  bool output_frames = false;
+  media::test::FrameOutputConfig frame_output_config;
   base::FilePath::StringType output_folder = base::FilePath::kCurrentDirectory;
   bool use_vd = false;
+  bool use_vd_vda = false;
+  media::test::DecoderImplementation implementation =
+      media::test::DecoderImplementation::kVDA;
   base::CommandLine::SwitchMap switches = cmd_line->GetSwitches();
   for (base::CommandLine::SwitchMap::const_iterator it = switches.begin();
        it != switches.end(); ++it) {
-    // Ignore arguments handled by Chrome, GoogleTest, and base::TestLauncher.
-    if (it->first == "v" || it->first == "vmodule" ||
-        it->first.find("gtest_") == 0 ||
-        it->first.find("test-launcher") != std::string::npos ||
-        it->first == "single-process-tests") {
+    if (it->first.find("gtest_") == 0 ||               // Handled by GoogleTest
+        it->first == "v" || it->first == "vmodule") {  // Handled by Chrome
       continue;
     }
 
     if (it->first == "disable_validator") {
       enable_validator = false;
     } else if (it->first == "output_frames") {
-      output_frames = true;
+      if (it->second == "all") {
+        frame_output_config.output_mode = media::test::FrameOutputMode::kAll;
+      } else if (it->second == "corrupt") {
+        frame_output_config.output_mode =
+            media::test::FrameOutputMode::kCorrupt;
+      } else {
+        std::cout << "unknown frame output mode \"" << it->second
+                  << "\", possible values are \"all|corrupt\"\n";
+        return EXIT_FAILURE;
+      }
+    } else if (it->first == "output_format") {
+      if (it->second == "png") {
+        frame_output_config.output_format =
+            media::test::VideoFrameFileWriter::OutputFormat::kPNG;
+      } else if (it->second == "yuv") {
+        frame_output_config.output_format =
+            media::test::VideoFrameFileWriter::OutputFormat::kYUV;
+      } else {
+        std::cout << "unknown frame output format \"" << it->second
+                  << "\", possible values are \"png|yuv\"\n";
+        return EXIT_FAILURE;
+      }
+    } else if (it->first == "output_limit") {
+      if (!base::StringToUint64(it->second,
+                                &frame_output_config.output_limit)) {
+        std::cout << "invalid number \"" << it->second << "\n";
+        return EXIT_FAILURE;
+      }
     } else if (it->first == "output_folder") {
       output_folder = it->second;
     } else if (it->first == "use_vd") {
       use_vd = true;
+      implementation = media::test::DecoderImplementation::kVD;
+    } else if (it->first == "use_vd_vda") {
+      use_vd_vda = true;
+      implementation = media::test::DecoderImplementation::kVDVDA;
     } else {
       std::cout << "unknown option: --" << it->first << "\n"
                 << media::test::usage_msg;
@@ -367,22 +479,24 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (use_vd && use_vd_vda) {
+    std::cout << "--use_vd and --use_vd_vda cannot be enabled together.\n"
+              << media::test::usage_msg;
+    return EXIT_FAILURE;
+  }
+
   testing::InitGoogleTest(&argc, argv);
 
   // Set up our test environment.
   media::test::VideoPlayerTestEnvironment* test_environment =
       media::test::VideoPlayerTestEnvironment::Create(
-          video_path, video_metadata_path, enable_validator, output_frames,
-          base::FilePath(output_folder), use_vd);
+          video_path, video_metadata_path, enable_validator, implementation,
+          base::FilePath(output_folder), frame_output_config);
   if (!test_environment)
     return EXIT_FAILURE;
 
   media::test::g_env = static_cast<media::test::VideoPlayerTestEnvironment*>(
       testing::AddGlobalTestEnvironment(test_environment));
 
-  // Launch all tests sequentially and disable batching.
-  base::TestSuite test_suite(argc, argv);
-  return base::LaunchUnitTestsWithOptions(
-      argc, argv, 1, 0, true,
-      base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
+  return RUN_ALL_TESTS();
 }

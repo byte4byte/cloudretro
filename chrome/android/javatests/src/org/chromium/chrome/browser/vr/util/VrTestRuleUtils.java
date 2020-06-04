@@ -15,6 +15,8 @@ import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+import org.chromium.base.BundleUtils;
+import org.chromium.base.test.BundleTestRule;
 import org.chromium.base.test.params.ParameterSet;
 import org.chromium.chrome.browser.vr.TestVrShellDelegate;
 import org.chromium.chrome.browser.vr.VrFeedbackStatus;
@@ -22,10 +24,8 @@ import org.chromium.chrome.browser.vr.VrIntentDelegate;
 import org.chromium.chrome.browser.vr.rules.ChromeTabbedActivityVrTestRule;
 import org.chromium.chrome.browser.vr.rules.CustomTabActivityVrTestRule;
 import org.chromium.chrome.browser.vr.rules.VrActivityRestrictionRule;
-import org.chromium.chrome.browser.vr.rules.VrModuleNotInstalled;
 import org.chromium.chrome.browser.vr.rules.VrTestRule;
 import org.chromium.chrome.browser.vr.rules.WebappActivityVrTestRule;
-import org.chromium.components.module_installer.Module;
 
 import java.util.ArrayList;
 import java.util.concurrent.Callable;
@@ -41,11 +41,6 @@ public class VrTestRuleUtils extends XrTestRuleUtils {
     private static final int VRCORE_UNREGISTER_DELAY_MS = 500;
 
     /**
-     * Essentially a Runnable that can throw exceptions.
-     */
-    public interface ChromeLaunchMethod { public void launch() throws Throwable; }
-
-    /**
      * Helper method to apply a VrTestRule/ChromeActivityTestRule combination. The only difference
      * between various classes that implement VrTestRule is how they start their activity, so the
      * common boilerplate code can be kept here so each VrTestRule only has to provide a way to
@@ -59,10 +54,6 @@ public class VrTestRuleUtils extends XrTestRuleUtils {
      */
     public static void evaluateVrTestRuleImpl(final Statement base, final Description desc,
             final VrTestRule rule, final ChromeLaunchMethod launcher) throws Throwable {
-        // Should be called before any other VR methods get called.
-        if (desc.getAnnotation(VrModuleNotInstalled.class) != null) {
-            Module.setForceUninstalled("vr");
-        }
         TestVrShellDelegate.setDescription(desc);
 
         VrTestRuleUtils.ensureNoVrActivitiesDisplayed();
@@ -128,6 +119,8 @@ public class VrTestRuleUtils extends XrTestRuleUtils {
      * Creates a RuleChain that applies the XrActivityRestrictionRule and VrActivityRestrictionRule
      * before the given VrTestRule.
      *
+     * Also enforces that {@link BundleUtils#isBundle()} returns true for vr to be initialized.
+     *
      * @param rule The TestRule to wrap in an XrActivityRestrictionRule and
      *        VrActivityRestrictionRule.
      * @return A RuleChain that ensures an XrActivityRestrictionRule and VrActivityRestrictionRule
@@ -137,6 +130,7 @@ public class VrTestRuleUtils extends XrTestRuleUtils {
         Assert.assertTrue("Given rule is not an VrTestRule", rule instanceof VrTestRule);
         return RuleChain
                 .outerRule(new VrActivityRestrictionRule(((VrTestRule) rule).getRestriction()))
+                .around(new BundleTestRule())
                 .around(XrTestRuleUtils.wrapRuleInActivityRestrictionRule(rule));
     }
 

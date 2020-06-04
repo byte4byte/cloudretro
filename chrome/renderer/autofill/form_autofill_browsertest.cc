@@ -20,6 +20,7 @@
 #include "components/autofill/core/common/autofill_data_validation.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/renderer_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
@@ -329,7 +330,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     const FormData& form = forms[0];
@@ -421,7 +422,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -430,8 +431,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form_data;
     FormFieldData field;
-    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, &form_data,
-                                                      &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form_data, &field));
     if (!unowned) {
       EXPECT_EQ(ASCIIToUTF16("TestForm"), form_data.name);
       EXPECT_EQ(GURL("http://abc.com"), form_data.action);
@@ -676,7 +677,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(0U, forms.size());
   }
 
@@ -686,7 +687,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -695,8 +696,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form and verify it's the correct form.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -745,7 +746,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the textarea element we want to find.
@@ -757,8 +758,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form and verify it's the correct form.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(textarea_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(textarea_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -813,7 +814,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -822,8 +823,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -867,8 +868,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     if (!unowned) {
@@ -909,7 +910,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -918,8 +919,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -955,8 +956,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     if (!unowned) {
@@ -989,7 +990,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -998,8 +999,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -1035,8 +1036,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     if (!unowned) {
@@ -1072,7 +1073,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     const size_t expected_size = unowned ? 1 : 2;
     ASSERT_EQ(expected_size, forms.size());
 
@@ -1082,8 +1083,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -1126,8 +1127,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     if (!unowned) {
@@ -1169,7 +1170,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -1181,8 +1182,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     if (!unowned) {
@@ -1257,8 +1258,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     if (!unowned) {
@@ -1325,7 +1326,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -1363,8 +1364,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
@@ -1397,8 +1398,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
@@ -1507,7 +1508,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -1531,8 +1532,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
@@ -1559,8 +1560,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
@@ -1627,7 +1628,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -1650,8 +1651,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
@@ -1678,8 +1679,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
@@ -1745,7 +1746,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Get the input element we want to find.
@@ -1772,8 +1773,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the form that contains the input element.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
@@ -1800,8 +1801,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Find the newly-filled form that contains the input element.
     FormData form2;
     FormFieldData field2;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(input_element, &form2, &field2));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(input_element, nullptr,
+                                                      &form2, &field2));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form2.url);
     EXPECT_EQ(ASCIIToUTF16("TestForm"), form2.name);
@@ -1864,7 +1865,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the auto-filled attribute.
@@ -1890,8 +1891,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Verify the form is cleared.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(firstname, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(firstname, nullptr, &form,
+                                                      &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_FALSE(form.url.is_empty());
@@ -1975,7 +1976,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the autofilled attribute and specify the section attribute.
@@ -2027,8 +2028,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Verify that the shipping section is cleared, but not the billing one.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(FindFormAndFieldForFormControlElement(firstname_shipping, &form,
-                                                      &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(firstname_shipping,
+                                                      nullptr, &form, &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_FALSE(form.url.is_empty());
@@ -2087,7 +2088,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the auto-filled attribute.
@@ -2111,8 +2112,8 @@ class FormAutofillTest : public ChromeRenderViewTest {
     // Verify the form is cleared.
     FormData form;
     FormFieldData field;
-    EXPECT_TRUE(
-        FindFormAndFieldForFormControlElement(firstname, &form, &field));
+    EXPECT_TRUE(FindFormAndFieldForFormControlElement(firstname, nullptr, &form,
+                                                      &field));
     EXPECT_EQ(GetCanonicalOriginForDocument(web_frame->GetDocument()),
               form.url);
     EXPECT_FALSE(form.url.is_empty());
@@ -2159,7 +2160,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the auto-filled attribute.
@@ -2214,7 +2215,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the auto-filled attribute.
@@ -2268,7 +2269,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the auto-filled attribute.
@@ -2323,7 +2324,7 @@ class FormAutofillTest : public ChromeRenderViewTest {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     ASSERT_EQ(1U, forms.size());
 
     // Set the autofilled attribute.
@@ -2352,12 +2353,6 @@ class FormAutofillTest : public ChromeRenderViewTest {
     EXPECT_TRUE(phone.Value().IsEmpty());
     EXPECT_TRUE(phone.SuggestedValue().IsEmpty());
     EXPECT_FALSE(phone.IsAutofilled());
-  }
-
-  static void FillFormIncludingNonFocusableElementsWrapper(
-      const FormData& form,
-      const WebFormControlElement& element) {
-    FillFormIncludingNonFocusableElements(form, element.Form());
   }
 
   static WebString GetValueWrapper(WebFormControlElement element) {
@@ -2975,8 +2970,7 @@ TEST_F(FormAutofillTest, WebFormElementToFormData) {
   WebLocalFrame* frame = GetMainFrame();
   ASSERT_NE(nullptr, frame);
 
-  WebVector<WebFormElement> forms;
-  frame->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms = frame->GetDocument().Forms();
   ASSERT_EQ(1U, forms.size());
 
   WebInputElement input_element = GetInputElementById("firstname");
@@ -2986,7 +2980,8 @@ TEST_F(FormAutofillTest, WebFormElementToFormData) {
   EXPECT_TRUE(WebFormElementToFormData(forms[0], input_element, nullptr,
                                        EXTRACT_VALUE, &form, &field));
   EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
-  EXPECT_EQ(forms[0].UniqueRendererFormId(), form.unique_renderer_id);
+  EXPECT_EQ(FormRendererId(forms[0].UniqueRendererFormId()),
+            form.unique_renderer_id);
   EXPECT_EQ(GetCanonicalOriginForDocument(frame->GetDocument()), form.url);
   EXPECT_FALSE(form.url.is_empty());
   EXPECT_EQ(GURL("http://cnn.com/submit/"), form.action);
@@ -3044,11 +3039,12 @@ TEST_F(FormAutofillTest, WebFormElementToFormData) {
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields[5]);
 
   // Check unique_renderer_id.
-  WebVector<WebFormControlElement> form_control_elements;
-  forms[0].GetFormControlElements(form_control_elements);
+  WebVector<WebFormControlElement> form_control_elements =
+      forms[0].GetFormControlElements();
   for (size_t i = 0; i < fields.size(); ++i)
-    EXPECT_EQ(form_control_elements[i].UniqueRendererFormControlId(),
-              fields[i].unique_renderer_id);
+    EXPECT_EQ(
+        FieldRendererId(form_control_elements[i].UniqueRendererFormControlId()),
+        fields[i].unique_renderer_id);
 }
 
 TEST_F(FormAutofillTest, WebFormElementConsiderNonControlLabelableElements) {
@@ -3096,8 +3092,7 @@ TEST_F(FormAutofillTest, MAYBE_WebFormElementToFormDataTooManyFields) {
   WebLocalFrame* frame = GetMainFrame();
   ASSERT_NE(nullptr, frame);
 
-  WebVector<WebFormElement> forms;
-  frame->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms = frame->GetDocument().Forms();
   ASSERT_EQ(1U, forms.size());
 
   WebInputElement input_element = GetInputElementById("firstname");
@@ -3267,7 +3262,7 @@ TEST_F(FormAutofillTest, ExtractMultipleForms) {
   ASSERT_NE(nullptr, web_frame);
 
   FormCache form_cache(web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
+  std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_EQ(2U, forms.size());
 
   // First form.
@@ -3344,11 +3339,11 @@ TEST_F(FormAutofillTest, OnlyExtractNewForms) {
   ASSERT_NE(nullptr, web_frame);
 
   FormCache form_cache(web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
+  std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_EQ(1U, forms.size());
 
   // Second call should give nothing as there are no new forms.
-  forms = form_cache.ExtractNewForms();
+  forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_TRUE(forms.empty());
 
   // Append to the current form will re-extract.
@@ -3360,7 +3355,7 @@ TEST_F(FormAutofillTest, OnlyExtractNewForms) {
       "document.getElementById('testform').appendChild(newInput);");
   base::RunLoop().RunUntilIdle();
 
-  forms = form_cache.ExtractNewForms();
+  forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_EQ(1U, forms.size());
 
   const std::vector<FormFieldData>& fields = forms[0].fields;
@@ -3421,7 +3416,7 @@ TEST_F(FormAutofillTest, OnlyExtractNewForms) {
   base::RunLoop().RunUntilIdle();
 
   web_frame = GetMainFrame();
-  forms = form_cache.ExtractNewForms();
+  forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_EQ(1U, forms.size());
 
   const std::vector<FormFieldData>& fields2 = forms[0].fields;
@@ -3467,7 +3462,7 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFields) {
          kAutofillEnforceMinRequiredFieldsForUpload},
         // Disabled.
         {});
-    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms().empty());
+    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms(nullptr).empty());
   }
 
   // If at least one of the minimums is not enforced, we parse the form.
@@ -3479,7 +3474,7 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFields) {
          kAutofillEnforceMinRequiredFieldsForQuery},
         // Disabled.
         {kAutofillEnforceMinRequiredFieldsForUpload});
-    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms().empty());
+    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms(nullptr).empty());
   }
 }
 
@@ -3492,7 +3487,7 @@ TEST_F(FormAutofillTest, ExtractFormsNoFields) {
   ASSERT_NE(nullptr, web_frame);
 
   FormCache form_cache(web_frame);
-  std::vector<FormData> forms = form_cache.ExtractNewForms();
+  std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
   ASSERT_TRUE(forms.empty());
 }
 
@@ -3520,7 +3515,7 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFieldsSkipsCheckable) {
          kAutofillEnforceMinRequiredFieldsForUpload},
         // Disabled.
         {});
-    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms().empty());
+    ASSERT_TRUE(FormCache(web_frame).ExtractNewForms(nullptr).empty());
   }
 
   // With small form support, the form is parsed.
@@ -3533,7 +3528,7 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFieldsSkipsCheckable) {
         {kAutofillEnforceMinRequiredFieldsForHeuristics,
          kAutofillEnforceMinRequiredFieldsForQuery,
          kAutofillEnforceMinRequiredFieldsForUpload});
-    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms().empty());
+    ASSERT_FALSE(FormCache(web_frame).ExtractNewForms(nullptr).empty());
   }
 }
 
@@ -3551,8 +3546,7 @@ TEST_F(FormAutofillTest, WebFormElementToFormDataAutocomplete) {
     WebLocalFrame* web_frame = GetMainFrame();
     ASSERT_NE(nullptr, web_frame);
 
-    WebVector<WebFormElement> web_forms;
-    web_frame->GetDocument().Forms(web_forms);
+    WebVector<WebFormElement> web_forms = web_frame->GetDocument().Forms();
     ASSERT_EQ(1U, web_forms.size());
     WebFormElement web_form = web_forms[0];
 
@@ -3644,92 +3638,6 @@ TEST_F(FormAutofillTest, FillFormForUnownedNonASCIIForm) {
       "</TITLE></HEAD>");
   html.append(kUnownedUntitledFormHtml);
   TestFillForm(html.c_str(), true, nullptr);
-}
-
-TEST_F(FormAutofillTest, FillFormIncludingNonFocusableElements) {
-  static const AutofillFieldCase field_cases[] = {
-      // fields: form_control_type, name, initial_value, autocomplete_attribute,
-      //         should_be_autofilled, autofill_value, expected_value
-
-      // Regular empty fields (firstname & lastname) should be autofilled.
-      {"text",
-       "firstname",
-       "",
-       "",
-       true,
-       "filled firstname",
-       "filled firstname"},
-      {"text", "lastname", "", "", true, "filled lastname", "filled lastname"},
-      // hidden fields should not be extracted to form_data.
-      // Non empty fields should be overriden.
-      {"text",
-       "notempty",
-       "Hi",
-       "",
-       true,
-       "filled notempty",
-       "filled notempty"},
-      {"text",
-       "noautocomplete",
-       "",
-       "off",
-       true,
-       "filled noautocomplete",
-       "filled noautocomplete"},
-      // Disabled fields should not be autofilled.
-      {"text", "notenabled", "", "", false, "filled notenabled", ""},
-      // Readonly fields should not be autofilled.
-      {"text", "readonly", "", "", false, "filled readonly", ""},
-      // Fields with "visibility: hidden" should also be autofilled.
-      {"text",
-       "invisible",
-       "",
-       "",
-       true,
-       "filled invisible",
-       "filled invisible"},
-      // Fields with "display:none" should also be autofilled.
-      {"text",
-       "displaynone",
-       "",
-       "",
-       true,
-       "filled displaynone",
-       "filled displaynone"},
-      // Regular <input type="month"> should be autofilled.
-      {"month", "month", "", "", true, "2017-11", "2017-11"},
-      // Non-empty <input type="month"> should be overridden.
-      {"month", "month-nonempty", "2011-12", "", true, "2017-11", "2017-11"},
-      // Regular select fields should be autofilled.
-      {"select-one", "select", "", "", true, "TX", "TX"},
-      // Select fields should be autofilled even if they already have a
-      // non-empty value.
-      {"select-one", "select-nonempty", "CA", "", true, "TX", "TX"},
-      // Select fields should not be autofilled if no new value is passed from
-      // autofill profile. The existing value should not be overriden.
-      {"select-one", "select-unchanged", "CA", "", false, "CA", "CA"},
-      // Select fields that are not focusable should always be filled.
-      {"select-one", "select-displaynone", "CA", "", true, "CA", "CA"},
-      // Regular textarea elements should be autofilled.
-      {"textarea",
-       "textarea",
-       "",
-       "",
-       true,
-       "some multi-\nline value",
-       "some multi-\nline value"},
-      // Nonempty textarea elements should be overridden.
-      {"textarea",
-       "textarea-nonempty",
-       "Go\naway!",
-       "",
-       true,
-       "some multi-\nline value",
-       "some multi-\nline value"},
-  };
-  TestFormFillFunctions(
-      kFormHtml, false, nullptr, field_cases, base::size(field_cases),
-      &FillFormIncludingNonFocusableElementsWrapper, &GetValueWrapper);
 }
 
 TEST_F(FormAutofillTest, PreviewForm) {
@@ -4962,8 +4870,7 @@ TEST_F(FormAutofillTest, ThreePartPhone) {
   WebLocalFrame* frame = GetMainFrame();
   ASSERT_NE(nullptr, frame);
 
-  WebVector<WebFormElement> forms;
-  frame->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms = frame->GetDocument().Forms();
   ASSERT_EQ(1U, forms.size());
 
   FormData form;
@@ -5021,8 +4928,7 @@ TEST_F(FormAutofillTest, MaxLengthFields) {
   WebLocalFrame* frame = GetMainFrame();
   ASSERT_NE(nullptr, frame);
 
-  WebVector<WebFormElement> forms;
-  frame->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms = frame->GetDocument().Forms();
   ASSERT_EQ(1U, forms.size());
 
   FormData form;
@@ -5453,8 +5359,7 @@ TEST_F(FormAutofillTest, SelectOneAsText) {
       frame->GetDocument().GetElementById("country").To<WebSelectElement>();
   select_element.SetValue(WebString::FromUTF8("AL"));
 
-  WebVector<WebFormElement> forms;
-  frame->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms = frame->GetDocument().Forms();
   ASSERT_EQ(1U, forms.size());
 
   FormData form;
@@ -5564,8 +5469,8 @@ TEST_F(FormAutofillTest,
 
   FormData form;
   EXPECT_TRUE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
-      fieldsets, control_elements, nullptr, frame->GetDocument(), extract_mask,
-      &form, nullptr));
+      fieldsets, control_elements, nullptr, frame->GetDocument(), nullptr,
+      extract_mask, &form, nullptr));
 
   EXPECT_TRUE(form.name.empty());
   EXPECT_EQ(GURL(frame->GetDocument().Url()), form.url);
@@ -5627,8 +5532,8 @@ TEST_F(FormAutofillTest,
 
   FormData form;
   EXPECT_TRUE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
-      fieldsets, control_elements, nullptr, frame->GetDocument(), extract_mask,
-      &form, nullptr));
+      fieldsets, control_elements, nullptr, frame->GetDocument(), nullptr,
+      extract_mask, &form, nullptr));
 
   EXPECT_TRUE(form.name.empty());
   EXPECT_EQ(GURL(frame->GetDocument().Url()), form.url);
@@ -5679,8 +5584,8 @@ TEST_F(FormAutofillTest, UnownedFormElementsAndFieldSetsToFormDataWithForm) {
 
   FormData form;
   EXPECT_FALSE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
-      fieldsets, control_elements, nullptr, frame->GetDocument(), extract_mask,
-      &form, nullptr));
+      fieldsets, control_elements, nullptr, frame->GetDocument(), nullptr,
+      extract_mask, &form, nullptr));
 }
 
 TEST_F(FormAutofillTest, FormlessForms) {
@@ -5706,7 +5611,7 @@ TEST_F(FormAutofillTest, FormlessForms) {
         features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
     FormData form;
     EXPECT_FALSE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
-        fieldsets, control_elements, nullptr, frame->GetDocument(),
+        fieldsets, control_elements, nullptr, frame->GetDocument(), nullptr,
         extract_mask, &form, nullptr));
   }
 
@@ -5716,7 +5621,7 @@ TEST_F(FormAutofillTest, FormlessForms) {
         features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
     FormData form;
     EXPECT_TRUE(UnownedCheckoutFormElementsAndFieldSetsToFormData(
-        fieldsets, control_elements, nullptr, frame->GetDocument(),
+        fieldsets, control_elements, nullptr, frame->GetDocument(), nullptr,
         extract_mask, &form, nullptr));
   }
 }
@@ -5800,7 +5705,7 @@ TEST_F(FormAutofillTest, FormCache_ExtractNewForms) {
     ASSERT_NE(nullptr, web_frame);
 
     FormCache form_cache(web_frame);
-    std::vector<FormData> forms = form_cache.ExtractNewForms();
+    std::vector<FormData> forms = form_cache.ExtractNewForms(nullptr);
     EXPECT_EQ(test_case.has_extracted_form, forms.size() == 1);
 
     if (test_case.has_extracted_form) {

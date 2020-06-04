@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.password_manager;
 import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.support.v7.app.AlertDialog;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
@@ -16,7 +15,10 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
+
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.ui.base.WindowAndroid;
 
@@ -80,7 +82,8 @@ public class AutoSigninFirstRunDialog
             spanableExplanation.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View view) {
-                    nativeOnLinkClicked(mNativeAutoSigninFirstRunDialog);
+                    AutoSigninFirstRunDialogJni.get().onLinkClicked(
+                            mNativeAutoSigninFirstRunDialog, AutoSigninFirstRunDialog.this);
                     mDialog.dismiss();
                 }
             }, mExplanationLinkStart, mExplanationLinkEnd, Spanned.SPAN_INCLUSIVE_INCLUSIVE);
@@ -101,9 +104,11 @@ public class AutoSigninFirstRunDialog
     @Override
     public void onClick(DialogInterface dialog, int whichButton) {
         if (whichButton == DialogInterface.BUTTON_NEGATIVE) {
-            nativeOnTurnOffClicked(mNativeAutoSigninFirstRunDialog);
+            AutoSigninFirstRunDialogJni.get().onTurnOffClicked(
+                    mNativeAutoSigninFirstRunDialog, AutoSigninFirstRunDialog.this);
         } else if (whichButton == DialogInterface.BUTTON_POSITIVE) {
-            nativeOnOkClicked(mNativeAutoSigninFirstRunDialog);
+            AutoSigninFirstRunDialogJni.get().onOkClicked(
+                    mNativeAutoSigninFirstRunDialog, AutoSigninFirstRunDialog.this);
         }
     }
 
@@ -114,7 +119,8 @@ public class AutoSigninFirstRunDialog
 
     private void destroy() {
         assert mNativeAutoSigninFirstRunDialog != 0;
-        nativeDestroy(mNativeAutoSigninFirstRunDialog);
+        AutoSigninFirstRunDialogJni.get().destroy(
+                mNativeAutoSigninFirstRunDialog, AutoSigninFirstRunDialog.this);
         mNativeAutoSigninFirstRunDialog = 0;
         mDialog = null;
     }
@@ -126,8 +132,14 @@ public class AutoSigninFirstRunDialog
         mDialog.dismiss();
     }
 
-    private native void nativeOnTurnOffClicked(long nativeAutoSigninFirstRunDialogAndroid);
-    private native void nativeOnOkClicked(long nativeAutoSigninFirstRunDialogAndroid);
-    private native void nativeDestroy(long nativeAutoSigninFirstRunDialogAndroid);
-    private native void nativeOnLinkClicked(long nativeAutoSigninFirstRunDialogAndroid);
+    @NativeMethods
+    interface Natives {
+        void onTurnOffClicked(
+                long nativeAutoSigninFirstRunDialogAndroid, AutoSigninFirstRunDialog caller);
+        void onOkClicked(
+                long nativeAutoSigninFirstRunDialogAndroid, AutoSigninFirstRunDialog caller);
+        void destroy(long nativeAutoSigninFirstRunDialogAndroid, AutoSigninFirstRunDialog caller);
+        void onLinkClicked(
+                long nativeAutoSigninFirstRunDialogAndroid, AutoSigninFirstRunDialog caller);
+    }
 }

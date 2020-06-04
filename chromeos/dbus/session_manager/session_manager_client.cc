@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <cstring>
 #include <memory>
 #include <utility>
 
@@ -15,16 +16,23 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/files/scoped_file.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/platform_shared_memory_region.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/writable_shared_memory_region.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/unguessable_token.h"
 #include "chromeos/dbus/blocking_method_caller.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/login_manager/arc.pb.h"
+#include "chromeos/dbus/login_manager/login_screen_storage.pb.h"
 #include "chromeos/dbus/login_manager/policy_descriptor.pb.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
 #include "components/policy/proto/device_management_backend.pb.h"
@@ -48,6 +56,9 @@ constexpr char kEmptyAccountId[] = "";
 // The timeout used when starting the android container is 90 seconds
 constexpr int kStartArcTimeout = 90 * 1000;
 
+// 10MB. It's the current restriction enforced by session manager.
+const size_t kSharedMemoryDataSizeLimit = 10 * 1024 * 1024;
+
 // Helper to get the enum type of RetrievePolicyResponseType based on error
 // name.
 RetrievePolicyResponseType GetPolicyResponseTypeByError(
@@ -56,8 +67,8 @@ RetrievePolicyResponseType GetPolicyResponseTypeByError(
     return RetrievePolicyResponseType::SUCCESS;
   } else if (error_name == login_manager::dbus_error::kGetServiceFail ||
              error_name == login_manager::dbus_error::kSessionDoesNotExist) {
-    // TODO(crbug.com/765644, ljusten): Remove kSessionDoesNotExist case once
-    // Chrome OS has switched to kGetServiceFail.
+    // TODO(crbug.com/765644): Remove kSessionDoesNotExist case once Chrome OS
+    // has switched to kGetServiceFail.
     return RetrievePolicyResponseType::GET_SERVICE_FAIL;
   } else if (error_name == login_manager::dbus_error::kSigEncodeFail) {
     return RetrievePolicyResponseType::POLICY_ENCODE_ERROR;
@@ -103,10 +114,19 @@ login_manager::PolicyDescriptor MakeChromePolicyDescriptor(
 }
 
 // Creates a pipe that contains the given data. The data will be prefixed by a
-// size_t sized variable containing the size of the data to read.
+// size_t sized variable containing the size of the data to read. Since we don't
+// pass this pipe's read end anywhere, we can be sure that the only FD that can
+// read from that pipe will be closed on browser's exit, therefore the password
+// won't be leaked if the browser crashes.
 base::ScopedFD CreatePasswordPipe(const std::string& data) {
+  // 64k of data, minus 64 bits for a preceding size. This number was chosen to
+  // fit all the data in a single pipe buffer and avoid blocking on write.
+  // (http://man7.org/linux/man-pages/man7/pipe.7.html)
+  const size_t kPipeDataSizeLimit = 1024 * 64 - sizeof(size_t);
+
   int pipe_fds[2];
-  if (!base::CreateLocalNonBlockingPipe(pipe_fds)) {
+  if (data.size() > kPipeDataSizeLimit ||
+      !base::CreateLocalNonBlockingPipe(pipe_fds)) {
     DLOG(ERROR) << "Failed to create pipe";
     return base::ScopedFD();
   }
@@ -121,6 +141,50 @@ base::ScopedFD CreatePasswordPipe(const std::string& data) {
   base::WriteFileDescriptor(pipe_write_end.get(), data.c_str(), data.size());
 
   return pipe_read_end;
+}
+
+// Creates a read-only shared memory region that contains the given data.
+base::ScopedFD CreateSharedMemoryRegionFDWithData(const std::string& data) {
+  if (data.size() > kSharedMemoryDataSizeLimit) {
+    LOG(ERROR) << "Couldn't create shared memory, data is too big.";
+    return base::ScopedFD();
+  }
+  auto region = base::WritableSharedMemoryRegion::Create(data.size());
+  base::WritableSharedMemoryMapping mapping = region.Map();
+  if (!mapping.IsValid())
+    return base::ScopedFD();
+  memcpy(mapping.memory(), data.data(), data.size());
+  return base::WritableSharedMemoryRegion::TakeHandleForSerialization(
+             std::move(region))
+      .PassPlatformHandle()
+      .readonly_fd;
+}
+
+// Reads |secret_size| bytes from a given shared memory region. Puts result into
+// |secret|. |fd| should point at a read-only shared memory region.
+bool ReadSecretFromSharedMemory(base::ScopedFD fd,
+                                size_t secret_size,
+                                std::vector<uint8_t>* secret) {
+  if (secret_size > kSharedMemoryDataSizeLimit) {
+    LOG(ERROR) << "Couldn't read secret from the shared memory, "
+                  "secret's size is too big.";
+    return false;
+  }
+  auto platform_region(base::subtle::PlatformSharedMemoryRegion::Take(
+      std::move(fd), base::subtle::PlatformSharedMemoryRegion::Mode::kReadOnly,
+      secret_size, base::UnguessableToken::Create()));
+  if (!platform_region.IsValid())
+    return false;
+  auto region =
+      base::ReadOnlySharedMemoryRegion::Deserialize(std::move(platform_region));
+  if (!region.IsValid())
+    return false;
+  base::ReadOnlySharedMemoryMapping mapping = region.Map();
+  if (!mapping.IsValid())
+    return false;
+  secret->resize(secret_size);
+  memcpy(secret->data(), mapping.memory(), secret->size());
+  return true;
 }
 
 }  // namespace
@@ -200,6 +264,73 @@ class SessionManagerClientImpl : public SessionManagerClient {
                                        base::DoNothing());
   }
 
+  void LoginScreenStorageStore(
+      const std::string& key,
+      const login_manager::LoginScreenStorageMetadata& metadata,
+      const std::string& data,
+      LoginScreenStorageStoreCallback callback) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerLoginScreenStorageStore);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(key);
+
+    const std::string metadata_blob = metadata.SerializeAsString();
+    writer.AppendArrayOfBytes(
+        reinterpret_cast<const uint8_t*>(metadata_blob.data()),
+        metadata_blob.size());
+    writer.AppendUint64(data.size());
+
+    base::ScopedFD fd = CreateSharedMemoryRegionFDWithData(data);
+    if (!fd.is_valid()) {
+      std::string error = "Could not create shared memory.";
+      std::move(callback).Run(std::move(error));
+      return;
+    }
+    writer.AppendFileDescriptor(fd.get());
+
+    session_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&SessionManagerClientImpl::OnLoginScreenStorageStore,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void LoginScreenStorageRetrieve(
+      const std::string& key,
+      LoginScreenStorageRetrieveCallback callback) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerLoginScreenStorageRetrieve);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(key);
+    session_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&SessionManagerClientImpl::OnLoginScreenStorageRetrieve,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void LoginScreenStorageListKeys(
+      LoginScreenStorageListKeysCallback callback) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerLoginScreenStorageListKeys);
+    session_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&SessionManagerClientImpl::OnLoginScreenStorageListKeys,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void LoginScreenStorageDelete(const std::string& key) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerLoginScreenStorageDelete);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(key);
+    session_manager_proxy_->CallMethod(&method_call,
+                                       dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                       base::DoNothing());
+  }
+
   void StartSession(
       const cryptohome::AccountIdentifier& cryptohome_id) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
@@ -212,11 +343,12 @@ class SessionManagerClientImpl : public SessionManagerClient {
                                        base::DoNothing());
   }
 
-  void StopSession() override {
-    dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
-                                 login_manager::kSessionManagerStopSession);
+  void StopSession(login_manager::SessionStopReason reason) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerStopSessionWithReason);
     dbus::MessageWriter writer(&method_call);
-    writer.AppendString("");  // Unique ID is deprecated
+    writer.AppendUint32(static_cast<uint32_t>(reason));
     session_manager_proxy_->CallMethod(&method_call,
                                        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
                                        base::DoNothing());
@@ -225,6 +357,18 @@ class SessionManagerClientImpl : public SessionManagerClient {
   void StartDeviceWipe() override {
     SimpleMethodCallToSessionManager(
         login_manager::kSessionManagerStartDeviceWipe);
+  }
+
+  void StartRemoteDeviceWipe(
+      const enterprise_management::SignedData& signed_command) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerStartRemoteDeviceWipe);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendProtoAsArrayOfBytes(signed_command);
+    session_manager_proxy_->CallMethod(&method_call,
+                                       dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                       base::DoNothing());
   }
 
   void ClearForcedReEnrollmentVpd(VoidDBusMethodCallback callback) override {
@@ -434,9 +578,16 @@ class SessionManagerClientImpl : public SessionManagerClient {
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void StopArcInstance(VoidDBusMethodCallback callback) override {
+  void StopArcInstance(const std::string& account_id,
+                       bool should_backup_log,
+                       VoidDBusMethodCallback callback) override {
     dbus::MethodCall method_call(login_manager::kSessionManagerInterface,
                                  login_manager::kSessionManagerStopArcInstance);
+
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(account_id);
+    writer.AppendBool(should_backup_log);
+
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::BindOnce(&SessionManagerClientImpl::OnVoidMethod,
@@ -480,6 +631,28 @@ class SessionManagerClientImpl : public SessionManagerClient {
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
+  void EnableAdbSideload(EnableAdbSideloadCallback callback) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerEnableAdbSideload);
+
+    session_manager_proxy_->CallMethodWithErrorResponse(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&SessionManagerClientImpl::OnEnableAdbSideload,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void QueryAdbSideload(QueryAdbSideloadCallback callback) override {
+    dbus::MethodCall method_call(
+        login_manager::kSessionManagerInterface,
+        login_manager::kSessionManagerQueryAdbSideload);
+
+    session_manager_proxy_->CallMethodWithErrorResponse(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&SessionManagerClientImpl::OnQueryAdbSideload,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
   void Init(dbus::Bus* bus) {
     session_manager_proxy_ = bus->GetObjectProxy(
         login_manager::kSessionManagerServiceName,
@@ -491,36 +664,38 @@ class SessionManagerClientImpl : public SessionManagerClient {
     session_manager_proxy_->ConnectToSignal(
         login_manager::kSessionManagerInterface,
         login_manager::kOwnerKeySetSignal,
-        base::Bind(&SessionManagerClientImpl::OwnerKeySetReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&SessionManagerClientImpl::OwnerKeySetReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&SessionManagerClientImpl::SignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     session_manager_proxy_->ConnectToSignal(
         login_manager::kSessionManagerInterface,
         login_manager::kPropertyChangeCompleteSignal,
-        base::Bind(&SessionManagerClientImpl::PropertyChangeCompleteReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(
+            &SessionManagerClientImpl::PropertyChangeCompleteReceived,
+            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&SessionManagerClientImpl::SignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     session_manager_proxy_->ConnectToSignal(
         login_manager::kSessionManagerInterface,
         login_manager::kScreenIsLockedSignal,
-        base::Bind(&SessionManagerClientImpl::ScreenIsLockedReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&SessionManagerClientImpl::ScreenIsLockedReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&SessionManagerClientImpl::SignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     session_manager_proxy_->ConnectToSignal(
         login_manager::kSessionManagerInterface,
         login_manager::kScreenIsUnlockedSignal,
-        base::Bind(&SessionManagerClientImpl::ScreenIsUnlockedReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&SessionManagerClientImpl::ScreenIsUnlockedReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&SessionManagerClientImpl::SignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     session_manager_proxy_->ConnectToSignal(
         login_manager::kSessionManagerInterface,
         login_manager::kArcInstanceStopped,
-        base::Bind(&SessionManagerClientImpl::ArcInstanceStoppedReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(
+            &SessionManagerClientImpl::ArcInstanceStoppedReceived,
+            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&SessionManagerClientImpl::SignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -644,6 +819,60 @@ class SessionManagerClientImpl : public SessionManagerClient {
       }
     }
     std::move(callback).Run(std::move(sessions));
+  }
+
+  void OnLoginScreenStorageStore(LoginScreenStorageStoreCallback callback,
+                                 dbus::Response* response) {
+    std::move(callback).Run(base::nullopt);
+  }
+
+  void OnLoginScreenStorageRetrieve(LoginScreenStorageRetrieveCallback callback,
+                                    dbus::Response* response) {
+    if (!response) {
+      std::move(callback).Run(base::nullopt /* data */,
+                              "LoginScreenStorageRetrieve() D-Bus method "
+                              "returned an empty response");
+      return;
+    }
+
+    dbus::MessageReader reader(response);
+    base::ScopedFD result_fd;
+    uint64_t result_size;
+    if (!reader.PopUint64(&result_size) ||
+        !reader.PopFileDescriptor(&result_fd)) {
+      std::string error = "Invalid response: " + response->ToString();
+      std::move(callback).Run(base::nullopt /* data */, error);
+      return;
+    }
+    std::vector<uint8_t> result_data;
+    if (!ReadSecretFromSharedMemory(std::move(result_fd), result_size,
+                                    &result_data)) {
+      std::string error = "Couldn't read retrieved data from shared memory.";
+      std::move(callback).Run(base::nullopt /* data */, error);
+      return;
+    }
+    std::move(callback).Run(std::string(result_data.begin(), result_data.end()),
+                            base::nullopt /* error */);
+  }
+
+  void OnLoginScreenStorageListKeys(LoginScreenStorageListKeysCallback callback,
+                                    dbus::Response* response) {
+    if (!response) {
+      // TODO(voit): Add more granular error handling: key is not found error vs
+      // general 'something went wrong' error.
+      std::move(callback).Run({} /* keys */,
+                              "LoginScreenStorageListKeys() D-Bus method "
+                              "returned an empty response");
+      return;
+    }
+    dbus::MessageReader reader(response);
+    std::vector<std::string> keys;
+    if (!reader.PopArrayOfStrings(&keys)) {
+      std::string error = "Invalid response: " + response->ToString();
+      std::move(callback).Run({} /* keys */, error);
+      return;
+    }
+    std::move(callback).Run(std::move(keys), base::nullopt /* error */);
   }
 
   // Reads an array of policy data bytes data as std::string.
@@ -781,6 +1010,54 @@ class SessionManagerClientImpl : public SessionManagerClient {
     std::move(callback).Run(base::TimeTicks::FromInternalValue(ticks));
   }
 
+  void OnEnableAdbSideload(EnableAdbSideloadCallback callback,
+                           dbus::Response* response,
+                           dbus::ErrorResponse* error) {
+    if (!response) {
+      LOG(ERROR) << "Failed to call EnableAdbSideload: "
+                 << (error ? error->ToString() : "(null)");
+      if (error && error->GetErrorName() == DBUS_ERROR_NOT_SUPPORTED) {
+        std::move(callback).Run(AdbSideloadResponseCode::NEED_POWERWASH);
+      } else {
+        std::move(callback).Run(AdbSideloadResponseCode::FAILED);
+      }
+      return;
+    }
+
+    bool succeeded;
+    dbus::MessageReader reader(response);
+    if (!reader.PopBool(&succeeded)) {
+      LOG(ERROR) << "Failed to enable sideloading";
+      std::move(callback).Run(AdbSideloadResponseCode::FAILED);
+      return;
+    }
+    std::move(callback).Run(AdbSideloadResponseCode::SUCCESS);
+  }
+
+  void OnQueryAdbSideload(QueryAdbSideloadCallback callback,
+                          dbus::Response* response,
+                          dbus::ErrorResponse* error) {
+    if (!response) {
+      LOG(ERROR) << "Failed to call QueryAdbSideload: "
+                 << (error ? error->ToString() : "(null)");
+      if (error && error->GetErrorName() == DBUS_ERROR_NOT_SUPPORTED) {
+        std::move(callback).Run(AdbSideloadResponseCode::NEED_POWERWASH, false);
+      } else {
+        std::move(callback).Run(AdbSideloadResponseCode::FAILED, false);
+      }
+      return;
+    }
+
+    bool is_allowed;
+    dbus::MessageReader reader(response);
+    if (!reader.PopBool(&is_allowed)) {
+      LOG(ERROR) << "Failed to interpret the response";
+      std::move(callback).Run(AdbSideloadResponseCode::FAILED, false);
+      return;
+    }
+    std::move(callback).Run(AdbSideloadResponseCode::SUCCESS, is_allowed);
+  }
+
   dbus::ObjectProxy* session_manager_proxy_ = nullptr;
   std::unique_ptr<BlockingMethodCaller> blocking_method_caller_;
   base::ObserverList<Observer>::Unchecked observers_;
@@ -823,8 +1100,10 @@ void SessionManagerClient::InitializeFake() {
 
 // static
 void SessionManagerClient::InitializeFakeInMemory() {
-  new FakeSessionManagerClient(
-      FakeSessionManagerClient::PolicyStorageType::kInMemory);
+  if (!FakeSessionManagerClient::Get()) {
+    new FakeSessionManagerClient(
+        FakeSessionManagerClient::PolicyStorageType::kInMemory);
+  }
 }
 
 // static

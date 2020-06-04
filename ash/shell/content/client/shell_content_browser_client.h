@@ -23,13 +23,6 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
   // Overridden from content::ContentBrowserClient:
   std::unique_ptr<content::BrowserMainParts> CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) override;
-  void GetQuotaSettings(
-      content::BrowserContext* context,
-      content::StoragePartition* partition,
-      storage::OptionalQuotaSettingsCallback callback) override;
-  base::Optional<service_manager::Manifest> GetServiceManifestOverlay(
-      base::StringPiece name) override;
-  std::vector<service_manager::Manifest> GetExtraServiceManifests() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellContentBrowserClient);

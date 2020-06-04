@@ -1,7 +1,8 @@
+drubery@chromium.org
 nparker@chromium.org
 vakh@chromium.org
 
-# For interstitial-related changes:
-per-file *safe_browsing_blocking_page*=felt@chromium.org
+per-file *password_protection*=file://components/safe_browsing/content/password_protection/OWNERS
 
 # COMPONENT: Services>Safebrowsing
+# TEAM: safebrowsing@chromium.org

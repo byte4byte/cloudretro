@@ -12,12 +12,13 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/path_service.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chromecast/base/cast_paths.h"
 #include "chromecast/browser/cast_download_manager_delegate.h"
 #include "chromecast/browser/cast_permission_manager.h"
-#include "chromecast/browser/url_request_context_factory.h"
 #include "components/keyed_service/core/simple_key_map.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cors_origin_pattern_setter.h"
 #include "content/public/browser/resource_context.h"
@@ -58,8 +59,8 @@ CastBrowserContext::~CastBrowserContext() {
   SimpleKeyMap::GetInstance()->Dissociate(this);
   BrowserContext::NotifyWillBeDestroyed(this);
   ShutdownStoragePartitions();
-  content::BrowserThread::DeleteSoon(content::BrowserThread::IO, FROM_HERE,
-                                     resource_context_.release());
+  base::DeleteSoon(FROM_HERE, {content::BrowserThread::IO},
+                   resource_context_.release());
 }
 
 void CastBrowserContext::InitWhileIOAllowed() {
@@ -76,7 +77,6 @@ void CastBrowserContext::InitWhileIOAllowed() {
   // shared in a single location as defined here.
   CHECK(base::PathService::Get(DIR_CAST_HOME, &path_));
 #endif  // defined(OS_ANDROID)
-  BrowserContext::Initialize(this, path_);
 }
 
 #if !defined(OS_ANDROID)
@@ -121,6 +121,11 @@ content::PushMessagingService* CastBrowserContext::GetPushMessagingService() {
   return nullptr;
 }
 
+content::StorageNotificationService*
+CastBrowserContext::GetStorageNotificationService() {
+  return nullptr;
+}
+
 content::SSLHostStateDelegate* CastBrowserContext::GetSSLHostStateDelegate() {
   return nullptr;
 }
@@ -149,18 +154,6 @@ CastBrowserContext::GetBackgroundSyncController() {
 
 content::BrowsingDataRemoverDelegate*
 CastBrowserContext::GetBrowsingDataRemoverDelegate() {
-  return nullptr;
-}
-
-net::URLRequestContextGetter* CastBrowserContext::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  NOTREACHED();
-  return nullptr;
-}
-
-net::URLRequestContextGetter* CastBrowserContext::CreateMediaRequestContext() {
-  NOTREACHED();
   return nullptr;
 }
 

@@ -149,13 +149,12 @@ void NavigateShareTargetPost(
       ui::PageTransition::PAGE_TRANSITION_AUTO_TOPLEVEL,
       false /* is_renderer_initiated */);
   open_url_params.post_data = post_data;
-  open_url_params.uses_post = true;
   open_url_params.extra_headers = header_list;
   web_contents->OpenURL(open_url_params);
 }
 }  // namespace webapk
 
-void JNI_WebApkPostShareTargetNavigator_LoadViewForShareTargetPost(
+static void JNI_WebApkPostShareTargetNavigator_NativeLoadViewForShareTargetPost(
     JNIEnv* env,
     const jboolean java_is_multipart_encoding,
     const JavaParamRef<jobjectArray>& java_names,

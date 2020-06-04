@@ -9,6 +9,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/prefs/pref_registry_simple.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "components/signin/public/base/device_id_helper.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -16,7 +17,6 @@
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
 #include "google_apis/gaia/oauth2_access_token_manager.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 using signin_metrics::SourceForRefreshTokenOperation;
@@ -28,8 +28,8 @@ std::string SourceToString(SourceForRefreshTokenOperation source) {
       return "Unknown";
     case SourceForRefreshTokenOperation::kTokenService_LoadCredentials:
       return "TokenService::LoadCredentials";
-    case SourceForRefreshTokenOperation::kSupervisedUser_InitSync:
-      return "SupervisedUser::InitSync";
+    case SourceForRefreshTokenOperation::kDeprecatedSupervisedUser_InitSync:
+      return "DeprecatedSupervisedUser::InitSync";
     case SourceForRefreshTokenOperation::kInlineLoginHandler_Signin:
       return "InlineLoginHandler::Signin";
     case SourceForRefreshTokenOperation::kPrimaryAccountManager_ClearAccount:
@@ -62,15 +62,18 @@ std::string SourceToString(SourceForRefreshTokenOperation source) {
       return "MachineLogon::CredentialProvider";
     case SourceForRefreshTokenOperation::kTokenService_ExtractCredentials:
       return "TokenService::ExtractCredentials";
+    case SourceForRefreshTokenOperation::
+        kAccountReconcilor_RevokeTokensNotInCookies:
+      return "AccountReconcilor::RevokeTokensNotInCookies";
   }
 }
 }  // namespace
 
 ProfileOAuth2TokenService::ProfileOAuth2TokenService(
     PrefService* user_prefs,
-    std::unique_ptr<OAuth2TokenServiceDelegate> delegate)
-    : OAuth2TokenService(std::move(delegate)),
-      user_prefs_(user_prefs),
+    std::unique_ptr<ProfileOAuth2TokenServiceDelegate> delegate)
+    : user_prefs_(user_prefs),
+      delegate_(std::move(delegate)),
       all_credentials_loaded_(false) {
   DCHECK(user_prefs_);
   DCHECK(delegate_);
@@ -104,7 +107,7 @@ ProfileOAuth2TokenService::GetURLLoaderFactory() const {
 void ProfileOAuth2TokenService::OnAccessTokenInvalidated(
     const CoreAccountId& account_id,
     const std::string& client_id,
-    const std::set<std::string>& scopes,
+    const OAuth2AccessTokenManager::ScopeSet& scopes,
     const std::string& access_token) {
   delegate_->OnAccessTokenInvalidated(account_id, client_id, scopes,
                                       access_token);
@@ -135,13 +138,22 @@ void ProfileOAuth2TokenService::RegisterProfilePrefs(
                                std::string());
 }
 
+ProfileOAuth2TokenServiceDelegate* ProfileOAuth2TokenService::GetDelegate() {
+  return delegate_.get();
+}
+
+const ProfileOAuth2TokenServiceDelegate*
+ProfileOAuth2TokenService::GetDelegate() const {
+  return delegate_.get();
+}
+
 void ProfileOAuth2TokenService::AddObserver(
-    OAuth2TokenServiceObserver* observer) {
+    ProfileOAuth2TokenServiceObserver* observer) {
   delegate_->AddObserver(observer);
 }
 
 void ProfileOAuth2TokenService::RemoveObserver(
-    OAuth2TokenServiceObserver* observer) {
+    ProfileOAuth2TokenServiceObserver* observer) {
   delegate_->RemoveObserver(observer);
 }
 
@@ -244,7 +256,7 @@ void ProfileOAuth2TokenService::SetRefreshTokenRevokedFromSourceCallback(
 }
 
 void ProfileOAuth2TokenService::Shutdown() {
-  CancelAllRequests();
+  token_manager_->CancelAllRequests();
   GetDelegate()->Shutdown();
 }
 
@@ -278,8 +290,8 @@ void ProfileOAuth2TokenService::RevokeAllCredentials(
     SourceForRefreshTokenOperation source) {
   base::AutoReset<SourceForRefreshTokenOperation> auto_reset(
       &update_refresh_token_source_, source);
-  CancelAllRequests();
-  ClearCache();
+  token_manager_->CancelAllRequests();
+  token_manager_->ClearCache();
   GetDelegate()->RevokeAllCredentials();
 }
 
@@ -332,27 +344,20 @@ void ProfileOAuth2TokenService::UpdateAuthErrorForTesting(
   GetDelegate()->UpdateAuthError(account_id, error);
 }
 
-int ProfileOAuth2TokenService::GetTokenCacheCountForTesting() {
-  return token_manager_->token_cache().size();
-}
-
 void ProfileOAuth2TokenService::
     set_max_authorization_token_fetch_retries_for_testing(int max_retries) {
   token_manager_->set_max_authorization_token_fetch_retries_for_testing(
       max_retries);
 }
 
-size_t ProfileOAuth2TokenService::GetNumPendingRequestsForTesting(
-    const std::string& client_id,
-    const CoreAccountId& account_id,
-    const OAuth2AccessTokenManager::ScopeSet& scopes) const {
-  return token_manager_->GetNumPendingRequestsForTesting(client_id, account_id,
-                                                         scopes);
-}
-
 void ProfileOAuth2TokenService::OverrideAccessTokenManagerForTesting(
     std::unique_ptr<OAuth2AccessTokenManager> token_manager) {
   token_manager_ = std::move(token_manager);
+}
+
+bool ProfileOAuth2TokenService::IsFakeProfileOAuth2TokenServiceForTesting()
+    const {
+  return false;
 }
 
 OAuth2AccessTokenManager* ProfileOAuth2TokenService::GetAccessTokenManager() {
@@ -371,8 +376,8 @@ void ProfileOAuth2TokenService::OnRefreshTokenAvailable(
     is_valid = false;
   }
 
-  CancelRequestsForAccount(account_id);
-  ClearCacheForAccount(account_id);
+  token_manager_->CancelRequestsForAccount(account_id);
+  token_manager_->ClearCacheForAccount(account_id);
 
   signin_metrics::RecordRefreshTokenUpdatedFromSource(
       is_valid, update_refresh_token_source_);
@@ -388,8 +393,8 @@ void ProfileOAuth2TokenService::OnRefreshTokenRevoked(
   // If this was the last token, recreate the device ID.
   RecreateDeviceIdIfNeeded();
 
-  CancelRequestsForAccount(account_id);
-  ClearCacheForAccount(account_id);
+  token_manager_->CancelRequestsForAccount(account_id);
+  token_manager_->ClearCacheForAccount(account_id);
 
   signin_metrics::RecordRefreshTokenRevokedFromSource(
       update_refresh_token_source_);
@@ -401,9 +406,9 @@ void ProfileOAuth2TokenService::OnRefreshTokenRevoked(
 void ProfileOAuth2TokenService::OnRefreshTokensLoaded() {
   all_credentials_loaded_ = true;
 
-  DCHECK_NE(OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_NOT_STARTED,
+  DCHECK_NE(signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED,
             GetDelegate()->load_credentials_state());
-  DCHECK_NE(OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_IN_PROGRESS,
+  DCHECK_NE(signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS,
             GetDelegate()->load_credentials_state());
 
   // Reset the state for update refresh token operations to Unknown as this
@@ -415,41 +420,23 @@ void ProfileOAuth2TokenService::OnRefreshTokensLoaded() {
   RecreateDeviceIdIfNeeded();
 }
 
-void ProfileOAuth2TokenService::ClearCache() {
-  token_manager_->ClearCache();
-}
-
-void ProfileOAuth2TokenService::ClearCacheForAccount(
-    const CoreAccountId& account_id) {
-  token_manager_->ClearCacheForAccount(account_id);
-}
-
-void ProfileOAuth2TokenService::CancelAllRequests() {
-  token_manager_->CancelAllRequests();
-}
-
-void ProfileOAuth2TokenService::CancelRequestsForAccount(
-    const CoreAccountId& account_id) {
-  token_manager_->CancelRequestsForAccount(account_id);
-}
-
 bool ProfileOAuth2TokenService::HasLoadCredentialsFinishedWithNoErrors() {
   switch (GetDelegate()->load_credentials_state()) {
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_NOT_STARTED:
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_IN_PROGRESS:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED:
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS:
       // LoadCredentials has not finished.
       return false;
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_DB_CANNOT_BE_OPENED:
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_FINISHED_WITH_DB_ERRORS:
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_DB_ERRORS:
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_DECRYPT_ERRORS:
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_UNKNOWN_ERRORS:
       // LoadCredentials finished, but with errors
       return false;
-    case OAuth2TokenServiceDelegate::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS:
-    case OAuth2TokenServiceDelegate::
+    case signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS:
+    case signin::LoadCredentialsState::
         LOAD_CREDENTIALS_FINISHED_WITH_NO_TOKEN_FOR_PRIMARY_ACCOUNT:
       // Load credentials finished with success.
       return true;

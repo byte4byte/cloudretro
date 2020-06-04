@@ -7,7 +7,7 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/focus/focus_manager.h"
 
-namespace app_list {
+namespace ash {
 
 bool IsUnhandledUnmodifiedEvent(const ui::KeyEvent& event) {
   if (event.handled() || event.type() != ui::ET_KEY_PRESSED)
@@ -54,14 +54,14 @@ bool LeftRightKeyEventShouldExitText(views::Textfield* textfield,
                                      const ui::KeyEvent& key_event) {
   DCHECK(IsUnhandledLeftRightKeyEvent(key_event));
 
-  if (textfield->text().empty())
+  if (textfield->GetText().empty())
     return true;
 
   if (textfield->HasSelection())
     return false;
 
   if (textfield->GetCursorPosition() != 0 &&
-      textfield->GetCursorPosition() != textfield->text().length()) {
+      textfield->GetCursorPosition() != textfield->GetText().length()) {
     return false;
   }
 
@@ -100,4 +100,4 @@ bool ProcessLeftRightKeyTraversalForTextfield(views::Textfield* textfield,
   return true;
 }
 
-}  // namespace app_list
+}  // namespace ash

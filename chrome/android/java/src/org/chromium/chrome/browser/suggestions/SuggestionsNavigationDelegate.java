@@ -4,9 +4,9 @@
 
 package org.chromium.chrome.browser.suggestions;
 
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.native_page.NativePageHost;
+import android.app.Activity;
+
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegateImpl;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
@@ -16,6 +16,7 @@ import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.native_page.NativePageHost;
 import org.chromium.components.offline_items_collection.LaunchLocation;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.common.Referrer;
@@ -29,9 +30,9 @@ import org.chromium.ui.mojom.WindowOpenDisposition;
 public class SuggestionsNavigationDelegate extends NativePageNavigationDelegateImpl {
     private static final String NEW_TAB_URL_HELP = "https://support.google.com/chrome/?p=new_tab";
 
-    public SuggestionsNavigationDelegate(ChromeActivity activity, Profile profile,
-            NativePageHost host, TabModelSelector tabModelSelector) {
-        super(activity, profile, host, tabModelSelector);
+    public SuggestionsNavigationDelegate(Activity activity, Profile profile, NativePageHost host,
+            TabModelSelector tabModelSelector, Tab tab) {
+        super(activity, profile, host, tabModelSelector, tab);
     }
 
     @Override
@@ -62,27 +63,25 @@ public class SuggestionsNavigationDelegate extends NativePageNavigationDelegateI
     public void openSnippet(final int windowOpenDisposition, final SnippetArticle article) {
         NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_SNIPPET);
 
-        if (OfflinePageUtils.isEnabled()) {
-            // We explicitly open an offline page only for prefetched offline pages when Data
-            // Reduction Proxy is enabled. For all other sections the URL is opened and it is up to
-            // Offline Pages whether to open its offline page (e.g. when offline).
-            if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()
-                    && article.isPrefetched()) {
-                assert article.getOfflinePageOfflineId() != null;
-                assert windowOpenDisposition == WindowOpenDisposition.CURRENT_TAB
-                        || windowOpenDisposition == WindowOpenDisposition.NEW_WINDOW
-                        || windowOpenDisposition == WindowOpenDisposition.NEW_BACKGROUND_TAB;
-                OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(article.mUrl,
-                        article.getOfflinePageOfflineId(), LaunchLocation.SUGGESTION,
-                        (loadUrlParams) -> {
-                            if (loadUrlParams == null) return;
-                            // Extra headers are not read in loadUrl, but verbatim headers are.
-                            loadUrlParams.setVerbatimHeaders(loadUrlParams.getExtraHeadersString());
-                            openDownloadSuggestion(windowOpenDisposition, article, loadUrlParams);
-                        });
+        // We explicitly open an offline page only for prefetched offline pages when Data
+        // Reduction Proxy is enabled. For all other sections the URL is opened and it is up to
+        // Offline Pages whether to open its offline page (e.g. when offline).
+        if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()
+                && article.isPrefetched()) {
+            assert article.getOfflinePageOfflineId() != null;
+            assert windowOpenDisposition == WindowOpenDisposition.CURRENT_TAB
+                    || windowOpenDisposition == WindowOpenDisposition.NEW_WINDOW
+                    || windowOpenDisposition == WindowOpenDisposition.NEW_BACKGROUND_TAB;
+            OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(article.mUrl,
+                    article.getOfflinePageOfflineId(), LaunchLocation.SUGGESTION,
+                    (loadUrlParams) -> {
+                        if (loadUrlParams == null) return;
+                        // Extra headers are not read in loadUrl, but verbatim headers are.
+                        loadUrlParams.setVerbatimHeaders(loadUrlParams.getExtraHeadersString());
+                        openDownloadSuggestion(windowOpenDisposition, article, loadUrlParams);
+                    });
 
-                return;
-            }
+            return;
         }
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(article.mUrl, PageTransition.AUTO_BOOKMARK);

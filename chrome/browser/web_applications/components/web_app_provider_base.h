@@ -13,11 +13,20 @@ class Profile;
 namespace web_app {
 
 // Forward declarations of generalized interfaces.
-class PendingAppManager;
-class InstallManager;
+class AppIconManager;
 class AppRegistrar;
+class AppRegistryController;
+class AppShortcutManager;
+class FileHandlerManager;
+class InstallFinalizer;
+class InstallManager;
+class ManifestUpdateManager;
+class PendingAppManager;
+class SystemWebAppManager;
+class WebAppAudioFocusIdMap;
 class WebAppPolicyManager;
 class WebAppUiManager;
+class SystemWebAppManager;
 
 class WebAppProviderBase : public KeyedService {
  public:
@@ -26,20 +35,35 @@ class WebAppProviderBase : public KeyedService {
   WebAppProviderBase();
   ~WebAppProviderBase() override;
 
-  // The app registry manager.
+  // The app registry model.
   virtual AppRegistrar& registrar() = 0;
+  // The app registry controller.
+  virtual AppRegistryController& registry_controller() = 0;
   // UIs can use InstallManager for user-initiated Web Apps install.
   virtual InstallManager& install_manager() = 0;
+  // Implements persistence for Web Apps install.
+  virtual InstallFinalizer& install_finalizer() = 0;
+  // Keeps app metadata up to date with site manifests.
+  virtual ManifestUpdateManager& manifest_update_manager() = 0;
   // Clients can use PendingAppManager to install, uninstall, and update
   // Web Apps.
   virtual PendingAppManager& pending_app_manager() = 0;
   // Clients can use WebAppPolicyManager to request updates of policy installed
   // Web Apps.
-  // TODO(crbug.com/916381): Make a reference once WebAppPolicyManager is always
-  // present. It's currently only present for Bookmark Apps.
-  virtual WebAppPolicyManager* policy_manager() = 0;
+  virtual WebAppPolicyManager& policy_manager() = 0;
 
   virtual WebAppUiManager& ui_manager() = 0;
+
+  virtual WebAppAudioFocusIdMap& audio_focus_id_map() = 0;
+
+  virtual FileHandlerManager& file_handler_manager() = 0;
+
+  // Implements fetching of app icons.
+  virtual AppIconManager& icon_manager() = 0;
+
+  virtual AppShortcutManager& shortcut_manager() = 0;
+
+  virtual SystemWebAppManager& system_web_app_manager() = 0;
 
   DISALLOW_COPY_AND_ASSIGN(WebAppProviderBase);
 };

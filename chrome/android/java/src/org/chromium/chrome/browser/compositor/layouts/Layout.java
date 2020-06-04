@@ -7,11 +7,12 @@ package org.chromium.chrome.browser.compositor.layouts;
 import android.content.Context;
 import android.graphics.PointF;
 import android.graphics.RectF;
-import android.support.annotation.IntDef;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
@@ -140,6 +141,11 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     public CompositorAnimationHandler getAnimationHandler() {
         return mUpdateHost.getAnimationHandler();
     }
+
+    /**
+     * Called when native initialization is completed.
+     */
+    public void onFinishNativeInitialization() {}
 
     /**
      * Adds a {@link SceneOverlay} that can be shown in this layout to the first position in the
@@ -878,15 +884,4 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     protected void updateSceneLayer(RectF viewport, RectF contentViewport,
             LayerTitleCache layerTitleCache, TabContentManager tabContentManager,
             ResourceManager resourceManager, ChromeFullscreenManager fullscreenManager) {}
-
-    /**
-     * Gets the full screen manager.
-     * @return The {@link ChromeFullscreenManager} manager, possibly null
-     */
-    public ChromeFullscreenManager getFullscreenManager() {
-        if (mTabModelSelector == null) return null;
-        if (mTabModelSelector.getCurrentTab() == null) return null;
-        if (mTabModelSelector.getCurrentTab().getActivity() == null) return null;
-        return mTabModelSelector.getCurrentTab().getActivity().getFullscreenManager();
-    }
 }

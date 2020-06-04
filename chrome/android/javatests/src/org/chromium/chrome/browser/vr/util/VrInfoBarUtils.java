@@ -7,9 +7,9 @@ package org.chromium.chrome.browser.vr.util;
 import static org.chromium.chrome.browser.vr.XrTestFramework.POLL_CHECK_INTERVAL_SHORT_MS;
 import static org.chromium.chrome.browser.vr.XrTestFramework.POLL_TIMEOUT_SHORT_MS;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
-import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.util.InfoBarUtil;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;

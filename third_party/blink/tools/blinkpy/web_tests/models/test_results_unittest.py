@@ -29,10 +29,11 @@
 import unittest
 
 from blinkpy.web_tests.models.test_results import TestResult
+from blinkpy.web_tests.port.driver import DriverOutput
+from blinkpy.web_tests.models import test_failures
 
 
 class TestResultsTest(unittest.TestCase):
-
     def test_defaults(self):
         result = TestResult('foo')
         self.assertEqual(result.test_name, 'foo')
@@ -40,9 +41,7 @@ class TestResultsTest(unittest.TestCase):
         self.assertEqual(result.test_run_time, 0)
 
     def test_loads(self):
-        result = TestResult(test_name='foo',
-                            failures=[],
-                            test_run_time=1.1)
+        result = TestResult(test_name='foo', failures=[], test_run_time=1.1)
         s = result.dumps()
         new_result = TestResult.loads(s)
         self.assertIsInstance(new_result, TestResult)
@@ -51,3 +50,15 @@ class TestResultsTest(unittest.TestCase):
 
         # Also check that != is implemented.
         self.assertFalse(new_result != result)
+
+    def test_results_has_stderr(self):
+        driver_output = DriverOutput(None, None, None, None, error='error')
+        failures = [test_failures.FailureCrash(driver_output, None)]
+        result = TestResult('foo', failures=failures)
+        self.assertTrue(result.has_stderr)
+
+    def test_results_has_repaint_overlay(self):
+        driver_output = DriverOutput('"invalidations": [', None, None, None)
+        failures = [test_failures.FailureTextMismatch(driver_output, None)]
+        result = TestResult('foo', failures=failures)
+        self.assertTrue(result.has_repaint_overlay)

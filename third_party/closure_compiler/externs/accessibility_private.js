@@ -73,6 +73,22 @@ chrome.accessibilityPrivate.SwitchAccessCommand = {
 /**
  * @enum {string}
  */
+chrome.accessibilityPrivate.SwitchAccessMenuAction = {
+  DECREMENT: 'decrement',
+  DICTATION: 'dictation',
+  INCREMENT: 'increment',
+  KEYBOARD: 'keyboard',
+  SCROLL_DOWN: 'scroll_down',
+  SCROLL_LEFT: 'scroll_left',
+  SCROLL_RIGHT: 'scroll_right',
+  SCROLL_UP: 'scroll_up',
+  SELECT: 'select',
+  SETTINGS: 'settings',
+};
+
+/**
+ * @enum {string}
+ */
 chrome.accessibilityPrivate.SyntheticKeyboardEventType = {
   KEYUP: 'keyup',
   KEYDOWN: 'keydown',
@@ -148,12 +164,13 @@ chrome.accessibilityPrivate.FocusType = {
 chrome.accessibilityPrivate.FocusRingInfo;
 
 /**
- * Called to translate language code into human-readable string in the language
- * of the provided language code.
- * @param {string} languageCode
- * @return {string} The human-readable language string in the provided language.
+ * Called to translate localeCodeToTranslate into human-readable string in the
+ * locale specified by displayLocaleCode
+ * @param {string} localeCodeToTranslate
+ * @param {string} displayLocaleCode
+ * @return {string} The human-readable locale string in the provided locale.
  */
-chrome.accessibilityPrivate.getDisplayLanguage = function(languageCode) {};
+chrome.accessibilityPrivate.getDisplayNameForLocale = function(localeCodeToTranslate, displayLocaleCode) {};
 
 /**
  * Called to request battery status from Chrome OS system.
@@ -204,13 +221,6 @@ chrome.accessibilityPrivate.setKeyboardListener = function(enabled, capture) {};
  * @param {boolean} enabled True to darken screen; false to undarken screen.
  */
 chrome.accessibilityPrivate.darkenScreen = function(enabled) {};
-
-/**
- * Change the keyboard keys captured by Switch Access.
- * @param {!Array<number>} key_codes The key codes for the keys that will be
- *     captured.
- */
-chrome.accessibilityPrivate.setSwitchAccessKeys = function(key_codes) {};
 
 /**
  * Shows or hides the Switch Access menu. If shown, it is at the indicated
@@ -283,11 +293,12 @@ chrome.accessibilityPrivate.toggleDictation = function() {};
 chrome.accessibilityPrivate.setVirtualKeyboardVisible = function(isVisible) {};
 
 /**
- * Opens a settings subpage, specified by the portion of the page's URL after
- * "chrome://settings/"
+ * Opens a specified settings subpage. To open a page with url
+ * chrome://settings/manageAccessibility/tts, pass in the substring
+ * 'manageAccessibility/tts'.
  * @param {string} subpage
  */
-chrome.accessibilityPrivate.openSettingsSubpage = function (subpage) {}
+chrome.accessibilityPrivate.openSettingsSubpage = function(subpage) {};
 
 /**
  * Fired whenever ChromeVox should output introduction.
@@ -317,21 +328,21 @@ chrome.accessibilityPrivate.onTwoFingerTouchStart;
 chrome.accessibilityPrivate.onTwoFingerTouchStop;
 
 /**
- * Called when Chrome OS wants to change the Select-to-Speak state, between
+ * Fired when Chrome OS wants to change the Select-to-Speak state, between
  * selecting with the mouse, speaking, and inactive.
  * @type {!ChromeEvent}
  */
 chrome.accessibilityPrivate.onSelectToSpeakStateChangeRequested;
 
 /**
- * Called when Chrome OS has received a key event corresponding to a Switch
+ * Fired when Chrome OS has received a key event corresponding to a Switch
  * Access command.
  * @type {!ChromeEvent}
  */
 chrome.accessibilityPrivate.onSwitchAccessCommand;
 
 /**
- * Called when an internal component within accessibility wants to force speech
+ * Fired when an internal component within accessibility wants to force speech
  * output for an accessibility extension. Do not use without approval from
  * accessibility owners.
  * @type {!ChromeEvent}
@@ -339,9 +350,16 @@ chrome.accessibilityPrivate.onSwitchAccessCommand;
 chrome.accessibilityPrivate.onAnnounceForAccessibility;
 
 /**
- * Called when an internal component within accessibility wants to find the
+ * Fired when an internal component within accessibility wants to find the
  * nearest scrolling container at a given screen coordinate. Used in Automatic
  * Clicks.
  * @type {!ChromeEvent}
  */
 chrome.accessibilityPrivate.findScrollableBoundsForPoint;
+
+/**
+ * Fired when a custom spoken feedback on the active window gets enabled or
+ * disabled. Called from ARC++ accessibility.
+ * @type {!ChromeEvent}
+ */
+chrome.accessibilityPrivate.onCustomSpokenFeedbackToggled;

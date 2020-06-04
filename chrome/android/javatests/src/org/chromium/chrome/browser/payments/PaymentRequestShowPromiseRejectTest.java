@@ -13,10 +13,12 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -35,15 +37,14 @@ public class PaymentRequestShowPromiseRejectTest implements MainActivityStartCal
             new PaymentRequestTestRule("show_promise/reject.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testReject() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.IMMEDIATE_RESPONSE);
-        mRule.openPageAndClickNodeAndWait("buy", mRule.getDismissed());
+    public void testReject() throws TimeoutException {
+        mRule.addPaymentAppFactory("basic-card", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
+        mRule.openPageAndClickNodeAndWait("buy", mRule.getRendererClosedMojoConnection());
         mRule.expectResultContains(new String[] {"AbortError"});
     }
 }

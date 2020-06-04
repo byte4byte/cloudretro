@@ -19,16 +19,16 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.tab.MockTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.top.ToolbarLayout;
-import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 /**
@@ -48,13 +48,12 @@ public class LocationBarModelTest {
     /**
      * After closing all {@link Tab}s, the {@link LocationBarModel} should know that it is not
      * showing any {@link Tab}.
-     * @throws InterruptedException
      */
     @Test
     @Feature({"Android-Toolbar"})
     @MediumTest
     @RetryOnFailure
-    public void testClosingLastTabReflectedInModel() throws InterruptedException {
+    public void testClosingLastTabReflectedInModel() {
         Assert.assertNotSame("No current tab", Tab.INVALID_TAB_ID,
                 getCurrentTabId(mActivityTestRule.getActivity()));
         ChromeTabUtils.closeCurrentTab(
@@ -67,7 +66,7 @@ public class LocationBarModelTest {
 
     @Test
     @SmallTest
-    public void testDisplayAndEditText() throws Exception {
+    public void testDisplayAndEditText() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             TestLocationBarModel model = new TestLocationBarModel();
             model.mUrl = UrlConstants.NTP_URL;

@@ -7,6 +7,7 @@ import subprocess
 import unittest
 
 from . import notarize, test_common, test_config
+from .model import CodeSignedProduct, Paths
 
 mock = test_common.import_mock()
 
@@ -203,7 +204,7 @@ class TestWaitForResults(unittest.TestCase):
             list(notarize.wait_for_results(uuids, test_config.TestConfig()))
 
         self.assertEqual(
-            "Timed out waiting for notarization requests: ['0c652bb4-7d44-4904-8c59-1ee86a376ece']",
+            "Timed out waiting for notarization requests: set(['0c652bb4-7d44-4904-8c59-1ee86a376ece'])",
             str(cm.exception))
 
         for call in kwargs['run_command_output'].mock_calls:
@@ -216,7 +217,7 @@ class TestWaitForResults(unittest.TestCase):
                 ]))
 
         total_time = sum([call[1][0] for call in kwargs['sleep'].mock_calls])
-        self.assertLess(total_time, 31 * 60)
+        self.assertLess(total_time, 61 * 60)
 
 
 class TestStaple(unittest.TestCase):
@@ -226,3 +227,24 @@ class TestStaple(unittest.TestCase):
         notarize.staple('/tmp/file.dmg')
         run_command.assert_called_once_with(
             ['xcrun', 'stapler', 'staple', '--verbose', '/tmp/file.dmg'])
+
+    @mock.patch('signing.notarize.staple')
+    def test_staple_bundled_parts(self, staple):
+        notarize.staple_bundled_parts([
+            CodeSignedProduct('Foo.app/Contents/Helpers/Helper.app', ''),
+            CodeSignedProduct('Foo.app/Contents/Helpers/loose_exectuable', ''),
+            CodeSignedProduct('Foo.app/Contents/XPCServices/Service1.xpc', ''),
+            CodeSignedProduct(
+                'Foo.app/Contents/Helpers/Helper.app/Contents/Helpers/Bar.app',
+                ''),
+            CodeSignedProduct(
+                'Foo.app/Contents/Helpers/Helper.app/Contents/XPCServices/'
+                'Service2.xpc', ''),
+            CodeSignedProduct('Foo.app', '')
+        ], Paths('in', 'out', 'work'))
+        staple.assert_has_calls([
+            mock.call('work/Foo.app/Contents/Helpers/Helper.app/Contents'
+                      '/Helpers/Bar.app'),
+            mock.call('work/Foo.app/Contents/Helpers/Helper.app'),
+            mock.call('work/Foo.app')
+        ])

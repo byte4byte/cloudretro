@@ -1,37 +1,15 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
       "name": "Scrolling Contents Layer",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutNGBlockFlow HTML",
-          "rect": [8, 8, 743, 204],
-          "reason": "chunk appeared"
-        },
-        {
-          "object": "LayoutNGBlockFlow HTML",
-          "rect": [8, 8, 743, 204],
-          "reason": "chunk disappeared"
-        },
-        {
-          "object": "LayoutInline SPAN id='target'",
-          "rect": [111, 194, 182, 18],
-          "reason": "chunk disappeared"
-        }
+      "invalidations": [
+        [111, 194, 182, 18],
+        [292, 108, 101, 100],
+        [111, 108, 101, 100],
+        [108, 194, 4, 18]
       ]
     }
   ]

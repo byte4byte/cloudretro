@@ -7,14 +7,15 @@
 #import "base/mac/foundation_util.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
-#import "ios/chrome/browser/ui/material_components/utils.h"
 #import "ios/chrome/browser/ui/settings/bar_button_activity_indicator.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
+#import "ios/chrome/browser/ui/settings/settings_root_table_constants.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -39,9 +40,6 @@ enum SavedBarButtomItemPositionEnum {
 const CGFloat kActivityIndicatorDimensionIPad = 64;
 const CGFloat kActivityIndicatorDimensionIPhone = 56;
 }  // namespace
-
-NSString* const kSettingsToolbarDeleteButtonId =
-    @"PasswordsToolbarDeleteButtonId";
 
 @interface SettingsRootTableViewController ()
 
@@ -68,14 +66,14 @@ NSString* const kSettingsToolbarDeleteButtonId =
 #pragma mark - Public
 
 - (void)updateUIForEditState {
-  if (self.tableView.editing) {
-    self.navigationItem.rightBarButtonItem = [self createEditModeDoneButton];
-    return;
-  }
-
+  // Update toolbar.
   [self.navigationController setToolbarHidden:self.shouldHideToolbar
                                      animated:YES];
-  if (self.shouldShowEditButton) {
+
+  // Update edit button.
+  if (self.tableView.editing) {
+    self.navigationItem.rightBarButtonItem = [self createEditModeDoneButton];
+  } else if (self.shouldShowEditButton) {
     self.navigationItem.rightBarButtonItem = [self createEditButton];
   } else {
     self.navigationItem.rightBarButtonItem = [self doneButtonIfNeeded];
@@ -97,22 +95,20 @@ NSString* const kSettingsToolbarDeleteButtonId =
                target:self
                action:@selector(deleteButtonCallback)];
     _deleteButton.accessibilityIdentifier = kSettingsToolbarDeleteButtonId;
-    _deleteButton.tintColor = [UIColor redColor];
+    _deleteButton.tintColor = [UIColor colorNamed:kRedColor];
   }
   return _deleteButton;
 }
 
 #pragma mark - UIViewController
 
-- (NSArray<UIBarButtonItem*>*)toolbarItems {
+- (void)viewDidLoad {
   UIBarButtonItem* flexibleSpace = [[UIBarButtonItem alloc]
       initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                            target:nil
                            action:nil];
-  return @[ flexibleSpace, self.deleteButton, flexibleSpace ];
-}
-
-- (void)viewDidLoad {
+  [self setToolbarItems:@[ flexibleSpace, self.deleteButton, flexibleSpace ]
+               animated:YES];
   if (base::FeatureList::IsEnabled(kSettingsRefresh)) {
     self.styler.tableViewBackgroundColor = UIColor.cr_systemBackgroundColor;
   } else {
@@ -352,6 +348,13 @@ NSString* const kSettingsToolbarDeleteButtonId =
   }
   self.savedBarButtonItem = nil;
   self.savedBarButtonItemPosition = kUndefinedBarButtonItemPosition;
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (BOOL)presentationControllerShouldDismiss:
+    (UIPresentationController*)presentationController {
+  return YES;
 }
 
 @end

@@ -18,14 +18,16 @@
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/win/win_util.h"
-#include "chrome/chrome_cleaner/mojom/windows_handle.mojom.h"
 #include "chrome/chrome_cleaner/ipc/ipc_test_util.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
+#include "chrome/chrome_cleaner/mojom/windows_handle.mojom.h"
 #include "chrome/chrome_cleaner/os/pre_fetched_paths.h"
 #include "chrome/chrome_cleaner/test/test_native_reg_util.h"
 #include "mojo/core/embedder/embedder.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/system/platform_handle.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "sandbox/win/src/win_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
@@ -34,7 +36,6 @@ using base::WaitableEvent;
 using chrome_cleaner::MojoTaskRunner;
 using chrome_cleaner::String16EmbeddedNulls;
 using chrome_cleaner::mojom::TestWindowsHandle;
-using chrome_cleaner::mojom::TestWindowsHandlePtr;
 
 namespace chrome_cleaner_sandbox {
 
@@ -51,8 +52,8 @@ class TestFile : public base::File {
 class TestWindowsHandleImpl : public TestWindowsHandle {
  public:
   explicit TestWindowsHandleImpl(
-      chrome_cleaner::mojom::TestWindowsHandleRequest request)
-      : binding_(this, std::move(request)) {}
+      mojo::PendingReceiver<TestWindowsHandle> receiver)
+      : receiver_(this, std::move(receiver)) {}
 
   // TestWindowsHandle
 
@@ -60,13 +61,13 @@ class TestWindowsHandleImpl : public TestWindowsHandle {
     std::move(callback).Run(handle);
   }
 
-  void EchoRawHandle(mojo::ScopedHandle handle,
+  void EchoRawHandle(mojo::PlatformHandle handle,
                      EchoRawHandleCallback callback) override {
     std::move(callback).Run(std::move(handle));
   }
 
  private:
-  mojo::Binding<TestWindowsHandle> binding_;
+  mojo::Receiver<TestWindowsHandle> receiver_;
 };
 
 class SandboxParentProcess : public chrome_cleaner::ParentProcess {
@@ -76,10 +77,9 @@ class SandboxParentProcess : public chrome_cleaner::ParentProcess {
 
  protected:
   void CreateImpl(mojo::ScopedMessagePipeHandle mojo_pipe) override {
-    chrome_cleaner::mojom::TestWindowsHandleRequest request(
-        std::move(mojo_pipe));
+    mojo::PendingReceiver<TestWindowsHandle> receiver(std::move(mojo_pipe));
     test_windows_handle_impl_ =
-        std::make_unique<TestWindowsHandleImpl>(std::move(request));
+        std::make_unique<TestWindowsHandleImpl>(std::move(receiver));
   }
 
   void DestroyImpl() override { test_windows_handle_impl_.reset(); }
@@ -94,13 +94,13 @@ class SandboxChildProcess : public chrome_cleaner::ChildProcess {
  public:
   explicit SandboxChildProcess(scoped_refptr<MojoTaskRunner> mojo_task_runner)
       : ChildProcess(mojo_task_runner),
-        test_windows_handle_ptr_(std::make_unique<TestWindowsHandlePtr>()) {}
+        test_windows_handle_(
+            std::make_unique<mojo::Remote<TestWindowsHandle>>()) {}
 
   void BindToPipe(mojo::ScopedMessagePipeHandle mojo_pipe,
                   WaitableEvent* event) {
-    test_windows_handle_ptr_->Bind(
-        chrome_cleaner::mojom::TestWindowsHandlePtrInfo(std::move(mojo_pipe),
-                                                        0));
+    test_windows_handle_->Bind(
+        mojo::PendingRemote<TestWindowsHandle>(std::move(mojo_pipe), 0));
     event->Signal();
   }
 
@@ -117,24 +117,24 @@ class SandboxChildProcess : public chrome_cleaner::ChildProcess {
     mojo_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(
-            [](TestWindowsHandlePtr* ptr, HANDLE handle,
+            [](mojo::Remote<TestWindowsHandle>* remote, HANDLE handle,
                TestWindowsHandle::EchoHandleCallback callback) {
-              (*ptr)->EchoHandle(std::move(handle), std::move(callback));
+              (*remote)->EchoHandle(std::move(handle), std::move(callback));
             },
-            base::Unretained(test_windows_handle_ptr_.get()), input_handle,
+            base::Unretained(test_windows_handle_.get()), input_handle,
             std::move(callback)));
     event.Wait();
     return output_handle;
   }
 
   HANDLE EchoRawHandle(HANDLE input_handle) {
-    mojo::ScopedHandle scoped_handle = mojo::WrapPlatformFile(input_handle);
-    mojo::ScopedHandle output_handle;
+    mojo::PlatformHandle scoped_handle((base::win::ScopedHandle(input_handle)));
+    mojo::PlatformHandle output_handle;
     WaitableEvent event(WaitableEvent::ResetPolicy::MANUAL,
                         WaitableEvent::InitialState::NOT_SIGNALED);
     auto callback = base::BindOnce(
-        [](mojo::ScopedHandle* handle_holder, WaitableEvent* event,
-           mojo::ScopedHandle handle) {
+        [](mojo::PlatformHandle* handle_holder, WaitableEvent* event,
+           mojo::PlatformHandle handle) {
           *handle_holder = std::move(handle);
           event->Signal();
         },
@@ -142,20 +142,17 @@ class SandboxChildProcess : public chrome_cleaner::ChildProcess {
 
     mojo_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(
-                       [](TestWindowsHandlePtr* ptr, mojo::ScopedHandle handle,
+                       [](mojo::Remote<TestWindowsHandle>* remote,
+                          mojo::PlatformHandle handle,
                           TestWindowsHandle::EchoRawHandleCallback callback) {
-                         (*ptr)->EchoRawHandle(std::move(handle),
-                                               std::move(callback));
+                         (*remote)->EchoRawHandle(std::move(handle),
+                                                  std::move(callback));
                        },
-                       base::Unretained(test_windows_handle_ptr_.get()),
-                       base::Passed(&scoped_handle), std::move(callback)));
+                       base::Unretained(test_windows_handle_.get()),
+                       std::move(scoped_handle), std::move(callback)));
     event.Wait();
 
-    HANDLE raw_output_handle;
-    CHECK_EQ(
-        mojo::UnwrapPlatformFile(std::move(output_handle), &raw_output_handle),
-        MOJO_RESULT_OK);
-    return raw_output_handle;
+    return output_handle.ReleaseHandle();
   }
 
  private:
@@ -163,11 +160,13 @@ class SandboxChildProcess : public chrome_cleaner::ChildProcess {
     mojo_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(
-            [](std::unique_ptr<TestWindowsHandlePtr> ptr) { ptr.reset(); },
-            base::Passed(&test_windows_handle_ptr_)));
+            [](std::unique_ptr<mojo::Remote<TestWindowsHandle>> remote) {
+              remote.reset();
+            },
+            std::move(test_windows_handle_)));
   }
 
-  std::unique_ptr<TestWindowsHandlePtr> test_windows_handle_ptr_;
+  std::unique_ptr<mojo::Remote<TestWindowsHandle>> test_windows_handle_;
 };
 
 base::string16 HandlePath(HANDLE handle) {
@@ -222,7 +221,7 @@ MULTIPROCESS_TEST_MAIN(HandleWrappingIPCMain) {
                       WaitableEvent::InitialState::NOT_SIGNALED);
   mojo_task_runner->PostTask(
       FROM_HERE, base::BindOnce(&SandboxChildProcess::BindToPipe, child_process,
-                                base::Passed(&message_pipe_handle), &event));
+                                std::move(message_pipe_handle), &event));
   event.Wait();
 
   // Check that this test is actually testing what it thinks it is: when

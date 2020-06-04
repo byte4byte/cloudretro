@@ -14,6 +14,7 @@
 #include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/macros.h"
+#include "base/observer_list_types.h"
 #include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 
@@ -90,6 +91,8 @@ enum RenameError {
 };
 
 // Format error reported by cros-disks.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum FormatError {
   FORMAT_ERROR_NONE,
   FORMAT_ERROR_UNKNOWN,
@@ -100,6 +103,10 @@ enum FormatError {
   FORMAT_ERROR_FORMAT_PROGRAM_NOT_FOUND,
   FORMAT_ERROR_FORMAT_PROGRAM_FAILED,
   FORMAT_ERROR_DEVICE_NOT_ALLOWED,
+  FORMAT_ERROR_INVALID_OPTIONS,
+  FORMAT_ERROR_LONG_NAME,
+  FORMAT_ERROR_INVALID_CHARACTER,
+  FORMAT_ERROR_COUNT,
 };
 
 // Event type each corresponding to a signal sent from cros-disks.
@@ -110,12 +117,6 @@ enum MountEventType {
   CROS_DISKS_DEVICE_ADDED,
   CROS_DISKS_DEVICE_REMOVED,
   CROS_DISKS_DEVICE_SCANNED,
-};
-
-// Additional unmount flags to be added to unmount request.
-enum UnmountOptions {
-  UNMOUNT_OPTIONS_NONE,
-  UNMOUNT_OPTIONS_LAZY,  // Do lazy unmount.
 };
 
 // Mount option to control write permission to a device.
@@ -292,7 +293,7 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) CrosDisksClient : public DBusClient {
   // The argument is the unmount error code.
   typedef base::OnceCallback<void(MountError error_code)> UnmountCallback;
 
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
     // Called when a mount event signal is received.
     virtual void OnMountEvent(MountEventType event_type,
@@ -308,9 +309,6 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) CrosDisksClient : public DBusClient {
     // Called when a RenameCompleted signal is received.
     virtual void OnRenameCompleted(RenameError error_code,
                                    const std::string& device_path) = 0;
-
-   protected:
-    virtual ~Observer() = default;
   };
 
   ~CrosDisksClient() override;
@@ -341,7 +339,6 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) CrosDisksClient : public DBusClient {
   // Calls Unmount method.  On method call completion, |callback| is called
   // with the error code.
   virtual void Unmount(const std::string& device_path,
-                       UnmountOptions options,
                        UnmountCallback callback) = 0;
 
   // Calls EnumerateDevices method.  |callback| is called after the

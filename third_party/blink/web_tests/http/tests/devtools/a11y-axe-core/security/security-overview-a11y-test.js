@@ -7,20 +7,11 @@
   await TestRunner.loadModule('axe_core_test_runner');
   await TestRunner.showPanel('security');
 
-  // Using an insecure request since the insecure overview page encompasses the most elements.
-  /** @type {!Protocol.Security.InsecureContentStatus} */
-  const insecureContentStatus = {
-    ranMixedContent: false,
-    displayedMixedContent: false,
-    ranContentWithCertErrors: false,
-    displayedContentWithCertErrors: true,
-    ranInsecureContentStyle: Protocol.Security.SecurityState.Insecure,
-    displayedInsecureContentStyle: Protocol.Security.SecurityState.Neutral
-  };
-  const pageSecurityState = new Security.PageSecurityState(Protocol.Security.SecurityState.Secure, [], insecureContentStatus, null);
-
+  const pageVisibleSecurityState = new Security.PageVisibleSecurityState(
+    Protocol.Security.SecurityState.Secure, /* certificateSecurityState= */ null,
+    /* safetyTipsInfo= */ null, /* securityStateIssueIds= */ []);
   TestRunner.mainTarget.model(Security.SecurityModel).dispatchEventToListeners(
-    Security.SecurityModel.Events.SecurityStateChanged, pageSecurityState);
+    Security.SecurityModel.Events.VisibleSecurityStateChanged, pageVisibleSecurityState);
   const request = new SDK.NetworkRequest(0, 'http://foo.test', 'https://foo.test', 0, 0, null);
   request.setBlockedReason(Protocol.Network.BlockedReason.MixedContent);
   request.mixedContentType = 'blockable';

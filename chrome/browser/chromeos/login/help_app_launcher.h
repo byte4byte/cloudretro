@@ -40,6 +40,11 @@ class HelpAppLauncher : public base::RefCountedThreadSafe<HelpAppLauncher> {
     HELP_WILCO_BATTERY_CHARGER = 9383188,
     // Shown as "Learn more" for Wilco notifications related to dock station.
     HELP_WILCO_DOCK = 9385025,
+    // Shown under "Need help?" button on parent access dialog.
+    HELP_PARENT_ACCESS_CODE = 7307262,
+    // Shown as "Learn more" for ADB sideloading dialog. The original URL is
+    // https://support.google.com/chromebook/?p=develop_android_apps
+    HELP_ADB_SIDELOADING = 9770692,
   };
 
   // The dialog is shown as a child of |parent_window|. If |parent_window| is

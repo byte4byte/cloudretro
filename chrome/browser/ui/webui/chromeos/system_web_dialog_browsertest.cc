@@ -7,7 +7,8 @@
 #include "ash/public/cpp/test/shell_test_api.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
-#include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
+#include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
@@ -18,19 +19,15 @@
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/common/page_zoom.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/common/web_preferences.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "url/gurl.h"
 
 namespace chromeos {
 
 namespace {
-
-constexpr char kTestUser[] = "test-user@gmail.com";
-constexpr char kTestUserGaiaId[] = "1234567890";
 
 class MockSystemWebDialog : public SystemWebDialogDelegate {
  public:
@@ -54,29 +51,30 @@ class MockSystemWebDialog : public SystemWebDialogDelegate {
 
 class SystemWebDialogLoginTest : public LoginManagerTest {
  public:
-  SystemWebDialogLoginTest()
-      : LoginManagerTest(false, true /* should_initialize_webui */) {}
+  SystemWebDialogLoginTest() : LoginManagerTest() {
+    login_mixin_.AppendRegularUsers(1);
+  }
   ~SystemWebDialogLoginTest() override = default;
+
+ protected:
+  LoginManagerMixin login_mixin_{&mixin_host_};
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SystemWebDialogLoginTest);
 };
 
+using SystemWebDialogOobeTest = OobeBaseTest;
+
 // Verifies that system dialogs are modal before login (e.g. during OOBE).
-IN_PROC_BROWSER_TEST_F(SystemWebDialogLoginTest, ModalTest) {
+IN_PROC_BROWSER_TEST_F(SystemWebDialogOobeTest, ModalTest) {
   auto* dialog = new MockSystemWebDialog();
   dialog->ShowSystemDialog();
   EXPECT_TRUE(ash::ShellTestApi().IsSystemModalWindowOpen());
 }
 
-IN_PROC_BROWSER_TEST_F(SystemWebDialogLoginTest, PRE_NonModalTest) {
-  RegisterUser(AccountId::FromUserEmailGaiaId(kTestUser, kTestUserGaiaId));
-  StartupUtils::MarkOobeCompleted();
-}
-
 // Verifies that system dialogs are not modal and always-on-top after login.
 IN_PROC_BROWSER_TEST_F(SystemWebDialogLoginTest, NonModalTest) {
-  LoginUser(AccountId::FromUserEmailGaiaId(kTestUser, kTestUserGaiaId));
+  LoginUser(login_mixin_.users()[0].account_id);
   auto* dialog = new MockSystemWebDialog();
   dialog->ShowSystemDialog();
   EXPECT_FALSE(ash::ShellTestApi().IsSystemModalWindowOpen());
@@ -104,9 +102,6 @@ IN_PROC_BROWSER_TEST_F(SystemWebDialogTest, FontSize) {
   const int kDefaultFontSize = kDefaultPrefs.default_font_size;
   const int kDefaultFixedFontSize = kDefaultPrefs.default_fixed_font_size;
 
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(features::kSplitSettings);
-
   // Set the browser font sizes to non-default values.
   PrefService* profile_prefs = browser()->profile()->GetPrefs();
   profile_prefs->SetInteger(prefs::kWebKitDefaultFontSize,
@@ -128,11 +123,8 @@ IN_PROC_BROWSER_TEST_F(SystemWebDialogTest, FontSize) {
 }
 
 IN_PROC_BROWSER_TEST_F(SystemWebDialogTest, PageZoom) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(features::kSplitSettings);
-
   // Set the default browser page zoom to 150%.
-  double level = content::ZoomFactorToZoomLevel(1.5);
+  double level = blink::PageZoomFactorToZoomLevel(1.5);
   browser()->profile()->GetZoomLevelPrefs()->SetDefaultZoomLevelPref(level);
 
   // Open a system dialog.
@@ -142,8 +134,8 @@ IN_PROC_BROWSER_TEST_F(SystemWebDialogTest, PageZoom) {
   // Dialog page zoom is still 100%.
   auto* web_contents = dialog->GetWebUIForTest()->GetWebContents();
   double dialog_level = content::HostZoomMap::GetZoomLevel(web_contents);
-  EXPECT_TRUE(content::ZoomValuesEqual(dialog_level,
-                                       content::ZoomFactorToZoomLevel(1.0)))
+  EXPECT_TRUE(blink::PageZoomValuesEqual(dialog_level,
+                                         blink::PageZoomFactorToZoomLevel(1.0)))
       << dialog_level;
 }
 

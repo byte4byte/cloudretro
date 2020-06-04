@@ -26,8 +26,6 @@
 #include "chrome/common/webui_url_constants.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user_names.h"
-#include "content/public/common/service_manager_connection.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace {
 LoginScreenClient* g_login_screen_client_instance = nullptr;
@@ -132,11 +130,22 @@ void LoginScreenClient::AuthenticateUserWithEasyUnlock(
   }
 }
 
-bool LoginScreenClient::ValidateParentAccessCode(
+void LoginScreenClient::AuthenticateUserWithChallengeResponse(
     const AccountId& account_id,
-    const std::string& access_code) {
+    base::OnceCallback<void(bool)> callback) {
+  if (delegate_) {
+    delegate_->HandleAuthenticateUserWithChallengeResponse(account_id,
+                                                           std::move(callback));
+    auth_recorder_->RecordAuthMethod(
+        chromeos::LoginAuthRecorder::AuthMethod::kChallengeResponse);
+  }
+}
+
+bool LoginScreenClient::ValidateParentAccessCode(const AccountId& account_id,
+                                                 const std::string& access_code,
+                                                 base::Time validation_time) {
   return chromeos::parent_access::ParentAccessService::Get()
-      .ValidateParentAccessCode(account_id, access_code);
+      .ValidateParentAccessCode(account_id, access_code, validation_time);
 }
 
 void LoginScreenClient::HardlockPod(const AccountId& account_id) {
@@ -169,11 +178,16 @@ void LoginScreenClient::FocusOobeDialog() {
     delegate_->HandleFocusOobeDialog();
 }
 
-void LoginScreenClient::ShowGaiaSignin(bool can_close,
-                                       const AccountId& prefilled_account) {
+void LoginScreenClient::ShowGaiaSignin(const AccountId& prefilled_account) {
   if (chromeos::LoginDisplayHost::default_host()) {
     chromeos::LoginDisplayHost::default_host()->ShowGaiaDialog(
-        can_close, prefilled_account);
+        prefilled_account);
+  }
+}
+
+void LoginScreenClient::HideGaiaSignin() {
+  if (chromeos::LoginDisplayHost::default_host()) {
+    chromeos::LoginDisplayHost::default_host()->HideOobeDialog();
   }
 }
 
@@ -216,10 +230,18 @@ void LoginScreenClient::ShowResetScreen() {
   chromeos::LoginDisplayHost::default_host()->ShowResetScreen();
 }
 
-void LoginScreenClient::ShowAccountAccessHelpApp() {
+void LoginScreenClient::ShowAccountAccessHelpApp(
+    gfx::NativeWindow parent_window) {
   scoped_refptr<chromeos::HelpAppLauncher>(
-      new chromeos::HelpAppLauncher(nullptr))
+      new chromeos::HelpAppLauncher(parent_window))
       ->ShowHelpTopic(chromeos::HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+}
+
+void LoginScreenClient::ShowParentAccessHelpApp(
+    gfx::NativeWindow parent_window) {
+  scoped_refptr<chromeos::HelpAppLauncher>(
+      new chromeos::HelpAppLauncher(parent_window))
+      ->ShowHelpTopic(chromeos::HelpAppLauncher::HELP_PARENT_ACCESS_CODE);
 }
 
 void LoginScreenClient::ShowLockScreenNotificationSettings() {

@@ -15,6 +15,7 @@
 #include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "gpu/command_buffer/service/service_utils.h"
@@ -23,7 +24,6 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/config/gpu_util.h"
-#include "gpu/ipc/gpu_in_process_thread_service.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -43,19 +43,48 @@ base::Lock& GetLock() {
   return *lock;
 }
 
-// We expect |GetLock()| to be acquired before accessing this variable.
+// We expect GetLock() to be acquired before accessing these variables.
 TestGpuServiceHolder* g_holder = nullptr;
+bool g_should_register_listener = true;
+bool g_registered_listener = false;
 
-class InstanceResetter : public testing::EmptyTestEventListener {
+class InstanceResetter
+    : public testing::EmptyTestEventListener,
+      public base::test::TaskEnvironment::DestructionObserver {
  public:
-  InstanceResetter() = default;
-  ~InstanceResetter() override = default;
+  InstanceResetter() {
+    base::test::TaskEnvironment::AddDestructionObserver(this);
+  }
 
+  ~InstanceResetter() override {
+    base::test::TaskEnvironment::RemoveDestructionObserver(this);
+  }
+
+  // testing::EmptyTestEventListener:
   void OnTestEnd(const testing::TestInfo& test_info) override {
+    {
+      base::AutoLock locked(GetLock());
+      // Make sure the TestGpuServiceHolder instance is not re-created after
+      // WillDestroyCurrentTaskEnvironment().
+      // Otherwise we'll end up with GPU tasks weirdly running in a different
+      // context after the test.
+      DCHECK(!(reset_by_task_env && g_holder))
+          << "TestGpuServiceHolder was re-created after "
+             "base::test::TaskEnvironment was destroyed.";
+    }
+    reset_by_task_env = false;
+    TestGpuServiceHolder::ResetInstance();
+  }
+
+  // base::test::TaskEnvironment::DestructionObserver:
+  void WillDestroyCurrentTaskEnvironment() override {
+    reset_by_task_env = true;
     TestGpuServiceHolder::ResetInstance();
   }
 
  private:
+  bool reset_by_task_env = false;
+
   DISALLOW_COPY_AND_ASSIGN(InstanceResetter);
 };
 
@@ -65,14 +94,23 @@ class InstanceResetter : public testing::EmptyTestEventListener {
 TestGpuServiceHolder* TestGpuServiceHolder::GetInstance() {
   base::AutoLock locked(GetLock());
 
-  // Make sure all TestGpuServiceHolders are deleted at process exit.
+  // Make sure the global TestGpuServiceHolder is delete after each test. The
+  // listener will always be registered with gtest even if gtest isn't
+  // otherwised used. This should do nothing in the non-gtest case.
+  if (!g_registered_listener && g_should_register_listener) {
+    g_registered_listener = true;
+    testing::TestEventListeners& listeners =
+        testing::UnitTest::GetInstance()->listeners();
+    // |listeners| assumes ownership of InstanceResetter.
+    listeners.Append(new InstanceResetter);
+  }
+
+  // Make sure the global TestGpuServiceHolder is deleted at process exit.
   static bool registered_cleanup = false;
   if (!registered_cleanup) {
     registered_cleanup = true;
-    base::AtExitManager::RegisterTask(base::BindOnce([]() {
-      if (g_holder)
-        delete g_holder;
-    }));
+    base::AtExitManager::RegisterTask(
+        base::BindOnce(&TestGpuServiceHolder::ResetInstance));
   }
 
   if (!g_holder) {
@@ -92,14 +130,12 @@ void TestGpuServiceHolder::ResetInstance() {
 }
 
 // static
-void TestGpuServiceHolder::DestroyInstanceAfterEachTest() {
-  static bool registered_listener = false;
-  if (!registered_listener) {
-    registered_listener = true;
-    testing::TestEventListeners& listeners =
-        testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new InstanceResetter);
-  }
+void TestGpuServiceHolder::DoNotResetOnTestExit() {
+  base::AutoLock locked(GetLock());
+
+  // This must be called before GetInstance() is ever called.
+  DCHECK(!g_registered_listener);
+  g_should_register_listener = false;
 }
 
 TestGpuServiceHolder::TestGpuServiceHolder(
@@ -125,6 +161,20 @@ TestGpuServiceHolder::~TestGpuServiceHolder() {
   io_thread_.Stop();
 }
 
+scoped_refptr<gpu::SharedContextState>
+TestGpuServiceHolder::GetSharedContextState() {
+  return gpu_service_->GetContextState();
+}
+
+scoped_refptr<gl::GLShareGroup> TestGpuServiceHolder::GetShareGroup() {
+  return gpu_service_->share_group();
+}
+
+void TestGpuServiceHolder::ScheduleGpuTask(base::OnceClosure callback) {
+  DCHECK(gpu_task_sequence_);
+  gpu_task_sequence_->ScheduleTask(std::move(callback), {});
+}
+
 void TestGpuServiceHolder::InitializeOnGpuThread(
     const gpu::GpuPreferences& gpu_preferences,
     base::WaitableEvent* completion) {
@@ -135,14 +185,14 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
     bool use_swiftshader = gpu_preferences.use_vulkan ==
                            gpu::VulkanImplementationName::kSwiftshader;
 
-#ifndef USE_X11
+#if !defined(USE_X11)
     // TODO(samans): Support Swiftshader on more platforms.
     // https://crbug.com/963988
     LOG_IF(ERROR, use_swiftshader)
         << "Unable to use Vulkan Swiftshader on this platform. Falling back to "
            "GPU.";
     use_swiftshader = false;
-#endif
+#endif  // !defined(USE_X11)
     vulkan_implementation_ = gpu::CreateVulkanImplementation(use_swiftshader);
     if (!vulkan_implementation_ ||
         !vulkan_implementation_->InitializeVulkanInstance(
@@ -175,6 +225,7 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
       /*gpu_info_for_hardware_gpu=*/gpu::GPUInfo(),
       /*gpu_feature_info_for_hardware_gpu=*/gpu::GpuFeatureInfo(),
       /*gpu_extra_info=*/gpu::GpuExtraInfo(),
+      /*device_perf_info=*/base::nullopt,
 #if BUILDFLAG(ENABLE_VULKAN)
       vulkan_implementation_.get(),
 #else
@@ -193,23 +244,29 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
       /*shutdown_event=*/nullptr);
 
   task_executor_ = std::make_unique<gpu::GpuInProcessThreadService>(
-      gpu_thread_.task_runner(), gpu_service_->scheduler(),
+      this, gpu_thread_.task_runner(), gpu_service_->GetGpuScheduler(),
       gpu_service_->sync_point_manager(), gpu_service_->mailbox_manager(),
-      gpu_service_->share_group(),
       gpu_service_->gpu_channel_manager()
           ->default_offscreen_surface()
           ->GetFormat(),
       gpu_service_->gpu_feature_info(),
       gpu_service_->gpu_channel_manager()->gpu_preferences(),
       gpu_service_->shared_image_manager(),
-      gpu_service_->gpu_channel_manager()->program_cache(),
-      gpu_service_->GetContextState());
+      gpu_service_->gpu_channel_manager()->program_cache());
+
+  // TODO(weiliangc): Since SkiaOutputSurface should not depend on command
+  // buffer, the |gpu_task_sequence_| should be coming from
+  // SkiaOutputSurfaceDependency. SkiaOutputSurfaceDependency cannot be
+  // initialized here because the it will not have correct client thread set up
+  // when unit tests are running in parallel.
+  gpu_task_sequence_ = task_executor_->CreateSequence();
 
   completion->Signal();
 }
 
 void TestGpuServiceHolder::DeleteOnGpuThread() {
   task_executor_.reset();
+  gpu_task_sequence_.reset();
   gpu_service_.reset();
 }
 

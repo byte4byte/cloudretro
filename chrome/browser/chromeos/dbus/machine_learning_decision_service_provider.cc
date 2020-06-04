@@ -5,8 +5,9 @@
 #include "chrome/browser/chromeos/dbus/machine_learning_decision_service_provider.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "chrome/browser/chromeos/power/ml/user_activity_controller.h"
-#include "chromeos/constants/devicetype.h"
+#include "chrome/common/chrome_features.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -15,8 +16,7 @@ namespace chromeos {
 
 MachineLearningDecisionServiceProvider::MachineLearningDecisionServiceProvider()
     : user_activity_controller_(
-          std::make_unique<power::ml::UserActivityController>()),
-      weak_ptr_factory_(this) {}
+          std::make_unique<power::ml::UserActivityController>()) {}
 
 MachineLearningDecisionServiceProvider::
     ~MachineLearningDecisionServiceProvider() = default;
@@ -29,8 +29,8 @@ void MachineLearningDecisionServiceProvider::Start(
       base::BindRepeating(
           &MachineLearningDecisionServiceProvider::ShouldDeferScreenDim,
           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&MachineLearningDecisionServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&MachineLearningDecisionServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void MachineLearningDecisionServiceProvider::OnExported(
@@ -48,9 +48,9 @@ void MachineLearningDecisionServiceProvider::ShouldDeferScreenDim(
   std::unique_ptr<dbus::Response> response =
       dbus::Response::FromMethodCall(method_call);
 
-  // Smart dim only works on chromebook devices. Simply return false on other
-  // device types.
-  if (chromeos::GetDeviceType() != chromeos::DeviceType::kChromebook) {
+  // Smart dim only works when features::kSmartDim is enabled. Simply return
+  // false otherwise.
+  if (!base::FeatureList::IsEnabled(features::kSmartDim)) {
     SendSmartDimDecision(std::move(response), std::move(response_sender),
                          false);
     return;
@@ -68,7 +68,7 @@ void MachineLearningDecisionServiceProvider::SendSmartDimDecision(
     bool defer_dimming) {
   dbus::MessageWriter writer(response.get());
   writer.AppendBool(defer_dimming);
-  response_sender.Run(std::move(response));
+  std::move(response_sender).Run(std::move(response));
 }
 
 }  // namespace chromeos

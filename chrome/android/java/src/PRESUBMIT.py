@@ -79,11 +79,12 @@ def _CheckAlertDialogBuilder(input_api, output_api):
   # general, preference and FRE related UIs are not relevant to VR mode.
   blacklist = (
       BROWSER_ROOT + 'browserservices/ClearDataDialogActivity.java',
-      BROWSER_ROOT + 'init/InvalidStartupDialog.java',
+      BROWSER_ROOT + 'browsing_data/ConfirmImportantSitesDialogFragment.java',
+      BROWSER_ROOT + 'browsing_data/OtherFormsOfHistoryDialogFragment.java',
+      BROWSER_ROOT + 'datareduction/settings/DataReductionStatsPreference.java',
       BROWSER_ROOT + 'password_manager/AccountChooserDialog.java',
       BROWSER_ROOT + 'password_manager/AutoSigninFirstRunDialog.java',
-      BROWSER_ROOT + r'preferences[\\\/].*',
-      BROWSER_ROOT + 'signin/AccountAdder.java',
+      BROWSER_ROOT + r'settings[\\\/].*',
       BROWSER_ROOT + 'signin/AccountPickerDialogFragment.java',
       BROWSER_ROOT + 'signin/AccountSigninView.java',
       BROWSER_ROOT + 'signin/ConfirmImportSyncDataDialog.java',
@@ -91,6 +92,14 @@ def _CheckAlertDialogBuilder(input_api, output_api):
       BROWSER_ROOT + 'signin/ConfirmSyncDataStateMachineDelegate.java',
       BROWSER_ROOT + 'signin/SigninFragmentBase.java',
       BROWSER_ROOT + 'signin/SignOutDialogFragment.java',
+      BROWSER_ROOT + 'site_settings/AddExceptionPreference.java',
+      BROWSER_ROOT + 'site_settings/ChosenObjectSettings.java',
+      BROWSER_ROOT + 'site_settings/ManageSpaceActivity.java',
+      BROWSER_ROOT + 'site_settings/ManageSpaceActivity.java',
+      BROWSER_ROOT + 'site_settings/SingleCategorySettings.java',
+      BROWSER_ROOT + 'site_settings/SingleWebsiteSettings.java',
+      BROWSER_ROOT + 'sync/settings/ManageSyncSettings.java',
+      BROWSER_ROOT + 'sync/settings/SyncAndServicesSettings.java',
       BROWSER_ROOT + 'sync/ui/PassphraseCreationDialogFragment.java',
       BROWSER_ROOT + 'sync/ui/PassphraseDialogFragment.java',
       BROWSER_ROOT + 'sync/ui/PassphraseTypeDialogFragment.java',
@@ -101,14 +110,11 @@ def _CheckAlertDialogBuilder(input_api, output_api):
   below.
 
   We recommend you use ModalDialogProperties to show a dialog whenever possible
-  to support VR mode and Touchless mode. You could only keep the AlertDialog if
-  you are certain that
-    1) Your new AlertDialog is not used in VR mode (e.g. pereference, FRE)
-    2) You have handled Touchless display if Touchless mode is relevant
+  to support VR mode. You could only keep the AlertDialog if you are certain
+  that your new AlertDialog is not used in VR mode (e.g. pereference, FRE)
 
   If you are in doubt, contact
   //src/chrome/android/java/src/org/chromium/chrome/browser/vr/VR_JAVA_OWNERS
-  //src/chrome/android/touchless/OWNERS
   '''
   error_files = []
   result = _CheckReIgnoreComment(input_api, output_api, error_msg, blacklist,
@@ -150,7 +156,7 @@ def _CheckCompatibleAlertDialogBuilder(input_api, output_api):
       BROWSER_ROOT + 'externalnav/ExternalNavigationDelegateImpl.java',
       BROWSER_ROOT + 'payments/AndroidPaymentApp.java',
       BROWSER_ROOT + 'permissions/AndroidPermissionRequester.java',
-      BROWSER_ROOT + 'share/ShareHelper.java',
+      BROWSER_ROOT + 'share/ShareDelegateImpl.java',
       BROWSER_ROOT + 'util/AccessibilityUtil.java',
       BROWSER_ROOT + 'webapps/AddToHomescreenDialog.java',
       BROWSER_ROOT + 'webapps/WebappOfflineDialog.java',
@@ -161,14 +167,11 @@ def _CheckCompatibleAlertDialogBuilder(input_api, output_api):
   constructors, listed below.
 
   We recommend you use ModalDialogProperties to show a dialog whenever possible
-  to support VR mode and Touchless mode. You could only keep the AlertDialog if
-  you are certain that
-    1) Your new AlertDialog is not used in VR mode (e.g. pereference, FRE)
-    2) You have handled Touchless display if Touchless mode is relevant
+  to support VR mode. You could only keep the AlertDialog if you are certain
+  that your new AlertDialog is not used in VR mode (e.g. pereference, FRE)
 
   If you are in doubt, contact
   //src/chrome/android/java/src/org/chromium/chrome/browser/vr/VR_JAVA_OWNERS
-  //src/chrome/android/touchless/OWNERS
   '''
   return _CheckReIgnoreComment(input_api, output_api, error_msg, blacklist,
                                NEW_COMPATIBLE_ALERTDIALOG_BUILDER_RE)

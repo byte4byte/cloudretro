@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/browser/ui/confirm_bubble_model.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
@@ -21,11 +22,35 @@
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
+#include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
+
+namespace {
+
+std::unique_ptr<views::View> CreateExtraView(views::ButtonListener* listener) {
+  auto help_button = CreateVectorImageButtonWithNativeTheme(
+      listener, vector_icons::kHelpOutlineIcon);
+  help_button->SetFocusForPlatform();
+  help_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  return help_button;
+}
+
+}  // namespace
 
 ConfirmBubbleViews::ConfirmBubbleViews(
     std::unique_ptr<ConfirmBubbleModel> model)
     : model_(std::move(model)), help_button_(nullptr) {
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK, model_->GetButtonLabel(ui::DIALOG_BUTTON_OK));
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_CANCEL,
+      model_->GetButtonLabel(ui::DIALOG_BUTTON_CANCEL));
+  DialogDelegate::SetAcceptCallback(base::BindOnce(
+      &ConfirmBubbleModel::Accept, base::Unretained(model_.get())));
+  DialogDelegate::SetCancelCallback(base::BindOnce(
+      &ConfirmBubbleModel::Cancel, base::Unretained(model_.get())));
+  help_button_ = DialogDelegate::SetExtraView(::CreateExtraView(this));
+
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
   views::GridLayout* layout =
@@ -39,7 +64,9 @@ ConfirmBubbleViews::ConfirmBubbleViews(
                 kMaxMessageWidth, false);
 
   // Add the message label.
-  auto label = std::make_unique<views::Label>(model_->GetMessageText());
+  auto label = std::make_unique<views::Label>(
+      model_->GetMessageText(), views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   DCHECK(!label->GetText().empty());
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetMultiLine(true);
@@ -51,50 +78,6 @@ ConfirmBubbleViews::ConfirmBubbleViews(
 }
 
 ConfirmBubbleViews::~ConfirmBubbleViews() {
-}
-
-base::string16 ConfirmBubbleViews::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  switch (button) {
-    case ui::DIALOG_BUTTON_OK:
-      return model_->GetButtonLabel(ConfirmBubbleModel::BUTTON_OK);
-    case ui::DIALOG_BUTTON_CANCEL:
-      return model_->GetButtonLabel(ConfirmBubbleModel::BUTTON_CANCEL);
-    default:
-      NOTREACHED();
-      return DialogDelegateView::GetDialogButtonLabel(button);
-  }
-}
-
-bool ConfirmBubbleViews::IsDialogButtonEnabled(ui::DialogButton button) const {
-  switch (button) {
-    case ui::DIALOG_BUTTON_OK:
-      return !!(model_->GetButtons() & ConfirmBubbleModel::BUTTON_OK);
-    case ui::DIALOG_BUTTON_CANCEL:
-      return !!(model_->GetButtons() & ConfirmBubbleModel::BUTTON_CANCEL);
-    default:
-      NOTREACHED();
-      return false;
-  }
-}
-
-std::unique_ptr<views::View> ConfirmBubbleViews::CreateExtraView() {
-  auto help_button = CreateVectorImageButton(this);
-  help_button->SetFocusForPlatform();
-  help_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-  help_button_ = help_button.get();
-  SetImageFromVectorIcon(help_button_, vector_icons::kHelpOutlineIcon);
-  return help_button;
-}
-
-bool ConfirmBubbleViews::Cancel() {
-  model_->Cancel();
-  return true;
-}
-
-bool ConfirmBubbleViews::Accept() {
-  model_->Accept();
-  return true;
 }
 
 ui::ModalType ConfirmBubbleViews::GetModalType() const {
@@ -117,13 +100,9 @@ void ConfirmBubbleViews::ButtonPressed(views::Button* sender,
   }
 }
 
-void ConfirmBubbleViews::ViewHierarchyChanged(
-    const views::ViewHierarchyChangedDetails& details) {
-  if (details.is_add && details.child == this && GetWidget()) {
-    GetWidget()->GetRootView()->GetViewAccessibility().OverrideDescribedBy(
-        label_);
-  }
-  DialogDelegateView::ViewHierarchyChanged(details);
+void ConfirmBubbleViews::OnDialogInitialized() {
+  GetWidget()->GetRootView()->GetViewAccessibility().OverrideDescribedBy(
+      label_);
 }
 
 namespace chrome {

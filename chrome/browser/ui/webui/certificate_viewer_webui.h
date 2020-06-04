@@ -54,8 +54,7 @@ class CertificateViewerDialog : public ui::WebDialogDelegate {
       std::vector<content::WebUIMessageHandler*>* handlers) const override;
   void GetDialogSize(gfx::Size* size) const override;
   std::string GetDialogArgs() const override;
-  void OnDialogShown(content::WebUI* webui,
-                     content::RenderViewHost* render_view_host) override;
+  void OnDialogShown(content::WebUI* webui) override;
   void OnDialogClosed(const std::string& json_retval) override;
   void OnCloseContents(content::WebContents* source,
                        bool* out_close_dialog) override;
@@ -89,18 +88,18 @@ class CertificateViewerDialogHandler : public content::WebUIMessageHandler {
   // chain.
   //
   // The input is an integer index to the certificate in the chain to export.
-  void ExportCertificate(const base::ListValue* args);
+  void HandleExportCertificate(const base::ListValue* args);
 
-  // Gets the details for a specific certificate in the certificate chain. Calls
-  // the javascript function cert_viewer.getCertificateFields with a tree
-  // structure containing the fields and values for certain nodes.
+  // Gets the details for a specific certificate in the certificate chain.
+  // Responds with a tree structure containing the fields and values for certain
+  // nodes.
   //
   // The input is an integer index to the certificate in the chain to view.
-  void RequestCertificateFields(const base::ListValue* args);
+  void HandleRequestCertificateFields(const base::ListValue* args);
 
-  // Helper function to get the certificate index from |args|. Returns -1 if
-  // the index is out of range.
-  int GetCertificateIndex(const base::ListValue* args) const;
+  // Helper function to get the certificate index. Returns -1 if the index is
+  // out of range.
+  int GetCertificateIndex(int requested_index) const;
 
   // The dialog.
   CertificateViewerDialog* dialog_;

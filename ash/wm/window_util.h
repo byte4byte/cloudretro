@@ -10,6 +10,7 @@
 
 #include "ash/ash_export.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/wm/core/window_util.h"
 
 namespace aura {
 class Window;
@@ -17,31 +18,17 @@ class Window;
 
 namespace gfx {
 class Point;
-}
-
-namespace ui {
-class Event;
+class Rect;
 }
 
 namespace ash {
 
-namespace wm {
+namespace window_util {
 
-// Utility functions for window activation.
-// DEPRECATED: Prefer the functions in ui/wm/core/window_util.h.
-ASH_EXPORT void ActivateWindow(aura::Window* window);
-ASH_EXPORT void DeactivateWindow(aura::Window* window);
-ASH_EXPORT bool IsActiveWindow(aura::Window* window);
+// See ui/wm/core/window_util.h for ActivateWindow(), DeactivateWindow(),
+// IsActiveWindow() and CanActivateWindow().
 ASH_EXPORT aura::Window* GetActiveWindow();
-ASH_EXPORT bool CanActivateWindow(aura::Window* window);
 ASH_EXPORT aura::Window* GetFocusedWindow();
-
-// Retrieves the activatable window for |window|. If |window| is activatable,
-// this will just return it, otherwise it will climb the parent/transient parent
-// chain looking for a window that is activatable, per the ActivationController.
-// If you're looking for a function to get the activatable "top level" window,
-// this is probably what you're looking for.
-ASH_EXPORT aura::Window* GetActivatableWindow(aura::Window* window);
 
 // Returns the window with capture, null if no window currently has capture.
 ASH_EXPORT aura::Window* GetCaptureWindow();
@@ -71,11 +58,6 @@ ASH_EXPORT void SetAutoHideShelf(aura::Window* window, bool autohide);
 // Moves |window| to the root window for the given |display_id|, if it is not
 // already in the same root window. Returns true if |window| was moved.
 ASH_EXPORT bool MoveWindowToDisplay(aura::Window* window, int64_t display_id);
-
-// Moves |window| to the root window where the |event| occurred, if it is not
-// already in the same root window. Returns true if |window| was moved.
-ASH_EXPORT bool MoveWindowToEventRoot(aura::Window* window,
-                                      const ui::Event& event);
 
 // Convenience for window->delegate()->GetNonClientComponent(location) that
 // returns HTNOWHERE if window->delegate() is null.
@@ -109,14 +91,42 @@ ASH_EXPORT bool ShouldExcludeForOverview(const aura::Window* window);
 ASH_EXPORT void RemoveTransientDescendants(
     std::vector<aura::Window*>* out_window_list);
 
-// Hides a list of |windows| without any animations, in case users wants to hide
-// them right away or apply their own animations. Setting |minimize| to true
-// will result in also setting the window states to minimized.
-ASH_EXPORT void HideAndMaybeMinimizeWithoutAnimation(
-    std::vector<aura::Window*> windows,
-    bool minimize);
+// Minimizes a hides list of |windows| without any animations.
+ASH_EXPORT void MinimizeAndHideWithoutAnimation(
+    const std::vector<aura::Window*>& windows);
 
-}  // namespace wm
+// Returns the RootWindow at |point_in_screen| in virtual screen coordinates.
+// Returns nullptr if the root window does not exist at the given point.
+ASH_EXPORT aura::Window* GetRootWindowAt(const gfx::Point& point_in_screen);
+
+// Returns the RootWindow that shares the most area with |rect_in_screen| in
+// virtual screen coordinates.
+ASH_EXPORT aura::Window* GetRootWindowMatching(const gfx::Rect& rect_in_screen);
+
+// Returns true if |window| is an ARC app window.
+ASH_EXPORT bool IsArcWindow(const aura::Window* window);
+
+// Returns true if |window| is an ARC PIP window.
+ASH_EXPORT bool IsArcPipWindow(const aura::Window* window);
+
+// Expands the Android PIP window.
+ASH_EXPORT void ExpandArcPipWindow();
+
+// Returns true if any window is being dragged, or we are in overview mode and
+// an item is being dragged around.
+bool IsAnyWindowDragged();
+
+// Returns the top window on MRU window list, or null if the list is empty.
+aura::Window* GetTopWindow();
+
+// Returns whether the top window should be minimized on back action.
+ASH_EXPORT bool ShouldMinimizeTopWindowOnBack();
+
+// Sends |ui::VKEY_BROWSER_BACK| key press and key release event to the
+// WindowTreeHost associated with |root_window|.
+void SendBackKeyEvent(aura::Window* root_window);
+
+}  // namespace window_util
 }  // namespace ash
 
 #endif  // ASH_WM_WINDOW_UTIL_H_

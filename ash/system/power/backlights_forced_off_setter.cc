@@ -9,15 +9,15 @@
 #include "ash/system/power/scoped_backlights_forced_off.h"
 #include "ash/touch/touch_devices_controller.h"
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "ui/display/manager/touch_device_manager.h"
 
 namespace ash {
 
 BacklightsForcedOffSetter::BacklightsForcedOffSetter()
-    : power_manager_observer_(this), weak_ptr_factory_(this) {
+    : power_manager_observer_(this) {
   InitDisableTouchscreenWhileScreenOff();
 
   power_manager_observer_.Add(chromeos::PowerManagerClient::Get());

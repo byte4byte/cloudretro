@@ -12,8 +12,10 @@
 #include "base/no_destructor.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
+#include "base/strings/string_piece_forward.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/device_event_log/device_event_log.h"
+#include "device/fido/win/logging.h"
 #include "device/fido/win/type_conversions.h"
 
 namespace device {
@@ -160,28 +162,10 @@ class WinWebAuthnApiImpl : public WinWebAuthnApi {
   decltype(&WebAuthNGetApiVersionNumber) get_api_version_number_ = nullptr;
 };
 
-static WinWebAuthnApi* kDefaultForTesting = nullptr;
-
 // static
 WinWebAuthnApi* WinWebAuthnApi::GetDefault() {
-  if (kDefaultForTesting) {
-    return kDefaultForTesting;
-  }
-
   static base::NoDestructor<WinWebAuthnApiImpl> api;
   return api.get();
-}
-
-// static
-void WinWebAuthnApi::SetDefaultForTesting(WinWebAuthnApi* api) {
-  DCHECK(!kDefaultForTesting);
-  kDefaultForTesting = api;
-}
-
-// static
-void WinWebAuthnApi::ClearDefaultForTesting() {
-  DCHECK(kDefaultForTesting);
-  kDefaultForTesting = nullptr;
 }
 
 WinWebAuthnApi::WinWebAuthnApi() = default;
@@ -251,14 +235,18 @@ AuthenticatorMakeCredentialBlocking(WinWebAuthnApi* webauthn_api,
   if (request.cred_protect) {
     // MakeCredentialRequestHandler rejects a request with credProtect
     // enforced=true if webauthn.dll does not support credProtect.
-    if (request.cred_protect->second &&
+    if (request.cred_protect_enforce &&
         webauthn_api->Version() < WEBAUTHN_API_VERSION_2) {
       NOTREACHED();
       return {CtapDeviceResponseCode::kCtap2ErrNotAllowed, base::nullopt};
     }
+    // Windows doesn't support the concept of
+    // CredProtectRequest::kUVOrCredIDRequiredOrBetter. So an authenticators
+    // that defaults to credProtect level three will only use level two when
+    // Chrome is setting the credProtect level for discoverable credentials.
     maybe_cred_protect_extension = WEBAUTHN_CRED_PROTECT_EXTENSION_IN{
-        /*dwCredProtect=*/static_cast<uint8_t>(request.cred_protect->first),
-        /*bRequireCredProtect=*/request.cred_protect->second,
+        /*dwCredProtect=*/static_cast<uint8_t>(*request.cred_protect),
+        /*bRequireCredProtect=*/request.cred_protect_enforce,
     };
     extensions.emplace_back(WEBAUTHN_EXTENSION{
         /*pwszExtensionIdentifier=*/WEBAUTHN_EXTENSIONS_IDENTIFIER_CRED_PROTECT,
@@ -283,7 +271,7 @@ AuthenticatorMakeCredentialBlocking(WinWebAuthnApi* webauthn_api,
   // Note that entries in |exclude_list_credentials| hold pointers
   // into request.exclude_list.
   std::vector<WEBAUTHN_CREDENTIAL_EX> exclude_list_credentials =
-      ToWinCredentialExVector(&request.exclude_list.value());
+      ToWinCredentialExVector(&request.exclude_list);
   std::vector<WEBAUTHN_CREDENTIAL_EX*> exclude_list_ptrs;
   std::transform(
       exclude_list_credentials.begin(), exclude_list_credentials.end(),
@@ -315,14 +303,24 @@ AuthenticatorMakeCredentialBlocking(WinWebAuthnApi* webauthn_api,
             webauthn_api->FreeCredentialAttestation(ptr);
           });
 
+  FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorMakeCredential("
+                  << "rp=" << rp_info << ", user=" << user_info
+                  << ", cose_credential_parameters="
+                  << cose_credential_parameters
+                  << ", client_data=" << client_data << ", options=" << options
+                  << ")";
   HRESULT hresult = webauthn_api->AuthenticatorMakeCredential(
       h_wnd, &rp_info, &user_info, &cose_credential_parameters, &client_data,
       &options, &credential_attestation);
   if (hresult != S_OK) {
+    FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorMakeCredential()="
+                    << webauthn_api->GetErrorName(hresult);
     return {WinErrorNameToCtapDeviceResponseCode(
                 base::as_u16cstr(webauthn_api->GetErrorName(hresult))),
             base::nullopt};
   }
+  FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorMakeCredential()="
+                  << *credential_attestation;
   return {CtapDeviceResponseCode::kSuccess,
           ToAuthenticatorMakeCredentialResponse(*credential_attestation)};
 }
@@ -410,13 +408,19 @@ AuthenticatorGetAssertionBlocking(WinWebAuthnApi* webauthn_api,
         webauthn_api->FreeAssertion(ptr);
       });
 
+  FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorGetAssertion("
+                  << "rp_id=\"" << rp_id16 << "\", client_data=" << client_data
+                  << ", options=" << options << ")";
   HRESULT hresult = webauthn_api->AuthenticatorGetAssertion(
       h_wnd, base::as_wcstr(rp_id16), &client_data, &options, &assertion);
   if (hresult != S_OK) {
+    FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorGetAssertion()="
+                    << webauthn_api->GetErrorName(hresult);
     return {WinErrorNameToCtapDeviceResponseCode(
                 base::as_u16cstr(webauthn_api->GetErrorName(hresult))),
             base::nullopt};
   }
+  FIDO_LOG(DEBUG) << "WebAuthNAuthenticatorGetAssertion()=" << *assertion;
   return {CtapDeviceResponseCode::kSuccess,
           ToAuthenticatorGetAssertionResponse(*assertion)};
 }

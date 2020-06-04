@@ -4,7 +4,8 @@
 
 #include "media/capture/video/chromeos/gpu_memory_buffer_tracker.h"
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "media/capture/video/chromeos/pixel_format_utils.h"
 #include "media/capture/video/video_capture_buffer_handle.h"
 #include "ui/gfx/geometry/size.h"
@@ -50,16 +51,15 @@ GpuMemoryBufferTracker::GetMemoryMappedAccess() {
   return std::make_unique<NullHandle>();
 }
 
-mojo::ScopedSharedBufferHandle GpuMemoryBufferTracker::GetHandleForTransit(
-    bool read_only) {
+base::UnsafeSharedMemoryRegion
+GpuMemoryBufferTracker::DuplicateAsUnsafeRegion() {
   NOTREACHED() << "Unsupported operation";
-  return mojo::ScopedSharedBufferHandle();
+  return base::UnsafeSharedMemoryRegion();
 }
 
-base::SharedMemoryHandle
-GpuMemoryBufferTracker::GetNonOwnedSharedMemoryHandleForLegacyIPC() {
+mojo::ScopedSharedBufferHandle GpuMemoryBufferTracker::DuplicateAsMojoBuffer() {
   NOTREACHED() << "Unsupported operation";
-  return base::SharedMemoryHandle();
+  return mojo::ScopedSharedBufferHandle();
 }
 
 gfx::GpuMemoryBufferHandle GpuMemoryBufferTracker::GetGpuMemoryBufferHandle() {

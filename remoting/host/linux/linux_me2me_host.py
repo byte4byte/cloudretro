@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,11 +9,9 @@
 # This script is intended to run continuously as a background daemon
 # process, running under an ordinary (non-root) user account.
 
-from __future__ import print_function
-
 import sys
-if sys.version_info[0] != 2 or sys.version_info[1] < 7:
-  print("This script requires Python version 2.7")
+if sys.version_info[0] != 3 or sys.version_info[1] < 3:
+  print("This script requires Python version 3.3")
   sys.exit(1)
 
 import argparse
@@ -29,7 +27,6 @@ import os
 import pipes
 import platform
 import psutil
-import platform
 import pwd
 import re
 import signal
@@ -77,9 +74,13 @@ XORG_DUMMY_VIDEO_RAM = 1048576 # KiB
 # defaults can be overridden in ~/.profile.
 DEFAULT_SIZES = "1600x1200,3840x2560"
 
-# If RANDR is not available, use a smaller default size. Only a single
-# resolution is supported in this case.
-DEFAULT_SIZE_NO_RANDR = "1600x1200"
+# Xorg's dummy driver only supports switching between preconfigured sizes. To
+# make resize-to-fit somewhat useful, include several common resolutions by
+# default.
+DEFAULT_SIZES_XORG = ("1600x1200,1600x900,1440x900,1366x768,1360x768,1280x1024,"
+                      "1280x800,1280x768,1280x720,1152x864,1024x768,1024x600,"
+                      "800x600,1680x1050,1920x1080,1920x1200,2560x1440,"
+                      "2560x1600,3840x2160,3840x2560")
 
 SCRIPT_PATH = os.path.abspath(sys.argv[0])
 SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
@@ -99,6 +100,8 @@ HOME_DIR = os.environ["HOME"]
 CONFIG_DIR = os.path.join(HOME_DIR, ".config/chrome-remote-desktop")
 SESSION_FILE_PATH = os.path.join(HOME_DIR, ".chrome-remote-desktop-session")
 SYSTEM_SESSION_FILE_PATH = "/etc/chrome-remote-desktop-session"
+
+DEBIAN_XSESSION_PATH = "/etc/X11/Xsession"
 
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
@@ -148,7 +151,7 @@ COMMAND_NOT_EXECUTABLE_EXIT_CODE = 126
 
 # Globals needed by the atexit cleanup() handler.
 g_desktop = None
-g_host_hash = hashlib.md5(socket.gethostname()).hexdigest()
+g_host_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()
 
 def gen_xorg_config(sizes):
   return (
@@ -241,24 +244,8 @@ def is_supported_platform():
       os.path.isfile(SYSTEM_SESSION_FILE_PATH)):
     return True
 
-  # The host has been tested only on Ubuntu.
-  distribution = platform.linux_distribution()
-  return (distribution[0]).lower() == 'ubuntu'
-
-
-def locate_xvfb_randr():
-  """Returns a path to our RANDR-supporting Xvfb server, if it is found on the
-  system. Otherwise returns None."""
-
-  xvfb = "/usr/bin/Xvfb-randr"
-  if os.path.exists(xvfb):
-    return xvfb
-
-  xvfb = os.path.join(SCRIPT_DIR, "Xvfb-randr")
-  if os.path.exists(xvfb):
-    return xvfb
-
-  return None
+  # The session chooser expects a Debian-style Xsession script.
+  return os.path.isfile(DEBIAN_XSESSION_PATH);
 
 
 class Config:
@@ -347,7 +334,6 @@ class Host:
   def __init__(self):
     # Note: Initial values are never used.
     self.host_id = None
-    self.gcd_device_id = None
     self.host_name = None
     self.host_secret_hash = None
     self.private_key = None
@@ -355,19 +341,16 @@ class Host:
   def copy_from(self, config):
     try:
       self.host_id = config.get("host_id")
-      self.gcd_device_id = config.get("gcd_device_id")
       self.host_name = config["host_name"]
       self.host_secret_hash = config.get("host_secret_hash")
       self.private_key = config["private_key"]
     except KeyError:
       return False
-    return bool(self.host_id or self.gcd_device_id)
+    return bool(self.host_id)
 
   def copy_to(self, config):
     if self.host_id:
       config["host_id"] = self.host_id
-    if self.gcd_device_id:
-      config["gcd_device_id"] = self.gcd_device_id
     config["host_name"] = self.host_name
     config["host_secret_hash"] = self.host_secret_hash
     config["private_key"] = self.private_key
@@ -392,7 +375,7 @@ class SessionOutputFilterThread(threading.Thread):
         print("IOError when reading session output: ", e)
         return
 
-      if line == "":
+      if line == b"":
         # EOF reached. Just stop the thread.
         return
 
@@ -401,10 +384,11 @@ class SessionOutputFilterThread(threading.Thread):
 
       if time.time() - started_time >= SESSION_OUTPUT_TIME_LIMIT_SECONDS:
         is_logging = False
-        print("Suppressing rest of the session output.")
-        sys.stdout.flush()
+        print("Suppressing rest of the session output.", flush=True)
       else:
-        print("Session output: %s" % line.strip("\n"))
+        # Pass stream bytes through as is instead of decoding and encoding.
+        sys.stdout.buffer.write(
+            "Session output: ".encode(sys.stdout.encoding) + line);
         sys.stdout.flush()
 
 
@@ -439,6 +423,11 @@ class Desktop:
 
   def _init_child_env(self):
     self.child_env = dict(os.environ)
+
+    # Force GDK to use the X11 backend, as otherwise parts of the host that use
+    # GTK can end up connecting to an active Wayland display instead of the
+    # CRD X11 session.
+    self.child_env["GDK_BACKEND"] = "x11"
 
     # Ensure that the software-rendering GL drivers are loaded by the desktop
     # session, instead of any hardware GL drivers installed on the system.
@@ -541,14 +530,10 @@ class Desktop:
     max_width = max([width for width, height in self.sizes])
     max_height = max([height for width, height in self.sizes])
 
-    xvfb = locate_xvfb_randr()
-    if not xvfb:
-      xvfb = "Xvfb"
-
-    logging.info("Starting %s on display :%d" % (xvfb, display))
+    logging.info("Starting Xvfb on display :%d" % display)
     screen_option = "%dx%dx24" % (max_width, max_height)
     self.x_proc = subprocess.Popen(
-        [xvfb, ":%d" % display,
+        ["Xvfb", ":%d" % display,
          "-auth", x_auth_file,
          "-nolisten", "tcp",
          "-noreset",
@@ -572,7 +557,7 @@ class Desktop:
     with tempfile.NamedTemporaryFile(
         prefix="chrome_remote_desktop_",
         suffix=".conf", delete=False) as config_file:
-      config_file.write(gen_xorg_config(self.sizes))
+      config_file.write(gen_xorg_config(self.sizes).encode())
 
     # We can't support exact resize with the current Xorg dummy driver.
     self.server_supports_exact_resize = False
@@ -627,8 +612,19 @@ class Desktop:
     # Use a separate profile for any instances of Chrome that are started in
     # the virtual session. Chrome doesn't support sharing a profile between
     # multiple DISPLAYs, but Chrome Sync allows for a reasonable compromise.
+    #
+    # M61 introduced CHROME_CONFIG_HOME, which allows specifying a different
+    # config base path while still using different user data directories for
+    # different channels (Stable, Beta, Dev). For existing users who only have
+    # chrome-profile, continue using CHROME_USER_DATA_DIR so they don't have to
+    # set up their profile again.
     chrome_profile = os.path.join(CONFIG_DIR, "chrome-profile")
-    self.child_env["CHROME_USER_DATA_DIR"] = chrome_profile
+    chrome_config_home = os.path.join(CONFIG_DIR, "chrome-config")
+    if (os.path.exists(chrome_profile)
+        and not os.path.exists(chrome_config_home)):
+      self.child_env["CHROME_USER_DATA_DIR"] = chrome_profile
+    else:
+      self.child_env["CHROME_CONFIG_HOME"] = chrome_config_home
 
     # Set SSH_AUTH_SOCK to the file name to listen on.
     if self.ssh_auth_sockname:
@@ -924,29 +920,8 @@ def choose_x_session():
         # current user.
         return ["/bin/sh", startup_file]
 
-  # Choose a session wrapper script to run the session. On some systems,
-  # /etc/X11/Xsession fails to load the user's .profile, so look for an
-  # alternative wrapper that is more likely to match the script that the
-  # system actually uses for console desktop sessions.
-  SESSION_WRAPPERS = [
-    "/usr/sbin/lightdm-session",
-    "/etc/gdm/Xsession",
-    "/etc/X11/Xsession" ]
-  for session_wrapper in SESSION_WRAPPERS:
-    if os.path.exists(session_wrapper):
-      if os.path.exists("/usr/bin/unity-2d-panel"):
-        # On Ubuntu 12.04, the default session relies on 3D-accelerated
-        # hardware. Trying to run this with a virtual X display produces
-        # weird results on some systems (for example, upside-down and
-        # corrupt displays).  So if the ubuntu-2d session is available,
-        # choose it explicitly.
-        return [session_wrapper, "/usr/bin/gnome-session --session=ubuntu-2d"]
-      else:
-        # Use the session wrapper by itself, and let the system choose a
-        # session.
-        return [session_wrapper]
-  return None
-
+  # If there's no configuration, show the user a session chooser.
+  return [HOST_BINARY_PATH, "--type=xsession_chooser"]
 
 class ParentProcessLogger(object):
   """Redirects logs to the parent process, until the host is ready or quits.
@@ -1104,7 +1079,11 @@ def run_command_with_group(command, group):
            # Close no-longer-needed file descriptors
            "6>&- 7<&- 8>&- 9>&-"
            .format(command=" ".join(map(pipes.quote, command)))],
-        preexec_fn=lambda: pre_exec(read_fd, write_fd))
+        # It'd be nice to use pass_fds instead close_fds=False. Unfortunately,
+        # pass_fds doesn't seem usable with remapping. It runs after preexec_fn,
+        # which does the remapping, but complains if the specified fds don't
+        # exist ahead of time.
+        close_fds=False, preexec_fn=lambda: pre_exec(read_fd, write_fd))
     result = process.wait()
   except OSError as e:
     logging.error("Failed to execute sg: {}".format(e.strerror))
@@ -1553,12 +1532,10 @@ Web Store: https://chrome.google.com/remotedesktop"""
   # Start logging to user-session messaging pipe if it exists.
   ParentProcessLogger.try_start_logging(USER_SESSION_MESSAGE_FD)
 
-  # If a RANDR-supporting Xvfb is not available, limit the default size to
-  # something more sensible.
-  if USE_XORG_ENV_VAR not in os.environ and locate_xvfb_randr():
-    default_sizes = DEFAULT_SIZES
+  if USE_XORG_ENV_VAR in os.environ:
+    default_sizes = DEFAULT_SIZES_XORG
   else:
-    default_sizes = DEFAULT_SIZE_NO_RANDR
+    default_sizes = DEFAULT_SIZES
 
   # Collate the list of sizes that XRANDR should support.
   if not options.size:
@@ -1620,8 +1597,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   if host.host_id:
     logging.info("Using host_id: " + host.host_id)
-  if host.gcd_device_id:
-    logging.info("Using gcd_device_id: " + host.gcd_device_id)
 
   desktop = Desktop(sizes)
 
@@ -1746,7 +1721,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
       desktop.host_ready = False
 
       # These exit-codes must match the ones used by the host.
-      # See remoting/host/host_error_codes.h.
+      # See remoting/host/host_exit_codes.h.
       # Delete the host or auth configuration depending on the returned error
       # code, so the next time this script is run, a new configuration
       # will be created and registered.

@@ -41,11 +41,8 @@ constexpr char kCRDDebugLog[] = "_debug_log";
 // Connect message parameters:
 constexpr char kCRDConnectUserName[] = "userName";
 constexpr char kCRDConnectAuth[] = "authServiceWithToken";
-constexpr char kCRDConnectDirectoryBot[] = "directoryBotJid";
-constexpr char kCRDConnectNoDialogs[] = "noDialogs";
-
-// Connect message parameter values:
-constexpr char kCRDConnectDirectoryBotValue[] = "remoting@bot.talk.google.com";
+constexpr char kCRDConnectSuppressUserDialogs[] = "suppressUserDialogs";
+constexpr char kCRDConnectSuppressNotifications[] = "suppressNotifications";
 
 // CRD host states we care about:
 constexpr char kCRDStateKey[] = "state";
@@ -96,7 +93,7 @@ void It2MeCliHost::PrintHelp() {
               .c_str());
 }
 
-It2MeCliHost::It2MeCliHost() : weak_factory_(this) {}
+It2MeCliHost::It2MeCliHost() {}
 It2MeCliHost::~It2MeCliHost() = default;
 
 void It2MeCliHost::Start() {
@@ -120,7 +117,7 @@ void It2MeCliHost::Start() {
       &It2MeCliHost::StartCRDHostAndGetCode, base::Unretained(this)));
 
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier(
-      net::NetworkChangeNotifier::Create());
+      net::NetworkChangeNotifier::CreateIfNeeded());
   ui_loop.Run();
 }
 
@@ -216,9 +213,8 @@ void It2MeCliHost::StartCRDHostAndGetCode(OAuthTokenGetter::Status status,
 
   connect_params.SetKey(kCRDConnectUserName, base::Value(user_email));
   connect_params.SetKey(kCRDConnectAuth, base::Value("oauth2:" + access_token));
-  connect_params.SetKey(kCRDConnectDirectoryBot,
-                        base::Value(kCRDConnectDirectoryBotValue));
-  connect_params.SetKey(kCRDConnectNoDialogs, base::Value(true));
+  connect_params.SetKey(kCRDConnectSuppressUserDialogs, base::Value(true));
+  connect_params.SetKey(kCRDConnectSuppressNotifications, base::Value(true));
   connect_params_ = std::move(connect_params);
 
   remote_connected_ = false;

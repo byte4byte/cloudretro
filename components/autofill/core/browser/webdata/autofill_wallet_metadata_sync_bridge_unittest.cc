@@ -17,8 +17,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/data_model/autofill_metadata.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
@@ -30,7 +29,7 @@
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/mock_autofill_webdata_backend.h"
 #include "components/autofill/core/common/autofill_constants.h"
-#include "components/sync/base/hash_util.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/model/data_batch.h"
 #include "components/sync/model/entity_data.h"
 #include "components/sync/model/mock_model_type_change_processor.h"
@@ -86,6 +85,8 @@ const char kLocalAddr1ServerId[] = "e171e3ed-858a-4dd5-9bf3-8517f14ba5fc";
 const char kLocalAddr2ServerId[] = "fa232b9a-f248-4e5a-8d76-d46f821c0c5f";
 
 const char kLocaleString[] = "en-US";
+
+const char kDefaultCacheGuid[] = "CacheGuid";
 
 base::Time UseDateFromProtoValue(int64_t use_date_proto_value) {
   return base::Time::FromDeltaSinceWindowsEpoch(
@@ -289,6 +290,7 @@ class AutofillWalletMetadataSyncBridgeTest : public testing::Test {
     model_type_state.set_initial_sync_done(initial_sync_done);
     model_type_state.mutable_progress_marker()->set_data_type_id(
         GetSpecificsFieldNumberFromModelType(syncer::AUTOFILL_WALLET_METADATA));
+    model_type_state.set_cache_guid(kDefaultCacheGuid);
     EXPECT_TRUE(table()->UpdateModelTypeState(syncer::AUTOFILL_WALLET_METADATA,
                                               model_type_state));
     bridge_.reset(new AutofillWalletMetadataSyncBridge(
@@ -306,6 +308,7 @@ class AutofillWalletMetadataSyncBridgeTest : public testing::Test {
     base::RunLoop loop;
     syncer::DataTypeActivationRequest request;
     request.error_handler = base::DoNothing();
+    request.cache_guid = kDefaultCacheGuid;
     real_processor_->OnSyncStarting(
         request,
         base::BindLambdaForTesting(
@@ -349,28 +352,27 @@ class AutofillWalletMetadataSyncBridgeTest : public testing::Test {
     real_processor_->OnUpdateReceived(state, std::move(updates));
   }
 
-  std::unique_ptr<EntityData> SpecificsToEntity(
-      const WalletMetadataSpecifics& specifics,
-      bool is_deleted = false) {
-    auto data = std::make_unique<EntityData>();
-    *data->specifics.mutable_wallet_metadata() = specifics;
-    data->client_tag_hash = syncer::GenerateSyncableHash(
-        syncer::AUTOFILL_WALLET_METADATA, bridge()->GetClientTag(*data));
+  EntityData SpecificsToEntity(const WalletMetadataSpecifics& specifics,
+                               bool is_deleted = false) {
+    EntityData data;
+    *data.specifics.mutable_wallet_metadata() = specifics;
+    data.client_tag_hash = syncer::ClientTagHash::FromUnhashed(
+        syncer::AUTOFILL_WALLET_METADATA, bridge()->GetClientTag(data));
     if (is_deleted) {
       // Specifics had to be set in order to generate the client tag. Since
       // deleted entity is defined by specifics being empty, we need to clear
       // them now.
-      data->specifics = sync_pb::EntitySpecifics();
+      data.specifics = sync_pb::EntitySpecifics();
     }
     return data;
   }
 
-  std::unique_ptr<syncer::UpdateResponseData> SpecificsToUpdateResponse(
+  syncer::UpdateResponseData SpecificsToUpdateResponse(
       const WalletMetadataSpecifics& specifics,
       bool is_deleted = false) {
-    auto data = std::make_unique<syncer::UpdateResponseData>();
-    data->entity = SpecificsToEntity(specifics, is_deleted);
-    data->response_version = response_version;
+    syncer::UpdateResponseData data;
+    data.entity = SpecificsToEntity(specifics, is_deleted);
+    data.response_version = response_version;
     return data;
   }
 
@@ -452,7 +454,7 @@ class AutofillWalletMetadataSyncBridgeTest : public testing::Test {
   int response_version = 0;
   autofill::TestAutofillClock test_clock_;
   ScopedTempDir temp_dir_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   testing::NiceMock<MockAutofillWebDataBackend> backend_;
   AutofillTable table_;
   WebDatabase db_;
@@ -468,7 +470,7 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, GetClientTagForAddress) {
   ResetBridge();
   WalletMetadataSpecifics specifics =
       CreateWalletMetadataSpecificsForAddress(kAddr1SpecificsId);
-  EXPECT_EQ(bridge()->GetClientTag(*SpecificsToEntity(specifics)),
+  EXPECT_EQ(bridge()->GetClientTag(SpecificsToEntity(specifics)),
             kAddr1SyncTag);
 }
 
@@ -476,7 +478,7 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, GetClientTagForCard) {
   ResetBridge();
   WalletMetadataSpecifics specifics =
       CreateWalletMetadataSpecificsForCard(kCard1SpecificsId);
-  EXPECT_EQ(bridge()->GetClientTag(*SpecificsToEntity(specifics)),
+  EXPECT_EQ(bridge()->GetClientTag(SpecificsToEntity(specifics)),
             kCard1SyncTag);
 }
 
@@ -485,7 +487,7 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, GetStorageKeyForAddress) {
   ResetBridge();
   WalletMetadataSpecifics specifics =
       CreateWalletMetadataSpecificsForAddress(kAddr1SpecificsId);
-  EXPECT_EQ(bridge()->GetStorageKey(*SpecificsToEntity(specifics)),
+  EXPECT_EQ(bridge()->GetStorageKey(SpecificsToEntity(specifics)),
             GetAddressStorageKey(kAddr1SpecificsId));
 }
 
@@ -493,7 +495,7 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, GetStorageKeyForCard) {
   ResetBridge();
   WalletMetadataSpecifics specifics =
       CreateWalletMetadataSpecificsForCard(kCard1SpecificsId);
-  EXPECT_EQ(bridge()->GetStorageKey(*SpecificsToEntity(specifics)),
+  EXPECT_EQ(bridge()->GetStorageKey(SpecificsToEntity(specifics)),
             GetCardStorageKey(kCard1SpecificsId));
 }
 
@@ -867,7 +869,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest,
 
 // Verify that old orphan metadata gets deleted on startup.
 TEST_F(AutofillWalletMetadataSyncBridgeTest, DeleteOldOrphanMetadataOnStartup) {
-  base::HistogramTester histogram_tester;
   WalletMetadataSpecifics profile =
       CreateWalletMetadataSpecificsForAddressWithDetails(
           kAddr1SpecificsId, /*use_count=*/10, /*use_date=*/20);
@@ -889,8 +890,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, DeleteOldOrphanMetadataOnStartup) {
   EXPECT_CALL(*backend(), CommitChanges());
 
   ResetBridge();
-  histogram_tester.ExpectBucketCount("Sync.WalletMetadata.DeletedOldOrphans",
-                                     /*bucket=*/2, /*count=*/1);
 
   ASSERT_THAT(GetAllLocalDataInclRestart(), IsEmpty());
 }
@@ -898,7 +897,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest, DeleteOldOrphanMetadataOnStartup) {
 // Verify that recent orphan metadata does not get deleted on startup.
 TEST_F(AutofillWalletMetadataSyncBridgeTest,
        DoNotDeleteOldNonOrphanMetadataOnStartup) {
-  base::HistogramTester histogram_tester;
   WalletMetadataSpecifics profile =
       CreateWalletMetadataSpecificsForAddressWithDetails(
           kAddr1SpecificsId, /*use_count=*/10, /*use_date=*/20);
@@ -918,8 +916,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest,
   EXPECT_CALL(*backend(), CommitChanges()).Times(0);
 
   ResetBridge();
-  histogram_tester.ExpectTotalCount("Sync.WalletMetadata.DeletedOldOrphans",
-                                    /*count=*/0);
 
   EXPECT_THAT(
       GetAllLocalDataInclRestart(),
@@ -929,7 +925,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest,
 // Verify that recent orphan metadata does not get deleted on startup.
 TEST_F(AutofillWalletMetadataSyncBridgeTest,
        DoNotDeleteRecentOrphanMetadataOnStartup) {
-  base::HistogramTester histogram_tester;
   WalletMetadataSpecifics profile =
       CreateWalletMetadataSpecificsForAddressWithDetails(
           kAddr1SpecificsId, /*use_count=*/10, /*use_date=*/20);
@@ -948,8 +943,6 @@ TEST_F(AutofillWalletMetadataSyncBridgeTest,
   EXPECT_CALL(*backend(), CommitChanges()).Times(0);
 
   ResetBridge();
-  histogram_tester.ExpectTotalCount("Sync.WalletMetadata.DeletedOldOrphans",
-                                    /*count=*/0);
 
   EXPECT_THAT(
       GetAllLocalDataInclRestart(),
@@ -1749,7 +1742,7 @@ TEST_P(AutofillWalletMetadataSyncBridgeRemoteChangesTest,
               UnorderedElementsAre(EqualsSpecifics(merged_profile)));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          AutofillWalletMetadataSyncBridgeRemoteChangesTest,
                          ::testing::Values(INITIAL_SYNC_ADD,
                                            LATER_SYNC_ADD,

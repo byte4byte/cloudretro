@@ -9,7 +9,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Region;
-import android.support.annotation.IntDef;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.View;
@@ -18,7 +17,9 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Interpolator;
 import android.widget.FrameLayout;
 
-import org.chromium.chrome.browser.util.MathUtils;
+import androidx.annotation.IntDef;
+
+import org.chromium.base.MathUtils;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.WebContents;

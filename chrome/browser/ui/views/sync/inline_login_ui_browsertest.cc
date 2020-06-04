@@ -64,8 +64,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -105,7 +103,7 @@ ContentInfo NavigateAndGetInfo(Browser* browser,
                                WindowOpenDisposition disposition) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser, url, disposition,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   content::WebContents* contents =
       browser->tab_strip_model()->GetActiveWebContents();
   content::RenderProcessHost* process = contents->GetMainFrame()->GetProcess();
@@ -359,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOffer) {
 IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferProfileConnected) {
   auto* identity_manager =
       IdentityManagerFactory::GetForProfile(browser()->profile());
-  identity::MakePrimaryAccountAvailable(identity_manager, "foo@gmail.com");
+  signin::MakePrimaryAccountAvailable(identity_manager, "foo@gmail.com");
   EnableSigninAllowed(true);
 
   std::string error_message;
@@ -493,8 +491,8 @@ class InlineLoginHelperBrowserTest : public InProcessBrowserTest {
 
   void SimulateOnClientOAuthSuccess(GaiaAuthConsumer* consumer,
                                     const std::string& refresh_token) {
-    GaiaAuthConsumer::ClientOAuthResult result;
-    result.refresh_token = refresh_token;
+    GaiaAuthConsumer::ClientOAuthResult result(refresh_token, "", 0, false,
+                                               false);
     consumer->OnClientOAuthSuccess(result);
     base::RunLoop().RunUntilIdle();
   }
@@ -505,7 +503,7 @@ class InlineLoginHelperBrowserTest : public InProcessBrowserTest {
   }
 
  protected:
-  identity::IdentityManager* identity_manager() {
+  signin::IdentityManager* identity_manager() {
     return identity_test_env_profile_adaptor_->identity_test_env()
         ->identity_manager();
   }
@@ -791,9 +789,16 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest, Basic) {
   ui_test_utils::NavigateToURL(browser(), content::GetWebUIURL("foo/"));
 }
 
+// Flaky on MacOS - crbug.com/1021209
+#if defined(OS_MACOSX)
+#define MAYBE_NoWebUIInIframe DISABLED_NoWebUIInIframe
+#else
+#define MAYBE_NoWebUIInIframe NoWebUIInIframe
+#endif
 // Make sure that the foo webui handler does not get created when we try to
 // load it inside the iframe of the login ui.
-IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest, NoWebUIInIframe) {
+IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest,
+                       MAYBE_NoWebUIInIframe) {
   GURL url = GetSigninPromoURL().Resolve(
       "?source=0&access_point=0&reason=5&frameUrl=chrome://foo");
   EXPECT_CALL(foo_provider(), NewWebUI(_, _)).Times(0);
@@ -816,25 +821,6 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest,
 
   content::NavigationController& controller = contents->GetController();
   EXPECT_TRUE(controller.GetPendingEntry() == NULL);
-}
-
-// Flaky on CrOS, http://crbug.com/364759.
-// Also flaky on Mac, http://crbug.com/442674.
-// Also flaky on Linux which is just too flaky
-IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest,
-                       DISABLED_NavigationToOtherChromeURLDisallowed) {
-  ui_test_utils::NavigateToURL(browser(), GetSigninPromoURL());
-  WaitUntilUIReady(browser());
-
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_TRUE(content::ExecuteScript(contents,
-                                     "window.location.href = 'chrome://foo'"));
-
-  content::TestNavigationObserver navigation_observer(contents, 1);
-  navigation_observer.Wait();
-
-  EXPECT_EQ(GURL("about:blank"), contents->GetVisibleURL());
 }
 
 // Tracks the URLs requested while running a browser test and returns a default
@@ -892,11 +878,11 @@ class HtmlRequestTracker {
         }
       }
 
-      if (query_params_match)
-        return true;
+      if (!query_params_match)
+        return false;
     }
 
-    return false;
+    return true;
   }
 
  private:
@@ -949,6 +935,11 @@ IN_PROC_BROWSER_TEST_F(InlineLoginCorrectGaiaUrlBrowserTest,
   signin_metrics::Reason reason = signin_metrics::Reason::REASON_FETCH_LST_ONLY;
 
   auto signin_url = signin::GetEmbeddedPromoURL(access_point, reason, false);
+  // Set the show_tos parameter so that we can verify if that was passed in
+  // while loading the signin page.
+  signin_url = net::AppendQueryParameter(
+      signin_url, credential_provider::kShowTosSwitch, "1");
+
   ui_test_utils::NavigateToURL(browser(), signin_url);
 
   WaitUntilUIReady(browser());
@@ -956,7 +947,8 @@ IN_PROC_BROWSER_TEST_F(InlineLoginCorrectGaiaUrlBrowserTest,
   // Expected gaia endpoint to load.
   GURL gaia_url = GaiaUrls::GetInstance()->embedded_setup_windows_url();
 
-  EXPECT_TRUE(tracker_.PageRequested(gaia_url, {{"flow", "signin"}}));
+  EXPECT_TRUE(tracker_.PageRequested(gaia_url,
+                                     {{"flow", "signin"}, {"show_tos", "1"}}));
 }
 
 IN_PROC_BROWSER_TEST_F(InlineLoginCorrectGaiaUrlBrowserTest,
@@ -974,6 +966,10 @@ IN_PROC_BROWSER_TEST_F(InlineLoginCorrectGaiaUrlBrowserTest,
   signin_url = net::AppendQueryParameter(
       signin_url, credential_provider::kValidateGaiaIdSigninPromoParameter,
       "gaia_id");
+  // Set the show_tos parameter so that we can verify if that was passed in
+  // while loading the signin page.
+  signin_url = net::AppendQueryParameter(
+      signin_url, credential_provider::kShowTosSwitch, "1");
 
   ui_test_utils::NavigateToURL(browser(), signin_url);
   WaitUntilUIReady(browser());
@@ -981,7 +977,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginCorrectGaiaUrlBrowserTest,
   // Expected gaia endpoint to load.
   GURL gaia_url = GaiaUrls::GetInstance()->embedded_setup_windows_url();
 
-  EXPECT_TRUE(
-      tracker_.PageRequested(gaia_url, {{"flow", "reauth"}, {"email", email}}));
+  EXPECT_TRUE(tracker_.PageRequested(
+      gaia_url, {{"flow", "reauth"}, {"email", email}, {"show_tos", "1"}}));
 }
 #endif

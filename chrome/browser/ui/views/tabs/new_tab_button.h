@@ -36,12 +36,6 @@ class NewTabButton : public views::ImageButton,
   NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener);
   ~NewTabButton() override;
 
-  // Set the background X offset used to match the background image to the frame
-  // image.
-  void set_background_offset(int offset) {
-    background_offset_ = offset;
-  }
-
   // Retrieves the last active BrowserView instance to display the NewTabPromo.
   static void ShowPromoForLastActiveBrowser();
 
@@ -67,11 +61,16 @@ class NewTabButton : public views::ImageButton,
 
   // views::View:
   const char* GetClassName() const override;
-  void Layout() override;
   void AddLayerBeneathView(ui::Layer* new_layer) override;
   void RemoveLayerBeneathView(ui::Layer* old_layer) override;
 
+ protected:
+  // views::View:
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+
  private:
+  class HighlightPathGenerator;
+
 // views::ImageButton:
 #if defined(OS_WIN)
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -79,7 +78,6 @@ class NewTabButton : public views::ImageButton,
   void OnGestureEvent(ui::GestureEvent* event) override;
   void NotifyClick(const ui::Event& event) override;
   void PaintButtonContents(gfx::Canvas* canvas) override;
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   gfx::Size CalculatePreferredSize() const override;
 
   // views::MaskedTargeterDelegate:
@@ -116,9 +114,6 @@ class NewTabButton : public views::ImageButton,
   // Promotional UI that appears next to the NewTabButton and encourages its
   // use. Owned by its NativeWidget.
   FeaturePromoBubbleView* new_tab_promo_ = nullptr;
-
-  // The offset used to paint the background image.
-  int background_offset_;
 
   // were we destroyed?
   bool* destroyed_ = nullptr;

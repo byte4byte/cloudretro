@@ -3,20 +3,26 @@
 // found in the LICENSE file.
 
 // Utilities that are used in multiple tests.
-function MockWindow(width, height, sizer) {
+
+import {Viewport} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/viewport.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+export function MockWindow(width, height, sizer) {
   this.innerWidth = width;
   this.innerHeight = height;
   this.addEventListener = function(e, f) {
-    if (e == 'scroll')
+    if (e === 'scroll') {
       this.scrollCallback = f;
-    if (e == 'resize')
+    }
+    if (e === 'resize') {
       this.resizeCallback = f;
+    }
   };
   this.setSize = function(width, height) {
     this.innerWidth = width;
     this.innerHeight = height;
     this.resizeCallback();
-  }
+  };
   this.scrollTo = function(x, y) {
     if (sizer) {
       x = Math.min(x, parseInt(sizer.style.width) - width);
@@ -28,15 +34,16 @@ function MockWindow(width, height, sizer) {
   };
   this.setTimeout = function(callback, time) {
     this.timerCallback = callback;
-    return "timerId";
+    return 'timerId';
   };
   this.clearTimeout = function(timerId) {
     this.timerCallback = null;
   };
   this.runTimeout = function() {
-    if (this.timerCallback)
+    if (this.timerCallback) {
       this.timerCallback();
-  }
+    }
+  };
   if (sizer) {
     sizer.resizeCallback_ = function() {
       this.scrollTo(this.pageXOffset, this.pageYOffset);
@@ -49,27 +56,33 @@ function MockWindow(width, height, sizer) {
   this.timerCallback = null;
 }
 
-function MockSizer() {
-  var sizer = this;
+export function MockSizer() {
+  const sizer = this;
   this.style = {
     width_: '0px',
     height_: '0px',
-    get height() { return this.height_; },
+    get height() {
+      return this.height_;
+    },
     set height(height) {
       this.height_ = height;
-      if (sizer.resizeCallback_)
+      if (sizer.resizeCallback_) {
         sizer.resizeCallback_();
+      }
     },
-    get width() { return this.width_; },
+    get width() {
+      return this.width_;
+    },
     set width(width) {
       this.width_ = width;
-      if (sizer.resizeCallback_)
+      if (sizer.resizeCallback_) {
         sizer.resizeCallback_();
+      }
     },
   };
 }
 
-function MockViewportChangedCallback() {
+export function MockViewportChangedCallback() {
   this.wasCalled = false;
   this.callback = function() {
     this.wasCalled = true;
@@ -79,24 +92,25 @@ function MockViewportChangedCallback() {
   };
 }
 
-function MockDocumentDimensions(width, height) {
+export function MockDocumentDimensions(width, height, layoutOptions) {
   this.width = width || 0;
   this.height = height ? height : 0;
+  this.layoutOptions = layoutOptions;
   this.pageDimensions = [];
   this.addPage = function(w, h) {
-    var y = 0;
-    if (this.pageDimensions.length != 0) {
+    let y = 0;
+    if (this.pageDimensions.length !== 0) {
       y = this.pageDimensions[this.pageDimensions.length - 1].y +
           this.pageDimensions[this.pageDimensions.length - 1].height;
     }
     this.width = Math.max(this.width, w);
     this.height += h;
-    this.pageDimensions.push({
-      x: 0,
-      y: y,
-      width: w,
-      height: h
-    });
+    this.pageDimensions.push({x: 0, y: y, width: w, height: h});
+  };
+  this.addPageForTwoUpView = function(x, y, w, h) {
+    this.width = Math.max(this.width, 2 * w);
+    this.height = Math.max(this.height, y + h);
+    this.pageDimensions.push({x: x, y: y, width: w, height: h});
   };
   this.reset = function() {
     this.width = 0;
@@ -105,19 +119,41 @@ function MockDocumentDimensions(width, height) {
   };
 }
 
-function animationFrame() {
-  return new Promise(resolve => requestAnimationFrame(resolve));
+/**
+ * @return {!HTMLElement} An element containing a dom-repeat of bookmarks, for
+ *     testing the bookmarks outside of the toolbar.
+ */
+export function createBookmarksForTest() {
+  Polymer({
+    is: 'test-bookmarks',
+
+    _template: html`
+      <template is="dom-repeat" items="[[bookmarks]]">
+        <viewer-bookmark bookmark="[[item]]" depth="0"></viewer-bookmark>
+      </template>`,
+
+    properties: {
+      bookmarks: Array,
+    },
+  });
+  return document.createElement('test-bookmarks');
 }
 
-function contentElement() {
-  return document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-}
-
-async function testAsync(f) {
-  try {
-    await f();
-    chrome.test.succeed();
-  } catch (e) {
-    chrome.test.fail(e);
-  }
+/**
+ * Create a viewport with basic default zoom values.
+ * @param {!Window} window
+ * @param {!HTMLDivElement} sizer The element which represents the size of the
+ *     document in the viewport
+ * @param {number} scrollbarWidth The width of scrollbars on the page
+ * @param {number} defaultZoom The default zoom level.
+ * @param {number} topToolbarHeight The number of pixels that should initially
+ *     be left blank above the document for the toolbar.
+ * @return {!Viewport} The viewport object with zoom values set.
+ */
+export function getZoomableViewport(
+    window, sizer, scrollbarWidth, defaultZoom, topToolbarHeight) {
+  const viewport = new Viewport(
+      window, sizer, scrollbarWidth, defaultZoom, topToolbarHeight);
+  viewport.setZoomFactorRange([0.25, 0.4, 0.5, 1, 2]);
+  return viewport;
 }

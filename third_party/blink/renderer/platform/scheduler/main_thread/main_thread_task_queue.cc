@@ -4,8 +4,13 @@
 
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_task_queue.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/bind.h"
+#include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 namespace scheduler {
@@ -56,12 +61,51 @@ const char* MainThreadTaskQueue::NameForQueueType(
       return "cleanup_tq";
     case MainThreadTaskQueue::QueueType::kOther:
       return "other_tq";
+    case MainThreadTaskQueue::QueueType::kWebScheduling:
+      return "web_scheduling_tq";
+    case MainThreadTaskQueue::QueueType::kNonWaking:
+      return "non_waking_tq";
     case MainThreadTaskQueue::QueueType::kCount:
       NOTREACHED();
       return nullptr;
   }
   NOTREACHED();
   return nullptr;
+}
+
+// static
+bool MainThreadTaskQueue::IsPerFrameTaskQueue(
+    MainThreadTaskQueue::QueueType queue_type) {
+  switch (queue_type) {
+    // TODO(altimin): Remove kDefault once there is no per-frame kDefault queue.
+    case MainThreadTaskQueue::QueueType::kDefault:
+    case MainThreadTaskQueue::QueueType::kFrameLoading:
+    case MainThreadTaskQueue::QueueType::kFrameLoadingControl:
+    case MainThreadTaskQueue::QueueType::kFrameThrottleable:
+    case MainThreadTaskQueue::QueueType::kFrameDeferrable:
+    case MainThreadTaskQueue::QueueType::kFramePausable:
+    case MainThreadTaskQueue::QueueType::kFrameUnpausable:
+    case MainThreadTaskQueue::QueueType::kIdle:
+    case MainThreadTaskQueue::QueueType::kWebScheduling:
+      return true;
+    case MainThreadTaskQueue::QueueType::kControl:
+    case MainThreadTaskQueue::QueueType::kUnthrottled:
+    case MainThreadTaskQueue::QueueType::kCompositor:
+    case MainThreadTaskQueue::QueueType::kTest:
+    case MainThreadTaskQueue::QueueType::kV8:
+    case MainThreadTaskQueue::QueueType::kIPC:
+    case MainThreadTaskQueue::QueueType::kInput:
+    case MainThreadTaskQueue::QueueType::kDetached:
+    case MainThreadTaskQueue::QueueType::kCleanup:
+    case MainThreadTaskQueue::QueueType::kNonWaking:
+    case MainThreadTaskQueue::QueueType::kOther:
+      return false;
+    case MainThreadTaskQueue::QueueType::kCount:
+      NOTREACHED();
+      return false;
+  }
+  NOTREACHED();
+  return false;
 }
 
 MainThreadTaskQueue::QueueClass MainThreadTaskQueue::QueueClassForQueueType(
@@ -73,6 +117,7 @@ MainThreadTaskQueue::QueueClass MainThreadTaskQueue::QueueClassForQueueType(
     case QueueType::kTest:
     case QueueType::kV8:
     case QueueType::kIPC:
+    case QueueType::kNonWaking:
     case QueueType::kCleanup:
       return QueueClass::kNone;
     case QueueType::kFrameLoading:
@@ -83,6 +128,7 @@ MainThreadTaskQueue::QueueClass MainThreadTaskQueue::QueueClassForQueueType(
     case QueueType::kFrameDeferrable:
     case QueueType::kFramePausable:
     case QueueType::kFrameUnpausable:
+    case QueueType::kWebScheduling:
       return QueueClass::kTimer;
     case QueueType::kCompositor:
     case QueueType::kInput:
@@ -108,6 +154,7 @@ MainThreadTaskQueue::MainThreadTaskQueue(
       fixed_priority_(params.fixed_priority),
       queue_traits_(params.queue_traits),
       freeze_when_keep_active_(params.freeze_when_keep_active),
+      web_scheduling_priority_(params.web_scheduling_priority),
       main_thread_scheduler_(main_thread_scheduler),
       frame_scheduler_(params.frame_scheduler) {
   if (GetTaskQueueImpl() && spec.should_notify_observers) {
@@ -116,6 +163,9 @@ MainThreadTaskQueue::MainThreadTaskQueue(
     // MainThreadSchedulerImpl::OnTaskStarted/Completed. At the moment this
     // is not possible due to task queue being created inside
     // MainThreadScheduler's constructor.
+    GetTaskQueueImpl()->SetOnTaskReadyHandler(
+        base::BindRepeating(&MainThreadTaskQueue::OnTaskReady,
+                            base::Unretained(this), frame_scheduler_));
     GetTaskQueueImpl()->SetOnTaskStartedHandler(base::BindRepeating(
         &MainThreadTaskQueue::OnTaskStarted, base::Unretained(this)));
     GetTaskQueueImpl()->SetOnTaskCompletedHandler(base::BindRepeating(
@@ -124,6 +174,14 @@ MainThreadTaskQueue::MainThreadTaskQueue(
 }
 
 MainThreadTaskQueue::~MainThreadTaskQueue() = default;
+
+void MainThreadTaskQueue::OnTaskReady(
+    const void* frame_scheduler,
+    const base::sequence_manager::Task& task,
+    base::sequence_manager::LazyNow* lazy_now) {
+  if (main_thread_scheduler_)
+    main_thread_scheduler_->OnTaskReady(frame_scheduler, task, lazy_now);
+}
 
 void MainThreadTaskQueue::OnTaskStarted(
     const base::sequence_manager::Task& task,
@@ -150,6 +208,11 @@ void MainThreadTaskQueue::DetachFromMainThreadScheduler() {
     return;
 
   if (GetTaskQueueImpl()) {
+    // Since the OnTaskReadyHandler can be invoked from any thread, it is not
+    // possible to bind it to a WeakPtr. Simply stop invoking it once the
+    // MainThreadScheduler is detached. This is not a problem since it is only
+    // used to record histograms.
+    GetTaskQueueImpl()->SetOnTaskReadyHandler({});
     GetTaskQueueImpl()->SetOnTaskStartedHandler(
         base::BindRepeating(&MainThreadSchedulerImpl::OnTaskStarted,
                             main_thread_scheduler_->GetWeakPtr(), nullptr));
@@ -174,6 +237,7 @@ void MainThreadTaskQueue::ClearReferencesToSchedulers() {
 }
 
 FrameSchedulerImpl* MainThreadTaskQueue::GetFrameScheduler() const {
+  DCHECK(task_runner()->BelongsToCurrentThread());
   return frame_scheduler_;
 }
 
@@ -190,6 +254,19 @@ void MainThreadTaskQueue::SetNetRequestPriority(
 base::Optional<net::RequestPriority> MainThreadTaskQueue::net_request_priority()
     const {
   return net_request_priority_;
+}
+
+void MainThreadTaskQueue::SetWebSchedulingPriority(
+    WebSchedulingPriority priority) {
+  if (web_scheduling_priority_ == priority)
+    return;
+  web_scheduling_priority_ = priority;
+  frame_scheduler_->OnWebSchedulingTaskQueuePriorityChanged(this);
+}
+
+base::Optional<WebSchedulingPriority>
+MainThreadTaskQueue::web_scheduling_priority() const {
+  return web_scheduling_priority_;
 }
 
 }  // namespace scheduler

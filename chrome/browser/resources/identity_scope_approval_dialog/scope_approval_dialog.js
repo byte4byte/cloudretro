@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 let webview;
+let windowId;
 
 /**
  * Points the webview to the starting URL of a scope authorization
@@ -36,12 +37,21 @@ function loadAuthUrlAndShowWindow(url, win) {
   }
 
   webview.src = url;
-  if (win) {
-    webview.addEventListener('loadstop', function() {
+  let windowShown = false;
+  webview.addEventListener('loadstop', function() {
+    if (win && !windowShown) {
       win.show();
-    });
-  }
+      windowId = win.id;
+      windowShown = true;
+    }
+    webview.executeScript({file: 'inject.js'});
+  });
 }
+
+chrome.runtime.onMessageExternal.addListener(function(
+    message, sender, sendResponse) {
+  chrome.identityPrivate.setConsentResult(message.consentResult, windowId);
+});
 
 document.addEventListener('DOMContentLoaded', function() {
   webview = document.querySelector('webview');

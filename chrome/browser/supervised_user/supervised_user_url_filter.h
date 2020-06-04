@@ -15,17 +15,13 @@
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/values.h"
+#include "chrome/browser/supervised_user/supervised_user_error_page/supervised_user_error_page.h"
 #include "chrome/browser/supervised_user/supervised_user_site_list.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
 #include "components/safe_search_api/url_checker.h"
-#include "components/supervised_user_error_page/supervised_user_error_page.h"
 
 class GURL;
 class SupervisedUserBlacklist;
-
-namespace identity {
-class IdentityManager;
-}
 
 namespace base {
 class TaskRunner;
@@ -46,6 +42,8 @@ class SharedURLLoaderFactory;
 //     sources.
 class SupervisedUserURLFilter {
  public:
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.superviseduser
   enum FilteringBehavior {
     ALLOW,
     WARN,
@@ -94,10 +92,11 @@ class SupervisedUserURLFilter {
   //   or accounts.google.com).
   // - If the pattern ends with ".*", it matches the host on any known TLD
   //   (e.g. the pattern "google.*" would match google.com or google.co.uk).
-  // See the SupervisedUserURLFilterTest.HostMatchesPattern unit test for more
-  // examples.
-  // Asterisks in other parts of the pattern are not allowed.
-  // |host| and |pattern| are assumed to be normalized to lower-case.
+  // If the |host| starts with "www." but the |pattern| starts with neither
+  // "www." nor "*.", the function strips the "www." part of |host| and tries to
+  // match again. See the SupervisedUserURLFilterTest.HostMatchesPattern unit
+  // test for more examples. Asterisks in other parts of the pattern are not
+  // allowed. |host| and |pattern| are assumed to be normalized to lower-case.
   // This method is public for testing.
   static bool HostMatchesPattern(const std::string& canonical_host,
                                  const std::string& pattern);
@@ -156,8 +155,7 @@ class SupervisedUserURLFilter {
 
   // Initializes the experimental asynchronous checker.
   void InitAsyncURLChecker(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      identity::IdentityManager* identity_manager);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Clears any asynchronous checker.
   void ClearAsyncURLChecker();
@@ -169,8 +167,8 @@ class SupervisedUserURLFilter {
   // present, and resets the default behavior to "allow".
   void Clear();
 
-  void AddObserver(Observer* observer) const;
-  void RemoveObserver(Observer* observer) const;
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // Sets a different task runner for testing.
   void SetBlockingTaskRunnerForTesting(
@@ -192,8 +190,7 @@ class SupervisedUserURLFilter {
                      safe_search_api::Classification classification,
                      bool uncertain) const;
 
-  // This is mutable to allow notification in const member functions.
-  mutable base::ObserverList<Observer>::Unchecked observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   FilteringBehavior default_behavior_;
   std::unique_ptr<Contents> contents_;

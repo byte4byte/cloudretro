@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "components/autofill_assistant/browser/client_memory.h"
 #include "components/autofill_assistant/browser/client_settings.h"
 #include "components/autofill_assistant/browser/script_executor_delegate.h"
 #include "components/autofill_assistant/browser/trigger_context.h"
@@ -28,14 +27,16 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   const ClientSettings& GetSettings() override;
   const GURL& GetCurrentURL() override;
   const GURL& GetDeeplinkURL() override;
+  const GURL& GetScriptURL() override;
   Service* GetService() override;
-  UiController* GetUiController() override;
   WebController* GetWebController() override;
-  ClientMemory* GetClientMemory() override;
   TriggerContext* GetTriggerContext() override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
+  WebsiteLoginFetcher* GetWebsiteLoginFetcher() override;
   content::WebContents* GetWebContents() override;
-  void EnterState(AutofillAssistantState state) override;
+  std::string GetAccountEmailAddress() override;
+  std::string GetLocale() override;
+  bool EnterState(AutofillAssistantState state) override;
   void SetTouchableElementArea(const ElementAreaProto& element) override;
   void SetStatusMessage(const std::string& message) override;
   std::string GetStatusMessage() const override;
@@ -48,29 +49,39 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
   void SetProgressVisible(bool visible) override;
   void SetUserActions(
       std::unique_ptr<std::vector<UserAction>> user_actions) override;
-  void SetPaymentRequestOptions(
-      std::unique_ptr<PaymentRequestOptions> options) override;
-  void SetResizeViewport(bool resize_viewport) override;
-  bool GetResizeViewport() override;
+  void SetCollectUserDataOptions(CollectUserDataOptions* options) override;
+  void WriteUserData(
+      base::OnceCallback<void(UserData*, UserData::FieldChange*)>) override;
+  void SetViewportMode(ViewportMode mode) override;
+  ViewportMode GetViewportMode() override;
   void SetPeekMode(ConfigureBottomSheetProto::PeekMode peek_mode) override;
   ConfigureBottomSheetProto::PeekMode GetPeekMode() override;
-  bool SetForm(std::unique_ptr<FormProto> form,
-               base::RepeatingCallback<void(const FormProto::Result*)> callback)
-      override;
+  void ExpandBottomSheet() override;
+  void CollapseBottomSheet() override;
+  bool SetForm(
+      std::unique_ptr<FormProto> form,
+      base::RepeatingCallback<void(const FormProto::Result*)> changed_callback,
+      base::OnceCallback<void(const ClientStatus&)> cancel_callback) override;
+  UserModel* GetUserModel() override;
+  EventHandler* GetEventHandler() override;
   bool HasNavigationError() override;
   bool IsNavigatingToNewDocument() override;
-  void AddListener(Listener* listener) override;
-  void RemoveListener(Listener* listener) override;
+  void RequireUI() override;
+  void AddListener(NavigationListener* listener) override;
+  void RemoveListener(NavigationListener* listener) override;
+  void SetExpandSheetForPromptAction(bool expand) override;
+  void SetGenericUi(
+      std::unique_ptr<GenericUserInterfaceProto> generic_ui,
+      base::OnceCallback<void(bool,
+                              ProcessedActionStatusProto,
+                              const UserModel*)> end_action_callback) override;
+  void ClearGenericUi() override;
 
   ClientSettings* GetMutableSettings() { return &client_settings_; }
 
   void SetCurrentURL(const GURL& url) { current_url_ = url; }
 
   void SetService(Service* service) { service_ = service; }
-
-  void SetUiController(UiController* ui_controller) {
-    ui_controller_ = ui_controller;
-  }
 
   void SetWebController(WebController* web_controller) {
     web_controller_ = web_controller;
@@ -80,7 +91,15 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
     trigger_context_ = std::move(trigger_context);
   }
 
-  AutofillAssistantState GetState() { return state_; }
+  void SetUserModel(UserModel* user_model) { user_model_ = user_model; }
+
+  std::vector<AutofillAssistantState> GetStateHistory() {
+    return state_history_;
+  }
+  AutofillAssistantState GetState() {
+    return state_history_.empty() ? AutofillAssistantState::INACTIVE
+                                  : state_history_.back();
+  }
 
   Details* GetDetails() { return details_.get(); }
 
@@ -88,7 +107,7 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
 
   std::vector<UserAction>* GetUserActions() { return user_actions_.get(); }
 
-  PaymentRequestOptions* GetOptions() { return payment_request_options_.get(); }
+  CollectUserDataOptions* GetOptions() { return payment_request_options_; }
 
   void UpdateNavigationState(bool navigating, bool error) {
     navigating_to_new_document_ = navigating;
@@ -101,26 +120,33 @@ class FakeScriptExecutorDelegate : public ScriptExecutorDelegate {
 
   bool HasListeners() { return !listeners_.empty(); }
 
+  bool IsUIRequired() { return require_ui_; }
+
  private:
   ClientSettings client_settings_;
   GURL current_url_;
   Service* service_ = nullptr;
-  UiController* ui_controller_ = nullptr;
   WebController* web_controller_ = nullptr;
-  ClientMemory memory_;
   std::unique_ptr<TriggerContext> trigger_context_;
-  AutofillAssistantState state_ = AutofillAssistantState::INACTIVE;
+  std::vector<AutofillAssistantState> state_history_;
   std::string status_message_;
   std::unique_ptr<Details> details_;
   std::unique_ptr<InfoBox> info_box_;
   std::unique_ptr<std::vector<UserAction>> user_actions_;
-  std::unique_ptr<PaymentRequestOptions> payment_request_options_;
+  CollectUserDataOptions* payment_request_options_;
+  std::unique_ptr<UserData> payment_request_info_;
   bool navigating_to_new_document_ = false;
   bool navigation_error_ = false;
-  std::set<ScriptExecutorDelegate::Listener*> listeners_;
-  bool resize_viewport_ = false;
+  std::set<ScriptExecutorDelegate::NavigationListener*> listeners_;
+  ViewportMode viewport_mode_ = ViewportMode::NO_RESIZE;
   ConfigureBottomSheetProto::PeekMode peek_mode_ =
       ConfigureBottomSheetProto::HANDLE;
+  bool expand_or_collapse_updated_ = false;
+  bool expand_or_collapse_value_ = false;
+  bool expand_sheet_for_prompt_ = true;
+  UserModel* user_model_ = nullptr;
+
+  bool require_ui_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeScriptExecutorDelegate);
 };

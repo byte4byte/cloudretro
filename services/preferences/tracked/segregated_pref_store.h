@@ -16,6 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "components/prefs/persistent_pref_store.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
 
 // Provides a unified PersistentPrefStore implementation that splits its storage
@@ -45,7 +46,8 @@ class SegregatedPrefStore : public PersistentPrefStore {
       const scoped_refptr<PersistentPrefStore>& default_pref_store,
       const scoped_refptr<PersistentPrefStore>& selected_pref_store,
       const std::set<std::string>& selected_pref_names,
-      prefs::mojom::TrackedPreferenceValidationDelegatePtr validation_delegate);
+      mojo::Remote<prefs::mojom::TrackedPreferenceValidationDelegate>
+          validation_delegate);
 
   // PrefStore implementation
   void AddObserver(Observer* observer) override;
@@ -61,6 +63,7 @@ class SegregatedPrefStore : public PersistentPrefStore {
                 std::unique_ptr<base::Value> value,
                 uint32_t flags) override;
   void RemoveValue(const std::string& key, uint32_t flags) override;
+  void RemoveValuesByPrefixSilently(const std::string& prefix) override;
 
   // PersistentPrefStore implementation
   bool GetMutableValue(const std::string& key, base::Value** result) override;
@@ -109,7 +112,8 @@ class SegregatedPrefStore : public PersistentPrefStore {
   // |validation_delegate_| is used by |default_pref_store_| and
   // |selected_pref_store_| PrefHashFilters. Its lifetime is managed here since
   // a single owner is required.
-  prefs::mojom::TrackedPreferenceValidationDelegatePtr validation_delegate_;
+  mojo::Remote<prefs::mojom::TrackedPreferenceValidationDelegate>
+      validation_delegate_;
 
   scoped_refptr<PersistentPrefStore> default_pref_store_;
   scoped_refptr<PersistentPrefStore> selected_pref_store_;

@@ -13,9 +13,10 @@
 #include "base/task/post_task.h"
 #include "base/test/bind_test_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/arc/auth/arc_auth_service.h"
 #include "chrome/browser/chromeos/arc/auth/arc_robot_auth_code_fetcher.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -120,7 +121,7 @@ class ArcRobotAuthCodeFetcherBrowserTest : public InProcessBrowserTest {
     base::RunLoop run_loop;
     fetcher->SetURLLoaderFactoryForTesting(
         test_url_loader_factory_.GetSafeWeakWrapper());
-    fetcher->Fetch(base::Bind(
+    fetcher->Fetch(base::BindOnce(
         [](bool* output_fetch_success, std::string* output_auth_code,
            base::RunLoop* run_loop, bool fetch_success,
            const std::string& auth_code) {

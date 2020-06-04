@@ -19,6 +19,12 @@
 #include "chrome/common/media_router/media_route.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/common/media_router/mojom/media_controller.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#endif  // !defined(OS_ANDROID)
+
 namespace media_router {
 
 class MediaRouterBase : public MediaRouter {
@@ -37,13 +43,18 @@ class MediaRouterBase : public MediaRouter {
   std::unique_ptr<media::FlingingController> GetFlingingController(
       const MediaRoute::Id& route_id) override;
 #if !defined(OS_ANDROID)
-  scoped_refptr<MediaRouteController> GetRouteController(
-      const MediaRoute::Id& route_id) override;
+  void GetMediaController(
+      const MediaRoute::Id& route_id,
+      mojo::PendingReceiver<mojom::MediaController> controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer) override;
 #endif  // !defined(OS_ANDROID)
   void RegisterRemotingSource(SessionID tab_id,
                               CastRemotingConnector* remoting_source) override;
   void UnregisterRemotingSource(SessionID tab_id) override;
   base::Value GetState() const override;
+  void GetProviderState(
+      MediaRouteProviderId provider_id,
+      mojom::MediaRouteProvider::GetStateCallback callback) const override;
 
  protected:
   FRIEND_TEST_ALL_PREFIXES(MediaRouterMojoImplTest,
@@ -105,12 +116,6 @@ class MediaRouterBase : public MediaRouter {
 
   // KeyedService
   void Shutdown() override;
-
-#if !defined(OS_ANDROID)
-  // MediaRouter
-  void DetachRouteController(const MediaRoute::Id& route_id,
-                             MediaRouteController* controller) override;
-#endif  // !defined(OS_ANDROID)
 
   IssueManager issue_manager_;
 

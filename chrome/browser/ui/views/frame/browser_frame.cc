@@ -17,7 +17,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
+#include "chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/frame/browser_root_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -26,12 +26,11 @@
 #include "chrome/browser/ui/views/frame/native_browser_frame_factory.h"
 #include "chrome/browser/ui/views/frame/system_menu_model_builder.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/font_list.h"
-#include "ui/native_theme/native_theme_dark_aura.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/native_widget.h"
 
@@ -39,12 +38,8 @@
 #include "components/user_manager/user_manager.h"
 #endif
 
-#if defined(OS_LINUX)
-#include "chrome/browser/ui/views/frame/browser_command_handler_linux.h"
-#endif
-
-#if defined(USE_X11)
-#include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#include "ui/display/screen.h"
 #endif
 
 namespace {
@@ -71,7 +66,6 @@ BrowserFrame::BrowserFrame(BrowserView* browser_view)
   set_is_secondary_widget(false);
   // Don't focus anything on creation, selecting a tab will set the focus.
   set_focus_on_creation(false);
-  md_observer_.Add(ui::MaterialDesignController::GetInstance());
 }
 
 BrowserFrame::~BrowserFrame() {}
@@ -82,8 +76,8 @@ void BrowserFrame::InitBrowserFrame() {
   views::Widget::InitParams params = native_browser_frame_->GetWidgetParams();
   params.name = "BrowserFrame";
   params.delegate = browser_view_;
-  if (browser_view_->browser()->is_type_tabbed() ||
-      browser_view_->browser()->is_devtools()) {
+  if (browser_view_->browser()->is_type_normal() ||
+      browser_view_->browser()->is_type_devtools()) {
     // Typed panel/popup can only return a size once the widget has been
     // created.
     // DevTools counts as a popup, but DevToolsWindow::CreateDevToolsBrowser
@@ -104,16 +98,12 @@ void BrowserFrame::InitBrowserFrame() {
     }
   }
 
-  Init(params);
+  Init(std::move(params));
 
   if (!native_browser_frame_->UsesNativeSystemMenu()) {
     DCHECK(non_client_view());
     non_client_view()->set_context_menu_controller(this);
   }
-
-#if defined(OS_LINUX)
-  browser_command_handler_.reset(new BrowserCommandHandlerLinux(browser_view_));
-#endif
 }
 
 int BrowserFrame::GetMinimizeButtonOffset() const {
@@ -150,6 +140,10 @@ bool BrowserFrame::UseCustomFrame() const {
 
 bool BrowserFrame::ShouldSaveWindowPlacement() const {
   return native_browser_frame_->ShouldSaveWindowPlacement();
+}
+
+bool BrowserFrame::ShouldDrawFrameHeader() const {
+  return true;
 }
 
 void BrowserFrame::GetWindowPlacement(gfx::Rect* bounds,
@@ -208,28 +202,26 @@ bool BrowserFrame::GetAccelerator(int command_id,
 
 const ui::ThemeProvider* BrowserFrame::GetThemeProvider() const {
   Browser* browser = browser_view_->browser();
-  Profile* profile = browser->profile();
-  return ShouldUseTheme()
-             ? &ThemeService::GetThemeProviderForProfile(profile)
-             : &ThemeService::GetDefaultThemeProviderForProfile(profile);
+  if (browser->app_controller())
+    return browser->app_controller()->GetThemeProvider();
+  return &ThemeService::GetThemeProviderForProfile(browser->profile());
 }
 
 const ui::NativeTheme* BrowserFrame::GetNativeTheme() const {
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   if (browser_view_->browser()->profile()->IsIncognitoProfile() &&
       ThemeServiceFactory::GetForProfile(browser_view_->browser()->profile())
           ->UsingDefaultTheme()) {
-    return ui::NativeThemeDarkAura::instance();
+    return ui::NativeTheme::GetInstanceForDarkUI();
   }
-#endif
   return views::Widget::GetNativeTheme();
 }
 
 void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
   chrome::SaveWindowWorkspace(browser_view_->browser(), GetWorkspace());
-#if defined(USE_X11)
-  BrowserList::MoveBrowsersInWorkspaceToFront(
-      views::X11DesktopHandler::get()->GetWorkspace());
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  auto workspace = display::Screen::GetScreen()->GetCurrentWorkspace();
+  BrowserList::MoveBrowsersInWorkspaceToFront(workspace.empty() ? GetWorkspace()
+                                                                : workspace);
 #endif
   Widget::OnNativeWidgetWorkspaceChanged();
 }
@@ -255,11 +247,11 @@ void BrowserFrame::ShowContextMenuForViewImpl(views::View* source,
   views::View::ConvertPointFromScreen(non_client_view(), &point_in_view_coords);
   int hit_test = non_client_view()->NonClientHitTest(point_in_view_coords);
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
-    menu_runner_.reset(new views::MenuRunner(
+    menu_runner_ = std::make_unique<views::MenuRunner>(
         GetSystemMenuModel(),
         views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU,
         base::BindRepeating(&BrowserFrame::OnMenuClosed,
-                            base::Unretained(this))));
+                            base::Unretained(this)));
     menu_runner_->RunMenuAt(source->GetWidget(), nullptr,
                             gfx::Rect(p, gfx::Size(0, 0)),
                             views::MenuAnchorPosition::kTopLeft, source_type);
@@ -283,6 +275,23 @@ ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
     menu_model_builder_->Init();
   }
   return menu_model_builder_->menu_model();
+}
+
+void BrowserFrame::SetTabDragKind(TabDragKind tab_drag_kind) {
+  if (tab_drag_kind_ == tab_drag_kind)
+    return;
+
+  bool was_dragging_window = tab_drag_kind_ == TabDragKind::kAllTabs;
+  bool is_dragging_window = tab_drag_kind == TabDragKind::kAllTabs;
+  if (was_dragging_window != is_dragging_window && native_browser_frame_)
+    native_browser_frame_->TabDraggingStatusChanged(is_dragging_window);
+
+  bool was_dragging_any = tab_drag_kind_ != TabDragKind::kNone;
+  bool is_dragging_any = tab_drag_kind != TabDragKind::kNone;
+  if (was_dragging_any != is_dragging_any)
+    browser_view_->TabDraggingStatusChanged(is_dragging_any);
+
+  tab_drag_kind_ = tab_drag_kind;
 }
 
 void BrowserFrame::OnMenuClosed() {

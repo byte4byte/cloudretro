@@ -15,7 +15,9 @@
 #include "base/unguessable_token.h"
 #include "content/browser/web_package/prefetched_signed_exchange_cache.h"
 #include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
@@ -26,18 +28,17 @@ namespace storage {
 class BlobStorageContext;
 }  // namespace storage
 
-namespace net {
-class URLRequestContextGetter;
-}
-
 namespace network {
 class SharedURLLoaderFactory;
 }
 
+namespace blink {
+class URLLoaderThrottle;
+}
+
 namespace content {
 
-class ResourceContext;
-class URLLoaderThrottle;
+class BrowserContext;
 class PrefetchedSignedExchangeCacheAdapter;
 class SignedExchangePrefetchHandler;
 class SignedExchangePrefetchMetricRecorder;
@@ -48,32 +49,32 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
                                          public mojo::DataPipeDrainer::Client {
  public:
   using URLLoaderThrottlesGetter = base::RepeatingCallback<
-      std::vector<std::unique_ptr<content::URLLoaderThrottle>>()>;
+      std::vector<std::unique_ptr<blink::URLLoaderThrottle>>()>;
+  using RecursivePrefetchTokenGenerator =
+      base::OnceCallback<base::UnguessableToken(
+          const network::ResourceRequest&)>;
 
-  // |url_loader_throttles_getter|, |resource_context| and
-  // |request_context_getter| may be used when a prefetch handler
-  // needs to additionally create a request (e.g. for fetching certificate
-  // if the prefetch was for a signed exchange).
-  // |frame_tree_node_id_getter| is called only on UI thread when NetworkService
-  // is not enabled, but can be also called on IO thread otherwise.
+  // |url_loader_throttles_getter| may be used when a prefetch handler needs to
+  // additionally create a request (e.g. for fetching certificate if the
+  // prefetch was for a signed exchange).
   PrefetchURLLoader(
       int32_t routing_id,
       int32_t request_id,
       uint32_t options,
-      base::RepeatingCallback<int(void)> frame_tree_node_id_getter,
+      int frame_tree_node_id,
       const network::ResourceRequest& resource_request,
-      network::mojom::URLLoaderClientPtr client,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
       scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
       URLLoaderThrottlesGetter url_loader_throttles_getter,
-      ResourceContext* resource_context,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+      BrowserContext* browser_context,
       scoped_refptr<SignedExchangePrefetchMetricRecorder>
           signed_exchange_prefetch_metric_recorder,
       scoped_refptr<PrefetchedSignedExchangeCache>
           prefetched_signed_exchange_cache,
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
-      const std::string& accept_langs);
+      const std::string& accept_langs,
+      RecursivePrefetchTokenGenerator recursive_prefetch_token_generator);
   ~PrefetchURLLoader() override;
 
   // Sends an empty response's body to |forwarding_client_|. If failed to create
@@ -89,16 +90,15 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
   void FollowRedirect(const std::vector<std::string>& removed_headers,
                       const net::HttpRequestHeaders& modified_headers,
                       const base::Optional<GURL>& new_url) override;
-  void ProceedWithResponse() override;
   void SetPriority(net::RequestPriority priority,
                    int intra_priority_value) override;
   void PauseReadingBodyFromNet() override;
   void ResumeReadingBodyFromNet() override;
 
   // network::mojom::URLLoaderClient overrides:
-  void OnReceiveResponse(const network::ResourceResponseHead& head) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
-                         const network::ResourceResponseHead& head) override;
+                         network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         base::OnceCallback<void()> callback) override;
@@ -115,7 +115,7 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
 
   void OnNetworkConnectionError();
 
-  const base::RepeatingCallback<int(void)> frame_tree_node_id_getter_;
+  const int frame_tree_node_id_;
 
   // Set in the constructor and updated when redirected.
   network::ResourceRequest resource_request_;
@@ -123,17 +123,13 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
   scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory_;
 
   // For the actual request.
-  network::mojom::URLLoaderPtr loader_;
-  mojo::Binding<network::mojom::URLLoaderClient> client_binding_;
+  mojo::Remote<network::mojom::URLLoader> loader_;
+  mojo::Receiver<network::mojom::URLLoaderClient> client_receiver_{this};
 
   // To be a URLLoader for the client.
-  network::mojom::URLLoaderClientPtr forwarding_client_;
+  mojo::Remote<network::mojom::URLLoaderClient> forwarding_client_;
 
-  // |url_loader_throttles_getter_| and |resource_context_| should be
-  // valid as far as |request_context_getter_| returns non-null value.
   URLLoaderThrottlesGetter url_loader_throttles_getter_;
-  ResourceContext* resource_context_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
   std::unique_ptr<mojo::DataPipeDrainer> pipe_drainer_;
 
@@ -149,6 +145,12 @@ class CONTENT_EXPORT PrefetchURLLoader : public network::mojom::URLLoader,
       prefetched_signed_exchange_cache_adapter_;
 
   const std::string accept_langs_;
+
+  RecursivePrefetchTokenGenerator recursive_prefetch_token_generator_;
+
+  // TODO(kinuko): This value can become stale if the preference is updated.
+  // Make this listen to the changes if it becomes a real concern.
+  bool is_signed_exchange_handling_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(PrefetchURLLoader);
 };

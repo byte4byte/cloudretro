@@ -15,6 +15,10 @@
     "dependencies": ["permission:brailleDisplayPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "commandLinePrivate": {
+    "dependencies": ["permission:commandLinePrivate"],
+    "contexts": ["blessed_extension"]
+  },
   "i18n": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
@@ -27,7 +31,7 @@
     "contexts": ["blessed_extension"]
   },
   "extension.getURL": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script", "extension_service_worker"]
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "extension.getViews": [
     {
@@ -84,6 +88,10 @@
       "chrome://bookmarks/*"
     ]
   }],
+  "loginState": {
+    "dependencies": ["permission:loginState"],
+    "contexts": ["blessed_extension"]
+  },
   "settingsPrivate": [{
     "dependencies": ["permission:settingsPrivate"],
     "contexts": ["blessed_extension"]
@@ -97,7 +105,7 @@
   "tabs": [{
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"],
-    "contexts": ["blessed_extension", "extension_service_worker"]
+    "contexts": ["blessed_extension"]
   }, {
     "channel": "stable",
     "contexts": ["webui"],
@@ -107,6 +115,10 @@
   }],
   "tts": {
     "dependencies": ["permission:tts"],
+    "contexts": ["blessed_extension"]
+  },
+  "loginState": {
+    "dependencies": ["permission:loginState"],
     "contexts": ["blessed_extension"]
   },
   "windows": [{

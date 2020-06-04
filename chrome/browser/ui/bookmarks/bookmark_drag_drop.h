@@ -5,8 +5,10 @@
 #ifndef CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_DRAG_DROP_H_
 #define CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_DRAG_DROP_H_
 
+#include <memory>
 #include <vector>
 
+#include "base/callback.h"
 #include "build/build_config.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/gfx/geometry/point.h"

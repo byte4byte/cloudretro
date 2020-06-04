@@ -52,9 +52,8 @@ void SetupAccessibilityDisplayOptionsNotifier() {
 }  // namespace
 
 void BrowserAccessibilityStateImpl::PlatformInitialize() {
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&SetupAccessibilityDisplayOptionsNotifier));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&SetupAccessibilityDisplayOptionsNotifier));
 }
 
 void BrowserAccessibilityStateImpl::
@@ -85,6 +84,18 @@ void BrowserAccessibilityStateImpl::
 }
 
 void BrowserAccessibilityStateImpl::
-    UpdatePlatformSpecificHistogramsOnOtherThread() {}
+    UpdatePlatformSpecificHistogramsOnOtherThread() {
+  // Screen reader metric.
+  ui::AXMode mode =
+      BrowserAccessibilityStateImpl::GetInstance()->GetAccessibilityMode();
+  UMA_HISTOGRAM_BOOLEAN("Accessibility.Mac.ScreenReader",
+                        mode.has_mode(ui::AXMode::kScreenReader));
+}
+
+void BrowserAccessibilityStateImpl::UpdateUniqueUserHistograms() {
+  ui::AXMode mode = GetAccessibilityMode();
+  UMA_HISTOGRAM_BOOLEAN("Accessibility.Mac.ScreenReader.EveryReport",
+                        mode.has_mode(ui::AXMode::kScreenReader));
+}
 
 }  // namespace content

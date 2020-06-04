@@ -9,23 +9,31 @@
 #include <string>
 #include <utility>
 
-#include "ash/public/interfaces/ime_controller.mojom.h"
-#include "ash/public/interfaces/ime_info.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "ash/public/cpp/ime_controller.h"
+#include "ash/public/cpp/ime_info.h"
 
-class TestImeController : ash::mojom::ImeController {
+// Class that resets the ImeController instance to nullptr and then restores it
+// when it is destroyed.
+class ImeControllerResetterForTest {
+ public:
+  ImeControllerResetterForTest();
+  ~ImeControllerResetterForTest();
+
+ private:
+  ash::ImeController* const instance_;
+};
+
+class TestImeController : private ImeControllerResetterForTest,
+                          public ash::ImeController {
  public:
   TestImeController();
   ~TestImeController() override;
 
-  // Returns a mojo interface pointer bound to this object.
-  ash::mojom::ImeControllerPtr CreateInterfacePtr();
-
-  // ash::mojom::ImeController:
-  void SetClient(ash::mojom::ImeControllerClientPtr client) override;
+  // ash::ImeController:
+  void SetClient(ash::ImeControllerClient* client) override;
   void RefreshIme(const std::string& current_ime_id,
-                  std::vector<ash::mojom::ImeInfoPtr> available_imes,
-                  std::vector<ash::mojom::ImeMenuItemPtr> menu_items) override;
+                  std::vector<ash::ImeInfo> available_imes,
+                  std::vector<ash::ImeMenuItem> menu_items) override;
   void SetImesManagedByPolicy(bool managed) override;
   void ShowImeMenuOnShelf(bool show) override;
   void UpdateCapsLockState(bool enabled) override;
@@ -39,8 +47,8 @@ class TestImeController : ash::mojom::ImeController {
 
   // The most recent values received via mojo.
   std::string current_ime_id_;
-  std::vector<ash::mojom::ImeInfoPtr> available_imes_;
-  std::vector<ash::mojom::ImeMenuItemPtr> menu_items_;
+  std::vector<ash::ImeInfo> available_imes_;
+  std::vector<ash::ImeMenuItem> menu_items_;
   bool managed_by_policy_ = false;
   bool show_ime_menu_on_shelf_ = false;
   bool show_mode_indicator_ = false;
@@ -52,8 +60,6 @@ class TestImeController : ash::mojom::ImeController {
   bool is_voice_enabled_ = false;
 
  private:
-  mojo::Binding<ash::mojom::ImeController> binding_;
-
   DISALLOW_COPY_AND_ASSIGN(TestImeController);
 };
 

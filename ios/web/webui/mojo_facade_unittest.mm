@@ -13,7 +13,6 @@
 #import "base/test/ios/wait_util.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/web_test.h"
-#include "ios/web/public/web_state/web_state_interface_provider.h"
 #include "ios/web/test/mojo_test.mojom.h"
 #include "ios/web/web_state/web_state_impl.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
@@ -69,9 +68,14 @@ class FakeWebState : public TestWebState {
     EXPECT_TRUE(facade_->HandleMojoMessage(GetJson(cancel_watch)).empty());
   }
 
+  InterfaceBinder* GetInterfaceBinderForMainFrame() override {
+    return &interface_binder_;
+  }
+
  private:
   int watch_id_;
   MojoFacade* facade_;  // weak
+  InterfaceBinder interface_binder_{this};
 };
 
 }  // namespace
@@ -80,11 +84,7 @@ class FakeWebState : public TestWebState {
 class MojoFacadeTest : public WebTest {
  protected:
   MojoFacadeTest() {
-    interface_provider_ = std::make_unique<WebStateInterfaceProvider>();
-    interface_provider_->registry()->AddInterface(base::Bind(
-        &MojoFacadeTest::BindTestUIHandlerMojoRequest, base::Unretained(this)));
-    facade_ =
-        std::make_unique<MojoFacade>(interface_provider_.get(), &web_state_);
+    facade_ = std::make_unique<MojoFacade>(&web_state_);
     web_state_.SetFacade(facade_.get());
   }
 
@@ -120,9 +120,6 @@ class MojoFacadeTest : public WebTest {
   }
 
  private:
-  void BindTestUIHandlerMojoRequest(TestUIHandlerMojoRequest request) {}
-
-  std::unique_ptr<WebStateInterfaceProvider> interface_provider_;
   FakeWebState web_state_;
   std::unique_ptr<MojoFacade> facade_;
 };

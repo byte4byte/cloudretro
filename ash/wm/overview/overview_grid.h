@@ -10,14 +10,17 @@
 #include <memory>
 #include <vector>
 
+#include "ash/public/cpp/wallpaper_controller_observer.h"
 #include "ash/rotator/screen_rotation_animator_observer.h"
 #include "ash/wm/overview/overview_session.h"
-#include "ash/wm/window_state_observer.h"
+#include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_drag_indicators.h"
+#include "ash/wm/splitview/split_view_observer.h"
+#include "ash/wm/window_state.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
-#include "ui/aura/window_observer.h"
+#include "ui/aura/window.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -29,7 +32,9 @@ namespace ash {
 
 class DesksBarView;
 class FpsCounter;
+class OverviewGridEventHandler;
 class OverviewItem;
+class PresentationTimeRecorder;
 
 // Represents a grid of windows in the Overview Mode in a particular root
 // window, and manages a selection widget that can be moved with the arrow keys.
@@ -49,14 +54,13 @@ class OverviewItem;
 //    0, 1, 2, 3, 4, 5, 6
 // The selector is switched to the next window grid (if available) or wrapped if
 // it reaches the end of its movement sequence.
-class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
-                                public wm::WindowStateObserver,
-                                public ScreenRotationAnimatorObserver {
+class ASH_EXPORT OverviewGrid : public SplitViewObserver,
+                                public ScreenRotationAnimatorObserver,
+                                public WallpaperControllerObserver {
  public:
   OverviewGrid(aura::Window* root_window,
                const std::vector<aura::Window*>& window_list,
-               OverviewSession* overview_session,
-               const gfx::Rect& bounds_in_screen);
+               OverviewSession* overview_session);
   ~OverviewGrid() override;
 
   // Exits overview mode.
@@ -71,10 +75,10 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // |animate| is true. Items in |ignored_items| are not positioned. This is for
   // dragging. |transition| specifies the overview state when this function is
   // called.
-  void PositionWindows(bool animate,
-                       const base::flat_set<OverviewItem*>& ignored_items = {},
-                       OverviewSession::OverviewTransition transition =
-                           OverviewSession::OverviewTransition::kInOverview);
+  void PositionWindows(
+      bool animate,
+      const base::flat_set<OverviewItem*>& ignored_items = {},
+      OverviewTransition transition = OverviewTransition::kInOverview);
 
   // Returns the OverviewItem if a window is contained in any of the
   // OverviewItems this grid owns. Returns nullptr if no such a OverviewItem
@@ -85,33 +89,55 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // grid. If |reposition| is true, repositions all items except those in
   // |ignored_items|. If |animate| is true, animates the repositioning.
   // |animate| has no effect if |reposition| is false.
-  //
-  // Note: This function should only be called by |OverviewSession::AddItem|.
-  // |overview_session_| keeps count of all overview items, but this function
-  // does not update the tally.
+  // If |use_spawn_animation| is true, and this item is being added *while*
+  // overview is already active, it will use a special spawn animation on its
+  // first position in the grid. |use_spawn_animation| has no effect if either
+  // |animate| or |reposition| are false.
+  // If |reposition|, |animate|, and |restack| are all true, the stacking order
+  // will be adjusted after the animation. If |restack| is true but at least one
+  // of |reposition| and |animate| is false, the stacking order will be adjusted
+  // immediately.
   void AddItem(aura::Window* window,
                bool reposition,
                bool animate,
                const base::flat_set<OverviewItem*>& ignored_items,
-               size_t index);
+               size_t index,
+               bool use_spawn_animation,
+               bool restack);
 
   // Similar to the above function, but adds the window to the end of the grid.
-  void AppendItem(aura::Window* window, bool reposition, bool animate);
+  void AppendItem(aura::Window* window,
+                  bool reposition,
+                  bool animate,
+                  bool use_spawn_animation);
+
+  // Like |AddItem|, but adds |window| at the correct position according to MRU
+  // order.
+  void AddItemInMruOrder(aura::Window* window,
+                         bool reposition,
+                         bool animate,
+                         bool restack);
 
   // Removes |overview_item| from the grid. |overview_item| cannot already be
-  // absent from the grid. No items are repositioned.
-  //
-  // Note: This function should only be called by |OverviewSession::RemoveItem|
-  // and |OverviewGrid::Shutdown|. |overview_session_| keeps count of all
-  // overview items, but this function does not update the tally.
-  void RemoveItem(OverviewItem* overview_item);
+  // absent from the grid. If |item_destroying| is true, we may want to notify
+  // |overview_session_| that this grid has become empty. If |item_destroying|
+  // and |reposition| are both true, all items are repositioned with animation.
+  // |reposition| has no effect if |item_destroying| is false.
+  void RemoveItem(OverviewItem* overview_item,
+                  bool item_destroying,
+                  bool reposition);
 
   // Adds a drop target for |dragged_item|, at the index immediately following
   // |dragged_item|. Repositions all items except |dragged_item|, so that the
   // drop target takes the place of |dragged_item|. Does not animate the
   // repositioning or fade in the drop target. The visual effect is that the
   // drop target was already present but was covered by |dragged_item|.
-  void AddDropTargetForDraggingFromOverview(OverviewItem* dragged_item);
+  void AddDropTargetForDraggingFromThisGrid(OverviewItem* dragged_item);
+
+  // Adds a drop target for |dragged_window|. Used for dragging from another
+  // grid, from the top in tablet mode, or from the shelf in tablet mode.
+  void AddDropTargetNotForDraggingFromThisGrid(aura::Window* dragged_window,
+                                               bool animate);
 
   // Removes the drop target from the grid.
   void RemoveDropTarget();
@@ -120,21 +146,33 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // except windows in |ignored_items|.
   void SetBoundsAndUpdatePositions(
       const gfx::Rect& bounds_in_screen,
-      const base::flat_set<OverviewItem*>& ignored_items);
+      const base::flat_set<OverviewItem*>& ignored_items,
+      bool animate);
 
   // Updates overview bounds and hides the drop target when a preview area is
-  // shown.
-  void RearrangeDuringDrag(aura::Window* dragged_window,
-                           IndicatorState indicator_state);
+  // shown or the drag is currently outside of |root_window_|. For dragging from
+  // the top or from the shelf, pass null for |dragged_item|.
+  void RearrangeDuringDrag(
+      OverviewItem* dragged_item,
+      SplitViewDragIndicators::WindowDraggingState window_dragging_state);
+
+  // Sets the dragged window on |split_view_drag_indicators_|.
+  void SetSplitViewDragIndicatorsDraggedWindow(aura::Window* dragged_window);
+
+  // Sets the window dragging state on |split_view_drag_indicators_|.
+  void SetSplitViewDragIndicatorsWindowDraggingState(
+      SplitViewDragIndicators::WindowDraggingState window_dragging_state);
+
+  // Updates the desks bar widget bounds if necessary.
+  // Returns true if the desks widget's bounds have been updated.
+  bool MaybeUpdateDesksWidgetBounds();
 
   // Updates the appearance of the drop target to visually indicate when the
-  // dragged window is being dragged over it. For dragging from the top, pass
-  // null for |dragged_item|.
+  // dragged window is being dragged over it. For dragging from the top or from
+  // the shelf, pass null for |dragged_item|.
   void UpdateDropTargetBackgroundVisibility(
       OverviewItem* dragged_item,
       const gfx::PointF& location_in_screen);
-
-  void UpdateCannotSnapWarningVisibility();
 
   // Called when any OverviewItem on any OverviewGrid has started/ended being
   // dragged.
@@ -144,13 +182,17 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // Called when a window (either it's browser window or an app window)
   // start/continue/end being dragged in tablet mode.
   void OnWindowDragStarted(aura::Window* dragged_window, bool animate);
-  void OnWindowDragContinued(aura::Window* dragged_window,
-                             const gfx::PointF& location_in_screen,
-                             IndicatorState indicator_state);
+  void OnWindowDragContinued(
+      aura::Window* dragged_window,
+      const gfx::PointF& location_in_screen,
+      SplitViewDragIndicators::WindowDraggingState window_dragging_state);
   void OnWindowDragEnded(aura::Window* dragged_window,
                          const gfx::PointF& location_in_screen,
                          bool should_drop_window_into_overview,
                          bool snap);
+  // Shows/Hides windows during window dragging. Used when swiping up a window
+  // from shelf.
+  void SetVisibleDuringWindowDragging(bool visible, bool animate);
 
   // Returns true if |window| is the placeholder window from the drop target.
   bool IsDropTargetWindow(aura::Window* window) const;
@@ -159,33 +201,26 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // Returns nullptr if overview does not have the drop target.
   OverviewItem* GetDropTarget();
 
-  // aura::WindowObserver:
-  void OnWindowDestroying(aura::Window* window) override;
-  // TODO(flackr): Handle window bounds changed in OverviewItem. See also
-  // OnWindowPropertyChanged() below.
-  void OnWindowBoundsChanged(aura::Window* window,
-                             const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds,
-                             ui::PropertyChangeReason reason) override;
-  void OnWindowPropertyChanged(aura::Window* window,
-                               const void* key,
-                               intptr_t old) override;
+  // Called by |OverviewSession::OnDisplayMetricsChanged|, only for the display
+  // with this grid.
+  void OnDisplayMetricsChanged();
 
-  // wm::WindowStateObserver:
-  void OnPostWindowStateTypeChange(wm::WindowState* window_state,
-                                   WindowStateType old_type) override;
+  // SplitViewObserver:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
+  void OnSplitViewDividerPositionChanged() override;
 
   // ScreenRotationAnimatorObserver:
   void OnScreenCopiedBeforeRotation() override;
   void OnScreenRotationAnimationFinished(ScreenRotationAnimator* animator,
                                          bool canceled) override;
 
+  // WallpaperControllerObserver:
+  void OnWallpaperChanging() override;
+  void OnWallpaperChanged() override;
+
   // Called when overview starting animation completes.
   void OnStartingAnimationComplete(bool canceled);
-
-  // Checks if the grid needs to have the wallpaper animated. Returns false if
-  // one of the grids windows covers the the entire workspace, true otherwise.
-  bool ShouldAnimateWallpaper() const;
 
   // Calculates |should_animate_when_entering_| and
   // |should_animate_when_exiting_| of the overview items based on where
@@ -196,7 +231,7 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // and the overview bounds should be queried from |window_list_|.
   void CalculateWindowListAnimationStates(
       OverviewItem* selected_item,
-      OverviewSession::OverviewTransition transition,
+      OverviewTransition transition,
       const std::vector<gfx::RectF>& target_bounds);
 
   // Do not animate the entire window list during exiting the overview. It's
@@ -229,8 +264,9 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // transformation and opacity change should be animated. The animation
   // settings will be set by the caller via |callback|. Returns the settings of
   // the first window we are animating; the caller will observe this animation.
+  // The returned object may be nullptr.
   std::unique_ptr<ui::ScopedLayerAnimationSettings> UpdateYPositionAndOpacity(
-      int new_y,
+      float new_y,
       float opacity,
       OverviewSession::UpdateAnimationSettingsCallback callback);
 
@@ -265,6 +301,34 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   bool MaybeDropItemOnDeskMiniView(const gfx::Point& screen_location,
                                    OverviewItem* drag_item);
 
+  // Prepares the |scroll_offset_min_| as a limit for |scroll_offset| from
+  // scrolling or positioning windows too far offscreen.
+  void StartScroll();
+
+  // |delta| is used for updating |scroll_offset_| with new scroll values so
+  // that windows in tablet overview mode get positioned accordingly. Returns
+  // true if the grid was moved to the edge.
+  bool UpdateScrollOffset(float delta);
+
+  void EndScroll();
+
+  // Calculate the width of an item based on |height|. The width tries to keep
+  // the same aspect ratio as the original window, but may be modified if the
+  // bounds of the window are considered extreme, or if the window is in
+  // splitview or entering splitview.
+  int CalculateWidthAndMaybeSetUnclippedBounds(OverviewItem* item, int height);
+
+  // Called when a desk is added or removed to update the bounds of the desks
+  // widget as it may need to switch between default and compact layouts.
+  void OnDesksChanged();
+
+  // Returns true if any desk name is being modified in its mini view on this
+  // grid.
+  bool IsDeskNameBeingModified() const;
+
+  // Commits any on-going desk name changes if any.
+  void CommitDeskNameChanges();
+
   // Returns true if the grid has no more windows.
   bool empty() const { return window_list_.empty(); }
 
@@ -280,6 +344,12 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
     return window_list_;
   }
 
+  SplitViewDragIndicators* split_view_drag_indicators() {
+    return split_view_drag_indicators_.get();
+  }
+
+  const views::Widget* desks_widget() const { return desks_widget_.get(); }
+
   const DesksBarView* desks_bar_view() const { return desks_bar_view_; }
 
   const gfx::Rect bounds() const { return bounds_; }
@@ -291,6 +361,12 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   void set_suspend_reposition(bool value) { suspend_reposition_ = value; }
 
   views::Widget* drop_target_widget() { return drop_target_widget_.get(); }
+
+  float scroll_offset() const { return scroll_offset_; }
+
+  OverviewGridEventHandler* grid_event_handler() {
+    return grid_event_handler_.get();
+  }
 
  private:
   class TargetWindowObserver;
@@ -320,6 +396,14 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   std::vector<gfx::RectF> GetWindowRects(
       const base::flat_set<OverviewItem*>& ignored_items);
 
+  // Gets the layout of the overview items. Currently only for tablet mode.
+  // Positions up to six windows into two rows of equal height, scaling each
+  // window to fit that height. Additional windows are placed off-screen.
+  // |ignored_items| won't be shown along with the other windows in overview
+  // mode.
+  std::vector<gfx::RectF> GetWindowRectsForTabletModeLayout(
+      const base::flat_set<OverviewItem*>& ignored_items);
+
   // Attempts to fit all |out_rects| inside |bounds|. The method ensures that
   // the |out_rects| vector has appropriate size and populates it with the
   // values placing rects next to each other left-to-right in rows of equal
@@ -339,16 +423,21 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
       int* out_min_right,
       int* out_max_right);
 
-  // Returns the overview item iterator that contains |window|.
-  std::vector<std::unique_ptr<OverviewItem>>::iterator
-  GetOverviewItemIterContainingWindow(aura::Window* window);
-
   // Returns the index of |item| in |window_list_|.
   size_t GetOverviewItemIndex(OverviewItem* item) const;
+
+  // Returns the index where |window| can be inserted into |window_list_| based
+  // on MRU order.
+  size_t FindInsertionIndex(const aura::Window* window);
 
   // Adds the |dragged_window| into overview on drag ended. Might need to update
   // the window's bounds if it has been resized.
   void AddDraggedWindowIntoOverviewOnDragEnd(aura::Window* dragged_window);
+
+  // Returns the the bounds of the desks widget in screen coordinates.
+  gfx::Rect GetDesksWidgetBounds() const;
+
+  void UpdateCannotSnapWarningVisibility();
 
   // Root window the grid is in.
   aura::Window* root_window_;
@@ -359,8 +448,9 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // Vector containing all the windows in this grid.
   std::vector<std::unique_ptr<OverviewItem>> window_list_;
 
-  ScopedObserver<aura::Window, OverviewGrid> window_observer_;
-  ScopedObserver<wm::WindowState, OverviewGrid> window_state_observer_;
+  // The owner of the widget that displays split-view-related information. Null
+  // if split view is unsupported (see |ShouldAllowSplitView|).
+  std::unique_ptr<SplitViewDragIndicators> split_view_drag_indicators_;
 
   // Widget that contains the DeskBarView contents when the Virtual Desks
   // feature is enabled.
@@ -383,9 +473,6 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // minimized widget's content view so that it reflects the merge.
   std::unique_ptr<TargetWindowObserver> target_window_observer_;
 
-  // True only after all windows have been prepared for overview.
-  bool prepared_for_overview_ = false;
-
   // True if the overview grid should animate when exiting overview mode. Note
   // even if it's true, it doesn't mean all window items in the grid should
   // animate when exiting overview, instead each window item's animation status
@@ -403,9 +490,31 @@ class ASH_EXPORT OverviewGrid : public aura::WindowObserver,
   // Measures the animation smoothness of overview animation.
   std::unique_ptr<FpsCounter> fps_counter_;
 
-  // True to skip |PositionWindows()|. Used to avoid O(n^2) layout
-  // when reposition windows in tablet overview mode.
+  // True to skip |PositionWindows()|. Used to avoid O(n^2) layout when
+  // reposition windows in tablet overview mode.
   bool suspend_reposition_ = false;
+
+  // Used by |GetWindowRectsForTabletModeLayout| to shift the x position of the
+  // overview items.
+  float scroll_offset_ = 0;
+
+  // Value to clamp |scroll_offset| so scrolling stays limited to windows that
+  // are visible in tablet overview mode.
+  float scroll_offset_min_ = 0;
+
+  // Cached values of the item bounds so that they do not have to be calculated
+  // on each scroll update.
+  std::vector<gfx::RectF> items_scrolling_bounds_;
+
+  // Handles events that are not handled by the OverviewItems.
+  std::unique_ptr<OverviewGridEventHandler> grid_event_handler_;
+
+  // Records the presentation time of scrolling the grid in overview mode.
+  std::unique_ptr<PresentationTimeRecorder> presentation_time_recorder_;
+
+  // Weak pointer to the window that is being dragged from the top, if there is
+  // one.
+  aura::Window* dragged_window_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(OverviewGrid);
 };

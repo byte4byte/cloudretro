@@ -15,7 +15,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "mojo/public/cpp/system/file_data_source.h"
@@ -40,10 +40,10 @@ class DataPipeReader {
         watcher_(FROM_HERE,
                  SimpleWatcher::ArmingPolicy::AUTOMATIC,
                  base::SequencedTaskRunnerHandle::Get()) {
-    watcher_.Watch(
-        consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
-        MOJO_WATCH_CONDITION_SATISFIED,
-        base::Bind(&DataPipeReader::OnDataAvailable, base::Unretained(this)));
+    watcher_.Watch(consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
+                   MOJO_WATCH_CONDITION_SATISFIED,
+                   base::BindRepeating(&DataPipeReader::OnDataAvailable,
+                                       base::Unretained(this)));
   }
   ~DataPipeReader() = default;
 
@@ -119,19 +119,20 @@ class DataPipeProducerTest : public testing::Test {
       std::unique_ptr<DataPipeProducer> producer,
       std::unique_ptr<FilteredDataSource::Filter> filter,
       base::File file,
-      size_t max_bytes) {
+      uint64_t max_bytes) {
     DataPipeProducer* raw_producer = producer.get();
+    auto data_source = std::make_unique<FileDataSource>(std::move(file));
+    data_source->SetRange(0u, max_bytes);
     raw_producer->Write(
-        std::make_unique<FilteredDataSource>(
-            std::make_unique<FileDataSource>(std::move(file), max_bytes),
-            std::move(filter)),
+        std::make_unique<FilteredDataSource>(std::move(data_source),
+                                             std::move(filter)),
         base::BindOnce([](std::unique_ptr<DataPipeProducer> producer,
                           MojoResult result) {},
                        std::move(producer)));
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
   int tmp_file_id_ = 0;
 
@@ -140,7 +141,7 @@ class DataPipeProducerTest : public testing::Test {
 
 struct DataPipeObserverData {
   int num_read_errors = 0;
-  size_t bytes_read = 0;
+  uint64_t bytes_read = 0;
   int done_called = 0;
 };
 
@@ -270,8 +271,8 @@ TEST_F(DataPipeProducerTest, TinyFile) {
 
 TEST_F(DataPipeProducerTest, HugeFile) {
   // We want a file size that is many times larger than the data pipe size.
-  // 63MB is large enough, while being small enough to fit in a typical tmpfs.
-  constexpr size_t kHugeFileSize = 63 * 1024 * 1024;
+  // 5MB is large enough, while being small enough to fit in a typical tmpfs.
+  constexpr size_t kHugeFileSize = 5 * 1024 * 1024;
   constexpr uint32_t kDataPipeSize = 512 * 1024;
 
   std::string test_string(kHugeFileSize, 'a');

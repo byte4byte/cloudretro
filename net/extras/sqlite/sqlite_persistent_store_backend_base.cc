@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
@@ -81,10 +82,6 @@ bool SQLitePersistentStoreBackendBase::InitializeDatabase() {
     return false;
   }
 
-  int64_t db_size = 0;
-  if (base::GetFileSize(path_, &db_size))
-    base::UmaHistogramCounts1M(histogram_tag_ + ".DBSizeInKB", db_size / 1024);
-
   db_ = std::make_unique<sql::Database>();
   db_->set_histogram_tag(histogram_tag_);
 
@@ -102,6 +99,7 @@ bool SQLitePersistentStoreBackendBase::InitializeDatabase() {
     Reset();
     return false;
   }
+  db_->Preload();
 
   if (!MigrateDatabaseSchema() || !CreateDatabaseSchema()) {
     DLOG(ERROR) << "Unable to update or initialize " << histogram_tag_

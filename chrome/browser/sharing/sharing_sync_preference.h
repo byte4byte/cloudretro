@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -15,70 +16,51 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "components/sync_device_info/device_info.h"
+
+namespace syncer {
+class DeviceInfoSyncService;
+class LocalDeviceInfoProvider;
+}  // namespace syncer
 
 namespace user_prefs {
 class PrefRegistrySyncable;
-}
+}  // namespace user_prefs
 
 class PrefService;
+
+enum class SharingDevicePlatform;
 
 // SharingSyncPreference manages all preferences related to Sharing using Sync,
 // such as storing list of user devices synced via Chrome and VapidKey used
 // for authentication.
 class SharingSyncPreference {
  public:
-  struct Device {
-    Device(std::string fcm_token,
-           std::string p256dh,
-           std::string auth_secret,
-           const int capabilities);
-    Device(Device&& other);
-    ~Device();
-
-    // FCM registration token of device for sending SharingMessage.
-    std::string fcm_token;
-
-    // Subscription public key required for WebPush protocol.
-    std::string p256dh;
-
-    // Auth secret key required for WebPush protocol.
-    std::string auth_secret;
-
-    // Bitmask of capabilities, defined in SharingDeviceCapability enum, that
-    // are supported by the device.
-    int capabilities;
-  };
-
   // FCM registration status of current device. Not synced across devices.
   struct FCMRegistration {
-    // Authorized entity registered with FCM.
-    std::string authorized_entity;
+    FCMRegistration(base::Optional<std::string> authorized_entity,
+                    base::Time timestamp);
+    FCMRegistration(FCMRegistration&& other);
+    FCMRegistration& operator=(FCMRegistration&& other);
+    ~FCMRegistration();
 
-    // FCM registration token of the device.
-    std::string fcm_token;
+    // Authorized entity registered with FCM.
+    base::Optional<std::string> authorized_entity;
 
     // Timestamp of latest registration.
     base::Time timestamp;
   };
 
-  explicit SharingSyncPreference(PrefService* prefs);
+  SharingSyncPreference(
+      PrefService* prefs,
+      syncer::DeviceInfoSyncService* device_info_sync_service);
   ~SharingSyncPreference();
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
-  // Returns a copy of |local_value| to sync if its timestamp is older than the
-  // one of |server_value|. Otherwise returns nullptr which means that we pick
-  // the |server_value| as is.
-  static std::unique_ptr<base::Value> MaybeMergeVapidKey(
-      const base::Value& local_value,
-      const base::Value& server_value);
-
-  // Returns a new dictionary with devices merged from both |local_value| and
-  // |server_value| based on their last modified timestamp. May return nullptr
-  // if we should just pick |server_value| as is.
-  static std::unique_ptr<base::Value> MaybeMergeSyncedDevices(
-      const base::Value& local_value,
-      const base::Value& server_value);
+  // Returns local SharingInfo to be uploaded to sync.
+  static base::Optional<syncer::DeviceInfo::SharingInfo>
+  GetLocalSharingInfoForSync(PrefService* prefs);
 
   // Returns VAPID key from preferences if present, otherwise returns
   // base::nullopt.
@@ -95,32 +77,22 @@ class SharingSyncPreference {
   // Clears previously set observer.
   void ClearVapidKeyChangeObserver();
 
-  // Returns the map of guid to device from sharing preferences. Guid is same
-  // as sync device guid.
-  std::map<std::string, Device> GetSyncedDevices() const;
-
-  // Stores |device| with key |guid| in sharing preferences.
-  // |guid| is same as sync device guid.
-  void SetSyncDevice(const std::string& guid, const Device& device);
-
-  // Removes device corresponding to |guid| from sharing preferences.
-  // |guid| is same as sync device guid.
-  void RemoveDevice(const std::string& guid);
-
   base::Optional<FCMRegistration> GetFCMRegistration() const;
 
   void SetFCMRegistration(FCMRegistration registration);
 
   void ClearFCMRegistration();
 
+  void SetLocalSharingInfo(syncer::DeviceInfo::SharingInfo sharing_info);
+
+  void ClearLocalSharingInfo();
+
  private:
   friend class SharingSyncPreferenceTest;
 
-  static base::Value DeviceToValue(const Device& device, base::Time timestamp);
-
-  static base::Optional<Device> ValueToDevice(const base::Value& value);
-
   PrefService* prefs_;
+  syncer::DeviceInfoSyncService* device_info_sync_service_;
+  syncer::LocalDeviceInfoProvider* local_device_info_provider_;
   PrefChangeRegistrar pref_change_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SharingSyncPreference);

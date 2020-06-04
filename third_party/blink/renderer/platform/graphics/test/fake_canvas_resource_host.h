@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_TEST_FAKE_CANVAS_RESOURCE_HOST_H_
 
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_host.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
@@ -38,23 +39,17 @@ class FakeCanvasResourceHost : public CanvasResourceHost {
                                     : CanvasResourceProvider::ResourceUsage::
                                           kSoftwareCompositedResourceUsage;
 
-    CanvasResourceProvider::PresentationMode presentation_mode =
-        RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled()
-            ? CanvasResourceProvider::kAllowImageChromiumPresentationMode
-            : CanvasResourceProvider::kDefaultPresentationMode;
-
-    std::unique_ptr<CanvasResourceProvider> provider;
-    if (provider_type_) {
-      provider = CanvasResourceProvider::CreateForTesting(
-          size_, *provider_type_, SharedGpuContext::ContextProviderWrapper(), 0,
-          CanvasColorParams(), presentation_mode, nullptr);
-    } else {
-      provider = CanvasResourceProvider::Create(
-          size_, usage, SharedGpuContext::ContextProviderWrapper(), 0,
-          CanvasColorParams(), presentation_mode, nullptr);
+    uint8_t presentation_mode =
+        CanvasResourceProvider::kDefaultPresentationMode;
+    if (RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled()) {
+      presentation_mode |=
+          CanvasResourceProvider::kAllowImageChromiumPresentationMode;
     }
 
-    ReplaceResourceProvider(std::move(provider));
+    ReplaceResourceProvider(CanvasResourceProvider::Create(
+        size_, usage, SharedGpuContext::ContextProviderWrapper(), 0,
+        kMedium_SkFilterQuality, CanvasColorParams(), presentation_mode,
+        nullptr));
     return ResourceProvider();
   }
 
@@ -62,12 +57,7 @@ class FakeCanvasResourceHost : public CanvasResourceHost {
     return kLow_SkFilterQuality;
   }
 
-  void set_provider_type(CanvasResourceProvider::ResourceProviderType type) {
-    provider_type_ = type;
-  }
-
  private:
-  base::Optional<CanvasResourceProvider::ResourceProviderType> provider_type_;
   IntSize size_;
 };
 

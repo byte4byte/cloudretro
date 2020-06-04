@@ -4,30 +4,32 @@
 
 package org.chromium.chrome.browser.infobar;
 
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ObserverList;
 import org.chromium.base.UserData;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBarUiItem;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.KeyboardVisibilityDelegate.KeyboardVisibilityListener;
-import org.chromium.ui.modaldialog.DialogDismissalCause;
-import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
+import org.chromium.ui.base.WindowAndroid;
 
 import java.util.ArrayList;
 
@@ -37,10 +39,17 @@ import java.util.ArrayList;
  * When initiated from native code, special code is needed to keep the Java and native infobar in
  * sync, see NativeInfoBar.
  */
-public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
+public class InfoBarContainer implements UserData, KeyboardVisibilityListener, InfoBar.Container {
     private static final String TAG = "InfoBarContainer";
 
     private static final Class<InfoBarContainer> USER_DATA_KEY = InfoBarContainer.class;
+
+    private static final AccessibilityUtil.Observer sAccessibilityObserver;
+
+    static {
+        sAccessibilityObserver = (enabled) -> setIsAllowedToAutoHide(!enabled);
+        AccessibilityUtil.addObserver(sAccessibilityObserver);
+    }
 
     /**
      * A listener for the InfoBar animations.
@@ -59,7 +68,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
          * Notifies the subscriber when all animations are finished.
          * @param frontInfoBar The frontmost infobar or {@code null} if none are showing.
          */
-        void notifyAllAnimationsFinished(Item frontInfoBar);
+        void notifyAllAnimationsFinished(InfoBarUiItem frontInfoBar);
     }
 
     /**
@@ -111,8 +120,8 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         }
 
         @Override
-        public void onActivityAttachmentChanged(Tab tab, boolean isAttached) {
-            if (isAttached) {
+        public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
+            if (window != null) {
                 initializeContainerView();
                 updateWebContents();
             } else {
@@ -156,7 +165,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
                 }
 
                 @Override
-                public void notifyAllAnimationsFinished(Item frontInfoBar) {
+                public void notifyAllAnimationsFinished(InfoBarUiItem frontInfoBar) {
                     for (InfoBarAnimationListener listener : mAnimationListeners) {
                         listener.notifyAllAnimationsFinished(frontInfoBar);
                     }
@@ -174,7 +183,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
     /** The tab that hosts this infobar container. */
     private final Tab mTab;
 
-    /** Native InfoBarContainer pointer which will be set by nativeInit(). */
+    /** Native InfoBarContainer pointer which will be set by InfoBarContainerJni.get().init(). */
     private long mNativeInfoBarContainer;
 
     /** True when this container has been emptied and its native counterpart has been destroyed. */
@@ -226,19 +235,11 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         mTabView = tab.getView();
         mTab = tab;
 
-        if (tab.getActivity() != null) initializeContainerView();
+        if (((TabImpl) tab).getActivity() != null) initializeContainerView();
 
         // Chromium's InfoBarContainer may add an InfoBar immediately during this initialization
         // call, so make sure everything in the InfoBarContainer is completely ready beforehand.
-        mNativeInfoBarContainer = nativeInit();
-    }
-
-    public SnackbarManager getSnackbarManager() {
-        if (mTab != null && mTab.getActivity() != null) {
-            return mTab.getActivity().getSnackbarManager();
-        }
-
-        return null;
+        mNativeInfoBarContainer = InfoBarContainerJni.get().init(InfoBarContainer.this);
     }
 
     /**
@@ -292,16 +293,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         }
 
         infoBar.setContext(mInfoBarContainerView.getContext());
-        infoBar.setInfoBarContainer(this);
-
-        // TODO(957153): In touchless we will be needlessly logging show/close events. We should
-        //               clean this up to avoid skewing the metrics.
-        if (FeatureUtilities.isNoTouchModeEnabled() && !infoBar.supportsTouchlessMode()) {
-            // Pose the closing of the infobar as the native container does not handle closing the
-            // infobar during the show process well (native will crash).
-            mTab.getView().post(() -> infoBar.onCloseButtonClicked());
-            return;
-        }
+        infoBar.setContainer(this);
 
         // We notify observers immediately (before the animation starts).
         for (InfoBarContainerObserver observer : mObservers) {
@@ -315,12 +307,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         // to be available when they get the notification.
         mInfoBars.add(infoBar);
 
-        if (FeatureUtilities.isNoTouchModeEnabled() && infoBar.supportsTouchlessMode()) {
-            mTab.getActivity().getModalDialogManager().showDialog(
-                    infoBar.createModel(), ModalDialogType.APP);
-        } else {
-            mInfoBarContainerView.addInfoBar(infoBar);
-        }
+        mInfoBarContainerView.addInfoBar(infoBar);
     }
 
     /**
@@ -332,10 +319,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         addInfoBar(infoBar);
     }
 
-    /**
-     * Notifies that an infobar's View ({@link InfoBar#getView}) has changed. If the infobar is
-     * visible, a view swapping animation will be run.
-     */
+    @Override
     public void notifyInfoBarViewChanged() {
         assert !mDestroyed;
         if (mInfoBarContainerView != null) mInfoBarContainerView.notifyInfoBarViewChanged();
@@ -356,26 +340,13 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         return mInfoBarContainerView != null ? mInfoBarContainerView.getVisibility() : View.GONE;
     }
 
-    /**
-     * Called by {@link InfoBar} to remove itself from the view hierarchy.
-     *
-     * @param infoBar InfoBar to remove from the View hierarchy.
-     */
-    void removeInfoBar(InfoBar infoBar) {
+    @Override
+    public void removeInfoBar(InfoBar infoBar) {
         assert !mDestroyed;
 
         if (!mInfoBars.remove(infoBar)) {
-            // In touchless mode, an infobar can be removed without technically being added. This
-            // is allowed to support whitelisted infobars (while easily blocking the rest).
-            if (FeatureUtilities.isNoTouchModeEnabled()) return;
             assert false : "Trying to remove an InfoBar that is not in this container.";
             return;
-        }
-
-        if (infoBar.supportsTouchlessMode() && FeatureUtilities.isNoTouchModeEnabled()
-                && infoBar.getModel() != null) {
-            mTab.getActivity().getModalDialogManager().dismissDialog(
-                    infoBar.getModel(), DialogDismissalCause.UNKNOWN);
         }
 
         // Notify observers immediately, before any animations begin.
@@ -383,18 +354,13 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
             observer.onRemoveInfoBar(this, infoBar, mInfoBars.isEmpty());
         }
 
-        if (!FeatureUtilities.isNoTouchModeEnabled()) {
-            assert mInfoBarContainerView
-                    != null : "The container view is null when removing an InfoBar.";
-            mInfoBarContainerView.removeInfoBar(infoBar);
-        }
+        assert mInfoBarContainerView
+                != null : "The container view is null when removing an InfoBar.";
+        mInfoBarContainerView.removeInfoBar(infoBar);
     }
 
-    /**
-     * @return True when this container has been emptied and its native counterpart has been
-     *         destroyed.
-     */
-    public boolean hasBeenDestroyed() {
+    @Override
+    public boolean isDestroyed() {
         return mDestroyed;
     }
 
@@ -403,7 +369,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         destroyContainerView();
         mTab.removeObserver(mTabObserver);
         if (mNativeInfoBarContainer != 0) {
-            nativeDestroy(mNativeInfoBarContainer);
+            InfoBarContainerJni.get().destroy(mNativeInfoBarContainer, InfoBarContainer.this);
             mNativeInfoBarContainer = 0;
         }
         mDestroyed = true;
@@ -426,13 +392,13 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
     }
 
     /**
-     * @return Pointer to the native InfoBarAndroid object which is currently at the top of the
-     *         infobar stack, or 0 if there are no infobars.
+     * @return InfoBarIdentifier of the InfoBar which is currently at the top of the infobar stack,
+     *         or InfoBarIdentifier.INVALID if there are no infobars.
      */
     @CalledByNative
-    private long getTopNativeInfoBarPtr() {
-        if (!hasInfoBars()) return 0;
-        return mInfoBars.get(0).getNativeInfoBarPtr();
+    private @InfoBarIdentifier int getTopInfoBarIdentifier() {
+        if (!hasInfoBars()) return InfoBarIdentifier.INVALID;
+        return mInfoBars.get(0).getInfoBarIdentifier();
     }
 
     /**
@@ -451,7 +417,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
      * Expected to be called when Touch Exploration is enabled.
      * @param isAllowed Whether auto-hiding is allowed.
      */
-    public static void setIsAllowedToAutoHide(boolean isAllowed) {
+    private static void setIsAllowedToAutoHide(boolean isAllowed) {
         InfoBarContainerView.setIsAllowedToAutoHide(isAllowed);
     }
 
@@ -480,7 +446,8 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         if (webContents != null && webContents != mInfoBarContainerView.getWebContents()) {
             mInfoBarContainerView.setWebContents(webContents);
             if (mNativeInfoBarContainer != 0) {
-                nativeSetWebContents(mNativeInfoBarContainer, webContents);
+                InfoBarContainerJni.get().setWebContents(
+                        mNativeInfoBarContainer, InfoBarContainer.this, webContents);
             }
         }
 
@@ -490,7 +457,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
     }
 
     private void initializeContainerView() {
-        final ChromeActivity chromeActivity = mTab.getActivity();
+        final ChromeActivity chromeActivity = ((TabImpl) mTab).getActivity();
         assert chromeActivity
                 != null
             : "ChromeActivity should not be null when initializing InfoBarContainerView";
@@ -501,19 +468,21 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
                 new View.OnAttachStateChangeListener() {
                     @Override
                     public void onViewAttachedToWindow(View view) {
-                        if (mTab.getActivity().getBottomSheet() != null
-                                && mBottomSheetObserver == null) {
+                        if (mBottomSheetObserver == null) {
                             mBottomSheetObserver = new EmptyBottomSheetObserver() {
                                 @Override
                                 public void onSheetStateChanged(int sheetState) {
                                     if (mTab.isHidden()) return;
                                     mInfoBarContainerView.setVisibility(
-                                            sheetState == BottomSheet.SheetState.FULL
+                                            sheetState == BottomSheetController.SheetState.FULL
                                                     ? View.INVISIBLE
                                                     : View.VISIBLE);
                                 }
                             };
-                            mTab.getActivity().getBottomSheet().addObserver(mBottomSheetObserver);
+                            ((TabImpl) mTab)
+                                    .getActivity()
+                                    .getBottomSheetController()
+                                    .addObserver(mBottomSheetObserver);
                         }
 
                         for (InfoBarContainer.InfoBarContainerObserver observer : mObservers) {
@@ -528,7 +497,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         mInfoBarContainerView.setHidden(mIsHidden);
         setParentView(chromeActivity.findViewById(R.id.bottom_container));
 
-        mIPHSupport = new IPHInfoBarSupport(new IPHBubbleDelegateImpl(chromeActivity));
+        mIPHSupport = new IPHInfoBarSupport(new IPHBubbleDelegateImpl(chromeActivity, mTab));
         addAnimationListener(mIPHSupport);
         addObserver(mIPHSupport);
 
@@ -544,14 +513,17 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
 
         if (mInfoBarContainerView != null) {
             mInfoBarContainerView.setWebContents(null);
-            if (mNativeInfoBarContainer != 0) nativeSetWebContents(mNativeInfoBarContainer, null);
+            if (mNativeInfoBarContainer != 0) {
+                InfoBarContainerJni.get().setWebContents(
+                        mNativeInfoBarContainer, InfoBarContainer.this, null);
+            }
             mInfoBarContainerView.destroy();
             mInfoBarContainerView = null;
         }
 
-        ChromeActivity activity = mTab.getActivity();
-        if (activity != null && mBottomSheetObserver != null && activity.getBottomSheet() != null) {
-            activity.getBottomSheet().removeObserver(mBottomSheetObserver);
+        ChromeActivity activity = ((TabImpl) mTab).getActivity();
+        if (activity != null && mBottomSheetObserver != null) {
+            activity.getBottomSheetController().removeObserver(mBottomSheetObserver);
         }
 
         mTab.getWindowAndroid().getKeyboardDelegate().removeKeyboardVisibilityListener(this);
@@ -562,13 +534,10 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         }
     }
 
-    /**
-     * @return The infobar in front.
-     */
-    @Nullable
-    InfoBar getFrontInfoBar() {
-        if (mInfoBars.isEmpty()) return null;
-        return mInfoBars.get(0);
+    @Override
+    public boolean isFrontInfoBar(InfoBar infoBar) {
+        if (mInfoBars.isEmpty()) return false;
+        return mInfoBars.get(0) == infoBar;
     }
 
     /**
@@ -588,8 +557,11 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener {
         return mInfoBarContainerView;
     }
 
-    private native long nativeInit();
-    private native void nativeSetWebContents(
-            long nativeInfoBarContainerAndroid, WebContents webContents);
-    private native void nativeDestroy(long nativeInfoBarContainerAndroid);
+    @NativeMethods
+    interface Natives {
+        long init(InfoBarContainer caller);
+        void setWebContents(long nativeInfoBarContainerAndroid, InfoBarContainer caller,
+                WebContents webContents);
+        void destroy(long nativeInfoBarContainerAndroid, InfoBarContainer caller);
+    }
 }

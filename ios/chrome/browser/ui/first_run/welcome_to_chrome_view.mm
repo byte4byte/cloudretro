@@ -14,9 +14,8 @@
 #import "ios/chrome/browser/ui/util/label_observer.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/common/string_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -88,10 +87,8 @@ NSString* const kAppLogoImageName = @"launchscreen_app_logo";
 NSString* const kCheckBoxImageName = @"checkbox";
 NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
 
-// Constants for the Terms of Service and Privacy Notice URLs in the
-// first run experience.
+// Constant for the Terms of Service URL in the first run experience.
 const char kTermsOfServiceUrl[] = "internal://terms-of-service";
-const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
 
 }  // namespace
 
@@ -165,7 +162,7 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    self.backgroundColor = UIColor.cr_systemBackgroundColor;
+    self.backgroundColor = [UIColor colorNamed:kBackgroundColor];
     self.autoresizingMask =
         UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   }
@@ -224,7 +221,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
 - (UIView*)containerView {
   if (!_containerView) {
     _containerView = [[UIView alloc] initWithFrame:CGRectZero];
-    [_containerView setBackgroundColor:UIColor.cr_systemBackgroundColor];
   }
   return _containerView;
 }
@@ -232,7 +228,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
 - (UILabel*)titleLabel {
   if (!_titleLabel) {
     _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    [_titleLabel setBackgroundColor:UIColor.cr_systemBackgroundColor];
     [_titleLabel setNumberOfLines:0];
     [_titleLabel setLineBreakMode:NSLineBreakByWordWrapping];
     [_titleLabel setBaselineAdjustment:UIBaselineAdjustmentAlignBaselines];
@@ -246,7 +241,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
   if (!_imageView) {
     UIImage* image = [UIImage imageNamed:kAppLogoImageName];
     _imageView = [[UIImageView alloc] initWithImage:image];
-    [_imageView setBackgroundColor:UIColor.cr_systemBackgroundColor];
   }
   return _imageView;
 }
@@ -296,7 +290,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
     UIImage* selectedImage = [[UIImage imageNamed:kCheckBoxCheckedImageName]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     [_checkBoxButton setImage:selectedImage forState:UIControlStateSelected];
-    _checkBoxButton.tintColor = [UIColor colorNamed:kTintColor];
   }
   return _checkBoxButton;
 }
@@ -391,35 +384,13 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
   self.TOSLabel.frame = {CGPointZero, containerSize};
   NSString* TOSText = l10n_util::GetNSString(IDS_IOS_FIRSTRUN_AGREE_TO_TERMS);
   NSRange tosLinkTextRange = NSMakeRange(NSNotFound, 0);
-  NSRange privacyLinkTextRange = NSMakeRange(NSNotFound, 0);
   TOSText = ParseStringWithTag(TOSText, &tosLinkTextRange,
                                @"BEGIN_LINK_TOS[ \t]*", @"[ \t]*END_LINK_TOS");
-  TOSText = ParseStringWithTag(TOSText, &privacyLinkTextRange,
-                               @"BEGIN_LINK_PRIVACY[ \t]*",
-                               @"[ \t]*END_LINK_PRIVACY");
 
   DCHECK_NE(NSNotFound, static_cast<NSInteger>(tosLinkTextRange.location));
   DCHECK_NE(0u, tosLinkTextRange.length);
-  DCHECK_NE(NSNotFound, static_cast<NSInteger>(privacyLinkTextRange.location));
-  DCHECK_NE(0u, privacyLinkTextRange.length);
 
   self.TOSLabel.text = TOSText;
-  if (FixOrphanWord(self.TOSLabel)) {
-    // If a newline is inserted, check whether it was added mid-link and adjust
-    // |tosLinkTextRange| and |privacyLinkTextRange| accordingly.
-    NSRange newlineRange = [self.TOSLabel.text rangeOfString:@"\n"
-                                                     options:0
-                                                       range:tosLinkTextRange];
-    if (newlineRange.length) {
-      tosLinkTextRange.location++;
-      privacyLinkTextRange.location++;
-    }
-    newlineRange = [self.TOSLabel.text rangeOfString:@"\n"
-                                             options:0
-                                               range:privacyLinkTextRange];
-    if (newlineRange.length)
-      privacyLinkTextRange.location++;
-  }
 
   __weak WelcomeToChromeView* weakSelf = self;
   ProceduralBlockWithURL action = ^(const GURL& url) {
@@ -428,8 +399,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
       return;
     if (url == kTermsOfServiceUrl) {
       [[strongSelf delegate] welcomeToChromeViewDidTapTOSLink];
-    } else if (url == kPrivacyNoticeUrl) {
-      [[strongSelf delegate] welcomeToChromeViewDidTapPrivacyLink];
     } else {
       NOTREACHED();
     }
@@ -439,9 +408,7 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
       [[LabelLinkController alloc] initWithLabel:_TOSLabel action:action];
   [_TOSLabelLinkController addLinkWithRange:tosLinkTextRange
                                         url:GURL(kTermsOfServiceUrl)];
-  [_TOSLabelLinkController addLinkWithRange:privacyLinkTextRange
-                                        url:GURL(kPrivacyNoticeUrl)];
-  [_TOSLabelLinkController setLinkColor:[UIColor colorNamed:kTintColor]];
+  [_TOSLabelLinkController setLinkColor:[UIColor colorNamed:kBlueColor]];
 
   CGSize TOSLabelSize = [self.TOSLabel sizeThatFits:containerSize];
   CGFloat TOSLabelTopPadding = kTOSLabelTopPadding[[self heightSizeClassIdiom]];
@@ -470,7 +437,6 @@ const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
       CGRectMake(optInLabelOriginX,
                  CGRectGetMaxY(self.TOSLabel.frame) + optInLabelTopPadding,
                  optInLabelSize.width, optInLabelSize.height));
-  FixOrphanWord(self.optInLabel);
 }
 
 - (void)layoutCheckBoxButton {

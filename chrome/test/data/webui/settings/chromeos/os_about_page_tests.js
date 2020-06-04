@@ -23,7 +23,7 @@ cr.define('settings_about_page', function() {
     suite('AboutPageTest', function() {
       let page = null;
 
-      /** @type {?settings.TestAboutPageBrowserProxy} */
+      /** @type {?settings.TestAboutPageBrowserProxyChromeOS} */
       let aboutBrowserProxy = null;
 
       /** @type {?settings.TestLifetimeBrowserProxy} */
@@ -35,7 +35,7 @@ cr.define('settings_about_page', function() {
         lifetimeBrowserProxy = new settings.TestLifetimeBrowserProxy();
         settings.LifetimeBrowserProxyImpl.instance_ = lifetimeBrowserProxy;
 
-        aboutBrowserProxy = new TestAboutPageBrowserProxy();
+        aboutBrowserProxy = new TestAboutPageBrowserProxyChromeOS();
         settings.AboutPageBrowserProxyImpl.instance_ = aboutBrowserProxy;
         return initNewPage();
       });
@@ -51,12 +51,14 @@ cr.define('settings_about_page', function() {
         lifetimeBrowserProxy.reset();
         PolymerTest.clearBody();
         page = document.createElement('os-settings-about-page');
-        settings.navigateTo(settings.routes.ABOUT);
+        settings.Router.getInstance().navigateTo(settings.routes.ABOUT);
         document.body.appendChild(page);
         return Promise.all([
           aboutBrowserProxy.whenCalled('getChannelInfo'),
           aboutBrowserProxy.whenCalled('refreshUpdateStatus'),
           aboutBrowserProxy.whenCalled('refreshTPMFirmwareUpdateStatus'),
+          aboutBrowserProxy.whenCalled('getEnabledReleaseNotes'),
+          aboutBrowserProxy.whenCalled('checkInternetConnection'),
         ]);
       }
 
@@ -278,6 +280,78 @@ cr.define('settings_about_page', function() {
         assertFalse(page.$.relaunchAndPowerwash.hidden);
       });
 
+      /**
+       * Test that release notes button can toggled by feature flags.
+       * Test that release notes button handles offline/online mode properly.
+       * page.$$("#") is used to access items inside dom-if.
+       */
+      test('ReleaseNotes', async () => {
+        const releaseNotes = null;
+
+        /**
+         * Checks the visibility of the "release notes" section when online.
+         * @param {boolean} isShowing Whether the section is expected to be
+         *     visible.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesOnline(isShowing) {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOnlineEl = page.$$('#releaseNotesOnline');
+          assertTrue(!!releaseNotesOnlineEl);
+          assertEquals(isShowing, !releaseNotesOnlineEl.hidden);
+        }
+
+        /**
+         * Checks the visibility of the "release notes" for offline mode.
+         * @param {boolean} isShowing Whether the section is expected to be
+         *     visible.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesOffline(isShowing) {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOfflineEl = page.$$('#releaseNotesOffline');
+          assertTrue(!!releaseNotesOfflineEl);
+          assertEquals(isShowing, !releaseNotesOfflineEl.hidden);
+        }
+
+        /**
+         * Checks the visibility of the "release notes" section when disabled.
+         * @return {!Promise}
+         */
+        async function checkReleaseNotesDisabled() {
+          await aboutBrowserProxy.whenCalled('getEnabledReleaseNotes');
+          const releaseNotesOnlineEl = page.$$('#releaseNotesOnline');
+          assertTrue(!releaseNotesOnlineEl);
+          const releaseNotesOfflineEl = page.$$('#releaseNotesOffline');
+          assertTrue(!releaseNotesOfflineEl);
+        }
+
+        aboutBrowserProxy.setReleaseNotes(false);
+        aboutBrowserProxy.setInternetConnection(false);
+        await initNewPage();
+        await checkReleaseNotesDisabled();
+
+        aboutBrowserProxy.setReleaseNotes(false);
+        aboutBrowserProxy.setInternetConnection(true);
+        await initNewPage();
+        await checkReleaseNotesDisabled();
+
+        aboutBrowserProxy.setReleaseNotes(true);
+        aboutBrowserProxy.setInternetConnection(false);
+        await initNewPage();
+        await checkReleaseNotesOnline(false);
+        await checkReleaseNotesOffline(true);
+
+        aboutBrowserProxy.setReleaseNotes(true);
+        aboutBrowserProxy.setInternetConnection(true);
+        await initNewPage();
+        await checkReleaseNotesOnline(true);
+        await checkReleaseNotesOffline(false);
+
+        page.$$('#releaseNotesOnline').click();
+        return aboutBrowserProxy.whenCalled('launchReleaseNotes');
+      });
+
       test('RegulatoryInfo', async () => {
         const regulatoryInfo = {text: 'foo', url: 'bar'};
 
@@ -313,7 +387,7 @@ cr.define('settings_about_page', function() {
         aboutBrowserProxy.refreshTPMFirmwareUpdateStatus();
         assertFalse(page.$.aboutTPMFirmwareUpdate.hidden);
         page.$.aboutTPMFirmwareUpdate.click();
-        await PolymerTest.flushTasks();
+        await test_util.flushTasks();
         const dialog = page.$$('os-settings-powerwash-dialog');
         assertTrue(!!dialog);
         assertTrue(dialog.$.dialog.open);
@@ -331,9 +405,10 @@ cr.define('settings_about_page', function() {
          * @return {!Promise}
          */
         async function checkHasEndOfLife(isShowing) {
-          await aboutBrowserProxy.whenCalled('getHasEndOfLife');
+          await aboutBrowserProxy.whenCalled('getEndOfLifeInfo');
           const {endOfLifeMessageContainer} = page.$;
           assertTrue(!!endOfLifeMessageContainer);
+
           assertEquals(isShowing, !endOfLifeMessageContainer.hidden);
 
           // Update status message should be hidden before user has
@@ -347,7 +422,7 @@ cr.define('settings_about_page', function() {
             const icon = page.$$('iron-icon');
             assertTrue(!!icon);
             assertEquals(null, icon.src);
-            assertEquals('settings:end-of-life', icon.icon);
+            assertEquals('os-settings:end-of-life', icon.icon);
 
             const {checkForUpdates} = page.$;
             assertTrue(!!checkForUpdates);
@@ -357,15 +432,53 @@ cr.define('settings_about_page', function() {
 
         // Force test proxy to not respond to JS requests.
         // End of life message should still be hidden in this case.
-        aboutBrowserProxy.setHasEndOfLife(new Promise(() => {}));
+        aboutBrowserProxy.setEndOfLifeInfo(new Promise(function(res, rej) {}));
         await initNewPage();
         await checkHasEndOfLife(false);
-        aboutBrowserProxy.setHasEndOfLife(true);
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          endOfLifeAboutMessage: '',
+        });
         await initNewPage();
         await checkHasEndOfLife(true);
-        aboutBrowserProxy.setHasEndOfLife(false);
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: false,
+          endOfLifeAboutMessage: '',
+        });
         await initNewPage();
         await checkHasEndOfLife(false);
+      });
+
+      test('detailed build info page', async () => {
+        async function checkEndOfLifeSection() {
+          await aboutBrowserProxy.whenCalled('getEndOfLifeInfo');
+          const buildInfoPage = page.$$('settings-detailed-build-info');
+          assertTrue(!!buildInfoPage.$['endOfLifeSectionContainer']);
+          assertFalse(buildInfoPage.$['endOfLifeSectionContainer'].hidden);
+        }
+
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          aboutPageEndOfLifeMessage: '',
+        });
+        await initNewPage();
+        page.scroller = page.offsetParent;
+        assertTrue(!!page.$['detailed-build-info-trigger']);
+        page.$['detailed-build-info-trigger'].click();
+        const buildInfoPage = page.$$('settings-detailed-build-info');
+        assertTrue(!!buildInfoPage);
+        assertTrue(!!buildInfoPage.$['endOfLifeSectionContainer']);
+        assertTrue(buildInfoPage.$['endOfLifeSectionContainer'].hidden);
+
+        aboutBrowserProxy.setEndOfLifeInfo({
+          hasEndOfLife: true,
+          aboutPageEndOfLifeMessage: 'message',
+        });
+        await initNewPage();
+        page.scroller = page.offsetParent;
+        assertTrue(!!page.$['detailed-build-info-trigger']);
+        page.$['detailed-build-info-trigger'].click();
+        checkEndOfLifeSection();
       });
 
       test('GetHelp', function() {
@@ -379,7 +492,7 @@ cr.define('settings_about_page', function() {
   function registerOfficialBuildTests() {
     suite('AboutPageTest_OfficialBuild', function() {
       test('ReportAnIssue', function() {
-        const browserProxy = new TestAboutPageBrowserProxy();
+        const browserProxy = new TestAboutPageBrowserProxyChromeOS();
         settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
         PolymerTest.clearBody();
         const page = document.createElement('os-settings-about-page');
@@ -392,11 +505,220 @@ cr.define('settings_about_page', function() {
     });
   }
 
+  function registerDetailedBuildInfoTests() {
+    suite('DetailedBuildInfoTest', function() {
+      let page = null;
+      let browserProxy = null;
+
+      setup(function() {
+        browserProxy = new TestAboutPageBrowserProxyChromeOS();
+        settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
+        PolymerTest.clearBody();
+      });
+
+      teardown(function() {
+        page.remove();
+        page = null;
+      });
+
+      test('Initialization', async () => {
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+
+        await Promise.all([
+          browserProxy.whenCalled('pageReady'),
+          browserProxy.whenCalled('canChangeChannel'),
+          browserProxy.whenCalled('getChannelInfo'),
+          browserProxy.whenCalled('getVersionInfo'),
+        ]);
+      });
+
+      /**
+       * Checks whether the "change channel" button state (enabled/disabled)
+       * correctly reflects whether the user is allowed to change channel (as
+       * dictated by the browser via loadTimeData boolean).
+       * @param {boolean} canChangeChannel Whether to simulate the case where
+       *     changing channels is allowed.
+       * @return {!Promise}
+       */
+      async function checkChangeChannelButton(canChangeChannel) {
+        browserProxy.setCanChangeChannel(canChangeChannel);
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+        await browserProxy.whenCalled('canChangeChannel');
+        const changeChannelButton = page.$$('cr-button');
+        assertTrue(!!changeChannelButton);
+        assertEquals(canChangeChannel, !changeChannelButton.disabled);
+      }
+
+      test('ChangeChannel_Enabled', function() {
+        return checkChangeChannelButton(true);
+      });
+
+      test('ChangeChannel_Disabled', function() {
+        return checkChangeChannelButton(false);
+      });
+
+      /**
+       * Checks whether the "change channel" button state (enabled/disabled)
+       * is correct before getChannelInfo() returns
+       * (see https://crbug.com/848750). Here, getChannelInfo() is blocked
+       * manually until after the button check.
+       */
+      async function checkChangeChannelButtonWithDelayedChannelState(
+          canChangeChannel) {
+        const resolver = new PromiseResolver();
+        browserProxy.getChannelInfo = async function() {
+          await resolver.promise;
+          this.methodCalled('getChannelInfo');
+          return Promise.resolve(this.channelInfo_);
+        };
+        const result = await checkChangeChannelButton(canChangeChannel);
+        resolver.resolve();
+        return result;
+      }
+
+      test('ChangeChannel_EnabledWithDelayedChannelState', function() {
+        return checkChangeChannelButtonWithDelayedChannelState(true);
+      });
+
+      test('ChangeChannel_DisabledWithDelayedChannelState', function() {
+        return checkChangeChannelButtonWithDelayedChannelState(false);
+      });
+
+      async function checkCopyBuildDetailsButton() {
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+        const copyBuildDetailsButton = page.$$('cr-icon-button');
+        await browserProxy.whenCalled('getVersionInfo');
+        await browserProxy.whenCalled('getChannelInfo');
+        await browserProxy.whenCalled('canChangeChannel');
+
+        const expectedClipBoardText =
+            `${loadTimeData.getString('application_label')}: ` +
+            `${loadTimeData.getString('aboutBrowserVersion')}\n` +
+            `Platform: ${browserProxy.versionInfo_.osVersion}\n` +
+            `Channel: ${browserProxy.channelInfo_.targetChannel}\n` +
+            `Firmware Version: ${browserProxy.versionInfo_.osFirmware}\n` +
+            `ARC Enabled: ${loadTimeData.getBoolean('aboutIsArcEnabled')}\n` +
+            `ARC: ${browserProxy.versionInfo_.arcVersion}\n` +
+            `Enterprise Enrolled: ` +
+            `${loadTimeData.getBoolean('aboutEnterpriseManaged')}\n` +
+            `Developer Mode: ` +
+            `${loadTimeData.getBoolean('aboutIsDeveloperMode')}`;
+
+        assertTrue(!!copyBuildDetailsButton);
+        await navigator.clipboard.readText().then(text => assertFalse(!!text));
+        copyBuildDetailsButton.click();
+        await navigator.clipboard.readText().then(
+            text => assertEquals(text, expectedClipBoardText));
+      }
+
+      test('CheckCopyBuildDetails', function() {
+        checkCopyBuildDetailsButton();
+      });
+    });
+  }
+
+  function registerChannelSwitcherDialogTests() {
+    suite('ChannelSwitcherDialogTest', function() {
+      let dialog = null;
+      let radioButtons = null;
+      let browserProxy = null;
+      const currentChannel = BrowserChannel.BETA;
+
+      setup(function() {
+        browserProxy = new TestAboutPageBrowserProxyChromeOS();
+        browserProxy.setChannels(currentChannel, currentChannel);
+        settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
+        PolymerTest.clearBody();
+        dialog = document.createElement('settings-channel-switcher-dialog');
+        document.body.appendChild(dialog);
+
+        radioButtons = dialog.shadowRoot.querySelectorAll('cr-radio-button');
+        assertEquals(3, radioButtons.length);
+        return browserProxy.whenCalled('getChannelInfo');
+      });
+
+      teardown(function() {
+        dialog.remove();
+      });
+
+      test('Initialization', function() {
+        const radioGroup = dialog.$$('cr-radio-group');
+        assertTrue(!!radioGroup);
+        assertTrue(!!dialog.$.warningSelector);
+        assertTrue(!!dialog.$.changeChannel);
+        assertTrue(!!dialog.$.changeChannelAndPowerwash);
+
+        // Check that upon initialization the radio button corresponding to
+        // the current release channel is pre-selected.
+        assertEquals(currentChannel, radioGroup.selected);
+        assertEquals(dialog.$.warningSelector.selected, -1);
+
+        // Check that action buttons are hidden when current and target
+        // channel are the same.
+        assertTrue(dialog.$.changeChannel.hidden);
+        assertTrue(dialog.$.changeChannelAndPowerwash.hidden);
+      });
+
+      // Test case where user switches to a less stable channel.
+      test('ChangeChannel_LessStable', async () => {
+        assertEquals(BrowserChannel.DEV, radioButtons.item(2).name);
+        radioButtons.item(2).click();
+        Polymer.dom.flush();
+
+        await browserProxy.whenCalled('getChannelInfo');
+        assertEquals(dialog.$.warningSelector.selected, 2);
+        // Check that only the "Change channel" button becomes visible.
+        assertTrue(dialog.$.changeChannelAndPowerwash.hidden);
+        assertFalse(dialog.$.changeChannel.hidden);
+
+        const whenTargetChannelChangedFired =
+            test_util.eventToPromise('target-channel-changed', dialog);
+
+        dialog.$.changeChannel.click();
+        const [channel, isPowerwashAllowed] =
+            await browserProxy.whenCalled('setChannel');
+        assertEquals(BrowserChannel.DEV, channel);
+        assertFalse(isPowerwashAllowed);
+        const {detail} = await whenTargetChannelChangedFired;
+        assertEquals(BrowserChannel.DEV, detail);
+      });
+
+      // Test case where user switches to a more stable channel.
+      test('ChangeChannel_MoreStable', async () => {
+        assertEquals(BrowserChannel.STABLE, radioButtons.item(0).name);
+        radioButtons.item(0).click();
+        Polymer.dom.flush();
+
+        await browserProxy.whenCalled('getChannelInfo');
+        assertEquals(dialog.$.warningSelector.selected, 1);
+        // Check that only the "Change channel and Powerwash" button becomes
+        // visible.
+        assertFalse(dialog.$.changeChannelAndPowerwash.hidden);
+        assertTrue(dialog.$.changeChannel.hidden);
+
+        const whenTargetChannelChangedFired =
+            test_util.eventToPromise('target-channel-changed', dialog);
+
+        dialog.$.changeChannelAndPowerwash.click();
+        const [channel, isPowerwashAllowed] =
+            await browserProxy.whenCalled('setChannel');
+        assertEquals(BrowserChannel.STABLE, channel);
+        assertTrue(isPowerwashAllowed);
+        const {detail} = await whenTargetChannelChangedFired;
+        assertEquals(BrowserChannel.STABLE, detail);
+      });
+    });
+  }
+
   return {
-    // TODO(aee): move the detailed build info and channel switch dialog tests
-    // from the browser about page tests when those CrOS-specific parts are
-    // removed from the browser about page.
-    registerTests: registerAboutPageTests,
+    registerTests: function() {
+      registerDetailedBuildInfoTests();
+      registerChannelSwitcherDialogTests();
+      registerAboutPageTests();
+    },
     registerOfficialBuildTests: registerOfficialBuildTests,
   };
 });

@@ -5,7 +5,9 @@
 #include "ash/shell/content/test/ash_content_test.h"
 
 #include <utility>
+#include <vector>
 
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/shell.h"
 #include "ash/shell/content/client/shell_browser_main_parts.h"
 #include "ash/shell/content/embedded_browser.h"
@@ -13,6 +15,7 @@
 #include "ash/wm/mru_window_tracker.h"
 #include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
@@ -26,6 +29,7 @@
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
 #include "base/test/test_file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chromeos/constants/chromeos_switches.h"
@@ -33,6 +37,7 @@
 #include "content/public/browser/tracing_controller.h"
 #include "content/public/test/browser_test_utils.h"
 #include "services/tracing/public/cpp/trace_event_agent.h"
+#include "testing/perf/luci_test_result.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/display/display_switches.h"
@@ -55,15 +60,29 @@ float GetHistogramMean(const std::string& name) {
   return static_cast<float>(samples->sum()) / samples->TotalCount();
 }
 
+perf_test::LuciTestResult CreateTestResult(
+    const base::FilePath& trace_file,
+    const std::vector<std::string>& tbm_metrics) {
+  perf_test::LuciTestResult result =
+      perf_test::LuciTestResult::CreateForGTest();
+  result.AddOutputArtifactFile("trace/1.json", trace_file, "application/json");
+  for (auto& metric : tbm_metrics)
+    result.AddTag("tbmv2", metric);
+
+  return result;
+}
+
 }  // namespace
 
 class AshContentTest::Tracer {
  public:
   Tracer(base::FilePath trace_dir,
          std::string tracing_categories,
-         std::vector<std::string> histograms)
+         std::vector<std::string> histograms,
+         std::vector<std::string> tbm_metrics)
       : trace_dir_(std::move(trace_dir)),
-        tracing_categories_(std::move(tracing_categories)) {
+        tracing_categories_(std::move(tracing_categories)),
+        tbm_metrics_(std::move(tbm_metrics)) {
     auto* controller = content::TracingController::GetInstance();
     base::trace_event::TraceConfig config(
         tracing_categories_, base::trace_event::RECORD_CONTINUOUSLY);
@@ -78,16 +97,9 @@ class AshContentTest::Tracer {
   }
 
   ~Tracer() {
-    {
-      // TODO(oshima): Figure out how interactive_ui_tests allows IO operation
-      // in teardown.
-      base::RunLoop runloop;
-      base::PostTaskWithTraitsAndReply(
-          FROM_HERE, {base::MayBlock()},
-          base::BindOnce(&Tracer::CreateTmp, base::Unretained(this)),
-          runloop.QuitClosure());
-      runloop.Run();
-    }
+    base::ScopedAllowBlockingForTesting allow_io;
+    CreateTmp();
+
     {
       base::RunLoop runloop;
       auto trace_data_endpoint = content::TracingController::CreateFileEndpoint(
@@ -97,6 +109,10 @@ class AshContentTest::Tracer {
       runloop.Run();
       CHECK(result);
     }
+
+    base::FilePath report_file =
+        trace_file_.AddExtension(FILE_PATH_LITERAL("test_result.json"));
+    CreateTestResult(trace_file_, tbm_metrics_).WriteToFile(report_file);
   }
 
   void CreateTmp() {
@@ -106,6 +122,7 @@ class AshContentTest::Tracer {
   base::FilePath trace_dir_;
   base::FilePath trace_file_;
   std::string tracing_categories_;
+  std::vector<std::string> tbm_metrics_;
 };
 
 AshContentTest::AshContentTest()
@@ -121,7 +138,6 @@ AshContentTest::AshContentTest()
 AshContentTest::~AshContentTest() = default;
 
 void AshContentTest::SetUp() {
-  content::ContentBrowserTest::SetUp();
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   // Add command line arguments that are used by all AshContentTests.
   if (!command_line->HasSwitch(switches::kHostWindowBounds) &&
@@ -132,6 +148,7 @@ void AshContentTest::SetUp() {
     command_line->AppendSwitchASCII(switches::kHostWindowBounds,
                                     "0+0-1280x800");
   }
+  content::ContentBrowserTest::SetUp();
 }
 
 void AshContentTest::SetUpOnMainThread() {
@@ -143,14 +160,18 @@ void AshContentTest::SetUpOnMainThread() {
         std::move(dir),
         std::move(
             "benchmark,cc,viz,input,latency,gpu,rail,toplevel,ui,views,viz"),
-        GetUMAHistogramNames());
+        GetUMAHistogramNames(), GetTimelineBasedMetrics());
   }
+  gfx::Size display_size = ash::Shell::GetPrimaryRootWindow()->bounds().size();
+  test_window_size_.set_height(
+      (display_size.height() - ash::ShelfConfig::Get()->shelf_size()) * 0.95f);
+  test_window_size_.set_width(display_size.width() * 0.7f);
 }
 
 void AshContentTest::TearDownOnMainThread() {
   tracer_.reset();
-  bool print =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(kPerfTestPrintUmaMeans);
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  const bool print = command_line->HasSwitch(kPerfTestPrintUmaMeans);
   LOG_IF(INFO, print) << "=== Histogram Means ===";
   for (auto name : GetUMAHistogramNames()) {
     EXPECT_TRUE(!!base::StatisticsRecorder::FindHistogram(name))
@@ -164,14 +185,15 @@ void AshContentTest::TearDownOnMainThread() {
 
 aura::Window* AshContentTest::CreateBrowserWindow(const GURL& url) {
   return ash::shell::EmbeddedBrowser::Create(
-      ash::shell::ShellBrowserMainParts::GetBrowserContext(), url);
+      ash::shell::ShellBrowserMainParts::GetBrowserContext(), url,
+      gfx::Rect(test_window_size_));
 }
 
 aura::Window* AshContentTest::CreateTestWindow() {
-  views::Widget* widget = views::Widget::CreateWindowWithContextAndBounds(
+  views::Widget* widget = views::Widget::CreateWindowWithContext(
       new ash::shell::WindowTypeLauncher(base::NullCallback(),
                                          base::NullCallback()),
-      ash::Shell::GetPrimaryRootWindow(), gfx::Rect(600, 800));
+      ash::Shell::GetPrimaryRootWindow(), gfx::Rect(test_window_size_));
   widget->GetNativeView()->SetName("WindowTypeLauncher");
   widget->Show();
 
@@ -204,5 +226,9 @@ void AshContentTest::PostRunTestOnMainThread() {
 }
 
 std::vector<std::string> AshContentTest::GetUMAHistogramNames() const {
-  return std::vector<std::string>();
+  return {};
+}
+
+std::vector<std::string> AshContentTest::GetTimelineBasedMetrics() const {
+  return {"renderingMetric", "umaMetric"};
 }

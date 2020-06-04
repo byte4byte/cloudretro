@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -21,8 +20,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/app_modal/javascript_app_modal_dialog.h"
-#include "components/app_modal/native_app_modal_dialog.h"
+#include "components/embedder_support/switches.h"
+#include "components/javascript_dialogs/app_modal_dialog_controller.h"
+#include "components/javascript_dialogs/app_modal_dialog_view.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -132,7 +132,7 @@ class UnloadTest : public InProcessBrowserTest {
         testing::UnitTest::GetInstance()->current_test_info();
     if (strstr(test_info->name(), "BrowserCloseTabWhenOtherTabHasListener") !=
         nullptr) {
-      command_line->AppendSwitch(switches::kDisablePopupBlocking);
+      command_line->AppendSwitch(embedder_support::kDisablePopupBlocking);
     } else if (strstr(test_info->name(), "BrowserTerminateBeforeUnload") !=
                nullptr) {
 #if defined(OS_POSIX)
@@ -192,12 +192,12 @@ class UnloadTest : public InProcessBrowserTest {
   // If |accept| is true, simulates user clicking OK, otherwise simulates
   // clicking Cancel.
   void ClickModalDialogButton(bool accept) {
-    app_modal::JavaScriptAppModalDialog* dialog =
+    javascript_dialogs::AppModalDialogController* dialog =
         ui_test_utils::WaitForAppModalDialog();
     if (accept)
-      dialog->native_dialog()->AcceptAppModalDialog();
+      dialog->view()->AcceptAppModalDialog();
     else
-      dialog->native_dialog()->CancelAppModalDialog();
+      dialog->view()->CancelAppModalDialog();
   }
 
   void PrepareForDialog(Browser* browser) {
@@ -639,6 +639,31 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseWithCrossSiteIframe) {
   // Install a dialog-showing beforeunload handler in the iframe.
   content::RenderFrameHost* child =
       ChildFrameAt(web_contents->GetMainFrame(), 0);
+  EXPECT_TRUE(
+      ExecuteScript(child, "window.onbeforeunload = () => { return 'x' };"));
+
+  // Close the browser and make sure the beforeunload dialog is shown and can
+  // be clicked.
+  PrepareForDialog(browser());
+  ManuallyCloseWindow();
+}
+
+// Tests that a same-site iframe runs its beforeunload handler when closing the
+// browser.  See https://crbug.com/1010456.
+IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseWithSameSiteIframe) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Navigate to a page with a same-site iframe.
+  GURL main_url(embedded_test_server()->GetURL("a.com", "/iframe.html"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::RenderFrameHost* child =
+      ChildFrameAt(web_contents->GetMainFrame(), 0);
+  EXPECT_EQ(child->GetSiteInstance(),
+            web_contents->GetMainFrame()->GetSiteInstance());
+
+  // Install a dialog-showing beforeunload handler in the iframe.
   EXPECT_TRUE(
       ExecuteScript(child, "window.onbeforeunload = () => { return 'x' };"));
 

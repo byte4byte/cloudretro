@@ -75,8 +75,7 @@ class TestPacketSender : public PacketTransport {
 
   int64_t GetBytesSent() final { return 0; }
 
-  void StartReceiving(
-      const PacketReceiverCallbackWithStatus& packet_receiver) final {}
+  void StartReceiving(PacketReceiverCallbackWithStatus packet_receiver) final {}
 
   void StopReceiving() final {}
 
@@ -112,9 +111,8 @@ class AudioSenderTest : public ::testing::Test {
         base::WrapUnique(transport_), task_runner_));
     OperationalStatus operational_status = STATUS_UNINITIALIZED;
     audio_sender_.reset(new AudioSender(
-        cast_environment_,
-        audio_config_,
-        base::Bind(&SaveOperationalStatus, &operational_status),
+        cast_environment_, audio_config_,
+        base::BindOnce(&SaveOperationalStatus, &operational_status),
         transport_sender_.get()));
     task_runner_->RunTasks();
     CHECK_EQ(STATUS_INITIALIZED, operational_status);

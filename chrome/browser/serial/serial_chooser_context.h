@@ -14,26 +14,32 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/unguessable_token.h"
-#include "chrome/browser/permissions/chooser_context_base.h"
-#include "services/device/public/mojom/serial.mojom.h"
+#include "components/permissions/chooser_context_base.h"
+#include "content/public/browser/serial_delegate.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/device/public/mojom/serial.mojom-forward.h"
 #include "third_party/blink/public/mojom/serial/serial.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+
+class Profile;
 
 namespace base {
 class Value;
 }
 
-class SerialChooserContext : public ChooserContextBase {
+class SerialChooserContext : public permissions::ChooserContextBase,
+                             public device::mojom::SerialPortManagerClient {
  public:
+  using PortObserver = content::SerialDelegate::Observer;
+
   explicit SerialChooserContext(Profile* profile);
   ~SerialChooserContext() override;
 
-  // ChooserContextBase implementation.
+  // ChooserContextBase:
   bool IsValidObject(const base::Value& object) override;
-
-  // Returns the human readable string representing the given object.
-  static std::string GetObjectName(const base::Value& object);
+  base::string16 GetObjectDisplayName(const base::Value& object) override;
 
   // In addition these methods from ChooserContextBase are overridden in order
   // to expose ephemeral devices through the public interface.
@@ -55,12 +61,22 @@ class SerialChooserContext : public ChooserContextBase {
 
   device::mojom::SerialPortManager* GetPortManager();
 
-  void SetPortManagerForTesting(device::mojom::SerialPortManagerPtr manager);
+  void AddPortObserver(PortObserver* observer);
+  void RemovePortObserver(PortObserver* observer);
+
+  void SetPortManagerForTesting(
+      mojo::PendingRemote<device::mojom::SerialPortManager> manager);
+  void FlushPortManagerConnectionForTesting();
   base::WeakPtr<SerialChooserContext> AsWeakPtr();
+
+  // SerialPortManagerClient implementation.
+  void OnPortAdded(device::mojom::SerialPortInfoPtr port) override;
+  void OnPortRemoved(device::mojom::SerialPortInfoPtr port) override;
 
  private:
   void EnsurePortManagerConnection();
-  void SetUpPortManagerConnection(device::mojom::SerialPortManagerPtr manager);
+  void SetUpPortManagerConnection(
+      mojo::PendingRemote<device::mojom::SerialPortManager> manager);
   void OnPortManagerConnectionError();
   void OnGetPorts(const url::Origin& requesting_origin,
                   const url::Origin& embedding_origin,
@@ -78,7 +94,9 @@ class SerialChooserContext : public ChooserContextBase {
   // Holds information about ports in |ephemeral_ports_|.
   std::map<base::UnguessableToken, base::Value> port_info_;
 
-  device::mojom::SerialPortManagerPtr port_manager_;
+  mojo::Remote<device::mojom::SerialPortManager> port_manager_;
+  mojo::Receiver<device::mojom::SerialPortManagerClient> client_receiver_{this};
+  base::ObserverList<PortObserver> port_observer_list_;
 
   base::WeakPtrFactory<SerialChooserContext> weak_factory_{this};
 

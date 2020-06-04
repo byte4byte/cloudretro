@@ -12,7 +12,7 @@
 namespace blink {
 
 class CORE_EXPORT CompositorKeyframeValue
-    : public GarbageCollectedFinalized<CompositorKeyframeValue> {
+    : public GarbageCollected<CompositorKeyframeValue> {
  public:
   virtual ~CompositorKeyframeValue() = default;
 
@@ -25,7 +25,6 @@ class CORE_EXPORT CompositorKeyframeValue
 
   virtual void Trace(Visitor*) {}
 
- protected:
   enum class Type {
     kDouble,
     kFilterOperations,
@@ -33,14 +32,8 @@ class CORE_EXPORT CompositorKeyframeValue
     kColor,
   };
 
- private:
   virtual Type GetType() const = 0;
 };
-
-#define DEFINE_COMPOSITOR_KEYFRAME_VALUE_TYPE_CASTS(thisType, predicate) \
-  DEFINE_TYPE_CASTS(thisType, CompositorKeyframeValue, value,            \
-                    value->predicate, value.predicate)
-
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_COMPOSITOR_KEYFRAME_VALUE_H_

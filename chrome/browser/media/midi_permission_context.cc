@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/media/midi_permission_context.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom.h"
 
-MidiPermissionContext::MidiPermissionContext(Profile* profile)
-    : PermissionContextBase(profile,
-                            CONTENT_SETTINGS_TYPE_MIDI,
+MidiPermissionContext::MidiPermissionContext(
+    content::BrowserContext* browser_context)
+    : PermissionContextBase(browser_context,
+                            ContentSettingsType::MIDI,
                             blink::mojom::FeaturePolicyFeature::kMidiFeature) {}
 
 MidiPermissionContext::~MidiPermissionContext() {

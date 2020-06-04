@@ -37,8 +37,9 @@
 #include "components/omnibox/browser/document_suggestions_service.h"
 #include "components/omnibox/browser/history_provider.h"
 #include "components/omnibox/browser/in_memory_url_index_types.h"
+#include "components/omnibox/browser/keyword_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
-#include "components/omnibox/browser/omnibox_pref_names.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/search_provider.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -47,7 +48,6 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/base/url_util.h"
-#include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -90,6 +90,8 @@ AutocompleteMatch::DocumentType GetIconForMIMEType(
           {"image/gif", AutocompleteMatch::DocumentType::DRIVE_IMAGE},
           {"application/pdf", AutocompleteMatch::DocumentType::DRIVE_PDF},
           {"video/mp4", AutocompleteMatch::DocumentType::DRIVE_VIDEO},
+          {"application/vnd.google-apps.folder",
+           AutocompleteMatch::DocumentType::DRIVE_FOLDER},
       };
 
   const auto& iterator = kIconMap.find(mimetype);
@@ -101,6 +103,11 @@ AutocompleteMatch::DocumentType GetIconForMIMEType(
 const char kErrorMessageAdminDisabled[] =
     "Not eligible to query due to admin disabled Chrome search settings.";
 const char kErrorMessageRetryLater[] = "Not eligible to query, see retry info.";
+
+// TODO(manukh): Remove ResponseContainsBackoffSignal once the check using http
+// status code in |OnURLLoadComplete| rolls out and the backend returns to
+// sending 4xx backoff responses as opposed to 2xx; or, if the backend is never
+// adjusted to send 2xx responses, once that check rolls out.
 bool ResponseContainsBackoffSignal(const base::DictionaryValue* root_dict) {
   const base::DictionaryValue* error_info;
   if (!root_dict->GetDictionary("error", &error_info)) {
@@ -185,7 +192,7 @@ std::vector<const std::string*> ExtractResultList(
   if (!values)
     return {};
 
-  const base::Value::ListStorage& list = values->GetList();
+  base::Value::ConstListView list = values->GetList();
   std::vector<const std::string*> extracted(list.size());
   std::transform(list.begin(), list.end(), extracted.begin(),
                  [field_path](const auto& value) {
@@ -276,13 +283,81 @@ int BoostOwned(const int score,
   return std::max(score + (owned ? promotion : -demotion), 0);
 }
 
+// Derived from google3/apps/share/util/docs_url_extractor.cc.
+std::string ExtractDocIdFromUrl(const std::string& url) {
+  static const RE2 docs_url_pattern_(
+      "\\b("  // The first groups matches the whole URL.
+      // Domain.
+      "(?:https?://)?(?:"
+      "spreadsheets|docs|drive|script|sites|jamboard"
+      ")[0-9]?.google.com"
+      "(?::[0-9]+)?\\/"  // Port.
+      "(?:\\S*)"         // Non-whitespace chars.
+      "(?:"
+      // Doc url prefix to match /d/{id}. (?:e/)? deviates from google3.
+      "(?:/d/(?:e/)?(?P<path_docid>[0-9a-zA-Z\\-\\_]+))"
+      "|"
+      // Docs id expr to match a valid id parameter.
+      "(?:(?:\\?|&|&amp;)"
+      "(?:id|docid|key|docID|DocId)=(?P<query_docid>[0-9a-zA-Z\\-\\_]+))"
+      "|"
+      // Folder url prefix to match /folders/{folder_id}.
+      "(?:/folders/(?P<folder_docid>[0-9a-zA-Z\\-\\_]+))"
+      "|"
+      // Sites url prefix.
+      "(?:/?s/)(?P<sites_docid>[0-9a-zA-Z\\-\\_]+)"
+      "(?:/p/[0-9a-zA-Z\\-\\_]+)?/edit"
+      "|"
+      // Jam url.
+      "(?:d/)(?P<jam_docid>[0-9a-zA-Z\\-\\_]+)/(?:edit|viewer)"
+      ")"
+      // Other valid chars.
+      "(?:[0-9a-zA-Z$\\-\\_\\.\\+\\!\\*\'\\,;:@&=/\\?]*)"
+      // Summarization details.
+      "(?:summarizationDetails=[0-9a-zA-Z$\\-\\_\\.\\+\\!\\*\'\\,;:@&=/"
+      "\\?(?:%5B)(?:%5D)]*)?"
+      // Pther valid chars.
+      "(?:[0-9a-zA-Z$\\-\\_\\.\\+\\!\\*\'\\,;:@&=/\\?]*)"
+      "(?:(#[0-9a-zA-Z$\\-\\_\\.\\+\\!\\*\'\\,;:@&=/\\?]+)?)"  // Fragment
+      ")");
+
+  std::vector<re2::StringPiece> matched_doc_ids(
+      docs_url_pattern_.NumberOfCapturingGroups() + 1);
+  // ANCHOR_START deviates from google3 which uses UNANCHORED. Using
+  // ANCHOR_START prevents incorrectly matching with non-drive URLs but which
+  // contain a drive URL; e.g.,
+  // url-parser.com/?url=https://docs.google.com/document/d/(id)/edit.
+  if (!docs_url_pattern_.Match(url, 0, url.size(), RE2::ANCHOR_START,
+                               matched_doc_ids.data(),
+                               matched_doc_ids.size())) {
+    return std::string();
+  }
+  for (const auto& doc_id_group : docs_url_pattern_.NamedCapturingGroups()) {
+    re2::StringPiece identified_doc_id = matched_doc_ids[doc_id_group.second];
+    if (!identified_doc_id.empty()) {
+      return std::string(identified_doc_id);
+    }
+  }
+  return std::string();
+}
+
+base::string16 TitleForAutocompletion(AutocompleteMatch match) {
+  return match.contents +
+         base::UTF8ToUTF16(" - " + match.destination_url.spec());
+}
+
+bool WithinBounds(int value, int min, int max) {
+  return value >= min && (value < max || max == -1);
+}
+
 }  // namespace
 
 // static
 DocumentProvider* DocumentProvider::Create(
     AutocompleteProviderClient* client,
-    AutocompleteProviderListener* listener) {
-  return new DocumentProvider(client, listener);
+    AutocompleteProviderListener* listener,
+    size_t cache_size) {
+  return new DocumentProvider(client, listener, cache_size);
 }
 
 // static
@@ -292,7 +367,8 @@ void DocumentProvider::RegisterProfilePrefs(
 }
 
 bool DocumentProvider::IsDocumentProviderAllowed(
-    AutocompleteProviderClient* client) {
+    AutocompleteProviderClient* client,
+    const AutocompleteInput& input) {
   // Feature must be on.
   if (!base::FeatureList::IsEnabled(omnibox::kDocumentProvider))
     return false;
@@ -316,20 +392,37 @@ bool DocumentProvider::IsDocumentProviderAllowed(
     return false;
 
   // We haven't received a server backoff signal.
-  if (backoff_for_session_) {
+  if (backoff_for_session_)
     return false;
-  }
 
-  // Google must be set as default search provider; we mix results which may
-  // change placement.
+  // Google must be set as default search provider.
   auto* template_url_service = client->GetTemplateURLService();
   if (template_url_service == nullptr)
     return false;
   const TemplateURL* default_provider =
       template_url_service->GetDefaultSearchProvider();
-  return default_provider != nullptr &&
-         default_provider->GetEngineType(
-             template_url_service->search_terms_data()) == SEARCH_ENGINE_GOOGLE;
+  if (default_provider == nullptr ||
+      default_provider->GetEngineType(
+          template_url_service->search_terms_data()) != SEARCH_ENGINE_GOOGLE)
+    return false;
+  if (OmniboxFieldTrial::IsExperimentalKeywordModeEnabled() &&
+      input.prefer_keyword()) {
+    // If a keyword provider matches, and we're explicitly in keyword mode,
+    // then the keyword provider must match the default, or the document
+    // provider.
+    AutocompleteInput keyword_input = input;
+    const TemplateURL* keyword_provider =
+        KeywordProvider::GetSubstitutingTemplateURLForInput(
+            template_url_service, &keyword_input);
+    if (keyword_provider == nullptr)
+      return true;
+    // True if not explicitly in keyword mode, or a Drive suggestion.
+    return !IsExplicitlyInKeywordMode(input, keyword_provider->keyword()) ||
+           base::StartsWith(input.text(),
+                            base::ASCIIToUTF16("drive.google.com"),
+                            base::CompareCase::SENSITIVE);
+  }
+  return true;
 }
 
 // static
@@ -362,42 +455,47 @@ void DocumentProvider::Start(const AutocompleteInput& input,
 
   // Perform various checks - feature is enabled, user is allowed to use the
   // feature, we're not under backoff, etc.
-  if (!IsDocumentProviderAllowed(client_)) {
+  if (!IsDocumentProviderAllowed(client_, input)) {
+    return;
+  }
+
+  // There should be no document suggestions fetched for on-focus suggestion
+  // requests, or if the input is empty.
+  if (input.from_omnibox_focus() ||
+      input.type() == metrics::OmniboxInputType::EMPTY) {
     return;
   }
 
   // Experiment: don't issue queries for inputs under some length.
-  const size_t min_query_length =
-      static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
-          omnibox::kDocumentProvider, "DocumentProviderMinQueryLength", 4));
-  if (input.text().length() < min_query_length) {
+  if (!WithinBounds(input.text().length(), min_query_length_,
+                    max_query_length_))
     return;
-  }
 
   // Don't issue queries for input likely to be a URL.
   if (IsInputLikelyURL(input)) {
     return;
   }
 
-  // We currently only provide asynchronous matches.
+  Stop(false, false);
+
+  input_ = input;
+
+  // Return cached suggestions synchronously.
+  CopyCachedMatchesToMatches();
+
   if (!input.want_asynchronous_matches()) {
     return;
   }
 
-  Stop(true, false);
-
-  input_ = input;
-
-  // Create a request for suggestions, routing completion to
-  base::BindOnce(&DocumentProvider::OnDocumentSuggestionsLoaderAvailable,
-                 weak_ptr_factory_.GetWeakPtr()),
-      base::BindOnce(&DocumentProvider::OnURLLoadComplete,
-                     base::Unretained(this) /* own SimpleURLLoader */);
-
   done_ = false;  // Set true in callbacks.
+  debouncer_->RequestRun(
+      base::BindOnce(&DocumentProvider::Run, base::Unretained(this)));
+}
+
+void DocumentProvider::Run() {
   client_->GetDocumentSuggestionsService(/*create_if_necessary=*/true)
       ->CreateDocumentSuggestionsRequest(
-          input.text(), client_->GetTemplateURLService(),
+          input_.text(), client_->IsOffTheRecord(),
           base::BindOnce(
               &DocumentProvider::OnDocumentSuggestionsLoaderAvailable,
               weak_ptr_factory_.GetWeakPtr()),
@@ -409,6 +507,7 @@ void DocumentProvider::Start(const AutocompleteInput& input,
 void DocumentProvider::Stop(bool clear_cached_results,
                             bool due_to_user_inactivity) {
   TRACE_EVENT0("omnibox", "DocumentProvider::Stop");
+  debouncer_->CancelRequest();
   if (loader_)
     LogOmniboxDocumentRequest(DOCUMENT_REQUEST_INVALIDATED);
   loader_.reset();
@@ -456,13 +555,58 @@ void DocumentProvider::ResetSession() {
 }
 
 DocumentProvider::DocumentProvider(AutocompleteProviderClient* client,
-                                   AutocompleteProviderListener* listener)
+                                   AutocompleteProviderListener* listener,
+                                   size_t cache_size)
     : AutocompleteProvider(AutocompleteProvider::TYPE_DOCUMENT),
+      min_query_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMinQueryLength",
+              4))),
+      max_query_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMaxQueryLength",
+              -1))),
+      min_query_show_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMinQueryShowLength",
+              min_query_length_))),
+      max_query_show_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMaxQueryShowLength",
+              max_query_length_))),
+      min_query_log_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMinQueryLogLength",
+              min_query_length_))),
+      max_query_log_length_(
+          static_cast<size_t>(base::GetFieldTrialParamByFeatureAsInt(
+              omnibox::kDocumentProvider,
+              "DocumentProviderMaxQueryLogLength",
+              max_query_length_))),
       field_trial_triggered_(false),
       field_trial_triggered_in_session_(false),
       backoff_for_session_(false),
       client_(client),
-      listener_(listener) {}
+      listener_(listener),
+      cache_size_(cache_size),
+      matches_cache_(MatchesCache::NO_AUTO_EVICT) {
+  if (base::FeatureList::IsEnabled(omnibox::kDebounceDocumentProvider)) {
+    bool from_last_run = base::GetFieldTrialParamByFeatureAsBool(
+        omnibox::kDebounceDocumentProvider,
+        "DebounceDocumentProviderFromLastRun", true);
+    int delay_ms = base::GetFieldTrialParamByFeatureAsInt(
+        omnibox::kDebounceDocumentProvider, "DebounceDocumentProviderDelayMs",
+        100);
+    debouncer_ = std::make_unique<AutocompleteProviderDebouncer>(from_last_run,
+                                                                 delay_ms);
+  } else
+    debouncer_ = std::make_unique<AutocompleteProviderDebouncer>(false, 0);
+}
 
 DocumentProvider::~DocumentProvider() {}
 
@@ -474,10 +618,15 @@ void DocumentProvider::OnURLLoadComplete(
 
   LogOmniboxDocumentRequest(DOCUMENT_REPLY_RECEIVED);
 
+  int httpStatusCode = source->ResponseInfo() && source->ResponseInfo()->headers
+                           ? source->ResponseInfo()->headers->response_code()
+                           : 0;
+
+  if (httpStatusCode == 400 || httpStatusCode == 499)
+    backoff_for_session_ = true;
+
   const bool results_updated =
-      response_body && source->NetError() == net::OK &&
-      (source->ResponseInfo() && source->ResponseInfo()->headers &&
-       source->ResponseInfo()->headers->response_code() == 200) &&
+      response_body && source->NetError() == net::OK && httpStatusCode == 200 &&
       UpdateResults(SearchSuggestionParser::ExtractJsonData(
           source, std::move(response_body)));
   loader_.reset();
@@ -491,7 +640,13 @@ bool DocumentProvider::UpdateResults(const std::string& json_data) {
   if (!response)
     return false;
 
-  return ParseDocumentSearchResults(*response, &matches_);
+  matches_ = ParseDocumentSearchResults(*response);
+  for (auto it = matches_.rbegin(); it != matches_.rend(); ++it)
+    matches_cache_.Put(it->stripped_destination_url, *it);
+  CopyCachedMatchesToMatches(matches_.size());
+  matches_cache_.ShrinkToSize(cache_size_);
+
+  return !matches_.empty();
 }
 
 void DocumentProvider::OnDocumentSuggestionsLoaderAvailable(
@@ -531,7 +686,8 @@ base::string16 DocumentProvider::GenerateLastModifiedString(
 }
 
 // static
-base::string16 GetProductDescriptionString(const std::string& mimetype) {
+base::string16 DocumentProvider::GetProductDescriptionString(
+    const std::string& mimetype) {
   if (mimetype == kDocumentMimetype)
     return l10n_util::GetStringUTF16(IDS_DRIVE_SUGGESTION_DOCUMENT);
   if (mimetype == kFormMimetype)
@@ -544,12 +700,37 @@ base::string16 GetProductDescriptionString(const std::string& mimetype) {
   return l10n_util::GetStringUTF16(IDS_DRIVE_SUGGESTION_GENERAL);
 }
 
-bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
-                                                  ACMatches* matches) {
+// static
+base::string16 DocumentProvider::GetMatchDescription(
+    const std::string& update_time,
+    const std::string& mimetype,
+    const std::string& owner) {
+  base::string16 mime_desc = GetProductDescriptionString(mimetype);
+  if (!update_time.empty()) {
+    base::string16 date_desc =
+        GenerateLastModifiedString(update_time, base::Time::Now());
+    return owner.empty()
+               ? l10n_util::GetStringFUTF16(
+                     IDS_DRIVE_SUGGESTION_DESCRIPTION_TEMPLATE_WITHOUT_OWNER,
+                     date_desc, mime_desc)
+               : l10n_util::GetStringFUTF16(
+                     IDS_DRIVE_SUGGESTION_DESCRIPTION_TEMPLATE, date_desc,
+                     base::UTF8ToUTF16(owner), mime_desc);
+  }
+  return owner.empty()
+             ? mime_desc
+             : l10n_util::GetStringFUTF16(
+                   IDS_DRIVE_SUGGESTION_DESCRIPTION_TEMPLATE_WITHOUT_DATE,
+                   base::UTF8ToUTF16(owner), mime_desc);
+}
+
+ACMatches DocumentProvider::ParseDocumentSearchResults(
+    const base::Value& root_val) {
+  ACMatches matches;
   const base::DictionaryValue* root_dict = nullptr;
   const base::ListValue* results_list = nullptr;
   if (!root_val.GetAsDictionary(&root_dict)) {
-    return false;
+    return matches;
   }
 
   // The server may ask the client to back off, in which case we back off for
@@ -557,12 +738,12 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
   // TODO(skare): Respect retryDelay if provided, ideally by calling via gRPC.
   if (ResponseContainsBackoffSignal(root_dict)) {
     backoff_for_session_ = true;
-    return false;
+    return matches;
   }
 
   // Otherwise parse the results.
   if (!root_dict->GetList("results", &results_list)) {
-    return false;
+    return matches;
   }
   size_t num_results = results_list->GetSize();
   UMA_HISTOGRAM_COUNTS_1M("Omnibox.DocumentSuggest.ResultCount", num_results);
@@ -597,17 +778,40 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
   bool in_counterfactual_group = base::GetFieldTrialParamByFeatureAsBool(
       omnibox::kDocumentProvider, "DocumentProviderCounterfactualArm", false);
 
-  // Clear the previous results now that new results are available.
-  matches->clear();
+  // In order to compare groups with different |min_query_length|_ values,
+  // |min_query_show_length_| specifies the min query length for which to show
+  // drive requests. Shorter queries that return drive suggestions will still
+  // log field_trials_triggered. E.g., if |min_query_length_| is 3 and
+  // |min_query_show_length_| is 5, then:
+  // - Inputs of lengths 0 to 2 will not make drive requests.
+  // - Inputs of lengths 3 to 4 will make drive requests; if drive suggestions
+  // are returned, field_trial_triggered will be logged, but the suggestions
+  // will not be shown.
+  // - Inputs of length 5 or more will make drive requests; if drive suggestions
+  // are returned, field_trial_triggered will be logged, and, if not in
+  // counterfactual, the suggestions will be shown.
+  bool show_doc_suggestions =
+      !in_counterfactual_group &&
+      WithinBounds(input_.text().length(), min_query_show_length_,
+                   max_query_show_length_);
+  // In order to compare small slices of input length while excluding noise from
+  // the larger group of all input lenghts, |min_query_log_length_| and
+  // |max_query_log_length_| specify the queries that will log
+  // field_trial_triggered. E.g., if |min_query_log_length_| is 50 and
+  // |max_query_log_length_| is -1, only inputs of length 50 or greater which
+  // return a drive suggestions will log field_trial_triggered are returned
+  // while shorter queries will continue to make requests and show suggestions.
+  // This allows an uninterrupted user experience for short queries while
+  // allowing focused analysis of long queries.
+  bool trigger_field_trial = WithinBounds(
+      input_.text().length(), min_query_log_length_, max_query_log_length_);
+
   // Ensure server's suggestions are added with monotonically decreasing scores.
   int previous_score = INT_MAX;
   for (size_t i = 0; i < num_results; i++) {
-    if (matches->size() >= provider_max_matches_) {
-      break;
-    }
     const base::DictionaryValue* result = nullptr;
     if (!results_list->GetDictionary(i, &result)) {
-      return false;
+      return matches;
     }
     base::string16 title;
     base::string16 url;
@@ -623,25 +827,31 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
     int server_score = 0;
     result->GetInteger("score", &server_score);
     int score = 0;
-    if (use_client_score && use_server_score)
-      score = std::min(client_score, server_score);
-    else
-      score = use_client_score ? client_score : server_score;
+    // Set |score| only if we haven't surpassed |provider_max_matches_| yet.
+    // Otherwise, score the remaining matches 0 to avoid displaying them except
+    // when deduped with history, shortcut, or bookmark matches.
+    if (matches.size() < provider_max_matches_) {
+      if (use_client_score && use_server_score)
+        score = std::min(client_score, server_score);
+      else
+        score = use_client_score ? client_score : server_score;
 
-    if (cap_score_per_rank) {
-      int score_cap = i < score_caps.size() ? score_caps[i] : score_caps.back();
-      score = std::min(score, score_cap);
+      if (cap_score_per_rank) {
+        int score_cap =
+            i < score_caps.size() ? score_caps[i] : score_caps.back();
+        score = std::min(score, score_cap);
+      }
+
+      if (boost_owned)
+        score = BoostOwned(score, client_->ProfileUserName(), result);
+
+      // Decrement scores if necessary to ensure suggestion order is preserved.
+      // Don't decrement client scores which don't necessarily rank suggestions
+      // the same as the server.
+      if (!use_client_score && score >= previous_score)
+        score = std::max(previous_score - 1, 0);
+      previous_score = score;
     }
-
-    if (boost_owned)
-      score = BoostOwned(score, client_->ProfileUserName(), result);
-
-    // Decrement scores if necessary to ensure suggestion order is preserved.
-    // Don't decrement client scores which don't necessarily rank suggestions
-    // the same as the server.
-    if (!use_client_score && score >= previous_score)
-      score = std::max(previous_score - 1, 0);
-    previous_score = score;
 
     AutocompleteMatch match(this, score, false,
                             AutocompleteMatchType::DOCUMENT_SUGGESTION);
@@ -650,11 +860,8 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
     match.fill_into_edit = url;
     match.destination_url = GURL(url);
     base::string16 original_url;
-    std::string mimetype;
     if (result->GetString("originalUrl", &original_url)) {
-      GURL stripped_url = GURL(original_url);
-      if (base::FeatureList::IsEnabled(omnibox::kDedupeGoogleDriveURLs))
-        stripped_url = GetURLForDeduping(stripped_url);
+      GURL stripped_url = GetURLForDeduping(GURL(original_url));
       if (stripped_url.is_valid())
         match.stripped_destination_url = stripped_url;
     }
@@ -662,6 +869,7 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
     match.contents_class = Classify(match.contents, input_.text());
     const base::DictionaryValue* metadata = nullptr;
     if (result->GetDictionary("metadata", &metadata)) {
+      std::string mimetype;
       if (metadata->GetString("mimeType", &mimetype)) {
         match.document_type = GetIconForMIMEType(mimetype);
         match.RecordAdditionalInfo(
@@ -670,30 +878,62 @@ bool DocumentProvider::ParseDocumentSearchResults(const base::Value& root_val,
       }
       std::string update_time;
       metadata->GetString("updateTime", &update_time);
-      if (!update_time.empty()) {
-        match.description = l10n_util::GetStringFUTF16(
-            IDS_DRIVE_SUGGESTION_DESCRIPTION_TEMPLATE,
-            GenerateLastModifiedString(update_time, base::Time::Now()),
-            GetProductDescriptionString(mimetype));
-      } else {
-        match.description = GetProductDescriptionString(mimetype);
-      }
+      bool display_owner = base::GetFieldTrialParamByFeatureAsBool(
+          omnibox::kDocumentProvider, "DisplayOwner", false);
+      auto owners = ExtractResultList(result, "metadata.owner.personNames",
+                                      "displayName");
+      if (!owners.empty())
+        match.RecordAdditionalInfo("document owner", *owners[0]);
+      match.description = GetMatchDescription(
+          update_time, mimetype,
+          display_owner && !owners.empty() ? *owners[0] : "");
       AutocompleteMatch::AddLastClassificationIfNecessary(
           &match.description_class, 0, ACMatchClassification::DIM);
+      // Exclude date from description_for_shortcut to avoid showing stale dates
+      // from the shortcuts provider.
+      match.description_for_shortcuts = GetMatchDescription(
+          "", mimetype, display_owner && !owners.empty() ? *owners[0] : "");
+      AutocompleteMatch::AddLastClassificationIfNecessary(
+          &match.description_class_for_shortcuts, 0,
+          ACMatchClassification::DIM);
+      match.RecordAdditionalInfo(
+          "description_for_shortcuts",
+          base::UTF16ToUTF8(match.description_for_shortcuts));
     }
+
+    match.TryAutocompleteWithTitle(TitleForAutocompletion(match), input_);
     match.transition = ui::PAGE_TRANSITION_GENERATED;
     match.RecordAdditionalInfo("client score", client_score);
     match.RecordAdditionalInfo("server score", server_score);
+    if (matches.size() >= provider_max_matches_)
+      match.RecordAdditionalInfo("for deduping only", "true");
     const std::string* snippet = result->FindStringPath("snippet.snippet");
     if (snippet)
       match.RecordAdditionalInfo("snippet", *snippet);
-    if (!in_counterfactual_group) {
-      matches->push_back(match);
+    if (show_doc_suggestions)
+      matches.push_back(match);
+    if (trigger_field_trial) {
+      field_trial_triggered_ = true;
+      field_trial_triggered_in_session_ = true;
     }
-    field_trial_triggered_ = true;
-    field_trial_triggered_in_session_ = true;
   }
-  return true;
+  return matches;
+}
+
+void DocumentProvider::CopyCachedMatchesToMatches(
+    size_t skip_n_most_recent_matches) {
+  std::for_each(std::next(matches_cache_.begin(), skip_n_most_recent_matches),
+                matches_cache_.end(), [this](const auto& cache_key_match_pair) {
+                  auto match = cache_key_match_pair.second;
+                  match.relevance = 0;
+                  match.allowed_to_be_default_match = false;
+                  match.TryAutocompleteWithTitle(TitleForAutocompletion(match),
+                                                 input_);
+                  match.contents_class =
+                      DocumentProvider::Classify(match.contents, input_.text());
+                  match.RecordAdditionalInfo("from cache", "true");
+                  matches_.push_back(match);
+                });
 }
 
 // static
@@ -708,43 +948,34 @@ ACMatchClassifications DocumentProvider::Classify(
 
 // static
 const GURL DocumentProvider::GetURLForDeduping(const GURL& url) {
+  // Early exit to avoid unnecessary and more involved checks.
+  if (!url.DomainIs("google.com"))
+    return GURL();
+
   // We aim to prevent duplicate Drive URLs to appear between the Drive document
   // search provider and history/bookmark entries.
-  // Drive URLs take on two core forms, and may have request parameters.
-  // Additionally, we may have redirector URLs which wrap a drive URL.
   // All URLs are canonicalized to a GURL form only used for deduplication and
   // not guaranteed to be usable for navigation.
-  // URLs of the following forms are handled:
-  // https://drive.google.com/[a/domain.tld]/open?id=(id)
-  // https://docs.google.com/[a/domain.tld/]document/d/(id)/[...]
-  // https://docs.google.com/[a/domain.tld/]spreadsheets/d/(id)/edit#gid=12345
-  // https://docs.google.com/[a/domain.tld/]presentation/d/(id)/edit#slide=id.g12345a_0_26
-  // https://www.google.com/url?[...]url=https://drive.google.com/a/domain.tld/open?id%3D(id)[%26D...][&...]
-  // where id is comprised of characters in [0-9A-Za-z\-_] = [\w\-]
-  std::string id;
 
-  if (url.host() == "drive.google.com") {
-    static re2::LazyRE2 path_regex = {"^/(?:a/[\\w\\.]+/)?open$"};
-    if (RE2::PartialMatch(url.path(), *path_regex))
-      net::GetValueForKeyInQuery(url, "id", &id);
-  } else if (url.host() == "docs.google.com") {
-    static re2::LazyRE2 doc_link_regex = {
-        "^/(?:a/[\\w\\.]+/)?(?:document|spreadsheets|presentation|forms)/d/"
-        "([\\w-]+)/"};
-    RE2::PartialMatch(url.path(), *doc_link_regex, &id);
-  } else if (url.host() == "www.google.com" && url.path() == "/url") {
-    // Redirect links wrapping a drive.google.com/open?id= link.
-    static re2::LazyRE2 redirect_link_regex = {
-        "^[^#]*url=https://drive\\.google\\.com/(?:a/[\\w\\.]+/"
-        ")?open\\?id%3D(.*?)(?:%26|#|&|$)"};
-    RE2::PartialMatch(url.query(), *redirect_link_regex, &id);
-  }
-
-  if (id.empty()) {
-    return GURL();
+  // Drive redirects are already handled by the regex in |ExtractDocIdFromUrl|.
+  // The below logic handles google.com redirects; e.g., google.com/url/q=<url>
+  std::string url_str;
+  if (url.host() == "www.google.com" && url.path() == "/url") {
+    if ((!net::GetValueForKeyInQuery(url, "q", &url_str) || url_str.empty()) &&
+        (!net::GetValueForKeyInQuery(url, "url", &url_str) || url_str.empty()))
+      return GURL();
   } else {
-    // Canonicalize to the /open form without any extra args.
-    // This is similar to what we expect from the server.
-    return GURL("https://drive.google.com/open?id=" + id);
+    url_str = url.spec();
   }
+
+  // Unescape |url_str|
+  url_str = net::UnescapeURLComponent(
+      url_str, net::UnescapeRule::PATH_SEPARATORS |
+                   net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+
+  const std::string id = ExtractDocIdFromUrl(url_str);
+
+  // Canonicalize to the /open form without any extra args.
+  // This is similar to what we expect from the server.
+  return id.empty() ? GURL() : GURL("https://drive.google.com/open?id=" + id);
 }

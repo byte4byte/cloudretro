@@ -12,14 +12,17 @@
 #include "base/base_paths.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
@@ -50,6 +53,42 @@ std::string GetServerTypeString(BaseTestServer::Type type) {
       NOTREACHED();
   }
   return std::string();
+}
+
+// Returns platform-specific path to the config file for the test server.
+base::FilePath GetTestServerConfigFilePath() {
+  base::FilePath dir;
+#if defined(OS_ANDROID)
+  base::PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &dir);
+#else
+  base::PathService::Get(base::DIR_TEMP, &dir);
+#endif
+  return dir.AppendASCII("net-test-server-config");
+}
+
+// Reads base URL for the test server spawner. That URL is used to control the
+// test server.
+std::string ReadSpawnerUrlFromConfig() {
+  base::ScopedAllowBlockingForTesting allow_blocking;
+
+  base::FilePath config_path = GetTestServerConfigFilePath();
+
+  if (!base::PathExists(config_path))
+    return "";
+
+  std::string config_json;
+  if (!ReadFileToString(config_path, &config_json))
+    LOG(FATAL) << "Failed to read " << config_path.value();
+
+  base::Optional<base::Value> config = base::JSONReader::Read(config_json);
+  if (!config)
+    LOG(FATAL) << "Failed to parse " << config_path.value();
+
+  std::string* result = config->FindStringKey("spawner_url_base");
+  if (!result)
+    LOG(FATAL) << "spawner_url_base is not specified in the config";
+
+  return *result;
 }
 
 }  // namespace
@@ -95,9 +134,7 @@ bool RemoteTestServer::StartInBackground() {
   // the test spawer may forward OCSP a second time, from the device to the
   // host.
   bool ocsp_server_enabled =
-      type() == TYPE_HTTPS && (ssl_options().server_certificate ==
-                                   SSLOptions::CERT_AUTO_AIA_INTERMEDIATE ||
-                               !ssl_options().GetOCSPArgument().empty());
+      type() == TYPE_HTTPS && !ssl_options().GetOCSPArgument().empty();
   if (ocsp_server_enabled) {
     ocsp_proxy_ = std::make_unique<TcpSocketProxy>(io_thread_.task_runner());
     bool initialized = ocsp_proxy_->Initialize();
@@ -113,8 +150,7 @@ bool RemoteTestServer::StartInBackground() {
     return false;
 
   start_request_ = std::make_unique<RemoteTestServerSpawnerRequest>(
-      io_thread_.task_runner(), config_.GetSpawnerUrl("start"),
-      arguments_string);
+      io_thread_.task_runner(), GetSpawnerUrl("start"), arguments_string);
 
   return true;
 }
@@ -135,25 +171,13 @@ bool RemoteTestServer::BlockUntilStarted() {
     return false;
   }
 
-  // If the server is not on localhost then start a proxy on localhost to
-  // forward connections to the server.
-  if (config_.address() != IPAddress::IPv4Localhost()) {
-    test_server_proxy_ =
-        std::make_unique<TcpSocketProxy>(io_thread_.task_runner());
-    bool initialized = test_server_proxy_->Initialize();
-    CHECK(initialized);
-    test_server_proxy_->Start(IPEndPoint(config_.address(), remote_port_));
-
-    SetPort(test_server_proxy_->local_port());
-  } else {
-    SetPort(remote_port_);
-  }
+  SetPort(remote_port_);
 
   if (ocsp_proxy_) {
-    const base::Value* ocsp_port_value = server_data().FindKey("ocsp_port");
-    if (ocsp_port_value && ocsp_port_value->is_int()) {
+    base::Optional<int> ocsp_port_value = server_data().FindIntKey("ocsp_port");
+    if (ocsp_port_value) {
       ocsp_proxy_->Start(
-          IPEndPoint(config_.address(), ocsp_port_value->GetInt()));
+          IPEndPoint(IPAddress::IPv4Localhost(), *ocsp_port_value));
     } else {
       LOG(WARNING) << "testserver.py didn't return ocsp_port.";
     }
@@ -169,8 +193,7 @@ bool RemoteTestServer::Stop() {
     std::unique_ptr<RemoteTestServerSpawnerRequest> kill_request =
         std::make_unique<RemoteTestServerSpawnerRequest>(
             io_thread_.task_runner(),
-            config_.GetSpawnerUrl(
-                base::StringPrintf("kill?port=%d", remote_port_)),
+            GetSpawnerUrl(base::StringPrintf("kill?port=%d", remote_port_)),
             std::string());
 
     if (!kill_request->WaitForCompletion(nullptr))
@@ -198,10 +221,10 @@ bool RemoteTestServer::Init(const base::FilePath& document_root) {
   if (document_root.IsAbsolute())
     return false;
 
-  config_ = RemoteTestServerConfig::Load();
+  spawner_url_base_ = ReadSpawnerUrlFromConfig();
 
   bool thread_started = io_thread_.StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
   CHECK(thread_started);
 
   // Unlike LocalTestServer, RemoteTestServer passes relative paths to the test
@@ -215,6 +238,14 @@ bool RemoteTestServer::Init(const base::FilePath& document_root) {
                                   .AppendASCII("ssl")
                                   .AppendASCII("certificates"));
   return true;
+}
+
+GURL RemoteTestServer::GetSpawnerUrl(const std::string& command) const {
+  CHECK(!spawner_url_base_.empty());
+  std::string url = spawner_url_base_ + "/" + command;
+  GURL result = GURL(url);
+  CHECK(result.is_valid()) << url;
+  return result;
 }
 
 }  // namespace net

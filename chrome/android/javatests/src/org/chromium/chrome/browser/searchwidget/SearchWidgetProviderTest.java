@@ -24,15 +24,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.IntentUtils;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.searchwidget.SearchActivity.SearchActivityDelegate;
-import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -91,7 +91,7 @@ public class SearchWidgetProviderTest {
         }
     }
 
-    private final static class TestContext extends AdvancedMockContext {
+    private static final class TestContext extends AdvancedMockContext {
         public TestContext() {
             super(InstrumentationRegistry.getInstrumentation()
                             .getTargetContext()
@@ -107,7 +107,7 @@ public class SearchWidgetProviderTest {
     private TestDelegate mDelegate;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         ApplicationTestUtils.setUp(InstrumentationRegistry.getTargetContext());
         SearchActivity.setDelegateForTests(new TestSearchDelegate());
 
@@ -117,7 +117,7 @@ public class SearchWidgetProviderTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         ApplicationTestUtils.tearDown(InstrumentationRegistry.getTargetContext());
     }
 
@@ -168,7 +168,7 @@ public class SearchWidgetProviderTest {
     public void testUpdateCachedEngineNameBeforeFirstRun() throws ExecutionException {
         Assert.assertFalse(TestThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
             @Override
-            public Boolean call() throws Exception {
+            public Boolean call() {
                 return SearchWidgetProvider.shouldShowFullString();
             }
         }));

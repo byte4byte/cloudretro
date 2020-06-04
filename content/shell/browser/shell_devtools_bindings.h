@@ -9,6 +9,7 @@
 #include <set>
 
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -45,8 +46,12 @@ class ShellDevToolsBindings : public WebContentsObserver,
                         WebContents* inspected_contents,
                         ShellDevToolsDelegate* delegate);
 
+  static std::vector<ShellDevToolsBindings*> GetInstancesForWebContents(
+      WebContents* web_contents);
+
   void InspectElementAt(int x, int y);
   virtual void Attach();
+  void UpdateInspectedWebContents(WebContents* new_contents);
 
   void CallClientFunction(const std::string& function_name,
                           const base::Value* arg1,
@@ -60,7 +65,7 @@ class ShellDevToolsBindings : public WebContentsObserver,
   // content::DevToolsAgentHostClient implementation.
   void AgentHostClosed(DevToolsAgentHost* agent_host) override;
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
-                               const std::string& message) override;
+                               base::span<const uint8_t> message) override;
 
   void HandleMessageFromDevToolsFrontend(const std::string& message);
 
@@ -69,6 +74,7 @@ class ShellDevToolsBindings : public WebContentsObserver,
   void WebContentsDestroyed() override;
 
   void SendMessageAck(int request_id, const base::Value* arg1);
+  void AttachInternal();
 
   WebContents* inspected_contents_;
   ShellDevToolsDelegate* delegate_;

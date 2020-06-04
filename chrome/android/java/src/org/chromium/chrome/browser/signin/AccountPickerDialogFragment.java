@@ -4,17 +4,9 @@
 
 package org.chromium.chrome.browser.signin;
 
+import android.accounts.Account;
 import android.app.Dialog;
 import android.os.Bundle;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.v4.app.DialogFragment;
-import android.support.v4.app.Fragment;
-import android.support.v4.util.ObjectsCompat;
-import android.support.v7.app.AlertDialog;
-import android.support.v7.content.res.AppCompatResources;
-import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -22,10 +14,22 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.core.util.ObjectsCompat;
+import androidx.fragment.app.DialogFragment;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.components.signin.AccountManagerDelegateException;
-import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.components.signin.AccountManagerFacadeProvider;
+import org.chromium.components.signin.AccountUtils;
 import org.chromium.components.signin.AccountsChangeObserver;
 
 import java.lang.annotation.Retention;
@@ -111,26 +115,49 @@ public class AccountPickerDialogFragment extends DialogFragment {
 
         @Override
         public ViewHolder onCreateViewHolder(ViewGroup viewGroup, @ViewType int viewType) {
-            LayoutInflater inflater = LayoutInflater.from(viewGroup.getContext());
+            View view = inflateRowView(viewGroup, viewType);
             if (viewType == ViewType.NEW_ACCOUNT) {
-                TextView view = (TextView) inflater.inflate(
-                        R.layout.account_picker_new_account_row, viewGroup, false);
-                // Set the vector drawable programmatically because app:drawableStartCompat is only
-                // available after AndroidX appcompat library.
-                // TODO(https://crbug.com/948367): Use app:drawableStartCompat.
-                view.setCompoundDrawablesRelativeWithIntrinsicBounds(
-                        AppCompatResources.getDrawable(
-                                viewGroup.getContext(), R.drawable.ic_add_circle_40dp),
-                        null, null, null);
                 return new ViewHolder(view);
             }
-            View view = inflater.inflate(R.layout.account_picker_row, viewGroup, false);
             ImageView accountImage = view.findViewById(R.id.account_image);
             TextView accountTextPrimary = view.findViewById(R.id.account_text_primary);
             TextView accountTextSecondary = view.findViewById(R.id.account_text_secondary);
             ImageView selectionMark = view.findViewById(R.id.account_selection_mark);
             return new ViewHolder(
                     view, accountImage, accountTextPrimary, accountTextSecondary, selectionMark);
+        }
+
+        private View inflateRowView(ViewGroup viewGroup, @ViewType int viewType) {
+            LayoutInflater inflater = LayoutInflater.from(viewGroup.getContext());
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.MOBILE_IDENTITY_CONSISTENCY)) {
+                if (viewType == ViewType.NEW_ACCOUNT) {
+                    TextView view = (TextView) inflater.inflate(
+                            R.layout.account_picker_new_account_row, viewGroup, false);
+                    view.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                            AppCompatResources.getDrawable(
+                                    viewGroup.getContext(), R.drawable.ic_person_add_24dp),
+                            null, null, null);
+                    return view;
+                } else {
+                    return inflater.inflate(R.layout.account_picker_row, viewGroup, false);
+                }
+            } else {
+                if (viewType == ViewType.NEW_ACCOUNT) {
+                    TextView view = (TextView) inflater.inflate(
+                            R.layout.account_picker_new_account_row_legacy, viewGroup, false);
+                    // Set the vector drawable programmatically because app:drawableStartCompat is
+                    // only available after AndroidX appcompat library.
+
+                    // TODO(https://crbug.com/948367): Use app:drawableStartCompat.
+                    view.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                            AppCompatResources.getDrawable(
+                                    viewGroup.getContext(), R.drawable.ic_add_circle_40dp),
+                            null, null, null);
+                    return view;
+                } else {
+                    return inflater.inflate(R.layout.account_picker_row_legacy, viewGroup, false);
+                }
+            }
         }
 
         @Override
@@ -150,7 +177,7 @@ public class AccountPickerDialogFragment extends DialogFragment {
                     return;
                 case ViewType.NEW_ACCOUNT:
                     // "Add account" row is immutable.
-                    holder.itemView.setOnClickListener(view -> getCallback().addAccount());
+                    holder.itemView.setOnClickListener(view -> addAccount());
                     return;
                 default:
                     assert false : "Unexpected view type!";
@@ -188,8 +215,9 @@ public class AccountPickerDialogFragment extends DialogFragment {
     private final AccountsChangeObserver mAccountsChangeObserver = this::updateAccounts;
     private final ProfileDataCache.Observer mProfileDataObserver = accountId -> updateProfileData();
     private ProfileDataCache mProfileDataCache;
-    private List<String> mAccounts;
+    private List<String> mAccountNames;
     private Adapter mAdapter;
+    private Callback mCallback;
 
     /**
      * Creates an instance and sets its arguments.
@@ -210,7 +238,8 @@ public class AccountPickerDialogFragment extends DialogFragment {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        assert getCallback() != null : "No callback for AccountPickerDialogFragment";
+        mCallback = (Callback) getTargetFragment();
+        assert mCallback != null : "No callback for AccountPickerDialogFragment";
 
         mProfileDataCache = new ProfileDataCache(
                 getActivity(), getResources().getDimensionPixelSize(R.dimen.user_picture_size));
@@ -223,7 +252,7 @@ public class AccountPickerDialogFragment extends DialogFragment {
     @Override
     public void onStart() {
         super.onStart();
-        AccountManagerFacade.get().addObserver(mAccountsChangeObserver);
+        AccountManagerFacadeProvider.getInstance().addObserver(mAccountsChangeObserver);
         mProfileDataCache.addObserver(mProfileDataObserver);
         updateAccounts();
     }
@@ -232,7 +261,7 @@ public class AccountPickerDialogFragment extends DialogFragment {
     public void onStop() {
         super.onStop();
         mProfileDataCache.removeObserver(mProfileDataObserver);
-        AccountManagerFacade.get().removeObserver(mAccountsChangeObserver);
+        AccountManagerFacadeProvider.getInstance().removeObserver(mAccountsChangeObserver);
     }
 
     @Override
@@ -258,32 +287,35 @@ public class AccountPickerDialogFragment extends DialogFragment {
     }
 
     private void onAccountSelected(String accountName, boolean isDefaultAccount) {
-        getCallback().onAccountSelected(accountName, isDefaultAccount);
-        dismiss();
+        if (!isResumed() || isStateSaved()) return;
+        mCallback.onAccountSelected(accountName, isDefaultAccount);
+        dismissAllowingStateLoss();
+    }
+
+    private void addAccount() {
+        if (!isResumed() || isStateSaved()) return;
+        mCallback.addAccount();
     }
 
     private void updateAccounts() {
+        List<Account> accounts;
         try {
-            mAccounts = AccountManagerFacade.get().getGoogleAccountNames();
+            accounts = AccountManagerFacadeProvider.getInstance().getGoogleAccounts();
         } catch (AccountManagerDelegateException ex) {
             Log.e(TAG, "Can't get account list", ex);
-            dismiss();
+            dismissAllowingStateLoss();
             return;
         }
-
-        mProfileDataCache.update(mAccounts);
+        mAccountNames = AccountUtils.toAccountNames(accounts);
+        mProfileDataCache.update(mAccountNames);
         updateProfileData();
     }
 
     private void updateProfileData() {
         List<DisplayableProfileData> profileDataList = new ArrayList<>();
-        for (String accountName : mAccounts) {
+        for (String accountName : mAccountNames) {
             profileDataList.add(mProfileDataCache.getProfileDataOrDefault(accountName));
         }
         mAdapter.setProfileDataList(profileDataList);
-    }
-
-    private Callback getCallback() {
-        return (Callback) getParentFragment();
     }
 }

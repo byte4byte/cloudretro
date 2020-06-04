@@ -37,9 +37,7 @@ const char
 
 DetachableBaseNotificationController::DetachableBaseNotificationController(
     DetachableBaseHandler* detachable_base_handler)
-    : detachable_base_handler_(detachable_base_handler),
-      detachable_base_observer_(this),
-      session_observer_(this) {
+    : detachable_base_handler_(detachable_base_handler) {
   detachable_base_observer_.Add(detachable_base_handler);
   ShowPairingNotificationIfNeeded();
 }
@@ -65,7 +63,7 @@ void DetachableBaseNotificationController::
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_UPDATE_NEEDED_MESSAGE);
 
   std::unique_ptr<message_center::Notification> notification =
-      ash::CreateSystemNotification(
+      CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE,
           kBaseRequiresUpdateNotificationId, title, message, base::string16(),
           GURL(),
@@ -141,7 +139,7 @@ void DetachableBaseNotificationController::ShowPairingNotificationIfNeeded() {
       IDS_ASH_DETACHABLE_BASE_NOTIFICATION_DEVICE_CHANGED_MESSAGE);
 
   std::unique_ptr<message_center::Notification> notification =
-      ash::CreateSystemNotification(
+      CreateSystemNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE, kBaseChangedNotificationId,
           title, message, base::string16(), GURL(),
           message_center::NotifierId(

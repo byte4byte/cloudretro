@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
@@ -27,12 +27,12 @@ public class PaymentRequestLongIdTest implements MainActivityStartCallback {
             new PaymentRequestTestRule("payment_request_long_id_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testNoCrash() throws InterruptedException, TimeoutException {
+    public void testNoCrash() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickNode("buy");
         mPaymentRequestTestRule.expectResultContains(
                 new String[] {"ID cannot be longer than 1024 characters"});

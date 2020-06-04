@@ -41,13 +41,14 @@ public final class ExploreSitesBridgeExperimentalTest {
     private Profile mProfile;
 
     @Before
-    public void setUp() throws Exception {
-        TestThreadUtils.runOnUiThreadBlocking(() -> { mProfile = Profile.getLastUsedProfile(); });
+    public void setUp() {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> { mProfile = Profile.getLastUsedRegularProfile(); });
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -59,8 +60,10 @@ public final class ExploreSitesBridgeExperimentalTest {
         // workaround, fall back to our own comparison logic if sameAs returns false.
         // See https://crbug.com/927014 for more tracking.
         if (expected.getConfig() != actual.getConfig()) return false;
-        if (expected.getWidth() != actual.getWidth() || expected.getHeight() != actual.getHeight())
+        if (expected.getWidth() != actual.getWidth()
+                || expected.getHeight() != actual.getHeight()) {
             return false;
+        }
         for (int i = 0; i < expected.getWidth(); i++) {
             for (int j = 0; j < expected.getHeight(); j++) {
                 if (expected.getPixel(i, j) != actual.getPixel(i, j)) return false;

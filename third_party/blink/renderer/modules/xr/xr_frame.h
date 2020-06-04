@@ -7,7 +7,9 @@
 
 #include <memory>
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
@@ -16,11 +18,19 @@
 namespace blink {
 
 class ExceptionState;
+class XRAnchorSet;
+class XRHitTestResult;
+class XRHitTestSource;
 class XRInputSource;
+class XRLightEstimate;
+class XRLightProbe;
 class XRPose;
 class XRReferenceSpace;
+class XRRigidTransform;
 class XRSession;
 class XRSpace;
+class XRTransientInputHitTestResult;
+class XRTransientInputHitTestSource;
 class XRViewerPose;
 class XRWorldInformation;
 
@@ -35,16 +45,30 @@ class XRFrame final : public ScriptWrappable {
   XRViewerPose* getViewerPose(XRReferenceSpace*, ExceptionState&) const;
   XRPose* getPose(XRSpace*, XRSpace*, ExceptionState&);
   XRWorldInformation* worldInformation() const { return world_information_; }
+  XRAnchorSet* trackedAnchors() const;
+  XRLightEstimate* getLightEstimate(XRLightProbe*, ExceptionState&) const;
 
-  void SetBasePoseMatrix(const TransformationMatrix&);
-
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   void Deactivate();
 
   void SetAnimationFrame(bool is_animation_frame) {
     is_animation_frame_ = is_animation_frame;
   }
+
+  HeapVector<Member<XRHitTestResult>> getHitTestResults(
+      XRHitTestSource* hit_test_source,
+      ExceptionState& exception_state);
+
+  HeapVector<Member<XRTransientInputHitTestResult>>
+  getHitTestResultsForTransientInput(
+      XRTransientInputHitTestSource* hit_test_source,
+      ExceptionState& exception_state);
+
+  ScriptPromise createAnchor(ScriptState* script_state,
+                             XRRigidTransform* initial_pose,
+                             XRSpace* space,
+                             ExceptionState& exception_state);
 
  private:
   std::unique_ptr<TransformationMatrix> GetAdjustedPoseMatrix(XRSpace*) const;
@@ -54,9 +78,6 @@ class XRFrame final : public ScriptWrappable {
   Member<XRWorldInformation> world_information_;
 
   const Member<XRSession> session_;
-
-  // Maps from mojo space to headset space.
-  std::unique_ptr<TransformationMatrix> base_pose_matrix_;
 
   // Frames are only active during callbacks. getPose and getViewerPose should
   // only be called from JS on active frames.

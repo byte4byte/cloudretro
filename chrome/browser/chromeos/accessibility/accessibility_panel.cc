@@ -12,7 +12,6 @@
 #include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/views/controls/webview/webview.h"
@@ -67,7 +66,7 @@ AccessibilityPanel::AccessibilityPanel(content::BrowserContext* browser_context,
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.name = widget_name;
   params.shadow_elevation = wm::kShadowElevationInactiveWindow;
-  widget_->Init(params);
+  widget_->Init(std::move(params));
 }
 
 AccessibilityPanel::~AccessibilityPanel() = default;

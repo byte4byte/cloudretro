@@ -3,24 +3,34 @@
 # found in the LICENSE file.
 
 import("//third_party/closure_compiler/compile_js.gni")
+import("//tools/polymer/polymer.gni")
+import("../settings.gni")
 
-js_type_check("closure_compile") {
-  deps = [
-    ":basic_page",
-  ]
+js_type_check("closure_compile_module") {
+  is_polymer3 = true
+  closure_flags = settings_closure_flags
+  deps = [ ":basic_page" ]
 }
 
 js_library("basic_page") {
   deps = [
-    "..:page_visibility",
-    "..:route",
-    "..:search_settings",
-    "../android_apps_page:android_apps_browser_proxy",
-    "../change_password_page:change_password_browser_proxy",
+    "..:page_visibility.m",
+    "..:route.m",
+    "..:router.m",
+    "..:search_settings.m",
     "../chrome_cleanup_page:chrome_cleanup_proxy",
-    "../settings_page:main_page_behavior",
-    "//ui/webui/resources/js:load_time_data",
-    "//ui/webui/resources/js:web_ui_listener_behavior",
+    "../prefs:prefs_behavior.m",
+    "../settings_page:main_page_behavior.m",
+    "//ui/webui/resources/js:load_time_data.m",
   ]
-  externs_list = [ "$externs_path/pending.js" ]
+}
+
+group("polymer3_elements") {
+  public_deps = [ ":basic_page_module" ]
+}
+
+polymer_modulizer("basic_page") {
+  js_file = "basic_page.js"
+  html_file = "basic_page.html"
+  html_type = "v3-ready"
 }

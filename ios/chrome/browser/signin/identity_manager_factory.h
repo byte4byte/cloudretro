@@ -10,24 +10,21 @@
 #include "base/observer_list.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
+class ChromeBrowserState;
 class IdentityManagerFactoryObserver;
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}
-
-namespace ios {
-class ChromeBrowserState;
 }
 
 // Singleton that owns all IdentityManager instances and associates them with
 // BrowserStates.
 class IdentityManagerFactory : public BrowserStateKeyedServiceFactory {
  public:
-  static identity::IdentityManager* GetForBrowserState(
-      ios::ChromeBrowserState* browser_state);
-  static identity::IdentityManager* GetForBrowserStateIfExists(
-      ios::ChromeBrowserState* browser_state);
+  static signin::IdentityManager* GetForBrowserState(
+      ChromeBrowserState* browser_state);
+  static signin::IdentityManager* GetForBrowserStateIfExists(
+      ChromeBrowserState* browser_state);
 
   // Returns an instance of the IdentityManagerFactory singleton.
   static IdentityManagerFactory* GetInstance();

@@ -12,8 +12,8 @@
 #include "base/strings/string16.h"
 #include "ios/web/navigation/error_retry_state_machine.h"
 #include "ios/web/public/favicon/favicon_status.h"
-#import "ios/web/public/navigation_item.h"
-#include "ios/web/public/referrer.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#include "ios/web/public/navigation/referrer.h"
 #include "ios/web/public/security/ssl_status.h"
 #include "url/gurl.h"
 
@@ -57,7 +57,9 @@ class NavigationItemImpl : public web::NavigationItem {
   void SetTimestamp(base::Time timestamp) override;
   base::Time GetTimestamp() const override;
   void SetUserAgentType(UserAgentType type) override;
-  UserAgentType GetUserAgentType() const override;
+  UserAgentType GetUserAgentType(
+      id<UITraitEnvironment> web_view) const override;
+  UserAgentType GetUserAgentForInheritance() const override;
   bool HasPostData() const override;
   NSDictionary* GetHttpRequestHeaders() const override;
   void AddHttpRequestHeaders(NSDictionary* additional_headers) override;
@@ -96,6 +98,11 @@ class NavigationItemImpl : public web::NavigationItem {
   void SetShouldSkipRepostFormConfirmation(bool skip);
   bool ShouldSkipRepostFormConfirmation() const;
 
+  // Whether or not to bypass serializing this item to session storage.  Set to
+  // YES to skip saving this page (and therefore restoring this page).
+  void SetShouldSkipSerialization(bool skip);
+  bool ShouldSkipSerialization() const;
+
   // Data submitted with a POST request, persisted for resubmits.
   void SetPostData(NSData* post_data);
   NSData* GetPostData() const;
@@ -124,6 +131,9 @@ class NavigationItemImpl : public web::NavigationItem {
   void SetUntrusted();
   bool IsUntrusted();
 
+  // Restores the state of the |other| navigation item in this item.
+  void RestoreStateFromItem(NavigationItem* other);
+
 #ifndef NDEBUG
   // Returns a human-readable description of the state for debugging purposes.
   NSString* GetDescription() const;
@@ -146,6 +156,7 @@ class NavigationItemImpl : public web::NavigationItem {
   SSLStatus ssl_;
   base::Time timestamp_;
   UserAgentType user_agent_type_;
+  UserAgentType user_agent_type_inheritance_;
   NSMutableDictionary* http_request_headers_;
 
   NSString* serialized_state_object_;
@@ -153,6 +164,7 @@ class NavigationItemImpl : public web::NavigationItem {
   bool has_state_been_replaced_;
   bool is_created_from_hash_change_;
   bool should_skip_repost_form_confirmation_;
+  bool should_skip_serialization_;
   NSData* post_data_;
   ErrorRetryStateMachine error_retry_state_machine_;
 

@@ -7,8 +7,10 @@
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/ui/browser.h"
@@ -16,6 +18,7 @@
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
+#include "crypto/ec_private_key.h"
 
 namespace {
 
@@ -26,12 +29,11 @@ class SyncTransportActiveChecker : public SingleClientStatusChangeChecker {
   explicit SyncTransportActiveChecker(ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
 
-  bool IsExitConditionSatisfied() override {
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    *os << "Waiting for sync transport to become active";
     return service()->GetTransportState() ==
            syncer::SyncService::TransportState::ACTIVE;
   }
-
-  std::string GetDebugMessage() const override { return "Sync Active"; }
 };
 
 // This test verifies some basic functionality of local sync, used for roaming
@@ -73,6 +75,9 @@ IN_PROC_BROWSER_TEST_F(LocalSyncTest, ShouldStart) {
   ASSERT_TRUE(SyncTransportActiveChecker(service).Wait());
 
   EXPECT_TRUE(service->IsLocalSyncEnabled());
+
+  // Verify certain features are disabled.
+  EXPECT_FALSE(send_tab_to_self::IsUserSyncTypeActive(browser()->profile()));
 }
 #endif  // defined(OS_WIN)
 

@@ -72,12 +72,18 @@ class COMPONENT_EXPORT(DBUS_POWER) PowerManagerClient {
     // PowerManagerClient if the service's availability is already known.
     virtual void PowerManagerBecameAvailable(bool available) {}
 
+    // Called when the power manager is completely initialized.
+    virtual void PowerManagerInitialized() {}
+
     // Called if the power manager process restarts.
     virtual void PowerManagerRestarted() {}
 
     // Called when the screen brightness is changed.
     virtual void ScreenBrightnessChanged(
         const power_manager::BacklightBrightnessChange& change) {}
+
+    // Called when the ambient light changed.
+    virtual void AmbientColorChanged(const int32_t color_temperature) {}
 
     // Called when the keyboard brightness is changed.
     virtual void KeyboardBrightnessChanged(
@@ -130,6 +136,12 @@ class COMPONENT_EXPORT(DBUS_POWER) PowerManagerClient {
     // from within this method.  UnblockSuspend() must be called once the
     // observer is ready for suspend.
     virtual void DarkSuspendImminent() {}
+
+    // Called when the browser is about to request shutdown. Shutdown is
+    // deferred until all observers' implementations of this method have
+    // finished running.
+    virtual void ShutdownRequested(
+        power_manager::RequestShutdownReason reason) {}
 
     // Called when the power button is pressed or released.
     virtual void PowerButtonEventReceived(bool down,
@@ -288,6 +300,9 @@ class COMPONENT_EXPORT(DBUS_POWER) PowerManagerClient {
   // ready for a suspend.
   virtual void UnblockSuspend(const base::UnguessableToken& token) = 0;
 
+  // Whether the device supports Ambient color.
+  virtual bool SupportsAmbientColor() = 0;
+
   // Creates timers corresponding to clocks present in |arc_timer_requests|.
   // ScopedFDs are used to indicate timer expiration as described in
   // |StartArcTimer|. Aysnchronously runs |callback| with the created timers'
@@ -317,6 +332,9 @@ class COMPONENT_EXPORT(DBUS_POWER) PowerManagerClient {
   // false on failure.
   virtual void DeleteArcTimers(const std::string& tag,
                                VoidDBusMethodCallback callback) = 0;
+
+  // The time power manager will wait before resuspending from a dark resume.
+  virtual base::TimeDelta GetDarkSuspendDelayTimeout() = 0;
 
   PowerManagerClient();
   virtual ~PowerManagerClient();

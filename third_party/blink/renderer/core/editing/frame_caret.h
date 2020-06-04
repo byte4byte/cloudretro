@@ -50,8 +50,7 @@ struct PhysicalOffset;
 
 enum class CaretVisibility { kVisible, kHidden };
 
-class CORE_EXPORT FrameCaret final
-    : public GarbageCollectedFinalized<FrameCaret> {
+class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
  public:
   FrameCaret(LocalFrame&, const SelectionEditor&);
   ~FrameCaret();
@@ -79,6 +78,8 @@ class CORE_EXPORT FrameCaret final
   void LayoutBlockWillBeDestroyed(const LayoutBlock&);
   void UpdateStyleAndLayoutIfNeeded();
   void InvalidatePaint(const LayoutBlock&, const PaintInvalidatorContext&);
+
+  bool CaretIsActive();
 
   bool ShouldPaintCaret(const LayoutBlock&) const;
   void PaintCaret(GraphicsContext&, const PhysicalOffset&) const;

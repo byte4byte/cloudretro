@@ -9,18 +9,24 @@
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
-#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -29,23 +35,24 @@
 #include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/app_list_model_updater.h"
-#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_item.h"
 #include "chrome/browser/ui/app_list/search/search_controller.h"
 #include "chrome/browser/ui/app_list/test/chrome_app_list_test_support.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/web_applications/system_web_app_manager.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
-#include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -54,6 +61,9 @@
 #include "extensions/common/constants.h"
 #include "ui/aura/window.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
+#include "ui/wm/core/window_util.h"
 
 // Browser Test for AppListClientImpl.
 using AppListClientImplBrowserTest = extensions::PlatformAppBrowserTest;
@@ -71,11 +81,15 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, IsExtensionAppOpen) {
     content::WindowedNotificationObserver app_loaded_observer(
         content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
         content::NotificationService::AllSources());
-    OpenApplication(
-        AppLaunchParams(profile(), extension_app->id(),
-                        extensions::LaunchContainer::kLaunchContainerWindow,
-                        WindowOpenDisposition::NEW_WINDOW,
-                        extensions::AppLaunchSource::kSourceTest));
+    apps::AppServiceProxy* proxy =
+        apps::AppServiceProxyFactory::GetForProfile(profile());
+    proxy->Launch(extension_app->id(),
+                  apps::GetEventFlags(
+                      apps::mojom::LaunchContainer::kLaunchContainerWindow,
+                      WindowOpenDisposition::NEW_WINDOW,
+                      false /* preferred_containner */),
+                  apps::mojom::LaunchSource::kFromTest,
+                  display::Screen::GetScreen()->GetPrimaryDisplay().id());
     app_loaded_observer.Wait();
   }
   EXPECT_TRUE(delegate->IsAppOpen(extension_app->id()));
@@ -98,6 +112,66 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, IsPlatformAppOpen) {
   EXPECT_TRUE(delegate->IsAppOpen(app->id()));
 }
 
+// Test UninstallApp for platform apps.
+IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, UninstallApp) {
+  AppListClientImpl* client = AppListClientImpl::GetInstance();
+  const extensions::Extension* app = InstallPlatformApp("minimal");
+
+  // Bring up the app list.
+  EXPECT_FALSE(client->GetAppListWindow());
+  client->ShowAppList();
+  EXPECT_TRUE(client->GetAppListWindow());
+
+  EXPECT_TRUE(wm::GetTransientChildren(client->GetAppListWindow()).empty());
+
+  // Open the uninstall dialog.
+  base::RunLoop run_loop;
+  client->UninstallApp(profile(), app->id());
+
+  apps::AppServiceProxy* app_service_proxy_ =
+      apps::AppServiceProxyFactory::GetForProfile(profile());
+  DCHECK(app_service_proxy_);
+  app_service_proxy_->FlushMojoCallsForTesting();
+
+  run_loop.RunUntilIdle();
+  EXPECT_FALSE(wm::GetTransientChildren(client->GetAppListWindow()).empty());
+
+  // The app list should not be dismissed when the dialog is shown.
+  EXPECT_TRUE(client->app_list_visible());
+  EXPECT_TRUE(client->GetAppListWindow());
+}
+
+IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, ShowAppInfo) {
+  web_app::WebAppProvider::Get(profile())
+      ->system_web_app_manager()
+      .InstallSystemAppsForTesting();
+
+  AppListClientImpl* client = AppListClientImpl::GetInstance();
+  const extensions::Extension* app = InstallPlatformApp("minimal");
+
+  // Bring up the app list.
+  EXPECT_FALSE(client->GetAppListWindow());
+  client->ShowAppList();
+  EXPECT_TRUE(client->GetAppListWindow());
+  EXPECT_TRUE(wm::GetTransientChildren(client->GetAppListWindow()).empty());
+
+  // Open the app info dialog.
+  client->DoShowAppInfoFlow(profile(), app->id());
+  Browser* settings_app =
+      chrome::SettingsWindowManager::GetInstance()->FindBrowserForProfile(
+          profile());
+  content::WaitForLoadStop(
+      settings_app->tab_strip_model()->GetActiveWebContents());
+
+  EXPECT_EQ(
+      chrome::GetOSSettingsUrl(base::StrCat(
+          {chrome::kAppManagementDetailSubPage, "?id=", app->id()})),
+      settings_app->tab_strip_model()->GetActiveWebContents()->GetVisibleURL());
+  // The app list should be dismissed when the dialog is shown.
+  EXPECT_FALSE(client->app_list_visible());
+  EXPECT_FALSE(client->GetAppListWindow());
+}
+
 // Test the CreateNewWindow function of the controller delegate.
 IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, CreateNewWindow) {
   AppListClientImpl* client = AppListClientImpl::GetInstance();
@@ -106,14 +180,51 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, CreateNewWindow) {
 
   EXPECT_EQ(1U, chrome::GetBrowserCount(browser()->profile()));
   EXPECT_EQ(0U, chrome::GetBrowserCount(
-                    browser()->profile()->GetOffTheRecordProfile()));
+                    browser()->profile()->GetPrimaryOTRProfile()));
 
-  controller->CreateNewWindow(browser()->profile(), false);
+  controller->CreateNewWindow(/*incognito=*/false);
   EXPECT_EQ(2U, chrome::GetBrowserCount(browser()->profile()));
 
-  controller->CreateNewWindow(browser()->profile(), true);
+  controller->CreateNewWindow(/*incognito=*/true);
   EXPECT_EQ(1U, chrome::GetBrowserCount(
-                    browser()->profile()->GetOffTheRecordProfile()));
+                    browser()->profile()->GetPrimaryOTRProfile()));
+}
+
+// When getting activated, SelfDestroyAppItem has itself removed from the
+// model updater.
+class SelfDestroyAppItem : public ChromeAppListItem {
+ public:
+  SelfDestroyAppItem(Profile* profile,
+                     const std::string& app_id,
+                     AppListModelUpdater* model_updater)
+      : ChromeAppListItem(profile, app_id, model_updater),
+        updater_(model_updater) {}
+  ~SelfDestroyAppItem() override = default;
+
+  // ChromeAppListItem:
+  void Activate(int event_flags) override { updater_->RemoveItem(id()); }
+
+ private:
+  AppListModelUpdater* updater_;
+};
+
+// Verifies that activating an app item which destroys itself during activation
+// will not cause crash (see https://crbug.com/990282).
+IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, ActivateSelfDestroyApp) {
+  AppListClientImpl* client = AppListClientImpl::GetInstance();
+  client->UpdateProfile();
+  ASSERT_TRUE(client);
+  AppListModelUpdater* model_updater = test::GetModelUpdater(client);
+
+  // Add an app item which destroys itself during activation.
+  const std::string app_id("fake_id");
+  model_updater->AddItem(std::make_unique<SelfDestroyAppItem>(
+      browser()->profile(), app_id, model_updater));
+  ChromeAppListItem* item = model_updater->FindItem(app_id);
+  ASSERT_TRUE(item);
+
+  // Activates |item|.
+  client->ActivateItem(/*profile_id=*/0, item->id(), /*event_flags=*/0);
 }
 
 // Test that all the items in the context menu for a hosted app have valid
@@ -172,11 +283,11 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, OpenSearchResult) {
 
   // Any app that opens a window to dismiss app list is good enough for this
   // test.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   const std::string app_title = "chrome";
 #else
   const std::string app_title = "chromium";
-#endif  // !defined(GOOGLE_CHROME_BUILD)
+#endif  // !BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   const std::string app_result_id =
       "chrome-extension://mgndgikekgjfcpckkfioiadnlibdjbkf/";
@@ -189,7 +300,8 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, OpenSearchResult) {
   // Open the app result.
   client->OpenSearchResult(app_result_id, ui::EF_NONE,
                            ash::AppListLaunchedFrom::kLaunchedFromSearchBox,
-                           ash::AppListLaunchType::kAppSearchResult, 0);
+                           ash::AppListLaunchType::kAppSearchResult, 0,
+                           false /* launch_as_default */);
 
   // App list should be dismissed.
   EXPECT_FALSE(client->app_list_target_visibility());
@@ -210,7 +322,7 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest,
   ASSERT_TRUE(controller);
 
   Profile* profile = browser()->profile();
-  Profile* profile_otr = profile->GetOffTheRecordProfile();
+  Profile* profile_otr = profile->GetPrimaryOTRProfile();
 
   extensions::ExtensionPrefs* prefs = extensions::ExtensionPrefs::Get(profile);
 
@@ -225,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest,
 
   // Create an incognito browser so that we can close the regular one without
   // exiting the test.
-  controller->CreateNewWindow(profile, true);
+  controller->CreateNewWindow(/*incognito=*/true);
   EXPECT_EQ(1U, chrome::GetBrowserCount(profile_otr));
   // Creating incognito browser should not update the launch time.
   EXPECT_EQ(time_recorded1,
@@ -240,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest,
 
   // Launch another regular browser.
   const base::Time time_before_launch = base::Time::Now();
-  controller->CreateNewWindow(profile, false);
+  controller->CreateNewWindow(/*incognito=*/false);
   const base::Time time_after_launch = base::Time::Now();
   EXPECT_EQ(1U, chrome::GetBrowserCount(profile));
 
@@ -250,24 +362,31 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest,
   EXPECT_GE(time_after_launch, time_recorded2);
 
   // Creating a second regular browser should not update the launch time.
-  controller->CreateNewWindow(profile, false);
+  controller->CreateNewWindow(/*incognito=*/false);
   EXPECT_EQ(2U, chrome::GetBrowserCount(profile));
   EXPECT_EQ(time_recorded2,
             prefs->GetLastLaunchTime(extension_misc::kChromeAppId));
 }
 
 // Browser Test for AppListClient that observes search result changes.
-using AppListClientSearchResultsBrowserTest = extensions::ExtensionBrowserTest;
+class AppListClientSearchResultsBrowserTest
+    : public extensions::ExtensionBrowserTest {
+ public:
+  AppListClientSearchResultsBrowserTest() {
+    // Zero state changes UI behavior. This test case tests the expected UI
+    // behavior with zero state being disabled.
+    // TODO(jennyz): write new test case for zero state, crbug.com/925195.
+    feature_list_.InitAndDisableFeature(
+        app_list_features::kEnableZeroStateSuggestions);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
 
 // Test showing search results, and uninstalling one of them while displayed.
 IN_PROC_BROWSER_TEST_F(AppListClientSearchResultsBrowserTest,
                        UninstallSearchResult) {
-  // Zero state changes UI behavior. This test case tests the expected UI
-  // behavior with zero state being disabled.
-  // TODO(jennyz): write new test case for zero state, crbug.com/925195.
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(
-      app_list_features::kEnableZeroStateSuggestions);
   ASSERT_FALSE(app_list_features::IsZeroStateSuggestionsEnabled());
 
   base::FilePath test_extension_path;

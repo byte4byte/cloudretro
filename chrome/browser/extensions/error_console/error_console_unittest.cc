@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,13 +16,13 @@
 #include "components/crx_file/id_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_error.h"
 #include "extensions/browser/extension_error_test_util.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_builder.h"
-#include "extensions/common/feature_switch.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -40,17 +39,13 @@ class ErrorConsoleUnitTest : public testing::Test {
 
   void SetUp() override {
     testing::Test::SetUp();
-    // Errors are only kept if we have the FeatureSwitch and have Developer Mode
-    // enabled.
-    FeatureSwitch::error_console()->SetOverrideValue(
-        FeatureSwitch::OVERRIDE_ENABLED);
     profile_.reset(new TestingProfile);
     profile_->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode, true);
     error_console_ = ErrorConsole::Get(profile_.get());
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   ErrorConsole* error_console_;
 };

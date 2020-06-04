@@ -6,6 +6,8 @@
 <link rel="import" href="chrome://resources/cr_elements/cr_toolbar/cr_toolbar.html">
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/find_shortcut_behavior.html">
 <link rel="import" href="chrome://resources/html/util.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
@@ -18,19 +20,16 @@
 <link rel="import" href="../page_visibility.html">
 <link rel="import" href="../prefs/prefs.html">
 <link rel="import" href="../route.html">
+<link rel="import" href="../router.html">
 <link rel="import" href="../settings_vars_css.html">
-
-<if expr="chromeos">
-<link rel="import" href="chrome://resources/cr_elements/chromeos/network/cr_onc_types.html">
-</if>
 
 <dom-module id="settings-ui">
   <template>
     <style include="cr-page-host-style settings-shared">
       :host {
-        @apply --layout-fit;
         display: flex;
         flex-direction: column;
+        height: 100%;
         --settings-menu-width: 250px;
         /* Centered cards has a max-width of var(--cr-centered-card-max-width)
          * and a width of a certain percentage. Therefore, to make room for the
@@ -41,9 +40,7 @@
       }
 
       cr-toolbar {
-        @apply --layout-center;
         min-height: 56px;
-        z-index: 2;
         --cr-toolbar-left-spacer-width: var(--settings-menu-width);
         --cr-toolbar-center-basis: var(--settings-main-basis);
       }
@@ -126,12 +123,6 @@
       <div class="drawer-content">
         <template is="dom-if" id="drawerTemplate">
           <settings-menu page-visibility="[[pageVisibility_]]"
-              show-apps="[[showApps_]]"
-              show-android-apps="[[showAndroidApps_]]"
-              show-crostini="[[showCrostini_]]"
-              show-parental-controls="[[showParentalControls_]]"
-              show-plugin-vm="[[showPluginVm_]]"
-              have-play-store-app="[[havePlayStoreApp_]]"
               on-iron-activate="onIronActivate_"
               advanced-opened="{{advancedOpenedInMenu_}}">
           </settings-menu>
@@ -141,12 +132,6 @@
     <div id="container" class="no-outline">
       <div id="left">
         <settings-menu page-visibility="[[pageVisibility_]]"
-            show-apps="[[showApps_]]"
-            show-android-apps="[[showAndroidApps_]]"
-            show-crostini="[[showCrostini_]]"
-            show-parental-controls="[[showParentalControls_]]"
-            show-plugin-vm="[[showPluginVm_]]"
-            have-play-store-app="[[havePlayStoreApp_]]"
             on-iron-activate="onIronActivate_"
             advanced-opened="{{advancedOpenedInMenu_}}">
         </settings-menu>
@@ -154,12 +139,6 @@
       <settings-main id="main" prefs="{{prefs}}"
           toolbar-spinner-active="{{toolbarSpinnerActive_}}"
           page-visibility="[[pageVisibility_]]"
-          show-apps="[[showApps_]]"
-          show-android-apps="[[showAndroidApps_]]"
-          show-crostini="[[showCrostini_]]"
-          show-parental-controls="[[showParentalControls_]]"
-          show-plugin-vm="[[showPluginVm_]]"
-          have-play-store-app="[[havePlayStoreApp_]]"
           advanced-toggle-expanded="{{advancedOpenedInMain_}}">
       </settings-main>
       <!-- An additional child of the flex #container to take up space,

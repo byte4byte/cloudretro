@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <string>
 
+#include "base/containers/span.h"
 #include "base/strings/string_number_conversions.h"
 #include "cc/paint/display_item_list.h"
 #include "cc/paint/draw_image.h"
@@ -148,7 +149,6 @@ PaintImage CreateDiscardablePaintImage(const gfx::Size& size,
         info, std::vector<FrameMetadata>{FrameMetadata()},
         allocate_encoded_data);
   }
-  generator->SetEligibleForAcceleratedDecoding();
   auto paint_image =
       PaintImageBuilder::WithDefault()
           .set_id(id)
@@ -222,8 +222,8 @@ scoped_refptr<SkottieWrapper> CreateSkottie(const gfx::Size& size,
                  base::NumberToString(duration_secs * kFps));
   }
 
-  return base::MakeRefCounted<SkottieWrapper>(
-      std::make_unique<SkMemoryStream>(json.c_str(), json.size()));
+  return SkottieWrapper::CreateNonSerializable(
+      base::as_bytes(base::make_span(json)));
 }
 
 PaintImage CreateNonDiscardablePaintImage(const gfx::Size& size) {
@@ -235,9 +235,9 @@ PaintImage CreateNonDiscardablePaintImage(const gfx::Size& size) {
   bitmap.eraseColor(SK_AlphaTRANSPARENT);
   return PaintImageBuilder::WithDefault()
       .set_id(PaintImage::GetNextId())
-      .set_image(SkImage::MakeFromBitmap(bitmap)->makeTextureImage(
-                     context.get(), nullptr),
-                 PaintImage::GetNextContentId())
+      .set_image(
+          SkImage::MakeFromBitmap(bitmap)->makeTextureImage(context.get()),
+          PaintImage::GetNextContentId())
       .TakePaintImage();
 }
 

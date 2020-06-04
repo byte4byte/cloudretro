@@ -10,13 +10,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.TypedArray;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
-import org.chromium.chrome.browser.webapps.WebApkInfo;
+import org.chromium.chrome.browser.webapps.WebappInfo;
 import org.chromium.chrome.browser.webapps.WebappLauncherActivity;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -36,7 +37,8 @@ public class FreIntentCreator {
      */
     public Intent create(Context caller, Intent fromIntent, boolean requiresBroadcast,
             boolean preferLightweightFre) {
-        @Nullable WebApkInfo webApkInfo =
+        @Nullable
+        WebappInfo webApkInfo =
                 WebappLauncherActivity.maybeSlowlyGenerateWebApkInfoFromIntent(fromIntent);
         Intent intentToLaunchAfterFreComplete = (webApkInfo == null)
                 ? fromIntent
@@ -54,12 +56,12 @@ public class FreIntentCreator {
      * @param caller               Activity instance that is requesting the first run.
      * @param fromIntent           Intent used to launch the caller.
      * @param preferLightweightFre Whether to prefer the Lightweight First Run Experience.
-     * @param webApkInfo           An optional WebApkInfo if this FRE flow was triggered
+     * @param webApkInfo           An optional WebappInfo if this FRE flow was triggered
      *                             by launching a WebAPK.
      * @return Intent to launch First Run Experience.
      */
     protected Intent createInternal(Context caller, Intent fromIntent, boolean preferLightweightFre,
-            @Nullable WebApkInfo webApkInfo) {
+            @Nullable WebappInfo webApkInfo) {
         // Launch the Generic First Run Experience if it was previously active.
         boolean isGenericFreActive = checkIsGenericFreActive();
         if (preferLightweightFre && !isGenericFreActive) {
@@ -72,11 +74,11 @@ public class FreIntentCreator {
     /**
      * Returns an intent to show the lightweight first run activity.
      * @param context                        The context.
-     * @param webApkInfo                     An optional WebApkInfo if this FRE flow was triggered
+     * @param webApkInfo                     An optional WebappInfo if this FRE flow was triggered
      *                                       by launching a WebAPK.
      */
     private static Intent createLightweightFirstRunIntent(
-            Context context, @Nullable WebApkInfo webApkInfo) {
+            Context context, @Nullable WebappInfo webApkInfo) {
         Intent intent = new Intent(context, LightweightFirstRunActivity.class);
         String webApkShortName = webApkInfo == null ? null : webApkInfo.shortName();
         if (webApkShortName != null) {

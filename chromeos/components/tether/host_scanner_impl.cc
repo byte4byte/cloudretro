@@ -50,8 +50,7 @@ HostScannerImpl::HostScannerImpl(
       device_id_tether_network_guid_map_(device_id_tether_network_guid_map),
       host_scan_cache_(host_scan_cache),
       connection_preserver_(connection_preserver),
-      clock_(clock),
-      weak_ptr_factory_(this) {
+      clock_(clock) {
   session_manager_->AddObserver(this);
 }
 
@@ -101,7 +100,7 @@ void HostScannerImpl::OnTetherHostsFetched(
   tether_guids_in_cache_before_scan_ =
       host_scan_cache_->GetTetherGuidsInCache();
 
-  host_scanner_operation_ = HostScannerOperation::Factory::NewInstance(
+  host_scanner_operation_ = HostScannerOperation::Factory::Create(
       tether_hosts, device_sync_client_, secure_channel_client_,
       host_scan_device_prioritizer_, tether_host_response_recorder_,
       connection_preserver_);

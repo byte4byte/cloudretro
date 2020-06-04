@@ -7,8 +7,9 @@ package org.chromium.chrome.browser.explore_sites;
 import static org.junit.Assert.assertEquals;
 
 import android.support.test.filters.SmallTest;
-import android.support.v7.widget.RecyclerView;
 import android.util.Pair;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -18,11 +19,11 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.components.embedder_support.util.UrlConstants;
 
 import java.util.ArrayList;
 
@@ -77,7 +78,7 @@ public class ExploreSitesCategoryCardViewTest {
             new ChromeActivityTestRule<>(ChromeActivity.class);
 
     private Pair<ExploreSitesCategoryCardView, ExploreSitesCategory> initializeCategoryAndView(
-            int numSitesTotal, int numBlacklisted) throws Exception {
+            int numSitesTotal, int numBlacklisted) {
         ExploreSitesCategory category = createSyntheticCategory(numSitesTotal, numBlacklisted);
 
         ArrayList<ExploreSitesCategory> catalog = new ArrayList<>();
@@ -104,7 +105,7 @@ public class ExploreSitesCategoryCardViewTest {
 
     // package-private helper for running a tile quantity render tests.
     void runTileQuantityTest(int numSitesTotal, int numBlacklisted, boolean incompleteAllowed,
-            int expectedMaxRows, int expectedTilesToDisplay) throws Exception {
+            int expectedMaxRows, int expectedTilesToDisplay) {
         Pair<ExploreSitesCategoryCardView, ExploreSitesCategory> categoryState =
                 initializeCategoryAndView(numSitesTotal, numBlacklisted);
 
@@ -125,42 +126,72 @@ public class ExploreSitesCategoryCardViewTest {
     // Covers: IS_DENSE=false, MAX_ROWS=2, MAX_COLUMNS=4, numSites=MAX_COLUMNS, numBlacklisted=0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalPerfectRow() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalPerfectRow() {
         runTileQuantityTest(4, 0, false, 1, 4);
     }
 
     // Covers: IS_DENSE=false, MAX_ROWS=2, MAX_COLUMNS=4, numSites>MAX_COLUMNS, numBlacklisted=0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalImperfectRow() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalImperfectRow() {
         runTileQuantityTest(5, 0, false, 1, 4);
     }
 
     // Covers: IS_DENSE=false, MAX_ROWS=2, MAX_COLUMNS=4, numSites=MAX_COLUMNS, numBlacklisted>0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalPerfectRowAfterBlacklisted() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalPerfectRowAfterBlacklisted() {
         runTileQuantityTest(5, 1, false, 1, 4);
     }
 
     // Covers: IS_DENSE=false, MAX_ROWS=2, MAX_COLUMNS=4, numSites>MAX_COLUMNS, numBlacklisted>0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalImperfectRowAfterBlacklisted() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalImperfectRowAfterBlacklisted() {
         runTileQuantityTest(8, 2, false, 2, 6);
     }
 
     // Covers: IS_DENSE=true, MAX_ROWS=2, MAX_COLUMNS=4, numSites<MAX_COLUMNS, numBlacklisted>0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalTooFewTilesAfterBlacklisted() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalTooFewTilesAfterBlacklisted() {
         runTileQuantityTest(5, 4, false, 1, 1);
     }
 
     // Covers: IS_DENSE=true, MAX_ROWS=2, MAX_COLUMNS=4, numSites>MAX_TILE_COUNT, numBlacklisted=0
     @Test
     @SmallTest
-    public void testTileQuantityOriginalTooManyTiles() throws Exception {
+    @CommandLineFlags.
+    Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/"
+                    + "denseVariation/original"})
+    public void
+    testTileQuantityOriginalTooManyTiles() {
         runTileQuantityTest(15, 0, false, 2, 8);
     }
 }

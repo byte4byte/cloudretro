@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
 using base::android::ConvertJavaStringToUTF16;
@@ -30,6 +31,7 @@ int OriginVerifier::clear_browsing_data_call_count_for_tests_;
 
 OriginVerifier::OriginVerifier(JNIEnv* env,
                                const JavaRef<jobject>& obj,
+                               const JavaRef<jobject>& jweb_contents,
                                const JavaRef<jobject>& jprofile) {
   jobject_.Reset(obj);
   Profile* profile = ProfileAndroid::FromProfileAndroid(jprofile);
@@ -37,7 +39,8 @@ OriginVerifier::OriginVerifier(JNIEnv* env,
   asset_link_handler_ =
       std::make_unique<digital_asset_links::DigitalAssetLinksHandler>(
           content::BrowserContext::GetDefaultStoragePartition(profile)
-              ->GetURLLoaderFactoryForBrowserProcess());
+              ->GetURLLoaderFactoryForBrowserProcess(),
+          content::WebContents::FromJavaWebContents(jweb_contents));
 }
 
 OriginVerifier::~OriginVerifier() = default;
@@ -62,10 +65,10 @@ bool OriginVerifier::VerifyOrigin(JNIEnv* env,
   // UrlFetcher making the request will also get killed, so we won't get any
   // dangling callback reference issues.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return asset_link_handler_->CheckDigitalAssetLinkRelationship(
-      base::Bind(&customtabs::OriginVerifier::OnRelationshipCheckComplete,
-                 base::Unretained(this)),
-      origin, package_name, fingerprint, relationship);
+  return asset_link_handler_->CheckDigitalAssetLinkRelationshipForAndroidApp(
+      origin, relationship, fingerprint, package_name,
+      base::BindOnce(&customtabs::OriginVerifier::OnRelationshipCheckComplete,
+                     base::Unretained(this)));
 }
 
 void OriginVerifier::OnRelationshipCheckComplete(
@@ -98,11 +101,13 @@ int OriginVerifier::GetClearBrowsingDataCallCountForTesting() {
 static jlong JNI_OriginVerifier_Init(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj,
+    const base::android::JavaParamRef<jobject>& jweb_contents,
     const base::android::JavaParamRef<jobject>& jprofile) {
   if (!g_browser_process)
     return 0;
 
-  OriginVerifier* native_verifier = new OriginVerifier(env, obj, jprofile);
+  OriginVerifier* native_verifier =
+      new OriginVerifier(env, obj, jweb_contents, jprofile);
   return reinterpret_cast<intptr_t>(native_verifier);
 }
 

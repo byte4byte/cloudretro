@@ -15,6 +15,8 @@
 #include "content/public/browser/devtools_agent_host_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "url/gurl.h"
 
@@ -25,11 +27,14 @@
 class ExtensionViewViews;
 
 namespace content {
+class BrowserContext;
 class DevToolsAgentHost;
 }
 
 namespace extensions {
+class Extension;
 class ExtensionViewHost;
+enum class UnloadedExtensionReason;
 }
 
 // The bubble used for hosting a browser-action popup provided by an extension.
@@ -38,6 +43,7 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
                        public wm::ActivationChangeObserver,
 #endif
                        public ExtensionViewViews::Container,
+                       public extensions::ExtensionRegistryObserver,
                        public content::NotificationObserver,
                        public TabStripModelObserver,
                        public content::DevToolsAgentHostObserver {
@@ -75,9 +81,7 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
   // views::BubbleDialogDelegateView:
   gfx::Size CalculatePreferredSize() const override;
   void AddedToWidget() override;
-  int GetDialogButtons() const override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
-  bool ShouldHaveRoundCorners() const override;
 #if defined(USE_AURA)
   void OnWidgetDestroying(views::Widget* widget) override;
 
@@ -89,6 +93,11 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
 
   // ExtensionViewViews::Container:
   void OnExtensionSizeChanged(ExtensionViewViews* view) override;
+
+  // extensions::ExtensionRegistryObserver:
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
 
   // content::NotificationObserver:
   void Observe(int type,
@@ -124,10 +133,13 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
   // The contained host for the view.
   std::unique_ptr<extensions::ExtensionViewHost> host_;
 
+  ScopedObserver<extensions::ExtensionRegistry,
+                 extensions::ExtensionRegistryObserver>
+      extension_registry_observer_;
+
   ShowAction show_action_;
 
   content::NotificationRegistrar registrar_;
-  ScopedObserver<TabStripModel, TabStripModelObserver> observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopup);
 };

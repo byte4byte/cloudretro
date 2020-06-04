@@ -9,13 +9,17 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/chromeos/android_sms/android_sms_app_setup_controller.h"
 #include "chrome/browser/chromeos/android_sms/android_sms_urls.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chromeos/components/multidevice/logging/logging.h"
-#include "extensions/common/extension.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
+#include "ui/display/types/display_constants.h"
 
 namespace chromeos {
 
@@ -26,17 +30,32 @@ namespace {
 const PwaDomain kDomains[] = {PwaDomain::kProdAndroid, PwaDomain::kProdGoogle,
                               PwaDomain::kStaging};
 
+const char kLastSuccessfulDomainPref[] = "android_sms.last_successful_domain";
+
 }  // namespace
+
+// static
+void AndroidSmsAppManagerImpl::RegisterProfilePrefs(
+    PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(kLastSuccessfulDomainPref, std::string());
+}
 
 AndroidSmsAppManagerImpl::PwaDelegate::PwaDelegate() = default;
 
 AndroidSmsAppManagerImpl::PwaDelegate::~PwaDelegate() = default;
 
-content::WebContents* AndroidSmsAppManagerImpl::PwaDelegate::OpenApp(
-    const AppLaunchParams& params) {
-  // Note: OpenApplications() is not namespaced and is defined in
-  // application_launch.h.
-  return OpenApplication(params);
+void AndroidSmsAppManagerImpl::PwaDelegate::OpenApp(Profile* profile,
+                                                    const std::string& app_id) {
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfile(profile);
+  DCHECK(proxy);
+  proxy->Launch(
+      app_id,
+      apps::GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerWindow,
+                          WindowOpenDisposition::NEW_WINDOW,
+                          false /* preferred_containner */),
+      apps::mojom::LaunchSource::kFromChromeInternal,
+      display::kInvalidDisplayId);
 }
 
 bool AndroidSmsAppManagerImpl::PwaDelegate::TransferItemAttributes(
@@ -50,14 +69,15 @@ bool AndroidSmsAppManagerImpl::PwaDelegate::TransferItemAttributes(
 AndroidSmsAppManagerImpl::AndroidSmsAppManagerImpl(
     Profile* profile,
     AndroidSmsAppSetupController* setup_controller,
+    PrefService* pref_service,
     app_list::AppListSyncableService* app_list_syncable_service,
     scoped_refptr<base::TaskRunner> task_runner)
     : profile_(profile),
       setup_controller_(setup_controller),
       app_list_syncable_service_(app_list_syncable_service),
+      pref_service_(pref_service),
       installed_url_at_last_notify_(GetCurrentAppUrl()),
-      pwa_delegate_(std::make_unique<PwaDelegate>()),
-      weak_ptr_factory_(this) {
+      pwa_delegate_(std::make_unique<PwaDelegate>()) {
   // Post a task to complete initialization. This portion of the flow must be
   // posted asynchronously because it accesses the networking stack, which is
   // not completely loaded until after this class is instantiated.
@@ -89,12 +109,14 @@ void AndroidSmsAppManagerImpl::SetUpAndroidSmsApp() {
   if (migrating_from && *migrating_from == GetPreferredPwaDomain())
     migrating_from.reset();
 
+  GURL install_url = GetAndroidMessagesURL(true /* use_install_url */);
+
   is_new_app_setup_in_progress_ = true;
   setup_controller_->SetUpApp(
-      GetAndroidMessagesURL() /* app_url */,
-      GetAndroidMessagesURL(true /* use_install_url */) /* install_url */,
+      GetAndroidMessagesURL() /* app_url */, install_url,
       base::BindOnce(&AndroidSmsAppManagerImpl::OnSetUpNewAppResult,
-                     weak_ptr_factory_.GetWeakPtr(), migrating_from));
+                     weak_ptr_factory_.GetWeakPtr(), migrating_from,
+                     install_url));
 }
 
 void AndroidSmsAppManagerImpl::SetUpAndLaunchAndroidSmsApp() {
@@ -103,12 +125,20 @@ void AndroidSmsAppManagerImpl::SetUpAndLaunchAndroidSmsApp() {
 }
 
 void AndroidSmsAppManagerImpl::TearDownAndroidSmsApp() {
+  pref_service_->SetString(kLastSuccessfulDomainPref, std::string());
+
   base::Optional<GURL> installed_app_url = GetCurrentAppUrl();
   if (!installed_app_url)
     return;
 
   setup_controller_->DeleteRememberDeviceByDefaultCookie(*installed_app_url,
                                                          base::DoNothing());
+}
+
+bool AndroidSmsAppManagerImpl::HasAppBeenManuallyUninstalledByUser() {
+  GURL url = GetAndroidMessagesURL(true /* use_install_url */);
+  return pref_service_->GetString(kLastSuccessfulDomainPref) == url.spec() &&
+         !setup_controller_->GetPwa(url);
 }
 
 base::Optional<PwaDomain> AndroidSmsAppManagerImpl::GetInstalledPwaDomain() {
@@ -153,10 +183,11 @@ void AndroidSmsAppManagerImpl::NotifyInstalledAppUrlChangedIfNecessary() {
 
 void AndroidSmsAppManagerImpl::OnSetUpNewAppResult(
     const base::Optional<PwaDomain>& migrating_from,
+    const GURL& install_url,
     bool success) {
   is_new_app_setup_in_progress_ = false;
 
-  const extensions::Extension* new_pwa = setup_controller_->GetPwa(
+  base::Optional<web_app::AppId> new_pwa = setup_controller_->GetPwa(
       GetAndroidMessagesURL(true /* use_install_url */));
 
   // If the app failed to install or the PWA does not exist, do not launch.
@@ -165,6 +196,9 @@ void AndroidSmsAppManagerImpl::OnSetUpNewAppResult(
     return;
   }
 
+  if (success)
+    pref_service_->SetString(kLastSuccessfulDomainPref, install_url.spec());
+
   // If there is no PWA installed at the old URL, no migration is needed and
   // setup is finished.
   if (!migrating_from) {
@@ -172,13 +206,13 @@ void AndroidSmsAppManagerImpl::OnSetUpNewAppResult(
     return;
   }
 
-  const extensions::Extension* old_pwa = setup_controller_->GetPwa(
+  base::Optional<web_app::AppId> old_pwa = setup_controller_->GetPwa(
       GetAndroidMessagesURL(true /* use_install_url */, *migrating_from));
 
   // Transfer attributes from the old PWA to the new one. This ensures that the
   // PWA's placement in the app launcher and shelf remains constant..
   bool transfer_attributes_success = pwa_delegate_->TransferItemAttributes(
-      old_pwa->id() /* from_app_id */, new_pwa->id() /* to_app_id */,
+      *old_pwa /* from_app_id */, *new_pwa /* to_app_id */,
       app_list_syncable_service_);
   if (!transfer_attributes_success) {
     PA_LOG(ERROR) << "AndroidSmsAppManagerImpl::OnSetUpNewAppResult(): Failed "
@@ -227,14 +261,9 @@ void AndroidSmsAppManagerImpl::HandleAppSetupFinished() {
   // Otherwise, launch the app.
   PA_LOG(VERBOSE) << "AndroidSmsAppManagerImpl::HandleAppSetupFinished(): "
                   << "Launching Messages PWA.";
-  pwa_delegate_->OpenApp(AppLaunchParams(
-      profile_,
-      setup_controller_
-          ->GetPwa(GetAndroidMessagesURL(true /* use_install_url */, *domain))
-          ->id(),
-      apps::mojom::LaunchContainer::kLaunchContainerWindow,
-      WindowOpenDisposition::NEW_WINDOW,
-      apps::mojom::AppLaunchSource::kSourceChromeInternal));
+  pwa_delegate_->OpenApp(profile_,
+                         *setup_controller_->GetPwa(GetAndroidMessagesURL(
+                             true /* use_install_url */, *domain)));
 }
 
 void AndroidSmsAppManagerImpl::SetPwaDelegateForTesting(

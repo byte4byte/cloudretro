@@ -125,15 +125,18 @@ class KioskAppData : public KioskAppDataBase,
   void StartFetch();
 
   // extensions::WebstoreDataFetcherDelegate overrides:
-  void OnWebstoreRequestFailure() override;
+  void OnWebstoreRequestFailure(const std::string& extension_id) override;
   void OnWebstoreResponseParseSuccess(
+      const std::string& extension_id,
       std::unique_ptr<base::DictionaryValue> webstore_data) override;
-  void OnWebstoreResponseParseFailure(const std::string& error) override;
+  void OnWebstoreResponseParseFailure(const std::string& extension_id,
+                                      const std::string& error) override;
 
   // Helper function for testing for the existence of |key| in
   // |response|. Passes |key|'s content via |value| and returns
   // true when |key| is present.
-  bool CheckResponseKeyValue(const base::DictionaryValue* response,
+  bool CheckResponseKeyValue(const std::string& extension_id,
+                             const base::DictionaryValue* response,
                              const char* key,
                              std::string* value);
 
@@ -153,7 +156,7 @@ class KioskAppData : public KioskAppDataBase,
 
   base::FilePath crx_file_;
 
-  base::WeakPtrFactory<KioskAppData> weak_factory_;
+  base::WeakPtrFactory<KioskAppData> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(KioskAppData);
 };

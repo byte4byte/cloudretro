@@ -12,8 +12,7 @@
 #include "chrome/services/cups_proxy/cups_proxy_service_delegate.h"
 #include "chromeos/printing/printer_configuration.h"
 
-namespace chromeos {
-namespace printing {
+namespace cups_proxy {
 
 // Fake implementation for use in unit_tests.
 class FakeCupsProxyServiceDelegate : public CupsProxyServiceDelegate {
@@ -22,14 +21,17 @@ class FakeCupsProxyServiceDelegate : public CupsProxyServiceDelegate {
   ~FakeCupsProxyServiceDelegate() override = default;
 
   // CupsProxyServiceDelegate overrides.
-  std::vector<chromeos::Printer> GetPrinters() override;
+  bool IsPrinterAccessAllowed() const override;
+  std::vector<chromeos::Printer> GetPrinters(
+      chromeos::PrinterClass printer_class) override;
   base::Optional<chromeos::Printer> GetPrinter(const std::string& id) override;
-  bool IsPrinterInstalled(const Printer& printer) override;
+  bool IsPrinterInstalled(const chromeos::Printer& printer) override;
+  void PrinterInstalled(const chromeos::Printer& printer) override;
   scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() override;
-  void SetupPrinter(const Printer& printer, PrinterSetupCallback cb) override;
+  void SetupPrinter(const chromeos::Printer& printer,
+                    SetupPrinterCallback cb) override;
 };
 
-}  // namespace printing
-}  // namespace chromeos
+}  // namespace cups_proxy
 
 #endif  // CHROME_SERVICES_CUPS_PROXY_FAKE_CUPS_PROXY_SERVICE_DELEGATE_H_

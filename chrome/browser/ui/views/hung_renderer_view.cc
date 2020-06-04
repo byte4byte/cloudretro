@@ -31,9 +31,7 @@
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -65,7 +63,7 @@ HungRendererDialogView* HungRendererDialogView::g_instance_ = nullptr;
 // HungPagesTableModel, public:
 
 HungPagesTableModel::HungPagesTableModel(Delegate* delegate)
-    : delegate_(delegate), process_observer_(this), widget_observer_(this) {}
+    : delegate_(delegate) {}
 
 HungPagesTableModel::~HungPagesTableModel() {}
 
@@ -270,10 +268,64 @@ bool HungRendererDialogView::IsFrameActive(WebContents* contents) {
   return platform_util::IsWindowActive(window);
 }
 
-HungRendererDialogView::HungRendererDialogView()
-    : info_label_(nullptr), hung_pages_table_(nullptr), initialized_(false) {
+HungRendererDialogView::HungRendererDialogView() {
+#if defined(OS_WIN)
+  // Never use the custom frame when Aero Glass is disabled. See
+  // https://crbug.com/323278
+  DialogDelegate::set_use_custom_frame(ui::win::IsAeroGlassEnabled());
+#endif
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::CONTROL));
+  auto info_label = std::make_unique<views::Label>(
+      base::string16(), CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
+  info_label->SetMultiLine(true);
+  info_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  hung_pages_table_model_ = std::make_unique<HungPagesTableModel>(this);
+  const std::vector<ui::TableColumn> columns = {ui::TableColumn()};
+  auto hung_pages_table = std::make_unique<views::TableView>(
+      hung_pages_table_model_.get(), columns, views::ICON_AND_TEXT, true);
+  hung_pages_table_ = hung_pages_table.get();
+
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_CANCEL,
+      l10n_util::GetPluralStringFUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END,
+                                       hung_pages_table_model_->RowCount()));
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT));
+
+  DialogDelegate::SetAcceptCallback(base::BindOnce(
+      &HungRendererDialogView::RestartHangTimer, base::Unretained(this)));
+  DialogDelegate::SetCancelCallback(base::BindOnce(
+      &HungRendererDialogView::ForceCrashHungRenderer, base::Unretained(this)));
+  DialogDelegate::SetCloseCallback(base::BindOnce(
+      &HungRendererDialogView::RestartHangTimer, base::Unretained(this)));
+
+  DialogModelChanged();
+
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>());
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+
+  constexpr int kColumnSetId = 0;
+  views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
+                        views::GridLayout::USE_PREF, 0, 0);
+
+  layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
+  info_label_ = layout->AddView(std::move(info_label));
+
+  layout->AddPaddingRow(
+      views::GridLayout::kFixedSize,
+      provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
+
+  layout->StartRow(1.0, kColumnSetId);
+  layout->AddView(
+      views::TableView::CreateScrollViewWithTable(std::move(hung_pages_table)),
+      1, 1, views::GridLayout::FILL, views::GridLayout::FILL, kTableViewWidth,
+      kTableViewHeight);
+
   chrome::RecordDialogCreation(chrome::DialogIdentifier::HUNG_RENDERER);
 }
 
@@ -349,9 +401,6 @@ void HungRendererDialogView::EndForWebContents(
 // HungRendererDialogView, views::DialogDelegate implementation:
 
 base::string16 HungRendererDialogView::GetWindowTitle() const {
-  if (!initialized_)
-    return base::string16();
-
   return l10n_util::GetPluralStringFUTF16(
       IDS_BROWSER_HANGMONITOR_RENDERER_TITLE,
       hung_pages_table_model_->RowCount());
@@ -366,21 +415,7 @@ void HungRendererDialogView::WindowClosing() {
   g_instance_ = nullptr;
 }
 
-int HungRendererDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
-}
-
-base::string16 HungRendererDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_CANCEL) {
-    return l10n_util::GetPluralStringFUTF16(
-        IDS_BROWSER_HANGMONITOR_RENDERER_END,
-        hung_pages_table_model_->RowCount());
-  }
-  return l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
-}
-
-bool HungRendererDialogView::Cancel() {
+void HungRendererDialogView::ForceCrashHungRenderer() {
   auto* render_widget_host = hung_pages_table_model_->GetRenderWidgetHost();
   bool currently_unresponsive =
       render_widget_host && render_widget_host->IsCurrentlyUnresponsive();
@@ -400,26 +435,6 @@ bool HungRendererDialogView::Cancel() {
     rph->Shutdown(content::RESULT_CODE_HUNG);
 #endif
   }
-  return true;
-}
-
-bool HungRendererDialogView::Accept() {
-  RestartHangTimer();
-  return true;
-}
-
-bool HungRendererDialogView::Close() {
-  return Accept();
-}
-
-bool HungRendererDialogView::ShouldUseCustomFrame() const {
-#if defined(OS_WIN)
-  // Use the old dialog style without Aero glass, otherwise the dialog will be
-  // visually constrained to browser window bounds. See http://crbug.com/323278
-  return ui::win::IsAeroGlassEnabled();
-#else
-  return views::DialogDelegateView::ShouldUseCustomFrame();
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -436,53 +451,8 @@ void HungRendererDialogView::TabDestroyed() {
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView, views::View overrides:
 
-void HungRendererDialogView::ViewHierarchyChanged(
-    const views::ViewHierarchyChangedDetails& details) {
-  views::DialogDelegateView::ViewHierarchyChanged(details);
-  if (!initialized_ && details.is_add && details.child == this && GetWidget())
-    Init();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // HungRendererDialogView, private:
-
-void HungRendererDialogView::Init() {
-  auto info_label = std::make_unique<views::Label>(
-      base::string16(), CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY);
-  info_label->SetMultiLine(true);
-  info_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-
-  hung_pages_table_model_.reset(new HungPagesTableModel(this));
-  std::vector<ui::TableColumn> columns;
-  columns.push_back(ui::TableColumn());
-  auto hung_pages_table = std::make_unique<views::TableView>(
-      hung_pages_table_model_.get(), columns, views::ICON_AND_TEXT, true);
-  hung_pages_table_ = hung_pages_table.get();
-
-  views::GridLayout* layout =
-      SetLayoutManager(std::make_unique<views::GridLayout>());
-  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-
-  constexpr int kColumnSetId = 0;
-  views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
-  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                        views::GridLayout::USE_PREF, 0, 0);
-
-  layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
-  info_label_ = layout->AddView(std::move(info_label));
-
-  layout->AddPaddingRow(
-      views::GridLayout::kFixedSize,
-      provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
-
-  layout->StartRow(1.0, kColumnSetId);
-  layout->AddView(
-      views::TableView::CreateScrollViewWithTable(std::move(hung_pages_table)),
-      1, 1, views::GridLayout::FILL, views::GridLayout::FILL, kTableViewWidth,
-      kTableViewHeight);
-
-  initialized_ = true;
-}
 
 void HungRendererDialogView::RestartHangTimer() {
   // Start waiting again for responsiveness.

@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "content/common/content_export.h"
-#include "content/common/input/input_event_ack.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 
 namespace blink {
@@ -70,8 +69,11 @@ class CONTENT_EXPORT RenderWidgetInputHandlerDelegate {
   // won't be sent to WebKit or trigger DidHandleMouseEvent().
   virtual bool WillHandleMouseEvent(const blink::WebMouseEvent& event) = 0;
 
+  // Whether buffered touch events should be supported or not.
+  virtual bool SupportsBufferedTouchEvents() = 0;
+
  protected:
-  virtual ~RenderWidgetInputHandlerDelegate() {}
+  virtual ~RenderWidgetInputHandlerDelegate() = default;
 };
 
 }  // namespace content

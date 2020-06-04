@@ -25,8 +25,8 @@ void WeakReference::Flag::Invalidate() {
 }
 
 bool WeakReference::Flag::IsValid() const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_)
-      << "WeakPtrs must be checked on the same sequenced thread.";
+  // WeakPtrs must be checked on the same sequenced thread.
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return !invalidated_.IsSet();
 }
 
@@ -46,7 +46,7 @@ WeakReference::WeakReference(const scoped_refptr<Flag>& flag) : flag_(flag) {}
 
 WeakReference::~WeakReference() = default;
 
-WeakReference::WeakReference(WeakReference&& other) = default;
+WeakReference::WeakReference(WeakReference&& other) noexcept = default;
 
 WeakReference::WeakReference(const WeakReference& other) = default;
 

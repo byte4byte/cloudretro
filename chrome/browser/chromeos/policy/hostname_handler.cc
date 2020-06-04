@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_handler.h"
@@ -22,6 +23,7 @@ constexpr char kAssetIDPlaceholder[] = "${ASSET_ID}";
 constexpr char kMachineNamePlaceholder[] = "${MACHINE_NAME}";
 constexpr char kSerialNumPlaceholder[] = "${SERIAL_NUM}";
 constexpr char kMACAddressPlaceholder[] = "${MAC_ADDR}";
+constexpr char kLocationPlaceholder[] = "${LOCATION}";
 
 // As per RFC 1035, hostname should be 63 characters or less.
 const int kMaxHostnameLength = 63;
@@ -47,7 +49,7 @@ bool IsValidHostname(const std::string& hostname) {
 namespace policy {
 
 HostnameHandler::HostnameHandler(chromeos::CrosSettings* cros_settings)
-    : cros_settings_(cros_settings), weak_factory_(this) {
+    : cros_settings_(cros_settings) {
   policy_subscription_ = cros_settings_->AddSettingsObserver(
       chromeos::kDeviceHostnameTemplate,
       base::BindRepeating(&HostnameHandler::OnDeviceHostnamePropertyChanged,
@@ -68,18 +70,25 @@ void HostnameHandler::Shutdown() {
   }
 }
 
+const std::string& HostnameHandler::GetDeviceHostname() const {
+  return hostname_;
+}
+
 // static
 std::string HostnameHandler::FormatHostname(const std::string& name_template,
                                             const std::string& asset_id,
                                             const std::string& serial,
                                             const std::string& mac,
-                                            const std::string& machine_name) {
+                                            const std::string& machine_name,
+                                            const std::string& location) {
   std::string result = name_template;
   base::ReplaceSubstringsAfterOffset(&result, 0, kAssetIDPlaceholder, asset_id);
   base::ReplaceSubstringsAfterOffset(&result, 0, kSerialNumPlaceholder, serial);
   base::ReplaceSubstringsAfterOffset(&result, 0, kMACAddressPlaceholder, mac);
   base::ReplaceSubstringsAfterOffset(&result, 0, kMachineNamePlaceholder,
                                      machine_name);
+  base::ReplaceSubstringsAfterOffset(&result, 0, kLocationPlaceholder,
+                                     location);
 
   if (!IsValidHostname(result))
     return std::string();
@@ -94,8 +103,8 @@ void HostnameHandler::DefaultNetworkChanged(
 void HostnameHandler::OnDeviceHostnamePropertyChanged() {
   chromeos::CrosSettingsProvider::TrustedStatus status =
       cros_settings_->PrepareTrustedValues(
-          base::BindRepeating(&HostnameHandler::OnDeviceHostnamePropertyChanged,
-                              weak_factory_.GetWeakPtr()));
+          base::BindOnce(&HostnameHandler::OnDeviceHostnamePropertyChanged,
+                         weak_factory_.GetWeakPtr()));
   if (status != chromeos::CrosSettingsProvider::TRUSTED)
     return;
 
@@ -124,6 +133,10 @@ void HostnameHandler::
                                        ->browser_policy_connector_chromeos()
                                        ->GetMachineName();
 
+  const std::string location = g_browser_process->platform_part()
+                                   ->browser_policy_connector_chromeos()
+                                   ->GetDeviceAnnotatedLocation();
+
   chromeos::NetworkStateHandler* handler =
       chromeos::NetworkHandler::Get()->network_state_handler();
 
@@ -138,8 +151,9 @@ void HostnameHandler::
     }
   }
 
-  handler->SetHostname(
-      FormatHostname(hostname_template, asset_id, serial, mac, machine_name));
+  hostname_ = FormatHostname(hostname_template, asset_id, serial, mac,
+                             machine_name, location);
+  handler->SetHostname(hostname_);
 }
 
 }  // namespace policy

@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/ui/settings/table_cell_catalog_view_controller.h"
 
-#import "ios/chrome/browser/ui/authentication/cells/account_control_item.h"
 #import "ios/chrome/browser/ui/authentication/cells/signin_promo_view_configurator.h"
 #import "ios/chrome/browser/ui/authentication/cells/table_view_account_item.h"
 #import "ios/chrome/browser/ui/authentication/cells/table_view_signin_promo_item.h"
@@ -28,8 +27,8 @@
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/signin_resources_provider.h"
 #include "url/gurl.h"
@@ -81,8 +80,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
-  return [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  return [super initWithStyle:style];
 }
 
 - (void)viewDidLoad {
@@ -134,10 +132,10 @@ typedef NS_ENUM(NSInteger, ItemType) {
   TableViewImageItem* textImageItem2 =
       [[TableViewImageItem alloc] initWithType:ItemTypeTextAccessoryImage];
   textImageItem2.title = @"Image item without image, and disabled";
-  textImageItem2.textColor = [UIColor colorNamed:kDestructiveTintColor];
+  textImageItem2.textColor = [UIColor colorNamed:kRedColor];
   textImageItem2.detailText =
       @"Very very very long detail text for the image cell without image";
-  textImageItem2.detailTextColor = [UIColor colorNamed:kDestructiveTintColor];
+  textImageItem2.detailTextColor = [UIColor colorNamed:kRedColor];
   textImageItem2.enabled = NO;
   [model addItem:textImageItem2 toSectionWithIdentifier:SectionIdentifierText];
 
@@ -247,7 +245,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [[TableViewTextEditItem alloc] initWithType:ItemTypeTextEditItem];
   textEditItem.textFieldName = @"Edit Text Item";
   textEditItem.textFieldValue = @" with no icons";
-  textEditItem.hideEditIcon = YES;
+  textEditItem.hideIcon = YES;
   textEditItem.textFieldEnabled = YES;
   [model addItem:textEditItem toSectionWithIdentifier:SectionIdentifierText];
 
@@ -412,29 +410,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
       @"eiusmod tempor incididunt ut labore et dolore magna aliqua.";
   accountItemCheckMark.accessoryType = UITableViewCellAccessoryCheckmark;
   [model addItem:accountItemCheckMark
-      toSectionWithIdentifier:SectionIdentifierAccount];
-
-  AccountControlItem* accountControlItem =
-      [[AccountControlItem alloc] initWithType:ItemTypeAccount];
-  accountControlItem.image = [UIImage imageNamed:@"settings_sync"];
-  accountControlItem.text = @"Account Sync Settings";
-  accountControlItem.detailText = @"Detail text";
-  accountControlItem.accessoryType =
-      UITableViewCellAccessoryDisclosureIndicator;
-  [model addItem:accountControlItem
-      toSectionWithIdentifier:SectionIdentifierAccount];
-
-  AccountControlItem* accountControlItemWithExtraLongText =
-      [[AccountControlItem alloc] initWithType:ItemTypeAccount];
-  accountControlItemWithExtraLongText.image = [[ChromeIcon infoIcon]
-      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-  accountControlItemWithExtraLongText.text =
-      @"Account Control Settings - long title";
-  accountControlItemWithExtraLongText.detailText =
-      @"Detail text detail text detail text detail text detail text.";
-  accountControlItemWithExtraLongText.accessoryType =
-      UITableViewCellAccessoryDisclosureIndicator;
-  [model addItem:accountControlItemWithExtraLongText
       toSectionWithIdentifier:SectionIdentifierAccount];
 
   // SectionIdentifierURL.

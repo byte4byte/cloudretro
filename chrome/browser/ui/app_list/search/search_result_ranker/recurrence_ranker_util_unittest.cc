@@ -8,11 +8,8 @@
 #include <vector>
 
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
-#include "services/data_decoder/public/cpp/test_data_decoder_service.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "base/test/task_environment.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,23 +21,21 @@ namespace app_list {
 
 class RecurrenceRankerJsonConfigConverterTest : public testing::Test {
  public:
-  void SetUp() override {
-    converter_ = std::make_unique<JsonConfigConverter>(dd_service_.connector());
-  }
-
   // Converts the async JsonConfigConverter::Convert call into a synchronous
   // call for ease of testing.
   base::Optional<RecurrenceRankerConfigProto> Convert(const std::string& json) {
     base::RunLoop run_loop;
     done_callback_ = run_loop.QuitClosure();
-    converter_->Convert(
-        json, base::BindOnce(
-                  [](RecurrenceRankerJsonConfigConverterTest* fixture,
-                     base::Optional<RecurrenceRankerConfigProto> config) {
-                    fixture->config_ = config;
-                    fixture->done_callback_.Run();
-                  },
-                  base::Unretained(this)));
+    converter_ = JsonConfigConverter::Convert(
+        json, "",
+        base::BindOnce(
+            [](RecurrenceRankerJsonConfigConverterTest* fixture,
+               base::Optional<RecurrenceRankerConfigProto> config) {
+              fixture->converter_.reset();
+              fixture->config_ = config;
+              fixture->done_callback_.Run();
+            },
+            base::Unretained(this)));
     run_loop.Run();
     return config_;
   }
@@ -52,14 +47,14 @@ class RecurrenceRankerJsonConfigConverterTest : public testing::Test {
     return converted_proto.value();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-      base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::MainThreadType::DEFAULT,
+      base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED};
 
   std::unique_ptr<JsonConfigConverter> converter_;
 
   base::Closure done_callback_;
-  data_decoder::TestDataDecoderService dd_service_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   base::Optional<RecurrenceRankerConfigProto> config_;
 };
 

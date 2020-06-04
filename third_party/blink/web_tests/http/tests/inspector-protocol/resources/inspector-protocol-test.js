@@ -14,7 +14,7 @@ var TestRunner = class {
   }
 
   static get stabilizeNames() {
-    return ['id', 'nodeId', 'objectId', 'scriptId', 'timestamp', 'backendNodeId', 'parentId', 'frameId', 'loaderId', 'baseURL', 'documentURL', 'styleSheetId', 'executionContextId', 'targetId', 'browserContextId', 'sessionId', 'ownerNode'];
+    return ['id', 'nodeId', 'objectId', 'scriptId', 'timestamp', 'backendNodeId', 'parentId', 'frameId', 'loaderId', 'baseURL', 'documentURL', 'styleSheetId', 'executionContextId', 'openerId', 'targetId', 'browserContextId', 'sessionId', 'receivedBytes', 'ownerNode', 'guid'];
   }
 
   startDumpingProtocolMessages() {
@@ -138,6 +138,22 @@ var TestRunner = class {
   async loadScriptAbsolute(url) {
     var source = await this._fetch(url);
     return eval(`${source}\n//# sourceURL=${url}`);
+  };
+
+  async loadScriptModule(path) {
+    const source = await this._fetch(this._testBaseURL + path);
+
+    return new Promise((resolve, reject) => {
+      const src = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }));
+      const script = Object.assign(document.createElement('script'), {
+        src,
+        type: 'module',
+        onerror: reject,
+        onload: resolve
+      });
+
+      document.head.appendChild(script);
+    })
   };
 
   browserP() {
@@ -410,64 +426,6 @@ TestRunner.Session = class {
       };
       this._addEventHandler(eventName, handler);
     });
-  }
-};
-
-class WorkerProtocol {
-  constructor(dp, sessionId) {
-    this._sessionId = sessionId;
-    this._callbacks = new Map();
-    this._dp = dp;
-    this._dp.Target.onReceivedMessageFromTarget(
-        (message) => this._onMessage(message));
-    this.dp = this._setupProtocol();
-  }
-
-  _setupProtocol() {
-    let lastId = 0;
-    return new Proxy({}, {
-      get: (target, agentName, receiver) => new Proxy({}, {
-        get: (target, methodName, receiver) => {
-          const eventPattern = /^(once)?([A-Z][A-Za-z0-9]*)/;
-          var match = eventPattern.exec(methodName);
-          if (!match || match[1] !== 'once') {
-            return args => new Promise(resolve => {
-                     let id = ++lastId;
-                     this._callbacks.set(id, resolve);
-                     this._dp.Target.sendMessageToTarget({
-                       sessionId: this._sessionId,
-                       message: JSON.stringify({
-                         method: `${agentName}.${methodName}`,
-                         params: args || {},
-                         id: id
-                       })
-                     });
-                   });
-          }
-          var eventName = match[2];
-          eventName = eventName.charAt(0).toLowerCase() + eventName.slice(1);
-          return () => new Promise(resolve => {
-                   this._callbacks.set(`${agentName}.${eventName}`, resolve);
-                 });
-        }
-      })
-    });
-  }
-
-  _onMessage(message) {
-    if (message.params.sessionId !== this._sessionId)
-      return;
-    const {id, result, method, params} = JSON.parse(message.params.message);
-    if (id && this._callbacks.has(id)) {
-      let callback = this._callbacks.get(id);
-      this._callbacks.delete(id);
-      callback(result);
-    }
-    if (method && this._callbacks.has(method)) {
-      let callback = this._callbacks.get(method);
-      this._callbacks.delete(method);
-      callback(params);
-    }
   }
 };
 

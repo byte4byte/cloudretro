@@ -11,6 +11,7 @@
 #include "ash/ash_export.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace aura {
@@ -19,34 +20,33 @@ class Window;
 
 namespace ui {
 class LayerTreeOwner;
+class Shadow;
 }
 
 namespace ash {
 
-// DragWindowController is responsible for showing a semi-transparent window
-// while dragging a window across displays.
+// Handles visuals for window dragging as it relates to multi-display support.
+// Phantom windows called "drag windows" represent the window on other displays.
 class ASH_EXPORT DragWindowController {
  public:
-  // Returns 1 if |drag_location_in_screen| is contained in |root_window|.
-  // Otherwise, returns an opacity value based on what fraction of
-  // |dragged_window| is contained in |root_window|.
-  static float GetDragWindowOpacity(aura::Window* root_window,
-                                    aura::Window* dragged_window,
-                                    const gfx::Point& drag_location_in_screen);
-
-  explicit DragWindowController(aura::Window* window);
+  DragWindowController(
+      aura::Window* window,
+      bool is_touch_dragging,
+      const base::Optional<gfx::Rect>& shadow_bounds = base::nullopt);
   virtual ~DragWindowController();
 
-  // This is used to update the bounds and opacity for the drag window
-  // immediately.
-  // This also creates/destorys the drag window when necessary.
-  void Update(const gfx::Point& drag_location_in_screen);
+  // Updates bounds and opacity for the drag windows, and creates/destroys each
+  // drag window so that it only exists when it would have nonzero opacity. Also
+  // updates the opacity of the original window.
+  void Update();
 
  private:
   class DragWindowDetails;
   FRIEND_TEST_ALL_PREFIXES(DragWindowResizerTest, DragWindowController);
   FRIEND_TEST_ALL_PREFIXES(DragWindowResizerTest,
                            DragWindowControllerAcrossThreeDisplays);
+  FRIEND_TEST_ALL_PREFIXES(DragWindowResizerTest,
+                           DragWindowControllerWithCustomShadowBounds);
 
   // Returns the currently active drag windows.
   int GetDragWindowsCountForTest() const;
@@ -55,13 +55,24 @@ class ASH_EXPORT DragWindowController {
   // currently active drag windows list.
   const aura::Window* GetDragWindowForTest(size_t index) const;
   const ui::LayerTreeOwner* GetDragLayerOwnerForTest(size_t index) const;
+  const ui::Shadow* GetDragWindowShadowForTest(size_t index) const;
 
   // Call Layer::OnPaintLayer on all layers under the drag_windows_.
   void RequestLayerPaintForTest();
 
-  // Window the drag window is placed beneath.
+  // The original window.
   aura::Window* window_;
 
+  // Indicates touch dragging, as opposed to mouse dragging.
+  const bool is_touch_dragging_;
+
+  // Used if the drag windows may need their shadows adjusted.
+  const base::Optional<gfx::Rect> shadow_bounds_;
+
+  // |window_|'s opacity before the drag. Used to revert opacity after the drag.
+  const float old_opacity_;
+
+  // Phantom windows to visually represent |window_| on other displays.
   std::vector<std::unique_ptr<DragWindowDetails>> drag_windows_;
 
   DISALLOW_COPY_AND_ASSIGN(DragWindowController);

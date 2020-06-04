@@ -13,28 +13,42 @@ FakeAssistantManagerServiceImpl::FakeAssistantManagerServiceImpl() = default;
 
 FakeAssistantManagerServiceImpl::~FakeAssistantManagerServiceImpl() = default;
 
-void FakeAssistantManagerServiceImpl::Start(
-    const base::Optional<std::string>& access_token,
-    bool enable_hotword,
-    base::OnceClosure callback) {
-  state_ = State::RUNNING;
+void FakeAssistantManagerServiceImpl::FinishStart() {
+  SetStateAndInformObservers(State::RUNNING);
+}
 
-  if (callback)
-    std::move(callback).Run();
+void FakeAssistantManagerServiceImpl::Start(
+    const base::Optional<UserInfo>& user,
+    bool enable_hotword) {
+  SetStateAndInformObservers(State::STARTING);
+  SetUser(user);
 }
 
 void FakeAssistantManagerServiceImpl::Stop() {
-  state_ = State::STOPPED;
+  SetStateAndInformObservers(State::STOPPED);
 }
 
-void FakeAssistantManagerServiceImpl::SetAccessToken(
-    const std::string& access_token) {}
+void FakeAssistantManagerServiceImpl::SetUser(
+    const base::Optional<UserInfo>& user) {
+  if (user) {
+    gaia_id_ = user.value().gaia_id;
+    access_token_ = user.value().access_token;
+  } else {
+    gaia_id_ = base::nullopt;
+    access_token_ = base::nullopt;
+  }
+}
 
 void FakeAssistantManagerServiceImpl::EnableListening(bool enable) {}
 
 void FakeAssistantManagerServiceImpl::EnableHotword(bool enable) {}
 
+void FakeAssistantManagerServiceImpl::EnableAmbientMode(bool enabled) {}
+
 void FakeAssistantManagerServiceImpl::SetArcPlayStoreEnabled(bool enabled) {}
+
+void FakeAssistantManagerServiceImpl::SetAssistantContextEnabled(bool enabled) {
+}
 
 AssistantManagerService::State FakeAssistantManagerServiceImpl::GetState()
     const {
@@ -46,16 +60,32 @@ FakeAssistantManagerServiceImpl::GetAssistantSettingsManager() {
   return &assistant_settings_manager_;
 }
 
-void FakeAssistantManagerServiceImpl::StartCachedScreenContextInteraction() {}
+void FakeAssistantManagerServiceImpl::AddAndFireStateObserver(
+    StateObserver* observer) {
+  state_observers_.AddObserver(observer);
+  observer->OnStateChanged(GetState());
+}
+
+void FakeAssistantManagerServiceImpl::RemoveStateObserver(
+    const StateObserver* observer) {
+  state_observers_.RemoveObserver(observer);
+}
+
+void FakeAssistantManagerServiceImpl::UpdateInternalMediaPlayerStatus(
+    MediaSessionAction action) {
+  action_ = action;
+}
 
 void FakeAssistantManagerServiceImpl::StartEditReminderInteraction(
     const std::string& client_id) {}
 
-void FakeAssistantManagerServiceImpl::StartMetalayerInteraction(
-    const gfx::Rect& region) {}
+void FakeAssistantManagerServiceImpl::StartScreenContextInteraction(
+    ax::mojom::AssistantStructurePtr assistant_structure,
+    const std::vector<uint8_t>& assistant_screenshot) {}
 
 void FakeAssistantManagerServiceImpl::StartTextInteraction(
     const std::string& query,
+    mojom::AssistantQuerySource source,
     bool allow_tts) {}
 
 void FakeAssistantManagerServiceImpl::StartVoiceInteraction() {}
@@ -68,7 +98,7 @@ void FakeAssistantManagerServiceImpl::StopActiveInteraction(
     bool cancel_conversation) {}
 
 void FakeAssistantManagerServiceImpl::AddAssistantInteractionSubscriber(
-    mojom::AssistantInteractionSubscriberPtr subscriber) {}
+    mojo::PendingRemote<mojom::AssistantInteractionSubscriber> subscriber) {}
 
 void FakeAssistantManagerServiceImpl::RetrieveNotification(
     mojom::AssistantNotificationPtr notification,
@@ -77,21 +107,43 @@ void FakeAssistantManagerServiceImpl::RetrieveNotification(
 void FakeAssistantManagerServiceImpl::DismissNotification(
     mojom::AssistantNotificationPtr notification) {}
 
-void FakeAssistantManagerServiceImpl::CacheScreenContext(
-    CacheScreenContextCallback callback) {
-  std::move(callback).Run();
-}
-
-void FakeAssistantManagerServiceImpl::ClearScreenContextCache() {}
-
 void FakeAssistantManagerServiceImpl::OnAccessibilityStatusChanged(
     bool spoken_feedback_enabled) {}
 
 void FakeAssistantManagerServiceImpl::SendAssistantFeedback(
     mojom::AssistantFeedbackPtr feedback) {}
 
-void FakeAssistantManagerServiceImpl::StopAlarmTimerRinging() {}
-void FakeAssistantManagerServiceImpl::CreateTimer(base::TimeDelta duration) {}
+void FakeAssistantManagerServiceImpl::NotifyEntryIntoAssistantUi(
+    mojom::AssistantEntryPoint entry_point) {}
+
+void FakeAssistantManagerServiceImpl::AddTimeToTimer(const std::string& id,
+                                                     base::TimeDelta duration) {
+}
+
+void FakeAssistantManagerServiceImpl::RemoveAlarmTimer(const std::string& id) {}
+
+void FakeAssistantManagerServiceImpl::SetStateAndInformObservers(
+    State new_state) {
+  State old_state = state_;
+  state_ = new_state;
+
+  // In reality we will not skip states, i.e. we will always get |STARTING|
+  // before ever encountering |STARTED|. As such our fake implementation will
+  // send out all intermediate states between |old_state| and |new_state|.
+  MaybeSendStateChange(State::STOPPED, old_state, new_state);
+  MaybeSendStateChange(State::STARTING, old_state, new_state);
+  MaybeSendStateChange(State::STARTED, old_state, new_state);
+  MaybeSendStateChange(State::RUNNING, old_state, new_state);
+}
+
+void FakeAssistantManagerServiceImpl::MaybeSendStateChange(State state,
+                                                           State old_state,
+                                                           State target_state) {
+  if (state > old_state && state <= target_state) {
+    for (auto& observer : state_observers_)
+      observer.OnStateChanged(state);
+  }
+}
 
 }  // namespace assistant
 }  // namespace chromeos

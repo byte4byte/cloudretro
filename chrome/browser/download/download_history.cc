@@ -39,6 +39,7 @@
 #include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_crx_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/download/public/common/download_features.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_utils.h"
@@ -247,7 +248,6 @@ DownloadHistory::DownloadHistory(content::DownloadManager* manager,
     : notifier_(manager, this),
       history_(std::move(history)),
       loading_id_(download::DownloadItem::kInvalidId),
-      history_size_(0),
       initial_history_query_complete_(false) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   download::SimpleDownloadManager::DownloadVector items;
@@ -338,7 +338,6 @@ void DownloadHistory::LoadHistoryDownloads(
 #endif
     DCHECK_EQ(DownloadHistoryData::PERSISTED,
               DownloadHistoryData::Get(item)->state());
-    ++history_size_;
   }
 
   // Indicate that the history db is initialized.
@@ -361,11 +360,15 @@ void DownloadHistory::MaybeAddToHistory(download::DownloadItem* item) {
   bool removing = removing_ids_.find(download_id) != removing_ids_.end();
 
   // TODO(benjhayden): Remove IsTemporary().
-  if (download_crx_util::IsExtensionDownload(*item) ||
+  if ((notifier_.GetManager() &&
+       download_crx_util::IsTrustedExtensionDownload(
+           Profile::FromBrowserContext(
+               notifier_.GetManager()->GetBrowserContext()),
+           *item)) ||
       item->IsTemporary() ||
-      (data->state() != DownloadHistoryData::NOT_PERSISTED) ||
-      removing)
+      (data->state() != DownloadHistoryData::NOT_PERSISTED) || removing) {
     return;
+  }
 
   data->SetState(DownloadHistoryData::PERSISTING);
   // Keep the info for in-progress download, so we can check whether history DB
@@ -375,10 +378,10 @@ void DownloadHistory::MaybeAddToHistory(download::DownloadItem* item) {
     data->set_info(download_row);
   else
     data->clear_info();
-  history_->CreateDownload(download_row,
-                           base::BindRepeating(&DownloadHistory::ItemAdded,
-                                               weak_ptr_factory_.GetWeakPtr(),
-                                               download_id, download_row));
+  history_->CreateDownload(
+      download_row, base::BindOnce(&DownloadHistory::ItemAdded,
+                                   weak_ptr_factory_.GetWeakPtr(), download_id,
+                                   download_row));
 }
 
 void DownloadHistory::ItemAdded(uint32_t download_id,
@@ -417,13 +420,6 @@ void DownloadHistory::ItemAdded(uint32_t download_id,
     return;
   }
   data->SetState(DownloadHistoryData::PERSISTED);
-
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Download.HistorySize2",
-                              history_size_,
-                              1/*min*/,
-                              (1 << 23)/*max*/,
-                              (1 << 7)/*num_buckets*/);
-  ++history_size_;
 
   // Notify the observer about the change in the persistence state.
   if (was_persisted != IsPersisted(item)) {
@@ -505,10 +501,6 @@ void DownloadHistory::OnDownloadRemoved(content::DownloadManager* manager,
   // This is important: another OnDownloadRemoved() handler could do something
   // that synchronously fires an OnDownloadUpdated().
   data->SetState(DownloadHistoryData::NOT_PERSISTED);
-  // ItemAdded increments history_size_ only if the item wasn't
-  // removed_while_adding_, so the next line does not belong in
-  // ScheduleRemoveDownload().
-  --history_size_;
 }
 
 void DownloadHistory::ScheduleRemoveDownload(uint32_t download_id) {
@@ -517,10 +509,9 @@ void DownloadHistory::ScheduleRemoveDownload(uint32_t download_id) {
   // For database efficiency, batch removals together if they happen all at
   // once.
   if (removing_ids_.empty()) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(&DownloadHistory::RemoveDownloadsBatch,
-                       weak_ptr_factory_.GetWeakPtr()));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&DownloadHistory::RemoveDownloadsBatch,
+                                  weak_ptr_factory_.GetWeakPtr()));
   }
   removing_ids_.insert(download_id);
 }
@@ -554,10 +545,6 @@ bool DownloadHistory::NeedToUpdateDownloadHistory(
   }
 #endif
 
-  if (!base::FeatureList::IsEnabled(
-          download::features::kDownloadDBForNewDownloads)) {
-    return true;
-  }
   // When download DB is enabled, only downloads that are in terminal state
   // are added to or updated in history DB. Non-transient in-progress and
   // interrupted download will be stored in the in-progress DB.

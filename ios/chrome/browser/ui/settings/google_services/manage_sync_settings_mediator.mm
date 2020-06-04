@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/driver/sync_service.h"
@@ -13,15 +14,16 @@
 #include "ios/chrome/browser/sync/sync_observer_bridge.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #import "ios/chrome/browser/ui/list_model/list_model.h"
-#import "ios/chrome/browser/ui/settings/cells/settings_multiline_detail_item.h"
 #import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
 #import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_command_handler.h"
+#import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_constants.h"
 #import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_consumer.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_image_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_item.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -243,23 +245,26 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
   [self updateEncryptionItem:NO];
 
   // GoogleActivityControlsItemType.
-  SettingsMultilineDetailItem* googleActivityControlsItem =
-      [[SettingsMultilineDetailItem alloc]
-          initWithType:GoogleActivityControlsItemType];
-  googleActivityControlsItem.text =
+  TableViewImageItem* googleActivityControlsItem =
+      [[TableViewImageItem alloc] initWithType:GoogleActivityControlsItemType];
+  googleActivityControlsItem.title =
       GetNSString(IDS_IOS_MANAGE_SYNC_GOOGLE_ACTIVITY_CONTROLS_TITLE);
   googleActivityControlsItem.detailText =
       GetNSString(IDS_IOS_MANAGE_SYNC_GOOGLE_ACTIVITY_CONTROLS_DESCRIPTION);
+  googleActivityControlsItem.accessibilityTraits |= UIAccessibilityTraitButton;
   [model addItem:googleActivityControlsItem
       toSectionWithIdentifier:AdvancedSettingsSectionIdentifier];
 
   // AdvancedSettingsSectionIdentifier.
-  SettingsMultilineDetailItem* dataFromChromeSyncItem =
-      [[SettingsMultilineDetailItem alloc] initWithType:DataFromChromeSync];
-  dataFromChromeSyncItem.text =
+  TableViewImageItem* dataFromChromeSyncItem =
+      [[TableViewImageItem alloc] initWithType:DataFromChromeSync];
+  dataFromChromeSyncItem.title =
       GetNSString(IDS_IOS_MANAGE_SYNC_DATA_FROM_CHROME_SYNC_TITLE);
   dataFromChromeSyncItem.detailText =
       GetNSString(IDS_IOS_MANAGE_SYNC_DATA_FROM_CHROME_SYNC_DESCRIPTION);
+  dataFromChromeSyncItem.accessibilityIdentifier =
+      kDataFromChromeSyncAccessibilityIdentifier;
+  dataFromChromeSyncItem.accessibilityTraits |= UIAccessibilityTraitButton;
   [model addItem:dataFromChromeSyncItem
       toSectionWithIdentifier:AdvancedSettingsSectionIdentifier];
 }
@@ -278,6 +283,16 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
         [UIImage imageNamed:kGoogleServicesSyncErrorImage];
     self.encryptionItem.detailText = GetNSString(
         IDS_IOS_GOOGLE_SERVICES_SETTINGS_ENTER_PASSPHRASE_TO_START_SYNC);
+  } else if (self.shouldEncryptionItemBeEnabled &&
+             self.syncSetupService->GetSyncServiceState() ==
+                 SyncSetupService::kSyncServiceNeedsTrustedVaultKey) {
+    needsUpdate = needsUpdate || self.encryptionItem.image == nil;
+    self.encryptionItem.image =
+        [UIImage imageNamed:kGoogleServicesSyncErrorImage];
+    self.encryptionItem.detailText =
+        GetNSString(self.syncSetupService->IsEncryptEverythingEnabled()
+                        ? IDS_IOS_SYNC_ERROR_DESCRIPTION
+                        : IDS_IOS_SYNC_PASSWORDS_ERROR_DESCRIPTION);
   } else {
     needsUpdate = needsUpdate || self.encryptionItem.image != nil;
     self.encryptionItem.image = nil;
@@ -287,8 +302,7 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
   if (self.shouldEncryptionItemBeEnabled) {
     self.encryptionItem.textColor = nil;
   } else {
-    self.encryptionItem.textColor =
-        UIColorFromRGB(kTableViewSecondaryLabelLightGrayTextColor);
+    self.encryptionItem.textColor = UIColor.cr_secondaryLabelColor;
   }
   if (needsUpdate && notifyConsumer) {
     [self.consumer reloadItem:self.self.encryptionItem];
@@ -349,7 +363,8 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
   SyncSetupService::SyncServiceState state =
       self.syncSetupService->GetSyncServiceState();
   return state != SyncSetupService::kNoSyncServiceError &&
-         state != SyncSetupService::kSyncServiceNeedsPassphrase;
+         state != SyncSetupService::kSyncServiceNeedsPassphrase &&
+         state != SyncSetupService::kSyncServiceNeedsTrustedVaultKey;
 }
 
 - (BOOL)shouldSyncDataItemEnabled {
@@ -393,14 +408,15 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
 
 #pragma mark - ManageSyncSettingsServiceDelegate
 
-- (void)toggleSwitchItem:(SyncSwitchItem*)switchItem withValue:(BOOL)value {
+- (void)toggleSwitchItem:(TableViewItem*)item withValue:(BOOL)value {
   {
     // The notifications should be ignored to get smooth switch animations.
     // Notifications are sent by SyncObserverModelBridge while changing
     // settings.
     base::AutoReset<BOOL> autoReset(&_ignoreSyncStateChanges, YES);
-    switchItem.on = value;
-    ItemType itemType = static_cast<ItemType>(switchItem.type);
+    SyncSwitchItem* syncSwitchItem = base::mac::ObjCCast<SyncSwitchItem>(item);
+    syncSwitchItem.on = value;
+    ItemType itemType = static_cast<ItemType>(item.type);
     switch (itemType) {
       case SyncEverythingItemType:
         self.syncSetupService->SetSyncingAllDataTypes(value);
@@ -418,9 +434,10 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
       case PasswordsDataTypeItemType:
       case ReadingListDataTypeItemType:
       case SettingsDataTypeItemType: {
+        DCHECK(syncSwitchItem);
         SyncSetupService::SyncableDatatype dataType =
             static_cast<SyncSetupService::SyncableDatatype>(
-                switchItem.dataType);
+                syncSwitchItem.dataType);
         syncer::ModelType modelType =
             self.syncSetupService->GetModelType(dataType);
         self.syncSetupService->SetDataTypeEnabled(modelType, value);
@@ -452,6 +469,11 @@ NSString* kGoogleServicesSyncErrorImage = @"google_services_sync_error";
   ItemType itemType = static_cast<ItemType>(item.type);
   switch (itemType) {
     case EncryptionItemType:
+      if (self.syncSetupService->GetSyncServiceState() ==
+          SyncSetupService::kSyncServiceNeedsTrustedVaultKey) {
+        [self.commandHandler openTrustedVaultReauth];
+        break;
+      }
       [self.commandHandler openPassphraseDialog];
       break;
     case GoogleActivityControlsItemType:

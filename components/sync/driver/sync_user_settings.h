@@ -12,14 +12,25 @@
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/passphrase_enums.h"
 #include "components/sync/base/user_selectable_type.h"
-#include "components/sync/driver/data_type_encryption_handler.h"
 
 namespace syncer {
 
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class SyncFirstSetupCompleteSource {
+  BASIC_FLOW = 0,
+  ADVANCED_FLOW_CONFIRM = 1,
+  ADVANCED_FLOW_INTERRUPTED_TURN_SYNC_ON = 2,
+  ADVANCED_FLOW_INTERRUPTED_LEAVE_SYNC_OFF = 3,
+  ENGINE_INITIALIZED_WITH_AUTO_START = 4,
+  kMaxValue = ENGINE_INITIALIZED_WITH_AUTO_START,
+};
+
 // This class encapsulates all the user-configurable bits of Sync.
-class SyncUserSettings : public syncer::DataTypeEncryptionHandler {
+class SyncUserSettings {
  public:
-  ~SyncUserSettings() override = default;
+  virtual ~SyncUserSettings() = default;
 
   // Whether the user wants Sync to run. This is false by default, but gets set
   // to true early in the Sync setup flow, after the user has pressed "turn on
@@ -37,10 +48,10 @@ class SyncUserSettings : public syncer::DataTypeEncryptionHandler {
 
   // Whether the initial Sync setup has been completed, meaning the user has
   // consented to Sync.
-  // NOTE: On Android and ChromeOS, this gets set automatically, so it doesn't
-  // really mean anything. See |browser_defaults::kSyncAutoStarts|.
+  // NOTE: On ChromeOS, this gets set automatically, so it doesn't really mean
+  // anything. See |browser_defaults::kSyncAutoStarts|.
   virtual bool IsFirstSetupComplete() const = 0;
-  virtual void SetFirstSetupComplete() = 0;
+  virtual void SetFirstSetupComplete(SyncFirstSetupCompleteSource source) = 0;
 
   // The user's selected types. The "sync everything" flag means to sync all
   // current and future data types. If it is set, then GetSelectedTypes() will
@@ -55,10 +66,21 @@ class SyncUserSettings : public syncer::DataTypeEncryptionHandler {
   // UserSelectableType is registered iff main corresponding  ModelType is
   // registered.
   virtual UserSelectableTypeSet GetRegisteredSelectableTypes() const = 0;
-  // Returns the set of types which are enforced programmatically and can not
-  // be disabled by the user (e.g. enforced for supervised users). Types are
-  // not guaranteed to be registered.
-  virtual UserSelectableTypeSet GetForcedTypes() const = 0;
+
+#if defined(OS_CHROMEOS)
+  // As above, but for Chrome OS-specific data types. These are controlled by
+  // toggles in the OS Settings UI.
+  virtual bool IsSyncAllOsTypesEnabled() const = 0;
+  virtual UserSelectableOsTypeSet GetSelectedOsTypes() const = 0;
+  virtual void SetSelectedOsTypes(bool sync_all_os_types,
+                                  UserSelectableOsTypeSet types) = 0;
+  virtual UserSelectableOsTypeSet GetRegisteredSelectableOsTypes() const = 0;
+
+  // Whether the OS sync feature is enabled. Implies the user has consented.
+  // Exists in this interface for easier mocking in tests.
+  virtual bool IsOsSyncFeatureEnabled() const = 0;
+  virtual void SetOsSyncFeatureEnabled(bool enabled) = 0;
+#endif  // defined(OS_CHROMEOS)
 
   // Encryption state.
   // Note that all of this state may only be queried or modified if the Sync
@@ -74,24 +96,28 @@ class SyncUserSettings : public syncer::DataTypeEncryptionHandler {
   virtual void EnableEncryptEverything() = 0;
 
   // The current set of encrypted data types.
-  ModelTypeSet GetEncryptedDataTypes() const override = 0;
+  virtual ModelTypeSet GetEncryptedDataTypes() const = 0;
   // Whether a passphrase is required for encryption or decryption to proceed.
   // Note that Sync might still be working fine if the user has disabled all
   // encrypted data types.
-  bool IsPassphraseRequired() const override = 0;
+  virtual bool IsPassphraseRequired() const = 0;
   // Whether a passphrase is required to decrypt the data for any currently
   // enabled data type.
-  virtual bool IsPassphraseRequiredForDecryption() const = 0;
-  // Whether a "secondary" passphrase is in use, which means either a custom or
-  // a frozen implicit passphrase.
+  virtual bool IsPassphraseRequiredForPreferredDataTypes() const = 0;
+  // Whether trusted vault keys are required for encryption or decryption. Note
+  // that Sync might still be working fine if the user has disabled all
+  // encrypted data types.
+  virtual bool IsTrustedVaultKeyRequired() const = 0;
+  // Whether trusted vault keys are required for encryption or decryption to
+  // proceed for any currently enabled data type.
+  virtual bool IsTrustedVaultKeyRequiredForPreferredDataTypes() const = 0;
+  // Whether a "secondary" passphrase is in use (aka explicit passphrase), which
+  // means either a custom or a frozen implicit passphrase.
   virtual bool IsUsingSecondaryPassphrase() const = 0;
   // The time the current explicit passphrase (if any) was set. If no secondary
   // passphrase is in use, or no time is available, returns an unset base::Time.
   virtual base::Time GetExplicitPassphraseTime() const = 0;
-  // The type of the passphrase currently in use. This is KEYSTORE_PASSPHRASE if
-  // "encrypt everything" is disabled, or CUSTOM_PASSPHRASE if
-  // "encrypt everything" is enabled. There are also some legacy passphrase
-  // types which may still occur for a small number of users.
+  // The type of the passphrase currently in use.
   virtual PassphraseType GetPassphraseType() const = 0;
 
   // Asynchronously sets the passphrase to |passphrase| for encryption.

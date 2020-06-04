@@ -11,12 +11,12 @@
 #include "ash/public/cpp/app_list/app_list_metrics.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/app_icon_loader_delegate.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
-#include "components/arc/common/app.mojom.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "ui/gfx/image/image_skia.h"
 
 class AppListControllerDelegate;
+class AppServiceAppIconLoader;
 class Profile;
 
 namespace arc {
@@ -38,7 +38,7 @@ class ArcAppShortcutSearchResult : public ChromeSearchResult,
 
   // ChromeSearchResult:
   void Open(int event_flags) override;
-  SearchResultType GetSearchResultType() const override;
+  ash::SearchResultType GetSearchResultType() const override;
 
  private:
   // AppIconLoaderDelegate:
@@ -54,7 +54,7 @@ class ArcAppShortcutSearchResult : public ChromeSearchResult,
   arc::mojom::AppShortcutItemPtr data_;
   std::unique_ptr<arc::IconDecodeRequest> icon_decode_request_;
 
-  std::unique_ptr<ArcAppIconLoader> badge_icon_loader_;
+  std::unique_ptr<AppServiceAppIconLoader> badge_icon_loader_;
 
   Profile* const profile_;                            // Owned by ProfileInfo.
   AppListControllerDelegate* const list_controller_;  // Owned by AppListClient.

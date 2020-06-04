@@ -14,7 +14,10 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/launcher/test_launcher.h"
+#include "base/test/launcher/test_launcher_test_utils.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/scoped_run_loop_timeout.h"
+#include "base/test/test_switches.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -55,7 +58,7 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_RendererCrash) {
       shell()->web_contents()->GetMainFrame()->GetProcess(),
       content::RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
 
-  NavigateToURL(shell(), GetWebUIURL("crash"));
+  EXPECT_FALSE(NavigateToURL(shell(), GetWebUIURL("crash")));
   renderer_shutdown_observer.Wait();
 
   EXPECT_FALSE(renderer_shutdown_observer.did_exit_normally());
@@ -80,8 +83,8 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RendererCrashCallStack) {
       base::CommandLine(base::CommandLine::ForCurrentProcess()->GetProgram());
   new_test.AppendSwitchASCII(base::kGTestFilterFlag,
                              "ContentBrowserTest.MANUAL_RendererCrash");
-  new_test.AppendSwitch(kRunManualTestsFlag);
-  new_test.AppendSwitch(kSingleProcessTestsFlag);
+  new_test.AppendSwitch(switches::kRunManualTestsFlag);
+  new_test.AppendSwitch(switches::kSingleProcessTests);
 
 #if defined(THREAD_SANITIZER)
   // TSan appears to not be able to report intentional crashes from sandboxed
@@ -113,7 +116,13 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_BrowserCrash) {
 }
 
 // Tests that browser tests print the callstack on asserts.
-IN_PROC_BROWSER_TEST_F(ContentBrowserTest, BrowserCrashCallStack) {
+// Disabled on Windows crbug.com/1034784
+#if defined(OS_WIN)
+#define MAYBE_BrowserCrashCallStack DISABLED_BrowserCrashCallStack
+#else
+#define MAYBE_BrowserCrashCallStack BrowserCrashCallStack
+#endif
+IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MAYBE_BrowserCrashCallStack) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -121,8 +130,8 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, BrowserCrashCallStack) {
       base::CommandLine(base::CommandLine::ForCurrentProcess()->GetProgram());
   new_test.AppendSwitchASCII(base::kGTestFilterFlag,
                              "ContentBrowserTest.MANUAL_BrowserCrash");
-  new_test.AppendSwitch(kRunManualTestsFlag);
-  new_test.AppendSwitch(kSingleProcessTestsFlag);
+  new_test.AppendSwitch(switches::kRunManualTestsFlag);
+  new_test.AppendSwitch(switches::kSingleProcessTests);
   std::string output;
   base::GetAppOutputAndError(new_test, &output);
 
@@ -143,6 +152,71 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, BrowserCrashCallStack) {
   }
 }
 
+// The following 3 tests are disabled as they are meant to only run from
+// |RunMockTests| to validate tests launcher output for known results.
+using MockContentBrowserTest = ContentBrowserTest;
+
+// Basic Test to pass
+IN_PROC_BROWSER_TEST_F(MockContentBrowserTest, DISABLED_PassTest) {
+  ASSERT_TRUE(true);
+}
+// Basic Test to fail
+IN_PROC_BROWSER_TEST_F(MockContentBrowserTest, DISABLED_FailTest) {
+  ASSERT_TRUE(false);
+}
+// Basic Test to crash
+IN_PROC_BROWSER_TEST_F(MockContentBrowserTest, DISABLED_CrashTest) {
+  IMMEDIATE_CRASH();
+}
+
+// Using TestLauncher to launch 3 simple browser tests
+// and validate the resulting json file.
+IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RunMockTests) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+
+  base::CommandLine command_line(
+      base::CommandLine::ForCurrentProcess()->GetProgram());
+  command_line.AppendSwitchASCII("gtest_filter",
+                                 "MockContentBrowserTest.DISABLED_*");
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  base::FilePath path =
+      temp_dir.GetPath().AppendASCII("SaveSummaryResult.json");
+  command_line.AppendSwitchPath("test-launcher-summary-output", path);
+  command_line.AppendSwitch("gtest_also_run_disabled_tests");
+  command_line.AppendSwitchASCII("test-launcher-retry-limit", "0");
+
+  std::string output;
+  base::GetAppOutputAndError(command_line, &output);
+
+  // Validate the resulting JSON file is the expected output.
+  base::Optional<base::Value> root =
+      base::test_launcher_utils::ReadSummary(path);
+  ASSERT_TRUE(root);
+
+  base::Value* val = root->FindDictKey("test_locations");
+  ASSERT_TRUE(val);
+  EXPECT_EQ(3u, val->DictSize());
+  EXPECT_TRUE(base::test_launcher_utils::ValidateTestLocations(
+      val, "MockContentBrowserTest"));
+
+  val = root->FindListKey("per_iteration_data");
+  ASSERT_TRUE(val);
+  ASSERT_EQ(1u, val->GetList().size());
+
+  base::Value* iteration_val = &(val->GetList()[0]);
+  ASSERT_TRUE(iteration_val);
+  ASSERT_TRUE(iteration_val->is_dict());
+  EXPECT_EQ(3u, iteration_val->DictSize());
+  // We expect the result to be stripped of disabled prefix.
+  EXPECT_TRUE(base::test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockContentBrowserTest.PassTest", "SUCCESS", 0u));
+  EXPECT_TRUE(base::test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockContentBrowserTest.FailTest", "FAILURE", 1u));
+  EXPECT_TRUE(base::test_launcher_utils::ValidateTestResult(
+      iteration_val, "MockContentBrowserTest.CrashTest", "CRASH", 0u));
+}
+
 #endif
 
 class ContentBrowserTestSanityTest : public ContentBrowserTest {
@@ -159,7 +233,7 @@ class ContentBrowserTestSanityTest : public ContentBrowserTest {
 
     base::string16 expected_title(base::ASCIIToUTF16("OK"));
     TitleWatcher title_watcher(shell()->web_contents(), expected_title);
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     base::string16 title = title_watcher.WaitAndGetTitle();
     EXPECT_EQ(expected_title, title);
   }
@@ -228,12 +302,14 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, NonNestableTask) {
 IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RunTimeoutInstalled) {
   // Verify that a RunLoop timeout is installed and shorter than the test
   // timeout itself.
-  const auto* run_timeout = base::RunLoop::ScopedRunTimeoutForTest::Current();
+  const base::RunLoop::RunLoopTimeout* run_timeout =
+      base::test::ScopedRunLoopTimeout::GetTimeoutForCurrentThread();
   EXPECT_TRUE(run_timeout);
-  EXPECT_LT(run_timeout->timeout(), TestTimeouts::test_launcher_timeout());
+  EXPECT_LT(run_timeout->timeout, TestTimeouts::test_launcher_timeout());
 
-  EXPECT_NONFATAL_FAILURE({ run_timeout->on_timeout().Run(); },
-                          "RunLoop::Run() timed out");
+  static const base::RepeatingClosure& static_on_timeout =
+      run_timeout->on_timeout;
+  EXPECT_FATAL_FAILURE(static_on_timeout.Run(), "RunLoop::Run() timed out");
 }
 
 }  // namespace content

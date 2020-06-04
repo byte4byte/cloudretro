@@ -13,9 +13,10 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -25,6 +26,7 @@
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_process.h"
+#include "remoting/host/fake_keyboard_layout_monitor.h"
 #include "remoting/host/fake_mouse_cursor_monitor.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_mock_objects.h"
@@ -32,7 +34,6 @@
 #include "remoting/protocol/fake_desktop_capturer.h"
 #include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -124,6 +125,11 @@ class DesktopProcessTest : public testing::Test {
   // DesktopEnvironment::CreateMouseCursorMonitor().
   webrtc::MouseCursorMonitor* CreateMouseCursorMonitor();
 
+  // Creates a FakeKeyboardLayoutMonitor to mock
+  // DesktopEnvironment::CreateKeyboardLayoutMonitor
+  KeyboardLayoutMonitor* CreateKeyboardLayoutMonitor(
+      base::RepeatingCallback<void(const protocol::KeyboardLayout&)> callback);
+
   // Disconnects the daemon-to-desktop channel causing the desktop process to
   // exit.
   void DisconnectChannels();
@@ -151,7 +157,8 @@ class DesktopProcessTest : public testing::Test {
   MockDaemonListener daemon_listener_;
 
   // Runs the daemon's end of the channel.
-  base::MessageLoopForUI message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::UI};
 
   scoped_refptr<AutoThreadTaskRunner> io_task_runner_;
 
@@ -195,6 +202,9 @@ DesktopEnvironment* DesktopProcessTest::CreateDesktopEnvironment() {
   EXPECT_CALL(*desktop_environment, CreateMouseCursorMonitorPtr())
       .Times(AtMost(1))
       .WillOnce(Invoke(this, &DesktopProcessTest::CreateMouseCursorMonitor));
+  EXPECT_CALL(*desktop_environment, CreateKeyboardLayoutMonitorPtr(_))
+      .Times(AtMost(1))
+      .WillOnce(Invoke(this, &DesktopProcessTest::CreateKeyboardLayoutMonitor));
   EXPECT_CALL(*desktop_environment, GetCapabilities())
       .Times(AtMost(1));
   EXPECT_CALL(*desktop_environment, SetCapabilities(_))
@@ -219,6 +229,11 @@ webrtc::MouseCursorMonitor* DesktopProcessTest::CreateMouseCursorMonitor() {
   return new FakeMouseCursorMonitor();
 }
 
+KeyboardLayoutMonitor* DesktopProcessTest::CreateKeyboardLayoutMonitor(
+    base::RepeatingCallback<void(const protocol::KeyboardLayout&)> callback) {
+  return new FakeKeyboardLayoutMonitor();
+}
+
 void DesktopProcessTest::DisconnectChannels() {
   daemon_channel_.reset();
   network_channel_.reset();
@@ -226,22 +241,22 @@ void DesktopProcessTest::DisconnectChannels() {
 }
 
 void DesktopProcessTest::PostDisconnectChannels() {
-  message_loop_.task_runner()->PostTask(
+  task_environment_.GetMainThreadTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&DesktopProcessTest::DisconnectChannels,
                                 base::Unretained(this)));
 }
 
 void DesktopProcessTest::RunDesktopProcess() {
   base::RunLoop run_loop;
-  base::Closure quit_ui_task_runner = base::Bind(
-      base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
-      message_loop_.task_runner(),
-      FROM_HERE, run_loop.QuitClosure());
+  base::Closure quit_ui_task_runner =
+      base::Bind(base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
+                 task_environment_.GetMainThreadTaskRunner(), FROM_HERE,
+                 run_loop.QuitClosure());
   scoped_refptr<AutoThreadTaskRunner> ui_task_runner = new AutoThreadTaskRunner(
-      message_loop_.task_runner(), quit_ui_task_runner);
+      task_environment_.GetMainThreadTaskRunner(), quit_ui_task_runner);
 
-  io_task_runner_ = AutoThread::CreateWithType(
-      "IPC thread", ui_task_runner, base::MessageLoop::TYPE_IO);
+  io_task_runner_ = AutoThread::CreateWithType("IPC thread", ui_task_runner,
+                                               base::MessagePumpType::IO);
 
   mojo::MessagePipe pipe;
   daemon_channel_ = IPC::ChannelProxy::Create(

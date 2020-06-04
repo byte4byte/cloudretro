@@ -15,16 +15,22 @@ import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.UserData;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
+import org.chromium.chrome.browser.media.MediaCaptureDevicesDispatcherAndroid;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsAccessibility;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Represents the suspension page presented when a user tries to visit a site whose fully-qualified
@@ -44,7 +50,12 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         return suspendedTab != null && suspendedTab.isShowing();
     }
 
+    /**
+     * @return The SuspendedTab instance for the given Tab object. This can never return null, but
+     *         is not safe to call if the tab has been destroyed.
+     */
     public static SuspendedTab from(Tab tab) {
+        assert tab.isInitialized();
         SuspendedTab suspendedTab = get(tab);
         if (suspendedTab == null) {
             suspendedTab = tab.getUserDataHost().setUserData(USER_DATA_KEY, new SuspendedTab(tab));
@@ -77,6 +88,14 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         WebContents webContents = mTab.getWebContents();
         if (webContents != null) {
             webContents.onHide();
+            webContents.suspendAllMediaPlayers();
+            webContents.setAudioMuted(true);
+            WebContentsAccessibility.fromWebContents(webContents).setObscuredByAnotherView(true);
+            if (MediaCaptureDevicesDispatcherAndroid.isCapturingAudio(webContents)
+                    || MediaCaptureDevicesDispatcherAndroid.isCapturingVideo(webContents)
+                    || MediaCaptureDevicesDispatcherAndroid.isCapturingScreen(webContents)) {
+                MediaCaptureDevicesDispatcherAndroid.notifyStopped(webContents);
+            }
         }
 
         InfoBarContainer infoBarContainer = InfoBarContainer.get(mTab);
@@ -89,9 +108,8 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         } else {
             attachView();
         }
-        mTab.updateAccessibilityVisibility();
 
-        TabContentManager tabContentManager = mTab.getActivity().getTabContentManager();
+        TabContentManager tabContentManager = ((TabImpl) mTab).getActivity().getTabContentManager();
         if (tabContentManager != null) {
             // We have to wait for the view to layout to cache a new thumbnail for it; otherwise,
             // its width and height won't be available yet.
@@ -109,8 +127,9 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
         WebContents webContents = mTab.getWebContents();
         if (webContents != null) {
             webContents.onShow();
+            webContents.setAudioMuted(false);
+            WebContentsAccessibility.fromWebContents(webContents).setObscuredByAnotherView(false);
         }
-        mTab.updateAccessibilityVisibility();
 
         mView = null;
         mFqdn = null;
@@ -190,8 +209,8 @@ public class SuspendedTab extends EmptyTabObserver implements UserData {
 
     // TabObserver implementation.
     @Override
-    public void onActivityAttachmentChanged(Tab tab, boolean isAttached) {
-        if (!isAttached) {
+    public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
+        if (window == null) {
             removeViewIfPresent();
         } else {
             attachView();

@@ -89,7 +89,8 @@ IN_PROC_BROWSER_TEST_F(InputImeApiTest, DISABLED_BasicApiTest) {
   composition.text = base::UTF8ToUTF16("test_set_composition");
   composition.ime_text_spans.push_back(ui::ImeTextSpan(
       ui::ImeTextSpan::Type::kComposition, 0, composition.text.length(),
-      ui::ImeTextSpan::Thickness::kThin, SK_ColorTRANSPARENT));
+      ui::ImeTextSpan::Thickness::kThin,
+      ui::ImeTextSpan::UnderlineStyle::kSolid, SK_ColorTRANSPARENT));
   composition.selection = gfx::Range(2, 2);
   const std::vector<ui::CompositionText>& composition_history =
       client->composition_history();
@@ -108,7 +109,13 @@ IN_PROC_BROWSER_TEST_F(InputImeApiTest, DISABLED_BasicApiTest) {
   input_method->DetachTextInputClient(client2.get());
 }
 
-IN_PROC_BROWSER_TEST_F(InputImeApiTest, SendKeyEventsOnNormalPage) {
+// TODO(crbug.com/1004628) Flakes on Windows and Linux
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_SendKeyEventsOnNormalPage DISABLED_SendKeyEventsOnNormalPage
+#else
+#define MAYBE_SendKeyEventsOnNormalPage SendKeyEventsOnNormalPage
+#endif
+IN_PROC_BROWSER_TEST_F(InputImeApiTest, MAYBE_SendKeyEventsOnNormalPage) {
   // Navigates to special page that sendKeyEvents API has limition with.
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
   // Manipulates the focused text input client because the follow cursor

@@ -213,12 +213,13 @@ public class BaseChromiumAndroidJUnitRunner extends AndroidJUnitRunner {
     }
 
     private TestRequest createListTestRequest(Bundle arguments) {
-        List<DexFile> dexFiles = new ArrayList<>();
+        ArrayList<DexFile> dexFiles = new ArrayList<>();
         try {
             Class<?> bootstrapClass =
                     Class.forName("org.chromium.incrementalinstall.BootstrapApplication");
-            dexFiles = Arrays.asList(
-                    (DexFile[]) bootstrapClass.getDeclaredField("sIncrementalDexFiles").get(null));
+            DexFile[] incrementalInstallDexes =
+                    (DexFile[]) bootstrapClass.getDeclaredField("sIncrementalDexFiles").get(null);
+            dexFiles.addAll(Arrays.asList(incrementalInstallDexes));
         } catch (Exception e) {
             // Not an incremental apk.
             if (BuildConfig.IS_MULTIDEX_ENABLED
@@ -238,9 +239,9 @@ public class BaseChromiumAndroidJUnitRunner extends AndroidJUnitRunner {
         }
         builder.addFromRunnerArgs(runnerArgs);
         builder.addApkToScan(getContext().getPackageCodePath());
-        // See crbug://841695. TestLoader.isTestClass is incorrectly deciding that
-        // InstrumentationTestSuite is a test class.
-        builder.removeTestClass("android.test.InstrumentationTestSuite");
+
+        // Ignore tests from framework / support library classes.
+        builder.removeTestPackage("android");
         builder.setClassLoader(new ForgivingClassLoader());
         return builder.build();
     }
@@ -277,6 +278,12 @@ public class BaseChromiumAndroidJUnitRunner extends AndroidJUnitRunner {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+
+        @Override
+        public TestRequestBuilder removeTestPackage(String testPackage) {
+            mExcludedPrefixes.add(testPackage);
+            return this;
         }
 
         @Override
@@ -337,6 +344,15 @@ public class BaseChromiumAndroidJUnitRunner extends AndroidJUnitRunner {
                         continue;
                     }
                     if (startsWithAny(className, mExcludedPrefixes)) {
+                        continue;
+                    }
+                    if (!className.endsWith("Test")) {
+                        // Speeds up test listing to filter by name before
+                        // trying to load the class. We have an ErrorProne
+                        // check that enforces this convention:
+                        // //tools/android/errorprone_plugin/src/org/chromium/tools/errorprone/plugin/TestClassNameCheck.java
+                        // As of Dec 2019, this speeds up test listing on
+                        // android-kitkat-arm-rel from 41s -> 23s.
                         continue;
                     }
                     if (!className.contains("$") && loader.loadIfTest(className) != null) {

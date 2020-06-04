@@ -15,17 +15,16 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/explore_sites/catalog.pb.h"
 #include "chrome/browser/android/explore_sites/explore_sites_bridge.h"
 #include "chrome/browser/android/explore_sites/explore_sites_feature.h"
 #include "chrome/browser/android/explore_sites/explore_sites_types.h"
 #include "chrome/browser/android/explore_sites/url_util.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/common/channel_info.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/service_manager_connection.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
@@ -46,7 +45,6 @@ namespace {
 // proto format.
 const char kRequestContentType[] = "application/x-protobuf";
 const char kRequestMethod[] = "GET";
-const char kExperiment[] = "exp";
 
 constexpr net::NetworkTrafficAnnotationTag traffic_annotation =
     net::DefineNetworkTrafficAnnotation("explore_sites", R"(
@@ -122,8 +120,7 @@ ExploreSitesFetcher::ExploreSitesFetcher(
       url_(url),
       device_delegate_(std::make_unique<DeviceDelegate>()),
       callback_(std::move(callback)),
-      url_loader_factory_(loader_factory),
-      weak_factory_(this) {
+      url_loader_factory_(loader_factory) {
   base::Version version = version_info::GetVersion();
   std::string channel_name = chrome::GetChannelName();
   client_version_ = base::StringPrintf("%d.%d.%d.%s.chrome",
@@ -163,9 +160,12 @@ void ExploreSitesFetcher::Start() {
 
   // Get field trial value, if any.
   std::string tag = base::GetFieldTrialParamValueByFeature(
-      chrome::android::kExploreSites, kExperiment);
+      chrome::android::kExploreSites,
+      chrome::android::explore_sites::
+          kExploreSitesHeadersExperimentParameterName);
+
   if (!tag.empty()) {
-    resource_request->headers.SetHeader("X-Google-Chrome-Experiment-Tag", tag);
+    resource_request->headers.SetHeader("X-Goog-Chrome-Experiment-Tag", tag);
   }
 
   url_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),

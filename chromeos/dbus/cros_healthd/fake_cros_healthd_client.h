@@ -9,29 +9,59 @@
 #include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "chromeos/dbus/cros_healthd/cros_healthd_client.h"
+#include "chromeos/dbus/cros_healthd/fake_cros_healthd_service.h"
 #include "chromeos/services/cros_healthd/public/mojom/cros_healthd.mojom.h"
+#include "chromeos/services/cros_healthd/public/mojom/cros_healthd_diagnostics.mojom.h"
+#include "chromeos/services/cros_healthd/public/mojom/cros_healthd_probe.mojom.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace chromeos {
+namespace cros_healthd {
 
 // Fake implementation of CrosHealthdClient.
-class FakeCrosHealthdClient : public CrosHealthdClient {
+class COMPONENT_EXPORT(CROS_HEALTHD) FakeCrosHealthdClient
+    : public CrosHealthdClient {
  public:
+  // FakeCrosHealthdClient can be embedded in unit tests, but the
+  // InitializeFake/Shutdown pattern should be preferred. Constructing the
+  // instance will set the global instance for the fake and for the base class,
+  // so the static Get() accessor can be used with that pattern.
   FakeCrosHealthdClient();
-  explicit FakeCrosHealthdClient(
-      mojo::PendingRemote<cros_healthd::mojom::CrosHealthdService>
-          mock_service);
   ~FakeCrosHealthdClient() override;
 
+  // Checks that a FakeCrosHealthdClient instance was initialized and returns
+  // it.
+  static FakeCrosHealthdClient* Get();
+
   // CrosHealthdClient overrides:
-  mojo::Remote<cros_healthd::mojom::CrosHealthdService> BootstrapMojoConnection(
+  mojo::Remote<mojom::CrosHealthdServiceFactory> BootstrapMojoConnection(
       base::OnceCallback<void(bool success)> result_callback) override;
 
+  // Set the list of routines that will be used in the response to any
+  // GetAvailableRoutines IPCs received.
+  void SetAvailableRoutinesForTesting(
+      const std::vector<mojom::DiagnosticRoutineEnum>& available_routines);
+
+  // Set the RunRoutine response that will be used in the response to any
+  // RunSomeRoutine IPCs received.
+  void SetRunRoutineResponseForTesting(mojom::RunRoutineResponsePtr& response);
+
+  // Set the GetRoutineUpdate response that will be used in the response to any
+  // GetRoutineUpdate IPCs received.
+  void SetGetRoutineUpdateResponseForTesting(mojom::RoutineUpdatePtr& response);
+
+  // Set the TelemetryInfoPtr that will be used in the response to any
+  // ProbeTelemetryInfo IPCs received.
+  void SetProbeTelemetryInfoResponseForTesting(mojom::TelemetryInfoPtr& info);
+
  private:
-  mojo::PendingRemote<cros_healthd::mojom::CrosHealthdService> mock_service_;
+  FakeCrosHealthdService fake_service_;
+  mojo::Receiver<mojom::CrosHealthdServiceFactory> receiver_{&fake_service_};
 
   DISALLOW_COPY_AND_ASSIGN(FakeCrosHealthdClient);
 };
 
+}  // namespace cros_healthd
 }  // namespace chromeos
 
 #endif  // CHROMEOS_DBUS_CROS_HEALTHD_FAKE_CROS_HEALTHD_CLIENT_H_

@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/core/scroll/scroll_animator.h"
 
 #include "base/single_thread_task_runner.h"
+#include "base/test/test_mock_time_task_runner.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -46,16 +47,16 @@ using testing::AtLeast;
 using testing::Return;
 using testing::_;
 
-static double g_mocked_time = 0.0;
-
-static double GetMockedTime() {
-  return g_mocked_time;
-}
-
 namespace {
 
+double NowTicksInSeconds(const base::TestMockTimeTaskRunner* task_runner) {
+  return task_runner->NowTicks().since_origin().InSecondsF();
+}
+
+}  // namespace
+
 class MockScrollableAreaForAnimatorTest
-    : public GarbageCollectedFinalized<MockScrollableAreaForAnimatorTest>,
+    : public GarbageCollected<MockScrollableAreaForAnimatorTest>,
       public ScrollableArea {
   USING_GARBAGE_COLLECTED_MIXIN(MockScrollableAreaForAnimatorTest);
 
@@ -73,22 +74,23 @@ class MockScrollableAreaForAnimatorTest
   MOCK_CONST_METHOD1(ScrollSize, int(ScrollbarOrientation));
   MOCK_CONST_METHOD0(IsScrollCornerVisible, bool());
   MOCK_CONST_METHOD0(ScrollCornerRect, IntRect());
-  MOCK_METHOD2(UpdateScrollOffset, void(const ScrollOffset&, ScrollType));
+  MOCK_METHOD2(UpdateScrollOffset,
+               void(const ScrollOffset&, mojom::blink::ScrollType));
   MOCK_METHOD0(ScrollControlWasSetNeedsPaintInvalidation, void());
   MOCK_CONST_METHOD0(EnclosingScrollableArea, ScrollableArea*());
   MOCK_CONST_METHOD1(VisibleContentRect, IntRect(IncludeScrollbarsInRect));
   MOCK_CONST_METHOD0(ContentsSize, IntSize());
   MOCK_CONST_METHOD0(ScrollbarsCanBeActive, bool());
-  MOCK_CONST_METHOD0(ScrollableAreaBoundingBox, IntRect());
   MOCK_METHOD0(RegisterForAnimation, void());
   MOCK_METHOD0(ScheduleAnimation, bool());
+  MOCK_CONST_METHOD0(UsedColorScheme, WebColorScheme());
 
   bool UserInputScrollable(ScrollbarOrientation) const override { return true; }
   bool ShouldPlaceVerticalScrollbarOnLeft() const override { return false; }
   IntSize ScrollOffsetInt() const override { return IntSize(); }
   int VisibleHeight() const override { return 768; }
   int VisibleWidth() const override { return 1024; }
-  CompositorElementId GetCompositorElementId() const override {
+  CompositorElementId GetScrollElementId() const override {
     return CompositorElementId();
   }
   bool ScrollAnimatorEnabled() const override {
@@ -113,8 +115,9 @@ class MockScrollableAreaForAnimatorTest
   }
 
   void SetScrollOffset(const ScrollOffset& offset,
-                       ScrollType type,
-                       ScrollBehavior behavior = kScrollBehaviorInstant,
+                       mojom::blink::ScrollType type,
+                       mojom::blink::ScrollBehavior behavior =
+                           mojom::blink::ScrollBehavior::kInstant,
                        ScrollCallback on_finish = ScrollCallback()) override {
     if (animator)
       animator->SetCurrentOffset(offset);
@@ -131,18 +134,15 @@ class MockScrollableAreaForAnimatorTest
   }
 
   ScrollbarTheme& GetPageScrollbarTheme() const override {
-    return ScrollbarTheme::DeprecatedStaticGetTheme();
+    return ScrollbarTheme::GetTheme();
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     visitor->Trace(animator);
     ScrollableArea::Trace(visitor);
   }
 
-  void DisposeImpl() override {
-      timer_task_runner_.reset();
-      ScrollableArea::DisposeImpl();
-  }
+  void DisposeImpl() override { timer_task_runner_.reset(); }
 
  private:
   bool scroll_animator_enabled_;
@@ -155,8 +155,8 @@ class MockScrollableAreaForAnimatorTest
 class TestScrollAnimator : public ScrollAnimator {
  public:
   TestScrollAnimator(ScrollableArea* scrollable_area,
-                     TimeFunction timing_function)
-      : ScrollAnimator(scrollable_area, timing_function) {}
+                     const base::TickClock* tick_clock)
+      : ScrollAnimator(scrollable_area, tick_clock) {}
   ~TestScrollAnimator() override = default;
 
   void SetShouldSendToCompositor(bool send) {
@@ -180,8 +180,6 @@ class TestScrollAnimator : public ScrollAnimator {
   bool should_send_to_compositor_ = false;
 };
 
-}  // namespace
-
 static void Reset(ScrollAnimator& scroll_animator) {
   scroll_animator.ScrollToOffsetWithoutAnimation(ScrollOffset());
 }
@@ -192,8 +190,10 @@ TEST(ScrollAnimatorTest, MainThreadStates) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(2);
   // Once from userScroll, once from updateCompositorAnimations.
@@ -216,12 +216,12 @@ TEST(ScrollAnimatorTest, MainThreadStates) {
                 kWaitingToSendToCompositor);
 
   // RunningOnMainThread
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
@@ -234,7 +234,7 @@ TEST(ScrollAnimatorTest, MainThreadStates) {
 
   // Idle
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_EQ(scroll_animator->run_state_,
             ScrollAnimatorCompositorCoordinator::RunState::kIdle);
 
@@ -248,8 +248,10 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(9);
   EXPECT_CALL(*scrollable_area, RegisterForAnimation()).Times(6);
@@ -273,9 +275,9 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
   EXPECT_TRUE(result.did_scroll_x);
   EXPECT_FLOAT_EQ(0.0, result.unused_scroll_delta_x);
 
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
   EXPECT_NE(100, scroll_animator->CurrentOffset().Width());
   EXPECT_NE(0, scroll_animator->CurrentOffset().Width());
@@ -287,9 +289,9 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
                               ScrollableArea::ScrollCallback());
   EXPECT_TRUE(scroll_animator->HasAnimationThatRequiresService());
 
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
   EXPECT_NE(100, scroll_animator->CurrentOffset().Width());
   EXPECT_NE(0, scroll_animator->CurrentOffset().Width());
@@ -301,19 +303,19 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
                               ScrollableArea::ScrollCallback());
   EXPECT_TRUE(scroll_animator->HasAnimationThatRequiresService());
 
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
   EXPECT_NE(100, scroll_animator->CurrentOffset().Width());
   EXPECT_NE(0, scroll_animator->CurrentOffset().Width());
   EXPECT_EQ(0, scroll_animator->CurrentOffset().Height());
 
-  g_mocked_time += 1.0;
+  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(1.0));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
   EXPECT_EQ(100, scroll_animator->CurrentOffset().Width());
@@ -337,8 +339,10 @@ TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(3);
   EXPECT_CALL(*scrollable_area, RegisterForAnimation()).Times(2);
@@ -357,9 +361,9 @@ TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
   EXPECT_FLOAT_EQ(0.0, result.unused_scroll_delta_x);
   EXPECT_TRUE(scroll_animator->HasRunningAnimation());
 
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
   EXPECT_NE(100, scroll_animator->CurrentOffset().Width());
   EXPECT_NE(0, scroll_animator->CurrentOffset().Width());
@@ -372,7 +376,7 @@ TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
                                        FloatSize(100, 0),
                                        ScrollableArea::ScrollCallback());
   EXPECT_TRUE(result.did_scroll_x);
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_FALSE(scroll_animator->HasRunningAnimation());
   EXPECT_EQ(x + 100, scroll_animator->CurrentOffset().Width());
@@ -387,8 +391,11 @@ TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
   TestScrollAnimator* scroll_animator =
-      MakeGarbageCollected<TestScrollAnimator>(scrollable_area, GetMockedTime);
+      MakeGarbageCollected<TestScrollAnimator>(scrollable_area,
+                                               task_runner->GetMockTickClock());
 
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(2);
   // Called from userScroll, updateCompositorAnimations, then
@@ -410,7 +417,7 @@ TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
   EXPECT_TRUE(scroll_animator->HasRunningAnimation());
 
   // Update compositor animation.
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->SetShouldSendToCompositor(true);
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_EQ(
@@ -429,7 +436,7 @@ TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_NE(100, scroll_animator->CurrentOffset().Width());
   EXPECT_NE(0, scroll_animator->CurrentOffset().Width());
   EXPECT_EQ(0, scroll_animator->CurrentOffset().Height());
@@ -440,8 +447,10 @@ TEST(ScrollAnimatorTest, Disabled) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           false, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(8);
   EXPECT_CALL(*scrollable_area, RegisterForAnimation()).Times(0);
@@ -481,8 +490,10 @@ TEST(ScrollAnimatorTest, CancellingAnimationResetsState) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   // Called from first userScroll, setCurrentOffset, and second userScroll.
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(3);
@@ -504,12 +515,12 @@ TEST(ScrollAnimatorTest, CancellingAnimationResetsState) {
                 kWaitingToSendToCompositor);
 
   // RunningOnMainThread
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
@@ -533,9 +544,9 @@ TEST(ScrollAnimatorTest, CancellingAnimationResetsState) {
                 kWaitingToSendToCompositor);
 
   // Finish scroll animation.
-  g_mocked_time += 1.0;
+  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(1));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kPostAnimationCleanup);
@@ -551,8 +562,10 @@ TEST(ScrollAnimatorTest, UserScrollCallBackAtAnimationFinishOnMainThread) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  ScrollAnimator* scroll_animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* scroll_animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   // Called from first userScroll, setCurrentOffset, and second userScroll.
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(3);
@@ -577,13 +590,13 @@ TEST(ScrollAnimatorTest, UserScrollCallBackAtAnimationFinishOnMainThread) {
                 kWaitingToSendToCompositor);
 
   // RunningOnMainThread
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_FALSE(finished);
   EXPECT_EQ(
       scroll_animator->run_state_,
       ScrollAnimatorCompositorCoordinator::RunState::kRunningOnMainThread);
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
 
   // Amount scrolled so far.
   float offset_x = scroll_animator->CurrentOffset().Width();
@@ -605,9 +618,9 @@ TEST(ScrollAnimatorTest, UserScrollCallBackAtAnimationFinishOnMainThread) {
                 kWaitingToSendToCompositor);
 
   // Finish scroll animation.
-  g_mocked_time += 1.0;
+  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(1.0));
   scroll_animator->UpdateCompositorAnimations();
-  scroll_animator->TickAnimation(GetMockedTime());
+  scroll_animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_TRUE(finished);
   EXPECT_EQ(
       scroll_animator->run_state_,
@@ -626,8 +639,11 @@ TEST(ScrollAnimatorTest, UserScrollCallBackAtAnimationFinishOnCompositor) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
   TestScrollAnimator* scroll_animator =
-      MakeGarbageCollected<TestScrollAnimator>(scrollable_area, GetMockedTime);
+      MakeGarbageCollected<TestScrollAnimator>(scrollable_area,
+                                               task_runner->GetMockTickClock());
 
   // Called from userScroll, and first update.
   EXPECT_CALL(*scrollable_area, ScheduleAnimation())
@@ -649,7 +665,7 @@ TEST(ScrollAnimatorTest, UserScrollCallBackAtAnimationFinishOnCompositor) {
                 kWaitingToSendToCompositor);
 
   // Update compositor animation.
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->SetShouldSendToCompositor(true);
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_FALSE(finished);
@@ -674,8 +690,11 @@ TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
   TestScrollAnimator* scroll_animator =
-      MakeGarbageCollected<TestScrollAnimator>(scrollable_area, GetMockedTime);
+      MakeGarbageCollected<TestScrollAnimator>(scrollable_area,
+                                               task_runner->GetMockTickClock());
 
   // Called when reset, not setting anywhere else.
   EXPECT_CALL(*scrollable_area, UpdateScrollOffset(_, _)).Times(1);
@@ -699,7 +718,7 @@ TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
   EXPECT_EQ(0, scroll_animator->DesiredTargetOffset().Height());
 
   // Update compositor animation.
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->SetShouldSendToCompositor(true);
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_EQ(
@@ -729,7 +748,7 @@ TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
   EXPECT_EQ(0, scroll_animator->DesiredTargetOffset().Height());
 
   // Update compositor animation.
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   scroll_animator->UpdateCompositorAnimations();
   EXPECT_EQ(
       scroll_animator->run_state_,
@@ -759,8 +778,10 @@ TEST(ScrollAnimatorTest, ImplOnlyAnimationUpdatesCleared) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(), ScrollOffset(1000, 1000));
-  TestScrollAnimator* animator =
-      MakeGarbageCollected<TestScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  TestScrollAnimator* animator = MakeGarbageCollected<TestScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
 
   // From calls to adjust/takeoverImplOnlyScrollOffsetAnimation.
   EXPECT_CALL(*scrollable_area, RegisterForAnimation()).Times(3);
@@ -797,8 +818,10 @@ TEST(ScrollAnimatorTest, MainThreadAnimationTargetAdjustment) {
   auto* scrollable_area =
       MakeGarbageCollected<MockScrollableAreaForAnimatorTest>(
           true, ScrollOffset(-100, -100), ScrollOffset(1000, 1000));
-  ScrollAnimator* animator =
-      MakeGarbageCollected<ScrollAnimator>(scrollable_area, GetMockedTime);
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner =
+      base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  ScrollAnimator* animator = MakeGarbageCollected<ScrollAnimator>(
+      scrollable_area, task_runner->GetMockTickClock());
   scrollable_area->SetScrollAnimator(animator);
 
   // Twice from tickAnimation, once from reset, and twice from
@@ -819,9 +842,9 @@ TEST(ScrollAnimatorTest, MainThreadAnimationTargetAdjustment) {
                        ScrollableArea::ScrollCallback());
 
   // RunningOnMainThread
-  g_mocked_time += 0.05;
+  task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(50));
   animator->UpdateCompositorAnimations();
-  animator->TickAnimation(GetMockedTime());
+  animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   ScrollOffset offset = animator->CurrentOffset();
   EXPECT_EQ(ScrollOffset(100, 100), animator->DesiredTargetOffset());
   EXPECT_GT(offset.Width(), 0);
@@ -829,18 +852,20 @@ TEST(ScrollAnimatorTest, MainThreadAnimationTargetAdjustment) {
 
   // Adjustment
   ScrollOffset new_offset = offset + ScrollOffset(10, -10);
-  animator->AdjustAnimationAndSetScrollOffset(new_offset, kAnchoringScroll);
+  animator->AdjustAnimationAndSetScrollOffset(
+      new_offset, mojom::blink::ScrollType::kAnchoring);
   EXPECT_EQ(ScrollOffset(110, 90), animator->DesiredTargetOffset());
 
   // Adjusting after finished animation should do nothing.
-  g_mocked_time += 1.0;
+  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(1));
   animator->UpdateCompositorAnimations();
-  animator->TickAnimation(GetMockedTime());
+  animator->TickAnimation(NowTicksInSeconds(task_runner.get()));
   EXPECT_EQ(
       animator->RunStateForTesting(),
       ScrollAnimatorCompositorCoordinator::RunState::kPostAnimationCleanup);
   new_offset = animator->CurrentOffset() + ScrollOffset(10, -10);
-  animator->AdjustAnimationAndSetScrollOffset(new_offset, kAnchoringScroll);
+  animator->AdjustAnimationAndSetScrollOffset(
+      new_offset, mojom::blink::ScrollType::kAnchoring);
   EXPECT_EQ(
       animator->RunStateForTesting(),
       ScrollAnimatorCompositorCoordinator::RunState::kPostAnimationCleanup);

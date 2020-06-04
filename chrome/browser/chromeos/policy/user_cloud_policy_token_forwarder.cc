@@ -15,7 +15,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "content/public/browser/notification_source.h"
 #include "google_apis/gaia/gaia_constants.h"
 
@@ -38,14 +40,13 @@ constexpr char UserCloudPolicyTokenForwarder::kUMAChildUserOAuthTokenError[];
 
 UserCloudPolicyTokenForwarder::UserCloudPolicyTokenForwarder(
     UserCloudPolicyManagerChromeOS* manager,
-    identity::IdentityManager* identity_manager)
+    signin::IdentityManager* identity_manager)
     : manager_(manager),
       identity_manager_(identity_manager),
       refresh_oauth_token_timer_(std::make_unique<base::RepeatingTimer>()),
       retry_backoff_(
           std::make_unique<net::BackoffEntry>(&kFetchTokenRetryBackoffPolicy)),
-      clock_(base::DefaultClock::GetInstance()),
-      weak_ptr_factory_(this) {
+      clock_(base::DefaultClock::GetInstance()) {
   // Start by waiting for the CloudPolicyService to be initialized, so that
   // we can check if it already has a DMToken or not.
   if (manager_->core()->service()->IsInitializationComplete()) {
@@ -101,21 +102,24 @@ void UserCloudPolicyTokenForwarder::StartRequest() {
   // login whitelist is available there is no reason to fetch the OAuth2 token
   // for regular user here if the client is already registered. If it is not
   // recurring token fetch for child user check and bail out here.
-  identity::ScopeSet scopes;
+  signin::ScopeSet scopes;
   scopes.insert(GaiaConstants::kDeviceManagementServiceOAuth);
   scopes.insert(GaiaConstants::kOAuthWrapBridgeUserInfoScope);
-  access_token_fetcher_ = std::make_unique<
-      identity::PrimaryAccountAccessTokenFetcher>(
-      "policy_token_forwarder", identity_manager_, scopes,
-      base::BindOnce(
-          &UserCloudPolicyTokenForwarder::OnAccessTokenFetchCompleted,
-          base::Unretained(this)),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+
+  // NOTE: The primary account may not be available yet.
+  access_token_fetcher_ =
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+          "policy_token_forwarder", identity_manager_, scopes,
+          base::BindOnce(
+              &UserCloudPolicyTokenForwarder::OnAccessTokenFetchCompleted,
+              base::Unretained(this)),
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
+          signin::ConsentLevel::kNotRequired);
 }
 
 void UserCloudPolicyTokenForwarder::OnAccessTokenFetchCompleted(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   DCHECK(access_token_fetcher_);
 
   if (error.state() == GoogleServiceAuthError::NONE) {

@@ -6,8 +6,8 @@
 
 #import "ios/chrome/browser/ui/translate/translate_infobar_language_tab_strip_view_delegate.h"
 #import "ios/chrome/browser/ui/translate/translate_infobar_language_tab_view_delegate.h"
-#import "ios/chrome/browser/ui/translate/translate_infobar_view.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/browser/ui/translate/translate_infobar_view_constants.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -131,11 +131,10 @@ CGFloat kScrollViewTrailingGradientStart = 0.975;
   [self addSubview:self.languagesScrollView];
 
   self.gradientLayer = [CAGradientLayer layer];
-  self.gradientLayer.colors =
-      [NSArray arrayWithObjects:(id)[[UIColor clearColor] CGColor],
-                                (id)[[UIColor whiteColor] CGColor],
-                                (id)[[UIColor whiteColor] CGColor],
-                                (id)[[UIColor clearColor] CGColor], nil];
+  self.gradientLayer.colors = @[
+    (id)UIColor.clearColor.CGColor, (id)UIColor.whiteColor.CGColor,
+    (id)UIColor.whiteColor.CGColor, (id)UIColor.clearColor.CGColor
+  ];
   // The following two lines make the gradient horizontal.
   self.gradientLayer.startPoint = CGPointMake(0.0, 0.5);
   self.gradientLayer.endPoint = CGPointMake(1.0, 0.5);
@@ -173,7 +172,7 @@ CGFloat kScrollViewTrailingGradientStart = 0.975;
         @"targetLanguage" : self.targetLanguageTab,
       },
       @{
-        @"infobarHeight" : @(kInfobarHeight),
+        @"infobarHeight" : @(kTranslateInfobarHeight),
       });
 }
 

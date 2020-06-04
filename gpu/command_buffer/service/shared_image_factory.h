@@ -20,20 +20,25 @@
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gl_bindings.h"
 
+namespace viz {
+class VulkanContextProvider;
+}  // namespace viz
+
 namespace gpu {
-class SharedContextState;
+class ExternalVkImageFactory;
 class GpuDriverBugWorkarounds;
 class ImageFactory;
 class MailboxManager;
+class MemoryTracker;
+class SharedContextState;
 class SharedImageBackingFactory;
 class SharedImageBackingFactoryGLTexture;
 struct GpuFeatureInfo;
 struct GpuPreferences;
-class MemoryTracker;
 
-#if defined(OS_WIN)
-class SwapChainFactoryDXGI;
-#endif  // OS_WIN
+#if defined(OS_FUCHSIA)
+class SysmemBufferCollection;
+#endif  // OS_FUCHSIA
 
 namespace raster {
 class WrappedSkImageFactory;
@@ -43,6 +48,7 @@ class WrappedSkImageFactory;
 // SharedImageRepresentationFactory.
 class GPU_GLES2_EXPORT SharedImageFactory {
  public:
+  // All objects passed are expected to outlive this class.
   SharedImageFactory(const GpuPreferences& gpu_preferences,
                      const GpuDriverBugWorkarounds& workarounds,
                      const GpuFeatureInfo& gpu_feature_info,
@@ -58,6 +64,7 @@ class GPU_GLES2_EXPORT SharedImageFactory {
                          viz::ResourceFormat format,
                          const gfx::Size& size,
                          const gfx::ColorSpace& color_space,
+                         gpu::SurfaceHandle surface_handle,
                          uint32_t usage);
   bool CreateSharedImage(const Mailbox& mailbox,
                          viz::ResourceFormat format,
@@ -90,12 +97,22 @@ class GPU_GLES2_EXPORT SharedImageFactory {
   bool PresentSwapChain(const Mailbox& mailbox);
 #endif  // OS_WIN
 
+#if defined(OS_FUCHSIA)
+  bool RegisterSysmemBufferCollection(gfx::SysmemBufferCollectionId id,
+                                      zx::channel token);
+  bool ReleaseSysmemBufferCollection(gfx::SysmemBufferCollectionId id);
+#endif  // defined(OS_FUCHSIA)
+
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd,
                     int client_id,
                     uint64_t client_tracing_id);
   bool RegisterBacking(std::unique_ptr<SharedImageBacking> backing,
                        bool allow_legacy_mailbox);
+
+  SharedContextState* GetSharedContextState() const {
+    return shared_context_state_;
+  }
 
   void RegisterSharedImageBackingFactoryForTesting(
       SharedImageBackingFactory* factory);
@@ -104,13 +121,16 @@ class GPU_GLES2_EXPORT SharedImageFactory {
   bool IsSharedBetweenThreads(uint32_t usage);
   SharedImageBackingFactory* GetFactoryByUsage(
       uint32_t usage,
+      viz::ResourceFormat format,
       bool* allow_legacy_mailbox,
       gfx::GpuMemoryBufferType gmb_type = gfx::EMPTY_BUFFER);
   MailboxManager* mailbox_manager_;
   SharedImageManager* shared_image_manager_;
+  SharedContextState* shared_context_state_;
   std::unique_ptr<MemoryTypeTracker> memory_tracker_;
   const bool using_vulkan_;
   const bool using_metal_;
+  const bool using_dawn_;
 
   // The set of SharedImages which have been created (and are being kept alive)
   // by this factory.
@@ -121,16 +141,26 @@ class GPU_GLES2_EXPORT SharedImageFactory {
   // eventually.
   std::unique_ptr<SharedImageBackingFactoryGLTexture> gl_backing_factory_;
 
-  // Used for creating shared image which can be shared between gl and vulakn.
+  // Used for creating shared image which can be shared between GL, Vulkan and
+  // D3D12.
   std::unique_ptr<SharedImageBackingFactory> interop_backing_factory_;
+
+#if defined(OS_ANDROID)
+  // On android we have two interop factory which is |interop_backing_factory_|
+  // and |external_vk_image_factory_| and we choose one of those
+  // based on the format it supports.
+  std::unique_ptr<ExternalVkImageFactory> external_vk_image_factory_;
+#endif
 
   // Non-null if compositing with SkiaRenderer.
   std::unique_ptr<raster::WrappedSkImageFactory> wrapped_sk_image_factory_;
 
-#if defined(OS_WIN)
-  // Used for creating DXGI Swap Chain.
-  std::unique_ptr<SwapChainFactoryDXGI> swap_chain_factory_;
-#endif  // OS_WIN
+#if defined(OS_FUCHSIA)
+  viz::VulkanContextProvider* vulkan_context_provider_;
+  base::flat_map<gfx::SysmemBufferCollectionId,
+                 std::unique_ptr<gpu::SysmemBufferCollection>>
+      buffer_collections_;
+#endif  // OS_FUCHSIA
 
   SharedImageBackingFactory* backing_factory_for_testing_ = nullptr;
 };
@@ -154,7 +184,9 @@ class GPU_GLES2_EXPORT SharedImageRepresentationFactory {
       scoped_refptr<SharedContextState> context_State);
   std::unique_ptr<SharedImageRepresentationDawn> ProduceDawn(
       const Mailbox& mailbox,
-      DawnDevice device);
+      WGPUDevice device);
+  std::unique_ptr<SharedImageRepresentationOverlay> ProduceOverlay(
+      const Mailbox& mailbox);
 
  private:
   SharedImageManager* const manager_;

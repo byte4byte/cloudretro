@@ -22,20 +22,26 @@ void TestLoginScreenModel::EnableAuthForUser(const AccountId& account_id) {}
 void TestLoginScreenModel::DisableAuthForUser(
     const AccountId& account_id,
     const ash::AuthDisabledData& auth_disabled_data) {}
-void TestLoginScreenModel::EnableTapToUnlockForUser(
-    const AccountId& account_id) {}
+void TestLoginScreenModel::SetTapToUnlockEnabledForUser(
+    const AccountId& account_id,
+    bool enabled) {}
 void TestLoginScreenModel::ForceOnlineSignInForUser(
     const AccountId& account_id) {}
 void TestLoginScreenModel::ShowEasyUnlockIcon(
     const AccountId& account_id,
     const ash::EasyUnlockIconOptions& icon) {}
+void TestLoginScreenModel::SetChallengeResponseAuthEnabledForUser(
+    const AccountId& user,
+    bool enabled) {}
 void TestLoginScreenModel::UpdateWarningMessage(const base::string16& message) {
 }
 void TestLoginScreenModel::SetSystemInfo(
-    bool show_if_hidden,
+    bool show,
+    bool enforced,
     const std::string& os_version_label_text,
     const std::string& enterprise_info_text,
-    const std::string& bluetooth_name) {}
+    const std::string& bluetooth_name,
+    bool adb_sideloading_enabled) {}
 void TestLoginScreenModel::SetPublicSessionDisplayName(
     const AccountId& account_id,
     const std::string& display_name) {}

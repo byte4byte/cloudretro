@@ -13,7 +13,7 @@ class AccountTrackerService;
 class PrefService;
 class PrimaryAccountManager;
 
-namespace identity {
+namespace signin {
 
 // Concrete implementation of PrimaryAccountMutator that is based on the
 // PrimaryAccountManager API.
@@ -27,8 +27,8 @@ class PrimaryAccountMutatorImpl : public PrimaryAccountMutator {
   // PrimaryAccountMutator implementation.
   bool SetPrimaryAccount(const CoreAccountId& account_id) override;
 #if defined(OS_CHROMEOS)
-  bool SetPrimaryAccountAndUpdateAccountInfo(const std::string& gaia_id,
-                                             const std::string& email) override;
+  void RevokeSyncConsent() override;
+  void SetUnconsentedPrimaryAccount(const CoreAccountId& account_id) override;
 #endif
 #if !defined(OS_CHROMEOS)
   bool ClearPrimaryAccount(
@@ -45,6 +45,6 @@ class PrimaryAccountMutatorImpl : public PrimaryAccountMutator {
   PrefService* pref_service_ = nullptr;
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_PRIMARY_ACCOUNT_MUTATOR_IMPL_H_

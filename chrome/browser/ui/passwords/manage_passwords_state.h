@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_STATE_H_
 #define CHROME_BROWSER_UI_PASSWORDS_MANAGE_PASSWORDS_STATE_H_
 
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -21,8 +20,7 @@
 namespace password_manager {
 class PasswordFormManagerForUI;
 class PasswordManagerClient;
-}
-
+}  // namespace password_manager
 
 // ManagePasswordsState keeps the current state for ManagePasswordsUIController
 // as well as up-to-date data for this state.
@@ -38,6 +36,8 @@ class ManagePasswordsState {
   void set_client(password_manager::PasswordManagerClient* client) {
     client_ = client;
   }
+
+  password_manager::PasswordManagerClient* client() { return client_; }
 
   // The methods below discard the current state/data of the object and move it
   // to the specified state.
@@ -65,14 +65,13 @@ class ManagePasswordsState {
       std::unique_ptr<password_manager::PasswordFormManagerForUI> form_manager);
 
   // Move to MANAGE_STATE or INACTIVE_STATE for PSL matched passwords.
-  // |password_form_map| contains best matches from the password store for the
+  // |password_forms| contains best matches from the password store for the
   // form which was autofilled, |origin| is an origin of the form which was
   // autofilled. In addition, |federated_matches|, if not null, contains stored
   // federated credentials to show to the user as well.
   void OnPasswordAutofilled(
-      const std::map<base::string16, const autofill::PasswordForm*>&
-          password_form_map,
-      const GURL& origin,
+      const std::vector<const autofill::PasswordForm*>& password_forms,
+      GURL origin,
       const std::vector<const autofill::PasswordForm*>* federated_matches);
 
   // Move to INACTIVE_STATE.
@@ -86,12 +85,18 @@ class ManagePasswordsState {
   void ProcessLoginsChanged(
       const password_manager::PasswordStoreChangeList& changes);
 
+  void ProcessUnsyncedCredentialsWillBeDeleted(
+      const std::vector<autofill::PasswordForm>& unsynced_credentials);
+
   // Called when the user chooses a credential. |form| is passed to the
   // credentials callback. Method should be called in the
   // CREDENTIAL_REQUEST_STATE state.
   void ChooseCredential(const autofill::PasswordForm* form);
 
   password_manager::ui::State state() const { return state_; }
+  const std::vector<autofill::PasswordForm>& unsynced_credentials() const {
+    return unsynced_credentials_;
+  }
   const GURL& origin() const { return origin_; }
   password_manager::PasswordFormManagerForUI* form_manager() const {
     return form_manager_.get();
@@ -127,6 +132,9 @@ class ManagePasswordsState {
 
   // Contains all the current forms.
   std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials_forms_;
+
+  // Contains any non synced credentials.
+  std::vector<autofill::PasswordForm> unsynced_credentials_;
 
   // A callback to be invoked when user selects a credential.
   CredentialsCallback credentials_callback_;

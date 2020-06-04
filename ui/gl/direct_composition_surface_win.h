@@ -11,11 +11,12 @@
 #include <wrl/client.h>
 
 #include "base/callback.h"
-#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "ui/gl/child_window_win.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface_egl.h"
+#include "ui/gl/gpu_switching_observer.h"
+#include "ui/gl/vsync_observer.h"
 
 namespace gl {
 class DCLayerTree;
@@ -23,7 +24,9 @@ class DirectCompositionChildSurfaceWin;
 class GLSurfacePresentationHelper;
 class VSyncThreadWin;
 
-class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
+class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL,
+                                              public VSyncObserver,
+                                              public ui::GpuSwitchingObserver {
  public:
   using VSyncCallback =
       base::RepeatingCallback<void(base::TimeTicks, base::TimeDelta)>;
@@ -31,6 +34,8 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   struct Settings {
     bool disable_nv12_dynamic_textures = false;
     bool disable_larger_than_screen_overlays = false;
+    bool disable_vp_scaling = false;
+    size_t max_pending_frames = 2;
   };
 
   DirectCompositionSurfaceWin(
@@ -45,14 +50,21 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   // chain.  Overridden with --disable-direct-composition.
   static bool IsDirectCompositionSupported();
 
-  // Returns true if hardware overlays are supported, and DirectComposition
-  // surface and layers should be used.  Overridden with
-  // --enable-direct-composition-layers and --disable-direct-composition-layers.
+  // Returns true if hardware video overlays are supported and should be used.
+  // Overridden with --enable-direct-composition-video-overlays and
+  // --disable-direct-composition-video-overlays.
+  // This function is thread safe.
   static bool AreOverlaysSupported();
+
+  // Returns true if zero copy decode swap chain is supported.
+  static bool IsDecodeSwapChainSupported();
 
   // After this is called, hardware overlay support is disabled during the
   // current GPU process' lifetime.
   static void DisableOverlays();
+
+  // Indicate the overlay caps are invalid.
+  static void InvalidateOverlayCaps();
 
   // Returns true if scaled hardware overlays are supported.
   static bool AreScaledOverlaysSupported();
@@ -72,6 +84,11 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   // Returns true if there is an HDR capable display connected.
   static bool IsHDRSupported();
 
+  // Returns true if swap chain tearing is supported.
+  static bool IsSwapChainTearingSupported();
+
+  static bool AllowTearing();
+
   static void SetScaledOverlaysSupportedForTesting(bool value);
 
   static void SetOverlayFormatUsedForTesting(DXGI_FORMAT format);
@@ -84,7 +101,7 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   void* GetHandle() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
-              ColorSpace color_space,
+              const gfx::ColorSpace& color_space,
               bool has_alpha) override;
   gfx::SwapResult SwapBuffers(PresentationCallback callback) override;
   gfx::SwapResult PostSubBuffer(int x,
@@ -95,23 +112,29 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   gfx::VSyncProvider* GetVSyncProvider() override;
   void SetVSyncEnabled(bool enabled) override;
   bool SetEnableDCLayers(bool enable) override;
-  bool FlipsVertically() const override;
+  gfx::SurfaceOrigin GetOrigin() const override;
   bool SupportsPostSubBuffer() override;
   bool OnMakeCurrent(GLContext* context) override;
   bool SupportsDCLayers() const override;
-  bool UseOverlaysForVideo() const override;
   bool SupportsProtectedVideo() const override;
   bool SetDrawRectangle(const gfx::Rect& rect) override;
   gfx::Vector2d GetDrawOffset() const override;
   bool SupportsGpuVSync() const override;
   void SetGpuVSyncEnabled(bool enabled) override;
-
   // This schedules an overlay plane to be displayed on the next SwapBuffers
   // or PostSubBuffer call. Overlay planes must be scheduled before every swap
   // to remain in the layer tree. This surface's backbuffer doesn't have to be
   // scheduled with ScheduleDCLayer, as it's automatically placed in the layer
   // tree at z-order 0.
   bool ScheduleDCLayer(const ui::DCRendererLayerParams& params) override;
+
+  // VSyncObserver implementation.
+  void OnVSync(base::TimeTicks vsync_time, base::TimeDelta interval) override;
+
+  // Implements GpuSwitchingObserver.
+  void OnGpuSwitched(gl::GpuPreference active_gpu_heuristic) override;
+  void OnDisplayAdded() override;
+  void OnDisplayRemoved() override;
 
   HWND window() const { return window_; }
 
@@ -127,11 +150,28 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
   ~DirectCompositionSurfaceWin() override;
 
  private:
-  void HandleVSyncOnVSyncThread(base::TimeTicks vsync_time,
-                                base::TimeDelta vsync_interval);
+  struct PendingFrame {
+    PendingFrame(Microsoft::WRL::ComPtr<ID3D11Query> query,
+                 PresentationCallback callback);
+    PendingFrame(PendingFrame&& other);
+    ~PendingFrame();
+    PendingFrame& operator=(PendingFrame&& other);
 
+    // Event query issued after frame is presented.
+    Microsoft::WRL::ComPtr<ID3D11Query> query;
+
+    // Presentation callback enqueued in SwapBuffers().
+    PresentationCallback callback;
+  };
+
+  void EnqueuePendingFrame(PresentationCallback callback);
+  void CheckPendingFrames();
+
+  bool VSyncCallbackEnabled() const;
+
+  void StartOrStopVSyncThread();
   void HandleVSyncOnMainThread(base::TimeTicks vsync_time,
-                               base::TimeDelta vsync_interval);
+                               base::TimeDelta interval);
 
   HWND window_ = nullptr;
   ChildWindowWin child_window_;
@@ -139,20 +179,27 @@ class GL_EXPORT DirectCompositionSurfaceWin : public GLSurfaceEGL {
 
   scoped_refptr<DirectCompositionChildSurfaceWin> root_surface_;
   std::unique_ptr<DCLayerTree> layer_tree_;
+  std::unique_ptr<GLSurfacePresentationHelper> presentation_helper_;
 
-  std::unique_ptr<VSyncThreadWin> vsync_thread_;
   std::unique_ptr<gfx::VSyncProvider> vsync_provider_;
 
   const VSyncCallback vsync_callback_;
-  bool vsync_callback_enabled_ = false;
+  mutable base::Lock vsync_callback_lock_;
+  bool GUARDED_BY(vsync_callback_lock_) vsync_callback_enabled_ = false;
+  VSyncThreadWin* vsync_thread_ = nullptr;
 
-  std::unique_ptr<GLSurfacePresentationHelper> presentation_helper_;
+  base::TimeTicks last_vsync_time_;
+  base::TimeDelta last_vsync_interval_;
+
+  // Queue of pending presentation callbacks.
+  base::circular_deque<PendingFrame> pending_frames_;
+  const size_t max_pending_frames_;
 
   Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device_;
   Microsoft::WRL::ComPtr<IDCompositionDevice2> dcomp_device_;
 
-  VSyncCallback main_thread_vsync_callback_;
-  base::WeakPtrFactory<DirectCompositionSurfaceWin> weak_ptr_factory_;
+  base::WeakPtr<DirectCompositionSurfaceWin> weak_ptr_;
+  base::WeakPtrFactory<DirectCompositionSurfaceWin> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DirectCompositionSurfaceWin);
 };

@@ -5,11 +5,14 @@
 #include "ash/system/power/power_button_menu_view.h"
 
 #include "ash/display/screen_orientation_controller.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/new_window_delegate.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/power/power_button_menu_item_view.h"
 #include "ash/system/power/power_button_menu_metrics_type.h"
 #include "ash/system/user/login_status.h"
@@ -33,6 +36,14 @@ constexpr int kMenuViewRoundRectRadiusDp = 16;
 
 // Horizontal padding between two menu items.
 constexpr int kPaddingBetweenMenuItems = 8;
+
+SkColor GetMenuBackgroundColor() {
+  return AshColorProvider::Get()->DeprecatedGetBaseLayerColor(
+      features::IsBackgroundBlurEnabled()
+          ? AshColorProvider::BaseLayerType::kTransparent80
+          : AshColorProvider::BaseLayerType::kTransparent90,
+      kPowerButtonMenuBackgroundColor);
+}
 
 }  // namespace
 
@@ -144,68 +155,61 @@ void PowerButtonMenuView::CreateItems() {
       l10n_util::GetStringUTF16(IDS_ASH_POWER_BUTTON_MENU_POWER_OFF_BUTTON));
   AddChildView(power_off_item_);
 
-  const LoginStatus login_status =
-      Shell::Get()->session_controller()->login_status();
+  const SessionControllerImpl* const session_controller =
+      Shell::Get()->session_controller();
+  const LoginStatus login_status = session_controller->login_status();
   if (login_status != LoginStatus::NOT_LOGGED_IN) {
     sign_out_item_ = new PowerButtonMenuItemView(
         this, kSystemPowerButtonMenuSignOutIcon,
         user::GetLocalizedSignOutStringForStatus(login_status, false));
     AddChildView(sign_out_item_);
+  }
 
-    const SessionControllerImpl* const session_controller =
-        Shell::Get()->session_controller();
-    if (session_controller->CanLockScreen() &&
-        !session_controller->IsScreenLocked()) {
-      lock_screen_item_ = new PowerButtonMenuItemView(
-          this, kSystemPowerButtonMenuLockScreenIcon,
-          l10n_util::GetStringUTF16(
-              IDS_ASH_POWER_BUTTON_MENU_LOCK_SCREEN_BUTTON));
-      AddChildView(lock_screen_item_);
+  if (login_status != LoginStatus::LOCKED &&
+      session_controller->CanLockScreen()) {
+    lock_screen_item_ = new PowerButtonMenuItemView(
+        this, kSystemPowerButtonMenuLockScreenIcon,
+        l10n_util::GetStringUTF16(
+            IDS_ASH_POWER_BUTTON_MENU_LOCK_SCREEN_BUTTON));
+    AddChildView(lock_screen_item_);
+  }
 
-      feedback_item_ = new PowerButtonMenuItemView(
-          this, kSystemPowerButtonMenuFeedbackIcon,
-          l10n_util::GetStringUTF16(IDS_ASH_POWER_BUTTON_MENU_FEEDBACK_BUTTON));
-      AddChildView(feedback_item_);
-    }
+  if (login_status != LoginStatus::NOT_LOGGED_IN &&
+      login_status != LoginStatus::LOCKED &&
+      login_status != LoginStatus::KIOSK_APP) {
+    feedback_item_ = new PowerButtonMenuItemView(
+        this, kSystemPowerButtonMenuFeedbackIcon,
+        l10n_util::GetStringUTF16(IDS_ASH_POWER_BUTTON_MENU_FEEDBACK_BUTTON));
+    AddChildView(feedback_item_);
   }
 }
 
 void PowerButtonMenuView::Layout() {
-  gfx::Rect rect(GetContentsBounds());
-  const gfx::Size item_size(power_off_item_->GetPreferredSize());
-  rect.set_size(item_size);
-  gfx::Rect power_off_rect(rect);
+  gfx::Rect rect(GetContentsBounds().origin(),
+                 power_off_item_->GetPreferredSize());
   const int y_offset =
       kMenuItemVerticalPadding - PowerButtonMenuItemView::kItemBorderThickness;
-  const int power_off_x_offset = kMenuItemHorizontalPadding -
-                                 PowerButtonMenuItemView::kItemBorderThickness;
-  power_off_rect.Offset(power_off_x_offset, y_offset);
-  power_off_item_->SetBoundsRect(power_off_rect);
+  int x_offset = kMenuItemHorizontalPadding -
+                 PowerButtonMenuItemView::kItemBorderThickness;
+  rect.Offset(x_offset, y_offset);
+  power_off_item_->SetBoundsRect(rect);
 
   if (sign_out_item_) {
-    gfx::Rect sign_out_rect(rect);
     const int padding_between_items_with_border =
         kPaddingBetweenMenuItems -
         2 * PowerButtonMenuItemView::kItemBorderThickness;
-    const int sign_out_x_offset = power_off_x_offset + item_size.width() +
-                                  padding_between_items_with_border;
-    sign_out_rect.Offset(sign_out_x_offset, y_offset);
-    sign_out_item_->SetBoundsRect(sign_out_rect);
+    x_offset = rect.width() + padding_between_items_with_border;
+    rect.Offset(x_offset, 0);
+    sign_out_item_->SetBoundsRect(rect);
 
     if (lock_screen_item_) {
-      gfx::Rect lock_screen_rect(rect);
-      const int lock_screen_x_offset = sign_out_x_offset + item_size.width() +
-                                       padding_between_items_with_border;
-      lock_screen_rect.Offset(lock_screen_x_offset, y_offset);
-      lock_screen_item_->SetBoundsRect(lock_screen_rect);
+      rect.Offset(x_offset, 0);
+      lock_screen_item_->SetBoundsRect(rect);
+    }
 
-      if (feedback_item_) {
-        gfx::Rect feedback_rect(rect);
-        feedback_rect.Offset(lock_screen_x_offset + item_size.width() +
-                                 padding_between_items_with_border,
-                             y_offset);
-        feedback_item_->SetBoundsRect(feedback_rect);
-      }
+    if (feedback_item_) {
+      rect.Offset(x_offset, 0);
+      feedback_item_->SetBoundsRect(rect);
     }
   }
 }
@@ -220,7 +224,7 @@ void PowerButtonMenuView::OnPaint(gfx::Canvas* canvas) {
   SkPath path;
   path.addRoundRect(gfx::RectToSkRect(gfx::Rect(size())), kRadius);
   canvas->ClipPath(path, true);
-  canvas->DrawColor(SK_ColorWHITE);
+  canvas->DrawColor(GetMenuBackgroundColor());
 }
 
 gfx::Size PowerButtonMenuView::CalculatePreferredSize() const {

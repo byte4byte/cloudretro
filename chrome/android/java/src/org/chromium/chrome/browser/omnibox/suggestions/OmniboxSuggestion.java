@@ -6,14 +6,17 @@ package org.chromium.chrome.browser.omnibox.suggestions;
 
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
-import android.support.annotation.Nullable;
-import android.support.v4.util.ObjectsCompat;
 import android.text.TextUtils;
+import android.util.Base64;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.util.ObjectsCompat;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.omnibox.MatchClassificationStyle;
 import org.chromium.components.omnibox.SuggestionAnswer;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +26,8 @@ import java.util.List;
  */
 @VisibleForTesting
 public class OmniboxSuggestion {
+    public static final int INVALID_GROUP = -1;
+
     private static final String KEY_ZERO_SUGGEST_LIST_SIZE = "zero_suggest_list_size";
     private static final String KEY_PREFIX_ZERO_SUGGEST_URL = "zero_suggest_url";
     private static final String KEY_PREFIX_ZERO_SUGGEST_DISPLAY_TEST = "zero_suggest_display_text";
@@ -30,10 +35,15 @@ public class OmniboxSuggestion {
     private static final String KEY_PREFIX_ZERO_SUGGEST_NATIVE_TYPE = "zero_suggest_native_type";
     private static final String KEY_PREFIX_ZERO_SUGGEST_IS_SEARCH_TYPE = "zero_suggest_is_search";
     private static final String KEY_PREFIX_ZERO_SUGGEST_ANSWER_TEXT = "zero_suggest_answer_text";
+    private static final String KEY_PREFIX_ZERO_SUGGEST_GROUP_ID = "zero_suggest_group_id";
     // Deprecated:
     // private static final String KEY_PREFIX_ZERO_SUGGEST_ANSWER_TYPE = "zero_suggest_answer_type";
     private static final String KEY_PREFIX_ZERO_SUGGEST_IS_DELETABLE = "zero_suggest_is_deletable";
     private static final String KEY_PREFIX_ZERO_SUGGEST_IS_STARRED = "zero_suggest_is_starred";
+    private static final String KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_TYPE =
+            "zero_suggest_post_content_type";
+    private static final String KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_DATA =
+            "zero_suggest_post_content_data";
 
     /**
      * Specifies the style of portions of the suggestion text.
@@ -73,19 +83,23 @@ public class OmniboxSuggestion {
     private final List<MatchClassification> mDescriptionClassifications;
     private final SuggestionAnswer mAnswer;
     private final String mFillIntoEdit;
-    private final String mUrl;
-    private final String mImageUrl;
+    private final GURL mUrl;
+    private final GURL mImageUrl;
     private final String mImageDominantColor;
     private final int mRelevance;
     private final int mTransition;
     private final boolean mIsStarred;
     private final boolean mIsDeletable;
+    private final String mPostContentType;
+    private final byte[] mPostData;
+    private final int mGroupId;
 
     public OmniboxSuggestion(int nativeType, boolean isSearchType, int relevance, int transition,
             String displayText, List<MatchClassification> displayTextClassifications,
             String description, List<MatchClassification> descriptionClassifications,
-            SuggestionAnswer answer, String fillIntoEdit, String url, String imageUrl,
-            String imageDominantColor, boolean isStarred, boolean isDeletable) {
+            SuggestionAnswer answer, String fillIntoEdit, GURL url, GURL imageUrl,
+            String imageDominantColor, boolean isStarred, boolean isDeletable,
+            String postContentType, byte[] postData, int groupId) {
         mType = nativeType;
         mIsSearchType = isSearchType;
         mRelevance = relevance;
@@ -96,11 +110,16 @@ public class OmniboxSuggestion {
         mDescriptionClassifications = descriptionClassifications;
         mAnswer = answer;
         mFillIntoEdit = TextUtils.isEmpty(fillIntoEdit) ? displayText : fillIntoEdit;
+        assert url != null;
         mUrl = url;
+        assert imageUrl != null;
         mImageUrl = imageUrl;
         mImageDominantColor = imageDominantColor;
         mIsStarred = isStarred;
         mIsDeletable = isDeletable;
+        mPostContentType = postContentType;
+        mPostData = postData;
+        mGroupId = groupId;
     }
 
     public int getType() {
@@ -139,12 +158,11 @@ public class OmniboxSuggestion {
         return mFillIntoEdit;
     }
 
-    public String getUrl() {
+    public GURL getUrl() {
         return mUrl;
     }
 
-    @Nullable
-    public String getImageUrl() {
+    public GURL getImageUrl() {
         return mImageUrl;
     }
 
@@ -154,10 +172,10 @@ public class OmniboxSuggestion {
     }
 
     /**
-     * @return Whether the suggestion is a URL.
+     * @return Whether the suggestion is a search suggestion.
      */
-    public boolean isUrlSuggestion() {
-        return !mIsSearchType;
+    public boolean isSearchSuggestion() {
+        return mIsSearchType;
     }
 
     /**
@@ -169,6 +187,14 @@ public class OmniboxSuggestion {
 
     public boolean isDeletable() {
         return mIsDeletable;
+    }
+
+    public String getPostContentType() {
+        return mPostContentType;
+    }
+
+    public byte[] getPostData() {
+        return mPostData;
     }
 
     /**
@@ -222,15 +248,23 @@ public class OmniboxSuggestion {
             OmniboxSuggestion suggestion = suggestions.get(i);
             if (suggestion.mAnswer != null) continue;
 
-            editor.putString(KEY_PREFIX_ZERO_SUGGEST_URL + i, suggestion.getUrl())
+            editor.putString(KEY_PREFIX_ZERO_SUGGEST_URL + i, suggestion.getUrl().serialize())
                     .putString(
                             KEY_PREFIX_ZERO_SUGGEST_DISPLAY_TEST + i, suggestion.getDisplayText())
                     .putString(KEY_PREFIX_ZERO_SUGGEST_DESCRIPTION + i, suggestion.getDescription())
                     .putInt(KEY_PREFIX_ZERO_SUGGEST_NATIVE_TYPE + i, suggestion.getType())
                     .putBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_SEARCH_TYPE + i,
-                            !suggestion.isUrlSuggestion())
-                    .putBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_DELETABLE + i, suggestion.mIsDeletable)
-                    .putBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_STARRED + i, suggestion.mIsStarred)
+                            suggestion.isSearchSuggestion())
+                    .putBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_DELETABLE + i, suggestion.isDeletable())
+                    .putBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_STARRED + i, suggestion.isStarred())
+                    .putString(KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_TYPE + i,
+                            suggestion.getPostContentType())
+                    .putString(KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_DATA + i,
+                            suggestion.getPostData() == null
+                                    ? ""
+                                    : Base64.encodeToString(
+                                            suggestion.getPostData(), Base64.DEFAULT))
+                    .putInt(KEY_PREFIX_ZERO_SUGGEST_GROUP_ID + i, suggestion.getGroupId())
                     .apply();
         }
     }
@@ -254,21 +288,40 @@ public class OmniboxSuggestion {
                 String answerText = prefs.getString(KEY_PREFIX_ZERO_SUGGEST_ANSWER_TEXT + i, "");
                 if (!TextUtils.isEmpty(answerText)) continue;
 
-                String url = prefs.getString(KEY_PREFIX_ZERO_SUGGEST_URL + i, "");
+                GURL url = GURL.deserialize(prefs.getString(KEY_PREFIX_ZERO_SUGGEST_URL + i, ""));
+                if (url == null) continue;
                 String displayText = prefs.getString(KEY_PREFIX_ZERO_SUGGEST_DISPLAY_TEST + i, "");
                 String description = prefs.getString(KEY_PREFIX_ZERO_SUGGEST_DESCRIPTION + i, "");
                 int nativeType = prefs.getInt(KEY_PREFIX_ZERO_SUGGEST_NATIVE_TYPE + i, -1);
                 boolean isSearchType =
-                        prefs.getBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_SEARCH_TYPE, true);
+                        prefs.getBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_SEARCH_TYPE + i, true);
                 boolean isStarred = prefs.getBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_STARRED + i, false);
                 boolean isDeletable =
                         prefs.getBoolean(KEY_PREFIX_ZERO_SUGGEST_IS_DELETABLE + i, false);
-                OmniboxSuggestion suggestion = new OmniboxSuggestion(nativeType, !isSearchType, 0,
-                        0, displayText, classifications, description, classifications, null, "",
-                        url, null, null, isStarred, isDeletable);
+                String postContentType =
+                        prefs.getString(KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_TYPE + i, "");
+                byte[] postData = Base64.decode(
+                        prefs.getString(KEY_PREFIX_ZERO_SUGGEST_POST_CONTENT_DATA + i, ""),
+                        Base64.DEFAULT);
+                int groupId = prefs.getInt(KEY_PREFIX_ZERO_SUGGEST_GROUP_ID + i, INVALID_GROUP);
+
+                OmniboxSuggestion suggestion = new OmniboxSuggestion(nativeType, isSearchType, 0, 0,
+                        displayText, classifications, description, classifications, null, "", url,
+                        GURL.emptyGURL(), null, isStarred, isDeletable,
+                        postContentType.isEmpty() ? null : postContentType,
+                        postData.length == 0 ? null : postData, groupId);
                 suggestions.add(suggestion);
             }
         }
         return suggestions;
+    }
+
+    /**
+     * @return ID of the group this suggestion is associated with, or null, if the suggestion is
+     *         not associated with any group, or INVALID_GROUP if suggestion is not associated with
+     *         any group.
+     */
+    public int getGroupId() {
+        return mGroupId;
     }
 }

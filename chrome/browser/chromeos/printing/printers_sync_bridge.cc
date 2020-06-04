@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/chromeos/printing/specifics_translation.h"
@@ -41,6 +42,42 @@ std::unique_ptr<EntityData> CopyToEntityData(
   return entity_data;
 }
 
+// Computes the make_and_model field for old |specifics| where it is missing.
+// Returns true if an update was made.  make_and_model is computed from the
+// manufacturer and model strings.
+bool MigrateMakeAndModel(sync_pb::PrinterSpecifics* specifics) {
+  if (specifics->has_make_and_model()) {
+    base::UmaHistogramBoolean("Printing.CUPS.MigratedMakeAndModel", false);
+    return false;
+  }
+
+  specifics->set_make_and_model(
+      chromeos::MakeAndModel(specifics->manufacturer(), specifics->model()));
+  base::UmaHistogramBoolean("Printing.CUPS.MigratedMakeAndModel", true);
+  return true;
+}
+
+// If |specifics|'s PPD reference has both autoconf and another option selected,
+// we strip the autoconf flag and return true, false otherwise.
+bool ResolveInvalidPpdReference(sync_pb::PrinterSpecifics* specifics) {
+  auto* ppd_ref = specifics->mutable_ppd_reference();
+
+  if (!ppd_ref->autoconf()) {
+    base::UmaHistogramBoolean("Printing.CUPS.InvalidPpdResolved", false);
+    return false;
+  }
+
+  if (!ppd_ref->has_user_supplied_ppd_url() &&
+      !ppd_ref->has_effective_make_and_model()) {
+    base::UmaHistogramBoolean("Printing.CUPS.InvalidPpdResolved", false);
+    return false;
+  }
+
+  ppd_ref->clear_autoconf();
+  base::UmaHistogramBoolean("Printing.CUPS.InvalidPpdResolved", true);
+  return true;
+}
+
 }  // namespace
 
 // Delegate class which helps to manage the ModelTypeStore.
@@ -48,7 +85,7 @@ class PrintersSyncBridge::StoreProxy {
  public:
   StoreProxy(PrintersSyncBridge* owner,
              syncer::OnceModelTypeStoreFactory callback)
-      : owner_(owner), weak_ptr_factory_(this) {
+      : owner_(owner) {
     std::move(callback).Run(syncer::PRINTERS,
                             base::BindOnce(&StoreProxy::OnStoreCreated,
                                            weak_ptr_factory_.GetWeakPtr()));
@@ -142,7 +179,7 @@ class PrintersSyncBridge::StoreProxy {
   PrintersSyncBridge* owner_;
 
   std::unique_ptr<ModelTypeStore> store_;
-  base::WeakPtrFactory<StoreProxy> weak_ptr_factory_;
+  base::WeakPtrFactory<StoreProxy> weak_ptr_factory_{this};
 };
 
 PrintersSyncBridge::PrintersSyncBridge(
@@ -188,7 +225,17 @@ base::Optional<syncer::ModelError> PrintersSyncBridge::MergeSyncData(
     // appropriate metadata.
     for (const auto& entry : all_data_) {
       const std::string& local_entity_id = entry.first;
-      if (!base::Contains(sync_entity_ids, local_entity_id)) {
+
+      // TODO(crbug.com/737809): Remove when all data is expected to have been
+      // migrated.
+      bool migrated = MigrateMakeAndModel(entry.second.get());
+
+      // TODO(crbug.com/987869): Remove when all data is expected to have been
+      // resolved.
+      bool resolved = ResolveInvalidPpdReference(entry.second.get());
+
+      if (migrated || resolved ||
+          !base::Contains(sync_entity_ids, local_entity_id)) {
         // Only local objects which were not updated are uploaded.  Objects for
         // which there was a remote copy are overwritten.
         change_processor()->Put(local_entity_id,

@@ -17,6 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -44,7 +45,6 @@
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/browser/ui/startup/startup_tab_provider.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/welcome/nux_helper.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -62,11 +62,13 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension_features.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,6 +78,7 @@
 #include "base/callback.h"
 #include "base/run_loop.h"
 #include "base/values.h"
+#include "chrome/browser/ui/webui/welcome/helpers.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
@@ -93,10 +96,6 @@ using testing::Return;
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
-
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-#include "chrome/browser/ui/webui/welcome/nux_helper.h"
-#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
 
 using testing::_;
 using extensions::Extension;
@@ -176,11 +175,8 @@ class StartupBrowserCreatorTest : public extensions::ExtensionBrowserTest {
                const Extension** out_app_extension) {
     ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(app_name.c_str())));
 
-    extensions::ExtensionService* service =
-        extensions::ExtensionSystem::Get(browser()->profile())
-            ->extension_service();
-    *out_app_extension = service->GetExtensionById(
-        last_loaded_extension_id(), false);
+    *out_app_extension = extension_registry()->GetExtensionById(
+        last_loaded_extension_id(), extensions::ExtensionRegistry::ENABLED);
     ASSERT_TRUE(*out_app_extension);
 
     // Code that opens a new browser assumes we start with exactly one.
@@ -354,7 +350,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppUrlShortcut) {
   ASSERT_TRUE(new_browser);
 
   // The new window should be an app window.
-  EXPECT_TRUE(new_browser->is_app());
+  EXPECT_TRUE(new_browser->is_type_app());
 
   TabStripModel* tab_strip = new_browser->tab_strip_model();
   ASSERT_EQ(1, tab_strip->count());
@@ -396,8 +392,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutNoPref) {
   EXPECT_EQ(tab_strip->GetActiveWebContents(), tab_strip->GetWebContentsAt(1));
 
   // It should be a standard tabbed window, not an app window.
-  EXPECT_FALSE(browser()->is_app());
-  EXPECT_TRUE(browser()->is_type_tabbed());
+  EXPECT_FALSE(browser()->is_type_app());
+  EXPECT_TRUE(browser()->is_type_normal());
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutWindowPref) {
@@ -421,7 +417,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutWindowPref) {
   ASSERT_TRUE(new_browser);
 
   // Expect an app window.
-  EXPECT_TRUE(new_browser->is_app());
+  EXPECT_TRUE(new_browser->is_type_app());
 
   // The browser's app_name should include the app's ID.
   EXPECT_NE(
@@ -658,14 +654,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, PRE_UpdateWithTwoProfiles) {
 
   // Open some urls with the browsers, and close them.
   Browser* browser1 =
-      new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile1, true));
+      new Browser(Browser::CreateParams(Browser::TYPE_NORMAL, profile1, true));
   chrome::NewTab(browser1);
   ui_test_utils::NavigateToURL(browser1,
                                embedded_test_server()->GetURL("/empty.html"));
   CloseBrowserSynchronously(browser1);
 
   Browser* browser2 =
-      new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile2, true));
+      new Browser(Browser::CreateParams(Browser::TYPE_NORMAL, profile2, true));
   chrome::NewTab(browser2);
   ui_test_utils::NavigateToURL(browser2,
                                embedded_test_server()->GetURL("/form.html"));
@@ -802,7 +798,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
 
   // Open a page with profile_last.
   Browser* browser_last = new Browser(
-      Browser::CreateParams(Browser::TYPE_TABBED, profile_last, true));
+      Browser::CreateParams(Browser::TYPE_NORMAL, profile_last, true));
   chrome::NewTab(browser_last);
   ui_test_utils::NavigateToURL(browser_last,
                                embedded_test_server()->GetURL("/empty.html"));
@@ -917,7 +913,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   static_cast<ProfileImpl*>(profile_urls)->last_session_exit_type_ =
       Profile::EXIT_CRASHED;
 
-#if !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+#if !defined(OS_MACOSX) && !BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Use HistogramTester to make sure a bubble is shown when it's not on
   // platform Mac OS X and it's not official Chrome build.
   //
@@ -928,7 +924,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   // the file thread before the bubble is shown. It is difficult to make sure
   // that the histogram check runs after all threads have finished their tasks.
   base::HistogramTester histogram_tester;
-#endif  // !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+#endif  // !defined(OS_MACOSX) && !BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
   dummy.AppendSwitchASCII(switches::kTestType, "browser");
@@ -978,11 +974,11 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   EXPECT_TRUE(search::IsInstantNTP(tab_strip->GetWebContentsAt(0)));
   EnsureRestoreUIWasShown(tab_strip->GetWebContentsAt(0));
 
-#if !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+#if !defined(OS_MACOSX) && !BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Each profile should have one session restore bubble shown, so we should
   // observe count 3 in bucket 0 (which represents bubble shown).
   histogram_tester.ExpectBucketCount("SessionCrashed.Bubble", 0, 3);
-#endif  // !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+#endif  // !defined(OS_MACOSX) && !BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
@@ -1025,37 +1021,133 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   ASSERT_EQ(1u, chrome::GetBrowserCount(profile2));
 }
 
-class SupervisedUserBrowserCreatorTest : public InProcessBrowserTest {
- protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kSupervisedUserId,
-                                    supervised_users::kChildAccountSUID);
+#endif  // !defined(OS_CHROMEOS)
+
+#if defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
+                       PRE_ShortcutsAreMigratedOnce) {
+  content::RunAllTasksUntilIdle();
+
+  // Confirm that shortcuts were migrated.
+  const std::string last_version_migrated =
+      g_browser_process->local_state()->GetString(
+          prefs::kShortcutMigrationVersion);
+  EXPECT_EQ(last_version_migrated, version_info::GetVersionNumber());
+
+  // Set the version back as far as kLastVersionNeedingMigration and ensure it's
+  // not migrated again.
+  g_browser_process->local_state()->SetString(prefs::kShortcutMigrationVersion,
+                                              "80.0.3978.0");
+}
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ShortcutsAreMigratedOnce) {
+  content::RunAllTasksUntilIdle();
+
+  // Confirm that shortcuts weren't migrated when marked as having last been
+  // migrated in kLastVersionNeedingMigration+.
+  const std::string last_version_migrated =
+      g_browser_process->local_state()->GetString(
+          prefs::kShortcutMigrationVersion);
+  EXPECT_EQ(last_version_migrated, "80.0.3978.0");
+}
+#endif  // defined(OS_WIN)
+
+class StartupBrowserCreatorExtensionsCheckupExperimentTest
+    : public extensions::ExtensionBrowserTest {
+ public:
+  // ExtensionsBrowserTest opens about::blank via the command line, and
+  // command-line tabs supersede all others, except pinned tabs.
+  StartupBrowserCreatorExtensionsCheckupExperimentTest() {
+    set_open_about_blank_on_browser_launch(false);
   }
+
+  void SetUp() override {
+    // Enable the extensions checkup experiment.
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        extensions_features::kExtensionsCheckup,
+        {{extensions_features::kExtensionsCheckupEntryPointParameter,
+          extensions_features::kStartupEntryPoint}});
+    extensions::ExtensionBrowserTest::SetUp();
+  }
+
+  void AddExtension() {
+    // Adds a non policy-installed extension to the extension registry.
+    const Extension* extension =
+        LoadExtension(test_data_dir_.AppendASCII("good.crx"));
+    ASSERT_TRUE(extension);
+
+    constexpr char kGoodExtensionId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
+    extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(profile());
+    EXPECT_TRUE(registry->enabled_extensions().GetByID(kGoodExtensionId));
+
+    extensions::ExtensionPrefs* prefs =
+        extensions::ExtensionPrefs::Get(profile());
+    EXPECT_TRUE(prefs->GetInstalledExtensionInfo(kGoodExtensionId));
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  DISALLOW_COPY_AND_ASSIGN(
+      StartupBrowserCreatorExtensionsCheckupExperimentTest);
 };
 
-IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
-                       StartupSupervisedUserProfile) {
-  StartupBrowserCreator browser_creator;
-
-  // Do a simple non-process-startup browser launch.
-  base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
-  StartupBrowserCreatorImpl launch(base::FilePath(), dummy, &browser_creator,
-                                   chrome::startup::IS_FIRST_RUN);
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
-  ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
-
-  // This should have created a new browser window.
-  Browser* new_browser = FindOneOtherBrowser(browser());
-  ASSERT_TRUE(new_browser);
-
-  TabStripModel* tab_strip = new_browser->tab_strip_model();
-
-  EXPECT_EQ(1, tab_strip->count());
+// Test that when the extensions checkup experiment is enabled for the startup
+// entry point and a user has extensions installed, the user is directed to the
+// chrome://extensions page upon startup.
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorExtensionsCheckupExperimentTest,
+                       PRE_ExtensionsCheckup) {
+  AddExtension();
 }
 
-#endif  // !defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorExtensionsCheckupExperimentTest,
+                       ExtensionsCheckup) {
+  // The new browser should have exactly two tabs (chrome://extensions page and
+  // the NTP).
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  content::WebContents* extensions_tab = tab_strip->GetWebContentsAt(0);
+
+  // Check that the tab showing the extensions page is the active tab.
+  EXPECT_EQ(extensions_tab, tab_strip->GetActiveWebContents());
+
+  // Check that both the extensions page and the ntp page are shown.
+  ASSERT_EQ(2, tab_strip->count());
+  EXPECT_EQ("chrome://extensions/?checkup=shown",
+            extensions_tab->GetLastCommittedURL());
+  EXPECT_EQ(chrome::kChromeUINewTabURL,
+            tab_strip->GetWebContentsAt(1)->GetLastCommittedURL());
+
+  // Once the user sees the extensions page upon startup, they should not see it
+  // again.
+  Browser* other_browser = CreateBrowser(browser()->profile());
+
+  // Make sure we are observing a new browser instance.
+  EXPECT_NE(other_browser, browser());
+
+  TabStripModel* other_tab_strip = other_browser->tab_strip_model();
+  ASSERT_EQ(1, other_tab_strip->count());
+  EXPECT_NE("chrome://extensions/?checkup=shown",
+            other_tab_strip->GetWebContentsAt(0)->GetLastCommittedURL());
+}
+
+// Test that when the extensions checkup experiment has been shown and the
+// browser is started again, the user is not directed to the
+// chrome://extensions page upon startup.
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorExtensionsCheckupExperimentTest,
+                       PRE_ExtensionsCheckupAlreadyShown) {
+  AddExtension();
+  extensions::ExtensionPrefs::Get(profile())
+      ->SetUserHasSeenExtensionsCheckupOnStartup(true);
+}
+
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorExtensionsCheckupExperimentTest,
+                       ExtensionsCheckupAlreadyShown) {
+  // The new browser should have exactly one tab (the NTP).
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+
+  ASSERT_EQ(1, tab_strip->count());
+  EXPECT_EQ(chrome::kChromeUINewTabURL,
+            tab_strip->GetActiveWebContents()->GetLastCommittedURL());
+}
 
 // These tests are not applicable to Chrome OS as neither master_preferences nor
 // the onboarding promos exist there.
@@ -1064,8 +1156,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
 class StartupBrowserCreatorFirstRunTest : public InProcessBrowserTest {
  public:
   StartupBrowserCreatorFirstRunTest() {
-    scoped_feature_list_.InitWithFeatures({nux::kNuxOnboardingForceEnabled},
-                                          {});
+    scoped_feature_list_.InitWithFeatures({welcome::kForceEnabled}, {});
   }
 
  protected:
@@ -1087,14 +1178,14 @@ void StartupBrowserCreatorFirstRunTest::SetUpCommandLine(
 }
 
 void StartupBrowserCreatorFirstRunTest::SetUpInProcessBrowserTestFixture() {
-#if defined(OS_LINUX) && defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_LINUX) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Set a policy that prevents the first-run dialog from being shown.
   policy_map_.Set(policy::key::kMetricsReportingEnabled,
                   policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                   policy::POLICY_SOURCE_CLOUD,
                   std::make_unique<base::Value>(false), nullptr);
   provider_.UpdateChromePolicy(policy_map_);
-#endif  // defined(OS_LINUX) && defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(OS_LINUX) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   EXPECT_CALL(provider_, IsInitializationComplete(_))
       .WillRepeatedly(Return(true));
@@ -1130,7 +1221,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest, AddFirstRunTab) {
             tab_strip->GetWebContentsAt(1)->GetURL().ExtractFileName());
 }
 
-#if defined(GOOGLE_CHROME_BUILD) && defined(OS_MACOSX)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && defined(OS_MACOSX)
 // http://crbug.com/314819
 #define MAYBE_RestoreOnStartupURLsPolicySpecified \
     DISABLED_RestoreOnStartupURLsPolicySpecified
@@ -1187,7 +1278,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
             tab_strip->GetWebContentsAt(0)->GetURL().ExtractFileName());
 }
 
-#if defined(GOOGLE_CHROME_BUILD) && defined(OS_MACOSX)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && defined(OS_MACOSX)
 // http://crbug.com/314819
 #define MAYBE_FirstRunTabsWithRestoreSession \
     DISABLED_FirstRunTabsWithRestoreSession
@@ -1284,7 +1375,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
                   policy::POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(4),
                   nullptr);
   auto url_list = std::make_unique<base::Value>(base::Value::Type::LIST);
-  url_list->GetList().push_back(
+  url_list->Append(
       base::Value(embedded_test_server()->GetURL("/title1.html").spec()));
   policy_map_.Set(policy::key::kRestoreOnStartupURLs,
                   policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_MACHINE,
@@ -1375,7 +1466,7 @@ class StartupBrowserCreatorWelcomeBackTest : public InProcessBrowserTest {
                  policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
                  std::make_unique<base::Value>(4), nullptr);
       auto url_list = std::make_unique<base::Value>(base::Value::Type::LIST);
-      url_list->GetList().push_back(base::Value("http://managed.site.com/"));
+      url_list->Append(base::Value("http://managed.site.com/"));
       values.Set(policy::key::kRestoreOnStartupURLs, variant.value(),
                  policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
                  std::move(url_list), nullptr);
@@ -1567,4 +1658,75 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(CommandLineFlagSecurityWarningsPolicy::kNoPolicy,
                       CommandLineFlagSecurityWarningsPolicy::kEnabled,
                       CommandLineFlagSecurityWarningsPolicy::kDisabled));
+
+// Verifies that infobars are not displayed in Kiosk mode.
+class StartupBrowserCreatorInfobarsKioskTest : public InProcessBrowserTest {
+ public:
+  StartupBrowserCreatorInfobarsKioskTest() = default;
+
+ protected:
+  InfoBarService* LaunchKioskBrowserAndGetCreatedInfobarService(
+      const std::string& extra_switch) {
+    Profile* profile = browser()->profile();
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+    command_line.AppendSwitch(switches::kKioskMode);
+    command_line.AppendSwitch(extra_switch);
+    StartupBrowserCreatorImpl launch(base::FilePath(), command_line,
+                                     chrome::startup::IS_NOT_FIRST_RUN);
+    EXPECT_TRUE(launch.Launch(profile, std::vector<GURL>(), true));
+
+    // This should have created a new browser window.
+    Browser* new_browser = FindOneOtherBrowser(browser());
+    EXPECT_TRUE(new_browser);
+    if (!new_browser)
+      return nullptr;
+
+    return InfoBarService::FromWebContents(
+        new_browser->tab_strip_model()->GetActiveWebContents());
+  }
+};
+
+// Verify that the Automation Enabled infobar is still shown in Kiosk mode.
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorInfobarsKioskTest,
+                       CheckInfobarForEnableAutomation) {
+  InfoBarService* infobar_service =
+      LaunchKioskBrowserAndGetCreatedInfobarService(
+          switches::kEnableAutomation);
+  ASSERT_TRUE(infobar_service);
+
+  bool found_automation_infobar = false;
+  for (size_t i = 0; i < infobar_service->infobar_count(); i++) {
+    infobars::InfoBar* infobar = infobar_service->infobar_at(i);
+    if (infobar->delegate()->GetIdentifier() ==
+        infobars::InfoBarDelegate::AUTOMATION_INFOBAR_DELEGATE) {
+      found_automation_infobar = true;
+    }
+  }
+
+  EXPECT_TRUE(found_automation_infobar);
+}
+
+// Verify that the Bad Flags infobar is not shown in kiosk mode.
+IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorInfobarsKioskTest,
+                       CheckInfobarForBadFlag) {
+  // BadFlagsPrompt::ShowBadFlagsPrompt uses CommandLine::ForCurrentProcess
+  // instead of the command-line passed to StartupBrowserCreator. In browser
+  // tests, this references the browser test's instead of the new process.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableWebSecurity);
+
+  // Passing the kDisableWebSecurity argument here presently does not do
+  // anything because of the aforementioned limitation.
+  // https://crbug.com/1060293
+  InfoBarService* infobar_service =
+      LaunchKioskBrowserAndGetCreatedInfobarService(
+          switches::kDisableWebSecurity);
+  ASSERT_TRUE(infobar_service);
+
+  for (size_t i = 0; i < infobar_service->infobar_count(); i++) {
+    infobars::InfoBar* infobar = infobar_service->infobar_at(i);
+    EXPECT_NE(infobars::InfoBarDelegate::BAD_FLAGS_INFOBAR_DELEGATE,
+              infobar->delegate()->GetIdentifier());
+  }
+}
 #endif  // !defined(OS_CHROMEOS)

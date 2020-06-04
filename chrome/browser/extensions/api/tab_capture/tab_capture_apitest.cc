@@ -5,7 +5,6 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -30,6 +29,7 @@
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 namespace extensions {
 
@@ -161,8 +161,9 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ApiTests) {
   ASSERT_TRUE(RunExtensionSubtest("tab_capture", "api_tests.html")) << message_;
 }
 
-#if defined(OS_MACOSX) && defined(ADDRESS_SANITIZER)
-// Flaky on ASAN on Mac. See https://crbug.com/674497.
+#if (defined(OS_MACOSX) && defined(ADDRESS_SANITIZER)) || defined(OS_LINUX) || \
+    defined(OS_WIN)
+// Flaky on ASAN on Mac, and on Linux and Windows. See https://crbug.com/674497.
 #define MAYBE_MaxOffscreenTabs DISABLED_MaxOffscreenTabs
 #else
 #define MAYBE_MaxOffscreenTabs MaxOffscreenTabs
@@ -176,7 +177,9 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_MaxOffscreenTabs) {
 }
 
 // Tests that tab capture video frames can be received in a VIDEO element.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, EndToEndWithoutRemoting) {
+// Flaky on all platforms. See https://crbug.com/1040894
+IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest,
+                       DISABLED_EndToEndWithoutRemoting) {
   if (IsTooIntensiveForThisPlatform()) {
     LOG(WARNING) << "Skipping this CPU-intensive test on this platform/build.";
     return;
@@ -196,7 +199,8 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, EndToEndWithoutRemoting) {
 // received in a VIDEO element.  More allowance is provided for color deviation
 // because of the additional layers of video processing performed within
 // WebRTC.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, EndToEndThroughWebRTC) {
+// Flaky on all platforms. See https://crbug.com/1040894
+IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, DISABLED_EndToEndThroughWebRTC) {
   if (IsTooIntensiveForThisPlatform()) {
     LOG(WARNING) << "Skipping this CPU-intensive test on this platform/build.";
     return;
@@ -246,14 +250,8 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiPixelTest, MAYBE_OffscreenTabEvilTests) {
   ASSERT_FALSE(profile()->HasOffTheRecordProfile());
 }
 
-// http://crbug.com/177163
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_GetUserMediaTest DISABLED_GetUserMediaTest
-#else
-#define MAYBE_GetUserMediaTest GetUserMediaTest
-#endif
 // Tests that getUserMedia() is NOT a way to start tab capture.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_GetUserMediaTest) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
   ExtensionTestMessageListener listener("ready", true);
 
   ASSERT_TRUE(RunExtensionSubtest("tab_capture", "get_user_media_test.html"))
@@ -277,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_GetUserMediaTest) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// http://crbug.com/177163, http://crbug.com/427730
+// http://crbug.com/427730
 // Make sure tabCapture.capture only works if the tab has been granted
 // permission via an extension icon click or the extension is whitelisted.
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_ActiveTabPermission) {
@@ -351,7 +349,6 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_FullscreenEvents) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// Times out on Win dbg bots: https://crbug.com/177163
 // Flaky on MSan bots: https://crbug.com/294431
 // But really, just flaky everywhere. http://crbug.com/294431#c33
 // Make sure tabCapture API can be granted for Chrome:// pages.
@@ -379,74 +376,41 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_GrantForChromePages) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// http://crbug.com/177163
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_CaptureInSplitIncognitoMode DISABLED_CaptureInSplitIncognitoMode
-#else
-#define MAYBE_CaptureInSplitIncognitoMode CaptureInSplitIncognitoMode
-#endif
 // Tests that a tab in incognito mode can be captured.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_CaptureInSplitIncognitoMode) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, CaptureInSplitIncognitoMode) {
   AddExtensionToCommandLineWhitelist();
-  ASSERT_TRUE(RunExtensionSubtest("tab_capture",
-                                  "start_tab_capture.html",
-                                  kFlagEnableIncognito | kFlagUseIncognito))
+  ASSERT_TRUE(RunExtensionSubtest("tab_capture", "start_tab_capture.html",
+                                  kFlagEnableIncognito, kFlagUseIncognito))
       << message_;
 }
 
-// http://crbug.com/177163
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_Constraints DISABLED_Constraints
-#else
-#define MAYBE_Constraints Constraints
-#endif
 // Tests that valid constraints allow tab capture to start, while invalid ones
 // do not.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_Constraints) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, Constraints) {
   AddExtensionToCommandLineWhitelist();
   ASSERT_TRUE(RunExtensionSubtest("tab_capture", "constraints.html"))
       << message_;
 }
 
-// http://crbug.com/177163
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_TabIndicator DISABLED_TabIndicator
-#else
-#define MAYBE_TabIndicator TabIndicator
-#endif
 // Tests that the tab indicator (in the tab strip) is shown during tab capture.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_TabIndicator) {
-  ASSERT_EQ(TabAlertState::NONE,
-            chrome::GetTabAlertStateForContents(
-                browser()->tab_strip_model()->GetActiveWebContents()));
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, TabIndicator) {
+  content::WebContents* const contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_THAT(chrome::GetTabAlertStatesForContents(contents),
+              ::testing::IsEmpty());
 
-  // A TabStripModelObserver that quits the MessageLoop whenever the UI's model
-  // is sent an event that changes the indicator status.
+  // A TabStripModelObserver that quits the MessageLoop whenever the
+  // UI's model is sent an event that might change the indicator status.
   class IndicatorChangeObserver : public TabStripModelObserver {
    public:
-    explicit IndicatorChangeObserver(Browser* browser)
-        : browser_(browser),
-          last_alert_state_(chrome::GetTabAlertStateForContents(
-              browser->tab_strip_model()->GetActiveWebContents())) {
+    explicit IndicatorChangeObserver(Browser* browser) : browser_(browser) {
       browser_->tab_strip_model()->AddObserver(this);
     }
-
-    ~IndicatorChangeObserver() override {
-      browser_->tab_strip_model()->RemoveObserver(this);
-    }
-
-    TabAlertState last_alert_state() const { return last_alert_state_; }
 
     void TabChangedAt(content::WebContents* contents,
                       int index,
                       TabChangeType change_type) override {
-      const TabAlertState alert_state =
-          chrome::GetTabAlertStateForContents(contents);
-      if (alert_state != last_alert_state_) {
-        last_alert_state_ = alert_state;
-        if (on_tab_changed_)
-          std::move(on_tab_changed_).Run();
-      }
+      std::move(on_tab_changed_).Run();
     }
 
     void WaitForTabChange() {
@@ -457,12 +421,11 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_TabIndicator) {
 
    private:
     Browser* const browser_;
-    TabAlertState last_alert_state_;
     base::OnceClosure on_tab_changed_;
   };
 
-  IndicatorChangeObserver observer(browser());
-  ASSERT_EQ(TabAlertState::NONE, observer.last_alert_state());
+  ASSERT_THAT(chrome::GetTabAlertStatesForContents(contents),
+              ::testing::IsEmpty());
 
   // Run an extension test that just turns on tab capture, which should cause
   // the indicator to turn on.
@@ -472,10 +435,13 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_TabIndicator) {
 
   // Run the browser until the indicator turns on.
   const base::TimeTicks start_time = base::TimeTicks::Now();
-  while (observer.last_alert_state() != TabAlertState::TAB_CAPTURING) {
+  IndicatorChangeObserver observer(browser());
+  while (!base::Contains(chrome::GetTabAlertStatesForContents(contents),
+                         TabAlertState::TAB_CAPTURING)) {
     if (base::TimeTicks::Now() - start_time >
             TestTimeouts::action_max_timeout()) {
-      EXPECT_EQ(TabAlertState::TAB_CAPTURING, observer.last_alert_state());
+      EXPECT_THAT(chrome::GetTabAlertStatesForContents(contents),
+                  ::testing::Contains(TabAlertState::TAB_CAPTURING));
       return;
     }
     observer.WaitForTabChange();

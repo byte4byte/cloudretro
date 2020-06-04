@@ -11,7 +11,7 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema.h"
@@ -53,7 +53,7 @@ class PolicyTestBase : public testing::Test {
                       const std::string& schema);
 
   // Needs to be the first member
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   SchemaRegistry schema_registry_;
 
  private:
@@ -131,7 +131,7 @@ class ConfigurationPolicyProviderTest
   // |expected_value|.
   void CheckValue(const char* policy_name,
                   const base::Value& expected_value,
-                  base::Closure install_value);
+                  base::OnceClosure install_value);
 
   std::unique_ptr<PolicyProviderTestHarness> test_harness_;
   std::unique_ptr<ConfigurationPolicyProvider> provider_;

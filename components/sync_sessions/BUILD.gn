@@ -4,13 +4,9 @@
 
 static_library("sync_sessions") {
   sources = [
-    "favicon_cache.cc",
-    "favicon_cache.h",
     "local_session_event_handler_impl.cc",
     "local_session_event_handler_impl.h",
     "local_session_event_router.h",
-    "lost_navigations_recorder.cc",
-    "lost_navigations_recorder.h",
     "open_tabs_ui_delegate.cc",
     "open_tabs_ui_delegate.h",
     "open_tabs_ui_delegate_impl.cc",
@@ -61,7 +57,6 @@ static_library("sync_sessions") {
     "//components/keyed_service/core",
     "//components/prefs",
     "//components/sync_user_events",
-    "//components/variations",
     "//components/version_info",
     "//google_apis",
     "//ui/base:base",
@@ -99,9 +94,7 @@ static_library("test_support") {
 source_set("unit_tests") {
   testonly = true
   sources = [
-    "favicon_cache_unittest.cc",
     "local_session_event_handler_impl_unittest.cc",
-    "lost_navigations_recorder_unittest.cc",
     "open_tabs_ui_delegate_impl_unittest.cc",
     "session_store_unittest.cc",
     "session_sync_bridge_unittest.cc",

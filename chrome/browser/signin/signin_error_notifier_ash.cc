@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/account_manager/account_manager_util.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -37,6 +38,7 @@
 #include "chrome/grit/theme_resources.h"
 #include "chromeos/components/account_manager/account_manager_factory.h"
 #include "components/account_id/account_id.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/vector_icons/vector_icons.h"
@@ -48,7 +50,7 @@
 namespace {
 
 constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
-constexpr char kSecondaryAccountNotificationIdSuffix[] = "secondary-account";
+constexpr char kSecondaryAccountNotificationIdSuffix[] = "/secondary-account";
 
 void HandleDeviceAccountReauthNotificationClick(
     base::Optional<int> button_index) {
@@ -75,18 +77,32 @@ SigninErrorNotifier::SigninErrorNotifier(SigninErrorController* controller,
       identity_manager_(IdentityManagerFactory::GetForProfile(profile_)),
       account_manager_(g_browser_process->platform_part()
                            ->GetAccountManagerFactory()
-                           ->GetAccountManager(profile_->GetPath().value())),
-      weak_factory_(this) {
+                           ->GetAccountManager(profile_->GetPath().value())) {
   DCHECK(account_manager_);
   // Create a unique notification ID for this profile.
   device_account_notification_id_ =
       kProfileSigninNotificationId + profile->GetProfileUserName();
   secondary_account_notification_id_ =
-      std::string(kProfileSigninNotificationId) +
-      kSecondaryAccountNotificationIdSuffix;
+      device_account_notification_id_ + kSecondaryAccountNotificationIdSuffix;
 
   error_controller_->AddObserver(this);
+  const AccountId account_id =
+      multi_user_util::GetAccountIdFromProfile(profile_);
+  if (TokenHandleUtil::HasToken(account_id)) {
+    token_handle_util_ = std::make_unique<TokenHandleUtil>();
+    token_handle_util_->CheckToken(
+        account_id, base::Bind(&SigninErrorNotifier::OnTokenHandleCheck,
+                               weak_factory_.GetWeakPtr()));
+  }
   OnErrorChanged();
+}
+
+void SigninErrorNotifier::OnTokenHandleCheck(
+    const AccountId& account_id,
+    TokenHandleUtil::TokenHandleStatus status) {
+  if (status != TokenHandleUtil::INVALID)
+    return;
+  HandleDeviceAccountError();
 }
 
 SigninErrorNotifier::~SigninErrorNotifier() {
@@ -127,9 +143,11 @@ void SigninErrorNotifier::OnErrorChanged() {
     return;
   }
 
-  const std::string error_account_id = error_controller_->error_account_id();
-  if (error_account_id ==
-      identity_manager_->GetPrimaryAccountInfo().account_id) {
+  const CoreAccountId error_account_id = error_controller_->error_account_id();
+  const CoreAccountId primary_account_id =
+      identity_manager_->GetPrimaryAccountId(
+          signin::ConsentLevel::kNotRequired);
+  if (error_account_id == primary_account_id) {
     HandleDeviceAccountError();
   } else {
     HandleSecondaryAccountError(error_account_id);
@@ -144,10 +162,22 @@ void SigninErrorNotifier::HandleDeviceAccountError() {
   if (service->signout_required_after_supervision_enabled())
     return;
 
+  const AccountId account_id =
+      multi_user_util::GetAccountIdFromProfile(profile_);
+  // We need to save the flag in the local state because
+  // TokenHandleUtil::CheckToken might fail on the login screen due to lack of
+  // network connectivity.
+  user_manager::UserManager::Get()->SaveForceOnlineSignin(
+      account_id, true /* force_online_signin */);
+
+  // We need to remove the handle so it won't be checked next time session is
+  // started.
+  TokenHandleUtil::DeleteHandle(account_id);
+
   // Add an accept button to sign the user out.
   message_center::RichNotificationData data;
   data.buttons.push_back(message_center::ButtonInfo(
-      l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL)));
+      l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_BUTTON)));
 
   message_center::NotifierId notifier_id(
       message_center::NotifierType::SYSTEM_COMPONENT,
@@ -178,7 +208,7 @@ void SigninErrorNotifier::HandleDeviceAccountError() {
 }
 
 void SigninErrorNotifier::HandleSecondaryAccountError(
-    const std::string& account_id) {
+    const CoreAccountId& account_id) {
   account_manager_->GetAccounts(base::BindOnce(
       &SigninErrorNotifier::OnGetAccounts, weak_factory_.GetWeakPtr()));
 }

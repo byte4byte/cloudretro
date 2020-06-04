@@ -50,10 +50,6 @@ class BookmarkBarNavigationTest : public InProcessBrowserTest {
       : https_test_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
 
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        {network::features::kFetchMetadata,
-         network::features::kFetchMetadataDestination},
-        {});
     InProcessBrowserTest::SetUp();
   }
 
@@ -163,8 +159,15 @@ IN_PROC_BROWSER_TEST_F(BookmarkBarNavigationTest, SecFetchFromEmptyTab) {
   }
 }
 
+#if defined(OS_MACOSX) || defined(OS_WIN)
+//  TODO(crbug.com/1006033): Test flaky on Mac and Windows.
+#define MAYBE_SecFetchSiteNoneFromNonEmptyTab \
+  DISABLED_SecFetchSiteNoneFromNonEmptyTab
+#else
+#define MAYBE_SecFetchSiteNoneFromNonEmptyTab SecFetchSiteNoneFromNonEmptyTab
+#endif
 IN_PROC_BROWSER_TEST_F(BookmarkBarNavigationTest,
-                       SecFetchSiteNoneFromNonEmptyTab) {
+                       MAYBE_SecFetchSiteNoneFromNonEmptyTab) {
   // Navigate to an non-empty tab
   ui_test_utils::NavigateToURL(browser(), GURL("http://example.com/"));
 

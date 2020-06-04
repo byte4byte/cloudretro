@@ -57,7 +57,7 @@ class WebThread {
     IO,
 
     // NOTE: do not add new threads here. Instead you should just use
-    // base::Create*TaskRunnerWithTraits to run tasks on the ThreadPool.
+    // base::Create*TaskRunner to run tasks on the ThreadPool.
 
     // This identifier does not represent a thread.  Instead it counts the
     // number of well-known threads.  Insert new well-known threads before this
@@ -67,8 +67,13 @@ class WebThread {
 
   // NOTE: Task posting APIs have moved to post_task.h. See web_task_traits.h.
 
-  // TODO(crbug.com/878356): Consider replacing callsites of this with
-  // base::CreateTaskRunnerWithTraits({id})->DeleteSoon(..).
+  // Delete/ReleaseSoon() helpers allow future deletion of an owned object on
+  // its associated thread. If you already have a task runner bound to a
+  // WebThread you should use its SequencedTaskRunner::DeleteSoon() member
+  // method. If you don't, the helpers below avoid having to do
+  // base::CreateSingleThreadTaskRunner({WebThread::ID})->DeleteSoon(...) which
+  // is equivalent.
+
   template <class T>
   static bool DeleteSoon(ID identifier,
                          const base::Location& from_here,

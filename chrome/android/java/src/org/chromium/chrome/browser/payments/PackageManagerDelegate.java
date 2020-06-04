@@ -15,14 +15,27 @@ import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.StrictMode;
 import android.os.StrictMode.ThreadPolicy;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.PackageManagerUtils;
+import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 
 import java.util.List;
 
 /** Abstraction of Android's package manager to enable testing. */
 public class PackageManagerDelegate {
+    /**
+     * Checks whether the system has the given feature.
+     * @param feature The feature to check.
+     * @return Whether the system has the given feature.
+     */
+    public boolean hasSystemFeature(String feature) {
+        return ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(feature);
+    }
+
     /**
      * Retrieves package information of an installed application.
      *
@@ -40,33 +53,12 @@ public class PackageManagerDelegate {
     }
 
     /**
-     * Retrieves the single activity that matches the given intent, or null if none found.
-     * @param intent The intent to query.
-     * @return The matching activity.
-     */
-    public ResolveInfo resolveActivity(Intent intent) {
-        ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            return ContextUtils.getApplicationContext().getPackageManager().resolveActivity(
-                    intent, 0);
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
-    }
-
-    /**
      * Retrieves the list of activities that can respond to the given intent.
      * @param intent The intent to query.
      * @return The list of activities that can respond to the intent.
      */
     public List<ResolveInfo> getActivitiesThatCanRespondToIntent(Intent intent) {
-        ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            return ContextUtils.getApplicationContext().getPackageManager().queryIntentActivities(
-                    intent, 0);
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        return PackageManagerUtils.queryIntentActivities(intent, 0);
     }
 
     /**
@@ -77,13 +69,7 @@ public class PackageManagerDelegate {
      * @return The list of activities that can respond to the intent.
      */
     public List<ResolveInfo> getActivitiesThatCanRespondToIntentWithMetaData(Intent intent) {
-        ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            return ContextUtils.getApplicationContext().getPackageManager().queryIntentActivities(
-                    intent, PackageManager.GET_META_DATA);
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        return PackageManagerUtils.queryIntentActivities(intent, PackageManager.GET_META_DATA);
     }
 
     /**
@@ -138,5 +124,20 @@ public class PackageManagerDelegate {
             return null;
         }
         return resources == null ? null : resources.getStringArray(resourceId);
+    }
+
+    /**
+     * Get the package name of an activity if it is a Trusted Web Activity.
+     * @param activity An activity that is intended to check whether its a Trusted Web Activity and
+     *         get the package name from. Not allowed to be null.
+     * @return The package name of a given activity if it is a Trusted Web Activity; null otherwise.
+     */
+    @Nullable
+    public String getTwaPackageName(ChromeActivity activity) {
+        assert activity != null;
+        if (!(activity instanceof CustomTabActivity)) return null;
+        CustomTabActivity customTabActivity = ((CustomTabActivity) activity);
+        if (!customTabActivity.isInTwaMode()) return null;
+        return customTabActivity.getTwaPackage();
     }
 }

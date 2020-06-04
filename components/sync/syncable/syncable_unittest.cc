@@ -7,7 +7,7 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -17,7 +17,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/synchronization/condition_variable.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/values_test_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
@@ -67,9 +67,7 @@ class TestBackingStore : public OnDiskDirectoryBackingStore {
 TestBackingStore::TestBackingStore(const std::string& dir_name,
                                    const base::FilePath& backing_filepath)
     : OnDiskDirectoryBackingStore(dir_name,
-                                  base::BindRepeating([]() -> std::string {
-                                    return "test_cache_guid";
-                                  }),
+                                  "test_cache_guid",
                                   backing_filepath),
       fail_save_changes_(false) {}
 
@@ -122,8 +120,7 @@ TestDirectory::TestDirectory(
     TestBackingStore* backing_store)
     : Directory(base::WrapUnique(backing_store),
                 handler,
-                base::Closure(),
-                nullptr,
+                base::NullCallback(),
                 nullptr),
       backing_store_(backing_store) {}
 
@@ -136,7 +133,7 @@ TestDirectory::~TestDirectory() {}
 #define MAYBE_FailInitialWrite FailInitialWrite
 #endif
 TEST(OnDiskSyncableDirectory, MAYBE_FailInitialWrite) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   FakeEncryptor encryptor;
   TestUnrecoverableErrorHandler handler;
   base::ScopedTempDir temp_dir;
@@ -185,10 +182,8 @@ class OnDiskSyncableDirectoryTest : public SyncableDirectoryTest {
     test_directory_ = test_directory.get();
     dir() = std::move(test_directory);
     DCHECK(dir());
-    DirOpenResult result = dir()->Open(
-        kDirectoryName, directory_change_delegate(), NullTransactionObserver());
-    dir()->set_cache_guid(dir()->legacy_cache_guid());
-    return result;
+    return dir()->Open(kDirectoryName, directory_change_delegate(),
+                       NullTransactionObserver());
   }
 
   void SaveAndReloadDir() {
@@ -323,12 +318,9 @@ TEST_F(OnDiskSyncableDirectoryTest,
   dir()->SaveChanges();
   dir() = std::make_unique<Directory>(
       std::make_unique<OnDiskDirectoryBackingStore>(
-          kDirectoryName, base::BindRepeating([]() -> std::string {
-            return "test_cache_guid";
-          }),
-          file_path_),
+          kDirectoryName, "test_cache_guid", file_path_),
       MakeWeakHandle(unrecoverable_error_handler()->GetWeakPtr()),
-      base::Closure(), nullptr, nullptr);
+      base::NullCallback(), nullptr);
 
   ASSERT_TRUE(dir().get());
   ASSERT_EQ(OPENED_EXISTING,
@@ -526,7 +518,7 @@ class SyncableDirectoryManagement : public testing::Test {
   void TearDown() override {}
 
  protected:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
   FakeEncryptor encryptor_;
   TestUnrecoverableErrorHandler handler_;
@@ -539,19 +531,16 @@ TEST_F(SyncableDirectoryManagement, TestFileRelease) {
 
   {
     Directory dir(std::make_unique<OnDiskDirectoryBackingStore>(
-                      "ScopeTest", base::BindRepeating([]() -> std::string {
-                        return "test_cache_guid";
-                      }),
-                      path),
-                  MakeWeakHandle(handler_.GetWeakPtr()), base::Closure(),
-                  nullptr, nullptr);
+                      "ScopeTest", "test_cache_guid", path),
+                  MakeWeakHandle(handler_.GetWeakPtr()), base::NullCallback(),
+                  nullptr);
     DirOpenResult result =
         dir.Open("ScopeTest", &delegate_, NullTransactionObserver());
     ASSERT_EQ(result, OPENED_NEW);
   }
 
   // Destroying the directory should have released the backing database file.
-  ASSERT_TRUE(base::DeleteFile(path, true));
+  ASSERT_TRUE(base::DeleteFileRecursively(path));
 }
 
 class SyncableClientTagTest : public SyncableDirectoryTest {

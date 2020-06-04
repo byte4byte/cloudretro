@@ -9,14 +9,13 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/services/file_util/public/mojom/file_util_service.mojom.h"
 #include "chrome/services/file_util/public/mojom/safe_archive_analyzer.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace safe_browsing {
 struct ArchiveAnalyzerResults;
-}
-
-namespace service_manager {
-class Connector;
 }
 
 // This class is used to analyze rar files in a sandbox for file download
@@ -25,12 +24,13 @@ class Connector;
 class SandboxedRarAnalyzer
     : public base::RefCountedThreadSafe<SandboxedRarAnalyzer> {
  public:
-  using ResultCallback = base::RepeatingCallback<void(
-      const safe_browsing::ArchiveAnalyzerResults&)>;
+  using ResultCallback =
+      base::OnceCallback<void(const safe_browsing::ArchiveAnalyzerResults&)>;
 
-  SandboxedRarAnalyzer(const base::FilePath& rar_file_path,
-                       const ResultCallback& callback,
-                       service_manager::Connector* connector);
+  SandboxedRarAnalyzer(
+      const base::FilePath& rar_file_path,
+      ResultCallback callback,
+      mojo::PendingRemote<chrome::mojom::FileUtilService> service);
 
   // Starts the analysis. Must be called on the UI thread.
   void Start();
@@ -60,13 +60,11 @@ class SandboxedRarAnalyzer
   const base::FilePath file_path_;
 
   // Callback invoked on the UI thread with the file analyze results.
-  const ResultCallback callback_;
+  ResultCallback callback_;
 
-  // The connector to the service manager, only used on the UI thread.
-  service_manager::Connector* connector_;
-
-  // Pointer to the SafeArchiveAnalyzer interface. Only used from the UI thread.
-  chrome::mojom::SafeArchiveAnalyzerPtr analyzer_ptr_;
+  // Remote interfaces to the file util service. Only used from the UI thread.
+  mojo::Remote<chrome::mojom::FileUtilService> service_;
+  mojo::Remote<chrome::mojom::SafeArchiveAnalyzer> remote_analyzer_;
 
   DISALLOW_COPY_AND_ASSIGN(SandboxedRarAnalyzer);
 };

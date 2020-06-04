@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/test/gtest_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "chromeos/services/secure_channel/error_tolerant_ble_advertisement_impl.h"
 #include "chromeos/services/secure_channel/fake_ble_advertiser.h"
@@ -50,7 +50,7 @@ class FakeErrorTolerantBleAdvertisementFactory
 
  private:
   // ErrorTolerantBleAdvertisementImpl::Factory:
-  std::unique_ptr<ErrorTolerantBleAdvertisement> BuildInstance(
+  std::unique_ptr<ErrorTolerantBleAdvertisement> CreateInstance(
       const DeviceIdPair& device_id_pair,
       std::unique_ptr<DataWithTimestamp> advertisement_data,
       BleSynchronizerBase* ble_synchronizer) override {
@@ -119,7 +119,7 @@ class SecureChannelBleAdvertiserImplTest : public testing::Test {
 
     test_runner_ = base::MakeRefCounted<base::TestSimpleTaskRunner>();
 
-    advertiser_ = BleAdvertiserImpl::Factory::Get()->BuildInstance(
+    advertiser_ = BleAdvertiserImpl::Factory::Create(
         fake_delegate_.get(), fake_ble_service_data_helper_.get(),
         fake_ble_synchronizer_.get(), fake_timer_factory_.get(), test_runner_);
   }
@@ -262,7 +262,7 @@ class SecureChannelBleAdvertiserImplTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<FakeBleAdvertiserDelegate> fake_delegate_;
   std::unique_ptr<FakeBleServiceDataHelper> fake_ble_service_data_helper_;

@@ -33,6 +33,11 @@ class IOSChromeSavePasswordInfoBarDelegate
 
   ~IOSChromeSavePasswordInfoBarDelegate() override;
 
+  // Returns |delegate| as an IOSChromeSavePasswordInfoBarDelegate, or nullptr
+  // if it is of another type.
+  static IOSChromeSavePasswordInfoBarDelegate* FromInfobarDelegate(
+      infobars::InfoBarDelegate* delegate);
+
   // InfoBarDelegate implementation
   bool ShouldExpire(const NavigationDetails& details) const override;
 
@@ -41,17 +46,27 @@ class IOSChromeSavePasswordInfoBarDelegate
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
   bool Cancel() override;
+  void InfoBarDismissed() override;
 
   // Updates the credentials being saved with |username| and |password|.
-  void UpdateCredentials(NSString* username, NSString* password);
+  // TODO(crbug.com/1040653): This function is only virtual so it can be mocked
+  // for testing purposes.  It should become non-virtual once this test is
+  // refactored for testability.
+  virtual void UpdateCredentials(NSString* username, NSString* password);
 
   // Informs the delegate that the Infobar has been presented. If |automatic|
   // YES the Infobar was presented automatically (e.g. The banner was
   // presented), if NO the user triggered it  (e.g. Tapped on the badge).
-  void InfobarPresenting(bool automatic);
+  // TODO(crbug.com/1040653): This function is only virtual so it can be mocked
+  // for testing purposes.  It should become non-virtual once this test is
+  // refactored for testability.
+  virtual void InfobarPresenting(bool automatic);
 
   // Informs the delegate that the Infobar has been dismissed.
-  void InfobarDismissed();
+  // TODO(crbug.com/1040653): This function is only virtual so it can be mocked
+  // for testing purposes.  It should become non-virtual once this test is
+  // refactored for testability.
+  virtual void InfobarDismissed();
 
   // true if password is being updated at the moment the InfobarModal is
   // created.

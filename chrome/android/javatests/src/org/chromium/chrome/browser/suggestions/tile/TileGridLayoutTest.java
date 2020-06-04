@@ -16,12 +16,13 @@ import static org.chromium.chrome.test.util.browser.suggestions.mostvisited.Fake
 import android.app.Activity;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
-import android.support.annotation.Nullable;
 import android.support.test.espresso.matcher.ViewMatchers;
 import android.support.test.filters.MediumTest;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+
+import androidx.annotation.Nullable;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -39,10 +40,10 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.GlobalDiscardableReferencePool;
-import org.chromium.chrome.browser.night_mode.NightModeTestUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.night_mode.ChromeNightModeTestUtils;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder.PartialBindCallback;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
@@ -51,23 +52,24 @@ import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.util.ViewUtils;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
-import org.chromium.chrome.test.util.RenderTestRule;
 import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.offlinepages.FakeOfflinePageBridge;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.chrome.test.util.browser.suggestions.mostvisited.FakeMostVisitedSites;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServerRule;
+import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.modelutil.ListObservable;
+import org.chromium.ui.test.util.NightModeTestUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -92,7 +94,7 @@ public class TileGridLayoutTest {
     public EmbeddedTestServerRule mTestServerRule = new EmbeddedTestServerRule();
 
     @Rule
-    public RenderTestRule mRenderTestRule = new RenderTestRule();
+    public ChromeRenderTestRule mRenderTestRule = new ChromeRenderTestRule();
 
     private static final String[] FAKE_MOST_VISITED_URLS = new String[] {
             "/chrome/test/data/android/navigate/one.html",
@@ -113,18 +115,18 @@ public class TileGridLayoutTest {
 
     @BeforeClass
     public static void setUpBeforeActivityLaunched() {
-        NightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
+        ChromeNightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
     }
 
     @ParameterAnnotations.UseMethodParameterBefore(NightModeTestUtils.NightModeParams.class)
     public void setupNightMode(boolean nightModeEnabled) {
-        NightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
+        ChromeNightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
         mRenderTestRule.setNightModeEnabled(nightModeEnabled);
     }
 
     @AfterClass
     public static void tearDownAfterActivityDestroyed() {
-        NightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
+        ChromeNightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
     }
 
     @Test
@@ -158,6 +160,10 @@ public class TileGridLayoutTest {
         if (((FrameLayout) tileGridLayout.getParent()).getMeasuredWidth() > tileGridMaxWidthPx) {
             assertThat(tileGridLayout.getMeasuredWidth(), greaterThan(tileGridMaxWidthPx));
         }
+
+        // Reset device orientation.
+        setOrientation(
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, mActivityTestRule.getActivity());
     }
 
     @Test
@@ -174,6 +180,10 @@ public class TileGridLayoutTest {
 
         setOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, mActivityTestRule.getActivity());
         mRenderTestRule.render(tileGridLayout, "modern_two_tiles_grid_landscape");
+
+        // Reset device orientation.
+        setOrientation(
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, mActivityTestRule.getActivity());
     }
 
     @Test
@@ -208,7 +218,7 @@ public class TileGridLayoutTest {
         return siteSuggestions;
     }
 
-    private NewTabPage setUpFakeDataToShowOnNtp(int suggestionCount) throws InterruptedException {
+    private NewTabPage setUpFakeDataToShowOnNtp(int suggestionCount) {
         List<SiteSuggestion> siteSuggestions = makeSuggestions(suggestionCount);
 
         FakeMostVisitedSites mMostVisitedSites = new FakeMostVisitedSites();
@@ -278,7 +288,7 @@ public class TileGridLayoutTest {
      * @return the layout in which the suggestions are rendered.
      */
     private TileGridLayout renderTiles(List<SiteSuggestion> siteSuggestions,
-            List<String> offlineUrls) throws IOException, InterruptedException {
+            List<String> offlineUrls) throws InterruptedException {
         // Launching the activity, that should now use the right UI.
         mActivityTestRule.startMainActivityOnBlankPage();
         ChromeActivity activity = mActivityTestRule.getActivity();
@@ -312,7 +322,7 @@ public class TileGridLayoutTest {
     }
 
     private TileGridLayout renderTiles(List<SiteSuggestion> siteSuggestions)
-            throws IOException, InterruptedException {
+            throws InterruptedException {
         return renderTiles(siteSuggestions, Collections.emptyList());
     }
 
@@ -322,7 +332,8 @@ public class TileGridLayoutTest {
 
         ChromeActivity activity = mActivityTestRule.getActivity();
 
-        Profile profile = Profile.getLastUsedProfile();
+        // TODO (https://crbug.com/1063807):  Add incognito mode tests.
+        Profile profile = Profile.getLastUsedRegularProfile();
         SuggestionsUiDelegate uiDelegate = new SuggestionsUiDelegateImpl(
                 mSuggestionsDeps.getFactory().createSuggestionSource(null),
                 mSuggestionsDeps.getFactory().createEventReporter(), null, profile, null,

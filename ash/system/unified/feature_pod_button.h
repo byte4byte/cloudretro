@@ -20,14 +20,17 @@ namespace ash {
 
 class FeaturePodControllerBase;
 
-// ImageButon internally used in FeaturePodButton. Should not be used directly.
-class FeaturePodIconButton : public views::ImageButton {
+// A toggle button with an icon used by feature pods and in other places.
+class FeaturePodIconButton : public views::ToggleImageButton {
  public:
-  explicit FeaturePodIconButton(views::ButtonListener* listener);
+  FeaturePodIconButton(views::ButtonListener* listener, bool is_togglable);
   ~FeaturePodIconButton() override;
 
   // Change the toggle state. See FeaturePodButton::SetToggled.
   void SetToggled(bool toggled);
+
+  // Sets the button's icon.
+  void SetVectorIcon(const gfx::VectorIcon& icon);
 
   // views::ImageButton:
   void PaintButtonContents(gfx::Canvas* canvas) override;
@@ -35,20 +38,22 @@ class FeaturePodIconButton : public views::ImageButton {
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   const char* GetClassName() const override;
 
   bool toggled() const { return toggled_; }
 
  private:
-  // Ture if the button is currently toggled.
+  // True if this button is a togglable.
+  const bool is_togglable_;
+
+  // True if the button is currently toggled.
   bool toggled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FeaturePodIconButton);
 };
 
-// Buton internally used in FeaturePodButton. Should not be used directly.
+// Button internally used in FeaturePodButton. Should not be used directly.
 class FeaturePodLabelButton : public views::Button {
  public:
   explicit FeaturePodLabelButton(views::ButtonListener* listener);
@@ -56,10 +61,12 @@ class FeaturePodLabelButton : public views::Button {
 
   // Set the text of label shown below the icon. See FeaturePodButton::SetLabel.
   void SetLabel(const base::string16& label);
+  const base::string16& GetLabelText() const;
 
   // Set the text of sub-label shown below the label.
   // See FeaturePodButton::SetSubLabel.
   void SetSubLabel(const base::string16& sub_label);
+  const base::string16& GetSubLabelText() const;
 
   // Show arrow to indicate that the feature has a detailed view.
   // See FeaturePodButton::ShowDetailedViewArrow.
@@ -72,7 +79,6 @@ class FeaturePodLabelButton : public views::Button {
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   const char* GetClassName() const override;
 
  private:
@@ -95,13 +101,15 @@ class FeaturePodLabelButton : public views::Button {
 
 // A button in FeaturePodsView. These buttons are main entry points of features
 // in UnifiedSystemTray. Each button has its icon, label, and sub-label placed
-// vertically. They are also togglable and the background color indicates the
-// current state.
+// vertically. The button may be togglable and the background color indicates
+// the current state. Otherwise, the button is not a toggle button and just
+// navigates to the appropriate detailed view.
 // See the comment in FeaturePodsView for detail.
 class ASH_EXPORT FeaturePodButton : public views::View,
                                     public views::ButtonListener {
  public:
-  explicit FeaturePodButton(FeaturePodControllerBase* controller);
+  FeaturePodButton(FeaturePodControllerBase* controller,
+                   bool is_togglable = true);
   ~FeaturePodButton() override;
 
   // Set the vector icon shown in a circle.
@@ -130,7 +138,8 @@ class ASH_EXPORT FeaturePodButton : public views::View,
   void DisableLabelButtonFocus();
 
   // Change the toggled state. If toggled, the background color of the circle
-  // will change.
+  // will change. If the button is not togglable, then SetToggled() will do
+  // nothing and |IsToggled()| will always return false.
   void SetToggled(bool toggled);
   bool IsToggled() const { return icon_button_->toggled(); }
 
@@ -162,7 +171,6 @@ class ASH_EXPORT FeaturePodButton : public views::View,
 
   bool visible_preferred() const { return visible_preferred_; }
 
- protected:
   FeaturePodIconButton* icon_button() const { return icon_button_; }
 
  private:

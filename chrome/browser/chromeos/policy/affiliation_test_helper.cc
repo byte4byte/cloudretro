@@ -13,17 +13,17 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/common/chrome_paths.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
-#include "chromeos/dbus/auth_policy/fake_auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/fake_authpolicy_client.h"
 #include "chromeos/dbus/constants/dbus_paths.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
@@ -38,8 +38,6 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/test/test_utils.h"
 #include "crypto/rsa_private_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -84,16 +82,16 @@ AffiliationTestHelper AffiliationTestHelper::CreateForCloud(
     chromeos::FakeSessionManagerClient* fake_session_manager_client) {
   return AffiliationTestHelper(ManagementType::kCloud,
                                fake_session_manager_client,
-                               nullptr /* fake_auth_policy_client */);
+                               nullptr /* fake_authpolicy_client */);
 }
 
 // static
 AffiliationTestHelper AffiliationTestHelper::CreateForActiveDirectory(
     chromeos::FakeSessionManagerClient* fake_session_manager_client,
-    chromeos::FakeAuthPolicyClient* fake_auth_policy_client) {
+    chromeos::FakeAuthPolicyClient* fake_authpolicy_client) {
   return AffiliationTestHelper(ManagementType::kActiveDirectory,
                                fake_session_manager_client,
-                               fake_auth_policy_client);
+                               fake_authpolicy_client);
 }
 
 AffiliationTestHelper::AffiliationTestHelper(AffiliationTestHelper&& other) =
@@ -102,17 +100,17 @@ AffiliationTestHelper::AffiliationTestHelper(AffiliationTestHelper&& other) =
 AffiliationTestHelper::AffiliationTestHelper(
     ManagementType management_type,
     chromeos::FakeSessionManagerClient* fake_session_manager_client,
-    chromeos::FakeAuthPolicyClient* fake_auth_policy_client)
+    chromeos::FakeAuthPolicyClient* fake_authpolicy_client)
     : management_type_(management_type),
       fake_session_manager_client_(fake_session_manager_client),
-      fake_auth_policy_client_(fake_auth_policy_client) {
+      fake_authpolicy_client_(fake_authpolicy_client) {
   DCHECK(fake_session_manager_client);
 }
 
 void AffiliationTestHelper::CheckPreconditions() {
   ASSERT_TRUE(fake_session_manager_client_);
   ASSERT_TRUE(management_type_ != ManagementType::kActiveDirectory ||
-              fake_auth_policy_client_);
+              fake_authpolicy_client_);
 }
 
 void AffiliationTestHelper::SetDeviceAffiliationIDs(
@@ -135,10 +133,8 @@ void AffiliationTestHelper::SetDeviceAffiliationIDs(
   fake_session_manager_client_->set_device_policy(device_policy->GetBlob());
   fake_session_manager_client_->OnPropertyChangeComplete(true);
 
-  if (management_type_ == ManagementType::kActiveDirectory) {
-    fake_auth_policy_client_->set_device_affiliation_ids(
-        device_affiliation_ids);
-  }
+  if (management_type_ == ManagementType::kActiveDirectory)
+    fake_authpolicy_client_->set_device_affiliation_ids(device_affiliation_ids);
 }
 
 void AffiliationTestHelper::SetUserAffiliationIDs(
@@ -165,7 +161,7 @@ void AffiliationTestHelper::SetUserAffiliationIDs(
       user_policy->GetBlob());
 
   if (management_type_ == ManagementType::kActiveDirectory)
-    fake_auth_policy_client_->set_user_affiliation_ids(user_affiliation_ids);
+    fake_authpolicy_client_->set_user_affiliation_ids(user_affiliation_ids);
 }
 
 // static
@@ -198,11 +194,8 @@ void AffiliationTestHelper::LoginUser(const AccountId& account_id) {
   chromeos::ExistingUserController* controller =
       chromeos::ExistingUserController::current_controller();
   CHECK(controller);
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
   controller->Login(user_context, chromeos::SigninSpecifics());
-  observer.Wait();
+  chromeos::test::WaitForPrimaryUserSessionStart();
 
   const user_manager::UserList& logged_users =
       user_manager::UserManager::Get()->GetLoggedInUsers();

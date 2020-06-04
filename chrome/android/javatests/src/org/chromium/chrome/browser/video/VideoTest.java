@@ -18,7 +18,7 @@ import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -43,7 +43,7 @@ public class VideoTest {
     @Feature({"Media", "Media-Video", "Main"})
     @LargeTest
     @RetryOnFailure
-    public void testLoadMediaUrl() throws InterruptedException, TimeoutException {
+    public void testLoadMediaUrl() throws TimeoutException {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         try {

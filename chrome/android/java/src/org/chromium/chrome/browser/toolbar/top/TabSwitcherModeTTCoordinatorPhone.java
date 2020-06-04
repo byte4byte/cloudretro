@@ -9,10 +9,20 @@ import android.animation.AnimatorListenerAdapter;
 import android.view.View;
 import android.view.ViewStub;
 
-import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
+import androidx.annotation.Nullable;
+
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 import org.chromium.chrome.browser.toolbar.IncognitoStateProvider;
 import org.chromium.chrome.browser.toolbar.TabCountProvider;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuButtonHelper;
 
 /**
  * The coordinator for the tab switcher mode top toolbar shown on phones, responsible for
@@ -32,8 +42,12 @@ class TabSwitcherModeTTCoordinatorPhone {
     private TabModelSelector mTabModelSelector;
     private IncognitoStateProvider mIncognitoStateProvider;
     private boolean mAccessibilityEnabled;
+    private boolean mIsBottomToolbarVisible;
 
     private TabSwitcherModeTTPhone mTabSwitcherModeToolbar;
+
+    @Nullable
+    private TabModelObserver mTabModelObserver;
 
     TabSwitcherModeTTCoordinatorPhone(ViewStub tabSwitcherToolbarStub) {
         mTabSwitcherToolbarStub = tabSwitcherToolbarStub;
@@ -46,6 +60,9 @@ class TabSwitcherModeTTCoordinatorPhone {
         if (mTabSwitcherModeToolbar != null) {
             mTabSwitcherModeToolbar.destroy();
             mTabSwitcherModeToolbar = null;
+        }
+        if (mTabModelSelector != null && mTabModelObserver != null) {
+            mTabModelSelector.getModel(true).removeObserver(mTabModelObserver);
         }
     }
 
@@ -138,24 +155,44 @@ class TabSwitcherModeTTCoordinatorPhone {
     }
 
     void setTabSwitcherToolbarVisibility(boolean shouldShowTabSwitcherToolbar) {
-        final float targetAlpha = shouldShowTabSwitcherToolbar ? 1.0f : 0.0f;
+        if (mTabSwitcherModeToolbar == null
+                || (mTabSwitcherModeToolbar.getVisibility() == View.VISIBLE)
+                        == shouldShowTabSwitcherToolbar) {
+            return;
+        }
 
+        final float targetAlpha = shouldShowTabSwitcherToolbar ? 1.0f : 0.0f;
         mTabSwitcherModeToolbar.animate()
                 .alpha(targetAlpha)
                 .setDuration(TopToolbarCoordinator.TAB_SWITCHER_MODE_NORMAL_ANIMATION_DURATION_MS)
                 .setListener(new AnimatorListenerAdapter() {
                     @Override
                     public void onAnimationStart(Animator animation) {
-                        if (shouldShowTabSwitcherToolbar)
+                        if (shouldShowTabSwitcherToolbar) {
                             mTabSwitcherModeToolbar.setVisibility(View.VISIBLE);
+                        }
                     }
 
                     @Override
                     public void onAnimationEnd(Animator animation) {
-                        if (!shouldShowTabSwitcherToolbar)
+                        if (!shouldShowTabSwitcherToolbar) {
                             mTabSwitcherModeToolbar.setVisibility(View.GONE);
+                        }
                     }
                 });
+    }
+
+    /**
+     * @param isVisible Whether the bottom toolbar is visible.
+     */
+    void onBottomToolbarVisibilityChanged(boolean isVisible) {
+        if (mIsBottomToolbarVisible == isVisible) {
+            return;
+        }
+        mIsBottomToolbarVisible = isVisible;
+        if (mTabSwitcherModeToolbar != null) {
+            mTabSwitcherModeToolbar.onBottomToolbarVisibilityChanged(isVisible);
+        }
     }
 
     private void initializeTabSwitcherToolbar() {
@@ -176,6 +213,35 @@ class TabSwitcherModeTTCoordinatorPhone {
 
         assert mTabModelSelector != null;
         mTabSwitcherModeToolbar.setTabModelSelector(mTabModelSelector);
+        if (isNewTabVariationEnabled()) {
+            mTabModelObserver = new EmptyTabModelObserver() {
+                @Override
+                public void didAddTab(Tab tab, int type, @TabCreationState int creationState) {
+                    assert tab.isIncognito();
+                    updateIncognitoTabsCount();
+                }
+
+                @Override
+                public void didCloseTab(int tabId, boolean incognito) {
+                    assert incognito;
+                    updateIncognitoTabsCount();
+                }
+
+                @Override
+                public void tabRemoved(Tab tab) {
+                    assert tab.isIncognito();
+                    updateIncognitoTabsCount();
+                }
+
+                private void updateIncognitoTabsCount() {
+                    int incognitoTabsCount = mTabModelSelector.getModel(true).getCount();
+                    mTabSwitcherModeToolbar.onIncognitoTabsCountChanged(incognitoTabsCount);
+                }
+            };
+            TabModel incognitoTabModel = mTabModelSelector.getModel(true);
+            incognitoTabModel.addObserver(mTabModelObserver);
+            mTabSwitcherModeToolbar.onIncognitoTabsCountChanged(incognitoTabModel.getCount());
+        }
 
         assert mIncognitoStateProvider != null;
         mTabSwitcherModeToolbar.setIncognitoStateProvider(mIncognitoStateProvider);
@@ -183,5 +249,15 @@ class TabSwitcherModeTTCoordinatorPhone {
         if (mAccessibilityEnabled) {
             mTabSwitcherModeToolbar.onAccessibilityStatusChanged(mAccessibilityEnabled);
         }
+        mTabSwitcherModeToolbar.onBottomToolbarVisibilityChanged(mIsBottomToolbarVisible);
+    }
+
+    private boolean isNewTabVariationEnabled() {
+        return TabUiFeatureUtilities.isGridTabSwitcherEnabled() && ChromeFeatureList.isInitialized()
+                && IncognitoUtils.isIncognitoModeEnabled()
+                && ChromeFeatureList
+                           .getFieldTrialParamByFeature(ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID,
+                                   "tab_grid_layout_android_new_tab")
+                           .equals("NewTabVariation");
     }
 }

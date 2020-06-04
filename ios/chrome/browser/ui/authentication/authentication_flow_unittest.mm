@@ -7,19 +7,19 @@
 #include <memory>
 
 #include "base/bind.h"
-#import "base/mac/scoped_block.h"
 #include "base/memory/ptr_util.h"
 #import "base/test/ios/wait_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/sync_preferences/pref_service_mock_factory.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
+#include "ios/chrome/browser/main/test_browser.h"
 #include "ios/chrome/browser/prefs/browser_prefs.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/signin/authentication_service_fake.h"
 #import "ios/chrome/browser/ui/authentication/authentication_flow_performer.h"
 #include "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #import "testing/gtest_mac.h"
 #import "testing/platform_test.h"
 #import "third_party/ocmock/gtest_support.h"
@@ -44,6 +44,10 @@ class AuthenticationFlowTest : public PlatformTest {
             &AuthenticationServiceFake::CreateAuthenticationService));
     builder.SetPrefService(CreatePrefService());
     browser_state_ = builder.Build();
+    WebStateList* web_state_list = nullptr;
+    browser_ =
+        std::make_unique<TestBrowser>(browser_state_.get(), web_state_list);
+
     ios::FakeChromeIdentityService* identityService =
         ios::FakeChromeIdentityService::GetInstanceFromChromeProvider();
     identityService->AddIdentities(@[ @"identity1", @"identity2" ]);
@@ -80,11 +84,11 @@ class AuthenticationFlowTest : public PlatformTest {
     ChromeIdentity* identity = identity1_;
     view_controller_ = [OCMockObject niceMockForClass:[UIViewController class]];
     authentication_flow_ =
-        [[AuthenticationFlow alloc] initWithBrowserState:browser_state_.get()
-                                                identity:identity
-                                         shouldClearData:shouldClearData
-                                        postSignInAction:postSignInAction
-                                presentingViewController:view_controller_];
+        [[AuthenticationFlow alloc] initWithBrowser:browser_.get()
+                                           identity:identity
+                                    shouldClearData:shouldClearData
+                                   postSignInAction:postSignInAction
+                           presentingViewController:view_controller_];
     performer_ =
         [OCMockObject mockForClass:[AuthenticationFlowPerformer class]];
     [authentication_flow_
@@ -102,9 +106,10 @@ class AuthenticationFlowTest : public PlatformTest {
     [performer_ verify];
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   AuthenticationFlow* authentication_flow_;
   std::unique_ptr<TestChromeBrowserState> browser_state_;
+  std::unique_ptr<Browser> browser_;
   ChromeIdentity* identity1_;
   ChromeIdentity* identity2_;
   OCMockObject* performer_;
@@ -192,8 +197,8 @@ TEST_F(AuthenticationFlowTest, TestSignOutUserChoice) {
     [authentication_flow_
         didChooseClearDataPolicy:SHOULD_CLEAR_DATA_CLEAR_DATA];
   }] promptMergeCaseForIdentity:identity1_
-                    browserState:browser_state_.get()
-                  viewController:view_controller_];
+                        browser:browser_.get()
+                 viewController:view_controller_];
 
   [[[performer_ expect] andDo:^(NSInvocation*) {
     [authentication_flow_ didSignOut];
@@ -201,8 +206,7 @@ TEST_F(AuthenticationFlowTest, TestSignOutUserChoice) {
 
   [[[performer_ expect] andDo:^(NSInvocation*) {
     [authentication_flow_ didClearData];
-  }] clearData:browser_state_.get()
-      dispatcher:nil];
+  }] clearDataFromBrowser:browser_.get() commandHandler:nil];
 
   [[performer_ expect] signInIdentity:identity1_
                      withHostedDomain:nil
@@ -234,8 +238,8 @@ TEST_F(AuthenticationFlowTest, TestCancel) {
   [[[performer_ expect] andDo:^(NSInvocation*) {
     [authentication_flow_ cancelAndDismiss];
   }] promptMergeCaseForIdentity:identity1_
-                    browserState:browser_state_.get()
-                  viewController:view_controller_];
+                        browser:browser_.get()
+                 viewController:view_controller_];
 
   [[performer_ expect] cancelAndDismiss];
 
@@ -260,8 +264,9 @@ TEST_F(AuthenticationFlowTest, TestFailFetchManagedStatus) {
     [invocation getArgument:&completionBlock atIndex:3];
     completionBlock();
   }] showAuthenticationError:[OCMArg any]
-               withCompletion:[OCMArg any]
-               viewController:view_controller_];
+              withCompletion:[OCMArg any]
+              viewController:view_controller_
+                     browser:browser_.get()];
 
   [authentication_flow_ startSignInWithCompletion:sign_in_completion_];
 
@@ -286,12 +291,12 @@ TEST_F(AuthenticationFlowTest, TestShowManagedConfirmation) {
   [[[performer_ expect] andDo:^(NSInvocation*) {
     [authentication_flow_ didAcceptManagedConfirmation];
   }] showManagedConfirmationForHostedDomain:@"foo.com"
-                              viewController:view_controller_];
+                             viewController:view_controller_
+                                    browser:browser_.get()];
 
   [[[performer_ expect] andDo:^(NSInvocation*) {
     [authentication_flow_ didClearData];
-  }] clearData:browser_state_.get()
-      dispatcher:nil];
+  }] clearDataFromBrowser:browser_.get() commandHandler:nil];
 
   [[performer_ expect] signInIdentity:identity1_
                      withHostedDomain:@"foo.com"

@@ -15,16 +15,17 @@
 #include "base/process/process.h"
 #include "base/rand_util.h"
 #include "base/sequence_checker.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/task/post_task.h"
-#include "base/task_runner.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/page_visibility_state.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/page_visibility_state.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser.h"
@@ -44,13 +45,13 @@ namespace {
 
 struct AfterStartupTask {
   AfterStartupTask(const base::Location& from_here,
-                   const scoped_refptr<base::TaskRunner>& task_runner,
+                   const scoped_refptr<base::SequencedTaskRunner>& task_runner,
                    base::OnceClosure task)
       : from_here(from_here), task_runner(task_runner), task(std::move(task)) {}
   ~AfterStartupTask() {}
 
   const base::Location from_here;
-  const scoped_refptr<base::TaskRunner> task_runner;
+  const scoped_refptr<base::SequencedTaskRunner> task_runner;
   base::OnceClosure task;
 };
 
@@ -81,7 +82,8 @@ void ScheduleTask(std::unique_ptr<AfterStartupTask> queued_task) {
   // Spread their execution over a brief time.
   constexpr int kMinDelaySec = 0;
   constexpr int kMaxDelaySec = 10;
-  scoped_refptr<base::TaskRunner> target_runner = queued_task->task_runner;
+  scoped_refptr<base::SequencedTaskRunner> target_runner =
+      queued_task->task_runner;
   base::Location from_here = queued_task->from_here;
   int delay_in_seconds = g_schedule_tasks_with_delay
                              ? base::RandInt(kMinDelaySec, kMaxDelaySec)
@@ -101,9 +103,9 @@ void QueueTask(std::unique_ptr<AfterStartupTask> queued_task) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     // Posted with USER_VISIBLE priority to avoid this becoming an after startup
     // task itself.
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI, base::TaskPriority::USER_VISIBLE},
-        base::BindOnce(QueueTask, std::move(queued_task)));
+    base::PostTask(FROM_HERE,
+                   {BrowserThread::UI, base::TaskPriority::USER_VISIBLE},
+                   base::BindOnce(QueueTask, std::move(queued_task)));
     return;
   }
 
@@ -174,9 +176,16 @@ class StartupObserver : public WebContentsObserver {
 
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
-                   int error_code,
-                   const base::string16& error_description) override {
+                   int error_code) override {
     if (!render_frame_host->GetParent())
+      OnStartupComplete();
+  }
+
+  // Starting the browser with a file download url will not result in
+  // DidFinishLoad firing, so watch for this case too. crbug.com/1006954
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override {
+    if (navigation_handle->IsInMainFrame() && navigation_handle->IsDownload())
       OnStartupComplete();
   }
 
@@ -218,36 +227,13 @@ void StartupObserver::Start() {
   delay = base::TimeDelta::FromMinutes(kLongerDelayMins);
 #endif  // !defined(OS_ANDROID)
 
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&StartupObserver::OnFailsafeTimeout,
-                     weak_factory_.GetWeakPtr()),
-      delay);
+  base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
+                        base::BindOnce(&StartupObserver::OnFailsafeTimeout,
+                                       weak_factory_.GetWeakPtr()),
+                        delay);
 }
 
 }  // namespace
-
-AfterStartupTaskUtils::Runner::Runner(
-    scoped_refptr<base::TaskRunner> destination_runner)
-    : destination_runner_(std::move(destination_runner)) {
-  DCHECK(destination_runner_);
-}
-
-AfterStartupTaskUtils::Runner::~Runner() = default;
-
-bool AfterStartupTaskUtils::Runner::PostDelayedTask(
-    const base::Location& from_here,
-    base::OnceClosure task,
-    base::TimeDelta delay) {
-  DCHECK(delay.is_zero());
-  AfterStartupTaskUtils::PostTask(from_here, destination_runner_,
-                                  std::move(task));
-  return true;
-}
-
-bool AfterStartupTaskUtils::Runner::RunsTasksInCurrentSequence() const {
-  return destination_runner_->RunsTasksInCurrentSequence();
-}
 
 void AfterStartupTaskUtils::StartMonitoringStartup() {
   // The observer is self-deleting.
@@ -256,7 +242,7 @@ void AfterStartupTaskUtils::StartMonitoringStartup() {
 
 void AfterStartupTaskUtils::PostTask(
     const base::Location& from_here,
-    const scoped_refptr<base::TaskRunner>& destination_runner,
+    const scoped_refptr<base::SequencedTaskRunner>& destination_runner,
     base::OnceClosure task) {
   if (IsBrowserStartupComplete()) {
     destination_runner->PostTask(from_here, std::move(task));

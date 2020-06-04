@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "components/prefs/persistent_pref_store_unittest.h"
 #include "components/prefs/pref_store_observer_mock.h"
@@ -22,7 +22,7 @@ class InMemoryPrefStoreTest : public testing::Test {
 
   void SetUp() override { store_ = new InMemoryPrefStore(); }
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   scoped_refptr<InMemoryPrefStore> store_;
   PrefStoreObserverMock observer_;
 };
@@ -107,7 +107,27 @@ TEST_F(InMemoryPrefStoreTest, ReadPrefs) {
 }
 
 TEST_F(InMemoryPrefStoreTest, CommitPendingWriteWithCallback) {
-  TestCommitPendingWriteWithCallback(store_.get(), &scoped_task_environment_);
+  TestCommitPendingWriteWithCallback(store_.get(), &task_environment_);
+}
+
+TEST_F(InMemoryPrefStoreTest, RemoveValuesByPrefix) {
+  const base::Value* value;
+  const std::string prefix = "pref";
+  const std::string subpref_name1 = "pref.a";
+  const std::string subpref_name2 = "pref.b";
+  const std::string other_name = "other";
+
+  store_->SetValue(subpref_name1, std::make_unique<base::Value>(42),
+                   WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  store_->SetValue(subpref_name2, std::make_unique<base::Value>(42),
+                   WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  store_->SetValue(other_name, std::make_unique<base::Value>(42),
+                   WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+
+  store_->RemoveValuesByPrefixSilently(prefix);
+  EXPECT_FALSE(store_->GetValue(subpref_name1, &value));
+  EXPECT_FALSE(store_->GetValue(subpref_name2, &value));
+  EXPECT_TRUE(store_->GetValue(other_name, &value));
 }
 
 }  // namespace

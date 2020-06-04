@@ -36,13 +36,27 @@ class FaviconLoader : public KeyedService {
   //   1. Use |large_icon_service_| to fetch from local DB managed by
   //      HistoryService;
   //   2. Use |large_icon_service_| to fetch from Google Favicon server if
-  //      |fallback_to_google_server|=YES;
+  //      |fallback_to_google_server|=YES (|size_in_points| is ignored when
+  //      fetching from the Google server);
   //   3. Create a favicon base on the fallback style from |large_icon_service|.
   void FaviconForPageUrl(const GURL& page_url,
                          float size_in_points,
                          float min_size_in_points,
                          bool fallback_to_google_server,
                          FaviconAttributesCompletionBlock faviconBlockHandler);
+
+  // Tries to find a FaviconAttributes in |favicon_cache_| with |page_url|:
+  // If found, invokes |faviconBlockHandler| and exits.
+  // If not found, invokes |faviconBlockHandler| with a default placeholder
+  // then invokes it again asynchronously with the favicon fetched by trying
+  // following methods:
+  //   1. Use |large_icon_service_| to fetch from local DB managed by
+  //      HistoryService;
+  //   2. Create a favicon base on the fallback style from |large_icon_service|.
+  void FaviconForPageUrlOrHost(
+      const GURL& page_url,
+      float size_in_points,
+      FaviconAttributesCompletionBlock favicon_block_handler);
 
   // Tries to find a FaviconAttributes in |favicon_cache_| with |icon_url|:
   // If found, invokes |faviconBlockHandler| and exits.

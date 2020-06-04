@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,19 @@
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
 #import "ios/chrome/browser/metrics/drag_and_drop_recorder.h"
 #import "ios/chrome/browser/metrics/size_class_recorder.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
+#import "ios/chrome/browser/metrics/user_interface_style_recorder.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface ChromeOverlayWindow () {
-  SizeClassRecorder* _sizeClassRecorder;
-  DragAndDropRecorder* _dragAndDropRecorder;
-}
+@interface ChromeOverlayWindow ()
+@property(nonatomic, strong)
+    UserInterfaceStyleRecorder* userInterfaceStyleRecorder API_AVAILABLE(
+        ios(13.0));
+@property(nonatomic, strong) SizeClassRecorder* sizeClassRecorder;
+@property(nonatomic, strong) DragAndDropRecorder* dragAndDropRecorder;
 
 // Initializes the size class recorder. On iPad It starts tracking horizontal
 // size class changes.
@@ -38,6 +40,10 @@
     [self initializeSizeClassRecorder];
     [self updateBreakpad];
     _dragAndDropRecorder = [[DragAndDropRecorder alloc] initWithView:self];
+    if (@available(iOS 13, *)) {
+      _userInterfaceStyleRecorder = [[UserInterfaceStyleRecorder alloc]
+          initWithUserInterfaceStyle:self.traitCollection.userInterfaceStyle];
+    }
   }
   return self;
 }
@@ -61,6 +67,8 @@
 - (void)updateBreakpad {
   breakpad_helper::SetCurrentHorizontalSizeClass(
       self.traitCollection.horizontalSizeClass);
+  breakpad_helper::SetCurrentUserInterfaceStyle(
+      self.traitCollection.userInterfaceStyle);
 }
 
 #pragma mark - UITraitEnvironment
@@ -71,6 +79,15 @@
       self.traitCollection.horizontalSizeClass) {
     [_sizeClassRecorder
         horizontalSizeClassDidChange:self.traitCollection.horizontalSizeClass];
+    [self updateBreakpad];
+  }
+  if (@available(iOS 13, *)) {
+    if ([self.traitCollection
+            hasDifferentColorAppearanceComparedToTraitCollection:
+                previousTraitCollection]) {
+      [self.userInterfaceStyleRecorder
+          userInterfaceStyleDidChange:self.traitCollection.userInterfaceStyle];
+    }
     [self updateBreakpad];
   }
 }

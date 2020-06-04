@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -72,10 +71,14 @@ template <class C>
 void DataReductionProxySettingsTestBase::ResetSettings(base::Clock* clock) {
   MockDataReductionProxySettings<C>* settings =
       new MockDataReductionProxySettings<C>();
-  settings->config_ = test_context_->config();
+  if (settings_) {
+    settings->data_reduction_proxy_service_ =
+        std::move(settings_->data_reduction_proxy_service_);
+  } else {
+    settings->data_reduction_proxy_service_ = test_context_->TakeService();
+  }
+  settings->data_reduction_proxy_service_->SetSettingsForTesting(settings);
   settings->prefs_ = test_context_->pref_service();
-  settings->data_reduction_proxy_service_ =
-      test_context_->CreateDataReductionProxyService(settings);
   if (clock)
     settings->clock_ = clock;
   EXPECT_CALL(*settings, GetOriginalProfilePrefs())
@@ -119,11 +122,9 @@ void DataReductionProxySettingsTestBase::CheckOnPrefChange(
 void DataReductionProxySettingsTestBase::InitDataReductionProxy(
     bool enabled_at_startup) {
   settings_->InitDataReductionProxySettings(
-      test_context_->pref_service(), test_context_->io_data(),
-      test_context_->CreateDataReductionProxyService(settings_.get()));
-  settings_->data_reduction_proxy_service()->SetIOData(
-      test_context_->io_data()->GetWeakPtr());
-  settings_->SetCallbackToRegisterSyntheticFieldTrial(base::Bind(
+      test_context_->pref_service(),
+      std::move(settings_->data_reduction_proxy_service_));
+  settings_->SetCallbackToRegisterSyntheticFieldTrial(base::BindRepeating(
       &DataReductionProxySettingsTestBase::OnSyntheticFieldTrialRegistration,
       base::Unretained(this)));
 

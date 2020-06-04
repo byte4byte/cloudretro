@@ -16,7 +16,9 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/tile_size_calculator.h"
+#include "cc/paint/discardable_image_map.h"
 #include "cc/paint/image_id.h"
+#include "cc/raster/lcd_text_disallowed_reason.h"
 #include "cc/tiles/picture_layer_tiling.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
 #include "cc/tiles/tiling_set_eviction_queue.h"
@@ -33,17 +35,19 @@ class CC_EXPORT PictureLayerImpl
       public PictureLayerTilingClient,
       public ImageAnimationController::AnimationDriver {
  public:
-  static std::unique_ptr<PictureLayerImpl>
-  Create(LayerTreeImpl* tree_impl, int id, Layer::LayerMaskType mask_type) {
-    return base::WrapUnique(new PictureLayerImpl(tree_impl, id, mask_type));
+  static std::unique_ptr<PictureLayerImpl> Create(LayerTreeImpl* tree_impl,
+                                                  int id) {
+    return base::WrapUnique(new PictureLayerImpl(tree_impl, id));
   }
   PictureLayerImpl(const PictureLayerImpl&) = delete;
   ~PictureLayerImpl() override;
 
   PictureLayerImpl& operator=(const PictureLayerImpl&) = delete;
 
-  Layer::LayerMaskType mask_type() const { return mask_type_; }
-  void SetLayerMaskType(Layer::LayerMaskType type);
+  void SetIsBackdropFilterMask(bool is_backdrop_filter_mask) {
+    is_backdrop_filter_mask_ = is_backdrop_filter_mask;
+  }
+  bool is_backdrop_filter_mask() const { return is_backdrop_filter_mask_; }
 
   // LayerImpl overrides.
   const char* LayerTypeAsString() const override;
@@ -61,6 +65,7 @@ class CC_EXPORT PictureLayerImpl
   void RecreateTileResources() override;
   Region GetInvalidationRegionForDebugging() override;
   gfx::Rect GetEnclosingRectInTargetSpace() const override;
+  gfx::ContentColorUsage GetContentColorUsage() const override;
 
   // PictureLayerTilingClient overrides.
   std::unique_ptr<Tile> CreateTile(const Tile::CreateInfo& info) override;
@@ -101,6 +106,8 @@ class CC_EXPORT PictureLayerImpl
 
   void SetUseTransformedRasterization(bool use);
 
+  void SetDirectlyCompositedImageSize(base::Optional<gfx::Size>);
+
   size_t GPUMemoryUsageInBytes() const override;
 
   void RunMicroBenchmark(MicroBenchmarkImpl* benchmark) override;
@@ -116,10 +123,6 @@ class CC_EXPORT PictureLayerImpl
   // Used for benchmarking
   RasterSource* GetRasterSource() const { return raster_source_.get(); }
 
-  void set_is_directly_composited_image(bool is_directly_composited_image) {
-    is_directly_composited_image_ = is_directly_composited_image;
-  }
-
   // This enum is the return value of the InvalidateRegionForImages() call. The
   // possible values represent the fact that there are no images on this layer
   // (kNoImages), the fact that the invalidation images don't cause an
@@ -134,12 +137,20 @@ class CC_EXPORT PictureLayerImpl
   ImageInvalidationResult InvalidateRegionForImages(
       const PaintImageIdFlatSet& images_to_invalidate);
 
-  bool can_use_lcd_text() const { return can_use_lcd_text_; }
+  bool can_use_lcd_text() const {
+    return lcd_text_disallowed_reason_ == LCDTextDisallowedReason::kNone;
+  }
+  LCDTextDisallowedReason lcd_text_disallowed_reason() const {
+    return lcd_text_disallowed_reason_;
+  }
+  LCDTextDisallowedReason ComputeLCDTextDisallowedReasonForTesting() const {
+    return ComputeLCDTextDisallowedReason();
+  }
 
   const Region& InvalidationForTesting() const { return invalidation_; }
 
   // Set the paint result (PaintRecord) for a given PaintWorkletInput.
-  void SetPaintWorkletRecord(scoped_refptr<PaintWorkletInput>,
+  void SetPaintWorkletRecord(scoped_refptr<const PaintWorkletInput>,
                              sk_sp<PaintRecord>);
 
   // Retrieve the map of PaintWorkletInputs to their painted results
@@ -151,10 +162,13 @@ class CC_EXPORT PictureLayerImpl
 
   gfx::Size content_bounds() { return content_bounds_; }
 
+  // Invalidates all PaintWorklets in this layer who depend on the given
+  // property to be painted. Used when the value for the property is changed by
+  // an animation, at which point the PaintWorklet must be re-painted.
+  void InvalidatePaintWorklets(const PaintWorkletInput::PropertyKey& key);
+
  protected:
-  PictureLayerImpl(LayerTreeImpl* tree_impl,
-                   int id,
-                   Layer::LayerMaskType mask_type);
+  PictureLayerImpl(LayerTreeImpl* tree_impl, int id);
   PictureLayerTiling* AddTiling(const gfx::AxisTransform2d& contents_transform);
   void RemoveAllTilings();
   void AddTilingsForRasterScale();
@@ -168,6 +182,7 @@ class CC_EXPORT PictureLayerImpl
   float MaximumContentsScale() const;
   void UpdateViewportRectForTilePriorityInContentSpace();
   PictureLayerImpl* GetRecycledTwinLayer() const;
+  float GetDirectlyCompositedImageRasterScale() const;
 
   void SanityCheckTilingState() const;
 
@@ -183,11 +198,13 @@ class CC_EXPORT PictureLayerImpl
   void RegisterAnimatedImages();
   void UnregisterAnimatedImages();
 
-  std::unique_ptr<base::DictionaryValue> LayerAsJson() const override;
-
-  // Set the collection of PaintWorkletInputs that are part of this layer.
+  // Set the collection of PaintWorkletInput as well as their PaintImageId that
+  // are part of this layer.
   void SetPaintWorkletInputs(
-      const std::vector<scoped_refptr<PaintWorkletInput>>& inputs);
+      const std::vector<DiscardableImageMap::PaintWorkletInputWithImageId>&
+          inputs);
+
+  LCDTextDisallowedReason ComputeLCDTextDisallowedReason() const;
 
   PictureLayerImpl* twin_layer_;
 
@@ -215,15 +232,17 @@ class CC_EXPORT PictureLayerImpl
   float raster_contents_scale_;
   float low_res_raster_contents_scale_;
 
-  Layer::LayerMaskType mask_type_;
+  bool is_backdrop_filter_mask_ : 1;
 
   bool was_screen_space_transform_animating_ : 1;
   bool only_used_low_res_last_append_quads_ : 1;
 
   bool nearest_neighbor_ : 1;
   bool use_transformed_rasterization_ : 1;
-  bool is_directly_composited_image_ : 1;
-  bool can_use_lcd_text_ : 1;
+
+  LCDTextDisallowedReason lcd_text_disallowed_reason_;
+
+  base::Optional<gfx::Size> directly_composited_image_size_;
 
   // Use this instead of |visible_layer_rect()| for tiling calculations. This
   // takes external viewport and transform for tile priority into account.

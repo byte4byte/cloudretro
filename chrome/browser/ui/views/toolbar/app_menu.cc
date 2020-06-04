@@ -12,12 +12,13 @@
 
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -47,14 +48,16 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/image/image_skia_source.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/text_utils.h"
+#include "ui/native_theme/themed_vector_icon.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
@@ -113,6 +116,8 @@ class FullscreenButton : public ImageButton {
  public:
   explicit FullscreenButton(views::ButtonListener* listener)
       : ImageButton(listener) { }
+  FullscreenButton(const FullscreenButton&) = delete;
+  FullscreenButton& operator=(const FullscreenButton&) = delete;
 
   // Overridden from ImageButton.
   gfx::Size CalculatePreferredSize() const override {
@@ -128,9 +133,6 @@ class FullscreenButton : public ImageButton {
     ImageButton::GetAccessibleNodeData(node_data);
     node_data->role = ax::mojom::Role::kMenuItem;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FullscreenButton);
 };
 
 // Combination border/background for the buttons contained in the menu. The
@@ -150,6 +152,8 @@ class InMenuButtonBackground : public views::Background {
   };
 
   explicit InMenuButtonBackground(ButtonType type) : type_(type) {}
+  InMenuButtonBackground(const InMenuButtonBackground&) = delete;
+  InMenuButtonBackground& operator=(const InMenuButtonBackground&) = delete;
 
   // Overridden from views::Background.
   void Paint(gfx::Canvas* canvas, View* view) const override {
@@ -183,23 +187,6 @@ class InMenuButtonBackground : public views::Background {
   }
 
  private:
-  static SkColor BackgroundColor(const View* view,
-                                 views::Button::ButtonState state) {
-    const ui::NativeTheme* theme = view->GetNativeTheme();
-    switch (state) {
-      case views::Button::STATE_PRESSED:
-        return theme->GetSystemColor(
-            ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor);
-      case views::Button::STATE_HOVERED:
-        // Hovered should be handled in DrawBackground.
-        NOTREACHED();
-        FALLTHROUGH;
-      default:
-        return theme->GetSystemColor(
-            ui::NativeTheme::kColorId_MenuBackgroundColor);
-    }
-  }
-
   void DrawBackground(gfx::Canvas* canvas,
                       const views::View* view,
                       const gfx::Rect& bounds,
@@ -219,8 +206,6 @@ class InMenuButtonBackground : public views::Background {
   }
 
   const ButtonType type_;
-
-  DISALLOW_COPY_AND_ASSIGN(InMenuButtonBackground);
 };
 
 base::string16 GetAccessibleNameForAppMenuItem(ButtonMenuItemModel* model,
@@ -248,6 +233,9 @@ class InMenuButton : public LabelButton {
  public:
   InMenuButton(views::ButtonListener* listener, const base::string16& text)
       : LabelButton(listener, text) {}
+  InMenuButton(const InMenuButton&) = delete;
+  InMenuButton& operator=(const InMenuButton&) = delete;
+
   ~InMenuButton() override {}
 
   void Init(InMenuButtonBackground::ButtonType type) {
@@ -269,6 +257,7 @@ class InMenuButton : public LabelButton {
 
   // views::LabelButton
   void OnThemeChanged() override {
+    LabelButton::OnThemeChanged();
     ui::NativeTheme* theme = GetNativeTheme();
     if (theme) {
       SetTextColor(
@@ -289,9 +278,6 @@ class InMenuButton : public LabelButton {
               ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor));
     }
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InMenuButton);
 };
 
 // AppMenuView is a view that can contain label buttons.
@@ -299,6 +285,8 @@ class AppMenuView : public views::View, public views::ButtonListener {
  public:
   AppMenuView(AppMenu* menu, ButtonMenuItemModel* menu_model)
       : menu_(menu->AsWeakPtr()), menu_model_(menu_model) {}
+  AppMenuView(const AppMenuView&) = delete;
+  AppMenuView& operator=(const AppMenuView&) = delete;
 
   ~AppMenuView() override = default;
 
@@ -306,15 +294,6 @@ class AppMenuView : public views::View, public views::ButtonListener {
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     views::View::GetAccessibleNodeData(node_data);
     node_data->role = ax::mojom::Role::kMenu;
-  }
-
-  // Overridden from views::View.
-  void SchedulePaintInRect(const gfx::Rect& r) override {
-    // Normally when the mouse enters/exits a button the buttons invokes
-    // SchedulePaint. As part of the button border (InMenuButtonBackground) is
-    // rendered by the button to the left/right of it SchedulePaint on the the
-    // button may not be enough, so this forces a paint all.
-    View::SchedulePaintInRect(gfx::Rect(size()));
   }
 
   InMenuButton* CreateAndConfigureButton(
@@ -364,41 +343,6 @@ class AppMenuView : public views::View, public views::ButtonListener {
 
   // The menu model containing the increment/decrement/reset items.
   ButtonMenuItemModel* menu_model_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppMenuView);
-};
-
-// Generate the button image for hover state.
-class HoveredImageSource : public gfx::ImageSkiaSource {
- public:
-  HoveredImageSource(const gfx::ImageSkia& image, SkColor color)
-      : image_(image),
-        color_(color) {
-  }
-  ~HoveredImageSource() override {}
-
-  gfx::ImageSkiaRep GetImageForScale(float scale) override {
-    const gfx::ImageSkiaRep& rep = image_.GetRepresentation(scale);
-    SkBitmap bitmap = rep.GetBitmap();
-    SkBitmap white;
-    white.allocN32Pixels(bitmap.width(), bitmap.height());
-    white.eraseARGB(0, 0, 0, 0);
-    for (int y = 0; y < bitmap.height(); ++y) {
-      uint32_t* image_row = bitmap.getAddr32(0, y);
-      uint32_t* dst_row = white.getAddr32(0, y);
-      for (int x = 0; x < bitmap.width(); ++x) {
-        uint32_t image_pixel = image_row[x];
-        // Fill the non transparent pixels with |color_|.
-        dst_row[x] = (image_pixel & 0xFF000000) == 0x0 ? 0x0 : color_;
-      }
-    }
-    return gfx::ImageSkiaRep(white, scale);
-  }
-
- private:
-  const gfx::ImageSkia image_;
-  const SkColor color_;
-  DISALLOW_COPY_AND_ASSIGN(HoveredImageSource);
 };
 
 }  // namespace
@@ -421,6 +365,8 @@ class AppMenu::CutCopyPasteView : public AppMenuView {
     CreateAndConfigureButton(IDS_PASTE, InMenuButtonBackground::LEADING_BORDER,
                              paste_index);
   }
+  CutCopyPasteView(const CutCopyPasteView&) = delete;
+  CutCopyPasteView& operator=(const CutCopyPasteView&) = delete;
 
   // Overridden from View.
   gfx::Size CalculatePreferredSize() const override {
@@ -452,8 +398,6 @@ class AppMenu::CutCopyPasteView : public AppMenuView {
       width = std::max(width, child->GetPreferredSize().width());
     return width;
   }
-
-  DISALLOW_COPY_AND_ASSIGN(CutCopyPasteView);
 };
 
 // ZoomView --------------------------------------------------------------------
@@ -480,8 +424,8 @@ class AppMenu::ZoomView : public AppMenuView {
     browser_zoom_subscription_ =
         zoom::ZoomEventManager::GetForBrowserContext(menu->browser_->profile())
             ->AddZoomLevelChangedCallback(
-                base::Bind(&AppMenu::ZoomView::OnZoomLevelChanged,
-                           base::Unretained(this)));
+                base::BindRepeating(&AppMenu::ZoomView::OnZoomLevelChanged,
+                                    base::Unretained(this)));
 
     decrement_button_ = CreateButtonWithAccName(
         IDS_ZOOM_MINUS2, InMenuButtonBackground::LEADING_BORDER,
@@ -510,10 +454,6 @@ class AppMenu::ZoomView : public AppMenuView {
     // all buttons on menu should must be a custom button in order for
     // the keyboard navigation to work.
     DCHECK(Button::AsButton(fullscreen_button_));
-    gfx::ImageSkia* full_screen_image =
-        ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-            IDR_FULLSCREEN_MENU_BUTTON);
-    fullscreen_button_->SetImage(ImageButton::STATE_NORMAL, full_screen_image);
 
     // Since |fullscreen_button_| will reside in a menu, make it ALWAYS
     // focusable regardless of the platform.
@@ -532,8 +472,9 @@ class AppMenu::ZoomView : public AppMenuView {
     OnThemeChanged();
     UpdateZoomControls();
   }
-
-  ~ZoomView() override {}
+  ZoomView(const ZoomView&) = delete;
+  ZoomView& operator=(const ZoomView&) = delete;
+  ~ZoomView() override = default;
 
   // Overridden from View.
   gfx::Size CalculatePreferredSize() const override {
@@ -584,22 +525,23 @@ class AppMenu::ZoomView : public AppMenuView {
     zoom_label_max_width_valid_ = false;
 
     ui::NativeTheme* theme = GetNativeTheme();
-    if (theme) {
-      zoom_label_->SetEnabledColor(theme->GetSystemColor(
-          ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor));
-      gfx::ImageSkia* full_screen_image =
-          ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_FULLSCREEN_MENU_BUTTON);
-      SkColor fg_color = theme->GetSystemColor(
-          ui::NativeTheme::kColorId_SelectedMenuItemForegroundColor);
-      gfx::ImageSkia hovered_fullscreen_image(
-          std::make_unique<HoveredImageSource>(*full_screen_image, fg_color),
-          full_screen_image->size());
-      fullscreen_button_->SetImage(
-          ImageButton::STATE_HOVERED, &hovered_fullscreen_image);
-      fullscreen_button_->SetImage(
-          ImageButton::STATE_PRESSED, &hovered_fullscreen_image);
-    }
+    zoom_label_->SetEnabledColor(theme->GetSystemColor(
+        ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor));
+
+    fullscreen_button_->SetImage(
+        ImageButton::STATE_NORMAL,
+        gfx::CreateVectorIcon(
+            kFullscreenIcon,
+            GetNativeTheme()->GetSystemColor(
+                ui::NativeTheme::kColorId_EnabledMenuItemForegroundColor)));
+    gfx::ImageSkia hovered_fullscreen_image = gfx::CreateVectorIcon(
+        kFullscreenIcon,
+        theme->GetSystemColor(
+            ui::NativeTheme::kColorId_SelectedMenuItemForegroundColor));
+    fullscreen_button_->SetImage(ImageButton::STATE_HOVERED,
+                                 hovered_fullscreen_image);
+    fullscreen_button_->SetImage(ImageButton::STATE_PRESSED,
+                                 hovered_fullscreen_image);
   }
 
   // Overridden from ButtonListener.
@@ -702,8 +644,6 @@ class AppMenu::ZoomView : public AppMenuView {
   // Flag tracking whether calls to ZoomLabelMaxWidth() need to re-calculate
   // the label width, because the cached value may no longer be correct.
   mutable bool zoom_label_max_width_valid_;
-
-  DISALLOW_COPY_AND_ASSIGN(ZoomView);
 };
 
 // RecentTabsMenuModelDelegate  ------------------------------------------------
@@ -718,7 +658,9 @@ class AppMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
       : app_menu_(app_menu), model_(model), menu_item_(menu_item) {
     model_->SetMenuModelDelegate(this);
   }
-
+  RecentTabsMenuModelDelegate(const RecentTabsMenuModelDelegate&) = delete;
+  RecentTabsMenuModelDelegate& operator=(const RecentTabsMenuModelDelegate&) =
+      delete;
   ~RecentTabsMenuModelDelegate() override {
     model_->SetMenuModelDelegate(nullptr);
   }
@@ -733,9 +675,12 @@ class AppMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
     int command_id = model_->GetCommandIdAt(index);
     views::MenuItemView* item = menu_item_->GetMenuItemByID(command_id);
     DCHECK(item);
-    gfx::Image icon;
-    model_->GetIconAt(index, &icon);
-    item->SetIcon(*icon.ToImageSkia());
+    ui::ImageModel image = model_->GetIconAt(index);
+    // TODO (kylixrd): Use a utility function to get this as an actual image.
+    if (image.IsImage())
+      item->SetIcon(*image.GetImage().ToImageSkia());
+    else if (image.IsVectorIcon())
+      item->SetIcon(ui::ThemedVectorIcon(image.GetVectorIcon()));
   }
 
   void OnMenuStructureChanged() override {
@@ -768,8 +713,6 @@ class AppMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
   AppMenu* app_menu_;
   ui::MenuModel* model_;
   views::MenuItemView* menu_item_;
-
-  DISALLOW_COPY_AND_ASSIGN(RecentTabsMenuModelDelegate);
 };
 
 // AppMenu ------------------------------------------------------------------
@@ -808,7 +751,7 @@ void AppMenu::Init(ui::MenuModel* model) {
   if (run_types_ & views::MenuRunner::SHOULD_SHOW_MNEMONICS)
     types |= views::MenuRunner::SHOULD_SHOW_MNEMONICS;
 
-  menu_runner_.reset(new views::MenuRunner(root_, types));
+  menu_runner_ = std::make_unique<views::MenuRunner>(root_, types);
 }
 
 void AppMenu::RunMenu(views::MenuButtonController* host) {
@@ -1046,12 +989,9 @@ void AppMenu::OnMenuClosed(views::MenuItemView* menu) {
 
 bool AppMenu::ShouldExecuteCommandWithoutClosingMenu(int command_id,
                                                      const ui::Event& event) {
-  if (IsRecentTabsCommand(command_id) && event.IsMouseEvent()) {
-    const auto disposition = ui::DispositionFromEventFlags(event.flags());
-    if (disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)
-      return true;
-  }
-  return false;
+  return IsRecentTabsCommand(command_id) && event.IsMouseEvent() &&
+         (ui::DispositionFromEventFlags(event.flags()) ==
+          WindowOpenDisposition::NEW_BACKGROUND_TAB);
 }
 
 void AppMenu::BookmarkModelChanged() {
@@ -1093,14 +1033,8 @@ void AppMenu::PopulateMenu(MenuItemView* parent, MenuModel* model) {
 
     switch (model->GetCommandIdAt(i)) {
       case IDC_EXTENSIONS_OVERFLOW_MENU: {
-        auto extension_toolbar =
-            std::make_unique<ExtensionToolbarMenuView>(browser_, item);
-        for (View* action_view : extension_toolbar->contents()->children()) {
-          action_view->SetBackground(std::make_unique<InMenuButtonBackground>(
-              InMenuButtonBackground::ROUNDED_BUTTON));
-        }
-        extension_toolbar_ = extension_toolbar.get();
-        item->AddChildView(extension_toolbar.release());
+        extension_toolbar_ = item->AddChildView(
+            std::make_unique<ExtensionToolbarMenuView>(browser_, item));
         break;
       }
 
@@ -1110,7 +1044,8 @@ void AppMenu::PopulateMenu(MenuItemView* parent, MenuModel* model) {
         DCHECK_EQ(IDC_COPY, submodel->GetCommandIdAt(1));
         DCHECK_EQ(IDC_PASTE, submodel->GetCommandIdAt(2));
         item->SetTitle(l10n_util::GetStringUTF16(IDS_EDIT2));
-        item->AddChildView(new CutCopyPasteView(this, submodel, 0, 1, 2));
+        item->AddChildView(
+            std::make_unique<CutCopyPasteView>(this, submodel, 0, 1, 2));
         break;
       }
 
@@ -1120,7 +1055,7 @@ void AppMenu::PopulateMenu(MenuItemView* parent, MenuModel* model) {
         DCHECK_EQ(IDC_ZOOM_PLUS, submodel->GetCommandIdAt(1));
         DCHECK_EQ(IDC_FULLSCREEN, submodel->GetCommandIdAt(2));
         item->SetTitle(l10n_util::GetStringUTF16(IDS_ZOOM_MENU2));
-        item->AddChildView(new ZoomView(this, submodel, 0, 1, 2));
+        item->AddChildView(std::make_unique<ZoomView>(this, submodel, 0, 1, 2));
         break;
       }
 
@@ -1129,7 +1064,7 @@ void AppMenu::PopulateMenu(MenuItemView* parent, MenuModel* model) {
         bookmark_menu_ = item;
         break;
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
       case IDC_FEEDBACK:
         DCHECK(!feedback_menu_item_);
         feedback_menu_item_ = item;
@@ -1188,9 +1123,11 @@ MenuItemView* AppMenu::AddMenuItem(MenuItemView* parent,
     menu_item->SetVisible(model->IsVisibleAt(model_index));
 
     if (menu_type == MenuModel::TYPE_COMMAND && model->HasIcons()) {
-      gfx::Image icon;
-      if (model->GetIconAt(model_index, &icon))
-        menu_item->SetIcon(*icon.ToImageSkia());
+      ui::ImageModel icon = model->GetIconAt(model_index);
+      if (icon.IsImage())
+        menu_item->SetIcon(*icon.GetImage().ToImageSkia());
+      else if (icon.IsVectorIcon())
+        menu_item->SetIcon(ui::ThemedVectorIcon(icon.GetVectorIcon()));
     }
 
     // If we want to show items relating to reopening the last-closed tab as

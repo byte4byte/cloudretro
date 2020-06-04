@@ -29,6 +29,7 @@
 <translation id="1243314992276662751">Nahrať</translation>
 <translation id="1249250836236328755">Žáner</translation>
 <translation id="1278813325885878377">Maďarská klávesnica QWERTY</translation>
+<translation id="1293556467332435079">Súbory</translation>
 <translation id="1297922636971898492">Služba Disk Google práve teraz nie je k dispozícii. Nahrávanie sa automaticky spustí znova, keď bude služba Disk Google opäť dostupná.</translation>
 <translation id="1307931752636661898">Súbory systému Linux sa nedajú zobraziť</translation>
 <translation id="1310751437842832374">Prepis (mausam → ନମସ୍ତେ)</translation>
@@ -75,20 +76,19 @@
 <translation id="1829129547161959350">Tučniak</translation>
 <translation id="183183971458492120">Načítavajú sa informácie…</translation>
 <translation id="1838709767668011582">Web Google</translation>
-<translation id="1839704667838141620">Zmeňte spôsob zdieľania tohto súboru</translation>
 <translation id="1844692022597038441">Tento súbor nie je k dispozícii v režime offline.</translation>
 <translation id="184633654410729720">Thajská klávesnica (Kedmanee)</translation>
 <translation id="1847880352285315359">Uložené</translation>
-<translation id="1864676585353837027">Zmeňte spôsob zdieľania týchto súborov</translation>
 <translation id="1864756863218646478">Súbor sa nepodarilo nájsť.</translation>
 <translation id="1921986354447415460">Turecká klávesnica (typ F)</translation>
+<translation id="1924372192547904021">Disk <ph name="DRIVE_NAME" /> bol naformátovaný</translation>
 <translation id="1931134289871235022">slovenčina</translation>
 <translation id="1933345018156373194">Presun zlyhal, neočakávaná chyba: <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">Fínčina</translation>
 <translation id="1942765061641586207">Rozlíšenie obrázka</translation>
 <translation id="1943097386230153518">Inštalovať novú službu</translation>
 <translation id="1947424002851288782">nemecká klávesnica</translation>
-<translation id="197560921582345123">Môže upravovať</translation>
+<translation id="1972984168337863910">Rozbaliť panely so spätnou väzbou týkajúcou sa súborov</translation>
 <translation id="1984603991036629094">Arménska fonetická klávesnica</translation>
 <translation id="2001796770603320721">Spravovať na Disku</translation>
 <translation id="2009067268969781306">Formátovaním kľúča odstránite všetky dáta, ktoré sú v ňom uložené. Túto akciu nie je možné vrátiť späť.</translation>
@@ -165,6 +165,7 @@
 <translation id="2942290791863759244">Nemecká klávesnica NEO 2</translation>
 <translation id="2943400156390503548">Prezentácie</translation>
 <translation id="2943503720238418293">Použite kratší názov</translation>
+<translation id="2949781154072577687">Disk <ph name="DRIVE_NAME" /> sa formátuje...</translation>
 <translation id="2951236788251446349">Medúza</translation>
 <translation id="2963783323012015985">turecká klávesnica</translation>
 <translation id="2966459079597787514">švédska klávesnica</translation>
@@ -225,6 +226,7 @@
 <translation id="3645531960514756307">Odopnúť priečinok</translation>
 <translation id="3678559383040232393">Maltézska klávesnica</translation>
 <translation id="3685122418104378273">Synchronizácia Disku Google je pri používaní mobilných dát v predvolenom nastavení zakázaná.</translation>
+<translation id="3689865792480713551">Zrušiť <ph name="ACTIVITY_DESCRIPTION" />.</translation>
 <translation id="3726463242007121105">Toto zariadenie nie je možné otvoriť, pretože jeho systém súborov nie je podporovaný.</translation>
 <translation id="3741243925913727067">Zálohujte si fotky a videá z mediálneho zariadenia na Disk Google.</translation>
 <translation id="3749289110408117711">Názov súboru</translation>
@@ -266,11 +268,9 @@
 <translation id="421017592316736757">Ak chcete pristupovať k tomuto súboru, musíte byť online.</translation>
 <translation id="4212740939091998969">Priečinok s názvom <ph name="FOLDER_NAME" /> už existuje. Vyberte iný názov.</translation>
 <translation id="4215448920900139318">Zálohujú sa fotky (<ph name="FILE_COUNT" />)</translation>
-<translation id="4242533952199664413">Otvoriť nastavenia</translation>
 <translation id="426015154560005552">Arabská klávesnica</translation>
 <translation id="4261901459838235729">Prezentácia Google</translation>
 <translation id="4290535918735525311">So systémom Linux zdieľate 1 priečinok</translation>
-<translation id="42981349822642051">Rozbaliť</translation>
 <translation id="4298972503445160211">dánska klávesnica</translation>
 <translation id="4299729908419173967">brazílčina</translation>
 <translation id="4309915981827077375">Všeobecné informácie</translation>
@@ -278,6 +278,7 @@
 <translation id="4336032328163998280">Kopírovanie zlyhalo. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">Dyňa</translation>
 <translation id="4372884569765913867">1x1</translation>
+<translation id="4394214039309501350">Externý odkaz</translation>
 <translation id="4425149324548788773">Môj disk</translation>
 <translation id="4465830120256509958">brazílska klávesnica</translation>
 <translation id="4470564870223067757">Hangul 2 Set</translation>
@@ -287,7 +288,6 @@
 <translation id="4522570452068850558">Podrobnosti</translation>
 <translation id="4552678318981539154">Kúpiť väčší ukladací priestor</translation>
 <translation id="4559767610552730302">Rozostrenie</translation>
-<translation id="4568854179928172494">Čas úpravy</translation>
 <translation id="4572815280350369984">Súbor <ph name="FILE_TYPE" /></translation>
 <translation id="457386861538956877">Viac...</translation>
 <translation id="4579744207439506346">Položka <ph name="ENTRY_NAME" /> bola pridaná do výberu.</translation>
@@ -326,7 +326,6 @@
 <translation id="4880520557730313061">Automatická oprava</translation>
 <translation id="4881695831933465202">Otvoriť</translation>
 <translation id="4886021172213954916">Tamilská klávesnica (písací stroj)</translation>
-<translation id="4892969127351273348">Nedá sa otvoriť pomocou aplikácie <ph name="APP_NAME" /></translation>
 <translation id="4905417359854579806">Môžete začať zálohovať (počet: <ph name="FILE_COUNT" />)</translation>
 <translation id="4924638091161556692">Pevné</translation>
 <translation id="4935975195727477204">Kvet gazánie</translation>
@@ -366,7 +365,6 @@
 <translation id="5218183485292899140">Švajčiarska francúzska klávesnica</translation>
 <translation id="5234764350956374838">Zatvoriť</translation>
 <translation id="5241298539944515331">Vietnamská klávesnica (VIQR)</translation>
-<translation id="52446585071384036">Ak chcete otvárať súbory pomocou aplikácie <ph name="APP_NAME" />, najprv ich skopírujte do priečinka so súbormi systému Linux.</translation>
 <translation id="5253070652067921974">Autor</translation>
 <translation id="5257456363153333584">Vážka</translation>
 <translation id="5262311848634918433"><ph name="MARKUP_1" />Pristupujte k súborom odkiaľkoľvek, dokonca aj v režime offline.<ph name="MARKUP_2" />
@@ -425,7 +423,6 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="5818003990515275822">Kórejčina</translation>
 <translation id="5819442873484330149">Hangul 3 Set (konečné)</translation>
 <translation id="5833610766403489739">Umiestnenie tohto súboru sa zmenilo. Skontrolujte nastavenie umiestnenia pre sťahované súbory a skúste to znova.</translation>
-<translation id="5838051104334203064">Aplikácie z Obchodu Play nemajú prístup k tomuto zariadeniu</translation>
 <translation id="5838451609423551646">Z výberu boli odstránené všetky položky.</translation>
 <translation id="5838825566232597749">US Workman international – medzinárodná</translation>
 <translation id="5850516540536751549">Tento typ súboru nie je podporovaný. Navštívte <ph name="BEGIN_LINK" />Internetový obchod Chrome<ph name="END_LINK" />, kde nájdete aplikáciu, pomocou ktorej môžete otvoriť tento typ súboru.
@@ -471,6 +468,7 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="6339145975392024142">Americká klávesnica s medzinárodným rozložením klávesov (PC)</translation>
 <translation id="6346310558342052870">Prístup je zakázaný</translation>
 <translation id="6353618411602605519">chorvátska klávesnica</translation>
+<translation id="6356685157277930264">Okno spätnej väzby týkajúcej sa súborov</translation>
 <translation id="6358884629796491903">Drak</translation>
 <translation id="637062427944097960">Tento súbor je otvorený na inej pracovnej ploche. Ak ho chcete zobraziť, prejdite do profilu <ph name="USER_NAME" /> (<ph name="MAIL_ADDRESS" />).</translation>
 <translation id="6395575651121294044">Počet položiek: <ph name="NUMBER_OF_FILES" /></translation>
@@ -511,6 +509,7 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="6878261347041253038">Klávesnica dévanágarí (fonetický prepis)</translation>
 <translation id="6885780034956018177">Slimák</translation>
 <translation id="6896758677409633944">Kopírovať</translation>
+<translation id="6898028766943174120">Ďalšie podpriečinky…</translation>
 <translation id="691516599546977041">Do priečinka <ph name="FOLDER_NAME" /> sa nedá ukladať. Upravené obrázky sa uložia do priečinka Stiahnuté súbory</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
@@ -523,6 +522,7 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="696203921837389374">Povoliť synchronizáciu prostredníctvom mobilných dát</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6970230597523682626">Bulharčina</translation>
+<translation id="6973630695168034713">Priečinky</translation>
 <translation id="6978611942794658017">Tento súbor je navrhnutý na použitie v počítači so softvérom Windows. Nie je kompatibilný s vaším zariadením so systémom OS Chrome. Nájdite vhodnú náhradnú aplikáciu v Internetovom obchode Chrome.</translation>
 <translation id="6979158407327259162">Disk Google</translation>
 <translation id="6990081529015358884">Nemáte dostatok miesta</translation>
@@ -570,9 +570,11 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="7589661784326793847">Vydržte chvíľu</translation>
 <translation id="7603724359189955920">Mriežky</translation>
 <translation id="7627790789328695202">Hops, súbor <ph name="FILE_NAME" /> už existuje. Premenujte ho a skúste to znova.</translation>
+<translation id="7628656427739290098">Dokončené: <ph name="PERCENT" /> %.</translation>
 <translation id="7649070708921625228">Pomocník</translation>
 <translation id="7654209398114106148">Presúvajú sa položky (<ph name="NUMBER_OF_ITEMS" />)…</translation>
 <translation id="7658239707568436148">Zrušiť</translation>
+<translation id="7695430100978772476">Disk <ph name="DRIVE_NAME" /> sa nepodarilo naformátovať</translation>
 <translation id="770015031906360009">Gréčtina</translation>
 <translation id="7706319470528945664">portugalská klávesnica</translation>
 <translation id="7711920809702896782">Informácie o obrázku</translation>
@@ -596,7 +598,6 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="7827012282502221009"><ph name="NUMBER_OF_TB" /> TB</translation>
 <translation id="7839804798877833423">Načítanie týchto súborov spotrebuje približne <ph name="FILE_SIZE" /> mobilných dát.</translation>
 <translation id="7846076177841592234">Zrušiť výber</translation>
-<translation id="7850851215703745691">Tieto súbory služby Disk nie sú zatiaľ zdieľané</translation>
 <translation id="7853966320808728790">Francúzština – BÉPO</translation>
 <translation id="7864662577698025113">Pridať novú službu</translation>
 <translation id="7873831373602885875">Úpravy sa nedajú uložiť do priečinka <ph name="FOLDER_NAME" />. Všetky úpravy sa uložia do priečinka <ph name="DOWNLOADS_FOLDER" /> v Stiahnutých súboroch.</translation>
@@ -612,7 +613,6 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="7969525169268594403">Slovinčina</translation>
 <translation id="7982283708762922719">Výška</translation>
 <translation id="7987485481246785146">Kurdská klávesnica (sorání) s arabským rozložením</translation>
-<translation id="799923393800005025">Môže zobraziť</translation>
 <translation id="8008366997883261463">Jack Russell teriér</translation>
 <translation id="8028993641010258682">Veľkosť</translation>
 <translation id="8031722894461705849">slovenská klávesnica</translation>
@@ -641,6 +641,7 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="8223479393428528563">Ak chcete tieto súbory uložiť na používanie offline, prejdite online, kliknite na súbory pravým tlačidlom a vyberte možnosť <ph name="OFFLINE_CHECKBOX_NAME" />.</translation>
 <translation id="8249296373107784235">Prerušiť</translation>
 <translation id="8261506727792406068">Odstrániť</translation>
+<translation id="8269755669432358899">Zbaliť panely so spätnou väzbou týkajúcou sa súborov</translation>
 <translation id="8279388322240498158">Kurdská klávesnica (sorání) s anglickým rozložením</translation>
 <translation id="8280151743281770066">Arménska fonetická klávesnica</translation>
 <translation id="8294431847097064396">Zdroj</translation>
@@ -671,9 +672,8 @@ s ostatnými, a to všetko na jednom mieste.<ph name="MARKUP_9" /></translatio
 <translation id="8569764466147087991">Vyberte súbor, ktorý chcete otvoriť</translation>
 <translation id="8579285237314169903">Synchronizujú sa položky (počet: <ph name="NUMBER_OF_FILES" />)...</translation>
 <translation id="8600173386174225982">Zoznam súborov sa zmenil na zobrazenie miniatúr.</translation>
+<translation id="8601932370724196034">Súbor obrázka Crostini</translation>
 <translation id="8669949407341943408">Presúva sa...</translation>
-<translation id="8671210955687109937">Môže pridávať komentáre</translation>
-<translation id="8686213429977032554">Tento súbor na Disku sa zatiaľ nezdieľa</translation>
 <translation id="8698464937041809063">Nákres Google</translation>
 <translation id="8714406895390098252">Bicykel</translation>
 <translation id="8719721339511222681">Bola vybraná položka <ph name="ENTRY_NAME" />.</translation>

@@ -9,7 +9,11 @@ Coffee
 - black hot drink
 Milk
 - white cold drink
-x + a / b
+x
++
+a
+/
+b
 Most important heading here
 Google Chrome
 
@@ -51,7 +55,7 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 
 AXRole: AXWebArea
     AXRole: AXGenericContainer
-        AXRole: AXBanner
+        AXRole: AXHeader
             AXRole: AXStaticText "This is a Header for this page"
                 AXRole: AXInlineTextBox "This is a Header for this page"
         AXRole: AXHeading "Heading"
@@ -64,7 +68,7 @@ AXRole: AXWebArea
             AXRole: AXStaticText "Paragraph"
                 AXRole: AXInlineTextBox "Paragraph"
         AXRole: AXRuby
-            AXRole: AXAnnotation
+            AXRole: AXRubyAnnotation
                 AXRole: AXStaticText "한국"
                     AXRole: AXInlineTextBox "한국"
             AXRole: AXStaticText "韓國"
@@ -83,19 +87,26 @@ AXRole: AXWebArea
                 AXRole: AXStaticText "- white cold drink"
                     AXRole: AXInlineTextBox "- white cold drink"
         AXRole: AXMath
-            AXRole: AXStaticText "x "
-                AXRole: AXInlineTextBox "x "
-            AXRole: AXStaticText "+ "
-                AXRole: AXInlineTextBox "+ "
-            AXRole: AXStaticText "a "
-                AXRole: AXInlineTextBox "a "
-            AXRole: AXStaticText "/ "
-                AXRole: AXInlineTextBox "/ "
-            AXRole: AXStaticText "b"
-                AXRole: AXInlineTextBox "b"
+            AXRole: AXGenericContainer
+                AXRole: AXGenericContainer
+                    AXRole: AXStaticText "x"
+                        AXRole: AXInlineTextBox "x"
+                AXRole: AXGenericContainer
+                    AXRole: AXStaticText "+"
+                        AXRole: AXInlineTextBox "+"
+                AXRole: AXGenericContainer
+                    AXRole: AXGenericContainer
+                        AXRole: AXStaticText "a"
+                            AXRole: AXInlineTextBox "a"
+                    AXRole: AXGenericContainer
+                        AXRole: AXStaticText "/"
+                            AXRole: AXInlineTextBox "/"
+                    AXRole: AXGenericContainer
+                        AXRole: AXStaticText "b"
+                            AXRole: AXInlineTextBox "b"
         AXRole: AXMain
             AXRole: AXArticle
-                AXRole: AXGenericContainer
+                AXRole: AXHeaderAsNonLandmark
                     AXRole: AXHeading "Most important heading here"
                         AXRole: AXStaticText "Most important heading here"
                             AXRole: AXInlineTextBox "Most important heading here"
@@ -106,7 +117,7 @@ AXRole: AXWebArea
                     AXRole: AXStaticText "Google Chrome is a free, open-source web browser developed by Google, released in 2008."
                         AXRole: AXInlineTextBox "Google Chrome is a free, open-source web browser developed by Google, "
                         AXRole: AXInlineTextBox "released in 2008."
-                AXRole: AXGenericContainer
+                AXRole: AXFooterAsNonLandmark
                     AXRole: AXParagraph
                         AXRole: AXStaticText "Footer in article"
                             AXRole: AXInlineTextBox "Footer in article"
@@ -140,15 +151,15 @@ element
                 AXRole: AXInlineTextBox "element"
                 AXRole: AXInlineTextBox "
 "
-        AXRole: AXRegion
-            AXRole: AXGenericContainer
+        AXRole: AXSection
+            AXRole: AXHeaderAsNonLandmark
                 AXRole: AXHeading "Most important heading here"
                     AXRole: AXStaticText "Most important heading here"
                         AXRole: AXInlineTextBox "Most important heading here"
             AXRole: AXParagraph
                 AXRole: AXStaticText "Section"
                     AXRole: AXInlineTextBox "Section"
-            AXRole: AXGenericContainer
+            AXRole: AXFooterAsNonLandmark
                 AXRole: AXParagraph
                     AXRole: AXStaticText "Footer in section"
                         AXRole: AXInlineTextBox "Footer in section"

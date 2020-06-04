@@ -6,7 +6,7 @@
 
 #include <numeric>
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace chromeos {
 namespace power {
@@ -23,6 +23,10 @@ void AmbientLightSampleBuffer::SaveToBuffer(
     const AmbientLightSampleBuffer::Sample& sample) {
   samples_.push_back(sample);
   Prune(sample.sample_time);
+}
+
+void AmbientLightSampleBuffer::ClearBuffer() {
+  samples_.clear();
 }
 
 base::Optional<AlsAvgStdDev> AmbientLightSampleBuffer::AverageAmbientWithStdDev(

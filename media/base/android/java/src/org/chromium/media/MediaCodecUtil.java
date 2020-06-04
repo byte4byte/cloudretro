@@ -15,8 +15,9 @@ import android.media.MediaCodecList;
 import android.media.MediaCrypto;
 import android.media.MediaFormat;
 import android.os.Build;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.Log;
@@ -39,7 +40,7 @@ import java.util.NoSuchElementException;
 @JNINamespace("media")
 @MainDex
 class MediaCodecUtil {
-    private static final String TAG = "cr_MediaCodecUtil";
+    private static final String TAG = "MediaCodecUtil";
 
     /**
      * Information returned by createDecoder()
@@ -71,7 +72,7 @@ class MediaCodecUtil {
             if (supportsNewMediaCodecList()) {
                 try {
                     mCodecList = new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos();
-                } catch (RuntimeException e) {
+                } catch (Throwable e) {
                     // Swallow the exception due to bad Android implementation and pretend
                     // MediaCodecList is not supported.
                 }
@@ -187,7 +188,11 @@ class MediaCodecUtil {
 
             for (String supportedType : info.getSupportedTypes()) {
                 if (supportedType.equalsIgnoreCase(mime)) {
-                    return info.getCapabilitiesForType(supportedType).colorFormats;
+                    try {
+                        return info.getCapabilitiesForType(supportedType).colorFormats;
+                    } catch (IllegalArgumentException e) {
+                        // Type is not supported.
+                    }
                 }
             }
         }
@@ -218,16 +223,27 @@ class MediaCodecUtil {
                 try {
                     CodecCapabilities caps = info.getCapabilitiesForType(mime);
                     if (caps != null) {
+                        // There may be multiple entries in the list for the same family
+                        // (e.g. OMX.qcom.video.decoder.avc and OMX.qcom.video.decoder.avc.secure),
+                        // so return early if this one matches what we're looking for.
+
                         // If a secure decoder is required, then FEATURE_SecurePlayback must be
                         // supported.
-                        if (isSecure) {
-                            return caps.isFeatureSupported(
-                                    CodecCapabilities.FEATURE_SecurePlayback);
+                        if (isSecure
+                                && caps.isFeatureSupported(
+                                        CodecCapabilities.FEATURE_SecurePlayback)) {
+                            return true;
                         }
 
                         // If a secure decoder is not required, then make sure that
-                        // FEATURE_SecurePlayback is not required.
-                        return !caps.isFeatureRequired(CodecCapabilities.FEATURE_SecurePlayback);
+                        // FEATURE_SecurePlayback is not required. It may work for unsecure
+                        // content, but keep scanning for another codec that supports
+                        // unsecure content directly.
+                        if (!isSecure
+                                && !caps.isFeatureRequired(
+                                        CodecCapabilities.FEATURE_SecurePlayback)) {
+                            return true;
+                        }
                     }
                 } catch (IllegalArgumentException e) {
                     // Type is not supported.
@@ -294,14 +310,19 @@ class MediaCodecUtil {
                 // support. In this case, estimate the level from MediaCodecInfo.VideoCapabilities
                 // instead. Assume VP9 is not supported before L. For more information, consult
                 // https://developer.android.com/reference/android/media/MediaCodecInfo.CodecProfileLevel.html
-                CodecCapabilities codecCapabilities = info.getCapabilitiesForType(mime);
-                if (mime.endsWith("vp9") && Build.VERSION_CODES.LOLLIPOP <= Build.VERSION.SDK_INT
-                        && Build.VERSION.SDK_INT <= Build.VERSION_CODES.M) {
-                    addVp9CodecProfileLevels(profileLevels, codecCapabilities);
-                    continue;
-                }
-                for (CodecProfileLevel profileLevel : codecCapabilities.profileLevels) {
-                    profileLevels.addCodecProfileLevel(mime, profileLevel);
+                try {
+                    CodecCapabilities codecCapabilities = info.getCapabilitiesForType(mime);
+                    if (mime.endsWith("vp9")
+                            && Build.VERSION_CODES.LOLLIPOP <= Build.VERSION.SDK_INT
+                            && Build.VERSION.SDK_INT <= Build.VERSION_CODES.M) {
+                        addVp9CodecProfileLevels(profileLevels, codecCapabilities);
+                        continue;
+                    }
+                    for (CodecProfileLevel profileLevel : codecCapabilities.profileLevels) {
+                        profileLevels.addCodecProfileLevel(mime, profileLevel);
+                    }
+                } catch (IllegalArgumentException e) {
+                    // Type is not supported.
                 }
             }
         }

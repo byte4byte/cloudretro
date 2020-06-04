@@ -74,7 +74,7 @@
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   DCHECK_EQ(_webStateList, webStateList);
   if (!newWebState)
     return;
@@ -97,15 +97,59 @@
 
 #pragma mark - InfobarBadgeUIDelegate
 
-- (void)infobarWasAccepted:(InfobarType)infobarType {
-  if (IsInfobarUIRebootEnabled()) {
-    web::WebState* webState = self.webStateList->GetActiveWebState();
-    DCHECK(webState);
+- (void)infobarWasAccepted:(InfobarType)infobarType
+               forWebState:(web::WebState*)webState {
+  if (!webState || !self.webStateList ||
+      webState != self.webStateList->GetActiveWebState()) {
+    // No need to update the badge if the infobar was accepted in a webstate
+    // that isn't the active WebState.
+    return;
+  }
     InfobarBadgeTabHelper* infobarBadgeTabHelper =
         InfobarBadgeTabHelper::FromWebState(webState);
     DCHECK(infobarBadgeTabHelper);
     infobarBadgeTabHelper->UpdateBadgeForInfobarAccepted(infobarType);
+}
+
+- (void)infobarWasReverted:(InfobarType)infobarType
+               forWebState:(web::WebState*)webState {
+  if (!webState || !self.webStateList ||
+      webState != self.webStateList->GetActiveWebState()) {
+    // No need to update the badge if the infobar was reverted in a webstate
+    // that isn't the active WebState.
+    return;
   }
+  InfobarBadgeTabHelper* infobarBadgeTabHelper =
+      InfobarBadgeTabHelper::FromWebState(webState);
+  DCHECK(infobarBadgeTabHelper);
+  infobarBadgeTabHelper->UpdateBadgeForInfobarReverted(infobarType);
+}
+
+- (void)infobarBannerWasPresented:(InfobarType)infobarType
+                      forWebState:(web::WebState*)webState {
+  if (!webState || !self.webStateList ||
+      webState != self.webStateList->GetActiveWebState()) {
+    // No need to update the badge if the infobar was presented in a webstate
+    // that isn't the active WebState.
+    return;
+  }
+  InfobarBadgeTabHelper* infobarBadgeTabHelper =
+      InfobarBadgeTabHelper::FromWebState(webState);
+  DCHECK(infobarBadgeTabHelper);
+  infobarBadgeTabHelper->UpdateBadgeForInfobarBannerPresented(infobarType);
+}
+
+- (void)infobarBannerWasDismissed:(InfobarType)infobarType
+                      forWebState:(web::WebState*)webState {
+  if (!webState) {
+    return;
+  }
+  // If the banner is dismissed because of a change in WebState, |webState| will
+  // not match the AcitveWebStaate, so don't DCHECK.
+  InfobarBadgeTabHelper* infobarBadgeTabHelper =
+      InfobarBadgeTabHelper::FromWebState(webState);
+  DCHECK(infobarBadgeTabHelper);
+  infobarBadgeTabHelper->UpdateBadgeForInfobarBannerDismissed(infobarType);
 }
 
 #pragma mark - UpgradeCenterClient

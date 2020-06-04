@@ -4,44 +4,45 @@
 
 #include "device/fido/win/authenticator.h"
 
-#include <Combaseapi.h>
 #include <windows.h>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/containers/flat_map.h"
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/notreached.h"
 #include "base/optional.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "device/fido/authenticator_supported_options.h"
 #include "device/fido/ctap_get_assertion_request.h"
 #include "device/fido/ctap_make_credential_request.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_transport_protocol.h"
 #include "device/fido/win/type_conversions.h"
+#include "device/fido/win/webauthn_api.h"
 #include "third_party/microsoft_webauthn/webauthn.h"
 
 namespace device {
 
 // static
-bool WinWebAuthnApiAuthenticator::
-    IsUserVerifyingPlatformAuthenticatorAvailable() {
+bool WinWebAuthnApiAuthenticator::IsUserVerifyingPlatformAuthenticatorAvailable(
+    WinWebAuthnApi* api) {
   BOOL result;
-  WinWebAuthnApi* api = WinWebAuthnApi::GetDefault();
-  return api->IsAvailable() &&
+  return api && api->IsAvailable() &&
          api->IsUserVerifyingPlatformAuthenticatorAvailable(&result) == S_OK &&
          result == TRUE;
 }
 
-WinWebAuthnApiAuthenticator::WinWebAuthnApiAuthenticator(HWND current_window)
-    : FidoAuthenticator(),
-      current_window_(current_window),
-      win_api_(WinWebAuthnApi::GetDefault()) {
+WinWebAuthnApiAuthenticator::WinWebAuthnApiAuthenticator(
+    HWND current_window,
+    WinWebAuthnApi* win_api)
+    : current_window_(current_window), win_api_(win_api) {
   CHECK(win_api_->IsAvailable());
   CoCreateGuid(&cancellation_id_);
 }
@@ -66,7 +67,7 @@ void WinWebAuthnApiAuthenticator::MakeCredential(
   }
   is_pending_ = true;
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskPriority::USER_BLOCKING, base::MayBlock()},
       base::BindOnce(&AuthenticatorMakeCredentialBlocking, win_api_,
                      current_window_, cancellation_id_, std::move(request)),
@@ -108,7 +109,7 @@ void WinWebAuthnApiAuthenticator::GetAssertion(CtapGetAssertionRequest request,
 
   is_pending_ = true;
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskPriority::USER_BLOCKING, base::MayBlock()},
       base::BindOnce(&AuthenticatorGetAssertionBlocking, win_api_,
                      current_window_, cancellation_id_, std::move(request)),
@@ -183,6 +184,10 @@ bool WinWebAuthnApiAuthenticator::IsWinNativeApiAuthenticator() const {
   return true;
 }
 
+bool WinWebAuthnApiAuthenticator::SupportsCredProtectExtension() const {
+  return win_api_->Version() >= WEBAUTHN_API_VERSION_2;
+}
+
 const base::Optional<AuthenticatorSupportedOptions>&
 WinWebAuthnApiAuthenticator::Options() const {
   // The request can potentially be fulfilled by any device that Windows
@@ -195,10 +200,6 @@ WinWebAuthnApiAuthenticator::Options() const {
 
 base::WeakPtr<FidoAuthenticator> WinWebAuthnApiAuthenticator::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
-}
-
-bool WinWebAuthnApiAuthenticator::SupportsCredProtectExtension() const {
-  return win_api_->Version() >= WEBAUTHN_API_VERSION_2;
 }
 
 bool WinWebAuthnApiAuthenticator::ShowsPrivacyNotice() const {

@@ -16,6 +16,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/network_service_instance.h"
@@ -137,7 +138,7 @@ void KerberosFilesHandler::SetFiles(base::Optional<std::string> krb5cc,
                                     base::Optional<std::string> krb5conf) {
   krb5conf =
       MaybeAdjustConfig(krb5conf, !negotiate_disable_cname_lookup_.GetValue());
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -149,7 +150,7 @@ void KerberosFilesHandler::SetFiles(base::Optional<std::string> krb5cc,
 void KerberosFilesHandler::DeleteFiles() {
   // These files contain user credentials, so use BLOCK_SHUTDOWN here to make
   // sure they do get deleted.
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN},

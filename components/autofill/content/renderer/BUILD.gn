@@ -8,6 +8,8 @@ jumbo_static_library("renderer") {
   sources = [
     "autofill_agent.cc",
     "autofill_agent.h",
+    "autofill_assistant_agent.cc",
+    "autofill_assistant_agent.h",
     "field_data_manager.cc",
     "field_data_manager.h",
     "form_autofill_util.cc",
@@ -32,8 +34,6 @@ jumbo_static_library("renderer") {
     "password_generation_agent.h",
     "prefilled_values_detector.cc",
     "prefilled_values_detector.h",
-    "provisionally_saved_password_form.cc",
-    "provisionally_saved_password_form.h",
     "renderer_save_password_progress_logger.cc",
     "renderer_save_password_progress_logger.h",
   ]
@@ -41,8 +41,10 @@ jumbo_static_library("renderer") {
   deps = [
     "//base",
     "//base:i18n",
-    "//components/autofill/content/common:mojo_interfaces",
+    "//components/autofill/content/common/mojom",
     "//components/autofill/core/common",
+    "//components/password_manager/core/common:common",
+    "//components/safe_browsing:buildflags",
     "//components/strings",
     "//content/public/common",
     "//content/public/renderer",
@@ -64,6 +66,8 @@ jumbo_static_library("renderer") {
 jumbo_static_library("test_support") {
   testonly = true
   sources = [
+    "focus_test_utils.cc",
+    "focus_test_utils.h",
     "test_password_autofill_agent.cc",
     "test_password_autofill_agent.h",
   ]
@@ -76,6 +80,7 @@ jumbo_static_library("test_support") {
     "//components/autofill/content/renderer",
     "//services/service_manager/public/cpp",
     "//skia",
+    "//testing/gtest",
     "//third_party/blink/public:blink",
   ]
 }
@@ -91,7 +96,7 @@ source_set("unit_tests") {
   deps = [
     ":test_support",
     "//base/test:test_support",
-    "//components/autofill/content/common:mojo_interfaces",
+    "//components/autofill/content/common/mojom",
     "//components/autofill/core/common",
     "//testing/gtest",
   ]

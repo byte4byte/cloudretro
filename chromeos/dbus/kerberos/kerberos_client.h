@@ -43,6 +43,34 @@ class COMPONENT_EXPORT(KERBEROS) KerberosClient {
   using KerberosTicketExpiringCallback =
       base::RepeatingCallback<void(const std::string& principal_name)>;
 
+  // Interface with testing functionality. Accessed through GetTestInterface(),
+  // only implemented in the fake implementation.
+  class TestInterface {
+   public:
+    // Sets the artificial delay for asynchronous function calls.
+    // Should be set to 0 for tests.
+    virtual void SetTaskDelay(base::TimeDelta delay) = 0;
+
+    // Starts recording which functions are called.
+    virtual void StartRecordingFunctionCalls() = 0;
+
+    // Stops recording which functions are called and returns calls as a
+    // comma separated list, e.g. "AddAccount,ListAccounts".
+    virtual std::string StopRecordingAndGetRecordedFunctionCalls() = 0;
+
+    // Returns the number of accounts currently saved.
+    virtual std::size_t GetNumberOfAccounts() const = 0;
+
+    // Sets the simulated number of network failures for |AcquireKerberosTgt()|.
+    // The default value is zero. This value should be set when testing the
+    // exponential backoff retry for adding managed accounts.
+    virtual void SetSimulatedNumberOfNetworkFailures(
+        int number_of_failures) = 0;
+
+   protected:
+    virtual ~TestInterface() {}
+  };
+
   // Creates and initializes the global instance. |bus| must not be null.
   static void Initialize(dbus::Bus* bus);
 
@@ -90,6 +118,9 @@ class COMPONENT_EXPORT(KERBEROS) KerberosClient {
 
   virtual void ConnectToKerberosTicketExpiringSignal(
       KerberosTicketExpiringCallback callback) = 0;
+
+  // Returns an interface for testing (fake only), or returns nullptr.
+  virtual TestInterface* GetTestInterface() = 0;
 
  protected:
   // Initialize/Shutdown should be used instead.

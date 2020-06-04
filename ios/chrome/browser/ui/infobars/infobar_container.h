@@ -7,15 +7,20 @@
 
 #import <Foundation/Foundation.h>
 
+@class InfobarCoordinator;
+
 // Protocol for the InfobarCoordinators to communicate with the InfobarContainer
 // Coordinator.
 @protocol InfobarContainer
 
-// Informs the InfobarContainer Coordinator that its child coordinator has
+// Informs the InfobarContainerCoordinator that |infobarCoordinator| has
+// finished presenting its banner(s).
+- (void)childCoordinatorBannerFinishedPresented:
+    (InfobarCoordinator*)infobarCoordinator;
+
+// Informs the InfobarContainerCoordinator that |infobarCoordinator| has
 // stopped.
-// TODO(crbug.com/961343): Add support to indicate which Coordinator has
-// stopped.
-- (void)childCoordinatorStopped;
+- (void)childCoordinatorStopped:(InfobarCoordinator*)infobarCoordinator;
 
 @end
 

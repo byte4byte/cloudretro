@@ -11,6 +11,8 @@
 #include "ash/session/session_observer.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/enterprise/enterprise_domain_observer.h"
 #include "ash/system/model/clock_model.h"
 #include "ash/system/model/clock_observer.h"
@@ -19,14 +21,16 @@
 #include "ash/system/power/power_status.h"
 #include "ash/system/supervised/supervised_icon_string.h"
 #include "ash/system/tray/system_tray_notifier.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "ash/system/unified/unified_system_tray_view.h"
 #include "base/i18n/time_formatting.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/animation/ink_drop_ripple.h"
@@ -38,6 +42,9 @@
 #include "ui/views/layout/fill_layout.h"
 
 namespace ash {
+
+using ContentLayerType = AshColorProvider::ContentLayerType;
+using AshColorMode = AshColorProvider::AshColorMode;
 
 namespace {
 
@@ -92,7 +99,8 @@ DateView::DateView(UnifiedSystemTrayController* controller)
 
   label_->SetAutoColorReadabilityEnabled(false);
   label_->SetSubpixelRenderingEnabled(false);
-  label_->SetEnabledColor(kUnifiedMenuTextColor);
+  label_->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+      ContentLayerType::kTextPrimary, AshColorMode::kDark));
   Update();
 
   Shell::Get()->system_tray_model()->clock()->AddObserver(this);
@@ -101,6 +109,7 @@ DateView::DateView(UnifiedSystemTrayController* controller)
 
   SetInstallFocusRingOnFocus(true);
   SetFocusForPlatform();
+  focus_ring()->SetColor(UnifiedSystemTrayView::GetFocusRingColor());
 
   SetInkDropMode(views::InkDropHostView::InkDropMode::OFF);
 }
@@ -146,6 +155,7 @@ class BatteryView : public views::View, public PowerStatus::Observer {
   ~BatteryView() override;
 
   // views::View:
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void ChildPreferredSizeChanged(views::View* child) override;
   void ChildVisibilityChanged(views::View* child) override;
   const char* GetClassName() const override { return "BatteryView"; }
@@ -192,6 +202,11 @@ BatteryView::~BatteryView() {
   PowerStatus::Get()->RemoveObserver(this);
 }
 
+void BatteryView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  node_data->role = ax::mojom::Role::kLabelText;
+  node_data->SetName(PowerStatus::Get()->GetAccessibleNameString(true));
+}
+
 void BatteryView::ChildPreferredSizeChanged(views::View* child) {
   PreferredSizeChanged();
 }
@@ -224,7 +239,9 @@ void BatteryView::Update() {
 void BatteryView::ConfigureLabel(views::Label* label) {
   label->SetAutoColorReadabilityEnabled(false);
   label->SetSubpixelRenderingEnabled(false);
-  label->SetEnabledColor(kUnifiedMenuSecondaryTextColor);
+  label->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+      ContentLayerType::kTextSecondary, AshColorMode::kDark));
+  label->GetViewAccessibility().OverrideIsIgnored(true);
 }
 
 // A base class of the views showing device management state.
@@ -255,18 +272,22 @@ ManagedStateView::ManagedStateView(views::ButtonListener* listener,
   auto* label = new views::Label;
   label->SetAutoColorReadabilityEnabled(false);
   label->SetSubpixelRenderingEnabled(false);
-  label->SetEnabledColor(kUnifiedMenuSecondaryTextColor);
+  label->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+      ContentLayerType::kTextSecondary, AshColorMode::kDark));
   label->SetText(l10n_util::GetStringUTF16(label_id));
   AddChildView(label);
 
   auto* image = new views::ImageView;
-  image->SetImage(gfx::CreateVectorIcon(icon, kUnifiedMenuSecondaryTextColor));
+  image->SetImage(gfx::CreateVectorIcon(
+      icon, AshColorProvider::Get()->GetContentLayerColor(
+                ContentLayerType::kIconSecondary, AshColorMode::kDark)));
   image->SetPreferredSize(
       gfx::Size(kUnifiedSystemInfoHeight, kUnifiedSystemInfoHeight));
   AddChildView(image);
 
   SetInstallFocusRingOnFocus(true);
   SetFocusForPlatform();
+  focus_ring()->SetColor(UnifiedSystemTrayView::GetFocusRingColor());
 
   SetInkDropMode(views::InkDropHostView::InkDropMode::OFF);
 }
@@ -371,6 +392,11 @@ SupervisedUserView::SupervisedUserView()
   SetVisible(Shell::Get()->session_controller()->IsUserSupervised());
   if (Shell::Get()->session_controller()->IsUserSupervised())
     SetTooltipText(GetSupervisedUserMessage());
+
+  // TODO(crbug/1026821) Add SupervisedUserView::ButtonPress() overload
+  // to show a similar ui to enterprise managed accounts. Disable button
+  // state for now.
+  SetState(ButtonState::STATE_DISABLED);
 }
 
 }  // namespace
@@ -387,7 +413,8 @@ UnifiedSystemInfoView::UnifiedSystemInfoView(
 
   if (PowerStatus::Get()->IsBatteryPresent()) {
     auto* separator = new views::Separator();
-    separator->SetColor(kUnifiedSystemInfoSeparatorColor);
+    separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+        ContentLayerType::kSeparator, AshColorMode::kDark));
     separator->SetPreferredHeight(kUnifiedSystemInfoHeight);
     AddChildView(separator);
 

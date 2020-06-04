@@ -5,15 +5,16 @@
 package org.chromium.chrome.browser.bookmarks;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.RecyclerView.ViewHolder;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkModelObserver;
@@ -145,7 +146,8 @@ class BookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
     /**
      * @return The position of the given bookmark in adapter. Will return -1 if not found.
      */
-    private int getPositionForBookmark(BookmarkId bookmark) {
+    @Override
+    public int getPositionForBookmark(BookmarkId bookmark) {
         assert bookmark != null;
         int position = -1;
         for (int i = 0; i < getItemCount(); i++) {
@@ -365,16 +367,6 @@ class BookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
         throw new RuntimeException("Cannot reorder bookmarks when bookmark reordering flag is off");
     }
 
-    @Override
-    public void moveToTop(BookmarkId bookmarkId) {
-        throw new RuntimeException("Cannot reorder bookmarks when bookmark reordering flag is off");
-    }
-
-    @Override
-    public void moveToBottom(BookmarkId bookmarkId) {
-        throw new RuntimeException("Cannot reorder bookmarks when bookmark reordering flag is off");
-    }
-
     private static class ItemViewHolder extends RecyclerView.ViewHolder {
         private ItemViewHolder(View view) {
             super(view);
@@ -441,5 +433,15 @@ class BookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
     @VisibleForTesting
     public BookmarkDelegate getDelegateForTesting() {
         return mDelegate;
+    }
+
+    /**
+     * Scroll the bookmarks list such that bookmarkId is shown in the view, and highlight it.
+     *
+     * @param bookmarkId The BookmarkId of the bookmark of interest.
+     */
+    @Override
+    public void highlightBookmark(BookmarkId bookmarkId) {
+        // This method is currently implemented for the ReorderBookmarkItemsAdapter only.
     }
 }

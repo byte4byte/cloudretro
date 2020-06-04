@@ -36,13 +36,19 @@ class CryptAuthDevice;
 // A hypothetical group public key.
 extern const char kGroupPublicKey[];
 
+// The first 8 bytes of the SHA-256 group-public-key hash, converted into a
+// 64-bit signed integer in little-endian order. This is needed when sharing
+// the group private key.
+extern const int64_t kGroupPublicKeyHash;
+
 // Three test devices: The local device, a remote device that needs the group
 // private key, and a remote device that has the group private key.
 const CryptAuthDevice& GetLocalDeviceForTest();
 const CryptAuthDevice& GetRemoteDeviceNeedsGroupPrivateKeyForTest();
 const CryptAuthDevice& GetRemoteDeviceHasGroupPrivateKeyForTest();
 const CryptAuthDevice& GetTestDeviceWithId(const std::string& id);
-const std::vector<CryptAuthDevice>& GetAllTestDevicesWithoutMetadata();
+const std::vector<CryptAuthDevice>& GetAllTestDevices();
+const std::vector<CryptAuthDevice>& GetAllTestDevicesWithoutRemoteMetadata();
 
 const base::flat_set<std::string>& GetAllTestDeviceIds();
 const base::flat_set<std::string>& GetAllTestDeviceIdsThatNeedGroupPrivateKey();

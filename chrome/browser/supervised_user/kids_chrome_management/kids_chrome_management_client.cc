@@ -16,8 +16,10 @@
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "components/google/core/common/google_util.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -27,7 +29,6 @@
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_status.h"
-#include "services/identity/public/cpp/scope_set.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -145,7 +146,7 @@ struct KidsChromeManagementClient::KidsChromeManagementRequest {
   KidsChromeManagementCallback callback;
   std::unique_ptr<network::ResourceRequest> resource_request;
   const net::NetworkTrafficAnnotationTag traffic_annotation;
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher;
   bool access_token_expired;
   const char* oauth_consumer_name;
@@ -171,8 +172,7 @@ void KidsChromeManagementClient::ClassifyURL(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(kClassifyUrlRequestApiPath);
   resource_request->method = "POST";
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   const net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation(
@@ -224,21 +224,23 @@ void KidsChromeManagementClient::StartFetching(
     KidsChromeRequestList::iterator it) {
   KidsChromeManagementRequest* req = it->get();
 
-  identity::ScopeSet scopes{req->scope};
+  signin::ScopeSet scopes{req->scope};
 
   req->access_token_fetcher =
-      std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
           req->oauth_consumer_name, identity_manager_, scopes,
           base::BindOnce(
               &KidsChromeManagementClient::OnAccessTokenFetchComplete,
               base::Unretained(this), it),
-          identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate,
+          // This class doesn't care about browser sync consent.
+          signin::ConsentLevel::kNotRequired);
 }
 
 void KidsChromeManagementClient::OnAccessTokenFetchComplete(
     KidsChromeRequestList::iterator it,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   if (error.state() != GoogleServiceAuthError::NONE) {
     DLOG(WARNING) << "Token error: " << error.ToString();
 
@@ -287,7 +289,7 @@ void KidsChromeManagementClient::OnAccessTokenFetchComplete(
 void KidsChromeManagementClient::OnSimpleLoaderComplete(
     KidsChromeRequestList::iterator it,
     std::unique_ptr<network::SimpleURLLoader> simple_url_loader,
-    identity::AccessTokenInfo token_info,
+    signin::AccessTokenInfo token_info,
     std::unique_ptr<std::string> response_body) {
   int response_code = -1;
 
@@ -301,9 +303,11 @@ void KidsChromeManagementClient::OnSimpleLoaderComplete(
     if (response_code == net::HTTP_UNAUTHORIZED && !req->access_token_expired) {
       DLOG(WARNING) << "Access token expired:\n" << token_info.token;
       req->access_token_expired = true;
-      identity::ScopeSet scopes{req->scope};
+      signin::ScopeSet scopes{req->scope};
       identity_manager_->RemoveAccessTokenFromCache(
-          identity_manager_->GetPrimaryAccountId(), scopes, token_info.token);
+          identity_manager_->GetPrimaryAccountId(
+              signin::ConsentLevel::kNotRequired),
+          scopes, token_info.token);
       StartFetching(it);
       return;
     }

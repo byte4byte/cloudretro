@@ -14,6 +14,8 @@
 #include "chromeos/services/device_sync/proto/cryptauth_enrollment.pb.h"
 #include "chromeos/services/device_sync/proto/cryptauth_proto_to_query_parameters_util.h"
 #include "chromeos/services/device_sync/switches.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -64,6 +66,7 @@ const char kShareGroupPrivateKeyPath[] = "/v1:shareGroupPrivateKey";
 const char kBatchNotifyGroupDevicesPath[] = "/v1:batchNotifyGroupDevices";
 const char kBatchGetFeatureStatusesPath[] = "/v1:batchGetFeatureStatuses";
 const char kBatchSetFeatureStatusesPath[] = "/v1:batchSetFeatureStatuses";
+const char kGetDevicesActivityStatusPath[] = "/v1:getDevicesActivityStatus";
 
 const char kCryptAuthOAuth2Scope[] =
     "https://www.googleapis.com/auth/cryptauth";
@@ -107,15 +110,14 @@ GURL CreateV2DeviceSyncRequestUrl(const std::string& request_path) {
 
 CryptAuthClientImpl::CryptAuthClientImpl(
     std::unique_ptr<CryptAuthApiCallFlow> api_call_flow,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const cryptauth::DeviceClassifier& device_classifier)
     : api_call_flow_(std::move(api_call_flow)),
       identity_manager_(identity_manager),
       url_loader_factory_(std::move(url_loader_factory)),
       device_classifier_(device_classifier),
-      has_call_started_(false),
-      weak_ptr_factory_(this) {}
+      has_call_started_(false) {}
 
 CryptAuthClientImpl::~CryptAuthClientImpl() {}
 
@@ -464,8 +466,6 @@ void CryptAuthClientImpl::ShareGroupPrivateKey(
               error_callback, partial_traffic_annotation);
 }
 
-// TODO(https://crbug.com/953087): Populate the "sender" and "trigger" fields
-// when method is used in codebase.
 void CryptAuthClientImpl::BatchNotifyGroupDevices(
     const cryptauthv2::BatchNotifyGroupDevicesRequest& request,
     const BatchNotifyGroupDevicesCallback& callback,
@@ -476,11 +476,15 @@ void CryptAuthClientImpl::BatchNotifyGroupDevices(
           "oauth2_api_call_flow",
           R"(
       semantics {
-        sender: "TBD"
+        sender: "CryptAuth Device Notifier"
         description:
           "The client sends a list of the user's devices that it wants to "
           "tickle via a GCM message."
-        trigger: "TBD"
+        trigger:
+          "The DeviceSync service has a NotifyDevices() method that triggers "
+          "this API call. Currently, that method is only used by the "
+          "multi-device host verifier to alert the current multi-device host "
+          "that it needs to enable its individual multi-device features."
         data:
           "The list of device IDs to notify as well as a specification of the "
           "the CryptAuth service (Enrollment or DeviceSync) and feature "
@@ -541,8 +545,6 @@ void CryptAuthClientImpl::BatchGetFeatureStatuses(
       callback, error_callback, partial_traffic_annotation);
 }
 
-// TODO(https://crbug.com/953087): Populate the "sender" and "trigger" fields
-// when method is used in codebase.
 void CryptAuthClientImpl::BatchSetFeatureStatuses(
     const cryptauthv2::BatchSetFeatureStatusesRequest& request,
     const BatchSetFeatureStatusesCallback& callback,
@@ -553,11 +555,15 @@ void CryptAuthClientImpl::BatchSetFeatureStatuses(
           "oauth2_api_call_flow",
           R"(
       semantics {
-        sender: "TBD"
+        sender: "CryptAuth Feature Status Setter"
         description:
           "The client requests CryptAuth to set the state of various features "
           "for the user's devices."
-        trigger: "TBD"
+        trigger:
+          "The DeviceSync service has a SetFeatureStatus() method that "
+          "triggers this API call. Currently, that method is only used by the "
+          "multi-device host backend delegate to enable (disable) the "
+          "kBetterTogetherHost bit for the desired (current) multi-device host."
         data: "User device IDs and feature state specifications."
         destination: GOOGLE_OWNED_SERVICE
       }
@@ -575,6 +581,45 @@ void CryptAuthClientImpl::BatchSetFeatureStatuses(
               RequestType::kPost, request.SerializeAsString(),
               base::nullopt /* request_as_query_parameters */, callback,
               error_callback, partial_traffic_annotation);
+}
+
+void CryptAuthClientImpl::GetDevicesActivityStatus(
+    const cryptauthv2::GetDevicesActivityStatusRequest& request,
+    const GetDevicesActivityStatusCallback& callback,
+    const ErrorCallback& error_callback) {
+  net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
+      net::DefinePartialNetworkTrafficAnnotation(
+          "cryptauth_v2_devicesync_get_devices_activity_status",
+          "oauth2_api_call_flow",
+          R"(
+      semantics {
+        sender: "CryptAuth Device Activity Getter"
+        description:
+          "The client queries CryptAuth for the activity of status of the "
+          "user's devices."
+        trigger:
+          "The DeviceSync service has a GetDevicesActivityStatus() method that "
+          "triggers this API call. Currently, that method is only used by the "
+          "eligible-host-devices provider in order to better organize the "
+          "drop-down list used for multi-device setup."
+        data: "User device ID."
+        destination: GOOGLE_OWNED_SERVICE
+      }
+      policy {
+        setting:
+          "This feature cannot be disabled by settings. However, this request "
+          "is made only for signed-in users."
+        chrome_policy {
+          SigninAllowed {
+            SigninAllowed: false
+          }
+        }
+      })");
+  MakeApiCall(
+      CreateV2DeviceSyncRequestUrl(kGetDevicesActivityStatusPath),
+      RequestType::kGet, base::nullopt /* serialized_request */,
+      cryptauthv2::GetDevicesActivityStatusRequestToQueryParameters(request),
+      callback, error_callback, partial_traffic_annotation);
 }
 
 std::string CryptAuthClientImpl::GetAccessTokenUsed() {
@@ -608,14 +653,15 @@ void CryptAuthClientImpl::MakeApiCall(
   OAuth2AccessTokenManager::ScopeSet scopes;
   scopes.insert(kCryptAuthOAuth2Scope);
 
-  access_token_fetcher_ = std::make_unique<
-      identity::PrimaryAccountAccessTokenFetcher>(
-      "cryptauth_client", identity_manager_, scopes,
-      base::BindOnce(&CryptAuthClientImpl::OnAccessTokenFetched<ResponseProto>,
-                     weak_ptr_factory_.GetWeakPtr(), request_type,
-                     serialized_request, request_as_query_parameters,
-                     response_callback),
-      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
+  access_token_fetcher_ =
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+          "cryptauth_client", identity_manager_, scopes,
+          base::BindOnce(
+              &CryptAuthClientImpl::OnAccessTokenFetched<ResponseProto>,
+              weak_ptr_factory_.GetWeakPtr(), request_type, serialized_request,
+              request_as_query_parameters, response_callback),
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
+          signin::ConsentLevel::kNotRequired);
 }
 
 template <class ResponseProto>
@@ -626,7 +672,7 @@ void CryptAuthClientImpl::OnAccessTokenFetched(
         request_as_query_parameters,
     const base::Callback<void(const ResponseProto&)>& response_callback,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   access_token_fetcher_.reset();
 
   if (error.state() != GoogleServiceAuthError::NONE) {
@@ -686,7 +732,7 @@ RequestProto CryptAuthClientImpl::RequestWithDeviceClassifierSet(
 
 // CryptAuthClientFactoryImpl
 CryptAuthClientFactoryImpl::CryptAuthClientFactoryImpl(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const cryptauth::DeviceClassifier& device_classifier)
     : identity_manager_(identity_manager),

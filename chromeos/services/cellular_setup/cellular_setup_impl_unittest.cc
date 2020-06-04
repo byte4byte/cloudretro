@@ -10,7 +10,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/dbus/shill/shill_clients.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/services/cellular_setup/cellular_setup_base.h"
@@ -18,6 +18,7 @@
 #include "chromeos/services/cellular_setup/fake_ota_activator.h"
 #include "chromeos/services/cellular_setup/ota_activator_impl.h"
 #include "chromeos/services/cellular_setup/public/cpp/fake_activation_delegate.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -37,16 +38,18 @@ class FakeOtaActivatorFactory : public OtaActivatorImpl::Factory {
 
  private:
   // OtaActivatorImpl::Factory:
-  std::unique_ptr<OtaActivator> BuildInstance(
-      mojom::ActivationDelegatePtr activation_delegate,
+  std::unique_ptr<OtaActivator> CreateInstance(
+      mojo::PendingRemote<mojom::ActivationDelegate> activation_delegate,
       base::OnceClosure on_finished_callback,
       NetworkStateHandler* network_state_handler,
       NetworkConnectionHandler* network_connection_handler,
-      NetworkActivationHandler* network_activation_handler) override {
+      NetworkActivationHandler* network_activation_handler,
+      scoped_refptr<base::TaskRunner> task_runner) override {
     EXPECT_TRUE(activation_delegate);
     EXPECT_TRUE(network_state_handler);
     EXPECT_TRUE(network_connection_handler);
     EXPECT_TRUE(network_activation_handler);
+    EXPECT_TRUE(task_runner);
 
     auto fake_ota_activator =
         std::make_unique<FakeOtaActivator>(std::move(on_finished_callback));
@@ -73,7 +76,7 @@ class CellularSetupImplTest : public testing::Test {
         &fake_ota_activator_factory_);
     shill_clients::InitializeFakes();
     NetworkHandler::Initialize();
-    cellular_setup_ = CellularSetupImpl::Factory::Create();
+    cellular_setup_ = std::make_unique<CellularSetupImpl>();
   }
 
   void TearDown() override {
@@ -90,7 +93,7 @@ class CellularSetupImplTest : public testing::Test {
 
     base::RunLoop run_loop;
     cellular_setup_->StartActivation(
-        fake_activation_delegate->GenerateInterfacePtr(),
+        fake_activation_delegate->GenerateRemote(),
         base::BindOnce(&CellularSetupImplTest::OnCarrierPortalHandlerReceived,
                        base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
@@ -106,12 +109,12 @@ class CellularSetupImplTest : public testing::Test {
  private:
   void OnCarrierPortalHandlerReceived(
       base::OnceClosure quit_closure,
-      mojom::CarrierPortalHandlerPtr carrier_portal_handler) {
+      mojo::PendingRemote<mojom::CarrierPortalHandler> carrier_portal_handler) {
     ++num_carrier_portal_handlers_received_;
     std::move(quit_closure).Run();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   FakeOtaActivatorFactory fake_ota_activator_factory_;
 
   std::unique_ptr<CellularSetupBase> cellular_setup_;

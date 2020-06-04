@@ -5,19 +5,22 @@
 #ifndef COMPONENTS_DOM_DISTILLER_CONTENT_BROWSER_DISTILLER_JAVASCRIPT_SERVICE_IMPL_H_
 #define COMPONENTS_DOM_DISTILLER_CONTENT_BROWSER_DISTILLER_JAVASCRIPT_SERVICE_IMPL_H_
 
-#include "base/macros.h"
-#include "components/dom_distiller/content/browser/distiller_ui_handle.h"
 #include "components/dom_distiller/content/common/mojom/distiller_javascript_service.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "components/dom_distiller/core/distilled_page_prefs.h"
+#include "components/dom_distiller/core/distiller_ui_handle.h"
+#include "components/dom_distiller/core/mojom/distilled_page_prefs.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace dom_distiller {
+
+class DistilledPagePrefs;
 
 // This is the receiving end of "distiller" JavaScript object calls.
 class DistillerJavaScriptServiceImpl
     : public mojom::DistillerJavaScriptService {
  public:
-  DistillerJavaScriptServiceImpl(content::RenderFrameHost* render_frame_host,
-                                 DistillerUIHandle* distiller_ui_handle);
+  DistillerJavaScriptServiceImpl(DistillerUIHandle* distiller_ui_handle,
+                                 DistilledPagePrefs* distilled_page_prefs);
   ~DistillerJavaScriptServiceImpl() override;
 
   // Mojo mojom::DistillerJavaScriptService implementation.
@@ -25,18 +28,24 @@ class DistillerJavaScriptServiceImpl
   // Show the Android view containing Reader Mode settings.
   void HandleDistillerOpenSettingsCall() override;
 
- private:
-  content::RenderFrameHost* render_frame_host_;
-  DistillerUIHandle* distiller_ui_handle_;
+  void HandleStoreThemePref(mojom::Theme theme) override;
+  void HandleStoreFontFamilyPref(mojom::FontFamily font_family) override;
 
-  DISALLOW_COPY_AND_ASSIGN(DistillerJavaScriptServiceImpl);
+  DistillerJavaScriptServiceImpl(const DistillerJavaScriptServiceImpl&) =
+      delete;
+  DistillerJavaScriptServiceImpl& operator=(
+      const DistillerJavaScriptServiceImpl&) = delete;
+
+ private:
+  DistillerUIHandle* distiller_ui_handle_;
+  DistilledPagePrefs* distilled_page_prefs_;
 };
 
 // static
 void CreateDistillerJavaScriptService(
     DistillerUIHandle* distiller_ui_handle,
-    mojom::DistillerJavaScriptServiceRequest request,
-    content::RenderFrameHost* render_frame_host);
+    DistilledPagePrefs* distilled_page_prefs,
+    mojo::PendingReceiver<mojom::DistillerJavaScriptService> receiver);
 
 }  // namespace dom_distiller
 

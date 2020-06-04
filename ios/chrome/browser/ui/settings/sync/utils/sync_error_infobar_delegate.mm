@@ -15,7 +15,6 @@
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/sync/driver/sync_service.h"
-#include "components/unified_consent/feature.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
@@ -29,7 +28,7 @@
 
 // static
 bool SyncErrorInfoBarDelegate::Create(infobars::InfoBarManager* infobar_manager,
-                                      ios::ChromeBrowserState* browser_state,
+                                      ChromeBrowserState* browser_state,
                                       id<SyncPresenter> presenter) {
   DCHECK(infobar_manager);
   std::unique_ptr<ConfirmInfoBarDelegate> delegate(
@@ -39,7 +38,7 @@ bool SyncErrorInfoBarDelegate::Create(infobars::InfoBarManager* infobar_manager,
 }
 
 SyncErrorInfoBarDelegate::SyncErrorInfoBarDelegate(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     id<SyncPresenter> presenter)
     : browser_state_(browser_state), presenter_(presenter) {
   DCHECK(!browser_state->IsOffTheRecord());
@@ -94,11 +93,7 @@ bool SyncErrorInfoBarDelegate::Accept() {
   if (ShouldShowSyncSignin(error_state_)) {
     [presenter_ showReauthenticateSignin];
   } else if (ShouldShowSyncSettings(error_state_)) {
-    if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-      [presenter_ showGoogleServicesSettings];
-    } else {
-      [presenter_ showSyncSettings];
-    }
+    [presenter_ showGoogleServicesSettings];
   } else if (ShouldShowSyncPassphraseSettings(error_state_)) {
     [presenter_ showSyncPassphraseSettings];
   }

@@ -15,6 +15,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -256,8 +257,7 @@ UDPSocketWin::UDPSocketWin(DatagramSocket::BindType bind_type,
       read_iobuffer_len_(0),
       write_iobuffer_len_(0),
       recv_from_address_(nullptr),
-      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)),
-      event_pending_(this) {
+      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)) {
   EnsureWinsockInit();
   net_log_.BeginEventReferencingSource(NetLogEventType::SOCKET_ALIVE, source);
 }
@@ -1241,7 +1241,7 @@ DatagramBuffers UDPSocketWin::GetUnwrittenBuffers() {
   return result;
 }
 DscpManager::DscpManager(QwaveApi* api, SOCKET socket)
-    : api_(api), socket_(socket), weak_ptr_factory_(this) {
+    : api_(api), socket_(socket) {
   RequestHandle();
 }
 
@@ -1334,7 +1334,7 @@ void DscpManager::RequestHandle() {
   }
 
   handle_is_initializing_ = true;
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&DscpManager::DoCreateHandle, api_),
       base::BindOnce(&DscpManager::OnHandleCreated, api_,

@@ -34,7 +34,6 @@ namespace syncer {
 
 class CancelationSignal;
 class ModelTypeProcessor;
-class WorkerEntityTracker;
 
 // A smart cache for sync types that use message passing (rather than
 // transactions and the syncable::Directory) to communicate with the sync
@@ -124,12 +123,14 @@ class ModelTypeWorker : public UpdateHandler,
   // called when a new encryption mechanism is ready.
   void EncryptionAcceptedMaybeApplyUpdates();
 
-  // Callback for when our contribution gets a response.
-  void OnCommitResponse(CommitResponseDataList* response_list);
-
   // If migration the directory encounters an error partway through, we need to
   // clear the update data that has been added so far.
   void AbortMigration();
+
+  // Public for testing.
+  // Returns true if this type should stop communicating because of outstanding
+  // encryption issues and must wait for keys to be updated.
+  bool BlockForEncryption() const;
 
   // Returns the estimate of dynamically allocated memory in bytes.
   size_t EstimateMemoryUsage() const;
@@ -178,10 +179,6 @@ class ModelTypeWorker : public UpdateHandler,
   // settings in a good state.
   bool CanCommitItems() const;
 
-  // Returns true if this type should stop communicating because of outstanding
-  // encryption issues and must wait for keys to be updated.
-  bool BlockForEncryption() const;
-
   // Updates the encryption key name stored in |model_type_state_| if it differs
   // from the default encryption key name in |cryptographer_|. Returns whether
   // an update occurred.
@@ -191,16 +188,6 @@ class ModelTypeWorker : public UpdateHandler,
   // decrypt anything that has encrypted data.
   // Should only be called during a GetUpdates cycle.
   void DecryptStoredEntities();
-
-  // Returns the entity tracker for the given |tag_hash|, or nullptr.
-  WorkerEntityTracker* GetEntityTracker(const std::string& tag_hash);
-
-  // Creates an entity tracker in the map using the given |data| and returns a
-  // pointer to it. Requires that one doesn't exist for data.client_tag_hash.
-  WorkerEntityTracker* CreateEntityTracker(const std::string& tag_hash);
-
-  // Gets the entity tracker for |data| or creates one if it doesn't exist.
-  WorkerEntityTracker* GetOrCreateEntityTracker(const std::string& tag_hash);
 
   // Nudges nudge_handler_ when initial sync is done, processor has local
   // changes and either encryption is disabled for the type or cryptographer is
@@ -214,6 +201,20 @@ class ModelTypeWorker : public UpdateHandler,
   // Filters our duplicate updates from |pending_updates_| based on the client
   // tag hash. It discards all of them except the last one.
   void DeduplicatePendingUpdatesBasedOnClientTagHash();
+
+  // Filters our duplicate updates from |pending_updates_| based on the
+  // originator item ID (in practice used for bookmarks only). It discards all
+  // of them except the last one.
+  void DeduplicatePendingUpdatesBasedOnOriginatorClientItemId();
+
+  // Callback for when our contribution gets a response.
+  void OnCommitResponse(
+      const CommitResponseDataList& committed_response_list,
+      const FailedCommitResponseDataList& error_response_list);
+
+  // Callback when there is no response or server returns an error without
+  // response body.
+  void OnFullCommitFailure(SyncCommitError commit_error);
 
   ModelType type_;
   DataTypeDebugInfoEmitter* debug_info_emitter_;
@@ -236,10 +237,10 @@ class ModelTypeWorker : public UpdateHandler,
   // Interface used to access and send nudges to the sync scheduler. Not owned.
   NudgeHandler* nudge_handler_;
 
-  // A map of update responses, keyed by server_id.
-  // Holds updates encrypted with pending keys.
-  std::map<std::string, std::unique_ptr<UpdateResponseData>>
-      entries_pending_decryption_;
+  // A map of sync entities, keyed by server_id. Holds updates encrypted with
+  // pending keys. Entries are stored in a map for de-duplication (applying only
+  // the latest).
+  std::map<std::string, sync_pb::SyncEntity> entries_pending_decryption_;
 
   // Accumulates all the updates from a single GetUpdates cycle in memory so
   // they can all be sent to the processor at once.

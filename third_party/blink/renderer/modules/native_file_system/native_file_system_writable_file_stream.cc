@@ -6,170 +6,126 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view_or_blob_or_usv_string.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
-#include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/fileapi/blob.h"
-#include "third_party/blink/renderer/core/fileapi/file_error.h"
-#include "third_party/blink/renderer/modules/native_file_system/native_file_system_file_handle.h"
-#include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_queuing_strategy_init.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_write_params.h"
+#include "third_party/blink/renderer/core/streams/count_queuing_strategy.h"
+#include "third_party/blink/renderer/core/streams/writable_stream_default_controller.h"
+#include "third_party/blink/renderer/core/streams/writable_stream_default_writer.h"
+#include "third_party/blink/renderer/modules/native_file_system/native_file_system_underlying_sink.h"
+
+#include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 
 namespace blink {
 
-NativeFileSystemWritableFileStream::NativeFileSystemWritableFileStream(
-    RevocableInterfacePtr<mojom::blink::NativeFileSystemFileWriter> mojo_ptr)
-    : mojo_ptr_(std::move(mojo_ptr)) {
-  DCHECK(mojo_ptr_);
+NativeFileSystemWritableFileStream* NativeFileSystemWritableFileStream::Create(
+    ScriptState* script_state,
+    mojo::PendingRemote<mojom::blink::NativeFileSystemFileWriter>
+        writer_pending_remote) {
+  DCHECK(writer_pending_remote);
+  ScriptState::Scope scope(script_state);
+
+  ExecutionContext* context = ExecutionContext::From(script_state);
+
+  auto* stream = MakeGarbageCollected<NativeFileSystemWritableFileStream>();
+
+  auto* underlying_sink = MakeGarbageCollected<NativeFileSystemUnderlyingSink>(
+      context, std::move(writer_pending_remote));
+  stream->underlying_sink_ = underlying_sink;
+  auto underlying_sink_value = ScriptValue::From(script_state, underlying_sink);
+
+  auto* init = QueuingStrategyInit::Create();
+  // HighWaterMark set to 1 here. This allows the stream to appear available
+  // without adding additional buffering.
+  init->setHighWaterMark(
+      ScriptValue::From(script_state, static_cast<double>(1)));
+  auto* strategy = CountQueuingStrategy::Create(script_state, init);
+  ScriptValue strategy_value = ScriptValue::From(script_state, strategy);
+
+  ExceptionState exception_state(script_state->GetIsolate(),
+                                 ExceptionState::kConstructionContext,
+                                 "NativeFileSystemWritableFileStream");
+  stream->InitInternal(script_state, underlying_sink_value, strategy_value,
+                       exception_state);
+
+  if (exception_state.HadException())
+    return nullptr;
+
+  return stream;
 }
 
 ScriptPromise NativeFileSystemWritableFileStream::write(
     ScriptState* script_state,
-    uint64_t position,
-    const ArrayBufferOrArrayBufferViewOrBlobOrUSVString& data,
+    const ArrayBufferOrArrayBufferViewOrBlobOrUSVStringOrWriteParams& data,
     ExceptionState& exception_state) {
-  DCHECK(!data.IsNull());
+  WritableStreamDefaultWriter* writer =
+      WritableStream::AcquireDefaultWriter(script_state, this, exception_state);
+  if (exception_state.HadException())
+    return ScriptPromise();
 
-  auto blob_data = std::make_unique<BlobData>();
-  Blob* blob = nullptr;
-  if (data.IsArrayBuffer()) {
-    DOMArrayBuffer* array_buffer = data.GetAsArrayBuffer();
-    blob_data->AppendBytes(array_buffer->Data(), array_buffer->ByteLength());
-  } else if (data.IsArrayBufferView()) {
-    DOMArrayBufferView* array_buffer_view = data.GetAsArrayBufferView().View();
-    blob_data->AppendBytes(array_buffer_view->BaseAddress(),
-                           array_buffer_view->byteLength());
-  } else if (data.IsBlob()) {
-    blob = data.GetAsBlob();
-  } else if (data.IsUSVString()) {
-    // Let the developer be explicit about line endings.
-    blob_data->AppendText(data.GetAsUSVString(),
-                          /*normalize_line_endings_to_native=*/false);
-  }
+  ScriptPromise promise = writer->write(
+      script_state, ScriptValue::From(script_state, data), exception_state);
 
-  if (!blob) {
-    uint64_t size = blob_data->length();
-    blob = Blob::Create(BlobDataHandle::Create(std::move(blob_data), size));
-  }
-
-  return WriteBlob(script_state, position, blob);
+  WritableStreamDefaultWriter::Release(script_state, writer);
+  return promise;
 }
 
 ScriptPromise NativeFileSystemWritableFileStream::truncate(
     ScriptState* script_state,
-    uint64_t size) {
-  if (!mojo_ptr_ || pending_operation_) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state, MakeGarbageCollected<DOMException>(
-                          DOMExceptionCode::kInvalidStateError));
-  }
-  pending_operation_ =
-      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise result = pending_operation_->Promise();
-  mojo_ptr_->Truncate(
-      size, WTF::Bind(&NativeFileSystemWritableFileStream::TruncateComplete,
-                      WrapPersistent(this)));
-  return result;
+    uint64_t size,
+    ExceptionState& exception_state) {
+  WritableStreamDefaultWriter* writer =
+      WritableStream::AcquireDefaultWriter(script_state, this, exception_state);
+  if (exception_state.HadException())
+    return ScriptPromise();
+
+  auto* options = WriteParams::Create();
+  options->setType("truncate");
+  options->setSize(size);
+
+  ScriptPromise promise = writer->write(
+      script_state, ScriptValue::From(script_state, options), exception_state);
+
+  WritableStreamDefaultWriter::Release(script_state, writer);
+  return promise;
 }
 
-void NativeFileSystemWritableFileStream::WriteComplete(
-    mojom::blink::NativeFileSystemErrorPtr result,
-    uint64_t bytes_written) {
-  DCHECK(pending_operation_);
-  if (result->error_code == base::File::FILE_OK) {
-    pending_operation_->Resolve();
-  } else {
-    pending_operation_->Reject(
-        file_error::CreateDOMException(result->error_code));
-  }
-  pending_operation_ = nullptr;
-}
-
-void NativeFileSystemWritableFileStream::TruncateComplete(
-    mojom::blink::NativeFileSystemErrorPtr result) {
-  DCHECK(pending_operation_);
-  if (result->error_code == base::File::FILE_OK) {
-    pending_operation_->Resolve();
-  } else {
-    pending_operation_->Reject(
-        file_error::CreateDOMException(result->error_code));
-  }
-  pending_operation_ = nullptr;
-}
-
-ScriptPromise NativeFileSystemWritableFileStream::WriteBlob(
-    ScriptState* script_state,
-    uint64_t position,
-    Blob* blob) {
-  if (!mojo_ptr_ || pending_operation_) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state, MakeGarbageCollected<DOMException>(
-                          DOMExceptionCode::kInvalidStateError));
-  }
-  pending_operation_ =
-      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise result = pending_operation_->Promise();
-  mojo_ptr_->Write(position, blob->AsMojoBlob(),
-                   WTF::Bind(&NativeFileSystemWritableFileStream::WriteComplete,
-                             WrapPersistent(this)));
-  return result;
-}
-
-ScriptPromise NativeFileSystemWritableFileStream::abort(
+ScriptPromise NativeFileSystemWritableFileStream::close(
     ScriptState* script_state,
     ExceptionState& exception_state) {
-  return ScriptPromise::RejectWithDOMException(
-      script_state,
-      MakeGarbageCollected<DOMException>(DOMExceptionCode::kNotSupportedError));
+  WritableStreamDefaultWriter* writer =
+      WritableStream::AcquireDefaultWriter(script_state, this, exception_state);
+  if (exception_state.HadException())
+    return ScriptPromise();
+
+  ScriptPromise promise = writer->close(script_state, exception_state);
+
+  WritableStreamDefaultWriter::Release(script_state, writer);
+  return promise;
 }
 
-ScriptPromise NativeFileSystemWritableFileStream::abort(
+ScriptPromise NativeFileSystemWritableFileStream::seek(
     ScriptState* script_state,
-    ScriptValue reason,
+    uint64_t offset,
     ExceptionState& exception_state) {
-  return ScriptPromise::RejectWithDOMException(
-      script_state,
-      MakeGarbageCollected<DOMException>(DOMExceptionCode::kNotSupportedError));
-}
+  WritableStreamDefaultWriter* writer =
+      WritableStream::AcquireDefaultWriter(script_state, this, exception_state);
+  if (exception_state.HadException())
+    return ScriptPromise();
 
-ScriptValue NativeFileSystemWritableFileStream::getWriter(
-    ScriptState* script_state,
-    ExceptionState& exception_state) {
-  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
-                                    "Not Implemented");
-  return ScriptValue();
-}
+  auto* options = WriteParams::Create();
+  options->setType("seek");
+  options->setPosition(offset);
 
-bool NativeFileSystemWritableFileStream::locked(
-    ScriptState* script_state,
-    ExceptionState& exception_state) const {
-  auto result = IsLocked(script_state, exception_state);
+  ScriptPromise promise = writer->write(
+      script_state, ScriptValue::From(script_state, options), exception_state);
 
-  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
-                                    "Not Implemented");
-  return !result || *result;
-}
-
-base::Optional<bool> NativeFileSystemWritableFileStream::IsLocked(
-    ScriptState* script_state,
-    ExceptionState& exception_state) const {
-  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
-                                    "Not Implemented");
-  return base::nullopt;
-}
-
-void NativeFileSystemWritableFileStream::Serialize(
-    ScriptState* script_state,
-    MessagePort* port,
-    ExceptionState& exception_state) {
-  DCHECK(port);
-  DCHECK(RuntimeEnabledFeatures::TransferableStreamsEnabled());
-  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
-                                    "Not Implemented");
+  WritableStreamDefaultWriter::Release(script_state, writer);
+  return promise;
 }
 
 void NativeFileSystemWritableFileStream::Trace(Visitor* visitor) {
-  ScriptWrappable::Trace(visitor);
-  visitor->Trace(pending_operation_);
+  WritableStream::Trace(visitor);
+  visitor->Trace(underlying_sink_);
 }
 
 }  // namespace blink

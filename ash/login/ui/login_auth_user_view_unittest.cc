@@ -144,8 +144,7 @@ TEST_F(LoginAuthUserViewUnittest, OnlineSignInMessage) {
   // Clicking the message triggers |ShowGaiaSignin|.
   EXPECT_CALL(
       *client,
-      ShowGaiaSignin(true /*can_close*/,
-                     user_view->current_user().basic_user_info.account_id));
+      ShowGaiaSignin(user_view->current_user().basic_user_info.account_id));
   const ui::MouseEvent event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                              ui::EventTimeForNow(), 0, 0);
   view_->ButtonPressed(online_sign_in_message, event);
@@ -167,7 +166,7 @@ TEST_F(LoginAuthUserViewUnittest,
        PasswordClearedAfterAnimationIfPasswordDisabled) {
   LoginPasswordView::TestApi password_test(view_->password_view());
   auto has_password = [&]() {
-    return !password_test.textfield()->text().empty();
+    return !password_test.textfield()->GetText().empty();
   };
 
   // Set a password.
@@ -209,12 +208,34 @@ TEST_F(LoginAuthUserViewUnittest, AttemptsUnlockOnLidOpen) {
   base::RunLoop().RunUntilIdle();
 
   LoginPasswordView::TestApi password_test(test_auth_user_view.password_view());
-  EXPECT_FALSE(password_test.textfield()->read_only());
+  EXPECT_FALSE(password_test.textfield()->GetReadOnly());
   EXPECT_TRUE(test_auth_user_view.external_binary_auth_button()->state() ==
               views::Button::STATE_NORMAL);
   EXPECT_TRUE(
       test_auth_user_view.external_binary_enrollment_button()->state() ==
       views::Button::STATE_NORMAL);
+}
+
+TEST_F(LoginAuthUserViewUnittest, PasswordFieldChangeOnUpdateUser) {
+  LoginAuthUserView::TestApi test_auth_user_view(view_);
+  LoginPasswordView::TestApi password_test(test_auth_user_view.password_view());
+
+  const auto password = base::ASCIIToUTF16("abc1");
+  password_test.textfield()->SetText(password);
+  view_->UpdateForUser(user_);
+  EXPECT_EQ(password_test.textfield()->GetText(), password);
+
+  auto another_user = CreateUser("user2@domain.com");
+  view_->UpdateForUser(another_user);
+  EXPECT_TRUE(password_test.textfield()->GetText().empty());
+  password_test.textfield()->SetTextInputType(ui::TEXT_INPUT_TYPE_TEXT);
+  EXPECT_EQ(password_test.textfield()->GetTextInputType(),
+            ui::TEXT_INPUT_TYPE_TEXT);
+
+  // Updating user should make the textfield as a password again.
+  view_->UpdateForUser(user_);
+  EXPECT_EQ(password_test.textfield()->GetTextInputType(),
+            ui::TEXT_INPUT_TYPE_PASSWORD);
 }
 
 }  // namespace ash

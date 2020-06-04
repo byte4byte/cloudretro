@@ -18,21 +18,17 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.components.signin.AccountManagerDelegate;
 import org.chromium.components.signin.AccountManagerDelegateException;
-import org.chromium.components.signin.AccountManagerFacade;
-import org.chromium.components.signin.CoreAccountId;
-import org.chromium.components.signin.CoreAccountInfo;
+import org.chromium.components.signin.AccountManagerFacadeImpl;
+import org.chromium.components.signin.AccountManagerFacadeProvider;
 
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-/**
- * Tests for {@link ToSAckedReceiver}.
- */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class ToSAckedReceiverTest {
@@ -59,17 +55,16 @@ public class ToSAckedReceiverTest {
 
         mReceiver.onReceive(RuntimeEnvironment.application, intent);
         Assert.assertFalse(ToSAckedReceiver.checkAnyUserHasSeenToS());
-        Set<String> toSAckedAccounts = ContextUtils.getAppSharedPreferences().getStringSet(
-                ToSAckedReceiver.TOS_ACKED_ACCOUNTS, new HashSet<>());
+        Set<String> toSAckedAccounts = SharedPreferencesManager.getInstance().readStringSet(
+                ChromePreferenceKeys.TOS_ACKED_ACCOUNTS, new HashSet<>());
         Assert.assertThat(toSAckedAccounts, Matchers.contains(GOOGLE_ACCOUNT));
 
         AccountManagerDelegate accountManagerDelegate = Mockito.mock(AccountManagerDelegate.class);
-        CoreAccountInfo accountInfo = new CoreAccountInfo(
-                new CoreAccountId("gaia-id"), new Account(GOOGLE_ACCOUNT, "LegitAccount"));
-        Mockito.doReturn(Arrays.asList(accountInfo))
-                .when(accountManagerDelegate)
-                .getAccountInfosSync();
-        AccountManagerFacade.overrideAccountManagerFacadeForTests(accountManagerDelegate);
+        Account[] accounts = new Account[1];
+        accounts[0] = new Account(GOOGLE_ACCOUNT, "LegitAccount");
+        Mockito.doReturn(accounts).when(accountManagerDelegate).getAccountsSync();
+        AccountManagerFacadeProvider.setInstanceForTests(
+                new AccountManagerFacadeImpl(accountManagerDelegate));
         Assert.assertTrue(ToSAckedReceiver.checkAnyUserHasSeenToS());
     }
 }

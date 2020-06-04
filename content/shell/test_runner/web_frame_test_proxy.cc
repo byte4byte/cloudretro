@@ -4,26 +4,28 @@
 
 #include "content/shell/test_runner/web_frame_test_proxy.h"
 
+#include "content/common/unique_name_helper.h"
 #include "content/public/renderer/render_frame_observer.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/test_interfaces.h"
 #include "content/shell/test_runner/test_runner.h"
 #include "content/shell/test_runner/web_frame_test_client.h"
-#include "content/shell/test_runner/web_test_delegate.h"
-#include "content/shell/test_runner/web_test_interfaces.h"
 #include "content/shell/test_runner/web_view_test_proxy.h"
-#include "third_party/blink/public/web/web_user_gesture_indicator.h"
+#include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_testing_support.h"
+#include "third_party/blink/public/web/web_view.h"
 
-namespace test_runner {
+namespace content {
 
 namespace {
 
-void PrintFrameUserGestureStatus(WebTestDelegate* delegate,
+void PrintFrameUserGestureStatus(BlinkTestRunner* blink_test_runner,
                                  blink::WebLocalFrame* frame,
                                  const char* msg) {
-  bool is_user_gesture =
-      blink::WebUserGestureIndicator::IsProcessingUserGesture(frame);
-  delegate->PrintMessage(std::string("Frame with user gesture \"") +
-                         (is_user_gesture ? "true" : "false") + "\"" + msg);
+  bool is_user_gesture = frame->HasTransientUserActivation();
+  blink_test_runner->PrintMessage(std::string("Frame with user gesture \"") +
+                                  (is_user_gesture ? "true" : "false") + "\"" +
+                                  msg);
 }
 
 class TestRenderFrameObserver : public content::RenderFrameObserver {
@@ -38,7 +40,9 @@ class TestRenderFrameObserver : public content::RenderFrameObserver {
     return web_view_test_proxy_->test_interfaces()->GetTestRunner();
   }
 
-  WebTestDelegate* delegate() { return web_view_test_proxy_->delegate(); }
+  BlinkTestRunner* blink_test_runner() {
+    return web_view_test_proxy_->blink_test_runner();
+  }
 
   // content::RenderFrameObserver overrides.
   void OnDestruct() override { delete this; }
@@ -46,65 +50,80 @@ class TestRenderFrameObserver : public content::RenderFrameObserver {
   void DidStartNavigation(
       const GURL& url,
       base::Optional<blink::WebNavigationType> navigation_type) override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - DidStartNavigation\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - DidStartNavigation\n");
     }
 
-    if (test_runner()->shouldDumpUserGestureInFrameLoadCallbacks()) {
-      PrintFrameUserGestureStatus(delegate(), render_frame()->GetWebFrame(),
+    if (test_runner()->ShouldDumpUserGestureInFrameLoadCallbacks()) {
+      PrintFrameUserGestureStatus(blink_test_runner(),
+                                  render_frame()->GetWebFrame(),
                                   " - in DidStartNavigation\n");
     }
   }
 
   void ReadyToCommitNavigation(
       blink::WebDocumentLoader* document_loader) override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - ReadyToCommitNavigation\n");
-    }
-  }
-
-  void DidFailProvisionalLoad(const blink::WebURLError& error) override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - didFailProvisionalLoadWithError\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - ReadyToCommitNavigation\n");
     }
   }
 
   void DidCommitProvisionalLoad(bool is_same_document_navigation,
                                 ui::PageTransition transition) override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - didCommitLoadForFrame\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - didCommitLoadForFrame\n");
+    }
+
+    // Looking for navigations to about:blank after a test completes.
+    if (render_frame()->IsMainFrame() && !is_same_document_navigation) {
+      render_frame()->GetRenderView()->GetWebView()->SetFocusedFrame(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->DidCommitNavigationInMainFrame();
+    }
+  }
+
+  void DidFailProvisionalLoad() override {
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - didFailProvisionalLoadWithError\n");
     }
   }
 
   void DidFinishDocumentLoad() override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - didFinishDocumentLoadForFrame\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - didFinishDocumentLoadForFrame\n");
     }
   }
 
   void DidFinishLoad() override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - didFinishLoadForFrame\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - didFinishLoadForFrame\n");
     }
   }
 
   void DidHandleOnloadEvents() override {
-    if (test_runner()->shouldDumpFrameLoadCallbacks()) {
-      WebFrameTestClient::PrintFrameDescription(delegate(),
-                                                render_frame()->GetWebFrame());
-      delegate()->PrintMessage(" - didHandleOnloadEventsForFrame\n");
+    if (test_runner()->ShouldDumpFrameLoadCallbacks()) {
+      std::string description = WebFrameTestClient::GetFrameDescription(
+          render_frame()->GetWebFrame());
+      blink_test_runner()->PrintMessage(description +
+                                        " - didHandleOnloadEventsForFrame\n");
     }
   }
 
@@ -114,18 +133,52 @@ class TestRenderFrameObserver : public content::RenderFrameObserver {
 
 }  // namespace
 
+WebFrameTestProxy::WebFrameTestProxy(RenderFrameImpl::CreateParams params)
+    : RenderFrameImpl(std::move(params)),
+      web_view_test_proxy_(static_cast<WebViewTestProxy*>(render_view())),
+      test_client_(web_view_test_proxy_, this) {}
+
 WebFrameTestProxy::~WebFrameTestProxy() = default;
 
-void WebFrameTestProxy::Initialize(
-    WebTestInterfaces* interfaces,
-    content::RenderViewImpl* render_view_for_frame) {
-  // The RenderViewImpl will also be a test proxy type.
-  auto* view_proxy_for_frame =
-      static_cast<WebViewTestProxy*>(render_view_for_frame);
+void WebFrameTestProxy::Initialize() {
+  RenderFrameImpl::Initialize();
 
-  test_client_ =
-      interfaces->CreateWebFrameTestClient(view_proxy_for_frame, this);
-  new TestRenderFrameObserver(this, view_proxy_for_frame);  // deletes itself.
+  test_client_.Initialize();
+
+  GetAssociatedInterfaceRegistry()->AddInterface(
+      base::BindRepeating(&WebFrameTestProxy::BindReceiver,
+                          // The registry goes away and stops using this
+                          // callback when RenderFrameImpl (which is this class)
+                          // is destroyed.
+                          base::Unretained(this)));
+
+  new TestRenderFrameObserver(this, web_view_test_proxy_);  // deletes itself.
+}
+
+void WebFrameTestProxy::Reset() {
+  // TODO(crbug.com/936696): The RenderDocument project will cause us to replace
+  // the main frame on each navigation, including to about:blank and then to the
+  // next test. So resetting the frame or RenderWidget won't be meaningful then.
+
+  if (IsMainFrame()) {
+    GetWebFrame()->SetName(blink::WebString());
+    GetWebFrame()->ClearOpener();
+
+    blink::WebTestingSupport::ResetInternalsObject(GetWebFrame());
+    // Resetting the internals object also overrides the WebPreferences, so we
+    // have to sync them to WebKit again.
+    render_view()->SetWebkitPreferences(render_view()->GetWebkitPreferences());
+  }
+  if (IsLocalRoot()) {
+    GetLocalRootWebWidgetTestProxy()->Reset();
+    GetLocalRootWebWidgetTestProxy()->EndSyntheticGestures();
+  }
+
+  test_client_.Reset();
+}
+
+std::string WebFrameTestProxy::GetFrameNameForWebTests() {
+  return content::UniqueNameHelper::ExtractStableNameForTesting(unique_name());
 }
 
 void WebFrameTestProxy::UpdateAllLifecyclePhasesAndCompositeForTesting() {
@@ -138,7 +191,7 @@ void WebFrameTestProxy::UpdateAllLifecyclePhasesAndCompositeForTesting() {
 // WebLocalFrameClient implementation.
 blink::WebPlugin* WebFrameTestProxy::CreatePlugin(
     const blink::WebPluginParams& params) {
-  blink::WebPlugin* plugin = test_client_->CreatePlugin(params);
+  blink::WebPlugin* plugin = test_client_.CreatePlugin(params);
   if (plugin)
     return plugin;
   return RenderFrameImpl::CreatePlugin(params);
@@ -149,129 +202,73 @@ void WebFrameTestProxy::DidAddMessageToConsole(
     const blink::WebString& source_name,
     unsigned source_line,
     const blink::WebString& stack_trace) {
-  test_client_->DidAddMessageToConsole(message, source_name, source_line,
-                                       stack_trace);
+  test_client_.DidAddMessageToConsole(message, source_name, source_line,
+                                      stack_trace);
   RenderFrameImpl::DidAddMessageToConsole(message, source_name, source_line,
                                           stack_trace);
 }
 
-void WebFrameTestProxy::DownloadURL(
-    const blink::WebURLRequest& request,
-    blink::WebLocalFrameClient::CrossOriginRedirects
-        cross_origin_redirect_behavior,
-    mojo::ScopedMessagePipeHandle blob_url_token) {
-  test_client_->DownloadURL(request, cross_origin_redirect_behavior,
-                            mojo::ScopedMessagePipeHandle());
-  RenderFrameImpl::DownloadURL(request, cross_origin_redirect_behavior,
-                               std::move(blob_url_token));
-}
-
-void WebFrameTestProxy::DidReceiveTitle(const blink::WebString& title,
-                                        blink::WebTextDirection direction) {
-  test_client_->DidReceiveTitle(title, direction);
-  RenderFrameImpl::DidReceiveTitle(title, direction);
-}
-
-void WebFrameTestProxy::DidChangeIcon(blink::WebIconURL::Type icon_type) {
-  test_client_->DidChangeIcon(icon_type);
-  RenderFrameImpl::DidChangeIcon(icon_type);
-}
-
-void WebFrameTestProxy::DidFailLoad(const blink::WebURLError& error,
-                                    blink::WebHistoryCommitType commit_type) {
-  test_client_->DidFailLoad(error, commit_type);
-  RenderFrameImpl::DidFailLoad(error, commit_type);
-}
-
 void WebFrameTestProxy::DidStartLoading() {
-  test_client_->DidStartLoading();
+  test_client_.DidStartLoading();
   RenderFrameImpl::DidStartLoading();
 }
 
 void WebFrameTestProxy::DidStopLoading() {
   RenderFrameImpl::DidStopLoading();
-  test_client_->DidStopLoading();
+  test_client_.DidStopLoading();
 }
 
 void WebFrameTestProxy::DidChangeSelection(bool is_selection_empty) {
-  test_client_->DidChangeSelection(is_selection_empty);
+  test_client_.DidChangeSelection(is_selection_empty);
   RenderFrameImpl::DidChangeSelection(is_selection_empty);
 }
 
 void WebFrameTestProxy::DidChangeContents() {
-  test_client_->DidChangeContents();
+  test_client_.DidChangeContents();
   RenderFrameImpl::DidChangeContents();
 }
 
 blink::WebEffectiveConnectionType
 WebFrameTestProxy::GetEffectiveConnectionType() {
-  if (test_client_->GetEffectiveConnectionType() !=
+  if (test_client_.GetEffectiveConnectionType() !=
       blink::WebEffectiveConnectionType::kTypeUnknown) {
-    return test_client_->GetEffectiveConnectionType();
+    return test_client_.GetEffectiveConnectionType();
   }
   return RenderFrameImpl::GetEffectiveConnectionType();
 }
 
-void WebFrameTestProxy::RunModalAlertDialog(const blink::WebString& message) {
-  test_client_->RunModalAlertDialog(message);
-}
-
-bool WebFrameTestProxy::RunModalConfirmDialog(const blink::WebString& message) {
-  return test_client_->RunModalConfirmDialog(message);
-}
-
-bool WebFrameTestProxy::RunModalPromptDialog(
-    const blink::WebString& message,
-    const blink::WebString& default_value,
-    blink::WebString* actual_value) {
-  return test_client_->RunModalPromptDialog(message, default_value,
-                                            actual_value);
-}
-
-bool WebFrameTestProxy::RunModalBeforeUnloadDialog(bool is_reload) {
-  return test_client_->RunModalBeforeUnloadDialog(is_reload);
-}
-
 void WebFrameTestProxy::ShowContextMenu(
     const blink::WebContextMenuData& context_menu_data) {
-  test_client_->ShowContextMenu(context_menu_data);
+  test_client_.ShowContextMenu(context_menu_data);
   RenderFrameImpl::ShowContextMenu(context_menu_data);
 }
 
 void WebFrameTestProxy::DidDispatchPingLoader(const blink::WebURL& url) {
   // This is not implemented in RenderFrameImpl, so need to explicitly call
   // into the base proxy.
-  test_client_->DidDispatchPingLoader(url);
+  test_client_.DidDispatchPingLoader(url);
   RenderFrameImpl::DidDispatchPingLoader(url);
 }
 
 void WebFrameTestProxy::WillSendRequest(blink::WebURLRequest& request) {
   RenderFrameImpl::WillSendRequest(request);
-  test_client_->WillSendRequest(request);
+  test_client_.WillSendRequest(request);
 }
 
 void WebFrameTestProxy::BeginNavigation(
     std::unique_ptr<blink::WebNavigationInfo> info) {
-  if (test_client_->ShouldContinueNavigation(info.get()))
+  if (test_client_.ShouldContinueNavigation(info.get()))
     RenderFrameImpl::BeginNavigation(std::move(info));
 }
 
-void WebFrameTestProxy::PostAccessibilityEvent(
-    const blink::WebAXObject& object,
-    ax::mojom::Event event,
-    ax::mojom::EventFrom event_from) {
-  test_client_->PostAccessibilityEvent(object, event, event_from);
-  // Guard against the case where |this| was deleted as a result of an
-  // accessibility listener detaching a frame. If that occurs, the
-  // WebAXObject will be detached.
-  if (object.IsDetached())
-    return;  // |this| is invalid.
-  RenderFrameImpl::PostAccessibilityEvent(object, event, event_from);
+void WebFrameTestProxy::PostAccessibilityEvent(const ui::AXEvent& event) {
+  test_client_.PostAccessibilityEvent(event);
+  RenderFrameImpl::PostAccessibilityEvent(event);
 }
 
 void WebFrameTestProxy::MarkWebAXObjectDirty(const blink::WebAXObject& object,
                                              bool subtree) {
-  test_client_->MarkWebAXObjectDirty(object, subtree);
+  test_client_.MarkWebAXObjectDirty(object, subtree);
   // Guard against the case where |this| was deleted as a result of an
   // accessibility listener detaching a frame. If that occurs, the
   // WebAXObject will be detached.
@@ -283,13 +280,81 @@ void WebFrameTestProxy::MarkWebAXObjectDirty(const blink::WebAXObject& object,
 void WebFrameTestProxy::CheckIfAudioSinkExistsAndIsAuthorized(
     const blink::WebString& sink_id,
     blink::WebSetSinkIdCompleteCallback completion_callback) {
-  test_client_->CheckIfAudioSinkExistsAndIsAuthorized(
+  test_client_.CheckIfAudioSinkExistsAndIsAuthorized(
       sink_id, std::move(completion_callback));
 }
 
 void WebFrameTestProxy::DidClearWindowObject() {
-  test_client_->DidClearWindowObject();
+  test_client_.DidClearWindowObject();
+  blink::WebTestingSupport::InjectInternalsObject(GetWebFrame());
+
   RenderFrameImpl::DidClearWindowObject();
 }
 
-}  // namespace test_runner
+WebWidgetTestProxy* WebFrameTestProxy::GetLocalRootWebWidgetTestProxy() {
+  return static_cast<WebWidgetTestProxy*>(GetLocalRootRenderWidget());
+}
+
+void WebFrameTestProxy::CaptureDump(CaptureDumpCallback callback) {
+  blink_test_runner()->CaptureDump(std::move(callback));
+}
+
+void WebFrameTestProxy::CompositeWithRaster(
+    CompositeWithRasterCallback callback) {
+  // When the TestFinished() occurred, if the browser is capturing pixels, it
+  // asks each composited RenderFrame to submit a new frame via here.
+  UpdateAllLifecyclePhasesAndCompositeForTesting();
+  std::move(callback).Run();
+}
+
+void WebFrameTestProxy::DumpFrameLayout(DumpFrameLayoutCallback callback) {
+  TestInterfaces* interfaces = web_view_test_proxy_->test_interfaces();
+  TestRunner* test_runner = interfaces->GetTestRunner();
+  std::string dump = test_runner->DumpLayout(GetWebFrame());
+  std::move(callback).Run(std::move(dump));
+}
+
+void WebFrameTestProxy::ReplicateTestConfiguration(
+    mojom::ShellTestConfigurationPtr config) {
+  blink_test_runner()->OnReplicateTestConfiguration(std::move(config));
+}
+
+void WebFrameTestProxy::SetTestConfiguration(
+    mojom::ShellTestConfigurationPtr config) {
+  blink_test_runner()->OnSetTestConfiguration(std::move(config));
+}
+
+void WebFrameTestProxy::SetupRendererProcessForNonTestWindow() {
+  blink_test_runner()->OnSetupRendererProcessForNonTestWindow();
+}
+
+void WebFrameTestProxy::ResetRendererAfterWebTest() {
+  blink_test_runner()->OnResetRendererAfterWebTest();
+}
+
+void WebFrameTestProxy::FinishTestInMainWindow() {
+  blink_test_runner()->OnFinishTestInMainWindow();
+}
+
+void WebFrameTestProxy::LayoutDumpCompleted(
+    const std::string& completed_layout_dump) {
+  blink_test_runner()->OnLayoutDumpCompleted(completed_layout_dump);
+}
+
+void WebFrameTestProxy::ReplyBluetoothManualChooserEvents(
+    const std::vector<std::string>& events) {
+  blink_test_runner()->OnReplyBluetoothManualChooserEvents(events);
+}
+
+void WebFrameTestProxy::BindReceiver(
+    mojo::PendingAssociatedReceiver<mojom::BlinkTestControl> receiver) {
+  blink_test_control_receiver_.Bind(
+      std::move(receiver),
+      GetWebFrame()->GetTaskRunner(blink::TaskType::kInternalTest));
+}
+
+BlinkTestRunner* WebFrameTestProxy::blink_test_runner() {
+  return web_view_test_proxy_->blink_test_runner();
+}
+
+}  // namespace content

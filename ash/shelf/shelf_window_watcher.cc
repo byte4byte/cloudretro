@@ -10,14 +10,12 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_window_watcher_item_delegate.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/string_util.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/wm/public/activation_client.h"
@@ -101,7 +99,7 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowPropertyChanged(
     aura::Window* window,
     const void* key,
     intptr_t old) {
-  if (key == kShelfIDKey && window == wm::GetActiveWindow()) {
+  if (key == kShelfIDKey && window == window_util::GetActiveWindow()) {
     window_watcher_->model_->SetActiveShelfID(
         ShelfID::Deserialize(window->GetProperty(kShelfIDKey)));
   }
@@ -135,8 +133,6 @@ void ShelfWindowWatcher::UserWindowObserver::OnWindowTitleChanged(
 
 ShelfWindowWatcher::ShelfWindowWatcher(ShelfModel* model)
     : model_(model),
-      container_window_observer_(this),
-      user_window_observer_(this),
       observed_container_windows_(&container_window_observer_),
       observed_user_windows_(&user_window_observer_) {
   Shell::Get()->activation_client()->AddObserver(this);

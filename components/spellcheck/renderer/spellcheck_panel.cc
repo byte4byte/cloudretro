@@ -8,7 +8,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/local_interface_provider.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -23,7 +22,7 @@ SpellCheckPanel::SpellCheckPanel(
   DCHECK(render_frame);
   DCHECK(embedder_provider);
   registry->AddInterface(base::BindRepeating(
-      &SpellCheckPanel::SpellCheckPanelRequest, base::Unretained(this)));
+      &SpellCheckPanel::SpellCheckPanelReceiver, base::Unretained(this)));
   render_frame->GetWebFrame()->SetSpellCheckPanelHostClient(this);
 }
 
@@ -47,9 +46,9 @@ void SpellCheckPanel::UpdateSpellingUIWithMisspelledWord(
   GetSpellCheckPanelHost()->UpdateSpellingPanelWithMisspelledWord(word.Utf16());
 }
 
-void SpellCheckPanel::SpellCheckPanelRequest(
-    spellcheck::mojom::SpellCheckPanelRequest request) {
-  bindings_.AddBinding(this, std::move(request));
+void SpellCheckPanel::SpellCheckPanelReceiver(
+    mojo::PendingReceiver<spellcheck::mojom::SpellCheckPanel> receiver) {
+  receivers_.Add(this, std::move(receiver));
 }
 
 void SpellCheckPanel::AdvanceToNextMisspelling() {
@@ -72,9 +71,10 @@ void SpellCheckPanel::ToggleSpellPanel(bool visible) {
       blink::WebString::FromUTF8("ToggleSpellPanel"));
 }
 
-spellcheck::mojom::SpellCheckPanelHostPtr
+mojo::Remote<spellcheck::mojom::SpellCheckPanelHost>
 SpellCheckPanel::GetSpellCheckPanelHost() {
-  spellcheck::mojom::SpellCheckPanelHostPtr spell_check_panel_host;
-  embedder_provider_->GetInterface(&spell_check_panel_host);
+  mojo::Remote<spellcheck::mojom::SpellCheckPanelHost> spell_check_panel_host;
+  embedder_provider_->GetInterface(
+      spell_check_panel_host.BindNewPipeAndPassReceiver());
   return spell_check_panel_host;
 }

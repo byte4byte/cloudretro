@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -18,6 +18,7 @@ namespace policy {
 const char kDeviceStateManagementDomain[] = "management_domain";
 const char kDeviceStateMode[] = "device_mode";
 const char kDeviceStateDisabledMessage[] = "disabled_message";
+const char kDeviceStatePackagedLicense[] = "packaged_license";
 
 const char kDeviceStateRestoreModeReEnrollmentRequested[] =
     "re-enrollment-requested";

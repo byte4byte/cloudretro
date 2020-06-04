@@ -35,13 +35,13 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/sandbox_init.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "media/media_buildflags.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "ppapi/c/dev/ppp_network_state_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp.h"
@@ -50,7 +50,6 @@
 #include "ppapi/proxy/plugin_message_filter.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_reply_thread_registrar.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/blink/public/web/blink.h"
 #include "ui/base/buildflags.h"
 #include "ui/base/ui_base_features.h"
@@ -120,12 +119,14 @@ PpapiThread::PpapiThread(base::RepeatingClosure quit_closure,
   // In single process, browser main loop set up the discardable memory
   // allocator.
   if (!command_line.HasSwitch(switches::kSingleProcess)) {
-    discardable_memory::mojom::DiscardableSharedMemoryManagerPtr manager_ptr;
-    ChildThread::Get()->GetConnector()->BindInterface(
-        mojom::kSystemServiceName, mojo::MakeRequest(&manager_ptr));
+    mojo::PendingRemote<
+        discardable_memory::mojom::DiscardableSharedMemoryManager>
+        manager_remote;
+    ChildThread::Get()->BindHostReceiver(
+        manager_remote.InitWithNewPipeAndPassReceiver());
     discardable_shared_memory_manager_ = std::make_unique<
         discardable_memory::ClientDiscardableSharedMemoryManager>(
-        std::move(manager_ptr), GetIOTaskRunner());
+        std::move(manager_remote), GetIOTaskRunner());
     base::DiscardableMemoryAllocator::SetInstance(
         discardable_shared_memory_manager_.get());
   }
@@ -188,13 +189,6 @@ IPC::PlatformFileForTransit PpapiThread::ShareHandleWithRemote(
     base::ProcessId peer_pid,
     bool should_close_source) {
   return IPC::GetPlatformFileForTransit(handle, should_close_source);
-}
-
-base::SharedMemoryHandle PpapiThread::ShareSharedMemoryHandleWithRemote(
-    const base::SharedMemoryHandle& handle,
-    base::ProcessId remote_pid) {
-  DCHECK(remote_pid != base::kNullProcessId);
-  return base::SharedMemory::DuplicateHandle(handle);
 }
 
 base::UnsafeSharedMemoryRegion

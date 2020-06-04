@@ -37,6 +37,12 @@ LogoutConfirmationDialog::LogoutConfirmationDialog(
     LogoutConfirmationController* controller,
     base::TimeTicks logout_time)
     : controller_(controller), logout_time_(logout_time) {
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_ASH_LOGOUT_CONFIRMATION_BUTTON));
+  DialogDelegate::SetAcceptCallback(base::BindOnce(
+      &LogoutConfirmationDialog::OnDialogAccepted, base::Unretained(this)));
+
   SetLayoutManager(std::make_unique<views::FillLayout>());
   SetBorder(views::CreateEmptyBorder(
       views::LayoutProvider::Get()->GetDialogInsetsForContentType(
@@ -54,7 +60,7 @@ LogoutConfirmationDialog::LogoutConfirmationDialog(
       GetDialogWidgetInitParams(this, nullptr, nullptr, gfx::Rect());
   params.parent = Shell::GetPrimaryRootWindow()->GetChildById(
       kShellWindowId_SystemModalContainer);
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->Show();
 
   update_timer_.Start(
@@ -72,20 +78,6 @@ void LogoutConfirmationDialog::Update(base::TimeTicks logout_time) {
 void LogoutConfirmationDialog::ControllerGone() {
   controller_ = nullptr;
   GetWidget()->Close();
-}
-
-bool LogoutConfirmationDialog::Accept() {
-  logout_time_ = controller_->clock()->NowTicks();
-  UpdateLabel();
-  controller_->OnLogoutConfirmed();
-  return true;
-}
-
-base::string16 LogoutConfirmationDialog::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_OK)
-    return l10n_util::GetStringUTF16(IDS_ASH_LOGOUT_CONFIRMATION_BUTTON);
-  return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
 ui::ModalType LogoutConfirmationDialog::GetModalType() const {
@@ -130,6 +122,12 @@ void LogoutConfirmationDialog::UpdateLabel() {
         l10n_util::GetStringUTF16(IDS_ASH_LOGOUT_CONFIRMATION_WARNING_NOW));
     update_timer_.Stop();
   }
+}
+
+void LogoutConfirmationDialog::OnDialogAccepted() {
+  logout_time_ = controller_->clock()->NowTicks();
+  UpdateLabel();
+  controller_->OnLogoutConfirmed();
 }
 
 }  // namespace ash

@@ -54,6 +54,9 @@ class AppListControllerDelegate {
   // Dismisses the view.
   virtual void DismissView() = 0;
 
+  // Gets app list window.
+  virtual aura::Window* GetAppListWindow() = 0;
+
   // Gets display ID of app list window.
   virtual int64_t GetAppListDisplayId() = 0;
 
@@ -73,17 +76,13 @@ class AppListControllerDelegate {
   // Returns true if requested app is open.
   virtual bool IsAppOpen(const std::string& app_id) const = 0;
 
-  // Whether the controller supports a Show App Info flow.
-  virtual bool CanDoShowAppInfoFlow();
-
   // Show the dialog with the application's information. Call only if
   // CanDoShowAppInfoFlow() returns true.
-  virtual void DoShowAppInfoFlow(Profile* profile,
-                                 const std::string& extension_id);
+  virtual void DoShowAppInfoFlow(Profile* profile, const std::string& app_id);
 
   // Handle the "create window" context menu items of Chrome App.
   // |incognito| is true to create an incognito window.
-  virtual void CreateNewWindow(Profile* profile, bool incognito) = 0;
+  virtual void CreateNewWindow(bool incognito) = 0;
 
   // Opens the URL.
   virtual void OpenURL(Profile* profile,
@@ -107,7 +106,7 @@ class AppListControllerDelegate {
   static std::string AppListSourceToString(AppListSource source);
 
   // True if the user has permission to modify the given app's settings.
-  bool UserMayModifySettings(Profile* profile, const std::string& app_id);
+  bool UninstallAllowed(Profile* profile, const std::string& app_id);
 
   // Uninstall the app identified by |app_id| from |profile|.
   void UninstallApp(Profile* profile, const std::string& app_id);
@@ -148,7 +147,7 @@ class AppListControllerDelegate {
   void OnSearchStarted();
 
  private:
-  base::WeakPtrFactory<AppListControllerDelegate> weak_ptr_factory_;
+  base::WeakPtrFactory<AppListControllerDelegate> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_APP_LIST_APP_LIST_CONTROLLER_DELEGATE_H_

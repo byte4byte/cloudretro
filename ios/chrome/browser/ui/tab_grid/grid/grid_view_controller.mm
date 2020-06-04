@@ -19,7 +19,7 @@
 #import "ios/chrome/browser/ui/tab_grid/grid/grid_layout.h"
 #import "ios/chrome/browser/ui/tab_grid/transitions/grid_transition_layout.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -96,7 +96,7 @@ NSIndexPath* CreateIndexPath(NSInteger index) {
   collectionView.delegate = self;
   collectionView.backgroundView = [[UIView alloc] init];
   collectionView.backgroundView.backgroundColor =
-      UIColorFromRGB(kGridBackgroundColor);
+      [UIColor colorNamed:kGridBackgroundColor];
   // CollectionView, in contrast to TableView, doesn’t inset the
   // cell content to the safe area guide by default. We will just manage the
   // collectionView contentInset manually to fit in the safe area instead.
@@ -127,25 +127,11 @@ NSIndexPath* CreateIndexPath(NSInteger index) {
 
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
-  self.updatesCollectionView = YES;
-  self.defaultLayout.animatesItemUpdates = YES;
-  [self.collectionView reloadData];
-  // Selection is invalid if there are no items.
-  if (self.items.count == 0) {
-    [self animateEmptyStateIn];
-    return;
-  }
-  [self.collectionView selectItemAtIndexPath:CreateIndexPath(self.selectedIndex)
-                                    animated:animated
-                              scrollPosition:UICollectionViewScrollPositionTop];
-  // Update the delegate, in case it wasn't set when |items| was populated.
-  [self.delegate gridViewController:self didChangeItemCount:self.items.count];
-  [self removeEmptyStateAnimated:NO];
-  self.lastInsertedItemID = nil;
+  [self contentWillAppearAnimated:animated];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
-  self.updatesCollectionView = NO;
+  [self contentWillDisappear];
   [super viewWillDisappear:animated];
 }
 
@@ -245,6 +231,28 @@ NSIndexPath* CreateIndexPath(NSInteger index) {
   // Stop animating the collection view to prevent the insertion animation from
   // interfering with the tab presentation animation.
   self.defaultLayout.animatesItemUpdates = NO;
+}
+
+- (void)contentWillAppearAnimated:(BOOL)animated {
+  self.updatesCollectionView = YES;
+  self.defaultLayout.animatesItemUpdates = YES;
+  [self.collectionView reloadData];
+  // Selection is invalid if there are no items.
+  if (self.items.count == 0) {
+    [self animateEmptyStateIn];
+    return;
+  }
+  [self.collectionView selectItemAtIndexPath:CreateIndexPath(self.selectedIndex)
+                                    animated:NO
+                              scrollPosition:UICollectionViewScrollPositionTop];
+  // Update the delegate, in case it wasn't set when |items| was populated.
+  [self.delegate gridViewController:self didChangeItemCount:self.items.count];
+  [self removeEmptyStateAnimated:NO];
+  self.lastInsertedItemID = nil;
+}
+
+- (void)contentWillDisappear {
+  self.updatesCollectionView = NO;
 }
 
 #pragma mark - UICollectionViewDataSource

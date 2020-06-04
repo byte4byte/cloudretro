@@ -2,16 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings_search_page', function() {
+// clang-format off
+import 'chrome://settings/settings.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {SearchEnginesBrowserProxyImpl} from 'chrome://settings/settings.js';
+import {TestSearchEnginesBrowserProxy, createSampleSearchEngine} from 'chrome://test/settings/test_search_engines_browser_proxy.m.js';
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+// clang-format on
+
   function generateSearchEngineInfo() {
     const searchEngines0 =
-        settings_search.createSampleSearchEngine(true, false, false);
+        createSampleSearchEngine(true, false, false);
     searchEngines0.default = true;
     const searchEngines1 =
-        settings_search.createSampleSearchEngine(true, false, false);
+        createSampleSearchEngine(true, false, false);
     searchEngines1.default = false;
     const searchEngines2 =
-        settings_search.createSampleSearchEngine(true, false, false);
+        createSampleSearchEngine(true, false, false);
     searchEngines2.default = false;
 
     return {
@@ -28,9 +35,9 @@ cr.define('settings_search_page', function() {
     let browserProxy = null;
 
     setup(function() {
-      browserProxy = new settings_search.TestSearchEnginesBrowserProxy();
+      browserProxy = new TestSearchEnginesBrowserProxy();
       browserProxy.setSearchEnginesInfo(generateSearchEngineInfo());
-      settings.SearchEnginesBrowserProxyImpl.instance_ = browserProxy;
+      SearchEnginesBrowserProxyImpl.instance_ = browserProxy;
       PolymerTest.clearBody();
       page = document.createElement('settings-search-page');
       page.prefs = {
@@ -52,7 +59,7 @@ cr.define('settings_search_page', function() {
 
       return browserProxy.whenCalled('getSearchEnginesList')
           .then(function() {
-            Polymer.dom.flush();
+            flush();
             assertEquals(0, selectElement.selectedIndex);
 
             // Simulate a user initiated change of the default search engine.
@@ -70,9 +77,9 @@ cr.define('settings_search_page', function() {
             searchEnginesInfo.defaults[2].default = true;
 
             browserProxy.resetResolver('setDefaultSearchEngine');
-            cr.webUIListenerCallback(
+            webUIListenerCallback(
                 'search-engines-changed', searchEnginesInfo);
-            Polymer.dom.flush();
+            flush();
             assertEquals(2, selectElement.selectedIndex);
 
             browserProxy.whenCalled('setDefaultSearchEngine').then(function() {
@@ -97,7 +104,7 @@ cr.define('settings_search_page', function() {
           extensionCanBeDisabled: true,
           value: {},
         });
-        Polymer.dom.flush();
+        flush();
 
         assertTrue(selectElement.disabled);
         assertTrue(!!page.$$('extension-controlled-indicator'));
@@ -116,7 +123,7 @@ cr.define('settings_search_page', function() {
           enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
           value: {},
         });
-        Polymer.dom.flush();
+        flush();
 
         assertTrue(selectElement.disabled);
         assertFalse(!!page.$$('extension-controlled-indicator'));
@@ -125,4 +132,3 @@ cr.define('settings_search_page', function() {
     });
 
   });
-});

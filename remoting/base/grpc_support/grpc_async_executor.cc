@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
@@ -89,7 +90,7 @@ void CompletionQueueDispatcher::RunQueueOnDispatcherThread() {
 
 }  // namespace
 
-GrpcAsyncExecutor::GrpcAsyncExecutor() : weak_factory_(this) {
+GrpcAsyncExecutor::GrpcAsyncExecutor() {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 

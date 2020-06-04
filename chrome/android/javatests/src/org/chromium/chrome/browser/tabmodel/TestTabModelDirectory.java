@@ -306,9 +306,11 @@ public class TestTabModelDirectory {
      *                         subdirectories of the base data directory.
      */
     public TestTabModelDirectory(
-            Context context, String baseDirectoryName, String subdirectoryName) throws Exception {
+            Context context, String baseDirectoryName, String subdirectoryName) {
         mTestingDirectory = new File(context.getCacheDir(), baseDirectoryName);
-        if (mTestingDirectory.exists()) FileUtils.recursivelyDeleteFile(mTestingDirectory);
+        if (mTestingDirectory.exists()) {
+            FileUtils.recursivelyDeleteFile(mTestingDirectory, FileUtils.DELETE_ALL);
+        }
         if (!mTestingDirectory.mkdirs()) {
             Log.e(TAG, "Failed to create: " + mTestingDirectory.getName());
         }
@@ -324,8 +326,8 @@ public class TestTabModelDirectory {
     }
 
     /** Nukes all the testing data. */
-    public void tearDown() throws Exception {
-        FileUtils.recursivelyDeleteFile(mTestingDirectory);
+    public void tearDown() {
+        FileUtils.recursivelyDeleteFile(mTestingDirectory, FileUtils.DELETE_ALL);
     }
 
     /** Returns the base data directory. */

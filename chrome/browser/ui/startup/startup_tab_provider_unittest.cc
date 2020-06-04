@@ -8,7 +8,7 @@
 #include "build/build_config.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -239,9 +239,19 @@ TEST(StartupTabProviderTest, GetNewTabPageTabsForState_Negative) {
 }
 
 TEST(StartupTabProviderTest, IncognitoProfile) {
-  content::TestBrowserThreadBundle thread_bundle;
+  content::BrowserTaskEnvironment task_environment;
   TestingProfile profile;
-  Profile* incognito = profile.GetOffTheRecordProfile();
+  Profile* incognito = profile.GetPrimaryOTRProfile();
   StartupTabs output = StartupTabProviderImpl().GetOnboardingTabs(incognito);
   EXPECT_TRUE(output.empty());
+}
+
+TEST(StartupTabProviderTest, GetNewTabPageTabsForState_ExtensionsCheckup) {
+  SessionStartupPref pref_default(SessionStartupPref::Type::DEFAULT);
+
+  StartupTabs output = StartupTabProviderImpl::GetExtensionCheckupTabsForState(
+      /*serve_extensions_page=*/true);
+
+  ASSERT_EQ(1U, output.size());
+  EXPECT_EQ("chrome://extensions/?checkup=shown", output[0].url);
 }

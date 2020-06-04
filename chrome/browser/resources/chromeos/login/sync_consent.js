@@ -10,14 +10,25 @@
 Polymer({
   is: 'sync-consent',
 
-  behaviors: [I18nBehavior, OobeDialogHostBehavior],
+  behaviors: [OobeI18nBehavior, OobeDialogHostBehavior],
+
+  properties: {
+    /** @private */
+    splitSettingsSyncEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('splitSettingsSyncEnabled');
+      },
+      readOnly: true,
+    },
+  },
 
   /** @override */
-  ready: function() {
+  ready() {
     this.updateLocalizedContent();
   },
 
-  focus: function() {
+  focus() {
     let activeScreen = this.getActiveScreen_();
     if (activeScreen)
       activeScreen.focus();
@@ -27,7 +38,7 @@ Polymer({
    * Hides all screens to help switching from one screen to another.
    * @private
    */
-  hideAllScreens_: function() {
+  hideAllScreens_() {
     var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog');
     for (let screen of screens)
       screen.hidden = true;
@@ -37,7 +48,7 @@ Polymer({
    * Returns active screen or null if none.
    * @private
    */
-  getActiveScreen_: function() {
+  getActiveScreen_() {
     var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog');
     for (let screen of screens) {
       if (!screen.hidden)
@@ -51,7 +62,7 @@ Polymer({
    * @param id String Screen ID.
    * @private
    */
-  showScreen_: function(id) {
+  showScreen_(id) {
     this.hideAllScreens_();
 
     var screen = this.$[id];
@@ -64,22 +75,24 @@ Polymer({
   /**
    * Reacts to changes in loadTimeData.
    */
-  updateLocalizedContent: function() {
-    let useMakeBetterScreen = loadTimeData.getBoolean('syncConsentMakeBetter');
-    if (useMakeBetterScreen) {
-      if (this.$.syncConsentMakeChromeSyncOptionsDialog.hidden)
-        this.showScreen_('syncConsentNewDialog');
+  updateLocalizedContent() {
+    if (loadTimeData.getBoolean('splitSettingsSyncEnabled')) {
+      // SplitSettingsSync version.
+      this.showScreen_('splitSettingsSyncConsentDialog');
     } else {
+      // Regular version.
       this.showScreen_('syncConsentOverviewDialog');
     }
     this.i18nUpdateLocale();
   },
 
   /**
-   * This is 'on-tap' event handler for 'AcceptAndContinue' button.
+   * Continue button click handler for pre-SplitSettingsSync.
    * @private
    */
-  onSettingsSaveAndContinue_: function(e) {
+  onSettingsSaveAndContinue_(e) {
+    assert(e.path);
+    assert(!loadTimeData.getBoolean('splitSettingsSyncEnabled'));
     if (this.$.reviewSettingsBox.checked) {
       chrome.send('login.SyncConsentScreen.continueAndReview', [
         this.getConsentDescription_(), this.getConsentConfirmation_(e.path)
@@ -92,12 +105,28 @@ Polymer({
   },
 
   /**
+   * Continue button handler for SplitSettingsSync.
+   * @param {!Event} event
+   * @private
+   */
+  onSettingsAcceptAndContinue_(event) {
+    assert(loadTimeData.getBoolean('splitSettingsSyncEnabled'));
+    assert(event.path);
+    const enableOsSync = !!this.$.osSyncToggle.checked;
+    const reviewBrowserSync = !!this.$.reviewBrowserSyncOptionsBox.checked;
+    chrome.send('login.SyncConsentScreen.acceptAndContinue', [
+      this.getConsentDescription_(), this.getConsentConfirmation_(event.path),
+      enableOsSync, reviewBrowserSync
+    ]);
+  },
+
+  /**
    * @param {!Array<!HTMLElement>} path Path of the click event. Must contain
    *     a consent confirmation element.
    * @return {string} The text of the consent confirmation element.
    * @private
    */
-  getConsentConfirmation_: function(path) {
+  getConsentConfirmation_(path) {
     for (let element of path) {
       if (!element.hasAttribute)
         continue;
@@ -122,52 +151,12 @@ Polymer({
   },
 
   /** @return {!Array<string>} Text of the consent description elements. */
-  getConsentDescription_: function() {
+  getConsentDescription_() {
     let consentDescription =
         Array.from(this.shadowRoot.querySelectorAll('[consent-description]'))
             .filter(element => element.clientWidth * element.clientHeight > 0)
             .map(element => element.innerHTML.trim());
     assert(consentDescription);
     return consentDescription;
-  },
-
-  /******************************************************
-   * Get Google smarts in Chrome dialog.
-   ******************************************************/
-
-  /**
-   * @private
-   */
-  onMoreOptionsButton_: function() {
-    this.showScreen_('syncConsentMakeChromeSyncOptionsDialog');
-  },
-
-  /**
-   * @private
-   */
-  onConfirm_: function() {
-    chrome.send(
-        'login.SyncConsentScreen.userActed',
-        ['continue-with-sync-and-personalization']);
-  },
-
-  /******************************************************
-   * Get Google smarts ... options dialog
-   ******************************************************/
-
-  /** @private */
-  onOptionsAcceptAndContinue_: function() {
-    const selected = this.$.optionsGroup.selected;
-    if (selected == 'justSync') {
-      chrome.send(
-          'login.SyncConsentScreen.userActed', ['continue-with-sync-only']);
-    } else if (selected == 'syncAndPersonalization') {
-      chrome.send(
-          'login.SyncConsentScreen.userActed',
-          ['continue-with-sync-and-personalization']);
-    } else {
-      // 'Continue and review' is default option.
-      chrome.send('login.SyncConsentScreen.userActed', ['continue-and-review']);
-    }
   },
 });

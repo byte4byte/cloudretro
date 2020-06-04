@@ -4,7 +4,9 @@
 
 #include "media/base/byte_queue.h"
 
-#include "base/logging.h"
+#include <algorithm>
+
+#include "base/check_op.h"
 #include "base/numerics/checked_math.h"
 
 namespace media {

@@ -9,11 +9,8 @@ suite('InternetPage', function() {
   /** @type {?NetworkSummaryElement} */
   let networkSummary_ = null;
 
-  /** @type {?NetworkingPrivate} */
-  let api_;
-
-  /** @type {?chromeos.networkConfig.mojom.CrosNetworkConfigProxy} */
-  let mojoApi_;
+  /** @type {?chromeos.networkConfig.mojom.CrosNetworkConfigRemote} */
+  let mojoApi_ = null;
 
   suiteSetup(function() {
     loadTimeData.overrideValues({
@@ -23,32 +20,13 @@ suite('InternetPage', function() {
       internetAddConnectionNotAllowed: 'internetAddConnectionNotAllowed',
       internetAddThirdPartyVPN: 'internetAddThirdPartyVPN',
       internetAddVPN: 'internetAddVPN',
-      internetAddArcVPN: 'internetAddArcVPN',
-      internetAddArcVPNProvider: 'internetAddArcVPNProvider',
       internetAddWiFi: 'internetAddWiFi',
       internetDetailPageTitle: 'internetDetailPageTitle',
       internetKnownNetworksPageTitle: 'internetKnownNetworksPageTitle',
     });
 
-    CrOncStrings = {
-      OncTypeCellular: 'OncTypeCellular',
-      OncTypeEthernet: 'OncTypeEthernet',
-      OncTypeMobile: 'OncTypeMobile',
-      OncTypeTether: 'OncTypeTether',
-      OncTypeVPN: 'OncTypeVPN',
-      OncTypeWiFi: 'OncTypeWiFi',
-      OncTypeWiMAX: 'OncTypeWiMAX',
-      networkListItemConnected: 'networkListItemConnected',
-      networkListItemConnecting: 'networkListItemConnecting',
-      networkListItemConnectingTo: 'networkListItemConnectingTo',
-      networkListItemNotConnected: 'networkListItemNotConnected',
-      networkListItemNoNetwork: 'networkListItemNoNetwork',
-      vpnNameTemplate: 'vpnNameTemplate',
-    };
-
-    api_ = new chrome.FakeNetworkingPrivate();
-    mojoApi_ = new FakeNetworkConfig(api_);
-    network_config.MojoInterfaceProviderImpl.getInstance().proxy_ = mojoApi_;
+    mojoApi_ = new FakeNetworkConfig();
+    network_config.MojoInterfaceProviderImpl.getInstance().remote_ = mojoApi_;
 
     // Disable animations so sub-pages open within one event loop.
     testing.Test.disableAnimationsAndTransitions();
@@ -61,27 +39,22 @@ suite('InternetPage', function() {
   }
 
   function setNetworksForTest(networks) {
-    api_.resetForTest();
-    api_.addNetworksForTest(networks);
-  }
-
-  function setArcVpnProvidersForTest(arcVpnProviders) {
-    cr.webUIListenerCallback('sendArcVpnProviders', arcVpnProviders);
+    mojoApi_.resetForTest();
+    mojoApi_.addNetworksForTest(networks);
   }
 
   setup(function() {
     PolymerTest.clearBody();
     internetPage = document.createElement('settings-internet-page');
     assertTrue(!!internetPage);
-    api_.resetForTest();
-    internetPage.networkingPrivate = api_;
+    mojoApi_.resetForTest();
     document.body.appendChild(internetPage);
     networkSummary_ = internetPage.$$('network-summary');
     assertTrue(!!networkSummary_);
     return flushAsync().then(() => {
       return Promise.all([
-        api_.whenCalled('getNetworks'),
-        api_.whenCalled('getDeviceStates'),
+        mojoApi_.whenCalled('getNetworkStateList'),
+        mojoApi_.whenCalled('getDeviceStateList'),
       ]);
     });
   });
@@ -97,8 +70,7 @@ suite('InternetPage', function() {
     }
     internetPage.remove();
     internetPage = null;
-    // Navigating to the details page changes the Route state.
-    settings.resetRouteForTesting();
+    settings.Router.getInstance().resetRouteForTesting();
   });
 
   suite('MainPage', function() {
@@ -109,16 +81,16 @@ suite('InternetPage', function() {
       assertEquals(1, ethernet.networkStateList.length);
       assertEquals(null, networkSummary_.$$('#Cellular'));
       assertEquals(null, networkSummary_.$$('#VPN'));
-      assertEquals(null, networkSummary_.$$('#WiMAX'));
       assertEquals(null, networkSummary_.$$('#WiFi'));
     });
 
     test('WiFi', function() {
+      const mojom = chromeos.networkConfig.mojom;
       setNetworksForTest([
-        {GUID: 'wifi1_guid', Name: 'wifi1', Type: 'WiFi'},
-        {GUID: 'wifi12_guid', Name: 'wifi2', Type: 'WiFi'},
+        OncMojo.getDefaultNetworkState(mojom.NetworkType.kWiFi, 'wifi1'),
+        OncMojo.getDefaultNetworkState(mojom.NetworkType.kWiFi, 'wifi2'),
       ]);
-      api_.enableNetworkType('WiFi');
+      mojoApi_.setNetworkTypeEnabledState(mojom.NetworkType.kWiFi, true);
       return flushAsync().then(() => {
         const wifi = networkSummary_.$$('#WiFi');
         assertTrue(!!wifi);
@@ -127,15 +99,19 @@ suite('InternetPage', function() {
     });
 
     test('WiFiToggle', function() {
+      const mojom = chromeos.networkConfig.mojom;
       // Make WiFi an available but disabled technology.
-      api_.disableNetworkType('WiFi');
+      mojoApi_.setNetworkTypeEnabledState(mojom.NetworkType.kWiFi, false);
       return flushAsync().then(() => {
         const wifi = networkSummary_.$$('#WiFi');
         assertTrue(!!wifi);
 
         // Ensure that the initial state is disabled and the toggle is
         // enabled but unchecked.
-        assertEquals('Disabled', api_.getDeviceStateForTest('WiFi').State);
+        const wifiDevice =
+            mojoApi_.getDeviceStateForTest(mojom.NetworkType.kWiFi);
+        assertTrue(!!wifiDevice);
+        assertEquals(mojom.DeviceStateType.kDisabled, wifiDevice.deviceState);
         const toggle = wifi.$$('#deviceEnabledButton');
         assertTrue(!!toggle);
         assertFalse(toggle.disabled);
@@ -145,231 +121,51 @@ suite('InternetPage', function() {
         toggle.click();
         return flushAsync().then(() => {
           assertTrue(toggle.checked);
-          assertEquals('Enabled', api_.getDeviceStateForTest('WiFi').State);
-        });
-      });
-    });
-  });
-
-  suite('SubPage', function() {
-    test('WiFi', function() {
-      setNetworksForTest([
-        {GUID: 'wifi1_guid', Name: 'wifi1', Type: 'WiFi'},
-        {GUID: 'wifi12_guid', Name: 'wifi2', Type: 'WiFi'},
-      ]);
-      api_.enableNetworkType('WiFi');
-      return flushAsync().then(() => {
-        const wifi = networkSummary_.$$('#WiFi');
-        assertTrue(!!wifi);
-        wifi.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const subpage = internetPage.$$('settings-internet-subpage');
-          assertTrue(!!subpage);
-          assertEquals(2, subpage.networkStateList_.length);
-          const toggle = wifi.$$('#deviceEnabledButton');
-          assertTrue(!!toggle);
-          assertFalse(toggle.disabled);
-          const networkList = subpage.$$('#networkList');
-          assertTrue(!!networkList);
-          assertEquals(2, networkList.networks.length);
+          const wifiDevice =
+              mojoApi_.getDeviceStateForTest(mojom.NetworkType.kWiFi);
+          assertTrue(!!wifiDevice);
+          assertEquals(mojom.DeviceStateType.kEnabled, wifiDevice.deviceState);
         });
       });
     });
 
-    test('Cellular', function() {
-      setNetworksForTest([
-        {GUID: 'cellular1_guid', Name: 'cellular1', Type: 'Cellular'},
-      ]);
-      api_.enableNetworkType('Cellular');
-      return flushAsync().then(() => {
-        const mobile = networkSummary_.$$('#Cellular');
-        assertTrue(!!mobile);
-        mobile.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const detailPage = internetPage.$$('settings-internet-detail-page');
-          assertTrue(!!detailPage);
-        });
-      });
-    });
-
-    test('Tether', function() {
-      setNetworksForTest([
-        {GUID: 'tether1_guid', Name: 'tether1', Type: 'Tether'},
-        {GUID: 'tether2_guid', Name: 'tether2', Type: 'Tether'},
-      ]);
-      api_.enableNetworkType('Tether');
-      return flushAsync().then(() => {
-        const mobile = networkSummary_.$$('#Tether');
-        assertTrue(!!mobile);
-        mobile.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const subpage = internetPage.$$('settings-internet-subpage');
-          assertTrue(!!subpage);
-          assertEquals(2, subpage.networkStateList_.length);
-          const toggle = mobile.$$('#deviceEnabledButton');
-          assertTrue(!!toggle);
-          assertFalse(toggle.disabled);
-          const networkList = subpage.$$('#networkList');
-          assertTrue(!!networkList);
-          assertEquals(2, networkList.networks.length);
-          const tetherToggle = mobile.$$('#tetherEnabledButton');
-          // No separate tether toggle when Celular is not available; the
-          // primary toggle enables or disables Tether in that case.
-          assertFalse(!!tetherToggle);
-        });
-      });
-    });
-
-    test('Tether plus Cellular', function() {
-      setNetworksForTest([
-        {GUID: 'cellular1_guid', Name: 'cellular1', Type: 'Cellular'},
-        {GUID: 'tether1_guid', Name: 'tether1', Type: 'Tether'},
-        {GUID: 'tether2_guid', Name: 'tether2', Type: 'Tether'},
-      ]);
-      api_.enableNetworkType('Cellular');
-      api_.enableNetworkType('Tether');
-      return flushAsync().then(() => {
-        const mobile = networkSummary_.$$('#Cellular');
-        assertTrue(!!mobile);
-        assertTrue(!!mobile.$$('.subpage-arrow'));
-        mobile.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const subpage = internetPage.$$('settings-internet-subpage');
-          assertTrue(!!subpage);
-          assertEquals(3, subpage.networkStateList_.length);
-          const toggle = mobile.$$('#deviceEnabledButton');
-          assertTrue(!!toggle);
-          assertFalse(toggle.disabled);
-          const networkList = subpage.$$('#networkList');
-          assertTrue(!!networkList);
-          assertEquals(3, networkList.networks.length);
-          const tetherToggle = subpage.$$('#tetherEnabledButton');
-          assertTrue(!!tetherToggle);
-          assertFalse(tetherToggle.disabled);
-        });
-      });
-    });
-
-    test('VPN', function() {
-      setNetworksForTest([
-        {GUID: 'vpn1_guid', Name: 'vpn1', Type: 'VPN'},
-        {GUID: 'vpn2_guid', Name: 'vpn1', Type: 'VPN'},
+    test('VpnProviders', function() {
+      const mojom = chromeos.networkConfig.mojom;
+      mojoApi_.setVpnProvidersForTest([
         {
-          GUID: 'third_party1_vpn1_guid',
-          Name: 'vpn3',
-          Type: 'VPN',
-          VPN: {
-            Type: 'ThirdPartyVPN',
-            ThirdPartyVPN: {ExtensionID: 'id1', ProviderName: 'pname1'}
-          }
+          type: mojom.VpnType.kExtension,
+          providerId: 'extension_id1',
+          providerName: 'MyExtensionVPN1',
+          appId: 'extension_id1',
+          lastLaunchTime: {internalValue: 0},
         },
         {
-          GUID: 'third_party1_vpn2_guid',
-          Name: 'vpn4',
-          Type: 'VPN',
-          VPN: {
-            Type: 'ThirdPartyVPN',
-            ThirdPartyVPN: {ExtensionID: 'id1', ProviderName: 'pname1'}
-          }
+          type: mojom.VpnType.kArc,
+          providerId: 'vpn.app.package1',
+          providerName: 'MyArcVPN1',
+          appId: 'arcid1',
+          lastLaunchTime: {internalValue: 1},
         },
         {
-          GUID: 'third_party2_vpn1_guid',
-          Name: 'vpn5',
-          Type: 'VPN',
-          VPN: {
-            Type: 'ThirdPartyVPN',
-            ThirdPartyVPN: {ExtensionID: 'id2', ProviderName: 'pname2'}
-          }
-        },
-      ]);
-      api_.onNetworkListChanged.callListeners();
-      return flushAsync().then(() => {
-        const vpn = networkSummary_.$$('#VPN');
-        assertTrue(!!vpn);
-        vpn.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const subpage = internetPage.$$('settings-internet-subpage');
-          assertTrue(!!subpage);
-          assertEquals(2, subpage.networkStateList_.length);
-          const networkList = subpage.$$('#networkList');
-          assertTrue(!!networkList);
-          assertEquals(2, networkList.networks.length);
-          // TODO(stevenjb): Implement fake management API and test third
-          // party provider sections.
-        });
-      });
-    });
-
-    test('ArcVPNProvider', function() {
-      setArcVpnProvidersForTest([
-        {
-          Packagename: 'vpn.app.pacakge1',
-          ProviderName: 'MyArcVPN1',
-          AppID: 'arcid1',
-          LastLaunchTime: 0
-        },
-        {
-          Packagename: 'vpn.app.pacakge2',
-          ProviderName: 'MyArcVPN2',
-          AppID: 'arcid2',
-          LastLaunchTime: 1
+          type: mojom.VpnType.kArc,
+          providerId: 'vpn.app.package2',
+          providerName: 'MyArcVPN2',
+          appId: 'arcid2',
+          lastLaunchTime: {internalValue: 2},
         }
       ]);
       return flushAsync().then(() => {
-        const expandAddConnections = internetPage.$$('#expandAddConnections');
-        assertTrue(!!expandAddConnections);
-        assertTrue(!expandAddConnections.expanded);
-        internetPage.addConnectionExpanded_ = true;
-        return flushAsync().then(() => {
-          const addArcVpn = internetPage.$$('#addArcVpn');
-          assertTrue(!!addArcVpn);
-          addArcVpn.click();
-          return flushAsync().then(() => {
-            const subpage = internetPage.$$('settings-internet-subpage');
-            assertTrue(!!subpage);
-            assertEquals(2, subpage.arcVpnProviders.length);
-          });
-        });
-      });
-    });
-
-    test('WiFi Detail', function() {
-      setNetworksForTest([
-        {
-          GUID: 'wifi1_guid',
-          Name: 'wifi1',
-          Type: 'WiFi',
-          ConnectionState: 'Connected'
-        },
-      ]);
-      api_.enableNetworkType('WiFi');
-      return flushAsync().then(() => {
-        const wifi = networkSummary_.$$('#WiFi');
-        assertTrue(!!wifi);
-        wifi.$$('.subpage-arrow').click();
-        return flushAsync().then(() => {
-          const subpage = internetPage.$$('settings-internet-subpage');
-          assertTrue(!!subpage);
-          const networkList = subpage.$$('#networkList');
-          assertTrue(!!networkList);
-          assertEquals(1, networkList.networks.length);
-          assertEquals(1, networkList.listItems_.length);
-          const ironList = networkList.$$('iron-list');
-          assertTrue(!!ironList);
-          assertEquals(1, ironList.items.length);
-          const networkListItem = networkList.$$('cr-network-list-item');
-          assertTrue(!!networkListItem);
-          networkListItem.click();
-          return flushAsync().then(() => {
-            const detailPage = internetPage.$$('settings-internet-detail-page');
-            assertTrue(!!detailPage);
-            assertEquals('wifi1_guid', detailPage.guid);
-            return Promise.all([
-              api_.whenCalled('getManagedProperties'),
-            ]);
-          });
-        });
+        assertEquals(3, internetPage.vpnProviders_.length);
+        // Ensure providers are sorted by type and lastLaunchTime.
+        assertEquals('extension_id1', internetPage.vpnProviders_[0].providerId);
+        assertEquals(
+            'vpn.app.package2', internetPage.vpnProviders_[1].providerId);
+        assertEquals(
+            'vpn.app.package1', internetPage.vpnProviders_[2].providerId);
       });
     });
   });
+
+  // TODO(stevenjb): Figure out a way to reliably test navigation. Currently
+  // such tests are flaky.
 });

@@ -12,6 +12,7 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/power/battery_notification.h"
 #include "ash/system/power/dual_role_notification.h"
 #include "ash/system/time/time_view.h"
@@ -19,9 +20,9 @@
 #include "ash/system/tray/tray_item_view.h"
 #include "ash/system/tray/tray_utils.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/time/time.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/devicetype_utils.h"
@@ -62,7 +63,6 @@ gfx::Size PowerTrayView::CalculatePreferredSize() const {
 
 void PowerTrayView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetName(accessible_name_);
-  node_data->role = ax::mojom::Role::kButton;
 }
 
 views::View* PowerTrayView::GetTooltipHandlerForPoint(const gfx::Point& point) {
@@ -110,8 +110,9 @@ void PowerTrayView::UpdateImage() {
   icon_session_state_color_ = session_state;
 
   // Note: The icon color (both fg and bg) changes when the UI in in OOBE mode.
-  SkColor icon_fg_color = TrayIconColor(session_state);
-  SkColor icon_bg_color = SkColorSetA(icon_fg_color, kTrayIconBackgroundAlpha);
+  const SkColor icon_fg_color = TrayIconColor(session_state);
+  const SkColor icon_bg_color =
+      AshColorProvider::GetSecondToneColor(icon_fg_color);
   image_view()->SetImage(PowerStatus::GetBatteryImage(
       info, kUnifiedTrayIconSize, icon_bg_color, icon_fg_color));
 }

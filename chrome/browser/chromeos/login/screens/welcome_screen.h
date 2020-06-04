@@ -70,16 +70,15 @@ class WelcomeScreen : public BaseScreen,
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // BaseScreen implementation:
-  void Show() override;
-  void Hide() override;
-  void OnUserAction(const std::string& action_id) override;
-
  protected:
   // Exposes exit callback to test overrides.
   base::RepeatingClosure* exit_callback() { return &exit_callback_; }
 
  private:
+  // BaseScreen:
+  void ShowImpl() override;
+  void HideImpl() override;
+  void OnUserAction(const std::string& action_id) override;
 
   // InputMethodManager::Observer implementation:
   void InputMethodChanged(input_method::InputMethodManager* manager,
@@ -129,7 +128,7 @@ class WelcomeScreen : public BaseScreen,
 
   base::ObserverList<Observer>::Unchecked observers_;
 
-  base::WeakPtrFactory<WelcomeScreen> weak_factory_;
+  base::WeakPtrFactory<WelcomeScreen> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WelcomeScreen);
 };

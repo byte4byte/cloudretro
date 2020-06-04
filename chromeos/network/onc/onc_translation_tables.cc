@@ -33,6 +33,9 @@ const FieldTranslationEntry eap_fields[] = {
     {::onc::eap::kSaveCredentials, shill::kSaveCredentialsProperty},
     {::onc::eap::kServerCAPEMs, shill::kEapCaCertPemProperty},
     {::onc::eap::kSubjectMatch, shill::kEapSubjectMatchProperty},
+    // This field is converted during translation, see onc_translator_*.
+    // {::onc::eap::kSubjectAlternativeNameMatch,
+    //  shill::kEapSubjectAlternativeNameMatchProperty},
     {::onc::eap::kTLSVersionMax, shill::kEapTLSVersionMaxProperty},
     {::onc::eap::kUseSystemCAs, shill::kEapUseSystemCasProperty},
     {::onc::eap::kUseProactiveKeyCaching,
@@ -65,7 +68,9 @@ const FieldTranslationEntry l2tp_fields[] = {
     // doesn't support separate settings for ipsec and l2tp.
     // { ::onc::l2tp::kSaveCredentials, &kBoolSignature },
     {::onc::l2tp::kUsername, shill::kL2tpIpsecUserProperty},
-    {::onc::l2tp::kLcpEchoDisabled, shill::kL2tpIpsecLcpEchoDisabledProperty},
+    // kLcpEchoDisabled is a bool in ONC and a string in Shill.
+    // {::onc::l2tp::kLcpEchoDisabled,
+    // shill::kL2tpIpsecLcpEchoDisabledProperty},
     {nullptr}};
 
 const FieldTranslationEntry openvpn_fields[] = {
@@ -78,6 +83,8 @@ const FieldTranslationEntry openvpn_fields[] = {
     //  shill::kOpenVPNClientCertIdProperty},
     {::onc::openvpn::kCompLZO, shill::kOpenVPNCompLZOProperty},
     {::onc::openvpn::kCompNoAdapt, shill::kOpenVPNCompNoAdaptProperty},
+    // This field is converted during translation, see onc_translator_*
+    // {::onc::openvpn::kCompressionAlgorithm, shill::kOpenVPNCompressProperty},
     {::onc::openvpn::kExtraHosts, shill::kOpenVPNExtraHostsProperty},
     {::onc::openvpn::kIgnoreDefaultRoute,
      shill::kOpenVPNIgnoreDefaultRouteProperty},
@@ -144,18 +151,10 @@ const FieldTranslationEntry wifi_fields[] = {
     {::onc::wifi::kHexSSID, shill::kWifiHexSsid},
     {::onc::wifi::kHiddenSSID, shill::kWifiHiddenSsid},
     {::onc::wifi::kPassphrase, shill::kPassphraseProperty},
-    {::onc::wifi::kRoamThreshold, shill::kWifiRoamThresholdProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::wifi::kSecurity, shill::kSecurityClassProperty },
     {::onc::wifi::kSignalStrength, shill::kSignalStrengthProperty},
     {::onc::wifi::kTetheringState, shill::kTetheringProperty},
-    {nullptr}};
-
-const FieldTranslationEntry wimax_fields[] = {
-    {::onc::wimax::kAutoConnect, shill::kAutoConnectProperty},
-    // This dictionary is converted during translation, see onc_translator_*.
-    // { ::onc::wimax::kEAP, shill::kEap*},
-    {::onc::wimax::kSignalStrength, shill::kSignalStrengthProperty},
     {nullptr}};
 
 const FieldTranslationEntry cellular_apn_fields[] = {
@@ -274,8 +273,6 @@ const OncValueTranslationEntry onc_value_translation_table[] = {
     {&kTetherWithStateSignature, tether_fields},
     {&kWiFiSignature, wifi_fields},
     {&kWiFiWithStateSignature, wifi_fields},
-    {&kWiMAXSignature, wimax_fields},
-    {&kWiMAXWithStateSignature, wimax_fields},
     {&kCellularApnSignature, cellular_apn_fields},
     {&kCellularFoundNetworkSignature, cellular_found_network_fields},
     {&kCellularPaymentPortalSignature, cellular_payment_portal_fields},
@@ -314,7 +311,8 @@ const StringTranslationEntry kNetworkTypeTable[] = {
     // kTypeEthernetEap is set in onc_translator_onc_to_shill.cc.
     //  { ::onc::network_type::kEthernet, shill::kTypeEthernetEap },
     {::onc::network_type::kWiFi, shill::kTypeWifi},
-    {::onc::network_type::kWimax, shill::kTypeWimax},
+    // wimax entries are ignored in onc_translator_onc_to_shill.cc.
+    // {::onc::network_type::kWimax, shill::kTypeWimax},
     {::onc::network_type::kCellular, shill::kTypeCellular},
     {::onc::network_type::kVPN, shill::kTypeVPN},
     {::onc::network_type::kTether, kTypeTether},
@@ -394,6 +392,15 @@ const StringTranslationEntry kTetheringStateTable[] = {
      shill::kTetheringSuspectedState},
     {nullptr}};
 
+const StringTranslationEntry kOpenVpnCompressionAlgorithmTable[] = {
+    {::onc::openvpn_compression_algorithm::kFramingOnly,
+     shill::kOpenVPNCompressFramingOnly},
+    {::onc::openvpn_compression_algorithm::kLz4, shill::kOpenVPNCompressLz4},
+    {::onc::openvpn_compression_algorithm::kLz4V2,
+     shill::kOpenVPNCompressLz4V2},
+    {::onc::openvpn_compression_algorithm::kLzo, shill::kOpenVPNCompressLzo},
+    {nullptr}};
+
 // This must contain only Shill Device properties and no Service properties.
 // For Service properties see cellular_fields.
 const FieldTranslationEntry kCellularDeviceTable[] = {
@@ -416,7 +423,6 @@ const FieldTranslationEntry kCellularDeviceTable[] = {
     {::onc::cellular::kMEID, shill::kMeidProperty},
     {::onc::cellular::kMIN, shill::kMinProperty},
     {::onc::cellular::kModelID, shill::kModelIdProperty},
-    {::onc::cellular::kPRLVersion, shill::kPRLVersionProperty},
     {::onc::cellular::kScanning, shill::kScanningProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kSIMLockStatus, shill::kSIMLockStatusProperty},

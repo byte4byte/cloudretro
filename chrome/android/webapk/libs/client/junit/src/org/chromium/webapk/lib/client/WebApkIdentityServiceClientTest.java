@@ -6,7 +6,6 @@ package org.chromium.webapk.lib.client;
 
 import android.content.ComponentName;
 import android.os.Bundle;
-import android.os.RemoteException;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -46,7 +45,7 @@ public class WebApkIdentityServiceClientTest {
         private boolean mIsCalled;
 
         @Override
-        public void onChecked(boolean doesBrowserBackWebApk) {
+        public void onChecked(boolean doesBrowserBackWebApk, String browserPackageName) {
             mResult = doesBrowserBackWebApk;
             mIsCalled = true;
         }
@@ -61,7 +60,7 @@ public class WebApkIdentityServiceClientTest {
         }
 
         @Override
-        public String getRuntimeHostBrowserPackageName() throws RemoteException {
+        public String getRuntimeHostBrowserPackageName() {
             return mRuntimeHost;
         }
     }

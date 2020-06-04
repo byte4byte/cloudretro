@@ -14,6 +14,7 @@
 #include "chrome/browser/chromeos/arc/icon_decode_request.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
+#include "chrome/browser/ui/app_list/app_service/app_service_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/grit/generated_resources.h"
@@ -36,26 +37,21 @@ ArcAppShortcutSearchResult::ArcAppShortcutSearchResult(
   SetTitle(base::UTF8ToUTF16(data_->short_label));
   set_id(kAppShortcutSearchPrefix + GetAppId() + "/" + data_->shortcut_id);
   SetAccessibleName(ComputeAccessibleName());
-  SetResultType(ash::SearchResultType::kArcAppShortcut);
-
-  if (is_recommendation) {
-    SetDisplayType(ash::SearchResultDisplayType::kRecommendation);
-  } else {
-    SetDisplayType(ash::SearchResultDisplayType::kTile);
-  }
+  SetResultType(ash::AppListSearchResultType::kArcAppShortcut);
+  SetDisplayType(ash::SearchResultDisplayType::kTile);
+  SetIsRecommendation(is_recommendation);
 
   const int icon_dimension =
-      app_list::AppListConfig::instance().search_tile_icon_dimension();
+      ash::AppListConfig::instance().search_tile_icon_dimension();
   icon_decode_request_ = std::make_unique<arc::IconDecodeRequest>(
       base::BindOnce(&ArcAppShortcutSearchResult::SetIcon,
                      base::Unretained(this)),
       icon_dimension);
   icon_decode_request_->StartWithOptions(data_->icon_png);
 
-  badge_icon_loader_ = std::make_unique<ArcAppIconLoader>(
+  badge_icon_loader_ = std::make_unique<AppServiceAppIconLoader>(
       profile_,
-      app_list::AppListConfig::instance().search_tile_badge_icon_dimension(),
-      this);
+      ash::AppListConfig::instance().search_tile_badge_icon_dimension(), this);
   badge_icon_loader_->FetchImage(GetAppId());
 }
 
@@ -66,8 +62,8 @@ void ArcAppShortcutSearchResult::Open(int event_flags) {
                              list_controller_->GetAppListDisplayId());
 }
 
-SearchResultType ArcAppShortcutSearchResult::GetSearchResultType() const {
-  return PLAY_STORE_APP_SHORTCUT;
+ash::SearchResultType ArcAppShortcutSearchResult::GetSearchResultType() const {
+  return ash::PLAY_STORE_APP_SHORTCUT;
 }
 
 void ArcAppShortcutSearchResult::OnAppImageUpdated(

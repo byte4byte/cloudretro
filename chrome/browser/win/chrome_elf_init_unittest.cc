@@ -14,10 +14,9 @@
 #include "chrome/chrome_elf/chrome_elf_constants.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/install_static/install_util.h"
-#include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -59,7 +58,7 @@ class ChromeBlacklistTrialTest : public testing::Test {
 
   std::unique_ptr<base::win::RegKey> blacklist_registry_key_;
   registry_util::RegistryOverrideManager override_manager_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeBlacklistTrialTest);
@@ -91,10 +90,6 @@ TEST_F(ChromeBlacklistTrialTest, BlacklistDisabledRun) {
   blacklist_registry_key_->WriteValue(blacklist::kBeaconState,
                                       blacklist::BLACKLIST_ENABLED);
   blacklist_registry_key_->WriteValue(blacklist::kBeaconVersion, L"Data");
-
-  // Create the field trial with the blacklist disabled group.
-  base::FieldTrialList field_trial_list(
-      std::make_unique<variations::SHA1EntropyProvider>("test"));
 
   scoped_refptr<base::FieldTrial> trial(
     base::FieldTrialList::CreateFieldTrial(

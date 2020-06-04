@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "remoting/client/display/fake_canvas.h"
 #include "remoting/client/display/gl_renderer_delegate.h"
@@ -20,7 +20,7 @@ namespace remoting {
 
 class FakeGlRendererDelegate : public GlRendererDelegate {
  public:
-  FakeGlRendererDelegate() : weak_factory_(this) {}
+  FakeGlRendererDelegate() {}
 
   bool CanRenderFrame() override {
     can_render_frame_call_count_++;
@@ -40,7 +40,7 @@ class FakeGlRendererDelegate : public GlRendererDelegate {
     on_size_changed_call_count_++;
   }
 
-  void SetOnFrameRenderedCallback(const base::Closure& callback) {
+  void SetOnFrameRenderedCallback(const base::RepeatingClosure& callback) {
     on_frame_rendered_callback_ = callback;
   }
 
@@ -68,15 +68,15 @@ class FakeGlRendererDelegate : public GlRendererDelegate {
   int canvas_width_ = 0;
   int canvas_height_ = 0;
 
-  base::Closure on_frame_rendered_callback_;
-  base::WeakPtrFactory<FakeGlRendererDelegate> weak_factory_;
+  base::RepeatingClosure on_frame_rendered_callback_;
+  base::WeakPtrFactory<FakeGlRendererDelegate> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeGlRendererDelegate);
 };
 
 class FakeDrawable : public Drawable {
  public:
-  FakeDrawable() : weak_factory_(this) {}
+  FakeDrawable() {}
 
   void SetId(int id) { id_ = id; }
   int GetId() { return id_; }
@@ -103,7 +103,7 @@ class FakeDrawable : public Drawable {
   int id_ = -1;
   int z_index_ = -1;
 
-  base::WeakPtrFactory<FakeDrawable> weak_factory_;
+  base::WeakPtrFactory<FakeDrawable> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeDrawable);
 };
@@ -125,7 +125,7 @@ class GlRendererTest : public testing::Test {
     return on_desktop_frame_processed_call_count_;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<GlRenderer> renderer_;
   FakeGlRendererDelegate delegate_;
 
@@ -153,14 +153,14 @@ std::vector<base::WeakPtr<Drawable>> GlRendererTest::GetDrawables() {
 void GlRendererTest::SetDesktopFrameWithSize(const webrtc::DesktopSize& size) {
   renderer_->OnFrameReceived(
       std::make_unique<webrtc::BasicDesktopFrame>(size),
-      base::Bind(&GlRendererTest::OnDesktopFrameProcessed,
-                 base::Unretained(this)));
+      base::BindOnce(&GlRendererTest::OnDesktopFrameProcessed,
+                     base::Unretained(this)));
 }
 
 void GlRendererTest::PostSetDesktopFrameTasks(const webrtc::DesktopSize& size,
                                               int count) {
   for (int i = 0; i < count; i++) {
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&GlRendererTest::SetDesktopFrameWithSize,
                                   base::Unretained(this), size));
   }
@@ -172,8 +172,8 @@ void GlRendererTest::OnDesktopFrameProcessed() {
 
 void GlRendererTest::RunTasksInCurrentQueue() {
   base::RunLoop run_loop;
-  scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-      FROM_HERE, run_loop.QuitClosure());
+  task_environment_.GetMainThreadTaskRunner()->PostTask(FROM_HERE,
+                                                        run_loop.QuitClosure());
   run_loop.Run();
 }
 

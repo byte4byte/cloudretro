@@ -4,10 +4,11 @@
 
 #include "media/capture/video/video_capture_buffer_handle.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 
 namespace media {
-#if defined(OS_CHROMEOS)
 
 NullHandle::NullHandle() = default;
 
@@ -28,5 +29,4 @@ const uint8_t* NullHandle::const_data() const {
   return nullptr;
 }
 
-#endif
 }  // namespace media

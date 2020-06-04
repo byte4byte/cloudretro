@@ -17,13 +17,13 @@
 #include "ash/display/unified_mouse_warp_controller.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/keyboard/keyboard_controller_impl.h"
+#include "ash/public/cpp/ash_prefs.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
-#include "ash/shell/toplevel_window.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test_screenshot_delegate.h"
@@ -35,12 +35,11 @@
 #include "ash/wm/work_area_insets.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
-#include "mojo/public/cpp/bindings/map.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/env.h"
@@ -57,9 +56,11 @@
 #include "ui/display/types/display_constants.h"
 #include "ui/events/devices/device_data_manager_test_api.h"
 #include "ui/events/devices/touchscreen_device.h"
-#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
 using session_manager::SessionState;
@@ -115,8 +116,11 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
 
 /////////////////////////////////////////////////////////////////////////////
 
-AshTestBase::AshTestBase(AshTestBase::SubclassManagesTaskEnvironment /* tag */)
-    : scoped_task_environment_(base::nullopt) {}
+AshTestBase::AshTestBase(
+    std::unique_ptr<base::test::TaskEnvironment> task_environment)
+    : task_environment_(std::move(task_environment)) {
+  RegisterLocalStatePrefs(local_state_.registry(), true);
+}
 
 AshTestBase::~AshTestBase() {
   CHECK(setup_called_)
@@ -126,39 +130,23 @@ AshTestBase::~AshTestBase() {
 }
 
 void AshTestBase::SetUp() {
-  // At this point, the task APIs should already be provided either by
-  // |scoped_task_environment_| or by the subclass in the
-  // SubclassManagesTaskEnvironment mode.
+  SetUp(nullptr);
+}
+
+void AshTestBase::SetUp(std::unique_ptr<TestShellDelegate> delegate) {
+  // At this point, the task APIs should already be provided by
+  // |task_environment_|.
   CHECK(base::ThreadTaskRunnerHandle::IsSet());
   CHECK(base::ThreadPoolInstance::Get());
 
   setup_called_ = true;
 
-  // Clears the saved state so that test doesn't use on the wrong
-  // default state.
-  shell::ToplevelWindow::ClearSavedStateForTest();
-
   AshTestHelper::InitParams params;
   params.start_session = start_session_;
-  params.provide_local_state = provide_local_state_;
-  params.config_type = AshTestHelper::kUnitTest;
-  ash_test_helper_.SetUp(params);
-
-  Shell::GetPrimaryRootWindow()->Show();
-  Shell::GetPrimaryRootWindow()->GetHost()->Show();
-  // Move the mouse cursor to far away so that native events doesn't
-  // interfere test expectations.
-  Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
-  Shell::Get()->cursor_manager()->EnableMouseEvents();
-
-  // Changing GestureConfiguration shouldn't make tests fail. These values
-  // prevent unexpected events from being generated during tests. Such as
-  // delayed events which create race conditions on slower tests.
-  ui::GestureConfiguration* gesture_config =
-      ui::GestureConfiguration::GetInstance();
-  gesture_config->set_max_touch_down_duration_for_click_in_ms(800);
-  gesture_config->set_long_press_time_in_ms(1000);
-  gesture_config->set_max_touch_move_in_pixels_for_click(5);
+  params.delegate = std::move(delegate);
+  params.local_state = local_state();
+  ash_test_helper_ = std::make_unique<AshTestHelper>();
+  ash_test_helper_->SetUp(std::move(params));
 }
 
 void AshTestBase::TearDown() {
@@ -170,7 +158,7 @@ void AshTestBase::TearDown() {
   // Flush the message loop to finish pending release tasks.
   base::RunLoop().RunUntilIdle();
 
-  ash_test_helper_.TearDown();
+  ash_test_helper_->TearDown();
 
   event_generator_.reset();
   // Some tests set an internal display id,
@@ -226,8 +214,8 @@ void AshTestBase::UpdateDisplay(const std::string& display_specs) {
       .UpdateNaturalOrientation();
 }
 
-aura::Window* AshTestBase::CurrentContext() {
-  return ash_test_helper_.CurrentContext();
+aura::Window* AshTestBase::GetContext() {
+  return ash_test_helper_->GetContext();
 }
 
 // static
@@ -242,10 +230,33 @@ std::unique_ptr<views::Widget> AshTestBase::CreateTestWidget(
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = bounds;
   params.parent = Shell::GetPrimaryRootWindow()->GetChildById(container_id);
-  widget->Init(params);
+  widget->Init(std::move(params));
   if (show)
     widget->Show();
   return widget;
+}
+
+std::unique_ptr<aura::Window> AshTestBase::CreateAppWindow(
+    const gfx::Rect& bounds_in_screen,
+    AppType app_type,
+    int shell_window_id) {
+  // |widget| is configured to be owned by the underlying window.
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params;
+  // TestWidgetDelegate is owned by |widget|.
+  params.delegate = new TestWidgetDelegate();
+  params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
+  params.bounds =
+      bounds_in_screen.IsEmpty() ? gfx::Rect(0, 0, 300, 300) : bounds_in_screen;
+  params.context = Shell::GetPrimaryRootWindow();
+  if (app_type != AppType::NON_APP) {
+    params.init_properties_container.SetProperty(aura::client::kAppType,
+                                                 static_cast<int>(app_type));
+  }
+  widget->Init(std::move(params));
+  widget->GetNativeWindow()->set_id(shell_window_id);
+  widget->Show();
+  return base::WrapUnique(widget->GetNativeWindow());
 }
 
 std::unique_ptr<aura::Window> AshTestBase::CreateTestWindow(
@@ -257,19 +268,7 @@ std::unique_ptr<aura::Window> AshTestBase::CreateTestWindow(
         nullptr, type, shell_window_id, bounds_in_screen));
   }
 
-  // |widget| is configured to be owned by the underlying window.
-  views::Widget* widget = new views::Widget;
-  views::Widget::InitParams params;
-  // TestWidgetDelegate is owned by |widget|.
-  params.delegate = new TestWidgetDelegate();
-  params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
-  params.bounds =
-      bounds_in_screen.IsEmpty() ? gfx::Rect(0, 0, 300, 300) : bounds_in_screen;
-  params.context = Shell::GetPrimaryRootWindow();
-  widget->Init(params);
-  widget->GetNativeWindow()->set_id(shell_window_id);
-  widget->Show();
-  return base::WrapUnique(widget->GetNativeWindow());
+  return CreateAppWindow(bounds_in_screen, AppType::NON_APP, shell_window_id);
 }
 
 std::unique_ptr<aura::Window> AshTestBase::CreateToplevelTestWindow(
@@ -362,15 +361,15 @@ TestScreenshotDelegate* AshTestBase::GetScreenshotDelegate() {
 }
 
 TestSessionControllerClient* AshTestBase::GetSessionControllerClient() {
-  return ash_test_helper_.test_session_controller_client();
+  return ash_test_helper_->test_session_controller_client();
 }
 
 TestSystemTrayClient* AshTestBase::GetSystemTrayClient() {
-  return ash_test_helper_.system_tray_client();
+  return ash_test_helper_->system_tray_client();
 }
 
 AppListTestHelper* AshTestBase::GetAppListTestHelper() {
-  return ash_test_helper_.app_list_test_helper();
+  return ash_test_helper_->app_list_test_helper();
 }
 
 void AshTestBase::CreateUserSessions(int n) {
@@ -462,12 +461,25 @@ void AshTestBase::UnblockUserSession() {
   GetSessionControllerClient()->UnlockScreen();
 }
 
-void AshTestBase::SetTouchKeyboardEnabled(bool enabled) {
-  auto flag = keyboard::KeyboardEnableFlag::kTouchEnabled;
-  if (enabled)
-    Shell::Get()->keyboard_controller()->SetEnableFlag(flag);
-  else
-    Shell::Get()->keyboard_controller()->ClearEnableFlag(flag);
+void AshTestBase::SetVirtualKeyboardEnabled(bool enabled) {
+  // Note there are a lot of flags that can be set to control whether the
+  // keyboard is shown or not. You can see the logic in
+  // |KeyboardUIController::IsKeyboardEnableRequested|.
+  // The |kTouchEnabled| flag seems like a logical candidate to pick, but it
+  // does not work because the flag will automatically be toggled off once the
+  // |DeviceDataManager| detects there is a physical keyboard present. That's
+  // why I picked the |kPolicyEnabled| and |kPolicyDisabled| flags instead.
+  auto enable_flag = keyboard::KeyboardEnableFlag::kPolicyEnabled;
+  auto disable_flag = keyboard::KeyboardEnableFlag::kPolicyDisabled;
+  auto* keyboard_controller = Shell::Get()->keyboard_controller();
+
+  if (enabled) {
+    keyboard_controller->SetEnableFlag(enable_flag);
+    keyboard_controller->ClearEnableFlag(disable_flag);
+  } else {
+    keyboard_controller->ClearEnableFlag(enable_flag);
+    keyboard_controller->SetEnableFlag(disable_flag);
+  }
   // Ensure that observer methods and mojo calls between KeyboardControllerImpl,
   // keyboard::KeyboardUIController*, and AshKeyboardUI complete.
   base::RunLoop().RunUntilIdle();
@@ -502,20 +514,30 @@ bool AshTestBase::TestIfMouseWarpsAt(ui::test::EventGenerator* event_generator,
              .id();
 }
 
+void AshTestBase::SimulateMouseClickAt(
+    ui::test::EventGenerator* event_generator,
+    const views::View* target_view) {
+  DCHECK(target_view);
+  event_generator->MoveMouseTo(target_view->GetBoundsInScreen().CenterPoint());
+  event_generator->ClickLeftButton();
+}
+
 void AshTestBase::SwapPrimaryDisplay() {
   if (display::Screen::GetScreen()->GetNumDisplays() <= 1)
     return;
   Shell::Get()->window_tree_host_manager()->SetPrimaryDisplayId(
-      display_manager()->GetSecondaryDisplay().id());
+      display::test::DisplayManagerTestApi(display_manager())
+          .GetSecondaryDisplay()
+          .id());
 }
 
-display::Display AshTestBase::GetPrimaryDisplay() {
+display::Display AshTestBase::GetPrimaryDisplay() const {
   return display::Screen::GetScreen()->GetDisplayNearestWindow(
       Shell::GetPrimaryRootWindow());
 }
 
-display::Display AshTestBase::GetSecondaryDisplay() {
-  return ash_test_helper_.GetSecondaryDisplay();
+display::Display AshTestBase::GetSecondaryDisplay() const {
+  return ash_test_helper_->GetSecondaryDisplay();
 }
 
 }  // namespace ash

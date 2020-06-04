@@ -4,6 +4,8 @@
 
 #include "ash/public/cpp/login_types.h"
 
+#include "chromeos/components/proximity_auth/public/mojom/auth_type.mojom.h"
+
 namespace ash {
 
 EasyUnlockIconOptions::EasyUnlockIconOptions() = default;
@@ -35,6 +37,11 @@ LocaleItem::~LocaleItem() = default;
 LocaleItem& LocaleItem::operator=(const LocaleItem& other) = default;
 LocaleItem& LocaleItem::operator=(LocaleItem&& other) = default;
 
+bool LocaleItem::operator==(const LocaleItem& other) const {
+  return language_code == other.language_code && title == other.title &&
+         group_name == other.group_name;
+}
+
 PublicAccountInfo::PublicAccountInfo() = default;
 PublicAccountInfo::PublicAccountInfo(const PublicAccountInfo& other) = default;
 PublicAccountInfo::PublicAccountInfo(PublicAccountInfo&& other) = default;
@@ -45,7 +52,8 @@ PublicAccountInfo& PublicAccountInfo::operator=(
 PublicAccountInfo& PublicAccountInfo::operator=(PublicAccountInfo&& other) =
     default;
 
-LoginUserInfo::LoginUserInfo() = default;
+LoginUserInfo::LoginUserInfo()
+    : auth_type(proximity_auth::mojom::AuthType::OFFLINE_PASSWORD) {}
 LoginUserInfo::LoginUserInfo(const LoginUserInfo& other) = default;
 LoginUserInfo::LoginUserInfo(LoginUserInfo&& other) = default;
 LoginUserInfo::~LoginUserInfo() = default;
@@ -56,10 +64,12 @@ LoginUserInfo& LoginUserInfo::operator=(LoginUserInfo&& other) = default;
 AuthDisabledData::AuthDisabledData() = default;
 AuthDisabledData::AuthDisabledData(AuthDisabledReason reason,
                                    const base::Time& auth_reenabled_time,
-                                   const base::TimeDelta& device_used_time)
+                                   const base::TimeDelta& device_used_time,
+                                   bool disable_lock_screen_media)
     : reason(reason),
       auth_reenabled_time(auth_reenabled_time),
-      device_used_time(device_used_time) {}
+      device_used_time(device_used_time),
+      disable_lock_screen_media(disable_lock_screen_media) {}
 AuthDisabledData::AuthDisabledData(const AuthDisabledData& other) = default;
 AuthDisabledData::AuthDisabledData(AuthDisabledData&& other) = default;
 AuthDisabledData::~AuthDisabledData() = default;
@@ -68,5 +78,12 @@ AuthDisabledData& AuthDisabledData::operator=(const AuthDisabledData& other) =
     default;
 AuthDisabledData& AuthDisabledData::operator=(AuthDisabledData&& other) =
     default;
+
+SecurityTokenPinRequest::SecurityTokenPinRequest() = default;
+SecurityTokenPinRequest::SecurityTokenPinRequest(SecurityTokenPinRequest&&) =
+    default;
+SecurityTokenPinRequest& SecurityTokenPinRequest::operator=(
+    SecurityTokenPinRequest&&) = default;
+SecurityTokenPinRequest::~SecurityTokenPinRequest() = default;
 
 }  // namespace ash

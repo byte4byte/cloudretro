@@ -12,9 +12,9 @@
 #include "components/feedback/feedback_uploader.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 
-namespace identity {
+namespace signin {
 class PrimaryAccountAccessTokenFetcher;
-}  // namespace identity
+}  // namespace signin
 
 class GoogleServiceAuthError;
 
@@ -23,7 +23,6 @@ namespace feedback {
 class FeedbackUploaderChrome : public FeedbackUploader {
  public:
   FeedbackUploaderChrome(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       content::BrowserContext* context,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   ~FeedbackUploaderChrome() override;
@@ -48,9 +47,9 @@ class FeedbackUploaderChrome : public FeedbackUploader {
       network::ResourceRequest* resource_request) override;
 
   void AccessTokenAvailable(GoogleServiceAuthError error,
-                            identity::AccessTokenInfo access_token_info);
+                            signin::AccessTokenInfo access_token_info);
 
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher> token_fetcher_;
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher> token_fetcher_;
 
   std::string access_token_;
 

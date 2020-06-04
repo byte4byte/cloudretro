@@ -38,7 +38,7 @@ class MultiDeviceSetupAndroidSmsAppInstallingStatusObserverTest
     fake_host_status_provider_ = std::make_unique<FakeHostStatusProvider>();
     fake_feature_state_manager_ = std::make_unique<FakeFeatureStateManager>();
     android_sms_app_installing_status_observer_ =
-        AndroidSmsAppInstallingStatusObserver::Factory::Get()->BuildInstance(
+        AndroidSmsAppInstallingStatusObserver::Factory::Create(
             fake_host_status_provider_.get(), fake_feature_state_manager_.get(),
             fake_android_sms_app_helper_delegate_.get());
 
@@ -112,6 +112,19 @@ TEST_F(MultiDeviceSetupAndroidSmsAppInstallingStatusObserverTest,
   SetMessagesFeatureState(mojom::FeatureState::kProhibitedByPolicy);
   fake_app_helper_delegate()->Reset();
   EXPECT_FALSE(fake_app_helper_delegate()->has_installed_app());
+
+  SetHostWithStatus(mojom::HostStatus::kNoEligibleHosts,
+                    base::nullopt /* host_device */);
+  EXPECT_FALSE(fake_app_helper_delegate()->has_installed_app());
+
+  SetHostWithStatus(mojom::HostStatus::kHostVerified, GetFakePhone());
+  EXPECT_FALSE(fake_app_helper_delegate()->has_installed_app());
+}
+
+TEST_F(MultiDeviceSetupAndroidSmsAppInstallingStatusObserverTest,
+       DoesNotInstallAfterHostVerifiedIfUninstalledByUser) {
+  fake_app_helper_delegate()->Reset();
+  fake_app_helper_delegate()->set_has_app_been_manually_uninstalled(true);
 
   SetHostWithStatus(mojom::HostStatus::kNoEligibleHosts,
                     base::nullopt /* host_device */);

@@ -52,7 +52,7 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/views_test_base.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 namespace {
@@ -82,7 +82,6 @@ class PageFlipWaiter : public ash::PaginationModelObserver {
 
  private:
   // PaginationModelObserver overrides:
-  void TotalPagesChanged() override {}
   void SelectedPageChanged(int old_selected, int new_selected) override {
     if (!selected_pages_.empty())
       selected_pages_ += ',';
@@ -91,9 +90,6 @@ class PageFlipWaiter : public ash::PaginationModelObserver {
     if (wait_)
       ui_run_loop_->QuitWhenIdle();
   }
-  void TransitionStarted() override {}
-  void TransitionChanged() override {}
-  void TransitionEnded() override {}
 
   std::unique_ptr<base::RunLoop> ui_run_loop_;
   ash::PaginationModel* model_ = nullptr;
@@ -102,6 +98,42 @@ class PageFlipWaiter : public ash::PaginationModelObserver {
 
   DISALLOW_COPY_AND_ASSIGN(PageFlipWaiter);
 };
+
+// WindowDeletionWaiter waits for the specified window to be deleted.
+class WindowDeletionWaiter : aura::WindowObserver {
+ public:
+  explicit WindowDeletionWaiter(aura::Window* window) : window_(window) {
+    window_->AddObserver(this);
+  }
+  ~WindowDeletionWaiter() override = default;
+
+  void Wait() { run_loop_.Run(); }
+
+ private:
+  // WindowObserver:
+  void OnWindowDestroying(aura::Window* window) override {
+    window->RemoveObserver(this);
+    run_loop_.QuitWhenIdle();
+  }
+
+  base::RunLoop run_loop_;
+  aura::Window* window_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowDeletionWaiter);
+};
+
+// Find the window with type WINDOW_TYPE_MENU and returns the firstly found one.
+// Returns nullptr if no such window exists.
+aura::Window* FindMenuWindow(aura::Window* root) {
+  if (root->type() == aura::client::WINDOW_TYPE_MENU)
+    return root;
+  for (auto* child : root->children()) {
+    auto* menu_in_child = FindMenuWindow(child);
+    if (menu_in_child)
+      return menu_in_child;
+  }
+  return nullptr;
+}
 
 // Dragging task to be run after page flip is observed.
 class DragAfterPageFlipTask : public ash::PaginationModelObserver {
@@ -117,7 +149,8 @@ class DragAfterPageFlipTask : public ash::PaginationModelObserver {
 
  private:
   // PaginationModelObserver overrides:
-  void TotalPagesChanged() override {}
+  void TotalPagesChanged(int previous_page_count, int new_page_count) override {
+  }
   void SelectedPageChanged(int old_selected, int new_selected) override {
     view_->UpdateDragFromItem(AppsGridView::MOUSE, drag_event_);
   }
@@ -135,7 +168,8 @@ class DragAfterPageFlipTask : public ash::PaginationModelObserver {
 class TestSuggestedSearchResult : public TestSearchResult {
  public:
   TestSuggestedSearchResult() {
-    set_display_type(ash::SearchResultDisplayType::kRecommendation);
+    set_display_type(ash::SearchResultDisplayType::kTile);
+    set_is_recommendation(true);
   }
   ~TestSuggestedSearchResult() override {}
 
@@ -207,7 +241,10 @@ class AppsGridViewTest : public views::ViewsTestBase,
   AppListItemView* GetItemViewForPoint(const gfx::Point& point) const {
     for (size_t i = 0; i < model_->top_level_item_list()->item_count(); ++i) {
       AppListItemView* view = GetItemViewAt(i);
-      if (view->bounds().Contains(point))
+      gfx::Point view_origin = view->origin();
+      views::View::ConvertPointToTarget(view->parent(), apps_grid_view_,
+                                        &view_origin);
+      if (gfx::Rect(view_origin, view->size()).Contains(point))
         return view;
     }
     return nullptr;
@@ -270,19 +307,37 @@ class AppsGridViewTest : public views::ViewsTestBase,
     apps_grid_view_->OnKeyReleased(key_event);
   }
 
+  // Points are in |apps_grid_view_|'s coordinates, and fixed for RTL.
+  ui::GestureEvent SimulateTap(const gfx::Point& location) {
+    ui::GestureEvent gesture_event(
+        apps_grid_view_->GetMirroredXInView(location.x()), location.y(), 0,
+        base::TimeTicks(), ui::GestureEventDetails(ui::ET_GESTURE_TAP));
+    apps_grid_view_->OnGestureEvent(&gesture_event);
+    return gesture_event;
+  }
+
   // Tests that the order of item views in the AppsGridView is in accordance
   // with the order in the view model.
   void TestAppListItemViewIndice() {
     const views::ViewModelT<AppListItemView>* view_model =
         apps_grid_view_->view_model();
     DCHECK_GT(view_model->view_size(), 0);
-    auto app_iter = apps_grid_view_->FindChild(view_model->view_at(0));
-    DCHECK(app_iter != apps_grid_view_->children().cend());
+    views::View* items_container = apps_grid_view_->items_container_;
+    auto app_iter = items_container->FindChild(view_model->view_at(0));
+    DCHECK(app_iter != items_container->children().cend());
     for (int i = 1; i < view_model->view_size(); ++i) {
       ++app_iter;
-      ASSERT_NE(apps_grid_view_->children().cend(), app_iter);
+      ASSERT_NE(items_container->children().cend(), app_iter);
       EXPECT_EQ(view_model->view_at(i), *app_iter);
     }
+  }
+
+  gfx::Point GetDragViewCenter() {
+    gfx::Point drag_view_center =
+        apps_grid_view_->drag_view()->GetLocalBounds().CenterPoint();
+    views::View::ConvertPointToTarget(apps_grid_view_->drag_view(),
+                                      apps_grid_view_, &drag_view_center);
+    return drag_view_center;
   }
 
   AppListView* app_list_view_ = nullptr;    // Owned by native widget.
@@ -309,7 +364,7 @@ class AppsGridViewTest : public views::ViewsTestBase,
   DISALLOW_COPY_AND_ASSIGN(AppsGridViewTest);
 };
 
-INSTANTIATE_TEST_SUITE_P(, AppsGridViewTest, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(All, AppsGridViewTest, testing::Bool());
 
 class TestAppsGridViewFolderDelegate : public AppsGridViewFolderDelegate {
  public:
@@ -630,26 +685,21 @@ TEST_F(AppsGridViewTest, CloseFolderByClickingBackground) {
   EXPECT_FALSE(apps_container_view->IsInFolderView());
 }
 
-TEST_F(AppsGridViewTest, TapsBetweenAppsWontCloseAppList) {
+// Tests that taps between apps within the AppsGridView does not result in the
+// AppList closing.
+TEST_P(AppsGridViewTest, TapsBetweenAppsWontCloseAppList) {
   model_->PopulateApps(2);
   gfx::Point between_apps = GetItemRectOnCurrentPageAt(0, 0).right_center();
   gfx::Point empty_space = GetItemRectOnCurrentPageAt(0, 2).CenterPoint();
 
-  ui::GestureEvent tap_between(between_apps.x(), between_apps.y(), 0,
-                               base::TimeTicks(),
-                               ui::GestureEventDetails(ui::ET_GESTURE_TAP));
-  ui::GestureEvent tap_outside(empty_space.x(), empty_space.y(), 0,
-                               base::TimeTicks(),
-                               ui::GestureEventDetails(ui::ET_GESTURE_TAP));
-
   // Taps between apps should be handled to prevent them from going into
   // app_list
-  apps_grid_view_->OnGestureEvent(&tap_between);
+  ui::GestureEvent tap_between = SimulateTap(between_apps);
   EXPECT_TRUE(tap_between.handled());
 
   // Taps outside of occupied tiles should not be handled, that they may close
   // the app_list
-  apps_grid_view_->OnGestureEvent(&tap_outside);
+  ui::GestureEvent tap_outside = SimulateTap(empty_space);
   EXPECT_FALSE(tap_outside.handled());
 }
 
@@ -778,6 +828,53 @@ TEST_F(AppsGridViewTest, AppIconSelectedWhenMenuIsShown) {
   // Cancel the menu, |app| should no longer be selected.
   app->CancelContextMenu();
   EXPECT_FALSE(apps_grid_view_->IsSelectedView(app));
+}
+
+// Tests that the context menu for app item appears at the right position.
+TEST_P(AppsGridViewTest, MenuAtRightPosition) {
+  const size_t kItemsInPage =
+      apps_grid_view_->cols() * apps_grid_view_->rows_per_page();
+  const size_t kPages = 2;
+  model_->PopulateApps(kItemsInPage * kPages);
+
+  auto* root = apps_grid_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
+  gfx::Rect root_bounds = root->GetBoundsInScreen();
+
+  std::vector<int> pages_to_check = {1, 0};
+  for (int i : pages_to_check) {
+    apps_grid_view_->pagination_model()->SelectPage(i, /*animate=*/false);
+
+    for (size_t j = 0; j < kItemsInPage; ++j) {
+      const size_t idx = kItemsInPage * i + j;
+      AppListItemView* item_view = GetItemViewAt(idx);
+
+      // Send a mouse event which would show a context menu.
+      ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, gfx::Point(),
+                                 gfx::Point(), ui::EventTimeForNow(),
+                                 ui::EF_RIGHT_MOUSE_BUTTON,
+                                 ui::EF_RIGHT_MOUSE_BUTTON);
+      static_cast<views::View*>(item_view)->OnMouseEvent(&press_event);
+
+      ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, gfx::Point(),
+                                   gfx::Point(), ui::EventTimeForNow(),
+                                   ui::EF_RIGHT_MOUSE_BUTTON,
+                                   ui::EF_RIGHT_MOUSE_BUTTON);
+      static_cast<views::View*>(item_view)->OnMouseEvent(&release_event);
+
+      // Make sure that the menu is drawn on screen.
+      auto* menu_window = FindMenuWindow(root);
+      gfx::Rect menu_bounds = menu_window->GetBoundsInScreen();
+      EXPECT_TRUE(root_bounds.Contains(menu_bounds))
+          << "menu bounds for " << idx << "-th item " << menu_bounds.ToString()
+          << " is outside of the screen bounds " << root_bounds.ToString();
+
+      // CancelContextMenu doesn't remove the menu window immediately, so wait
+      // for its actual deletion.
+      WindowDeletionWaiter waiter(menu_window);
+      item_view->CancelContextMenu();
+      waiter.Wait();
+    }
+  }
 }
 
 TEST_P(AppsGridViewTest, MouseDragItemIntoFolder) {
@@ -1604,7 +1701,9 @@ TEST_F(AppsGridViewTest, ControlShiftArrowFolderLastItemOnPage) {
 
 TEST_P(AppsGridViewTest, MouseDragFlipPage) {
   apps_grid_view_->set_page_flip_delay_in_ms_for_testing(10);
-  GetPaginationModel()->SetTransitionDurations(10, 10);
+  GetPaginationModel()->SetTransitionDurations(
+      base::TimeDelta::FromMilliseconds(10),
+      base::TimeDelta::FromMilliseconds(10));
 
   PageFlipWaiter page_flip_waiter(GetPaginationModel());
 
@@ -1622,6 +1721,8 @@ TEST_P(AppsGridViewTest, MouseDragFlipPage) {
   page_flip_waiter.Reset();
   SimulateDrag(AppsGridView::MOUSE, from, to);
 
+  EXPECT_EQ(to, GetDragViewCenter());
+
   // Page should be flipped after sometime to hit page 1 and 2 then stop.
   while (test_api_->HasPendingPageFlip()) {
     page_flip_waiter.Wait();
@@ -1631,6 +1732,7 @@ TEST_P(AppsGridViewTest, MouseDragFlipPage) {
   // created at the end.
   EXPECT_EQ("1,2,3", page_flip_waiter.selected_pages());
   EXPECT_EQ(3, GetPaginationModel()->selected_page());
+  EXPECT_EQ(to, GetDragViewCenter());
 
   // Cancel drag and put the dragged view back to its ideal position so that
   // the next drag would pick it up.
@@ -1643,12 +1745,15 @@ TEST_P(AppsGridViewTest, MouseDragFlipPage) {
   page_flip_waiter.Reset();
   SimulateDrag(AppsGridView::MOUSE, from, to);
 
+  EXPECT_EQ(to, GetDragViewCenter());
+
   while (test_api_->HasPendingPageFlip()) {
     page_flip_waiter.Wait();
   }
 
   EXPECT_EQ("1,0", page_flip_waiter.selected_pages());
   EXPECT_EQ(0, GetPaginationModel()->selected_page());
+  EXPECT_EQ(to, GetDragViewCenter());
 
   apps_grid_view_->EndDrag(true);
 }
@@ -1750,7 +1855,60 @@ TEST_P(AppsGridViewTabletTest, Basic) {
       1);
 }
 
-INSTANTIATE_TEST_SUITE_P(, AppsGridViewTabletTest, testing::Bool());
+// Make sure that a folder icon resets background blur after scrolling the apps
+// grid without completing any transition (See https://crbug.com/1049275). The
+// background blur is masked by the apps grid's layer mask.
+TEST_F(AppsGridViewTabletTest, EnsureBlurAfterScrollingWithoutTransition) {
+  // Create a folder with 2 apps. Then add apps until a second page is created.
+  model_->CreateAndPopulateFolderWithApps(2);
+  model_->PopulateApps(GetTilesPerPage(0));
+  EXPECT_EQ(2, GetPaginationModel()->total_pages());
+
+  gfx::Point apps_grid_view_origin =
+      apps_grid_view_->GetBoundsInScreen().origin();
+  ui::GestureEvent scroll_begin(
+      apps_grid_view_origin.x(), apps_grid_view_origin.y(), 0,
+      base::TimeTicks(),
+      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_BEGIN, 0, -1));
+  ui::GestureEvent scroll_update_upwards(
+      apps_grid_view_origin.x(), apps_grid_view_origin.y(), 0,
+      base::TimeTicks(),
+      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_UPDATE, 0, -10));
+  ui::GestureEvent scroll_update_downwards(
+      apps_grid_view_origin.x(), apps_grid_view_origin.y(), 0,
+      base::TimeTicks(),
+      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_UPDATE, 0, 15));
+  ui::GestureEvent scroll_end(
+      apps_grid_view_origin.x(), apps_grid_view_origin.y(), 0,
+      base::TimeTicks(), ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_END));
+
+  AppListItemView* folder_view = GetItemViewAt(0);
+  ASSERT_TRUE(folder_view->is_folder());
+  ASSERT_FALSE(apps_grid_view_->layer()->layer_mask_layer());
+
+  // On the first page drag upwards, there should not be a page switch and the
+  // layer mask should make the folder lose blur.
+  ASSERT_EQ(0, GetPaginationModel()->selected_page());
+  apps_grid_view_->OnGestureEvent(&scroll_begin);
+  EXPECT_TRUE(scroll_begin.handled());
+  apps_grid_view_->OnGestureEvent(&scroll_update_upwards);
+  EXPECT_TRUE(scroll_update_upwards.handled());
+
+  ASSERT_EQ(0, GetPaginationModel()->selected_page());
+  ASSERT_TRUE(apps_grid_view_->layer()->layer_mask_layer());
+
+  // Continue drag, now switching directions and release. There shouldn't be any
+  // transition and the mask layer should've been reset.
+  apps_grid_view_->OnGestureEvent(&scroll_update_downwards);
+  EXPECT_TRUE(scroll_update_downwards.handled());
+  apps_grid_view_->OnGestureEvent(&scroll_end);
+  EXPECT_TRUE(scroll_end.handled());
+
+  EXPECT_FALSE(GetPaginationModel()->has_transition());
+  EXPECT_FALSE(apps_grid_view_->layer()->layer_mask_layer());
+}
+
+INSTANTIATE_TEST_SUITE_P(All, AppsGridViewTabletTest, testing::Bool());
 
 // Test various dragging behaviors only allowed when apps grid gap (part of
 // home launcher feature) is enabled.
@@ -1763,7 +1921,9 @@ class AppsGridGapTest : public AppsGridViewTest {
   void SetUp() override {
     AppsGridViewTest::SetUp();
     apps_grid_view_->set_page_flip_delay_in_ms_for_testing(10);
-    GetPaginationModel()->SetTransitionDurations(10, 10);
+    GetPaginationModel()->SetTransitionDurations(
+        base::TimeDelta::FromMilliseconds(10),
+        base::TimeDelta::FromMilliseconds(10));
     page_flip_waiter_ = std::make_unique<PageFlipWaiter>(GetPaginationModel());
   }
 
@@ -2072,5 +2232,62 @@ TEST_P(AppsGridGapTest, MoveItemToPreviousFullPage) {
   EXPECT_EQ(model_content, model_->GetModelContent());
 }
 
+TEST_F(AppsGridViewTest, CreateANewPageWithKeyboardLogsMetrics) {
+  base::HistogramTester histogram_tester;
+  model_->PopulateApps(2);
+
+  // Select first app and move it with the keyboard down to create a new page.
+  AppListItemView* moving_item = GetItemViewAt(0);
+  apps_grid_view_->GetFocusManager()->SetFocusedView(moving_item);
+  SimulateKeyPress(ui::VKEY_DOWN, ui::EF_CONTROL_DOWN);
+  SimulateKeyReleased(ui::VKEY_DOWN, ui::EF_NONE);
+
+  ASSERT_EQ(apps_grid_view_->pagination_model()->total_pages(), 2);
+  histogram_tester.ExpectBucketCount(
+      "Apps.AppList.AppsGridAddPage",
+      AppListPageCreationType::kMovingAppWithKeyboard, 1);
+}
+
+TEST_F(AppsGridViewTest, CreateANewPageByDraggingLogsMetrics) {
+  base::HistogramTester histogram_tester;
+  model_->PopulateApps(2);
+
+  PageFlipWaiter page_flip_waiter(GetPaginationModel());
+  // Drag down the first item until a new page is created.
+  gfx::Point from = GetItemRectOnCurrentPageAt(0, 0).CenterPoint();
+  const gfx::Rect apps_grid_bounds = apps_grid_view_->GetLocalBounds();
+  gfx::Point to =
+      gfx::Point(apps_grid_bounds.width() / 2, apps_grid_bounds.bottom() + 1);
+
+  // For fullscreen, drag to the bottom/right of bounds.
+  page_flip_waiter.Reset();
+  SimulateDrag(AppsGridView::MOUSE, from, to);
+
+  EXPECT_EQ(to, GetDragViewCenter());
+
+  while (test_api_->HasPendingPageFlip())
+    page_flip_waiter.Wait();
+
+  apps_grid_view_->EndDrag(false /*cancel*/);
+
+  ASSERT_EQ(apps_grid_view_->pagination_model()->total_pages(), 2);
+  histogram_tester.ExpectBucketCount("Apps.AppList.AppsGridAddPage",
+                                     AppListPageCreationType::kDraggingApp, 1);
+}
+
+TEST_F(AppsGridViewTest, CreateANewPageByAddingAppLogsMetrics) {
+  base::HistogramTester histogram_tester;
+  model_->PopulateApps(GetTilesPerPage(0));
+
+  // Add an item to simulate installing or syncing, the metric should be
+  // recorded.
+  model_->CreateAndAddItem("Extra App");
+
+  ASSERT_EQ(apps_grid_view_->pagination_model()->total_pages(), 2);
+  histogram_tester.ExpectBucketCount("Apps.AppList.AppsGridAddPage",
+                                     AppListPageCreationType::kSyncOrInstall,
+                                     1);
+}
+
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash

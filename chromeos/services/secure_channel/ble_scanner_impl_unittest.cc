@@ -90,7 +90,7 @@ class SecureChannelBleScannerImplTest : public testing::Test {
     mock_adapter_ =
         base::MakeRefCounted<testing::NiceMock<device::MockBluetoothAdapter>>();
 
-    ble_scanner_ = BleScannerImpl::Factory::Get()->BuildInstance(
+    ble_scanner_ = BleScannerImpl::Factory::Create(
         fake_delegate_.get(), fake_ble_service_data_helper_.get(),
         fake_ble_synchronizer_.get(), mock_adapter_);
 
@@ -107,6 +107,14 @@ class SecureChannelBleScannerImplTest : public testing::Test {
         .WillByDefault(testing::Invoke(
             [](const device::BluetoothDiscoveryFilter* discovery_filter,
                device::BluetoothAdapter::DiscoverySessionResultCallback&
+                   callback) {
+              std::move(callback).Run(
+                  /*is_error=*/false,
+                  device::UMABluetoothDiscoverySessionOutcome::SUCCESS);
+            }));
+    ON_CALL(*mock_adapter_, StopScan(testing::_))
+        .WillByDefault(testing::Invoke(
+            [](device::BluetoothAdapter::DiscoverySessionResultCallback
                    callback) {
               std::move(callback).Run(
                   /*is_error=*/false,
@@ -160,12 +168,12 @@ class SecureChannelBleScannerImplTest : public testing::Test {
         service_data, expected_remote_device, is_background_advertisement);
 
     size_t num_results_before_call = results.size();
-    FakeBluetoothDevice* fake_bluetooth_device =
+    std::unique_ptr<FakeBluetoothDevice> fake_bluetooth_device =
         SimulateScanResult(service_data);
     EXPECT_EQ(num_results_before_call + 1u, results.size());
 
     EXPECT_EQ(expected_remote_device, std::get<0>(results.back()));
-    EXPECT_EQ(fake_bluetooth_device, std::get<1>(results.back()));
+    EXPECT_EQ(fake_bluetooth_device.get(), std::get<1>(results.back()));
     EXPECT_EQ(is_background_advertisement ? ConnectionRole::kListenerRole
                                           : ConnectionRole::kInitiatorRole,
               std::get<2>(results.back()));
@@ -173,13 +181,13 @@ class SecureChannelBleScannerImplTest : public testing::Test {
 
   void InvokeStartDiscoveryCallback(bool success, size_t command_index) {
     if (!success) {
-      fake_ble_synchronizer_->GetStartDiscoveryErrorCallback(command_index)
+      fake_ble_synchronizer_->TakeStartDiscoveryErrorCallback(command_index)
           .Run();
       return;
     }
 
     StartDiscoverySession();
-    fake_ble_synchronizer_->GetStartDiscoveryCallback(command_index)
+    fake_ble_synchronizer_->TakeStartDiscoveryCallback(command_index)
         .Run(std::move(discovery_session_));
   }
 
@@ -209,7 +217,8 @@ class SecureChannelBleScannerImplTest : public testing::Test {
   }
 
  private:
-  FakeBluetoothDevice* SimulateScanResult(const std::string& service_data) {
+  std::unique_ptr<FakeBluetoothDevice> SimulateScanResult(
+      const std::string& service_data) {
     static const int16_t kFakeRssi = -70;
     static const std::vector<uint8_t> kFakeEir;
 
@@ -228,7 +237,7 @@ class SecureChannelBleScannerImplTest : public testing::Test {
                                            kFakeRssi, kFakeEir);
     }
 
-    return fake_bluetooth_device.get();
+    return fake_bluetooth_device;
   }
 
   const multidevice::RemoteDeviceRefList test_devices_;

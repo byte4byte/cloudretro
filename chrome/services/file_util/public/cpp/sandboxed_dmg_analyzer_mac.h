@@ -10,14 +10,13 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/services/file_util/public/mojom/file_util_service.mojom.h"
 #include "chrome/services/file_util/public/mojom/safe_archive_analyzer.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace safe_browsing {
 struct ArchiveAnalyzerResults;
-}
-
-namespace service_manager {
-class Connector;
 }
 
 // This class is used to analyze DMG files in a sandboxed utility process
@@ -27,12 +26,13 @@ class SandboxedDMGAnalyzer
     : public base::RefCountedThreadSafe<SandboxedDMGAnalyzer> {
  public:
   using ResultCallback =
-      base::Callback<void(const safe_browsing::ArchiveAnalyzerResults&)>;
+      base::OnceCallback<void(const safe_browsing::ArchiveAnalyzerResults&)>;
 
-  SandboxedDMGAnalyzer(const base::FilePath& dmg_file,
-                       const uint64_t max_size,
-                       const ResultCallback& callback,
-                       service_manager::Connector* connector);
+  SandboxedDMGAnalyzer(
+      const base::FilePath& dmg_file,
+      const uint64_t max_size,
+      ResultCallback callback,
+      mojo::PendingRemote<chrome::mojom::FileUtilService> service);
 
   // Starts the analysis. Must be called on the UI thread.
   void Start();
@@ -61,13 +61,11 @@ class SandboxedDMGAnalyzer
   const uint64_t max_size_;
 
   // Callback invoked on the UI thread with the file analyze results.
-  const ResultCallback callback_;
+  ResultCallback callback_;
 
-  // The connector to the service manager, only used on the UI thread.
-  service_manager::Connector* connector_;
-
-  // Pointer to the SafeArchiveAnalyzer interface. Only used from the UI thread.
-  chrome::mojom::SafeArchiveAnalyzerPtr analyzer_ptr_;
+  // Remote interfaces to the file util service. Only used from the UI thread.
+  mojo::Remote<chrome::mojom::FileUtilService> service_;
+  mojo::Remote<chrome::mojom::SafeArchiveAnalyzer> remote_analyzer_;
 
   DISALLOW_COPY_AND_ASSIGN(SandboxedDMGAnalyzer);
 };

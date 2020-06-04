@@ -14,7 +14,6 @@
 #include "chrome/browser/android/compositor/layer/tab_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
-#include "content/public/browser/android/compositor.h"
 #include "ui/android/resources/resource_manager_impl.h"
 
 using base::android::JavaParamRef;
@@ -146,7 +145,7 @@ void TabListSceneLayer::PutTabLayer(
     jint toolbar_textbox_background_color,
     jfloat toolbar_textbox_alpha,
     jfloat toolbar_alpha,
-    jfloat toolbar_y_offset,
+    jfloat content_offset,
     jfloat side_border_scale,
     jboolean inset_border) {
   scoped_refptr<TabLayer> layer;
@@ -190,8 +189,8 @@ void TabListSceneLayer::PutTabLayer(
         show_toolbar, default_theme_color, toolbar_background_color,
         close_button_color, anonymize_toolbar, show_tab_title,
         toolbar_textbox_resource_id, toolbar_textbox_background_color,
-        toolbar_textbox_alpha, toolbar_alpha, toolbar_y_offset,
-        side_border_scale, inset_border);
+        toolbar_textbox_alpha, toolbar_alpha, content_offset, side_border_scale,
+        inset_border);
   }
 
   gfx::RectF self(own_tree_->position(), gfx::SizeF(own_tree_->bounds()));
@@ -204,7 +203,8 @@ void TabListSceneLayer::PutBackgroundLayer(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jobj,
     jint resource_id,
-    jfloat alpha) {
+    jfloat alpha,
+    jint top_offset) {
   int ui_resource_id = resource_manager_->GetUIResourceId(
       ui::ANDROID_RESOURCE_TYPE_DYNAMIC, resource_id);
   if (ui_resource_id == 0)
@@ -223,6 +223,7 @@ void TabListSceneLayer::PutBackgroundLayer(
           ->size();
   background_layer_->SetBounds(size);
   background_layer_->SetOpacity(alpha);
+  background_layer_->SetPosition(gfx::PointF(0, top_offset));
 }
 
 void TabListSceneLayer::OnDetach() {

@@ -7,14 +7,14 @@
 #include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/notifications/notification_constants.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_notification_action.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_notification_options.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/modules/notifications/notification.h"
-#include "third_party/blink/renderer/modules/notifications/notification_options.h"
 #include "third_party/blink/renderer/modules/notifications/timestamp_trigger.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -38,7 +38,7 @@ const bool kNotificationRenotify = true;
 const bool kNotificationSilent = false;
 const bool kNotificationRequireInteraction = true;
 
-const mojom::blink::NotificationActionType kWebNotificationActionType =
+const mojom::blink::NotificationActionType kBlinkNotificationActionType =
     mojom::blink::NotificationActionType::TEXT;
 const char kNotificationActionType[] = "text";
 const char kNotificationActionAction[] = "my_action";
@@ -99,7 +99,7 @@ TEST_F(NotificationDataTest, ReflectProperties) {
     actions.push_back(action);
   }
 
-  DOMTimeStamp showTimestamp = WTF::CurrentTimeMS();
+  DOMTimeStamp showTimestamp = base::Time::Now().ToDoubleT() * 1000.0;
   TimestampTrigger* showTrigger = TimestampTrigger::Create(showTimestamp);
 
   NotificationOptions* options = NotificationOptions::Create();
@@ -157,7 +157,7 @@ TEST_F(NotificationDataTest, ReflectProperties) {
             notification_data->require_interaction);
   EXPECT_EQ(actions.size(), notification_data->actions->size());
   for (const auto& action : notification_data->actions.value()) {
-    EXPECT_EQ(kWebNotificationActionType, action->type);
+    EXPECT_EQ(kBlinkNotificationActionType, action->type);
     EXPECT_EQ(kNotificationActionAction, action->action);
     EXPECT_EQ(kNotificationActionTitle, action->title);
     EXPECT_EQ(kNotificationActionPlaceholder, action->placeholder);
@@ -286,7 +286,8 @@ TEST_F(NotificationDataTest, DefaultTimestampValue) {
   // The timestamp should be set to the current time since the epoch if it
   // wasn't supplied by the developer. "32" has no significance, but an equal
   // comparison of the value could lead to flaky failures.
-  EXPECT_NEAR(notification_data->timestamp, WTF::CurrentTimeMS(), 32);
+  EXPECT_NEAR(notification_data->timestamp,
+              base::Time::Now().ToDoubleT() * 1000.0, 32);
 }
 
 TEST_F(NotificationDataTest, DirectionValues) {

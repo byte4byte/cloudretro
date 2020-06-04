@@ -8,8 +8,8 @@
 
 #include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "build/build_config.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/test_screen.h"
@@ -38,8 +38,7 @@ class ChromeBrowserMainExtraPartsMetricsTest : public testing::Test {
 
  private:
   // Provides a message loop and allows the use of the task scheduler
-  content::TestBrowserThreadBundle thread_bundle_;
-  content::TestServiceManagerContext service_manager_context_;
+  content::BrowserTaskEnvironment task_environment_;
 
   // Dummy screen required by a ChromeBrowserMainExtraPartsMetrics test target.
   display::test::TestScreen test_screen_;
@@ -127,8 +126,16 @@ TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
 #else
 
 // Verify a TouchEventsEnabled value is recorded during PostBrowserStart.
+// Flaky on Win only.  http://crbug.com/1026946
+#if defined(OS_WIN)
+#define MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart \
+  DISABLED_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart
+#else
+#define MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart \
+  VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart
+#endif
 TEST_F(ChromeBrowserMainExtraPartsMetricsTest,
-       VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart) {
+       MAYBE_VerifyTouchEventsEnabledIsRecordedAfterPostBrowserStart) {
   base::HistogramTester histogram_tester;
   ChromeBrowserMainExtraPartsMetrics test_target;
 

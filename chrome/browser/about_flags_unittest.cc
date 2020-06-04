@@ -9,30 +9,26 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
-#include "base/base_paths.h"
-#include "base/feature_list.h"
-#include "base/files/file_path.h"
-#include "base/format_macros.h"
-#include "base/json/json_file_value_serializer.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_enum_reader.h"
-#include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/common/chrome_version.h"
 #include "components/flags_ui/feature_entry.h"
+#include "components/flags_ui/flags_test_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace about_flags {
 
 namespace {
 
-typedef base::HistogramBase::Sample Sample;
-typedef std::map<std::string, Sample> SwitchToIdMap;
+using Sample = base::HistogramBase::Sample;
+using SwitchToIdMap = std::map<std::string, Sample>;
 
 // Get all associated switches corresponding to defined about_flags.cc entries.
-std::set<std::string> GetAllSwitchesAndFeaturesForTesting() {
+std::set<std::string> GetAllPublicSwitchesAndFeaturesForTesting() {
   std::set<std::string> result;
 
   size_t num_entries = 0;
@@ -41,6 +37,15 @@ std::set<std::string> GetAllSwitchesAndFeaturesForTesting() {
 
   for (size_t i = 0; i < num_entries; ++i) {
     const flags_ui::FeatureEntry& entry = entries[i];
+
+    // Skip over flags that are part of the flags system itself - they don't
+    // have any of the usual metadata or histogram entries for flags, since they
+    // are synthesized during the build process.
+    // TODO(https://crbug.com/1068258): Remove the need for this by generating
+    // histogram entries automatically.
+    if (entry.supported_platforms & flags_ui::kFlagInfrastructure)
+      continue;
+
     switch (entry.type) {
       case flags_ui::FeatureEntry::SINGLE_VALUE:
       case flags_ui::FeatureEntry::SINGLE_DISABLE_VALUE:
@@ -68,61 +73,6 @@ std::set<std::string> GetAllSwitchesAndFeaturesForTesting() {
   return result;
 }
 
-struct FlagMetadataEntry {
-  std::vector<std::string> owners;
-  int expiry_milestone;
-};
-
-using FlagMetadataMap = std::map<std::string, FlagMetadataEntry>;
-
-FlagMetadataMap LoadFlagMetadata() {
-  FlagMetadataMap metadata;
-  base::FilePath metadata_path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &metadata_path);
-  JSONFileValueDeserializer deserializer(
-      metadata_path.AppendASCII("chrome").AppendASCII("browser").AppendASCII(
-          "flag-metadata.json"));
-  int error_code;
-  std::string error_message;
-  std::unique_ptr<base::Value> metadata_json =
-      deserializer.Deserialize(&error_code, &error_message);
-  DCHECK(metadata_json) << "Failed to load flag metadata: " << error_code << " "
-                        << error_message;
-
-  for (const auto& entry : metadata_json->GetList()) {
-    std::string name = entry.FindKey("name")->GetString();
-    std::vector<std::string> owners;
-    if (const base::Value* e = entry.FindKey("owners")) {
-      for (const auto& owner : e->GetList())
-        owners.push_back(owner.GetString());
-    }
-    int expiry_milestone = entry.FindKey("expiry_milestone")->GetInt();
-    metadata[name] = FlagMetadataEntry{owners, expiry_milestone};
-  }
-
-  return metadata;
-}
-
-std::vector<std::string> LoadFlagNeverExpireList() {
-  base::FilePath list_path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &list_path);
-  JSONFileValueDeserializer deserializer(
-      list_path.AppendASCII("chrome").AppendASCII("browser").AppendASCII(
-          "flag-never-expire-list.json"));
-  int error_code;
-  std::string error_message;
-  std::unique_ptr<base::Value> list_json =
-      deserializer.Deserialize(&error_code, &error_message);
-  DCHECK(list_json) << "Failed to load flag never expire list: " << error_code
-                    << " " << error_message;
-
-  std::vector<std::string> result;
-  for (const auto& entry : list_json->GetList()) {
-    result.push_back(entry.GetString());
-  }
-  return result;
-}
-
 }  // anonymous namespace
 
 // Makes sure there are no separators in any of the entry names.
@@ -141,54 +91,38 @@ TEST(AboutFlagsTest, NoSeparators) {
 TEST(AboutFlagsTest, EveryFlagHasMetadata) {
   size_t count;
   const flags_ui::FeatureEntry* entries = testing::GetFeatureEntries(&count);
-  FlagMetadataMap metadata = LoadFlagMetadata();
-
-  std::vector<std::string> missing_flags;
-
-  for (size_t i = 0; i < count; ++i) {
-    if (metadata.count(entries[i].internal_name) == 0)
-      missing_flags.push_back(entries[i].internal_name);
-  }
-
-  std::sort(missing_flags.begin(), missing_flags.end());
-
-  EXPECT_EQ(0u, missing_flags.size())
-      << "Missing flags: " << base::JoinString(missing_flags, "\n  ");
+  flags_ui::testing::EnsureEveryFlagHasMetadata(
+      base::make_span(entries, count));
 }
 
+// Ensures that all flags marked as never expiring in flag-metadata.json is
+// listed in flag-never-expire-list.json.
 TEST(AboutFlagsTest, OnlyPermittedFlagsNeverExpire) {
-  FlagMetadataMap metadata = LoadFlagMetadata();
-  std::vector<std::string> listed_flags = LoadFlagNeverExpireList();
-  std::vector<std::string> missing_flags;
-
-  for (const auto& entry : metadata) {
-    if (entry.second.expiry_milestone == -1 &&
-        std::find(listed_flags.begin(), listed_flags.end(), entry.first) ==
-            listed_flags.end()) {
-      missing_flags.push_back(entry.first);
-    }
-  }
-
-  std::sort(missing_flags.begin(), missing_flags.end());
-
-  EXPECT_EQ(0u, missing_flags.size())
-      << "Flags not listed for no-expire: "
-      << base::JoinString(missing_flags, "\n  ");
+  flags_ui::testing::EnsureOnlyPermittedFlagsNeverExpire();
 }
 
+// Ensures that every flag has an owner.
 TEST(AboutFlagsTest, EveryFlagHasNonEmptyOwners) {
-  FlagMetadataMap metadata = LoadFlagMetadata();
-  std::vector<std::string> sad_flags;
+  flags_ui::testing::EnsureEveryFlagHasNonEmptyOwners();
+}
 
-  for (const auto& it : metadata) {
-    if (it.second.owners.empty())
-      sad_flags.push_back(it.first);
-  }
+// Ensures that owners conform to rules in flag-metadata.json.
+TEST(AboutFlagsTest, OwnersLookValid) {
+  flags_ui::testing::EnsureOwnersLookValid();
+}
 
-  std::sort(sad_flags.begin(), sad_flags.end());
+// For some bizarre reason, far too many people see a file filled with
+// alphabetically-ordered items and think "hey, let me drop this new item into a
+// random location!" Prohibit such behavior in the flags files.
+TEST(AboutFlagsTest, FlagsListedInAlphabeticalOrder) {
+  flags_ui::testing::EnsureFlagsAreListedInAlphabeticalOrder();
+}
 
-  EXPECT_EQ(0u, sad_flags.size())
-      << "Flags missing owners: " << base::JoinString(sad_flags, "\n  ");
+TEST(AboutFlagsTest, RecentUnexpireFlagsArePresent) {
+  size_t count;
+  const flags_ui::FeatureEntry* entries = testing::GetFeatureEntries(&count);
+  flags_ui::testing::EnsureRecentUnexpireFlagsArePresent(
+      base::make_span(entries, count), CHROME_VERSION_MAJOR);
 }
 
 class AboutFlagsHistogramTest : public ::testing::Test {
@@ -250,7 +184,7 @@ TEST_F(AboutFlagsHistogramTest, CheckHistograms) {
   }
 
   // Check that all flags in about_flags.cc have entries in login_custom_flags.
-  std::set<std::string> all_flags = GetAllSwitchesAndFeaturesForTesting();
+  std::set<std::string> all_flags = GetAllPublicSwitchesAndFeaturesForTesting();
   for (const std::string& flag : all_flags) {
     // Skip empty placeholders.
     if (flag.empty())

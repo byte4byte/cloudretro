@@ -7,6 +7,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -18,10 +19,6 @@
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power/power_manager_client.h"
-#endif
-
-#if defined(OS_MACOSX)
-#include "chrome/browser/first_run/upgrade_util_mac.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -38,8 +35,19 @@ void UpdateRecommendedMessageBox::Show(gfx::NativeWindow parent_window) {
 // UpdateRecommendedMessageBox, private:
 
 UpdateRecommendedMessageBox::UpdateRecommendedMessageBox() {
-  views::MessageBoxView::InitParams params(
-      l10n_util::GetStringUTF16(IDS_UPDATE_RECOMMENDED));
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK, l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE));
+  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                                   l10n_util::GetStringUTF16(IDS_NOT_NOW));
+  base::string16 update_message;
+#if defined(OS_CHROMEOS)
+  update_message = l10n_util::GetStringUTF16(IDS_UPDATE_RECOMMENDED);
+#else
+  update_message = l10n_util::GetPluralStringFUTF16(
+      IDS_UPDATE_RECOMMENDED, BrowserList::GetIncognitoBrowserCount());
+#endif
+
+  views::MessageBoxView::InitParams params(update_message);
   params.message_width = ChromeLayoutProvider::Get()->GetDistanceMetric(
       ChromeDistanceMetric::DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
   // Also deleted when the window closes.
@@ -51,19 +59,8 @@ UpdateRecommendedMessageBox::~UpdateRecommendedMessageBox() {
 }
 
 bool UpdateRecommendedMessageBox::Accept() {
-#if defined(OS_MACOSX)
-  if (!upgrade_util::ShouldContinueToRelaunchForUpgrade())
-    return false;  // Leave the dialog up for the user to return to.
-#endif             // OS_MACOSX
-
   chrome::AttemptRelaunch();
   return true;
-}
-
-base::string16 UpdateRecommendedMessageBox::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16((button == ui::DIALOG_BUTTON_OK) ?
-      IDS_RELAUNCH_AND_UPDATE : IDS_NOT_NOW);
 }
 
 bool UpdateRecommendedMessageBox::ShouldShowWindowTitle() const {

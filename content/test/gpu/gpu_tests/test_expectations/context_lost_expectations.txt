@@ -1,18 +1,17 @@
-# tags: [ android linux lion mac mountainlion win win7 win8 ]
+# tags: [ android linux lion mac mountainlion win win7 win8 win10]
 # tags: [ debug ]
-# tags: [ skia-renderer no-skia-renderer ]
-# tags: [ amd-0x6779 nvidia qualcomm-adreno-(tm)-418 qualcomm-adreno-(tm)-420 ]
+# tags: [ intel nvidia qualcomm-adreno-(tm)-418 qualcomm-adreno-(tm)-420 ]
 # tags: [ asan no-asan ]
 # results: [ Failure RetryOnFailure Skip ]
-
-# AMD Radeon 6450
-crbug.com/479975 [ linux amd-0x6779 ] ContextLost_WebGLContextLostFromGPUProcessExit [ Failure ]
 
 # Win7 bots
 crbug.com/603329 [ win7 ] ContextLost_WebGLContextLostFromGPUProcessExit [ RetryOnFailure ]
 
 # Win8 Release and Debug NVIDIA bots.
 crbug.com/524808 [ win8 nvidia ] ContextLost_WebGLContextLostFromSelectElement [ Skip ]
+
+# Win10 NVIDIA
+crbug.com/965268 [ win10 nvidia ] ContextLost_WebGLBlockedAfterJSNavigation [ RetryOnFailure ]
 
 # Flakily timing out on Win x64 Debug bot. Unfortunately we can't identify this
 # separately from the 32-bit bots. Also unfortunately, the flaky retry mechanism
@@ -30,21 +29,24 @@ crbug.com/498149 [ lion debug ] ContextLost_WebGLContextLostFromSelectElement [ 
 crbug.com/923134 [ mac ] ContextLost_WebGL2Blocked [ Skip ]
 crbug.com/923134 [ android ] ContextLost_WebGL2Blocked [ Skip ]
 
-# 'Browser must support tab control' raised on Android
-crbug.com/609629 [ android ] GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash [ Skip ]
-crbug.com/609629 [ android ] ContextLost_WebGLContextLostFromGPUProcessExit [ Skip ]
-crbug.com/609629 [ android ] ContextLost_WebGLContextLostInHiddenTab [ Skip ]
-
 # Flaking on Nexus 5X
 crbug.com/965268 [ android qualcomm-adreno-(tm)-418 ] ContextLost_WebGLBlockedAfterJSNavigation [ Skip ]
 crbug.com/965268 [ android qualcomm-adreno-(tm)-418 ] ContextLost_WebGLUnblockedAfterUserInitiatedReload [ Skip ]
 crbug.com/880078 [ android ] ContextLost_WorkerRAFAfterGPUCrash [ Failure ]
 crbug.com/880078 [ android ] ContextLost_WorkerRAFAfterGPUCrash_OOPD [ Failure ]
+crbug.com/1064853 [ android qualcomm-adreno-(tm)-418 ] ContextLost_WebGLContextLostFromSelectElement [ Skip ]
 
 # Nexus 6
 # The Nexus 6 times out on these tests while waiting for the JS to complete
 crbug.com/611906 [ android qualcomm-adreno-(tm)-420 ] ContextLost_WebGLContextLostFromLoseContextExtension [ Failure ]
 crbug.com/611906 [ android qualcomm-adreno-(tm)-420 ] ContextLost_WebGLContextLostFromQuantity [ Failure ]
+crbug.com/609629 [ android qualcomm-adreno-(tm)-420 ] GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash [ Skip ]
+crbug.com/609629 [ android qualcomm-adreno-(tm)-420 ] ContextLost_WebGLContextLostFromGPUProcessExit [ Skip ]
+crbug.com/609629 [ android qualcomm-adreno-(tm)-420 ] ContextLost_WebGLContextLostInHiddenTab [ Skip ]
 
-# Consistent Failure in SkiaRenderer
-crbug.com/984110 [ linux skia-renderer ] ContextLost_WebGL2Blocked [ Skip ]
+# Mac NVIDIA only uses the low-power GPU.
+crbug.com/681341 [ mac nvidia ] ContextLost_MacWebGLMultisamplingHighPowerSwitchLosesContext [ Skip ]
+crbug.com/681341 [ mac nvidia ] ContextLost_MacWebGLPreserveDBHighPowerSwitchLosesContext [ Skip ]
+
+# Linux Intel Flake
+crbug.com/1034008 [ linux intel ] ContextLost_WebGLContextLostInHiddenTab [ RetryOnFailure ]

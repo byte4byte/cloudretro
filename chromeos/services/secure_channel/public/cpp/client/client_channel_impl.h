@@ -9,7 +9,10 @@
 #include "base/memory/weak_ptr.h"
 #include "chromeos/services/secure_channel/public/cpp/client/client_channel.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chromeos {
 
@@ -20,12 +23,18 @@ class ClientChannelImpl : public ClientChannel, public mojom::MessageReceiver {
  public:
   class Factory {
    public:
-    static Factory* Get();
+    static std::unique_ptr<ClientChannel> Create(
+        mojo::PendingRemote<mojom::Channel> channel,
+        mojo::PendingReceiver<mojom::MessageReceiver>
+            message_receiver_receiver);
     static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
     virtual ~Factory();
-    virtual std::unique_ptr<ClientChannel> BuildInstance(
-        mojom::ChannelPtr channel,
-        mojom::MessageReceiverRequest message_receiver_request);
+    virtual std::unique_ptr<ClientChannel> CreateInstance(
+        mojo::PendingRemote<mojom::Channel> channel,
+        mojo::PendingReceiver<mojom::MessageReceiver>
+            message_receiver_receiver) = 0;
 
    private:
     static Factory* test_factory_;
@@ -36,8 +45,9 @@ class ClientChannelImpl : public ClientChannel, public mojom::MessageReceiver {
  private:
   friend class SecureChannelClientChannelImplTest;
 
-  ClientChannelImpl(mojom::ChannelPtr channel,
-                    mojom::MessageReceiverRequest message_receiver_request);
+  ClientChannelImpl(
+      mojo::PendingRemote<mojom::Channel> channel,
+      mojo::PendingReceiver<mojom::MessageReceiver> message_receiver_receiver);
 
   // ClientChannel:
   void PerformGetConnectionMetadata(
@@ -57,10 +67,10 @@ class ClientChannelImpl : public ClientChannel, public mojom::MessageReceiver {
 
   void FlushForTesting();
 
-  mojom::ChannelPtr channel_;
-  mojo::Binding<mojom::MessageReceiver> binding_;
+  mojo::Remote<mojom::Channel> channel_;
+  mojo::Receiver<mojom::MessageReceiver> receiver_;
 
-  base::WeakPtrFactory<ClientChannelImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<ClientChannelImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ClientChannelImpl);
 };

@@ -20,8 +20,10 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_member.h"
+#include "components/sync/base/model_type.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_change.h"
 #include "components/sync/model/sync_data.h"
@@ -32,7 +34,7 @@
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/user_manager/scoped_user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -58,7 +60,10 @@ CreatePrefSyncData(const std::string& name, const base::Value& value) {
   JSONStringValueSerializer json(&serialized);
   json.Serialize(value);
   sync_pb::EntitySpecifics specifics;
-  sync_pb::PreferenceSpecifics* pref = specifics.mutable_preference();
+  sync_pb::PreferenceSpecifics* pref =
+      features::IsSplitSettingsSyncEnabled()
+          ? specifics.mutable_os_preference()->mutable_preference()
+          : specifics.mutable_preference();
   pref->set_name(name);
   pref->set_value(serialized);
   return syncer::SyncData::CreateRemoteData(1, specifics);
@@ -190,7 +195,7 @@ class PreferencesTest : public testing::Test {
     prefs_->SetInputMethodListForTesting();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
   std::unique_ptr<Preferences> prefs_;
@@ -336,6 +341,24 @@ class InputMethodPreferencesTest : public PreferencesTest {
     return base::JoinString(tokens, ",");
   }
 
+  // Simulates the initial sync of preferences.
+  syncer::SyncableService* SyncPreferences(
+      const syncer::SyncDataList& sync_data_list) {
+    // SplitSettingsSync moves IME prefs to be OS prefs.
+    syncer::ModelType model_type = features::IsSplitSettingsSyncEnabled()
+                                       ? syncer::OS_PREFERENCES
+                                       : syncer::PREFERENCES;
+    syncer::SyncableService* sync =
+        pref_service_->GetSyncableService(model_type);
+    sync->MergeDataAndStartSyncing(model_type, sync_data_list,
+                                   std::unique_ptr<syncer::SyncChangeProcessor>(
+                                       new syncer::FakeSyncChangeProcessor),
+                                   std::unique_ptr<syncer::SyncErrorFactory>(
+                                       new syncer::SyncErrorFactoryMock));
+    content::RunAllTasksUntilIdle();
+    return sync;
+  }
+
   StringPrefMember preferred_languages_;
   StringPrefMember preferred_languages_syncable_;
   StringPrefMember preload_engines_;
@@ -371,15 +394,7 @@ TEST_F(InputMethodPreferencesTest, TestOobeAndSync) {
       prefs::kLanguageEnabledImesSyncable, base::Value(kIdentityIMEID)));
 
   // Sync for the first time.
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  syncer::SyncableService* sync = SyncPreferences(sync_data_list);
 
   // Note that we expect the preload_engines to have been translated to input
   // method IDs during the merge.
@@ -457,15 +472,7 @@ TEST_F(InputMethodPreferencesTest, TestLogIn) {
                                               base::Value(kIdentityIMEID)));
 
   // Sync.
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  SyncPreferences(sync_data_list);
   {
     SCOPED_TRACE("Local preferences should have remained the same.");
     ExpectLocalValues(languages, preload_engines, extensions);
@@ -496,15 +503,8 @@ TEST_F(InputMethodPreferencesTest, TestLogInLegacy) {
   sync_data_list.push_back(CreatePrefSyncData(
       prefs::kLanguageEnabledImesSyncable, base::Value(kToUpperIMEID)));
 
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  // Sync.
+  SyncPreferences(sync_data_list);
   {
     SCOPED_TRACE("Local preferences should have remained the same.");
     ExpectLocalValues("es", "xkb:es::spa", kIdentityIMEID);
@@ -553,15 +553,7 @@ TEST_F(InputMethodPreferencesTest, MergeStressTest) {
       prefs::kLanguageEnabledImesSyncable, base::Value(std::string())));
 
   // Sync for the first time.
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  SyncPreferences(sync_data_list);
   {
     SCOPED_TRACE("Server values should have merged into local values.");
     ExpectLocalValues(
@@ -603,15 +595,7 @@ TEST_F(InputMethodPreferencesTest, MergeInvalidValues) {
       prefs::kLanguageEnabledImesSyncable, base::Value(kUnknownIMEID)));
 
   // Sync for the first time.
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  SyncPreferences(sync_data_list);
   {
     SCOPED_TRACE("Only valid server values should have been merged in.");
     ExpectLocalValues(
@@ -642,15 +626,8 @@ TEST_F(InputMethodPreferencesTest, MergeAfterSyncing) {
       prefs::kLanguageEnabledImesSyncable, base::Value(kUnknownIMEID)));
 
   // Sync for the first time.
-  syncer::SyncableService* sync =
-      pref_service_->GetSyncableService(
-          syncer::PREFERENCES);
-  sync->MergeDataAndStartSyncing(syncer::PREFERENCES, sync_data_list,
-                                 std::unique_ptr<syncer::SyncChangeProcessor>(
-                                     new syncer::FakeSyncChangeProcessor),
-                                 std::unique_ptr<syncer::SyncErrorFactory>(
-                                     new syncer::SyncErrorFactoryMock));
-  content::RunAllTasksUntilIdle();
+  SyncPreferences(sync_data_list);
+
   InitPreferences();
   content::RunAllTasksUntilIdle();
 

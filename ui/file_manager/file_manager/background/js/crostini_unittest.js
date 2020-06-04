@@ -25,9 +25,7 @@ let crostini;
 function setUp() {
   // Mock LoadTimeData strings.
   window.loadTimeData = {
-    data: {
-      'DRIVE_FS_ENABLED': false,
-    },
+    data: {},
     getBoolean: function(key) {
       return window.loadTimeData.data[key];
     },
@@ -49,15 +47,24 @@ function setUp() {
 
   // Create and initialize Crostini.
   crostini = createCrostiniForTest();
-  crostini.init(volumeManager);
+  crostini.initVolumeManager(volumeManager);
 }
 
 /**
- * Sets the DriveFs enabled state.
- * @param {boolean} enabled
+ * Tests init sets crostini and PluginVm enabled status.
  */
-function setDriveFsEnabled(enabled) {
-  window.loadTimeData.data['DRIVE_FS_ENABLED'] = enabled;
+function testInitCrostiniPluginVmEnabled() {
+  window.loadTimeData.data['CROSTINI_ENABLED'] = true;
+  window.loadTimeData.data['PLUGIN_VM_ENABLED'] = true;
+  crostini.initEnabled();
+  assertTrue(crostini.isEnabled('termina'));
+  assertTrue(crostini.isEnabled('PvmDefault'));
+
+  window.loadTimeData.data['CROSTINI_ENABLED'] = false;
+  window.loadTimeData.data['PLUGIN_VM_ENABLED'] = false;
+  crostini.initEnabled();
+  assertFalse(crostini.isEnabled('termina'));
+  assertFalse(crostini.isEnabled('PvmDefault'));
 }
 
 /**
@@ -65,12 +72,12 @@ function setDriveFsEnabled(enabled) {
  */
 function testIsPathShared() {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const root = new MockDirectoryEntry(mockFileSystem, '/');
-  const a = new MockDirectoryEntry(mockFileSystem, '/a');
-  const aa = new MockDirectoryEntry(mockFileSystem, '/a/a');
-  const ab = new MockDirectoryEntry(mockFileSystem, '/a/b');
-  const b = new MockDirectoryEntry(mockFileSystem, '/b');
-  const bb = new MockDirectoryEntry(mockFileSystem, '/b/b');
+  const root = MockDirectoryEntry.create(mockFileSystem, '/');
+  const a = MockDirectoryEntry.create(mockFileSystem, '/a');
+  const aa = MockDirectoryEntry.create(mockFileSystem, '/a/a');
+  const ab = MockDirectoryEntry.create(mockFileSystem, '/a/b');
+  const b = MockDirectoryEntry.create(mockFileSystem, '/b');
+  const bb = MockDirectoryEntry.create(mockFileSystem, '/b/b');
 
   assertFalse(crostini.isPathShared('vm1', a));
   assertFalse(crostini.isPathShared('vm2', a));
@@ -140,35 +147,12 @@ function testCanSharePath() {
   crostini.setEnabled('vm', true);
 
   const mockFileSystem = new MockFileSystem('test');
-  const root = new MockDirectoryEntry(mockFileSystem, '/');
+  const root = MockDirectoryEntry.create(mockFileSystem, '/');
   const rootFile = new MockEntry(mockFileSystem, '/file');
-  const rootFolder = new MockDirectoryEntry(mockFileSystem, '/folder');
+  const rootFolder = MockDirectoryEntry.create(mockFileSystem, '/folder');
   const fooFile = new MockEntry(mockFileSystem, '/foo/file');
-  const fooFolder = new MockDirectoryEntry(mockFileSystem, '/foo/folder');
+  const fooFolder = MockDirectoryEntry.create(mockFileSystem, '/foo/folder');
 
-  // Test with DriveFs disabled.
-  setDriveFsEnabled(false);
-  const disallowed = [
-    'computers_grand_root', 'computer', 'drive', 'shared_drives_grand_root',
-    'team_drive', 'test'
-  ];
-  for (const type of disallowed) {
-    volumeManagerRootType =
-        /** @type {!VolumeManagerCommon.RootType<string>} */ (type);
-    assertFalse(crostini.canSharePath('vm', root, true));
-    assertFalse(crostini.canSharePath('vm', root, false));
-    assertFalse(crostini.canSharePath('vm', rootFile, true));
-    assertFalse(crostini.canSharePath('vm', rootFile, false));
-    assertFalse(crostini.canSharePath('vm', rootFolder, true));
-    assertFalse(crostini.canSharePath('vm', rootFolder, false));
-    assertFalse(crostini.canSharePath('vm', fooFile, true));
-    assertFalse(crostini.canSharePath('vm', fooFile, false));
-    assertFalse(crostini.canSharePath('vm', fooFolder, true));
-    assertFalse(crostini.canSharePath('vm', fooFolder, false));
-  }
-
-  // Test with DriveFs enabled.
-  setDriveFsEnabled(true);
   // TODO(crbug.com/917920): Add computers_grand_root and computers when DriveFS
   // enforces allowed write paths.
 
@@ -198,11 +182,12 @@ function testCanSharePath() {
   }
 
   // TODO(crbug.com/917920): Remove when DriveFS enforces allowed write paths.
-  const grandRootFolder = new MockDirectoryEntry(mockFileSystem, '/Computers');
+  const grandRootFolder =
+      MockDirectoryEntry.create(mockFileSystem, '/Computers');
   const computerRootFolder =
-      new MockDirectoryEntry(mockFileSystem, '/Computers/My');
+      MockDirectoryEntry.create(mockFileSystem, '/Computers/My');
   const computerFolder =
-      new MockDirectoryEntry(mockFileSystem, '/Computers/My/foo');
+      MockDirectoryEntry.create(mockFileSystem, '/Computers/My/foo');
   volumeManagerRootType = VolumeManagerCommon.RootType.COMPUTERS_GRAND_ROOT;
   assertFalse(crostini.canSharePath('vm', root, false));
   assertFalse(crostini.canSharePath('vm', grandRootFolder, false));
@@ -213,4 +198,9 @@ function testCanSharePath() {
   assertFalse(crostini.canSharePath('vm', grandRootFolder, false));
   assertFalse(crostini.canSharePath('vm', computerRootFolder, false));
   assertTrue(crostini.canSharePath('vm', computerFolder, false));
+
+  // Sharing LinuxFiles is allowed for all VMs except termina.
+  volumeManagerRootType = VolumeManagerCommon.RootType.CROSTINI;
+  assertTrue(crostini.canSharePath('vm', root, false));
+  assertFalse(crostini.canSharePath('termina', root, false));
 }

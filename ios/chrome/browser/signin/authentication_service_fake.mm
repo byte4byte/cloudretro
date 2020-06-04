@@ -23,13 +23,13 @@
 AuthenticationServiceFake::AuthenticationServiceFake(
     PrefService* pref_service,
     SyncSetupService* sync_setup_service,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     syncer::SyncService* sync_service)
     : AuthenticationService(pref_service,
                             sync_setup_service,
                             identity_manager,
                             sync_service),
-      have_accounts_changed_(false) {}
+      have_accounts_changed_while_in_background_(false) {}
 
 AuthenticationServiceFake::~AuthenticationServiceFake() {}
 
@@ -42,18 +42,20 @@ void AuthenticationServiceFake::SignIn(ChromeIdentity* identity) {
 
 void AuthenticationServiceFake::SignOut(
     signin_metrics::ProfileSignout signout_source,
+    bool force_clear_browsing_data,
     ProceduralBlock completion) {
   authenticated_identity_ = nil;
   if (completion)
     completion();
 }
 
-void AuthenticationServiceFake::SetHaveAccountsChanged(bool changed) {
-  have_accounts_changed_ = changed;
+void AuthenticationServiceFake::SetHaveAccountsChangedWhileInBackground(
+    bool changed) {
+  have_accounts_changed_while_in_background_ = changed;
 }
 
-bool AuthenticationServiceFake::HaveAccountsChanged() const {
-  return have_accounts_changed_;
+bool AuthenticationServiceFake::HaveAccountsChangedWhileInBackground() const {
+  return have_accounts_changed_while_in_background_;
 }
 
 bool AuthenticationServiceFake::IsAuthenticated() const {
@@ -67,8 +69,8 @@ ChromeIdentity* AuthenticationServiceFake::GetAuthenticatedIdentity() const {
 std::unique_ptr<KeyedService>
 AuthenticationServiceFake::CreateAuthenticationService(
     web::BrowserState* context) {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   auto service = base::WrapUnique(new AuthenticationServiceFake(
       browser_state->GetPrefs(),
       SyncSetupServiceFactory::GetForBrowserState(browser_state),

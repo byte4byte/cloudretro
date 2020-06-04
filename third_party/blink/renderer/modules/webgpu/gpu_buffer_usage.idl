@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
-typedef unsigned long GPUBufferUsageFlags;
+typedef [EnforceRange] unsigned long GPUBufferUsageFlags;
 [
-    RuntimeEnabled=WebGPU
+    Exposed(Window WebGPU, Worker WebGPU)
 ] interface GPUBufferUsage {
-    const unsigned long NONE = 0;
     const unsigned long MAP_READ = 1;
     const unsigned long MAP_WRITE = 2;
     const unsigned long COPY_SRC = 4;
@@ -17,4 +16,5 @@ typedef unsigned long GPUBufferUsageFlags;
     const unsigned long VERTEX = 32;
     const unsigned long UNIFORM = 64;
     const unsigned long STORAGE = 128;
+    const unsigned long INDIRECT = 256;
 };

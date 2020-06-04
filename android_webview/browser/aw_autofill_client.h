@@ -13,6 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "components/autofill/core/browser/autofill_client.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/android/view_android.h"
 
@@ -25,7 +26,7 @@ class FormStructure;
 class MigratableCreditCard;
 class PersonalDataManager;
 class StrikeDatabase;
-}
+}  // namespace autofill
 
 namespace content {
 class WebContents;
@@ -65,7 +66,7 @@ class AwAutofillClient : public autofill::AutofillClient,
       override;
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
-  identity::IdentityManager* GetIdentityManager() override;
+  signin::IdentityManager* GetIdentityManager() override;
   autofill::FormDataImporter* GetFormDataImporter() override;
   autofill::payments::PaymentsClient* GetPaymentsClient() override;
   autofill::StrikeDatabase* GetStrikeDatabase() override;
@@ -82,7 +83,7 @@ class AwAutofillClient : public autofill::AutofillClient,
   void ShowLocalCardMigrationDialog(
       base::OnceClosure show_migration_dialog_closure) override;
   void ConfirmMigrateLocalCardToCloud(
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const autofill::LegalMessageLines& legal_message_lines,
       const std::string& user_email,
       const std::vector<autofill::MigratableCreditCard>&
           migratable_credit_cards,
@@ -93,8 +94,6 @@ class AwAutofillClient : public autofill::AutofillClient,
       const std::vector<autofill::MigratableCreditCard>&
           migratable_credit_cards,
       MigrationDeleteCardCallback delete_local_card_callback) override;
-  void ConfirmSaveAutofillProfile(const autofill::AutofillProfile& profile,
-                                  base::OnceClosure callback) override;
   void ConfirmSaveCreditCardLocally(
       const autofill::CreditCard& card,
       SaveCreditCardOptions options,
@@ -107,14 +106,14 @@ class AwAutofillClient : public autofill::AutofillClient,
           callback) override;
   void ConfirmSaveCreditCardToCloud(
       const autofill::CreditCard& card,
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const autofill::LegalMessageLines& legal_message_lines,
       SaveCreditCardOptions options,
       UploadSaveCardPromptCallback callback) override;
   void CreditCardUploadCompleted(bool card_saved) override;
   void ConfirmCreditCardFillAssist(const autofill::CreditCard& card,
                                    base::OnceClosure callback) override;
   bool HasCreditCardScanFeature() override;
-  void ScanCreditCard(const CreditCardScanCallback& callback) override;
+  void ScanCreditCard(CreditCardScanCallback callback) override;
   void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
@@ -125,7 +124,11 @@ class AwAutofillClient : public autofill::AutofillClient,
   void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
       const std::vector<base::string16>& labels) override;
-  void HideAutofillPopup() override;
+  base::span<const autofill::Suggestion> GetPopupSuggestions() const override;
+  void PinPopupView() override;
+  void UpdatePopup(const std::vector<autofill::Suggestion>& suggestions,
+                   autofill::PopupType popup_type) override;
+  void HideAutofillPopup(autofill::PopupHidingReason reason) override;
   bool IsAutocompleteEnabled() override;
   void PropagateAutofillPredictions(
       content::RenderFrameHost* rfh,

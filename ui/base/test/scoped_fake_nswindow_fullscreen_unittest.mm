@@ -4,18 +4,19 @@
 
 #import "ui/base/test/scoped_fake_nswindow_fullscreen.h"
 
+#import <AppKit/AppKit.h>
+
 #import "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
-#import "base/mac/sdk_forward_declarations.h"
-#include "base/message_loop/message_loop.h"
-#import "testing/gtest_mac.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#import "testing/gtest_mac.h"
 #import "ui/base/test/windowed_nsnotification_observer.h"
 #import "ui/gfx/mac/nswindow_frame_controls.h"
 
 @interface TestNSWindowDelegate : NSObject<NSWindowDelegate> {
  @private
-  NSSize targetSize_;
+  NSSize _targetSize;
 }
 - (instancetype)initWithFullScreenContentSize:(NSSize)targetSize;
 @end
@@ -24,14 +25,14 @@
 
 - (instancetype)initWithFullScreenContentSize:(NSSize)targetSize {
   if ((self = [super init])) {
-    targetSize_ = targetSize;
+    _targetSize = targetSize;
   }
   return self;
 }
 
 - (NSSize)window:(NSWindow*)window
     willUseFullScreenContentSize:(NSSize)proposedSize {
-  return targetSize_;
+  return _targetSize;
 }
 
 @end
@@ -41,7 +42,8 @@ namespace test {
 
 // Test the order of notifications sent when faking fullscreen transitions.
 TEST(ScopedFakeNSWindowFullscreenTest, TestOrdering) {
-  base::MessageLoopForUI message_loop;
+  base::test::SingleThreadTaskEnvironment task_environment(
+      base::test::SingleThreadTaskEnvironment::MainThreadType::UI);
 
   NSUInteger style_mask = NSTexturedBackgroundWindowMask | NSTitledWindowMask |
                           NSClosableWindowMask | NSMiniaturizableWindowMask |

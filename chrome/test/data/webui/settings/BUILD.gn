@@ -1,0 +1,51 @@
+# Copyright 2020 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//chrome/browser/resources/settings/settings.gni")
+import("//ui/webui/resources/tools/js_modulizer.gni")
+import("../namespace_rewrites.gni")
+
+js_modulizer("modulize") {
+  input_files = [
+    "fake_input_method_private.js",
+    "fake_language_settings_private.js",
+    "fake_settings_private.js",
+    "prefs_test_cases.js",
+    "prefs_tests.js",
+    "pref_util_tests.js",
+    "settings_slider_tests.js",
+    "settings_textarea_tests.js",
+    "settings_toggle_button_tests.js",
+    "sync_test_util.js",
+    "test_languages_browser_proxy.js",
+    "test_lifetime_browser_proxy.js",
+    "test_profile_info_browser_proxy.js",
+    "test_search_engines_browser_proxy.js",
+    "test_sync_browser_proxy.js",
+  ]
+
+  namespace_rewrites = settings_namespace_rewrites + test_namespace_rewrites + [
+                         "export_passwords_tests.run|run",
+                         "settings.buildRouterForTesting|buildRouter",
+                         "settings.defaultSettingLabel|defaultSettingLabel",
+                         "settings.FakeLanguageSettingsPrivate|FakeLanguageSettingsPrivate",
+                         "settings.FakeInputMethodPrivate|FakeInputMethodPrivate",
+                         "settings.FakeSettingsPrivate|FakeSettingsPrivate",
+                         "settings.getFakeLanguagePrefs|getFakeLanguagePrefs",
+                         "settings.kMenuCloseDelay|kMenuCloseDelay",
+                         "settings.setLanguageSettingsPrivateApiForTest|setLanguageSettingsPrivateApiForTest",
+                         "settings.setPageVisibilityForTesting|setPageVisibilityForTesting",
+                         "settings.setSearchManagerForTesting|setSearchManagerForTesting",
+                         "settings.TestLanguagesBrowserProxy|TestLanguagesBrowserProxy",
+                         "settings.TestLifetimeBrowserProxy|TestLifetimeBrowserProxy",
+                         "settings_page_test_util.getPage|getPage",
+                         "settings_page_test_util.getSection|getSection",
+                         "settings_search.createSampleSearchEngine|createSampleSearchEngine",
+                         "settings_search.TestSearchEnginesBrowserProxy|TestSearchEnginesBrowserProxy",
+                         "sync_test_util.getSyncAllPrefs|getSyncAllPrefs",
+                         "sync_test_util.setupRouterWithSyncRoutes|setupRouterWithSyncRoutes",
+                         "sync_test_util.simulateSyncStatus|simulateSyncStatus",
+                         "sync_test_util.simulateStoredAccounts|simulateStoredAccounts",
+                       ]
+}

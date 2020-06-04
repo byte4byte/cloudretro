@@ -58,8 +58,8 @@ class ScreenLockerTest : public InProcessBrowserTest {
 
     FakeBiodClient::Get()->StartEnrollSession(
         "test-user", std::string(),
-        base::BindRepeating(&ScreenLockerTest::OnStartSession,
-                            base::Unretained(this)));
+        base::BindOnce(&ScreenLockerTest::OnStartSession,
+                       base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
 
     FakeBiodClient::Get()->SendEnrollScanDone(
@@ -120,12 +120,12 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, LockScreenWhileAddingUser) {
 IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   // 1) If the active browser window is in fullscreen and the fullscreen window
   // does not have all the pixels (e.g. the shelf is auto hidden instead of
-  // hidden), locking the screen should not exit fullscreen. The shelf is
+  // hidden), locking the screen should exit fullscreen. The shelf is
   // auto hidden when in immersive fullscreen.
   ScreenLockerTester tester;
   BrowserWindow* browser_window = browser()->window();
-  ash::wm::WindowState* window_state =
-      ash::wm::GetWindowState(browser_window->GetNativeWindow());
+  ash::WindowState* window_state =
+      ash::WindowState::Get(browser_window->GetNativeWindow());
   {
     FullscreenNotificationObserver fullscreen_waiter(browser());
     browser()
@@ -139,30 +139,23 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   }
   {
     tester.Lock();
-    EXPECT_TRUE(browser_window->IsFullscreen());
-    EXPECT_FALSE(window_state->GetHideShelfWhenFullscreen());
+    EXPECT_FALSE(browser_window->IsFullscreen());
+    EXPECT_TRUE(window_state->GetHideShelfWhenFullscreen());
     EXPECT_TRUE(tester.IsLocked());
   }
   tester.SetUnlockPassword(user_manager::StubAccountId(), "pass");
   tester.UnlockWithPassword(user_manager::StubAccountId(), "pass");
   EXPECT_FALSE(tester.IsLocked());
-  {
-    FullscreenNotificationObserver fullscreen_waiter(browser());
-    browser()
-        ->exclusive_access_manager()
-        ->fullscreen_controller()
-        ->ToggleBrowserFullscreenMode();
-    fullscreen_waiter.Wait();
-    EXPECT_FALSE(browser_window->IsFullscreen());
-  }
+  EXPECT_FALSE(browser_window->IsFullscreen());
 
   // Browser window should be activated after screen locker is gone. Otherwise,
   // the rest of the test would fail.
-  ASSERT_EQ(window_state, ash::wm::GetActiveWindowState());
+  ASSERT_EQ(window_state, ash::WindowState::ForActiveWindow());
 
-  // 2) If the active browser window is in fullscreen and the fullscreen window
-  // has all of the pixels, locking the screen should exit fullscreen. The
-  // fullscreen window has all of the pixels when in tab fullscreen.
+  // 2) Similar to 1) if the active browser window is in fullscreen and the
+  // fullscreen window has all of the pixels, locking the screen should exit
+  // fullscreen. The fullscreen window has all of the pixels when in tab
+  // fullscreen.
   {
     FullscreenNotificationObserver fullscreen_waiter(browser());
     content::WebContents* web_contents =
@@ -223,11 +216,11 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, PasswordAuthWhenAuthDisabled) {
       user_manager::StubAccountId(),
       ash::AuthDisabledData(ash::AuthDisabledReason::kTimeWindowLimit,
                             base::Time::Now() + base::TimeDelta::FromHours(1),
-                            base::TimeDelta::FromHours(1)));
+                            base::TimeDelta::FromHours(1),
+                            true /*disable_lock_screen_media*/));
 
   // Try to authenticate with password.
-  tester.UnlockWithPassword(user_manager::StubAccountId(), kPassword);
-  base::RunLoop().RunUntilIdle();
+  tester.ForceSubmitPassword(user_manager::StubAccountId(), kPassword);
   EXPECT_TRUE(tester.IsLocked());
 
   // Re-enable authentication for user.
@@ -261,7 +254,8 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, FingerprintAuthWhenAuthDisabled) {
       user_manager::StubAccountId(),
       ash::AuthDisabledData(ash::AuthDisabledReason::kTimeUsageLimit,
                             base::Time::Now() + base::TimeDelta::FromHours(1),
-                            base::TimeDelta::FromHours(3)));
+                            base::TimeDelta::FromHours(3),
+                            true /*disable_lock_screen_media*/));
 
   // Try to authenticate with fingerprint.
   AuthenticateWithFingerprint();

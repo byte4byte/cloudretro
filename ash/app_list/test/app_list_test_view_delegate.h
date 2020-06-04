@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ash/app_list/app_list_view_delegate.h"
@@ -22,7 +23,7 @@
 #include "services/content/public/cpp/test/fake_navigable_contents_factory.h"
 #include "ui/base/models/simple_menu_model.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 class AppListTestModel;
@@ -65,10 +66,10 @@ class AppListTestViewDelegate : public AppListViewDelegate,
                         int event_flags,
                         ash::AppListLaunchedFrom launched_from,
                         ash::AppListLaunchType launch_type,
-                        int suggestion_index) override;
-  void LogResultLaunchHistogram(
-      app_list::SearchResultLaunchLocation launch_location,
-      int suggestion_index) override {}
+                        int suggestion_index,
+                        bool launch_as_default) override;
+  void LogResultLaunchHistogram(SearchResultLaunchLocation launch_location,
+                                int suggestion_index) override {}
   void LogSearchAbandonHistogram() override {}
   void InvokeSearchResultAction(const std::string& result_id,
                                 int action_index,
@@ -90,8 +91,7 @@ class AppListTestViewDelegate : public AppListViewDelegate,
       ash::AppListViewState target_state) override;
   void ShowWallpaperContextMenu(const gfx::Point& onscreen_location,
                                 ui::MenuSourceType source_type) override;
-  bool ProcessHomeLauncherGesture(ui::GestureEvent* event,
-                                  const gfx::Point& screen_location) override;
+  bool ProcessHomeLauncherGesture(ui::GestureEvent* event) override;
   bool CanProcessEventsOnApplistViews() override;
   bool ShouldDismissImmediately() override;
   void GetNavigableContentsFactory(
@@ -101,6 +101,10 @@ class AppListTestViewDelegate : public AppListViewDelegate,
   ash::AssistantViewDelegate* GetAssistantViewDelegate() override;
   void OnSearchResultVisibilityChanged(const std::string& id,
                                        bool visibility) override;
+  void NotifySearchResultsForLogging(
+      const base::string16& raw_query,
+      const ash::SearchResultIdWithPositionIndices& results,
+      int position_index) override;
   bool IsAssistantAllowedAndEnabled() const override;
   bool ShouldShowAssistantPrivacyInfo() const override;
   void MaybeIncreaseAssistantPrivacyInfoShownCount() override;
@@ -108,7 +112,9 @@ class AppListTestViewDelegate : public AppListViewDelegate,
   void OnStateTransitionAnimationCompleted(
       ash::AppListViewState state) override;
   void GetAppLaunchedMetricParams(
-      app_list::AppLaunchedMetricParams* metric_params) override;
+      AppLaunchedMetricParams* metric_params) override;
+  gfx::Rect SnapBoundsToDisplayEdge(const gfx::Rect& bounds) override;
+  int GetShelfSize() override;
 
   // Do a bulk replacement of the items in the model.
   void ReplaceTestModel(int item_count);
@@ -139,6 +145,6 @@ class AppListTestViewDelegate : public AppListViewDelegate,
 };
 
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_TEST_APP_LIST_TEST_VIEW_DELEGATE_H_

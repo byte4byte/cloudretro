@@ -13,7 +13,7 @@ namespace chromeos {
 
 ShutdownPolicyHandler::ShutdownPolicyHandler(CrosSettings* cros_settings,
                                              Delegate* delegate)
-    : cros_settings_(cros_settings), delegate_(delegate), weak_factory_(this) {
+    : cros_settings_(cros_settings), delegate_(delegate) {
   DCHECK(cros_settings_);
   DCHECK(delegate);
   shutdown_policy_subscription_ = cros_settings_->AddSettingsObserver(
@@ -26,9 +26,9 @@ ShutdownPolicyHandler::~ShutdownPolicyHandler() {}
 
 void ShutdownPolicyHandler::NotifyDelegateWithShutdownPolicy() {
   CrosSettingsProvider::TrustedStatus status =
-      cros_settings_->PrepareTrustedValues(
-          base::Bind(&ShutdownPolicyHandler::NotifyDelegateWithShutdownPolicy,
-                     weak_factory_.GetWeakPtr()));
+      cros_settings_->PrepareTrustedValues(base::BindOnce(
+          &ShutdownPolicyHandler::NotifyDelegateWithShutdownPolicy,
+          weak_factory_.GetWeakPtr()));
   if (status != CrosSettingsProvider::TRUSTED)
     return;
 

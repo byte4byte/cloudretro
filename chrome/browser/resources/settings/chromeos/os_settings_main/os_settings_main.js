@@ -43,7 +43,7 @@ Polymer({
      */
     showPages_: {
       type: Object,
-      value: function() {
+      value() {
         return {about: false, settings: false};
       },
     },
@@ -75,21 +75,21 @@ Polymer({
 
     /**
      * Dictionary defining page visibility.
-     * @type {!PageVisibility}
+     * @type {!OSPageVisibility}
      */
     pageVisibility: Object,
 
-    showApps: Boolean,
-
     showAndroidApps: Boolean,
 
-    showAssistant: Boolean,
+    showCrostini: Boolean,
+
+    showReset: Boolean,
 
     havePlayStoreApp: Boolean,
   },
 
   /** @private */
-  overscrollChanged_: function() {
+  overscrollChanged_() {
     if (!this.overscroll_ && this.boundScroll_) {
       this.offsetParent.removeEventListener('scroll', this.boundScroll_);
       window.removeEventListener('resize', this.boundScroll_);
@@ -111,7 +111,7 @@ Polymer({
    * @param {number=} opt_minHeight The minimum overscroll height needed.
    * @private
    */
-  setOverscroll_: function(opt_minHeight) {
+  setOverscroll_(opt_minHeight) {
     const scroller = this.offsetParent;
     if (!scroller) {
       return;
@@ -131,8 +131,9 @@ Polymer({
    * current route.
    * @param {!settings.Route} newRoute
    */
-  currentRouteChanged: function(newRoute) {
-    const inAbout = settings.routes.ABOUT.contains(settings.getCurrentRoute());
+  currentRouteChanged(newRoute) {
+    const inAbout = settings.routes.ABOUT.contains(
+        settings.Router.getInstance().getCurrentRoute());
     this.showPages_ = {about: inAbout, settings: !inAbout};
 
     if (!newRoute.isSubpage()) {
@@ -144,12 +145,12 @@ Polymer({
   },
 
   /** @private */
-  onShowingSubpage_: function() {
+  onShowingSubpage_() {
     this.showingSubpage_ = true;
   },
 
   /** @private */
-  onShowingMainPage_: function() {
+  onShowingMainPage_() {
     this.showingSubpage_ = false;
   },
 
@@ -160,7 +161,7 @@ Polymer({
    * @param {!CustomEvent<!HTMLElement>} e
    * @private
    */
-  onShowingSection_: function(e) {
+  onShowingSection_(e) {
     const section = e.detail;
     // Calculate the height that the overscroll padding should be set to, so
     // that the given section is displayed at the top of the viewport.
@@ -170,6 +171,7 @@ Polymer({
     const overscroll = Math.max(0, this.offsetParent.clientHeight - distance);
     this.setOverscroll_(overscroll);
     section.scrollIntoView();
+    section.focus();
   },
 
   /**
@@ -177,7 +179,7 @@ Polymer({
    * @param {!settings.Route} route
    * @return {?OsSettingsPageElement}
    */
-  getPage_: function(route) {
+  getPage_(route) {
     if (settings.routes.BASIC.contains(route) ||
         (settings.routes.ADVANCED &&
          settings.routes.ADVANCED.contains(route))) {
@@ -191,7 +193,7 @@ Polymer({
    * @param {string} query
    * @return {!Promise} A promise indicating that searching finished.
    */
-  searchContents: function(query) {
+  searchContents(query) {
     // Trigger rendering of the basic and advanced pages and search once ready.
     this.inSearchMode_ = true;
     this.toolbarSpinnerActive = true;
@@ -231,7 +233,7 @@ Polymer({
    * @return {boolean}
    * @private
    */
-  showManagedHeader_: function() {
+  showManagedHeader_() {
     return !this.inSearchMode_ && !this.showingSubpage_ &&
         !this.showPages_.about;
   },

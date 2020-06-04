@@ -1,3 +1,5 @@
-document
-++group
-++++description Name='This is a section element.'
+Document
+++Group
+++++Text Name='This is a section element.'
+++Group LocalizedControlType='section' Name='section'
+++++Text Name='This is a named section element.'

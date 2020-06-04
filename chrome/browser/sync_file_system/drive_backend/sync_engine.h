@@ -36,6 +36,7 @@ class DriveUploaderInterface;
 }
 
 namespace extensions {
+class ExtensionRegistry;
 class ExtensionServiceInterface;
 }
 
@@ -65,7 +66,7 @@ class SyncEngine
       public LocalChangeProcessor,
       public drive::DriveNotificationObserver,
       public drive::DriveServiceObserver,
-      public identity::IdentityManager::Observer,
+      public signin::IdentityManager::Observer,
       public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
   typedef RemoteFileSyncService::Observer SyncServiceObserver;
@@ -75,7 +76,7 @@ class SyncEngine
     DriveServiceFactory() {}
     virtual ~DriveServiceFactory() {}
     virtual std::unique_ptr<drive::DriveServiceInterface> CreateDriveService(
-        identity::IdentityManager* identity_manager,
+        signin::IdentityManager* identity_manager,
         scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
         base::SequencedTaskRunner* blocking_task_runner);
 
@@ -166,7 +167,8 @@ class SyncEngine
              TaskLogger* task_logger,
              drive::DriveNotificationManager* notification_manager,
              extensions::ExtensionServiceInterface* extension_service,
-             identity::IdentityManager* identity_manager,
+             extensions::ExtensionRegistry* extension_registry,
+             signin::IdentityManager* identity_manager,
              scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
              std::unique_ptr<DriveServiceFactory> drive_service_factory,
              leveldb::Env* env_override);
@@ -196,7 +198,8 @@ class SyncEngine
   // KeyedService::DependsOn().
   drive::DriveNotificationManager* notification_manager_;
   extensions::ExtensionServiceInterface* extension_service_;
-  identity::IdentityManager* identity_manager_;
+  extensions::ExtensionRegistry* extension_registry_;
+  signin::IdentityManager* identity_manager_;
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 

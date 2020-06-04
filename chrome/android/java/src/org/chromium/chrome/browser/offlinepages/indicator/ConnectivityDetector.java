@@ -12,15 +12,16 @@ import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Handler;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.task.AsyncTask;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.content.ContentUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.net.ConnectionType;
 import org.chromium.net.NetworkChangeNotifier;
 
@@ -225,6 +226,10 @@ public class ConnectivityDetector implements NetworkChangeNotifier.ConnectionTyp
         mHandler = new Handler();
         NetworkChangeNotifier.addConnectionTypeObserver(this);
         detect();
+    }
+
+    public void destroy() {
+        NetworkChangeNotifier.removeConnectionTypeObserver(this);
     }
 
     public void detect() {

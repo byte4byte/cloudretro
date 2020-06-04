@@ -9,11 +9,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "base/containers/circular_deque.h"
 #include "base/containers/queue.h"
 #include "base/containers/small_map.h"
 #include "net/base/interval_set.h"
 #include "net/third_party/quiche/src/common/simple_linked_hash_map.h"
+#include "net/third_party/quiche/src/quic/platform/api/quic_flags.h"
 
 namespace quic {
 
@@ -32,6 +32,9 @@ template <typename Key,
               typename std::unordered_map<Key, Value, Hash>::allocator_type>
 using QuicUnorderedMapImpl = std::unordered_map<Key, Value, Hash, Eq, Alloc>;
 
+template <typename Key, typename Value, typename Hash>
+using QuicHashMapImpl = std::unordered_map<Key, Value, Hash>;
+
 // TODO(mpw): s/std::unordered_set/gtl::node_hash_set/ once node_hash_set is
 //   PG3-compatible.
 template <typename Key,
@@ -40,6 +43,9 @@ template <typename Key,
           typename Alloc =
               typename std::unordered_set<Key, Hash>::allocator_type>
 using QuicUnorderedSetImpl = std::unordered_set<Key, Hash, Eq, Alloc>;
+
+template <typename Key, typename Hash>
+using QuicHashSetImpl = std::unordered_set<Key, Hash>;
 
 // A map which offers insertion-ordered iteration.
 template <typename Key, typename Value, typename Hash>
@@ -62,13 +68,6 @@ using QuicIntervalSetImpl = net::IntervalSet<T>;
 // DOES NOT GUARANTEE POINTER STABILITY!
 template <typename T>
 using QuicQueueImpl = base::queue<T>;
-
-// Represents a double-ended queue which may be backed by a list or
-// a flat circular buffer.
-//
-// DOES NOT GUARANTEE POINTER OR ITERATOR STABILITY!
-template <typename T>
-using QuicDequeImpl = base::circular_deque<T>;
 
 // TODO(wub): Switch to absl::InlinedVector once it is allowed.
 template <typename T, size_t N, typename A = std::allocator<T>>

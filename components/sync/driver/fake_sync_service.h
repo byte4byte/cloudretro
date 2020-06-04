@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "components/sync/driver/sync_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -26,13 +27,14 @@ class FakeSyncService : public SyncService {
   // SyncService implementation.
   syncer::SyncUserSettings* GetUserSettings() override;
   const syncer::SyncUserSettings* GetUserSettings() const override;
-  int GetDisableReasons() const override;
+  DisableReasonSet GetDisableReasons() const override;
   TransportState GetTransportState() const override;
   CoreAccountInfo GetAuthenticatedAccountInfo() const override;
   bool IsAuthenticatedAccountPrimary() const override;
   bool IsLocalSyncEnabled() const override;
   void TriggerRefresh(const ModelTypeSet& types) override;
   ModelTypeSet GetActiveDataTypes() const override;
+  ModelTypeSet GetBackedOffDataTypes() const override;
   void AddObserver(SyncServiceObserver* observer) override;
   void RemoveObserver(SyncServiceObserver* observer) override;
   bool HasObserver(const SyncServiceObserver* observer) const override;
@@ -47,7 +49,7 @@ class FakeSyncService : public SyncService {
   base::Time GetAuthErrorTime() const override;
   bool RequiresClientUpgrade() const override;
   UserShare* GetUserShare() const override;
-  void ReadyForStartChanged(syncer::ModelType type) override;
+  void DataTypePreconditionChanged(syncer::ModelType type) override;
   SyncTokenStatus GetSyncTokenStatusForDebugging() const override;
   bool QueryDetailedSyncStatusForDebugging(SyncStatus* result) const override;
   base::Time GetLastSyncedTimeForDebugging() const override;
@@ -62,9 +64,15 @@ class FakeSyncService : public SyncService {
   void RemoveTypeDebugInfoObserver(TypeDebugInfoObserver* observer) override;
   base::WeakPtr<JsController> GetJsController() override;
   void GetAllNodesForDebugging(
-      const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback)
+      base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback)
       override;
   void SetInvalidationsForSessionsEnabled(bool enabled) override;
+  void AddTrustedVaultDecryptionKeysFromWeb(
+      const std::string& gaia_id,
+      const std::vector<std::vector<uint8_t>>& keys,
+      int last_key_version) override;
+  UserDemographicsResult GetUserNoisedBirthYearAndGender(
+      base::Time now) override;
 
   // KeyedService implementation.
   void Shutdown() override;

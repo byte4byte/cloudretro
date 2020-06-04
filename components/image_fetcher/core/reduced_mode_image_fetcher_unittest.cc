@@ -15,8 +15,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/image_fetcher/core/cache/image_cache.h"
 #include "components/image_fetcher/core/cache/image_data_store_disk.h"
@@ -44,12 +44,16 @@ namespace image_fetcher {
 
 namespace {
 
-const GURL kImageUrl = GURL("http://gstatic.img.com/foo.jpg");
-
 constexpr char kUmaClientName[] = "TestUma";
 constexpr char kImageData[] = "data";
 
 const char kImageFetcherEventHistogramName[] = "ImageFetcher.Events";
+
+// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
+// function.
+GURL ImageUrl() {
+  return GURL("http://gstatic.img.com/foo.jpg");
+}
 
 }  // namespace
 
@@ -85,11 +89,12 @@ class ReducedModeImageFetcherTest : public testing::Test {
         base::SequencedTaskRunnerHandle::Get());
 
     // Use an initial request to start the cache up.
-    image_cache_->SaveImage(kImageUrl.spec(), kImageData,
-                            /* needs_transcoding */ false);
+    image_cache_->SaveImage(ImageUrl().spec(), kImageData,
+                            /* needs_transcoding */ false,
+                            /* expiration_interval */ base::nullopt);
     RunUntilIdle();
     db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
-    image_cache_->DeleteImage(kImageUrl.spec());
+    image_cache_->DeleteImage(ImageUrl().spec());
     RunUntilIdle();
 
     shared_factory_ =
@@ -106,7 +111,7 @@ class ReducedModeImageFetcherTest : public testing::Test {
     RunUntilIdle();
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   void VerifyCacheHit() {
     RunUntilIdle();
@@ -115,7 +120,7 @@ class ReducedModeImageFetcherTest : public testing::Test {
 
     EXPECT_CALL(data_callback, Run(kImageData, _));
     reduced_mode_image_fetcher()->FetchImageAndData(
-        kImageUrl, data_callback.Get(), ImageFetcherCallback(),
+        ImageUrl(), data_callback.Get(), ImageFetcherCallback(),
         ImageFetcherParams(TRAFFIC_ANNOTATION_FOR_TESTS, kUmaClientName));
     db()->LoadCallback(true);
     RunUntilIdle();
@@ -152,7 +157,7 @@ class ReducedModeImageFetcherTest : public testing::Test {
   FakeDB<CachedImageMetadataProto>* db_;
   std::map<std::string, CachedImageMetadataProto> metadata_store_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::HistogramTester histogram_tester_;
 
   DISALLOW_COPY_AND_ASSIGN(ReducedModeImageFetcherTest);
@@ -160,15 +165,17 @@ class ReducedModeImageFetcherTest : public testing::Test {
 
 TEST_F(ReducedModeImageFetcherTest, FetchNeedsTranscodingImageFromCache) {
   // Save the image that needs transcoding in the database.
-  image_cache()->SaveImage(kImageUrl.spec(), kImageData,
-                           /* needs_transcoding */ true);
+  image_cache()->SaveImage(ImageUrl().spec(), kImageData,
+                           /* needs_transcoding */ true,
+                           /* expiration_interval */ base::nullopt);
   VerifyCacheHit();
 }
 
 TEST_F(ReducedModeImageFetcherTest, FetchImageFromCache) {
   // Save the image that doesn't need transcoding in the database.
-  image_cache()->SaveImage(kImageUrl.spec(), kImageData,
-                           /* needs_transcoding */ false);
+  image_cache()->SaveImage(ImageUrl().spec(), kImageData,
+                           /* needs_transcoding */ false,
+                           /* expiration_interval */ base::nullopt);
   VerifyCacheHit();
 }
 

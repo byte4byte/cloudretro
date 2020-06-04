@@ -11,7 +11,6 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/window_factory.h"
 #include "ash/wm/desks/desks_util.h"
-#include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "base/run_loop.h"
@@ -24,6 +23,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
@@ -156,8 +156,8 @@ class ExtendedDesktopTest : public AshTestBase {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
     params.bounds = bounds;
     views::Widget* widget = new views::Widget;
-    params.context = CurrentContext();
-    widget->Init(params);
+    params.context = GetContext();
+    widget->Init(std::move(params));
     widget->Show();
     return widget;
   }
@@ -234,9 +234,8 @@ TEST_F(ExtendedDesktopTest, SystemModal) {
   EXPECT_EQ(root_windows[0], Shell::GetRootWindowForNewWindows());
 
   // Open system modal. Make sure it's on 2nd root window and active.
-  views::Widget* modal_widget = views::Widget::CreateWindowWithContextAndBounds(
-      new ModalWidgetDelegate(), CurrentContext(),
-      gfx::Rect(1200, 100, 100, 100));
+  views::Widget* modal_widget = views::Widget::CreateWindowWithContext(
+      new ModalWidgetDelegate(), GetContext(), gfx::Rect(1200, 100, 100, 100));
   modal_widget->Show();
   EXPECT_TRUE(wm::IsActiveWindow(modal_widget->GetNativeView()));
   EXPECT_EQ(root_windows[1], modal_widget->GetNativeView()->GetRootWindow());
@@ -263,11 +262,11 @@ TEST_F(ExtendedDesktopTest, TestCursor) {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   aura::WindowTreeHost* host0 = root_windows[0]->GetHost();
   aura::WindowTreeHost* host1 = root_windows[1]->GetHost();
-  EXPECT_EQ(ui::CursorType::kPointer, host0->last_cursor().native_type());
-  EXPECT_EQ(ui::CursorType::kNull, host1->last_cursor().native_type());
-  Shell::Get()->cursor_manager()->SetCursor(ui::CursorType::kCopy);
-  EXPECT_EQ(ui::CursorType::kCopy, host0->last_cursor().native_type());
-  EXPECT_EQ(ui::CursorType::kCopy, host1->last_cursor().native_type());
+  EXPECT_EQ(ui::mojom::CursorType::kPointer, host0->last_cursor().type());
+  EXPECT_EQ(ui::mojom::CursorType::kNull, host1->last_cursor().type());
+  Shell::Get()->cursor_manager()->SetCursor(ui::mojom::CursorType::kCopy);
+  EXPECT_EQ(ui::mojom::CursorType::kCopy, host0->last_cursor().type());
+  EXPECT_EQ(ui::mojom::CursorType::kCopy, host1->last_cursor().type());
 }
 
 TEST_F(ExtendedDesktopTest, TestCursorLocation) {
@@ -298,17 +297,18 @@ TEST_F(ExtendedDesktopTest, GetRootWindowAt) {
   SetSecondaryDisplayLayout(display::DisplayPlacement::LEFT);
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-400, 100)));
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-1, 100)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(0, 300)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(700, 300)));
+  using window_util::GetRootWindowAt;
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-400, 100)));
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-1, 100)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(0, 300)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(700, 300)));
 
   // Zero origin.
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(0, 0)));
 
   // Out of range point should return the nearest root window
-  EXPECT_EQ(root_windows[1], wm::GetRootWindowAt(gfx::Point(-600, 0)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowAt(gfx::Point(701, 100)));
+  EXPECT_EQ(root_windows[1], GetRootWindowAt(gfx::Point(-600, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowAt(gfx::Point(701, 100)));
 }
 
 TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
@@ -318,32 +318,29 @@ TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
   // Containing rect.
+  using window_util::GetRootWindowMatching;
   EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-300, 10, 50, 50)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(100, 10, 50, 50)));
+            GetRootWindowMatching(gfx::Rect(-300, 10, 50, 50)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(100, 10, 50, 50)));
 
   // Intersecting rect.
   EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-200, 0, 300, 300)));
+            GetRootWindowMatching(gfx::Rect(-200, 0, 300, 300)));
   EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(-100, 0, 300, 300)));
+            GetRootWindowMatching(gfx::Rect(-100, 0, 300, 300)));
 
   // Zero origin.
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowMatching(gfx::Rect(0, 0, 0, 0)));
-  EXPECT_EQ(root_windows[0], wm::GetRootWindowMatching(gfx::Rect(0, 0, 1, 1)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 0, 0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 0, 1, 1)));
 
   // Empty rect.
-  EXPECT_EQ(root_windows[1],
-            wm::GetRootWindowMatching(gfx::Rect(-400, 100, 0, 0)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(100, 100, 0, 0)));
+  EXPECT_EQ(root_windows[1], GetRootWindowMatching(gfx::Rect(-400, 100, 0, 0)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(100, 100, 0, 0)));
 
   // Out of range rect should return the primary root window.
   EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(-600, -300, 50, 50)));
-  EXPECT_EQ(root_windows[0],
-            wm::GetRootWindowMatching(gfx::Rect(0, 1000, 50, 50)));
+            GetRootWindowMatching(gfx::Rect(-600, -300, 50, 50)));
+  EXPECT_EQ(root_windows[0], GetRootWindowMatching(gfx::Rect(0, 1000, 50, 50)));
 }
 
 TEST_F(ExtendedDesktopTest, Capture) {
@@ -791,8 +788,9 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
   w1->SetBounds(gfx::Rect(10, 10, 50, 50));
   EXPECT_EQ(root_windows[0], w1->GetNativeView()->GetRootWindow());
 
-  // a window in SettingsBubbleContainer and StatusContainer should
-  // not move to another root window regardles of the bounds specified.
+  // a window in SettingsBubbleContainer, ShelfControlContainer and
+  // OverviewFocusContainer should not move to another root window
+  // regardless of the bounds specified.
   aura::Window* settings_bubble_container =
       Shell::GetPrimaryRootWindowController()->GetContainer(
           kShellWindowId_SettingBubbleContainer);
@@ -803,7 +801,7 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
 
   aura::Window* status_container =
       Shell::GetPrimaryRootWindowController()->GetContainer(
-          kShellWindowId_StatusContainer);
+          kShellWindowId_ShelfContainer);
   window = aura::test::CreateTestWindowWithId(100, status_container);
   window->SetBoundsInScreen(gfx::Rect(150, 10, 50, 50), GetSecondaryDisplay());
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
@@ -828,8 +826,8 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   views::Textfield* textfield = new views::Textfield;
   lock_widget->client_view()->AddChildView(textfield);
 
-  ash::Shell::GetContainer(Shell::GetPrimaryRootWindow(),
-                           ash::kShellWindowId_LockScreenContainer)
+  Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                      kShellWindowId_LockScreenContainer)
       ->AddChild(lock_widget->GetNativeView());
   lock_widget->Show();
   textfield->RequestFocus();
@@ -845,13 +843,13 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_A, 0);
   event_generator->ReleaseKey(ui::VKEY_A, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("a", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("a", base::UTF16ToASCII(textfield->GetText()));
 
   event_generator->set_current_target(root_windows[1]);
   event_generator->PressKey(ui::VKEY_B, 0);
   event_generator->ReleaseKey(ui::VKEY_B, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("ab", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("ab", base::UTF16ToASCII(textfield->GetText()));
 
   // Deleting 2nd display. The lock window still should get the events.
   UpdateDisplay("100x100");
@@ -859,7 +857,7 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_C, 0);
   event_generator->ReleaseKey(ui::VKEY_C, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abc", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abc", base::UTF16ToASCII(textfield->GetText()));
 
   // Creating 2nd display again, and lock window still should get events
   // on both root windows.
@@ -869,13 +867,13 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   event_generator->PressKey(ui::VKEY_D, 0);
   event_generator->ReleaseKey(ui::VKEY_D, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abcd", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abcd", base::UTF16ToASCII(textfield->GetText()));
 
   event_generator->set_current_target(root_windows[1]);
   event_generator->PressKey(ui::VKEY_E, 0);
   event_generator->ReleaseKey(ui::VKEY_E, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
-  EXPECT_EQ("abcde", base::UTF16ToASCII(textfield->text()));
+  EXPECT_EQ("abcde", base::UTF16ToASCII(textfield->GetText()));
 }
 
 // Verifies that clicking in the primary display and dragging to the secondary

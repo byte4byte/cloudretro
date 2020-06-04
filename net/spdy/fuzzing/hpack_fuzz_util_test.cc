@@ -71,7 +71,7 @@ TEST(HpackFuzzUtilTest, ParsesSequenceOfHeaderBlocks) {
   HpackFuzzUtil::Input input;
   input.input.assign(fixture, base::size(fixture) - 1);
 
-  SpdyStringPiece block;
+  quiche::QuicheStringPiece block;
 
   EXPECT_TRUE(HpackFuzzUtil::NextHeaderBlock(&input, &block));
   EXPECT_EQ("aaaaa", block);
@@ -91,16 +91,16 @@ TEST(HpackFuzzUtilTest, ParsesSequenceOfHeaderBlocks) {
 }
 
 TEST(HpackFuzzUtilTest, SerializedHeaderBlockPrefixes) {
-  EXPECT_EQ(SpdyString("\x00\x00\x00\x00", 4),
+  EXPECT_EQ(std::string("\x00\x00\x00\x00", 4),
             HpackFuzzUtil::HeaderBlockPrefix(0));
-  EXPECT_EQ(SpdyString("\x00\x00\x00\x05", 4),
+  EXPECT_EQ(std::string("\x00\x00\x00\x05", 4),
             HpackFuzzUtil::HeaderBlockPrefix(5));
   EXPECT_EQ("\x4f\xb3\x0a\x91", HpackFuzzUtil::HeaderBlockPrefix(1337133713));
 }
 
 TEST(HpackFuzzUtilTest, PassValidInputThroughAllStages) {
   // Example lifted from HpackDecoderTest.SectionD4RequestHuffmanExamples.
-  SpdyString input = SpdyHexDecode("828684418cf1e3c2e5f23a6ba0ab90f4ff");
+  std::string input = SpdyHexDecode("828684418cf1e3c2e5f23a6ba0ab90f4ff");
 
   HpackFuzzUtil::FuzzerContext context;
   HpackFuzzUtil::InitializeFuzzerContext(&context);
@@ -132,7 +132,7 @@ TEST(HpackFuzzUtilTest, ValidFuzzExamplesRegressionTest) {
   HpackFuzzUtil::FuzzerContext context;
   HpackFuzzUtil::InitializeFuzzerContext(&context);
 
-  SpdyStringPiece block;
+  quiche::QuicheStringPiece block;
   while (HpackFuzzUtil::NextHeaderBlock(&input, &block)) {
     // As these are valid examples, all fuzz stages should succeed.
     EXPECT_TRUE(
@@ -142,7 +142,7 @@ TEST(HpackFuzzUtilTest, ValidFuzzExamplesRegressionTest) {
 
 TEST(HpackFuzzUtilTest, FlipBitsMutatesBuffer) {
   char buffer[] = "testbuffer1234567890";
-  SpdyString unmodified(buffer, base::size(buffer) - 1);
+  std::string unmodified(buffer, base::size(buffer) - 1);
 
   EXPECT_EQ(unmodified, buffer);
   HpackFuzzUtil::FlipBits(reinterpret_cast<uint8_t*>(buffer),

@@ -9,6 +9,7 @@
 
 #include "ash/app_list/app_list_export.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view_targeter_delegate.h"
 
@@ -18,11 +19,10 @@ class SlideAnimation;
 
 namespace views {
 class InkDrop;
-class InkDropMask;
 class InkDropRipple;
 }  // namespace views
 
-namespace app_list {
+namespace ash {
 
 class AppListView;
 class ContentsView;
@@ -35,26 +35,36 @@ class APP_LIST_EXPORT ExpandArrowView : public views::Button,
   ExpandArrowView(ContentsView* contents_view, AppListView* app_list_view);
   ~ExpandArrowView() override;
 
-  // Overridden from views::Button:
+  // views::Button:
   void PaintButtonContents(gfx::Canvas* canvas) override;
 
-  // Overridden from views::ButtonListener:
+  // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // Overridden from views::View:
+  // views::View:
   gfx::Size CalculatePreferredSize() const override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void OnFocus() override;
   void OnBlur() override;
   const char* GetClassName() const override;
 
-  // Overridden from views::InkDropHost:
+  // views::InkDropHostView:
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
 
+  // Calculates vertical offset between expand arrow circle's positions with app
+  // list view drag progress |progress| and the current app list progress
+  // (calculated without taking app list animation state into account).
+  float CalculateOffsetFromCurrentAppListProgress(double progress) const;
+
+  void MaybeEnableHintingAnimation(bool enabled);
+
+  bool IsHintingAnimationRunningForTest() {
+    return hinting_animation_timer_.IsRunning();
+  }
+
  private:
-  // gfx::AnimationDelegate overrides:
+  // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
 
@@ -86,11 +96,13 @@ class APP_LIST_EXPORT ExpandArrowView : public views::Button,
   // The y position offset of the arrow in this view.
   int arrow_y_offset_;
 
-  base::WeakPtrFactory<ExpandArrowView> weak_ptr_factory_;
+  base::OneShotTimer hinting_animation_timer_;
+
+  base::WeakPtrFactory<ExpandArrowView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExpandArrowView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_EXPAND_ARROW_VIEW_H_

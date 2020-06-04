@@ -12,7 +12,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/form_structure.h"
@@ -33,7 +33,6 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/variations/entropy_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -59,7 +58,10 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
   explicit TestPasswordManagerDriver(PasswordManagerClient* client)
       : password_manager_(client),
         password_generation_manager_(client, this),
-        password_autofill_manager_(this, nullptr, client) {}
+        password_autofill_manager_(this, nullptr, client) {
+    ON_CALL(*this, GetLastCommittedURL())
+        .WillByDefault(testing::ReturnRef(empty_url_));
+  }
   ~TestPasswordManagerDriver() override {}
 
   // PasswordManagerDriver implementation.
@@ -72,8 +74,10 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
   }
 
   MOCK_METHOD0(AllowToRunFormClassifier, void());
+  MOCK_CONST_METHOD0(GetLastCommittedURL, GURL&());
 
  private:
+  GURL empty_url_;
   PasswordManager password_manager_;
   PasswordGenerationFrameHelper password_generation_manager_;
   PasswordAutofillManager password_autofill_manager_;
@@ -117,7 +121,6 @@ class FakePasswordRequirementsSpecFetcher
 
 class MockPasswordManagerClient : public StubPasswordManagerClient {
  public:
-  MOCK_CONST_METHOD0(GetPasswordSyncState, SyncState());
   MOCK_CONST_METHOD1(IsSavingAndFillingEnabled, bool(const GURL&));
   MOCK_CONST_METHOD0(IsIncognito, bool());
 
@@ -130,7 +133,9 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
 
   ~MockPasswordManagerClient() override { store_->ShutdownOnUIThread(); }
 
-  PasswordStore* GetPasswordStore() const override { return store_.get(); }
+  PasswordStore* GetProfilePasswordStore() const override {
+    return store_.get();
+  }
   PrefService* GetPrefs() const override { return prefs_.get(); }
   PasswordRequirementsService* GetPasswordRequirementsService() override {
     return &password_requirements_service_;
@@ -177,7 +182,7 @@ class PasswordGenerationFrameHelperTest : public testing::Test {
     return GetGenerationHelper()->IsGenerationEnabled(true);
   }
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MockPasswordManagerClient> client_;
 };
 
@@ -186,29 +191,21 @@ TEST_F(PasswordGenerationFrameHelperTest, IsGenerationEnabled) {
   // be enabled, unless the sync is with a custom passphrase.
   EXPECT_CALL(*client_, IsSavingAndFillingEnabled(_))
       .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_NORMAL_ENCRYPTION));
-  EXPECT_TRUE(IsGenerationEnabled());
-
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_WITH_CUSTOM_PASSPHRASE));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(true));
   EXPECT_TRUE(IsGenerationEnabled());
 
   // Disabling password syncing should cause generation to be disabled.
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(NOT_SYNCING));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(false));
   EXPECT_FALSE(IsGenerationEnabled());
 
   // Disabling the PasswordManager should cause generation to be disabled even
   // if syncing is enabled.
   EXPECT_CALL(*client_, IsSavingAndFillingEnabled(_))
       .WillRepeatedly(testing::Return(false));
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_NORMAL_ENCRYPTION));
-  EXPECT_FALSE(IsGenerationEnabled());
-
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_WITH_CUSTOM_PASSPHRASE));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(true));
   EXPECT_FALSE(IsGenerationEnabled());
 }
 
@@ -218,8 +215,8 @@ TEST_F(PasswordGenerationFrameHelperTest, ProcessPasswordRequirements) {
   // Setup so that IsGenerationEnabled() returns true.
   EXPECT_CALL(*client_, IsSavingAndFillingEnabled(_))
       .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_NORMAL_ENCRYPTION));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(true));
   struct {
     const char* name;
     bool has_domain_wide_requirements = false;
@@ -344,10 +341,37 @@ TEST_F(PasswordGenerationFrameHelperTest, UpdatePasswordSyncStateIncognito) {
   EXPECT_CALL(*client_, IsIncognito()).WillRepeatedly(testing::Return(true));
   PrefService* prefs = client_->GetPrefs();
   prefs->SetBoolean(prefs::kCredentialsEnableService, true);
-  EXPECT_CALL(*client_, GetPasswordSyncState())
-      .WillRepeatedly(testing::Return(SYNCING_NORMAL_ENCRYPTION));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(true));
 
   EXPECT_FALSE(IsGenerationEnabled());
+}
+
+TEST_F(PasswordGenerationFrameHelperTest, GenerationDisabledForGoogle) {
+  EXPECT_CALL(*client_, IsSavingAndFillingEnabled(_))
+      .WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*client_->GetPasswordFeatureManager(), IsGenerationEnabled())
+      .WillRepeatedly(testing::Return(true));
+
+  GURL accounts_url = GURL("https://accounts.google.com/path?q=1");
+  EXPECT_CALL(*GetTestDriver(), GetLastCommittedURL())
+      .WillOnce(testing::ReturnRef(accounts_url));
+  EXPECT_FALSE(IsGenerationEnabled());
+
+  GURL myaccount_url = GURL("https://myaccount.google.com/path?q=1");
+  EXPECT_CALL(*GetTestDriver(), GetLastCommittedURL())
+      .WillOnce(testing::ReturnRef(myaccount_url));
+  EXPECT_FALSE(IsGenerationEnabled());
+
+  GURL google_url = GURL("https://subdomain1.subdomain2.google.com/path");
+  EXPECT_CALL(*GetTestDriver(), GetLastCommittedURL())
+      .WillOnce(testing::ReturnRef(google_url));
+  EXPECT_FALSE(IsGenerationEnabled());
+
+  GURL non_google_url = GURL("https://example.com");
+  EXPECT_CALL(*GetTestDriver(), GetLastCommittedURL())
+      .WillOnce(testing::ReturnRef(non_google_url));
+  EXPECT_TRUE(IsGenerationEnabled());
 }
 
 }  // namespace password_manager

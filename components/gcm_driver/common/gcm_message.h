@@ -25,7 +25,7 @@ struct GCM_DRIVER_EXPORT OutgoingMessage {
   // Message ID.
   std::string id;
   // In seconds.
-  int time_to_live;
+  int time_to_live = kMaximumTTL;
   MessageData data;
 
   static const int kMaximumTTL;
@@ -45,23 +45,7 @@ struct GCM_DRIVER_EXPORT IncomingMessage {
 
   // Whether the contents of the message have been decrypted, and are
   // available in |raw_data|.
-  bool decrypted;
-};
-
-// Message to be delivered to the other party via Web Push.
-struct GCM_DRIVER_EXPORT WebPushMessage {
-  WebPushMessage();
-  WebPushMessage(WebPushMessage&& other);
-  ~WebPushMessage();
-  WebPushMessage& operator=(WebPushMessage&& other);
-
-  // In seconds.
-  int time_to_live;
-  std::string payload;
-
-  static const int kMaximumTTL;
-
-  DISALLOW_COPY_AND_ASSIGN(WebPushMessage);
+  bool decrypted = false;
 };
 
 }  // namespace gcm

@@ -11,10 +11,12 @@
 #include "ash/shell.h"
 #include "ash/shell_state.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
+#include "base/numerics/ranges.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
@@ -27,21 +29,15 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
 
 namespace {
 
-// Returns the default width of a snapped window.
-int GetDefaultSnappedWindowWidth(aura::Window* window) {
-  const float kSnappedWidthWorkspaceRatio = 0.5f;
-
-  int work_area_width =
+int GetSnappedWindowWidth(int ideal_width, aura::Window* window) {
+  const int work_area_width =
       screen_util::GetDisplayWorkAreaBoundsInParent(window).width();
-  int min_width =
+  const int min_width =
       window->delegate() ? window->delegate()->GetMinimumSize().width() : 0;
-  int ideal_width =
-      static_cast<int>(work_area_width * kSnappedWidthWorkspaceRatio);
-  return std::min(work_area_width, std::max(ideal_width, min_width));
+  return base::ClampToRange(ideal_width, min_width, work_area_width);
 }
 
 // Return true if the window or one of its ancestor returns true from
@@ -91,24 +87,35 @@ void AdjustBoundsToEnsureMinimumWindowVisibility(const gfx::Rect& visible_area,
 }
 
 gfx::Rect GetDefaultLeftSnappedWindowBoundsInParent(aura::Window* window) {
-  gfx::Rect work_area_in_parent(
-      screen_util::GetDisplayWorkAreaBoundsInParent(window));
-  return gfx::Rect(work_area_in_parent.x(), work_area_in_parent.y(),
-                   GetDefaultSnappedWindowWidth(window),
-                   work_area_in_parent.height());
+  return GetDefaultLeftSnappedWindowBounds(
+      screen_util::GetDisplayWorkAreaBoundsInParent(window), window);
 }
 
 gfx::Rect GetDefaultRightSnappedWindowBoundsInParent(aura::Window* window) {
-  gfx::Rect work_area_in_parent(
-      screen_util::GetDisplayWorkAreaBoundsInParent(window));
-  int width = GetDefaultSnappedWindowWidth(window);
-  return gfx::Rect(work_area_in_parent.right() - width, work_area_in_parent.y(),
-                   width, work_area_in_parent.height());
+  return GetDefaultRightSnappedWindowBounds(
+      screen_util::GetDisplayWorkAreaBoundsInParent(window), window);
+}
+
+gfx::Rect GetDefaultLeftSnappedWindowBounds(const gfx::Rect& work_area,
+                                            aura::Window* window) {
+  DCHECK(!Shell::Get()->tablet_mode_controller()->InTabletMode());
+  const int width = GetSnappedWindowWidth(
+      work_area.CenterPoint().x() - work_area.x(), window);
+  return gfx::Rect(work_area.x(), work_area.y(), width, work_area.height());
+}
+
+gfx::Rect GetDefaultRightSnappedWindowBounds(const gfx::Rect& work_area,
+                                             aura::Window* window) {
+  DCHECK(!Shell::Get()->tablet_mode_controller()->InTabletMode());
+  const int width = GetSnappedWindowWidth(
+      work_area.right() - work_area.CenterPoint().x(), window);
+  return gfx::Rect(work_area.right() - width, work_area.y(), width,
+                   work_area.height());
 }
 
 void CenterWindow(aura::Window* window) {
   WMEvent event(WM_EVENT_CENTER);
-  wm::GetWindowState(window)->OnWMEvent(&event);
+  WindowState::Get(window)->OnWMEvent(&event);
 }
 
 void SetBoundsInScreen(aura::Window* window,
@@ -139,8 +146,8 @@ void SetBoundsInScreen(aura::Window* window,
     }
 
     if (dst_container && window->parent() != dst_container) {
-      aura::Window* focused = GetFocusedWindow();
-      aura::Window* active = GetActiveWindow();
+      aura::Window* focused = window_util::GetFocusedWindow();
+      aura::Window* active = window_util::GetActiveWindow();
 
       aura::WindowTracker tracker;
       if (focused)
@@ -151,7 +158,7 @@ void SetBoundsInScreen(aura::Window* window,
       // Client controlled window will have its own logic on client side
       // to adjust bounds.
       // TODO(oshima): Use WM_EVENT_SET_BOUNDS with target display id.
-      auto* window_state = wm::GetWindowState(window);
+      auto* window_state = WindowState::Get(window);
       if (!window_state || !window_state->allow_set_bounds_direct()) {
         gfx::Point origin = bounds_in_screen.origin();
         const gfx::Point display_origin = display.bounds().origin();
@@ -188,5 +195,4 @@ void SetBoundsInScreen(aura::Window* window,
   window->SetBounds(gfx::Rect(origin, bounds_in_screen.size()));
 }
 
-}  // namespace wm
 }  // namespace ash

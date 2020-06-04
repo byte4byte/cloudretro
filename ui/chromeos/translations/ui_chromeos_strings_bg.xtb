@@ -29,6 +29,7 @@
 <translation id="1243314992276662751">Качване</translation>
 <translation id="1249250836236328755">Жанр</translation>
 <translation id="1278813325885878377">Унгарска (QWERTY) клавиатура</translation>
+<translation id="1293556467332435079">Файлове</translation>
 <translation id="1297922636971898492">В момента няма достъп до Google Диск. Качването ще се рестартира автоматично, щом услугата отново е налице.</translation>
 <translation id="1307931752636661898">Файловете за Linux не могат да бъдат показани</translation>
 <translation id="1310751437842832374">Транслитерация (mausam → ନମସ୍ତେ)</translation>
@@ -75,20 +76,19 @@
 <translation id="1829129547161959350">Пингвин</translation>
 <translation id="183183971458492120">Информацията се зарежда...</translation>
 <translation id="1838709767668011582">Сайт в Google</translation>
-<translation id="1839704667838141620">Промяна на начина на споделяне на този файл</translation>
 <translation id="1844692022597038441">Този файл не е налице офлайн.</translation>
 <translation id="184633654410729720">Тайландска клавиатура (кедмани)</translation>
 <translation id="1847880352285315359">Запазено</translation>
-<translation id="1864676585353837027">Промяна на начина на споделяне на тези файлове</translation>
 <translation id="1864756863218646478">Файлът не можа да бъде намерен.</translation>
 <translation id="1921986354447415460">Турска клавиатура от тип „F“</translation>
+<translation id="1924372192547904021">Устройството „<ph name="DRIVE_NAME" />“ бе форматирано</translation>
 <translation id="1931134289871235022">словашки</translation>
 <translation id="1933345018156373194">Преместването не бе успешно. Възникна неочаквана грешка: <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">финландски</translation>
 <translation id="1942765061641586207">Разделителна способност на изображението</translation>
 <translation id="1943097386230153518">Инсталиране на нова услуга</translation>
 <translation id="1947424002851288782">Немска клавиатура</translation>
-<translation id="197560921582345123">Може да редактира</translation>
+<translation id="1972984168337863910">Разгъване на панелите с информация за файловете</translation>
 <translation id="1984603991036629094">Арменска фонетична клавиатура</translation>
 <translation id="2001796770603320721">Управление в Диск</translation>
 <translation id="2009067268969781306">При форматирането на устройство ще бъдат изтрити всички съхранявани на него данни. Това действие не може да бъде отменено.</translation>
@@ -165,6 +165,7 @@
 <translation id="2942290791863759244">Немска клавиатура (NEO 2)</translation>
 <translation id="2943400156390503548">Презентации</translation>
 <translation id="2943503720238418293">Използвайте по-кратко име</translation>
+<translation id="2949781154072577687">Устройството „<ph name="DRIVE_NAME" />“ се форматира...</translation>
 <translation id="2951236788251446349">Медуза</translation>
 <translation id="2963783323012015985">Турска клавиатура</translation>
 <translation id="2966459079597787514">Шведска клавиатура</translation>
@@ -225,6 +226,7 @@
 <translation id="3645531960514756307">Освобождаване на папката</translation>
 <translation id="3678559383040232393">Малтийска клавиатура</translation>
 <translation id="3685122418104378273">Синхронизирането на Google Диск е деактивирано по подразбиране, когато се използват мобилни данни.</translation>
+<translation id="3689865792480713551">Анулиране на <ph name="ACTIVITY_DESCRIPTION" />.</translation>
 <translation id="3726463242007121105">Това устройство не може да бъде отворено, защото файловата му система не се поддържа.</translation>
 <translation id="3741243925913727067">Създавайте в Google Диск резервни копия на снимките и видеоклиповете от мултимедийното си устройство.</translation>
 <translation id="3749289110408117711">Име на файла</translation>
@@ -266,11 +268,9 @@
 <translation id="421017592316736757">Трябва да сте онлайн, за да осъществите достъп до този файл.</translation>
 <translation id="4212740939091998969">Папката „<ph name="FOLDER_NAME" />“ вече съществува. Моля, изберете друго име.</translation>
 <translation id="4215448920900139318">Създаваме резервно копие на <ph name="FILE_COUNT" /></translation>
-<translation id="4242533952199664413">Отваряне на настройките</translation>
 <translation id="426015154560005552">Арабска клавиатура</translation>
 <translation id="4261901459838235729">Презентация в Google</translation>
 <translation id="4290535918735525311">1 папка е споделена с Linux</translation>
-<translation id="42981349822642051">Разгъване</translation>
 <translation id="4298972503445160211">Датска клавиатура</translation>
 <translation id="4299729908419173967">бразилска</translation>
 <translation id="4309915981827077375">Обща информация</translation>
@@ -278,6 +278,7 @@
 <translation id="4336032328163998280">Копирането не бе успешно. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">Пъпеш</translation>
 <translation id="4372884569765913867">1 x 1</translation>
+<translation id="4394214039309501350">Външна връзка</translation>
 <translation id="4425149324548788773">Моят диск</translation>
 <translation id="4465830120256509958">Бразилска клавиатура</translation>
 <translation id="4470564870223067757">Хангъл, 2 набора</translation>
@@ -287,7 +288,6 @@
 <translation id="4522570452068850558">Подробности</translation>
 <translation id="4552678318981539154">Купуване на още хранилище</translation>
 <translation id="4559767610552730302">Боке</translation>
-<translation id="4568854179928172494">Час на промяна</translation>
 <translation id="4572815280350369984">Файл от тип <ph name="FILE_TYPE" /></translation>
 <translation id="457386861538956877">Още...</translation>
 <translation id="4579744207439506346">Добавихте <ph name="ENTRY_NAME" /> към избраните.</translation>
@@ -326,7 +326,6 @@
 <translation id="4880520557730313061">Автокоригиране</translation>
 <translation id="4881695831933465202">Отваряне</translation>
 <translation id="4886021172213954916">Тамилска клавиатура (пишеща машина)</translation>
-<translation id="4892969127351273348">Отварянето чрез <ph name="APP_NAME" /> не е възможно</translation>
 <translation id="4905417359854579806">Готови сме да създадем резервно копие на <ph name="FILE_COUNT" /></translation>
 <translation id="4924638091161556692">Коригирано</translation>
 <translation id="4935975195727477204">Газания</translation>
@@ -366,7 +365,6 @@
 <translation id="5218183485292899140">Швейцарска (френски) клавиатура</translation>
 <translation id="5234764350956374838">Отхвърляне</translation>
 <translation id="5241298539944515331">Виетнамска клавиатура (VIQR)</translation>
-<translation id="52446585071384036">За да отваряте файлове чрез <ph name="APP_NAME" />, първо копирайте в папката с файлове на Linux.</translation>
 <translation id="5253070652067921974">Създадено от</translation>
 <translation id="5257456363153333584">Водно конче</translation>
 <translation id="5262311848634918433"><ph name="MARKUP_1" />Файловете ви ще са достъпни от всяко място дори когато сте офлайн.<ph name="MARKUP_2" />
@@ -425,7 +423,6 @@
 <translation id="5818003990515275822">корейски</translation>
 <translation id="5819442873484330149">Хангъл, 3 набора (окончателна)</translation>
 <translation id="5833610766403489739">Този файл се е скрил някъде. Моля, проверете настройката си за местоположението на изтеглянията и опитайте отново.</translation>
-<translation id="5838051104334203064">Приложенията от Google Play Магазин нямат достъп до това устройство</translation>
 <translation id="5838451609423551646">Премахнахте избора на всички елементи.</translation>
 <translation id="5838825566232597749">Американска (Уъркман) международна клавиатура</translation>
 <translation id="5850516540536751549">Този файлов тип не се поддържа. Моля, посетете <ph name="BEGIN_LINK" />уеб магазина на Chrome<ph name="END_LINK" />, за да намерите приложение, което може да го отвори.
@@ -471,6 +468,7 @@
 <translation id="6339145975392024142">Американска международна (PC)</translation>
 <translation id="6346310558342052870">Достъпът е ограничен</translation>
 <translation id="6353618411602605519">Хърватска клавиатура</translation>
+<translation id="6356685157277930264">Прозорец с информация за файловете</translation>
 <translation id="6358884629796491903">Дракон</translation>
 <translation id="637062427944097960">Този файл се отвори на друг работен плот. Преминете към <ph name="USER_NAME" /> (<ph name="MAIL_ADDRESS" />), за да го прегледате.</translation>
 <translation id="6395575651121294044"><ph name="NUMBER_OF_FILES" /> елемента</translation>
@@ -511,6 +509,7 @@
 <translation id="6878261347041253038">Деванагари клавиатура (фонетична)</translation>
 <translation id="6885780034956018177">Охлюв</translation>
 <translation id="6896758677409633944">Копиране</translation>
+<translation id="6898028766943174120">Още подпапки...</translation>
 <translation id="691516599546977041">Запазването в(ъв) „<ph name="FOLDER_NAME" />“ не е възможно. Редактираните изображения ще бъдат запазени в папката „Изтегляния“.</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Американска (Уъркман) клавиатура</translation>
@@ -523,6 +522,7 @@
 <translation id="696203921837389374">Активиране на синхронизирането чрез мобилни данни</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6970230597523682626">български</translation>
+<translation id="6973630695168034713">Папки</translation>
 <translation id="6978611942794658017">Този файл е предназначен за компютри със софтуер Windows и не е съвместим с устройството ви с Chrome OS. Моля, потърсете в уеб магазина на Chrome подходящо приложение със същата функционалност.</translation>
 <translation id="6979158407327259162">Google Диск</translation>
 <translation id="6990081529015358884">Нямате свободно място</translation>
@@ -570,9 +570,11 @@
 <translation id="7589661784326793847">Изчакайте само секунда</translation>
 <translation id="7603724359189955920">Решетки</translation>
 <translation id="7627790789328695202">Ами сега! Файлът „<ph name="FILE_NAME" />“ вече съществува. Преименувайте го и опитайте отново.</translation>
+<translation id="7628656427739290098">Завършено: <ph name="PERCENT" />%</translation>
 <translation id="7649070708921625228">Помощ</translation>
 <translation id="7654209398114106148"><ph name="NUMBER_OF_ITEMS" /> елемента се преместват...</translation>
 <translation id="7658239707568436148">Отказ</translation>
+<translation id="7695430100978772476">Устройството „<ph name="DRIVE_NAME" />“ не бе форматирано</translation>
 <translation id="770015031906360009">гръцки</translation>
 <translation id="7706319470528945664">Португалска клавиатура</translation>
 <translation id="7711920809702896782">Информация за изображението</translation>
@@ -596,7 +598,6 @@
 <translation id="7827012282502221009"><ph name="NUMBER_OF_TB" /> ТБ</translation>
 <translation id="7839804798877833423">При извличането на тези файлове ще се използват приблизително <ph name="FILE_SIZE" /> мобилни данни.</translation>
 <translation id="7846076177841592234">Анулиране на избора</translation>
-<translation id="7850851215703745691">Тези файлове в Диск още не са споделени</translation>
 <translation id="7853966320808728790">френски (BÉPO)</translation>
 <translation id="7864662577698025113">Добавяне на нова услуга</translation>
 <translation id="7873831373602885875">Запазването в(ъв) „<ph name="FOLDER_NAME" />“ не е възможно. Всички редакции ще се съхранят в(ъв) „<ph name="DOWNLOADS_FOLDER" />“ в папката „Изтегляния“.</translation>
@@ -612,7 +613,6 @@
 <translation id="7969525169268594403">словенски</translation>
 <translation id="7982283708762922719">Височина</translation>
 <translation id="7987485481246785146">Кюрдски (сорани), базирана на арабски клавиатура</translation>
-<translation id="799923393800005025">Може да преглежда</translation>
 <translation id="8008366997883261463">Джак Ръсел териер</translation>
 <translation id="8028993641010258682">Размер</translation>
 <translation id="8031722894461705849">Словашка клавиатура</translation>
@@ -641,6 +641,7 @@
 <translation id="8223479393428528563">За да запазите тези файлове за използване офлайн, върнете се онлайн, кликнете с десния бутон на мишката върху тях и изберете опцията „<ph name="OFFLINE_CHECKBOX_NAME" />“.</translation>
 <translation id="8249296373107784235">Прекратяване</translation>
 <translation id="8261506727792406068">Изтриване</translation>
+<translation id="8269755669432358899">Свиване на панелите с информация за файловете</translation>
 <translation id="8279388322240498158">Кюрдски (сорани), базирана на английски клавиатура</translation>
 <translation id="8280151743281770066">Арменска фонетична клавиатура</translation>
 <translation id="8294431847097064396">Източник</translation>
@@ -671,9 +672,8 @@
 <translation id="8569764466147087991">Изберете файл за отваряне</translation>
 <translation id="8579285237314169903"><ph name="NUMBER_OF_FILES" /> елемента се синхронизират...</translation>
 <translation id="8600173386174225982">Списъкът с файлове е превключен към изглед с миниизображения.</translation>
+<translation id="8601932370724196034">Файл с образ на Crostini</translation>
 <translation id="8669949407341943408">Извършва се преместване...</translation>
-<translation id="8671210955687109937">Може да коментира</translation>
-<translation id="8686213429977032554">Този файл в Диск още не е споделен</translation>
 <translation id="8698464937041809063">Рисунка в Google</translation>
 <translation id="8714406895390098252">Велосипед</translation>
 <translation id="8719721339511222681">Избрахте <ph name="ENTRY_NAME" />.</translation>

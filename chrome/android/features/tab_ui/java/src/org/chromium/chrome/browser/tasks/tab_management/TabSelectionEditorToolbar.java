@@ -6,13 +6,16 @@ package org.chromium.chrome.browser.tasks.tab_management;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.support.v7.content.res.AppCompatResources;
 import android.util.AttributeSet;
 import android.widget.Button;
 
-import org.chromium.chrome.browser.widget.TintedDrawable;
-import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
+import androidx.annotation.ColorInt;
+import androidx.appcompat.content.res.AppCompatResources;
+
 import org.chromium.chrome.tab_ui.R;
+import org.chromium.components.browser_ui.widget.NumberRollView;
+import org.chromium.components.browser_ui.widget.TintedDrawable;
+import org.chromium.components.browser_ui.widget.selectable_list.SelectableListToolbar;
 
 import java.util.Collections;
 import java.util.List;
@@ -23,6 +26,9 @@ import java.util.List;
 class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
     private static final List<Integer> sEmptyIntegerList = Collections.emptyList();
     private Button mGroupButton;
+    @ColorInt
+    private int mBackgroundColor;
+    private int mActionButtonEnablingThreshold = 2;
 
     public TabSelectionEditorToolbar(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -33,7 +39,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         super.onFinishInflate();
 
         showNavigationButton();
-        mGroupButton = (Button) findViewById(org.chromium.chrome.R.id.action_button);
+        mGroupButton = (Button) findViewById(R.id.action_button);
         mNumberRollView.setStringForZero(R.string.tab_selection_editor_toolbar_select_tabs);
     }
 
@@ -51,7 +57,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
     @Override
     public void onSelectionStateChange(List<Integer> selectedItems) {
         super.onSelectionStateChange(selectedItems);
-        mGroupButton.setEnabled(selectedItems.size() > 1);
+        mGroupButton.setEnabled(selectedItems.size() >= mActionButtonEnablingThreshold);
     }
 
     @Override
@@ -64,6 +70,14 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         showSelectionView(sEmptyIntegerList, true);
     }
 
+    @Override
+    protected void showSelectionView(List<Integer> selectedItems, boolean wasSelectionEnabled) {
+        super.showSelectionView(selectedItems, wasSelectionEnabled);
+        if (mBackgroundColor != 0) {
+            setBackgroundColor(mBackgroundColor);
+        }
+    }
+
     /**
      * Sets a {@link android.view.View.OnClickListener} to respond to {@code mGroupButton} clicking
      * event.
@@ -71,5 +85,47 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
      */
     public void setActionButtonOnClickListener(OnClickListener listener) {
         mGroupButton.setOnClickListener(listener);
+    }
+
+    /**
+     * Update the tint for buttons, the navigation button and the action button, in the toolbar.
+     * @param tint New {@link ColorStateList} to use.
+     */
+    public void setButtonTint(ColorStateList tint) {
+        mGroupButton.setTextColor(tint);
+        TintedDrawable navigation = (TintedDrawable) getNavigationIcon();
+        navigation.setTint(tint);
+    }
+
+    /**
+     * Update the toolbar background color.
+     * @param backgroundColor The new color to use.
+     */
+    public void setToolbarBackgroundColor(@ColorInt int backgroundColor) {
+        mBackgroundColor = backgroundColor;
+    }
+
+    /**
+     * Update the text appearance for {@link NumberRollView}.
+     * @param resId The new text appearance to use.
+     */
+    public void setTextAppearance(int resId) {
+        mNumberRollView.setTextAppearance(resId);
+    }
+
+    /**
+     * Set action button text.
+     * @param text The text to display.
+     */
+    public void setActionButtonText(String text) {
+        mGroupButton.setText(text);
+    }
+
+    /**
+     * Set the action button enabling threshold.
+     * @param threshold New threshold.
+     */
+    public void setActionButtonEnablingThreshold(int threshold) {
+        mActionButtonEnablingThreshold = threshold;
     }
 }

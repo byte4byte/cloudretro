@@ -7,14 +7,31 @@
  * 'site-data' handles showing the local storage summary list for all sites.
  */
 
-/**
- * @typedef {{
- *   site: string,
- *   id: string,
- *   localData: string,
- * }}
- */
-let CookieDataSummaryItem;
+import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
+import 'chrome://resources/cr_elements/cr_search_field/cr_search_field.m.js';
+import 'chrome://resources/cr_elements/icons.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
+import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
+import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
+import 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
+import '../settings_shared_css.m.js';
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {focusWithoutInk} from 'chrome://resources/js/cr/ui/focus_without_ink.m.js';
+import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
+import {ListPropertyUpdateBehavior} from 'chrome://resources/js/list_property_update_behavior.m.js';
+import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {GlobalScrollTargetBehavior, GlobalScrollTargetBehaviorImpl} from '../global_scroll_target_behavior.m.js';
+import {loadTimeData} from '../i18n_setup.m.js';
+import {routes} from '../route.m.js';
+import {Route, RouteObserverBehavior, Router} from '../router.m.js';
+
+import {LocalDataBrowserProxy, LocalDataBrowserProxyImpl} from './local_data_browser_proxy.js';
+import {CookieDataSummaryItem} from './site_data_entry.js';
+import {SiteSettingsBehavior} from './site_settings_behavior.js';
 
 /**
  * @typedef {{
@@ -28,10 +45,12 @@ let CookieRemovePacket;
 Polymer({
   is: 'site-data',
 
+  _template: html`{__html_template__}`,
+
   behaviors: [
     I18nBehavior,
     ListPropertyUpdateBehavior,
-    settings.GlobalScrollTargetBehavior,
+    GlobalScrollTargetBehavior,
     WebUIListenerBehavior,
   ],
 
@@ -40,7 +59,7 @@ Polymer({
      * The current filter applied to the cookie data list.
      */
     filter: {
-      observer: 'updateSiteList_',
+      observer: 'onFilterChanged_',
       notify: true,
       type: String,
     },
@@ -56,18 +75,18 @@ Polymer({
     /** @type {!Array<!CookieDataSummaryItem>} */
     sites: {
       type: Array,
-      value: function() {
+      value() {
         return [];
       },
     },
 
     /**
-     * settings.GlobalScrollTargetBehavior
+     * GlobalScrollTargetBehavior
      * @override
      */
     subpageRoute: {
       type: Object,
-      value: settings.routes.SITE_SETTINGS_SITE_DATA,
+      value: routes.SITE_SETTINGS_SITE_DATA,
     },
 
     /** @private */
@@ -77,7 +96,7 @@ Polymer({
     listBlurred_: Boolean,
   },
 
-  /** @private {settings.LocalDataBrowserProxy} */
+  /** @private {LocalDataBrowserProxy} */
   browserProxy_: null,
 
   /**
@@ -89,8 +108,12 @@ Polymer({
   lastSelected_: null,
 
   /** @override */
-  ready: function() {
-    this.browserProxy_ = settings.LocalDataBrowserProxyImpl.getInstance();
+  created() {
+    this.browserProxy_ = LocalDataBrowserProxyImpl.getInstance();
+  },
+
+  /** @override */
+  ready() {
     this.addWebUIListener(
         'on-tree-item-removed', this.updateSiteList_.bind(this));
   },
@@ -98,14 +121,13 @@ Polymer({
   /**
    * Reload cookies when the site data page is visited.
    *
-   * settings.RouteObserverBehavior
-   * @param {!settings.Route} currentRoute
+   * RouteObserverBehavior
+   * @param {!Route} currentRoute
    * @protected
    */
-  currentRouteChanged: function(currentRoute) {
-    settings.GlobalScrollTargetBehaviorImpl.currentRouteChanged.call(
-        this, currentRoute);
-    if (currentRoute == settings.routes.SITE_SETTINGS_SITE_DATA) {
+  currentRouteChanged(currentRoute) {
+    GlobalScrollTargetBehaviorImpl.currentRouteChanged.call(this, currentRoute);
+    if (currentRoute == routes.SITE_SETTINGS_SITE_DATA) {
       this.isLoading_ = true;
       // Needed to fix iron-list rendering issue. The list will not render
       // correctly until a scroll occurs.
@@ -121,7 +143,7 @@ Polymer({
    * @param {?Map<string, (string|Function)>} oldConfig
    * @private
    */
-  focusConfigChanged_: function(newConfig, oldConfig) {
+  focusConfigChanged_(newConfig, oldConfig) {
     // focusConfig is set only once on the parent, so this observer should only
     // fire once.
     assert(!oldConfig);
@@ -129,7 +151,7 @@ Polymer({
     // Populate the |focusConfig| map of the parent <settings-animated-pages>
     // element, with additional entries that correspond to subpage trigger
     // elements residing in this element's Shadow DOM.
-    if (settings.routes.SITE_SETTINGS_DATA_DETAILS) {
+    if (routes.SITE_SETTINGS_DATA_DETAILS) {
       const onNavigatedTo = () => this.async(() => {
         if (this.lastSelected_ == null || this.sites.length == 0) {
           return;
@@ -152,7 +174,7 @@ Polymer({
         this.focusOnSiteSelectButton_(index);
       });
       this.focusConfig.set(
-          settings.routes.SITE_SETTINGS_DATA_DETAILS.path, onNavigatedTo);
+          routes.SITE_SETTINGS_DATA_DETAILS.path, onNavigatedTo);
     }
   },
 
@@ -160,20 +182,32 @@ Polymer({
    * @param {number} index
    * @private
    */
-  focusOnSiteSelectButton_: function(index) {
+  focusOnSiteSelectButton_(index) {
     const ironList =
         /** @type {!IronListElement} */ (this.$$('iron-list'));
     ironList.focusItem(index);
     const siteToSelect = this.sites[index].site.replace(/[.]/g, '\\.');
     const button = this.$$(`#siteItem_${siteToSelect}`).$$('.subpage-arrow');
-    cr.ui.focusWithoutInk(assert(button));
+    focusWithoutInk(assert(button));
+  },
+
+  /**
+   * @param {string} current
+   * @param {string|undefined} previous
+   * @private
+   */
+  onFilterChanged_(current, previous) {
+    if (previous === undefined) {
+      return;
+    }
+    this.updateSiteList_();
   },
 
   /**
    * Gather all the site data.
    * @private
    */
-  updateSiteList_: function() {
+  updateSiteList_() {
     this.isLoading_ = true;
     this.browserProxy_.getDisplayList(this.filter).then(listInfo => {
       this.updateList('sites', item => item.site, listInfo.items);
@@ -188,7 +222,7 @@ Polymer({
    * @return {string}
    * @private
    */
-  computeRemoveLabel_: function(filter) {
+  computeRemoveLabel_(filter) {
     if (filter.length == 0) {
       return loadTimeData.getString('siteSettingsCookieRemoveAll');
     }
@@ -196,13 +230,23 @@ Polymer({
   },
 
   /** @private */
-  onCloseDialog_: function() {
+  onCloseDialog_() {
     this.$.confirmDeleteDialog.close();
   },
 
   /** @private */
-  onConfirmDeleteDialogClosed_: function() {
-    cr.ui.focusWithoutInk(assert(this.$.removeShowingSites));
+  onCloseThirdPartyDialog_() {
+    this.$.confirmDeleteThirdPartyDialog.close();
+  },
+
+  /** @private */
+  onConfirmDeleteDialogClosed_() {
+    focusWithoutInk(assert(this.$.removeShowingSites));
+  },
+
+  /** @private */
+  onConfirmDeleteThirdPartyDialogClosed_() {
+    focusWithoutInk(assert(this.$.removeAllThirdPartyCookies));
   },
 
   /**
@@ -210,16 +254,26 @@ Polymer({
    * @param {!Event} e
    * @private
    */
-  onRemoveShowingSitesTap_: function(e) {
+  onRemoveShowingSitesTap_(e) {
     e.preventDefault();
     this.$.confirmDeleteDialog.showModal();
+  },
+
+  /**
+   * Shows a dialog to confirm the deletion of cookies available
+   * in third-party contexts and associated site data.
+   * @private
+   */
+  onRemoveThirdPartyCookiesTap_(e) {
+    e.preventDefault();
+    this.$.confirmDeleteThirdPartyDialog.showModal();
   },
 
   /**
    * Called when deletion for all showing sites has been confirmed.
    * @private
    */
-  onConfirmDelete_: function() {
+  onConfirmDelete_() {
     this.$.confirmDeleteDialog.close();
     if (this.filter.length == 0) {
       this.browserProxy_.removeAll().then(() => {
@@ -233,17 +287,38 @@ Polymer({
   },
 
   /**
+   * Called when deletion of all third-party cookies and site data has been
+   * confirmed.
+   * @private
+   */
+  onConfirmThirdPartyDelete_() {
+    this.$.confirmDeleteThirdPartyDialog.close();
+    this.browserProxy_.removeAllThirdPartyCookies().then(() => {
+      this.updateSiteList_();
+    });
+  },
+
+  /**
    * @param {!{model: !{item: CookieDataSummaryItem, index: number}}} event
    * @private
    */
-  onSiteClick_: function(event) {
+  onSiteClick_(event) {
     // If any delete button is selected, the focus will be in a bad state when
     // returning to this page. To avoid this, the site select button is given
     // focus. See https://crbug.com/872197.
     this.focusOnSiteSelectButton_(event.model.index);
-    settings.navigateTo(
-        settings.routes.SITE_SETTINGS_DATA_DETAILS,
+    Router.getInstance().navigateTo(
+        routes.SITE_SETTINGS_DATA_DETAILS,
         new URLSearchParams('site=' + event.model.item.site));
     this.lastSelected_ = event.model;
+  },
+
+  /**
+   * @private
+   * @return {boolean}
+   */
+  showRemoveThirdPartyCookies_() {
+    return loadTimeData.getBoolean('enableRemovingAllThirdPartyCookies') &&
+        this.sites.length > 0 && this.filter.length == 0;
   },
 });

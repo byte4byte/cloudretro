@@ -5,11 +5,11 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/observers/resource_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_test_waiter.h"
 #include "chrome/browser/subresource_filter/subresource_filter_browser_test_harness.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/page_load_metrics/browser/page_load_metrics_test_waiter.h"
 #include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/subresource_filter/core/common/activation_scope.h"
@@ -129,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(ResourceMetricsObserverBrowserTest,
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL("about:blank"), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB |
-          ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+          ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   waiter = CreatePageLoadMetricsTestWaiter();
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("foo.com", "/cachetime"));
@@ -141,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(ResourceMetricsObserverBrowserTest,
   // Resource should be recorded as loaded from the cache. Favicon not
   // fetched this time.
   histogram_tester.ExpectTotalCount(
-      "Ads.ResourceUsage.Size.Cache.Mainframe.VanillaResource", 1);
+      "Ads.ResourceUsage.Size.Cache2.Mainframe.VanillaResource", 1);
 }
 
 // Verify that Mime type metrics are recorded correctly.

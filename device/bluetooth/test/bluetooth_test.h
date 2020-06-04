@@ -13,7 +13,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/optional.h"
+#include "base/test/task_environment.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/bluetooth_device.h"
@@ -310,6 +311,23 @@ class BluetoothTestBase : public testing::Test {
   // objects after the Chrome objects have been deleted, e.g. with DeleteDevice.
   virtual void RememberDeviceForSubsequentAction(BluetoothDevice* device) {}
 
+  // Performs a GATT connection to the given device and returns whether it was
+  // successful. The |service_uuid| is passed to
+  // |BluetoothDevice::CreateGattConnection|; see the documentation for it
+  // there. The callback is called to complete the GATT connection. If not
+  // given, |SimulateGattConnection| is called but the callback argument lets
+  // one override that.
+  bool ConnectGatt(BluetoothDevice* device,
+                   base::Optional<BluetoothUUID> service_uuid = base::nullopt,
+                   base::Optional<base::OnceCallback<void(BluetoothDevice*)>> =
+                       base::nullopt);
+
+  // GetTargetGattService returns the specific GATT service, if any, that was
+  // targeted for discovery, i.e. via the |service_uuid| argument to
+  // |CreateGattConnection|.
+  virtual base::Optional<BluetoothUUID> GetTargetGattService(
+      BluetoothDevice* device);
+
   // Simulates success of implementation details of CreateGattConnection.
   virtual void SimulateGattConnection(BluetoothDevice* device) {}
 
@@ -331,6 +349,9 @@ class BluetoothTestBase : public testing::Test {
   // open.
   virtual void SimulateGattNameChange(BluetoothDevice* device,
                                       const std::string& new_name) {}
+
+  // Simulates a connection status change to disconnect.
+  virtual void SimulateStatusChangeToDisconnect(BluetoothDevice* device) {}
 
   // Simulates success of discovering services. |uuids| is used to create a
   // service for each UUID string. Multiple UUIDs with the same value produce
@@ -608,6 +629,7 @@ class BluetoothTestBase : public testing::Test {
 
   // Accessors to get callbacks bound to this fixture:
   base::Closure GetCallback(Call expected);
+  base::OnceClosure GetOnceCallback(Call expected);
   BluetoothAdapter::CreateAdvertisementCallback GetCreateAdvertisementCallback(
       Call expected);
   BluetoothAdapter::DiscoverySessionCallback GetDiscoverySessionCallback(
@@ -623,6 +645,7 @@ class BluetoothTestBase : public testing::Test {
   BluetoothRemoteGattCharacteristic::ValueCallback GetReadValueCallback(
       Call expected);
   BluetoothAdapter::ErrorCallback GetErrorCallback(Call expected);
+  BluetoothAdapter::ErrorOnceCallback GetErrorOnceCallback(Call expected);
   BluetoothAdapter::AdvertisementErrorCallback GetAdvertisementErrorCallback(
       Call expected);
   BluetoothDevice::ConnectErrorCallback GetConnectErrorCallback(Call expected);
@@ -648,9 +671,9 @@ class BluetoothTestBase : public testing::Test {
   // |device_ordinal|.
   LowEnergyDeviceData GetLowEnergyDeviceData(int device_ordinal) const;
 
-  // A ScopedTaskEnvironment is required by some implementations that will
+  // A TaskEnvironment is required by some implementations that will
   // PostTasks and by base::RunLoop().RunUntilIdle() use in this fixture.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   scoped_refptr<BluetoothAdapter> adapter_;
   std::vector<scoped_refptr<BluetoothAdvertisement>> advertisements_;
@@ -685,7 +708,7 @@ class BluetoothTestBase : public testing::Test {
   bool unexpected_success_callback_ = false;
   bool unexpected_error_callback_ = false;
 
-  base::WeakPtrFactory<BluetoothTestBase> weak_factory_;
+  base::WeakPtrFactory<BluetoothTestBase> weak_factory_{this};
 };
 
 }  // namespace device

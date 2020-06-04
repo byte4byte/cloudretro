@@ -4,12 +4,15 @@
 
 #include "chrome/renderer/net/available_offline_content_helper.h"
 
+#include <utility>
+
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_value_converter.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -17,7 +20,9 @@
 #include "components/error_page/common/net_error_info.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_thread.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/platform.h"
 
 namespace {
 
@@ -69,7 +74,7 @@ base::Value AvailableContentListToValue(
     const std::vector<AvailableOfflineContentPtr>& content_list) {
   base::Value value(base::Value::Type::LIST);
   for (const auto& content : content_list) {
-    value.GetList().push_back(AvailableContentToValue(content));
+    value.Append(AvailableContentToValue(content));
   }
   return value;
 }
@@ -80,6 +85,11 @@ void RecordSuggestionPresented(
     UMA_HISTOGRAM_ENUMERATION("Net.ErrorPageCounts.SuggestionPresented",
                               item->content_type);
   }
+}
+
+AvailableOfflineContentHelper::Binder& GetBinderOverride() {
+  static base::NoDestructor<AvailableOfflineContentHelper::Binder> binder;
+  return *binder;
 }
 
 }  // namespace
@@ -105,9 +115,22 @@ void AvailableOfflineContentHelper::FetchAvailableContent(
 bool AvailableOfflineContentHelper::BindProvider() {
   if (provider_)
     return true;
-  content::RenderThread::Get()->GetConnector()->BindInterface(
-      content::mojom::kBrowserServiceName, &provider_);
-  return !!provider_;
+
+  auto receiver = provider_.BindNewPipeAndPassReceiver();
+  const auto& binder_override = GetBinderOverride();
+  if (binder_override) {
+    binder_override.Run(std::move(receiver));
+    return true;
+  }
+
+  blink::Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+      std::move(receiver));
+  return true;
+}
+
+// static
+void AvailableOfflineContentHelper::OverrideBinderForTesting(Binder binder) {
+  GetBinderOverride() = std::move(binder);
 }
 
 void AvailableOfflineContentHelper::LaunchItem(const std::string& id,

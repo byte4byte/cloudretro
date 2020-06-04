@@ -20,6 +20,8 @@ class AXVirtualView;
 class AXVirtualViewWrapper : public AXAuraObjWrapper {
  public:
   AXVirtualViewWrapper(AXVirtualView* virtual_view, AXAuraObjCache* cache);
+  AXVirtualViewWrapper(const AXVirtualViewWrapper&) = delete;
+  AXVirtualViewWrapper& operator=(const AXVirtualViewWrapper&) = delete;
   ~AXVirtualViewWrapper() override;
 
   // AXAuraObjWrapper:
@@ -29,12 +31,11 @@ class AXVirtualViewWrapper : public AXAuraObjWrapper {
   void Serialize(ui::AXNodeData* out_node_data) override;
   int32_t GetUniqueId() const override;
   bool HandleAccessibleAction(const ui::AXActionData& action) override;
+  std::string ToString() const override;
 
  private:
   // Weak.
   AXVirtualView* virtual_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(AXVirtualViewWrapper);
 };
 
 }  // namespace views

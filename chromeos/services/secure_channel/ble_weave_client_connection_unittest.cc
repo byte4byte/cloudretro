@@ -12,8 +12,9 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/test/gmock_move_support.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/timer/mock_timer.h"
 #include "base/timer/timer.h"
@@ -47,12 +48,6 @@ namespace secure_channel {
 namespace weave {
 
 namespace {
-
-ACTION_TEMPLATE(MoveArg,
-                HAS_1_TEMPLATE_PARAMS(int, k),
-                AND_1_VALUE_PARAMS(pointer)) {
-  *pointer = std::move(::std::get<k>(args));
-}
 
 typedef BluetoothLowEnergyWeaveClientConnection::SubStatus SubStatus;
 typedef BluetoothLowEnergyWeavePacketReceiver::State ReceiverState;
@@ -432,9 +427,9 @@ class SecureChannelBluetoothLowEnergyWeaveClientConnectionTest
     }
 
     // Preparing |connection| for a CreateGattConnection call.
-    EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection(_, _))
-        .WillOnce(DoAll(SaveArg<0>(&create_gatt_connection_success_callback_),
-                        SaveArg<1>(&create_gatt_connection_error_callback_)));
+    EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection_(_, _))
+        .WillOnce(DoAll(MoveArg<0>(&create_gatt_connection_success_callback_),
+                        MoveArg<1>(&create_gatt_connection_error_callback_)));
 
     connection->Connect();
 
@@ -461,8 +456,8 @@ class SecureChannelBluetoothLowEnergyWeaveClientConnectionTest
             Return(new NiceMock<MockBluetoothLowEnergyCharacteristicsFinder>(
                 remote_device_))));
 
-    create_gatt_connection_success_callback_.Run(
-        std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
+    std::move(create_gatt_connection_success_callback_)
+        .Run(std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
             adapter_, kTestRemoteDeviceBluetoothAddress));
 
     EXPECT_EQ(connection->sub_status(), SubStatus::WAITING_CHARACTERISTICS);
@@ -669,7 +664,7 @@ class SecureChannelBluetoothLowEnergyWeaveClientConnectionTest
   std::unique_ptr<device::MockBluetoothGattCharacteristic> tx_characteristic_;
   std::unique_ptr<device::MockBluetoothGattCharacteristic> rx_characteristic_;
   std::vector<uint8_t> last_value_written_on_tx_characteristic_;
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   int32_t rssi_for_channel_ = device::BluetoothDevice::kUnknownPower;
   bool last_wire_message_success_;
   bool has_verified_connection_result_;
@@ -1369,9 +1364,9 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
                   device::BluetoothDevice::CONNECTION_LATENCY_LOW, _, _))
       .WillOnce(DoAll(SaveArg<1>(&connection_latency_callback_),
                       SaveArg<2>(&connection_latency_error_callback_)));
-  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection(_, _))
-      .WillOnce(DoAll(SaveArg<0>(&create_gatt_connection_success_callback_),
-                      SaveArg<1>(&create_gatt_connection_error_callback_)));
+  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection_(_, _))
+      .WillOnce(DoAll(MoveArg<0>(&create_gatt_connection_success_callback_),
+                      MoveArg<1>(&create_gatt_connection_error_callback_)));
 
   // No GATT connection should be created before the delay.
   connection->Connect();
@@ -1397,8 +1392,8 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
           Return(new NiceMock<MockBluetoothLowEnergyCharacteristicsFinder>(
               remote_device_))));
 
-  create_gatt_connection_success_callback_.Run(
-      std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
+  std::move(create_gatt_connection_success_callback_)
+      .Run(std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
           adapter_, kTestRemoteDeviceBluetoothAddress));
 
   CharacteristicsFound(connection.get());
@@ -1428,9 +1423,9 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
   connection->Connect();
   ASSERT_FALSE(connection_latency_error_callback_.is_null());
 
-  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection(_, _))
-      .WillOnce(DoAll(SaveArg<0>(&create_gatt_connection_success_callback_),
-                      SaveArg<1>(&create_gatt_connection_error_callback_)));
+  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection_(_, _))
+      .WillOnce(DoAll(MoveArg<0>(&create_gatt_connection_success_callback_),
+                      MoveArg<1>(&create_gatt_connection_error_callback_)));
   connection_latency_error_callback_.Run();
   EXPECT_FALSE(create_gatt_connection_error_callback_.is_null());
   ASSERT_FALSE(create_gatt_connection_success_callback_.is_null());
@@ -1443,8 +1438,8 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
           Return(new NiceMock<MockBluetoothLowEnergyCharacteristicsFinder>(
               remote_device_))));
 
-  create_gatt_connection_success_callback_.Run(
-      std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
+  std::move(create_gatt_connection_success_callback_)
+      .Run(std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
           adapter_, kTestRemoteDeviceBluetoothAddress));
 
   CharacteristicsFound(connection.get());
@@ -1477,9 +1472,9 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
   ASSERT_FALSE(connection_latency_callback_.is_null());
   ASSERT_FALSE(connection_latency_error_callback_.is_null());
 
-  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection(_, _))
-      .WillOnce(DoAll(SaveArg<0>(&create_gatt_connection_success_callback_),
-                      SaveArg<1>(&create_gatt_connection_error_callback_)));
+  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection_(_, _))
+      .WillOnce(DoAll(MoveArg<0>(&create_gatt_connection_success_callback_),
+                      MoveArg<1>(&create_gatt_connection_error_callback_)));
 
   // Simulate a timeout.
   test_timer_->Fire();
@@ -1500,8 +1495,8 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
           Return(new NiceMock<MockBluetoothLowEnergyCharacteristicsFinder>(
               remote_device_))));
 
-  create_gatt_connection_success_callback_.Run(
-      std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
+  std::move(create_gatt_connection_success_callback_)
+      .Run(std::make_unique<NiceMock<device::MockBluetoothGattConnection>>(
           adapter_, kTestRemoteDeviceBluetoothAddress));
 
   CharacteristicsFound(connection.get());
@@ -1528,9 +1523,9 @@ TEST_F(SecureChannelBluetoothLowEnergyWeaveClientConnectionTest,
                       SaveArg<2>(&connection_latency_error_callback_)));
 
   // Preparing |connection| for a CreateGattConnection call.
-  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection(_, _))
-      .WillOnce(DoAll(SaveArg<0>(&create_gatt_connection_success_callback_),
-                      SaveArg<1>(&create_gatt_connection_error_callback_)));
+  EXPECT_CALL(*mock_bluetooth_device_, CreateGattConnection_(_, _))
+      .WillOnce(DoAll(MoveArg<0>(&create_gatt_connection_success_callback_),
+                      MoveArg<1>(&create_gatt_connection_error_callback_)));
 
   connection->Connect();
 

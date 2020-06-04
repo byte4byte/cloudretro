@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -44,7 +44,7 @@ class PermissionRequestCreatorApiaryTest : public testing::Test {
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)) {
     AccountInfo account_info =
-        identity_test_env_.MakePrimaryAccountAvailable(kEmail);
+        identity_test_env_.MakeUnconsentedPrimaryAccountAvailable(kEmail);
     account_id_ = account_info.account_id;
     permission_creator_ = std::make_unique<PermissionRequestCreatorApiary>(
         identity_test_env_.identity_manager(), test_shared_loader_factory_);
@@ -64,14 +64,14 @@ class PermissionRequestCreatorApiaryTest : public testing::Test {
   }
 
   void SetupResponse(net::Error error, const std::string& response) {
-    network::ResourceResponseHead head;
+    auto head = network::mojom::URLResponseHead::New();
     std::string headers("HTTP/1.1 200 OK\n\n");
-    head.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+    head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         net::HttpUtil::AssembleRawHeaders(headers));
     network::URLLoaderCompletionStatus status(error);
     status.decoded_body_length = response.size();
-    test_url_loader_factory_.AddResponse(permission_creator_->GetApiUrl(), head,
-                                         response, status);
+    test_url_loader_factory_.AddResponse(permission_creator_->GetApiUrl(),
+                                         std::move(head), response, status);
   }
 
   void CreateRequest(const GURL& url) {
@@ -85,9 +85,9 @@ class PermissionRequestCreatorApiaryTest : public testing::Test {
 
   MOCK_METHOD1(OnRequestCreated, void(bool success));
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  std::string account_id_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  CoreAccountId account_id_;
+  signin::IdentityTestEnvironment identity_test_env_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   std::unique_ptr<PermissionRequestCreatorApiary> permission_creator_;

@@ -61,7 +61,6 @@ class PLATFORM_EXPORT TransformOperation
     kMatrix3D,
     kPerspective,
     kInterpolated,
-    kIdentity,
     kRotateAroundOrigin,
   };
 
@@ -73,6 +72,11 @@ class PLATFORM_EXPORT TransformOperation
 
   virtual void Apply(TransformationMatrix&,
                      const FloatSize& border_box_size) const = 0;
+
+  // Implements the accumulative behavior described in
+  // https://drafts.csswg.org/css-transforms-2/#combining-transform-lists
+  virtual scoped_refptr<TransformOperation> Accumulate(
+      const TransformOperation& other) = 0;
 
   virtual scoped_refptr<TransformOperation> Blend(
       const TransformOperation* from,
@@ -90,6 +94,8 @@ class PLATFORM_EXPORT TransformOperation
   }
   virtual bool CanBlendWith(const TransformOperation& other) const = 0;
 
+  virtual bool PreservesAxisAlignment() const { return false; }
+
   bool Is3DOperation() const {
     OperationType op_type = GetType();
     return op_type == kScaleZ || op_type == kScale3D ||
@@ -106,11 +112,6 @@ class PLATFORM_EXPORT TransformOperation
  private:
   DISALLOW_COPY_AND_ASSIGN(TransformOperation);
 };
-
-#define DEFINE_TRANSFORM_TYPE_CASTS(thisType)                                \
-  DEFINE_TYPE_CASTS(thisType, TransformOperation, transform,                 \
-                    thisType::IsMatchingOperationType(transform->GetType()), \
-                    thisType::IsMatchingOperationType(transform.GetType()))
 
 }  // namespace blink
 

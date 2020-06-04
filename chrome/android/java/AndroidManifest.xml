@@ -36,11 +36,7 @@ by a child template that "extends" this file.
     <uses-permission-sdk-23 android:name="android.permission.BLUETOOTH_ADMIN"/>
     <uses-permission-sdk-23 android:name="android.permission.READ_CONTACTS"/>
     <uses-permission-sdk-23 android:name="android.permission.REORDER_TASKS"/>
-    <!-- notouch build doesn't support downloads home and shouldn't need this permission -->
-    {% set notouch_build = notouch_build|default(0) %}
-    {% if notouch_build == "false" %}
-        <uses-permission-sdk-23 android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-    {% endif %}
+    <uses-permission-sdk-23 android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
@@ -58,6 +54,7 @@ by a child template that "extends" this file.
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.USE_CREDENTIALS"/>
+    <uses-permission-sdk-23 android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission-sdk-23 android:name="android.permission.USE_FINGERPRINT"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -77,6 +74,9 @@ by a child template that "extends" this file.
     <uses-feature android:name="android.hardware.screen.landscape" android:required="false"/>
     <!-- Indicates that head tracking should be done in 6DoF, if available -->
     <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="false"/>
+    <!-- Feature declarations required to support conditional install for VR DFM -->
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false"/>
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false"/>
     {% endif %}
 
     <permission android:name="{{ manifest_package }}.permission.CHILD_SERVICE" android:protectionLevel="signature" />
@@ -132,9 +132,7 @@ by a child template that "extends" this file.
         android:largeHeap="false"
         android:manageSpaceActivity="@string/manage_space_activity"
         android:supportsRtl="true"
-        {% if (use_zygote|default(false) == 'true') %}
         android:zygotePreloadName="org.chromium.content.app.ZygotePreload"
-        {% endif %}
         {% if backup_key is defined %}
         android:allowBackup="true"
         android:backupAgent="org.chromium.chrome.browser.ChromeBackupAgent"
@@ -178,21 +176,6 @@ by a child template that "extends" this file.
         <!-- ARCore APK integration -->
         <!-- This tag indicates that this application optionally uses ARCore. -->
         <meta-data android:name="com.google.ar.core" android:value="optional" />
-        <!-- This value must match value present in ARCore SDK's .aar -->
-        <!-- TODO(https://crbug.com/917406): modify build scripts to
-             automatically pull this value in - the problem exists because in
-             bundle mode, the ARCore SDK is packaged into AR module and
-             the module installation will not automatically bring in DFM's
-             manifest entries. -->
-        <meta-data android:name="com.google.ar.core.min_apk_version"
-            android:value="190531000"/>
-        <activity
-            android:name="com.google.ar.core.InstallActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:theme="@android:style/Theme.Material.Light.Dialog.Alert" />
         {% endif %}
 
         <!-- Cast support -->
@@ -297,6 +280,28 @@ by a child template that "extends" this file.
                 {{ self.mhtml_view_intent_shared_filter_body() }}
                 <data android:mimeType="*/*"/>
             </intent-filter>
+            <!-- Web Bundles (.wbn) support -->
+            {% if channel in ['dev', 'canary', 'default'] %}
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+                <data android:host="*" />
+                {% for i in range(10) %}
+                <data android:pathPattern="/.*{{ '\\\\..*' * i }}\\.wbn" />
+                {% endfor %}
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/webbundle" />
+            </intent-filter>
+            {% endif %}
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -373,30 +378,6 @@ by a child template that "extends" this file.
             </intent-filter>
         </activity-alias>
 
-        {% if notouch_build == "true" %}
-        <activity-alias android:name="com.google.android.apps.chrome.DinoActivity"
-            android:targetActivity="org.chromium.chrome.browser.touchless.DinoActivity"
-            android:exported="true">
-            <intent-filter android:priority="-1">
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity android:name="org.chromium.chrome.browser.touchless.DinoActivity"
-          android:theme="@style/Theme.Chromium.Activity"
-            android:icon="@mipmap/dino"
-            android:label="@string/dino_game_title"
-            android:exported="false"
-            android:persistableMode="persistNever"
-            android:launchMode="singleTask"
-            android:taskAffinity=""
-            android:noHistory="true"
-            {{ self.chrome_activity_common() }}>
-          </activity>
-        {% endif %}
-
         <activity android:name="org.chromium.chrome.browser.LauncherShortcutActivity"
             android:theme="@android:style/Theme.NoDisplay"
             android:taskAffinity=""
@@ -414,6 +395,12 @@ by a child template that "extends" this file.
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <receiver android:name="org.chromium.chrome.browser.sharing.click_to_call.ClickToCallMessageHandler$PhoneUnlockedReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+        </receiver>
 
         <!-- Upgrade related -->
         <receiver android:name="org.chromium.chrome.browser.upgrade.PackageReplacedBroadcastReceiver"
@@ -494,30 +481,16 @@ by a child template that "extends" this file.
           {% endfor %}
         {% endif %}
 
-        <activity android:name="org.chromium.chrome.browser.incognito.IncognitoDisclosureActivity"
-          android:theme="@style/Theme.Chromium.Activity.Fullscreen.Transparent"
-          android:exported="false">
-        </activity>
-
         <!-- ChromeTabbedActivity related -->
         <activity android:name="org.chromium.chrome.browser.ChromeTabbedActivity"
             android:theme="@style/Theme.Chromium.TabbedMode"
-            {% if notouch_build == "true" %}
-            android:exported="false"
-            {% else %}
             android:exported="true"
-            {% endif %}
             android:launchMode="singleTask"
             {# We can only use blocks once in Jinja, for future substitutions we use
             self.supports_video_persistence(). #}
             {% block supports_video_persistence %}
-            {% if notouch_build == "true" %}
-            android:supportsPictureInPicture="false"
-            android:resizeableActivity="false"
-            {% else %}
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
-            {% endif %}
             {% endblock %}
             {% block chrome_activity_common %}
             android:windowSoftInputMode="adjustResize"
@@ -543,9 +516,7 @@ by a child template that "extends" this file.
         </activity>
         <!-- TODO(crbug.com/780674): retarget .Main back to CTA for non-modern APK -->
         <activity-alias android:name="com.google.android.apps.chrome.Main"
-            {% if notouch_build == "true" %}
-            android:targetActivity="org.chromium.chrome.browser.touchless.NoTouchActivity"
-            {% elif min_sdk_version|int < 21 %}
+            {% if min_sdk_version|int < 21 %}
             android:targetActivity="org.chromium.chrome.browser.document.ChromeLauncherActivity"
             {% else %}
             android:targetActivity="org.chromium.chrome.browser.ChromeTabbedActivity"
@@ -585,16 +556,6 @@ by a child template that "extends" this file.
             {{ self.chrome_activity_common() }}>
             {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
-        {% if notouch_build == "true" %}
-        <activity android:name="org.chromium.chrome.browser.touchless.NoTouchActivity"
-            android:theme="@style/Theme.Chromium.Activity"
-            android:exported="false"
-            android:launchMode="singleTask"
-            {{ self.chrome_activity_common() }}
-            {{ self.supports_video_persistence() }} >
-            {{ self.extra_web_rendering_activity_definitions() }}
-        </activity>
-        {% endif %}
 
         <activity android:name="org.chromium.chrome.browser.sync.ui.PassphraseActivity"
             android:theme="@style/Theme.Chromium.Activity"
@@ -635,22 +596,14 @@ by a child template that "extends" this file.
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
             android:exported="false">
         </activity>
-        {% if notouch_build == "true" %}
-        <activity-alias android:name="org.chromium.chrome.browser.preferences.Preferences"
-            android:targetActivity="org.chromium.chrome.browser.touchless.TouchlessPreferences">
-        </activity-alias>
-        <activity android:name="org.chromium.chrome.browser.touchless.TouchlessPreferences"
-            android:theme="@style/Theme.Chromium.Preferences.Touchless"
-        {% else %}
-        <activity android:name="org.chromium.chrome.browser.preferences.Preferences"
-            android:theme="@style/Theme.Chromium.Preferences"
-        {% endif %}
+        <activity android:name="org.chromium.chrome.browser.settings.SettingsActivity"
+            android:theme="@style/Theme.Chromium.Settings"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
-            android:label="@string/preferences"
+            android:label="@string/settings"
             android:exported="false">
         </activity>
-        <activity android:name="org.chromium.chrome.browser.preferences.website.ManageSpaceActivity"
-            android:theme="@style/Theme.Chromium.Preferences.ManageSpace"
+        <activity android:name="org.chromium.chrome.browser.site_settings.ManageSpaceActivity"
+            android:theme="@style/Theme.Chromium.Settings.ManageSpace"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
             android:label="@string/storage_management_activity_label"
             android:exported="false">
@@ -662,7 +615,8 @@ by a child template that "extends" this file.
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
         <activity android:name="org.chromium.chrome.browser.bookmarks.BookmarkAddActivity"
-            android:theme="@style/Theme.Chromium.DialogWhenLarge"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true"
             android:windowSoftInputMode="stateHidden"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
             <intent-filter>
@@ -697,15 +651,6 @@ by a child template that "extends" this file.
             android:exported="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
         </activity>
-
-        {% if notouch_build == "true" %}
-        <activity android:name="org.chromium.chrome.browser.download.TouchlessDownloadActivity"
-            android:theme="@style/Theme.Chromium.Activity.Fullscreen"
-            android:windowSoftInputMode="stateAlwaysHidden|adjustResize"
-            android:exported="false"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize">
-        </activity>
-        {% endif %}
 
         <!-- Activities for history. -->
         <activity android:name="org.chromium.chrome.browser.history.HistoryActivity"
@@ -798,35 +743,6 @@ by a child template that "extends" this file.
             {{ self.supports_vr() }}
             {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
-        <activity android:name="org.chromium.chrome.browser.webapps.WebApkActivity"
-            android:theme="@style/Theme.Chromium.Webapp"
-            android:label="@string/webapp_activity_title"
-            android:launchMode="singleTop"
-            android:documentLaunchMode="intoExisting"
-            android:exported="false"
-            android:persistableMode="persistNever"
-            {{ self.supports_video_persistence() }}
-            {{ self.chrome_activity_common() }}
-        >
-            {{ self.supports_vr() }}
-            {{ self.extra_web_rendering_activity_definitions() }}
-        </activity>
-        {% for i in range(10) %}
-        <activity android:name="org.chromium.chrome.browser.webapps.WebApkActivity{{ i }}"
-            android:theme="@style/Theme.Chromium.Webapp"
-            android:icon="@mipmap/app_shortcut_icon"
-            android:label="@string/webapp_activity_title"
-            android:launchMode="singleTask"
-            android:exported="false"
-            android:persistableMode="persistNever"
-            android:taskAffinity="{{ manifest_package }}.webapps.WebApkActivity{{ i }}"
-            {{ self.supports_video_persistence() }}
-            {{ self.chrome_activity_common() }}
-        >
-            {{ self.supports_vr() }}
-            {{ self.extra_web_rendering_activity_definitions() }}
-        </activity>
-        {% endfor %}
 
         <activity android:name="org.chromium.chrome.browser.webapps.ActivateWebApkActivity"
             android:theme="@android:style/Theme.NoDisplay"
@@ -893,6 +809,40 @@ by a child template that "extends" this file.
             </intent-filter>
           </activity>
 
+          <activity
+            android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardShareActivity"
+            android:icon="@drawable/ic_devices_48dp"
+            android:label="@string/shared_clipboard_share_activity_title"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Chromium.Activity.TranslucentNoAnimations"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize" >
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+          </activity>
+
+          <activity
+            android:name="org.chromium.chrome.browser.share.qrcode.QrCodeShareActivity"
+            android:icon="@drawable/ic_launcher"
+            android:label="@string/qr_code_share_icon_label"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize" >
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+          </activity>
+
         <!-- Activity for dispatching intents to Instant Apps. -->
         <activity
             android:name="org.chromium.chrome.browser.instantapps.AuthenticatedProxyActivity"
@@ -938,6 +888,11 @@ by a child template that "extends" this file.
             android:name="org.chromium.chrome.browser.browserservices.ManageTrustedWebActivityDataActivity"
             android:theme="@style/Theme.Chromium.Activity.Fullscreen.Transparent"
             android:exported="true">
+            <intent-filter>
+                <action android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Legacy filter. We no longer need data, but must accept intents that provide data. -->
             <intent-filter>
                 <action android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -1088,20 +1043,14 @@ by a child template that "extends" this file.
               <action android:name="com.google.android.c2dm.intent.RECEIVE" />
             </intent-filter>
         </service>
+        <service android:name="org.chromium.chrome.browser.services.gcm.GCMBackgroundService"
+            android:exported="false"/>
         <meta-data android:name="ipc.invalidation.ticl.gcm_upstream_service_class"
             android:value="org.chromium.chrome.browser.services.gcm.InvalidationGcmUpstreamSender" />
         <service android:name="org.chromium.chrome.browser.services.gcm.InvalidationGcmUpstreamSender"
             android:exported="false"/>
 
         <!-- Notification service for sync. -->
-        <meta-data android:name="ipc.invalidation.ticl.listener_service_class"
-            android:value="org.chromium.chrome.browser.invalidation.ChromeInvalidationClientService"/>
-        <service android:name="org.chromium.chrome.browser.invalidation.ChromeInvalidationClientService"
-            android:exported="false">
-            <intent-filter>
-              <action android:name="com.google.ipc.invalidation.AUTH_TOKEN_REQUEST"/>
-            </intent-filter>
-        </service>
         <service android:name="com.google.ipc.invalidation.ticl.android2.TiclService"
             android:exported="false"/>
         <service android:name="com.google.ipc.invalidation.ticl.android2.channel.AndroidMessageSenderService"
@@ -1128,18 +1077,22 @@ by a child template that "extends" this file.
             android:permission="android.permission.BIND_JOB_SERVICE"/>
 
         <!-- Background Task Scheduler job service -->
-        <service android:name="org.chromium.components.background_task_scheduler.BackgroundTaskJobService"
+        <service android:name="org.chromium.components.background_task_scheduler.internal.BackgroundTaskJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE"/>
 
         <!-- Background Task Scheduler GCM task service -->
-        <service android:name="org.chromium.components.background_task_scheduler.BackgroundTaskGcmTaskService"
+        <service android:name="org.chromium.components.background_task_scheduler.internal.BackgroundTaskGcmTaskService"
             android:permission="com.google.android.gms.permission.BIND_NETWORK_TASK_SERVICE"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.gcm.ACTION_TASK_READY" />
             </intent-filter>
         </service>
+
+        <!-- Background Task Scheduler alarm receiver -->
+        <receiver android:name="org.chromium.components.background_task_scheduler.internal.BackgroundTaskBroadcastReceiver"
+            android:exported="false" />
 
         <!-- GcmTaskService implementation to wake Chrome on scheduled events -->
         <service android:name="org.chromium.chrome.browser.ChromeBackgroundService"
@@ -1162,9 +1115,11 @@ by a child template that "extends" this file.
               <category android:name="androidx.browser.trusted.category.TrustedWebActivitySplashScreensV1"/>
               <category android:name="androidx.browser.customtabs.category.NavBarColorCustomization"/>
               <category android:name="androidx.browser.customtabs.category.ColorSchemeCustomization"/>
+              <category android:name="androidx.browser.trusted.category.WebShareTargetV2"/>
+              <category android:name="androidx.browser.trusted.category.ImmersiveMode"/>
             </intent-filter>
         </service>
-        <service android:name="android.support.customtabs.PostMessageService" />
+        <service android:name="androidx.browser.customtabs.PostMessageService" />
 
         <!-- Crash reporting services. -->
         <service android:name="org.chromium.chrome.browser.crash.ChromeMinidumpUploadJobService"
@@ -1193,7 +1148,7 @@ by a child template that "extends" this file.
             android:permission="{{ manifest_package }}.permission.CHILD_SERVICE"
             android:isolatedProcess="true"
             android:exported="{{sandboxed_service_exported|default(false)}}"
-            {% if (use_zygote|default(false) == 'true') %}
+            {% if (i == 0) %}
             android:useAppZygote="true"
             {% endif %}
             {% if (sandboxed_service_exported|default(false)) == 'true' %}
@@ -1219,20 +1174,27 @@ android:value="true" />
             android:exported="false" />
         {% endfor %}
 
+        <receiver android:name="org.chromium.chrome.browser.announcement.AnnouncementNotificationManager$Receiver"
+            android:exported="false"/>
+
         <receiver android:name="org.chromium.chrome.browser.notifications.NotificationIntentInterceptor$Receiver"
             android:exported="false"/>
 
         <receiver android:name="org.chromium.chrome.browser.notifications.scheduler.DisplayAgent$Receiver"
             android:exported="false"/>
 
-        <receiver android:name="org.chromium.chrome.browser.send_tab_to_self.NotificationManager$TapReceiver"
+        <receiver android:name="org.chromium.chrome.browser.send_tab_to_self.NotificationManager$SendTabToSelfNotificationReceiver"
             android:exported="false"/>
-        <receiver android:name="org.chromium.chrome.browser.send_tab_to_self.NotificationManager$DeleteReceiver"
-            android:exported="false"/>
-        <receiver android:name="org.chromium.chrome.browser.send_tab_to_self.NotificationManager$TimeoutReceiver"
+
+        <!-- Save image notification receiver -->
+        <receiver android:name="org.chromium.chrome.browser.share.SaveImageNotificationManager$TapReceiver"
             android:exported="false"/>
 
         <receiver android:name="org.chromium.chrome.browser.sharing.click_to_call.ClickToCallMessageHandler$TapReceiver"
+            android:exported="false"/>
+        <receiver android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardMessageHandler$TapReceiver"
+            android:exported="false"/>
+        <receiver android:name="org.chromium.chrome.browser.sharing.shared_clipboard.SharedClipboardMessageHandler$TryAgainReceiver"
             android:exported="false"/>
 
         <receiver android:name="org.chromium.chrome.browser.offlinepages.prefetch.PrefetchedPagesNotifier$ClickReceiver"
@@ -1292,6 +1254,17 @@ android:value="true" />
 
         <meta-data android:name="org.chromium.content.browser.SMART_CLIP_PROVIDER"
             android:value="org.chromium.content_public.browser.SmartClipProvider"/>
+
+        {% if min_sdk_version|int >= 21 %}
+        <activity
+            android:name="org.chromium.chrome.features.test_dummy.TestDummyActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.AppCompat"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize" >
+        </activity>
+        {% endif %}
 
         {% block extra_application_definitions %}
 

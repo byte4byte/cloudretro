@@ -8,14 +8,17 @@
 #import <WebKit/WebKit.h>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#import "ios/net/cookies/system_cookie_util.h"
+#include "ios/web/common/features.h"
 #import "ios/web/net/cookies/wk_cookie_util.h"
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/download/download_task_observer.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #import "ios/web/web_view/error_translation_util.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/data_url.h"
@@ -23,7 +26,10 @@
 #include "net/base/io_buffer.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/base/net_errors.h"
+#include "net/cookies/cookie_store.h"
 #include "net/url_request/url_fetcher_response_writer.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "url/url_constants.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -115,12 +121,12 @@ int GetTaskPercentComplete(NSURLSessionTask* task) {
                     task:(NSURLSessionTask*)task
     didCompleteWithError:(nullable NSError*)error {
   __weak CRWURLSessionDelegate* weakSelf = self;
-  base::PostTaskWithTraits(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
-                             CRWURLSessionDelegate* strongSelf = weakSelf;
-                             if (strongSelf.propertiesBlock)
-                               strongSelf.propertiesBlock(
-                                   task, error, /*terminal_callback=*/true);
-                           }));
+  base::PostTask(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
+                   CRWURLSessionDelegate* strongSelf = weakSelf;
+                   if (strongSelf.propertiesBlock)
+                     strongSelf.propertiesBlock(task, error,
+                                                /*terminal_callback=*/true);
+                 }));
 }
 
 - (void)URLSession:(NSURLSession*)session
@@ -132,26 +138,26 @@ int GetTaskPercentComplete(NSURLSessionTask* task) {
   using Bytes = const void* _Nonnull;
   [data enumerateByteRangesUsingBlock:^(Bytes bytes, NSRange range, BOOL*) {
     auto buffer = GetBuffer(bytes, range.length);
-    base::PostTaskWithTraits(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
-                               CRWURLSessionDelegate* strongSelf = weakSelf;
-                               if (!strongSelf.dataBlock) {
-                                 dispatch_semaphore_signal(semaphore);
-                                 return;
-                               }
-                               strongSelf.dataBlock(std::move(buffer), ^{
-                                 // Data was written to disk, unblock queue to
-                                 // read the next chunk of downloaded data.
-                                 dispatch_semaphore_signal(semaphore);
-                               });
-                             }));
+    base::PostTask(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
+                     CRWURLSessionDelegate* strongSelf = weakSelf;
+                     if (!strongSelf.dataBlock) {
+                       dispatch_semaphore_signal(semaphore);
+                       return;
+                     }
+                     strongSelf.dataBlock(std::move(buffer), ^{
+                       // Data was written to disk, unblock queue to
+                       // read the next chunk of downloaded data.
+                       dispatch_semaphore_signal(semaphore);
+                     });
+                   }));
     dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
   }];
-  base::PostTaskWithTraits(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
-                             CRWURLSessionDelegate* strongSelf = weakSelf;
-                             if (strongSelf.propertiesBlock)
-                               weakSelf.propertiesBlock(
-                                   task, nil, /*terminal_callback=*/false);
-                           }));
+  base::PostTask(FROM_HERE, {WebThread::UI}, base::BindOnce(^{
+                   CRWURLSessionDelegate* strongSelf = weakSelf;
+                   if (strongSelf.propertiesBlock)
+                     weakSelf.propertiesBlock(task, nil,
+                                              /*terminal_callback=*/false);
+                 }));
 }
 
 - (void)URLSession:(NSURLSession*)session
@@ -169,6 +175,7 @@ namespace web {
 
 DownloadTaskImpl::DownloadTaskImpl(const WebState* web_state,
                                    const GURL& original_url,
+                                   NSString* http_method,
                                    const std::string& content_disposition,
                                    int64_t total_bytes,
                                    const std::string& mime_type,
@@ -176,6 +183,7 @@ DownloadTaskImpl::DownloadTaskImpl(const WebState* web_state,
                                    NSString* identifier,
                                    Delegate* delegate)
     : original_url_(original_url),
+      http_method_(http_method),
       total_bytes_(total_bytes),
       content_disposition_(content_disposition),
       original_mime_type_(mime_type),
@@ -262,6 +270,11 @@ NSString* DownloadTaskImpl::GetIndentifier() const {
 const GURL& DownloadTaskImpl::GetOriginalUrl() const {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   return original_url_;
+}
+
+NSString* DownloadTaskImpl::GetHttpMethod() const {
+  DCHECK_CURRENTLY_ON(web::WebThread::UI);
+  return http_method_;
 }
 
 bool DownloadTaskImpl::IsDone() const {
@@ -402,14 +415,30 @@ NSURLSession* DownloadTaskImpl::CreateSession(NSString* identifier,
 
 void DownloadTaskImpl::GetCookies(
     base::Callback<void(NSArray<NSHTTPCookie*>*)> callback) {
-  DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  auto store = WKCookieStoreForBrowserState(web_state_->GetBrowserState());
-  DCHECK(store);
-  [store getAllCookies:^(NSArray<NSHTTPCookie*>* cookies) {
-    // getAllCookies: callback is always called on UI thread.
-    DCHECK_CURRENTLY_ON(WebThread::UI);
-    callback.Run(cookies);
-  }];
+  DCHECK_CURRENTLY_ON(WebThread::UI);
+  scoped_refptr<net::URLRequestContextGetter> context_getter(
+      web_state_->GetBrowserState()->GetRequestContext());
+
+  // net::URLRequestContextGetter must be used in the IO thread.
+  base::PostTask(FROM_HERE, {WebThread::IO},
+                 base::BindOnce(&DownloadTaskImpl::GetCookiesFromContextGetter,
+                                context_getter, callback));
+}
+
+void DownloadTaskImpl::GetCookiesFromContextGetter(
+    scoped_refptr<net::URLRequestContextGetter> context_getter,
+    base::Callback<void(NSArray<NSHTTPCookie*>*)> callback) {
+  DCHECK_CURRENTLY_ON(WebThread::IO);
+  context_getter->GetURLRequestContext()->cookie_store()->GetAllCookiesAsync(
+      base::BindOnce(
+          [](base::Callback<void(NSArray<NSHTTPCookie*>*)> callback,
+             const net::CookieList& cookie_list) {
+            NSArray<NSHTTPCookie*>* cookies =
+                SystemCookiesFromCanonicalCookieList(cookie_list);
+            base::PostTask(FROM_HERE, {WebThread::UI},
+                           base::BindOnce(callback, cookies));
+          },
+          callback));
 }
 
 void DownloadTaskImpl::StartWithCookies(NSArray<NSHTTPCookie*>* cookies) {
@@ -426,7 +455,9 @@ void DownloadTaskImpl::StartWithCookies(NSArray<NSHTTPCookie*>* cookies) {
       UIApplicationStateActive;
 
   NSURL* url = net::NSURLWithGURL(GetOriginalUrl());
-  session_task_ = [session_ dataTaskWithURL:url];
+  NSMutableURLRequest* request = [[NSMutableURLRequest alloc] initWithURL:url];
+  request.HTTPMethod = GetHttpMethod();
+  session_task_ = [session_ dataTaskWithRequest:request];
   [session_task_ resume];
   OnDownloadUpdated();
 }
@@ -455,6 +486,11 @@ void DownloadTaskImpl::OnDownloadUpdated() {
 }
 
 void DownloadTaskImpl::OnDownloadFinished(int error_code) {
+  // If downloads manager's flag is enabled, keeps the downloaded file. The
+  // writer deletes it if it owns it, that's why it shouldn't owns it anymore
+  // when the current download is finished.
+  if (base::FeatureList::IsEnabled(web::features::kEnablePersistentDownloads))
+    writer_->AsFileWriter()->DisownFile();
   error_code_ = error_code;
   state_ = State::kComplete;
   session_task_ = nil;

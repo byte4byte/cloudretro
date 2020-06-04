@@ -8,15 +8,12 @@
 #include "base/memory/weak_ptr.h"
 #include "chromeos/services/secure_channel/public/cpp/client/secure_channel_client.h"
 #include "chromeos/services/secure_channel/public/mojom/secure_channel.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class TaskRunner;
 }  // namespace base
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
 
 namespace chromeos {
 
@@ -27,13 +24,17 @@ class SecureChannelClientImpl : public SecureChannelClient {
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetInstanceForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<SecureChannelClient> BuildInstance(
-        service_manager::Connector* connector,
+    static std::unique_ptr<SecureChannelClient> Create(
+        mojo::PendingRemote<mojom::SecureChannel> channel,
         scoped_refptr<base::TaskRunner> task_runner =
             base::ThreadTaskRunnerHandle::Get());
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<SecureChannelClient> CreateInstance(
+        mojo::PendingRemote<mojom::SecureChannel> channel,
+        scoped_refptr<base::TaskRunner> task_runner) = 0;
 
    private:
     static Factory* test_factory_;
@@ -44,7 +45,7 @@ class SecureChannelClientImpl : public SecureChannelClient {
  private:
   friend class SecureChannelClientImplTest;
 
-  SecureChannelClientImpl(service_manager::Connector* connector,
+  SecureChannelClientImpl(mojo::PendingRemote<mojom::SecureChannel> channel,
                           scoped_refptr<base::TaskRunner> task_runner);
 
   // SecureChannelClient:
@@ -64,21 +65,23 @@ class SecureChannelClientImpl : public SecureChannelClient {
       multidevice::RemoteDeviceRef local_device,
       const std::string& feature,
       ConnectionPriority connection_priority,
-      mojom::ConnectionDelegatePtr connection_delegate_ptr);
+      mojo::PendingRemote<mojom::ConnectionDelegate>
+          connection_delegate_remote);
   void PerformListenForConnectionFromDevice(
       multidevice::RemoteDeviceRef device_to_connect,
       multidevice::RemoteDeviceRef local_device,
       const std::string& feature,
       ConnectionPriority connection_priority,
-      mojom::ConnectionDelegatePtr connection_delegate_ptr);
+      mojo::PendingRemote<mojom::ConnectionDelegate>
+          connection_delegate_remote);
 
   void FlushForTesting();
 
-  mojom::SecureChannelPtr secure_channel_ptr_;
+  mojo::Remote<mojom::SecureChannel> secure_channel_remote_;
 
   scoped_refptr<base::TaskRunner> task_runner_;
 
-  base::WeakPtrFactory<SecureChannelClientImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<SecureChannelClientImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SecureChannelClientImpl);
 };

@@ -4,32 +4,29 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.browser.translate.TranslateBridge;
 
 import java.util.LinkedHashSet;
 
 /**
- * Controls how Translation One-box triggering is handled for the {@link ContextualSearchManager}.
+ * Controls how Translation triggering is handled for the {@link ContextualSearchManager}.
  */
 public class ContextualSearchTranslationImpl implements ContextualSearchTranslation {
     private final TranslateBridgeWrapper mTranslateBridgeWrapper;
-    private final ContextualSearchPolicy mPolicy;
     /**
      * Creates a {@link ContextualSearchTranslation} for updating {@link ContextualSearchRequest}s
      * for translation.
      */
-    ContextualSearchTranslationImpl(ContextualSearchPolicy policy) {
-        mPolicy = policy;
+    public ContextualSearchTranslationImpl() {
         mTranslateBridgeWrapper = new TranslateBridgeWrapper();
     }
 
     /** Constructor useful for testing, uses the given {@link TranslateBridgeWrapper}. */
-    ContextualSearchTranslationImpl(
-            ContextualSearchPolicy policy, TranslateBridgeWrapper translateBridgeWrapper) {
-        mPolicy = policy;
+    ContextualSearchTranslationImpl(TranslateBridgeWrapper translateBridgeWrapper) {
         mTranslateBridgeWrapper = translateBridgeWrapper;
     }
 
@@ -48,9 +45,7 @@ public class ContextualSearchTranslationImpl implements ContextualSearchTranslat
 
     @Override
     public boolean needsTranslation(@Nullable String sourceLanguage) {
-        if (TextUtils.isEmpty(sourceLanguage) || isBlockedLanguage(sourceLanguage)
-                || mPolicy.isTranslationDisabled())
-            return false;
+        if (TextUtils.isEmpty(sourceLanguage) || isBlockedLanguage(sourceLanguage)) return false;
 
         LinkedHashSet<String> languages = mTranslateBridgeWrapper.getModelLanguages();
         for (String language : languages) {

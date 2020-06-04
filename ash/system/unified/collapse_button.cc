@@ -6,20 +6,17 @@
 
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/scoped_canvas.h"
-#include "ui/views/view_class_properties.h"
 
 namespace ash {
 
 CollapseButton::CollapseButton(views::ButtonListener* listener)
     : CustomShapeButton(listener) {
   OnEnabledChanged();
-  auto path = std::make_unique<SkPath>(
-      CreateCustomShapePath(gfx::Rect(CalculatePreferredSize())));
-  SetProperty(views::kHighlightPathKey, path.release());
 }
 
 CollapseButton::~CollapseButton() = default;
@@ -62,10 +59,14 @@ const char* CollapseButton::GetClassName() const {
 }
 
 void CollapseButton::OnEnabledChanged() {
+  const SkColor icon_color = AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kIconPrimary,
+      AshColorProvider::AshColorMode::kDark);
   SetImage(views::Button::STATE_NORMAL,
-           gfx::CreateVectorIcon(kUnifiedMenuExpandIcon,
-                                 GetEnabled() ? kUnifiedMenuIconColor
-                                              : kUnifiedMenuIconColorDisabled));
+           gfx::CreateVectorIcon(
+               kUnifiedMenuExpandIcon,
+               GetEnabled() ? icon_color
+                            : AshColorProvider::GetDisabledColor(icon_color)));
 }
 
 }  // namespace ash

@@ -7,6 +7,7 @@
 
 #include "base/containers/span.h"
 #include "cc/debug/debug_export.h"
+#include "cc/raster/lcd_text_disallowed_reason.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace cc {
@@ -23,9 +24,6 @@ class CC_DEBUG_EXPORT DebugColors {
 
   static SkColor ContentLayerBorderColor();
   static int ContentLayerBorderWidth(float device_scale_factor);
-
-  static SkColor MaskingLayerBorderColor();
-  static int MaskingLayerBorderWidth(float device_scale_factor);
 
   static SkColor ContainerLayerBorderColor();
   static int ContainerLayerBorderWidth(float device_scale_factor);
@@ -104,6 +102,10 @@ class CC_DEBUG_EXPORT DebugColors {
   static int NonFastScrollableRectBorderWidth();
   static SkColor NonFastScrollableRectFillColor();
 
+  static SkColor MainThreadScrollingReasonRectBorderColor();
+  static int MainThreadScrollingReasonRectBorderWidth();
+  static SkColor MainThreadScrollingReasonRectFillColor();
+
   static SkColor LayerAnimationBoundsBorderColor();
   static int LayerAnimationBoundsBorderWidth();
   static SkColor LayerAnimationBoundsFillColor();
@@ -124,6 +126,8 @@ class CC_DEBUG_EXPORT DebugColors {
   static SkColor FPSDisplayTextAndGraphColor();
   static SkColor MemoryDisplayTextColor();
   static SkColor PaintTimeDisplayTextAndGraphColor();
+
+  static SkColor NonLCDTextHighlightColor(LCDTextDisallowedReason);
 };
 
 }  // namespace cc

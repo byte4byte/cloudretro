@@ -17,12 +17,14 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/shell_integration.h"
+#include "chrome/common/buildflags.h"
 #include "media/media_buildflags.h"
 
 class BackgroundModeManager;
+class BrowserProcessPlatformPart;
+class BuildState;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GpuModeManager;
@@ -88,10 +90,6 @@ class OptimizationGuideService;
 namespace policy {
 class ChromeBrowserPolicyConnector;
 class PolicyService;
-}
-
-namespace prefs {
-class InProcessPrefServiceFactory;
 }
 
 namespace printing {
@@ -248,8 +246,10 @@ class BrowserProcess {
 
   virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   virtual component_updater::SupervisedUserWhitelistInstaller*
   supervised_user_whitelist_installer() = 0;
+#endif
 
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
 
@@ -267,13 +267,7 @@ class BrowserProcess {
   virtual resource_coordinator::ResourceCoordinatorParts*
   resource_coordinator_parts() = 0;
 
-  // Returns the default web client state of Chrome (i.e., was it the user's
-  // default browser) at the time a previous check was made sometime between
-  // process startup and now.
-  virtual shell_integration::DefaultWebClientState
-  CachedDefaultWebClientState() = 0;
-
-  virtual prefs::InProcessPrefServiceFactory* pref_service_factory() const = 0;
+  virtual BuildState* GetBuildState() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

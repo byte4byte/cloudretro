@@ -7,8 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "chrome/browser/notifications/scheduler/internal/notification_scheduler.h"
+#include "chrome/browser/notifications/scheduler/internal/stats.h"
 #include "chrome/browser/notifications/scheduler/public/notification_params.h"
 
 namespace notifications {
@@ -33,10 +34,10 @@ void NotificationScheduleServiceImpl::DeleteNotifications(
   scheduler_->DeleteAllNotifications(type);
 }
 
-void NotificationScheduleServiceImpl::GetImpressionDetail(
+void NotificationScheduleServiceImpl::GetClientOverview(
     SchedulerClientType type,
-    ImpressionDetail::ImpressionDetailCallback callback) {
-  scheduler_->GetImpressionDetail(type, std::move(callback));
+    ClientOverview::ClientOverviewCallback callback) {
+  scheduler_->GetClientOverview(type, std::move(callback));
 }
 
 NotificationBackgroundTaskScheduler::Handler*
@@ -49,30 +50,18 @@ UserActionHandler* NotificationScheduleServiceImpl::GetUserActionHandler() {
 }
 
 void NotificationScheduleServiceImpl::OnStartTask(
-    SchedulerTaskTime task_time,
     TaskFinishedCallback callback) {
-  scheduler_->OnStartTask(task_time, std::move(callback));
+  scheduler_->OnStartTask(std::move(callback));
 }
 
-void NotificationScheduleServiceImpl::OnStopTask(SchedulerTaskTime task_time) {
-  scheduler_->OnStopTask(task_time);
+void NotificationScheduleServiceImpl::OnStopTask() {
+  scheduler_->OnStopTask();
 }
 
-void NotificationScheduleServiceImpl::OnClick(SchedulerClientType type,
-                                              const std::string& guid) {
-  scheduler_->OnClick(type, guid);
-}
-
-void NotificationScheduleServiceImpl::OnActionClick(
-    SchedulerClientType type,
-    const std::string& guid,
-    ActionButtonType button_type) {
-  scheduler_->OnActionClick(type, guid, button_type);
-}
-
-void NotificationScheduleServiceImpl::OnDismiss(SchedulerClientType type,
-                                                const std::string& guid) {
-  scheduler_->OnDismiss(type, guid);
+void NotificationScheduleServiceImpl::OnUserAction(
+    const UserActionData& action_data) {
+  stats::LogUserAction(action_data);
+  scheduler_->OnUserAction(action_data);
 }
 
 void NotificationScheduleServiceImpl::OnInitialized(bool success) {

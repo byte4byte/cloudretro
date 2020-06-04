@@ -8,6 +8,7 @@
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "chromeos/dbus/shill/shill_clients.h"
+#include "chromeos/network/device_state.h"
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
@@ -29,8 +30,7 @@ const char kProfilePathUser[] = "user_profile_path";
 }  // namespace
 
 NetworkStateTestHelper::NetworkStateTestHelper(
-    bool use_default_devices_and_services)
-    : weak_ptr_factory_(this) {
+    bool use_default_devices_and_services) {
   if (!ShillManagerClient::Get()) {
     shill_clients::InitializeFakes();
     shill_clients_initialized_ = true;
@@ -96,6 +96,14 @@ void NetworkStateTestHelper::ClearServices() {
   base::RunLoop().RunUntilIdle();
 }
 
+void NetworkStateTestHelper::AddDevice(const std::string& device_path,
+                                       const std::string& type,
+                                       const std::string& name) {
+  device_test()->AddDevice(device_path, type, name);
+  base::RunLoop().RunUntilIdle();
+  network_state_handler()->SetDeviceStateUpdatedForTest(device_path);
+}
+
 std::string NetworkStateTestHelper::ConfigureService(
     const std::string& shill_json_string) {
   last_created_service_path_.clear();
@@ -115,9 +123,9 @@ std::string NetworkStateTestHelper::ConfigureService(
   // returned from this function.
   ShillManagerClient::Get()->ConfigureService(
       *shill_json_dict,
-      base::Bind(&NetworkStateTestHelper::ConfigureCallback,
-                 weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&FailErrorCallback));
+      base::BindOnce(&NetworkStateTestHelper::ConfigureCallback,
+                     weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&FailErrorCallback));
   base::RunLoop().RunUntilIdle();
 
   return last_created_service_path_;
@@ -151,43 +159,42 @@ NetworkStateTestHelper::CreateStandaloneNetworkProperties(
     network_config::mojom::NetworkType type,
     network_config::mojom::ConnectionStateType connection_state,
     int signal_strength) {
+  using network_config::mojom::NetworkType;
+  using network_config::mojom::NetworkTypeStateProperties;
   auto network = network_config::mojom::NetworkStateProperties::New();
   network->guid = id;
   network->name = id;
   network->type = type;
   network->connection_state = connection_state;
   switch (type) {
-    case network_config::mojom::NetworkType::kAll:
-    case network_config::mojom::NetworkType::kMobile:
-    case network_config::mojom::NetworkType::kWireless:
+    case NetworkType::kAll:
+    case NetworkType::kMobile:
+    case NetworkType::kWireless:
       NOTREACHED();
       break;
-    case network_config::mojom::NetworkType::kCellular: {
+    case NetworkType::kCellular: {
       auto cellular = network_config::mojom::CellularStateProperties::New();
       cellular->signal_strength = signal_strength;
-      network->cellular = std::move(cellular);
+      network->type_state =
+          NetworkTypeStateProperties::NewCellular(std::move(cellular));
       break;
     }
-    case network_config::mojom::NetworkType::kEthernet:
+    case NetworkType::kEthernet:
       break;
-    case network_config::mojom::NetworkType::kTether: {
+    case NetworkType::kTether: {
       auto tether = network_config::mojom::TetherStateProperties::New();
       tether->signal_strength = signal_strength;
-      network->tether = std::move(tether);
+      network->type_state =
+          NetworkTypeStateProperties::NewTether(std::move(tether));
       break;
     }
-    case network_config::mojom::NetworkType::kVPN:
+    case NetworkType::kVPN:
       break;
-    case network_config::mojom::NetworkType::kWiFi: {
+    case NetworkType::kWiFi: {
       auto wifi = network_config::mojom::WiFiStateProperties::New();
       wifi->signal_strength = signal_strength;
-      network->wifi = std::move(wifi);
-      break;
-    }
-    case network_config::mojom::NetworkType::kWiMAX: {
-      auto wimax = network_config::mojom::WiMAXStateProperties::New();
-      wimax->signal_strength = signal_strength;
-      network->wimax = std::move(wimax);
+      network->type_state =
+          NetworkTypeStateProperties::NewWifi(std::move(wifi));
       break;
     }
   }

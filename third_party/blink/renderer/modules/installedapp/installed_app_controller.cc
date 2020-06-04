@@ -6,10 +6,13 @@
 
 #include <utility>
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/mojom/installedapp/related_application.mojom-blink.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/manifest/manifest_manager.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -52,15 +55,12 @@ const char InstalledAppController::kSupplementName[] = "InstalledAppController";
 
 InstalledAppController::InstalledAppController(LocalFrame& frame)
     : Supplement<LocalFrame>(frame),
-      ContextLifecycleObserver(frame.GetDocument()) {}
-
-void InstalledAppController::ContextDestroyed(ExecutionContext*) {
-  provider_.reset();
-}
+      ExecutionContextClient(frame.DomWindow()),
+      provider_(frame.DomWindow()) {}
 
 void InstalledAppController::OnGetManifestForRelatedApps(
     std::unique_ptr<AppInstalledCallbacks> callbacks,
-    const KURL& /*url*/,
+    const KURL& url,
     mojom::blink::ManifestPtr manifest) {
   Vector<mojom::blink::RelatedApplicationPtr> mojo_related_apps;
   for (const auto& related_application : manifest->related_applications) {
@@ -72,19 +72,19 @@ void InstalledAppController::OnGetManifestForRelatedApps(
     mojo_related_apps.push_back(std::move(application));
   }
 
-  if (!provider_) {
+  if (!provider_.is_bound()) {
     // See https://bit.ly/2S0zRAS for task types.
-    GetSupplementable()->GetInterfaceProvider().GetInterface(mojo::MakeRequest(
-        &provider_,
-        GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+    GetSupplementable()->GetBrowserInterfaceBroker().GetInterface(
+        provider_.BindNewPipeAndPassReceiver(
+            GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI)));
     // TODO(mgiuca): Set a connection error handler. This requires a refactor to
     // work like NavigatorShare.cpp (retain a persistent list of clients to
     // reject all of their promises).
-    DCHECK(provider_);
+    DCHECK(provider_.is_bound());
   }
 
   provider_->FilterInstalledApps(
-      std::move(mojo_related_apps),
+      std::move(mojo_related_apps), url,
       WTF::Bind(&InstalledAppController::OnFilterInstalledApps,
                 WrapPersistent(this), WTF::Passed(std::move(callbacks))));
 }
@@ -94,16 +94,20 @@ void InstalledAppController::OnFilterInstalledApps(
     Vector<mojom::blink::RelatedApplicationPtr> result) {
   HeapVector<Member<RelatedApplication>> applications;
   for (const auto& res : result) {
-    auto* app = MakeGarbageCollected<RelatedApplication>(res->platform,
-                                                         res->url, res->id);
+    auto* app = MakeGarbageCollected<RelatedApplication>();
+    app->setPlatform(res->platform);
+    app->setUrl(res->url);
+    app->setId(res->id);
+    app->setVersion(res->version);
     applications.push_back(app);
   }
   callbacks->OnSuccess(applications);
 }
 
 void InstalledAppController::Trace(Visitor* visitor) {
+  visitor->Trace(provider_);
   Supplement<LocalFrame>::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

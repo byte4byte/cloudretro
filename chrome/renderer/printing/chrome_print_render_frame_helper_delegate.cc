@@ -7,14 +7,15 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/strings/string_util.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/prerender.mojom.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/prerender/prerender_helper.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/buildflags/buildflags.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -30,17 +31,6 @@ ChromePrintRenderFrameHelperDelegate::ChromePrintRenderFrameHelperDelegate() =
 
 ChromePrintRenderFrameHelperDelegate::~ChromePrintRenderFrameHelperDelegate() =
     default;
-
-bool ChromePrintRenderFrameHelperDelegate::CancelPrerender(
-    content::RenderFrame* render_frame) {
-  if (!prerender::PrerenderHelper::IsPrerendering(render_frame))
-    return false;
-
-  chrome::mojom::PrerenderCancelerPtr canceler;
-  render_frame->GetRemoteInterfaces()->GetInterface(&canceler);
-  canceler->CancelPrerenderForPrinting();
-  return true;
-}
 
 // Return the PDF object element if |frame| is the out of process PDF extension.
 blink::WebElement ChromePrintRenderFrameHelperDelegate::GetPdfElement(
@@ -86,4 +76,8 @@ bool ChromePrintRenderFrameHelperDelegate::OverridePrint(
   }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   return false;
+}
+
+bool ChromePrintRenderFrameHelperDelegate::ShouldGenerateTaggedPDF() {
+  return base::FeatureList::IsEnabled(features::kExportTaggedPDF);
 }

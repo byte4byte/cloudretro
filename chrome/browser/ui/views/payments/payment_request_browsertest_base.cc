@@ -42,7 +42,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/events/base_event_utils.h"
@@ -50,6 +49,7 @@
 #include "ui/gfx/animation/test_animation_delegate.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/styled_label.h"
 
@@ -256,13 +256,6 @@ void PaymentRequestBrowserTestBase::OnProcessingSpinnerShown() {
 void PaymentRequestBrowserTestBase::OnProcessingSpinnerHidden() {
   if (event_waiter_)
     event_waiter_->OnEvent(DialogEvent::PROCESSING_SPINNER_HIDDEN);
-}
-
-void PaymentRequestBrowserTestBase::OnInterfaceRequestFromFrame(
-    content::RenderFrameHost* render_frame_host,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle* interface_pipe) {
-  registry_.TryBindInterface(interface_name, interface_pipe, render_frame_host);
 }
 
 void PaymentRequestBrowserTestBase::InvokePaymentRequestUI() {
@@ -497,7 +490,7 @@ void PaymentRequestBrowserTestBase::WaitForOnPersonalDataChanged() {
 }
 
 void PaymentRequestBrowserTestBase::CreatePaymentRequestForTest(
-    payments::mojom::PaymentRequestRequest request,
+    mojo::PendingReceiver<payments::mojom::PaymentRequest> receiver,
     content::RenderFrameHost* render_frame_host) {
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host);
@@ -509,7 +502,7 @@ void PaymentRequestBrowserTestBase::CreatePaymentRequestForTest(
   delegate_ = delegate.get();
   PaymentRequestWebContentsManager::GetOrCreateForWebContents(web_contents)
       ->CreatePaymentRequest(web_contents->GetMainFrame(), web_contents,
-                             std::move(delegate), std::move(request), this);
+                             std::move(delegate), std::move(receiver), this);
 }
 
 void PaymentRequestBrowserTestBase::ClickOnDialogViewAndWait(
@@ -693,7 +686,7 @@ base::string16 PaymentRequestBrowserTestBase::GetEditorTextfieldValue(
       static_cast<ValidatingTextfield*>(delegate_->dialog_view()->GetViewByID(
           EditorViewController::GetInputFieldViewId(type)));
   DCHECK(textfield);
-  return textfield->text();
+  return textfield->GetText();
 }
 
 void PaymentRequestBrowserTestBase::SetEditorTextfieldValue(
@@ -747,7 +740,7 @@ bool PaymentRequestBrowserTestBase::IsEditorTextfieldInvalid(
       static_cast<ValidatingTextfield*>(delegate_->dialog_view()->GetViewByID(
           EditorViewController::GetInputFieldViewId(type)));
   DCHECK(textfield);
-  return textfield->invalid();
+  return textfield->GetInvalid();
 }
 
 bool PaymentRequestBrowserTestBase::IsEditorComboboxInvalid(
@@ -767,6 +760,13 @@ bool PaymentRequestBrowserTestBase::IsPayButtonEnabled() {
   return button->GetEnabled();
 }
 
+base::string16 PaymentRequestBrowserTestBase::GetPrimaryButtonLabel() const {
+  return static_cast<views::MdTextButton*>(
+             delegate_->dialog_view()->GetViewByID(
+                 static_cast<int>(DialogViewID::PAY_BUTTON)))
+      ->GetText();
+}
+
 void PaymentRequestBrowserTestBase::WaitForAnimation() {
   WaitForAnimation(delegate_->dialog_view());
 }
@@ -775,13 +775,15 @@ void PaymentRequestBrowserTestBase::WaitForAnimation(
     PaymentRequestDialogView* dialog_view) {
   ViewStack* view_stack = dialog_view->view_stack_for_testing();
   if (view_stack->slide_in_animator_->IsAnimating()) {
-    view_stack->slide_in_animator_->SetAnimationDuration(1);
+    view_stack->slide_in_animator_->SetAnimationDuration(
+        base::TimeDelta::FromMilliseconds(1));
     view_stack->slide_in_animator_->SetAnimationDelegate(
         view_stack->top(), std::unique_ptr<gfx::AnimationDelegate>(
                                new gfx::TestAnimationDelegate()));
     base::RunLoop().Run();
   } else if (view_stack->slide_out_animator_->IsAnimating()) {
-    view_stack->slide_out_animator_->SetAnimationDuration(1);
+    view_stack->slide_out_animator_->SetAnimationDuration(
+        base::TimeDelta::FromMilliseconds(1));
     view_stack->slide_out_animator_->SetAnimationDelegate(
         view_stack->top(), std::unique_ptr<gfx::AnimationDelegate>(
                                new gfx::TestAnimationDelegate()));

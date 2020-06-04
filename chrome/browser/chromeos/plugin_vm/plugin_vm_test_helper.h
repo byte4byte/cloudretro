@@ -32,13 +32,13 @@ class PluginVmTestHelper {
   void SetPolicyRequirementsToAllowPluginVm();
   void SetUserRequirementsToAllowPluginVm();
   void EnablePluginVmFeature();
-  void EnableDevMode();
   void EnterpriseEnrollDevice();
 
   void AllowPluginVm();
-  // Sets the conditions required by PluginVm to be allowed when device is not
-  // enterprise enrolled so that manual testing of PluginVm is easier.
-  void AllowPluginVmForManualTesting();
+
+  // Fakes the Plugin VM window being opened or closed.
+  void OpenShelfItem();
+  void CloseShelfItem();
 
  private:
   TestingProfile* testing_profile_;

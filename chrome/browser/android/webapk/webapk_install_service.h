@@ -70,7 +70,7 @@ class WebApkInstallService : public KeyedService {
   void InstallAsync(content::WebContents* web_contents,
                     const ShortcutInfo& shortcut_info,
                     const SkBitmap& primary_icon,
-                    const SkBitmap& badge_icon,
+                    bool is_primary_icon_maskable,
                     WebappInstallSource install_source);
 
   // Talks to the Chrome WebAPK server to update a WebAPK on the server and to
@@ -95,6 +95,7 @@ class WebApkInstallService : public KeyedService {
   void OnFinishedInstall(std::unique_ptr<LifetimeObserver> observer,
                          const ShortcutInfo& shortcut_info,
                          const SkBitmap& primary_icon,
+                         bool is_priamry_icon_maskable,
                          WebApkInstallResult result,
                          bool relax_updates,
                          const std::string& webapk_package_name);
@@ -102,11 +103,13 @@ class WebApkInstallService : public KeyedService {
   // Shows a notification that an install is in progress.
   static void ShowInstallInProgressNotification(
       const ShortcutInfo& shortcut_info,
-      const SkBitmap& primary_icon);
+      const SkBitmap& primary_icon,
+      bool is_primary_icon_maskable);
 
   // Shows a notification that an install is completed.
   static void ShowInstalledNotification(const ShortcutInfo& shortcut_info,
                                         const SkBitmap& primary_icon,
+                                        bool is_primary_icon_maskable,
                                         const std::string& webapk_package_name);
 
   content::BrowserContext* browser_context_;
@@ -115,7 +118,7 @@ class WebApkInstallService : public KeyedService {
   std::set<GURL> installs_;
 
   // Used to get |weak_ptr_|.
-  base::WeakPtrFactory<WebApkInstallService> weak_ptr_factory_;
+  base::WeakPtrFactory<WebApkInstallService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebApkInstallService);
 };

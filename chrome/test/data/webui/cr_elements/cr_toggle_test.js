@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
+// #import {keyEventOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+// #import {eventToPromise} from '../test_util.m.js';
+// clang-format on
+
 suite('cr-toggle', function() {
   let toggle;
 
@@ -46,18 +52,6 @@ suite('cr-toggle', function() {
   }
 
   /**
-   * @param {string} keyName The name of the key to trigger.
-   * @param {string} keyCode The event keyCode and code to trigger.
-   */
-  function triggerKeyPressEvent(keyName, keyCode) {
-    // Note: MockInteractions incorrectly populates |keyCode| and |code| with
-    // the same value. The intention of passing a string here is only to set
-    // |code|, since |keyCode| is not used its value doesn't matter.
-    MockInteractions.keyEventOn(
-        toggle, 'keypress', keyCode, undefined, keyName);
-  }
-
-  /**
    * Simulates dragging the toggle button left/right.
    * @param {number} moveDirection -1 for left, 1 for right, 0 when no
    *     pointermove event should be simulated.
@@ -83,7 +77,7 @@ suite('cr-toggle', function() {
     }
     toggle.dispatchEvent(
         new PointerEvent('pointerup', {pointerId: 1, clientX: xEnd}));
-    MockInteractions.tap(toggle);
+    toggle.click();
   }
 
   // Test that the control is toggled when the |checked| attribute is
@@ -167,25 +161,20 @@ suite('cr-toggle', function() {
 
   // Test that the control is toggled when the user presses the 'Enter' or
   // 'Space' key.
-  test('ToggleByKey', function() {
-    let whenChanged = test_util.eventToPromise('change', toggle);
-    triggerKeyPressEvent('Enter', 'Enter');
-    return whenChanged
-        .then(function() {
-          assertChecked();
-          whenChanged = test_util.eventToPromise('change', toggle);
-          triggerKeyPressEvent(' ', 'Space');
-          return whenChanged;
-        })
-        .then(function() {
-          assertNotChecked();
-          whenChanged = test_util.eventToPromise('change', toggle);
-          triggerKeyPressEvent('Enter', 'NumpadEnter');
-          return whenChanged;
-        })
-        .then(function() {
-          assertChecked();
-        });
+  test('ToggleByKey', () => {
+    assertNotChecked();
+    toggle.dispatchEvent(
+        new KeyboardEvent('keydown', {key: 'Enter', repeat: true}));
+    assertNotChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keydown', {key: ' '}));
+    assertNotChecked();
+    toggle.dispatchEvent(
+        new KeyboardEvent('keydown', {key: ' ', repeat: true}));
+    assertNotChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+    assertChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keyup', {key: ' '}));
+    assertNotChecked();
   });
 
   // Test that the control is not affected by user interaction when disabled.

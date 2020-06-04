@@ -7,15 +7,16 @@
 #include <memory>
 #include <string>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/notifications/win/fake_notification_image_retainer.h"
 #include "chrome/browser/notifications/win/notification_launch_id.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/grit/chromium_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -70,6 +71,8 @@ class NotificationTemplateBuilderTest : public ::testing::Test {
         NotifierId(origin_url), RichNotificationData(), nullptr /* delegate */);
     // Set a fixed timestamp, to avoid having to test against current timestamp.
     notification.set_timestamp(FixedTime());
+    notification.set_settings_button_handler(
+        message_center::SettingsButtonHandler::DELEGATE);
     return notification;
   }
 
@@ -84,7 +87,7 @@ class NotificationTemplateBuilderTest : public ::testing::Test {
     EXPECT_EQ(xml_template, expected_xml_template);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NotificationTemplateBuilderTest);
@@ -284,6 +287,32 @@ TEST_F(NotificationTemplateBuilderTest, RequireInteraction) {
   ASSERT_NO_FATAL_FAILURE(VerifyXml(notification, kExpectedXml));
 }
 
+TEST_F(NotificationTemplateBuilderTest, RequireInteractionSuppressed) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kNotificationDurationLongForRequireInteraction);
+
+  message_center::Notification notification = BuildNotification();
+  notification.set_never_timeout(true);
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="0|0|Default|0|https://example.com/|notification_id" duration="long" displayTimestamp="1998-09-04T01:02:03Z">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text placement="attribution">example.com</text>
+  </binding>
+ </visual>
+ <actions>
+  <action content="settings" placement="contextMenu" activationType="foreground" arguments="2|0|Default|0|https://example.com/|notification_id"/>
+ </actions>
+</toast>
+)";
+
+  ASSERT_NO_FATAL_FAILURE(VerifyXml(notification, kExpectedXml));
+}
+
 TEST_F(NotificationTemplateBuilderTest, NullTimestamp) {
   message_center::Notification notification = BuildNotification();
   notification.set_timestamp(base::Time());
@@ -448,6 +477,33 @@ TEST_F(NotificationTemplateBuilderTest, ProgressBar) {
   ASSERT_NO_FATAL_FAILURE(VerifyXml(notification, kExpectedXml));
 }
 
+TEST_F(NotificationTemplateBuilderTest, ProgressBar_Indeterminate) {
+  message_center::Notification notification = BuildNotification();
+
+  notification.set_type(message_center::NOTIFICATION_TYPE_PROGRESS);
+  // Setting the progress outside the [0-100] range should result in an
+  // indeterminate progress notification.
+  notification.set_progress(-1);
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="0|0|Default|0|https://example.com/|notification_id" displayTimestamp="1998-09-04T01:02:03Z">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text placement="attribution">example.com</text>
+   <progress status="" value="indeterminate"/>
+  </binding>
+ </visual>
+ <actions>
+  <action content="settings" placement="contextMenu" activationType="foreground" arguments="2|0|Default|0|https://example.com/|notification_id"/>
+ </actions>
+</toast>
+)";
+
+  ASSERT_NO_FATAL_FAILURE(VerifyXml(notification, kExpectedXml));
+}
+
 TEST_F(NotificationTemplateBuilderTest, ListEntries) {
   message_center::Notification notification = BuildNotification();
 
@@ -476,6 +532,31 @@ title4 - message4
  <actions>
   <action content="settings" placement="contextMenu" activationType="foreground" arguments="2|0|Default|0|https://example.com/|notification_id"/>
  </actions>
+</toast>
+)";
+
+  ASSERT_NO_FATAL_FAILURE(VerifyXml(notification, kExpectedXml));
+}
+
+TEST_F(NotificationTemplateBuilderTest, NoSettings) {
+  message_center::Notification notification = BuildNotification();
+
+  // Disable overriding context menu label.
+  SetContextMenuLabelForTesting(nullptr);
+
+  notification.set_settings_button_handler(
+      message_center::SettingsButtonHandler::NONE);
+
+  const wchar_t kExpectedXml[] =
+      LR"(<toast launch="0|0|Default|0|https://example.com/|notification_id" displayTimestamp="1998-09-04T01:02:03Z">
+ <visual>
+  <binding template="ToastGeneric">
+   <text>My Title</text>
+   <text>My Message</text>
+   <text placement="attribution">example.com</text>
+  </binding>
+ </visual>
+ <actions/>
 </toast>
 )";
 

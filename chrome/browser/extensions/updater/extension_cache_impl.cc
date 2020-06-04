@@ -13,6 +13,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/updater/chromeos_extension_cache_delegate.h"
@@ -33,10 +34,9 @@ ExtensionCacheImpl::ExtensionCacheImpl(
           delegate->GetCacheDir(),
           delegate->GetMaximumCacheSize(),
           delegate->GetMaximumCacheAge(),
-          base::CreateSequencedTaskRunnerWithTraits(
+          base::ThreadPool::CreateSequencedTaskRunner(
               {base::MayBlock(), task_priority,
-               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}))),
-      weak_ptr_factory_(this) {
+               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}))) {
   notification_registrar_.Add(
       this, extensions::NOTIFICATION_EXTENSION_INSTALL_ERROR,
       content::NotificationService::AllBrowserContextsAndSources());
@@ -44,8 +44,7 @@ ExtensionCacheImpl::ExtensionCacheImpl(
                                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-ExtensionCacheImpl::~ExtensionCacheImpl() {
-}
+ExtensionCacheImpl::~ExtensionCacheImpl() = default;
 
 void ExtensionCacheImpl::Start(const base::Closure& callback) {
   if (!cache_ || cache_->is_ready()) {
@@ -129,12 +128,7 @@ void ExtensionCacheImpl::Observe(int type,
     DVLOG(2) << "Extension install was declined, file kept";
     return;
   }
-
-  if (error_type ==
-          extensions::CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE &&
-      error->sandbox_failure_detail() ==
-          extensions::SandboxedUnpackerFailureReason::
-              CRX_HASH_VERIFICATION_FAILED) {
+  if (error->IsCrxVerificationFailedError()) {
     if (cache_->ShouldRetryDownload(id, hash)) {
       cache_->RemoveExtension(id, hash);
       installer->set_hash_check_failed(true);

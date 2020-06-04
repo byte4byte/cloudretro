@@ -39,14 +39,9 @@ namespace content {
 
 class WebTestDevToolsBindings::SecondaryObserver : public WebContentsObserver {
  public:
-  SecondaryObserver(WebTestDevToolsBindings* bindings, bool is_startup_test)
+  explicit SecondaryObserver(WebTestDevToolsBindings* bindings)
       : WebContentsObserver(bindings->inspected_contents()),
-        bindings_(bindings) {
-    if (is_startup_test) {
-      bindings_->NavigateDevToolsFrontend();
-      bindings_ = nullptr;
-    }
-  }
+        bindings_(bindings) {}
 
   // WebContentsObserver implementation.
   void DocumentAvailableInMainFrame() override {
@@ -88,19 +83,11 @@ GURL WebTestDevToolsBindings::MapTestURLIfNeeded(const GURL& test_url,
   base::FilePath dev_tools_path;
   bool is_debug_dev_tools = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDebugDevTools);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kCustomDevToolsFrontend)) {
-    dev_tools_path = base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-        switches::kCustomDevToolsFrontend);
-  } else {
-    std::string folder = is_debug_dev_tools ? "debug/" : "";
-    dev_tools_path = dir_exe.AppendASCII("resources/inspector/" + folder);
-  }
-
-  GURL result = net::FilePathToFileURL(
-      dev_tools_path.AppendASCII("integration_test_runner.html"));
-  std::string url_string =
-      base::StringPrintf("%s?experiments=true", result.spec().c_str());
+  // The test runner hosts DevTools resources at this path.
+  std::string url_string = "http://localhost:8000/inspector-sources/";
+  if (is_debug_dev_tools)
+    url_string += "debug/";
+  url_string += "integration_test_runner.html?experiments=true";
   if (is_debug_dev_tools)
     url_string += "&debugFrontend=true";
   url_string += "&test=" + test_url_string;
@@ -116,12 +103,6 @@ void WebTestDevToolsBindings::NavigateDevToolsFrontend() {
 }
 
 void WebTestDevToolsBindings::Attach() {
-  DCHECK(is_startup_test_);
-  ShellDevToolsBindings::Attach();
-  web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::UTF8ToUTF16("TestRunner._startupTestSetupFinished();\n//# "
-                        "sourceURL=layout_test_devtools_bindings.cc"),
-      base::NullCallback());
 }
 
 WebTestDevToolsBindings::WebTestDevToolsBindings(
@@ -130,12 +111,7 @@ WebTestDevToolsBindings::WebTestDevToolsBindings(
     const GURL& frontend_url)
     : ShellDevToolsBindings(devtools_contents, inspected_contents, nullptr),
       frontend_url_(frontend_url) {
-  is_startup_test_ =
-      frontend_url.query().find("/startup/") != std::string::npos;
-  secondary_observer_ =
-      std::make_unique<SecondaryObserver>(this, is_startup_test_);
-  if (is_startup_test_)
-    return;
+  secondary_observer_ = std::make_unique<SecondaryObserver>(this);
   NavigationController::LoadURLParams params(GetInspectedPageURL(frontend_url));
   params.transition_type = ui::PageTransitionFromInt(
       ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
@@ -144,21 +120,7 @@ WebTestDevToolsBindings::WebTestDevToolsBindings(
 
 WebTestDevToolsBindings::~WebTestDevToolsBindings() {}
 
-void WebTestDevToolsBindings::RenderProcessGone(
-    base::TerminationStatus status) {
-  if (BlinkTestController::Get())
-    BlinkTestController::Get()->DevToolsProcessCrashed();
-}
-
-void WebTestDevToolsBindings::RenderFrameCreated(
-    RenderFrameHost* render_frame_host) {
-  if (BlinkTestController::Get())
-    BlinkTestController::Get()->HandleNewRenderFrameHost(render_frame_host);
-}
-
 void WebTestDevToolsBindings::DocumentAvailableInMainFrame() {
-  if (is_startup_test_)
-    return;
   ShellDevToolsBindings::Attach();
 }
 

@@ -105,7 +105,7 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
     auto mock_timer = std::make_unique<base::MockOneShotTimer>();
     timer_ = mock_timer.get();
 
-    sharer_ = CryptAuthGroupPrivateKeySharerImpl::Factory::Get()->BuildInstance(
+    sharer_ = CryptAuthGroupPrivateKeySharerImpl::Factory::Create(
         client_factory_.get(), std::move(mock_timer));
   }
 
@@ -135,7 +135,7 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
     sharer_->ShareGroupPrivateKey(
         GetRequestContext(), group_key, id_to_encrypting_key_map,
         base::BindOnce(&DeviceSyncCryptAuthGroupPrivateKeySharerImplTest::
-                           OnGetFeatureStatusesComplete,
+                           OnShareGroupPrivateKeyComplete,
                        base::Unretained(this)));
   }
 
@@ -187,11 +187,6 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
         static_cast<int>(expected_device_ids.size()),
         share_group_private_key_request_->encrypted_group_private_keys_size());
 
-    ASSERT_TRUE(group_key_);
-    int64_t expected_group_public_key_hash;
-    crypto::SHA256HashString(group_key_->public_key(),
-                             &expected_group_public_key_hash, sizeof(int64_t));
-
     for (const cryptauthv2::EncryptedGroupPrivateKey& request_encrypted_key :
          share_group_private_key_request_->encrypted_group_private_keys()) {
       const std::string& recipient_id =
@@ -204,7 +199,7 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
 
       EXPECT_EQ(GetRequestContext().device_id(),
                 request_encrypted_key.sender_device_id());
-      EXPECT_EQ(expected_group_public_key_hash,
+      EXPECT_EQ(kGroupPublicKeyHash,
                 request_encrypted_key.group_public_key_hash());
       EXPECT_EQ(*expected_it->second,
                 request_encrypted_key.encrypted_private_key());
@@ -236,7 +231,7 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
   }
 
   void VerifyShareGroupPrivateKeyResult(
-      const CryptAuthDeviceSyncResult::ResultCode& expected_result_code) {
+      CryptAuthDeviceSyncResult::ResultCode expected_result_code) {
     ASSERT_TRUE(device_sync_result_code_);
     EXPECT_EQ(expected_result_code, device_sync_result_code_);
   }
@@ -261,8 +256,8 @@ class DeviceSyncCryptAuthGroupPrivateKeySharerImplTest
     share_group_private_key_failure_callback_ = error_callback;
   }
 
-  void OnGetFeatureStatusesComplete(
-      const CryptAuthDeviceSyncResult::ResultCode& device_sync_result_code) {
+  void OnShareGroupPrivateKeyComplete(
+      CryptAuthDeviceSyncResult::ResultCode device_sync_result_code) {
     device_sync_result_code_ = device_sync_result_code;
   }
 

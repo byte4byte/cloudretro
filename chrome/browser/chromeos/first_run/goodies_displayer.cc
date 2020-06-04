@@ -9,8 +9,10 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/profiles/profile.h"
@@ -65,7 +67,7 @@ void UpdateGoodiesPrefCantShow(bool can_show_goodies) {
 }  // namespace
 
 const char GoodiesDisplayer::kGoodiesURL[] =
-    "https://www.google.com/chrome/devices/goodies.html";
+    "https://www.google.com/chromebook/offers/";
 
 GoodiesDisplayer::GoodiesDisplayer() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -84,10 +86,10 @@ bool GoodiesDisplayer::Init() {
   const bool can_show = g_browser_process->local_state()->GetBoolean(
       prefs::kCanShowOobeGoodiesPage);
   if (can_show) {
-    base::PostTaskWithTraitsAndReplyWithResult(
+    base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-        base::Bind(&CheckGoodiesPrefAgainstOobeTimestamp),
-        base::Bind(&UpdateGoodiesPrefCantShow));
+        base::BindOnce(&CheckGoodiesPrefAgainstOobeTimestamp),
+        base::BindOnce(&UpdateGoodiesPrefCantShow));
   }
   return can_show;
 }
@@ -110,7 +112,7 @@ void GoodiesDisplayer::Delete() {
 // removes itself from BrowserListObservers, and deletes itself.
 void GoodiesDisplayer::OnBrowserSetLastActive(Browser* browser) {
   // 1. Must be an actual tabbed browser window.
-  if (browser->type() != Browser::TYPE_TABBED)
+  if (!browser->is_type_normal())
     return;
 
   // 2. Not guest or incognito session or supervised user (keep observing).

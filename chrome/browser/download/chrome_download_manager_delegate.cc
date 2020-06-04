@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
@@ -20,11 +21,11 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_completion_blocker.h"
 #include "chrome/browser/download/download_core_service.h"
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_crx_util.h"
@@ -40,6 +41,7 @@
 #include "chrome/browser/download/save_package_file_picker.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/cloud_content_scanning/binary_upload_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -48,9 +50,9 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/net/safe_search_util.h"
 #include "chrome/common/pdf_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_features.h"
@@ -60,14 +62,21 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/buildflags.h"
+#include "components/safe_browsing/core/file_type_policies.h"
+#include "components/services/quarantine/public/mojom/quarantine.mojom.h"
+#include "components/services/quarantine/quarantine_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/page_navigator.h"
+#include "content/public/browser/service_process_host.h"
 #include "content/public/common/origin_util.h"
 #include "extensions/buildflags/buildflags.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_util.h"
 #include "ppapi/buildflags/buildflags.h"
@@ -75,21 +84,16 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
-#include "chrome/browser/android/download/chrome_duplicate_download_infobar_delegate.h"
-#include "chrome/browser/android/download/download_controller.h"
-#include "chrome/browser/android/download/download_location_dialog_bridge_impl.h"
-#include "chrome/browser/android/download/download_manager_service.h"
-#include "chrome/browser/android/download/download_utils.h"
-#include "chrome/browser/android/feature_utilities.h"
+#include "chrome/browser/download/android/chrome_duplicate_download_infobar_delegate.h"
+#include "chrome/browser/download/android/download_controller.h"
+#include "chrome/browser/download/android/download_location_dialog_bridge_impl.h"
+#include "chrome/browser/download/android/download_manager_service.h"
+#include "chrome/browser/download/android/download_open_source.h"
+#include "chrome/browser/download/android/download_utils.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #else
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/drive/download_handler.h"
-#include "chrome/browser/chromeos/drive/file_system_util.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -105,6 +109,10 @@
 #include "components/offline_pages/core/client_namespace_constants.h"
 #endif
 
+#if defined(OS_WIN)
+#include "components/services/quarantine/public/cpp/quarantine_features_win.h"
+#endif
+
 using content::BrowserThread;
 using content::DownloadManager;
 using download::DownloadItem;
@@ -114,26 +122,6 @@ using safe_browsing::DownloadFileType;
 using safe_browsing::DownloadProtectionService;
 
 namespace {
-
-#if defined(FULL_SAFE_BROWSING)
-
-// String pointer used for identifying safebrowing data associated with
-// a download item.
-const char kSafeBrowsingUserDataKey[] = "Safe Browsing ID";
-
-// The state of a safebrowsing check.
-class SafeBrowsingState : public DownloadCompletionBlocker {
- public:
-  SafeBrowsingState() {}
-  ~SafeBrowsingState() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingState);
-};
-
-SafeBrowsingState::~SafeBrowsingState() {}
-
-#endif  // FULL_SAFE_BROWSING
 
 // Used with GetPlatformDownloadPath() to indicate which platform path to
 // return.
@@ -150,30 +138,16 @@ enum PlatformDownloadPathType {
 // Returns a path in the form that that is expected by platform_util::OpenItem /
 // platform_util::ShowItemInFolder / DownloadTargetDeterminer.
 //
-// DownloadItems corresponding to Drive downloads use a temporary file as the
-// target path. The paths returned by DownloadItem::GetFullPath() /
-// GetTargetFilePath() refer to this temporary file. This function looks up the
-// corresponding path in Drive for these downloads.
-//
 // How the platform path is determined is based on PlatformDownloadPathType.
 base::FilePath GetPlatformDownloadPath(Profile* profile,
                                        const DownloadItem* download,
                                        PlatformDownloadPathType path_type) {
-#if defined(OS_CHROMEOS)
-  // Drive downloads always return the target path for all types.
-  drive::DownloadHandler* drive_download_handler =
-      drive::DownloadHandler::GetForProfile(profile);
-  if (drive_download_handler &&
-      drive_download_handler->IsDriveDownload(download))
-    return drive_download_handler->GetTargetPath(download);
-#endif
-
   if (path_type == PLATFORM_TARGET_PATH)
     return download->GetTargetFilePath();
   return download->GetFullPath();
 }
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 // Callback invoked by DownloadProtectionService::CheckClientDownload.
 // |is_content_check_supported| is true if the SB service supports scanning the
 // download for malicious content.
@@ -219,16 +193,6 @@ std::string GetMimeType(const base::FilePath& path) {
   return mime_type;
 }
 
-// Reason for why danger type is DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE.
-// Used by "Download.DangerousFile.Reason" UMA metric.
-// Do not change the ordering or remove items.
-enum DangerousFileReason {
-  SB_NOT_AVAILABLE = 0,
-  SB_RETURNS_UNKOWN = 1,
-  SB_RETURNS_SAFE = 2,
-  DANGEROUS_FILE_REASON_MAX
-};
-
 // On Android, Chrome wants to warn the user of file overwrites rather than
 // uniquify.
 #if defined(OS_ANDROID)
@@ -246,17 +210,18 @@ using CanDownloadCallback =
     base::OnceCallback<void(bool /* storage permission granted */,
                             bool /*allow*/)>;
 
-void CheckCanDownload(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
-    const GURL& url,
-    const std::string& request_method,
-    base::Optional<url::Origin> request_initiator,
-    CanDownloadCallback can_download_cb) {
+void CheckCanDownload(const content::WebContents::Getter& web_contents_getter,
+                      const GURL& url,
+                      const std::string& request_method,
+                      base::Optional<url::Origin> request_initiator,
+                      bool from_download_cross_origin_redirect,
+                      CanDownloadCallback can_download_cb) {
   DownloadRequestLimiter* limiter =
       g_browser_process->download_request_limiter();
   if (limiter) {
     limiter->CanDownload(web_contents_getter, url, request_method,
                          std::move(request_initiator),
+                         from_download_cross_origin_redirect,
                          base::BindOnce(std::move(can_download_cb), true));
   }
 }
@@ -265,7 +230,7 @@ void CheckCanDownload(
 // TODO(qinmin): reuse the similar function defined in
 // DownloadResourceThrottle.
 void OnDownloadAcquireFileAccessPermissionDone(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    const content::WebContents::Getter& web_contents_getter,
     const GURL& url,
     const std::string& request_method,
     base::Optional<url::Origin> request_initiator,
@@ -273,7 +238,9 @@ void OnDownloadAcquireFileAccessPermissionDone(
     bool granted) {
   if (granted) {
     CheckCanDownload(web_contents_getter, url, request_method,
-                     std::move(request_initiator), std::move(can_download_cb));
+                     std::move(request_initiator),
+                     false /* from_download_cross_origin_redirect */,
+                     std::move(can_download_cb));
   } else {
     std::move(can_download_cb).Run(false, false);
   }
@@ -302,6 +269,45 @@ void OnDownloadLocationDetermined(
 }
 #endif  // defined(OS_ANDROID)
 
+void ConnectToQuarantineService(
+    mojo::PendingReceiver<quarantine::mojom::Quarantine> receiver) {
+#if defined(OS_WIN)
+  if (base::FeatureList::IsEnabled(quarantine::kOutOfProcessQuarantine)) {
+    content::ServiceProcessHost::Launch(
+        std::move(receiver),
+        content::ServiceProcessHost::Options()
+            .WithDisplayName("Quarantine Service")
+            .WithSandboxType(service_manager::SandboxType::kNoSandbox)
+            .Pass());
+    return;
+  }
+#endif
+
+  mojo::MakeSelfOwnedReceiver(std::make_unique<quarantine::QuarantineImpl>(),
+                              std::move(receiver));
+}
+
+bool IsDangerTypeBlocked(download::DownloadDangerType danger_type) {
+  return (danger_type == download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE ||
+          danger_type ==
+              download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED ||
+          danger_type ==
+              download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK);
+}
+
+void OnCheckExistingDownloadPathDone(
+    std::unique_ptr<DownloadTargetInfo> target_info,
+    content::DownloadTargetCallback callback,
+    bool file_exists) {
+  if (file_exists)
+    target_info->result = download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED;
+
+  std::move(callback).Run(
+      target_info->target_path, target_info->target_disposition,
+      target_info->danger_type, target_info->mixed_content_status,
+      target_info->intermediate_path, target_info->result);
+}
+
 }  // namespace
 
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
@@ -309,9 +315,6 @@ ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
       next_download_id_(download::DownloadItem::kInvalidId),
       next_id_retrieved_(false),
       download_prefs_(new DownloadPrefs(profile)),
-      disk_access_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
       is_file_picker_showing_(false) {
 #if defined(OS_ANDROID)
   location_dialog_bridge_.reset(new DownloadLocationDialogBridgeImpl);
@@ -360,8 +363,8 @@ void ChromeDownloadManagerDelegate::Shutdown() {
 
 content::DownloadIdCallback
 ChromeDownloadManagerDelegate::GetDownloadIdReceiverCallback() {
-  return base::Bind(&ChromeDownloadManagerDelegate::SetNextId,
-                    weak_ptr_factory_.GetWeakPtr());
+  return base::BindOnce(&ChromeDownloadManagerDelegate::SetNextId,
+                        weak_ptr_factory_.GetWeakPtr());
 }
 
 void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
@@ -378,50 +381,47 @@ void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
 
   IdCallbackVector callbacks;
   id_callbacks_.swap(callbacks);
-  for (IdCallbackVector::const_iterator it = callbacks.begin();
-       it != callbacks.end(); ++it) {
-    ReturnNextId(*it);
-  }
+  for (auto& callback : callbacks)
+    ReturnNextId(std::move(callback));
 }
 
 void ChromeDownloadManagerDelegate::GetNextId(
-    const content::DownloadIdCallback& callback) {
+    content::DownloadIdCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (profile_->IsOffTheRecord()) {
     content::BrowserContext::GetDownloadManager(profile_->GetOriginalProfile())
-        ->GetNextId(callback);
+        ->GetNextId(std::move(callback));
     return;
   }
   if (!next_id_retrieved_) {
-    id_callbacks_.push_back(callback);
+    id_callbacks_.push_back(std::move(callback));
     return;
   }
-  ReturnNextId(callback);
+  ReturnNextId(std::move(callback));
 }
 
 void ChromeDownloadManagerDelegate::ReturnNextId(
-    const content::DownloadIdCallback& callback) {
+    content::DownloadIdCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!profile_->IsOffTheRecord());
   // kInvalidId is returned to indicate the error.
-  callback.Run(next_download_id_);
+  std::move(callback).Run(next_download_id_);
   if (next_download_id_ != download::DownloadItem::kInvalidId)
     ++next_download_id_;
 }
 
 bool ChromeDownloadManagerDelegate::DetermineDownloadTarget(
     DownloadItem* download,
-    const content::DownloadTargetCallback& callback) {
+    content::DownloadTargetCallback* callback) {
   if (download->GetTargetFilePath().empty() &&
       download->GetMimeType() == kPDFMimeType && !download->HasUserGesture()) {
     ReportPDFLoadStatus(PDFLoadStatus::kTriggeredNoGestureDriveByDownload);
   }
 
   DownloadTargetDeterminer::CompletionCallback target_determined_callback =
-      base::Bind(&ChromeDownloadManagerDelegate::OnDownloadTargetDetermined,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 download->GetId(),
-                 callback);
+      base::BindOnce(&ChromeDownloadManagerDelegate::OnDownloadTargetDetermined,
+                     weak_ptr_factory_.GetWeakPtr(), download->GetId(),
+                     std::move(*callback));
   base::FilePath download_path =
       GetPlatformDownloadPath(profile_, download, PLATFORM_TARGET_PATH);
   DownloadPathReservationTracker::FilenameConflictAction action =
@@ -432,7 +432,7 @@ bool ChromeDownloadManagerDelegate::DetermineDownloadTarget(
 #endif
   DownloadTargetDeterminer::Start(download, download_path, action,
                                   download_prefs_.get(), this,
-                                  target_determined_callback);
+                                  std::move(target_determined_callback));
   return true;
 }
 
@@ -454,12 +454,14 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
 // static
 void ChromeDownloadManagerDelegate::DisableSafeBrowsing(DownloadItem* item) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-      item->GetUserData(&kSafeBrowsingUserDataKey));
+      item->GetUserData(&SafeBrowsingState::kSafeBrowsingUserDataKey));
   if (!state) {
-    state = new SafeBrowsingState();
-    item->SetUserData(&kSafeBrowsingUserDataKey, base::WrapUnique(state));
+    auto new_state = std::make_unique<SafeBrowsingState>();
+    state = new_state.get();
+    item->SetUserData(&SafeBrowsingState::kSafeBrowsingUserDataKey,
+                      std::move(new_state));
   }
   state->CompleteDownload();
 #endif
@@ -467,31 +469,32 @@ void ChromeDownloadManagerDelegate::DisableSafeBrowsing(DownloadItem* item) {
 
 bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
     DownloadItem* item,
-    const base::Closure& internal_complete_callback) {
+    base::OnceClosure internal_complete_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   if (!download_prefs_->safebrowsing_for_trusted_sources_enabled() &&
       download_prefs_->IsFromTrustedSource(*item)) {
     return true;
   }
 
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-      item->GetUserData(&kSafeBrowsingUserDataKey));
+      item->GetUserData(&SafeBrowsingState::kSafeBrowsingUserDataKey));
   if (!state) {
     // Begin the safe browsing download protection check.
+    state = new SafeBrowsingState();
+    state->set_callback(std::move(internal_complete_callback));
+    item->SetUserData(&SafeBrowsingState::kSafeBrowsingUserDataKey,
+                      base::WrapUnique(state));
     DownloadProtectionService* service = GetDownloadProtectionService();
     if (service) {
       DVLOG(2) << __func__ << "() Start SB download check for download = "
                << item->DebugString(false);
-      state = new SafeBrowsingState();
-      state->set_callback(internal_complete_callback);
-      item->SetUserData(&kSafeBrowsingUserDataKey, base::WrapUnique(state));
-      service->CheckClientDownload(
-          item,
-          base::Bind(&ChromeDownloadManagerDelegate::CheckClientDownloadDone,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     item->GetId()));
-      return false;
+      if (service->MaybeCheckClientDownload(
+              item, base::Bind(
+                        &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
+                        weak_ptr_factory_.GetWeakPtr(), item->GetId()))) {
+        return false;
+      }
     }
 
     // In case the service was disabled between the download starting and now,
@@ -516,15 +519,14 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
             download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE,
             download::DOWNLOAD_INTERRUPT_REASON_NONE);
       }
-      UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
-                                SB_NOT_AVAILABLE, DANGEROUS_FILE_REASON_MAX);
-      base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                               internal_complete_callback);
+      state->CompleteDownload();
       return false;
     }
-  } else if (!state->is_complete()) {
+  } else if (!state->is_complete() &&
+             item->GetDangerType() !=
+                 download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED) {
     // Don't complete the download until we have an answer.
-    state->set_callback(internal_complete_callback);
+    state->set_callback(std::move(internal_complete_callback));
     return false;
   }
 
@@ -534,24 +536,34 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
 
 void ChromeDownloadManagerDelegate::ShouldCompleteDownloadInternal(
     uint32_t download_id,
-    const base::Closure& user_complete_callback) {
+    base::OnceClosure user_complete_callback) {
   DownloadItem* item = download_manager_->GetDownload(download_id);
   if (!item)
     return;
-  if (ShouldCompleteDownload(item, user_complete_callback))
-    user_complete_callback.Run();
+  // This should be called only once.
+  base::RepeatingClosure callback = base::BindRepeating(
+      [](base::OnceClosure callback) { std::move(callback).Run(); },
+      base::Passed(&user_complete_callback));
+  if (ShouldCompleteDownload(item, callback)) {
+    // |callback| should not have run when ShouldCompleteDownload() returns
+    // true.
+    std::move(callback).Run();
+  }
 }
 
 bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(
     DownloadItem* item,
-    const base::Closure& user_complete_callback) {
-  return IsDownloadReadyForCompletion(item, base::Bind(
-      &ChromeDownloadManagerDelegate::ShouldCompleteDownloadInternal,
-      weak_ptr_factory_.GetWeakPtr(), item->GetId(), user_complete_callback));
+    base::OnceClosure user_complete_callback) {
+  return IsDownloadReadyForCompletion(
+      item, base::BindOnce(
+                &ChromeDownloadManagerDelegate::ShouldCompleteDownloadInternal,
+                weak_ptr_factory_.GetWeakPtr(), item->GetId(),
+                std::move(user_complete_callback)));
 }
 
 bool ChromeDownloadManagerDelegate::ShouldOpenDownload(
-    DownloadItem* item, const content::DownloadOpenDelayedCallback& callback) {
+    DownloadItem* item,
+    content::DownloadOpenDelayedCallback callback) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   if (download_crx_util::IsExtensionDownload(*item) &&
       !extensions::WebstoreInstaller::GetAssociatedApproval(*item)) {
@@ -565,7 +577,7 @@ bool ChromeDownloadManagerDelegate::ShouldOpenDownload(
         extensions::NOTIFICATION_CRX_INSTALLER_DONE,
         content::Source<extensions::CrxInstaller>(crx_installer.get()));
 
-    crx_installers_[crx_installer.get()] = callback;
+    crx_installers_[crx_installer.get()] = std::move(callback);
     // The status text and percent complete indicator will change now
     // that we are installing a CRX.  Update observers so that they pick
     // up the change.
@@ -607,15 +619,10 @@ bool ChromeDownloadManagerDelegate::InterceptDownloadIfApplicable(
 void ChromeDownloadManagerDelegate::GetSaveDir(
     content::BrowserContext* browser_context,
     base::FilePath* website_save_dir,
-    base::FilePath* download_save_dir,
-    bool* skip_dir_check) {
+    base::FilePath* download_save_dir) {
   *website_save_dir = download_prefs_->SaveFilePath();
   DCHECK(!website_save_dir->empty());
   *download_save_dir = download_prefs_->DownloadPath();
-  *skip_dir_check = false;
-#if defined(OS_CHROMEOS)
-  *skip_dir_check = drive::util::IsUnderDriveMountPoint(*website_save_dir);
-#endif
 }
 
 void ChromeDownloadManagerDelegate::ChooseSavePath(
@@ -623,15 +630,11 @@ void ChromeDownloadManagerDelegate::ChooseSavePath(
     const base::FilePath& suggested_path,
     const base::FilePath::StringType& default_extension,
     bool can_save_as_complete,
-    const content::SavePackagePathPickedCallback& callback) {
+    content::SavePackagePathPickedCallback callback) {
   // Deletes itself.
-  new SavePackageFilePicker(
-      web_contents,
-      suggested_path,
-      default_extension,
-      can_save_as_complete,
-      download_prefs_.get(),
-      callback);
+  new SavePackageFilePicker(web_contents, suggested_path, default_extension,
+                            can_save_as_complete, download_prefs_.get(),
+                            std::move(callback));
 }
 
 void ChromeDownloadManagerDelegate::SanitizeSavePackageResourceName(
@@ -646,6 +649,16 @@ void ChromeDownloadManagerDelegate::SanitizeSavePackageResourceName(
   base::FilePath default_filename = base::FilePath::FromUTF8Unsafe(
       l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
   *filename = filename->AddExtension(default_filename.BaseName().value());
+}
+
+void ChromeDownloadManagerDelegate::SanitizeDownloadParameters(
+    download::DownloadUrlParameters* params) {
+  if (profile_->GetPrefs()->GetBoolean(prefs::kForceGoogleSafeSearch)) {
+    GURL safe_url;
+    safe_search_util::ForceGoogleSafeSearch(params->url(), &safe_url);
+    if (!safe_url.is_empty())
+      params->set_url(std::move(safe_url));
+  }
 }
 
 void ChromeDownloadManagerDelegate::OpenDownloadUsingPlatformHandler(
@@ -669,17 +682,14 @@ void ChromeDownloadManagerDelegate::OpenDownload(DownloadItem* download) {
                                          false /* show_download_in_folder */);
 
 #if defined(OS_ANDROID)
-  DownloadUtils::OpenDownload(download, 0 /* download source */);
-  return;
-#endif
-
+  DownloadUtils::OpenDownload(download, DownloadOpenSource::kUnknown);
+#else
   if (!DownloadItemModel(download).ShouldPreferOpeningInBrowser()) {
     RecordDownloadOpenMethod(DOWNLOAD_OPEN_METHOD_DEFAULT_PLATFORM);
     OpenDownloadUsingPlatformHandler(download);
     return;
   }
 
-#if !defined(OS_ANDROID)
   content::WebContents* web_contents =
       content::DownloadItemUtils::GetWebContents(download);
   Browser* browser =
@@ -701,9 +711,6 @@ void ChromeDownloadManagerDelegate::OpenDownload(DownloadItem* download) {
     browser->OpenURL(params);
 
   RecordDownloadOpenMethod(DOWNLOAD_OPEN_METHOD_DEFAULT_BROWSER);
-#else   // OS_ANDROID
-  // ShouldPreferOpeningInBrowser() should never be true on Android.
-  NOTREACHED();
 #endif  // OS_ANDROID
 }
 
@@ -750,30 +757,6 @@ void ChromeDownloadManagerDelegate::ShowDownloadInShell(
   platform_util::ShowItemInFolder(profile_, platform_path);
 }
 
-void ContinueCheckingForFileExistence(
-    content::CheckForFileExistenceCallback callback) {
-  std::move(callback).Run(false);
-}
-
-void ChromeDownloadManagerDelegate::CheckForFileExistence(
-    DownloadItem* download,
-    content::CheckForFileExistenceCallback callback) {
-#if defined(OS_CHROMEOS)
-  drive::DownloadHandler* drive_download_handler =
-      drive::DownloadHandler::GetForProfile(profile_);
-  if (drive_download_handler &&
-      drive_download_handler->IsDriveDownload(download)) {
-    drive_download_handler->CheckForFileExistence(download,
-                                                  std::move(callback));
-    return;
-  }
-#endif
-  base::PostTaskAndReplyWithResult(
-      disk_access_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&base::PathExists, download->GetTargetFilePath()),
-      std::move(callback));
-}
-
 std::string
 ChromeDownloadManagerDelegate::ApplicationClientIdForFileScanning() {
   return std::string(chrome::kApplicationClientIDStringForAVScanning);
@@ -782,23 +765,23 @@ ChromeDownloadManagerDelegate::ApplicationClientIdForFileScanning() {
 DownloadProtectionService*
     ChromeDownloadManagerDelegate::GetDownloadProtectionService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   safe_browsing::SafeBrowsingService* sb_service =
       g_browser_process->safe_browsing_service();
-  if (sb_service && sb_service->download_protection_service() &&
-      profile_->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled)) {
+  if (sb_service && sb_service->download_protection_service()) {
     return sb_service->download_protection_service();
   }
 #endif
   return nullptr;
 }
 
-void ChromeDownloadManagerDelegate::ShouldBlockDownload(
+void ChromeDownloadManagerDelegate::GetMixedContentStatus(
     download::DownloadItem* download,
     const base::FilePath& virtual_path,
-    const ShouldBlockDownloadCallback& callback) {
+    const GetMixedContentStatusCallback& callback) {
   DCHECK(download);
-  callback.Run(ShouldBlockFileAsMixedContent(virtual_path, *download));
+  callback.Run(
+      GetMixedContentStatusForDownload(profile_, virtual_path, download));
 }
 
 void ChromeDownloadManagerDelegate::NotifyExtensions(
@@ -830,20 +813,15 @@ void ChromeDownloadManagerDelegate::ReserveVirtualPath(
     const base::FilePath& virtual_path,
     bool create_directory,
     DownloadPathReservationTracker::FilenameConflictAction conflict_action,
-    const DownloadTargetDeterminerDelegate::ReservedPathCallback& callback) {
+    DownloadTargetDeterminerDelegate::ReservedPathCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!virtual_path.empty());
-#if defined(OS_CHROMEOS)
-  if (drive::util::IsUnderDriveMountPoint(virtual_path)) {
-    callback.Run(PathValidationResult::SUCCESS, virtual_path);
-    return;
-  }
-#endif
+
   base::FilePath document_dir;
   base::PathService::Get(chrome::DIR_USER_DOCUMENTS, &document_dir);
   DownloadPathReservationTracker::GetReservedPath(
       download, virtual_path, download_prefs_->DownloadPath(), document_dir,
-      create_directory, conflict_action, callback);
+      create_directory, conflict_action, std::move(callback));
 }
 
 void ChromeDownloadManagerDelegate::RequestConfirmation(
@@ -857,8 +835,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
 #if defined(OS_ANDROID)
   content::WebContents* web_contents =
       content::DownloadItemUtils::GetWebContents(download);
-  if (!chrome::android::IsNoTouchModeEnabled() &&
-      base::FeatureList::IsEnabled(features::kDownloadsLocationChange)) {
+  if (base::FeatureList::IsEnabled(features::kDownloadsLocationChange)) {
     if (reason == DownloadConfirmationReason::SAVE_AS) {
       // If this is a 'Save As' download, just run without confirmation.
       callback.Run(DownloadConfirmationResult::CONTINUE_WITHOUT_CONFIRMATION,
@@ -874,8 +851,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
       }
 
       if (reason == DownloadConfirmationReason::TARGET_PATH_NOT_WRITEABLE) {
-        OnDownloadCanceled(
-            download, DownloadController::CANCEL_REASON_NO_EXTERNAL_STORAGE);
+        OnDownloadCanceled(download, true /* has_no_external_storage */);
         callback.Run(DownloadConfirmationResult::CANCELED, base::FilePath());
         return;
       }
@@ -884,9 +860,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
       // is no way to prompt user for a dialog. This could happen after chrome
       // gets killed, and user tries to resume a download while another app has
       // created the target file (not the temporary .crdownload file).
-      OnDownloadCanceled(
-          download,
-          DownloadController::CANCEL_REASON_CANNOT_DETERMINE_DOWNLOAD_TARGET);
+      OnDownloadCanceled(download, false /* has_no_external_storage */);
       callback.Run(DownloadConfirmationResult::CANCELED, base::FilePath());
     } else if (reason == DownloadConfirmationReason::TARGET_CONFLICT) {
       // If there is a file that already has the same name, try to generate a
@@ -909,7 +883,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
           download, suggested_path, download_dir,
           base::FilePath() /* fallback_directory */, true,
           DownloadPathReservationTracker::UNIQUIFY,
-          base::BindRepeating(
+          base::BindOnce(
               &ChromeDownloadManagerDelegate::GenerateUniqueFileNameDone,
               weak_ptr_factory_.GetWeakPtr(), native_window, callback));
       return;
@@ -947,8 +921,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
         return;
 
       case DownloadConfirmationReason::TARGET_PATH_NOT_WRITEABLE:
-        OnDownloadCanceled(
-            download, DownloadController::CANCEL_REASON_NO_EXTERNAL_STORAGE);
+        OnDownloadCanceled(download, true /* has_no_external_storage */);
         callback.Run(DownloadConfirmationResult::CANCELED, base::FilePath());
         return;
 
@@ -982,9 +955,7 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
       // gets killed, and user tries to resume a download while another app has
       // created the target file (not the temporary .crdownload file).
       case DownloadConfirmationReason::UNEXPECTED:
-        OnDownloadCanceled(
-            download,
-            DownloadController::CANCEL_REASON_CANNOT_DETERMINE_DOWNLOAD_TARGET);
+        OnDownloadCanceled(download, false /* has_no_external_storage */);
         callback.Run(DownloadConfirmationResult::CANCELED, base::FilePath());
         return;
     }
@@ -1075,8 +1046,8 @@ void ChromeDownloadManagerDelegate::GenerateUniqueFileNameDone(
 
 void ChromeDownloadManagerDelegate::OnDownloadCanceled(
     download::DownloadItem* download,
-    DownloadController::DownloadCancelReason reason) {
-  DownloadManagerService::OnDownloadCanceled(download, reason);
+    bool has_no_external_storage) {
+  DownloadManagerService::OnDownloadCanceled(download, has_no_external_storage);
 }
 #endif  // defined(OS_ANDROID)
 
@@ -1085,15 +1056,6 @@ void ChromeDownloadManagerDelegate::DetermineLocalPath(
     const base::FilePath& virtual_path,
     const DownloadTargetDeterminerDelegate::LocalPathCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(OS_CHROMEOS)
-  drive::DownloadHandler* drive_download_handler =
-      drive::DownloadHandler::GetForProfile(profile_);
-  if (drive_download_handler) {
-    drive_download_handler->SubstituteDriveDownloadPath(
-        virtual_path, download, callback);
-    return;
-  }
-#endif
   callback.Run(virtual_path);
 }
 
@@ -1103,7 +1065,7 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrl(
     const CheckDownloadUrlCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   safe_browsing::DownloadProtectionService* service =
       GetDownloadProtectionService();
   if (service) {
@@ -1111,10 +1073,11 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrl(
         service->IsSupportedDownload(*download, suggested_path);
     DVLOG(2) << __func__ << "() Start SB URL check for download = "
              << download->DebugString(false);
-    service->CheckDownloadUrl(download,
-                              base::Bind(&CheckDownloadUrlDone, callback,
-                                         is_content_check_supported));
-    return;
+    if (service->MaybeCheckDownloadUrl(
+            download, base::BindOnce(&CheckDownloadUrlDone, callback,
+                                     is_content_check_supported))) {
+      return;
+    }
   }
 #endif
   callback.Run(download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
@@ -1124,20 +1087,28 @@ void ChromeDownloadManagerDelegate::GetFileMimeType(
     const base::FilePath& path,
     const GetFileMimeTypeCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock()}, base::Bind(&GetMimeType, path), callback);
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock()}, base::BindOnce(&GetMimeType, path),
+      base::BindOnce(callback));
 }
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
     uint32_t download_id,
     safe_browsing::DownloadCheckResult result) {
   DownloadItem* item = download_manager_->GetDownload(download_id);
-  if (!item || (item->GetState() != DownloadItem::IN_PROGRESS))
+  if (!item || (item->GetState() != DownloadItem::IN_PROGRESS &&
+                item->GetDangerType() !=
+                    download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING)) {
     return;
+  }
 
   DVLOG(2) << __func__ << "() download = " << item->DebugString(false)
            << " verdict = " << static_cast<int>(result);
+
+  // Indicates whether we expect future verdicts on this download. For example,
+  // if Safe Browsing is performing deep scanning, we will receive a more
+  // specific verdict later.
   bool is_pending_scanning = false;
 
   // We only mark the content as being dangerous if the download's safety state
@@ -1145,7 +1116,9 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
   if (item->GetDangerType() == download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS ||
       item->GetDangerType() ==
           download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT ||
-      item->GetDangerType() == download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING) {
+      item->GetDangerType() == download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING ||
+      item->GetDangerType() ==
+          download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING) {
     download::DownloadDangerType danger_type =
         download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS;
     switch (result) {
@@ -1154,9 +1127,6 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
         if (DownloadItemModel(item).GetDangerLevel() !=
             DownloadFileType::NOT_DANGEROUS) {
           danger_type = download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
-          UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
-                                    SB_RETURNS_UNKOWN,
-                                    DANGEROUS_FILE_REASON_MAX);
         }
         break;
       case safe_browsing::DownloadCheckResult::SAFE:
@@ -1166,8 +1136,6 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
         if (DownloadItemModel(item).GetDangerLevel() ==
             DownloadFileType::DANGEROUS) {
           danger_type = download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
-          UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
-                                    SB_RETURNS_SAFE, DANGEROUS_FILE_REASON_MAX);
         }
         break;
       case safe_browsing::DownloadCheckResult::DANGEROUS:
@@ -1192,27 +1160,59 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
       case safe_browsing::DownloadCheckResult::BLOCKED_PASSWORD_PROTECTED:
         danger_type = download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED;
         break;
+      case safe_browsing::DownloadCheckResult::BLOCKED_TOO_LARGE:
+        danger_type = download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE;
+        break;
+      case safe_browsing::DownloadCheckResult::SENSITIVE_CONTENT_WARNING:
+        danger_type = download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING;
+        break;
+      case safe_browsing::DownloadCheckResult::SENSITIVE_CONTENT_BLOCK:
+        danger_type = download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK;
+        break;
+      case safe_browsing::DownloadCheckResult::DEEP_SCANNED_SAFE:
+        danger_type = download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE;
+        break;
+      case safe_browsing::DownloadCheckResult::PROMPT_FOR_SCANNING:
+        danger_type = download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING;
+        is_pending_scanning = true;
+        break;
+      case safe_browsing::DownloadCheckResult::BLOCKED_UNSUPPORTED_FILE_TYPE:
+        danger_type =
+            download::DOWNLOAD_DANGER_TYPE_BLOCKED_UNSUPPORTED_FILETYPE;
+        break;
     }
     DCHECK_NE(danger_type,
               download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT);
 
-    if (danger_type != download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS) {
-      if (ShouldBlockFile(danger_type, item)) {
-        item->OnContentCheckCompleted(
-            // Specifying a dangerous type here would take precendence over the
-            // blocking of the file.
-            download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-            download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED);
+    if (item->GetState() == DownloadItem::COMPLETE &&
+        item->GetDangerType() ==
+            download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING) {
+      // If the file was opened during async scanning, we override the danger
+      // type, since the user can no longer discard the download.
+      if (danger_type != download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS) {
+        item->OnAsyncScanningCompleted(
+            download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS);
       } else {
-        item->OnContentCheckCompleted(danger_type,
-                                      download::DOWNLOAD_INTERRUPT_REASON_NONE);
+        item->OnAsyncScanningCompleted(danger_type);
       }
+    } else if (ShouldBlockFile(danger_type, item)) {
+      // Specifying a dangerous type here would take precedence over the
+      // blocking of the file. For BLOCKED_TOO_LARGE and
+      // BLOCKED_PASSWORD_PROTECTED, we want to display more clear UX, so
+      // allow those danger types.
+      if (!IsDangerTypeBlocked(danger_type))
+        danger_type = download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS;
+      item->OnContentCheckCompleted(
+          danger_type, download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED);
+    } else {
+      item->OnContentCheckCompleted(danger_type,
+                                    download::DOWNLOAD_INTERRUPT_REASON_NONE);
     }
   }
 
   if (!is_pending_scanning) {
     SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
-        item->GetUserData(&kSafeBrowsingUserDataKey));
+        item->GetUserData(&SafeBrowsingState::kSafeBrowsingUserDataKey));
     state->CompleteDownload();
   }
 }
@@ -1231,15 +1231,15 @@ void ChromeDownloadManagerDelegate::Observe(
   scoped_refptr<extensions::CrxInstaller> installer =
       content::Source<extensions::CrxInstaller>(source).ptr();
   content::DownloadOpenDelayedCallback callback =
-      crx_installers_[installer.get()];
+      std::move(crx_installers_[installer.get()]);
   crx_installers_.erase(installer.get());
-  callback.Run(installer->did_handle_successfully());
+  std::move(callback).Run(installer->did_handle_successfully());
 #endif
 }
 
 void ChromeDownloadManagerDelegate::OnDownloadTargetDetermined(
     uint32_t download_id,
-    const content::DownloadTargetCallback& callback,
+    content::DownloadTargetCallback callback,
     std::unique_ptr<DownloadTargetInfo> target_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DownloadItem* item = download_manager_->GetDownload(download_id);
@@ -1262,19 +1262,13 @@ void ChromeDownloadManagerDelegate::OnDownloadTargetDetermined(
     target_info->danger_type = download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS;
   }
 
-  if (base::FeatureList::IsEnabled(
-          download::features::kPreventDownloadsWithSamePath)) {
-    // A separate reservation with the same target path may exist.
-    // If so, cancel the current reservation.
-    if (DownloadPathReservationTracker::CheckDownloadPathForExistingDownload(
-            target_info->target_path, item)) {
-      target_info->result = download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED;
-    }
-  }
-
-  callback.Run(target_info->target_path, target_info->target_disposition,
-               target_info->danger_type, target_info->intermediate_path,
-               target_info->result);
+  base::FilePath target_path = target_info->target_path;
+  // A separate reservation with the same target path may exist.
+  // If so, cancel the current reservation.
+  DownloadPathReservationTracker::CheckDownloadPathForExistingDownload(
+      target_path, item,
+      base::BindOnce(&OnCheckExistingDownloadPathDone, std::move(target_info),
+                     std::move(callback)));
 }
 
 bool ChromeDownloadManagerDelegate::IsOpenInBrowserPreferreredForFile(
@@ -1313,53 +1307,14 @@ bool ChromeDownloadManagerDelegate::ShouldBlockFile(
   DownloadPrefs::DownloadRestriction download_restriction =
       download_prefs_->download_restriction();
 
-  if (item &&
-      base::FeatureList::IsEnabled(features::kDisallowUnsafeHttpDownloads)) {
-    // Check field trial for an override of the default unsafe mime-type.
-    const std::string kDefaultUnsafeMimeType = "application/";
-    std::string field_trial_arg = base::GetFieldTrialParamValueByFeature(
-        features::kDisallowUnsafeHttpDownloads,
-        features::kDisallowUnsafeHttpDownloadsParamName);
-    std::vector<base::StringPiece> unsafe_mime_types = base::SplitStringPiece(
-        field_trial_arg, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-    if (unsafe_mime_types.empty())
-      unsafe_mime_types.push_back(kDefaultUnsafeMimeType);
+  if (IsDangerTypeBlocked(danger_type))
+    return true;
 
-    bool is_final_origin_secure = content::IsOriginSecure(item->GetURL());
-    bool is_redirect_chain_secure = true;
-    for (const auto& url : item->GetUrlChain()) {
-      if (!content::IsOriginSecure(url)) {
-        is_redirect_chain_secure = false;
-        break;
-      }
-    }
-
-    if (!(is_final_origin_secure && is_redirect_chain_secure)) {
-      bool is_unsafe_download = false;
-      for (const auto& prefix : unsafe_mime_types) {
-        if (base::StartsWith(item->GetMimeType(), prefix,
-                             base::CompareCase::INSENSITIVE_ASCII)) {
-          is_unsafe_download = true;
-          break;
-        }
-      }
-      if (is_unsafe_download) {
-        content::WebContents* web_contents =
-            content::DownloadItemUtils::GetWebContents(item);
-        if (web_contents) {
-          web_contents->GetMainFrame()->AddMessageToConsole(
-              blink::mojom::ConsoleMessageLevel::kWarning,
-              base::StringPrintf(
-                  "The download of %s has been blocked. Either the final "
-                  "download origin or one of the origins in the redirect "
-                  "chain leading to the download was insecure. Downloading "
-                  "unsafe file types over HTTP is deprecated.",
-                  item->GetURL().spec().c_str()));
-        }
-        return true;
-      }
-    }
-  }
+  // TODO(crbug/1061111): Move this into IsDangerTypeBlocked once the UX is
+  // ready.
+  if (danger_type ==
+      download::DOWNLOAD_DANGER_TYPE_BLOCKED_UNSUPPORTED_FILETYPE)
+    return true;
 
   switch (download_restriction) {
     case (DownloadPrefs::DownloadRestriction::NONE):
@@ -1387,13 +1342,14 @@ bool ChromeDownloadManagerDelegate::ShouldBlockFile(
       LOG(ERROR) << "Invalid download restruction value: "
                  << static_cast<int>(download_restriction);
   }
+
   return false;
 }
 
 void ChromeDownloadManagerDelegate::MaybeSendDangerousDownloadOpenedReport(
     DownloadItem* download,
     bool show_download_in_folder) {
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   safe_browsing::DownloadProtectionService* service =
       GetDownloadProtectionService();
   if (service) {
@@ -1404,10 +1360,12 @@ void ChromeDownloadManagerDelegate::MaybeSendDangerousDownloadOpenedReport(
 }
 
 void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    const content::WebContents::Getter& web_contents_getter,
     const GURL& url,
     const std::string& request_method,
     base::Optional<url::Origin> request_initiator,
+    bool from_download_cross_origin_redirect,
+    bool content_initiated,
     content::CheckDownloadAllowedCallback check_download_allowed_cb) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CanDownloadCallback cb = base::BindOnce(
@@ -1416,13 +1374,19 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
 #if defined(OS_ANDROID)
   DownloadControllerBase::Get()->AcquireFileAccessPermission(
       web_contents_getter,
-      base::Bind(&OnDownloadAcquireFileAccessPermissionDone,
-                 web_contents_getter, url, request_method,
-                 std::move(request_initiator), base::Passed(&cb)));
+      base::BindOnce(&OnDownloadAcquireFileAccessPermissionDone,
+                     web_contents_getter, url, request_method,
+                     std::move(request_initiator), base::Passed(&cb)));
 #else
   CheckCanDownload(web_contents_getter, url, request_method,
-                   std::move(request_initiator), std::move(cb));
+                   std::move(request_initiator),
+                   from_download_cross_origin_redirect, std::move(cb));
 #endif
+}
+
+download::QuarantineConnectionCallback
+ChromeDownloadManagerDelegate::GetQuarantineConnectionCallback() {
+  return base::BindRepeating(&ConnectToQuarantineService);
 }
 
 void ChromeDownloadManagerDelegate::OnCheckDownloadAllowedComplete(
@@ -1440,4 +1404,16 @@ void ChromeDownloadManagerDelegate::OnCheckDownloadAllowedComplete(
   }
 
   std::move(check_download_allowed_cb).Run(allow);
+}
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+ChromeDownloadManagerDelegate::SafeBrowsingState::~SafeBrowsingState() {}
+
+const char ChromeDownloadManagerDelegate::SafeBrowsingState::
+    kSafeBrowsingUserDataKey[] = "Safe Browsing ID";
+#endif  // FULL_SAFE_BROWSING
+
+base::WeakPtr<ChromeDownloadManagerDelegate>
+ChromeDownloadManagerDelegate::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
 }

@@ -106,6 +106,11 @@
 class PrefService;
 class Profile;
 
+namespace apps {
+struct FileHandler;
+struct FileHandlerInfo;
+}
+
 namespace extensions {
 struct EntryInfo;
 }
@@ -125,6 +130,7 @@ enum TaskType {
   DEPRECATED_TASK_TYPE_DRIVE_APP,
   TASK_TYPE_ARC_APP,
   TASK_TYPE_CROSTINI_APP,
+  TASK_TYPE_WEB_APP,
   // The enum values must be kept in sync with FileManagerTaskType in
   // tools/metrics/histograms/enums.xml. Since enums for histograms are
   // append-only (for keeping the number consistent across versions), new values
@@ -240,10 +246,10 @@ std::string TaskDescriptorToId(const TaskDescriptor& task_descriptor);
 // "task_id" looks like.
 bool ParseTaskID(const std::string& task_id, TaskDescriptor* task);
 
-// The callback is used for ExecuteFileTask(). Will be called with true if
-// the file task execution is successful, or false if unsuccessful.
+// The callback is used for ExecuteFileTask().
 typedef base::OnceCallback<void(
-    extensions::api::file_manager_private::TaskResult result)>
+    extensions::api::file_manager_private::TaskResult result,
+    std::string error_message)>
     FileTaskFinishedCallback;
 
 // Executes file handler task for each element of |file_urls|.
@@ -265,9 +271,29 @@ bool ExecuteFileTask(Profile* profile,
                      const std::vector<storage::FileSystemURL>& file_urls,
                      FileTaskFinishedCallback done);
 
+// Returns true if a file handler is enabled. Some handlers such as
+// import-crostini-image can be disabled at runtime by enterprise policy.
+bool IsFileHandlerEnabled(Profile* profile,
+                          const apps::FileHandlerInfo& file_handler_info);
+
 // Returns true if a file handler matches with entries as good match.
-bool IsGoodMatchFileHandler(
-    const extensions::FileHandlerInfo& file_handler_info,
+//
+// TODO(crbug.com/1060026): This can be removed in favour of
+// IsGoodMatchAppsFileHandler once apps::FileHandlerInfo is completely
+// replaced by apps::FileHandler.
+bool IsGoodMatchFileHandler(const apps::FileHandlerInfo& file_handler_info,
+                            const std::vector<extensions::EntryInfo>& entries);
+
+// Returns true if an apps::FileHandler matches with all of |entries|; that is,
+// if it doesn't include a blanket wild-card MIME type or file extension, it
+// doesn't include text/* and match on an unsupported text MIME type, and if
+// |entries| doesn't include directories.
+//
+// TODO(crbug.com/1060026): For now, this is called only in web_file_tasks,
+// where the new apps::FileHandler representation is used. Once this replaces
+// apps::FileHandlerInfo, this can be used everywhere.
+bool IsGoodMatchAppsFileHandler(
+    const apps::FileHandler& file_Handler,
     const std::vector<extensions::EntryInfo>& entries);
 
 // Finds the file handler tasks (apps declaring "file_handlers" in
@@ -308,6 +334,12 @@ void FindAllTypesOfTasks(Profile* profile,
 void ChooseAndSetDefaultTask(const PrefService& pref_service,
                              const std::vector<extensions::EntryInfo>& entries,
                              std::vector<FullTaskDescriptor>* tasks);
+
+// Returns whether |path| is a RAW image file according to its extension. Note
+// that since none of the extensions of interest are "known" mime types (per
+// net/mime_util.cc), it's enough to simply check the extension rather than
+// using MimeTypeCollector. TODO(crbug/1030935): Remove this.
+bool IsRawImage(const base::FilePath& path);
 
 }  // namespace file_tasks
 }  // namespace file_manager

@@ -5,12 +5,19 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_TOOLBAR_BUTTON_PROVIDER_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_TOOLBAR_BUTTON_PROVIDER_H_
 
+#include "chrome/browser/ui/page_action/page_action_icon_type.h"
+
 class AppMenuButton;
+class AvatarToolbarButton;
 class BrowserActionsContainer;
-class OmniboxPageActionIconContainerView;
+class ExtensionsToolbarContainer;
+class PageActionIconView;
+class ReloadButton;
+class ToolbarButton;
 
 namespace gfx {
 class Rect;
+class Size;
 }
 
 namespace views {
@@ -23,19 +30,29 @@ class View;
 class ToolbarButtonProvider {
  public:
   // Gets the browser actions container.
+  // TODO(pbos): Transition callers off of this function.
   virtual BrowserActionsContainer* GetBrowserActionsContainer() = 0;
 
-  // Gets the omnibox page action icon container.
-  virtual OmniboxPageActionIconContainerView*
-  GetOmniboxPageActionIconContainerView() = 0;
+  // Gets the ExtensionsToolbarContainer.
+  virtual ExtensionsToolbarContainer* GetExtensionsToolbarContainer() = 0;
+
+  // Get the default size for toolbar buttons.
+  virtual gfx::Size GetToolbarButtonSize() const = 0;
+
+  // Gets the default view to use as an anchor for extension dialogs if the
+  // ToolbarActionView is not visible or available.
+  virtual views::View* GetDefaultExtensionDialogAnchorView() = 0;
+
+  // Gets the specified page action icon.
+  virtual PageActionIconView* GetPageActionIconView(
+      PageActionIconType type) = 0;
 
   // Gets the app menu button.
   virtual AppMenuButton* GetAppMenuButton() = 0;
 
-  // Gets the area available for the find bar in widget space where
-  // |contents_height| is the amount of vertical space available, otherwise if
-  // there is no appropriate anchor point returns empty gfx::Rect.
-  virtual gfx::Rect GetFindBarBoundingBox(int contents_height) const = 0;
+  // Returns a bounding box for the find bar in widget coordinates given the
+  // bottom of the contents container.
+  virtual gfx::Rect GetFindBarBoundingBox(int contents_bottom) = 0;
 
   // Gives the toolbar focus.
   virtual void FocusToolbar() = 0;
@@ -43,8 +60,20 @@ class ToolbarButtonProvider {
   // Returns the toolbar as an AccessiblePaneView.
   virtual views::AccessiblePaneView* GetAsAccessiblePaneView() = 0;
 
-  // Returns the toolbar as an anchor point.
-  virtual views::View* GetAnchorView() = 0;
+  // Returns the appropriate anchor view for the page action icon.
+  virtual views::View* GetAnchorView(PageActionIconType type) = 0;
+
+  // See comment in browser_window.h for more info.
+  virtual void ZoomChangedForActiveTab(bool can_show_bubble) = 0;
+
+  // Returns the avatar button.
+  virtual AvatarToolbarButton* GetAvatarToolbarButton() = 0;
+
+  // Returns the back button.
+  virtual ToolbarButton* GetBackButton() = 0;
+
+  // Returns the reload button.
+  virtual ReloadButton* GetReloadButton() = 0;
 
   // TODO(calamity): Move other buttons and button actions into here.
  protected:

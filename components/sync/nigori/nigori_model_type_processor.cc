@@ -4,10 +4,14 @@
 
 #include "components/sync/nigori/nigori_model_type_processor.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/base/data_type_histogram.h"
+#include "components/sync/base/sync_base_switches.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/commit_queue.h"
+#include "components/sync/engine_impl/conflict_resolver.h"
 #include "components/sync/model_impl/processor_entity.h"
 #include "components/sync/nigori/forwarding_model_type_processor.h"
 #include "components/sync/nigori/nigori_sync_bridge.h"
@@ -21,7 +25,7 @@ namespace {
 // TODO(mamir): remove those and adjust the code accordingly. Similarly in
 // tests.
 const char kNigoriStorageKey[] = "NigoriStorageKey";
-const char kNigoriClientTagHash[] = "NigoriClientTagHash";
+const char kRawNigoriClientTagHash[] = "NigoriClientTagHash";
 
 }  // namespace
 
@@ -89,14 +93,15 @@ void NigoriModelTypeProcessor::GetLocalChanges(
 
 void NigoriModelTypeProcessor::OnCommitCompleted(
     const sync_pb::ModelTypeState& type_state,
-    const CommitResponseDataList& response_list) {
+    const CommitResponseDataList& committed_response_list,
+    const FailedCommitResponseDataList& error_response_list) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(entity_);
 
   model_type_state_ = type_state;
-  if (!response_list.empty()) {
-    entity_->ReceiveCommitResponse(response_list[0], /*commit_only=*/false,
-                                   ModelType::NIGORI);
+  if (!committed_response_list.empty()) {
+    entity_->ReceiveCommitResponse(committed_response_list[0],
+                                   /*commit_only=*/false, ModelType::NIGORI);
   } else {
     // If the entity hasn't been mentioned in response_list, then it's not
     // committed and we should reset its commit_requested_sequence_number so
@@ -129,12 +134,12 @@ void NigoriModelTypeProcessor::OnUpdateReceived(
     if (updates.empty()) {
       error = bridge_->MergeSyncData(base::nullopt);
     } else {
-      DCHECK(!updates[0]->entity->is_deleted());
+      DCHECK(!updates[0].entity.is_deleted());
       entity_ = ProcessorEntity::CreateNew(
-          kNigoriStorageKey, kNigoriClientTagHash, updates[0]->entity->id,
-          updates[0]->entity->creation_time);
-      entity_->RecordAcceptedUpdate(*updates[0]);
-      error = bridge_->MergeSyncData(std::move(*updates[0]->entity));
+          kNigoriStorageKey, ClientTagHash::FromHashed(kRawNigoriClientTagHash),
+          updates[0].entity.id, updates[0].entity.creation_time);
+      entity_->RecordAcceptedUpdate(updates[0]);
+      error = bridge_->MergeSyncData(std::move(updates[0].entity));
     }
     if (error) {
       ReportError(*error);
@@ -150,21 +155,26 @@ void NigoriModelTypeProcessor::OnUpdateReceived(
   DCHECK(entity_);
   // We assume the bridge will issue errors in case of deletions. Therefore, we
   // are adding the following DCHECK to simplify the code.
-  DCHECK(!updates[0]->entity->is_deleted());
+  DCHECK(!updates[0].entity.is_deleted());
 
-  if (entity_->UpdateIsReflection(updates[0]->response_version)) {
+  if (entity_->UpdateIsReflection(updates[0].response_version)) {
     // Seen this update before; just ignore it.
     bridge_->ApplySyncChanges(/*data=*/base::nullopt);
     return;
   }
 
   if (entity_->IsUnsynced()) {
-    // TODO(mamir): conflict resolution
-    NOTIMPLEMENTED();
-  } else if (!entity_->MatchesData(*updates[0]->entity)) {
+    // Remote update always win in case of conflict, because bridge takes care
+    // of reapplying pending local changes after processing the remote update.
+    entity_->RecordForcedUpdate(updates[0]);
+    error = bridge_->ApplySyncChanges(std::move(updates[0].entity));
+    UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                              ConflictResolver::NIGORI_MERGE,
+                              ConflictResolver::CONFLICT_RESOLUTION_SIZE);
+  } else if (!entity_->MatchesData(updates[0].entity)) {
     // Inform the bridge of the new or updated data.
-    entity_->RecordAcceptedUpdate(*updates[0]);
-    error = bridge_->ApplySyncChanges(std::move(*updates[0]->entity));
+    entity_->RecordAcceptedUpdate(updates[0]);
+    error = bridge_->ApplySyncChanges(std::move(updates[0].entity));
   }
 
   if (error) {
@@ -208,14 +218,9 @@ void NigoriModelTypeProcessor::OnSyncStopping(
     }
 
     case syncer::CLEAR_METADATA: {
-      // The bridge is responsible for deleting all data and metadata upon
-      // disabling sync.
-      bridge_->ApplyDisableSyncChanges();
+      ClearMetadataAndReset();
       model_ready_to_sync_ = false;
-      entity_.reset();
-      model_type_state_ = sync_pb::ModelTypeState();
-      model_type_state_.mutable_progress_marker()->set_data_type_id(
-          sync_pb::EntitySpecifics::kNigoriFieldNumber);
+
       // The model is still ready to sync (with the same |bridge_|) and same
       // sync metadata.
       ModelReadyToSync(bridge_, NigoriMetadataBatch());
@@ -228,35 +233,34 @@ void NigoriModelTypeProcessor::GetAllNodesForDebugging(
     AllNodesCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  std::unique_ptr<base::DictionaryValue> root_node;
   std::unique_ptr<EntityData> entity_data = bridge_->GetData();
-  if (entity_data) {
-    if (entity_) {
-      const sync_pb::EntityMetadata& metadata = entity_->metadata();
-      // Set id value as directory, "s" means server.
-      entity_data->id = "s" + metadata.server_id();
-      entity_data->creation_time = ProtoTimeToTime(metadata.creation_time());
-      entity_data->modification_time =
-          ProtoTimeToTime(metadata.modification_time());
-    }
-    root_node = entity_data->ToDictionaryValue();
-    if (entity_) {
-      root_node->Set("metadata", EntityMetadataToValue(entity_->metadata()));
-    }
-  } else {
-    root_node = std::make_unique<base::DictionaryValue>();
+  if (!entity_data) {
+    std::move(callback).Run(syncer::NIGORI,
+                            std::make_unique<base::ListValue>());
+    return;
+  }
+
+  if (entity_) {
+    const sync_pb::EntityMetadata& metadata = entity_->metadata();
+    // Set id value as directory, "s" means server.
+    entity_data->id = "s" + metadata.server_id();
+    entity_data->creation_time = ProtoTimeToTime(metadata.creation_time());
+    entity_data->modification_time =
+        ProtoTimeToTime(metadata.modification_time());
+  }
+  std::unique_ptr<base::DictionaryValue> root_node;
+  root_node = entity_data->ToDictionaryValue();
+  if (entity_) {
+    root_node->Set("metadata", EntityMetadataToValue(entity_->metadata()));
   }
 
   // Function isTypeRootNode in sync_node_browser.js use PARENT_ID and
   // UNIQUE_SERVER_TAG to check if the node is root node. isChildOf in
   // sync_node_browser.js uses modelType to check if root node is parent of real
-  // data node. NON_UNIQUE_NAME will be the name of node to display.
-  root_node->SetString("ID", "NIGORI_ROOT");
+  // data node.
   root_node->SetString("PARENT_ID", "r");
   root_node->SetString("UNIQUE_SERVER_TAG", "Nigori");
-  root_node->SetBoolean("IS_DIR", false);
-  root_node->SetString("modelType", "Nigori");
-  root_node->SetString("NON_UNIQUE_NAME", "Nigori");
+  root_node->SetString("modelType", ModelTypeToString(NIGORI));
 
   auto all_nodes = std::make_unique<base::ListValue>();
   all_nodes->Append(std::move(root_node));
@@ -300,7 +304,7 @@ void NigoriModelTypeProcessor::ModelReadyToSync(
     model_type_state_ = std::move(nigori_metadata.model_type_state);
     sync_pb::EntityMetadata metadata =
         std::move(*nigori_metadata.entity_metadata);
-    metadata.set_client_tag_hash(kNigoriClientTagHash);
+    metadata.set_client_tag_hash(kRawNigoriClientTagHash);
     entity_ = ProcessorEntity::CreateFromMetadata(kNigoriStorageKey,
                                                   std::move(metadata));
   } else {
@@ -333,6 +337,15 @@ void NigoriModelTypeProcessor::Put(std::unique_ptr<EntityData> entity_data) {
 
   entity_->MakeLocalChange(std::move(entity_data));
   NudgeForCommitIfNeeded();
+}
+
+bool NigoriModelTypeProcessor::IsEntityUnsynced() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (entity_ == nullptr) {
+    return false;
+  }
+
+  return entity_->IsUnsynced();
 }
 
 NigoriMetadataBatch NigoriModelTypeProcessor::GetMetadata() {
@@ -378,6 +391,11 @@ bool NigoriModelTypeProcessor::IsConnectedForTest() const {
   return IsConnected();
 }
 
+const sync_pb::ModelTypeState&
+NigoriModelTypeProcessor::GetModelTypeStateForTest() {
+  return model_type_state_;
+}
+
 bool NigoriModelTypeProcessor::IsTrackingMetadata() {
   return model_type_state_.initial_sync_done();
 }
@@ -400,16 +418,28 @@ void NigoriModelTypeProcessor::ConnectIfReady() {
     return;
   }
 
-  if (!model_type_state_.has_cache_guid()) {
+  if (base::FeatureList::IsEnabled(
+          switches::kSyncNigoriRemoveMetadataOnCacheGuidMismatch)) {
+    if (model_type_state_.initial_sync_done() &&
+        model_type_state_.cache_guid() != activation_request_.cache_guid) {
+      ClearMetadataAndReset();
+      DCHECK(model_ready_to_sync_);
+    }
+
     model_type_state_.set_cache_guid(activation_request_.cache_guid);
-  } else if (model_type_state_.cache_guid() != activation_request_.cache_guid) {
-    // TODO(mamir): implement error handling in case of cache GUID mismatch.
-    NOTIMPLEMENTED();
+  } else {
+    // Legacy logic.
+    if (!model_type_state_.has_cache_guid()) {
+      model_type_state_.set_cache_guid(activation_request_.cache_guid);
+    } else if (model_type_state_.cache_guid() !=
+               activation_request_.cache_guid) {
+      // Not implemented in legacy codepath.
+    }
   }
 
   // Cache GUID verification earlier above guarantees the user is the same.
   model_type_state_.set_authenticated_account_id(
-      activation_request_.authenticated_account_id);
+      activation_request_.authenticated_account_id.ToString());
 
   auto activation_response = std::make_unique<DataTypeActivationResponse>();
   activation_response->model_type_state = model_type_state_;
@@ -434,6 +464,16 @@ void NigoriModelTypeProcessor::NudgeForCommitIfNeeded() const {
   if (entity_->RequiresCommitRequest()) {
     worker_->NudgeForCommit();
   }
+}
+
+void NigoriModelTypeProcessor::ClearMetadataAndReset() {
+  // The bridge is responsible for deleting all data and metadata upon
+  // disabling sync.
+  bridge_->ApplyDisableSyncChanges();
+  entity_.reset();
+  model_type_state_ = sync_pb::ModelTypeState();
+  model_type_state_.mutable_progress_marker()->set_data_type_id(
+      sync_pb::EntitySpecifics::kNigoriFieldNumber);
 }
 
 }  // namespace syncer

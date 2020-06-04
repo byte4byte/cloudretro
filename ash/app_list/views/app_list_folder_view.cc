@@ -42,7 +42,7 @@
 #include "ui/views/view_model.h"
 #include "ui/views/view_model_utils.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -56,28 +56,18 @@ constexpr int kIndexChildItems = 2;
 constexpr int kIndexFolderHeader = 3;
 constexpr int kIndexPageSwitcher = 4;
 
-int GetCompositorActivatedFrameCount(ui::Compositor* compositor) {
-  return compositor ? compositor->activated_frame_count() : 0;
-}
-
 // Transit from the background of the folder item's icon to the opened
 // folder's background when opening the folder. Transit the other way when
 // closing the folder.
 class BackgroundAnimation : public AppListFolderView::Animation,
-                            public views::AnimationDelegateViews {
+                            public ui::ImplicitAnimationObserver {
  public:
   BackgroundAnimation(bool show,
                       AppListFolderView* folder_view,
                       views::View* background_view)
-      : AnimationDelegateViews(background_view),
-        show_(show),
-        animation_(this),
+      : show_(show),
         folder_view_(folder_view),
-        background_view_(background_view) {
-    animation_.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
-    animation_.SetSlideDuration(
-        AppListConfig::instance().folder_transition_in_duration_ms());
-  }
+        background_view_(background_view) {}
 
   ~BackgroundAnimation() override = default;
 
@@ -85,76 +75,58 @@ class BackgroundAnimation : public AppListFolderView::Animation,
   // AppListView::Animation:
   void ScheduleAnimation() override {
     // Calculate the source and target states.
-    const int icon_radius = AppListConfig::instance().folder_icon_radius();
+    const int icon_radius =
+        folder_view_->GetAppListConfig().folder_icon_radius();
     const int folder_radius =
-        AppListConfig::instance().folder_background_radius();
-    from_radius_ = show_ ? icon_radius : folder_radius;
-    to_radius_ = show_ ? folder_radius : icon_radius;
-    from_rect_ = show_ ? folder_view_->folder_item_icon_bounds()
-                       : background_view_->bounds();
-    from_rect_ -= background_view_->bounds().OffsetFromOrigin();
-    to_rect_ = show_ ? background_view_->bounds()
-                     : folder_view_->folder_item_icon_bounds();
-    to_rect_ -= background_view_->bounds().OffsetFromOrigin();
+        folder_view_->GetAppListConfig().folder_background_radius();
+    const int from_radius = show_ ? icon_radius : folder_radius;
+    const int to_radius = show_ ? folder_radius : icon_radius;
+    gfx::Rect from_rect = show_ ? folder_view_->folder_item_icon_bounds()
+                                : background_view_->bounds();
+    from_rect -= background_view_->bounds().OffsetFromOrigin();
+    gfx::Rect to_rect = show_ ? background_view_->bounds()
+                              : folder_view_->folder_item_icon_bounds();
+    to_rect -= background_view_->bounds().OffsetFromOrigin();
     const SkColor background_color =
-        AppListConfig::instance().folder_background_color();
+        folder_view_->GetAppListConfig().folder_background_color();
     const SkColor from_color =
-        show_ ? AppListConfig::instance().folder_bubble_color()
+        show_ ? folder_view_->GetAppListConfig().folder_bubble_color()
               : background_color;
     const SkColor to_color =
         show_ ? background_color
-              : AppListConfig::instance().folder_bubble_color();
+              : folder_view_->GetAppListConfig().folder_bubble_color();
 
     background_view_->layer()->SetColor(from_color);
-    background_view_->layer()->SetClipRect(from_rect_);
+    background_view_->layer()->SetClipRect(from_rect);
     background_view_->layer()->SetRoundedCornerRadius(
-        gfx::RoundedCornersF(from_radius_));
+        gfx::RoundedCornersF(from_radius));
 
-    // We use the layer animation for the color, while gfx::Animation to update
-    // the corner radius and the clip rect. They can be slightly inconsistent
-    // since these animations run independently.
     ui::ScopedLayerAnimationSettings settings(
         background_view_->layer()->GetAnimator());
-    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-        AppListConfig::instance().folder_transition_in_duration_ms()));
+    settings.SetTransitionDuration(
+        folder_view_->GetAppListConfig().folder_transition_in_duration());
     settings.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
+    settings.AddObserver(this);
     background_view_->layer()->SetColor(to_color);
-
-    animation_.Show();
-  }
-
-  bool IsAnimationRunning() override { return animation_.is_animating(); }
-
-  // gfx::AnimationDelegate
-  void AnimationProgressed(const gfx::Animation* animation) override {
-    const double progress = animation->GetCurrentValue();
-    const int current_radius =
-        gfx::Tween::IntValueBetween(progress, from_radius_, to_radius_);
+    background_view_->layer()->SetClipRect(to_rect);
     background_view_->layer()->SetRoundedCornerRadius(
-        gfx::RoundedCornersF(current_radius));
-    const gfx::Rect current_bounds =
-        gfx::Tween::RectValueBetween(progress, from_rect_, to_rect_);
-    background_view_->layer()->SetClipRect(current_bounds);
+        gfx::RoundedCornersF(to_radius));
+    is_animating_ = true;
   }
-  void AnimationEnded(const gfx::Animation* animation) override {
+
+  bool IsAnimationRunning() override { return is_animating_; }
+
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override {
+    is_animating_ = false;
     folder_view_->RecordAnimationSmoothness();
-  }
-  void AnimationCanceled(const gfx::Animation* animation) override {
-    AnimationEnded(animation);
   }
 
   // True if opening the folder.
   const bool show_;
 
-  // The source and target state of the background's corner radius.
-  int from_radius_ = 0;
-  int to_radius_ = 0;
+  bool is_animating_ = false;
 
-  // The source and target state of the bounds of the background.
-  gfx::Rect from_rect_;
-  gfx::Rect to_rect_;
-
-  gfx::SlideAnimation animation_;
   AppListFolderView* const folder_view_;  // Not owned.
   views::View* const background_view_;    // Not owned.
 
@@ -172,14 +144,14 @@ class FolderItemTitleAnimation : public AppListFolderView::Animation,
         animation_(this),
         folder_view_(folder_view) {
     // Calculate the source and target states.
-    from_color_ = show_ ? AppListConfig::instance().grid_title_color()
+    from_color_ = show_ ? folder_view_->GetAppListConfig().grid_title_color()
                         : SK_ColorTRANSPARENT;
     to_color_ = show_ ? SK_ColorTRANSPARENT
-                      : AppListConfig::instance().grid_title_color();
+                      : folder_view_->GetAppListConfig().grid_title_color();
 
     animation_.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
     animation_.SetSlideDuration(
-        AppListConfig::instance().folder_transition_in_duration_ms());
+        folder_view_->GetAppListConfig().folder_transition_in_duration());
   }
 
   ~FolderItemTitleAnimation() override = default;
@@ -257,7 +229,7 @@ class TopIconAnimation : public AppListFolderView::Animation,
     for (size_t i = 0; i < first_page_item_views_bounds.size(); ++i) {
       const AppListItem* top_item =
           folder_view_->folder_item()->item_list()->item_at(i);
-      if (top_item->icon().isNull() ||
+      if (top_item->GetIcon(folder_view_->GetAppListConfig().type()).isNull() ||
           (folder_view_->items_grid_view()->drag_view() &&
            top_item == folder_view_->items_grid_view()->drag_view()->item())) {
         // The item being dragged should be excluded.
@@ -270,8 +242,10 @@ class TopIconAnimation : public AppListFolderView::Animation,
                                   : folder_view_->folder_item_icon_bounds();
 
       auto icon_view = std::make_unique<TopIconAnimationView>(
-          top_item->icon(), base::UTF8ToUTF16(top_item->GetDisplayName()),
-          scaled_rect, show_, item_in_folder_icon);
+          folder_view_->items_grid_view(),
+          top_item->GetIcon(folder_view_->GetAppListConfig().type()),
+          base::UTF8ToUTF16(top_item->GetDisplayName()), scaled_rect, show_,
+          item_in_folder_icon);
       auto* icon_view_ptr = icon_view.get();
 
       icon_view_ptr->AddObserver(this);
@@ -313,24 +287,29 @@ class TopIconAnimation : public AppListFolderView::Animation,
  private:
   std::vector<gfx::Rect> GetTopItemViewsBoundsInFolderIcon() {
     std::vector<gfx::Rect> top_icons_bounds = FolderImage::GetTopIconsBounds(
+        folder_view_->GetAppListConfig(),
         folder_view_->folder_item_icon_bounds(),
         std::min(folder_view_->folder_item()->ChildItemCount(),
                  FolderImage::kNumFolderTopItems));
     std::vector<gfx::Rect> top_item_views_bounds;
-    const int icon_dimension = AppListConfig::instance().grid_icon_dimension();
-    const int tile_width = AppListConfig::instance().grid_tile_width();
-    const int tile_height = AppListConfig::instance().grid_tile_height();
+    const int icon_dimension =
+        folder_view_->GetAppListConfig().grid_icon_dimension();
+    const int icon_bottom_padding =
+        folder_view_->GetAppListConfig().grid_icon_bottom_padding();
+    const int tile_width = folder_view_->GetAppListConfig().grid_tile_width();
+    const int tile_height = folder_view_->GetAppListConfig().grid_tile_height();
     for (gfx::Rect bounds : top_icons_bounds) {
       // Calculate the item view's bounds based on the icon bounds.
-      int scale = icon_dimension / bounds.width();
-      bounds.set_y(bounds.y() -
-                   (tile_height -
-                    AppListConfig::instance().grid_icon_bottom_padding() -
-                    icon_dimension) /
-                       2 / scale);
-      bounds.set_x(bounds.x() - (tile_width - icon_dimension) / 2 / scale);
-      bounds.set_size(gfx::Size(tile_width / scale, tile_height / scale));
-      top_item_views_bounds.emplace_back(bounds);
+      gfx::Rect item_bounds(
+          (icon_dimension - tile_width) / 2,
+          (icon_dimension + icon_bottom_padding - tile_height) / 2, tile_width,
+          tile_height);
+      item_bounds = gfx::ScaleToRoundedRect(
+          item_bounds, bounds.width() / static_cast<float>(icon_dimension),
+          bounds.height() / static_cast<float>(icon_dimension));
+      item_bounds.Offset(bounds.x(), bounds.y());
+
+      top_item_views_bounds.emplace_back(item_bounds);
     }
     return top_item_views_bounds;
   }
@@ -346,7 +325,7 @@ class TopIconAnimation : public AppListFolderView::Animation,
   std::vector<gfx::Rect> GetFirstPageItemViewsBounds() {
     std::vector<gfx::Rect> items_bounds;
     const size_t count =
-        std::min(AppListConfig::instance().max_folder_items_per_page(),
+        std::min(folder_view_->GetAppListConfig().max_folder_items_per_page(),
                  folder_view_->folder_item()->ChildItemCount());
     for (size_t i = 0; i < count; ++i) {
       const gfx::Rect rect =
@@ -408,8 +387,8 @@ class ContentsContainerAnimation : public AppListFolderView::Animation,
     ui::ScopedLayerAnimationSettings animation(layer->GetAnimator());
     animation.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
     animation.AddObserver(this);
-    animation.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-        AppListConfig::instance().folder_transition_in_duration_ms()));
+    animation.SetTransitionDuration(
+        folder_view_->GetAppListConfig().folder_transition_in_duration());
     layer->SetTransform(show_ ? gfx::Transform() : transform);
     layer->SetOpacity(show_ ? 1.0f : 0.0f);
 
@@ -493,6 +472,12 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
           contents_view_->app_list_view()->is_tablet_mode()));
   view_model_->Add(page_switcher_, kIndexPageSwitcher);
 
+  show_hide_metrics_reporter_ =
+      std::make_unique<FolderShowHideAnimationReporter>();
+  show_hide_metrics_recorder_ =
+      std::make_unique<AppListAnimationMetricsRecorder>(
+          show_hide_metrics_reporter_.get());
+
   model_->AddObserver(this);
 }
 
@@ -519,8 +504,9 @@ void AppListFolderView::SetAppListFolderItem(AppListFolderItem* folder) {
 void AppListFolderView::ScheduleShowHideAnimation(bool show,
                                                   bool hide_for_reparent) {
   CreateOpenOrCloseFolderAccessibilityEvent(show);
-  animation_start_frame_number_ =
-      GetCompositorActivatedFrameCount(GetCompositor());
+  show_hide_metrics_recorder_->OnAnimationStart(
+      GetAppListConfig().folder_transition_in_duration(),
+      GetWidget()->GetCompositor());
 
   hide_for_reparent_ = hide_for_reparent;
 
@@ -550,8 +536,7 @@ void AppListFolderView::ScheduleShowHideAnimation(bool show,
 gfx::Size AppListFolderView::CalculatePreferredSize() const {
   gfx::Size size = items_grid_view_->GetTileGridSizeWithPadding();
   gfx::Size header_size = folder_header_view_->GetPreferredSize();
-  const int folder_padding =
-      AppListConfig::instance().grid_tile_spacing_in_folder();
+  const int folder_padding = GetAppListConfig().grid_tile_spacing_in_folder();
   size.Enlarge(folder_padding * 2, folder_padding + kFolderHeaderPadding * 2 +
                                        header_size.height());
   return size;
@@ -583,7 +568,7 @@ void AppListFolderView::OnAppListItemWillBeDeleted(AppListItem* item) {
   if (item == folder_item_) {
     items_grid_view_->OnFolderItemRemoved();
     folder_header_view_->OnFolderItemRemoved();
-    folder_item_ = NULL;
+    folder_item_ = nullptr;
 
     // Do not change state if it is hidden.
     if (hide_for_reparent_ || contents_container_->layer()->opacity() == 0.0f)
@@ -592,9 +577,9 @@ void AppListFolderView::OnAppListItemWillBeDeleted(AppListItem* item) {
     // If the folder item associated with this view is removed from the model,
     // (e.g. the last item in the folder was deleted), reset the view and signal
     // the container view to show the app list instead.
-    // Pass NULL to ShowApps() to avoid triggering animation from the deleted
+    // Pass nullptr to ShowApps() to avoid triggering animation from the deleted
     // folder.
-    container_view_->ShowApps(NULL);
+    container_view_->ShowApps(nullptr);
   }
 }
 
@@ -615,18 +600,34 @@ void AppListFolderView::UpdatePreferredBounds() {
   preferred_bounds_ = gfx::Rect(GetPreferredSize());
   preferred_bounds_ += (icon_bounds_in_container.CenterPoint() -
                         preferred_bounds_.CenterPoint());
+
   gfx::Rect container_bounds = container_view_->GetContentsBounds();
+  const gfx::Size search_box_size =
+      contents_view_->GetSearchBoxSize(AppListState::kStateApps);
+  // Adjust for apps container margins.
+  if (app_list_features::IsScalableAppListEnabled()) {
+    container_bounds.Inset(container_view_->CalculateMarginsForAvailableBounds(
+        container_bounds, search_box_size, true /*for_full_container_bounds*/));
+  } else {
+    container_bounds.Inset(
+        0, GetAppListConfig().search_box_fullscreen_top_padding(), 0, 0);
+  }
+  // Avoid overlap with the search box widget.
   container_bounds.Inset(
-      0,
-      AppListConfig::instance().search_box_fullscreen_top_padding() +
-          search_box::kSearchBoxPreferredHeight +
-          SearchBoxView::GetFocusRingSpacing(),
-      0, 0);
+      8, search_box_size.height() + SearchBoxView::GetFocusRingSpacing(), 8, 0);
   preferred_bounds_.AdjustToFit(container_bounds);
 
   // Calculate the folder icon's bounds relative to this view.
   folder_item_icon_bounds_ =
       icon_bounds_in_container - preferred_bounds_.OffsetFromOrigin();
+
+  // Adjust folder item icon bounds for RTL (cannot use GetMirroredRect(), as
+  // the current view bounds might not match the preferred bounds).
+  if (base::i18n::IsRTL()) {
+    folder_item_icon_bounds_.set_x(preferred_bounds_.width() -
+                                   folder_item_icon_bounds_.x() -
+                                   folder_item_icon_bounds_.width());
+  }
 }
 
 int AppListFolderView::GetYOffsetForFolder() {
@@ -659,30 +660,16 @@ bool AppListFolderView::IsAnimationRunning() const {
   return top_icon_animation_ && top_icon_animation_->IsAnimationRunning();
 }
 
+const AppListConfig& AppListFolderView::GetAppListConfig() const {
+  return items_grid_view_->GetAppListConfig();
+}
+
 AppListItemView* AppListFolderView::GetActivatedFolderItemView() {
   return container_view_->apps_grid_view()->activated_folder_item_view();
 }
 
 void AppListFolderView::RecordAnimationSmoothness() {
-  ui::Compositor* compositor = GetCompositor();
-  // Do not record animation smoothness if |compositor| is nullptr.
-  if (!compositor)
-    return;
-  // Do not record if the start frame number doesn't exist; either animation is
-  // not scheduled or the record happens.
-  if (!animation_start_frame_number_.has_value())
-    return;
-
-  const int end_frame_number = GetCompositorActivatedFrameCount(compositor);
-  if (end_frame_number > *animation_start_frame_number_) {
-    RecordFolderShowHideAnimationSmoothness(
-        end_frame_number - *animation_start_frame_number_,
-        AppListConfig::instance().folder_transition_in_duration_ms(),
-        compositor->refresh_rate());
-  }
-  // Resets the frame number so that further invocation won't record the
-  // metrics.
-  animation_start_frame_number_.reset();
+  show_hide_metrics_recorder_->OnAnimationEnd(GetWidget()->GetCompositor());
 }
 
 void AppListFolderView::OnTabletModeChanged(bool started) {
@@ -709,8 +696,7 @@ void AppListFolderView::CalculateIdealBounds() {
   view_model_->set_ideal_bounds(kIndexBackground, GetContentsBounds());
   view_model_->set_ideal_bounds(kIndexContentsContainer, GetContentsBounds());
 
-  const int folder_padding =
-      AppListConfig::instance().grid_tile_spacing_in_folder();
+  const int folder_padding = GetAppListConfig().grid_tile_spacing_in_folder();
   rect.Inset(folder_padding, folder_padding);
 
   // Calculate bounds for items grid view.
@@ -728,11 +714,13 @@ void AppListFolderView::CalculateIdealBounds() {
   // Calculate bounds for page_switcher.
   gfx::Rect page_switcher_frame(rect);
   gfx::Size page_switcher_size = page_switcher_->GetPreferredSize();
-  page_switcher_size.set_height(
-      AppListConfig::instance().folder_header_height());
   page_switcher_frame.set_x(page_switcher_frame.right() -
                             page_switcher_size.width());
-  page_switcher_frame.set_y(header_frame.y());
+  // The page switcher has a different height than the folder header, but it
+  // still needs to be aligned with it.
+  page_switcher_frame.set_y(
+      header_frame.y() -
+      (page_switcher_size.height() - header_frame.height()) / 2);
   page_switcher_frame.set_size(page_switcher_size);
   view_model_->set_ideal_bounds(kIndexPageSwitcher, page_switcher_frame);
 }
@@ -790,7 +778,9 @@ void AppListFolderView::DispatchDragEventForReparent(
     AppsGridView::Pointer pointer,
     const gfx::Point& drag_point_in_folder_grid) {
   AppsGridView* root_grid = container_view_->apps_grid_view();
-  gfx::Point drag_point_in_root_grid = drag_point_in_folder_grid;
+  gfx::Point drag_point_in_root_grid(
+      GetMirroredXInView(drag_point_in_folder_grid.x()),
+      drag_point_in_folder_grid.y());
 
   // Temporarily reset the transform of the contents container so that the point
   // can be correctly converted to the root grid's coordinates.
@@ -799,6 +789,8 @@ void AppListFolderView::DispatchDragEventForReparent(
   ConvertPointToTarget(items_grid_view_, root_grid, &drag_point_in_root_grid);
   contents_container_->SetTransform(original_transform);
 
+  drag_point_in_root_grid.set_x(
+      root_grid->GetMirroredXInView(drag_point_in_root_grid.x()));
   root_grid->UpdateDragFromReparentItem(pointer, drag_point_in_root_grid);
 }
 
@@ -824,19 +816,23 @@ void AppListFolderView::HideViewImmediately() {
   if (activated_folder_item_view) {
     activated_folder_item_view->SetIconVisible(true);
     activated_folder_item_view->title()->SetEnabledColor(
-        AppListConfig::instance().grid_title_color());
+        GetAppListConfig().grid_title_color());
     activated_folder_item_view->title()->SetVisible(true);
   }
 }
 
-void AppListFolderView::CloseFolderPage() {
+void AppListFolderView::ResetItemsGridForClose() {
   if (items_grid_view()->dragging())
     items_grid_view()->EndDrag(true);
+  items_grid_view()->ClearAnySelectedView();
+}
+
+void AppListFolderView::CloseFolderPage() {
   // When a folder is closed focus |activated_folder_item_view_| but only show
   // the selection highlight if there is already one showing.
   const bool should_show_focus_ring_on_hide =
       items_grid_view()->has_selected_view();
-  items_grid_view()->ClearAnySelectedView();
+  ResetItemsGridForClose();
   container_view_->ShowApps(folder_item_);
   if (should_show_focus_ring_on_hide) {
     GetActivatedFolderItemView()->RequestFocus();
@@ -896,4 +892,4 @@ void AppListFolderView::CreateOpenOrCloseFolderAccessibilityEvent(bool open) {
   announcement_view->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
 }
 
-}  // namespace app_list
+}  // namespace ash

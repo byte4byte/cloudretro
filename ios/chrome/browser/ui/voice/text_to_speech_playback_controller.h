@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "components/keyed_service/core/keyed_service.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
-#import "ios/web/public/web_state/web_state_observer.h"
+#include "ios/web/public/web_state_observer.h"
 
 @class TextToSpeechNotificationHandler;
 class WebStateList;
@@ -49,7 +49,7 @@ class TextToSpeechPlaybackController : public KeyedService,
                            web::WebState* old_web_state,
                            web::WebState* new_web_state,
                            int active_index,
-                           int reason) override;
+                           ActiveWebStateChangeReason reason) override;
   void WebStateDetachedAt(WebStateList* web_state_list,
                           web::WebState* web_state,
                           int index) override;

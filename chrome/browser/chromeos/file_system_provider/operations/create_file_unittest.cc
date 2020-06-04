@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
-#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/file_system/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -56,8 +56,9 @@ TEST_F(FileSystemProviderOperationsCreateFileTest, Execute) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  CreateFile create_file(NULL, file_system_info_, base::FilePath(kFilePath),
-                         base::Bind(&util::LogStatusCallback, &callback_log));
+  CreateFile create_file(
+      NULL, file_system_info_, base::FilePath(kFilePath),
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_file.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -87,8 +88,9 @@ TEST_F(FileSystemProviderOperationsCreateFileTest, Execute_NoListener) {
   util::LoggingDispatchEventImpl dispatcher(false /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  CreateFile create_file(NULL, file_system_info_, base::FilePath(kFilePath),
-                         base::Bind(&util::LogStatusCallback, &callback_log));
+  CreateFile create_file(
+      NULL, file_system_info_, base::FilePath(kFilePath),
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_file.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -105,9 +107,9 @@ TEST_F(FileSystemProviderOperationsCreateFileTest, Execute_ReadOnly) {
       base::FilePath() /* mount_path */, false /* configurable */,
       true /* watchable */, extensions::SOURCE_FILE, IconSet());
 
-  CreateFile create_file(NULL, read_only_file_system_info,
-                         base::FilePath(kFilePath),
-                         base::Bind(&util::LogStatusCallback, &callback_log));
+  CreateFile create_file(
+      NULL, read_only_file_system_info, base::FilePath(kFilePath),
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_file.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -119,8 +121,9 @@ TEST_F(FileSystemProviderOperationsCreateFileTest, OnSuccess) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  CreateFile create_file(NULL, file_system_info_, base::FilePath(kFilePath),
-                         base::Bind(&util::LogStatusCallback, &callback_log));
+  CreateFile create_file(
+      NULL, file_system_info_, base::FilePath(kFilePath),
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_file.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -138,8 +141,9 @@ TEST_F(FileSystemProviderOperationsCreateFileTest, OnError) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  CreateFile create_file(NULL, file_system_info_, base::FilePath(kFilePath),
-                         base::Bind(&util::LogStatusCallback, &callback_log));
+  CreateFile create_file(
+      NULL, file_system_info_, base::FilePath(kFilePath),
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   create_file.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));

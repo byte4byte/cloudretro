@@ -43,6 +43,8 @@ class PLATFORM_EXPORT NullResourceFetcherProperties final
   scheduler::FrameStatus GetFrameStatus() const override {
     return scheduler::FrameStatus::kNone;
   }
+  const KURL& WebBundlePhysicalUrl() const override;
+  int GetOutstandingThrottledLimit() const override { return 0; }
 
  private:
   const Member<const FetchClientSettingsObject> fetch_client_settings_object_;

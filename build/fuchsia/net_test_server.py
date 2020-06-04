@@ -55,7 +55,7 @@ class SSHPortForwarder(chrome_test_server_spawner.PortForwarder):
     raise Exception('Unmap called for unknown port: %d' % device_port)
 
 
-def SetupTestServer(target, test_concurrency):
+def SetupTestServer(target, test_concurrency, for_package):
   """Provisions a forwarding test server and configures |target| to use it.
 
   Returns a Popen object for the test server process."""
@@ -76,14 +76,12 @@ def SetupTestServer(target, test_concurrency):
 
   config_file = tempfile.NamedTemporaryFile(delete=True)
 
-  # Clean up the config JSON to only pass ports. See https://crbug.com/810209 .
   config_file.write(json.dumps({
-    'name': 'testserver',
-    'address': '127.0.0.1',
     'spawner_url_base': 'http://localhost:%d' % forwarded_port
   }))
 
   config_file.flush()
-  target.PutFile(config_file.name, '/tmp/net-test-server-config')
+  target.PutFile(config_file.name, '/tmp/net-test-server-config',
+                 for_package=for_package)
 
   return spawning_server

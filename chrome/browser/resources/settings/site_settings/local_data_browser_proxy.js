@@ -7,6 +7,11 @@
  * section.
  */
 
+// clang-format off
+import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+import {CookieDetails} from './cookie_info.js';
+// clang-format on
+
 /**
  * @typedef {{
  *   id: string,
@@ -14,7 +19,7 @@
  *   children: !Array<CookieDetails>,
  * }}
  */
-let CookieList;
+export let CookieList;
 
 /**
  * @typedef {{
@@ -42,9 +47,8 @@ let LocalDataList;
  */
 let EtldPlus1CookieNumber;
 
-cr.define('settings', function() {
   /** @interface */
-  class LocalDataBrowserProxy {
+  export class LocalDataBrowserProxy {
     /**
      * @param {string} filter Search filter (use "" for none).
      * @return {!Promise<!LocalDataList>}
@@ -97,20 +101,28 @@ cr.define('settings', function() {
      * @param {string} path The path to the parent cookie.
      */
     removeCookie(path) {}
+
+    /**
+     * Removes all SameSite=None cookies, as well as storage available in
+     * third-party contexts.
+     * Note: on-tree-item-removed will not be sent.
+     * @return {!Promise} To signal completion.
+     */
+    removeAllThirdPartyCookies() {}
   }
 
   /**
-   * @implements {settings.LocalDataBrowserProxy}
+   * @implements {LocalDataBrowserProxy}
    */
-  class LocalDataBrowserProxyImpl {
+  export class LocalDataBrowserProxyImpl {
     /** @override */
     getDisplayList(filter) {
-      return cr.sendWithPromise('localData.getDisplayList', filter);
+      return sendWithPromise('localData.getDisplayList', filter);
     }
 
     /** @override */
     removeAll() {
-      return cr.sendWithPromise('localData.removeAll');
+      return sendWithPromise('localData.removeAll');
     }
 
     /** @override */
@@ -125,31 +137,31 @@ cr.define('settings', function() {
 
     /** @override */
     getCookieDetails(site) {
-      return cr.sendWithPromise('localData.getCookieDetails', site);
+      return sendWithPromise('localData.getCookieDetails', site);
     }
 
     /** @override */
     getNumCookiesString(numCookies) {
-      return cr.sendWithPromise('localData.getNumCookiesString', numCookies);
+      return sendWithPromise('localData.getNumCookiesString', numCookies);
     }
 
     /** @override */
     reloadCookies() {
-      return cr.sendWithPromise('localData.reload');
+      return sendWithPromise('localData.reload');
     }
 
     /** @override */
     removeCookie(path) {
       chrome.send('localData.removeCookie', [path]);
     }
+
+    /** @override */
+    removeAllThirdPartyCookies() {
+      return sendWithPromise('localData.removeThirdPartyCookies');
+    }
   }
 
   // The singleton instance_ is replaced with a test version of this wrapper
   // during testing.
-  cr.addSingletonGetter(LocalDataBrowserProxyImpl);
+  addSingletonGetter(LocalDataBrowserProxyImpl);
 
-  return {
-    LocalDataBrowserProxy: LocalDataBrowserProxy,
-    LocalDataBrowserProxyImpl: LocalDataBrowserProxyImpl,
-  };
-});

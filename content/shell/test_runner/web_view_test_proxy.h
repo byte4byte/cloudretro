@@ -13,20 +13,18 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/accessibility_controller.h"
-#include "content/shell/test_runner/test_runner_export.h"
 #include "content/shell/test_runner/test_runner_for_specific_view.h"
 #include "content/shell/test_runner/text_input_controller.h"
 #include "content/shell/test_runner/web_widget_test_proxy.h"
 #include "third_party/blink/public/platform/web_drag_operation.h"
 #include "third_party/blink/public/platform/web_rect.h"
-#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_dom_message_event.h"
 #include "third_party/blink/public/web/web_history_commit_type.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
-#include "third_party/blink/public/web/web_text_direction.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_widget_client.h"
 
@@ -37,13 +35,12 @@ class WebView;
 struct WebWindowFeatures;
 }
 
-namespace test_runner {
+namespace content {
 class AccessibilityController;
+class BlinkTestRunner;
 class TestInterfaces;
 class TestRunnerForSpecificView;
 class TextInputController;
-class WebTestDelegate;
-class WebTestInterfaces;
 
 // WebViewTestProxy is used to run web tests. This class is a partial fake
 // implementation of RenderViewImpl that overrides the minimal necessary
@@ -62,13 +59,12 @@ class WebTestInterfaces;
 // Historically, the overridden functionality has been small enough to not
 // cause too much trouble. If that changes, then this entire testing
 // architecture should be revisited.
-class TEST_RUNNER_EXPORT WebViewTestProxy : public content::RenderViewImpl {
+class WebViewTestProxy : public content::RenderViewImpl {
  public:
   template <typename... Args>
   explicit WebViewTestProxy(Args&&... args)
-      : RenderViewImpl(std::forward<Args>(args)...) {}
-  void Initialize(WebTestInterfaces* interfaces,
-                  std::unique_ptr<WebTestDelegate> delegate);
+      : RenderViewImpl(std::forward<Args>(args)...), blink_test_runner_(this) {}
+  void Initialize(TestInterfaces* interfaces);
 
   // WebViewClient implementation.
   blink::WebView* CreateView(blink::WebLocalFrame* creator,
@@ -76,19 +72,18 @@ class TEST_RUNNER_EXPORT WebViewTestProxy : public content::RenderViewImpl {
                              const blink::WebWindowFeatures& features,
                              const blink::WebString& frame_name,
                              blink::WebNavigationPolicy policy,
-                             blink::WebSandboxFlags sandbox_flags,
+                             network::mojom::WebSandboxFlags sandbox_flags,
                              const blink::FeaturePolicy::FeatureState&,
                              const blink::SessionStorageNamespaceId&
                                  session_storage_namespace_id) override;
   void PrintPage(blink::WebLocalFrame* frame) override;
   blink::WebString AcceptLanguages() override;
   void DidFocus(blink::WebLocalFrame* calling_frame) override;
-  blink::WebScreenInfo GetScreenInfo() override;
 
   // Exposed for our TestRunner harness.
-  using RenderViewImpl::ApplyPageHidden;
+  using RenderViewImpl::ApplyPageVisibilityState;
 
-  WebTestDelegate* delegate() { return delegate_.get(); }
+  BlinkTestRunner* blink_test_runner() { return &blink_test_runner_; }
   TestInterfaces* test_interfaces() { return test_interfaces_; }
   AccessibilityController* accessibility_controller() {
     return &accessibility_controller_;
@@ -96,9 +91,7 @@ class TEST_RUNNER_EXPORT WebViewTestProxy : public content::RenderViewImpl {
   TestRunnerForSpecificView* view_test_runner() { return &view_test_runner_; }
 
   void Reset();
-  void BindTo(blink::WebLocalFrame* frame);
-
-  void GetScreenOrientationForTesting(blink::WebScreenInfo&);
+  void Install(blink::WebLocalFrame* frame);
 
  private:
   // RenderViewImpl has no public destructor.
@@ -106,8 +99,9 @@ class TEST_RUNNER_EXPORT WebViewTestProxy : public content::RenderViewImpl {
 
   TestRunner* GetTestRunner();
 
+  BlinkTestRunner blink_test_runner_;
+
   TestInterfaces* test_interfaces_ = nullptr;
-  std::unique_ptr<WebTestDelegate> delegate_;
 
   AccessibilityController accessibility_controller_{this};
   TextInputController text_input_controller_{this};
@@ -116,6 +110,6 @@ class TEST_RUNNER_EXPORT WebViewTestProxy : public content::RenderViewImpl {
   DISALLOW_COPY_AND_ASSIGN(WebViewTestProxy);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_WEB_VIEW_TEST_PROXY_H_

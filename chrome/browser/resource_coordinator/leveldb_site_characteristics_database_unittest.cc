@@ -13,10 +13,10 @@
 #include "base/strings/stringprintf.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_file_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/performance_manager/persistence/site_data/site_data.pb.h"
+#include "components/performance_manager/persistence/site_data/site_data.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 #include "url/gurl.h"
@@ -30,7 +30,7 @@ class ScopedReadOnlyDirectory {
   explicit ScopedReadOnlyDirectory(const base::FilePath& root_dir);
   ~ScopedReadOnlyDirectory() {
     permission_restorer_.reset();
-    EXPECT_TRUE(base::DeleteFile(read_only_path_, true));
+    EXPECT_TRUE(base::DeleteFileRecursively(read_only_path_));
   }
 
   const base::FilePath& GetReadOnlyPath() { return read_only_path_; }
@@ -66,7 +66,6 @@ void InitSiteCharacteristicProto(SiteDataProto* proto,
 
   proto->mutable_updates_favicon_in_background()->CopyFrom(feature_proto);
   proto->mutable_updates_title_in_background()->CopyFrom(feature_proto);
-  proto->mutable_uses_notifications_in_background()->CopyFrom(feature_proto);
   proto->mutable_uses_audio_in_background()->CopyFrom(feature_proto);
 }
 
@@ -143,7 +142,7 @@ class LevelDBSiteCharacteristicsDatabaseTest : public ::testing::Test {
   const url::Origin kDummyOrigin = url::Origin::Create(GURL("http://foo.com"));
 
   base::FilePath db_path_;
-  base::test::ScopedTaskEnvironment task_env_;
+  base::test::TaskEnvironment task_env_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<LevelDBSiteCharacteristicsDatabase> db_;
 };

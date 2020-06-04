@@ -8,7 +8,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/action_cell.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_action_cell.h"
 #import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_password_cell.h"
 #import "ios/chrome/browser/ui/list_model/list_item+Controller.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
@@ -16,8 +16,8 @@
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/favicon/favicon_attributes.h"
-#import "ios/chrome/common/favicon/favicon_view.h"
+#import "ios/chrome/common/ui/favicon/favicon_attributes.h"
+#import "ios/chrome/common/ui/favicon/favicon_view.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
@@ -33,9 +33,11 @@ typedef NS_ENUM(NSInteger, ManualFallbackItemType) {
 
 namespace manual_fill {
 
-NSString* const PasswordSearchBarAccessibilityIdentifier =
+NSString* const kPasswordDoneButtonAccessibilityIdentifier =
+    @"kManualFillPasswordDoneButtonAccessibilityIdentifier";
+NSString* const kPasswordSearchBarAccessibilityIdentifier =
     @"kManualFillPasswordSearchBarAccessibilityIdentifier";
-NSString* const PasswordTableViewAccessibilityIdentifier =
+NSString* const kPasswordTableViewAccessibilityIdentifier =
     @"kManualFillPasswordTableViewAccessibilityIdentifier";
 
 }  // namespace manual_fill
@@ -61,7 +63,7 @@ NSString* const PasswordTableViewAccessibilityIdentifier =
   [super viewDidLoad];
 
   self.tableView.accessibilityIdentifier =
-      manual_fill::PasswordTableViewAccessibilityIdentifier;
+      manual_fill::kPasswordTableViewAccessibilityIdentifier;
 
   self.definesPresentationContext = YES;
   self.searchController.searchBar.backgroundColor = [UIColor clearColor];
@@ -69,7 +71,7 @@ NSString* const PasswordTableViewAccessibilityIdentifier =
   self.navigationItem.searchController = self.searchController;
   self.navigationItem.hidesSearchBarWhenScrolling = NO;
   self.searchController.searchBar.accessibilityIdentifier =
-      manual_fill::PasswordSearchBarAccessibilityIdentifier;
+      manual_fill::kPasswordSearchBarAccessibilityIdentifier;
   NSString* titleString =
       l10n_util::GetNSString(IDS_IOS_MANUAL_FALLBACK_USE_OTHER_PASSWORD);
   self.title = titleString;
@@ -81,6 +83,14 @@ NSString* const PasswordTableViewAccessibilityIdentifier =
       UIOffsetMake(0.0f, kTableViewNavigationVerticalOffsetForSearchHeader);
   self.searchController.searchBar.searchFieldBackgroundPositionAdjustment =
       offset;
+
+  UIBarButtonItem* doneButton = [[UIBarButtonItem alloc]
+      initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                           target:self
+                           action:@selector(handleDoneButton)];
+  doneButton.accessibilityIdentifier =
+      manual_fill::kPasswordDoneButtonAccessibilityIdentifier;
+  self.navigationItem.rightBarButtonItem = doneButton;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -188,6 +198,10 @@ NSString* const PasswordTableViewAccessibilityIdentifier =
              [passwordCell configureWithFaviconAttributes:attributes];
            }
          }];
+}
+
+- (void)handleDoneButton {
+  [self.delegate passwordViewControllerDidTapDoneButton:self];
 }
 
 @end

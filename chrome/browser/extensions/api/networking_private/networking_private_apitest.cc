@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/networking_cast_private/chrome_networking_cast_private_delegate.h"
@@ -360,9 +359,8 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
 
  protected:
   bool RunNetworkingSubtest(const std::string& subtest) {
-    return RunExtensionSubtest("networking_private",
-                               "main.html?" + subtest,
-                               kFlagEnableFileAccess | kFlagLoadAsComponent);
+    return RunExtensionSubtest("networking_private", "main.html?" + subtest,
+                               kFlagEnableFileAccess, kFlagLoadAsComponent);
   }
 
  private:

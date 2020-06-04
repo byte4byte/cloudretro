@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/views/download/download_shelf_context_menu_view.h"
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/i18n/rtl.h"
-#include "base/logging.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "components/download/public/common/download_item.h"
 #include "content/public/browser/page_navigator.h"
@@ -30,11 +30,11 @@ void DownloadShelfContextMenuView::Run(
   // Run() should not be getting called if the DownloadItem was destroyed.
   DCHECK(menu_model);
 
-  menu_runner_.reset(new views::MenuRunner(
+  menu_runner_ = std::make_unique<views::MenuRunner>(
       menu_model,
       views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU,
       base::BindRepeating(&DownloadShelfContextMenuView::OnMenuClosed,
-                          base::Unretained(this), on_menu_closed_callback)));
+                          base::Unretained(this), on_menu_closed_callback));
 
   // The menu's alignment is determined based on the UI layout.
   Position position;
@@ -61,7 +61,6 @@ void DownloadShelfContextMenuView::ExecuteCommand(int command_id,
                                                   int event_flags) {
   DownloadCommands::Command command =
       static_cast<DownloadCommands::Command>(command_id);
-  DCHECK_NE(command, DownloadCommands::DISCARD);
 
   if (command == DownloadCommands::KEEP) {
     download_item_view_->MaybeSubmitDownloadToFeedbackService(

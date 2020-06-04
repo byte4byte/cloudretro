@@ -25,6 +25,8 @@
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/drop_data.h"
 #include "ui/android/overscroll_refresh_handler.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -51,8 +53,7 @@ namespace {
 // compositor event queue.
 bool ShouldRequestUnbufferedDispatch() {
   static bool should_request_unbuffered_dispatch =
-      base::FeatureList::IsEnabled(
-          content::android::kRequestUnbufferedDispatch) &&
+      base::FeatureList::IsEnabled(features::kRequestUnbufferedDispatch) &&
       base::android::BuildInfo::GetInstance()->sdk_int() >=
           base::android::SDK_VERSION_LOLLIPOP &&
       !content::GetContentClient()->UsingSynchronousCompositing();
@@ -229,12 +230,10 @@ gfx::Rect WebContentsViewAndroid::GetViewBounds() const {
   return gfx::Rect(view_.GetSize());
 }
 
-void WebContentsViewAndroid::CreateView(
-    const gfx::Size& initial_size, gfx::NativeView context) {
-}
+void WebContentsViewAndroid::CreateView(gfx::NativeView context) {}
 
 RenderWidgetHostViewBase* WebContentsViewAndroid::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host, bool is_guest_view_hack) {
+    RenderWidgetHost* render_widget_host) {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -260,9 +259,6 @@ RenderWidgetHostViewBase* WebContentsViewAndroid::CreateViewForChildWidget(
     RenderWidgetHost* render_widget_host) {
   RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(render_widget_host);
   return new RenderWidgetHostViewAndroid(rwhi, nullptr);
-}
-
-void WebContentsViewAndroid::RenderViewCreated(RenderViewHost* host) {
 }
 
 void WebContentsViewAndroid::RenderViewReady() {
@@ -328,19 +324,17 @@ SelectPopup* WebContentsViewAndroid::GetSelectPopup() {
 
 void WebContentsViewAndroid::ShowPopupMenu(
     RenderFrameHost* render_frame_host,
+    mojo::PendingRemote<blink::mojom::ExternalPopup> popup,
     const gfx::Rect& bounds,
     int item_height,
     double item_font_size,
     int selected_item,
-    const std::vector<MenuItem>& items,
+    std::vector<blink::mojom::MenuItemPtr> menu_items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  GetSelectPopup()->ShowMenu(render_frame_host, bounds, items, selected_item,
-                             allow_multiple_selection, right_aligned);
-}
-
-void WebContentsViewAndroid::HidePopupMenu() {
-  GetSelectPopup()->HideMenu();
+  GetSelectPopup()->ShowMenu(std::move(popup), bounds, std::move(menu_items),
+                             selected_item, allow_multiple_selection,
+                             right_aligned);
 }
 
 void WebContentsViewAndroid::StartDragging(
@@ -481,6 +475,7 @@ void WebContentsViewAndroid::OnDragExited() {
 void WebContentsViewAndroid::OnPerformDrop(DropData* drop_data,
                                            const gfx::PointF& location,
                                            const gfx::PointF& screen_location) {
+  web_contents_->Focus();
   web_contents_->GetRenderViewHost()->GetWidget()->FilterDropData(drop_data);
   web_contents_->GetRenderViewHost()->GetWidget()->DragTargetDrop(
       *drop_data, location, screen_location, 0);
@@ -531,9 +526,24 @@ int WebContentsViewAndroid::GetTopControlsHeight() const {
   return delegate ? delegate->GetTopControlsHeight() : 0;
 }
 
+int WebContentsViewAndroid::GetTopControlsMinHeight() const {
+  auto* delegate = web_contents_->GetDelegate();
+  return delegate ? delegate->GetTopControlsMinHeight() : 0;
+}
+
 int WebContentsViewAndroid::GetBottomControlsHeight() const {
   auto* delegate = web_contents_->GetDelegate();
   return delegate ? delegate->GetBottomControlsHeight() : 0;
+}
+
+int WebContentsViewAndroid::GetBottomControlsMinHeight() const {
+  auto* delegate = web_contents_->GetDelegate();
+  return delegate ? delegate->GetBottomControlsMinHeight() : 0;
+}
+
+bool WebContentsViewAndroid::ShouldAnimateBrowserControlsHeightChanges() const {
+  auto* delegate = web_contents_->GetDelegate();
+  return delegate && delegate->ShouldAnimateBrowserControlsHeightChanges();
 }
 
 bool WebContentsViewAndroid::DoBrowserControlsShrinkRendererSize() const {
@@ -607,6 +617,13 @@ void WebContentsViewAndroid::OnSizeChanged() {
 void WebContentsViewAndroid::OnPhysicalBackingSizeChanged() {
   if (web_contents_->GetRenderWidgetHostView())
     web_contents_->SendScreenRects();
+}
+
+void WebContentsViewAndroid::OnBrowserControlsHeightChanged() {
+  auto* rwhv = GetRenderWidgetHostViewAndroid();
+  if (rwhv)
+    rwhv->SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
+                                      base::nullopt);
 }
 
 } // namespace content

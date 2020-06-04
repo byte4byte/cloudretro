@@ -16,7 +16,6 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/window_util.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -54,7 +53,9 @@ class TestSessionObserver : public SessionObserver {
   void OnSessionStateChanged(SessionState state) override { state_ = state; }
 
   void OnActiveUserPrefServiceChanged(PrefService* pref_service) override {
+    DCHECK_NE(last_user_pref_service_, pref_service);
     last_user_pref_service_ = pref_service;
+    ++user_prefs_changed_count_;
   }
 
   std::string GetUserSessionEmails() const {
@@ -75,6 +76,7 @@ class TestSessionObserver : public SessionObserver {
     return last_user_pref_service_;
   }
   void clear_last_user_pref_service() { last_user_pref_service_ = nullptr; }
+  int user_prefs_changed_count() const { return user_prefs_changed_count_; }
 
  private:
   SessionState state_ = SessionState::UNKNOWN;
@@ -82,6 +84,7 @@ class TestSessionObserver : public SessionObserver {
   bool first_session_started_ = false;
   std::vector<AccountId> user_session_account_ids_;
   PrefService* last_user_pref_service_ = nullptr;
+  int user_prefs_changed_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TestSessionObserver);
 };
@@ -294,7 +297,8 @@ TEST_F(SessionControllerImplTest, GetLoginStateForActiveSession) {
       {user_manager::USER_TYPE_SUPERVISED, LoginStatus::SUPERVISED},
       {user_manager::USER_TYPE_KIOSK_APP, LoginStatus::KIOSK_APP},
       {user_manager::USER_TYPE_CHILD, LoginStatus::SUPERVISED},
-      {user_manager::USER_TYPE_ARC_KIOSK_APP, LoginStatus::ARC_KIOSK_APP},
+      {user_manager::USER_TYPE_ARC_KIOSK_APP, LoginStatus::KIOSK_APP},
+      {user_manager::USER_TYPE_WEB_KIOSK_APP, LoginStatus::KIOSK_APP}
       // TODO: Add USER_TYPE_ACTIVE_DIRECTORY if we add a status for it.
   };
 
@@ -427,7 +431,7 @@ TEST_F(SessionControllerImplTest, IsUserChild) {
 
 using SessionControllerImplPrefsTest = NoSessionAshTestBase;
 
-// Verifies that ShellObserver is notified for PrefService changes.
+// Verifies that SessionObserver is notified for PrefService changes.
 TEST_F(SessionControllerImplPrefsTest, Observer) {
   constexpr char kUser1[] = "user1@test.com";
   constexpr char kUser2[] = "user2@test.com";
@@ -465,30 +469,58 @@ TEST_F(SessionControllerImplPrefsTest, Observer) {
 
   // Switching to a user for which prefs are not ready does not notify and
   // GetLastActiveUserPrefService() returns the old PrefService.
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  session->SwitchActiveUser(kUserAccount2);
   EXPECT_EQ(nullptr, observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
             controller->GetLastActiveUserPrefService());
 
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser1));
-  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
-            observer.last_user_pref_service());
+  session->SwitchActiveUser(kUserAccount1);
+  EXPECT_EQ(nullptr, observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
             controller->GetLastActiveUserPrefService());
 
   // There should be no notification about a PrefService for an inactive user
   // becoming initialized.
-  observer.clear_last_user_pref_service();
   pref_service = std::make_unique<TestingPrefServiceSimple>();
   RegisterUserProfilePrefs(pref_service->registry(), true /* for_test */);
   session->SetUserPrefService(kUserAccount2, std::move(pref_service));
   EXPECT_EQ(nullptr, observer.last_user_pref_service());
 
-  session->SwitchActiveUser(AccountId::FromUserEmail(kUser2));
+  session->SwitchActiveUser(kUserAccount2);
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
             observer.last_user_pref_service());
   EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
             controller->GetLastActiveUserPrefService());
+
+  controller->RemoveObserver(&observer);
+}
+
+// Verifies that SessionObserver is notified only once for the same user prefs.
+TEST_F(SessionControllerImplPrefsTest, NotifyOnce) {
+  constexpr char kUser1[] = "user1@test.com";
+  constexpr char kUser2[] = "user2@test.com";
+  const AccountId kUserAccount1 = AccountId::FromUserEmail(kUser1);
+  const AccountId kUserAccount2 = AccountId::FromUserEmail(kUser2);
+
+  TestSessionObserver observer;
+  SessionControllerImpl* controller = Shell::Get()->session_controller();
+  controller->AddObserver(&observer);
+  ASSERT_EQ(0, observer.user_prefs_changed_count());
+
+  SimulateUserLogin(kUser1);
+  EXPECT_EQ(1, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
+
+  SimulateUserLogin(kUser2);
+  EXPECT_EQ(2, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount2),
+            observer.last_user_pref_service());
+
+  GetSessionControllerClient()->SwitchActiveUser(kUserAccount1);
+  EXPECT_EQ(3, observer.user_prefs_changed_count());
+  EXPECT_EQ(controller->GetUserPrefServiceForUser(kUserAccount1),
+            observer.last_user_pref_service());
 
   controller->RemoveObserver(&observer);
 }
@@ -612,14 +644,6 @@ class CanSwitchUserTest : public AshTestBase {
       switch_callback_hit_count_++;
   }
 
-  // Methods needed to test with overview mode.
-  bool StartOverview() {
-    return Shell::Get()->overview_controller()->StartOverview();
-  }
-  bool InOverviewSession() const {
-    return Shell::Get()->overview_controller()->InOverviewSession();
-  }
-
   // Various counter accessors.
   int stop_capture_callback_hit_count() const {
     return stop_capture_callback_hit_count_;
@@ -631,7 +655,7 @@ class CanSwitchUserTest : public AshTestBase {
 
  private:
   static void CloseMessageBox(ActionType action) {
-    aura::Window* active_window = ash::wm::GetActiveWindow();
+    aura::Window* active_window = window_util::GetActiveWindow();
     views::DialogDelegate* dialog =
         active_window ? views::Widget::GetWidgetForNativeWindow(active_window)
                             ->widget_delegate()
@@ -764,18 +788,6 @@ TEST_F(CanSwitchUserTest, BothActiveAccepted) {
   EXPECT_EQ(1, switch_callback_hit_count());
   EXPECT_EQ(1, stop_capture_callback_hit_count());
   EXPECT_EQ(1, stop_share_callback_hit_count());
-}
-
-// Test that overview mode is dismissed before switching user profile.
-TEST_F(CanSwitchUserTest, OverviewModeDismissed) {
-  EXPECT_EQ(0, switch_callback_hit_count());
-  gfx::Rect bounds(0, 0, 100, 100);
-  std::unique_ptr<aura::Window> w(CreateTestWindowInShellWithBounds(bounds));
-  ASSERT_TRUE(StartOverview());
-  ASSERT_TRUE(InOverviewSession());
-  SwitchUser(CanSwitchUserTest::NO_DIALOG);
-  ASSERT_FALSE(InOverviewSession());
-  EXPECT_EQ(1, switch_callback_hit_count());
 }
 
 using SessionControllerImplUnblockTest = NoSessionAshTestBase;

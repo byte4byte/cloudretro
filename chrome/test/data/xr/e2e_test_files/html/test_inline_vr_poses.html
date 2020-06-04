@@ -13,20 +13,23 @@ test can query for whether each submitted frame used the correct pose.
   <body>
     <canvas id="webgl-canvas"></canvas>
     <script>
-      let shouldDeferNonImmersiveSessionCreation = true;
+      // Since we requre the 'local' feature, let the test driver create the non-immersive session instead.
+      let shouldAutoCreateNonImmersiveSession = false;
     </script>
     <script src="../../../../../../third_party/blink/web_tests/resources/testharness.js"></script>
     <script src="../resources/webxr_e2e.js"></script>
     <script src="../resources/webxr_boilerplate.js"></script>
     <script>
+      setup({single_test: true});
+
       // Override the reference space map to only request eye-level stationary
       // reference spaces, as opposed to the identity MagicWindow/AR spaces.
       referenceSpaceMap = {
         [sessionTypes.IMMERSIVE]: 'local',
         [sessionTypes.MAGIC_WINDOW]: 'local',
         [sessionTypes.AR]: 'local'
-      }
-      requestMagicWindowSession();
+      };
+      nonImmersiveSessionInit = { requiredFeatures: ['local'] };
 
       let MAX_FRAME_CALLBACKS = 10;
 

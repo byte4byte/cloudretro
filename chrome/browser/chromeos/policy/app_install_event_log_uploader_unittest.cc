@@ -8,19 +8,25 @@
 #include <memory>
 #include <string>
 
+#include "base/json/json_string_value_serializer.h"
 #include "base/memory/ref_counted.h"
+#include "base/test/gmock_move_support.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "base/values.h"
+#include "chrome/browser/chromeos/policy/app_install_event_log_util.h"
+#include "chrome/browser/profiles/reporting_util.h"
+#include "chromeos/system/fake_statistics_provider.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
+#include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::Invoke;
 using testing::Mock;
-using testing::Pointee;
-using testing::SaveArg;
 using testing::WithArgs;
 using testing::_;
 
@@ -36,14 +42,19 @@ constexpr base::TimeDelta kMaxRetryBackoff = base::TimeDelta::FromDays(1);
 static const char kDmToken[] = "token";
 static const char kPackageName[] = "package";
 
-MATCHER_P(MatchProto, expected, "matches protobuf") {
-  return arg.SerializePartialAsString() == expected.SerializePartialAsString();
-}
+MATCHER_P(MatchValue, expected, "matches base::Value") {
+  std::string arg_serialized_string;
+  JSONStringValueSerializer arg_serializer(&arg_serialized_string);
+  if (!arg_serializer.Serialize(arg))
+    return false;
 
-ACTION_TEMPLATE(MoveArg,
-                HAS_1_TEMPLATE_PARAMS(int, k),
-                AND_1_VALUE_PARAMS(out)) {
-  *out = std::move(*testing::get<k>(args));
+  DCHECK(expected);
+  std::string expected_serialized_string;
+  JSONStringValueSerializer expected_serializer(&expected_serialized_string);
+  if (!expected_serializer.Serialize(*expected))
+    return false;
+
+  return arg_serialized_string == expected_serialized_string;
 }
 
 class MockAppInstallEventLogUploaderDelegate
@@ -52,10 +63,10 @@ class MockAppInstallEventLogUploaderDelegate
   MockAppInstallEventLogUploaderDelegate() {}
 
   void SerializeForUpload(SerializationCallback callback) override {
-    SerializeForUpload_(&callback);
+    SerializeForUpload_(callback);
   }
 
-  MOCK_METHOD1(SerializeForUpload_, void(SerializationCallback*));
+  MOCK_METHOD1(SerializeForUpload_, void(SerializationCallback&));
   MOCK_METHOD0(OnUploadSuccess, void());
 
  private:
@@ -66,13 +77,7 @@ class MockAppInstallEventLogUploaderDelegate
 
 class AppInstallEventLogUploaderTest : public testing::Test {
  protected:
-  AppInstallEventLogUploaderTest() {}
-
-  void SetUp() override {
-    task_runner_ = new base::TestMockTimeTaskRunner();
-    task_runner_handle_ =
-        std::make_unique<base::ThreadTaskRunnerHandle>(task_runner_);
-  }
+  AppInstallEventLogUploaderTest() = default;
 
   void TearDown() override {
     Mock::VerifyAndClearExpectations(&client_);
@@ -91,15 +96,16 @@ class AppInstallEventLogUploaderTest : public testing::Test {
   }
 
   void CreateUploader() {
-    uploader_ = std::make_unique<AppInstallEventLogUploader>(&client_);
+    uploader_ = std::make_unique<AppInstallEventLogUploader>(
+        &client_, /*profile=*/nullptr);
     uploader_->SetDelegate(&delegate_);
   }
 
   void CompleteSerialize() {
     EXPECT_CALL(delegate_, SerializeForUpload_(_))
         .WillOnce(WithArgs<0>(Invoke(
-            [=](AppInstallEventLogUploader::Delegate::SerializationCallback*
-                    callback) { std::move(*callback).Run(&log_); })));
+            [=](AppInstallEventLogUploader::Delegate::SerializationCallback&
+                    callback) { std::move(callback).Run(&log_); })));
   }
 
   void CaptureSerialize(
@@ -108,18 +114,36 @@ class AppInstallEventLogUploaderTest : public testing::Test {
         .WillOnce(MoveArg<0>(callback));
   }
 
+  void ClearReportDict() {
+    base::DictionaryValue* mutable_dict;
+    if (value_report_.GetAsDictionary(&mutable_dict))
+      mutable_dict->Clear();
+    else
+      NOTREACHED();
+  }
+
   void CompleteUpload(bool success) {
-    EXPECT_CALL(client_, UploadAppInstallReport(Pointee(MatchProto(log_)), _))
+    ClearReportDict();
+    base::Value context = reporting::GetContext(/*profile=*/nullptr);
+    value_report_ = RealtimeReportingJobConfiguration::BuildReport(
+        ConvertProtoToValue(&log_, context), std::move(context));
+
+    EXPECT_CALL(client_, UploadRealtimeReport_(MatchValue(&value_report_), _))
         .WillOnce(WithArgs<1>(
-            Invoke([=](const CloudPolicyClient::StatusCallback& callback) {
-              callback.Run(success);
+            Invoke([=](CloudPolicyClient::StatusCallback& callback) {
+              std::move(callback).Run(success);
             })));
   }
 
   void CaptureUpload(CloudPolicyClient::StatusCallback* callback) {
+    ClearReportDict();
+    base::Value context = reporting::GetContext(/*profile=*/nullptr);
+    value_report_ = RealtimeReportingJobConfiguration::BuildReport(
+        ConvertProtoToValue(&log_, context), std::move(context));
+
     CloudPolicyClient::StatusCallback status_callback;
-    EXPECT_CALL(client_, UploadAppInstallReport(Pointee(MatchProto(log_)), _))
-        .WillOnce(SaveArg<1>(callback));
+    EXPECT_CALL(client_, UploadRealtimeReport_(MatchValue(&value_report_), _))
+        .WillOnce(MoveArg<1>(callback));
   }
 
   void CompleteSerializeAndUpload(bool success) {
@@ -133,14 +157,17 @@ class AppInstallEventLogUploaderTest : public testing::Test {
     CaptureUpload(callback);
   }
 
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   em::AppInstallReportRequest log_;
+  base::Value value_report_{base::Value::Type::DICTIONARY};
 
   MockCloudPolicyClient client_;
   MockAppInstallEventLogUploaderDelegate delegate_;
   std::unique_ptr<AppInstallEventLogUploader> uploader_;
 
-  scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
-  std::unique_ptr<base::ThreadTaskRunnerHandle> task_runner_handle_;
+  chromeos::system::ScopedFakeStatisticsProvider
+      scoped_fake_statistics_provider_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AppInstallEventLogUploaderTest);
@@ -176,7 +203,7 @@ TEST_F(AppInstallEventLogUploaderTest, RequestSerializeRequestAndUpload) {
 
   EXPECT_CALL(delegate_, OnUploadSuccess());
   EXPECT_CALL(delegate_, SerializeForUpload_(_)).Times(0);
-  status_callback.Run(true);
+  std::move(status_callback).Run(true);
 }
 
 // Make a log upload request. Have serialization begin. Make a second upload
@@ -219,7 +246,7 @@ TEST_F(AppInstallEventLogUploaderTest, RequestCancelAndSerialize) {
   uploader_->CancelUpload();
   Mock::VerifyAndClearExpectations(&client_);
 
-  EXPECT_CALL(client_, UploadAppInstallReport(_, _)).Times(0);
+  EXPECT_CALL(client_, UploadRealtimeReport_(_, _)).Times(0);
   EXPECT_CALL(delegate_, OnUploadSuccess()).Times(0);
   std::move(serialization_callback).Run(&log_);
 }
@@ -262,11 +289,12 @@ TEST_F(AppInstallEventLogUploaderTest, Retry) {
   base::TimeDelta expected_delay = min_delay;
   int max_delay_count = 0;
   while (max_delay_count < 2) {
-    EXPECT_EQ(expected_delay, task_runner_->NextPendingTaskDelay());
+    EXPECT_EQ(expected_delay,
+              task_environment_.NextMainThreadPendingTaskDelay());
 
     CompleteSerializeAndUpload(false /* success */);
     EXPECT_CALL(delegate_, OnUploadSuccess()).Times(0);
-    task_runner_->FastForwardBy(expected_delay);
+    task_environment_.FastForwardBy(expected_delay);
     Mock::VerifyAndClearExpectations(&delegate_);
     Mock::VerifyAndClearExpectations(&client_);
 
@@ -276,12 +304,12 @@ TEST_F(AppInstallEventLogUploaderTest, Retry) {
     expected_delay = std::min(expected_delay * 2, max_delay);
   }
 
-  EXPECT_EQ(expected_delay, task_runner_->NextPendingTaskDelay());
+  EXPECT_EQ(expected_delay, task_environment_.NextMainThreadPendingTaskDelay());
 
   log_.add_app_install_reports()->set_package(kPackageName);
   CompleteSerializeAndUpload(true /* success */);
   EXPECT_CALL(delegate_, OnUploadSuccess());
-  task_runner_->FastForwardBy(expected_delay);
+  task_environment_.FastForwardBy(expected_delay);
   Mock::VerifyAndClearExpectations(&delegate_);
   Mock::VerifyAndClearExpectations(&client_);
 
@@ -289,7 +317,7 @@ TEST_F(AppInstallEventLogUploaderTest, Retry) {
   EXPECT_CALL(delegate_, OnUploadSuccess()).Times(0);
   uploader_->RequestUpload();
 
-  EXPECT_EQ(min_delay, task_runner_->NextPendingTaskDelay());
+  EXPECT_EQ(min_delay, task_environment_.NextMainThreadPendingTaskDelay());
 }
 
 // Create the uploader using a client that is not registered with the server
@@ -368,7 +396,7 @@ TEST_F(AppInstallEventLogUploaderTest,
   UnregisterClient();
   Mock::VerifyAndClearExpectations(&client_);
 
-  EXPECT_CALL(client_, UploadAppInstallReport(_, _)).Times(0);
+  EXPECT_CALL(client_, UploadRealtimeReport_(_, _)).Times(0);
   EXPECT_CALL(delegate_, OnUploadSuccess()).Times(0);
   std::move(serialization_callback).Run(&log_);
   Mock::VerifyAndClearExpectations(&delegate_);
@@ -407,7 +435,7 @@ TEST_F(AppInstallEventLogUploaderTest,
   CaptureSerialize(&serialization_callback_2);
   RegisterClient();
 
-  EXPECT_CALL(client_, UploadAppInstallReport(_, _)).Times(0);
+  EXPECT_CALL(client_, UploadRealtimeReport_(_, _)).Times(0);
   EXPECT_CALL(delegate_, OnUploadSuccess()).Times(0);
   std::move(serialization_callback_1).Run(&log_);
   Mock::VerifyAndClearExpectations(&delegate_);
@@ -432,6 +460,40 @@ TEST_F(AppInstallEventLogUploaderTest, RequestAndRemoveDelegate) {
 
   EXPECT_CALL(client_, CancelAppInstallReportUpload());
   uploader_->SetDelegate(nullptr);
+}
+
+// When there is more than one identical event in the log, ensure that only one
+// of those duplicate events is in the created report.
+TEST_F(AppInstallEventLogUploaderTest, DuplicateEvents) {
+  RegisterClient();
+  CreateUploader();
+
+  em::AppInstallReport* report = log_.add_app_install_reports();
+  report->set_package(kPackageName);
+
+  // Adding 3 events, but the first two are identical, so the final report
+  // should only contain 2 events.
+  em::AppInstallReportLogEvent* ev1 = report->add_logs();
+  ev1->set_event_type(em::AppInstallReportLogEvent::SUCCESS);
+  ev1->set_timestamp(0);
+
+  em::AppInstallReportLogEvent* ev2 = report->add_logs();
+  ev2->set_event_type(em::AppInstallReportLogEvent::SUCCESS);
+  ev2->set_timestamp(0);
+
+  em::AppInstallReportLogEvent* ev3 = report->add_logs();
+  ev3->set_event_type(em::AppInstallReportLogEvent::SUCCESS);
+  ev3->set_timestamp(1000);
+
+  CompleteSerializeAndUpload(true /* success */);
+  EXPECT_CALL(delegate_, OnUploadSuccess());
+  uploader_->RequestUpload();
+
+  EXPECT_EQ(2u,
+            value_report_
+                .FindListKey(RealtimeReportingJobConfiguration::kEventListKey)
+                ->GetList()
+                .size());
 }
 
 }  // namespace policy

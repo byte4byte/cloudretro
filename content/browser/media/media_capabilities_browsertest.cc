@@ -34,7 +34,13 @@ const char* kPropSupported = kSupported;
 const char* kPropSupported = kUnsupported;
 #endif  // USE_PROPRIETARY_CODECS
 
-enum StreamType { kAudio, kVideo };
+enum StreamType {
+  kAudio,
+  kVideo,
+  kAudioWithSpatialRendering,
+  kVideoWithHdrMetadata,
+  kVideoWithoutHdrMetadata
+};
 
 enum ConfigType { kFile, kMediaSource };
 
@@ -48,7 +54,9 @@ class MediaCapabilitiesTest : public ContentBrowserTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "MediaCapabilities");
+                                    "MediaCapabilitiesSpatialAudio");
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "MediaCapabilitiesDynamicRange");
   }
 
   std::string CanDecodeAudio(const std::string& config_type,
@@ -61,12 +69,66 @@ class MediaCapabilitiesTest : public ContentBrowserTest {
     return CanDecode(config_type, content_type, StreamType::kVideo);
   }
 
+  std::string CanDecodeAudioWithSpatialRendering(
+      const std::string& config_type,
+      const std::string& content_type,
+      bool spatial_rendering) {
+    return CanDecode(config_type, content_type,
+                     StreamType::kAudioWithSpatialRendering, spatial_rendering);
+  }
+
+  std::string CanDecodeVideoWithHdrMetadata(
+      const std::string& config_type,
+      const std::string& content_type,
+      const std::string& color_gamut,
+      const std::string& transfer_function,
+      const std::string& hdr_metadata_type = "") {
+    StreamType stream_type = StreamType::kVideoWithHdrMetadata;
+    if (hdr_metadata_type == "")
+      stream_type = StreamType::kVideoWithoutHdrMetadata;
+
+    return CanDecode(config_type, content_type, stream_type,
+                     /* spatialRendering */ false, hdr_metadata_type,
+                     color_gamut, transfer_function);
+  }
+
   std::string CanDecode(const std::string& config_type,
                         const std::string& content_type,
-                        StreamType stream_type) {
+                        StreamType stream_type,
+                        const bool& spatial_rendering = false,
+                        const std::string& hdr_metadata_type = "",
+                        const std::string& color_gamut = "",
+                        const std::string& transfer_function = "") {
     std::string command;
     if (stream_type == StreamType::kAudio) {
       command.append("testAudioConfig(");
+    } else if (stream_type == StreamType::kAudioWithSpatialRendering) {
+      command.append("testAudioConfigWithSpatialRendering(");
+      command.append(spatial_rendering ? "true, " : "false, ");
+    } else if (stream_type == StreamType::kVideoWithHdrMetadata) {
+      command.append("testVideoConfigWithHdrMetadata(");
+      DCHECK(!hdr_metadata_type.empty());
+      DCHECK(!color_gamut.empty());
+      DCHECK(!transfer_function.empty());
+      command.append("\"");
+      command.append(hdr_metadata_type);
+      command.append("\", ");
+      command.append("\"");
+      command.append(color_gamut);
+      command.append("\", ");
+      command.append("\"");
+      command.append(transfer_function);
+      command.append("\", ");
+    } else if (stream_type == StreamType::kVideoWithoutHdrMetadata) {
+      command.append("testVideoConfigWithoutHdrMetadata(");
+      DCHECK(!color_gamut.empty());
+      DCHECK(!transfer_function.empty());
+      command.append("\"");
+      command.append(color_gamut);
+      command.append("\", ");
+      command.append("\"");
+      command.append(transfer_function);
+      command.append("\", ");
     } else {
       command.append("testVideoConfig(");
     }
@@ -229,9 +291,144 @@ IN_PROC_BROWSER_TEST_P(MediaCapabilitiesTestWithConfigType,
             CanDecodeAudio(config_type, "'audio/ogg; codecs=\"vorbis\"'"));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+// Cover basic spatial rendering support.
+IN_PROC_BROWSER_TEST_P(MediaCapabilitiesTestWithConfigType,
+                       AudioTypesWithSpatialRendering) {
+  base::FilePath file_path = media::GetTestDataFilePath(kDecodeTestFile);
+
+  const std::string& config_type = GetTypeString();
+
+  EXPECT_TRUE(
+      NavigateToURL(shell(), content::GetFileUrlWithQuery(file_path, "")));
+
+  // These common codecs are not associated with a spatial audio format.
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/webm; codecs=\"opus\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/webm; codecs=\"vorbis\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/mp4; codecs=\"flac\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported,
+            CanDecodeAudioWithSpatialRendering(config_type, "'audio/mpeg'",
+                                               /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/mp4; codecs=\"mp4a.40.02\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported,
+            CanDecodeAudioWithSpatialRendering(config_type, "'audio/aac'",
+                                               /*spatial_rendering*/ true));
+
+  // Supported codecs should remain supported when querying with
+  // spatialRendering set to false.
+  EXPECT_EQ(kSupported, CanDecodeAudioWithSpatialRendering(
+                            config_type, "'audio/webm; codecs=\"opus\"'",
+                            /*spatial_rendering*/ false));
+  EXPECT_EQ(kSupported, CanDecodeAudioWithSpatialRendering(
+                            config_type, "'audio/webm; codecs=\"vorbis\"'",
+                            /*spatial_rendering*/ false));
+  EXPECT_EQ(kSupported, CanDecodeAudioWithSpatialRendering(
+                            config_type, "'audio/mp4; codecs=\"flac\"'",
+                            /*spatial_rendering*/ false));
+  EXPECT_EQ(kSupported,
+            CanDecodeAudioWithSpatialRendering(config_type, "'audio/mpeg'",
+                                               /*spatial_rendering*/ false));
+  EXPECT_EQ(kPropSupported,
+            CanDecodeAudioWithSpatialRendering(
+                config_type, "'audio/mp4; codecs=\"mp4a.40.02\"'",
+                /*spatial_rendering*/ false));
+  EXPECT_EQ(kPropSupported,
+            CanDecodeAudioWithSpatialRendering(config_type, "'audio/aac'",
+                                               /*spatial_rendering*/ false));
+
+  // Test a handful of invalid strings.
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/wav; codecs=\"mp3\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/webm; codecs=\"vp8\"'",
+                              /*spatial_rendering*/ true));
+
+  // Dolby Atmos = Dolby Digital Plus + Spatial Rendering. Currently not
+  // supported.
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/mp4; codecs=\"ec-3\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/mp4; codecs=\"mp4a.a6\"'",
+                              /*spatial_rendering*/ true));
+  EXPECT_EQ(kUnsupported, CanDecodeAudioWithSpatialRendering(
+                              config_type, "'audio/mp4; codecs=\"mp4a.A6\"'",
+                              /*spatial_rendering*/ true));
+}
+
+// Cover basic HDR support.
+IN_PROC_BROWSER_TEST_P(MediaCapabilitiesTestWithConfigType,
+                       VideoTypesWithDynamicRange) {
+  base::FilePath file_path = media::GetTestDataFilePath(kDecodeTestFile);
+
+  const std::string& config_type = GetTypeString();
+
+  EXPECT_TRUE(
+      NavigateToURL(shell(), content::GetFileUrlWithQuery(file_path, "")));
+
+  // All color gamuts and transfer functions should be supported.
+  EXPECT_EQ(kSupported, CanDecodeVideoWithHdrMetadata(
+                            config_type, "'video/webm; codecs=\"vp8\"'",
+                            /* colorGamut */ "srgb",
+                            /* transferFunction */ "srgb"));
+  EXPECT_EQ(kSupported, CanDecodeVideoWithHdrMetadata(
+                            config_type, "'video/webm; codecs=\"vp8\"'",
+                            /* colorGamut */ "p3",
+                            /* transferFunction */ "pq"));
+  EXPECT_EQ(kSupported, CanDecodeVideoWithHdrMetadata(
+                            config_type, "'video/webm; codecs=\"vp8\"'",
+                            /* colorGamut */ "rec2020",
+                            /* transferFunction */ "hlg"));
+
+  // No HdrMetadataType is currently supported.
+  EXPECT_EQ(kUnsupported, CanDecodeVideoWithHdrMetadata(
+                              config_type, "'video/webm; codecs=\"vp8\"'",
+                              /* colorGamut */ "srgb",
+                              /* transferFunction */ "srgb",
+                              /* hdrMetadataType */ "smpteSt2086"));
+  EXPECT_EQ(kUnsupported, CanDecodeVideoWithHdrMetadata(
+                              config_type, "'video/webm; codecs=\"vp8\"'",
+                              /* colorGamut */ "srgb",
+                              /* transferFunction */ "srgb",
+                              /* hdrMetadataType */ "smpteSt2094-10"));
+  EXPECT_EQ(kUnsupported, CanDecodeVideoWithHdrMetadata(
+                              config_type, "'video/webm; codecs=\"vp8\"'",
+                              /* colorGamut */ "srgb",
+                              /* transferFunction */ "srgb",
+                              /* hdrMetadataType */ "smpteSt2094-40"));
+
+  // Make sure results are expected with some USE_PROPRIETARY_CODECS
+  EXPECT_EQ(kPropSupported,
+            CanDecodeVideoWithHdrMetadata(config_type,
+                                          "'video/mp4; codecs=\"avc1.42E01E\"'",
+                                          /* colorGamut */ "p3",
+                                          /* transferFunction */ "pq"));
+  EXPECT_EQ(kPropSupported,
+            CanDecodeVideoWithHdrMetadata(config_type,
+                                          "'video/mp4; codecs=\"avc1.42101E\"'",
+                                          /* colorGamut */ "srgb",
+                                          /* transferFunction */ "srgb"));
+  EXPECT_EQ(kUnsupported,
+            CanDecodeVideoWithHdrMetadata(config_type,
+                                          "'video/mp4; codecs=\"avc1.42701E\"'",
+                                          /* colorGamut */ "srgb",
+                                          /* transferFunction */ "srgb",
+                                          /* hdrMetadataType */ "smpteSt2086"));
+}
+
+INSTANTIATE_TEST_SUITE_P(File,
                          MediaCapabilitiesTestWithConfigType,
-                         ::testing::Values(ConfigType::kFile,
-                                           ConfigType::kMediaSource));
+                         ::testing::Values(ConfigType::kFile));
+INSTANTIATE_TEST_SUITE_P(MediaSource,
+                         MediaCapabilitiesTestWithConfigType,
+                         ::testing::Values(ConfigType::kMediaSource));
 
 }  // namespace content

@@ -15,9 +15,10 @@
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/extensions/default_web_app_ids.h"
+#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/page_break_constants.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -43,13 +44,16 @@ const char* const kDefaultAppOrder[] = {
     arc::kPlayStoreAppId,
     extension_misc::kFilesManagerAppId,
     extension_misc::kGmailAppId,
+    arc::kGmailAppId,
     extension_misc::kGoogleDocAppId,
     extension_misc::kGoogleSlidesAppId,
     extension_misc::kGoogleSheetsAppId,
     extension_misc::kDriveHostedAppId,
     extension_misc::kGoogleKeepAppId,
     extension_misc::kCalendarAppId,
+    arc::kGoogleCalendarAppId,
     extension_misc::kYoutubeAppId,
+    arc::kYoutubeAppId,
     arc::kPlayMoviesAppId,                   // Play Movies & TV ARC app
     extension_misc::kGooglePlayMoviesAppId,  // Play Movies & TV Chrome app
     arc::kPlayMusicAppId,                    // Play Music ARC app
@@ -57,25 +61,32 @@ const char* const kDefaultAppOrder[] = {
     arc::kPlayGamesAppId,
     arc::kPlayBooksAppId,                   // Play Books ARC app
     extension_misc::kGooglePlayBooksAppId,  // Play Books Chrome app
-    app_list::kInternalAppIdCamera,
     extension_misc::kCameraAppId,
     extension_misc::kGooglePhotosAppId,
+    arc::kGooglePhotosAppId,
+    arc::kGoogleDuoAppId,
     app_list::kDefaultPageBreak1,  // First default page break
+    // TODO(crbug.com/976578): Remove after M78.
     extension_misc::kGoogleMapsAppId,
-    app_list::kInternalAppIdSettings,
-    app_list::kInternalAppIdDiscover,
+    default_web_apps::kGoogleMapsAppId,
+    arc::kGoogleMapsAppId,
+    ash::kInternalAppIdSettings,
+    default_web_apps::kSettingsAppId,
+    default_web_apps::kOsSettingsAppId,
+    ash::kInternalAppIdDiscover,
+    default_web_apps::kHelpAppId,
     extension_misc::kGeniusAppId,
     extension_misc::kCalculatorAppId,
     default_web_apps::kCanvasAppId,
     extension_misc::kTextEditorAppId,
-    arc::kGoogleDuo,
     default_web_apps::kYoutubeTVAppId,
-    arc::kLightRoom,
-    arc::kInfinitePainter,
+    default_web_apps::kGoogleNewsAppId,
+    extensions::kWebStoreAppId,
+    arc::kLightRoomAppId,
+    arc::kInfinitePainterAppId,
     default_web_apps::kShowtimeAppId,
     extension_misc::kGooglePlusAppId,
     extension_misc::kChromeRemoteDesktopAppId,
-    extensions::kWebStoreAppId,
 };
 
 // Reads external ordinal json file and returned the parsed value. Returns NULL
@@ -147,7 +158,7 @@ ExternalLoader::ExternalLoader(bool async)
   loader_instance = this;
 
   if (async) {
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
         base::BindOnce(&ExternalLoader::Load, base::Unretained(this)));
   } else {

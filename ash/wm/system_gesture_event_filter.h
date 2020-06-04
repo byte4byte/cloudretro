@@ -11,7 +11,7 @@
 #include "ui/events/event_handler.h"
 
 namespace ash {
-class OverviewGestureHandler;
+class WmGestureHandler;
 
 // An event filter which handles system level gesture events.
 class SystemGestureEventFilter : public ui::EventHandler {
@@ -22,13 +22,11 @@ class SystemGestureEventFilter : public ui::EventHandler {
   // Overridden from ui::EventHandler:
   void OnMouseEvent(ui::MouseEvent* event) override;
   void OnScrollEvent(ui::ScrollEvent* event) override;
-  void OnTouchEvent(ui::TouchEvent* event) override;
-  void OnGestureEvent(ui::GestureEvent* event) override;
 
  private:
   friend class SystemGestureEventFilterTest;
 
-  std::unique_ptr<OverviewGestureHandler> overview_gesture_handler_;
+  std::unique_ptr<WmGestureHandler> wm_gesture_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemGestureEventFilter);
 };

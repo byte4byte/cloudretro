@@ -169,8 +169,8 @@ class NavigationModelFakeItem extends NavigationModelItem {
 class NavigationListModel extends cr.EventTarget {
   /**
    * @param {!VolumeManager} volumeManager VolumeManager instance.
-   * @param {(!cr.ui.ArrayDataModel|!FolderShortcutsDataModel)}
-   *     shortcutListModel The list of folder shortcut.
+   * @param {!FolderShortcutsDataModel} shortcutListModel The list of folder
+   *     shortcut.
    * @param {NavigationModelFakeItem} recentModelItem Recent folder.
    * @param {!DirectoryModel} directoryModel
    * @param {!AndroidAppListModel} androidAppListModel
@@ -187,7 +187,7 @@ class NavigationListModel extends cr.EventTarget {
     this.volumeManager_ = volumeManager;
 
     /**
-     * @private {(!cr.ui.ArrayDataModel|!FolderShortcutsDataModel)}
+     * @private {!FolderShortcutsDataModel}
      * @const
      */
     this.shortcutListModel_ = shortcutListModel;
@@ -230,16 +230,6 @@ class NavigationListModel extends cr.EventTarget {
      * @private {!Map<string, !NavigationModelFakeItem>}
      */
     this.removableModels_ = new Map();
-
-    /**
-     * True when MyFiles should be a volume and Downloads just a plain folder
-     * inside it. When false MyFiles is an EntryList, which means UI only type,
-     * which contains Downloads as a child volume.
-     * @private {boolean}
-     */
-    this.myFilesVolumeEnabled_ =
-        loadTimeData.valueExists('MY_FILES_VOLUME_ENABLED') &&
-        loadTimeData.getBoolean('MY_FILES_VOLUME_ENABLED');
 
     /**
      * All root navigation items in display order.
@@ -495,6 +485,7 @@ class NavigationListModel extends cr.EventTarget {
         case VolumeManagerCommon.VolumeType.DRIVE:
         case VolumeManagerCommon.VolumeType.MEDIA_VIEW:
         case VolumeManagerCommon.VolumeType.DOCUMENTS_PROVIDER:
+        case VolumeManagerCommon.VolumeType.SMB:
           if (!volumeIndexes[volumeType]) {
             volumeIndexes[volumeType] = [i];
           } else {
@@ -539,7 +530,7 @@ class NavigationListModel extends cr.EventTarget {
       for (const removable of removableVolumes) {
         // Partitions on the same physical device share device path and drive
         // label. Create keys using these two identifiers.
-        let key = removable.volumeInfo.devicePath + '/' +
+        const key = removable.volumeInfo.devicePath + '/' +
             removable.volumeInfo.driveLabel;
         if (!removableGroups.has(key)) {
           // New key, so create a new array to hold partitions.
@@ -552,18 +543,52 @@ class NavigationListModel extends cr.EventTarget {
       return removableGroups;
     };
 
+    /**
+     * Creates a model item for a Recent view whose contents are filtered by
+     * their file types.
+     * @param {string} label
+     * @param {chrome.fileManagerPrivate.RecentFileType} fileType
+     * @param {VolumeManagerCommon.RootType} rootType
+     * @return {!NavigationModelFakeItem}
+     */
+    const createFilteredRecentModelItem = (label, fileType, rootType) => {
+      const entry = /** @type {!FakeEntry} */ (Object.assign(
+          Object.create(FakeEntry.prototype), this.recentModelItem_.entry));
+      entry.recentFileType = fileType;
+      entry.rootType = rootType;
+      return new NavigationModelFakeItem(
+          label, NavigationModelItemType.RECENT, entry);
+    };
+
     // Items as per required order.
     this.navigationItems_ = [];
 
     if (this.recentModelItem_) {
       this.navigationItems_.push(this.recentModelItem_);
+      if (util.isUnifiedMediaViewEnabled()) {
+        // Unified Media View (Images, Videos and Audio).
+        this.navigationItems_.push(createFilteredRecentModelItem(
+            str('MEDIA_VIEW_AUDIO_ROOT_LABEL'),
+            chrome.fileManagerPrivate.RecentFileType.AUDIO,
+            VolumeManagerCommon.RootType.RECENT_AUDIO));
+        this.navigationItems_.push(createFilteredRecentModelItem(
+            str('MEDIA_VIEW_IMAGES_ROOT_LABEL'),
+            chrome.fileManagerPrivate.RecentFileType.IMAGE,
+            VolumeManagerCommon.RootType.RECENT_IMAGES));
+        this.navigationItems_.push(createFilteredRecentModelItem(
+            str('MEDIA_VIEW_VIDEOS_ROOT_LABEL'),
+            chrome.fileManagerPrivate.RecentFileType.VIDEO,
+            VolumeManagerCommon.RootType.RECENT_VIDEOS));
+      }
     }
 
-    // Media View (Images, Videos and Audio).
-    for (const mediaView of getVolumes(
-             VolumeManagerCommon.VolumeType.MEDIA_VIEW)) {
-      this.navigationItems_.push(mediaView);
-      mediaView.section = NavigationSection.TOP;
+    // Legacy Media View (Images, Videos and Audio).
+    if (!util.isUnifiedMediaViewEnabled()) {
+      for (const mediaView of getVolumes(
+               VolumeManagerCommon.VolumeType.MEDIA_VIEW)) {
+        this.navigationItems_.push(mediaView);
+        mediaView.section = NavigationSection.TOP;
+      }
     }
     // Shortcuts.
     for (const shortcut of this.shortcutList_) {
@@ -572,41 +597,27 @@ class NavigationListModel extends cr.EventTarget {
 
     let myFilesEntry, myFilesModel;
     if (!this.myFilesModel_) {
-      if (this.myFilesVolumeEnabled_) {
-        // When MyFilesVolume is enabled we use the Downloads volume to be the
-        // MyFiles volume.
-        const myFilesVolumeModel =
-            getSingleVolume(VolumeManagerCommon.VolumeType.DOWNLOADS);
-        if (myFilesVolumeModel) {
-          myFilesEntry = new VolumeEntry(myFilesVolumeModel.volumeInfo);
-          myFilesModel = new NavigationModelFakeItem(
-              str('MY_FILES_ROOT_LABEL'), NavigationModelItemType.ENTRY_LIST,
-              myFilesEntry);
-          myFilesModel.section = NavigationSection.MY_FILES;
-          this.myFilesModel_ = myFilesModel;
-        } else {
-          // When MyFilesVolume isn't available we create a empty EntryList to
-          // be MyFiles to be able to display Linux or Play volumes. However we
-          // don't save it back to this.MyFilesModel_ so it's always re-created.
-          myFilesEntry = new EntryList(
-              str('MY_FILES_ROOT_LABEL'),
-              VolumeManagerCommon.RootType.MY_FILES);
-          myFilesModel = new NavigationModelFakeItem(
-              myFilesEntry.label, NavigationModelItemType.ENTRY_LIST,
-              myFilesEntry);
-          myFilesModel.section = NavigationSection.MY_FILES;
-        }
+      // When MyFilesVolume is enabled we use the Downloads volume to be the
+      // MyFiles volume.
+      const myFilesVolumeModel =
+          getSingleVolume(VolumeManagerCommon.VolumeType.DOWNLOADS);
+      if (myFilesVolumeModel) {
+        myFilesEntry = new VolumeEntry(myFilesVolumeModel.volumeInfo);
+        myFilesModel = new NavigationModelFakeItem(
+            str('MY_FILES_ROOT_LABEL'), NavigationModelItemType.ENTRY_LIST,
+            myFilesEntry);
+        myFilesModel.section = NavigationSection.MY_FILES;
+        this.myFilesModel_ = myFilesModel;
       } else {
-        // Here is the initial version for MyFiles, which is only an entry in JS
-        // to be displayed in the DirectoryTree, cotaining Downloads, Linux and
-        // Play files volumes.
+        // When MyFiles volume isn't available we create a empty EntryList to
+        // be MyFiles to be able to display Linux or Play volumes. However we
+        // don't save it back to this.MyFilesModel_ so it's always re-created.
         myFilesEntry = new EntryList(
             str('MY_FILES_ROOT_LABEL'), VolumeManagerCommon.RootType.MY_FILES);
         myFilesModel = new NavigationModelFakeItem(
             myFilesEntry.label, NavigationModelItemType.ENTRY_LIST,
             myFilesEntry);
         myFilesModel.section = NavigationSection.MY_FILES;
-        this.myFilesModel_ = myFilesModel;
       }
     } else {
       myFilesEntry = this.myFilesModel_.entry;
@@ -614,22 +625,6 @@ class NavigationListModel extends cr.EventTarget {
     }
     this.directoryModel_.setMyFiles(myFilesEntry);
     this.navigationItems_.push(myFilesModel);
-
-    // Add Downloads to My Files.
-    if (!this.myFilesVolumeEnabled_) {
-      const downloadsVolume =
-          getSingleVolume(VolumeManagerCommon.VolumeType.DOWNLOADS);
-      if (downloadsVolume) {
-        // Only add volume if MyFiles doesn't have it yet.
-        if (myFilesEntry.findIndexByVolumeInfo(downloadsVolume.volumeInfo) ===
-            -1) {
-          myFilesEntry.addEntry(new VolumeEntry(downloadsVolume.volumeInfo));
-        }
-      } else {
-        myFilesEntry.removeByVolumeType(
-            VolumeManagerCommon.VolumeType.DOWNLOADS);
-      }
-    }
 
     // Add Android to My Files.
     const androidVolume =
@@ -676,6 +671,12 @@ class NavigationListModel extends cr.EventTarget {
     if (!hasDrive && this.fakeDriveItem_) {
       this.navigationItems_.push(this.fakeDriveItem_);
       this.fakeDriveItem_.section = NavigationSection.CLOUD;
+    }
+
+    // Add SMB.
+    for (const provided of getVolumes(VolumeManagerCommon.VolumeType.SMB)) {
+      this.navigationItems_.push(provided);
+      provided.section = NavigationSection.CLOUD;
     }
 
     // Add FSP.

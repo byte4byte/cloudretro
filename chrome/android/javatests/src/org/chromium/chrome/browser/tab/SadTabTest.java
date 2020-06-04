@@ -18,8 +18,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.tab.Tab.TabHidingType;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -129,13 +128,12 @@ public class SadTabTest {
      * Confirm that after a successive refresh of a failed tab that failed to load, change the
      * button from "Reload" to "Send Feedback". If reloaded a third time and it is successful it
      * reverts from "Send Feedback" to "Reload".
-     * @throws InterruptedException
      * @throws IllegalArgumentException
      */
     @Test
     @SmallTest
     @Feature({"SadTab"})
-    public void testSadTabPageButtonText() throws IllegalArgumentException, InterruptedException {
+    public void testSadTabPageButtonText() throws IllegalArgumentException {
         final Tab tab = mActivityTestRule.getActivity().getActivityTab();
 
         Assert.assertFalse(isShowingSadTab(tab));

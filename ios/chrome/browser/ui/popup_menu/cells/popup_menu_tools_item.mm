@@ -6,22 +6,23 @@
 
 #include <stdlib.h>
 
+#include "base/feature_list.h"
 #include "base/logging.h"
 #import "ios/chrome/browser/ui/popup_menu/public/popup_menu_ui_constants.h"
 #import "ios/chrome/browser/ui/reading_list/number_badge_view.h"
 #import "ios/chrome/browser/ui/reading_list/text_badge_view.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
-const int kEnabledDefaultColor = 0x1A73E8;
-const int kEnabledDestructiveColor = 0xEA4334;
 const CGFloat kImageLength = 28;
 const CGFloat kCellHeight = 44;
 const CGFloat kInnerMargin = 11;
@@ -35,12 +36,6 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
 @implementation PopupMenuToolsItem
 
 @synthesize actionIdentifier = _actionIdentifier;
-@synthesize badgeNumber = _badgeNumber;
-@synthesize badgeText = _badgeText;
-@synthesize image = _image;
-@synthesize title = _title;
-@synthesize enabled = _enabled;
-@synthesize destructiveAction = _destructiveAction;
 
 - (instancetype)initWithType:(NSInteger)type {
   self = [super initWithType:type];
@@ -61,6 +56,7 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
   cell.destructiveAction = self.destructiveAction;
   [cell setBadgeNumber:self.badgeNumber];
   [cell setBadgeText:self.badgeText];
+  cell.additionalAccessibilityLabel = self.additionalAccessibilityLabel;
 }
 
 #pragma mark - PopupMenuItem
@@ -85,6 +81,11 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
 
 #pragma mark - PopupMenuToolsCell
 
+#if defined(__IPHONE_13_4)
+@interface PopupMenuToolsCell (Pointer) <UIPointerInteractionDelegate>
+@end
+#endif  // defined(__IPHONE_13_4)
+
 @interface PopupMenuToolsCell ()
 
 // Title label for the cell, redefined as readwrite.
@@ -105,11 +106,6 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
 @implementation PopupMenuToolsCell
 
 @synthesize imageView = _imageView;
-@synthesize numberBadgeView = _numberBadgeView;
-@synthesize textBadgeView = _textBadgeView;
-@synthesize titleLabel = _titleLabel;
-@synthesize titleToBadgeConstraint = _titleToBadgeConstraint;
-@synthesize destructiveAction = _destructiveAction;
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style
               reuseIdentifier:(NSString*)reuseIdentifier {
@@ -117,7 +113,7 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
   if (self) {
     UIView* selectedBackgroundView = [[UIView alloc] init];
     selectedBackgroundView.backgroundColor =
-        [UIColor colorWithWhite:0 alpha:kSelectedItemBackgroundAlpha];
+        [UIColor colorNamed:kTableViewRowHighlightColor];
     self.selectedBackgroundView = selectedBackgroundView;
 
     _titleLabel = [[UILabel alloc] init];
@@ -203,6 +199,15 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
         activateConstraints:@[ trailingEdge, heightConstraint ]];
 
     self.isAccessibilityElement = YES;
+
+#if defined(__IPHONE_13_4)
+    if (@available(iOS 13.4, *)) {
+      if (base::FeatureList::IsEnabled(kPointerSupport)) {
+        [self addInteraction:[[UIPointerInteraction alloc]
+                                 initWithDelegate:self]];
+      }
+    }
+#endif  // defined(__IPHONE_13_4)
   }
   return self;
 }
@@ -258,8 +263,8 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
 
 - (UIColor*)contentColor {
   if (self.destructiveAction)
-    return UIColorFromRGB(kEnabledDestructiveColor);
-  return UIColorFromRGB(kEnabledDefaultColor);
+    return [UIColor colorNamed:kRedColor];
+  return [UIColor colorNamed:kBlueColor];
 }
 
 - (void)registerForContentSizeUpdates {
@@ -311,11 +316,49 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
     self.titleLabel.textColor = self.contentColor;
     self.imageView.tintColor = self.contentColor;
   } else {
-    self.titleLabel.textColor = [[self class] disabledColor];
-    self.imageView.tintColor = [[self class] disabledColor];
+    self.titleLabel.textColor = [UIColor colorNamed:kDisabledTintColor];
+    self.imageView.tintColor = [UIColor colorNamed:kDisabledTintColor];
     self.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
   }
 }
+
+#pragma mark - Accessibility
+
+- (NSString*)accessibilityLabel {
+  if (self.additionalAccessibilityLabel) {
+    return [NSString stringWithFormat:@"%@, %@", self.titleLabel.text,
+                                      self.additionalAccessibilityLabel];
+  } else {
+    return self.titleLabel.text;
+  }
+}
+
+- (NSArray<NSString*>*)accessibilityUserInputLabels {
+  // The name for Voice Control shouldn't include any data from the badge.
+  return @[ self.titleLabel.text ];
+}
+
+#if defined(__IPHONE_13_4)
+
+#pragma mark UIPointerInteractionDelegate
+
+- (UIPointerRegion*)pointerInteraction:(UIPointerInteraction*)interaction
+                      regionForRequest:(UIPointerRegionRequest*)request
+                         defaultRegion:(UIPointerRegion*)defaultRegion
+    API_AVAILABLE(ios(13.4)) {
+  return defaultRegion;
+}
+
+- (UIPointerStyle*)pointerInteraction:(UIPointerInteraction*)interaction
+                       styleForRegion:(UIPointerRegion*)region
+    API_AVAILABLE(ios(13.4)) {
+  UIPointerHoverEffect* effect = [UIPointerHoverEffect
+      effectWithPreview:[[UITargetedPreview alloc] initWithView:self]];
+  effect.prefersScaledContent = NO;
+  effect.prefersShadow = NO;
+  return [UIPointerStyle styleWithEffect:effect shape:nil];
+}
+#endif  // defined(__IPHONE_13_4)
 
 #pragma mark - Private
 
@@ -327,18 +370,6 @@ NSString* const kToolsMenuTextBadgeAccessibilityIdentifier =
 // Font to be used for the title.
 - (UIFont*)titleFont {
   return [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-}
-
-// Returns the color of the disabled button's title.
-+ (UIColor*)disabledColor {
-  static UIColor* systemTintColorForDisabled = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    UIButton* button = [UIButton buttonWithType:UIButtonTypeSystem];
-    systemTintColorForDisabled =
-        [button titleColorForState:UIControlStateDisabled];
-  });
-  return systemTintColorForDisabled;
 }
 
 @end

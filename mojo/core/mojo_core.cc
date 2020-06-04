@@ -7,6 +7,7 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/no_destructor.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
@@ -22,7 +23,7 @@ namespace {
 class IPCSupport {
  public:
   IPCSupport() : ipc_thread_("Mojo IPC") {
-    base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
+    base::Thread::Options options(base::MessagePumpType::IO, 0);
     ipc_thread_.StartWithOptions(options);
     mojo::core::Core::Get()->SetIOTaskRunner(ipc_thread_.task_runner());
   }
@@ -30,8 +31,8 @@ class IPCSupport {
   ~IPCSupport() {
     base::WaitableEvent wait(base::WaitableEvent::ResetPolicy::MANUAL,
                              base::WaitableEvent::InitialState::NOT_SIGNALED);
-    mojo::core::Core::Get()->RequestShutdown(base::BindRepeating(
-        &base::WaitableEvent::Signal, base::Unretained(&wait)));
+    mojo::core::Core::Get()->RequestShutdown(
+        base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&wait)));
     wait.Wait();
   }
 

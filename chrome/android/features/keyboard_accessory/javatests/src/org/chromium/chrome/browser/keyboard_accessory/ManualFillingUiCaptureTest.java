@@ -16,7 +16,8 @@ import static org.chromium.chrome.browser.keyboard_accessory.ManualFillingTestHe
 import static org.chromium.chrome.browser.keyboard_accessory.tab_layout_component.KeyboardAccessoryTabTestHelper.isKeyboardAccessoryTabLayout;
 
 import android.support.test.filters.MediumTest;
-import android.support.v7.widget.RecyclerView;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.After;
 import org.junit.Rule;
@@ -26,8 +27,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.test.ScreenShooter;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -35,7 +36,6 @@ import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -120,7 +120,7 @@ public class ManualFillingUiCaptureTest {
     @EnableFeatures(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
     @Feature({"KeyboardAccessoryModern", "LTR", "UiCatalogue"})
     public void testCaptureKeyboardAccessoryV2WithPasswords()
-            throws InterruptedException, TimeoutException, ExecutionException {
+            throws InterruptedException, TimeoutException {
         mHelper.loadTestPage(false);
         ManualFillingTestHelper.createAutofillTestProfiles();
         mHelper.cacheTestCredentials();
@@ -150,7 +150,7 @@ public class ManualFillingUiCaptureTest {
     @EnableFeatures(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
     @Feature({"KeyboardAccessoryModern", "RTL", "UiCatalogue"})
     public void testCaptureKeyboardAccessoryV2WithPasswordsRTL()
-            throws InterruptedException, TimeoutException, ExecutionException {
+            throws InterruptedException, TimeoutException {
         mHelper.loadTestPage(true);
         ManualFillingTestHelper.createAutofillTestProfiles();
         mHelper.cacheTestCredentials();

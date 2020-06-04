@@ -5,25 +5,20 @@
 #include "components/os_crypt/key_storage_libsecret.h"
 
 #include "base/base64.h"
+#include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/time/time.h"
+#include "build/branding_buildflags.h"
 #include "components/os_crypt/libsecret_util_linux.h"
 
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 const char kApplicationName[] = "chrome";
 #else
 const char kApplicationName[] = "chromium";
 #endif
-
-// Deprecated in M55 (crbug.com/639298)
-const SecretSchema kKeystoreSchemaV1 = {
-    "chrome_libsecret_os_crypt_password",
-    SECRET_SCHEMA_NONE,
-    {
-        {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING},
-    }};
 
 const SecretSchema kKeystoreSchemaV2 = {
     "chrome_libsecret_os_crypt_password_v2",
@@ -46,6 +41,25 @@ SecretValue* ToSingleSecret(GList* secret_items) {
   SecretValue* secret_value =
       LibsecretLoader::secret_item_get_secret(secret_item);
   return secret_value;
+}
+
+// Checks the timestamps of the secret item and prints findings to logs. We
+// presume that at most one secret item can be present.
+void AnalyseKeyHistory(GList* secret_items) {
+  GList* first = g_list_first(secret_items);
+  if (first == nullptr)
+    return;
+
+  SecretItem* secret_item = static_cast<SecretItem*>(first->data);
+  auto created = base::Time::FromTimeT(
+      LibsecretLoader::secret_item_get_created(secret_item));
+  auto last_modified = base::Time::FromTimeT(
+      LibsecretLoader::secret_item_get_modified(secret_item));
+
+  VLOG(1) << "Libsecret key created: " << created;
+  VLOG(1) << "Libsecret key last modified: " << last_modified;
+  LOG_IF(WARNING, created != last_modified)
+      << "the encryption key has been modified since it was created.";
 }
 
 }  // namespace
@@ -85,11 +99,9 @@ std::string KeyStorageLibsecret::GetKeyImpl() {
 
   SecretValue* password_libsecret = ToSingleSecret(helper.results());
   if (!password_libsecret) {
-    std::string password = Migrate();
-    if (!password.empty())
-      return password;
     return AddRandomPasswordInLibsecret();
   }
+  AnalyseKeyHistory(helper.results());
   std::string password(
       LibsecretLoader::secret_value_get_text(password_libsecret));
   LibsecretLoader::secret_value_unref(password_libsecret);
@@ -101,53 +113,4 @@ bool KeyStorageLibsecret::Init() {
   if (loaded)
     LibsecretLoader::EnsureKeyringUnlocked();
   return loaded;
-}
-
-std::string KeyStorageLibsecret::Migrate() {
-  LibsecretAttributesBuilder attrs;
-
-  // Detect old entry.
-  LibsecretLoader::SearchHelper helper;
-  helper.Search(&kKeystoreSchemaV1, attrs.Get(),
-                SECRET_SEARCH_UNLOCK | SECRET_SEARCH_LOAD_SECRETS);
-  if (!helper.success())
-    return std::string();
-
-  SecretValue* password_libsecret = ToSingleSecret(helper.results());
-  if (!password_libsecret)
-    return std::string();
-
-  VLOG(1) << "OSCrypt detected a deprecated password in Libsecret.";
-  std::string password(
-      LibsecretLoader::secret_value_get_text(password_libsecret));
-  LibsecretLoader::secret_value_unref(password_libsecret);
-
-  // Create new entry.
-  GError* error = nullptr;
-  bool success = LibsecretLoader::secret_password_store_sync(
-      &kKeystoreSchemaV2, nullptr, KeyStorageLinux::kKey, password.c_str(),
-      nullptr, &error, "application", kApplicationName, nullptr);
-  if (error) {
-    VLOG(1) << "Failed to store migrated password. " << error->message;
-    g_error_free(error);
-    return std::string();
-  }
-  if (!success) {
-    VLOG(1) << "Failed to store migrated password.";
-    return std::string();
-  }
-
-  // Delete old entry.
-  // Even if deletion failed, we have to use the password that we created.
-  success = LibsecretLoader::secret_password_clear_sync(
-      &kKeystoreSchemaV1, nullptr, &error, nullptr);
-  if (error) {
-    VLOG(1) << "OSCrypt failed to delete deprecated password. "
-            << error->message;
-    g_error_free(error);
-  }
-
-  VLOG(1) << "OSCrypt migrated from deprecated password.";
-
-  return password;
 }

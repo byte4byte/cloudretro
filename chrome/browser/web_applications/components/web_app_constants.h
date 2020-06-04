@@ -5,17 +5,31 @@
 #ifndef CHROME_BROWSER_WEB_APPLICATIONS_COMPONENTS_WEB_APP_CONSTANTS_H_
 #define CHROME_BROWSER_WEB_APPLICATIONS_COMPONENTS_WEB_APP_CONSTANTS_H_
 
+#include "components/services/app_service/public/mojom/types.mojom-forward.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
+
 namespace web_app {
 
-// How the app will be launched after installation.
-enum class LaunchContainer {
-  // When `kDefault` is used, the app will launch in a window if the site is
-  // "installable" (also referred to as Progressive Web App) and in a tab if
-  // the site is not "installable".
+// Install sources are listed in the order of priority (from top to bottom).
+//
+// This enum should be zero based: values are used as index in a bitset.
+// We don't use this enum values in prefs or metrics: enumerators can be
+// reordered. This enum is not strongly typed enum class: it supports implicit
+// conversion to int and <> comparison operators.
+namespace Source {
+enum Type {
+  kMinValue = 0,
+  kSystem = kMinValue,
+  kPolicy,
+  kWebAppStore,
+  // We sync only regular user-installed apps from the open web. For
+  // user-installed apps without overlaps this is the only source that will be
+  // set.
+  kSync,
   kDefault,
-  kTab,
-  kWindow,
+  kMaxValue = kDefault
 };
+}  // namespace Source
 
 // The result of an attempted web app installation, uninstallation or update.
 //
@@ -27,17 +41,21 @@ enum class LaunchContainer {
 // numeric values should never be reused. Update corresponding enums.xml entry
 // when making changes here.
 enum class InstallResultCode {
-  kSuccess = 0,
-  kAlreadyInstalled = 1,
-  // Catch-all failure category. More-specific failure categories are below.
-  kFailedUnknownReason = 2,
+  // Success category:
+  kSuccessNewInstall = 0,
+  kSuccessAlreadyInstalled = 1,
+  // Failure category:
+  // An inter-process request to blink renderer failed.
   kGetWebApplicationInfoFailed = 3,
+  // A user previously uninstalled the app, user doesn't want to see it again.
   kPreviouslyUninstalled = 4,
+  // The blink renderer used to install the app was destroyed.
   kWebContentsDestroyed = 5,
+  // I/O error: Disk output failed.
   kWriteDataFailed = 6,
+  // A user rejected installation prompt.
   kUserInstallDeclined = 7,
-  kInstallManagerDestroyed = 8,
-  kWindowOpened = 9,
+  // |require_manifest| was specified but the app had no valid manifest.
   kNotValidManifestForWebApp = 10,
   // We have terminated the installation pipeline and intented to the Play
   // Store, where the user still needs to accept the Play installation prompt to
@@ -45,8 +63,32 @@ enum class InstallResultCode {
   kIntentToPlayStore = 11,
   // A web app has been disabled by device policy or by other reasons.
   kWebAppDisabled = 12,
-  kMaxValue = kWebAppDisabled
+  // The network request for the install URL was redirected.
+  kInstallURLRedirected = 13,
+  // The network request for the install URL failed.
+  kInstallURLLoadFailed = 14,
+  // The requested app_id check failed: actual resulting app_id doesn't match.
+  kExpectedAppIdCheckFailed = 15,
+  // The network request for the install URL timed out.
+  kInstallURLLoadTimeOut = 16,
+  // Placeholder uninstall fails (in PendingAppManager).
+  kFailedPlaceholderUninstall = 17,
+  // Web App is not considered installable, i.e. missing manifest fields, no
+  // service worker, etc.
+  kNotInstallable = 18,
+  // Bookmark App extension install or update fails.
+  kBookmarkExtensionInstallError = 19,
+  // Apk Web App install fails.
+  kApkWebAppInstallFailed = 20,
+  // App managers are shutting down. For example, when user logs out immediately
+  // after login.
+  kCancelledOnWebAppProviderShuttingDown = 21,
+
+  kMaxValue = kCancelledOnWebAppProviderShuttingDown
 };
+
+// Checks if InstallResultCode is not a failure.
+bool IsSuccess(InstallResultCode code);
 
 // PendingAppManager: Where an app was installed from. This affects what flags
 // will be used when installing the app.
@@ -107,6 +149,22 @@ enum class ExternalInstallSource {
   // ExternallyInstalledWebAppPrefs to track navigation url to app_id entries.
   kArc = 4,
 };
+
+// Icon size in pixels.
+// Small icons are used in confirmation dialogs and app windows.
+constexpr int kWebAppIconSmall = 32;
+
+using DisplayMode = blink::mojom::DisplayMode;
+
+// When user_display_mode indicates a user preference for opening in
+// a browser tab, we open in a browser tab. Otherwise, we open in a standalone
+// window (for app_display_mode 'standalone' or 'fullscreen'), or a minimal-ui
+// window (for app_display_mode 'browser' or 'minimal-ui').
+DisplayMode ResolveEffectiveDisplayMode(DisplayMode app_display_mode,
+                                        DisplayMode user_display_mode);
+
+apps::mojom::LaunchContainer ConvertDisplayModeToAppLaunchContainer(
+    DisplayMode display_mode);
 
 }  // namespace web_app
 

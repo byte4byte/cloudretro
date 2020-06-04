@@ -64,23 +64,22 @@ AttestationCAClient::AttestationCAClient() {
 AttestationCAClient::~AttestationCAClient() {}
 
 void AttestationCAClient::SendEnrollRequest(const std::string& request,
-                                            const DataCallback& on_response) {
+                                            DataCallback on_response) {
   FetchURL(
       GetType() == TEST_PCA ? kTestEnrollRequestURL : kDefaultEnrollRequestURL,
-      request, on_response);
+      request, std::move(on_response));
 }
 
-void AttestationCAClient::SendCertificateRequest(
-    const std::string& request,
-    const DataCallback& on_response) {
+void AttestationCAClient::SendCertificateRequest(const std::string& request,
+                                                 DataCallback on_response) {
   FetchURL(GetType() == TEST_PCA ? kTestCertificateRequestURL
                                  : kDefaultCertificateRequestURL,
-           request, on_response);
+           request, std::move(on_response));
 }
 
 void AttestationCAClient::OnURLLoadComplete(
     std::list<std::unique_ptr<network::SimpleURLLoader>>::iterator it,
-    const DataCallback& callback,
+    DataCallback callback,
     std::unique_ptr<std::string> response_body) {
   // Move the loader out of the active loaders list.
   std::unique_ptr<network::SimpleURLLoader> url_loader = std::move(*it);
@@ -94,7 +93,7 @@ void AttestationCAClient::OnURLLoadComplete(
     if (response_code < 200 || response_code > 299) {
       LOG(ERROR) << "Attestation CA sent an HTTP error response: "
                  << response_code;
-      callback.Run(false, "");
+      std::move(callback).Run(false, "");
       return;
     }
   }
@@ -103,17 +102,17 @@ void AttestationCAClient::OnURLLoadComplete(
     int net_error = url_loader->NetError();
     LOG(ERROR) << "Attestation CA request failed, error: "
                << net::ErrorToString(net_error);
-    callback.Run(false, "");
+    std::move(callback).Run(false, "");
     return;
   }
 
   // Run the callback last because it may delete |this|.
-  callback.Run(true, *response_body);
+  std::move(callback).Run(true, *response_body);
 }
 
 void AttestationCAClient::FetchURL(const std::string& url,
                                    const std::string& request,
-                                   const DataCallback& on_response) {
+                                   DataCallback on_response) {
   const net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("attestation_ca_client", R"(
         semantics {
@@ -145,9 +144,8 @@ void AttestationCAClient::FetchURL(const std::string& url,
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(url);
   resource_request->method = "POST";
-  resource_request->load_flags = net::LOAD_DO_NOT_SEND_COOKIES |
-                                 net::LOAD_DO_NOT_SAVE_COOKIES |
-                                 net::LOAD_DISABLE_CACHE;
+  resource_request->load_flags = net::LOAD_DISABLE_CACHE;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   auto url_loader = network::SimpleURLLoader::Create(
       std::move(resource_request), traffic_annotation);
@@ -160,7 +158,7 @@ void AttestationCAClient::FetchURL(const std::string& url,
       g_browser_process->shared_url_loader_factory().get(),
       base::BindOnce(&AttestationCAClient::OnURLLoadComplete,
                      base::Unretained(this), std::move(--url_loaders_.end()),
-                     on_response));
+                     std::move(on_response)));
 }
 
 PrivacyCAType AttestationCAClient::GetType() {

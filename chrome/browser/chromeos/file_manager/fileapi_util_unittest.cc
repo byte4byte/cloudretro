@@ -15,10 +15,10 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
 namespace file_manager {
@@ -38,8 +38,7 @@ constexpr char kFileSystemId[] = "test-filesystem";
 TEST(FileManagerFileAPIUtilTest,
      ConvertSelectedFileInfoListToFileChooserFileInfoList) {
   // Prepare the test environment.
-  content::TestBrowserThreadBundle threads;
-  content::TestServiceManagerContext service_manager_context;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 

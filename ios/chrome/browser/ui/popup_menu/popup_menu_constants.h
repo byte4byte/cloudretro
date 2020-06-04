@@ -12,12 +12,16 @@ extern NSString* const kPopupMenuToolsMenuTableViewId;
 extern NSString* const kPopupMenuNavigationTableViewId;
 
 // Accessibility IDs for the Tools Menu items.
+// Downloads item accessibility Identifier.
+extern NSString* const kToolsMenuDownloadsId;
 // Reload item accessibility Identifier.
 extern NSString* const kToolsMenuReload;
 // Stop item accessibility Identifier.
 extern NSString* const kToolsMenuStop;
 // New Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewTabId;
+// New Tab item accessibility Identifier.
+extern NSString* const kToolsMenuNewWindow;
 // New incognito Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewIncognitoTabId;
 // Close all Tabs item accessibility Identifier.
@@ -60,15 +64,15 @@ extern NSString* const kToolsMenuSiteInformation;
 extern NSString* const kToolsMenuPasteAndGo;
 // Voice Search item accessibility Identifier.
 extern NSString* const kToolsMenuVoiceSearch;
-// TODO(crbug.com/974751): Check if this is still used.
 // Search item accessibility Identifier.
 extern NSString* const kToolsMenuSearch;
-// TODO(crbug.com/974751): Check if this is still used.
 // Incognito Search item accessibility Identifier.
 extern NSString* const kToolsMenuIncognitoSearch;
 // QR Code Search item accessibility Identifier.
 extern NSString* const kToolsMenuQRCodeSearch;
 // Copied Image Search item accessibility Identifier.
 extern NSString* const kToolsMenuCopiedImageSearch;
+// Text Zoom item accessibility identifier.
+extern NSString* const kToolsMenuTextZoom;
 
 #endif  // IOS_CHROME_BROWSER_UI_POPUP_MENU_POPUP_MENU_CONSTANTS_H_

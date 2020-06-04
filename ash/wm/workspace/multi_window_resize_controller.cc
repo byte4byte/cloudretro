@@ -16,6 +16,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -36,9 +37,9 @@ const int kHideDelayMS = 500;
 // Padding from the bottom/right edge the resize widget is shown at.
 const int kResizeWidgetPadding = 15;
 
-gfx::Point ConvertPointFromScreen(aura::Window* window,
-                                  const gfx::Point& point) {
-  gfx::Point result(point);
+gfx::PointF ConvertPointFromScreen(aura::Window* window,
+                                   const gfx::PointF& point) {
+  gfx::PointF result(point);
   ::wm::ConvertPointFromScreen(window, &result);
   return result;
 }
@@ -62,8 +63,8 @@ bool ContainsX(aura::Window* window, int x) {
 }
 
 bool ContainsScreenX(aura::Window* window, int x_in_screen) {
-  gfx::Point window_loc =
-      ConvertPointFromScreen(window, gfx::Point(x_in_screen, 0));
+  gfx::PointF window_loc =
+      ConvertPointFromScreen(window, gfx::PointF(x_in_screen, 0));
   return ContainsX(window, window_loc.x());
 }
 
@@ -72,8 +73,8 @@ bool ContainsY(aura::Window* window, int y) {
 }
 
 bool ContainsScreenY(aura::Window* window, int y_in_screen) {
-  gfx::Point window_loc =
-      ConvertPointFromScreen(window, gfx::Point(0, y_in_screen));
+  gfx::PointF window_loc =
+      ConvertPointFromScreen(window, gfx::PointF(0, y_in_screen));
   return ContainsY(window, window_loc.y());
 }
 
@@ -152,14 +153,14 @@ class MultiWindowResizeController::ResizeView : public views::View {
   bool OnMousePressed(const ui::MouseEvent& event) override {
     gfx::Point location(event.location());
     views::View::ConvertPointToScreen(this, &location);
-    controller_->StartResize(location);
+    controller_->StartResize(gfx::PointF(location));
     return true;
   }
 
   bool OnMouseDragged(const ui::MouseEvent& event) override {
     gfx::Point location(event.location());
     views::View::ConvertPointToScreen(this, &location);
-    controller_->Resize(location, event.flags());
+    controller_->Resize(gfx::PointF(location), event.flags());
     return true;
   }
 
@@ -279,7 +280,7 @@ void MultiWindowResizeController::OnWindowDestroying(aura::Window* window) {
 }
 
 void MultiWindowResizeController::OnPostWindowStateTypeChange(
-    wm::WindowState* window_state,
+    WindowState* window_state,
     WindowStateType old_type) {
   if (window_state->IsMaximized() || window_state->IsFullscreen() ||
       window_state->IsMinimized()) {
@@ -292,8 +293,9 @@ MultiWindowResizeController::DetermineWindowsFromScreenPoint(
     aura::Window* window) const {
   gfx::Point mouse_location(
       display::Screen::GetScreen()->GetCursorScreenPoint());
-  mouse_location = ConvertPointFromScreen(window, mouse_location);
-  const int component = wm::GetNonClientComponent(window, mouse_location);
+  wm::ConvertPointFromScreen(window, &mouse_location);
+  const int component =
+      window_util::GetNonClientComponent(window, mouse_location);
   return DetermineWindows(window, component, mouse_location);
 }
 
@@ -431,12 +433,12 @@ void MultiWindowResizeController::FindWindowsTouching(
 
 void MultiWindowResizeController::StartObserving(aura::Window* window) {
   window->AddObserver(this);
-  wm::GetWindowState(window)->AddObserver(this);
+  WindowState::Get(window)->AddObserver(this);
 }
 
 void MultiWindowResizeController::StopObserving(aura::Window* window) {
   window->RemoveObserver(this);
-  wm::GetWindowState(window)->RemoveObserver(this);
+  WindowState::Get(window)->RemoveObserver(this);
 }
 
 void MultiWindowResizeController::ShowIfValidMouseLocation() {
@@ -455,20 +457,20 @@ void MultiWindowResizeController::ShowNow() {
   resize_widget_.reset(new views::Widget);
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.name = "MultiWindowResizeController";
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.parent = windows_.window1->GetRootWindow()->GetChildById(
       kShellWindowId_AlwaysOnTopContainer);
   ResizeView* view = new ResizeView(this, windows_.direction);
   resize_widget_->set_focus_on_creation(false);
-  resize_widget_->Init(params);
+  resize_widget_->Init(std::move(params));
   ::wm::SetWindowVisibilityAnimationType(
       resize_widget_->GetNativeWindow(),
       ::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
   resize_widget_->SetContentsView(view);
   show_bounds_in_screen_ = ConvertRectToScreen(
       windows_.window1->parent(),
-      CalculateResizeWidgetBounds(show_location_in_parent_));
+      CalculateResizeWidgetBounds(gfx::PointF(show_location_in_parent_)));
   resize_widget_->SetBounds(show_bounds_in_screen_);
   resize_widget_->Show();
   CreateMouseWatcher();
@@ -510,10 +512,10 @@ void MultiWindowResizeController::ResetResizer() {
 }
 
 void MultiWindowResizeController::StartResize(
-    const gfx::Point& location_in_screen) {
+    const gfx::PointF& location_in_screen) {
   DCHECK(!window_resizer_.get());
   DCHECK(windows_.is_valid());
-  gfx::Point location_in_parent =
+  gfx::PointF location_in_parent =
       ConvertPointFromScreen(windows_.window2->parent(), location_in_screen);
   aura::Window::Windows windows;
   windows.push_back(windows_.window2);
@@ -525,7 +527,7 @@ void MultiWindowResizeController::StartResize(
     windows.push_back(windows_.other_windows[i]);
   }
   int component = windows_.direction == LEFT_RIGHT ? HTRIGHT : HTBOTTOM;
-  wm::WindowState* window_state = wm::GetWindowState(windows_.window1);
+  WindowState* window_state = WindowState::Get(windows_.window1);
   window_state->CreateDragDetails(location_in_parent, component,
                                   ::wm::WINDOW_MOVE_SOURCE_MOUSE);
   window_resizer_.reset(WorkspaceWindowResizer::Create(window_state, windows));
@@ -534,9 +536,9 @@ void MultiWindowResizeController::StartResize(
   mouse_watcher_.reset();
 }
 
-void MultiWindowResizeController::Resize(const gfx::Point& location_in_screen,
+void MultiWindowResizeController::Resize(const gfx::PointF& location_in_screen,
                                          int event_flags) {
-  gfx::Point location_in_parent =
+  gfx::PointF location_in_parent =
       ConvertPointFromScreen(windows_.window1->parent(), location_in_screen);
   window_resizer_->Drag(location_in_parent, event_flags);
   gfx::Rect bounds =
@@ -552,7 +554,7 @@ void MultiWindowResizeController::Resize(const gfx::Point& location_in_screen,
 
 void MultiWindowResizeController::CompleteResize() {
   window_resizer_->CompleteDrag();
-  wm::GetWindowState(window_resizer_->GetTarget())->DeleteDragDetails();
+  WindowState::Get(window_resizer_->GetTarget())->DeleteDragDetails();
   window_resizer_.reset();
 
   // Mouse may still be over resizer, if not hide.
@@ -575,12 +577,12 @@ void MultiWindowResizeController::CancelResize() {
   if (!window_resizer_)
     return;  // Happens if window was destroyed and we nuked the WindowResizer.
   window_resizer_->RevertDrag();
-  wm::GetWindowState(window_resizer_->GetTarget())->DeleteDragDetails();
+  WindowState::Get(window_resizer_->GetTarget())->DeleteDragDetails();
   ResetResizer();
 }
 
 gfx::Rect MultiWindowResizeController::CalculateResizeWidgetBounds(
-    const gfx::Point& location_in_parent) const {
+    const gfx::PointF& location_in_parent) const {
   gfx::Size pref = resize_widget_->GetContentsView()->GetPreferredSize();
   int x = 0, y = 0;
   if (windows_.direction == LEFT_RIGHT) {
@@ -644,8 +646,9 @@ bool MultiWindowResizeController::IsOverComponent(
     aura::Window* window,
     const gfx::Point& location_in_screen,
     int component) const {
-  gfx::Point window_loc = ConvertPointFromScreen(window, location_in_screen);
-  return wm::GetNonClientComponent(window, window_loc) == component;
+  gfx::Point window_loc(location_in_screen);
+  ::wm::ConvertPointFromScreen(window, &window_loc);
+  return window_util::GetNonClientComponent(window, window_loc) == component;
 }
 
 }  // namespace ash

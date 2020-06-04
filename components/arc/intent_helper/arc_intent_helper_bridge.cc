@@ -13,17 +13,18 @@
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/optional.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/audio/arc_audio_bridge.h"
+#include "components/arc/intent_helper/control_camera_app_delegate.h"
 #include "components/arc/intent_helper/factory_reset_delegate.h"
 #include "components/arc/intent_helper/open_url_delegate.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/url_formatter/url_fixer.h"
-#include "content/public/common/service_manager_connection.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/layout.h"
 #include "url/url_constants.h"
 
@@ -37,6 +38,7 @@ constexpr const char* kArcSchemes[] = {url::kHttpScheme, url::kHttpsScheme,
 // Not owned. Must outlive all ArcIntentHelperBridge instances. Typically this
 // is ChromeNewWindowClient in the browser.
 OpenUrlDelegate* g_open_url_delegate = nullptr;
+ControlCameraAppDelegate* g_control_camera_app_delegate = nullptr;
 FactoryResetDelegate* g_factory_reset_delegate = nullptr;
 
 // Singleton factory for ArcIntentHelperBridge.
@@ -103,6 +105,12 @@ std::string ArcIntentHelperBridge::AppendStringToIntentHelperPackageName(
 // static
 void ArcIntentHelperBridge::SetOpenUrlDelegate(OpenUrlDelegate* delegate) {
   g_open_url_delegate = delegate;
+}
+
+// static
+void ArcIntentHelperBridge::SetControlCameraAppDelegate(
+    ControlCameraAppDelegate* delegate) {
+  g_control_camera_app_delegate = delegate;
 }
 
 // static
@@ -221,6 +229,69 @@ void ArcIntentHelperBridge::RecordShareFilesMetrics(mojom::ShareFiles flag) {
   UMA_HISTOGRAM_ENUMERATION("Arc.ShareFilesOnExit", flag);
 }
 
+void ArcIntentHelperBridge::LaunchCameraApp(uint32_t intent_id,
+                                            arc::mojom::CameraIntentMode mode,
+                                            bool should_handle_result,
+                                            bool should_down_scale,
+                                            bool is_secure,
+                                            int32_t task_id) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  base::DictionaryValue intent_info;
+  std::string mode_str =
+      mode == arc::mojom::CameraIntentMode::PHOTO ? "photo" : "video";
+
+  std::stringstream queries;
+  queries << "?intentId=" << intent_id << "&mode=" << mode_str
+          << "&shouldHandleResult=" << should_handle_result
+          << "&shouldDownScale=" << should_down_scale
+          << "&isSecure=" << is_secure;
+  g_control_camera_app_delegate->LaunchCameraApp(queries.str(), task_id);
+}
+
+void ArcIntentHelperBridge::OnIntentFiltersUpdatedForPackage(
+    const std::string& package_name,
+    std::vector<IntentFilter> filters) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  intent_filters_.erase(package_name);
+  if (filters.size() > 0)
+    intent_filters_[package_name] = std::move(filters);
+
+  for (auto& observer : observer_list_)
+    observer.OnIntentFiltersUpdated(package_name);
+}
+
+void ArcIntentHelperBridge::CloseCameraApp() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  g_control_camera_app_delegate->CloseCameraApp();
+}
+
+void ArcIntentHelperBridge::IsChromeAppEnabled(
+    arc::mojom::ChromeApp app,
+    IsChromeAppEnabledCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  if (app == arc::mojom::ChromeApp::CAMERA) {
+    std::move(callback).Run(
+        g_control_camera_app_delegate->IsCameraAppEnabled());
+    return;
+  }
+
+  NOTREACHED() << "Unknown chrome app";
+  std::move(callback).Run(false);
+}
+
+void ArcIntentHelperBridge::OnPreferredAppsChanged(
+    std::vector<IntentFilter> added,
+    std::vector<IntentFilter> deleted) {
+  added_preferred_apps_ = std::move(added);
+  deleted_preferred_apps_ = std::move(deleted);
+  for (auto& observer : observer_list_)
+    observer.OnPreferredAppsChanged();
+}
+
 ArcIntentHelperBridge::GetResult ArcIntentHelperBridge::GetActivityIcons(
     const std::vector<ActivityName>& activities,
     OnIconsReadyCallback callback) {
@@ -234,11 +305,15 @@ bool ArcIntentHelperBridge::ShouldChromeHandleUrl(const GURL& url) {
     return true;
   }
 
-  for (const IntentFilter& filter : intent_filters_) {
+  for (auto& package_filters : intent_filters_) {
     // The intent helper package is used by ARC to send URLs to Chrome, so it
     // does not count as a candidate.
-    if (filter.Match(url) && !IsIntentHelperPackage(filter.package_name()))
-      return false;
+    if (IsIntentHelperPackage(package_filters.first))
+      continue;
+    for (auto& filter : package_filters.second) {
+      if (filter.Match(url))
+        return false;
+    }
   }
 
   // Didn't find any matches for Android so let Chrome handle it.
@@ -256,6 +331,27 @@ void ArcIntentHelperBridge::RemoveObserver(ArcIntentHelperObserver* observer) {
 bool ArcIntentHelperBridge::HasObserver(
     ArcIntentHelperObserver* observer) const {
   return observer_list_.HasObserver(observer);
+}
+
+void ArcIntentHelperBridge::HandleCameraResult(
+    uint32_t intent_id,
+    arc::mojom::CameraIntentAction action,
+    const std::vector<uint8_t>& data,
+    arc::mojom::IntentHelperInstance::HandleCameraResultCallback callback) {
+  auto* arc_service_manager = arc::ArcServiceManager::Get();
+  arc::mojom::IntentHelperInstance* instance = nullptr;
+  if (arc_service_manager) {
+    instance = ARC_GET_INSTANCE_FOR_METHOD(
+        arc_service_manager->arc_bridge_service()->intent_helper(),
+        HandleCameraResult);
+  }
+  if (!instance) {
+    LOG(ERROR) << "Failed to get instance for HandleCameraResult().";
+    std::move(callback).Run(false);
+    return;
+  }
+
+  instance->HandleCameraResult(intent_id, action, data, std::move(callback));
 }
 
 // static
@@ -280,10 +376,29 @@ ArcIntentHelperBridge::FilterOutIntentHelper(
 void ArcIntentHelperBridge::OnIntentFiltersUpdated(
     std::vector<IntentFilter> filters) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  intent_filters_ = std::move(filters);
+  intent_filters_.clear();
+
+  for (auto& filter : filters)
+    intent_filters_[filter.package_name()].push_back(std::move(filter));
 
   for (auto& observer : observer_list_)
-    observer.OnIntentFiltersUpdated();
+    observer.OnIntentFiltersUpdated(base::nullopt);
+}
+
+const std::vector<IntentFilter>&
+ArcIntentHelperBridge::GetIntentFilterForPackage(
+    const std::string& package_name) {
+  return intent_filters_[package_name];
+}
+
+const std::vector<IntentFilter>&
+ArcIntentHelperBridge::GetAddedPreferredApps() {
+  return added_preferred_apps_;
+}
+
+const std::vector<IntentFilter>&
+ArcIntentHelperBridge::GetDeletedPreferredApps() {
+  return deleted_preferred_apps_;
 }
 
 }  // namespace arc

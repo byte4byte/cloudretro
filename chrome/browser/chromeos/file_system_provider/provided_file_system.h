@@ -21,8 +21,8 @@
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_observer.h"
 #include "chrome/browser/chromeos/file_system_provider/queue.h"
 #include "chrome/browser/chromeos/file_system_provider/request_manager.h"
-#include "storage/browser/fileapi/async_file_util.h"
-#include "storage/browser/fileapi/watcher_manager.h"
+#include "storage/browser/file_system/async_file_util.h"
+#include "storage/browser/file_system/watcher_manager.h"
 #include "url/gurl.h"
 
 class Profile;
@@ -153,7 +153,7 @@ class ProvidedFileSystem : public ProvidedFileSystemInterface {
                            bool recursive,
                            bool persistent,
                            storage::AsyncFileUtil::StatusCallback callback,
-                           const storage::WatcherManager::NotificationCallback&
+                           storage::WatcherManager::NotificationCallback
                                notification_callback) override;
   void RemoveWatcher(const GURL& origin,
                      const base::FilePath& entry_path,
@@ -251,7 +251,7 @@ class ProvidedFileSystem : public ProvidedFileSystemInterface {
   OpenedFiles opened_files_;
   base::ObserverList<ProvidedFileSystemObserver>::Unchecked observers_;
 
-  base::WeakPtrFactory<ProvidedFileSystem> weak_ptr_factory_;
+  base::WeakPtrFactory<ProvidedFileSystem> weak_ptr_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(ProvidedFileSystem);
 };
 

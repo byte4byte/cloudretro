@@ -4,7 +4,10 @@
 
 package org.chromium.chrome.test_support;
 
-import android.support.annotation.Nullable;
+import android.os.Build;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -79,21 +82,28 @@ public class PaymentRequestTestBridge {
         private final long mOnCanMakePaymentReturnedPtr;
         private final long mOnHasEnrolledInstrumentCalledPtr;
         private final long mOnHasEnrolledInstrumentReturnedPtr;
+        private final long mOnShowAppsReadyPtr;
         private final long mOnNotSupportedErrorPtr;
         private final long mOnConnectionTerminatedPtr;
         private final long mOnAbortCalledPtr;
+        private final long mOnCompleteCalledPtr;
+        private final long mOnMinimalUIReadyPtr;
 
         PaymentRequestNativeObserverBridgeToNativeForTest(long onCanMakePaymentCalledPtr,
                 long onCanMakePaymentReturnedPtr, long onHasEnrolledInstrumentCalledPtr,
-                long onHasEnrolledInstrumentReturnedPtr, long onNotSupportedErrorPtr,
-                long onConnectionTerminatedPtr, long onAbortCalledPtr) {
+                long onHasEnrolledInstrumentReturnedPtr, long onShowAppsReadyPtr,
+                long onNotSupportedErrorPtr, long onConnectionTerminatedPtr, long onAbortCalledPtr,
+                long onCompleteCalledPtr, long onMinimalUIReadyPtr) {
             mOnCanMakePaymentCalledPtr = onCanMakePaymentCalledPtr;
             mOnCanMakePaymentReturnedPtr = onCanMakePaymentReturnedPtr;
             mOnHasEnrolledInstrumentCalledPtr = onHasEnrolledInstrumentCalledPtr;
             mOnHasEnrolledInstrumentReturnedPtr = onHasEnrolledInstrumentReturnedPtr;
+            mOnShowAppsReadyPtr = onShowAppsReadyPtr;
             mOnNotSupportedErrorPtr = onNotSupportedErrorPtr;
             mOnConnectionTerminatedPtr = onConnectionTerminatedPtr;
             mOnAbortCalledPtr = onAbortCalledPtr;
+            mOnCompleteCalledPtr = onCompleteCalledPtr;
+            mOnMinimalUIReadyPtr = onMinimalUIReadyPtr;
         }
 
         @Override
@@ -113,6 +123,10 @@ public class PaymentRequestTestBridge {
             nativeResolvePaymentRequestObserverCallback(mOnHasEnrolledInstrumentReturnedPtr);
         }
         @Override
+        public void onShowAppsReady() {
+            nativeResolvePaymentRequestObserverCallback(mOnShowAppsReadyPtr);
+        }
+        @Override
         public void onNotSupportedError() {
             nativeResolvePaymentRequestObserverCallback(mOnNotSupportedErrorPtr);
         }
@@ -123,6 +137,14 @@ public class PaymentRequestTestBridge {
         @Override
         public void onAbortCalled() {
             nativeResolvePaymentRequestObserverCallback(mOnAbortCalledPtr);
+        }
+        @Override
+        public void onCompleteCalled() {
+            nativeResolvePaymentRequestObserverCallback(mOnCompleteCalledPtr);
+        }
+        @Override
+        public void onMinimalUIReady() {
+            nativeResolvePaymentRequestObserverCallback(mOnMinimalUIReadyPtr);
         }
     }
 
@@ -143,13 +165,47 @@ public class PaymentRequestTestBridge {
     @CalledByNative
     public static void setUseNativeObserverForTest(long onCanMakePaymentCalledPtr,
             long onCanMakePaymentReturnedPtr, long onHasEnrolledInstrumentCalledPtr,
-            long onHasEnrolledInstrumentReturnedPtr, long onNotSupportedErrorPtr,
-            long onConnectionTerminatedPtr, long onAbortCalledPtr) {
+            long onHasEnrolledInstrumentReturnedPtr, long onShowAppsReadyPtr,
+            long onNotSupportedErrorPtr, long onConnectionTerminatedPtr, long onAbortCalledPtr,
+            long onCompleteCalledPtr, long onMinimalUIReadyPtr) {
         PaymentRequestFactory.sNativeObserverForTest =
                 new PaymentRequestNativeObserverBridgeToNativeForTest(onCanMakePaymentCalledPtr,
                         onCanMakePaymentReturnedPtr, onHasEnrolledInstrumentCalledPtr,
-                        onHasEnrolledInstrumentReturnedPtr, onNotSupportedErrorPtr,
-                        onConnectionTerminatedPtr, onAbortCalledPtr);
+                        onHasEnrolledInstrumentReturnedPtr, onShowAppsReadyPtr,
+                        onNotSupportedErrorPtr, onConnectionTerminatedPtr, onAbortCalledPtr,
+                        onCompleteCalledPtr, onMinimalUIReadyPtr);
+    }
+
+    @CalledByNative
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public static WebContents getPaymentHandlerWebContentsForTest() {
+        return PaymentRequestImpl.getPaymentHandlerWebContentsForTest();
+    }
+
+    @CalledByNative
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public static boolean clickPaymentHandlerSecurityIconForTest() {
+        return PaymentRequestImpl.clickPaymentHandlerSecurityIconForTest();
+    }
+
+    @CalledByNative
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public static boolean confirmMinimalUIForTest() {
+        return PaymentRequestImpl.confirmMinimalUIForTest();
+    }
+
+    @CalledByNative
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public static boolean dismissMinimalUIForTest() {
+        return PaymentRequestImpl.dismissMinimalUIForTest();
+    }
+
+    @CalledByNative
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
+    public static boolean isAndroidMarshmallowOrLollipopForTest() {
+        return Build.VERSION.SDK_INT == Build.VERSION_CODES.M
+                || Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP
+                || Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP_MR1;
     }
 
     /**

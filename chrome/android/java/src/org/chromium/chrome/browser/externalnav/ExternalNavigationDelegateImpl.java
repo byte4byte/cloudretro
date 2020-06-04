@@ -6,75 +6,71 @@ package org.chromium.chrome.browser.externalnav;
 
 import android.Manifest.permission;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
 import android.content.DialogInterface.OnClickListener;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
-import android.os.Build;
 import android.os.StrictMode;
 import android.provider.Browser;
-import android.provider.Telephony;
 import android.text.TextUtils;
 import android.view.WindowManager.BadTokenException;
-import android.webkit.MimeTypeMap;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.PathUtils;
-import org.chromium.base.StrictModeContext;
-import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity2;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
+import org.chromium.chrome.browser.autofill_assistant.AutofillAssistantFacade;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.instantapps.AuthenticatedProxyActivity;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.RedirectHandlerTabHelper;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabImpl;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.tab.TabRedirectHandler;
-import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.util.UrlUtilities;
-import org.chromium.chrome.browser.webapps.WebappActivity;
-import org.chromium.chrome.browser.webapps.WebappScopePolicy;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.embedder_support.util.UrlUtilitiesJni;
+import org.chromium.components.external_intents.ExternalNavigationDelegate;
+import org.chromium.components.external_intents.ExternalNavigationHandler;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.components.external_intents.ExternalNavigationParams;
+import org.chromium.components.external_intents.RedirectHandlerImpl;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.network.mojom.ReferrerPolicy;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.PermissionCallback;
-import org.chromium.ui.base.WindowAndroid;
 import org.chromium.webapk.lib.client.WebApkValidator;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 /**
  * The main implementation of the {@link ExternalNavigationDelegate}.
  */
 public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegate {
-    private static final String PDF_VIEWER = "com.google.android.apps.docs";
-    private static final String PDF_MIME = "application/pdf";
-    private static final String PDF_SUFFIX = ".pdf";
-    private static final String PDF_EXTENSION = "pdf";
-
     protected final Context mApplicationContext;
     private final Tab mTab;
     private final TabObserver mTabObserver;
@@ -101,111 +97,10 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
      */
     protected final Context getAvailableContext() {
         if (mTab.getWindowAndroid() == null) return mApplicationContext;
-        Context activityContext = WindowAndroid.activityFromContext(
-                mTab.getWindowAndroid().getContext().get());
+        Context activityContext =
+                ContextUtils.activityFromContext(mTab.getWindowAndroid().getContext().get());
         if (activityContext == null) return mApplicationContext;
         return activityContext;
-    }
-
-    /**
-     * If the intent is for a pdf, resolves intent handlers to find the platform pdf viewer if
-     * it is available and force is for the provided |intent| so that the user doesn't need to
-     * choose it from Intent picker.
-     *
-     * @param intent Intent to open.
-     */
-    public static void forcePdfViewerAsIntentHandlerIfNeeded(Intent intent) {
-        if (intent == null || !isPdfIntent(intent)) return;
-        resolveIntent(intent, true /* allowSelfOpen (ignored) */);
-    }
-
-    /**
-     * Retrieve the best activity for the given intent. If a default activity is provided,
-     * choose the default one. Otherwise, return the Intent picker if there are more than one
-     * capable activities. If the intent is pdf type, return the platform pdf viewer if
-     * it is available so user don't need to choose it from Intent picker.
-     *
-     * Note this function is slow on Android versions less than Lollipop.
-     *
-     * @param intent Intent to open.
-     * @param allowSelfOpen Whether chrome itself is allowed to open the intent.
-     * @return true if the intent can be resolved, or false otherwise.
-     */
-    public static boolean resolveIntent(Intent intent, boolean allowSelfOpen) {
-        try {
-            boolean activityResolved = false;
-            Context context = ContextUtils.getApplicationContext();
-            ResolveInfo info = context.getPackageManager().resolveActivity(intent, 0);
-            if (info != null) {
-                final String packageName = context.getPackageName();
-                if (info.match != 0) {
-                    // There is a default activity for this intent, use that.
-                    if (allowSelfOpen || !packageName.equals(info.activityInfo.packageName)) {
-                        activityResolved = true;
-                    }
-                } else {
-                    List<ResolveInfo> handlers = context.getPackageManager().queryIntentActivities(
-                            intent, PackageManager.MATCH_DEFAULT_ONLY);
-                    if (handlers != null && !handlers.isEmpty()) {
-                        activityResolved = true;
-                        boolean canSelfOpen = false;
-                        boolean hasPdfViewer = false;
-                        for (ResolveInfo resolveInfo : handlers) {
-                            String pName = resolveInfo.activityInfo.packageName;
-                            if (packageName.equals(pName)) {
-                                canSelfOpen = true;
-                            } else if (PDF_VIEWER.equals(pName)) {
-                                if (isPdfIntent(intent)) {
-                                    intent.setClassName(pName, resolveInfo.activityInfo.name);
-                                    Uri referrer = new Uri.Builder().scheme(
-                                            IntentHandler.ANDROID_APP_REFERRER_SCHEME).authority(
-                                                    packageName).build();
-                                    intent.putExtra(Intent.EXTRA_REFERRER, referrer);
-                                    hasPdfViewer = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if ((canSelfOpen && !allowSelfOpen) && !hasPdfViewer) {
-                            activityResolved = false;
-                        }
-                    }
-                }
-            }
-            return activityResolved;
-        } catch (RuntimeException e) {
-            IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
-        }
-        return false;
-    }
-
-    private static boolean isPdfIntent(Intent intent) {
-        if (intent == null || intent.getData() == null) return false;
-        String filename = intent.getData().getLastPathSegment();
-        return (filename != null && filename.endsWith(PDF_SUFFIX))
-                || PDF_MIME.equals(intent.getType());
-    }
-
-    /**
-     * Retrieve information about the Activity that will handle the given Intent.
-     *
-     * Note this function is slow on Android versions less than Lollipop.
-     *
-     * @param intent Intent to resolve.
-     * @return       ResolveInfo of the Activity that will handle the Intent, or null if it failed.
-     */
-    public static ResolveInfo resolveActivity(Intent intent) {
-        // This function is expensive on KK and below and should not be called from main thread.
-        assert Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                || !ThreadUtils.runningOnUiThread();
-        try {
-            Context context = ContextUtils.getApplicationContext();
-            PackageManager pm = context.getPackageManager();
-            return pm.resolveActivity(intent, 0);
-        } catch (RuntimeException e) {
-            IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
-        }
-        return null;
     }
 
     /**
@@ -219,39 +114,19 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
      */
     public static boolean willChromeHandleIntent(Intent intent, boolean matchDefaultOnly) {
         Context context = ContextUtils.getApplicationContext();
-        try {
-            // Early-out if the intent targets Chrome.
-            if (context.getPackageName().equals(intent.getPackage())
-                    || (intent.getComponent() != null
-                               && context.getPackageName().equals(
-                                          intent.getComponent().getPackageName()))) {
-                return true;
-            }
-
-            // Fall back to the more expensive querying of Android when the intent doesn't target
-            // Chrome.
-            ResolveInfo info = context.getPackageManager().resolveActivity(
-                    intent, matchDefaultOnly ? PackageManager.MATCH_DEFAULT_ONLY : 0);
-            return info != null && info.activityInfo.packageName.equals(context.getPackageName());
-        } catch (RuntimeException e) {
-            IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
-            return false;
+        // Early-out if the intent targets Chrome.
+        if (context.getPackageName().equals(intent.getPackage())
+                || (intent.getComponent() != null
+                        && context.getPackageName().equals(
+                                intent.getComponent().getPackageName()))) {
+            return true;
         }
-    }
 
-    @Override
-    public List<ResolveInfo> queryIntentActivities(Intent intent) {
-        // White-list for Samsung. See http://crbug.com/613977 for more context.
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            return mApplicationContext.getPackageManager()
-                    .queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER);
-        } catch (RuntimeException e) {
-            IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
-            return null;
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        // Fall back to the more expensive querying of Android when the intent doesn't target
+        // Chrome.
+        ResolveInfo info = PackageManagerUtils.resolveActivity(
+                intent, matchDefaultOnly ? PackageManager.MATCH_DEFAULT_ONLY : 0);
+        return info != null && info.activityInfo.packageName.equals(context.getPackageName());
     }
 
     @Override
@@ -260,19 +135,18 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public @WebappScopePolicy.NavigationDirective int applyWebappScopePolicyForUrl(String url) {
-        Context context = getAvailableContext();
-        if (context instanceof WebappActivity) {
-            WebappActivity webappActivity = (WebappActivity) context;
-            return WebappScopePolicy.applyPolicyForNavigationToUrl(
-                    webappActivity.scopePolicy(), webappActivity.getWebappInfo(), url);
-        }
-        return WebappScopePolicy.NavigationDirective.NORMAL_BEHAVIOR;
+    public boolean shouldDisableExternalIntentRequestsForUrl(String url) {
+        return false;
     }
 
     @Override
     public int countSpecializedHandlers(List<ResolveInfo> infos) {
         return getSpecializedHandlersWithFilter(infos, null).size();
+    }
+
+    @Override
+    public ArrayList<String> getSpecializedHandlers(List<ResolveInfo> infos) {
+        return getSpecializedHandlersWithFilter(infos, null);
     }
 
     @VisibleForTesting
@@ -284,7 +158,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         }
 
         for (ResolveInfo info : infos) {
-            if (!matchResolveInfoExceptWildCardHost(info, filterPackageName)) {
+            if (!ExternalNavigationHandler.matchResolveInfoExceptWildCardHost(
+                        info, filterPackageName)) {
                 continue;
             }
 
@@ -302,37 +177,6 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         return result;
     }
 
-    private static boolean matchResolveInfoExceptWildCardHost(
-            ResolveInfo info, String filterPackageName) {
-        IntentFilter intentFilter = info.filter;
-        if (intentFilter == null) {
-            // Error on the side of classifying ResolveInfo as generic.
-            return false;
-        }
-        if (intentFilter.countDataAuthorities() == 0 && intentFilter.countDataPaths() == 0) {
-            // Don't count generic handlers.
-            return false;
-        }
-        boolean isWildCardHost = false;
-        Iterator<IntentFilter.AuthorityEntry> it = intentFilter.authoritiesIterator();
-        while (it != null && it.hasNext()) {
-            IntentFilter.AuthorityEntry entry = it.next();
-            if ("*".equals(entry.getHost())) {
-                isWildCardHost = true;
-                break;
-            }
-        }
-        if (isWildCardHost) {
-            return false;
-        }
-        if (!TextUtils.isEmpty(filterPackageName)
-                && (info.activityInfo == null
-                           || !info.activityInfo.packageName.equals(filterPackageName))) {
-            return false;
-        }
-        return true;
-    }
-
     /**
      * Check whether the given package is a specialized handler for the given intent
      *
@@ -342,28 +186,15 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
      *         no package name given checks whether there is any specialized handler.
      */
     public static boolean isPackageSpecializedHandler(String packageName, Intent intent) {
-        Context context = ContextUtils.getApplicationContext();
-        // On certain Samsung devices, queryIntentActivities can trigger a
-        // StrictModeDiskReadViolation (https://crbug.com/894160).
-        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            List<ResolveInfo> handlers = context.getPackageManager().queryIntentActivities(
-                    intent, PackageManager.GET_RESOLVED_FILTER);
-            return getSpecializedHandlersWithFilter(handlers, packageName).size() > 0;
-        } catch (RuntimeException e) {
-            IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
-        }
-        return false;
-    }
-
-    @Override
-    public String findFirstWebApkPackageName(List<ResolveInfo> infos) {
-        return WebApkValidator.findFirstWebApkPackage(mApplicationContext, infos);
+        List<ResolveInfo> handlers = PackageManagerUtils.queryIntentActivities(
+                intent, PackageManager.GET_RESOLVED_FILTER);
+        return !getSpecializedHandlersWithFilter(handlers, packageName).isEmpty();
     }
 
     @Override
     public void startActivity(Intent intent, boolean proxy) {
         try {
-            forcePdfViewerAsIntentHandlerIfNeeded(intent);
+            ExternalNavigationHandler.forcePdfViewerAsIntentHandlerIfNeeded(intent);
             if (proxy) {
                 dispatchAuthenticatedIntent(intent);
             } else {
@@ -371,7 +202,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                 if (!(context instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(intent);
             }
-            recordExternalNavigationDispatched(intent);
+            ExternalNavigationHandler.recordExternalNavigationDispatched(intent);
         } catch (RuntimeException e) {
             IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
         }
@@ -383,7 +214,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         // Only touches disk on Kitkat. See http://crbug.com/617725 for more context.
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
-            forcePdfViewerAsIntentHandlerIfNeeded(intent);
+            ExternalNavigationHandler.forcePdfViewerAsIntentHandlerIfNeeded(intent);
             if (proxy) {
                 dispatchAuthenticatedIntent(intent);
                 activityWasLaunched = true;
@@ -395,7 +226,9 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                     activityWasLaunched = false;
                 }
             }
-            if (activityWasLaunched) recordExternalNavigationDispatched(intent);
+            if (activityWasLaunched) {
+                ExternalNavigationHandler.recordExternalNavigationDispatched(intent);
+            }
             return activityWasLaunched;
         } catch (SecurityException e) {
             // https://crbug.com/808494: Handle the URL in Chrome if dispatching to another
@@ -410,31 +243,22 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         }
     }
 
-    private void recordExternalNavigationDispatched(Intent intent) {
-        ArrayList<String> specializedHandlers = intent.getStringArrayListExtra(
-                IntentHandler.EXTRA_EXTERNAL_NAV_PACKAGES);
-        if (specializedHandlers != null && specializedHandlers.size() > 0) {
-            RecordUserAction.record("MobileExternalNavigationDispatched");
-        }
-    }
-
     @Override
     public boolean startIncognitoIntent(final Intent intent, final String referrerUrl,
-            final String fallbackUrl, final Tab tab, final boolean needsToCloseTab,
-            final boolean proxy) {
+            final String fallbackUrl, final boolean needsToCloseTab, final boolean proxy) {
         try {
-            startIncognitoIntentInternal(intent, referrerUrl, fallbackUrl, needsToCloseTab, proxy);
+            return startIncognitoIntentInternal(
+                    intent, referrerUrl, fallbackUrl, needsToCloseTab, proxy);
         } catch (BadTokenException e) {
             return false;
         }
-        return true;
     }
 
-    private void startIncognitoIntentInternal(final Intent intent, final String referrerUrl,
+    private boolean startIncognitoIntentInternal(final Intent intent, final String referrerUrl,
             final String fallbackUrl, final boolean needsToCloseTab, final boolean proxy) {
-        if (!hasValidTab()) return;
+        if (!hasValidTab()) return false;
         Context context = mTab.getWindowAndroid().getContext().get();
-        if (!(context instanceof Activity)) return;
+        if (!(context instanceof Activity)) return false;
 
         Activity activity = (Activity) context;
         new UiUtils.CompatibleAlertDialogBuilder(activity, R.style.Theme_Chromium_AlertDialog)
@@ -444,10 +268,18 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                         new OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
-                                startActivity(intent, proxy);
-                                if (mTab != null && !mTab.isClosing() && mTab.isInitialized()
-                                        && needsToCloseTab) {
-                                    closeTab();
+                                try {
+                                    startActivity(intent, proxy);
+                                    if (mTab != null && !mTab.isClosing() && mTab.isInitialized()
+                                            && needsToCloseTab) {
+                                        closeTab();
+                                    }
+                                } catch (ActivityNotFoundException e) {
+                                    // The activity that we thought was going to handle the intent
+                                    // no longer exists, so catch the exception and assume Chrome
+                                    // can handle it.
+                                    loadIntent(intent, referrerUrl, fallbackUrl, mTab,
+                                            needsToCloseTab, true);
                                 }
                             }
                         })
@@ -466,6 +298,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                     }
                 })
                 .show();
+        return true;
     }
 
     @Override
@@ -593,12 +426,6 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         intent.putExtra(IntentHandler.EXTRA_WINDOW_ID, 2);
     }
 
-    @Override
-    public String getDefaultSmsPackageName() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) return null;
-        return Telephony.Sms.getDefaultSmsPackage(mApplicationContext);
-    }
-
     private void closeTab() {
         if (!hasValidTab()) return;
         Context context = mTab.getWindowAndroid().getContext().get();
@@ -608,33 +435,61 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public boolean isPdfDownload(String url) {
-        String fileExtension = MimeTypeMap.getFileExtensionFromUrl(url);
-        if (TextUtils.isEmpty(fileExtension)) return false;
-
-        return PDF_EXTENSION.equals(fileExtension);
+    public void maybeAdjustInstantAppExtras(Intent intent, boolean isIntentToInstantApp) {
+        if (isIntentToInstantApp) {
+            intent.putExtra(InstantAppsHandler.IS_GOOGLE_SEARCH_REFERRER, true);
+        } else {
+            // Make sure this extra is not sent unless we've done the verification.
+            intent.removeExtra(InstantAppsHandler.IS_GOOGLE_SEARCH_REFERRER);
+        }
     }
 
     @Override
-    public void maybeRecordAppHandlersInIntent(Intent intent, List<ResolveInfo> infos) {
-        intent.putExtra(IntentHandler.EXTRA_EXTERNAL_NAV_PACKAGES,
-                getSpecializedHandlersWithFilter(infos, null));
+    public void maybeSetUserGesture(Intent intent) {
+        // The intent can be used to launch Chrome itself, record the user
+        // gesture here so that it can be used later.
+        IntentWithGesturesHandler.getInstance().onNewIntentWithGesture(intent);
+    }
+
+    @Override
+    public void maybeSetPendingReferrer(Intent intent, String referrerUrl) {
+        IntentHandler.setPendingReferrer(intent, referrerUrl);
+    }
+
+    @Override
+    public void maybeSetPendingIncognitoUrl(Intent intent) {
+        IntentHandler.setPendingIncognitoUrl(intent);
+    }
+
+    @Nullable
+    private String getReferrerUrl() {
+        // TODO (thildebr): Investigate whether or not we can use getLastCommittedUrl() instead of
+        // the NavigationController.
+        if (!hasValidTab() || mTab.getWebContents() == null) return null;
+
+        NavigationController nController = mTab.getWebContents().getNavigationController();
+        int index = nController.getLastCommittedEntryIndex();
+        if (index == -1) return null;
+
+        NavigationEntry entry = nController.getEntryAtIndex(index);
+        if (entry == null) return null;
+
+        return entry.getUrl();
     }
 
     @Override
     public boolean isSerpReferrer() {
-        // TODO (thildebr): Investigate whether or not we can use getLastCommittedUrl() instead of
-        // the NavigationController.
-        if (!hasValidTab() || mTab.getWebContents() == null) return false;
+        String referrerUrl = getReferrerUrl();
+        if (referrerUrl == null) return false;
 
-        NavigationController nController = mTab.getWebContents().getNavigationController();
-        int index = nController.getLastCommittedEntryIndex();
-        if (index == -1) return false;
+        return UrlUtilitiesJni.get().isGoogleSearchUrl(referrerUrl);
+    }
 
-        NavigationEntry entry = nController.getEntryAtIndex(index);
-        if (entry == null) return false;
+    public boolean isGoogleReferrer() {
+        String referrerUrl = getReferrerUrl();
+        if (referrerUrl == null) return false;
 
-        return UrlUtilities.nativeIsGoogleSearchUrl(entry.getUrl());
+        return UrlUtilitiesJni.get().isGoogleSubDomainUrl(referrerUrl);
     }
 
     @Override
@@ -643,7 +498,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         if (!hasValidTab() || mTab.getWebContents() == null) return false;
 
         InstantAppsHandler handler = InstantAppsHandler.getInstance();
-        TabRedirectHandler redirect = TabRedirectHandler.get(mTab);
+        RedirectHandlerImpl redirect = RedirectHandlerTabHelper.getHandlerFor(mTab);
         Intent intent = redirect != null ? redirect.getInitialIntent() : null;
         // TODO(mariakhomenko): consider also handling NDEF_DISCOVER action redirects.
         if (isIncomingRedirect && intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
@@ -663,9 +518,9 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public String getPreviousUrl() {
-        if (mTab == null || mTab.getWebContents() == null) return null;
-        return mTab.getWebContents().getLastCommittedUrl();
+    public WebContents getWebContents() {
+        if (mTab == null) return null;
+        return mTab.getWebContents();
     }
 
     /**
@@ -682,6 +537,16 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     /**
+     * Starts the autofill assistant with the given intent. Exists to allow tests to stub out this
+     * functionality.
+     */
+    protected void startAutofillAssistantWithIntent(
+            Intent targetIntent, String browserFallbackUrl) {
+        AutofillAssistantFacade.start(
+                ((TabImpl) mTab).getActivity(), targetIntent.getExtras(), browserFallbackUrl);
+    }
+
+    /**
      * @return Whether or not we have a valid {@link Tab} available.
      */
     private boolean hasValidTab() {
@@ -690,6 +555,36 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
     @Override
     public boolean isIntentForTrustedCallingApp(Intent intent) {
+        return false;
+    }
+
+    @Override
+    public boolean isIntentToInstantApp(Intent intent) {
+        return InstantAppsHandler.isIntentToInstantApp(intent);
+    }
+
+    @Override
+    public boolean isIntentToAutofillAssistant(Intent intent) {
+        return AutofillAssistantFacade.isAutofillAssistantByIntentTriggeringEnabled(intent);
+    }
+
+    @Override
+    public boolean isValidWebApk(String packageName) {
+        return WebApkValidator.isValidWebApk(ContextUtils.getApplicationContext(), packageName);
+    }
+
+    @Override
+    public boolean handleWithAutofillAssistant(
+            ExternalNavigationParams params, Intent targetIntent, String browserFallbackUrl) {
+        if (browserFallbackUrl != null && !params.isIncognito()
+                && AutofillAssistantFacade.isAutofillAssistantByIntentTriggeringEnabled(
+                        targetIntent)
+                && isGoogleReferrer()) {
+            if (mTab != null) {
+                startAutofillAssistantWithIntent(targetIntent, browserFallbackUrl);
+            }
+            return true;
+        }
         return false;
     }
 }

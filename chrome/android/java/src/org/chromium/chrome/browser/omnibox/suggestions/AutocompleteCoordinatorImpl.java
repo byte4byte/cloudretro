@@ -5,39 +5,42 @@
 package org.chromium.chrome.browser.omnibox.suggestions;
 
 import android.content.Context;
-import android.support.annotation.Nullable;
-import android.support.v4.view.ViewCompat;
+import android.os.Handler;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.widget.ListView;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.core.view.ViewCompat;
+
 import org.chromium.base.Callback;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
-import org.chromium.chrome.browser.omnibox.LocationBarVoiceRecognitionHandler;
+import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController.OnSuggestionsReceivedListener;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionListViewBinder.SuggestionListViewHolder;
-import org.chromium.chrome.browser.omnibox.suggestions.answer.AnswerSuggestionView;
 import org.chromium.chrome.browser.omnibox.suggestions.answer.AnswerSuggestionViewBinder;
-import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionView;
+import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionView;
+import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionViewViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionViewBinder;
-import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionView;
 import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionViewBinder;
+import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionView;
+import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionViewBinder;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
 import org.chromium.ui.ViewProvider;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
-import org.chromium.ui.modelutil.ModelListAdapter;
+import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.ArrayList;
@@ -65,16 +68,24 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
         Context context = parent.getContext();
 
         PropertyModel listModel = new PropertyModel(SuggestionListProperties.ALL_KEYS);
+        ModelList listItems = new ModelList();
+        mMediator = new AutocompleteMediator(context, delegate, urlBarEditingTextProvider,
+                new AutocompleteController(), listModel, new Handler());
+        mMediator.initDefaultProcessors();
+
         listModel.set(SuggestionListProperties.EMBEDDER, listEmbedder);
         listModel.set(SuggestionListProperties.VISIBLE, false);
+        listModel.set(SuggestionListProperties.OBSERVER, mMediator);
+        listModel.set(SuggestionListProperties.SUGGESTION_MODELS, listItems);
 
-        ViewProvider<SuggestionListViewHolder> viewProvider = createViewProvider(context);
+        ViewProvider<SuggestionListViewHolder> viewProvider =
+                createViewProvider(context, listItems);
         viewProvider.whenLoaded((holder) -> { mListView = holder.listView; });
         LazyConstructionPropertyMcp.create(listModel, SuggestionListProperties.VISIBLE,
                 viewProvider, SuggestionListViewBinder::bind);
 
-        mMediator =
-                new AutocompleteMediator(context, delegate, urlBarEditingTextProvider, listModel);
+        // https://crbug.com/966227 Set initial layout direction ahead of inflating the suggestions.
+        updateSuggestionListLayoutDirection();
     }
 
     @Override
@@ -83,7 +94,8 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
         mMediator = null;
     }
 
-    private ViewProvider<SuggestionListViewHolder> createViewProvider(Context context) {
+    private ViewProvider<SuggestionListViewHolder> createViewProvider(
+            Context context, ModelList modelList) {
         return new ViewProvider<SuggestionListViewHolder>() {
             private List<Callback<SuggestionListViewHolder>> mCallbacks = new ArrayList<>();
             private SuggestionListViewHolder mHolder;
@@ -101,7 +113,8 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
                 // Start with visibility GONE to ensure that show() is called.
                 // http://crbug.com/517438
                 list.setVisibility(View.GONE);
-                ModelListAdapter adapter = new ModelListAdapter();
+                OmniboxSuggestionsListAdapter adapter =
+                        new OmniboxSuggestionsListAdapter(modelList);
                 list.setAdapter(adapter);
                 list.setClipToPadding(false);
 
@@ -110,28 +123,42 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
                 // clang-format off
                 adapter.registerType(
                         OmniboxSuggestionUiType.DEFAULT,
-                        () -> new SuggestionView(mListView.getContext()),
-                        SuggestionViewViewBinder::bind);
+                        parent -> new BaseSuggestionView<View>(
+                                parent.getContext(), R.layout.omnibox_basic_suggestion),
+                        new BaseSuggestionViewBinder<View>(SuggestionViewViewBinder::bind));
 
                 adapter.registerType(
                         OmniboxSuggestionUiType.EDIT_URL_SUGGESTION,
-                        () -> EditUrlSuggestionProcessor.createView(mListView.getContext()),
+                        parent -> EditUrlSuggestionProcessor.createView(parent.getContext()),
                         EditUrlSuggestionViewBinder::bind);
 
                 adapter.registerType(
                         OmniboxSuggestionUiType.ANSWER_SUGGESTION,
-                        () -> (AnswerSuggestionView) LayoutInflater.from(mListView.getContext())
-                                .inflate(R.layout.omnibox_answer_suggestion, null),
-                        AnswerSuggestionViewBinder::bind);
+                        parent -> new BaseSuggestionView<View>(
+                                parent.getContext(), R.layout.omnibox_answer_suggestion),
+                        new BaseSuggestionViewBinder<View>(AnswerSuggestionViewBinder::bind));
 
                 adapter.registerType(
                         OmniboxSuggestionUiType.ENTITY_SUGGESTION,
-                        () -> (EntitySuggestionView) LayoutInflater.from(mListView.getContext())
-                                .inflate(R.layout.omnibox_entity_suggestion, null),
-                        EntitySuggestionViewBinder::bind);
+                        parent -> new BaseSuggestionView<View>(
+                                parent.getContext(), R.layout.omnibox_entity_suggestion),
+                        new BaseSuggestionViewBinder<View>(EntitySuggestionViewBinder::bind));
+
+                adapter.registerType(
+                        OmniboxSuggestionUiType.TAIL_SUGGESTION,
+                        parent -> new BaseSuggestionView<TailSuggestionView>(
+                                new TailSuggestionView(parent.getContext())),
+                        new BaseSuggestionViewBinder<TailSuggestionView>(
+                                TailSuggestionViewBinder::bind));
+
+                adapter.registerType(
+                        OmniboxSuggestionUiType.CLIPBOARD_SUGGESTION,
+                        parent -> new BaseSuggestionView<View>(
+                                parent.getContext(), R.layout.omnibox_basic_suggestion),
+                        new BaseSuggestionViewBinder<View>(SuggestionViewViewBinder::bind));
                 // clang-format on
 
-                mHolder = new SuggestionListViewHolder(container, list, adapter);
+                mHolder = new SuggestionListViewHolder(container, list);
 
                 for (int i = 0; i < mCallbacks.size(); i++) {
                     mCallbacks.get(i).onResult(mHolder);
@@ -163,6 +190,11 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     @Override
     public void setToolbarDataProvider(ToolbarDataProvider toolbarDataProvider) {
         mMediator.setToolbarDataProvider(toolbarDataProvider);
+    }
+
+    @Override
+    public void setOverviewModeBehavior(OverviewModeBehavior overviewModeBehavior) {
+        mMediator.setOverviewModeBehavior(overviewModeBehavior);
     }
 
     @Override
@@ -201,8 +233,7 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     }
 
     @Override
-    public void onVoiceResults(
-            @Nullable List<LocationBarVoiceRecognitionHandler.VoiceResult> results) {
+    public void onVoiceResults(@Nullable List<VoiceRecognitionHandler.VoiceResult> results) {
         mMediator.onVoiceResults(results);
     }
 
@@ -245,8 +276,8 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
     }
 
     @Override
-    public void onTextChangedForAutocomplete() {
-        mMediator.onTextChangedForAutocomplete();
+    public void onTextChanged(String textWithoutAutocomplete, String textWithAutocomplete) {
+        mMediator.onTextChanged(textWithoutAutocomplete, textWithAutocomplete);
     }
 
     @Override
@@ -256,12 +287,12 @@ public class AutocompleteCoordinatorImpl implements AutocompleteCoordinator {
 
     @Override
     public String qualifyPartialURLQuery(String query) {
-        return AutocompleteController.nativeQualifyPartialURLQuery(query);
+        return AutocompleteControllerJni.get().qualifyPartialURLQuery(query);
     }
 
     @Override
     public void prefetchZeroSuggestResults() {
-        AutocompleteController.nativePrefetchZeroSuggestResults();
+        AutocompleteControllerJni.get().prefetchZeroSuggestResults();
     }
 
     @VisibleForTesting

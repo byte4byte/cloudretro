@@ -8,7 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/language/core/browser/language_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -35,15 +35,14 @@ using user_prefs::PrefRegistrySyncable;
 
 namespace {
 
-const char kBlacklistedSite[] = "http://blacklistedsite.com";
+const char kBlockedSite[] = "http://blockedsite.com";
 const char kLanguage1[] = "klingon";
 const char kLanguage2[] = "pirate";
 
 class TranslateTableViewControllerTest : public ChromeTableViewControllerTest {
  protected:
   TranslateTableViewControllerTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
     ChromeTableViewControllerTest::SetUp();
@@ -67,7 +66,7 @@ class TranslateTableViewControllerTest : public ChromeTableViewControllerTest {
     return factory.Create(registry.get());
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<PrefService> pref_service_;
 };
 
@@ -95,8 +94,8 @@ TEST_F(TranslateTableViewControllerTest, TestClearPreferences) {
   // Set some preferences.
   std::unique_ptr<translate::TranslatePrefs> translate_prefs(
       ChromeIOSTranslateClient::CreateTranslatePrefs(pref_service_.get()));
-  translate_prefs->BlacklistSite(kBlacklistedSite);
-  ASSERT_TRUE(translate_prefs->IsSiteBlacklisted(kBlacklistedSite));
+  translate_prefs->BlacklistSite(kBlockedSite);
+  ASSERT_TRUE(translate_prefs->IsSiteBlacklisted(kBlockedSite));
   translate_prefs->AddToLanguageList(kLanguage1, /*force_blocked=*/true);
   ASSERT_TRUE(translate_prefs->IsBlockedLanguage(kLanguage1));
   translate_prefs->WhitelistLanguagePair(kLanguage1, kLanguage2);
@@ -110,7 +109,7 @@ TEST_F(TranslateTableViewControllerTest, TestClearPreferences) {
   [controller tableView:controller.tableView
       didSelectRowAtIndexPath:[NSIndexPath indexPathForItem:1 inSection:0]];
   // Check that preferences are gone.
-  EXPECT_FALSE(translate_prefs->IsSiteBlacklisted(kBlacklistedSite));
+  EXPECT_FALSE(translate_prefs->IsSiteBlacklisted(kBlockedSite));
   EXPECT_FALSE(translate_prefs->IsBlockedLanguage(kLanguage1));
   EXPECT_FALSE(
       translate_prefs->IsLanguagePairWhitelisted(kLanguage1, kLanguage2));

@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <signal.h>
 
+#include "ash/public/cpp/accessibility_controller.h"
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
@@ -15,6 +16,7 @@
 #include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
@@ -65,6 +67,13 @@ void RebootDevice() {
       power_manager::REQUEST_RESTART_OTHER, "kiosk app session");
 }
 
+void StartFloatingAccessibilityMenu() {
+  ash::AccessibilityController* accessibility_controller =
+      ash::AccessibilityController::Get();
+  if (accessibility_controller)
+    accessibility_controller->ShowFloatingMenuIfEnabled();
+}
+
 // Sends a SIGFPE signal to plugin subprocesses that matches |child_ids|
 // to trigger a dump.
 void DumpPluginProcessOnIOThread(const std::set<int>& child_ids) {
@@ -92,7 +101,7 @@ void DumpPluginProcessOnIOThread(const std::set<int>& child_ids) {
 
   // Wait a bit to let dump finish (if requested) before rebooting the device.
   const int kDumpWaitSeconds = 10;
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {content::BrowserThread::UI}, base::BindOnce(&RebootDevice),
       base::TimeDelta::FromSeconds(dump_requested ? kDumpWaitSeconds : 0));
 }
@@ -153,7 +162,8 @@ class AppSession::AppWindowHandler : public AppWindowRegistry::Observer {
 
 class AppSession::BrowserWindowHandler : public BrowserListObserver {
  public:
-  BrowserWindowHandler() {
+  BrowserWindowHandler(AppSession* app_session, Browser* browser)
+      : app_session_(app_session), browser_(browser) {
     BrowserList::AddObserver(this);
   }
   ~BrowserWindowHandler() override { BrowserList::RemoveObserver(this); }
@@ -179,19 +189,33 @@ class AppSession::BrowserWindowHandler : public BrowserListObserver {
                        browser));
   }
 
+  // Called when a Browser is removed from the list.
+  void OnBrowserRemoved(Browser* browser) override {
+    // The app browser was removed.
+    if (browser == browser_) {
+      app_session_->OnLastAppWindowClosed();
+    }
+  }
+
+  AppSession* const app_session_;
+  Browser* const browser_;
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowHandler);
 };
 
-AppSession::AppSession() {}
+AppSession::AppSession()
+    : attempt_user_exit_(base::BindOnce(chrome::AttemptUserExit)) {}
 AppSession::~AppSession() {}
 
 void AppSession::Init(Profile* profile, const std::string& app_id) {
-  app_window_handler_.reset(new AppWindowHandler(this));
+  app_window_handler_ = std::make_unique<AppWindowHandler>(this);
   app_window_handler_->Init(profile, app_id);
 
-  browser_window_handler_.reset(new BrowserWindowHandler);
+  browser_window_handler_ =
+      std::make_unique<BrowserWindowHandler>(this, nullptr);
 
-  plugin_handler_.reset(new KioskSessionPluginHandler(this));
+  plugin_handler_ = std::make_unique<KioskSessionPluginHandler>(this);
+
+  StartFloatingAccessibilityMenu();
 
   // For a demo app, we don't need to either setup the update service or
   // the idle app name notification.
@@ -221,6 +245,19 @@ void AppSession::Init(Profile* profile, const std::string& app_id) {
   }
 }
 
+void AppSession::InitForWebKiosk(Browser* browser) {
+  // We should block all other browser window creation and terminate the session
+  // the browser window was closed.
+  browser_window_handler_ =
+      std::make_unique<BrowserWindowHandler>(this, browser);
+
+  StartFloatingAccessibilityMenu();
+}
+
+void AppSession::SetAttemptUserExitForTesting(base::OnceClosure closure) {
+  attempt_user_exit_ = std::move(closure);
+}
+
 void AppSession::OnAppWindowAdded(AppWindow* app_window) {
   if (is_shutting_down_)
     return;
@@ -245,7 +282,7 @@ void AppSession::OnLastAppWindowClosed() {
     return;
   is_shutting_down_ = true;
 
-  chrome::AttemptUserExit();
+  std::move(attempt_user_exit_).Run();
 }
 
 bool AppSession::ShouldHandlePlugin(const base::FilePath& plugin_path) const {
@@ -269,9 +306,8 @@ void AppSession::OnPluginHung(const std::set<int>& hung_plugins) {
   is_shutting_down_ = true;
 
   LOG(ERROR) << "Plugin hung detected. Dump and reboot.";
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(&DumpPluginProcessOnIOThread, hung_plugins));
+  base::PostTask(FROM_HERE, {content::BrowserThread::IO},
+                 base::BindOnce(&DumpPluginProcessOnIOThread, hung_plugins));
 }
 
 }  // namespace chromeos

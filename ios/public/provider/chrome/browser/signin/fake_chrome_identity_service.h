@@ -9,6 +9,7 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 
+@class FakeChromeIdentityInteractionManager;
 @class NSMutableArray;
 
 namespace ios {
@@ -29,8 +30,12 @@ class FakeChromeIdentityService : public ChromeIdentityService {
       UIViewController* viewController,
       BOOL animated) override;
   ChromeIdentityInteractionManager* CreateChromeIdentityInteractionManager(
-      ios::ChromeBrowserState* browser_state,
+      ChromeBrowserState* browser_state,
       id<ChromeIdentityInteractionManagerDelegate> delegate) const override;
+  FakeChromeIdentityInteractionManager*
+  CreateFakeChromeIdentityInteractionManager(
+      ChromeBrowserState* browser_state,
+      id<ChromeIdentityInteractionManagerDelegate> delegate) const;
 
   bool IsValidIdentity(ChromeIdentity* identity) const override;
   ChromeIdentity* GetIdentityWithGaiaID(
@@ -56,6 +61,9 @@ class FakeChromeIdentityService : public ChromeIdentityService {
       ChromeIdentity* identity,
       GetHostedDomainCallback callback) override;
 
+  virtual NSString* GetCachedHostedDomainForIdentity(
+      ChromeIdentity* identity) override;
+
   MOCK_METHOD1(GetMDMDeviceStatus,
                ios::MDMDeviceStatus(NSDictionary* user_info));
 
@@ -66,6 +74,9 @@ class FakeChromeIdentityService : public ChromeIdentityService {
 
   // Sets up the mock methods for integration tests.
   void SetUpForIntegrationTests();
+
+  // Adds the managed identities given their name.
+  void AddManagedIdentities(NSArray* identitiesName);
 
   // Adds the identities given their name.
   void AddIdentities(NSArray* identitiesNames);
@@ -81,11 +92,15 @@ class FakeChromeIdentityService : public ChromeIdentityService {
   // When set to true, call to GetAccessToken() fakes a MDM error.
   void SetFakeMDMError(bool fakeMDMError);
 
+  bool HasPendingCallback();
+
  private:
   NSMutableArray* identities_;
 
   // If true, call to GetAccessToken() fakes a MDM error.
   bool _fakeMDMError;
+
+  int _pendingCallback;
 };
 
 }  // namespace ios

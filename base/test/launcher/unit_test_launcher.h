@@ -19,11 +19,16 @@
 
 namespace base {
 
+extern const char kDontUseJobObjectFlag[];
+
 // Callback that runs a test suite and returns exit code.
 using RunTestSuiteCallback = OnceCallback<int(void)>;
 
 // Launches unit tests in given test suite. Returns exit code.
-int LaunchUnitTests(int argc, char** argv, RunTestSuiteCallback run_test_suite);
+int LaunchUnitTests(int argc,
+                    char** argv,
+                    RunTestSuiteCallback run_test_suite,
+                    size_t retry_limit = 1U);
 
 // Same as above, but always runs tests serially.
 int LaunchUnitTestsSerially(int argc,
@@ -126,16 +131,6 @@ class UnitTestLauncherDelegate : public TestLauncherDelegate {
  private:
   // TestLauncherDelegate:
   bool GetTests(std::vector<TestIdentifier>* output) override;
-  bool WillRunTest(const std::string& test_case_name,
-                   const std::string& test_name) override;
-
-  std::vector<TestResult> ProcessTestResults(
-      const std::vector<std::string>& test_names,
-      const base::FilePath& output_file,
-      const std::string& output,
-      const base::TimeDelta& elapsed_time,
-      int exit_code,
-      bool was_timeout) override;
 
   CommandLine GetCommandLine(const std::vector<std::string>& test_names,
                              const FilePath& temp_dir,

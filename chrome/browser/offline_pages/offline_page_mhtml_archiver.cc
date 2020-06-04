@@ -16,12 +16,12 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string16.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "components/offline_pages/core/archive_validator.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
 #include "components/offline_pages/core/offline_clock.h"
-#include "components/offline_pages/core/offline_page_feature.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/mhtml_generation_params.h"
@@ -31,7 +31,7 @@ namespace offline_pages {
 namespace {
 void DeleteFileOnFileThread(const base::FilePath& file_path,
                             const base::Closure& callback) {
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(base::IgnoreResult(&base::DeleteFile), file_path,
                      false /* recursive */),
@@ -44,7 +44,7 @@ void DeleteFileOnFileThread(const base::FilePath& file_path,
 void ComputeDigestOnFileThread(
     const base::FilePath& file_path,
     base::OnceCallback<void(const std::string&)> callback) {
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&ArchiveValidator::ComputeDigest, file_path),
       std::move(callback));
@@ -52,8 +52,7 @@ void ComputeDigestOnFileThread(
 }  // namespace
 
 // static
-OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver()
-    : weak_ptr_factory_(this) {}
+OfflinePageMHTMLArchiver::OfflinePageMHTMLArchiver() {}
 
 OfflinePageMHTMLArchiver::~OfflinePageMHTMLArchiver() {
 }
@@ -102,9 +101,10 @@ void OfflinePageMHTMLArchiver::GenerateMHTML(
   params.remove_popup_overlay = create_archive_params.remove_popup_overlay;
   params.use_page_problem_detectors =
       create_archive_params.use_page_problem_detectors;
-  params.compute_contents_hash = IsOnTheFlyMhtmlHashComputationEnabled();
+  params.compute_contents_hash =
+      create_archive_params.use_on_the_fly_hash_computation;
 
-  web_contents->GenerateMHTML(
+  web_contents->GenerateMHTMLWithResult(
       params,
       base::BindOnce(&OfflinePageMHTMLArchiver::OnGenerateMHTMLDone,
                      weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
@@ -117,8 +117,8 @@ void OfflinePageMHTMLArchiver::OnGenerateMHTMLDone(
     const base::string16& title,
     const std::string& name_space,
     base::Time mhtml_start_time,
-    int64_t file_size) {
-  if (file_size < 0) {
+    const content::MHTMLGenerationResult& result) {
+  if (result.file_size < 0) {
     DeleteFileAndReportFailure(file_path,
                                ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED);
     return;
@@ -129,11 +129,17 @@ void OfflinePageMHTMLArchiver::OnGenerateMHTMLDone(
       model_utils::AddHistogramSuffix(
           name_space, "OfflinePages.SavePage.CreateArchiveTime"),
       digest_start_time - mhtml_start_time);
-  ComputeDigestOnFileThread(
-      file_path,
-      base::BindOnce(&OfflinePageMHTMLArchiver::OnComputeDigestDone,
-                     weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
-                     name_space, digest_start_time, file_size));
+
+  if (result.file_digest) {
+    OnComputeDigestDone(url, file_path, title, name_space, base::Time(),
+                        result.file_size, result.file_digest.value());
+  } else {
+    ComputeDigestOnFileThread(
+        file_path,
+        base::BindOnce(&OfflinePageMHTMLArchiver::OnComputeDigestDone,
+                       weak_ptr_factory_.GetWeakPtr(), url, file_path, title,
+                       name_space, digest_start_time, result.file_size));
+  }
 }
 
 void OfflinePageMHTMLArchiver::OnComputeDigestDone(
@@ -150,10 +156,12 @@ void OfflinePageMHTMLArchiver::OnComputeDigestDone(
     return;
   }
 
-  base::UmaHistogramTimes(
-      model_utils::AddHistogramSuffix(
-          name_space, "OfflinePages.SavePage.ComputeDigestTime"),
-      OfflineTimeNow() - digest_start_time);
+  if (!digest_start_time.is_null()) {
+    base::UmaHistogramTimes(
+        model_utils::AddHistogramSuffix(
+            name_space, "OfflinePages.SavePage.ComputeDigestTime"),
+        OfflineTimeNow() - digest_start_time);
+  }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,

@@ -12,6 +12,7 @@
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shelf/shelf_window_watcher.h"
 #include "ash/shell.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
@@ -21,7 +22,6 @@
 #include "ui/aura/client/window_types.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_features.h"
-#include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/wm/core/focus_controller.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -32,6 +32,10 @@ using DemoModeApp = DemoSessionMetricsRecorder::DemoModeApp;
 
 // How often to sample.
 constexpr auto kSamplePeriod = base::TimeDelta::FromSeconds(1);
+
+// Redefining chromeos::default_web_apps::kHelpAppId as ash can't depend on
+// chrome.
+constexpr char kHelpAppId[] = "nbljnnecbjbmifnoehiemkgefbnpoeak";
 
 // How many periods to wait for user activity before discarding samples.
 // This timeout is low because demo sessions tend to be very short. If we
@@ -54,7 +58,8 @@ DemoModeApp GetAppFromAppId(const std::string& app_id) {
   if (app_id == extension_misc::kScreensaverAppId ||
       app_id == extension_misc::kScreensaverEveAppId ||
       app_id == extension_misc::kScreensaverNocturneAppId ||
-      app_id == extension_misc::kScreensaverAltAppId) {
+      app_id == extension_misc::kScreensaverAtlasAppId ||
+      app_id == extension_misc::kScreensaverKukuiAppId) {
     return DemoModeApp::kScreensaver;
   }
 
@@ -64,7 +69,7 @@ DemoModeApp GetAppFromAppId(const std::string& app_id) {
     return DemoModeApp::kBrowser;
   if (app_id == extension_misc::kFilesManagerAppId)
     return DemoModeApp::kFiles;
-  if (app_id == extension_misc::kGeniusAppId)
+  if (app_id == kHelpAppId || app_id == extension_misc::kGeniusAppId)
     return DemoModeApp::kGetHelp;
   if (app_id == extension_misc::kGoogleKeepAppId)
     return DemoModeApp::kGoogleKeep;
@@ -157,6 +162,20 @@ DemoModeApp GetAppFromWindow(const aura::Window* window) {
   return DemoModeApp::kOtherWindow;
 }
 
+// Identical to UmaHistogramLongTimes100, but reports times with second
+// granularity instead of millisecond granularity.
+// This significantly improves the bucketing if millisecond granularity is
+// not required - 90/100 buckets are greater than 10 seconds, compared to
+// 43/100 buckets using millisecond accuracy with min=1ms, or
+// 72/100 buckets using millisecond accuracy with min=1000ms.
+void ReportHistogramLongSecondsTimes100(const char* name,
+                                        base::TimeDelta sample) {
+  // We use a max of 1 hour = 60 * 60 secs.
+  base::UmaHistogramCustomCounts(name,
+                                 base::saturated_cast<int>(sample.InSeconds()),
+                                 /*min=*/1, /*max=*/60 * 60, /*buckets=*/100);
+}
+
 }  // namespace
 
 // Observes for changes in a window's ArcPackageName property for the purpose of
@@ -166,7 +185,7 @@ class DemoSessionMetricsRecorder::ActiveAppArcPackageNameObserver
  public:
   explicit ActiveAppArcPackageNameObserver(
       DemoSessionMetricsRecorder* metrics_recorder)
-      : metrics_recorder_(metrics_recorder), scoped_observer_(this) {}
+      : metrics_recorder_(metrics_recorder) {}
 
   // aura::WindowObserver
   void OnWindowPropertyChanged(aura::Window* window,
@@ -196,8 +215,7 @@ class DemoSessionMetricsRecorder::ActiveAppArcPackageNameObserver
 
  private:
   DemoSessionMetricsRecorder* metrics_recorder_;
-  ScopedObserver<aura::Window, ActiveAppArcPackageNameObserver>
-      scoped_observer_;
+  ScopedObserver<aura::Window, aura::WindowObserver> scoped_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ActiveAppArcPackageNameObserver);
 };
@@ -209,7 +227,7 @@ class DemoSessionMetricsRecorder::UniqueAppsLaunchedArcPackageNameObserver
  public:
   explicit UniqueAppsLaunchedArcPackageNameObserver(
       DemoSessionMetricsRecorder* metrics_recorder)
-      : metrics_recorder_(metrics_recorder), scoped_observer_(this) {}
+      : metrics_recorder_(metrics_recorder) {}
 
   // aura::WindowObserver
   void OnWindowPropertyChanged(aura::Window* window,
@@ -238,8 +256,7 @@ class DemoSessionMetricsRecorder::UniqueAppsLaunchedArcPackageNameObserver
 
  private:
   DemoSessionMetricsRecorder* metrics_recorder_;
-  ScopedObserver<aura::Window, UniqueAppsLaunchedArcPackageNameObserver>
-      scoped_observer_;
+  ScopedObserver<aura::Window, aura::WindowObserver> scoped_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UniqueAppsLaunchedArcPackageNameObserver);
 };
@@ -247,7 +264,6 @@ class DemoSessionMetricsRecorder::UniqueAppsLaunchedArcPackageNameObserver
 DemoSessionMetricsRecorder::DemoSessionMetricsRecorder(
     std::unique_ptr<base::RepeatingTimer> timer)
     : timer_(std::move(timer)),
-      observer_(this),
       unique_apps_arc_package_name_observer_(
           std::make_unique<UniqueAppsLaunchedArcPackageNameObserver>(this)),
       active_app_arc_package_name_observer_(
@@ -270,9 +286,14 @@ DemoSessionMetricsRecorder::DemoSessionMetricsRecorder(
 }
 
 DemoSessionMetricsRecorder::~DemoSessionMetricsRecorder() {
+  // TODO(mlcui): Investigate whether the metrics emitted here are gracefully
+  // handled during session / device shutdown.
+
   // Report any remaining stored samples on exit. (If the user went idle, there
   // won't be any.)
   ReportSamples();
+
+  ReportDwellTime();
 
   // Unsubscribe from window activation events.
   activation_client_->RemoveObserver(this);
@@ -352,6 +373,12 @@ void DemoSessionMetricsRecorder::OnWindowActivated(ActivationReason reason,
 }
 
 void DemoSessionMetricsRecorder::OnUserActivity(const ui::Event* event) {
+  // Record the first and last time activity was observed.
+  if (first_user_activity_.is_null()) {
+    first_user_activity_ = base::TimeTicks::Now();
+  }
+  last_user_activity_ = base::TimeTicks::Now();
+
   // Report samples recorded since the last activity.
   ReportSamples();
 
@@ -408,6 +435,18 @@ void DemoSessionMetricsRecorder::ReportUniqueAppsLaunched() {
     UMA_HISTOGRAM_COUNTS_100("DemoMode.UniqueAppsLaunched",
                              unique_apps_launched_.size());
   unique_apps_launched_.clear();
+}
+
+void DemoSessionMetricsRecorder::ReportDwellTime() {
+  if (!first_user_activity_.is_null()) {
+    DCHECK(!last_user_activity_.is_null());
+    DCHECK_LE(first_user_activity_, last_user_activity_);
+
+    base::TimeDelta dwell_time = last_user_activity_ - first_user_activity_;
+    ReportHistogramLongSecondsTimes100("DemoMode.DwellTime", dwell_time);
+  }
+  first_user_activity_ = base::TimeTicks();
+  last_user_activity_ = base::TimeTicks();
 }
 
 }  // namespace ash

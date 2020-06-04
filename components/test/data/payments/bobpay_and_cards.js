@@ -6,43 +6,63 @@
 
 /* global PaymentRequest:false */
 
+var request = null;
+var showPromise = null;
+
 /**
  * Helper function that launches the PaymentRequest UI with the specified
  * payment methods.
  *
  * @param {!Array<!Object>} methods: Payment methods data for PaymentRequest
  *     constructor.
+ * @param {boolean} requestShippingContact: Whether or not shipping address and
+ *     payer's contact information are required.
  */
-function testPaymentMethods(methods) {
+async function testPaymentMethods(methods, requestShippingContact = false) {
+  const shippingOptions = requestShippingContact
+      ? [{
+          id: 'freeShippingOption',
+          label: 'Free global shipping',
+          amount: {currency: 'USD', value: '0'},
+          selected: true,
+        }]
+      : [];
   try {
-    new PaymentRequest(
+    request = new PaymentRequest(
         methods,
-        {total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}}})
-        .show()
-        .then(function(resp) {
-          resp.complete('success')
-              .then(function() {
-                print(
-                    resp.methodName + '<br>' +
-                    JSON.stringify(resp.details, undefined, 2));
-              })
-              .catch(function(error) {
-                print(error.message);
-              });
-        })
-        .catch(function(error) {
-          print(error.message);
+        {total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}},
+            shippingOptions},
+        {
+          requestShipping: requestShippingContact,
+          requestPayerEmail: requestShippingContact,
+          requestPayerName: requestShippingContact,
+          requestPayerPhone: requestShippingContact,
         });
+    showPromise = request.show();
+    const resp = await showPromise;
+    await resp.complete('success');
+    const json = JSON.stringify(resp.details, undefined, 2);
+    print(`${resp.methodName}<br>${json}`);
   } catch (error) {
     print(error.message);
   }
 }
 
 /**
+ * Aborts the PaymentRequest initiated by testPaymentMethods().
+ */
+async function abort() { // eslint-disable-line no-unused-vars
+  await request.abort();
+  return await showPromise.catch((e) => {
+    return e.name == 'AbortError';
+  });
+}
+
+/**
  * Launches the PaymentRequest UI with Bob Pay and credit cards as payment
  * methods.
  */
-function buy() {  // eslint-disable-line no-unused-vars
+function buy() { // eslint-disable-line no-unused-vars
   testPaymentMethods([
       {supportedMethods: 'https://bobpay.com'},
       {
@@ -56,7 +76,7 @@ function buy() {  // eslint-disable-line no-unused-vars
  * Launches the PaymentRequest UI with kylepay.com and basic-card as payment
  * methods. kylepay.com hosts an installable payment app.
  */
-function testInstallableAppAndCard() {  // eslint-disable-line no-unused-vars
+function testInstallableAppAndCard() { // eslint-disable-line no-unused-vars
   testPaymentMethods([
       {supportedMethods: 'https://kylepay.com/webpay'},
       {supportedMethods: 'basic-card'},

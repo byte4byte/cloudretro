@@ -9,6 +9,8 @@
 
 #include "ash/public/cpp/ash_public_export.h"
 #include "base/callback_forward.h"
+#include "base/time/time.h"
+#include "ui/gfx/native_widget_types.h"
 
 class AccountId;
 
@@ -55,14 +57,23 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // the other auth methods above.
   virtual void AuthenticateUserWithEasyUnlock(const AccountId& account_id) = 0;
 
+  // Try to authenticate |account_id| using the challenge-response protocol
+  // against a security token.
+  // |account_id|: The account id of the user we are authenticating.
+  virtual void AuthenticateUserWithChallengeResponse(
+      const AccountId& account_id,
+      base::OnceCallback<void(bool)> callback) = 0;
+
   // Validates parent access code for the user identified by |account_id|. When
   // |account_id| is empty it tries to validate the access code for any child
-  // that is signed in the device. Returns validation result.
-  // Note: This should only be used for child user, it will always return false
-  // when a non-child id is used.
+  // that is signed in the device. Returns validation result. |validation_time|
+  // is the time that will be used to validate the code, validation will succeed
+  // if the code was valid this given time. Note: This should only be used for
+  // child user, it will always return false when a non-child id is used.
   // TODO(crbug.com/965479): move this to a more appropriate place.
   virtual bool ValidateParentAccessCode(const AccountId& account_id,
-                                        const std::string& access_code) = 0;
+                                        const std::string& access_code,
+                                        base::Time validation_time) = 0;
 
   // Request to hard lock the user pod.
   // |account_id|:    The account id of the user in the user pod.
@@ -100,11 +111,13 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   // Passes focus to the OOBE dialog if it is showing. No-op otherwise.
   virtual void FocusOobeDialog() = 0;
 
-  // Show the gaia sign-in dialog. If |can_close| is true, the dialog can be
-  // closed. The value in |prefilled_account| will be used to prefill the
-  // sign-in dialog so the user does not need to type the account email.
-  virtual void ShowGaiaSignin(bool can_close,
-                              const AccountId& prefilled_account) = 0;
+  // Show the gaia sign-in dialog.
+  // The value in |prefilled_account| will be used to prefill the sign-in dialog
+  // so the user does not need to type the account email.
+  virtual void ShowGaiaSignin(const AccountId& prefilled_account) = 0;
+
+  // Hides the Gaia sign-in dialog if it was open.
+  virtual void HideGaiaSignin() = 0;
 
   // Notification that the remove user warning was shown.
   virtual void OnRemoveUserWarningShown() = 0;
@@ -138,7 +151,10 @@ class ASH_PUBLIC_EXPORT LoginScreenClient {
   virtual void ShowResetScreen() = 0;
 
   // Show the help app for when users have trouble signing in to their account.
-  virtual void ShowAccountAccessHelpApp() = 0;
+  virtual void ShowAccountAccessHelpApp(gfx::NativeWindow parent_window) = 0;
+
+  // Shows help app for users that have trouble using parent access code.
+  virtual void ShowParentAccessHelpApp(gfx::NativeWindow parent_window) = 0;
 
   // Show the lockscreen notification settings page.
   virtual void ShowLockScreenNotificationSettings() = 0;

@@ -17,8 +17,9 @@
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,7 +60,7 @@ static void FlushTaskRunner(base::SequencedTaskRunner* task_runner) {
 class WebRtcRtpDumpWriterTest : public testing::Test {
  public:
   WebRtcRtpDumpWriterTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         temp_dir_(new base::ScopedTempDir()) {}
 
   void SetUp() override {
@@ -231,7 +232,7 @@ class WebRtcRtpDumpWriterTest : public testing::Test {
     return true;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<base::ScopedTempDir> temp_dir_;
   base::FilePath incoming_dump_path_;
   base::FilePath outgoing_dump_path_;
@@ -284,7 +285,13 @@ TEST_F(WebRtcRtpDumpWriterTest, WriteAndFlushSmallSizeDump) {
   VerifyDumps(1, 1);
 }
 
-TEST_F(WebRtcRtpDumpWriterTest, WriteOverMaxLimit) {
+// Flaky test disabled on Windows (https://crbug.com/1044271).
+#if defined(OS_WIN)
+#define MAYBE_WriteOverMaxLimit DISABLED_WriteOverMaxLimit
+#else
+#define MAYBE_WriteOverMaxLimit WriteOverMaxLimit
+#endif
+TEST_F(WebRtcRtpDumpWriterTest, MAYBE_WriteOverMaxLimit) {
   // Reset the writer with a small max size limit.
   writer_.reset(new WebRtcRtpDumpWriter(
       incoming_dump_path_,

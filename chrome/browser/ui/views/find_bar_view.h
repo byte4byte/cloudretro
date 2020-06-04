@@ -12,19 +12,21 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/views/dropdown_bar_host_delegate.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
-#include "ui/views/view_targeter_delegate.h"
 
 class FindBarHost;
+
+namespace find_in_page {
 class FindNotificationDetails;
+}
 
 namespace gfx {
 class Range;
 }
 
 namespace views {
-class ImageButton;
 class Painter;
 class Separator;
 class Textfield;
@@ -40,8 +42,7 @@ class Textfield;
 class FindBarView : public views::View,
                     public DropdownBarHostDelegate,
                     public views::ButtonListener,
-                    public views::TextfieldController,
-                    public views::ViewTargeterDelegate {
+                    public views::TextfieldController {
  public:
   explicit FindBarView(FindBarHost* host);
   ~FindBarView() override;
@@ -60,7 +61,7 @@ class FindBarView : public views::View,
 
   // Updates the label inside the Find text box that shows the ordinal of the
   // active item and how many matches were found.
-  void UpdateForResult(const FindNotificationDetails& result,
+  void UpdateForResult(const find_in_page::FindNotificationDetails& result,
                        const base::string16& find_text);
 
   // Clears the current Match Count value in the Find text box.
@@ -68,7 +69,7 @@ class FindBarView : public views::View,
 
   // views::View:
   const char* GetClassName() const override;
-  void Layout() override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
   gfx::Size CalculatePreferredSize() const override;
   void OnThemeChanged() override;
 
@@ -83,13 +84,6 @@ class FindBarView : public views::View,
                       const ui::KeyEvent& key_event) override;
   void OnAfterUserAction(views::Textfield* sender) override;
   void OnAfterPaste() override;
-
-  // views::ViewTargeterDelegate:
-  views::View* TargetForRect(View* root, const gfx::Rect& rect) override;
-
- protected:
-  // views::View overrides:
-  void AddedToWidget() override;
 
  private:
   class MatchCountLabel;
@@ -115,7 +109,6 @@ class FindBarView : public views::View,
   views::Textfield* find_text_;
   std::unique_ptr<views::Painter> find_text_border_;
   MatchCountLabel* match_count_text_;
-  views::View* focus_forwarder_view_;
   views::Separator* separator_;
   views::ImageButton* find_previous_button_;
   views::ImageButton* find_next_button_;

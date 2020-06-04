@@ -25,9 +25,26 @@ class ProgressCenterImpl {
 
     /**
      * List of panel UI managed by the progress center.
-     * @private @const {!Array<ProgressCenterPanel>}
+     * @private @const {!Array<ProgressCenterPanelInterface>}
      */
     this.panels_ = [];
+
+    /**
+     * Inhibit end of operation updates for testing.
+     * @private
+     */
+    this.neverNotifyCompleted_ = false;
+  }
+
+  /**
+   * Turns off sending updates when a file operation reaches 'completed' state.
+   * Used for testing UI that can be ephemeral otherwise.
+   * @public
+   */
+  neverNotifyCompleted() {
+    if (window.IN_TEST) {
+      this.neverNotifyCompleted_ = true;
+    }
   }
 
   /**
@@ -48,6 +65,10 @@ class ProgressCenterImpl {
     } else {
       // Error item is not removed until user explicitly dismiss it.
       if (item.state !== ProgressItemState.ERROR && index !== -1) {
+        if (this.neverNotifyCompleted_) {
+          item.state = ProgressItemState.PROGRESSING;
+          return;
+        }
         this.items_.splice(index, 1);
       }
     }
@@ -86,7 +107,7 @@ class ProgressCenterImpl {
 
   /**
    * Adds a panel UI to the notification center.
-   * @param {ProgressCenterPanel} panel Panel UI.
+   * @param {ProgressCenterPanelInterface} panel Panel UI.
    */
   addPanel(panel) {
     if (this.panels_.indexOf(panel) !== -1) {
@@ -110,7 +131,7 @@ class ProgressCenterImpl {
 
   /**
    * Removes a panel UI from the notification center.
-   * @param {ProgressCenterPanel} panel Panel UI.
+   * @param {ProgressCenterPanelInterface} panel Panel UI.
    */
   removePanel(panel) {
     const index = this.panels_.indexOf(panel);

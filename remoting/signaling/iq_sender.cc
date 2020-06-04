@@ -14,8 +14,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "remoting/signaling/jid_util.h"
 #include "remoting/signaling/signal_strategy.h"
+#include "remoting/signaling/signaling_id_util.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
 
@@ -45,7 +45,7 @@ IqSender::~IqSender() {
 
 std::unique_ptr<IqRequest> IqSender::SendIq(
     std::unique_ptr<jingle_xmpp::XmlElement> stanza,
-    const ReplyCallback& callback) {
+    ReplyCallback callback) {
   std::string addressee = stanza->Attr(jingle_xmpp::QN_TO);
   std::string id = stanza->Attr(jingle_xmpp::QN_ID);
   if (id.empty()) {
@@ -56,8 +56,10 @@ std::unique_ptr<IqRequest> IqSender::SendIq(
     return nullptr;
   }
   DCHECK(requests_.find(id) == requests_.end());
-  std::unique_ptr<IqRequest> request(new IqRequest(this, callback, addressee));
-  if (!callback.is_null())
+  bool callback_exists = !callback.is_null();
+  auto request =
+      std::make_unique<IqRequest>(this, std::move(callback), addressee);
+  if (callback_exists)
     requests_[id] = request.get();
   return request;
 }
@@ -66,8 +68,9 @@ std::unique_ptr<IqRequest> IqSender::SendIq(
     const std::string& type,
     const std::string& addressee,
     std::unique_ptr<jingle_xmpp::XmlElement> iq_body,
-    const ReplyCallback& callback) {
-  return SendIq(MakeIqStanza(type, addressee, std::move(iq_body)), callback);
+    ReplyCallback callback) {
+  return SendIq(MakeIqStanza(type, addressee, std::move(iq_body)),
+                std::move(callback));
 }
 
 void IqSender::RemoveRequest(IqRequest* request) {
@@ -116,7 +119,7 @@ bool IqSender::OnSignalStrategyIncomingStanza(const jingle_xmpp::XmlElement* sta
 
   IqRequest* request = it->second;
 
-  if (NormalizeJid(request->addressee_) != NormalizeJid(from)) {
+  if (NormalizeSignalingId(request->addressee_) != NormalizeSignalingId(from)) {
     LOG(ERROR) << "Received IQ response from an invalid JID. Ignoring it."
                << " Message received from: " << from
                << " Original JID: " << request->addressee_;
@@ -130,12 +133,9 @@ bool IqSender::OnSignalStrategyIncomingStanza(const jingle_xmpp::XmlElement* sta
 }
 
 IqRequest::IqRequest(IqSender* sender,
-                     const IqSender::ReplyCallback& callback,
+                     IqSender::ReplyCallback callback,
                      const std::string& addressee)
-    : sender_(sender),
-      callback_(callback),
-      addressee_(addressee),
-      weak_factory_(this) {}
+    : sender_(sender), callback_(std::move(callback)), addressee_(addressee) {}
 
 IqRequest::~IqRequest() {
   sender_->RemoveRequest(this);

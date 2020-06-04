@@ -13,11 +13,16 @@
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "base/time/time.h"
 #import "ios/chrome/browser/sessions/session_ios.h"
+#import "ios/chrome/browser/sessions/session_ios_factory.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
 #import "ios/web/public/session/crw_navigation_item_storage.h"
 #import "ios/web/public/session/crw_session_certificate_policy_cache_storage.h"
@@ -73,15 +78,16 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
   // The SequencedTaskRunner on which File IO operations are performed.
   scoped_refptr<base::SequencedTaskRunner> _taskRunner;
 
-  // Maps session path to the pending session for the delayed save behaviour.
-  NSMutableDictionary<NSString*, SessionIOSFactory>* _pendingSessions;
+  // Maps session path to the pending session factories for the delayed save
+  // behaviour. SessionIOSFactory pointers are weak.
+  NSMapTable<NSString*, SessionIOSFactory*>* _pendingSessions;
 }
 
 #pragma mark - NSObject overrides
 
 - (instancetype)init {
   scoped_refptr<base::SequencedTaskRunner> taskRunner =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   return [self initWithTaskRunner:taskRunner];
@@ -102,13 +108,13 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
   DCHECK(taskRunner);
   self = [super init];
   if (self) {
-    _pendingSessions = [NSMutableDictionary dictionary];
+    _pendingSessions = [NSMapTable strongToWeakObjectsMapTable];
     _taskRunner = taskRunner;
   }
   return self;
 }
 
-- (void)saveSession:(SessionIOSFactory)factory
+- (void)saveSession:(__weak SessionIOSFactory*)factory
           directory:(NSString*)directory
         immediately:(BOOL)immediately {
   NSString* sessionPath = [[self class] sessionPathForDirectory:directory];
@@ -128,7 +134,11 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
 
 - (SessionIOS*)loadSessionFromDirectory:(NSString*)directory {
   NSString* sessionPath = [[self class] sessionPathForDirectory:directory];
-  return [self loadSessionFromPath:sessionPath];
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  SessionIOS* session = [self loadSessionFromPath:sessionPath];
+  UmaHistogramTimes("Session.WebStates.ReadFromFileTime",
+                    base::TimeTicks::Now() - start_time);
+  return session;
 }
 
 - (SessionIOS*)loadSessionFromPath:(NSString*)sessionPath {
@@ -203,13 +213,16 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
 // Do the work of saving on a background thread.
 - (void)performSaveToPathInBackground:(NSString*)sessionPath {
   DCHECK(sessionPath);
-  DCHECK([_pendingSessions objectForKey:sessionPath] != nil);
 
   // Serialize to NSData on the main thread to avoid accessing potentially
   // non-threadsafe objects on a background thread.
-  SessionIOSFactory factory = [_pendingSessions objectForKey:sessionPath];
+  SessionIOSFactory* factory = [_pendingSessions objectForKey:sessionPath];
   [_pendingSessions removeObjectForKey:sessionPath];
-  SessionIOS* session = factory();
+  SessionIOS* session = [factory sessionForSaving];
+  // Because the factory may be called asynchronously after the underlying
+  // web state list is destroyed, the session may be nil; if so, do nothing.
+  if (!session)
+    return;
 
   @try {
     NSError* error = nil;
@@ -222,6 +235,9 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
                     << base::SysNSStringToUTF8([error description]);
       return;
     }
+
+    UMA_HISTOGRAM_COUNTS_100000("Session.WebStates.SerializedSize",
+                                sessionData.length / 1024);
 
     _taskRunner->PostTask(FROM_HERE, base::BindOnce(^{
                             [self performSaveSessionData:sessionData
@@ -272,12 +288,15 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
   NSDataWritingOptions options =
       NSDataWritingAtomic | NSDataWritingFileProtectionComplete;
 
+  base::TimeTicks start_time = base::TimeTicks::Now();
   if (![sessionData writeToFile:sessionPath options:options error:&error]) {
     NOTREACHED() << "Error writing session file: "
                  << base::SysNSStringToUTF8(sessionPath) << ": "
                  << base::SysNSStringToUTF8([error description]);
     return;
   }
+  UmaHistogramTimes("Session.WebStates.WriteToFileTime",
+                    base::TimeTicks::Now() - start_time);
 }
 
 @end

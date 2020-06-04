@@ -4,7 +4,7 @@
 
 #include "media/audio/audio_output_proxy.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_output_dispatcher.h"
 
@@ -44,7 +44,7 @@ void AudioOutputProxy::Start(AudioSourceCallback* callback) {
 
   if (!dispatcher_ || !dispatcher_->StartStream(callback, this)) {
     state_ = kStartError;
-    callback->OnError();
+    callback->OnError(AudioSourceCallback::ErrorType::kUnknown);
     return;
   }
   state_ = kPlaying;

@@ -77,15 +77,20 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   CHECK(!command_line()->HasSwitch(switches::kSingleProcess));
 
   std::unique_ptr<PosixFileDescriptorInfo> files_to_register =
-      CreateDefaultPosixFilesToMap(child_process_id(),
-                                   mojo_channel_->remote_endpoint(),
-                                   true /* include_service_required_files */,
-                                   GetProcessType(), command_line());
+      CreateDefaultPosixFilesToMap(
+          child_process_id(), mojo_channel_->remote_endpoint(),
+          files_to_preload_, GetProcessType(), command_line());
 
 #if ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
   base::MemoryMappedFile::Region icu_region;
   int fd = base::i18n::GetIcuDataFileHandle(&icu_region);
   files_to_register->ShareWithRegion(kAndroidICUDataDescriptor, fd, icu_region);
+  base::MemoryMappedFile::Region icu_extra_region;
+  int extra_fd = base::i18n::GetIcuExtraDataFileHandle(&icu_extra_region);
+  if (extra_fd != -1) {
+    files_to_register->ShareWithRegion(kAndroidICUExtraDataDescriptor, extra_fd,
+                                       icu_extra_region);
+  }
 #endif  // ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
 
   return files_to_register;
@@ -143,8 +148,8 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
       env, reinterpret_cast<intptr_t>(this), j_argv, j_file_infos,
       can_use_warm_up_connection));
   AddRef();  // Balanced by OnChildProcessStarted.
-  base::PostTaskWithTraits(
-      FROM_HERE, {client_thread_id_},
+  client_task_runner_->PostTask(
+      FROM_HERE,
       base::BindOnce(
           &ChildProcessLauncherHelper::set_java_peer_available_on_client_thread,
           this));
@@ -240,18 +245,6 @@ void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
 }
 
 // static
-void ChildProcessLauncherHelper::SetRegisteredFilesForService(
-    const std::string& service_name,
-    std::map<std::string, base::FilePath> required_files) {
-  SetFilesToShareForServicePosix(service_name, std::move(required_files));
-}
-
-// static
-void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {
-  ResetFilesToShareForTestingPosix();
-}
-
-// static
 base::File OpenFileToShare(const base::FilePath& path,
                            base::MemoryMappedFile::Region* region) {
   return base::File(base::android::OpenApkAsset(path.value(), region));
@@ -270,7 +263,6 @@ void ChildProcessLauncherHelper::DumpProcessStack(
 // the ChildProcess could not be created.
 void ChildProcessLauncherHelper::OnChildProcessStarted(
     JNIEnv*,
-    const base::android::JavaParamRef<jobject>& obj,
     jint handle) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   scoped_refptr<ChildProcessLauncherHelper> ref(this);

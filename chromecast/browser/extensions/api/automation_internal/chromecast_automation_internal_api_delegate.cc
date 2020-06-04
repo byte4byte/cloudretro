@@ -59,9 +59,14 @@ int ChromecastAutomationInternalApiDelegate::GetTabId(
 
 content::WebContents*
 ChromecastAutomationInternalApiDelegate::GetActiveWebContents(
-    UIThreadExtensionFunction* function) {
+    ExtensionFunction* function) {
   NOTIMPLEMENTED();
   return nullptr;
+}
+
+bool ChromecastAutomationInternalApiDelegate::EnableTree(
+    const ui::AXTreeID& tree_id) {
+  return false;
 }
 
 void ChromecastAutomationInternalApiDelegate::EnableDesktop() {

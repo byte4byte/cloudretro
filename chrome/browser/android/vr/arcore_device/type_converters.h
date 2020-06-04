@@ -5,14 +5,25 @@
 #ifndef CHROME_BROWSER_ANDROID_VR_ARCORE_DEVICE_TYPE_CONVERTERS_H_
 #define CHROME_BROWSER_ANDROID_VR_ARCORE_DEVICE_TYPE_CONVERTERS_H_
 
+#include "chrome/browser/android/vr/arcore_device/arcore_sdk.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
-#include "third_party/arcore-android-sdk/src/libraries/include/arcore_c_api.h"
+#include "ui/gfx/transform.h"
 
 namespace mojo {
 
 template <>
 struct TypeConverter<device::mojom::XRPlaneOrientation, ArPlaneType> {
   static device::mojom::XRPlaneOrientation Convert(ArPlaneType plane_type);
+};
+
+template <>
+struct TypeConverter<gfx::Transform, device::mojom::VRPosePtr> {
+  static gfx::Transform Convert(const device::mojom::VRPosePtr& pose);
+};
+
+template <>
+struct TypeConverter<gfx::Transform, device::mojom::Pose> {
+  static gfx::Transform Convert(const device::mojom::Pose& pose);
 };
 
 }  // namespace mojo

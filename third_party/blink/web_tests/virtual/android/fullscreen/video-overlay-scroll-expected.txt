@@ -1,6 +1,3 @@
-EVENT(fullscreenchange)
-END OF TEST
-
 {
   "layers": [
     {
@@ -15,7 +12,7 @@ END OF TEST
       "backgroundColor": "#333333"
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV",
+      "name": "LayoutNGBlockFlow (positioned) DIV",
       "bounds": [800, 600],
       "drawsContent": false
     },

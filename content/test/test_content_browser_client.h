@@ -23,10 +23,6 @@ class TestContentBrowserClient : public ContentBrowserClient {
   base::FilePath GetDefaultDownloadDirectory() override;
   GeneratedCodeCacheSettings GetGeneratedCodeCacheSettings(
       content::BrowserContext* context) override;
-  void GetQuotaSettings(
-      content::BrowserContext* context,
-      content::StoragePartition* partition,
-      storage::OptionalQuotaSettingsCallback callback) override;
   std::string GetUserAgent() override;
 #if defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(

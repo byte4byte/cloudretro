@@ -6,9 +6,10 @@
 
 #include "base/bind.h"
 #import "base/test/ios/wait_util.h"
+#include "components/security_interstitials/core/metrics_helper.h"
 #import "ios/chrome/browser/web/chrome_web_test.h"
 #include "ios/web/public/security/web_interstitial.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -24,11 +25,18 @@ TEST_F(IOSCaptivePortalBlockingPageTest, PresentAndDismiss) {
   LoadHtml(@"html", url);
 
   __block bool do_not_proceed_callback_called = false;
+  security_interstitials::MetricsHelper::ReportDetails report_details;
+  report_details.metric_prefix = "test";
   IOSCaptivePortalBlockingPage* page = new IOSCaptivePortalBlockingPage(
       web_state(), url, GURL("http://landing"), base::BindOnce(^(bool proceed) {
         EXPECT_FALSE(proceed);
         do_not_proceed_callback_called = true;
-      }));
+      }),
+      new security_interstitials::IOSBlockingPageControllerClient(
+          web_state(),
+          std::make_unique<security_interstitials::MetricsHelper>(
+              GURL(), report_details, nullptr),
+          "en-US"));
   page->Show();
 
   // Make sure that interstitial is displayed.

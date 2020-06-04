@@ -6,15 +6,17 @@ package org.chromium.chrome.browser.directactions;
 
 import android.annotation.TargetApi;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
+
+import androidx.annotation.NonNull;
 
 import org.chromium.base.Callback;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.supplier.Supplier;
 
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * Reports available direct actions and executes them.
@@ -53,6 +55,7 @@ public abstract class DirectActionCoordinator {
             }
         }
         reporter.report();
+        RecordUserAction.record("Android.DirectAction.List");
     }
 
     /** Performs an action and reports the result to the callback. */
@@ -60,9 +63,18 @@ public abstract class DirectActionCoordinator {
             String actionId, Bundle arguments, Consumer<Bundle> consumer) {
         if (!mIsEnabled.get()) return;
 
+        boolean performedAction = false;
         Callback<Bundle> callback = (result) -> consumer.accept(result);
         for (DirectActionHandler handler : mHandlers) {
-            if (handler.performDirectAction(actionId, arguments, callback)) return;
+            if (handler.performDirectAction(actionId, arguments, callback)) {
+                performedAction = true;
+                break;
+            }
+        }
+        if (performedAction) {
+            DirectActionUsageHistogram.record(actionId);
+        } else {
+            DirectActionUsageHistogram.recordUnknown();
         }
     }
 

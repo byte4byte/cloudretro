@@ -7,12 +7,12 @@ package org.chromium.chrome.browser.ntp.cards;
 import android.content.Context;
 import android.graphics.Region;
 
-import org.chromium.chrome.browser.ntp.NewTabPage.FakeboxDelegate;
+import org.chromium.chrome.browser.ntp.FakeboxDelegate;
 import org.chromium.chrome.browser.ntp.NewTabPageLayout;
 import org.chromium.chrome.browser.ntp.SnapScrollHelper;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
-import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.ViewUtils;
 
 /**
  * Simple wrapper on top of a RecyclerView that will acquire focus when tapped.  Ensures the

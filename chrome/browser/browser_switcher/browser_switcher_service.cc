@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/syslog_logging.h"
 #include "chrome/browser/browser_switcher/alternative_browser_driver.h"
 #include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
@@ -38,38 +39,41 @@ const base::TimeDelta kRefreshSitelistDelay = base::TimeDelta::FromMinutes(30);
 // How many times to re-try fetching the XML file for the sitelist.
 const int kFetchNumRetries = 1;
 
-// TODO(nicolaso): Add chrome_policy for this annotation once the policy is
-// implemented.
 constexpr net::NetworkTrafficAnnotationTag traffic_annotation =
     net::DefineNetworkTrafficAnnotation("browser_switcher_ieem_sitelist", R"(
         semantics {
-          sender: "Browser Switcher"
+          sender: "Legacy Browser Support "
           description:
-            "BrowserSwitcher may download Internet Explorer's Enterprise Mode "
-            "SiteList XML, to load the list of URLs to open in an alternative "
-            "browser. This is often on the organization's intranet.For more "
-            "information on Internet Explorer's Enterprise Mode, see: "
+            "Legacy Browser Support  may download Internet Explorer's "
+            "Enterprise Mode SiteList XML, to load the list of URLs to open in "
+            "an alternative browser. This is often on the organization's "
+            "intranet. For more information on Internet Explorer's Enterprise "
+            "Mode, see: "
             "https://docs.microsoft.com/internet-explorer/ie11-deploy-guide"
             "/what-is-enterprise-mode"
           trigger:
-            "This happens only once per profile, 60s after the first page "
-            "starts loading. The request may be retried once if it failed the "
-            "first time."
+            "1 minute after browser startup, and then refreshes every 30 "
+            "minutes afterwards. Only happens if Legacy Browser Support is "
+            "enabled via enterprise policies."
           data:
-            "Up to 2 (plus retries) HTTP or HTTPS GET requests to the URLs "
+            "Up to 3 (plus retries) HTTP or HTTPS GET requests to the URLs "
             "configured in Internet Explorer's SiteList policy, and Chrome's "
-            "BrowserSwitcherExternalSitelistUrl policy."
+            "BrowserSwitcherExternalSitelistUrl and "
+            "BrowserSwitcherExternalGreylistUrl policies."
           destination: OTHER
           destination_other:
-            "URL configured in Internet Explorer's SiteList policy, and URL "
-            "configured in Chrome's BrowserSwitcherExternalSitelistUrl policy. "
+            "URL configured in Internet Explorer's SiteList policy, and URLs "
+            "configured in Chrome's BrowserSwitcherExternalSitelistUrl and "
+            "BrowserSwitcherExternalGreylistUrl policies."
         }
         policy {
           cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
-          policy_exception_justification:
-            "This feature  still in development, and is disabled by default. "
-            "It needs to be enabled through policies."
+          chrome_policy: {
+            BrowserSwitcherEnabled: {
+              BrowserSwitcherEnabled: false
+            }
+          }
         })");
 
 }  // namespace
@@ -136,7 +140,7 @@ void XmlDownloader::FetchXml() {
     auto request = std::make_unique<network::ResourceRequest>();
     request->url = source.url;
     request->load_flags = net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
-    request->allow_credentials = false;
+    request->credentials_mode = network::mojom::CredentialsMode::kInclude;
     source.url_loader = network::SimpleURLLoader::Create(std::move(request),
                                                          traffic_annotation);
     source.url_loader->SetRetryOptions(
@@ -217,25 +221,30 @@ BrowserSwitcherService::BrowserSwitcherService(Profile* profile)
       prefs_(profile),
       driver_(new AlternativeBrowserDriverImpl(&prefs_)),
       sitelist_(new BrowserSwitcherSitelistImpl(&prefs_)) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&BrowserSwitcherService::Init,
-                                weak_ptr_factory_.GetWeakPtr()));
-
   prefs_subscription_ =
       prefs().RegisterPrefsChangedCallback(base::BindRepeating(
           &BrowserSwitcherService::OnBrowserSwitcherPrefsChanged,
           base::Unretained(this)));
+
+  if (prefs_.IsEnabled()) {
+    UMA_HISTOGRAM_ENUMERATION("BrowserSwitcher.AlternativeBrowser",
+                              driver_->GetBrowserType());
+  }
 }
 
 BrowserSwitcherService::~BrowserSwitcherService() = default;
 
 void BrowserSwitcherService::Init() {
+  LoadRulesFromPrefs();
   StartDownload(fetch_delay());
 }
 
-void BrowserSwitcherService::StartDownload(base::TimeDelta delay) {
-  LoadRulesFromPrefs();
+void BrowserSwitcherService::OnAllRulesetsLoadedForTesting(
+    base::OnceCallback<void()> cb) {
+  all_rulesets_loaded_callback_for_testing_ = std::move(cb);
+}
 
+void BrowserSwitcherService::StartDownload(base::TimeDelta delay) {
   // This destroys the previous XmlDownloader, which cancels any scheduled
   // refresh operations.
   sitelist_downloader_ = std::make_unique<XmlDownloader>(
@@ -258,6 +267,10 @@ BrowserSwitcherSitelist* BrowserSwitcherService::sitelist() {
 
 BrowserSwitcherPrefs& BrowserSwitcherService::prefs() {
   return prefs_;
+}
+
+Profile* BrowserSwitcherService::profile() {
+  return profile_;
 }
 
 XmlDownloader* BrowserSwitcherService::sitelist_downloader() {
@@ -311,6 +324,8 @@ void BrowserSwitcherService::LoadRulesFromPrefs() {
 
 void BrowserSwitcherService::OnAllRulesetsParsed() {
   callback_list_.Notify(this);
+  if (all_rulesets_loaded_callback_for_testing_)
+    std::move(all_rulesets_loaded_callback_for_testing_).Run();
 }
 
 std::unique_ptr<BrowserSwitcherService::CallbackSubscription>
@@ -322,6 +337,20 @@ BrowserSwitcherService::RegisterAllRulesetsParsedCallback(
 void BrowserSwitcherService::OnBrowserSwitcherPrefsChanged(
     BrowserSwitcherPrefs* prefs,
     const std::vector<std::string>& changed_prefs) {
+  // Record |BrowserSwitcher.AlternativeBrowser| when the
+  // |BrowserSwitcherEnabled| or |AlternativeBrowserPath| policies change.
+  bool should_record_metrics =
+      changed_prefs.end() !=
+      std::find_if(changed_prefs.begin(), changed_prefs.end(),
+                   [](const std::string& pref) {
+                     return pref == prefs::kEnabled ||
+                            pref == prefs::kAlternativeBrowserPath;
+                   });
+  if (should_record_metrics && prefs_.IsEnabled()) {
+    UMA_HISTOGRAM_ENUMERATION("BrowserSwitcher.AlternativeBrowser",
+                              driver_->GetBrowserType());
+  }
+
   auto sources = GetRulesetSources();
 
   // Re-download if one of the URLs changed. O(n^2), with n <= 3.

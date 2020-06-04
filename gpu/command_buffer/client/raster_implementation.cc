@@ -543,9 +543,20 @@ unsigned int RasterImplementation::GetTransferBufferFreeSize() const {
   return transfer_buffer_->GetFreeSize();
 }
 
+bool RasterImplementation::IsJpegDecodeAccelerationSupported() const {
+  return image_decode_accelerator_ &&
+         image_decode_accelerator_->IsJpegDecodeAccelerationSupported();
+}
+
+bool RasterImplementation::IsWebPDecodeAccelerationSupported() const {
+  return image_decode_accelerator_ &&
+         image_decode_accelerator_->IsWebPDecodeAccelerationSupported();
+}
+
 bool RasterImplementation::CanDecodeWithHardwareAcceleration(
-    base::span<const uint8_t> encoded_data) const {
-  return image_decode_accelerator_->IsImageSupported(encoded_data);
+    const cc::ImageHeaderMetadata* image_metadata) const {
+  return image_decode_accelerator_ &&
+         image_decode_accelerator_->IsImageSupported(image_metadata);
 }
 
 const std::string& RasterImplementation::GetLogPrefix() const {
@@ -577,7 +588,8 @@ void RasterImplementation::IssueQueryCounter(GLuint id,
                                              uint32_t sync_data_shm_id,
                                              uint32_t sync_data_shm_offset,
                                              GLuint submit_count) {
-  NOTIMPLEMENTED();
+  helper_->QueryCounterEXT(id, target, sync_data_shm_id, sync_data_shm_offset,
+                           submit_count);
 }
 
 void RasterImplementation::IssueSetDisjointValueSync(
@@ -896,12 +908,43 @@ void RasterImplementation::EndQueryEXT(GLenum target) {
     CheckGLError();
 }
 
+void RasterImplementation::QueryCounterEXT(GLuint id, GLenum target) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] QueryCounterEXT(" << id << ", "
+                     << GLES2Util::GetStringQueryTarget(target) << ")");
+
+  if (target != GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM) {
+    SetGLError(GL_INVALID_ENUM, "glQueryCounterEXT", "unknown query target");
+    return;
+  }
+
+  if (id == 0) {
+    SetGLError(GL_INVALID_OPERATION, "glQueryCounterEXT", "id is 0");
+    return;
+  }
+
+  if (!GetIdAllocator(IdNamespaces::kQueries)->InUse(id)) {
+    SetGLError(GL_INVALID_OPERATION, "glQueryCounterEXT", "invalid id");
+    return;
+  }
+
+  if (query_tracker_->QueryCounter(id, target, this))
+    CheckGLError();
+}
 void RasterImplementation::GetQueryObjectuivEXT(GLuint id,
                                                 GLenum pname,
                                                 GLuint* params) {
   GLuint64 result = 0;
   if (GetQueryObjectValueHelper("glGetQueryObjectuivEXT", id, pname, &result))
     *params = base::saturated_cast<GLuint>(result);
+}
+
+void RasterImplementation::GetQueryObjectui64vEXT(GLuint id,
+                                                  GLenum pname,
+                                                  GLuint64* params) {
+  GLuint64 result = 0;
+  if (GetQueryObjectValueHelper("glGetQueryObjectui64vEXT", id, pname, &result))
+    *params = result;
 }
 
 void* RasterImplementation::MapRasterCHROMIUM(uint32_t size,
@@ -1002,7 +1045,9 @@ void RasterImplementation::CopySubTexture(const gpu::Mailbox& source_mailbox,
                                           GLint x,
                                           GLint y,
                                           GLsizei width,
-                                          GLsizei height) {
+                                          GLsizei height,
+                                          GLboolean unpack_flip_y,
+                                          GLboolean unpack_premultiply_alpha) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glCopySubTexture("
                      << source_mailbox.ToDebugString() << ", "
@@ -1022,8 +1067,58 @@ void RasterImplementation::CopySubTexture(const gpu::Mailbox& source_mailbox,
   memcpy(mailboxes + sizeof(source_mailbox.name), dest_mailbox.name,
          sizeof(dest_mailbox.name));
   helper_->CopySubTextureINTERNALImmediate(xoffset, yoffset, x, y, width,
-                                           height, mailboxes);
+                                           height, unpack_flip_y,
+                                           unpack_premultiply_alpha, mailboxes);
   CheckGLError();
+}
+
+void RasterImplementation::WritePixels(const gpu::Mailbox& dest_mailbox,
+                                       int dst_x_offset,
+                                       int dst_y_offset,
+                                       GLenum texture_target,
+                                       GLuint row_bytes,
+                                       const SkImageInfo& src_info,
+                                       const void* src_pixels) {
+  // Get the size of the SkColorSpace while maintaining 8-byte alignment.
+  GLuint pixels_offset = 0;
+  if (src_info.colorSpace()) {
+    pixels_offset = base::bits::Align(
+        src_info.colorSpace()->writeToMemory(nullptr), sizeof(uint64_t));
+  }
+
+  GLuint src_size = src_info.computeByteSize(row_bytes);
+  GLuint total_size =
+      pixels_offset + base::bits::Align(src_size, sizeof(uint64_t));
+
+  GLint shm_id;
+  GLuint shm_offset;
+  void* address;
+  base::Optional<ScopedMappedMemoryPtr> mapped_ptr;
+  base::Optional<ScopedTransferBufferPtr> transfer_ptr;
+  // Prefer transfer buffer but fall back to MappedMemory if there's not enough
+  // free space.
+  if (transfer_buffer_->GetFreeSize() < total_size) {
+    mapped_ptr.emplace(total_size, helper(), mapped_memory_.get());
+    shm_id = mapped_ptr->shm_id();
+    shm_offset = mapped_ptr->offset();
+    address = mapped_ptr->address();
+  } else {
+    transfer_ptr.emplace(total_size, helper(), transfer_buffer_);
+    shm_id = transfer_ptr->shm_id();
+    shm_offset = transfer_ptr->offset();
+    address = transfer_ptr->address();
+  }
+
+  if (src_info.colorSpace()) {
+    size_t bytes_written = src_info.colorSpace()->writeToMemory(address);
+    DCHECK_LE(bytes_written, pixels_offset);
+  }
+  memcpy(static_cast<uint8_t*>(address) + pixels_offset, src_pixels, src_size);
+
+  helper_->WritePixelsINTERNALImmediate(
+      dst_x_offset, dst_y_offset, src_info.width(), src_info.height(),
+      row_bytes, src_info.colorType(), src_info.alphaType(), shm_id, shm_offset,
+      pixels_offset, dest_mailbox.name);
 }
 
 void RasterImplementation::BeginRasterCHROMIUM(
@@ -1099,8 +1194,7 @@ void RasterImplementation::RasterCHROMIUM(const cc::DisplayItemList* list,
       GetOrCreatePaintCache(), font_manager_.strike_server(),
       raster_properties_->color_space, raster_properties_->can_use_lcd_text,
       capabilities().context_supports_distance_field_text,
-      capabilities().max_texture_size,
-      capabilities().glyph_cache_max_texture_bytes);
+      capabilities().max_texture_size);
   serializer.Serialize(&list->paint_op_buffer_, &temp_raster_offsets_,
                        preamble);
   // TODO(piman): raise error if !serializer.valid()?
@@ -1138,6 +1232,34 @@ SyncToken RasterImplementation::ScheduleImageDecode(
   return decode_sync_token;
 }
 
+void RasterImplementation::ReadbackARGBPixelsAsync(
+    const gpu::Mailbox& source_mailbox,
+    GLenum source_target,
+    const gfx::Size& dst_size,
+    unsigned char* out,
+    GLenum format,
+    base::OnceCallback<void(bool)> readback_done) {
+  NOTREACHED();
+}
+
+void RasterImplementation::ReadbackYUVPixelsAsync(
+    const gpu::Mailbox& source_mailbox,
+    GLenum source_target,
+    const gfx::Size& source_size,
+    const gfx::Rect& output_rect,
+    bool vertically_flip_texture,
+    int y_plane_row_stride_bytes,
+    unsigned char* y_plane_data,
+    int u_plane_row_stride_bytes,
+    unsigned char* u_plane_data,
+    int v_plane_row_stride_bytes,
+    unsigned char* v_plane_data,
+    const gfx::Point& paste_location,
+    base::OnceCallback<void()> release_mailbox,
+    base::OnceCallback<void(bool)> readback_done) {
+  NOTREACHED();
+}
+
 void RasterImplementation::IssueImageDecodeCacheEntryCreation(
     base::span<const uint8_t> encoded_data,
     const gfx::Size& output_size,
@@ -1162,7 +1284,7 @@ void RasterImplementation::IssueImageDecodeCacheEntryCreation(
 }
 
 GLuint RasterImplementation::CreateAndConsumeForGpuRaster(
-    const GLbyte* mailbox) {
+    const gpu::Mailbox& mailbox) {
   NOTREACHED();
   return 0;
 }
@@ -1176,6 +1298,29 @@ void RasterImplementation::BeginGpuRaster() {
 }
 void RasterImplementation::EndGpuRaster() {
   NOTREACHED();
+}
+
+void RasterImplementation::BeginSharedImageAccessDirectCHROMIUM(GLuint texture,
+                                                                GLenum mode) {
+  NOTREACHED();
+}
+
+void RasterImplementation::EndSharedImageAccessDirectCHROMIUM(GLuint texture) {
+  NOTREACHED();
+}
+
+void RasterImplementation::InitializeDiscardableTextureCHROMIUM(
+    GLuint texture) {
+  NOTREACHED();
+}
+
+void RasterImplementation::UnlockDiscardableTextureCHROMIUM(GLuint texture) {
+  NOTREACHED();
+}
+
+bool RasterImplementation::LockDiscardableTextureCHROMIUM(GLuint texture) {
+  NOTREACHED();
+  return false;
 }
 
 void RasterImplementation::TraceBeginCHROMIUM(const char* category_name,

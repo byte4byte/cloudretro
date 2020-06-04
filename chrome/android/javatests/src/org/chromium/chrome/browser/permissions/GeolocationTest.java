@@ -12,14 +12,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.device.geolocation.LocationProviderOverrider;
 import org.chromium.device.geolocation.MockLocationProvider;
@@ -68,9 +67,8 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("disable-features=" + PermissionTestRule.MODAL_FLAG)
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
     @Feature({"Location", "Main"})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testGeolocationPlumbingAllowedInfoBar() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, false, false);
     }
@@ -81,7 +79,6 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location", "Main"})
     public void testGeolocationPlumbingAllowedDialog() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, true, true);
@@ -94,7 +91,6 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location", "Main"})
     public void testGeolocationPlumbingAllowedDialogNoGesture() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, false, true);
@@ -106,9 +102,8 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("disable-features=" + PermissionTestRule.MODAL_FLAG)
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
     @Feature({"Location"})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testGeolocationWatchInfoBar() throws Exception {
         runTest("initiate_watchPosition()", 2, false, false);
     }
@@ -119,7 +114,6 @@ public class GeolocationTest {
      */
     @Test
     @MediumTest
-    @CommandLineFlags.Add("enable-features=" + PermissionTestRule.MODAL_FLAG)
     @Feature({"Location"})
     public void testGeolocationWatchDialog() throws Exception {
         runTest("initiate_watchPosition()", 2, true, true);

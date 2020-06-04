@@ -12,25 +12,39 @@
 
 namespace ash {
 
-enum ShelfAlignment {
-  SHELF_ALIGNMENT_BOTTOM,
-  SHELF_ALIGNMENT_LEFT,
-  SHELF_ALIGNMENT_RIGHT,
+enum class ShelfAlignment {
+  kBottom,
+  kLeft,
+  kRight,
   // Top has never been supported.
 
   // The locked alignment is set temporarily and not saved to preferences.
-  SHELF_ALIGNMENT_BOTTOM_LOCKED,
+  kBottomLocked,
 };
 
-enum ShelfAutoHideBehavior {
-  // Always auto-hide.
-  SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS,
+enum class HotseatState {
+  // Hotseat is shown off screen.
+  kHidden,
 
-  // Never auto-hide.
-  SHELF_AUTO_HIDE_BEHAVIOR_NEVER,
+  // Hotseat is shown within the shelf in clamshell mode.
+  kShownClamshell,
 
-  // Always hide.
-  SHELF_AUTO_HIDE_ALWAYS_HIDDEN,
+  // Hotseat is shown in the tablet mode home launcher's shelf.
+  // Compared to kShownClamshell state, in this state, the shelf background is
+  // not visible behind the hotseat (shelf itself is transparent on the home
+  // screen). The hotseat also differs in size, and its bounds are moved
+  // slightly up to leave more space between the hotseat background and the
+  // bottom of the screen.
+  kShownHomeLauncher,
+
+  // Hotseat is shown above the shelf.
+  kExtended,
+};
+
+enum class ShelfAutoHideBehavior {
+  kAlways,        // Always auto-hide.
+  kNever,         // Never auto-hide.
+  kAlwaysHidden,  // Always hide.
 };
 
 enum ShelfAutoHideState {
@@ -49,29 +63,40 @@ enum ShelfVisibilityState {
   SHELF_HIDDEN,
 };
 
-enum ShelfBackgroundType {
+enum class ShelfBackgroundType {
   // The default transparent background.
-  SHELF_BACKGROUND_DEFAULT,
+  kDefaultBg,
 
   // The background when a window is maximized or two windows are maximized
   // for a split view.
-  SHELF_BACKGROUND_MAXIMIZED,
+  kMaximized,
 
-  // The background when fullscreen app list is visible.
-  SHELF_BACKGROUND_APP_LIST,
+  // The background when the app list is visible in clamshell mode.
+  kAppList,
+
+  // The background when the app list is visible in tablet mode.
+  kHomeLauncher,
+
+  // The background when a maximized window exists or two windows are maximized
+  // for a split view, and the app list is visible. If the app list were not
+  // visible, the shelf would be in ShelfBackgroundType::kMaximized state.
+  kMaximizedWithAppList,
 
   // The background when OOBE is active.
-  SHELF_BACKGROUND_OOBE,
+  kOobe,
 
   // The background when login/lock/user-add is active.
-  SHELF_BACKGROUND_LOGIN,
+  kLogin,
 
   // The background when login/lock/user-add is active and the wallpaper is not
   // blurred.
-  SHELF_BACKGROUND_LOGIN_NONBLURRED_WALLPAPER,
+  kLoginNonBlurredWallpaper,
 
   // The background when overview is active.
-  SHELF_BACKGROUND_OVERVIEW,
+  kOverview,
+
+  // The background for the in-app shelf in tablet mode.
+  kInApp,
 };
 
 // Source of the launch or activation request, for tracking.
@@ -108,6 +133,9 @@ enum ShelfAction {
 
   // The app list launcher menu was dismissed.
   SHELF_ACTION_APP_LIST_DISMISSED,
+
+  // The back action was performed on the app list.
+  SHELF_ACTION_APP_LIST_BACK,
 };
 
 // The type of a shelf item.
@@ -117,6 +145,10 @@ enum ShelfItemType {
 
   // The browser shortcut button, the browser may be running or not.
   TYPE_BROWSER_SHORTCUT,
+
+  // Represents the lacros "linux-chrome" browser. The browser may or may not
+  // be running.
+  TYPE_LACROS_BROWSER,
 
   // Represents an unpinned running app window. Supports these app types:
   // - Extension "V1" (legacy packaged and hosted) apps,
@@ -133,6 +165,9 @@ enum ShelfItemType {
 
 // Returns true if |type| is a valid ShelfItemType.
 ASH_PUBLIC_EXPORT bool IsValidShelfItemType(int64_t type);
+
+// Returns true if |type| is a pinned type (i.e. not a running app or dialog).
+ASH_PUBLIC_EXPORT bool IsPinnedShelfItemType(ShelfItemType type);
 
 // Returns true if types |a| and |b| have the same pin state, i.e. if they
 // are both pinned apps (or a browser shortcut which is always pinned) or both

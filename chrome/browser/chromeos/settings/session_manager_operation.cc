@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/net/nss_context.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -31,7 +32,7 @@ namespace em = enterprise_management;
 namespace chromeos {
 
 SessionManagerOperation::SessionManagerOperation(const Callback& callback)
-    : callback_(callback), weak_factory_(this) {}
+    : callback_(callback) {}
 
 SessionManagerOperation::~SessionManagerOperation() {}
 
@@ -89,9 +90,9 @@ void SessionManagerOperation::ReportResult(
 
 void SessionManagerOperation::EnsurePublicKey(const base::Closure& callback) {
   if (force_key_load_ || !public_key_ || !public_key_->is_loaded()) {
-    base::PostTaskWithTraitsAndReplyWithResult(
+    base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE,
-        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+        {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
         base::BindOnce(&SessionManagerOperation::LoadPublicKey, owner_key_util_,
                        force_key_load_ ? nullptr : public_key_),
@@ -162,7 +163,7 @@ void SessionManagerOperation::ValidateDeviceSettings(
   }
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
@@ -199,8 +200,8 @@ void SessionManagerOperation::ValidateDeviceSettings(
   } else {
     policy::DeviceCloudPolicyValidator::StartValidation(
         std::move(validator),
-        base::Bind(&SessionManagerOperation::ReportValidatorStatus,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&SessionManagerOperation::ReportValidatorStatus,
+                       weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -241,9 +242,7 @@ void LoadSettingsOperation::Run() {
 StoreSettingsOperation::StoreSettingsOperation(
     const Callback& callback,
     std::unique_ptr<em::PolicyFetchResponse> policy)
-    : SessionManagerOperation(callback),
-      policy_(std::move(policy)),
-      weak_factory_(this) {
+    : SessionManagerOperation(callback), policy_(std::move(policy)) {
   if (policy_->has_new_public_key())
     force_key_load_ = true;
 }
@@ -253,8 +252,8 @@ StoreSettingsOperation::~StoreSettingsOperation() {}
 void StoreSettingsOperation::Run() {
   session_manager_client()->StoreDevicePolicy(
       policy_->SerializeAsString(),
-      base::Bind(&StoreSettingsOperation::HandleStoreResult,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&StoreSettingsOperation::HandleStoreResult,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void StoreSettingsOperation::HandleStoreResult(bool success) {

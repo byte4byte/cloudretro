@@ -10,10 +10,20 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "ui/accessibility/platform/ax_platform_node.h"
 
 class AuraLinuxAccessibilityInProcessBrowserTest : public InProcessBrowserTest {
+ public:
+  void SetUp() override {
+    ui::AXPlatformNode::NotifyAddAXModeFlags(ui::kAXModeComplete);
+    InProcessBrowserTest::SetUp();
+  }
+
  protected:
-  AuraLinuxAccessibilityInProcessBrowserTest() {}
+  AuraLinuxAccessibilityInProcessBrowserTest() = default;
+
+  void VerifyEmbedRelationships();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AuraLinuxAccessibilityInProcessBrowserTest);
@@ -48,8 +58,7 @@ static AtkObject* FindParentFrame(AtkObject* object) {
   return nullptr;
 }
 
-IN_PROC_BROWSER_TEST_F(AuraLinuxAccessibilityInProcessBrowserTest,
-                       EmbeddedRelationship) {
+void AuraLinuxAccessibilityInProcessBrowserTest::VerifyEmbedRelationships() {
   AtkObject* native_view_accessible =
       static_cast<BrowserView*>(browser()->window())->GetNativeViewAccessible();
   EXPECT_NE(nullptr, native_view_accessible);
@@ -69,7 +78,13 @@ IN_PROC_BROWSER_TEST_F(AuraLinuxAccessibilityInProcessBrowserTest,
   EXPECT_EQ(1u, targets->len);
 
   AtkObject* target = static_cast<AtkObject*>(g_ptr_array_index(targets, 0));
+
   EXPECT_NE(nullptr, target);
+
+  content::WebContents* active_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_EQ(target, active_web_contents->GetRenderWidgetHostView()
+                        ->GetNativeViewAccessible());
 
   g_object_unref(relations);
 
@@ -88,4 +103,31 @@ IN_PROC_BROWSER_TEST_F(AuraLinuxAccessibilityInProcessBrowserTest,
   ASSERT_EQ(target, window);
 
   g_object_unref(relations);
+}
+
+IN_PROC_BROWSER_TEST_F(AuraLinuxAccessibilityInProcessBrowserTest,
+                       EmbeddedRelationship) {
+  // Force the creation of the document's native object which sets up the
+  // relationship.
+  content::WebContents* active_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_NE(nullptr, active_web_contents->GetRenderWidgetHostView()
+                         ->GetNativeViewAccessible());
+
+  GURL url(url::kAboutBlankURL);
+  AddTabAtIndex(0, url, ui::PAGE_TRANSITION_LINK);
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+
+  VerifyEmbedRelationships();
+
+  browser()->tab_strip_model()->ActivateTabAt(1);
+  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
+
+  VerifyEmbedRelationships();
+
+  browser()->tab_strip_model()->ActivateTabAt(0);
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+
+  VerifyEmbedRelationships();
 }

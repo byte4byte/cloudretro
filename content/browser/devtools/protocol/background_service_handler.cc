@@ -31,6 +31,9 @@ devtools::proto::BackgroundService ServiceNameToEnum(
   } else if (service_name ==
              BackgroundService::ServiceNameEnum::PaymentHandler) {
     return devtools::proto::BackgroundService::PAYMENT_HANDLER;
+  } else if (service_name ==
+             BackgroundService::ServiceNameEnum::PeriodicBackgroundSync) {
+    return devtools::proto::BackgroundService::PERIODIC_BACKGROUND_SYNC;
   }
   return devtools::proto::BackgroundService::UNKNOWN;
 }
@@ -47,6 +50,8 @@ std::string ServiceEnumToName(devtools::proto::BackgroundService service_enum) {
       return BackgroundService::ServiceNameEnum::Notifications;
     case devtools::proto::BackgroundService::PAYMENT_HANDLER:
       return BackgroundService::ServiceNameEnum::PaymentHandler;
+    case devtools::proto::BackgroundService::PERIODIC_BACKGROUND_SYNC:
+      return BackgroundService::ServiceNameEnum::PeriodicBackgroundSync;
     default:
       NOTREACHED();
   }
@@ -131,7 +136,7 @@ Response BackgroundServiceHandler::Disable() {
   if (!enabled_services_.empty())
     devtools_context_->RemoveObserver(this);
   enabled_services_.clear();
-  return Response::OK();
+  return Response::Success();
 }
 
 void BackgroundServiceHandler::StartObserving(
@@ -172,13 +177,13 @@ Response BackgroundServiceHandler::StopObserving(const std::string& service) {
     return Response::InvalidParams("Invalid service name");
 
   if (!enabled_services_.count(service_enum))
-    return Response::OK();
+    return Response::Success();
 
   enabled_services_.erase(service_enum);
   if (enabled_services_.empty())
     devtools_context_->RemoveObserver(this);
 
-  return Response::OK();
+  return Response::Success();
 }
 
 void BackgroundServiceHandler::DidGetLoggedEvents(
@@ -211,7 +216,7 @@ Response BackgroundServiceHandler::SetRecording(bool should_record,
     devtools_context_->StopRecording(service_enum);
   }
 
-  return Response::OK();
+  return Response::Success();
 }
 
 Response BackgroundServiceHandler::ClearEvents(const std::string& service) {
@@ -222,7 +227,7 @@ Response BackgroundServiceHandler::ClearEvents(const std::string& service) {
     return Response::InvalidParams("Invalid service name");
 
   devtools_context_->ClearLoggedBackgroundServiceEvents(service_enum);
-  return Response::OK();
+  return Response::Success();
 }
 
 void BackgroundServiceHandler::OnEventReceived(

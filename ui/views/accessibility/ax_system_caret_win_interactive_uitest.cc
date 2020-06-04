@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
+#include <windows.h>  // Must come before other Windows system headers.
+
 #include <oleacc.h>
 #include <wrl/client.h>
 
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_variant.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,6 +30,8 @@ namespace {
 class AXSystemCaretWinTest : public test::DesktopWidgetTest {
  public:
   AXSystemCaretWinTest() : self_(CHILDID_SELF) {}
+  AXSystemCaretWinTest(const AXSystemCaretWinTest&) = delete;
+  AXSystemCaretWinTest& operator=(const AXSystemCaretWinTest&) = delete;
   ~AXSystemCaretWinTest() override = default;
 
   void SetUp() override {
@@ -62,13 +64,15 @@ class AXSystemCaretWinTest : public test::DesktopWidgetTest {
   Widget* widget_;
   Textfield* textfield_;
   base::win::ScopedVariant self_;
-
-  DISALLOW_COPY_AND_ASSIGN(AXSystemCaretWinTest);
 };
 
 class WinAccessibilityCaretEventMonitor {
  public:
   WinAccessibilityCaretEventMonitor(UINT event_min, UINT event_max);
+  WinAccessibilityCaretEventMonitor(const WinAccessibilityCaretEventMonitor&) =
+      delete;
+  WinAccessibilityCaretEventMonitor& operator=(
+      const WinAccessibilityCaretEventMonitor&) = delete;
   ~WinAccessibilityCaretEventMonitor();
 
   // Blocks until the next event is received. When it's received, it
@@ -105,8 +109,6 @@ class WinAccessibilityCaretEventMonitor {
   base::RunLoop loop_runner_;
   HWINEVENTHOOK win_event_hook_handle_;
   static WinAccessibilityCaretEventMonitor* instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(WinAccessibilityCaretEventMonitor);
 };
 
 // static
@@ -194,7 +196,7 @@ WinAccessibilityCaretEventMonitor::WinEventHookThunk(HWINEVENTHOOK handle,
 }
 }  // namespace
 
-TEST_F(AXSystemCaretWinTest, DISABLED_TestOnCaretBoundsChangeInTextField) {
+TEST_F(AXSystemCaretWinTest, TestOnCaretBoundsChangeInTextField) {
   TextfieldTestApi textfield_test_api(textfield_);
   Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   gfx::NativeWindow native_window = widget_->GetNativeWindow();
@@ -203,9 +205,12 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestOnCaretBoundsChangeInTextField) {
   EXPECT_HRESULT_SUCCEEDED(AccessibleObjectFromWindow(
       hwnd, static_cast<DWORD>(OBJID_CARET), IID_PPV_ARGS(&caret_accessible)));
 
+  gfx::Rect window_bounds = native_window->GetBoundsInScreen();
+
   textfield_test_api.ExecuteTextEditCommand(
       ui::TextEditCommand::MOVE_TO_BEGINNING_OF_DOCUMENT);
-  gfx::Point caret_position = textfield_test_api.GetCursorViewRect().origin();
+  gfx::Point caret_position = textfield_test_api.GetCursorViewRect().origin() +
+                              window_bounds.OffsetFromOrigin();
   LONG x, y, width, height;
   EXPECT_EQ(S_OK,
             caret_accessible->accLocation(&x, &y, &width, &height, self_));
@@ -215,7 +220,8 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestOnCaretBoundsChangeInTextField) {
 
   textfield_test_api.ExecuteTextEditCommand(
       ui::TextEditCommand::MOVE_TO_END_OF_DOCUMENT);
-  gfx::Point caret_position2 = textfield_test_api.GetCursorViewRect().origin();
+  gfx::Point caret_position2 = textfield_test_api.GetCursorViewRect().origin() +
+                               window_bounds.OffsetFromOrigin();
   EXPECT_NE(caret_position, caret_position2);
   EXPECT_EQ(S_OK,
             caret_accessible->accLocation(&x, &y, &width, &height, self_));
@@ -224,7 +230,7 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestOnCaretBoundsChangeInTextField) {
   EXPECT_EQ(1, width);
 }
 
-TEST_F(AXSystemCaretWinTest, DISABLED_TestOnInputTypeChangeInTextField) {
+TEST_F(AXSystemCaretWinTest, TestOnInputTypeChangeInTextField) {
   Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   gfx::NativeWindow native_window = widget_->GetNativeWindow();
   ASSERT_NE(nullptr, native_window);
@@ -253,7 +259,7 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestOnInputTypeChangeInTextField) {
   EXPECT_EQ(height, height2);
 }
 
-TEST_F(AXSystemCaretWinTest, DISABLED_TestMovingWindow) {
+TEST_F(AXSystemCaretWinTest, TestMovingWindow) {
   Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   gfx::NativeWindow native_window = widget_->GetNativeWindow();
   ASSERT_NE(nullptr, native_window);
@@ -266,9 +272,6 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestMovingWindow) {
 
   widget_->SetBounds(gfx::Rect(100, 100, 500, 500));
   LONG x2, y2, width2, height2;
-  caret_accessible.Reset();
-  EXPECT_HRESULT_SUCCEEDED(AccessibleObjectFromWindow(
-      hwnd, static_cast<DWORD>(OBJID_CARET), IID_PPV_ARGS(&caret_accessible)));
   EXPECT_EQ(S_OK,
             caret_accessible->accLocation(&x2, &y2, &width2, &height2, self_));
   EXPECT_NE(x, x2);
@@ -279,13 +282,14 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestMovingWindow) {
 
   // Try maximizing the window.
   SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-  LONG x3, y3, width3, height3;
-  EXPECT_HRESULT_FAILED(
-      caret_accessible->accLocation(&x3, &y3, &width3, &height3, self_));
-  caret_accessible.Reset();
 
+  // On Win7, maximizing the window causes our caret object to get destroyed and
+  // re-created, so re-acquire it.
+  caret_accessible.Reset();
   EXPECT_HRESULT_SUCCEEDED(AccessibleObjectFromWindow(
       hwnd, static_cast<DWORD>(OBJID_CARET), IID_PPV_ARGS(&caret_accessible)));
+
+  LONG x3, y3, width3, height3;
   EXPECT_EQ(S_OK,
             caret_accessible->accLocation(&x3, &y3, &width3, &height3, self_));
   EXPECT_NE(x2, x3);
@@ -295,7 +299,7 @@ TEST_F(AXSystemCaretWinTest, DISABLED_TestMovingWindow) {
   EXPECT_EQ(height, height3);
 }
 
-TEST_F(AXSystemCaretWinTest, DISABLED_TestCaretMSAAEvents) {
+TEST_F(AXSystemCaretWinTest, TestCaretMSAAEvents) {
   TextfieldTestApi textfield_test_api(textfield_);
   Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   gfx::NativeWindow native_window = widget_->GetNativeWindow();

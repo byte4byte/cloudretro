@@ -4,9 +4,6 @@
 #
 # Additional dependencies not in the rpm find-requires output.
 
-# For lsb_release.
-/usr/bin/lsb_release
-
 # Make sure users have SSL certificates.
 ca-certificates
 
@@ -27,6 +24,9 @@ libssl3.so(NSS_3.28)(64bit)
 # of expected dependencies when Chrome is built with the older versions, add it
 # as a manual dependency.
 rpmlib(FileDigests) <= 4.6.0-1
+
+# libvulkan is dlopen()'ed, so must be added as a manual dependency.
+libvulkan.so.1()(64bit)
 
 # For uploading crash reports with Breakpad.
 wget

@@ -9,31 +9,31 @@
 
 #include "base/memory/weak_ptr.h"
 #include "build/buildflag.h"
+#include "components/viz/common/surfaces/surface_id.h"
 #include "media/base/renderer_factory_selector.h"
 #include "media/base/routing_token_callback.h"
 #include "media/blink/url_index.h"
 #include "media/blink/webmediaplayer_params.h"
 #include "media/media_buildflags.h"
 #include "media/mojo/buildflags.h"
-#include "media/mojo/interfaces/remoting.mojom.h"
+#include "media/mojo/clients/mojo_renderer_factory.h"
+#include "media/mojo/mojom/interface_factory.mojom.h"
+#include "media/mojo/mojom/remoting.mojom.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/platform/web_media_player_source.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_set_sink_id_callbacks.h"
 #include "third_party/blink/public/platform/web_string.h"
-
-#if BUILDFLAG(ENABLE_MOJO_MEDIA)
-#include "media/mojo/interfaces/interface_factory.mojom.h"  // nogncheck
-#endif
+#include "third_party/blink/public/web/web_media_inspector.h"
 
 namespace blink {
+class BrowserInterfaceBrokerProxy;
 class WebContentDecryptionModule;
 class WebEncryptedMediaClient;
-class WebLayerTreeView;
 class WebLocalFrame;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
-class WebMediaStreamRendererFactory;
 }
 
 namespace cc {
@@ -43,18 +43,12 @@ class LayerTreeSettings;
 namespace media {
 class CdmFactory;
 class DecoderFactory;
+class DefaultDecoderFactory;
 class MediaLog;
 class MediaObserver;
 class RemotePlaybackClientWrapper;
 class RendererWebMediaPlayerDelegate;
 class WebEncryptedMediaClientImpl;
-}
-
-namespace service_manager {
-class InterfaceProvider;
-namespace mojom {
-class InterfaceProvider;
-}
 }
 
 namespace content {
@@ -99,15 +93,15 @@ class MediaFactory {
   // to a ContentDecryptionModule if MediaKeys have been provided to the
   // |encrypted_client| (otherwise null). |sink_id|, when not empty, identifies
   // the audio sink to use for this player (see HTMLMediaElement.sinkId).
-  // The |layer_tree_view| will be used to generate the correct FrameSinkId for
-  // the Surface containing the corresponding HTMLMediaElement.
+  // |parent_frame_sink_id| identifies the local root widget's FrameSinkId.
   blink::WebMediaPlayer* CreateMediaPlayer(
       const blink::WebMediaPlayerSource& source,
       blink::WebMediaPlayerClient* client,
+      blink::MediaInspectorContext* inspector_context,
       blink::WebMediaPlayerEncryptedMediaClient* encrypted_client,
       blink::WebContentDecryptionModule* initial_cdm,
       const blink::WebString& sink_id,
-      blink::WebLayerTreeView* layer_tree_view,
+      viz::FrameSinkId parent_frame_sink_id,
       const cc::LayerTreeSettings& settings);
 
   // Provides an EncryptedMediaClient to connect blink's EME layer to media's
@@ -126,20 +120,16 @@ class MediaFactory {
 
   blink::WebMediaPlayer* CreateWebMediaPlayerForMediaStream(
       blink::WebMediaPlayerClient* client,
+      blink::MediaInspectorContext* inspector_context,
       const blink::WebString& sink_id,
       const blink::WebSecurityOrigin& security_origin,
       blink::WebLocalFrame* frame,
-      blink::WebLayerTreeView* layer_tree_view,
+      viz::FrameSinkId parent_frame_sink_id,
       const cc::LayerTreeSettings& settings);
 
   // Returns the media delegate for WebMediaPlayer usage.  If
   // |media_player_delegate_| is NULL, one is created.
   media::RendererWebMediaPlayerDelegate* GetWebMediaPlayerDelegate();
-
-  // Creates a blink::WebMediaStreamRendererFactory used for creating audio and
-  // video renderers for blink::WebMediaPlayerMS.
-  std::unique_ptr<blink::WebMediaStreamRendererFactory>
-  CreateMediaStreamRendererFactory();
 
   media::DecoderFactory* GetDecoderFactory();
 
@@ -149,31 +139,31 @@ class MediaFactory {
 
   media::CdmFactory* GetCdmFactory();
 
-#if BUILDFLAG(ENABLE_MOJO_MEDIA)
   media::mojom::InterfaceFactory* GetMediaInterfaceFactory();
 
-  // The media interface provider attached to this frame, lazily initialized.
-  std::unique_ptr<MediaInterfaceFactory> media_interface_factory_;
-#endif
+  std::unique_ptr<media::MojoRendererFactory> CreateMojoRendererFactory();
 
   // The render frame we're helping. RenderFrameImpl owns this factory, so the
   // pointer will always be valid.
   RenderFrameImpl* render_frame_;
 
+  // The media interface provider attached to this frame, lazily initialized.
+  std::unique_ptr<MediaInterfaceFactory> media_interface_factory_;
+
   // Injected callback for requesting overlay routing tokens.
   media::RequestRoutingTokenCallback request_routing_token_cb_;
 
-  // Handy pointer to RenderFrame's remote interfaces. Null until SetupMojo().
-  // Lifetime matches that of the owning |render_frame_|. Will always be valid
-  // once assigned.
-  service_manager::InterfaceProvider* remote_interfaces_ = nullptr;
+  // Handy pointer to RenderFrame's browser interface broker. Null until
+  // SetupMojo(). Lifetime matches that of the owning |render_frame_|. Will
+  // always be valid once assigned.
+  blink::BrowserInterfaceBrokerProxy* interface_broker_ = nullptr;
 
   // Manages play, pause notifications for WebMediaPlayer implementations; its
   // lifetime is tied to the RenderFrame via the RenderFrameObserver interface.
   media::RendererWebMediaPlayerDelegate* media_player_delegate_ = nullptr;
 
   // The CDM and decoder factory attached to this frame, lazily initialized.
-  std::unique_ptr<media::DecoderFactory> decoder_factory_;
+  std::unique_ptr<media::DefaultDecoderFactory> decoder_factory_;
   std::unique_ptr<media::CdmFactory> cdm_factory_;
 
   // Media resource cache, lazily initialized.
@@ -185,9 +175,9 @@ class MediaFactory {
       web_encrypted_media_client_;
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-  // Lazy-bound pointer to the RemoterFactory service in the browser
+  // Lazy-bound remote for the RemoterFactory service in the browser
   // process. Always use the GetRemoterFactory() accessor instead of this.
-  media::mojom::RemoterFactoryPtr remoter_factory_;
+  mojo::Remote<media::mojom::RemoterFactory> remoter_factory_;
 #endif
 };
 

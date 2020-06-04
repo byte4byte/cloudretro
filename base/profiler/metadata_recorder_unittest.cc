@@ -11,161 +11,223 @@
 
 namespace base {
 
-bool operator==(const base::ProfileBuilder::MetadataItem& lhs,
-                const base::ProfileBuilder::MetadataItem& rhs) {
+bool operator==(const MetadataRecorder::Item& lhs,
+                const MetadataRecorder::Item& rhs) {
   return lhs.name_hash == rhs.name_hash && lhs.value == rhs.value;
 }
 
-bool operator<(const base::ProfileBuilder::MetadataItem& lhs,
-               const base::ProfileBuilder::MetadataItem& rhs) {
+bool operator<(const MetadataRecorder::Item& lhs,
+               const MetadataRecorder::Item& rhs) {
   return lhs.name_hash < rhs.name_hash;
 }
 
 TEST(MetadataRecorderTest, GetItems_Empty) {
   MetadataRecorder recorder;
-  base::ProfileBuilder::MetadataItemArray items;
+  MetadataRecorder::ItemArray items;
 
-  size_t item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
 
-  ASSERT_EQ(0u, item_count);
+  EXPECT_EQ(0u, item_count);
 }
 
 TEST(MetadataRecorderTest, Set_NewNameHash) {
   MetadataRecorder recorder;
 
-  recorder.Set(10, 20);
+  recorder.Set(10, nullopt, 20);
 
-  base::ProfileBuilder::MetadataItemArray items;
+  MetadataRecorder::ItemArray items;
   size_t item_count;
   {
-    item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+    item_count = MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
     ASSERT_EQ(1u, item_count);
-    ASSERT_EQ(10u, items[0].name_hash);
-    ASSERT_EQ(20, items[0].value);
+    EXPECT_EQ(10u, items[0].name_hash);
+    EXPECT_FALSE(items[0].key.has_value());
+    EXPECT_EQ(20, items[0].value);
   }
 
-  recorder.Set(20, 30);
+  recorder.Set(20, nullopt, 30);
 
   {
-    item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+    item_count = MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
     ASSERT_EQ(2u, item_count);
-    ASSERT_EQ(20u, items[1].name_hash);
-    ASSERT_EQ(30, items[1].value);
+    EXPECT_EQ(20u, items[1].name_hash);
+    EXPECT_FALSE(items[1].key.has_value());
+    EXPECT_EQ(30, items[1].value);
   }
 }
 
 TEST(MetadataRecorderTest, Set_ExistingNameNash) {
   MetadataRecorder recorder;
-  recorder.Set(10, 20);
-  recorder.Set(10, 30);
+  recorder.Set(10, nullopt, 20);
+  recorder.Set(10, nullopt, 30);
 
-  base::ProfileBuilder::MetadataItemArray items;
-  size_t item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+  MetadataRecorder::ItemArray items;
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
   ASSERT_EQ(1u, item_count);
-  ASSERT_EQ(10u, items[0].name_hash);
-  ASSERT_EQ(30, items[0].value);
+  EXPECT_EQ(10u, items[0].name_hash);
+  EXPECT_FALSE(items[0].key.has_value());
+  EXPECT_EQ(30, items[0].value);
 }
 
 TEST(MetadataRecorderTest, Set_ReAddRemovedNameNash) {
   MetadataRecorder recorder;
-  base::ProfileBuilder::MetadataItemArray items;
-  std::vector<base::ProfileBuilder::MetadataItem> expected;
+  MetadataRecorder::ItemArray items;
+  std::vector<MetadataRecorder::Item> expected;
   for (size_t i = 0; i < items.size(); ++i) {
-    expected.push_back(base::ProfileBuilder::MetadataItem{i, 0});
-    recorder.Set(i, 0);
+    expected.push_back(MetadataRecorder::Item{i, nullopt, 0});
+    recorder.Set(i, nullopt, 0);
   }
 
   // By removing an item from a full recorder, re-setting the same item, and
   // verifying that the item is returned, we can verify that the recorder is
   // reusing the inactive slot for the same name hash instead of trying (and
   // failing) to allocate a new slot.
-  recorder.Remove(3);
-  recorder.Set(3, 0);
+  recorder.Remove(3, nullopt);
+  recorder.Set(3, nullopt, 0);
 
-  size_t item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
   EXPECT_EQ(items.size(), item_count);
-  ASSERT_THAT(expected, ::testing::UnorderedElementsAreArray(items));
+  EXPECT_THAT(expected, ::testing::UnorderedElementsAreArray(items));
 }
 
 TEST(MetadataRecorderTest, Set_AddPastMaxCount) {
   MetadataRecorder recorder;
-  base::ProfileBuilder::MetadataItemArray items;
+  MetadataRecorder::ItemArray items;
   for (size_t i = 0; i < items.size(); ++i) {
-    recorder.Set(i, 0);
+    recorder.Set(i, nullopt, 0);
   }
 
   // This should fail silently.
-  recorder.Set(items.size(), 0);
+  recorder.Set(items.size(), nullopt, 0);
+}
+
+TEST(MetadataRecorderTest, Set_NulloptKeyIsIndependentOfNonNulloptKey) {
+  MetadataRecorder recorder;
+
+  recorder.Set(10, 100, 20);
+
+  MetadataRecorder::ItemArray items;
+  size_t item_count;
+  {
+    item_count = MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
+    ASSERT_EQ(1u, item_count);
+    EXPECT_EQ(10u, items[0].name_hash);
+    ASSERT_TRUE(items[0].key.has_value());
+    EXPECT_EQ(100, *items[0].key);
+    EXPECT_EQ(20, items[0].value);
+  }
+
+  recorder.Set(10, nullopt, 30);
+
+  {
+    item_count = MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
+    ASSERT_EQ(2u, item_count);
+
+    EXPECT_EQ(10u, items[0].name_hash);
+    ASSERT_TRUE(items[0].key.has_value());
+    EXPECT_EQ(100, *items[0].key);
+    EXPECT_EQ(20, items[0].value);
+
+    EXPECT_EQ(10u, items[1].name_hash);
+    EXPECT_FALSE(items[1].key.has_value());
+    EXPECT_EQ(30, items[1].value);
+  }
 }
 
 TEST(MetadataRecorderTest, Remove) {
   MetadataRecorder recorder;
-  recorder.Set(10, 20);
-  recorder.Set(30, 40);
-  recorder.Set(50, 60);
-  recorder.Remove(30);
+  recorder.Set(10, nullopt, 20);
+  recorder.Set(30, nullopt, 40);
+  recorder.Set(50, nullopt, 60);
+  recorder.Remove(30, nullopt);
 
-  base::ProfileBuilder::MetadataItemArray items;
-  size_t item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+  MetadataRecorder::ItemArray items;
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
   ASSERT_EQ(2u, item_count);
-  ASSERT_EQ(10u, items[0].name_hash);
-  ASSERT_EQ(20, items[0].value);
-  ASSERT_EQ(50u, items[1].name_hash);
-  ASSERT_EQ(60, items[1].value);
+  EXPECT_EQ(10u, items[0].name_hash);
+  EXPECT_FALSE(items[0].key.has_value());
+  EXPECT_EQ(20, items[0].value);
+  EXPECT_EQ(50u, items[1].name_hash);
+  EXPECT_FALSE(items[1].key.has_value());
+  EXPECT_EQ(60, items[1].value);
 }
 
 TEST(MetadataRecorderTest, Remove_DoesntExist) {
   MetadataRecorder recorder;
-  recorder.Set(10, 20);
-  recorder.Remove(20);
+  recorder.Set(10, nullopt, 20);
+  recorder.Remove(20, nullopt);
 
-  base::ProfileBuilder::MetadataItemArray items;
-  size_t item_count = recorder.CreateMetadataProvider()->GetItems(&items);
+  MetadataRecorder::ItemArray items;
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
   ASSERT_EQ(1u, item_count);
-  ASSERT_EQ(10u, items[0].name_hash);
-  ASSERT_EQ(20, items[0].value);
+  EXPECT_EQ(10u, items[0].name_hash);
+  EXPECT_FALSE(items[0].key.has_value());
+  EXPECT_EQ(20, items[0].value);
+}
+
+TEST(MetadataRecorderTest, Remove_NulloptKeyIsIndependentOfNonNulloptKey) {
+  MetadataRecorder recorder;
+
+  recorder.Set(10, 100, 20);
+  recorder.Set(10, nullopt, 30);
+
+  recorder.Remove(10, nullopt);
+
+  MetadataRecorder::ItemArray items;
+  size_t item_count =
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&items);
+  ASSERT_EQ(1u, item_count);
+  EXPECT_EQ(10u, items[0].name_hash);
+  ASSERT_TRUE(items[0].key.has_value());
+  EXPECT_EQ(100, *items[0].key);
+  EXPECT_EQ(20, items[0].value);
 }
 
 TEST(MetadataRecorderTest, ReclaimInactiveSlots) {
   MetadataRecorder recorder;
 
-  std::set<base::ProfileBuilder::MetadataItem> items_set;
+  std::set<MetadataRecorder::Item> items_set;
   // Fill up the metadata map.
-  for (size_t i = 0; i < base::ProfileBuilder::MAX_METADATA_COUNT; ++i) {
-    recorder.Set(i, i);
-    items_set.insert(base::ProfileBuilder::MetadataItem{i, i});
+  for (size_t i = 0; i < MetadataRecorder::MAX_METADATA_COUNT; ++i) {
+    recorder.Set(i, nullopt, i);
+    items_set.insert(MetadataRecorder::Item{i, nullopt, i});
   }
 
   // Remove every fourth entry to fragment the data.
   size_t entries_removed = 0;
-  for (size_t i = 3; i < base::ProfileBuilder::MAX_METADATA_COUNT; i += 4) {
-    recorder.Remove(i);
+  for (size_t i = 3; i < MetadataRecorder::MAX_METADATA_COUNT; i += 4) {
+    recorder.Remove(i, nullopt);
     ++entries_removed;
-    items_set.erase(base::ProfileBuilder::MetadataItem{i, i});
+    items_set.erase(MetadataRecorder::Item{i, nullopt, i});
   }
 
   // Ensure that the inactive slots are reclaimed to make room for more entries.
   for (size_t i = 1; i <= entries_removed; ++i) {
-    recorder.Set(i * 100, i * 100);
-    items_set.insert(base::ProfileBuilder::MetadataItem{i * 100, i * 100});
+    recorder.Set(i * 100, nullopt, i * 100);
+    items_set.insert(MetadataRecorder::Item{i * 100, nullopt, i * 100});
   }
 
-  base::ProfileBuilder::MetadataItemArray items_arr;
+  MetadataRecorder::ItemArray items_arr;
   std::copy(items_set.begin(), items_set.end(), items_arr.begin());
 
-  base::ProfileBuilder::MetadataItemArray recorder_items;
+  MetadataRecorder::ItemArray recorder_items;
   size_t recorder_item_count =
-      recorder.CreateMetadataProvider()->GetItems(&recorder_items);
-  ASSERT_EQ(recorder_item_count, base::ProfileBuilder::MAX_METADATA_COUNT);
-  ASSERT_THAT(recorder_items, ::testing::UnorderedElementsAreArray(items_arr));
+      MetadataRecorder::MetadataProvider(&recorder).GetItems(&recorder_items);
+  EXPECT_EQ(recorder_item_count, MetadataRecorder::MAX_METADATA_COUNT);
+  EXPECT_THAT(recorder_items, ::testing::UnorderedElementsAreArray(items_arr));
 }
 
 TEST(MetadataRecorderTest, MetadataSlotsUsedUmaHistogram) {
   MetadataRecorder recorder;
-  base::HistogramTester histogram_tester;
+  HistogramTester histogram_tester;
 
-  for (size_t i = 0; i < base::ProfileBuilder::MAX_METADATA_COUNT; ++i) {
-    recorder.Set(i * 10, i * 100);
+  for (size_t i = 0; i < MetadataRecorder::MAX_METADATA_COUNT; ++i) {
+    recorder.Set(i * 10, nullopt, i * 100);
   }
 
   EXPECT_THAT(

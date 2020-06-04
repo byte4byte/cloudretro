@@ -10,6 +10,7 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 
 namespace network {
@@ -22,10 +23,12 @@ class TestCookieManager : public network::mojom::CookieManager {
   ~TestCookieManager() override;
 
   void SetCanonicalCookie(const net::CanonicalCookie& cookie,
-                          const std::string& source_scheme,
+                          const GURL& source_url,
                           const net::CookieOptions& cookie_options,
                           SetCanonicalCookieCallback callback) override;
   void GetAllCookies(GetAllCookiesCallback callback) override {}
+  void GetAllCookiesWithAccessSemantics(
+      GetAllCookiesWithAccessSemanticsCallback callback) override {}
   void GetCookieList(const GURL& url,
                      const net::CookieOptions& cookie_options,
                      GetCookieListCallback callback) override {}
@@ -35,12 +38,14 @@ class TestCookieManager : public network::mojom::CookieManager {
                      DeleteCookiesCallback callback) override {}
   void AddCookieChangeListener(
       const GURL& url,
-      const std::string& name,
-      network::mojom::CookieChangeListenerPtr listener) override;
+      const base::Optional<std::string>& name,
+      mojo::PendingRemote<network::mojom::CookieChangeListener> listener)
+      override;
   void AddGlobalChangeListener(
-      network::mojom::CookieChangeListenerPtr notification_pointer) override {}
-  void CloneInterface(
-      network::mojom::CookieManagerRequest new_interface) override {}
+      mojo::PendingRemote<network::mojom::CookieChangeListener>
+          notification_pointer) override {}
+  void CloneInterface(mojo::PendingReceiver<network::mojom::CookieManager>
+                          new_interface) override {}
   void FlushCookieStore(FlushCookieStoreCallback callback) override {}
   void AllowFileSchemeCookies(
       bool allow,
@@ -49,13 +54,18 @@ class TestCookieManager : public network::mojom::CookieManager {
       const std::vector<::ContentSettingPatternSource>& settings) override {}
   void SetForceKeepSessionState() override {}
   void BlockThirdPartyCookies(bool block) override {}
+  void SetContentSettingsForLegacyCookieAccess(
+      const std::vector<::ContentSettingPatternSource>& settings) override {}
+  void SetStorageAccessGrantSettings(
+      const std::vector<::ContentSettingPatternSource>& settings,
+      SetStorageAccessGrantSettingsCallback callback) override {}
 
-  void DispatchCookieChange(const net::CanonicalCookie& cookie,
-                            network::mojom::CookieChangeCause cause);
+  void DispatchCookieChange(const net::CookieChangeInfo& change);
 
  private:
   // List of observers receiving cookie change notifications.
-  std::vector<network::mojom::CookieChangeListenerPtr> cookie_change_listeners_;
+  std::vector<mojo::Remote<network::mojom::CookieChangeListener>>
+      cookie_change_listeners_;
 };
 
 }  // namespace network

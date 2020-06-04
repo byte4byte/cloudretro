@@ -5,7 +5,8 @@
 #import "ios/web/session/session_certificate_policy_cache_storage_builder.h"
 
 #import "ios/web/public/session/crw_session_certificate_policy_cache_storage.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/fakes/test_browser_state.h"
+#include "ios/web/public/test/web_task_environment.h"
 #import "ios/web/session/session_certificate_policy_cache_impl.h"
 #include "net/cert/x509_certificate.h"
 #include "net/test/cert_test_util.h"
@@ -24,8 +25,9 @@ using SessionCertificatePolicyCacheStorageBuilderTest = PlatformTest;
 // populates the storage with the correct data.
 TEST_F(SessionCertificatePolicyCacheStorageBuilderTest, BuildStorage) {
   // Create a cache and populate it with an allowed cert.
-  web::TestWebThreadBundle thread_bundle;
-  web::SessionCertificatePolicyCacheImpl cache;
+  web::WebTaskEnvironment task_environment;
+  web::TestBrowserState browser_state;
+  web::SessionCertificatePolicyCacheImpl cache(&browser_state);
   scoped_refptr<net::X509Certificate> cert =
       net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
   std::string host("test.com");
@@ -61,7 +63,8 @@ TEST_F(SessionCertificatePolicyCacheStorageBuilderTest,
   [cache_storage setCertificateStorages:[NSSet setWithObject:cert_storage]];
   // Build the cert policy cache and verify its contents.
   web::SessionCertificatePolicyCacheStorageBuilder builder;
+  web::TestBrowserState browser_state;
   std::unique_ptr<web::SessionCertificatePolicyCacheImpl> cache =
-      builder.BuildSessionCertificatePolicyCache(cache_storage);
+      builder.BuildSessionCertificatePolicyCache(cache_storage, &browser_state);
   EXPECT_NSEQ([cache_storage certificateStorages], cache -> GetAllowedCerts());
 }

@@ -10,8 +10,10 @@
 
 #include "content/public/browser/client_hints_controller_delegate.h"
 #include "net/http/http_request_headers.h"
+#include "services/network/public/mojom/parsed_headers.mojom-forward.h"
 
 class BrowserContext;
+class FrameTreeNode;
 
 namespace content {
 
@@ -31,8 +33,19 @@ CONTENT_EXPORT double RoundKbpsToMbpsForTesting(
 CONTENT_EXPORT void AddNavigationRequestClientHintsHeaders(
     const GURL& url,
     net::HttpRequestHeaders* headers,
-    content::BrowserContext* context,
-    content::ClientHintsControllerDelegate* delegate);
+    BrowserContext* context,
+    bool javascript_enabled,
+    ClientHintsControllerDelegate* delegate,
+    bool is_ua_override_on,
+    FrameTreeNode*);
+
+CONTENT_EXPORT void PersistAcceptCHAfterNagivationRequestRedirect(
+    const GURL& url,
+    const ::network::mojom::ParsedHeadersPtr& headers,
+    BrowserContext* context,
+    bool javascript_enabled,
+    ClientHintsControllerDelegate* delegate,
+    FrameTreeNode*);
 
 }  // namespace content
 

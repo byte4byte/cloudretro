@@ -20,26 +20,41 @@
 #include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/test/views_test_base.h"
+#include "ui/views/test/widget_test.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 constexpr size_t kInstalledApps = 4;
 constexpr size_t kPlayStoreApps = 2;
 constexpr size_t kRecommendedApps = 1;
 
-// used to test when multiple policy chips have been added
-constexpr size_t kMultipleRecommendedApps = 3;
+// used to test when multiple chips with specified display
+// indexes have been added
+constexpr size_t kRecommendedAppsWithDisplayIndex = 3;
 }  // namespace
 
 class SearchResultTileItemListViewTest
-    : public views::ViewsTestBase,
+    : public views::test::WidgetTest,
       public ::testing::WithParamInterface<std::pair<bool, bool>> {
  public:
   SearchResultTileItemListViewTest() = default;
   ~SearchResultTileItemListViewTest() override = default;
+
+  // Overridden from testing::Test:
+  void SetUp() override {
+    views::test::WidgetTest::SetUp();
+    widget_ = CreateTopLevelPlatformWidget();
+  }
+
+  void TearDown() override {
+    view_.reset();
+    widget_->CloseNow();
+    views::test::WidgetTest::TearDown();
+  }
 
  protected:
   void CreateSearchResultTileItemListView() {
@@ -76,6 +91,9 @@ class SearchResultTileItemListViewTest
     textfield_ = std::make_unique<views::Textfield>();
     view_ = std::make_unique<SearchResultTileItemListView>(
         nullptr, textfield_.get(), &view_delegate_);
+    widget_->SetBounds(gfx::Rect(0, 0, 300, 200));
+    widget_->GetContentsView()->AddChildView(view_.get());
+    widget_->Show();
     view_->SetResults(view_delegate_.GetSearchModel()->results());
   }
 
@@ -97,8 +115,8 @@ class SearchResultTileItemListViewTest
       std::unique_ptr<TestSearchResult> result =
           std::make_unique<TestSearchResult>();
       result->set_result_id("InstalledApp " + base::NumberToString(i));
-      result->set_display_type(ash::SearchResultDisplayType::kTile);
-      result->set_result_type(ash::SearchResultType::kInstalledApp);
+      result->set_display_type(SearchResultDisplayType::kTile);
+      result->set_result_type(AppListSearchResultType::kInstalledApp);
       result->set_title(base::ASCIIToUTF16("InstalledApp ") +
                         base::NumberToString16(i));
       results->Add(std::move(result));
@@ -110,8 +128,8 @@ class SearchResultTileItemListViewTest
         std::unique_ptr<TestSearchResult> result =
             std::make_unique<TestSearchResult>();
         result->set_result_id("PlayStoreApp " + base::NumberToString(i));
-        result->set_display_type(ash::SearchResultDisplayType::kTile);
-        result->set_result_type(ash::SearchResultType::kPlayStoreApp);
+        result->set_display_type(SearchResultDisplayType::kTile);
+        result->set_result_type(AppListSearchResultType::kPlayStoreApp);
         result->set_title(base::ASCIIToUTF16("PlayStoreApp ") +
                           base::NumberToString16(i));
         result->SetRating(1 + i);
@@ -126,11 +144,11 @@ class SearchResultTileItemListViewTest
         std::unique_ptr<TestSearchResult> result =
             std::make_unique<TestSearchResult>();
         result->set_result_id("RecommendedApp " + base::NumberToString(i));
-        result->set_display_type(ash::SearchResultDisplayType::kRecommendation);
-        result->set_result_type(ash::SearchResultType::kPlayStoreReinstallApp);
-        result->set_display_location(
-            ash::SearchResultDisplayLocation::kTileListContainer);
-        result->set_display_index(ash::SearchResultDisplayIndex::kSixthIndex);
+        result->set_display_type(SearchResultDisplayType::kTile);
+        result->set_is_recommendation(true);
+        result->set_result_type(
+            AppListSearchResultType::kPlayStoreReinstallApp);
+        result->set_display_index(SearchResultDisplayIndex::kSixthIndex);
         result->set_title(base::ASCIIToUTF16("RecommendedApp ") +
                           base::NumberToString16(i));
         result->SetRating(1 + i);
@@ -143,22 +161,16 @@ class SearchResultTileItemListViewTest
     RunPendingMessages();
   }
 
-  void SetUpSearchResultsWithMultiplePolicies() {
+  void SetUpSearchResultsWithMultipleDisplayIndexesRequested() {
     SearchModel::SearchResults* results = GetResults();
-
-    const ash::SearchResultDisplayIndex policy_indexes[3] = {
-        ash::SearchResultDisplayIndex::kFourthIndex,
-        ash::SearchResultDisplayIndex::kFifthIndex,
-        ash::SearchResultDisplayIndex::kSixthIndex,
-    };
 
     // Populate results for installed applications.
     for (size_t i = 0; i < kInstalledApps; ++i) {
       std::unique_ptr<TestSearchResult> result =
           std::make_unique<TestSearchResult>();
       result->set_result_id("InstalledApp " + base::NumberToString(i));
-      result->set_display_type(ash::SearchResultDisplayType::kTile);
-      result->set_result_type(ash::SearchResultType::kInstalledApp);
+      result->set_display_type(SearchResultDisplayType::kTile);
+      result->set_result_type(AppListSearchResultType::kInstalledApp);
       result->set_title(base::ASCIIToUTF16("InstalledApp ") +
                         base::NumberToString16(i));
       results->Add(std::move(result));
@@ -170,8 +182,8 @@ class SearchResultTileItemListViewTest
         std::unique_ptr<TestSearchResult> result =
             std::make_unique<TestSearchResult>();
         result->set_result_id("PlayStoreApp " + base::NumberToString(i));
-        result->set_display_type(ash::SearchResultDisplayType::kTile);
-        result->set_result_type(ash::SearchResultType::kPlayStoreApp);
+        result->set_display_type(SearchResultDisplayType::kTile);
+        result->set_result_type(AppListSearchResultType::kPlayStoreApp);
         result->set_title(base::ASCIIToUTF16("PlayStoreApp ") +
                           base::NumberToString16(i));
         result->SetRating(1 + i);
@@ -181,27 +193,27 @@ class SearchResultTileItemListViewTest
       }
     }
 
+    const SearchResultDisplayIndex
+        display_indexes[kRecommendedAppsWithDisplayIndex] = {
+            SearchResultDisplayIndex::kFourthIndex,
+            SearchResultDisplayIndex::kFifthIndex,
+            SearchResultDisplayIndex::kSixthIndex,
+        };
+
     if (IsReinstallAppRecommendationEnabled()) {
-      for (size_t i = 0; i < kMultipleRecommendedApps; ++i) {
+      for (size_t i = 0; i < kRecommendedAppsWithDisplayIndex; ++i) {
         std::unique_ptr<TestSearchResult> result =
             std::make_unique<TestSearchResult>();
         result->set_result_id("RecommendedApp " + base::NumberToString(i));
-        result->set_display_type(ash::SearchResultDisplayType::kRecommendation);
-        result->set_result_type(ash::SearchResultType::kPlayStoreReinstallApp);
-        result->set_display_location(
-            ash::SearchResultDisplayLocation::kTileListContainer);
-        result->set_display_index(policy_indexes[i]);
+        result->set_display_type(SearchResultDisplayType::kTile);
+        result->set_is_recommendation(true);
+        result->set_result_type(
+            AppListSearchResultType::kPlayStoreReinstallApp);
+        result->set_display_index(display_indexes[i]);
         result->set_title(base::ASCIIToUTF16("RecommendedApp ") +
                           base::NumberToString16(i));
         result->SetRating(1 + i);
-        results->Add(std::move(result));
-      }
-    }
-
-    for (size_t i = 0; i < results->item_count(); ++i) {
-      if (results->GetItemAt(i)->display_index() !=
-          ash::SearchResultDisplayIndex::kUndefined) {
-        results->Move(i, results->GetItemAt(i)->display_index());
+        results->AddAt(result->display_index(), std::move(result));
       }
     }
 
@@ -228,6 +240,7 @@ class SearchResultTileItemListViewTest
  private:
   test::AppListTestViewDelegate view_delegate_;
   std::unique_ptr<SearchResultTileItemListView> view_;
+  views::Widget* widget_;
   std::unique_ptr<views::Textfield> textfield_;
   base::test::ScopedFeatureList scoped_feature_list_;
 
@@ -266,8 +279,10 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
     ui::AXNodeData node_data;
     view()->children()[first_child + i * child_step]->GetAccessibleNodeData(
         &node_data);
-    EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
-    EXPECT_EQ("InstalledApp " + base::NumberToString(i),
+    EXPECT_EQ(ax::mojom::Role::kListBoxOption, node_data.role);
+    EXPECT_EQ(l10n_util::GetStringFUTF8(
+                  IDS_APP_ACCESSIBILITY_INSTALLED_APP_ANNOUNCEMENT,
+                  base::UTF8ToUTF16("InstalledApp " + base::NumberToString(i))),
               node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 
@@ -280,11 +295,14 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
     view()
         ->children()[first_child + (i + kInstalledApps) * child_step]
         ->GetAccessibleNodeData(&node_data);
-    EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
-    EXPECT_EQ("PlayStoreApp " + base::NumberToString(i) + ", Star rating " +
-                  base::NumberToString(i + 1) + ".0, Price " +
-                  base::NumberToString(i),
-              node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
+    EXPECT_EQ(ax::mojom::Role::kListBoxOption, node_data.role);
+    EXPECT_EQ(
+        l10n_util::GetStringFUTF8(
+            IDS_APP_ACCESSIBILITY_ARC_APP_ANNOUNCEMENT,
+            base::UTF8ToUTF16("PlayStoreApp " + base::NumberToString(i))) +
+            ", Star rating " + base::NumberToString(i + 1) + ".0, Price " +
+            base::NumberToString(i),
+        node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 
   // Recommendations.
@@ -294,10 +312,13 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
     view()
         ->children()[first_child + (i + start_index) * child_step]
         ->GetAccessibleNodeData(&node_data);
-    EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
-    EXPECT_EQ("RecommendedApp " + base::NumberToString(i) + ", Star rating " +
-                  base::NumberToString(i + 1) + ".0, App recommendation",
-              node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
+    EXPECT_EQ(ax::mojom::Role::kListBoxOption, node_data.role);
+    EXPECT_EQ(
+        l10n_util::GetStringFUTF8(
+            IDS_APP_ACCESSIBILITY_APP_RECOMMENDATION_ARC,
+            base::UTF8ToUTF16("RecommendedApp " + base::NumberToString(i))) +
+            ", Star rating " + base::NumberToString(i + 1) + ".0",
+        node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 
   ResetOpenResultCount();
@@ -317,26 +338,31 @@ TEST_P(SearchResultTileItemListViewTest, Basic) {
   }
 }
 
+// Tests that when multiple apps with specified indexes are added to the app
+// results list, they are found at the indexes they requested.
 TEST_P(SearchResultTileItemListViewTest, TestRecommendations) {
+  if (!IsReinstallAppRecommendationEnabled())
+    return;
+
   CreateSearchResultTileItemListView();
-  SetUpSearchResultsWithMultiplePolicies();
+  SetUpSearchResultsWithMultipleDisplayIndexesRequested();
 
   const size_t child_step = 2;
 
-  size_t first_index = kInstalledApps + kMultipleRecommendedApps;
+  size_t first_index = kInstalledApps + kRecommendedAppsWithDisplayIndex;
 
-  if (IsReinstallAppRecommendationEnabled()) {
-    size_t stepper = IsPlayStoreAppSearchEnabled() ? 3 : 2;
-    for (size_t i = 0; i < stepper; ++i) {
-      ui::AXNodeData node_data;
-      view()->children()[first_index + (i)*child_step]->GetAccessibleNodeData(
-          &node_data);
-      EXPECT_EQ(ax::mojom::Role::kButton, node_data.role);
-      EXPECT_EQ(
-          "RecommendedApp " + base::NumberToString(i) + ", Star rating " +
-              base::NumberToString(i + 1) + ".0, App recommendation",
-          node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
-    }
+  size_t stepper = IsPlayStoreAppSearchEnabled() ? 3 : 2;
+  for (size_t i = 0; i < stepper; ++i) {
+    ui::AXNodeData node_data;
+    view()->children()[first_index + i * child_step]->GetAccessibleNodeData(
+        &node_data);
+    EXPECT_EQ(ax::mojom::Role::kListBoxOption, node_data.role);
+    EXPECT_EQ(
+        l10n_util::GetStringFUTF8(
+            IDS_APP_ACCESSIBILITY_APP_RECOMMENDATION_ARC,
+            base::UTF8ToUTF16("RecommendedApp " + base::NumberToString(i))) +
+            ", Star rating " + base::NumberToString(i + 1) + ".0",
+        node_data.GetStringAttribute(ax::mojom::StringAttribute::kName));
   }
 }
 
@@ -347,4 +373,4 @@ INSTANTIATE_TEST_SUITE_P(,
                                             std::make_pair(true, false),
                                             std::make_pair(true, true)}));
 
-}  // namespace app_list
+}  // namespace ash

@@ -32,11 +32,11 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/portal_detector/network_portal_detector_strategy.h"
-#include "components/captive_portal/captive_portal_detector.h"
-#include "components/captive_portal/captive_portal_testing_utils.h"
+#include "components/captive_portal/core/captive_portal_detector.h"
+#include "components/captive_portal/core/captive_portal_testing_utils.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "dbus/object_path.h"
 #include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -101,7 +101,6 @@ class NetworkPortalDetectorImplTest
     // Create a profile for the user.
     profile_ = test_profile_manager_.CreateTestingProfile(
         test_account_id.GetUserEmail());
-    test_profile_manager_.SetLoggedIn(true);
     EXPECT_TRUE(user_manager::UserManager::Get()->GetPrimaryUser());
 
     network_portal_detector_.reset(
@@ -230,7 +229,7 @@ class NetworkPortalDetectorImplTest
     DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
         dbus::ObjectPath(service_path), shill::kStateProperty,
         base::Value(shill::kStateNoConnectivity), base::DoNothing(),
-        base::Bind(&ErrorCallbackFunction));
+        base::BindOnce(&ErrorCallbackFunction));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -245,14 +244,14 @@ class NetworkPortalDetectorImplTest
   void SetConnected(const std::string& service_path) {
     DBusThreadManager::Get()->GetShillServiceClient()->Connect(
         dbus::ObjectPath(service_path), base::DoNothing(),
-        base::Bind(&ErrorCallbackFunction));
+        base::BindOnce(&ErrorCallbackFunction));
     base::RunLoop().RunUntilIdle();
   }
 
   void SetDisconnected(const std::string& service_path) {
     DBusThreadManager::Get()->GetShillServiceClient()->Disconnect(
         dbus::ObjectPath(service_path), base::DoNothing(),
-        base::Bind(&ErrorCallbackFunction));
+        base::BindOnce(&ErrorCallbackFunction));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -290,7 +289,7 @@ class NetworkPortalDetectorImplTest
     NetworkHandler::Initialize();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   Profile* profile_ = nullptr;
   std::unique_ptr<NetworkPortalDetectorImpl> network_portal_detector_;
   std::unique_ptr<base::HistogramSamples> original_samples_;

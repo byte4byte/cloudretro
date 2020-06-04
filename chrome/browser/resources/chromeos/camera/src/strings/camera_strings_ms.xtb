@@ -3,13 +3,11 @@
 <translationbundle lang="ms">
 <translation id="1276998909102132017">Imej galeri</translation>
 <translation id="1430915738399379752">Cetak</translation>
-<translation id="1462966117743110941">Kini kamera anda menyokong mod baharu. Foto dan video anda akan tersedia dalam folder Muat Turun.</translation>
 <translation id="1620510694547887537">Kamera</translation>
 <translation id="1627744224761163218">4 x 4</translation>
 <translation id="1664224225747386870">Tiada apa-apa yang dirakamkan</translation>
 <translation id="1862930711583847113">Tidak dapat mengeksport <ph name="FILE" /></translation>
 <translation id="1899697626337024495">Peleraian foto</translation>
-<translation id="2008689030244369546">Rupa serba baharu</translation>
 <translation id="2036868001356139588">Tempoh pemasa</translation>
 <translation id="2050339315714019657">Potret</translation>
 <translation id="2064538373111010176"><ph name="CAMERA" /> aktif</translation>
@@ -19,10 +17,12 @@
 <translation id="2501953888035679275">Ambil foto dan rakam video dengan kamera anda.</translation>
 <translation id="2549985041256363841">Mulakan rakaman</translation>
 <translation id="2599796128805996109">Kamera belakang</translation>
+<translation id="2912439424121107408">Mod pakar tidak disokong pada peranti ini</translation>
 <translation id="2968794441791257519">Foto dan video yang diambil dengan kamera akan dialihkan ke folder Muat Turun. Anda boleh mengakses foto dan video itu dalam Fail.
 
         Apl yang diberikan kebenaran storan boleh mengakses foto dan video anda.</translation>
 <translation id="3081586908890909590">Beralih kepada merakam video</translation>
+<translation id="313467653172006084">30 FPS</translation>
 <translation id="3183731565330012717">Jenis grid</translation>
 <translation id="3227137524299004712">Mikrofon</translation>
 <translation id="3259149966178251584">Peleraian kamera</translation>
@@ -31,6 +31,7 @@
 <translation id="3810838688059735925">Video</translation>
 <translation id="4279490309300973883">Pencerminan</translation>
 <translation id="4329152592498422850">Beralih kepada mengambil foto segi empat sama</translation>
+<translation id="4383571725254449280">Cetak log prestasi</translation>
 <translation id="4445542136948522167">Berhenti mengambil foto</translation>
 <translation id="4497569853498380347">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" />) <ph name="MEGAPIXEL" /> megapiksel</translation>
 <translation id="4570032796877367747">Kamera hadapan</translation>
@@ -41,10 +42,10 @@
         Sila periksa sama ada kamera telah disambungkan dengan betul.</translation>
 <translation id="5152121255775685072">Pergi ke galeri</translation>
 <translation id="5671277269877808209">Segi empat sama</translation>
+<translation id="5775960006311140197">Mod pakar</translation>
 <translation id="5869546221129391014">Grid</translation>
-<translation id="6040143037577758943">Tutup</translation>
 <translation id="6073451960410192870">Hentikan rakaman</translation>
-<translation id="6165508094623778733">Ketahui lebih lanjut</translation>
+<translation id="6197807149213783179">Simpan metadata</translation>
 <translation id="6233780560267770709">3 kali 3</translation>
 <translation id="6243827288366940320">Nisbah keemasan</translation>
 <translation id="6248749904681914629">Kamera luar</translation>
@@ -62,10 +63,13 @@
 <translation id="7658239707568436148">Batal</translation>
 <translation id="7670511624014457267">60 FPS</translation>
 <translation id="8049189770492311300">Pemasa</translation>
+<translation id="8067883171444229417">Mainkan video</translation>
+<translation id="8131740175452115882">Sahkan</translation>
 <translation id="8145038249676204903">Beralih kepada mengambil foto</translation>
 <translation id="8261506727792406068">Padam</translation>
 <translation id="8428213095426709021">Tetapan</translation>
 <translation id="8687491812650032292">HD <ph name="HEIGHT" />p (<ph name="WIDTH" />:<ph name="HEIGHT" />)</translation>
+<translation id="8732462232047530626">Pratonton metadata</translation>
 <translation id="8815966864175525708">Beralih kepada mengambil foto potret</translation>
 <translation id="8870695351537079478">Tidak dapat memulakan rakaman</translation>
 <translation id="9045155556724273246">10 saat</translation>

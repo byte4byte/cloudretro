@@ -19,8 +19,6 @@ namespace mojom {
 enum class WindowStateType;
 }
 
-namespace wm {
-
 // ClientControlledState delegates the window state transition and
 // bounds control to the client. Its window state and bounds are
 // determined by the delegate. ARC++ window's state is controlled by
@@ -54,6 +52,9 @@ class ASH_EXPORT ClientControlledState : public BaseState {
 
   explicit ClientControlledState(std::unique_ptr<Delegate> delegate);
   ~ClientControlledState() override;
+
+  // Resets |delegate_|.
+  void ResetDelegate();
 
   // A flag used to update the window's bounds directly, instead of
   // delegating to |Delegate|. The Delegate should use this to
@@ -95,7 +96,7 @@ class ASH_EXPORT ClientControlledState : public BaseState {
   // Enters next state. This is used when the state moves from one to another
   // within the same desktop mode. Returns true if the state has changed, or
   // false otherwise.
-  bool EnterNextState(wm::WindowState* window_state,
+  bool EnterNextState(WindowState* window_state,
                       WindowStateType next_state_type);
 
  private:
@@ -110,7 +111,6 @@ class ASH_EXPORT ClientControlledState : public BaseState {
   DISALLOW_COPY_AND_ASSIGN(ClientControlledState);
 };
 
-}  // namespace wm
 }  // namespace ash
 
 #endif  // ASH_WM_DEFAULT_STATE_H_

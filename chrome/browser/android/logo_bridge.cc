@@ -20,7 +20,6 @@
 #include "components/search_provider_logos/logo_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "net/http/http_status_code.h"
-#include "services/network/public/cpp/resource_response_info.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -118,7 +117,7 @@ static jlong JNI_LogoBridge_Init(JNIEnv* env,
 }
 
 LogoBridge::LogoBridge(const JavaRef<jobject>& j_profile)
-    : logo_service_(nullptr), weak_ptr_factory_(this) {
+    : logo_service_(nullptr) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
   DCHECK(profile);
 

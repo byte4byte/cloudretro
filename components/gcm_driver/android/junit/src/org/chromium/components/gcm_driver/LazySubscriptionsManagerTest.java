@@ -12,15 +12,11 @@ import static org.junit.Assert.assertTrue;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.metrics.CachedMetrics;
-import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.base.metrics.test.ShadowRecordHistogram;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 
 import java.util.Set;
@@ -29,29 +25,26 @@ import java.util.Set;
  * Unit tests for LazySubscriptionsManager.
  */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowRecordHistogram.class})
+@Config(manifest = Config.NONE)
 public class LazySubscriptionsManagerTest {
-    @Before
-    public void setUp() {
-        // This commits and clears any cached metrics.
-        CachedMetrics.commitCachedMetrics();
-        ShadowRecordHistogram.reset();
-    }
-
     /**
      * Tests the persistence of the "hasPersistedMessages" flag.
      */
     @Test
     public void testHasPersistedMessages() {
         final String subscriptionId = "subscription_id";
-        // Default is false.
-        assertFalse(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId));
+        // By default there is no persisted messages.
+        assertTrue(LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId)
+                           .isEmpty());
 
         LazySubscriptionsManager.storeHasPersistedMessagesForSubscription(subscriptionId, true);
-        assertTrue(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId));
+        assertEquals(1,
+                LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId)
+                        .size());
 
         LazySubscriptionsManager.storeHasPersistedMessagesForSubscription(subscriptionId, false);
-        assertFalse(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId));
+        assertTrue(LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId)
+                           .isEmpty());
     }
 
     /**
@@ -71,16 +64,22 @@ public class LazySubscriptionsManagerTest {
                 .apply();
         LazySubscriptionsManager.migrateHasPersistedMessagesPref();
 
-        assertFalse(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId1));
-        assertFalse(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId2));
+        assertTrue(LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId1)
+                           .isEmpty());
+        assertTrue(LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId2)
+                           .isEmpty());
 
         sharedPrefs.edit()
                 .putBoolean(LazySubscriptionsManager.LEGACY_HAS_PERSISTED_MESSAGES_KEY, true)
                 .apply();
         LazySubscriptionsManager.migrateHasPersistedMessagesPref();
 
-        assertTrue(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId1));
-        assertTrue(LazySubscriptionsManager.hasPersistedMessagesForSubscription(subscriptionId2));
+        assertEquals(1,
+                LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId1)
+                        .size());
+        assertEquals(1,
+                LazySubscriptionsManager.getSubscriptionIdsWithPersistedMessages(subscriptionId2)
+                        .size());
     }
 
     /**
@@ -181,9 +180,6 @@ public class LazySubscriptionsManagerTest {
 
         messages = LazySubscriptionsManager.readMessages(anotherSubscriptionId);
         assertEquals(0, messages.length);
-        assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "PushMessaging.QueuedMessagesCount", 0));
     }
 
     /**
@@ -215,15 +211,6 @@ public class LazySubscriptionsManagerTest {
             assertEquals(
                     collapseKeyPrefix + (i + extraMessagesCount), messages[i].getCollapseKey());
         }
-        for (int i = 0; i < LazySubscriptionsManager.MESSAGES_QUEUE_SIZE; i++) {
-            assertEquals(1,
-                    RecordHistogram.getHistogramValueCountForTesting(
-                            "PushMessaging.QueuedMessagesCount", i));
-        }
-        assertEquals(extraMessagesCount,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "PushMessaging.QueuedMessagesCount",
-                        LazySubscriptionsManager.MESSAGES_QUEUE_SIZE));
     }
 
     /**
@@ -257,10 +244,6 @@ public class LazySubscriptionsManagerTest {
         messages = LazySubscriptionsManager.readMessages(subscriptionId);
         assertEquals(1, messages.length);
         assertArrayEquals(rawData2, messages[0].getRawData());
-
-        assertEquals(2,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "PushMessaging.QueuedMessagesCount", 0));
     }
 
     /**

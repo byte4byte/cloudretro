@@ -62,6 +62,19 @@ TypesettingFeatures FontDescription::default_typesetting_features_ = 0;
 
 bool FontDescription::use_subpixel_text_positioning_ = false;
 
+// static
+FontDescription FontDescription::CreateHashTableEmptyValue() {
+  FontDescription result;
+  memset(&result, 0, sizeof(FontDescription));
+  DCHECK(result.IsHashTableEmptyValue());
+  return result;
+}
+
+FontDescription::FontDescription(WTF::HashTableDeletedValueType) {
+  memset(this, 0, sizeof(FontDescription));
+  fields_.hash_category_ = kHashDeletedValue;
+}
+
 FontDescription::FontDescription()
     : specified_size_(0),
       computed_size_(0),
@@ -93,6 +106,8 @@ FontDescription::FontDescription()
   fields_.typesetting_features_ = default_typesetting_features_;
   fields_.variant_numeric_ = FontVariantNumeric().fields_as_unsigned_;
   fields_.subpixel_ascent_descent_ = false;
+  fields_.font_optical_sizing_ = OpticalSizing::kAutoOpticalSizing;
+  fields_.hash_category_ = kHashRegularValue;
 }
 
 FontDescription::FontDescription(const FontDescription&) = default;
@@ -217,11 +232,12 @@ FontCacheKey FontDescription::CacheKey(
     bool is_unique_match,
     const FontSelectionRequest& font_selection_request) const {
   unsigned options =
-      static_cast<unsigned>(fields_.synthetic_italic_) << 6 |  // bit 7
-      static_cast<unsigned>(fields_.synthetic_bold_) << 5 |    // bit 6
-      static_cast<unsigned>(fields_.text_rendering_) << 3 |    // bits 4-5
-      static_cast<unsigned>(fields_.orientation_) << 1 |       // bit 2-3
-      static_cast<unsigned>(fields_.subpixel_text_position_);  // bit 1
+      static_cast<unsigned>(fields_.font_optical_sizing_) << 7 |  // bit 8
+      static_cast<unsigned>(fields_.synthetic_italic_) << 6 |     // bit 7
+      static_cast<unsigned>(fields_.synthetic_bold_) << 5 |       // bit 6
+      static_cast<unsigned>(fields_.text_rendering_) << 3 |       // bits 4-5
+      static_cast<unsigned>(fields_.orientation_) << 1 |          // bit 2-3
+      static_cast<unsigned>(fields_.subpixel_text_position_);     // bit 1
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
   float device_scale_factor_for_key = FontCache::DeviceScaleFactor();
@@ -229,7 +245,7 @@ FontCacheKey FontDescription::CacheKey(
   float device_scale_factor_for_key = 1.0f;
 #endif
   FontCacheKey cache_key(creation_params, EffectiveFontSize(),
-                         options | font_selection_request_.GetHash() << 8,
+                         options | font_selection_request_.GetHash() << 9,
                          device_scale_factor_for_key, variation_settings_,
                          is_unique_match);
   return cache_key;
@@ -335,6 +351,17 @@ unsigned FontDescription::StyleHashWithoutFamilyList() const {
   return hash;
 }
 
+unsigned FontDescription::GetHash() const {
+  unsigned hash = StyleHashWithoutFamilyList();
+  for (const FontFamily* family = &family_list_; family;
+       family = family->Next()) {
+    if (!family->Family().length())
+      continue;
+    WTF::AddIntToHash(hash, WTF::AtomicStringHash::GetHash(family->Family()));
+  }
+  return hash;
+}
+
 SkFontStyle FontDescription::SkiaFontStyle() const {
   // FIXME(drott): This is a lossy conversion, compare
   // https://bugs.chromium.org/p/skia/issues/detail?id=6844
@@ -371,6 +398,42 @@ SkFontStyle FontDescription::SkiaFontStyle() const {
   return SkFontStyle(skia_weight, skia_width, slant);
 }
 
+void FontDescription::UpdateFromSkiaFontStyle(const SkFontStyle& font_style) {
+  SetWeight(FontSelectionValue(font_style.weight()));
+
+  switch (font_style.width()) {
+    case (SkFontStyle::kUltraCondensed_Width):
+      SetStretch(UltraCondensedWidthValue());
+      break;
+    case (SkFontStyle::kExtraCondensed_Width):
+      SetStretch(ExtraCondensedWidthValue());
+      break;
+    case (SkFontStyle::kCondensed_Width):
+      SetStretch(CondensedWidthValue());
+      break;
+    case (SkFontStyle::kSemiCondensed_Width):
+      SetStretch(SemiCondensedWidthValue());
+      break;
+    case (SkFontStyle::kSemiExpanded_Width):
+      SetStretch(SemiExpandedWidthValue());
+      break;
+    case (SkFontStyle::kExpanded_Width):
+      SetStretch(ExpandedWidthValue());
+      break;
+    case (SkFontStyle::kExtraExpanded_Width):
+      SetStretch(ExtraExpandedWidthValue());
+      break;
+    case (SkFontStyle::kUltraExpanded_Width):
+      SetStretch(UltraExpandedWidthValue());
+      break;
+  }
+
+  if (font_style.slant() == SkFontStyle::kOblique_Slant)
+    SetStyle(ItalicSlopeValue());
+  else
+    SetStyle(NormalSlopeValue());
+}
+
 int FontDescription::MinimumPrefixWidthToHyphenate() const {
   // If the maximum width available for the prefix before the hyphen is small,
   // then it is very unlikely that an hyphenation opportunity exists, so do not
@@ -398,8 +461,6 @@ String FontDescription::ToString(GenericFamilyType familyType) {
       return "Cursive";
     case GenericFamilyType::kFantasyFamily:
       return "Fantasy";
-    case GenericFamilyType::kPictographFamily:
-      return "Pictograph";
   }
   return "Unknown";
 }
@@ -496,7 +557,7 @@ String FontDescription::ToString() const {
       "keyword_size=%u, font_smoothing=%s, text_rendering=%s, "
       "synthetic_bold=%s, synthetic_italic=%s, subpixel_positioning=%s, "
       "subpixel_ascent_descent=%s, variant_numeric=[%s], "
-      "variant_east_asian=[%s]",
+      "variant_east_asian=[%s], font_optical_sizing=%s",
       family_list_.ToString().Ascii().c_str(),
       (feature_settings_ ? feature_settings_->ToString().Ascii().c_str() : ""),
       (variation_settings_ ? variation_settings_->ToString().Ascii().c_str()
@@ -524,7 +585,8 @@ String FontDescription::ToString() const {
       ToBooleanString(UseSubpixelPositioning()),
       ToBooleanString(SubpixelAscentDescent()),
       VariantNumeric().ToString().Ascii().c_str(),
-      VariantEastAsian().ToString().Ascii().c_str());
+      VariantEastAsian().ToString().Ascii().c_str(),
+      blink::ToString(FontOpticalSizing()).Ascii().c_str());
 }
 
 }  // namespace blink

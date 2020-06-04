@@ -5,9 +5,13 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/views/widget/root_view.h"
+
+class ToolbarView;
 
 namespace ui {
 class OSExchangeData;

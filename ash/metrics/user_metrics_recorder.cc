@@ -47,7 +47,7 @@ enum ActiveWindowStateType {
 ActiveWindowStateType GetActiveWindowState() {
   ActiveWindowStateType active_window_state_type =
       ACTIVE_WINDOW_STATE_TYPE_NO_ACTIVE_WINDOW;
-  wm::WindowState* active_window_state = ash::wm::GetActiveWindowState();
+  WindowState* active_window_state = WindowState::ForActiveWindow();
   if (active_window_state) {
     switch (active_window_state->GetStateType()) {
       case WindowStateType::kMaximized:
@@ -85,12 +85,6 @@ ActiveWindowStateType GetActiveWindowState() {
 bool IsKioskModeActive() {
   return Shell::Get()->session_controller()->login_status() ==
          LoginStatus::KIOSK_APP;
-}
-
-// Returns true if ARC kiosk mode is active.
-bool IsArcKioskModeActive() {
-  return Shell::Get()->session_controller()->login_status() ==
-         LoginStatus::ARC_KIOSK_APP;
 }
 
 // Returns true if there is an active user and their session isn't currently
@@ -132,8 +126,7 @@ int GetNumVisibleWindowsInPrimaryDisplay() {
                                                        rend = children.rend();
          it != rend; ++it) {
       const aura::Window* child_window = *it;
-      const wm::WindowState* child_window_state =
-          wm::GetWindowState(child_window);
+      const WindowState* child_window_state = WindowState::Get(child_window);
 
       if (!child_window->IsVisible() || child_window_state->IsMinimized())
         continue;
@@ -496,7 +489,7 @@ void UserMetricsRecorder::RecordPeriodicMetrics() {
 }
 
 bool UserMetricsRecorder::IsUserInActiveDesktopEnvironment() const {
-  return IsUserActive() && !IsKioskModeActive() && !IsArcKioskModeActive();
+  return IsUserActive() && !IsKioskModeActive();
 }
 
 void UserMetricsRecorder::StartTimer() {

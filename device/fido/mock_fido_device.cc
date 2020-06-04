@@ -36,8 +36,10 @@ std::unique_ptr<MockFidoDevice> MockFidoDevice::MakeCtap(
   if (!device_info) {
     device_info = DefaultAuthenticatorInfo();
   }
-  return std::make_unique<MockFidoDevice>(ProtocolVersion::kCtap2,
-                                          std::move(*device_info));
+  auto device = std::make_unique<MockFidoDevice>(ProtocolVersion::kCtap2,
+                                                 std::move(*device_info));
+  device->StubGetDisplayName();
+  return device;
 }
 
 // static
@@ -45,6 +47,8 @@ std::unique_ptr<MockFidoDevice>
 MockFidoDevice::MakeU2fWithGetInfoExpectation() {
   auto device = std::make_unique<MockFidoDevice>();
   device->StubGetId();
+  device->StubGetDisplayName();
+  device->ExpectWinkedAtLeastOnce();
   device->ExpectCtap2CommandAndRespondWith(
       CtapRequestCommand::kAuthenticatorGetInfo, base::nullopt);
   return device;
@@ -61,6 +65,7 @@ std::unique_ptr<MockFidoDevice> MockFidoDevice::MakeCtapWithGetInfoExpectation(
   CHECK(get_info);
   auto device = MockFidoDevice::MakeCtap(std::move(*get_info));
   device->StubGetId();
+  device->StubGetDisplayName();
   device->ExpectCtap2CommandAndRespondWith(
       CtapRequestCommand::kAuthenticatorGetInfo, std::move(get_info_response));
   return device;
@@ -86,7 +91,7 @@ MATCHER_P(IsCtap2Command, expected_command, "") {
   return !arg.empty() && arg[0] == base::strict_cast<uint8_t>(expected_command);
 }
 
-MockFidoDevice::MockFidoDevice() : weak_factory_(this) {}
+MockFidoDevice::MockFidoDevice() {}
 MockFidoDevice::MockFidoDevice(
     ProtocolVersion protocol_version,
     base::Optional<AuthenticatorGetInfoResponse> device_info)
@@ -104,12 +109,22 @@ FidoDevice::CancelToken MockFidoDevice::DeviceTransact(
   return DeviceTransactPtr(command, cb);
 }
 
+void MockFidoDevice::TryWink(base::OnceClosure cb) {
+  TryWinkRef(cb);
+}
+
 FidoTransportProtocol MockFidoDevice::DeviceTransport() const {
   return transport_protocol_;
 }
 
 base::WeakPtr<FidoDevice> MockFidoDevice::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
+}
+
+void MockFidoDevice::ExpectWinkedAtLeastOnce() {
+  EXPECT_CALL(*this, TryWinkRef(::testing::_))
+      .Times(::testing::AtLeast(1))
+      .WillRepeatedly([](base::OnceClosure& cb) { std::move(cb).Run(); });
 }
 
 void MockFidoDevice::StubGetId() {
@@ -179,6 +194,11 @@ void MockFidoDevice::ExpectRequestAndDoNotRespond(
 void MockFidoDevice::SetDeviceTransport(
     FidoTransportProtocol transport_protocol) {
   transport_protocol_ = transport_protocol;
+}
+
+void MockFidoDevice::StubGetDisplayName() {
+  EXPECT_CALL(*this, GetDisplayName())
+      .WillRepeatedly(testing::Return(base::string16()));
 }
 
 }  // namespace device

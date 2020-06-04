@@ -14,25 +14,19 @@
 #include "ui/views/controls/button/menu_button_controller.h"
 #include "ui/views/view_class_properties.h"
 
-AppMenuButton::AppMenuButton(views::MenuButtonListener* menu_button_listener)
+AppMenuButton::AppMenuButton(views::ButtonListener* button_listener)
     : ToolbarButton(nullptr) {
   std::unique_ptr<views::MenuButtonController> menu_button_controller =
       std::make_unique<views::MenuButtonController>(
-          this, menu_button_listener, CreateButtonControllerDelegate());
+          this, button_listener,
+          std::make_unique<views::Button::DefaultButtonControllerDelegate>(
+              this));
   menu_button_controller_ = menu_button_controller.get();
   SetButtonController(std::move(menu_button_controller));
   SetProperty(views::kInternalPaddingKey, gfx::Insets());
 }
 
 AppMenuButton::~AppMenuButton() {}
-
-void AppMenuButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  // TODO(pbos): Consolidate with ToolbarButton::OnBoundsChanged.
-  // ToolbarButton::OnBoundsChanged calls UpdateHighlightBackgroundAndInsets
-  // which expects ToolbarButtons to be the same height as the location bar
-  // which breaks tests on ChromeOS.
-  SetToolbarButtonHighlightPath(this, *GetProperty(views::kInternalPaddingKey));
-}
 
 void AppMenuButton::AddObserver(AppMenuButtonObserver* observer) {
   observer_list_.AddObserver(observer);

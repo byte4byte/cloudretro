@@ -14,7 +14,7 @@
 #include "content/public/browser/media_observer.h"
 #include "content/public/common/content_client.h"
 #include "media/audio/audio_logging.h"
-#include "media/mojo/interfaces/audio_data_pipe.mojom.h"
+#include "media/mojo/mojom/audio_data_pipe.mojom.h"
 
 namespace content {
 
@@ -69,7 +69,7 @@ AudioOutputStreamBroker::AudioOutputStreamBroker(
     const base::UnguessableToken& group_id,
     const base::Optional<base::UnguessableToken>& processing_id,
     DeleterCallback deleter,
-    media::mojom::AudioOutputStreamProviderClientPtr client)
+    mojo::PendingRemote<media::mojom::AudioOutputStreamProviderClient> client)
     : AudioStreamBroker(render_process_id, render_frame_id),
       output_device_id_(output_device_id),
       params_(params),
@@ -92,7 +92,7 @@ AudioOutputStreamBroker::AudioOutputStreamBroker(
     media_observer->OnCreatingAudioStream(render_process_id, render_frame_id);
 
   // Unretained is safe because |this| owns |client_|
-  client_.set_connection_error_handler(
+  client_.set_disconnect_handler(
       base::BindOnce(&AudioOutputStreamBroker::Cleanup, base::Unretained(this),
                      DisconnectReason::kTerminatedByClient));
 }
@@ -111,15 +111,6 @@ AudioOutputStreamBroker::~AudioOutputStreamBroker() {
   TRACE_EVENT_NESTABLE_ASYNC_END1("audio", "AudioOutputStreamBroker", this,
                                   "disconnect reason",
                                   static_cast<uint32_t>(reason));
-
-  UMA_HISTOGRAM_ENUMERATION("Media.Audio.Render.StreamBrokerDisconnectReason2",
-                            reason);
-
-  if (AwaitingCreated()) {
-    UMA_HISTOGRAM_TIMES(
-        "Media.Audio.Render.StreamBrokerDocumentDestroyedAwaitingCreatedTime",
-        base::TimeTicks::Now() - stream_creation_start_time_);
-  }
 }
 
 void AudioOutputStreamBroker::CreateStream(
@@ -147,11 +138,9 @@ void AudioOutputStreamBroker::CreateStream(
   constexpr int log_component_id = 0;
   factory->CreateOutputStream(
       std::move(stream_receiver), std::move(observer),
-      MediaInternals::GetInstance()
-          ->CreateMojoAudioLog(
-              media::AudioLogFactory::AudioComponent::AUDIO_OUTPUT_CONTROLLER,
-              log_component_id, render_process_id(), render_frame_id())
-          .PassInterface(),
+      MediaInternals::GetInstance()->CreateMojoAudioLog(
+          media::AudioLogFactory::AudioComponent::AUDIO_OUTPUT_CONTROLLER,
+          log_component_id, render_process_id(), render_frame_id()),
       output_device_id_, params_, group_id_, processing_id_,
       base::BindOnce(&AudioOutputStreamBroker::StreamCreated,
                      weak_ptr_factory_.GetWeakPtr(), std::move(stream)));
@@ -163,8 +152,6 @@ void AudioOutputStreamBroker::StreamCreated(
   DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
   TRACE_EVENT_NESTABLE_ASYNC_END1("audio", "CreateStream", this, "success",
                                   !!data_pipe);
-  UMA_HISTOGRAM_TIMES("Media.Audio.Render.StreamBrokerStreamCreationTime",
-                      base::TimeTicks::Now() - stream_creation_start_time_);
   stream_creation_start_time_ = base::TimeTicks();
 
   if (!data_pipe) {
@@ -175,8 +162,7 @@ void AudioOutputStreamBroker::StreamCreated(
     return;
   }
 
-  client_->Created(media::mojom::AudioOutputStreamPtr(std::move(stream)),
-                   std::move(data_pipe));
+  client_->Created(std::move(stream), std::move(data_pipe));
 }
 
 void AudioOutputStreamBroker::ObserverBindingLost(

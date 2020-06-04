@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 
-class Browser;
 class CommandUpdater;
 
 namespace autofill {
@@ -19,15 +18,15 @@ class ManageMigrationUiController;
 // bubble.
 class LocalCardMigrationIconView : public PageActionIconView {
  public:
-  LocalCardMigrationIconView(CommandUpdater* command_updater,
-                             Browser* browser,
-                             PageActionIconView::Delegate* delegate,
-                             const gfx::FontList& font_list);
+  LocalCardMigrationIconView(
+      CommandUpdater* command_updater,
+      IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
+      PageActionIconView::Delegate* page_action_icon_delegate);
   ~LocalCardMigrationIconView() override;
 
   // PageActionIconView:
   views::BubbleDialogDelegateView* GetBubble() const override;
-  bool Update() override;
+  void UpdateImpl() override;
   base::string16 GetTextForTooltipAndAccessibleName() const override;
 
  protected:
@@ -35,6 +34,7 @@ class LocalCardMigrationIconView : public PageActionIconView {
   void OnExecuting(PageActionIconView::ExecuteSource execute_source) override;
   const gfx::VectorIcon& GetVectorIcon() const override;
   const gfx::VectorIcon& GetVectorIconBadge() const override;
+  const char* GetClassName() const override;
 
  private:
   ManageMigrationUiController* GetController() const;
@@ -42,9 +42,6 @@ class LocalCardMigrationIconView : public PageActionIconView {
   // IconLabelBubbleView:
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
-
-  // Used to do nullptr check when getting the controller.
-  Browser* const browser_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalCardMigrationIconView);
 };

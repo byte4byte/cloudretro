@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_SEND_TAB_TO_SELF_SEND_TAB_TO_SELF_BUBBLE_VIEW_IMPL_H_
 #define CHROME_BROWSER_UI_VIEWS_SEND_TAB_TO_SELF_SEND_TAB_TO_SELF_BUBBLE_VIEW_IMPL_H_
 
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
@@ -21,7 +23,7 @@ class Canvas;
 
 namespace content {
 class WebContents;
-}
+}  // namespace content
 
 namespace send_tab_to_self {
 
@@ -35,16 +37,8 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
                                     public views::ButtonListener,
                                     public LocationBarBubbleDelegateView {
  public:
-  // The valid device button height.
-  static constexpr int kDeviceButtonHeight = 56;
-  // Maximum number of buttons that are shown without scroll. If the device
-  // number is larger than kMaximumButtons, the bubble content will be
-  // scrollable.
-  static constexpr int kMaximumButtons = 5;
-
   // Bubble will be anchored to |anchor_view|.
   SendTabToSelfBubbleViewImpl(views::View* anchor_view,
-                              const gfx::Point& anchor_point,
                               content::WebContents* web_contents,
                               SendTabToSelfBubbleController* controller);
 
@@ -58,10 +52,6 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   base::string16 GetWindowTitle() const override;
   void WindowClosing() override;
 
-  // views::DialogDelegate:
-  int GetDialogButtons() const override;
-  bool Close() override;
-
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
@@ -73,7 +63,7 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   void Show(DisplayReason reason);
 
   // Called by tests.
-  const std::vector<std::unique_ptr<SendTabToSelfBubbleDeviceButton>>&
+  const std::vector<SendTabToSelfBubbleDeviceButton*>&
   GetDeviceButtonsForTest();
 
  private:
@@ -88,7 +78,7 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   void CreateScrollView();
 
   // Populates the scroll view containing valid devices.
-  void PopulateScrollView(const std::vector<TargetDeviceInfo> devices);
+  void PopulateScrollView(const std::vector<TargetDeviceInfo>& devices);
 
   // Handles the action when a target device has been pressed.
   void DevicePressed(size_t index);
@@ -104,7 +94,7 @@ class SendTabToSelfBubbleViewImpl : public SendTabToSelfBubbleView,
   base::string16 bubble_title_;
 
   // Contains references to device buttons in the order they appear.
-  std::vector<std::unique_ptr<SendTabToSelfBubbleDeviceButton>> device_buttons_;
+  std::vector<SendTabToSelfBubbleDeviceButton*> device_buttons_;
 
   // ScrollView containing the list of device buttons.
   views::ScrollView* scroll_view_ = nullptr;

@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewStub;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -20,7 +21,7 @@ import javax.inject.Inject;
  */
 @ActivityScope
 public class CustomTabTopBarDelegate {
-    private final ChromeActivity mActivity;
+    private final ChromeActivity<?> mActivity;
     private ViewGroup mTopBarView;
     @Nullable
     private View mTopBarContentView;
@@ -28,7 +29,7 @@ public class CustomTabTopBarDelegate {
     private Integer mTopBarHeight;
 
     @Inject
-    public CustomTabTopBarDelegate(ChromeActivity activity) {
+    public CustomTabTopBarDelegate(ChromeActivity<?> activity) {
         mActivity = activity;
     }
 

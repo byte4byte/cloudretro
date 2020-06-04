@@ -17,14 +17,6 @@
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_predictor.pb.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker.pb.h"
 #include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker_config.pb.h"
-#include "content/public/browser/system_connector.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
 
 namespace app_list {
 namespace {
@@ -205,64 +197,74 @@ bool ConvertRecurrencePredictor(const Value* value,
 }  // namespace
 
 std::unique_ptr<RecurrencePredictor> MakePredictor(
-    const RecurrencePredictorConfigProto& config) {
+    const RecurrencePredictorConfigProto& config,
+    const std::string& model_identifier) {
   if (config.has_fake_predictor())
-    return std::make_unique<FakePredictor>(config.fake_predictor());
+    return std::make_unique<FakePredictor>(config.fake_predictor(),
+                                           model_identifier);
   if (config.has_default_predictor())
-    return std::make_unique<DefaultPredictor>(config.default_predictor());
+    return std::make_unique<DefaultPredictor>(config.default_predictor(),
+                                              model_identifier);
   if (config.has_conditional_frequency_predictor())
     return std::make_unique<ConditionalFrequencyPredictor>(
-        config.conditional_frequency_predictor());
+
+        config.conditional_frequency_predictor(), model_identifier);
   if (config.has_frecency_predictor())
-    return std::make_unique<FrecencyPredictor>(config.frecency_predictor());
+    return std::make_unique<FrecencyPredictor>(config.frecency_predictor(),
+                                               model_identifier);
   if (config.has_hour_bin_predictor())
-    return std::make_unique<HourBinPredictor>(config.hour_bin_predictor());
+    return std::make_unique<HourBinPredictor>(config.hour_bin_predictor(),
+                                              model_identifier);
   if (config.has_markov_predictor())
-    return std::make_unique<MarkovPredictor>(config.markov_predictor());
+    return std::make_unique<MarkovPredictor>(config.markov_predictor(),
+                                             model_identifier);
   if (config.has_exponential_weights_ensemble())
     return std::make_unique<ExponentialWeightsEnsemble>(
-        config.exponential_weights_ensemble());
+        config.exponential_weights_ensemble(), model_identifier);
 
-  LogConfigurationError(ConfigurationError::kInvalidPredictor);
+  LogInitializationStatus(model_identifier,
+                          InitializationStatus::kInvalidConfigPredictor);
   NOTREACHED();
   return nullptr;
 }
 
-JsonConfigConverter::JsonConfigConverter(service_manager::Connector* connector)
-    : connector_(connector) {
-  DCHECK(connector_);
+std::unique_ptr<JsonConfigConverter> JsonConfigConverter::Convert(
+    const std::string& json_string,
+    const std::string& model_identifier,
+    OnConfigLoadedCallback callback) {
+  // We don't use make_unique because the ctor is private.
+  std::unique_ptr<JsonConfigConverter> converter(new JsonConfigConverter());
+  converter->Start(json_string, model_identifier, std::move(callback));
+  return converter;
 }
-JsonConfigConverter::~JsonConfigConverter() {}
 
-void JsonConfigConverter::Convert(const std::string& json_string,
-                                  OnConfigLoadedCallback callback) {
-  GetJsonParser().Parse(
+JsonConfigConverter::JsonConfigConverter() = default;
+
+JsonConfigConverter::~JsonConfigConverter() = default;
+
+void JsonConfigConverter::Start(const std::string& json_string,
+                                const std::string& model_identifier,
+                                OnConfigLoadedCallback callback) {
+  data_decoder::DataDecoder::ParseJsonIsolated(
       json_string, base::BindOnce(&JsonConfigConverter::OnJsonParsed,
-                                  base::Unretained(this), std::move(callback)));
+                                  weak_ptr_factory_.GetWeakPtr(),
+                                  std::move(callback), model_identifier));
 }
 
 void JsonConfigConverter::OnJsonParsed(
     OnConfigLoadedCallback callback,
-    const base::Optional<base::Value> json_data,
-    const base::Optional<std::string>& error) {
+    const std::string& model_identifier,
+    data_decoder::DataDecoder::ValueOrError result) {
   RecurrenceRankerConfigProto proto;
-  if (json_data && ConvertRecurrenceRanker(&json_data.value(), &proto)) {
+  if (result.value && ConvertRecurrenceRanker(&result.value.value(), &proto)) {
+    LogJsonConfigConversionStatus(model_identifier,
+                                  JsonConfigConversionStatus::kSuccess);
     std::move(callback).Run(std::move(proto));
   } else {
+    LogJsonConfigConversionStatus(model_identifier,
+                                  JsonConfigConversionStatus::kFailure);
     std::move(callback).Run(base::nullopt);
   }
-}
-
-data_decoder::mojom::JsonParser& JsonConfigConverter::GetJsonParser() {
-  if (!json_parser_) {
-    connector_->BindInterface(data_decoder::mojom::kServiceName,
-                              mojo::MakeRequest(&json_parser_));
-    json_parser_.set_connection_error_handler(base::BindOnce(
-        [](JsonConfigConverter* const loader) { loader->json_parser_.reset(); },
-        base::Unretained(this)));
-  }
-
-  return *json_parser_;
 }
 
 }  // namespace app_list

@@ -4,10 +4,13 @@
 
 package org.chromium.chrome.browser.vr.util;
 
+import android.os.SystemClock;
+
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.permissions.PermissionDialogController;
 import org.chromium.chrome.browser.vr.ArConsentDialog;
 import org.chromium.chrome.browser.vr.VrConsentDialog;
+import org.chromium.components.permissions.PermissionDialogController;
+import org.chromium.content_public.browser.ContentFeatureList;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -27,6 +30,19 @@ public class PermissionUtils {
         CriteriaHelper.pollUiThread(() -> {
             return PermissionDialogController.getInstance().isDialogShownForTest();
         }, "Permission prompt did not appear in allotted time");
+    }
+
+    /**
+     * Blocks until the consent prompt is dismissed.
+     */
+    public static void waitForPermissionPromptDismissal() {
+        CriteriaHelper.pollUiThread(
+                ()
+                        -> {
+                    return !PermissionDialogController.getInstance().isDialogShownForTest();
+                },
+                "Consent prompt did not get dismissed in allotted time",
+                CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL, DIALOG_POLLING_INTERVAL_MS);
     }
 
     /**
@@ -53,6 +69,11 @@ public class PermissionUtils {
      * Blocks until the session consent prompt appears.
      */
     public static void waitForConsentPrompt(ChromeActivity activity) {
+        if (ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API)) {
+            waitForPermissionPrompt();
+            return;
+        }
+
         CriteriaHelper.pollUiThread(()
                                             -> { return isConsentDialogShown(activity); },
                 "Consent prompt did not appear in allotted time",
@@ -63,16 +84,29 @@ public class PermissionUtils {
      * Blocks until the consent prompt is dismissed.
      */
     public static void waitForConsentPromptDismissal(ChromeActivity activity) {
+        if (ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API)) {
+            waitForPermissionPromptDismissal();
+            return;
+        }
+
         CriteriaHelper.pollUiThread(()
                                             -> { return !isConsentDialogShown(activity); },
                 "Consent prompt did not get dismissed in allotted time",
                 CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL, DIALOG_POLLING_INTERVAL_MS);
+        // For some reason, the prompt can be dismissed, but we won't be able to show a new one for
+        // a short period of time (animations?), so wait a little longer to avoid that.
+        SystemClock.sleep(500);
     }
 
     /**
      * Accepts the currently displayed session consent prompt.
      */
     public static void acceptConsentPrompt(ChromeActivity activity) {
+        if (ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API)) {
+            acceptPermissionPrompt();
+            return;
+        }
+
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             clickConsentDialogButton(activity, ModalDialogProperties.ButtonType.POSITIVE);
         });
@@ -82,6 +116,11 @@ public class PermissionUtils {
      * Declines the currently displayed session consent prompt.
      */
     public static void declineConsentPrompt(ChromeActivity activity) {
+        if (ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API)) {
+            denyPermissionPrompt();
+            return;
+        }
+
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             clickConsentDialogButton(activity, ModalDialogProperties.ButtonType.NEGATIVE);
         });
@@ -91,6 +130,10 @@ public class PermissionUtils {
      * Helper function to check if the consent dialog is being shown.
      */
     public static boolean isConsentDialogShown(ChromeActivity activity) {
+        if (ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API)) {
+            return PermissionDialogController.getInstance().isDialogShownForTest();
+        }
+
         ModalDialogManager manager = activity.getModalDialogManager();
         PropertyModel model = manager.getCurrentDialogForTest();
         if (model == null) return false;
@@ -101,7 +144,9 @@ public class PermissionUtils {
     /**
      * Helper function to click a button in the consent dialog.
      */
-    public static void clickConsentDialogButton(ChromeActivity activity, int buttonType) {
+    private static void clickConsentDialogButton(ChromeActivity activity, int buttonType) {
+        assert (!ContentFeatureList.isEnabled(ContentFeatureList.WEBXR_PERMISSIONS_API));
+
         ModalDialogManager manager = activity.getModalDialogManager();
         PropertyModel model = manager.getCurrentDialogForTest();
         ModalDialogProperties.Controller dialog =

@@ -25,14 +25,25 @@ int CdmContext::GetCdmId() const {
   return kInvalidCdmId;
 }
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-CdmProxyContext* CdmContext::GetCdmProxyContext() {
-  return nullptr;
+bool CdmContext::RequiresMediaFoundationRenderer() {
+  return false;
 }
-#endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)
+
+#if defined(OS_WIN)
+bool CdmContext::GetMediaFoundationCdmProxy(
+    GetMediaFoundationCdmProxyCB get_mf_cdm_proxy_cb) {
+  return false;
+}
+#endif
 
 #if defined(OS_ANDROID)
 MediaCryptoContext* CdmContext::GetMediaCryptoContext() {
+  return nullptr;
+}
+#endif
+
+#if defined(OS_FUCHSIA)
+FuchsiaCdmContext* CdmContext::GetFuchsiaCdmContext() {
   return nullptr;
 }
 #endif

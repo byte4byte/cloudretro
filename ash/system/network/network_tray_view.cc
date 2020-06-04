@@ -12,6 +12,8 @@
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/network/network_icon.h"
 #include "ash/system/network/network_icon_animation.h"
+#include "ash/system/network/tray_network_state_model.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/views/controls/image_view.h"
 
@@ -34,6 +36,7 @@ network_icon::IconType GetIconType() {
 NetworkTrayView::NetworkTrayView(Shelf* shelf, ActiveNetworkIcon::Type type)
     : TrayItemView(shelf), type_(type) {
   Shell::Get()->system_tray_model()->network_state_model()->AddObserver(this);
+  Shell::Get()->session_controller()->AddObserver(this);
   CreateImageView();
   UpdateNetworkStateHandlerIcon();
   UpdateConnectionStatus(true /* notify_a11y */);
@@ -43,6 +46,7 @@ NetworkTrayView::~NetworkTrayView() {
   network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   Shell::Get()->system_tray_model()->network_state_model()->RemoveObserver(
       this);
+  Shell::Get()->session_controller()->RemoveObserver(this);
 }
 
 const char* NetworkTrayView::GetClassName() const {
@@ -52,7 +56,10 @@ const char* NetworkTrayView::GetClassName() const {
 void NetworkTrayView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetName(accessible_name_);
   node_data->SetDescription(accessible_description_);
-  node_data->role = ax::mojom::Role::kButton;
+}
+
+base::string16 NetworkTrayView::GetAccessibleNameString() const {
+  return tooltip_;
 }
 
 views::View* NetworkTrayView::GetTooltipHandlerForPoint(

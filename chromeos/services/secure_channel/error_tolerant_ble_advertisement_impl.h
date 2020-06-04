@@ -28,13 +28,18 @@ class ErrorTolerantBleAdvertisementImpl
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<ErrorTolerantBleAdvertisement> BuildInstance(
+    static std::unique_ptr<ErrorTolerantBleAdvertisement> Create(
         const DeviceIdPair& device_id_pair,
         std::unique_ptr<DataWithTimestamp> advertisement_data,
         BleSynchronizerBase* ble_synchronizer);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<ErrorTolerantBleAdvertisement> CreateInstance(
+        const DeviceIdPair& device_id_pair,
+        std::unique_ptr<DataWithTimestamp> advertisement_data,
+        BleSynchronizerBase* ble_synchronizer) = 0;
 
    private:
     static Factory* test_factory_;
@@ -90,7 +95,8 @@ class ErrorTolerantBleAdvertisementImpl
 
   base::Closure stop_callback_;
 
-  base::WeakPtrFactory<ErrorTolerantBleAdvertisementImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<ErrorTolerantBleAdvertisementImpl> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ErrorTolerantBleAdvertisementImpl);
 };

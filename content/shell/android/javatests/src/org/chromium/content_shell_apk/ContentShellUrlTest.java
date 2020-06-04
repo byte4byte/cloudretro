@@ -28,13 +28,13 @@ public class ContentShellUrlTest {
     @Test
     @SmallTest
     @Feature({"Main"})
-    public void testBaseStartup() throws Exception {
+    public void testBaseStartup() {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(URL);
 
         // Make sure the activity was created as expected.
         Assert.assertNotNull(activity);
 
         // Make sure that the URL is set as expected.
-        Assert.assertEquals(URL, activity.getActiveShell().getWebContents().getVisibleUrl());
+        Assert.assertEquals(URL, activity.getActiveShell().getWebContents().getVisibleUrlString());
     }
 }

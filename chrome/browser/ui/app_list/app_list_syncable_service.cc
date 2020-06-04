@@ -16,25 +16,23 @@
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
-#include "chrome/browser/chromeos/crostini/crostini_util.h"
+#include "chrome/browser/chromeos/crostini/crostini_features.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
+#include "chrome/browser/chromeos/web_applications/default_web_app_ids.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/browser/ui/app_list/app_list_model_updater.h"
-#include "chrome/browser/ui/app_list/app_service_app_model_builder.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_item.h"
+#include "chrome/browser/ui/app_list/app_service/app_service_app_model_builder.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_model_builder.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_item.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_model_updater.h"
-#include "chrome/browser/ui/app_list/crostini/crostini_app_model_builder.h"
 #include "chrome/browser/ui/app_list/extension_app_item.h"
-#include "chrome/browser/ui/app_list/extension_app_model_builder.h"
-#include "chrome/browser/ui/app_list/internal_app/internal_app_model_builder.h"
 #include "chrome/browser/ui/app_list/page_break_app_item.h"
 #include "chrome/browser/ui/app_list/page_break_constants.h"
 #include "chrome/common/chrome_features.h"
@@ -42,13 +40,14 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/services/app_service/public/cpp/app_service_proxy.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_data.h"
-#include "components/sync/model/sync_merge_result.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
@@ -91,12 +90,9 @@ syncer::SyncData GetSyncDataFromSyncItem(
 
 bool AppIsDefault(Profile* profile, const std::string& id) {
   // Querying the extension system is legacy logic from the time that we only
-  // had extension apps. The App Service is the canonical source of truth, when
-  // it is enabled, but we are not there yet (crbug.com/826982).
+  // had extension apps.
   if (extensions::ExtensionPrefs::Get(profile)->WasInstalledByDefault(id))
     return true;
-  if (!base::FeatureList::IsEnabled(features::kAppServiceAsh))
-    return false;
 
   bool result = false;
   apps::AppServiceProxyFactory::GetForProfile(profile)
@@ -108,12 +104,6 @@ bool AppIsDefault(Profile* profile, const std::string& id) {
 }
 
 void SetAppIsDefaultForTest(Profile* profile, const std::string& id) {
-  if (!base::FeatureList::IsEnabled(features::kAppServiceAsh)) {
-    extensions::ExtensionPrefs::Get(profile)->UpdateExtensionPref(
-        id, "was_installed_by_default", std::make_unique<base::Value>(true));
-    return;
-  }
-
   apps::mojom::AppPtr delta = apps::mojom::App::New();
   delta->app_type = apps::mojom::AppType::kExtension;
   delta->app_id = id;
@@ -127,11 +117,6 @@ void SetAppIsDefaultForTest(Profile* profile, const std::string& id) {
       .OnApps(std::move(deltas));
 }
 
-bool AppIsDefaultForExtensionService(extensions::ExtensionService* service,
-                                     const std::string& id) {
-  return service && AppIsDefault(service->profile(), id);
-}
-
 bool IsUnRemovableDefaultApp(const std::string& id) {
   return id == extension_misc::kChromeAppId ||
          id == extensions::kWebStoreAppId ||
@@ -140,8 +125,9 @@ bool IsUnRemovableDefaultApp(const std::string& id) {
 }
 
 void UninstallExtension(extensions::ExtensionService* service,
+                        extensions::ExtensionRegistry* registry,
                         const std::string& id) {
-  if (service && service->GetInstalledExtension(id)) {
+  if (service && registry->GetInstalledExtension(id)) {
     service->UninstallExtension(id, extensions::UNINSTALL_REASON_SYNC,
                                 nullptr /* error */);
   }
@@ -201,6 +187,11 @@ bool IsTopLevelAppItem(const AppListSyncableService::SyncItem& sync_item) {
 // Returns true if the sync item is a page break item.
 bool IsPageBreakItem(const AppListSyncableService::SyncItem& sync_item) {
   return sync_item.item_type == sync_pb::AppListSpecifics::TYPE_PAGE_BREAK;
+}
+
+// Returns true if the app is Settings app
+bool IsOsSettingsApp(const std::string& app_id) {
+  return app_id == chromeos::default_web_apps::kOsSettingsAppId;
 }
 
 }  // namespace
@@ -270,12 +261,6 @@ class AppListSyncableService::ModelUpdaterObserver
     if (item->is_folder())
       return;
 
-    if (item->GetItemType() == ArcAppItem::kItemType) {
-      // Don't sync remove changes coming as result of disabling ARC.
-      if (!arc::IsArcPlayStoreEnabledForProfile(owner_->profile()))
-        return;
-    }
-
     owner_->RemoveSyncItem(item->id());
   }
 
@@ -316,36 +301,18 @@ void AppListSyncableService::SetAppIsDefaultForTest(Profile* profile,
   app_list::SetAppIsDefaultForTest(profile, id);
 }
 
-AppListSyncableService::AppListSyncableService(
-    Profile* profile,
-    extensions::ExtensionSystem* extension_system)
+AppListSyncableService::AppListSyncableService(Profile* profile)
     : profile_(profile),
-      extension_system_(extension_system),
+      extension_system_(extensions::ExtensionSystem::Get(profile)),
+      extension_registry_(extensions::ExtensionRegistry::Get(profile)),
       initial_sync_data_processed_(false),
-      first_app_list_sync_(true),
-      is_app_service_enabled_(
-          base::FeatureList::IsEnabled(features::kAppServiceAsh)),
-      weak_ptr_factory_(this) {
-  // This log message helps us gather better manual bug reports, as we
-  // gradually roll out enabling the AppList + AppService integration across
-  // Chrome OS' various release channels.
-  //
-  // Asking users to inspect chrome://flags/#app-service-ash isn't enough, as
-  // that UI can display just "Default" without detailing whether the default
-  // is to enable or disable. Instead, we can ask them to inspect
-  // file:///var/log/chrome/chrome for this log message.
-  //
-  // TODO(crbug.com/826982): remove this log message once the roll out is
-  // complete, hopefully by mid-2019.
-  VLOG(1) << "AppList + AppService integration: "
-          << (is_app_service_enabled_ ? "enabled" : "disabled");
-
+      first_app_list_sync_(true) {
   if (g_model_updater_factory_callback_for_test_)
     model_updater_ = g_model_updater_factory_callback_for_test_->Run();
   else
     model_updater_ = std::make_unique<ChromeAppListModelUpdater>(profile);
 
-  if (!extension_system) {
+  if (!extension_system_) {
     LOG(ERROR) << "AppListSyncableService created with no ExtensionSystem";
     return;
   }
@@ -416,9 +383,7 @@ void AppListSyncableService::InitFromLocalStorage() {
 }
 
 bool AppListSyncableService::IsInitialized() const {
-  if (is_app_service_enabled_)
-    return app_service_apps_builder_.get();
-  return ext_apps_builder_.get();
+  return app_service_apps_builder_.get();
 }
 
 bool AppListSyncableService::IsSyncing() const {
@@ -432,39 +397,32 @@ void AppListSyncableService::BuildModel() {
   AppListClientImpl* client = AppListClientImpl::GetInstance();
   AppListControllerDelegate* controller = client;
 
-  if (is_app_service_enabled_) {
-    app_service_apps_builder_ =
-        std::make_unique<AppServiceAppModelBuilder>(controller);
-  } else {
-    ext_apps_builder_ = std::make_unique<ExtensionAppModelBuilder>(controller);
-    if (arc::IsArcAllowedForProfile(profile_))
-      arc_apps_builder_ = std::make_unique<ArcAppModelBuilder>(controller);
-    if (crostini::IsCrostiniUIAllowedForProfile(profile_)) {
-      crostini_apps_builder_ =
-          std::make_unique<CrostiniAppModelBuilder>(controller);
-    }
-    internal_apps_builder_ =
-        std::make_unique<InternalAppModelBuilder>(controller);
-  }
+  app_service_apps_builder_ =
+      std::make_unique<AppServiceAppModelBuilder>(controller);
 
   DCHECK(profile_);
   SyncStarted();
 
-  if (is_app_service_enabled_) {
-    app_service_apps_builder_->Initialize(this, profile_, model_updater_.get());
-  } else {
-    ext_apps_builder_->Initialize(this, profile_, model_updater_.get());
-    if (arc_apps_builder_.get())
-      arc_apps_builder_->Initialize(this, profile_, model_updater_.get());
-    if (crostini_apps_builder_.get())
-      crostini_apps_builder_->Initialize(this, profile_, model_updater_.get());
-    internal_apps_builder_->Initialize(this, profile_, model_updater_.get());
-  }
+  app_service_apps_builder_->Initialize(this, profile_, model_updater_.get());
 
   HandleUpdateFinished();
 
   if (wait_until_ready_to_sync_cb_)
     std::move(wait_until_ready_to_sync_cb_).Run();
+
+  // Install default page brakes for tablet form factor devices here as
+  // these devices do not have app list sync turned on.
+  if (chromeos::switches::IsTabletFormFactor() && profile_->IsNewProfile()) {
+    DCHECK(!ProfileSyncServiceFactory::GetForProfile(profile_)
+                ->GetActiveDataTypes()
+                .Has(syncer::APP_LIST));
+    // Create call back to create the default page break items at later time so
+    // that default page break items are not removed by
+    // |PruneRedundantPageBreakItems|
+    install_default_page_breaks_ =
+        base::BindOnce(&AppListSyncableService::InstallDefaultPageBreaks,
+                       weak_ptr_factory_.GetWeakPtr());
+  }
 }
 
 void AppListSyncableService::AddObserverAndStart(Observer* observer) {
@@ -592,7 +550,14 @@ void AppListSyncableService::AddItem(
     model_updater_->AddItemToFolder(std::move(app_item), folder_id);
   }
 
+  // Calculate this early since |sync_item| could be deleted in
+  // PruneRedundantPageBreakItems.
+  bool run_install_default_page_breaks =
+      install_default_page_breaks_ && IsOsSettingsApp(sync_item->item_id);
   PruneRedundantPageBreakItems();
+
+  if (run_install_default_page_breaks)
+    std::move(install_default_page_breaks_).Run();
 }
 
 AppListSyncableService::SyncItem* AppListSyncableService::FindOrAddSyncItem(
@@ -695,11 +660,11 @@ bool AppListSyncableService::RemoveDefaultApp(const ChromeAppListItem* item,
   // If there is an existing REMOVE_DEFAULT_APP entry, and the app is
   // installed as a Default app, uninstall the app instead of adding it.
   if (sync_item->item_type == sync_pb::AppListSpecifics::TYPE_APP &&
-      AppIsDefaultForExtensionService(extension_system_->extension_service(),
-                                      item->id())) {
+      AppIsDefault(profile_, item->id())) {
     VLOG(2) << this
             << ": HandleDefaultApp: Uninstall: " << sync_item->ToString();
-    UninstallExtension(extension_system_->extension_service(), item->id());
+    UninstallExtension(extension_system_->extension_service(),
+                       extension_registry_, item->id());
     return true;
   }
 
@@ -708,6 +673,21 @@ bool AppListSyncableService::RemoveDefaultApp(const ChromeAppListItem* item,
   // the user), so delete the REMOVE_DEFAULT_APP.
   DeleteSyncItem(sync_item->item_id);
   return false;
+}
+
+bool AppListSyncableService::InterceptDeleteDefaultApp(SyncItem* sync_item) {
+  if (sync_item->item_type != sync_pb::AppListSpecifics::TYPE_APP ||
+      !AppIsDefault(profile_, sync_item->item_id)) {
+    return false;
+  }
+
+  // This is a Default app; update the entry to a REMOVE_DEFAULT entry.
+  // This will overwrite any existing entry for the item.
+  VLOG(2) << this << " -> SYNC UPDATE: REMOVE_DEFAULT: " << sync_item->item_id;
+  sync_item->item_type = sync_pb::AppListSpecifics::TYPE_REMOVE_DEFAULT_APP;
+  UpdateSyncItemInLocalStorage(profile_, sync_item);
+  SendSyncChange(sync_item, SyncChange::ACTION_UPDATE);
+  return true;
 }
 
 void AppListSyncableService::DeleteSyncItem(const std::string& item_id) {
@@ -783,18 +763,9 @@ void AppListSyncableService::RemoveSyncItem(const std::string& id) {
     return;
   }
 
-  if (type == sync_pb::AppListSpecifics::TYPE_APP &&
-      AppIsDefaultForExtensionService(extension_system_->extension_service(),
-                                      id)) {
-    // This is a Default app; update the entry to a REMOVE_DEFAULT entry. This
-    // will overwrite any existing entry for the item.
-    VLOG(2) << this
-            << " -> SYNC UPDATE: REMOVE_DEFAULT: " << sync_item->item_id;
-    sync_item->item_type = sync_pb::AppListSpecifics::TYPE_REMOVE_DEFAULT_APP;
-    UpdateSyncItemInLocalStorage(profile_, sync_item);
-    SendSyncChange(sync_item, SyncChange::ACTION_UPDATE);
+  // Check if we're asked to remove a default-installed app.
+  if (InterceptDeleteDefaultApp(sync_item))
     return;
-  }
 
   DeleteSyncItem(iter->first);
 }
@@ -864,7 +835,8 @@ void AppListSyncableService::WaitUntilReadyToSync(base::OnceClosure done) {
   }
 }
 
-syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
+base::Optional<syncer::ModelError>
+AppListSyncableService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
     std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
@@ -893,8 +865,6 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
   sync_processor_ = std::move(sync_processor);
   sync_error_handler_ = std::move(error_handler);
 
-  syncer::SyncMergeResult result = syncer::SyncMergeResult(type);
-  result.set_num_items_before_association(sync_items_.size());
   VLOG(2) << this << ": MergeDataAndStartSyncing: " << initial_sync_data.size();
 
   // Copy all sync items to |unsynced_items|.
@@ -904,7 +874,6 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
   }
 
   // Create SyncItem entries for initial_sync_data.
-  size_t new_items = 0, updated_items = 0;
   for (syncer::SyncDataList::const_iterator iter = initial_sync_data.begin();
        iter != initial_sync_data.end(); ++iter) {
     const syncer::SyncData& data = *iter;
@@ -913,28 +882,19 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
     DVLOG(2) << this << "  Initial Sync Item: " << item_id
              << " Type: " << specifics.item_type();
     DCHECK_EQ(syncer::APP_LIST, data.GetDataType());
-    if (ProcessSyncItemSpecifics(specifics))
-      ++new_items;
-    else
-      ++updated_items;
+    ProcessSyncItemSpecifics(specifics);
     if (specifics.item_type() != sync_pb::AppListSpecifics::TYPE_FOLDER &&
         !IsUnRemovableDefaultApp(item_id) && !AppIsOem(item_id) &&
-        !AppIsDefaultForExtensionService(extension_system_->extension_service(),
-                                         item_id)) {
+        !AppIsDefault(profile_, item_id)) {
       VLOG(2) << "Syncing non-default item: " << item_id;
       first_app_list_sync_ = false;
     }
     unsynced_items.erase(item_id);
   }
-  result.set_num_items_after_association(sync_items_.size());
-  result.set_num_items_added(new_items);
-  result.set_num_items_deleted(0);
-  result.set_num_items_modified(updated_items);
-
   // Initial sync data has been processed, it is safe now to add new sync items.
   initial_sync_data_processed_ = true;
 
-  // Send unsynced items. Does not affect |result|.
+  // Send unsynced items.
   syncer::SyncChangeList change_list;
   for (std::set<std::string>::iterator iter = unsynced_items.begin();
        iter != unsynced_items.end(); ++iter) {
@@ -980,7 +940,12 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
 
   HandleUpdateFinished();
 
-  return result;
+  // Check if already signaled since unit tests make multiple calls.
+  if (!on_initialized_.is_signaled()) {
+    on_initialized_.Signal();
+  }
+
+  return base::nullopt;
 }
 
 void AppListSyncableService::StopSyncing(syncer::ModelType type) {
@@ -990,10 +955,7 @@ void AppListSyncableService::StopSyncing(syncer::ModelType type) {
   sync_error_handler_.reset();
 }
 
-syncer::SyncDataList AppListSyncableService::GetAllSyncData(
-    syncer::ModelType type) const {
-  DCHECK_EQ(syncer::APP_LIST, type);
-
+syncer::SyncDataList AppListSyncableService::GetAllSyncDataForTesting() const {
   VLOG(2) << this << ": GetAllSyncData: " << sync_items_.size();
   syncer::SyncDataList list;
   for (auto iter = sync_items_.begin(); iter != sync_items_.end(); ++iter) {
@@ -1003,13 +965,12 @@ syncer::SyncDataList AppListSyncableService::GetAllSyncData(
   return list;
 }
 
-syncer::SyncError AppListSyncableService::ProcessSyncChanges(
+base::Optional<syncer::ModelError> AppListSyncableService::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   if (!sync_processor_.get()) {
-    return syncer::SyncError(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
-                             "App List syncable service is not started.",
-                             syncer::APP_LIST);
+    return syncer::ModelError(FROM_HERE,
+                              "App List syncable service is not started.");
   }
 
   HandleUpdateStarted();
@@ -1033,18 +994,11 @@ syncer::SyncError AppListSyncableService::ProcessSyncChanges(
 
   HandleUpdateFinished();
 
-  return syncer::SyncError();
+  return base::nullopt;
 }
 
 void AppListSyncableService::Shutdown() {
-  if (is_app_service_enabled_) {
-    app_service_apps_builder_.reset();
-    return;
-  }
-  internal_apps_builder_.reset();
-  crostini_apps_builder_.reset();
-  arc_apps_builder_.reset();
-  ext_apps_builder_.reset();
+  app_service_apps_builder_.reset();
 }
 
 // AppListSyncableService private
@@ -1101,7 +1055,7 @@ void AppListSyncableService::ProcessNewSyncItem(SyncItem* sync_item) {
     case sync_pb::AppListSpecifics::TYPE_REMOVE_DEFAULT_APP: {
       VLOG(2) << this << ": Uninstall: " << sync_item->ToString();
       UninstallExtension(extension_system_->extension_service(),
-                         sync_item->item_id);
+                         extension_registry_, sync_item->item_id);
       return;
     }
     case sync_pb::AppListSpecifics::TYPE_FOLDER: {
@@ -1113,9 +1067,7 @@ void AppListSyncableService::ProcessNewSyncItem(SyncItem* sync_item) {
           false);                 // It's a folder itself.
       return;
     }
-    case sync_pb::AppListSpecifics::TYPE_URL: {
-      // TODO(stevenjb): Implement
-      LOG(WARNING) << "TYPE_URL not supported";
+    case sync_pb::AppListSpecifics::TYPE_OBSOLETE_URL: {
       return;
     }
     case sync_pb::AppListSpecifics::TYPE_PAGE_BREAK: {
@@ -1188,10 +1140,7 @@ void AppListSyncableService::SendSyncChange(
 
 AppListSyncableService::SyncItem* AppListSyncableService::FindSyncItem(
     const std::string& item_id) {
-  auto iter = sync_items_.find(item_id);
-  if (iter == sync_items_.end())
-    return NULL;
-  return iter->second.get();
+  return const_cast<SyncItem*>(GetSyncItem(item_id));
 }
 
 AppListSyncableService::SyncItem* AppListSyncableService::CreateSyncItem(
@@ -1223,6 +1172,11 @@ void AppListSyncableService::DeleteSyncItemSpecifics(
   auto iter = sync_items_.find(item_id);
   if (iter == sync_items_.end())
     return;
+
+  // Check if we're asked to remove a default-installed app.
+  if (InterceptDeleteDefaultApp(iter->second.get()))
+    return;
+
   sync_pb::AppListSpecifics::AppListItemType item_type =
       iter->second->item_type;
   VLOG(2) << this << " <- SYNC DELETE: " << iter->second->ToString();
@@ -1262,7 +1216,8 @@ bool AppListSyncableService::AppIsOem(const std::string& id) {
   if (!extension_system_->extension_service())
     return false;
   const extensions::Extension* extension =
-      extension_system_->extension_service()->GetExtensionById(id, true);
+      extension_registry_->GetExtensionById(
+          id, extensions::ExtensionRegistry::EVERYTHING);
   return extension && extension->was_installed_by_oem();
 }
 
@@ -1342,8 +1297,8 @@ void AppListSyncableService::PruneRedundantPageBreakItems() {
 }
 
 void AppListSyncableService::InstallDefaultPageBreaks() {
-  for (size_t i = 0; i < app_list::kDefaultPageBreakAppIdsLength; ++i) {
-    auto* const id = app_list::kDefaultPageBreakAppIds[i];
+  for (size_t i = 0; i < kDefaultPageBreakAppIdsLength; ++i) {
+    auto* const id = kDefaultPageBreakAppIds[i];
     auto* sync_item = GetSyncItem(id);
     if (sync_item) {
       // The user may have cleared their sync from

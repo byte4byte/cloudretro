@@ -7,7 +7,8 @@
 #include <algorithm>
 #include <string>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/resource_coordinator/tab_ranker/tab_features.h"
 #include "chrome/browser/resource_coordinator/tab_ranker/window_features.h"
 #include "chrome/browser/resource_coordinator/utils.h"
+#include "chrome/browser/tab_contents/form_interaction_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -29,10 +31,9 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/page_importance_signals.h"
 #include "net/base/mime_util.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
-#include "third_party/blink/public/platform/web_sudden_termination_disabler_type.h"
+#include "third_party/blink/public/mojom/frame/sudden_termination_disabler_type.mojom.h"
 #include "url/gurl.h"
 
 using metrics::TabMetricsEvent;
@@ -90,9 +91,10 @@ void PopulateTabFeaturesFromWebContents(content::WebContents* web_contents,
                                         tab_ranker::TabFeatures* tab_features) {
   tab_features->has_before_unload_handler =
       web_contents->GetMainFrame()->GetSuddenTerminationDisablerState(
-          blink::kBeforeUnloadHandler);
+          blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
   tab_features->has_form_entry =
-      web_contents->GetPageImportanceSignals().had_form_interaction;
+      FormInteractionTabHelper::FromWebContents(web_contents)
+          ->had_form_interaction();
   tab_features->host = web_contents->GetLastCommittedURL().host();
   tab_features->navigation_entry_count =
       web_contents->GetController().GetEntryCount();
@@ -212,9 +214,7 @@ void TabMetricsLogger::LogForegroundedOrClosedMetrics(
   ukm::builders::TabManager_Background_ForegroundedOrClosed(ukm_source_id)
       .SetLabelId(metrics.label_id)
       .SetIsForegrounded(metrics.is_foregrounded)
-      .SetMRUIndex(metrics.mru_index)
       .SetTimeFromBackgrounded(metrics.time_from_backgrounded)
-      .SetTotalTabCount(metrics.total_tab_count)
       .SetIsDiscarded(metrics.is_discarded)
       .Record(ukm::UkmRecorder::Get());
 }
@@ -235,11 +235,18 @@ tab_ranker::WindowFeatures TabMetricsLogger::CreateWindowFeatures(
 
   WindowMetricsEvent::Type window_type = WindowMetricsEvent::TYPE_UNKNOWN;
   switch (browser->type()) {
-    case Browser::TYPE_TABBED:
+    case Browser::TYPE_NORMAL:
       window_type = WindowMetricsEvent::TYPE_TABBED;
       break;
     case Browser::TYPE_POPUP:
       window_type = WindowMetricsEvent::TYPE_POPUP;
+      break;
+    case Browser::TYPE_APP:
+    case Browser::TYPE_APP_POPUP:
+      window_type = WindowMetricsEvent::TYPE_APP;
+      break;
+    case Browser::TYPE_DEVTOOLS:
+      window_type = WindowMetricsEvent::TYPE_APP;
       break;
     default:
       NOTREACHED();

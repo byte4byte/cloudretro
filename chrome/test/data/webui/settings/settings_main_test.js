@@ -2,7 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings_main_page', function() {
+// clang-format off
+import {CrSettingsPrefs, pageVisibility, Router, routes, SearchRequest, setSearchManagerForTesting} from 'chrome://settings/settings.js';
+import {eventToPromise, whenAttributeIs} from 'chrome://test/test_util.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+// clang-format on
+
   /**
    * Extending TestBrowserProxy even though SearchManager is not a browser proxy
    * itself. Essentially TestBrowserProxy can act as a "proxy" for any external
@@ -20,7 +27,7 @@ cr.define('settings_main_page', function() {
       /** @private {boolean} */
       this.matchesFound_ = true;
 
-      /** @private {?settings.SearchRequest} */
+      /** @private {?SearchRequest} */
       this.searchRequest_ = null;
     }
 
@@ -36,7 +43,7 @@ cr.define('settings_main_page', function() {
       this.methodCalled('search', text);
 
       if (this.searchRequest_ == null || !this.searchRequest_.isSame(text)) {
-        this.searchRequest_ = new settings.SearchRequest(text);
+        this.searchRequest_ = new SearchRequest(text);
         this.searchRequest_.finished = true;
         this.searchRequest_.updateMatches(this.matchesFound_);
         this.searchRequest_.resolver.resolve(this.searchRequest_);
@@ -60,14 +67,14 @@ cr.define('settings_main_page', function() {
     let settingsMain = null;
 
     setup(function() {
-      settings.navigateTo(settings.routes.BASIC);
+      Router.getInstance().navigateTo(routes.BASIC);
       searchManager = new TestSearchManager();
-      settings.setSearchManagerForTesting(searchManager);
+      setSearchManagerForTesting(searchManager);
       PolymerTest.clearBody();
       settingsMain = document.createElement('settings-main');
       settingsMain.prefs = settingsPrefs.prefs;
       settingsMain.toolbarSpinnerActive = false;
-      settingsMain.pageVisibility = settings.pageVisibility;
+      settingsMain.pageVisibility = pageVisibility;
       document.body.appendChild(settingsMain);
     });
 
@@ -76,7 +83,7 @@ cr.define('settings_main_page', function() {
     });
 
     test('searchContents() triggers SearchManager', function() {
-      Polymer.dom.flush();
+      flush();
 
       const expectedQuery1 = 'foo';
       const expectedQuery2 = 'bar';
@@ -116,7 +123,7 @@ cr.define('settings_main_page', function() {
     }
 
     test('managed header hides when searching', function() {
-      Polymer.dom.flush();
+      flush();
 
       assertTrue(showManagedHeader());
 
@@ -134,7 +141,7 @@ cr.define('settings_main_page', function() {
     });
 
     test('managed header hides when showing subpage', function() {
-      Polymer.dom.flush();
+      flush();
 
       assertTrue(showManagedHeader());
 
@@ -145,10 +152,10 @@ cr.define('settings_main_page', function() {
     });
 
     test('managed header hides when showing about page', function() {
-      Polymer.dom.flush();
+      flush();
 
       assertTrue(showManagedHeader());
-      settings.navigateTo(settings.routes.ABOUT);
+      Router.getInstance().navigateTo(routes.ABOUT);
 
       assertFalse(showManagedHeader());
     });
@@ -177,7 +184,7 @@ cr.define('settings_main_page', function() {
     }
 
     test('no results page shows and hides', function() {
-      Polymer.dom.flush();
+      flush();
       const noSearchResults = settingsMain.$.noSearchResults;
       assertTrue(!!noSearchResults);
       assertTrue(noSearchResults.hidden);
@@ -201,7 +208,7 @@ cr.define('settings_main_page', function() {
     // Ensure that when the user clears the search box, the "no results" page
     // is hidden and the "advanced page toggle" is visible again.
     test('no results page hides on clear', function() {
-      Polymer.dom.flush();
+      flush();
       const noSearchResults = settingsMain.$.noSearchResults;
       assertTrue(!!noSearchResults);
       assertTrue(noSearchResults.hidden);
@@ -211,7 +218,7 @@ cr.define('settings_main_page', function() {
       searchManager.setMatchesFound(false);
       // Clearing the search box is effectively a search for the empty string.
       return settingsMain.searchContents('').then(function() {
-        Polymer.dom.flush();
+        flush();
         assertTrue(noSearchResults.hidden);
         assertToggleContainerVisible(true);
       });
@@ -224,7 +231,7 @@ cr.define('settings_main_page', function() {
      * @return {!Promise}
      */
     function assertPageVisibility(expectedBasic, expectedAdvanced) {
-      Polymer.dom.flush();
+      flush();
       const page = settingsMain.$$('settings-basic-page');
       assertEquals(
           expectedBasic, getComputedStyle(page.$$('#basicPage')).display);
@@ -257,16 +264,16 @@ cr.define('settings_main_page', function() {
           })
           .then(function() {
             // Imitate behavior of clearing search.
-            settings.navigateTo(settings.routes.BASIC);
-            Polymer.dom.flush();
+            Router.getInstance().navigateTo(routes.BASIC);
+            flush();
             return assertPageVisibility('block', expectedAdvanced);
           });
     }
 
     test('exiting search mode, advanced collapsed', function() {
       // Simulating searching while the advanced page is collapsed.
-      settingsMain.currentRouteChanged(settings.routes.BASIC);
-      Polymer.dom.flush();
+      settingsMain.currentRouteChanged(routes.BASIC);
+      flush();
       return assertAdvancedVisibilityAfterSearch('none');
     });
 
@@ -275,12 +282,12 @@ cr.define('settings_main_page', function() {
     // whose parent is the "advanced" page.
     test('exiting search mode, advanced expanded', function() {
       // Trigger basic page to be rendered once.
-      settings.navigateTo(settings.routes.APPEARANCE);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.APPEARANCE);
+      flush();
 
       // Navigate to an "advanced" subpage.
-      settings.navigateTo(settings.routes.SITE_SETTINGS);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.LANGUAGES);
+      flush();
       return assertAdvancedVisibilityAfterSearch('block');
     });
 
@@ -288,31 +295,32 @@ cr.define('settings_main_page', function() {
     // lands the user in a page where both basic and advanced sections are
     // visible, because the page is still in search mode.
     test('returning from subpage to search results', function() {
-      settings.navigateTo(settings.routes.BASIC);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.BASIC);
+      flush();
 
       searchManager.setMatchesFound(true);
       return settingsMain.searchContents('Query1').then(function() {
         // Simulate navigating into a subpage.
-        settings.navigateTo(settings.routes.SEARCH_ENGINES);
+        Router.getInstance().navigateTo(
+            routes.SEARCH_ENGINES);
         settingsMain.$$('settings-basic-page').fire('subpage-expand');
-        Polymer.dom.flush();
+        flush();
 
         // Simulate clicking the left arrow to go back to the search results.
-        settings.navigateTo(settings.routes.BASIC);
+        Router.getInstance().navigateTo(routes.BASIC);
         return assertPageVisibility('block', 'block');
       });
     });
 
     // TODO(michaelpg): Move these to a new test for settings-basic-page.
     test('can collapse advanced on advanced section route', function() {
-      settings.navigateTo(settings.routes.PRIVACY);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.LANGUAGES);
+      flush();
 
       const basicPage = settingsMain.$$('settings-basic-page');
       let advancedPage = null;
 
-      return test_util.eventToPromise('showing-section', settingsMain)
+      return eventToPromise('showing-section', settingsMain)
           .then(() => {
             return basicPage.$$('#advancedPageTemplate').get();
           })
@@ -322,8 +330,8 @@ cr.define('settings_main_page', function() {
           })
           .then(function() {
             const whenHidden =
-                test_util.whenAttributeIs(advancedPage, 'hidden', '');
-            test_util.eventToPromise('scroll-to-bottom', basicPage)
+                whenAttributeIs(advancedPage, 'hidden', '');
+            eventToPromise('scroll-to-bottom', basicPage)
                 .then(event => event.detail.callback());
 
             const advancedToggle =
@@ -338,41 +346,22 @@ cr.define('settings_main_page', function() {
     });
 
     test('navigating to a basic page does not collapse advanced', function() {
-      settings.navigateTo(settings.routes.PRIVACY);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.LANGUAGES);
+      flush();
 
       assertToggleContainerVisible(true);
 
-      settings.navigateTo(settings.routes.PEOPLE);
-      Polymer.dom.flush();
+      Router.getInstance().navigateTo(routes.PEOPLE);
+      flush();
 
       return assertPageVisibility('block', 'block');
     });
 
-    test('verify showChangePassword value', function() {
-      settings.navigateTo(settings.routes.BASIC);
-      Polymer.dom.flush();
-      const basicPage = settingsMain.$$('settings-basic-page');
-      assertTrue(!!basicPage);
-      assertFalse(basicPage.showChangePassword);
-      assertFalse(!!basicPage.$$('settings-change-password-page'));
-
-      cr.webUIListenerCallback('change-password-visibility', true);
-      Polymer.dom.flush();
-      assertTrue(basicPage.showChangePassword);
-      assertTrue(!!basicPage.$$('settings-change-password-page'));
-
-      cr.webUIListenerCallback('change-password-visibility', false);
-      Polymer.dom.flush();
-      assertFalse(basicPage.showChangePassword);
-      assertFalse(!!basicPage.$$('settings-change-password-page'));
-    });
-
     test('updates the title based on current route', function() {
-      settings.navigateTo(settings.routes.BASIC);
+      Router.getInstance().navigateTo(routes.BASIC);
       assertEquals(document.title, loadTimeData.getString('settings'));
 
-      settings.navigateTo(settings.routes.ABOUT);
+      Router.getInstance().navigateTo(routes.ABOUT);
       assertEquals(
           document.title,
           loadTimeData.getStringF(
@@ -380,4 +369,3 @@ cr.define('settings_main_page', function() {
               loadTimeData.getString('aboutPageTitle')));
     });
   });
-});

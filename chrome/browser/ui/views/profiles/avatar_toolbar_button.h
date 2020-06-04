@@ -5,100 +5,95 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_PROFILES_AVATAR_TOOLBAR_BUTTON_H_
 #define CHROME_BROWSER_UI_VIEWS_PROFILES_AVATAR_TOOLBAR_BUTTON_H_
 
+#include "base/feature_list.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "build/build_config.h"
-#include "chrome/browser/profiles/profile_attributes_storage.h"
-#include "chrome/browser/ui/avatar_button_error_controller.h"
-#include "chrome/browser/ui/avatar_button_error_controller_delegate.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
-#include "components/signin/public/identity_manager/identity_manager.h"
-#include "ui/base/material_design/material_design_controller_observer.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_icon_container_view.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/events/event.h"
 
+class AvatarToolbarButtonDelegate;
 class Browser;
 
 class AvatarToolbarButton : public ToolbarButton,
-                            public AvatarButtonErrorControllerDelegate,
-                            public BrowserListObserver,
-                            public ProfileAttributesStorage::Observer,
-                            public identity::IdentityManager::Observer,
-                            public ui::MaterialDesignControllerObserver {
+                            ToolbarIconContainerView::Observer {
  public:
+  // States of the button ordered in priority of getting displayed.
+  enum class State {
+    kIncognitoProfile,
+    kGuestSession,
+    kGenericProfile,
+    kAnimatedUserIdentity,
+    kSyncPaused,
+    kSyncError,
+    kPasswordsOnlySyncError,
+    kNormal
+  };
+
+  class Observer {
+   public:
+    virtual ~Observer() = default;
+
+    virtual void OnAvatarHighlightAnimationFinished() = 0;
+  };
+
+  // TODO(crbug.com/922525): Remove this constructor when this button always has
+  // ToolbarIconContainerView as a parent.
   explicit AvatarToolbarButton(Browser* browser);
+  AvatarToolbarButton(Browser* browser, ToolbarIconContainerView* parent);
   ~AvatarToolbarButton() override;
 
   void UpdateIcon();
   void UpdateText();
-  void SetSuppressAvatarButtonState(bool suppress_avatar_button_state);
+  void ShowAvatarHighlightAnimation();
+  bool IsParentHighlighted() const;
+
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+
+  void NotifyHighlightAnimationFinished();
+
+  // views::View:
+  const char* GetClassName() const override;
+
+  static const char kAvatarToolbarButtonClassName[];
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AvatarToolbarButtonTest,
                            HighlightMeetsMinimumContrast);
-  enum class SyncState { kNormal, kPaused, kError };
 
   // ToolbarButton:
   void NotifyClick(const ui::Event& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
+  void OnBlur() override;
   void OnThemeChanged() override;
-  void AddedToWidget() override;
 
-  // AvatarButtonErrorControllerDelegate:
-  void OnAvatarErrorChanged() override;
+  // ToolbarIconContainerView::Observer:
+  void OnHighlightChanged() override;
 
-  // BrowserListObserver:
-  void OnBrowserAdded(Browser* browser) override;
-  void OnBrowserRemoved(Browser* browser) override;
-
-  // ProfileAttributesStorage::Observer:
-  void OnProfileAdded(const base::FilePath& profile_path) override;
-  void OnProfileWasRemoved(const base::FilePath& profile_path,
-                           const base::string16& profile_name) override;
-  void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
-  void OnProfileHighResAvatarLoaded(
-      const base::FilePath& profile_path) override;
-  void OnProfileNameChanged(const base::FilePath& profile_path,
-                            const base::string16& old_profile_name) override;
-
-  // IdentityManager::Observer:
-  // Needed if the first sync promo account should be displayed.
-  void OnAccountsInCookieUpdated(
-      const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
-      const GoogleServiceAuthError& error) override;
-  void OnExtendedAccountInfoUpdated(const AccountInfo& info) override;
-  void OnExtendedAccountInfoRemoved(const AccountInfo& info) override;
-
-  // ui::MaterialDesignControllerObserver:
-  void OnTouchUiChanged() override;
-
-  bool IsIncognito() const;
-  bool IsIncognitoCounterActive() const;
-  bool ShouldShowGenericIcon() const;
   base::string16 GetAvatarTooltipText() const;
-  gfx::ImageSkia GetAvatarIcon() const;
-  gfx::Image GetIconImageFromProfile() const;
-  SyncState GetSyncState() const;
+  gfx::ImageSkia GetAvatarIcon(ButtonState state,
+                               const gfx::Image& profile_identity_image) const;
 
   void SetInsets();
 
+  void OnTouchUiChanged();
+
+  std::unique_ptr<AvatarToolbarButtonDelegate> delegate_;
+
   Browser* const browser_;
-  Profile* const profile_;
+  ToolbarIconContainerView* const parent_;
 
-  // Indicates if the avatar icon should show text and update highlight color
-  // when sync state is not normal.
-  bool suppress_avatar_button_state_ = false;
+  std::unique_ptr<ui::TouchUiController::Subscription> subscription_ =
+      ui::TouchUiController::Get()->RegisterCallback(
+          base::BindRepeating(&AvatarToolbarButton::SetInsets,
+                              base::Unretained(this)));
 
-#if !defined(OS_CHROMEOS)
-  AvatarButtonErrorController error_controller_;
-#endif  // !defined(OS_CHROMEOS)
-  ScopedObserver<BrowserList, BrowserListObserver> browser_list_observer_;
-  ScopedObserver<ProfileAttributesStorage, AvatarToolbarButton>
-      profile_observer_;
-  ScopedObserver<identity::IdentityManager, AvatarToolbarButton>
-      identity_manager_observer_;
-  ScopedObserver<ui::MaterialDesignController, AvatarToolbarButton>
-      md_observer_{this};
+  base::ObserverList<Observer>::Unchecked observer_list_;
+
+  base::WeakPtrFactory<AvatarToolbarButton> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AvatarToolbarButton);
 };

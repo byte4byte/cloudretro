@@ -10,16 +10,18 @@
 #include "base/scoped_observer.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#include "ios/web/common/features.h"
 #import "ios/web/js_messaging/crw_js_injector.h"
 #import "ios/web/navigation/crw_wk_navigation_states.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
 #include "ios/web/public/deprecated/url_verification_constants.h"
 #import "ios/web/public/web_client.h"
-#include "ios/web/public/web_state/web_state_observer.h"
+#include "ios/web/public/web_state_observer.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
 #import "ios/web/web_state/web_state_impl.h"
+#include "url/url_constants.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -41,12 +43,12 @@ CRWWebController* GetWebController(web::WebState* web_state) {
 
 namespace web {
 
-WebTestWithWebState::WebTestWithWebState(TestWebThreadBundle::Options options)
+WebTestWithWebState::WebTestWithWebState(WebTaskEnvironment::Options options)
     : WebTest(options) {}
 
 WebTestWithWebState::WebTestWithWebState(
     std::unique_ptr<web::WebClient> web_client,
-    TestWebThreadBundle::Options options)
+    WebTaskEnvironment::Options options)
     : WebTest(std::move(web_client), options) {}
 
 WebTestWithWebState::~WebTestWithWebState() {}
@@ -137,11 +139,25 @@ void WebTestWithWebState::LoadHtml(NSString* html, const GURL& url) {
   // |-loadHTML|.
   // TODO(crbug.com/777884): consider changing |-loadHTML| to match WKWebView's
   // |-loadHTMLString:baseURL| that doesn't create a navigation entry.
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled() &&
-      !web_state()->GetNavigationManager()->GetItemCount()) {
-    GURL placeholder_url = wk_navigation_util::CreatePlaceholderUrlForUrl(url);
+  if (!web_state()->GetNavigationManager()->GetItemCount()) {
+    GURL placeholder_url(url::kAboutBlankURL);
+    if (!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage))
+      placeholder_url = wk_navigation_util::CreatePlaceholderUrlForUrl(url);
+
     NavigationManager::WebLoadParams params(placeholder_url);
     web_state()->GetNavigationManager()->LoadURLWithParams(params);
+
+    if (!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage)) {
+      // Set NoNavigationError so the placeHolder doesn't trigger a
+      // kNavigatingToFailedNavigationItem.
+      web::WebStateImpl* web_state_impl =
+          static_cast<web::WebStateImpl*>(web_state());
+      web_state_impl->GetNavigationManagerImpl()
+          .GetCurrentItemImpl()
+          ->error_retry_state_machine()
+          .SetIgnorePlaceholderNavigation();
+    }
+
     ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
       return web_controller.navigationState == web::WKNavigationState::FINISHED;
     }));
@@ -243,7 +259,7 @@ const web::WebState* WebTestWithWebState::web_state() const {
   return web_state_.get();
 }
 
-void WebTestWithWebState::WillProcessTask(const base::PendingTask&) {
+void WebTestWithWebState::WillProcessTask(const base::PendingTask&, bool) {
   // Nothing to do.
 }
 

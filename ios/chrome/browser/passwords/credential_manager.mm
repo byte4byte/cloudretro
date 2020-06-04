@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "ios/chrome/browser/passwords/credential_manager_util.h"
+#include "components/password_manager/ios/credential_manager_util.h"
 #include "ios/chrome/browser/passwords/js_credential_manager.h"
 #include "ios/web/public/js_messaging/web_frame.h"
-#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -33,15 +32,13 @@ CredentialManager::CredentialManager(
     password_manager::PasswordManagerClient* client,
     web::WebState* web_state)
     : impl_(client), web_state_(web_state) {
-  web_state_->AddScriptCommandCallback(
+  subscription_ = web_state_->AddScriptCommandCallback(
       base::Bind(&CredentialManager::HandleScriptCommand,
                  base::Unretained(this)),
       kCommandPrefix);
 }
 
-CredentialManager::~CredentialManager() {
-  web_state_->RemoveScriptCommandCallback(kCommandPrefix);
-}
+CredentialManager::~CredentialManager() {}
 
 void CredentialManager::HandleScriptCommand(const base::DictionaryValue& json,
                                             const GURL& origin_url,
@@ -61,7 +58,7 @@ void CredentialManager::HandleScriptCommand(const base::DictionaryValue& json,
   }
   int promise_id = static_cast<int>(promise_id_double);
 
-  if (!WebStateContentIsSecureHtml(web_state_)) {
+  if (!password_manager::WebStateContentIsSecureHtml(web_state_)) {
     RejectCredentialPromiseWithInvalidStateError(
         web_state_, promise_id,
         base::ASCIIToUTF16(
@@ -85,7 +82,7 @@ void CredentialManager::HandleScriptCommand(const base::DictionaryValue& json,
       return;
     }
     bool include_passwords;
-    if (!ParseIncludePasswords(json, &include_passwords)) {
+    if (!password_manager::ParseIncludePasswords(json, &include_passwords)) {
       RejectCredentialPromiseWithTypeError(
           web_state_, promise_id,
           base::ASCIIToUTF16(
@@ -93,7 +90,7 @@ void CredentialManager::HandleScriptCommand(const base::DictionaryValue& json,
       return;
     }
     std::vector<GURL> federations;
-    if (!ParseFederations(json, &federations)) {
+    if (!password_manager::ParseFederations(json, &federations)) {
       RejectCredentialPromiseWithTypeError(
           web_state_, promise_id,
           base::ASCIIToUTF16(

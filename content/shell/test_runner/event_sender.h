@@ -17,14 +17,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "content/shell/test_runner/test_runner_export.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "third_party/blink/public/common/input/web_touch_point.h"
 #include "third_party/blink/public/platform/web_drag_data.h"
 #include "third_party/blink/public/platform/web_drag_operation.h"
-#include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
-#include "third_party/blink/public/platform/web_mouse_wheel_event.h"
-#include "third_party/blink/public/platform/web_point.h"
-#include "third_party/blink/public/platform/web_touch_point.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace blink {
 class WebFrameWidget;
@@ -38,11 +37,11 @@ namespace gin {
 class Arguments;
 }  // namespace gin
 
-namespace test_runner {
+namespace content {
 
 class TestInterfaces;
 class WebWidgetTestProxy;
-class WebTestDelegate;
+class BlinkTestRunner;
 
 // Key event location code introduced in DOM Level 3.
 // See also: http://www.w3.org/TR/DOM-Level-3-Events/#events-keyboardevents
@@ -53,7 +52,7 @@ enum KeyLocationCode {
   DOMKeyLocationNumpad = 0x03
 };
 
-class TEST_RUNNER_EXPORT EventSender {
+class EventSender {
  public:
   explicit EventSender(WebWidgetTestProxy*);
   virtual ~EventSender();
@@ -102,7 +101,7 @@ class TEST_RUNNER_EXPORT EventSender {
 
     SavedEventType type;
     blink::WebMouseEvent::Button button_type;  // For MouseUp.
-    blink::WebPoint pos;                       // For MouseMove.
+    gfx::PointF pos;                           // For MouseMove.
     int milliseconds;                          // For LeapForward.
     int modifiers;
   };
@@ -132,13 +131,6 @@ class TEST_RUNNER_EXPORT EventSender {
 
   void DumpFilenameBeingDragged();
 
-  void GestureFlingCancel();
-  void GestureFlingStart(float x,
-                         float y,
-                         float velocity_x,
-                         float velocity_y,
-                         gin::Arguments* args);
-  bool IsFlinging();
   void GestureScrollFirstPoint(float x, float y);
 
   void TouchStart(gin::Arguments* args);
@@ -157,22 +149,25 @@ class TEST_RUNNER_EXPORT EventSender {
 
   void AddTouchPoint(float x, float y, gin::Arguments* args);
 
-  void GestureScrollBegin(gin::Arguments* args);
-  void GestureScrollEnd(gin::Arguments* args);
-  void GestureScrollUpdate(gin::Arguments* args);
-  void GestureTap(gin::Arguments* args);
-  void GestureTapDown(gin::Arguments* args);
-  void GestureShowPress(gin::Arguments* args);
-  void GestureTapCancel(gin::Arguments* args);
-  void GestureLongPress(gin::Arguments* args);
-  void GestureLongTap(gin::Arguments* args);
-  void GestureTwoFingerTap(gin::Arguments* args);
+  void GestureScrollBegin(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureScrollEnd(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureScrollUpdate(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureTap(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureTapDown(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureShowPress(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureTapCancel(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureLongPress(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureLongTap(blink::WebLocalFrame* frame, gin::Arguments* args);
+  void GestureTwoFingerTap(blink::WebLocalFrame* frame, gin::Arguments* args);
 
   void MouseScrollBy(gin::Arguments* args, MouseScrollType scroll_type);
-  void MouseMoveTo(gin::Arguments* args);
+  void MouseMoveTo(blink::WebLocalFrame* frame, gin::Arguments* args);
   void MouseLeave(blink::WebPointerProperties::PointerType, int pointerId);
-  void ScheduleAsynchronousClick(int button_number, int modifiers);
-  void ScheduleAsynchronousKeyDown(const std::string& code_str,
+  void ScheduleAsynchronousClick(blink::WebLocalFrame* frame,
+                                 int button_number,
+                                 int modifiers);
+  void ScheduleAsynchronousKeyDown(blink::WebLocalFrame* frame,
+                                   const std::string& code_str,
                                    int modifiers,
                                    KeyLocationCode location);
   // Consumes the transient user activation state for follow-up tests that don't
@@ -186,7 +181,9 @@ class TEST_RUNNER_EXPORT EventSender {
   uint32_t GetUniqueTouchEventId(gin::Arguments* args);
   void SendCurrentTouchEvent(blink::WebInputEvent::Type, gin::Arguments* args);
 
-  void GestureEvent(blink::WebInputEvent::Type, gin::Arguments*);
+  void GestureEvent(blink::WebInputEvent::Type,
+                    blink::WebLocalFrame* frame,
+                    gin::Arguments* args);
 
   void UpdateClickCountForButton(blink::WebMouseEvent::Button);
 
@@ -209,9 +206,6 @@ class TEST_RUNNER_EXPORT EventSender {
 
   void SendGesturesForMouseWheelEvent(
       const blink::WebMouseWheelEvent wheel_event);
-
-  std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
-      const blink::WebInputEvent& event);
 
   void UpdateLifecycleToPrePaint();
 
@@ -264,11 +258,11 @@ class TEST_RUNNER_EXPORT EventSender {
 
   WebWidgetTestProxy* web_widget_test_proxy_;
   TestInterfaces* interfaces();
-  WebTestDelegate* delegate();
+  BlinkTestRunner* blink_test_runner();
   const blink::WebView* view() const;
   blink::WebView* view();
   blink::WebWidget* widget();
-  blink::WebFrameWidget* mainFrameWidget();
+  blink::WebFrameWidget* MainFrameWidget();
 
   bool force_layout_on_events_;
 
@@ -285,7 +279,7 @@ class TEST_RUNNER_EXPORT EventSender {
   blink::WebDragData current_drag_data_;
 
   // Location of the touch point that initiated a gesture.
-  blink::WebFloatPoint current_gesture_location_;
+  gfx::PointF current_gesture_location_;
 
   // Mouse-like pointer properties.
   struct PointerState {
@@ -297,14 +291,13 @@ class TEST_RUNNER_EXPORT EventSender {
     int current_buttons_;
 
     // Location of last mouseMoveTo event of this pointer.
-    blink::WebPoint last_pos_;
+    gfx::PointF last_pos_;
 
     int modifiers_;
 
     PointerState()
         : pressed_button_(blink::WebMouseEvent::Button::kNoButton),
           current_buttons_(0),
-          last_pos_(blink::WebPoint(0, 0)),
           modifiers_(0) {}
   };
   typedef std::unordered_map<int, PointerState> PointerStateMap;
@@ -318,7 +311,7 @@ class TEST_RUNNER_EXPORT EventSender {
 
   // Time and place of the last mouse up event.
   base::TimeTicks last_click_time_;
-  blink::WebPoint last_click_pos_;
+  gfx::PointF last_click_pos_;
 
   // The last button number passed to mouseDown and mouseUp.
   // Used to determine whether the click count continues to increment or not.
@@ -336,6 +329,6 @@ class TEST_RUNNER_EXPORT EventSender {
   DISALLOW_COPY_AND_ASSIGN(EventSender);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_EVENT_SENDER_H_

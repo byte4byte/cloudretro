@@ -7,19 +7,25 @@ package org.chromium.chrome.browser.autofill_assistant;
 import static android.support.test.espresso.Espresso.onView;
 import static android.support.test.espresso.assertion.ViewAssertions.matches;
 import static android.support.test.espresso.matcher.RootMatchers.withDecorView;
+import static android.support.test.espresso.matcher.ViewMatchers.Visibility.VISIBLE;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static android.support.test.espresso.matcher.ViewMatchers.withEffectiveVisibility;
+import static android.support.test.espresso.matcher.ViewMatchers.withId;
 import static android.support.test.espresso.matcher.ViewMatchers.withText;
 
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.inOrder;
 
 import android.content.Intent;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
-import android.support.v7.widget.RecyclerView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -32,12 +38,10 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantCarouselCoordinator;
+import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantActionsCarouselCoordinator;
 import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantCarouselModel;
 import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantChip;
 import org.chromium.chrome.browser.autofill_assistant.details.AssistantDetails;
@@ -57,7 +61,6 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.List;
 
 /**
@@ -78,18 +81,18 @@ public class AutofillAssistantUiTest {
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
 
     @Before
-    public void setUp() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(true));
+    public void setUp() {
+        TestThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(true));
 
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mTestPage = mTestServer.getURL(UrlUtils.getIsolatedTestFilePath(
                 "components/test/data/autofill_assistant/autofill_assistant_target_website.html"));
-        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        LibraryLoader.getInstance().ensureInitialized();
     }
 
     @After
-    public void tearDown() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(false));
+    public void tearDown() {
+        TestThreadUtils.runOnUiThreadBlocking(() -> FirstRunStatus.setFirstRunFlowComplete(false));
         mTestServer.stopAndDestroyServer();
     }
 
@@ -119,15 +122,17 @@ public class AutofillAssistantUiTest {
 
         mCustomTabActivityTestRule.startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
         BottomSheetController bottomSheetController =
-                ThreadUtils.runOnUiThreadBlocking(this::initializeBottomSheet);
-        AssistantCoordinator assistantCoordinator = ThreadUtils.runOnUiThreadBlocking(
+                TestThreadUtils.runOnUiThreadBlocking(this::initializeBottomSheet);
+        AssistantCoordinator assistantCoordinator = TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> new AssistantCoordinator(getActivity(), bottomSheetController,
-                                /* overlayCoordinator= */ null));
+                                getActivity().getTabObscuringHandler(),
+                                /* overlayCoordinator= */ null, null));
 
         // Bottom sheet is shown in the BottomSheet when creating the AssistantCoordinator.
         ViewGroup bottomSheetContent =
-                bottomSheetController.getBottomSheet().findViewById(R.id.autofill_assistant);
+                bottomSheetController.getBottomSheetViewForTesting().findViewById(
+                        R.id.autofill_assistant);
         Assert.assertNotNull(bottomSheetContent);
 
         // Disable bottom sheet content animations. This is a workaround for http://crbug/943483.
@@ -135,24 +140,20 @@ public class AutofillAssistantUiTest {
 
         // Show and check status message.
         String testStatusMessage = "test message";
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getHeaderModel().set(
                                 AssistantHeaderModel.STATUS_MESSAGE, testStatusMessage));
-        TextView statusMessageView = bottomSheetContent.findViewById(R.id.status_message);
-        Assert.assertEquals(statusMessageView.getText(), testStatusMessage);
+        onView(withId(R.id.status_message))
+                .check(matches(allOf(isDisplayed(), withText(testStatusMessage))));
 
         // Show scrim.
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getOverlayModel().set(
                                 AssistantOverlayModel.STATE, AssistantOverlayState.FULL));
         View scrim = getActivity().getScrim();
         Assert.assertTrue(scrim.isShown());
-
-        // Test suggestions and actions carousels.
-        testChips(inOrder, assistantCoordinator.getModel().getSuggestionsModel(),
-                assistantCoordinator.getBottomBarCoordinator().getSuggestionsCoordinator());
 
         // TODO(crbug.com/806868): Fix test of actions carousel. This is currently broken as chips
         // are displayed in the reversed order in the actions carousel and calling
@@ -166,35 +167,41 @@ public class AutofillAssistantUiTest {
         String descriptionLine1 = "This is a fancy line1";
         String descriptionLine2 = "This is a fancy line2";
         String descriptionLine3 = "This is a fancy line3";
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getDetailsModel().set(
                                 AssistantDetailsModel.DETAILS,
-                                new AssistantDetails(movieTitle, /* imageUrl = */ "",
+                                new AssistantDetails(movieTitle, /* titleMaxLines = */ 1,
+                                        /* imageUrl = */ "",
+                                        /* imageAccessibilityHint = */ "",
                                         /* imageClickthroughData = */ null,
                                         /* showImage = */ false,
                                         /* totalPriceLabel = */ "",
-                                        /* totalPrice = */ "", Calendar.getInstance().getTime(),
-                                        descriptionLine1, descriptionLine2, descriptionLine3,
+                                        /* totalPrice = */ "", descriptionLine1, descriptionLine2,
+                                        descriptionLine3,
+                                        /* priceAttribution = */ "",
                                         /* userApprovalRequired= */ false,
                                         /* highlightTitle= */ false, /* highlightLine1= */
                                         false, /* highlightLine2 = */ false,
                                         /* highlightLine3 = */ false,
                                         /* animatePlaceholders= */ false)));
-        TextView detailsTitle = bottomSheetContent.findViewById(R.id.details_title);
-        TextView detailsLine1 = bottomSheetContent.findViewById(R.id.details_line1);
-        TextView detailsLine2 = bottomSheetContent.findViewById(R.id.details_line2);
-        TextView detailsLine3 = bottomSheetContent.findViewById(R.id.details_line3);
-        Assert.assertEquals(detailsTitle.getText(), movieTitle);
-        Assert.assertTrue(detailsLine1.getText().toString().contains(descriptionLine1));
-        Assert.assertTrue(detailsLine2.getText().toString().contains(descriptionLine2));
-        Assert.assertTrue(detailsLine3.getText().toString().contains(descriptionLine3));
+        onView(withId(R.id.details_title))
+                .check(matches(allOf(withText(movieTitle), withEffectiveVisibility(VISIBLE))));
+        onView(withId(R.id.details_line1))
+                .check(matches(
+                        allOf(withText(descriptionLine1), withEffectiveVisibility(VISIBLE))));
+        onView(withId(R.id.details_line2))
+                .check(matches(
+                        allOf(withText(descriptionLine2), withEffectiveVisibility(VISIBLE))));
+        onView(withId(R.id.details_line3))
+                .check(matches(
+                        allOf(withText(descriptionLine3), withEffectiveVisibility(VISIBLE))));
 
         // Progress bar must be shown.
         Assert.assertTrue(bottomSheetContent.findViewById(R.id.progress_bar).isShown());
 
         // Disable progress bar.
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getHeaderModel().set(
                                 AssistantHeaderModel.PROGRESS_VISIBLE, false));
@@ -202,7 +209,7 @@ public class AutofillAssistantUiTest {
 
         // Show info box content.
         String infoBoxExplanation = "InfoBox explanation.";
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getInfoBoxModel().set(
                                 AssistantInfoBoxModel.INFO_BOX,
@@ -210,24 +217,24 @@ public class AutofillAssistantUiTest {
                                         /* imagePath = */ "", infoBoxExplanation)));
         TextView infoBoxExplanationView =
                 bottomSheetContent.findViewById(R.id.info_box_explanation);
-        Assert.assertEquals(infoBoxExplanationView.getText(), infoBoxExplanation);
+        onView(is(infoBoxExplanationView)).check(matches(withText(infoBoxExplanation)));
     }
 
     private void testChips(InOrder inOrder, AssistantCarouselModel carouselModel,
-            AssistantCarouselCoordinator carouselCoordinator) {
+            AssistantActionsCarouselCoordinator carouselCoordinator) {
         List<AssistantChip> chips = Arrays.asList(
                 new AssistantChip(AssistantChip.Type.CHIP_ASSISTIVE, AssistantChip.Icon.NONE,
                         "chip 0",
-                        /* disabled= */ false, /* sticky= */ false, () -> {/* do nothing */}),
+                        /* disabled= */ false, /* sticky= */ false, "", () -> {/* do nothing */}),
                 new AssistantChip(AssistantChip.Type.CHIP_ASSISTIVE, AssistantChip.Icon.NONE,
                         "chip 1",
-                        /* disabled= */ false, /* sticky= */ false, mRunnableMock));
-        ThreadUtils.runOnUiThreadBlocking(() -> carouselModel.getChipsModel().set(chips));
+                        /* disabled= */ false, /* sticky= */ false, "", mRunnableMock));
+        TestThreadUtils.runOnUiThreadBlocking(() -> carouselModel.setChips(chips));
         RecyclerView chipsViewContainer = carouselCoordinator.getView();
         Assert.assertEquals(2, chipsViewContainer.getAdapter().getItemCount());
 
         // Choose the second chip.
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 () -> { chipsViewContainer.getChildAt(1).performClick(); });
         inOrder.verify(mRunnableMock).run();
     }
@@ -239,15 +246,17 @@ public class AutofillAssistantUiTest {
 
         mCustomTabActivityTestRule.startCustomTabActivityWithIntent(createMinimalCustomTabIntent());
         BottomSheetController bottomSheetController =
-                ThreadUtils.runOnUiThreadBlocking(this::initializeBottomSheet);
-        AssistantCoordinator assistantCoordinator = ThreadUtils.runOnUiThreadBlocking(
+                TestThreadUtils.runOnUiThreadBlocking(this::initializeBottomSheet);
+        AssistantCoordinator assistantCoordinator = TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> new AssistantCoordinator(getActivity(), bottomSheetController,
-                                /* overlayCoordinator= */ null));
+                                getActivity().getTabObscuringHandler(),
+                                /* overlayCoordinator= */ null, null));
 
         // Bottom sheet is shown in the BottomSheet when creating the AssistantCoordinator.
         ViewGroup bottomSheetContent =
-                bottomSheetController.getBottomSheet().findViewById(R.id.autofill_assistant);
+                bottomSheetController.getBottomSheetViewForTesting().findViewById(
+                        R.id.autofill_assistant);
         Assert.assertNotNull(bottomSheetContent);
 
         // Disable bottom sheet content animations. This is a workaround for http://crbug/943483.
@@ -255,7 +264,7 @@ public class AutofillAssistantUiTest {
 
         // Show and check the bubble message.
         String testBubbleMessage = "Bubble message.";
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 ()
                         -> assistantCoordinator.getModel().getHeaderModel().set(
                                 AssistantHeaderModel.BUBBLE_MESSAGE, testBubbleMessage));

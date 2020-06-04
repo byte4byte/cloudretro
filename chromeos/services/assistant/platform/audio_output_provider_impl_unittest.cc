@@ -11,8 +11,11 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
+#include "chromeos/services/assistant/fake_assistant_manager_service_impl.h"
+#include "chromeos/services/assistant/media_session/assistant_media_session.h"
+#include "chromeos/services/assistant/test_support/scoped_assistant_client.h"
 #include "libassistant/shared/public/platform_audio_output.h"
 #include "media/base/audio_bus.h"
 #include "media/base/bind_to_current_loop.h"
@@ -80,14 +83,14 @@ class FakeAudioOutputDelegate : public assistant_client::AudioOutput::Delegate {
 class AudioDeviceOwnerTest : public testing::Test {
  public:
   AudioDeviceOwnerTest()
-      : task_env_(base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT,
-                  base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::
-                      QUEUED) {}
+      : task_env_(
+            base::test::TaskEnvironment::MainThreadType::DEFAULT,
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
 
   ~AudioDeviceOwnerTest() override { task_env_.RunUntilIdle(); }
 
  private:
-  base::test::ScopedTaskEnvironment task_env_;
+  base::test::TaskEnvironment task_env_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioDeviceOwnerTest);
 };
@@ -103,11 +106,16 @@ TEST_F(AudioDeviceOwnerTest, BufferFilling) {
 
   delegate.set_num_of_bytes_to_fill(200);
   delegate.Reset();
+  ScopedAssistantClient client;
+  FakeAssistantManagerServiceImpl assistant_manager_service;
+  AssistantMediaSession media_session(&assistant_manager_service);
+
   auto owner = std::make_unique<AudioDeviceOwner>(
       base::SequencedTaskRunnerHandle::Get(),
       base::SequencedTaskRunnerHandle::Get(), "test device");
   // Upon start, it will start to fill the buffer.
-  owner->StartOnMainThread(&delegate, nullptr, format);
+  owner->StartOnMainThread(&media_session, &delegate, mojo::NullRemote(),
+                           format);
   delegate.Wait();
 
   delegate.Reset();

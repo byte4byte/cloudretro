@@ -56,27 +56,24 @@ class LocationIconView : public IconLabelBubbleView {
     // Gets an icon for the location bar icon chip.
     virtual gfx::ImageSkia GetLocationIcon(
         IconFetchedCallback on_icon_fetched) const = 0;
-
-    // Gets the color to use for icon ink highlights.
-    virtual SkColor GetLocationIconInkDropColor() const = 0;
-
-   protected:
-    virtual ~Delegate() {}
   };
 
-  LocationIconView(const gfx::FontList& font_list, Delegate* delagate);
+  LocationIconView(const gfx::FontList& font_list,
+                   IconLabelBubbleView::Delegate* parent_delegate,
+                   Delegate* delegate);
   ~LocationIconView() override;
 
   // IconLabelBubbleView:
   gfx::Size GetMinimumSize() const override;
-  bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
-  SkColor GetTextColor() const override;
+  SkColor GetForegroundColor() const override;
   bool ShouldShowSeparator() const override;
   bool ShowBubble(const ui::Event& event) override;
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   bool IsBubbleShowing() const override;
-  SkColor GetInkDropBaseColor() const override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void AddedToWidget() override;
+  void OnThemeChanged() override;
 
   // Returns what the minimum width for the label text.
   int GetMinimumLabelTextWidth() const;
@@ -106,7 +103,6 @@ class LocationIconView : public IconLabelBubbleView {
  protected:
   // IconLabelBubbleView:
   bool IsTriggerableEvent(const ui::Event& event) override;
-  double WidthMultiplier() const override;
 
  private:
   // The security level when the location icon was last updated. Used to decide
@@ -120,8 +116,6 @@ class LocationIconView : public IconLabelBubbleView {
 
   // Returns what the minimum size would be if the preferred size were |size|.
   gfx::Size GetMinimumSizeForPreferredSize(gfx::Size size) const;
-
-  int GetSlideDurationTime() const override;
 
   Delegate* delegate_;
 

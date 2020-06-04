@@ -9,13 +9,11 @@
 #include "base/files/file_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #import "ios/chrome/browser/ui/open_in/open_in_controller.h"
 #import "ios/chrome/browser/ui/open_in/open_in_controller_testing.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/test_web_thread.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_delegate.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/platform_test.h"
@@ -73,12 +71,11 @@ class OpenInControllerTest : public PlatformTest {
                        pdf_data.length);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory>
       test_shared_url_loader_factory_;
 
-  net::TestURLFetcherFactory factory_;
   OpenInController* open_in_controller_;
   UIView* parent_view_;
   base::HistogramTester histogram_tester_;
@@ -89,7 +86,9 @@ TEST_F(OpenInControllerTest, TestDisplayOpenInMenu) {
   histogram_tester_.ExpectTotalCount(kOpenInDownloadResultHistogram, 0);
   id document_controller =
       [OCMockObject niceMockForClass:[UIDocumentInteractionController class]];
-  [open_in_controller_ setDocumentInteractionController:document_controller];
+  id classMock = OCMClassMock([UIDocumentInteractionController class]);
+  OCMStub([classMock interactionControllerWithURL:[OCMArg any]])
+      .andReturn(document_controller);
   [open_in_controller_ startDownload];
   [[[document_controller expect] andReturnValue:@YES]
       presentOpenInMenuFromRect:CGRectZero
@@ -98,11 +97,10 @@ TEST_F(OpenInControllerTest, TestDisplayOpenInMenu) {
 
   auto* pending_request = test_url_loader_factory_.GetPendingRequest(0);
   ASSERT_TRUE(pending_request);
-  // Set the response for the set URLFetcher to be a blank PDF.
   std::string pdf_str = CreatePdfString();
   test_url_loader_factory_.SimulateResponseForPendingRequest(
       pending_request->request.url.spec(), pdf_str);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   histogram_tester_.ExpectBucketCount(kOpenInDownloadResultHistogram,
                                       static_cast<base::HistogramBase::Sample>(
                                           OpenInDownloadResult::kSucceeded),
@@ -113,9 +111,12 @@ TEST_F(OpenInControllerTest, TestDisplayOpenInMenu) {
 
 TEST_F(OpenInControllerTest, TestCorruptedPDFDownload) {
   histogram_tester_.ExpectTotalCount(kOpenInDownloadResultHistogram, 0);
+
   id document_controller =
       [OCMockObject niceMockForClass:[UIDocumentInteractionController class]];
-  [open_in_controller_ setDocumentInteractionController:document_controller];
+  id classMock = OCMClassMock([UIDocumentInteractionController class]);
+  OCMStub([classMock interactionControllerWithURL:[OCMArg any]])
+      .andReturn(document_controller);
   [open_in_controller_ startDownload];
   [[[document_controller reject] andReturnValue:@YES]
       presentOpenInMenuFromRect:CGRectZero
@@ -127,7 +128,7 @@ TEST_F(OpenInControllerTest, TestCorruptedPDFDownload) {
   // Only use half the string so the downloaded PDF is corrupted.
   test_url_loader_factory_.SimulateResponseForPendingRequest(
       pending_request->request.url.spec(), pdf_str.substr(pdf_str.size() / 2));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   histogram_tester_.ExpectBucketCount(
       kOpenInDownloadResultHistogram,
       static_cast<base::HistogramBase::Sample>(OpenInDownloadResult::kFailed),

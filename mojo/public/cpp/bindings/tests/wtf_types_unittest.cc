@@ -5,7 +5,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/lib/fixed_buffer.h"
 #include "mojo/public/cpp/bindings/lib/serialization.h"
 #include "mojo/public/cpp/bindings/lib/wtf_serialization.h"
@@ -59,7 +59,7 @@ class WTFTypesTest : public testing::Test {
   WTFTypesTest() {}
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 WTF::Vector<WTF::String> ConstructStringArray() {
@@ -84,25 +84,25 @@ WTF::HashMap<WTF::String, WTF::String> ConstructStringMap() {
 }
 
 void ExpectString(const WTF::String& expected_string,
-                  const base::Closure& closure,
+                  base::OnceClosure closure,
                   const WTF::String& string) {
   EXPECT_EQ(expected_string, string);
-  closure.Run();
+  std::move(closure).Run();
 }
 
 void ExpectStringArray(base::Optional<WTF::Vector<WTF::String>>* expected_arr,
-                       const base::Closure& closure,
+                       base::OnceClosure closure,
                        const base::Optional<WTF::Vector<WTF::String>>& arr) {
   EXPECT_EQ(*expected_arr, arr);
-  closure.Run();
+  std::move(closure).Run();
 }
 
 void ExpectStringMap(
     base::Optional<WTF::HashMap<WTF::String, WTF::String>>* expected_map,
-    const base::Closure& closure,
+    base::OnceClosure closure,
     const base::Optional<WTF::HashMap<WTF::String, WTF::String>>& map) {
   EXPECT_EQ(*expected_map, map);
-  closure.Run();
+  std::move(closure).Run();
 }
 
 }  // namespace

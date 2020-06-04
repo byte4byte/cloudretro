@@ -33,7 +33,7 @@
 #include "components/storage_monitor/storage_monitor.h"
 #include "components/storage_monitor/test_storage_monitor.h"
 #include "components/sync/model/string_ordinal.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -354,7 +354,7 @@ class MediaGalleriesPreferencesTest : public testing::Test {
 
  private:
   // Needed for extension service & friends to work.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   EnsureMediaDirectoriesExists mock_gallery_locations_;
 
@@ -1172,8 +1172,8 @@ TEST_F(MediaGalleriesPreferencesTest, ScanResults) {
 }
 
 TEST(MediaGalleriesPrefInfoTest, NameGeneration) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::MainThreadType::UI);
 
   ASSERT_TRUE(TestStorageMonitor::CreateAndInstall());
 
@@ -1223,10 +1223,7 @@ TEST_F(MediaGalleriesPreferencesTest, SetsDefaultGalleryTypeField) {
   // default_gallery field set.
 
   // No default galleries exist on CrOS so this test isn't relevant there.
-#if defined(OS_CHROMEOS)
-  return;
-#endif
-
+#if !defined(OS_CHROMEOS)
   base::FilePath music_path;
   base::FilePath pictures_path;
   base::FilePath videos_path;
@@ -1268,6 +1265,7 @@ TEST_F(MediaGalleriesPreferencesTest, SetsDefaultGalleryTypeField) {
   }
 
   EXPECT_EQ(3, num_default_galleries);
+#endif
 }
 
 TEST_F(MediaGalleriesPreferencesTest, UpdatesDefaultGalleryType) {
@@ -1276,10 +1274,7 @@ TEST_F(MediaGalleriesPreferencesTest, UpdatesDefaultGalleryType) {
   // rewrite the device ID in prefs to include the new path.
 
   // No default galleries exist on CrOS so this test isn't relevant there.
-#if defined(OS_CHROMEOS)
-  return;
-#endif
-
+#if !defined(OS_CHROMEOS)
   base::FilePath old_music_path;
   base::FilePath old_pictures_path;
   base::FilePath old_videos_path;
@@ -1377,6 +1372,7 @@ TEST_F(MediaGalleriesPreferencesTest, UpdatesDefaultGalleryType) {
   EXPECT_TRUE(found_music);
   EXPECT_TRUE(found_pictures);
   EXPECT_TRUE(found_videos);
+#endif
 }
 
 TEST_F(MediaGalleriesPreferencesTest, UpdateAddsDefaultGalleryTypeIfMissing) {
@@ -1385,10 +1381,7 @@ TEST_F(MediaGalleriesPreferencesTest, UpdateAddsDefaultGalleryTypeIfMissing) {
   // MediaGalleriesPreferences is initialized, it assigns the proper one.
 
   // No default galleries exist on CrOS so this test isn't relevant there.
-#if defined(OS_CHROMEOS)
-  return;
-#endif
-
+#if !defined(OS_CHROMEOS)
   // Add a new user added gallery.
   AddFixedGalleryWithExpectation("user_added", "UserAdded",
                                  MediaGalleryPrefInfo::kUserAdded);
@@ -1449,4 +1442,5 @@ TEST_F(MediaGalleriesPreferencesTest, UpdateAddsDefaultGalleryTypeIfMissing) {
   EXPECT_TRUE(found_pictures);
   EXPECT_TRUE(found_videos);
   EXPECT_TRUE(found_user_added);
+#endif
 }

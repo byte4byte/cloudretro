@@ -16,7 +16,7 @@
 #include "ios/chrome/common/string_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #import "ios/web/public/test/js_test_util.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 
@@ -264,10 +264,10 @@ class JsLanguageDetectionManagerDetectLanguageTest
     auto callback = base::Bind(
         &JsLanguageDetectionManagerDetectLanguageTest::CommandReceived,
         base::Unretained(this));
-    web_state()->AddScriptCommandCallback(callback, "languageDetection");
+    subscription_ =
+        web_state()->AddScriptCommandCallback(callback, "languageDetection");
   }
   void TearDown() override {
-    web_state()->RemoveScriptCommandCallback("languageDetection");
     JsLanguageDetectionManagerTest::TearDown();
   }
   // Called when "languageDetection" command is received.
@@ -281,6 +281,9 @@ class JsLanguageDetectionManagerDetectLanguageTest
  protected:
   // Received "languageDetection" commands.
   std::vector<std::unique_ptr<base::DictionaryValue>> commands_received_;
+
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
 };
 
 // Tests if |__gCrWeb.languageDetection.detectLanguage| correctly informs the

@@ -15,17 +15,13 @@
 #include "chrome/browser/search/search_suggest/search_suggest_data.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/webui_url_constants.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/common/google_util.h"
-#include "components/signin/core/browser/chrome_connected_header_helper.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "content/public/browser/system_connector.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "services/data_decoder/public/cpp/safe_json_parser.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -45,8 +41,8 @@ const char kSearchSuggestResponsePreamble[] = ")]}'";
 // Additionally |data| will be base::nullopt if "query_suggestions" keys is not
 // present.
 bool JsonToSearchSuggestionData(const base::Value& value,
-                                base::Optional<SearchSuggestData>& data) {
-  data = base::nullopt;
+                                base::Optional<SearchSuggestData>* data) {
+  data->reset();
 
   bool all_fields_present = true;
 
@@ -69,7 +65,6 @@ bool JsonToSearchSuggestionData(const base::Value& value,
   }
 
   SearchSuggestData result;
-  data = result;
 
   std::string suggestions_html = std::string();
   if (!query_suggestions->GetString("query_suggestions_with_html",
@@ -110,7 +105,7 @@ bool JsonToSearchSuggestionData(const base::Value& value,
   result.request_freeze_time_ms = request_freeze_time_ms;
   result.max_impressions = max_impressions;
 
-  data = result;
+  *data = result;
 
   return all_fields_present;
 }
@@ -204,10 +199,8 @@ void SearchSuggestLoaderImpl::AuthenticatedURLLoader::OnURLLoaderComplete(
 
 SearchSuggestLoaderImpl::SearchSuggestLoaderImpl(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    GoogleURLTracker* google_url_tracker,
     const std::string& application_locale)
     : url_loader_factory_(url_loader_factory),
-      google_url_tracker_(google_url_tracker),
       application_locale_(application_locale) {}
 
 SearchSuggestLoaderImpl::~SearchSuggestLoaderImpl() = default;
@@ -234,7 +227,7 @@ GURL SearchSuggestLoaderImpl::GetLoadURLForTesting() const {
 GURL SearchSuggestLoaderImpl::GetApiUrl(const std::string& blocklist) const {
   GURL google_base_url = google_util::CommandLineGoogleBaseURL();
   if (!google_base_url.is_valid()) {
-    google_base_url = google_url_tracker_->google_url();
+    google_base_url = GURL(google_util::kGoogleHomepageURL);
   }
 
   GURL api_url = google_base_url.Resolve(kNewTabSearchSuggestionsApiPath);
@@ -267,28 +260,27 @@ void SearchSuggestLoaderImpl::LoadDone(
     response = response.substr(strlen(kSearchSuggestResponsePreamble));
   }
 
-  data_decoder::SafeJsonParser::Parse(
-      content::GetSystemConnector(), response,
-      base::BindOnce(&SearchSuggestLoaderImpl::JsonParsed,
-                     weak_ptr_factory_.GetWeakPtr()),
-      base::BindOnce(&SearchSuggestLoaderImpl::JsonParseFailed,
-                     weak_ptr_factory_.GetWeakPtr()));
+  data_decoder::DataDecoder::ParseJsonIsolated(
+      response, base::BindOnce(&SearchSuggestLoaderImpl::JsonParsed,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
-void SearchSuggestLoaderImpl::JsonParsed(base::Value value) {
-  base::Optional<SearchSuggestData> result;
-  if (JsonToSearchSuggestionData(value, result)) {
-    Respond(Status::OK_WITH_SUGGESTIONS, result);
-  } else if (result.has_value()) {
-    Respond(Status::OK_WITHOUT_SUGGESTIONS, result);
-  } else {
-    Respond(Status::FATAL_ERROR, result);
+void SearchSuggestLoaderImpl::JsonParsed(
+    data_decoder::DataDecoder::ValueOrError result) {
+  if (!result.value) {
+    DVLOG(1) << "Parsing JSON failed: " << *result.error;
+    Respond(Status::FATAL_ERROR, base::nullopt);
+    return;
   }
-}
 
-void SearchSuggestLoaderImpl::JsonParseFailed(const std::string& message) {
-  DVLOG(1) << "Parsing JSON failed: " << message;
-  Respond(Status::FATAL_ERROR, base::nullopt);
+  base::Optional<SearchSuggestData> data;
+  if (JsonToSearchSuggestionData(*result.value, &data)) {
+    Respond(Status::OK_WITH_SUGGESTIONS, data);
+  } else if (data.has_value()) {
+    Respond(Status::OK_WITHOUT_SUGGESTIONS, data);
+  } else {
+    Respond(Status::FATAL_ERROR, data);
+  }
 }
 
 void SearchSuggestLoaderImpl::Respond(

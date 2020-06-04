@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -21,54 +22,32 @@ namespace send_tab_to_self {
 
 namespace {
 
-// Icon sizes in DIP.
-constexpr int kPrimaryIconSize = 20;
-constexpr int kPrimaryIconBorderWidth = 6;
+// IconView wraps the vector icon to track the color of the current Widget's
+// NativeTheme.
+class IconView : public views::ImageView {
+ public:
+  explicit IconView(const sync_pb::SyncEnums::DeviceType device_type)
+      : vector_icon_{device_type == sync_pb::SyncEnums::TYPE_PHONE
+                         ? &kHardwareSmartphoneIcon
+                         : &kHardwareComputerIcon} {
+    constexpr auto kPrimaryIconBorder = gfx::Insets(6);
+    SetBorder(views::CreateEmptyBorder(kPrimaryIconBorder));
+  }
+  ~IconView() override = default;
 
-enum class DeviceIconType {
-  DESKTOP = 0,
-  PHONE = 1,
-  TOTAL_COUNT = 2  // Add new types above this line.
+  // views::View:
+  void OnThemeChanged() override {
+    views::ImageView::OnThemeChanged();
+    const SkColor icon_color = GetNativeTheme()->GetSystemColor(
+        ui::NativeTheme::kColorId_DefaultIconColor);
+    SetImage(
+        gfx::CreateVectorIcon(*vector_icon_, kPrimaryIconSize, icon_color));
+  }
+
+ private:
+  static constexpr int kPrimaryIconSize = 20;
+  const gfx::VectorIcon* vector_icon_;
 };
-
-SkColor GetColorfromTheme() {
-  const ui::NativeTheme* native_theme =
-      ui::NativeTheme::GetInstanceForNativeUi();
-  return native_theme->GetSystemColor(
-      ui::NativeTheme::kColorId_DefaultIconColor);
-}
-
-gfx::ImageSkia CreateDeviceIcon(DeviceIconType icon_type) {
-  const gfx::VectorIcon* vector_icon;
-  switch (icon_type) {
-    case DeviceIconType::DESKTOP:
-      vector_icon = &kHardwareComputerIcon;
-      break;
-    case DeviceIconType::PHONE:
-      vector_icon = &kHardwareSmartphoneIcon;
-      break;
-    default:
-      vector_icon = &kSendTabToSelfIcon;
-  }
-
-  return gfx::CreateVectorIcon(*vector_icon, kPrimaryIconSize,
-                               GetColorfromTheme());
-}
-
-std::unique_ptr<views::ImageView> CreateIconView(
-    const sync_pb::SyncEnums::DeviceType device_type) {
-  gfx::ImageSkia image;
-  if (device_type == sync_pb::SyncEnums::TYPE_PHONE) {
-    image = CreateDeviceIcon(DeviceIconType::PHONE);
-  } else {
-    image = CreateDeviceIcon(DeviceIconType::DESKTOP);
-  }
-  auto icon_view = std::make_unique<views::ImageView>();
-  icon_view->SetImage(image);
-  icon_view->SetBorder(
-      views::CreateEmptyBorder(gfx::Insets(kPrimaryIconBorderWidth)));
-  return icon_view;
-}
 
 base::string16 GetLastUpdatedTime(const TargetDeviceInfo& device_info) {
   int time_in_days =
@@ -93,7 +72,7 @@ SendTabToSelfBubbleDeviceButton::SendTabToSelfBubbleDeviceButton(
     const TargetDeviceInfo& device_info,
     int button_tag)
     : HoverButton(button_listener,
-                  CreateIconView(device_info.device_type),
+                  std::make_unique<IconView>(device_info.device_type),
                   base::UTF8ToUTF16(device_info.device_name),
                   GetLastUpdatedTime(device_info)) {
   device_name_ = device_info.device_name;

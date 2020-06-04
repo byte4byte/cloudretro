@@ -4,7 +4,7 @@
 
 #include "ash/public/cpp/ambient/photo_controller.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace ash {
 
@@ -13,6 +13,15 @@ namespace {
 PhotoController* g_photo_controller = nullptr;
 
 }  // namespace
+
+PhotoController::Topic::Topic() = default;
+
+PhotoController::Topic::Topic(const Topic&) = default;
+
+PhotoController::Topic& PhotoController::Topic::operator=(const Topic&) =
+    default;
+
+PhotoController::Topic::~Topic() = default;
 
 // static
 PhotoController* PhotoController::Get() {

@@ -4,8 +4,9 @@
 
 package org.chromium.chrome.browser.infobar;
 
-import android.support.annotation.IntDef;
 import android.text.TextUtils;
+
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -256,8 +257,7 @@ public class TranslateOptions {
     }
 
     private boolean canSetLanguage(String sourceCode, String targetCode) {
-        return isValidLanguageCode(sourceCode) && isValidLanguageCode(targetCode)
-                && !sourceCode.equals(targetCode);
+        return isValidLanguageCode(sourceCode) && isValidLanguageCode(targetCode);
     }
 
     @Override

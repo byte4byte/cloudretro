@@ -5,11 +5,16 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_
 
-#include "chrome/browser/ui/extensions/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "url/gurl.h"
 
 class Browser;
 class Profile;
+
+namespace base {
+class CommandLine;
+class FilePath;
+}  // namespace base
 
 namespace content {
 class WebContents;
@@ -22,24 +27,29 @@ class Extension;
 enum class WindowOpenDisposition;
 
 // Opens the application, possibly prompting the user to re-enable it.
-void OpenApplicationWithReenablePrompt(const AppLaunchParams& params);
+void OpenApplicationWithReenablePrompt(Profile* profile,
+                                       const apps::AppLaunchParams& params);
 
 // Open the application in a way specified by |params|.
-content::WebContents* OpenApplication(const AppLaunchParams& params);
+content::WebContents* OpenApplication(Profile* profile,
+                                      const apps::AppLaunchParams& params);
 
 // Create the application in a way specified by |params| in a new window but
 // delaying activating and showing it.
-Browser* CreateApplicationWindow(const AppLaunchParams& params,
+Browser* CreateApplicationWindow(Profile* profile,
+                                 const apps::AppLaunchParams& params,
                                  const GURL& url);
 
-// Show the application window that's already created.
-content::WebContents* ShowApplicationWindow(const AppLaunchParams& params,
-                                            const GURL& url,
-                                            Browser* browser,
-                                            WindowOpenDisposition disposition);
+// Navigate application window to application url, but do not show it yet.
+content::WebContents* NavigateApplicationWindow(
+    Browser* browser,
+    const apps::AppLaunchParams& params,
+    const GURL& url,
+    WindowOpenDisposition disposition);
 
 // Open the application in a way specified by |params| in a new window.
-content::WebContents* OpenApplicationWindow(const AppLaunchParams& params,
+content::WebContents* OpenApplicationWindow(Profile* profile,
+                                            const apps::AppLaunchParams& params,
                                             const GURL& url);
 
 // Open |url| in an app shortcut window.
@@ -54,17 +64,17 @@ content::WebContents* OpenAppShortcutWindow(Profile* profile,
 // chrome.app.runtime.onLaunched event.
 bool CanLaunchViaEvent(const extensions::Extension* extension);
 
-// Reparents |contents| into a new app browser for |extension|.
-Browser* ReparentWebContentsIntoAppBrowser(
-    content::WebContents* contents,
-    const extensions::Extension* extension);
-
-// Reparents contents to a new app browser when entering the Focus Mode.
-Browser* ReparentWebContentsForFocusMode(content::WebContents* contents);
-
-// Reparents the active tab into a new app browser for the PWA that has the
-// tab's URL in its scope. Does nothing if the tab is not secure or there is no
-// applicable PWA.
-Browser* ReparentSecureActiveTabIntoPwaWindow(Browser* browser);
+// Attempt to open |app_id| in a new window or tab. Open an empty browser
+// window if unsuccessful. The user's preferred launch container for the app
+// (standalone window or browser tab) is used. |callback| will be called with
+// the container type used to open the app, kLaunchContainerNone if an empty
+// browser window was opened.
+void LaunchAppWithCallback(
+    Profile* profile,
+    const std::string& app_id,
+    const base::CommandLine& command_line,
+    const base::FilePath& current_directory,
+    base::OnceCallback<void(Browser* browser,
+                            apps::mojom::LaunchContainer container)> callback);
 
 #endif  // CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_

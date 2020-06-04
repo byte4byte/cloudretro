@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.autofill_assistant.details;
 
+import static org.chromium.chrome.browser.autofill_assistant.AssistantAccessibilityUtils.setAccessibility;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ArgbEvaluator;
@@ -16,21 +18,23 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.ThumbnailUtils;
-import android.support.annotation.StyleRes;
-import android.support.v4.graphics.drawable.RoundedBitmapDrawable;
-import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.StyleRes;
+import androidx.core.graphics.drawable.RoundedBitmapDrawable;
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.compositor.animation.CompositorAnimator;
+import org.chromium.chrome.browser.autofill_assistant.AssistantTextUtils;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
-import org.chromium.chrome.browser.modaldialog.AppModalPresenter;
+import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
+import org.chromium.components.browser_ui.widget.animation.Interpolators;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
@@ -38,13 +42,6 @@ import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
-
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Locale;
 
 /**
  * This class is responsible for pushing updates to the Autofill Assistant details view. These
@@ -56,8 +53,6 @@ class AssistantDetailsViewBinder
                 AssistantDetailsViewBinder.ViewHolder, PropertyKey> {
     private static final int IMAGE_BORDER_RADIUS = 8;
     private static final int PULSING_DURATION_MS = 1_000;
-    private static final String DETAILS_TIME_FORMAT = "H:mma";
-    private static final String DETAILS_DATE_FORMAT = "EEE, MMM d";
 
     /**
      * A wrapper class that holds the different views of the header.
@@ -90,7 +85,6 @@ class AssistantDetailsViewBinder
     }
 
     private final Context mContext;
-    private final Locale mLocale;
 
     private final int mImageWidth;
     private final int mImageHeight;
@@ -100,9 +94,8 @@ class AssistantDetailsViewBinder
     private ValueAnimator mPulseAnimation;
     private ImageFetcher mImageFetcher;
 
-    AssistantDetailsViewBinder(Context context, Locale locale, ImageFetcher imageFetcher) {
+    AssistantDetailsViewBinder(Context context, ImageFetcher imageFetcher) {
         mContext = context;
-        mLocale = locale;
         mImageWidth = context.getResources().getDimensionPixelSize(
                 R.dimen.autofill_assistant_details_image_size);
         mImageHeight = context.getResources().getDimensionPixelSize(
@@ -136,33 +129,29 @@ class AssistantDetailsViewBinder
     }
 
     private void setDetails(AssistantDetails details, ViewHolder viewHolder) {
-        viewHolder.mTitleView.setText(details.getTitle());
-        viewHolder.mDescriptionLine1View.setText(makeDescriptionLine1Text(details));
-        viewHolder.mDescriptionLine2View.setText(details.getDescriptionLine2());
-        viewHolder.mTotalPriceLabelView.setText(details.getTotalPriceLabel());
-        viewHolder.mTotalPriceView.setText(details.getTotalPrice());
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mTitleView, details.getTitle(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mDescriptionLine1View, details.getDescriptionLine1(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mDescriptionLine2View, details.getDescriptionLine2(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mDescriptionLine3View, details.getDescriptionLine3(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mTotalPriceLabelView, details.getTotalPriceLabel(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mTotalPriceView, details.getTotalPrice(), null);
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mPriceAttributionView, details.getPriceAttribution(), null);
 
-        // If there is a price, we show descriptionLine3 on its left. Otherwise, we show it below
-        // descriptionLine2.
-        if (details.getTotalPrice().isEmpty()) {
-            viewHolder.mDescriptionLine3View.setText(details.getDescriptionLine3());
-            viewHolder.mPriceAttributionView.setText("");
-        } else {
-            viewHolder.mDescriptionLine3View.setText("");
-            viewHolder.mPriceAttributionView.setText(details.getDescriptionLine3());
-        }
-
-        // Allow title line wrapping if no or only one description set.
-        boolean isDescriptionLine1Empty = viewHolder.mDescriptionLine1View.length() == 0;
-        boolean isDescriptionLine2Empty = viewHolder.mDescriptionLine2View.length() == 0;
-        if (isDescriptionLine1Empty || isDescriptionLine2Empty) {
-            int maxLines = isDescriptionLine1Empty && isDescriptionLine2Empty ? 3 : 2;
-            viewHolder.mTitleView.setSingleLine(false);
-            viewHolder.mTitleView.setMaxLines(maxLines);
-            viewHolder.mTitleView.setEllipsize(TextUtils.TruncateAt.END);
-        } else {
+        // Allow title line wrapping according to number of maximum allowed lines.
+        if (details.getTitleMaxLines() == 1) {
             viewHolder.mTitleView.setSingleLine(true);
             viewHolder.mTitleView.setEllipsize(null);
+        } else {
+            viewHolder.mTitleView.setSingleLine(false);
+            viewHolder.mTitleView.setMaxLines(details.getTitleMaxLines());
+            viewHolder.mTitleView.setEllipsize(TextUtils.TruncateAt.END);
         }
 
         hideIfEmpty(viewHolder.mDescriptionLine1View);
@@ -175,6 +164,8 @@ class AssistantDetailsViewBinder
                 details.getTotalPrice().isEmpty() ? View.GONE : View.VISIBLE);
 
         viewHolder.mImageView.setVisibility(View.VISIBLE);
+        setAccessibility(viewHolder.mImageView, details.getImageAccessibilityHint());
+
         if (details.getImageUrl().isEmpty()) {
             if (details.getShowImagePlaceholder()) {
                 viewHolder.mImageView.setImageDrawable(viewHolder.mDefaultImage);
@@ -203,38 +194,6 @@ class AssistantDetailsViewBinder
         setTextStyles(details, viewHolder);
     }
 
-    private String makeDescriptionLine1Text(AssistantDetails details) {
-        if (!details.getDescriptionLine1().isEmpty()) {
-            return details.getDescriptionLine1();
-        } else {
-            return makeDatetimeText(details);
-        }
-    }
-
-    private String makeDatetimeText(AssistantDetails details) {
-        List<String> parts = new ArrayList<>();
-        Date date = details.getDate();
-        if (date != null) {
-            parts.add(formatDetailsTime(date));
-            parts.add(formatDetailsDate(date));
-        }
-
-        // TODO(crbug.com/806868): Use a view instead of this dot text.
-        return TextUtils.join(" • ", parts);
-    }
-
-    private String formatDetailsTime(Date date) {
-        DateFormat df = DateFormat.getTimeInstance(DateFormat.SHORT, mLocale);
-        String timeFormatPattern = (df instanceof SimpleDateFormat)
-                ? ((SimpleDateFormat) df).toPattern()
-                : DETAILS_TIME_FORMAT;
-        return new SimpleDateFormat(timeFormatPattern, mLocale).format(date);
-    }
-
-    private String formatDetailsDate(Date date) {
-        return new SimpleDateFormat(DETAILS_DATE_FORMAT, mLocale).format(date);
-    }
-
     private void hideIfEmpty(TextView view) {
         view.setVisibility(view.length() == 0 ? View.GONE : View.VISIBLE);
     }
@@ -243,15 +202,15 @@ class AssistantDetailsViewBinder
         setTextStyle(viewHolder.mTitleView, details.getUserApprovalRequired(),
                 details.getHighlightTitle(), R.style.TextAppearance_AssistantDetailsTitle);
         setTextStyle(viewHolder.mDescriptionLine1View, details.getUserApprovalRequired(),
-                details.getHighlightLine1(), R.style.TextAppearance_BlackBody);
+                details.getHighlightLine1(), R.style.TextAppearance_TextMedium_Secondary);
         setTextStyle(viewHolder.mDescriptionLine2View, details.getUserApprovalRequired(),
-                details.getHighlightLine2(), R.style.TextAppearance_BlackBody);
+                details.getHighlightLine2(), R.style.TextAppearance_TextMedium_Secondary);
         setTextStyle(viewHolder.mDescriptionLine3View, details.getUserApprovalRequired(),
-                details.getHighlightLine2(), R.style.TextAppearance_AssistantDetailsAttribution);
+                details.getHighlightLine3(), R.style.TextAppearance_TextSmall_Tertiary);
         setTextStyle(viewHolder.mPriceAttributionView, details.getUserApprovalRequired(),
-                details.getHighlightLine3(), R.style.TextAppearance_AssistantDetailsAttribution);
+                details.getHighlightLine3(), R.style.TextAppearance_TextSmall_Tertiary);
         setTextStyle(viewHolder.mTotalPriceLabelView, details.getUserApprovalRequired(),
-                /* highlight= */ false, R.style.TextAppearance_BlackButtonText);
+                /* highlight= */ false, R.style.TextAppearance_TextMedium_Secondary);
         setTextStyle(viewHolder.mTotalPriceView, details.getUserApprovalRequired(),
                 /* highlight= */ false, R.style.TextAppearance_AssistantDetailsPrice);
 
@@ -281,6 +240,7 @@ class AssistantDetailsViewBinder
             view.setTypeface(view.getTypeface(), Typeface.BOLD_ITALIC);
         } else if (approvalRequired) {
             // De-emphasized style.
+            // TODO(b/154592651) Use setTextAppearance instead of setTextColor.
             view.setTextColor(ApiCompatibilityUtils.getColor(
                     mContext.getResources(), R.color.modern_grey_300));
         }
@@ -304,7 +264,7 @@ class AssistantDetailsViewBinder
         mPulseAnimation.setEvaluator(new ArgbEvaluator());
         mPulseAnimation.setRepeatCount(ValueAnimator.INFINITE);
         mPulseAnimation.setRepeatMode(ValueAnimator.REVERSE);
-        mPulseAnimation.setInterpolator(CompositorAnimator.ACCELERATE_INTERPOLATOR);
+        mPulseAnimation.setInterpolator(Interpolators.ACCELERATE_INTERPOLATOR);
         mPulseAnimation.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationCancel(Animator animation) {

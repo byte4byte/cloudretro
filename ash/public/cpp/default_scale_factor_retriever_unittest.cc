@@ -4,11 +4,13 @@
 
 #include "ash/public/cpp/default_scale_factor_retriever.h"
 
-#include "ash/public/interfaces/cros_display_config.mojom.h"
+#include "ash/public/mojom/cros_display_config.mojom.h"
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/display/display.h"
 
@@ -20,17 +22,17 @@ class TestCrosDisplayConfig : public ash::mojom::CrosDisplayConfigController {
  public:
   static constexpr int64_t kFakeDisplayId = 1;
 
-  TestCrosDisplayConfig() : binding_(this) {}
+  TestCrosDisplayConfig() = default;
 
-  ash::mojom::CrosDisplayConfigControllerPtr CreateInterfacePtrAndBind() {
-    ash::mojom::CrosDisplayConfigControllerPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
+  mojo::PendingRemote<ash::mojom::CrosDisplayConfigController>
+  CreateRemoteAndBind() {
+    return receiver_.BindNewPipeAndPassRemote();
   }
 
   // ash::mojom::CrosDisplayConfigController:
-  void AddObserver(ash::mojom::CrosDisplayConfigObserverAssociatedPtrInfo
-                       observer) override {}
+  void AddObserver(
+      mojo::PendingAssociatedRemote<ash::mojom::CrosDisplayConfigObserver>
+          observer) override {}
   void GetDisplayLayoutInfo(GetDisplayLayoutInfoCallback callback) override {}
   void SetDisplayLayoutInfo(ash::mojom::DisplayLayoutInfoPtr info,
                             SetDisplayLayoutInfoCallback callback) override {}
@@ -60,9 +62,10 @@ class TestCrosDisplayConfig : public ash::mojom::CrosDisplayConfigController {
                         ash::mojom::DisplayConfigOperation op,
                         ash::mojom::TouchCalibrationPtr calibration,
                         TouchCalibrationCallback callback) override {}
+  void HighlightDisplay(int64_t id) override {}
 
  private:
-  mojo::Binding<ash::mojom::CrosDisplayConfigController> binding_;
+  mojo::Receiver<ash::mojom::CrosDisplayConfigController> receiver_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestCrosDisplayConfig);
 };
@@ -73,7 +76,7 @@ class DefaultScaleFactorRetrieverTest : public testing::Test {
   ~DefaultScaleFactorRetrieverTest() override = default;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   DISALLOW_COPY_AND_ASSIGN(DefaultScaleFactorRetrieverTest);
 };
 
@@ -82,13 +85,13 @@ class DefaultScaleFactorRetrieverTest : public testing::Test {
 TEST_F(DefaultScaleFactorRetrieverTest, Basic) {
   display::Display::SetInternalDisplayId(TestCrosDisplayConfig::kFakeDisplayId);
   auto display_config = std::make_unique<TestCrosDisplayConfig>();
-  auto retriever = std::make_unique<ash::DefaultScaleFactorRetriever>();
+  auto retriever = std::make_unique<DefaultScaleFactorRetriever>();
 
   auto callback = [](float* result, float default_scale_factor) {
     result[0] = default_scale_factor;
   };
   float result1[1] = {0};
-  retriever->Start(display_config->CreateInterfacePtrAndBind());
+  retriever->Start(display_config->CreateRemoteAndBind());
   retriever->GetDefaultScaleFactor(base::BindOnce(callback, result1));
   float result2[1] = {0};
   // This will cancel the 1st callback.
@@ -116,13 +119,13 @@ TEST_F(DefaultScaleFactorRetrieverTest, Basic) {
 TEST_F(DefaultScaleFactorRetrieverTest, Cancel) {
   display::Display::SetInternalDisplayId(TestCrosDisplayConfig::kFakeDisplayId);
   auto display_config = std::make_unique<TestCrosDisplayConfig>();
-  auto retriever = std::make_unique<ash::DefaultScaleFactorRetriever>();
+  auto retriever = std::make_unique<DefaultScaleFactorRetriever>();
 
   auto callback = [](float* result, float default_scale_factor) {
     result[0] = default_scale_factor;
   };
   float result[1] = {0};
-  retriever->Start(display_config->CreateInterfacePtrAndBind());
+  retriever->Start(display_config->CreateRemoteAndBind());
   retriever->GetDefaultScaleFactor(base::BindOnce(callback, result));
   retriever->CancelCallback();
   EXPECT_EQ(0.f, result[0]);

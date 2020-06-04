@@ -4,9 +4,9 @@
 
 #include "ios/web_view/internal/signin/ios_web_view_signin_client.h"
 
+#include "base/macros.h"
 #include "components/signin/core/browser/cookie_settings_util.h"
-#include "google_apis/gaia/gaia_auth_fetcher.h"
-#import "ios/web_view/internal/sync/cwv_sync_controller_internal.h"
+#include "ios/web_view/internal/signin/web_view_gaia_auth_fetcher.h"
 #include "ios/web_view/internal/web_view_browser_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
@@ -16,26 +16,17 @@
 
 IOSWebViewSigninClient::IOSWebViewSigninClient(
     PrefService* pref_service,
-    ios_web_view::WebViewBrowserState* browser_state,
-    scoped_refptr<content_settings::CookieSettings> cookie_settings,
-    scoped_refptr<HostContentSettingsMap> host_content_settings_map)
+    ios_web_view::WebViewBrowserState* browser_state)
     : network_callback_helper_(
           std::make_unique<WaitForNetworkCallbackHelper>()),
       pref_service_(pref_service),
-      browser_state_(browser_state),
-      cookie_settings_(cookie_settings),
-      host_content_settings_map_(host_content_settings_map) {}
+      browser_state_(browser_state) {}
 
 IOSWebViewSigninClient::~IOSWebViewSigninClient() {
 }
 
 void IOSWebViewSigninClient::Shutdown() {
   network_callback_helper_.reset();
-}
-
-std::string IOSWebViewSigninClient::GetProductVersion() {
-  // TODO(crbug.com/768689): Implement this method with appropriate values.
-  return "";
 }
 
 PrefService* IOSWebViewSigninClient::GetPrefs() {
@@ -54,28 +45,27 @@ network::mojom::CookieManager* IOSWebViewSigninClient::GetCookieManager() {
 void IOSWebViewSigninClient::DoFinalInit() {}
 
 bool IOSWebViewSigninClient::AreSigninCookiesAllowed() {
-  return signin::SettingsAllowSigninCookies(cookie_settings_.get());
+  return false;
 }
 
 bool IOSWebViewSigninClient::AreSigninCookiesDeletedOnExit() {
-  return signin::SettingsDeleteSigninCookiesOnExit(cookie_settings_.get());
+  return false;
 }
 
 void IOSWebViewSigninClient::AddContentSettingsObserver(
     content_settings::Observer* observer) {
-  host_content_settings_map_->AddObserver(observer);
+  NOTIMPLEMENTED();
 }
 
 void IOSWebViewSigninClient::RemoveContentSettingsObserver(
     content_settings::Observer* observer) {
-  host_content_settings_map_->RemoveObserver(observer);
+  NOTIMPLEMENTED();
 }
 
 void IOSWebViewSigninClient::PreSignOut(
     base::OnceCallback<void(SignoutDecision)> on_signout_decision_reached,
     signin_metrics::ProfileSignout signout_source_metric) {
   std::move(on_signout_decision_reached).Run(SignoutDecision::ALLOW_SIGNOUT);
-  [sync_controller_ didSignoutWithSourceMetric:signout_source_metric];
 }
 
 void IOSWebViewSigninClient::DelayNetworkCall(base::OnceClosure callback) {
@@ -85,15 +75,7 @@ void IOSWebViewSigninClient::DelayNetworkCall(base::OnceClosure callback) {
 std::unique_ptr<GaiaAuthFetcher> IOSWebViewSigninClient::CreateGaiaAuthFetcher(
     GaiaAuthConsumer* consumer,
     gaia::GaiaSource source) {
-  return std::make_unique<GaiaAuthFetcher>(consumer, source,
-                                           GetURLLoaderFactory());
+  return std::make_unique<ios_web_view::WebViewGaiaAuthFetcher>(
+      consumer, source, GetURLLoaderFactory());
 }
 
-void IOSWebViewSigninClient::SetSyncController(
-    CWVSyncController* sync_controller) {
-  sync_controller_ = sync_controller;
-}
-
-CWVSyncController* IOSWebViewSigninClient::GetSyncController() const {
-  return sync_controller_;
-}

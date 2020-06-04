@@ -5,42 +5,43 @@
 package org.chromium.chrome.browser.explore_sites;
 
 import android.content.Context;
-import android.net.Uri;
 import android.os.Parcel;
 import android.os.Parcelable;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
+import android.text.format.DateUtils;
 import android.util.Base64;
-import android.view.View;
+import android.view.ViewGroup;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.gesturenav.HistoryNavigationLayout;
-import org.chromium.chrome.browser.native_page.BasicNativePage;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
-import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegate;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegateImpl;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
+import org.chromium.chrome.browser.ui.native_page.BasicNativePage;
+import org.chromium.chrome.browser.ui.native_page.NativePageHost;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.ui.modelutil.ListModel;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.RecyclerViewAdapter;
+import org.chromium.url.URI;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
 
@@ -48,11 +49,10 @@ import java.util.List;
  * Provides functionality when the user interacts with the explore sites page.
  */
 public class ExploreSitesPage extends BasicNativePage {
+    private static final long BACK_NAVIGATION_TIMEOUT_FOR_UMA = DateUtils.SECOND_IN_MILLIS * 30;
     private static final String CONTEXT_MENU_USER_ACTION_PREFIX = "ExploreSites";
-    private static final int INITIAL_SCROLL_POSITION = 3;
-    private static final int INITIAL_SCROLL_POSITION_PERSONALIZED = 0;
-    private static final String NAVIGATION_ENTRY_SCROLL_POSITION_KEY =
-            "ExploreSitesPageScrollPosition";
+    private static final int INITIAL_SCROLL_POSITION = 0;
+    private static final String NAVIGATION_ENTRY_PAGE_STATE_KEY = "ExploreSitesPageState";
     // Constants that dictate sizes of rows and columns
     private static final int MAX_COLUMNS_DENSE_TITLE_BOTTOM = 5;
     private static final int MAX_COLUMNS_DENSE_TITLE_RIGHT = 3;
@@ -61,6 +61,10 @@ public class ExploreSitesPage extends BasicNativePage {
     private static final int MAX_ROWS_DENSE_TITLE_BOTTOM = 2;
     private static final int MAX_ROWS_DENSE_TITLE_RIGHT = 3;
     private static final int MAX_ROWS_ORIGINAL = 2;
+    public static final int MAX_TILE_COUNT_ALL_VARIATIONS =
+            Math.max(Math.max(MAX_COLUMNS_DENSE_TITLE_BOTTOM * MAX_ROWS_DENSE_TITLE_BOTTOM,
+                             MAX_COLUMNS_DENSE_TITLE_RIGHT* MAX_ROWS_DENSE_TITLE_RIGHT),
+                    MAX_COLUMNS_ORIGINAL* MAX_ROWS_ORIGINAL);
 
     static final PropertyModel.WritableIntPropertyKey STATUS_KEY =
             new PropertyModel.WritableIntPropertyKey();
@@ -77,7 +81,8 @@ public class ExploreSitesPage extends BasicNativePage {
             new PropertyModel.ReadableIntPropertyKey();
     private static final int UNKNOWN_NAV_CATEGORY = -1;
 
-    @IntDef({CatalogLoadingState.LOADING, CatalogLoadingState.SUCCESS, CatalogLoadingState.ERROR})
+    @IntDef({CatalogLoadingState.LOADING, CatalogLoadingState.SUCCESS, CatalogLoadingState.ERROR,
+            CatalogLoadingState.LOADING_NET})
     @Retention(RetentionPolicy.SOURCE)
     public @interface CatalogLoadingState {
         int LOADING = 1; // Loading catalog info from disk.
@@ -90,7 +95,7 @@ public class ExploreSitesPage extends BasicNativePage {
     private Tab mTab;
     private TabObserver mTabObserver;
     private Profile mProfile;
-    private HistoryNavigationLayout mView;
+    private ViewGroup mView;
     private RecyclerView mRecyclerView;
     private StableScrollLayoutManager mLayoutManager;
     private String mTitle;
@@ -103,25 +108,52 @@ public class ExploreSitesPage extends BasicNativePage {
     @DenseVariation
     private int mDenseVariation;
     private int mMaxColumns;
-    /**
-     * Create a new instance of the explore sites page.
-     */
-    public ExploreSitesPage(ChromeActivity activity, NativePageHost host) {
-        super(activity, host);
-    }
 
-    /**
-     * Returns whether the given URL should render the ExploreSitesPage native page.
-     * @param url The url to check.
-     * @return Whether or not this URL corresponds to the ExploreSitesPage.
-     */
-    public static boolean isExploreSitesUrl(String url) {
-        Uri uri = Uri.parse(url);
-        if (!UrlConstants.CHROME_NATIVE_SCHEME.equals(uri.getScheme())) {
-            return false;
+    @VisibleForTesting
+    static class PageState implements Parcelable {
+        private Parcelable mStableLayoutManagerState;
+        private Long mLastTimestamp;
+
+        public static final Creator<PageState> CREATOR = new Creator<PageState>() {
+            @Override
+            public PageState createFromParcel(Parcel in) {
+                return new PageState(in);
+            }
+
+            @Override
+            public PageState[] newArray(int size) {
+                return new PageState[size];
+            }
+        };
+
+        PageState(Parcel parcel) {
+            mLastTimestamp = parcel.readLong();
+            mStableLayoutManagerState = parcel.readParcelable(getClass().getClassLoader());
         }
 
-        return isExploreSitesHost(uri.getHost());
+        PageState(Long lastTimestamp, Parcelable stableScrollLayoutManagerState) {
+            mLastTimestamp = lastTimestamp;
+            mStableLayoutManagerState = stableScrollLayoutManagerState;
+        }
+
+        @Override
+        public int describeContents() {
+            return 0;
+        }
+
+        @Override
+        public void writeToParcel(Parcel dest, int flags) {
+            dest.writeLong(mLastTimestamp);
+            dest.writeParcelable(mStableLayoutManagerState, flags);
+        }
+
+        public long getLastTimestamp() {
+            return mLastTimestamp;
+        }
+
+        public Parcelable getStableLayoutManagerState() {
+            return mStableLayoutManagerState;
+        }
     }
 
     /**
@@ -134,15 +166,19 @@ public class ExploreSitesPage extends BasicNativePage {
         return UrlConstants.EXPLORE_HOST.equals(host);
     }
 
-    @Override
-    protected void initialize(ChromeActivity activity, final NativePageHost host) {
+    /**
+     * Create a new instance of the explore sites page.
+     */
+    public ExploreSitesPage(ChromeActivity activity, NativePageHost host, Tab tab) {
+        super(host);
+
         mHost = host;
-        mTab = mHost.getActiveTab();
+        mTab = tab;
 
         mTitle = activity.getString(R.string.explore_sites_title);
-        mView = (HistoryNavigationLayout) activity.getLayoutInflater().inflate(
+        mView = (ViewGroup) activity.getLayoutInflater().inflate(
                 R.layout.explore_sites_page_layout, null);
-        mProfile = mHost.getActiveTab().getProfile();
+        mProfile = Profile.fromWebContents(mTab.getWebContents());
 
         mDenseVariation = ExploreSitesBridge.getDenseVariation();
         int maxRows;
@@ -196,21 +232,19 @@ public class ExploreSitesPage extends BasicNativePage {
                         context.getResources().getDimensionPixelSize(textSizeDimensionResource));
 
         NativePageNavigationDelegateImpl navDelegate = new NativePageNavigationDelegateImpl(
-                activity, mProfile, host, activity.getTabModelSelector());
+                activity, mProfile, host, activity.getTabModelSelector(), mTab);
 
-        // Don't direct reference activity because it might change if tab is reparented.
-        Runnable closeContextMenuCallback =
-                () -> host.getActiveTab().getActivity().closeContextMenu();
+        // ExploreSitePage is recreated upon reparenting. Safe to use |activity|.
+        Runnable closeContextMenuCallback = activity::closeContextMenu;
 
         mContextMenuManager = createContextMenuManager(
                 navDelegate, closeContextMenuCallback, CONTEXT_MENU_USER_ACTION_PREFIX);
 
-        host.getActiveTab().getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
+        mTab.getWindowAndroid().addContextMenuCloseListener(mContextMenuManager);
 
         CategoryCardAdapter adapterDelegate = new CategoryCardAdapter(
                 mModel, mLayoutManager, iconGenerator, mContextMenuManager, navDelegate, mProfile);
 
-        mView.setNavigationDelegate(host.createHistoryNavigationDelegate());
         mRecyclerView = mView.findViewById(R.id.explore_sites_category_recycler);
 
         CategoryCardViewHolderFactory factory = createCategoryCardViewHolderFactory();
@@ -233,17 +267,12 @@ public class ExploreSitesPage extends BasicNativePage {
             }
         });
 
-        // We don't want to scroll to the 4th category if personalized
-        // or integrated with Most Likely, or if we're on a touchless device.
-        int variation = ExploreSitesBridge.getVariation();
-        mInitialScrollPosition = variation == ExploreSitesVariation.PERSONALIZED
-                        || ExploreSitesBridge.isIntegratedWithMostLikely(variation)
-                        || FeatureUtilities.isNoTouchModeEnabled()
-                ? INITIAL_SCROLL_POSITION_PERSONALIZED
-                : INITIAL_SCROLL_POSITION;
+        mInitialScrollPosition = INITIAL_SCROLL_POSITION;
 
         ExploreSitesBridge.getCatalog(mProfile,
                 ExploreSitesCatalogUpdateRequestSource.EXPLORE_SITES_PAGE, this::translateToModel);
+
+        initWithView(mView);
 
         RecordUserAction.record("Android.ExploreSitesPage.Open");
     }
@@ -272,7 +301,7 @@ public class ExploreSitesPage extends BasicNativePage {
             }
         }
 
-        restoreScrollPosition();
+        restorePageState();
 
         if (mTab != null) {
             // We want to observe page load start so that we can store the recycler view layout
@@ -286,7 +315,7 @@ public class ExploreSitesPage extends BasicNativePage {
                                 && UrlConstants.EXPLORE_HOST.equals(uri.getHost())) {
                             return;
                         }
-                        saveLayoutManagerState();
+                        savePageState();
                     } catch (URISyntaxException e) {
                     }
                 }
@@ -297,23 +326,95 @@ public class ExploreSitesPage extends BasicNativePage {
         mIsLoaded = true;
     }
 
-    private void restoreScrollPosition() {
-        Parcelable savedScrollPosition = getLayoutManagerStateFromNavigationEntry();
+    /**
+     * Restore the state of the page from a Base64 Encoded String located in this page's nav entry.
+     */
+    private void restorePageState() {
+        // Get Parcelable from the nav entry.
+        PageState pageState = getPageStateFromNavigationEntry();
 
-        if (savedScrollPosition != null) {
-            mLayoutManager.onRestoreInstanceState(savedScrollPosition);
+        if (pageState == null) {
+            setInitialScrollPosition();
         } else {
-            int scrollPosition = mInitialScrollPosition;
-            if (mNavigateToCategory != UNKNOWN_NAV_CATEGORY) {
-                scrollPosition = lookupCategory();
-            }
-            if (scrollPosition == RecyclerView.NO_POSITION) {
-                // Default to first position.
-                scrollPosition = 0;
-            }
+            // Extract the previous timestamp.
+            long previousTimestamp = pageState.getLastTimestamp();
+            recordPageRevisitDelta(previousTimestamp);
 
-            mModel.set(SCROLL_TO_CATEGORY_KEY, scrollPosition);
+            // Restore the scroll position.
+            mLayoutManager.onRestoreInstanceState(pageState.getStableLayoutManagerState());
         }
+    }
+
+    /*
+     * Retrieves the state of the page from the navigation entry and reconstitutes it into a
+     * PageState using PageState.CREATOR.
+     */
+    private PageState getPageStateFromNavigationEntry() {
+        if (mTab.getWebContents() == null) return null;
+
+        NavigationController controller = mTab.getWebContents().getNavigationController();
+        int index = controller.getLastCommittedEntryIndex();
+        String pageStateFromNav =
+                controller.getEntryExtraData(index, NAVIGATION_ENTRY_PAGE_STATE_KEY);
+        if (TextUtils.isEmpty(pageStateFromNav)) return null;
+
+        byte[] parcelData = Base64.decode(pageStateFromNav, 0);
+        Parcel parcel = Parcel.obtain();
+        parcel.unmarshall(parcelData, 0, parcelData.length);
+        parcel.setDataPosition(0);
+        PageState pageState = PageState.CREATOR.createFromParcel(parcel);
+        parcel.recycle();
+
+        return pageState;
+    }
+
+    private void setInitialScrollPosition() {
+        int scrollPosition = mInitialScrollPosition;
+        if (mNavigateToCategory != UNKNOWN_NAV_CATEGORY) {
+            scrollPosition = lookupCategory();
+        }
+        if (scrollPosition == RecyclerView.NO_POSITION) {
+            // Default to first position.
+            scrollPosition = 0;
+        }
+
+        mModel.set(SCROLL_TO_CATEGORY_KEY, scrollPosition);
+    }
+
+    /** Records the time delta between page visits if it is under 30 seconds for UMA usage. */
+    private static void recordPageRevisitDelta(long previousTimestamp) {
+        long currentTimestamp = System.currentTimeMillis();
+        long delta = currentTimestamp - previousTimestamp;
+
+        if (delta < BACK_NAVIGATION_TIMEOUT_FOR_UMA) {
+            RecordHistogram.recordCustomTimesHistogram(
+                    "ExploreSites.NavBackTime", delta, 1, BACK_NAVIGATION_TIMEOUT_FOR_UMA, 50);
+        }
+    }
+
+    /** Save the state of the page to a parcelable located in this page's nav entry. */
+    private void savePageState() {
+        if (mTab == null || mTab.getWebContents() == null) return;
+
+        NavigationController controller = mTab.getWebContents().getNavigationController();
+        int index = controller.getLastCommittedEntryIndex();
+        NavigationEntry entry = controller.getEntryAtIndex(index);
+        if (entry == null) return;
+
+        PageState pageState = createPageState();
+        Parcel parcel = Parcel.obtain();
+        pageState.writeToParcel(parcel, 0);
+        String marshalledState = Base64.encodeToString(parcel.marshall(), 0);
+        parcel.recycle();
+
+        controller.setEntryExtraData(index, NAVIGATION_ENTRY_PAGE_STATE_KEY, marshalledState);
+    }
+
+    private PageState createPageState() {
+        Parcelable layoutManagerState = mLayoutManager.onSaveInstanceState();
+        long timestamp = System.currentTimeMillis();
+
+        return new PageState(timestamp, layoutManagerState);
     }
 
     boolean isLoadedForTests() {
@@ -327,11 +428,6 @@ public class ExploreSitesPage extends BasicNativePage {
     @Override
     public String getHost() {
         return UrlConstants.EXPLORE_HOST;
-    }
-
-    @Override
-    public View getView() {
-        return mView;
     }
 
     @Override
@@ -355,59 +451,12 @@ public class ExploreSitesPage extends BasicNativePage {
         }
     }
 
-    /* Gets the state of layout manager as a marshalled Parcel that's Base64 Encoded. */
-    private String getLayoutManagerState() {
-        Parcelable layoutManagerState = mLayoutManager.onSaveInstanceState();
-        Parcel parcel = Parcel.obtain();
-        layoutManagerState.writeToParcel(parcel, 0);
-        String marshalledState = Base64.encodeToString(parcel.marshall(), 0);
-        parcel.recycle();
-        return marshalledState;
-    }
-
-    /* Saves the state of the layout manager in the NavigationEntry for the current tab. */
-    private void saveLayoutManagerState() {
-        if (mTab == null || mTab.getWebContents() == null) return;
-
-        NavigationController controller = mTab.getWebContents().getNavigationController();
-        int index = controller.getLastCommittedEntryIndex();
-        NavigationEntry entry = controller.getEntryAtIndex(index);
-        if (entry == null) return;
-
-        controller.setEntryExtraData(
-                index, NAVIGATION_ENTRY_SCROLL_POSITION_KEY, getLayoutManagerState());
-    }
-
-    /*
-     * Retrieves the layout manager state from the navigation entry and reconstitutes it into a
-     * Parcelable using LinearLayoutManager.SavedState.CREATOR.
-     */
-    private Parcelable getLayoutManagerStateFromNavigationEntry() {
-        if (mTab.getWebContents() == null) return null;
-
-        NavigationController controller = mTab.getWebContents().getNavigationController();
-        int index = controller.getLastCommittedEntryIndex();
-        String layoutManagerState =
-                controller.getEntryExtraData(index, NAVIGATION_ENTRY_SCROLL_POSITION_KEY);
-        if (TextUtils.isEmpty(layoutManagerState)) return null;
-
-        byte[] parcelData = Base64.decode(layoutManagerState, 0);
-        Parcel parcel = Parcel.obtain();
-        parcel.unmarshall(parcelData, 0, parcelData.length);
-        parcel.setDataPosition(0);
-        Parcelable scrollPosition =
-                StableScrollLayoutManager.SavedState.CREATOR.createFromParcel(parcel);
-        parcel.recycle();
-
-        return scrollPosition;
-    }
-
     @Override
     public void destroy() {
         if (mTabObserver != null) {
             mTab.removeObserver(mTabObserver);
         }
-        mHost.getActiveTab().getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
+        mTab.getWindowAndroid().removeContextMenuCloseListener(mContextMenuManager);
         super.destroy();
     }
 

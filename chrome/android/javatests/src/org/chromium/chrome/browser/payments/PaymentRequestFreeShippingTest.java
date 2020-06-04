@@ -22,18 +22,18 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
-import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
-import org.chromium.chrome.browser.night_mode.NightModeTestUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.night_mode.ChromeNightModeTestUtils;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
-import org.chromium.chrome.test.util.RenderTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
+import org.chromium.ui.test.util.NightModeTestUtils;
+import org.chromium.ui.test.util.RenderTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -58,35 +58,35 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
     @BeforeClass
     public static void setUpBeforeActivityLaunched() {
-        NightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
+        ChromeNightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
     }
 
     @ParameterAnnotations.UseMethodParameterBefore(NightModeTestUtils.NightModeParams.class)
     public void setupNightMode(boolean nightModeEnabled) {
-        NightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
+        ChromeNightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
         mRenderTestRule.setNightModeEnabled(nightModeEnabled);
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mPaymentRequestTestRule.startMainActivity();
     }
 
     @AfterClass
     public static void tearDownAfterActivityDestroyed() {
-        NightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
+        ChromeNightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
     }
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
         // The user has a shipping address on disk.
         String billingAddressId = helper.setProfile(new AutofillProfile("", "https://example.com",
                 true, "Jon Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "",
                 "US", "650-253-0000", "", "en-US"));
         helper.setCreditCard(new CreditCard("", "https://example.com", true, true, "Jon Doe",
-                "4111111111111111", "1111", "12", "2050", "visa", R.drawable.visa_card,
-                CardType.UNKNOWN, billingAddressId, "" /* serverId */));
+                "4111111111111111", "1111", "12", "2050", "amex", R.drawable.amex_card,
+                billingAddressId, "" /* serverId */));
     }
 
     /** Submit the shipping address to the merchant when the user clicks "Pay." */
@@ -114,7 +114,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @MediumTest
     @FlakyTest(message = "crbug.com/673371")
     @Feature({"Payments"})
-    public void testAddInvalidAddressAndCancel() throws InterruptedException, TimeoutException {
+    public void testAddInvalidAddressAndCancel() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -134,7 +134,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testAddAddressAndPay() throws InterruptedException, TimeoutException {
+    public void testAddAddressAndPay() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -160,7 +160,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testChangeCountryAddAddressAndPay() throws InterruptedException, TimeoutException {
+    public void testChangeCountryAddAddressAndPay() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -188,8 +188,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickAddAddressAndCloseShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickAddAddressAndCloseShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -220,8 +219,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickCloseAndAddAddressShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickCloseAndAddAddressShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -249,8 +247,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @MediumTest
     @FlakyTest(message = "crbug.com/673371")
     @Feature({"Payments"})
-    public void testQuickAddAddressAndCancelShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickAddAddressAndCancelShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -281,8 +278,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testQuickCancelAndAddAddressShouldNotCrash()
-            throws InterruptedException, TimeoutException {
+    public void testQuickCancelAndAddAddressShouldNotCrash() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickInShippingAddressAndWait(
                 R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
@@ -312,7 +308,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPaymentRequestEventsMetric() throws InterruptedException, TimeoutException {
+    public void testPaymentRequestEventsMetric() throws TimeoutException {
         // Start and abort the Payment Request.
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         mPaymentRequestTestRule.clickAndWait(
@@ -322,7 +318,7 @@ public class PaymentRequestFreeShippingTest implements MainActivityStartCallback
 
         int expectedSample = Event.SHOWN | Event.USER_ABORTED | Event.HAD_INITIAL_FORM_OF_PAYMENT
                 | Event.HAD_NECESSARY_COMPLETE_SUGGESTIONS | Event.REQUEST_SHIPPING
-                | Event.REQUEST_METHOD_BASIC_CARD;
+                | Event.REQUEST_METHOD_BASIC_CARD | Event.AVAILABLE_METHOD_BASIC_CARD;
         Assert.assertEquals(1,
                 RecordHistogram.getHistogramValueCountForTesting(
                         "PaymentRequest.Events", expectedSample));

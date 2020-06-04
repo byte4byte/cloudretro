@@ -10,14 +10,16 @@
 #include "base/base64url.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/crx_file/id_util.h"
 #include "crypto/signature_verifier.h"
+#include "extensions/browser/content_verifier/content_verifier_utils.h"
+#include "extensions/browser/content_verifier/scoped_uma_recorder.h"
 #include "extensions/common/extension.h"
 
 namespace {
@@ -59,55 +61,10 @@ const base::Value* FindDictionaryWithValue(const base::Value& list,
   return nullptr;
 }
 
-// Helper to record UMA for results of initializing verified_contents.json file.
-// TODO(lazyboy): Merge this with ScopedUMARecorder in computed_hashes.cc.
-class ScopedUMARecorder {
- public:
-  ScopedUMARecorder() = default;
-
-  ~ScopedUMARecorder() {
-    if (recorded_)
-      return;
-    RecordImpl(false);
-  }
-
-  void RecordSuccess() {
-    recorded_ = true;
-    RecordImpl(true);
-  }
-
- private:
-  void RecordImpl(bool success) {
-    if (success) {
-      UMA_HISTOGRAM_TIMES(
-          "Extensions.ContentVerification.VerifiedContentsInitTime",
-          timer_.Elapsed());
-    }
-    UMA_HISTOGRAM_BOOLEAN(
-        "Extensions.ContentVerification.VerifiedContentsInitResult", success);
-  }
-
- private:
-  base::ElapsedTimer timer_;
-  bool recorded_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedUMARecorder);
-};
-
-#if defined(OS_WIN)
-// Returns true if |path| ends with (.| )+.
-// |out_path| will contain "." and/or " " suffix removed from |path|.
-bool TrimDotSpaceSuffix(const base::FilePath::StringType& path,
-                        base::FilePath::StringType* out_path) {
-  base::FilePath::StringType::size_type trim_pos =
-      path.find_last_not_of(FILE_PATH_LITERAL(". "));
-  if (trim_pos == base::FilePath::StringType::npos)
-    return false;
-
-  *out_path = path.substr(0, trim_pos + 1);
-  return true;
-}
-#endif  // defined(OS_WIN)
+const char kUMAVerifiedContentsInitResult[] =
+    "Extensions.ContentVerification.VerifiedContentsInitResult";
+const char kUMAVerifiedContentsInitTime[] =
+    "Extensions.ContentVerification.VerifiedContentsInitTime";
 
 }  // namespace
 
@@ -144,7 +101,9 @@ VerifiedContents::~VerifiedContents() {
 std::unique_ptr<VerifiedContents> VerifiedContents::Create(
     base::span<const uint8_t> public_key,
     const base::FilePath& path) {
-  ScopedUMARecorder uma_recorder;
+  ScopedUMARecorder<kUMAVerifiedContentsInitTime,
+                    kUMAVerifiedContentsInitResult>
+      uma_recorder;
   // Note: VerifiedContents constructor is private.
   auto verified_contents = base::WrapUnique(new VerifiedContents(public_key));
   std::string payload;
@@ -212,23 +171,13 @@ std::unique_ptr<VerifiedContents> VerifiedContents::Create(
                                  &root_hash)) {
         return nullptr;
       }
-      base::FilePath file_path =
-          base::FilePath::FromUTF8Unsafe(*file_path_string);
-      base::FilePath::StringType lowercase_file_path =
-          base::ToLowerASCII(file_path.value());
-      auto i = verified_contents->root_hashes_.insert(
-          std::make_pair(lowercase_file_path, std::string()));
-      i->second.swap(root_hash);
 
-#if defined(OS_WIN)
-      // Additionally store a canonicalized filename without (.| )+ suffix, so
-      // that any filename with (.| )+ suffix can be matched later, see
-      // HasTreeHashRoot() and TreeHashRootEquals().
-      base::FilePath::StringType trimmed_path;
-      if (TrimDotSpaceSuffix(lowercase_file_path, &trimmed_path))
-        verified_contents->root_hashes_.insert(
-            std::make_pair(trimmed_path, i->second));
-#endif  // defined(OS_WIN)
+      content_verifier_utils::CanonicalRelativePath canonical_path =
+          content_verifier_utils::CanonicalizeRelativePath(
+              base::FilePath::FromUTF8Unsafe(*file_path_string));
+      auto i = verified_contents->root_hashes_.insert(
+          std::make_pair(canonical_path, std::string()));
+      i->second.swap(root_hash);
     }
 
     break;
@@ -239,32 +188,16 @@ std::unique_ptr<VerifiedContents> VerifiedContents::Create(
 
 bool VerifiedContents::HasTreeHashRoot(
     const base::FilePath& relative_path) const {
-  base::FilePath::StringType path = base::ToLowerASCII(
-      relative_path.NormalizePathSeparatorsTo('/').value());
-  if (base::Contains(root_hashes_, path))
-    return true;
-
-#if defined(OS_WIN)
-  base::FilePath::StringType trimmed_path;
-  if (TrimDotSpaceSuffix(path, &trimmed_path))
-    return base::Contains(root_hashes_, trimmed_path);
-#endif  // defined(OS_WIN)
-  return false;
+  return base::Contains(
+      root_hashes_,
+      content_verifier_utils::CanonicalizeRelativePath(relative_path));
 }
 
 bool VerifiedContents::TreeHashRootEquals(const base::FilePath& relative_path,
                                           const std::string& expected) const {
-  base::FilePath::StringType normalized_relative_path =
-      base::ToLowerASCII(relative_path.NormalizePathSeparatorsTo('/').value());
-  if (TreeHashRootEqualsImpl(normalized_relative_path, expected))
-    return true;
-
-#if defined(OS_WIN)
-  base::FilePath::StringType trimmed_relative_path;
-  if (TrimDotSpaceSuffix(normalized_relative_path, &trimmed_relative_path))
-    return TreeHashRootEqualsImpl(trimmed_relative_path, expected);
-#endif  // defined(OS_WIN)
-  return false;
+  return TreeHashRootEqualsForCanonicalPath(
+      content_verifier_utils::CanonicalizeRelativePath(relative_path),
+      expected);
 }
 
 // We're loosely following the "JSON Web Signature" draft spec for signing
@@ -401,11 +334,12 @@ bool VerifiedContents::VerifySignature(const std::string& protected_value,
   return true;
 }
 
-bool VerifiedContents::TreeHashRootEqualsImpl(
-    const base::FilePath::StringType& normalized_relative_path,
+bool VerifiedContents::TreeHashRootEqualsForCanonicalPath(
+    const content_verifier_utils::CanonicalRelativePath&
+        canonical_relative_path,
     const std::string& expected) const {
   std::pair<RootHashes::const_iterator, RootHashes::const_iterator> hashes =
-      root_hashes_.equal_range(normalized_relative_path);
+      root_hashes_.equal_range(canonical_relative_path);
   for (auto iter = hashes.first; iter != hashes.second; ++iter) {
     if (expected == iter->second)
       return true;

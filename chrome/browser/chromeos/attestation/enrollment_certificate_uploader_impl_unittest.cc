@@ -21,7 +21,7 @@
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -34,28 +34,29 @@ namespace attestation {
 
 namespace {
 
-void CertCallbackSuccess(const AttestationFlow::CertificateCallback& callback) {
+void CertCallbackSuccess(AttestationFlow::CertificateCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, ATTESTATION_SUCCESS, "fake_cert"));
+      FROM_HERE,
+      base::BindOnce(std::move(callback), ATTESTATION_SUCCESS, "fake_cert"));
 }
 
 void CertCallbackUnspecifiedFailure(
-    const AttestationFlow::CertificateCallback& callback) {
+    AttestationFlow::CertificateCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, ATTESTATION_UNSPECIFIED_FAILURE, ""));
+      FROM_HERE,
+      base::BindOnce(std::move(callback), ATTESTATION_UNSPECIFIED_FAILURE, ""));
 }
 
 void CertCallbackBadRequestFailure(
-    const AttestationFlow::CertificateCallback& callback) {
+    AttestationFlow::CertificateCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(callback, ATTESTATION_SERVER_BAD_REQUEST_FAILURE, ""));
+      FROM_HERE, base::BindOnce(std::move(callback),
+                                ATTESTATION_SERVER_BAD_REQUEST_FAILURE, ""));
 }
 
-void StatusCallbackSuccess(
-    const policy::CloudPolicyClient::StatusCallback& callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::BindOnce(callback, true));
+void StatusCallbackSuccess(policy::CloudPolicyClient::StatusCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 
 }  // namespace
@@ -80,8 +81,8 @@ class EnrollmentCertificateUploaderTest : public ::testing::Test {
     // Setup expected cert generations. Again use WillOnce(). Cert generation
     // is another costly operation and if it gets triggered more than once
     // during a single pass this indicates a logical problem in the uploader.
-    EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _))
-        .WillOnce(WithArgs<4>(Invoke(CertCallbackSuccess)));
+    EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _, _))
+        .WillOnce(WithArgs<5>(Invoke(CertCallbackSuccess)));
   }
 
   void Run(bool expected_status) {
@@ -98,7 +99,7 @@ class EnrollmentCertificateUploaderTest : public ::testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   ScopedCrosSettingsTestHelper settings_helper_;
   FakeCryptohomeClient cryptohome_client_;
   StrictMock<MockAttestationFlow> attestation_flow_;
@@ -111,14 +112,14 @@ TEST_F(EnrollmentCertificateUploaderTest, UnregisteredPolicyClient) {
 }
 
 TEST_F(EnrollmentCertificateUploaderTest, GetCertificateUnspecifiedFailure) {
-  EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _))
-      .WillRepeatedly(WithArgs<4>(Invoke(CertCallbackUnspecifiedFailure)));
+  EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _, _))
+      .WillRepeatedly(WithArgs<5>(Invoke(CertCallbackUnspecifiedFailure)));
   Run(false /* expected_status */);
 }
 
 TEST_F(EnrollmentCertificateUploaderTest, GetCertificateBadRequestFailure) {
-  EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _))
-      .WillOnce(WithArgs<4>(Invoke(CertCallbackBadRequestFailure)));
+  EXPECT_CALL(attestation_flow_, GetCertificate(_, _, _, _, _, _))
+      .WillOnce(WithArgs<5>(Invoke(CertCallbackBadRequestFailure)));
   Run(false /* expected_status */);
 }
 

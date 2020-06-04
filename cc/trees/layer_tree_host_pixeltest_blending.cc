@@ -70,7 +70,9 @@ class LayerTreeHostBlendingPixelTest
           ::testing::tuple<PixelResourceTestCase, SkBlendMode>> {
  public:
   LayerTreeHostBlendingPixelTest()
-      : force_antialiasing_(false), force_blending_with_shaders_(false) {
+      : LayerTreeHostPixelResourceTest(resource_type()),
+        force_antialiasing_(false),
+        force_blending_with_shaders_(false) {
     pixel_comparator_ = std::make_unique<FuzzyPixelOffByOneComparator>(true);
   }
 
@@ -132,7 +134,6 @@ class LayerTreeHostBlendingPixelTest
     gfx::Size bounds = layer->bounds();
     scoped_refptr<PictureImageLayer> mask = PictureImageLayer::Create();
     mask->SetIsDrawable(true);
-    mask->SetLayerMaskType(Layer::LayerMaskType::SINGLE_TEXTURE_MASK);
     mask->SetBounds(bounds);
 
     sk_sp<SkSurface> surface =
@@ -151,7 +152,7 @@ class LayerTreeHostBlendingPixelTest
                                   PaintImage::GetNextContentId())
                        .TakePaintImage(),
                    SkMatrix::I(), false);
-    layer->SetMaskLayer(mask.get());
+    layer->SetMaskLayer(mask);
   }
 
   void SetupColorMatrix(scoped_refptr<Layer> layer) {
@@ -210,13 +211,12 @@ class LayerTreeHostBlendingPixelTest
   void RunBlendingWithRenderPass(RenderPassOptions flags) {
     const int kRootWidth = 2;
     const int kRootHeight = kRootWidth * kCSSTestColorsCount;
-    InitializeFromTestCase(resource_type());
 
     // Force shaders only applies to gl renderer.
-    if (renderer_type() != RENDERER_GL && flags & kForceShaders)
+    if (renderer_type_ != RENDERER_GL && flags & kForceShaders)
       return;
 
-    SCOPED_TRACE(TestTypeToString(renderer_type()));
+    SCOPED_TRACE(TestTypeToString());
     SCOPED_TRACE(SkBlendMode_Name(current_blend_mode()));
 
     scoped_refptr<SolidColorLayer> root = CreateSolidColorLayer(
@@ -224,39 +224,22 @@ class LayerTreeHostBlendingPixelTest
     scoped_refptr<Layer> background =
         CreateColorfulBackdropLayer(kRootWidth, kRootHeight);
 
-    background->SetIsRootForIsolatedGroup(true);
+    background->SetForceRenderSurfaceForTesting(true);
     root->AddChild(background);
 
     CreateBlendingColorLayers(kRootWidth, kRootHeight, background.get(), flags);
 
-    this->force_antialiasing_ = (flags & kUseAntialiasing);
-    this->force_blending_with_shaders_ = (flags & kForceShaders);
+    force_antialiasing_ = (flags & kUseAntialiasing);
+    force_blending_with_shaders_ = (flags & kForceShaders);
 
-    if ((flags & kUseAntialiasing) && (renderer_type() == RENDERER_GL)) {
+    if ((renderer_type_ == RENDERER_GL && force_antialiasing_) ||
+        renderer_type_ == RENDERER_SKIA_VK) {
       // Blending results might differ with one pixel.
-      // Don't allow large errors here, only off by ones.
-      // However, large error still has to be specified to satisfy
-      // the pixel comparator so set it equivalent to small errors.
+      float percentage_pixels_error = 35.f;
+      float percentage_pixels_small_error = 0.f;
+      float average_error_allowed_in_bad_pixels = 1.f;
       int large_error_allowed = 1;
-      int small_error_allowed = 1;
-      float percentage_pixels_small_error = 35.0f;
-      float percentage_pixels_error = 35.0f;
-      // The average error is still close to 1.
-      float average_error_allowed_in_bad_pixels = 1.4f;
-
-      pixel_comparator_ = std::make_unique<FuzzyPixelComparator>(
-          false,  // discard_alpha
-          percentage_pixels_error, percentage_pixels_small_error,
-          average_error_allowed_in_bad_pixels, large_error_allowed,
-          small_error_allowed);
-    } else if (renderer_type() == RENDERER_SKIA_VK) {
-      // TODO(penghuang): maybe need a new baseline for vulkan.
-      // https://crbug.com/963446
-      int large_error_allowed = 5;
-      int small_error_allowed = 5;
-      float percentage_pixels_small_error = 100.0f;
-      float percentage_pixels_error = 100.0f;
-      float average_error_allowed_in_bad_pixels = 2.6f;
+      int small_error_allowed = 0;
 
       pixel_comparator_ = std::make_unique<FuzzyPixelComparator>(
           false,  // discard_alpha
@@ -276,11 +259,13 @@ class LayerTreeHostBlendingPixelTest
 
 std::vector<PixelResourceTestCase> const kTestCases = {
     {LayerTreeTest::RENDERER_SOFTWARE, SOFTWARE},
+#if !defined(GL_NOT_ON_PLATFORM)
     {LayerTreeTest::RENDERER_GL, ZERO_COPY},
     {LayerTreeTest::RENDERER_SKIA_GL, GPU},
+#endif  // !defined(GL_NOT_ON_PLATFORM)
 #if defined(ENABLE_CC_VULKAN_TESTS)
     {LayerTreeTest::RENDERER_SKIA_VK, GPU},
-#endif
+#endif  // defined(ENABLE_CC_VULKAN_TESTS)
 };
 
 INSTANTIATE_TEST_SUITE_P(B,
@@ -291,7 +276,6 @@ INSTANTIATE_TEST_SUITE_P(B,
 TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithRoot) {
   const int kRootWidth = 2;
   const int kRootHeight = 2;
-  InitializeFromTestCase(resource_type());
 
   scoped_refptr<SolidColorLayer> background =
       CreateSolidColorLayer(gfx::Rect(kRootWidth, kRootHeight), kCSSOrange);
@@ -318,7 +302,6 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithRoot) {
 TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithBackdropFilter) {
   const int kRootWidth = 2;
   const int kRootHeight = 2;
-  InitializeFromTestCase(resource_type());
 
   scoped_refptr<SolidColorLayer> background =
       CreateSolidColorLayer(gfx::Rect(kRootWidth, kRootHeight), kCSSOrange);
@@ -358,7 +341,6 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithBackdropFilter) {
 TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithTransparent) {
   const int kRootWidth = 2;
   const int kRootHeight = 2;
-  InitializeFromTestCase(resource_type());
 
   // Intermediate layer here that should be ignored because of the isolated
   // group.
@@ -369,7 +351,7 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithTransparent) {
       CreateSolidColorLayer(gfx::Rect(kRootWidth, kRootHeight), kCSSOrange);
 
   root->AddChild(background);
-  background->SetIsRootForIsolatedGroup(true);
+  background->SetForceRenderSurfaceForTesting(true);
 
   // Orange child layers will blend with the green background
   gfx::Rect child_rect(kRootWidth, kRootHeight);
@@ -386,22 +368,6 @@ TEST_P(LayerTreeHostBlendingPixelTest, BlendingWithTransparent) {
   paint.setBlendMode(current_blend_mode());
   paint.setColor(kCSSGreen);
   canvas.drawRect(SkRect::MakeWH(kRootWidth, kRootHeight), paint);
-
-  if (renderer_type() == RENDERER_SKIA_VK) {
-    // TODO(penghuang): maybe need a new baseline for vulkan.
-    // https://crbug.com/963446
-    int large_error_allowed = 2;
-    int small_error_allowed = 2;
-    float percentage_pixels_small_error = 100.0f;
-    float percentage_pixels_error = 100.0f;
-    float average_error_allowed_in_bad_pixels = 2.6f;
-
-    pixel_comparator_ = std::make_unique<FuzzyPixelComparator>(
-        false,  // discard_alpha
-        percentage_pixels_error, percentage_pixels_small_error,
-        average_error_allowed_in_bad_pixels, large_error_allowed,
-        small_error_allowed);
-  }
 
   RunPixelResourceTest(root, expected);
 }

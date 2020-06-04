@@ -65,12 +65,6 @@ class ScriptExecutor {
     MATCH_ABOUT_BLANK,
   };
 
-  // The type of world to inject into (main world, or its own isolated world).
-  enum WorldType {
-    MAIN_WORLD,
-    ISOLATED_WORLD,
-  };
-
   // The type of process the target is.
   enum ProcessType {
     DEFAULT_PROCESS,
@@ -85,9 +79,8 @@ class ScriptExecutor {
 
   // Callback from ExecuteScript. The arguments are (error, on_url, result).
   // Success is implied by an empty error.
-  typedef base::Callback<
-      void(const std::string&, const GURL&, const base::ListValue&)>
-      ScriptFinishedCallback;
+  using ScriptFinishedCallback = base::OnceCallback<
+      void(const std::string&, const GURL&, const base::ListValue&)>;
 
   // Executes a script. The arguments match ExtensionMsg_ExecuteCode_Params in
   // extension_messages.h (request_id is populated automatically).
@@ -106,14 +99,13 @@ class ScriptExecutor {
                      int frame_id,
                      MatchAboutBlank match_about_blank,
                      UserScript::RunLocation run_at,
-                     WorldType world_type,
                      ProcessType process_type,
                      const GURL& webview_src,
-                     const GURL& file_url,
+                     const GURL& script_url,
                      bool user_gesture,
                      base::Optional<CSSOrigin> css_origin,
                      ResultType result_type,
-                     const ScriptFinishedCallback& callback);
+                     ScriptFinishedCallback callback);
 
   // Set the observer for ScriptsExecutedNotification callbacks.
   void set_observer(ScriptsExecutedNotification observer) {

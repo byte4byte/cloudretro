@@ -2,7 +2,9 @@
 
 "[Clusterfuzz](https://google.github.io/clusterfuzz/) is a scalable fuzzing
 infrastructure which finds security and stabilty issues in software". Chromium
-uses Clusterfuzz to find bugs in sqlite, among others.
+uses Clusterfuzz to find bugs in sqlite, among others. One can view sqlite
+Fuzzing coverage [here](https://chromium-coverage.appspot.com/reports/709707_fuzzers_only/linux/chromium/src/third_party/sqlite/amalgamation/report.html),
+with more detailed data [here](https://clusterfuzz.com/fuzzer-stats?fuzzer=libFuzzer_sqlite3_lpm_fuzzer).
 
 Given access to a clusterfuzz test case, this README will describe how one can
 reproduce and help diagnose sqlite bugs found by clusterfuzz.
@@ -38,14 +40,16 @@ more data is needed, reproduce a bit more manually by first building the target.
 To build the target, first set .gn args to match those in the clusterfuzz link,
 then build and run the fuzzer.
 
-1. `export FUZZER_NAME=sqlite3_fts3_lpm_fuzzer  # FUZZER_NAME is listed in the crbug as the "Fuzz target binary"`
+1. `export FUZZER_NAME=sqlite3_fts3_lpm_fuzzer  # FUZZER_NAME is listed in the crbug as the "Fuzz Target"`
 2. Download the clusterfuzz minimized testcase.
 3. `export CLUSTERFUZZ_TESTCASE=./clusterfuzz-testcase-minimized-sqlite3_fts3_lpm_fuzzer-5756437473656832  # Set the clusterfuzz testcase path to CLUSTERFUZZ_TESTCASE`
 3. `gn args out/Fuzzer  # Set arguments to matches those in the clusterfuzz "Detailed report"'s "GN CONFIG (ARGS.GN)" section`
 4. `autoninja -C out/Fuzzer/ ${FUZZER_NAME}  # Build the fuzzer target`
 5. `./out/Fuzzer/${FUZZER_NAME} ${CLUSTERFUZZ_TESTCASE}  # Verify repro by running fuzzer (for memory leaks, try setting "ASAN_OPTIONS=detect_leaks=1")`
-6. `LPM_DUMP_NATIVE_INPUT=1 SQL_SKIP_QUERIES=AlterTable ./out/Fuzzer/${FUZZER_NAME} ${CLUSTERFUZZ_TESTCASE}  # Try using different args to get SQL statements that will repro the bug`
-7. Optionally, take output from (7) into a repro.sql file for further testing.
+6. `LPM_DUMP_NATIVE_INPUT=1 SQL_SKIP_QUERIES=AlterTable ./out/Fuzzer/${FUZZER_NAME} ${CLUSTERFUZZ_TESTCASE}  # Try using different args to get SQL statements that will repro the bug. SQL_SKIP_QUERIES can help minimize the repro`
+7. Optionally, minimize the testcase further using the `-minimize_crash`
+[flag](https://chromium.googlesource.com/chromium/src/+/master/testing/libfuzzer/reproducing.md#minimizing-a-crash-input-optional).
+8. Optionally, take output from (7) into a repro.sql file for further testing.
 To do so, either copy the SQL query in the output from (6) into a .sql file, or
 run the final command in (7) with a `> repro.sql` at the end, and filter out
 non-sql content afterwards. Either way, ensure that the case continues to repro

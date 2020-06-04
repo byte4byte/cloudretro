@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_WORLD_INFORMATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_WORLD_INFORMATION_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
 #include "third_party/blink/renderer/modules/xr/xr_plane.h"
 #include "third_party/blink/renderer/modules/xr/xr_plane_set.h"
 
@@ -23,13 +23,13 @@ class XRWorldInformation : public ScriptWrappable {
   // disabled.
   XRPlaneSet* detectedPlanes() const;
 
-  void Trace(blink::Visitor* visitor) override;
+  void Trace(Visitor* visitor) override;
 
   // Applies changes to the stored plane information based on the contents of
   // the received frame data. This will update the contents of
   // plane_ids_to_planes_.
   void ProcessPlaneInformation(
-      const device::mojom::blink::XRPlaneDetectionDataPtr& detected_planes_data,
+      const device::mojom::blink::XRPlaneDetectionData* detected_planes_data,
       double timestamp);
 
  private:
@@ -37,7 +37,7 @@ class XRWorldInformation : public ScriptWrappable {
   // This is the case if we have a freshly constructed instance, or if our
   // last `ProcessPlaneInformation()` was called with base::nullopt.
   bool is_detected_planes_null_ = true;
-  HeapHashMap<int32_t, Member<XRPlane>> plane_ids_to_planes_;
+  HeapHashMap<uint64_t, Member<XRPlane>> plane_ids_to_planes_;
 
   Member<XRSession> session_;
 };

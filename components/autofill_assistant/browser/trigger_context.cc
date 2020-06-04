@@ -34,6 +34,7 @@ TriggerContextImpl::TriggerContextImpl(
     const std::string& experiment_ids)
     : parameters_(std::move(parameters)),
       experiment_ids_(std::move(experiment_ids)) {}
+
 TriggerContextImpl::~TriggerContextImpl() = default;
 
 void TriggerContextImpl::AddParameters(
@@ -56,6 +57,22 @@ base::Optional<std::string> TriggerContextImpl::GetParameter(
 
 std::string TriggerContextImpl::experiment_ids() const {
   return experiment_ids_;
+}
+
+bool TriggerContextImpl::is_cct() const {
+  return cct_;
+}
+
+bool TriggerContextImpl::is_onboarding_shown() const {
+  return onboarding_shown_;
+}
+
+bool TriggerContextImpl::is_direct_action() const {
+  return direct_action_;
+}
+
+std::string TriggerContextImpl::get_caller_account_hash() const {
+  return caller_account_hash_;
 }
 
 MergedTriggerContext::MergedTriggerContext(
@@ -94,6 +111,38 @@ std::string MergedTriggerContext::experiment_ids() const {
     experiment_ids.append(context->experiment_ids());
   }
   return experiment_ids;
+}
+
+bool MergedTriggerContext::is_cct() const {
+  for (const TriggerContext* context : contexts_) {
+    if (context->is_cct())
+      return true;
+  }
+  return false;
+}
+
+bool MergedTriggerContext::is_onboarding_shown() const {
+  for (const TriggerContext* context : contexts_) {
+    if (context->is_onboarding_shown())
+      return true;
+  }
+  return false;
+}
+
+bool MergedTriggerContext::is_direct_action() const {
+  for (const TriggerContext* context : contexts_) {
+    if (context->is_direct_action())
+      return true;
+  }
+  return false;
+}
+
+std::string MergedTriggerContext::get_caller_account_hash() const {
+  for (const TriggerContext* context : contexts_) {
+    if (!context->get_caller_account_hash().empty())
+      return context->get_caller_account_hash();
+  }
+  return "";
 }
 
 }  // namespace autofill_assistant

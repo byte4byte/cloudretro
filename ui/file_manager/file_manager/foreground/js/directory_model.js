@@ -209,8 +209,7 @@ class DirectoryModel extends cr.EventTarget {
    */
   isCurrentRootVolumeType_(volumeType) {
     const rootType = this.getCurrentRootType();
-    return rootType != null &&
-        rootType != VolumeManagerCommon.RootType.RECENT &&
+    return rootType != null && !util.isRecentRootType(rootType) &&
         VolumeManagerCommon.getVolumeTypeFromRootType(rootType) === volumeType;
   }
 
@@ -352,6 +351,20 @@ class DirectoryModel extends cr.EventTarget {
    */
   getCurrentDirEntry() {
     return this.currentDirContents_.getDirectoryEntry();
+  }
+
+  /**
+   * @public
+   * @return {string}
+   */
+  getCurrentDirName() {
+    const dirEntry = this.getCurrentDirEntry();
+    if (!dirEntry) {
+      return '';
+    }
+
+    const locationInfo = this.volumeManager_.getLocationInfo(dirEntry);
+    return util.getEntryLabel(locationInfo, dirEntry);
   }
 
   /**
@@ -585,7 +598,7 @@ class DirectoryModel extends cr.EventTarget {
     // Clear metadata information for the old (no longer visible) items in the
     // file list.
     const fileList = this.getFileList();
-    let removedUrls = [];
+    const removedUrls = [];
     for (let i = 0; i < fileList.length; i++) {
       removedUrls.push(fileList.item(i).toURL());
     }
@@ -1014,7 +1027,7 @@ class DirectoryModel extends cr.EventTarget {
     // available because it returns UI-only entries too, like Linux files and
     // Play files.
     const locationInfo = this.volumeManager_.getLocationInfo(dirEntry);
-    if (util.isMyFilesVolumeEnabled() && locationInfo && this.myFilesEntry_ &&
+    if (locationInfo && this.myFilesEntry_ &&
         locationInfo.rootType === VolumeManagerCommon.RootType.DOWNLOADS &&
         locationInfo.isRootEntry) {
       dirEntry = this.myFilesEntry_;
@@ -1198,7 +1211,7 @@ class DirectoryModel extends cr.EventTarget {
     // its contents.
     const currentDir = this.getCurrentDirEntry();
     const affectedVolumes = event.added.concat(event.removed);
-    for (let volume of affectedVolumes) {
+    for (const volume of affectedVolumes) {
       if (util.isSameEntry(currentDir, volume.prefixEntry)) {
         this.rescan(false);
         break;
@@ -1217,24 +1230,32 @@ class DirectoryModel extends cr.EventTarget {
         }
       }
     }
-    // If a new file backed provided volume is mounted,
-    // then redirect to it in the focused window.
-    // Note, that this is a temporary solution for https://crbug.com/427776.
-    // If crostini is mounted, redirect if it is the currently selected dir.
     if (event.added.length !== 1) {
       return;
     }
-    if ((window.isFocused() &&
+    // Redirect to newly mounted volume when:
+    // * There is no directory currently selected, meaning it's the first volume
+    //   to appear.
+    // * A new file backed provided volume is mounted, then redirect to it in
+    //   the focused window, because this means a zip file has been mounted.
+    //   Note, that this is a temporary solution for https://crbug.com/427776.
+    // * Crostini is mounted, redirect if it is the currently selected dir.
+    if (!currentDir ||
+        (window.isFocused() &&
          event.added[0].volumeType ===
              VolumeManagerCommon.VolumeType.PROVIDED &&
          event.added[0].source === VolumeManagerCommon.Source.FILE) ||
         (event.added[0].volumeType ===
              VolumeManagerCommon.VolumeType.CROSTINI &&
          this.getCurrentRootType() === VolumeManagerCommon.RootType.CROSTINI)) {
+      // Resolving a display root on FSP volumes is instant, despite the
+      // asynchronous call.
       event.added[0].resolveDisplayRoot().then((displayRoot) => {
-        // Resolving a display root on FSP volumes is instant, despite the
-        // asynchronous call.
-        this.changeDirectoryEntry(event.added[0].displayRoot);
+        // Only change directory if "currentDir" hasn't changed during the
+        // display root resolution.
+        if (currentDir === this.getCurrentDirEntry()) {
+          this.changeDirectoryEntry(event.added[0].displayRoot);
+        }
       });
     }
   }
@@ -1283,10 +1304,10 @@ class DirectoryModel extends cr.EventTarget {
     const locationInfo = this.volumeManager_.getLocationInfo(entry);
     const canUseDriveSearch =
         this.volumeManager_.getDriveConnectionState().type !==
-            VolumeManagerCommon.DriveConnectionType.OFFLINE &&
+            chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE &&
         (locationInfo && locationInfo.isDriveBased);
 
-    if (entry.rootType == VolumeManagerCommon.RootType.RECENT) {
+    if (util.isRecentRootType(entry.rootType)) {
       return DirectoryContents.createForRecent(
           context, /** @type {!FakeEntry} */ (entry), query);
     }

@@ -75,7 +75,7 @@ TEST(LayoutUnitTest, LayoutUnitInt) {
             LayoutUnit(kIntMaxForLayoutUnit + 100).RawValue());
   EXPECT_EQ((kIntMaxForLayoutUnit - 100) << kLayoutUnitFractionalBits,
             LayoutUnit(kIntMaxForLayoutUnit - 100).RawValue());
-  EXPECT_EQ(-max_internal_representation,
+  EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
             LayoutUnit(kIntMinForLayoutUnit).RawValue());
   EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
             LayoutUnit(kIntMinForLayoutUnit - 100).RawValue());
@@ -83,10 +83,6 @@ TEST(LayoutUnitTest, LayoutUnitInt) {
   // multiplication instead of direct shifting here.
   EXPECT_EQ((kIntMinForLayoutUnit + 100) * (1 << kLayoutUnitFractionalBits),
             LayoutUnit(kIntMinForLayoutUnit + 100).RawValue());
-  // A positive overflowed LayoutUnit should be of equal magnitude to a negative
-  // overflowed LayoutUnit.
-  EXPECT_EQ(LayoutUnit(), LayoutUnit(kIntMaxForLayoutUnit + 100) +
-                              LayoutUnit(-kIntMaxForLayoutUnit - 100));
 }
 
 TEST(LayoutUnitTest, LayoutUnitUnsigned) {
@@ -141,9 +137,12 @@ TEST(LayoutUnitTest, LayoutUnitRounding) {
   // The fractional part of LayoutUnit::Max() is 0x3f, so it should round up.
   EXPECT_EQ(((std::numeric_limits<int>::max() / kFixedPointDenominator) + 1),
             LayoutUnit::Max().Round());
-  // Similarly, LayoutUnit::Min() should round down.
-  EXPECT_EQ((-std::numeric_limits<int>::max() / kFixedPointDenominator) - 1,
-            LayoutUnit::Min().Round());
+  // The fractional part of LayoutUnit::Min() is 0, so the next bigger possible
+  // value should round down.
+  LayoutUnit epsilon;
+  epsilon.SetRawValue(1);
+  EXPECT_EQ(((std::numeric_limits<int>::min() / kFixedPointDenominator)),
+            (LayoutUnit::Min() + epsilon).Round());
 }
 
 TEST(LayoutUnitTest, LayoutUnitSnapSizeToPixel) {
@@ -156,8 +155,20 @@ TEST(LayoutUnitTest, LayoutUnitSnapSizeToPixel) {
   EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(1.5), LayoutUnit(0.99)));
   EXPECT_EQ(2, SnapSizeToPixel(LayoutUnit(1.5), LayoutUnit(1)));
 
-  EXPECT_EQ(0, SnapSizeToPixel(LayoutUnit(0.5), LayoutUnit(1.5)));
-  EXPECT_EQ(0, SnapSizeToPixel(LayoutUnit(0.99), LayoutUnit(1.5)));
+  // 0.046875 is 3/64, lower than 4 * LayoutUnit::Epsilon()
+  EXPECT_EQ(0, SnapSizeToPixel(LayoutUnit(0.046875), LayoutUnit(0)));
+  // 0.078125 is 5/64, higher than 4 * LayoutUnit::Epsilon()
+  EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(0.078125), LayoutUnit(0)));
+
+  // Negative versions
+  EXPECT_EQ(0, SnapSizeToPixel(LayoutUnit(-0.046875), LayoutUnit(0)));
+  EXPECT_EQ(-1, SnapSizeToPixel(LayoutUnit(-0.078125), LayoutUnit(0)));
+
+  // The next 2 would snap to zero but for the requirement that we not snap
+  // sizes greater than 4 * LayoutUnit::Epsilon() to 0.
+  EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(0.5), LayoutUnit(1.5)));
+  EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(0.99), LayoutUnit(1.5)));
+
   EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(1.0), LayoutUnit(1.5)));
   EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(1.49), LayoutUnit(1.5)));
   EXPECT_EQ(1, SnapSizeToPixel(LayoutUnit(1.5), LayoutUnit(1.5)));
@@ -306,20 +317,6 @@ TEST(LayoutUnitTest, LayoutUnitFloatOverflow) {
   EXPECT_EQ(kIntMinForLayoutUnit, LayoutUnit(-176972000.0f).ToInt());
   EXPECT_EQ(kIntMaxForLayoutUnit, LayoutUnit(176972000.0).ToInt());
   EXPECT_EQ(kIntMinForLayoutUnit, LayoutUnit(-176972000.0).ToInt());
-
-  EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
-            LayoutUnit::FromFloatCeil(-176972000.0f).RawValue());
-  EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
-            LayoutUnit::FromFloatFloor(-176972000.0f).RawValue());
-  EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
-            LayoutUnit::FromFloatRound(-176972000.0f).RawValue());
-
-  EXPECT_EQ(GetMinSaturatedSetResultForTesting(),
-            LayoutUnit::FromDoubleRound(-176972000.0).RawValue());
-
-  // A positive overflowed LayoutUnit should be of equal magnitude to a negative
-  // overflowed LayoutUnit.
-  EXPECT_EQ(LayoutUnit(), LayoutUnit(176972000.0) + LayoutUnit(-176972000.0));
 }
 
 TEST(LayoutUnitTest, UnaryMinus) {
@@ -327,8 +324,12 @@ TEST(LayoutUnitTest, UnaryMinus) {
   EXPECT_EQ(LayoutUnit(999), -LayoutUnit(-999));
   EXPECT_EQ(LayoutUnit(-999), -LayoutUnit(999));
 
-  // -LayoutUnit::Min() and LayoutUnit::Max() are equal.
-  EXPECT_EQ(LayoutUnit::Min(), -LayoutUnit::Max());
+  LayoutUnit negative_max;
+  negative_max.SetRawValue(LayoutUnit::Min().RawValue() + 1);
+  EXPECT_EQ(negative_max, -LayoutUnit::Max());
+  EXPECT_EQ(LayoutUnit::Max(), -negative_max);
+
+  // -LayoutUnit::min() is saturated to LayoutUnit::max()
   EXPECT_EQ(LayoutUnit::Max(), -LayoutUnit::Min());
 }
 

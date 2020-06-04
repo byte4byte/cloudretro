@@ -7,15 +7,18 @@
 
 #include "ash/public/cpp/ash_public_export.h"
 #include "ash/public/cpp/session/user_info.h"
+#include "base/callback.h"
 #include "base/time/time.h"
 #include "base/token.h"
-#include "chromeos/components/proximity_auth/public/mojom/auth_type.mojom.h"
+#include "chromeos/components/proximity_auth/public/mojom/auth_type.mojom-forward.h"
+#include "chromeos/components/security_token_pin/constants.h"
+#include "components/account_id/account_id.h"
 
 namespace ash {
 
 // State of the Oobe UI dialog, which is used to update the visibility of login
 // shelf buttons.
-// This comes from SIGNIN_UI_STATE defined in display_manager.js, with an
+// This comes from OOBE_UI_STATE defined in display_manager_types.js, with an
 // additional value HIDDEN to indicate the visibility of the oobe ui dialog.
 enum class OobeDialogState {
   // Showing other screen, which does not impact the visibility of login shelf
@@ -45,15 +48,24 @@ enum class OobeDialogState {
   // Showing error screen.
   ERROR = 8,
 
-  // Showing sync consent screen.
-  SYNC_CONSENT = 9,
+  // Showing any of post-login onboarding screens.
+  ONBOARDING = 9,
+
+  // Screen that blocks device usage for some reason.
+  BLOCKING = 10,
+
+  // Showing any of kiosk launch screens.
+  KIOSK_LAUNCH = 11,
+
+  // Showing data migration screen.
+  MIGRATION = 12,
 
   // Oobe UI dialog is currently hidden.
-  HIDDEN = 10,
+  HIDDEN = 13,
 
   // Showing login UI provided by a Chrome extension using chrome.loginScreenUi
   // API.
-  EXTENSION_LOGIN = 11,
+  EXTENSION_LOGIN = 14,
 };
 
 // Supported multi-profile user behavior values.
@@ -94,7 +106,12 @@ enum class FingerprintState {
   //  - the device does not have a fingerprint sensor
   UNAVAILABLE,
   // Fingerprint can be used to unlock the device.
-  AVAILABLE,
+  AVAILABLE_DEFAULT,
+  // Fingerprint can be used to unlock the device but the user touched the
+  // fingerprint icon instead of the fingerprint sensor. A warning message
+  // should be displayed for 3 seconds before getting back to AVAILABLE_DEFAULT
+  // state.
+  AVAILABLE_WITH_TOUCH_SENSOR_WARNING,
   // There have been too many attempts, so now fingerprint is disabled.
   DISABLED_FROM_ATTEMPTS,
   // It has been too long since the device was last used.
@@ -167,6 +184,8 @@ struct ASH_PUBLIC_EXPORT LocaleItem {
   LocaleItem& operator=(const LocaleItem& other);
   LocaleItem& operator=(LocaleItem&& other);
 
+  bool operator==(const LocaleItem& other) const;
+
   // Language code of the locale.
   std::string language_code;
 
@@ -207,6 +226,9 @@ struct ASH_PUBLIC_EXPORT PublicAccountInfo {
 
   // A list of available keyboard layouts.
   std::vector<InputMethodItem> keyboard_layouts;
+
+  // Whether public account uses SAML authentication.
+  bool using_saml = false;
 };
 
 // Info about a user in login/lock screen.
@@ -223,8 +245,8 @@ struct ASH_PUBLIC_EXPORT LoginUserInfo {
   UserInfo basic_user_info;
 
   // What method the user can use to sign in.
-  proximity_auth::mojom::AuthType auth_type =
-      proximity_auth::mojom::AuthType::OFFLINE_PASSWORD;
+  // Initialized in .cc file because the mojom header is huge.
+  proximity_auth::mojom::AuthType auth_type;
 
   // True if this user has already signed in.
   bool is_signed_in = false;
@@ -245,6 +267,9 @@ struct ASH_PUBLIC_EXPORT LoginUserInfo {
 
   // True if this user can be removed.
   bool can_remove = false;
+
+  // Show pin pad for password for this user or not.
+  bool show_pin_pad_for_password = false;
 
   // Contains the public account information if user type is PUBLIC_ACCOUNT.
   base::Optional<PublicAccountInfo> public_account_info;
@@ -267,7 +292,8 @@ struct ASH_PUBLIC_EXPORT AuthDisabledData {
   AuthDisabledData();
   AuthDisabledData(AuthDisabledReason reason,
                    const base::Time& auth_reenabled_time,
-                   const base::TimeDelta& device_used_time);
+                   const base::TimeDelta& device_used_time,
+                   bool disable_lock_screen_media);
   AuthDisabledData(const AuthDisabledData& other);
   AuthDisabledData(AuthDisabledData&& other);
   ~AuthDisabledData();
@@ -284,6 +310,10 @@ struct ASH_PUBLIC_EXPORT AuthDisabledData {
 
   // The amount of time that the user used this device.
   base::TimeDelta device_used_time;
+
+  // If true media will be suspended and media controls will be unavailable on
+  // lock screen.
+  bool disable_lock_screen_media = false;
 };
 
 // Possible reasons why the parent access code is required. This corresponds to
@@ -296,6 +326,44 @@ enum class ParentAccessRequestReason {
   kChangeTime,
   // Update values on the timezone settings page.
   kChangeTimezone,
+};
+
+// Parameters and callbacks for a security token PIN request that is to be shown
+// to the user.
+struct ASH_PUBLIC_EXPORT SecurityTokenPinRequest {
+  SecurityTokenPinRequest();
+  SecurityTokenPinRequest(SecurityTokenPinRequest&&);
+  SecurityTokenPinRequest& operator=(SecurityTokenPinRequest&&);
+  ~SecurityTokenPinRequest();
+
+  // The user whose authentication triggered this PIN request.
+  AccountId account_id;
+
+  // Type of the code requested from the user.
+  chromeos::security_token_pin::CodeType code_type =
+      chromeos::security_token_pin::CodeType::kPin;
+
+  // Whether the UI controls that allow user to enter the value should be
+  // enabled. MUST be |false| when |attempts_left| is zero.
+  bool enable_user_input = true;
+
+  // An optional error to be displayed to the user.
+  chromeos::security_token_pin::ErrorLabel error_label =
+      chromeos::security_token_pin::ErrorLabel::kNone;
+
+  // When non-negative, the UI should indicate this number to the user;
+  // otherwise must be equal to -1.
+  int attempts_left = -1;
+
+  // Called when the user submits the input. Will not be called if the UI is
+  // closed before that happens.
+  using OnPinEntered = base::OnceCallback<void(const std::string& user_input)>;
+  OnPinEntered pin_entered_callback;
+
+  // Called when the PIN request UI gets closed. Will not be called when the
+  // browser itself requests the UI to be closed.
+  using OnUiClosed = base::OnceClosure;
+  OnUiClosed pin_ui_closed_callback;
 };
 
 }  // namespace ash

@@ -10,9 +10,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
@@ -20,8 +21,10 @@
 #include "ui/gl/dc_layer_tree.h"
 #include "ui/gl/direct_composition_child_surface_win.h"
 #include "ui/gl/gl_angle_util_win.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_presentation_helper.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gpu_switching_manager.h"
 #include "ui/gl/vsync_thread_win.h"
 
 #ifndef EGL_ANGLE_flexible_surface_compatibility
@@ -31,8 +34,35 @@
 
 namespace gl {
 namespace {
-// Indicates support for either NV12 or YUY2 hardware overlays.
+// Whether the overlay caps are valid or not. GUARDED_BY GetOverlayLock().
+bool g_overlay_caps_valid = false;
+// Indicates support for either NV12 or YUY2 hardware overlays. GUARDED_BY
+// GetOverlayLock().
 bool g_supports_overlays = false;
+
+// The lock to guard g_overlay_caps_valid and g_supports_overlays.
+base::Lock& GetOverlayLock() {
+  static base::NoDestructor<base::Lock> overlay_lock;
+  return *overlay_lock;
+}
+
+bool SupportsOverlays() {
+  base::AutoLock auto_lock(GetOverlayLock());
+  return g_supports_overlays;
+}
+void SetSupportsOverlays(bool support) {
+  base::AutoLock auto_lock(GetOverlayLock());
+  g_supports_overlays = support;
+}
+
+bool OverlayCapsValid() {
+  base::AutoLock auto_lock(GetOverlayLock());
+  return g_overlay_caps_valid;
+}
+void SetOverlayCapsValid(bool valid) {
+  base::AutoLock auto_lock(GetOverlayLock());
+  g_overlay_caps_valid = valid;
+}
 
 // Used for workaround limiting overlay size to monitor size.
 gfx::Size g_overlay_monitor_size;
@@ -52,11 +82,17 @@ bool FlagsSupportsOverlays(UINT flags) {
                    DXGI_OVERLAY_SUPPORT_FLAG_SCALING));
 }
 
-void InitializeHardwareOverlaySupport() {
-  static bool overlay_support_initialized = false;
-  if (overlay_support_initialized)
-    return;
-  overlay_support_initialized = true;
+void GetGpuDriverHardwareOverlayInfo(bool* supports_overlays,
+                                     DXGI_FORMAT* overlay_format_used,
+                                     UINT* nv12_overlay_support_flags,
+                                     UINT* yuy2_overlay_support_flags,
+                                     gfx::Size* overlay_monitor_size) {
+  // Initialization
+  *supports_overlays = false;
+  *overlay_format_used = DXGI_FORMAT_NV12;
+  *nv12_overlay_support_flags = 0;
+  *yuy2_overlay_support_flags = 0;
+  *overlay_monitor_size = gfx::Size();
 
   // Check for DirectComposition support first to prevent likely crashes.
   if (!DirectCompositionSurfaceWin::IsDirectCompositionSupported())
@@ -104,10 +140,10 @@ void InitializeHardwareOverlaySupport() {
       continue;
     DCHECK(output3);
     output3->CheckOverlaySupport(DXGI_FORMAT_NV12, d3d11_device.Get(),
-                                 &g_nv12_overlay_support_flags);
+                                 nv12_overlay_support_flags);
     output3->CheckOverlaySupport(DXGI_FORMAT_YUY2, d3d11_device.Get(),
-                                 &g_yuy2_overlay_support_flags);
-    if (FlagsSupportsOverlays(g_nv12_overlay_support_flags) &&
+                                 yuy2_overlay_support_flags);
+    if (FlagsSupportsOverlays(*nv12_overlay_support_flags) &&
         base::FeatureList::IsEnabled(
             features::kDirectCompositionPreferNV12Overlays)) {
       // NV12 format is preferred if it's supported.
@@ -129,20 +165,20 @@ void InitializeHardwareOverlaySupport() {
         // performing an extra scaling Blt before calling the driver. Even when
         // scaled overlays aren't actually supported, presentation using the
         // overlay path should be relatively efficient.
-        g_overlay_format_used = DXGI_FORMAT_NV12;
-        g_supports_overlays = true;
+        *overlay_format_used = DXGI_FORMAT_NV12;
+        *supports_overlays = true;
       }
     }
-    if (!g_supports_overlays &&
-        FlagsSupportsOverlays(g_yuy2_overlay_support_flags)) {
+    if (!*supports_overlays &&
+        FlagsSupportsOverlays(*yuy2_overlay_support_flags)) {
       // If NV12 isn't supported, fallback to YUY2 if it's supported.
-      g_overlay_format_used = DXGI_FORMAT_YUY2;
-      g_supports_overlays = true;
+      *overlay_format_used = DXGI_FORMAT_YUY2;
+      *supports_overlays = true;
     }
-    if (g_supports_overlays) {
+    if (*supports_overlays) {
       DXGI_OUTPUT_DESC monitor_desc = {};
       if (SUCCEEDED(output3->GetDesc(&monitor_desc))) {
-        g_overlay_monitor_size =
+        *overlay_monitor_size =
             gfx::Rect(monitor_desc.DesktopCoordinates).size();
       }
     }
@@ -152,17 +188,68 @@ void InitializeHardwareOverlaySupport() {
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/display/multiplane-overlay-hardware-requirements
     // TODO(sunnyps): If the above is true, then we can only look at first
     // output instead of iterating over all outputs.
-    if (g_supports_overlays)
+    if (*supports_overlays)
       break;
   }
-  if (g_supports_overlays) {
-    base::UmaHistogramSparse("GPU.DirectComposition.OverlayFormatUsed3",
-                             g_overlay_format_used);
+}
+
+void UpdateHardwareOverlaySupport() {
+  if (OverlayCapsValid())
+    return;
+  SetOverlayCapsValid(true);
+
+  bool supports_overlays = false;
+  DXGI_FORMAT overlay_format_used = DXGI_FORMAT_NV12;
+  UINT nv12_overlay_support_flags = 0;
+  UINT yuy2_overlay_support_flags = 0;
+  gfx::Size overlay_monitor_size = gfx::Size();
+
+  GetGpuDriverHardwareOverlayInfo(
+      &supports_overlays, &overlay_format_used, &nv12_overlay_support_flags,
+      &yuy2_overlay_support_flags, &overlay_monitor_size);
+
+  if (supports_overlays != SupportsOverlays() ||
+      overlay_format_used != g_overlay_format_used) {
+    // Record the new histograms
+    if (supports_overlays) {
+      base::UmaHistogramSparse("GPU.DirectComposition.OverlayFormatUsed3",
+                               overlay_format_used);
+    }
+    UMA_HISTOGRAM_BOOLEAN("GPU.DirectComposition.OverlaysSupported",
+                          supports_overlays);
   }
-  UMA_HISTOGRAM_BOOLEAN("GPU.DirectComposition.OverlaysSupported",
-                        g_supports_overlays);
+
+  // Update global caps
+  SetSupportsOverlays(supports_overlays);
+  g_overlay_format_used = overlay_format_used;
+  g_nv12_overlay_support_flags = nv12_overlay_support_flags;
+  g_yuy2_overlay_support_flags = yuy2_overlay_support_flags;
+  g_overlay_monitor_size = overlay_monitor_size;
+}
+
+bool SupportsPresentationFeedback() {
+  return base::FeatureList::IsEnabled(
+             features::kDirectCompositionPresentationFeedback) &&
+         base::FeatureList::IsEnabled(features::kDirectCompositionGpuVSync);
+}
+
+bool SupportsLowLatencyPresentation() {
+  return base::FeatureList::IsEnabled(
+             features::kDirectCompositionLowLatencyPresentation) &&
+         SupportsPresentationFeedback();
 }
 }  // namespace
+
+DirectCompositionSurfaceWin::PendingFrame::PendingFrame(
+    Microsoft::WRL::ComPtr<ID3D11Query> query,
+    PresentationCallback callback)
+    : query(std::move(query)), callback(std::move(callback)) {}
+DirectCompositionSurfaceWin::PendingFrame::PendingFrame(PendingFrame&& other) =
+    default;
+DirectCompositionSurfaceWin::PendingFrame::~PendingFrame() = default;
+DirectCompositionSurfaceWin::PendingFrame&
+DirectCompositionSurfaceWin::PendingFrame::operator=(PendingFrame&& other) =
+    default;
 
 DirectCompositionSurfaceWin::DirectCompositionSurfaceWin(
     std::unique_ptr<gfx::VSyncProvider> vsync_provider,
@@ -175,14 +262,21 @@ DirectCompositionSurfaceWin::DirectCompositionSurfaceWin(
       root_surface_(new DirectCompositionChildSurfaceWin()),
       layer_tree_(std::make_unique<DCLayerTree>(
           settings.disable_nv12_dynamic_textures,
-          settings.disable_larger_than_screen_overlays)),
+          settings.disable_larger_than_screen_overlays,
+          settings.disable_vp_scaling)),
+      presentation_helper_(
+          std::make_unique<GLSurfacePresentationHelper>(vsync_provider.get())),
       vsync_provider_(std::move(vsync_provider)),
       vsync_callback_(std::move(vsync_callback)),
-      presentation_helper_(
-          std::make_unique<GLSurfacePresentationHelper>(vsync_provider_.get())),
-      weak_ptr_factory_(this) {}
+      max_pending_frames_(settings.max_pending_frames) {
+  // Call GetWeakPtr() on main thread before calling on vsync thread so that the
+  // internal weak reference is initialized in a thread-safe way.
+  weak_ptr_ = weak_factory_.GetWeakPtr();
+  ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
+}
 
 DirectCompositionSurfaceWin::~DirectCompositionSurfaceWin() {
+  ui::GpuSwitchingManager::GetInstance()->RemoveObserver(this);
   Destroy();
 }
 
@@ -191,6 +285,10 @@ bool DirectCompositionSurfaceWin::IsDirectCompositionSupported() {
   static const bool supported = [] {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kDisableDirectComposition))
+      return false;
+
+    // Direct composition can only be used with ANGLE.
+    if (gl::GetGLImplementation() != gl::kGLImplementationEGLANGLE)
       return false;
 
     // Blacklist direct composition if MCTU.dll or MCTUX.dll are injected. These
@@ -240,27 +338,42 @@ bool DirectCompositionSurfaceWin::IsDirectCompositionSupported() {
 bool DirectCompositionSurfaceWin::AreOverlaysSupported() {
   // Always initialize and record overlay support information irrespective of
   // command line flags.
-  InitializeHardwareOverlaySupport();
+  UpdateHardwareOverlaySupport();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   // Enable flag should be checked before the disable flag, so we could
   // overwrite GPU driver bug workarounds in testing.
-  if (command_line->HasSwitch(switches::kEnableDirectCompositionLayers))
+  if (command_line->HasSwitch(switches::kEnableDirectCompositionVideoOverlays))
     return true;
-  if (command_line->HasSwitch(switches::kDisableDirectCompositionLayers))
+  if (command_line->HasSwitch(switches::kDisableDirectCompositionVideoOverlays))
     return false;
 
-  return g_supports_overlays;
+  return SupportsOverlays();
+}
+
+// static
+bool DirectCompositionSurfaceWin::IsDecodeSwapChainSupported() {
+  if (base::FeatureList::IsEnabled(
+          features::kDirectCompositionUseNV12DecodeSwapChain)) {
+    UpdateHardwareOverlaySupport();
+    return GetOverlayFormatUsed() == DXGI_FORMAT_NV12;
+  }
+  return false;
 }
 
 // static
 void DirectCompositionSurfaceWin::DisableOverlays() {
-  g_supports_overlays = false;
+  SetSupportsOverlays(false);
+}
+
+// static
+void DirectCompositionSurfaceWin::InvalidateOverlayCaps() {
+  SetOverlayCapsValid(false);
 }
 
 // static
 bool DirectCompositionSurfaceWin::AreScaledOverlaysSupported() {
-  InitializeHardwareOverlaySupport();
+  UpdateHardwareOverlaySupport();
   if (g_overlay_format_used == DXGI_FORMAT_NV12)
     return !!(g_nv12_overlay_support_flags & DXGI_OVERLAY_SUPPORT_FLAG_SCALING);
   DCHECK_EQ(DXGI_FORMAT_YUY2, g_overlay_format_used);
@@ -269,7 +382,7 @@ bool DirectCompositionSurfaceWin::AreScaledOverlaysSupported() {
 
 // static
 UINT DirectCompositionSurfaceWin::GetOverlaySupportFlags(DXGI_FORMAT format) {
-  InitializeHardwareOverlaySupport();
+  UpdateHardwareOverlaySupport();
   if (format == DXGI_FORMAT_NV12)
     return g_nv12_overlay_support_flags;
   DCHECK_EQ(DXGI_FORMAT_YUY2, format);
@@ -289,7 +402,7 @@ DXGI_FORMAT DirectCompositionSurfaceWin::GetOverlayFormatUsed() {
 // static
 void DirectCompositionSurfaceWin::SetScaledOverlaysSupportedForTesting(
     bool supported) {
-  InitializeHardwareOverlaySupport();
+  UpdateHardwareOverlaySupport();
   if (supported) {
     g_nv12_overlay_support_flags |= DXGI_OVERLAY_SUPPORT_FLAG_SCALING;
     g_yuy2_overlay_support_flags |= DXGI_OVERLAY_SUPPORT_FLAG_SCALING;
@@ -304,7 +417,7 @@ void DirectCompositionSurfaceWin::SetScaledOverlaysSupportedForTesting(
 void DirectCompositionSurfaceWin::SetOverlayFormatUsedForTesting(
     DXGI_FORMAT format) {
   DCHECK(format == DXGI_FORMAT_NV12 || format == DXGI_FORMAT_YUY2);
-  InitializeHardwareOverlaySupport();
+  UpdateHardwareOverlaySupport();
   g_overlay_format_used = format;
   DCHECK_EQ(format, GetOverlayFormatUsed());
 }
@@ -313,6 +426,10 @@ void DirectCompositionSurfaceWin::SetOverlayFormatUsedForTesting(
 bool DirectCompositionSurfaceWin::IsHDRSupported() {
   // HDR support was introduced in Windows 10 Creators Update.
   if (base::win::GetVersion() < base::win::Version::WIN10_RS2)
+    return false;
+
+  // Only direct composition surface can allocate HDR swap chains.
+  if (!IsDirectCompositionSupported())
     return false;
 
   HRESULT hr = S_OK;
@@ -370,6 +487,51 @@ bool DirectCompositionSurfaceWin::IsHDRSupported() {
   return hdr_monitor_found;
 }
 
+// static
+bool DirectCompositionSurfaceWin::IsSwapChainTearingSupported() {
+  static const bool supported = [] {
+    Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device =
+        QueryD3D11DeviceObjectFromANGLE();
+    if (!d3d11_device) {
+      DLOG(ERROR) << "Not using swap chain tearing because failed to retrieve "
+                     "D3D11 device from ANGLE";
+      return false;
+    }
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+    d3d11_device.As(&dxgi_device);
+    DCHECK(dxgi_device);
+    Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter;
+    dxgi_device->GetAdapter(&dxgi_adapter);
+    DCHECK(dxgi_adapter);
+    Microsoft::WRL::ComPtr<IDXGIFactory5> dxgi_factory;
+    if (FAILED(dxgi_adapter->GetParent(IID_PPV_ARGS(&dxgi_factory)))) {
+      DLOG(ERROR) << "Not using swap chain tearing because failed to retrieve "
+                     "IDXGIFactory5 interface";
+      return false;
+    }
+
+    BOOL present_allow_tearing = FALSE;
+    DCHECK(dxgi_factory);
+    if (FAILED(dxgi_factory->CheckFeatureSupport(
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING, &present_allow_tearing,
+            sizeof(present_allow_tearing)))) {
+      DLOG(ERROR)
+          << "Not using swap chain tearing because CheckFeatureSupport failed";
+      return false;
+    }
+    return !!present_allow_tearing;
+  }();
+  return supported;
+}
+
+// static
+bool DirectCompositionSurfaceWin::AllowTearing() {
+  // Swap chain tearing is used only if vsync is disabled explicitly.
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kDisableGpuVsync) &&
+         DirectCompositionSurfaceWin::IsSwapChainTearingSupported();
+}
+
 bool DirectCompositionSurfaceWin::Initialize(GLSurfaceFormat format) {
   d3d11_device_ = QueryD3D11DeviceObjectFromANGLE();
   if (!d3d11_device_) {
@@ -396,30 +558,33 @@ bool DirectCompositionSurfaceWin::Initialize(GLSurfaceFormat format) {
   if (!root_surface_->Initialize(GLSurfaceFormat()))
     return false;
 
-  if (root_surface_->UseSwapChainFrameStatistics()) {
-    // Save weak ptr on main thread before any use on vsync thread.
-    main_thread_vsync_callback_ = base::BindRepeating(
-        &DirectCompositionSurfaceWin::HandleVSyncOnMainThread,
-        weak_ptr_factory_.GetWeakPtr());
-  }
-
-  if ((SupportsGpuVSync() && vsync_callback_) || main_thread_vsync_callback_) {
-    vsync_thread_ = std::make_unique<VSyncThreadWin>(
-        window_, d3d11_device_,
-        base::BindRepeating(
-            &DirectCompositionSurfaceWin::HandleVSyncOnVSyncThread,
-            base::Unretained(this)));
-  }
+  if ((SupportsGpuVSync() && vsync_callback_) || SupportsPresentationFeedback())
+    vsync_thread_ = VSyncThreadWin::GetInstance();
 
   return true;
 }
 
 void DirectCompositionSurfaceWin::Destroy() {
-  // Destroy vsync thread because joining it could issue callbacks.
-  vsync_thread_ = nullptr;
+  for (auto& frame : pending_frames_)
+    std::move(frame.callback).Run(gfx::PresentationFeedback::Failure());
+  pending_frames_.clear();
+
+  if (vsync_thread_) {
+    vsync_thread_->RemoveObserver(this);
+    vsync_thread_ = nullptr;
+  }
   // Destroy presentation helper first because its dtor calls GetHandle.
   presentation_helper_ = nullptr;
   root_surface_->Destroy();
+
+  // Freeing DComp resources such as visuals and surfaces causes the
+  // device to become 'dirty'. We must commit the changes to the device
+  // in order for the objects to actually be destroyed.
+  // Leaving the device in the dirty state for long periods of time means
+  // that if DWM.exe crashes, the Chromium window will become black until
+  // the next Commit.
+  layer_tree_.reset();
+  dcomp_device_->Commit();
 }
 
 gfx::Size DirectCompositionSurfaceWin::GetSize() {
@@ -436,7 +601,7 @@ void* DirectCompositionSurfaceWin::GetHandle() {
 
 bool DirectCompositionSurfaceWin::Resize(const gfx::Size& size,
                                          float scale_factor,
-                                         ColorSpace color_space,
+                                         const gfx::ColorSpace& color_space,
                                          bool has_alpha) {
   // Force a resize and redraw (but not a move, activate, etc.).
   if (!SetWindowPos(window_, nullptr, 0, 0, size.width(), size.height(),
@@ -453,26 +618,25 @@ gfx::SwapResult DirectCompositionSurfaceWin::SwapBuffers(
 
   base::Optional<GLSurfacePresentationHelper::ScopedSwapBuffers>
       scoped_swap_buffers;
-  if (!root_surface_->UseSwapChainFrameStatistics()) {
+  if (!SupportsPresentationFeedback()) {
     scoped_swap_buffers.emplace(presentation_helper_.get(),
                                 std::move(callback));
-    callback.Reset();
   }
 
-  gfx::SwapResult swap_result = root_surface_->SwapBuffers(std::move(callback));
-
-  if (swap_result == gfx::SwapResult::SWAP_ACK &&
+  gfx::SwapResult swap_result;
+  if (root_surface_->SwapBuffers(PresentationCallback()) ==
+          gfx::SwapResult::SWAP_ACK &&
       layer_tree_->CommitAndClearPendingOverlays(root_surface_.get())) {
-    if (vsync_thread_) {
-      vsync_thread_->SetEnabled(root_surface_->HasPendingFrames() ||
-                                vsync_callback_enabled_);
-    }
+    swap_result = gfx::SwapResult::SWAP_ACK;
   } else {
     swap_result = gfx::SwapResult::SWAP_FAILED;
   }
 
-  if (scoped_swap_buffers)
+  if (scoped_swap_buffers) {
     scoped_swap_buffers->set_result(swap_result);
+  } else {
+    EnqueuePendingFrame(std::move(callback));
+  }
 
   return swap_result;
 }
@@ -505,8 +669,8 @@ bool DirectCompositionSurfaceWin::SetEnableDCLayers(bool enable) {
   return root_surface_->SetEnableDCLayers(enable);
 }
 
-bool DirectCompositionSurfaceWin::FlipsVertically() const {
-  return true;
+gfx::SurfaceOrigin DirectCompositionSurfaceWin::GetOrigin() const {
+  return gfx::SurfaceOrigin::kTopLeft;
 }
 
 bool DirectCompositionSurfaceWin::SupportsPostSubBuffer() {
@@ -521,10 +685,6 @@ bool DirectCompositionSurfaceWin::OnMakeCurrent(GLContext* context) {
 
 bool DirectCompositionSurfaceWin::SupportsDCLayers() const {
   return true;
-}
-
-bool DirectCompositionSurfaceWin::UseOverlaysForVideo() const {
-  return AreOverlaysSupported();
 }
 
 bool DirectCompositionSurfaceWin::SupportsProtectedVideo() const {
@@ -547,34 +707,126 @@ bool DirectCompositionSurfaceWin::SupportsGpuVSync() const {
 
 void DirectCompositionSurfaceWin::SetGpuVSyncEnabled(bool enabled) {
   DCHECK(vsync_thread_);
-  if (vsync_callback_enabled_ == enabled)
-    return;
-  vsync_callback_enabled_ = enabled;
-  vsync_thread_->SetEnabled(root_surface_->HasPendingFrames() ||
-                            vsync_callback_enabled_);
+  {
+    base::AutoLock lock(vsync_callback_lock_);
+    vsync_callback_enabled_ = enabled;
+  }
+  StartOrStopVSyncThread();
 }
 
-void DirectCompositionSurfaceWin::HandleVSyncOnVSyncThread(
-    base::TimeTicks vsync_time,
-    base::TimeDelta vsync_interval) {
-  if (vsync_callback_)
-    vsync_callback_.Run(vsync_time, vsync_interval);
+void DirectCompositionSurfaceWin::CheckPendingFrames() {
+  DCHECK(SupportsPresentationFeedback());
 
-  if (main_thread_vsync_callback_) {
+  TRACE_EVENT1("gpu", "DirectCompositionSurfaceWin::CheckPendingFrames",
+               "num_pending_frames", pending_frames_.size());
+
+  if (pending_frames_.empty())
+    return;
+
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+  d3d11_device_->GetImmediateContext(&context);
+  while (!pending_frames_.empty()) {
+    auto& frame = pending_frames_.front();
+    if (frame.query) {
+      HRESULT hr = context->GetData(frame.query.Get(), nullptr, 0,
+                                    D3D11_ASYNC_GETDATA_DONOTFLUSH);
+      // When the GPU completes execution past the event query, GetData() will
+      // return S_OK, and S_FALSE otherwise.  Do not use SUCCEEDED() because
+      // S_FALSE is also a success code.
+      if (hr != S_OK)
+        break;
+    }
+    std::move(frame.callback)
+        .Run(
+            gfx::PresentationFeedback(last_vsync_time_, last_vsync_interval_,
+                                      gfx::PresentationFeedback::kVSync |
+                                          gfx::PresentationFeedback::kHWClock));
+    pending_frames_.pop_front();
+  }
+
+  StartOrStopVSyncThread();
+}
+
+void DirectCompositionSurfaceWin::EnqueuePendingFrame(
+    PresentationCallback callback) {
+  DCHECK(SupportsPresentationFeedback());
+
+  Microsoft::WRL::ComPtr<ID3D11Query> query;
+  D3D11_QUERY_DESC desc = {};
+  desc.Query = D3D11_QUERY_EVENT;
+
+  HRESULT hr = d3d11_device_->CreateQuery(&desc, &query);
+  if (SUCCEEDED(hr)) {
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    d3d11_device_->GetImmediateContext(&context);
+    context->End(query.Get());
+    context->Flush();
+  } else {
+    DLOG(ERROR) << "CreateQuery failed with error 0x" << std::hex << hr;
+  }
+
+  pending_frames_.emplace_back(std::move(query), std::move(callback));
+
+  StartOrStopVSyncThread();
+}
+
+bool DirectCompositionSurfaceWin::VSyncCallbackEnabled() const {
+  base::AutoLock lock(vsync_callback_lock_);
+  return vsync_callback_enabled_;
+}
+
+void DirectCompositionSurfaceWin::StartOrStopVSyncThread() {
+  if (VSyncCallbackEnabled() || !pending_frames_.empty()) {
+    vsync_thread_->AddObserver(this);
+  } else {
+    vsync_thread_->RemoveObserver(this);
+  }
+}
+
+void DirectCompositionSurfaceWin::OnVSync(base::TimeTicks vsync_time,
+                                          base::TimeDelta interval) {
+  if (!SupportsLowLatencyPresentation() && VSyncCallbackEnabled()) {
+    DCHECK(vsync_callback_);
+    vsync_callback_.Run(vsync_time, interval);
+  }
+
+  if (SupportsPresentationFeedback()) {
     task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(main_thread_vsync_callback_, vsync_time,
-                                  vsync_interval));
+        FROM_HERE,
+        base::BindOnce(&DirectCompositionSurfaceWin::HandleVSyncOnMainThread,
+                       weak_ptr_, vsync_time, interval));
   }
 }
 
 void DirectCompositionSurfaceWin::HandleVSyncOnMainThread(
     base::TimeTicks vsync_time,
-    base::TimeDelta vsync_interval) {
-  // Check pending frames in root surface in case client stops issuing swaps.
-  root_surface_->UpdateVSyncParameters(vsync_time, vsync_interval);
-  root_surface_->CheckPendingFrames();
-  vsync_thread_->SetEnabled(root_surface_->HasPendingFrames() ||
-                            vsync_callback_enabled_);
+    base::TimeDelta interval) {
+  last_vsync_time_ = vsync_time;
+  last_vsync_interval_ = interval;
+
+  CheckPendingFrames();
+
+  UMA_HISTOGRAM_COUNTS_100("GPU.DirectComposition.NumPendingFrames",
+                           pending_frames_.size());
+
+  if (SupportsLowLatencyPresentation() && VSyncCallbackEnabled() &&
+      pending_frames_.size() < max_pending_frames_) {
+    DCHECK(vsync_callback_);
+    vsync_callback_.Run(vsync_time, interval);
+  }
+}
+
+void DirectCompositionSurfaceWin::OnGpuSwitched(
+    gl::GpuPreference active_gpu_heuristic) {}
+
+void DirectCompositionSurfaceWin::OnDisplayAdded() {
+  InvalidateOverlayCaps();
+  UpdateHardwareOverlaySupport();
+}
+
+void DirectCompositionSurfaceWin::OnDisplayRemoved() {
+  InvalidateOverlayCaps();
+  UpdateHardwareOverlaySupport();
 }
 
 scoped_refptr<base::TaskRunner>

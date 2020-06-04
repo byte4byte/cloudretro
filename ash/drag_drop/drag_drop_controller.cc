@@ -9,10 +9,14 @@
 
 #include "ash/drag_drop/drag_drop_tracker.h"
 #include "ash/drag_drop/drag_image_view.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/pickle.h"
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/capture_client.h"
@@ -22,15 +26,20 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/clipboard/clipboard_format_type.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
+#include "ui/gfx/animation/animation_delegate_notifier.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
@@ -132,8 +141,7 @@ DragDropController::DragDropController()
       drag_source_window_(NULL),
       should_block_during_drag_drop_(true),
       drag_drop_window_delegate_(new DragDropTrackerDelegate(this)),
-      current_drag_event_source_(ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE),
-      weak_factory_(this) {
+      current_drag_event_source_(ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE) {
   Shell::Get()->AddPreTargetHandler(this, ui::EventTarget::Priority::kSystem);
   Shell::Get()->window_tree_host_manager()->AddObserver(this);
 }
@@ -191,32 +199,12 @@ int DragDropController::StartDragAndDrop(
 
   drag_data_ = std::move(data);
   drag_operation_ = operation;
+  current_drag_actions_ = 0;
 
-  float drag_image_scale = 1;
-  int drag_image_vertical_offset = 0;
-  if (source == ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH) {
-    drag_image_scale = kTouchDragImageScale;
-    drag_image_vertical_offset = kTouchDragImageVerticalOffset;
-  }
-  gfx::Point start_location = screen_location;
-  drag_image_final_bounds_for_cancel_animation_ =
-      gfx::Rect(start_location - provider->GetDragImageOffset(),
-                provider->GetDragImage().size());
-  drag_image_ =
-      std::make_unique<DragImageView>(source_window->GetRootWindow(), source);
-  drag_image_->SetImage(provider->GetDragImage());
-  drag_image_offset_ = provider->GetDragImageOffset();
-  gfx::Rect drag_image_bounds(start_location, drag_image_->GetPreferredSize());
-  drag_image_bounds = AdjustDragImageBoundsForScaleAndOffset(
-      drag_image_bounds, drag_image_vertical_offset, drag_image_scale,
-      &drag_image_offset_);
-  drag_image_->SetBoundsInScreen(drag_image_bounds);
-  drag_image_->SetWidgetVisible(true);
-  if (source == ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH) {
-    drag_image_->SetTouchDragOperationHintPosition(
-        gfx::Point(drag_image_offset_.x(),
-                   drag_image_offset_.y() + drag_image_vertical_offset));
-  }
+  start_location_ = screen_location;
+  current_location_ = screen_location;
+
+  SetDragImage(provider->GetDragImage(), provider->GetDragImageOffset());
 
   drag_window_ = NULL;
 
@@ -251,6 +239,39 @@ int DragDropController::StartDragAndDrop(
   }
 
   return drag_operation_;
+}
+
+void DragDropController::SetDragImage(const gfx::ImageSkia& image,
+                                      const gfx::Vector2d& image_offset) {
+  auto source = current_drag_event_source_;
+  auto* source_window = drag_source_window_;
+
+  float drag_image_scale = 1;
+  int drag_image_vertical_offset = 0;
+  if (source == ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH) {
+    drag_image_scale = kTouchDragImageScale;
+    drag_image_vertical_offset = kTouchDragImageVerticalOffset;
+  }
+  drag_image_final_bounds_for_cancel_animation_ =
+      gfx::Rect(start_location_ - image_offset, image.size());
+  if (!drag_image_) {
+    drag_image_ =
+        std::make_unique<DragImageView>(source_window->GetRootWindow(), source);
+  }
+  drag_image_->SetImage(image);
+  drag_image_offset_ = image_offset;
+  gfx::Rect drag_image_bounds(current_location_,
+                              drag_image_->GetPreferredSize());
+  drag_image_bounds = AdjustDragImageBoundsForScaleAndOffset(
+      drag_image_bounds, drag_image_vertical_offset, drag_image_scale,
+      &drag_image_offset_);
+  drag_image_->SetBoundsInScreen(drag_image_bounds);
+  drag_image_->SetWidgetVisible(true);
+  if (source == ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH) {
+    drag_image_->SetTouchDragOperationHintPosition(
+        gfx::Point(drag_image_offset_.x(),
+                   drag_image_offset_.y() + drag_image_vertical_offset));
+  }
 }
 
 void DragDropController::DragCancel() {
@@ -444,15 +465,25 @@ void DragDropController::DragUpdate(aura::Window* target,
       e.set_flags(event.flags());
       ui::Event::DispatcherApi(&e).set_target(target);
       op = delegate->OnDragUpdated(e);
-      gfx::NativeCursor cursor = ui::CursorType::kNoDrop;
+      gfx::NativeCursor cursor = ui::mojom::CursorType::kNoDrop;
       if (op & ui::DragDropTypes::DRAG_COPY)
-        cursor = ui::CursorType::kCopy;
+        cursor = ui::mojom::CursorType::kCopy;
       else if (op & ui::DragDropTypes::DRAG_LINK)
-        cursor = ui::CursorType::kAlias;
+        cursor = ui::mojom::CursorType::kAlias;
       else if (op & ui::DragDropTypes::DRAG_MOVE)
-        cursor = ui::CursorType::kGrabbing;
-      ash::Shell::Get()->cursor_manager()->SetCursor(cursor);
+        cursor = ui::mojom::CursorType::kGrabbing;
+
+      // TODO(https://crbug.com/1069869): don't show kNoDrop cursor for
+      // a tab drag that can drop into a new window.
+      Shell::Get()->cursor_manager()->SetCursor(cursor);
     }
+  }
+
+  if (op != current_drag_actions_) {
+    current_drag_actions_ = op;
+
+    for (aura::client::DragDropClientObserver& observer : observers_)
+      observer.OnDragActionsChanged(op);
   }
 
   DCHECK(drag_image_.get());
@@ -460,6 +491,7 @@ void DragDropController::DragUpdate(aura::Window* target,
     gfx::Point root_location_in_screen = event.root_location();
     ::wm::ConvertPointToScreen(target->GetRootWindow(),
                                &root_location_in_screen);
+    current_location_ = root_location_in_screen;
     drag_image_->SetScreenPosition(root_location_in_screen -
                                    drag_image_offset_);
     drag_image_->SetTouchDragOperation(op);
@@ -468,7 +500,7 @@ void DragDropController::DragUpdate(aura::Window* target,
 
 void DragDropController::Drop(aura::Window* target,
                               const ui::LocatedEvent& event) {
-  ash::Shell::Get()->cursor_manager()->SetCursor(ui::CursorType::kPointer);
+  Shell::Get()->cursor_manager()->SetCursor(ui::mojom::CursorType::kPointer);
 
   // We must guarantee that a target gets a OnDragEntered before Drop. WebKit
   // depends on not getting a Drop without DragEnter. This behavior is
@@ -480,22 +512,31 @@ void DragDropController::Drop(aura::Window* target,
   aura::client::DragDropDelegate* delegate =
       aura::client::GetDragDropDelegate(target);
   if (delegate) {
+    const bool is_chrome_tab_drag = IsChromeTabDrag();
+
     ui::DropTargetEvent e(*drag_data_.get(), event.location_f(),
                           event.root_location_f(), drag_operation_);
     e.set_flags(event.flags());
     ui::Event::DispatcherApi(&e).set_target(target);
+
+    ui::OSExchangeData copied_data(drag_data_->provider().Clone());
     drag_operation_ = delegate->OnPerformDrop(e, std::move(drag_data_));
-    if (drag_operation_ == 0)
+    if (drag_operation_ == 0 && is_chrome_tab_drag) {
+      Shell::Get()->shell_delegate()->CreateBrowserForTabDrop(
+          drag_source_window_, copied_data);
       StartCanceledAnimation(kCancelAnimationDuration);
-    else
+    } else if (drag_operation_ == 0) {
+      StartCanceledAnimation(kCancelAnimationDuration);
+    } else {
       drag_image_.reset();
+    }
   } else {
     drag_image_.reset();
   }
 
   Cleanup();
   if (should_block_during_drag_drop_)
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -503,6 +544,7 @@ void DragDropController::Drop(aura::Window* target,
 
 void DragDropController::AnimationEnded(const gfx::Animation* animation) {
   cancel_animation_.reset();
+  cancel_animation_notifier_.reset();
 
   // By the time we finish animation, another drag/drop session may have
   // started. We do not want to destroy the drag image in that case.
@@ -523,7 +565,7 @@ void DragDropController::AnimationEnded(const gfx::Animation* animation) {
 
 void DragDropController::DoDragCancel(
     base::TimeDelta drag_cancel_animation_duration) {
-  ash::Shell::Get()->cursor_manager()->SetCursor(ui::CursorType::kPointer);
+  Shell::Get()->cursor_manager()->SetCursor(ui::mojom::CursorType::kPointer);
 
   // |drag_window_| can be NULL if we have just started the drag and have not
   // received any DragUpdates, or, if the |drag_window_| gets destroyed during
@@ -537,7 +579,7 @@ void DragDropController::DoDragCancel(
   drag_operation_ = 0;
   StartCanceledAnimation(drag_cancel_animation_duration);
   if (should_block_during_drag_drop_)
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
 }
 
 void DragDropController::AnimationProgressed(const gfx::Animation* animation) {
@@ -564,8 +606,12 @@ void DragDropController::StartCanceledAnimation(
   drag_image_->SetTouchDragOperationHintOff();
   drag_image_initial_bounds_for_cancel_animation_ =
       drag_image_->GetBoundsInScreen();
-  cancel_animation_.reset(CreateCancelAnimation(
-      animation_duration, kCancelAnimationFrameRate, this));
+  cancel_animation_notifier_ = std::make_unique<
+      gfx::AnimationDelegateNotifier<views::AnimationDelegateViews>>(
+      this, drag_image_.get());
+  cancel_animation_.reset(
+      CreateCancelAnimation(animation_duration, kCancelAnimationFrameRate,
+                            cancel_animation_notifier_.get()));
   cancel_animation_->Start();
 }
 
@@ -589,7 +635,40 @@ void DragDropController::Cleanup() {
   drag_data_.reset();
   // Cleanup can be called again while deleting DragDropTracker, so delete
   // the pointer with a local variable to avoid double free.
-  std::unique_ptr<ash::DragDropTracker> holder = std::move(drag_drop_tracker_);
+  std::unique_ptr<DragDropTracker> holder = std::move(drag_drop_tracker_);
+}
+
+bool DragDropController::IsChromeTabDrag() {
+  if (!features::IsWebUITabStripTabDragIntegrationEnabled())
+    return false;
+
+  if (!drag_data_)
+    return false;
+  base::Pickle pickle;
+  drag_data_->GetPickledData(ui::ClipboardFormatType::GetWebCustomDataType(),
+                             &pickle);
+  base::PickleIterator iter(pickle);
+
+  uint32_t entry_count = 0;
+  if (!iter.ReadUInt32(&entry_count))
+    return false;
+
+  for (uint32_t i = 0; i < entry_count; ++i) {
+    base::StringPiece16 type;
+    base::StringPiece16 data;
+    if (!iter.ReadStringPiece16(&type) || !iter.ReadStringPiece16(&data)) {
+      return false;
+    }
+
+    // TODO(https://crbug.com/1069869): share this constant between Ash
+    // and Chrome instead of hardcoding it in both places.
+    static const base::string16 chrome_tab_type =
+        base::ASCIIToUTF16("application/vnd.chromium.tab");
+    if (type == chrome_tab_type)
+      return true;
+  }
+
+  return false;
 }
 
 }  // namespace ash

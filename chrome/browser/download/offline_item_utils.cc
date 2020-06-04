@@ -14,7 +14,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/download/download_utils.h"
+#include "chrome/browser/download/android/download_utils.h"
 #endif
 
 using DownloadItem = download::DownloadItem;
@@ -41,8 +41,18 @@ const char kDownloadNamespacePrefix[] = "LEGACY_DOWNLOAD";
 // The remaining time for a download item if it cannot be calculated.
 constexpr int64_t kUnknownRemainingTime = -1;
 
+base::Optional<OfflineItemFilter> FilterForSpecialMimeTypes(
+    const std::string& mime_type) {
+  if (base::EqualsCaseInsensitiveASCII(mime_type, "application/ogg"))
+    return OfflineItemFilter::FILTER_AUDIO;
+
+  return base::nullopt;
+}
+
 OfflineItemFilter MimeTypeToOfflineItemFilter(const std::string& mime_type) {
-  OfflineItemFilter filter = OfflineItemFilter::FILTER_OTHER;
+  auto filter = FilterForSpecialMimeTypes(mime_type);
+  if (filter.has_value())
+    return filter.value();
 
   if (base::StartsWith(mime_type, "audio/", base::CompareCase::SENSITIVE)) {
     filter = OfflineItemFilter::FILTER_AUDIO;
@@ -59,7 +69,7 @@ OfflineItemFilter MimeTypeToOfflineItemFilter(const std::string& mime_type) {
     filter = OfflineItemFilter::FILTER_OTHER;
   }
 
-  return filter;
+  return filter.value();
 }
 
 bool IsInterruptedDownloadAutoResumable(download::DownloadItem* item) {
@@ -93,6 +103,7 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
   item.total_size_bytes = download_item->GetTotalBytes();
   item.externally_removed = download_item->GetFileExternallyRemoved();
   item.creation_time = download_item->GetStartTime();
+  item.completion_time = download_item->GetEndTime();
   item.last_accessed_time = download_item->GetLastAccessTime();
   item.is_openable = download_item->CanOpenDownload();
   item.file_path = download_item->GetTargetFilePath();

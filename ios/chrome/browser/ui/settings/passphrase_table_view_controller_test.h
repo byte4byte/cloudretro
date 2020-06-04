@@ -11,7 +11,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/platform_test.h"
 
 namespace syncer {
@@ -22,6 +22,7 @@ namespace web {
 class BrowserState;
 }  // namespace web
 
+class Browser;
 class TestChromeBrowserState;
 @class UINavigationController;
 @class UIViewController;
@@ -42,9 +43,10 @@ class PassphraseTableViewControllerTest : public ChromeTableViewControllerTest {
 
   void SetUpNavigationController(UIViewController* test_controller);
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
 
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
+  std::unique_ptr<Browser> browser_;
   // Weak, owned by chrome_browser_state_.
   syncer::MockSyncService* fake_sync_service_;
 

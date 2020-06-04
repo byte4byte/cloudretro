@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.ssl;
 
-import android.support.annotation.IntDef;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 import android.util.Base64;
+
+import androidx.annotation.IntDef;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -17,15 +18,17 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.test.params.ParameterizedCommandLineFlags;
+import org.chromium.base.test.params.ParameterizedCommandLineFlags.Switches;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.parameter.CommandLineParameter;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
+import org.chromium.components.security_interstitials.CaptivePortalHelper;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -42,7 +45,12 @@ import java.util.concurrent.Callable;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @MediumTest
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@CommandLineParameter({"", "enable-features=" + ChromeFeatureList.CAPTIVE_PORTAL_CERTIFICATE_LIST})
+// clang-format off
+@ParameterizedCommandLineFlags({
+  @Switches(),
+  @Switches("enable-features=" + ChromeFeatureList.CAPTIVE_PORTAL_CERTIFICATE_LIST),
+})
+// clang-format on
 public class CaptivePortalTest {
     private static final String CAPTIVE_PORTAL_INTERSTITIAL_TITLE_PREFIX = "Connect to";
     private static final String SSL_INTERSTITIAL_TITLE = "Privacy error";
@@ -80,7 +88,7 @@ public class CaptivePortalTest {
     private EmbeddedTestServer mServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.startMainActivityFromLauncher();
         mServer = EmbeddedTestServer.createAndStartHTTPSServer(
                 InstrumentationRegistry.getContext(), ServerCertificate.CERT_MISMATCHED_NAME);
@@ -90,7 +98,7 @@ public class CaptivePortalTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mServer.stopAndDestroyServer();
     }
 

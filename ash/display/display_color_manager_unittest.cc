@@ -12,7 +12,7 @@
 #include "base/strings/pattern.h"
 #include "base/task/post_task.h"
 #include "base/test/scoped_path_override.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/constants/chromeos_paths.h"
 #include "components/quirks/quirks_manager.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -39,8 +39,8 @@ class DisplayColorManagerForTest : public DisplayColorManager {
       display::DisplayConfigurator* configurator)
       : DisplayColorManager(configurator, nullptr /* display_to_observe */) {}
 
-  void SetOnFinishedForTest(base::Closure on_finished_for_test) {
-    on_finished_for_test_ = on_finished_for_test;
+  void SetOnFinishedForTest(base::OnceClosure on_finished_for_test) {
+    on_finished_for_test_ = std::move(on_finished_for_test);
   }
 
  private:
@@ -54,8 +54,8 @@ class DisplayColorManagerForTest : public DisplayColorManager {
         display_id, product_id, has_color_correction_matrix, type, path,
         file_downloaded);
     // If path is empty, there is no icc file, and the DCM's work is done.
-    if (path.empty() && !on_finished_for_test_.is_null()) {
-      on_finished_for_test_.Run();
+    if (path.empty() && on_finished_for_test_) {
+      std::move(on_finished_for_test_).Run();
       on_finished_for_test_.Reset();
     }
   }
@@ -66,13 +66,13 @@ class DisplayColorManagerForTest : public DisplayColorManager {
       std::unique_ptr<ColorCalibrationData> data) override {
     DisplayColorManager::UpdateCalibrationData(display_id, product_id,
                                                std::move(data));
-    if (!on_finished_for_test_.is_null()) {
-      on_finished_for_test_.Run();
+    if (on_finished_for_test_) {
+      std::move(on_finished_for_test_).Run();
       on_finished_for_test_.Reset();
     }
   }
 
-  base::Closure on_finished_for_test_;
+  base::OnceClosure on_finished_for_test_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayColorManagerForTest);
 };
@@ -144,7 +144,7 @@ class DisplayColorManagerTest : public testing::Test {
   ~DisplayColorManagerTest() override = default;
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<base::ScopedPathOverride> path_override_;
   base::FilePath color_path_;
   std::unique_ptr<display::test::ActionLogger> log_;

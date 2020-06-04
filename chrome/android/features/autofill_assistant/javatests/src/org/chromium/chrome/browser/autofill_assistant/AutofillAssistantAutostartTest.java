@@ -4,14 +4,14 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static android.support.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withText;
+
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.startAutofillAssistant;
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.waitUntilViewMatchesCondition;
 
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
-import android.view.View;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -19,8 +19,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill_assistant.proto.ActionProto;
 import org.chromium.chrome.browser.autofill_assistant.proto.ChipProto;
 import org.chromium.chrome.browser.autofill_assistant.proto.ChipType;
@@ -29,9 +27,8 @@ import org.chromium.chrome.browser.autofill_assistant.proto.SupportedScriptProto
 import org.chromium.chrome.browser.autofill_assistant.proto.SupportedScriptProto.PresentationProto;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 import java.util.Collections;
 
@@ -45,7 +42,7 @@ public class AutofillAssistantAutostartTest {
     public CustomTabActivityTestRule mTestRule = new CustomTabActivityTestRule();
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         AutofillAssistantPreferencesUtil.setInitialPreferences(true);
     }
 
@@ -54,7 +51,10 @@ public class AutofillAssistantAutostartTest {
      */
     @Test
     @MediumTest
-    public void testAutostart() throws Exception {
+    public void testAutostart() {
+        mTestRule.startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
+                InstrumentationRegistry.getTargetContext(), "http://www.example.com"));
+
         AutofillAssistantTestScript script = new AutofillAssistantTestScript(
                 SupportedScriptProto.newBuilder()
                         .setPath("example.com/hello")
@@ -72,26 +72,10 @@ public class AutofillAssistantAutostartTest {
                                                                 .setText("Done"))))
                                 .build()));
 
-        // Create test service before starting activity.
         AutofillAssistantTestService testService =
                 new AutofillAssistantTestService(Collections.singletonList(script));
-        testService.scheduleForInjection();
+        startAutofillAssistant(mTestRule.getActivity(), testService);
 
-        mTestRule.startCustomTabActivityWithIntent(
-                CustomTabsTestUtils
-                        .createMinimalCustomTabIntent(InstrumentationRegistry.getTargetContext(),
-                                "http://www.example.com")
-                        .putExtra("org.chromium.chrome.browser.autofill_assistant.ENABLED", true));
-
-        // Wait until autofill assistant is visible on screen.
-        CriteriaHelper.pollUiThread(new Criteria("Autofill Assistant never started.") {
-            @Override
-            public boolean isSatisfied() {
-                View view = mTestRule.getActivity().findViewById(R.id.autofill_assistant);
-                return view != null && view.getHeight() > 0 && view.isShown();
-            }
-        });
-
-        onView(withText("Hello World!")).check(matches(isDisplayed()));
+        waitUntilViewMatchesCondition(withText("Hello World!"), isCompletelyDisplayed());
     }
 }

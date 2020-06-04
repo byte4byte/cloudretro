@@ -11,6 +11,7 @@
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/mei_preload_component_installer.h"
 #include "chrome/browser/media/media_engagement_contents_observer.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/sessions/session_restore_test_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/recently_audible_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -185,43 +187,26 @@ class MediaEngagementBrowserTest : public InProcessBrowserTest {
     Advance(MediaEngagementBrowserTest::kMaxWaitingTime);
   }
 
-  void ExpectScores(int visits,
-                    int media_playbacks,
-                    int audible_playbacks,
-                    int significant_playbacks) {
-    ExpectScores(http_server_.base_url(), visits, media_playbacks,
-                 audible_playbacks, significant_playbacks);
+  void ExpectScores(int visits, int media_playbacks) {
+    ExpectScores(http_server_.base_url(), visits, media_playbacks);
   }
 
-  void ExpectScoresSecondOrigin(int visits,
-                                int media_playbacks,
-                                int audible_playbacks,
-                                int significant_playbacks) {
-    ExpectScores(http_server_origin2_.base_url(), visits, media_playbacks,
-                 audible_playbacks, significant_playbacks);
+  void ExpectScoresSecondOrigin(int visits, int media_playbacks) {
+    ExpectScores(http_server_origin2_.base_url(), visits, media_playbacks);
   }
 
-  void ExpectScores(GURL url,
-                    int visits,
-                    int media_playbacks,
-                    int audible_playbacks,
-                    int significant_playbacks) {
-    ExpectScores(GetService(), url, visits, media_playbacks, audible_playbacks,
-                 significant_playbacks);
+  void ExpectScores(GURL url, int visits, int media_playbacks) {
+    ExpectScores(GetService(), url, visits, media_playbacks);
   }
 
   void ExpectScores(MediaEngagementService* service,
                     GURL url,
                     int visits,
-                    int media_playbacks,
-                    int audible_playbacks,
-                    int significant_playbacks) {
+                    int media_playbacks) {
     MediaEngagementScore score =
         service->CreateEngagementScore(url::Origin::Create(url));
     EXPECT_EQ(visits, score.visits());
     EXPECT_EQ(media_playbacks, score.media_playbacks());
-    EXPECT_EQ(audible_playbacks, score.audible_playbacks());
-    EXPECT_EQ(significant_playbacks, score.significant_playbacks());
   }
 
   content::WebContents* GetWebContents() {
@@ -236,7 +221,7 @@ class MediaEngagementBrowserTest : public InProcessBrowserTest {
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), GURL("chrome://about"),
         WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   }
 
   void CloseTab() {
@@ -340,16 +325,23 @@ class MediaEngagementPreloadBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordEngagement) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test.html", false);
   AdvanceMeaningfulPlaybackTime();
-  ExpectScores(0, 0, 0, 0);
+  ExpectScores(0, 0);
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
+  ExpectScores(1, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordEngagement_AudioOnly) {
+// Flaky tests on CrOS: http://crbug.com/1020131.
+#if defined(OS_CHROMEOS)
+#define MAYBE_RecordEngagement_AudioOnly DISABLED_RecordEngagement_AudioOnly
+#else
+#define MAYBE_RecordEngagement_AudioOnly RecordEngagement_AudioOnly
+#endif
+IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
+                       MAYBE_RecordEngagement_AudioOnly) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_audio.html", false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -357,15 +349,23 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   LoadTestPageAndWaitForPlayAndAudible("engagement_test.html", false);
   Advance(base::TimeDelta::FromSeconds(1));
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_DoNotRecordEngagement_NotTime_AudioOnly \
+  DISABLED_DoNotRecordEngagement_NotTime_AudioOnly
+#else
+#define MAYBE_DoNotRecordEngagement_NotTime_AudioOnly \
+  DoNotRecordEngagement_NotTime_AudioOnly
+#endif
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       DoNotRecordEngagement_NotTime_AudioOnly) {
+                       MAYBE_DoNotRecordEngagement_NotTime_AudioOnly) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_audio.html", false);
   Advance(base::TimeDelta::FromSeconds(1));
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -373,15 +373,23 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   LoadTestPageAndWaitForPlayAndAudible("engagement_test.html", true);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_DoNotRecordEngagement_TabMuted_AudioOnly \
+  DISABLED_DoNotRecordEngagement_TabMuted_AudioOnly
+#else
+#define MAYBE_DoNotRecordEngagement_TabMuted_AudioOnly \
+  DoNotRecordEngagement_TabMuted_AudioOnly
+#endif
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       DoNotRecordEngagement_TabMuted_AudioOnly) {
+                       MAYBE_DoNotRecordEngagement_TabMuted_AudioOnly) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_audio.html", true);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -390,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
       http_server().GetURL("/engagement_test_muted.html"), false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 0, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -399,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
       http_server().GetURL("/engagement_test_muted.html"), false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 0, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -409,17 +417,25 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   ExecuteScript("document.getElementById(\"media\").pause();");
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_DoNotRecordEngagement_PlaybackStopped_AudioOnly \
+  DISABLED_DoNotRecordEngagement_PlaybackStopped_AudioOnly
+#else
+#define MAYBE_DoNotRecordEngagement_PlaybackStopped_AudioOnly \
+  DoNotRecordEngagement_PlaybackStopped_AudioOnly
+#endif
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       DoNotRecordEngagement_PlaybackStopped_AudioOnly) {
+                       MAYBE_DoNotRecordEngagement_PlaybackStopped_AudioOnly) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_audio.html", false);
   Advance(base::TimeDelta::FromSeconds(1));
   ExecuteScript("document.getElementById(\"media\").pause();");
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -428,16 +444,24 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   OpenTabAsLink();
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
+  ExpectScores(1, 1);
 }
 
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_RecordEngagement_NotVisible_AudioOnly \
+  DISABLED_RecordEngagement_NotVisible_AudioOnly
+#else
+#define MAYBE_RecordEngagement_NotVisible_AudioOnly \
+  RecordEngagement_NotVisible_AudioOnly
+#endif
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       RecordEngagement_NotVisible_AudioOnly) {
+                       MAYBE_RecordEngagement_NotVisible_AudioOnly) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_audio.html", false);
   OpenTabAsLink();
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -446,7 +470,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
                                        false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -455,7 +479,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
       http_server().GetURL("/engagement_test_no_audio_track.html"), false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 0, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -464,7 +488,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
       http_server().GetURL("/engagement_test_silent_audio_track.html"), false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordVisitOnBrowserClose) {
@@ -473,11 +497,19 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordVisitOnBrowserClose) {
   AdvanceMeaningfulPlaybackTime();
 
   CloseBrowser();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+// Flaky timeout. https://crbug.com/1014229
+#define MAYBE_RecordSingleVisitOnSameOrigin \
+  DISABLED_RecordSingleVisitOnSameOrigin
+#else
+#define MAYBE_RecordSingleVisitOnSameOrigin RecordSingleVisitOnSameOrigin
+#endif
+
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       RecordSingleVisitOnSameOrigin) {
+                       MAYBE_RecordSingleVisitOnSameOrigin) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_small_frame_size.html",
                                        false);
   AdvanceMeaningfulPlaybackTime();
@@ -487,7 +519,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   AdvanceMeaningfulPlaybackTime();
 
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordVisitOnNewOrigin) {
@@ -496,17 +528,25 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordVisitOnNewOrigin) {
   AdvanceMeaningfulPlaybackTime();
 
   LoadNewOriginPage();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_DoNotRecordEngagement_SilentAudioTrack_AudioOnly \
+  DISABLED_DoNotRecordEngagement_SilentAudioTrack_AudioOnly
+#else
+#define MAYBE_DoNotRecordEngagement_SilentAudioTrack_AudioOnly \
+  DoNotRecordEngagement_SilentAudioTrack_AudioOnly
+#endif
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
-                       DoNotRecordEngagement_SilentAudioTrack_AudioOnly) {
+                       MAYBE_DoNotRecordEngagement_SilentAudioTrack_AudioOnly) {
   LoadTestPageAndWaitForPlay(
       http_server().GetURL("/engagement_test_silent_audio_track_audio.html"),
       false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, IFrameDelegation) {
@@ -519,8 +559,8 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, IFrameDelegation) {
   AdvanceMeaningfulPlaybackTime();
 
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
-  ExpectScoresSecondOrigin(0, 0, 0, 0);
+  ExpectScores(1, 1);
+  ExpectScoresSecondOrigin(0, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, IFrameDelegation_AudioOnly) {
@@ -533,8 +573,8 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, IFrameDelegation_AudioOnly) {
   AdvanceMeaningfulPlaybackTime();
 
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
-  ExpectScoresSecondOrigin(0, 0, 0, 0);
+  ExpectScores(1, 1);
+  ExpectScoresSecondOrigin(0, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -543,14 +583,20 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   EraseHistory();
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 1, 1, 1);
+  ExpectScores(1, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, MultipleElements) {
+// Flaky tests on CrOS: http://crbug.com/1019671.
+#if defined(OS_CHROMEOS)
+#define MAYBE_MultipleElements DISABLED_MultipleElements
+#else
+#define MAYBE_MultipleElements MultipleElements
+#endif
+IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, MAYBE_MultipleElements) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test_multiple.html", false);
   AdvanceMeaningfulPlaybackTime();
   CloseTab();
-  ExpectScores(1, 1, 3, 2);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -558,7 +604,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
   LoadTestPageAndWaitForPlayAndAudible("engagement_test.html", false);
   Advance(base::TimeDelta::FromSeconds(4));
   CloseTab();
-  ExpectScores(1, 0, 1, 0);
+  ExpectScores(1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -574,7 +620,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
 
   browser()->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(2, 2, 2, 2);
+  ExpectScores(2, 2);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabSameURL) {
@@ -588,7 +634,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabSameURL) {
 
   browser()->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(1, 1, 2, 2);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabSameOrigin) {
@@ -603,7 +649,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabSameOrigin) {
 
   browser()->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(1, 1, 2, 2);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabCrossOrigin) {
@@ -618,8 +664,8 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, SessionNewTabCrossOrigin) {
 
   browser()->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(http_server().base_url(), 1, 1, 1, 1);
-  ExpectScores(http_server_origin2().base_url(), 1, 1, 1, 1);
+  ExpectScores(http_server().base_url(), 1, 1);
+  ExpectScores(http_server_origin2().base_url(), 1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
@@ -641,7 +687,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
 
   browser()->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(1, 1, 3, 3);
+  ExpectScores(1, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementPreloadBrowserTest,
@@ -671,7 +717,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest,
 
   // The new tab should only count as the same visit if we visited that tab
   // through a link or reload (duplicate tab).
-  ExpectScores(2, 2, 2, 2);
+  ExpectScores(2, 2);
 }
 
 class MediaEngagementPrerenderBrowserTest : public MediaEngagementBrowserTest {
@@ -684,7 +730,12 @@ class MediaEngagementPrerenderBrowserTest : public MediaEngagementBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(MediaEngagementPrerenderBrowserTest, Ignored) {
+#if defined(OS_WIN)
+#define MAYBE_Ignored DISABLED_Ignored
+#else
+#define MAYBE_Ignored Ignored
+#endif
+IN_PROC_BROWSER_TEST_F(MediaEngagementPrerenderBrowserTest, MAYBE_Ignored) {
   const GURL& url = http_server().GetURL("/engagement_test.html");
 
   prerender::PrerenderManager* prerender_manager =
@@ -717,7 +768,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementPrerenderBrowserTest, Ignored) {
 
   test_prerender->WaitForStop();
 
-  ExpectScores(0, 0, 0, 0);
+  ExpectScores(0, 0);
 }
 
 class MediaEngagementSessionRestoreBrowserTest
@@ -740,12 +791,8 @@ class MediaEngagementSessionRestoreBrowserTest
     CloseBrowserSynchronously(browser());
 
     chrome::NewEmptyWindow(profile);
-    ui_test_utils::BrowserAddedObserver window_observer;
-    SessionRestoreTestHelper restore_observer;
-
-    Browser* new_browser = window_observer.WaitForSingleNewBrowser();
-    restore_observer.Wait();
-    return new_browser;
+    SessionRestoreTestHelper().Wait();
+    return BrowserList::GetInstance()->GetLastActive();
   }
 
   void WaitForTabsToLoad(Browser* browser) {
@@ -769,8 +816,7 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementSessionRestoreBrowserTest,
 
   new_browser->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(MediaEngagementService::Get(new_browser->profile()), url, 1, 0,
-               0, 0);
+  ExpectScores(MediaEngagementService::Get(new_browser->profile()), url, 1, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaEngagementSessionRestoreBrowserTest,
@@ -796,5 +842,5 @@ IN_PROC_BROWSER_TEST_F(MediaEngagementSessionRestoreBrowserTest,
 
   new_browser->tab_strip_model()->CloseAllTabs();
 
-  ExpectScores(new_service, url, 2, 2, 2, 2);
+  ExpectScores(new_service, url, 2, 2);
 }

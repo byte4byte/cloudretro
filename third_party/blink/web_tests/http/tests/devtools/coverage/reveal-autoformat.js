@@ -11,7 +11,7 @@
   await TestRunner.addStylesheetTag('resources/decorations-after-inplace-formatter.css');
   await TestRunner.addStylesheetTag('resources/long-mangled.css');
 
-  CoverageTestRunner.startCoverage();
+  await CoverageTestRunner.startCoverage();
   await TestRunner.evaluateInPagePromise('performActions()');
   await CoverageTestRunner.stopCoverage();
   var node = CoverageTestRunner.findCoverageNodeForURL('long-mangled.css');
@@ -21,15 +21,6 @@
   coverageListView._revealSourceForSelectedNode();
   await decoratePromise;
   TestRunner.addResult('The below should be formatted');
-  CoverageTestRunner.dumpDecorationsInSourceFrame(UI.panels.sources.visibleView);
-
-
-  node = CoverageTestRunner.findCoverageNodeForURL('decorations-after-inplace-formatter.css');
-  node.select();
-  decoratePromise = TestRunner.addSnifferPromise(Coverage.CoverageView.LineDecorator.prototype, '_innerDecorate');
-  coverageListView._revealSourceForSelectedNode();
-  await decoratePromise;
-  TestRunner.addResult('The below should NOT be formatted');
   CoverageTestRunner.dumpDecorationsInSourceFrame(UI.panels.sources.visibleView);
 
   TestRunner.completeTest();

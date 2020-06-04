@@ -16,6 +16,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
 #import "ios/chrome/browser/metrics/previous_session_info.h"
@@ -37,7 +38,7 @@ void UpdateMemoryValues() {
       static_cast<int>(base::SysInfo::AmountOfAvailablePhysicalMemory() / 1024);
   breakpad_helper::SetCurrentFreeMemoryInKB(free_memory);
 
-  NSURL* fileURL = [[NSURL alloc] initFileURLWithPath:@"/"];
+  NSURL* fileURL = [[NSURL alloc] initFileURLWithPath:NSHomeDirectory()];
   NSDictionary* results = [fileURL resourceValuesForKeys:@[
     NSURLVolumeAvailableCapacityForImportantUsageKey
   ]
@@ -57,7 +58,7 @@ void UpdateMemoryValues() {
 // |kMemoryMonitorDelayInSeconds|.
 void AsynchronousFreeMemoryMonitor() {
   UpdateMemoryValues();
-  base::PostDelayedTaskWithTraits(
+  base::ThreadPool::PostDelayedTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&AsynchronousFreeMemoryMonitor),
       base::TimeDelta::FromSeconds(kMemoryMonitorDelayInSeconds));
@@ -65,7 +66,7 @@ void AsynchronousFreeMemoryMonitor() {
 }  // namespace
 
 void StartFreeMemoryMonitor() {
-  base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-                           base::BindOnce(&AsynchronousFreeMemoryMonitor));
+  base::ThreadPool::PostTask(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+      base::BindOnce(&AsynchronousFreeMemoryMonitor));
 }

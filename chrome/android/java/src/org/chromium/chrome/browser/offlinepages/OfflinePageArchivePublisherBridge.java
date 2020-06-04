@@ -15,10 +15,11 @@ import android.os.Environment;
 import android.provider.MediaStore.MediaColumns;
 import android.text.format.DateUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -35,7 +36,7 @@ import java.lang.reflect.Method;
  */
 @JNINamespace("offline_pages")
 public class OfflinePageArchivePublisherBridge {
-    private static final String TAG = "Publisher";
+    private static final String TAG = "OPArchivePublisher";
     /** Offline pages should not be scanned as for media content. */
     public static final boolean IS_MEDIA_SCANNER_SCANNABLE = false;
 
@@ -76,7 +77,7 @@ public class OfflinePageArchivePublisherBridge {
             return callAddCompletedDownload(title, description, path, length, uri, referer);
         } catch (Exception e) {
             // In case of exception, we return a download id of 0.
-            Log.d(TAG, "ADM threw while trying to add a download. " + e);
+            Log.i(TAG, "ADM threw while trying to add a download. " + e);
             return 0;
         }
     }
@@ -116,7 +117,7 @@ public class OfflinePageArchivePublisherBridge {
 
             return downloadManager.remove(ids);
         } catch (Exception e) {
-            Log.d(TAG, "ADM threw while trying to remove a download. " + e);
+            Log.i(TAG, "ADM threw while trying to remove a download. " + e);
             return 0;
         }
     }
@@ -160,7 +161,7 @@ public class OfflinePageArchivePublisherBridge {
             pendingValues.put(
                     (String) primaryDirectoryField.get(null), Environment.DIRECTORY_DOWNLOADS);
         } catch (Exception e) {
-            Log.d(TAG, "Unable to set pending download fields.", e);
+            Log.i(TAG, "Unable to set pending download fields.", e);
             return "";
         }
 
@@ -172,7 +173,7 @@ public class OfflinePageArchivePublisherBridge {
         ContentResolver contentResolver = ContextUtils.getApplicationContext().getContentResolver();
         Uri intermediateUri = contentResolver.insert(externalDownloadUri, pendingValues);
         if (intermediateUri == null || !ContentUriUtils.isContentUri(intermediateUri.toString())) {
-            Log.d(TAG, "Failed to create intermediate URI.");
+            Log.i(TAG, "Failed to create intermediate URI.");
             return "";
         }
 
@@ -189,7 +190,11 @@ public class OfflinePageArchivePublisherBridge {
             in.close();
             out.close();
         } catch (Exception e) {
-            Log.d(TAG, "Unable to copy archive to pending URI.", e);
+            Log.i(TAG,
+                    "Unable to copy archive to pending URI (externalDownloadUri: "
+                            + externalDownloadUri + ", intermediateUri: " + intermediateUri
+                            + ", page.getFilePath(): " + page.getFilePath() + ")",
+                    e);
             return "";
         }
 
@@ -199,10 +204,38 @@ public class OfflinePageArchivePublisherBridge {
         publishValues.putNull("date_expires");
         publishValues.put(MediaColumns.DISPLAY_NAME, page.getTitle());
         publishValues.put(MediaColumns.MIME_TYPE, "multipart/related");
-        if (contentResolver.update(intermediateUri, publishValues, null, null) != 1) {
-            Log.d(TAG, "Failed to finish publishing archive.");
+        if (!updateContentResolver(contentResolver, intermediateUri, publishValues,
+                    "Failed to finish publishing archive.")) {
+            return "";
         }
 
+        // Android Q's MediaStore.Downloads has an issue that the custom mime type which is not
+        // supported by MimeTypeMap is overridden to "application/octet-stream" when publishing.
+        // To deal with this issue we set the mime type again after publishing.
+        // See crbug.com/1010829 for more details.
+        final ContentValues mimeTypeValues = new ContentValues();
+        mimeTypeValues.put(MediaColumns.MIME_TYPE, "multipart/related");
+        if (!updateContentResolver(contentResolver, intermediateUri, mimeTypeValues,
+                    "Failed to update mime type.")) {
+            return "";
+        }
         return intermediateUri.toString();
+    }
+
+    private static boolean updateContentResolver(ContentResolver contentResolver, Uri uri,
+            ContentValues contentValues, String errorMessage) {
+        /* Even though the documentation for ContentResolver.update doesn't mention it, an
+         * IllegalStateException (and other RuntimeException's) may be thrown in some situations.
+         * This is the case, for instance, when there is a long enough sequence of similarly named
+         * files and Android code refuses to generate a new unique filename. See
+         * https://crbug.com/1010916 for more details.
+         */
+        try {
+            if (contentResolver.update(uri, contentValues, null, null) == 1) return true;
+            Log.i(TAG, errorMessage);
+        } catch (RuntimeException e) {
+            Log.e(TAG, errorMessage, e);
+        }
+        return false;
     }
 }

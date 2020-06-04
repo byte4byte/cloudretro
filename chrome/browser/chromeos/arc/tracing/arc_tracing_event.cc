@@ -6,6 +6,8 @@
 
 #include <inttypes.h>
 
+#include <ostream>
+
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/common/trace_event_common.h"
 
@@ -64,6 +66,10 @@ ArcTracingEvent::ArcTracingEvent(base::Value dictionary)
     : dictionary_(std::move(dictionary)) {}
 
 ArcTracingEvent::~ArcTracingEvent() = default;
+
+ArcTracingEvent::ArcTracingEvent(ArcTracingEvent&&) = default;
+
+ArcTracingEvent& ArcTracingEvent::operator=(ArcTracingEvent&&) = default;
 
 int ArcTracingEvent::GetPid() const {
   return GetIntegerFromDictionary(GetDictionary(), kKeyPid,

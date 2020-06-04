@@ -9,7 +9,8 @@
 
 #include "base/macros.h"
 #include "chrome/browser/chromeos/printing/printer_detector.h"
-#include "services/device/public/mojom/usb_manager.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/device/public/mojom/usb_manager.mojom-forward.h"
 
 namespace chromeos {
 
@@ -21,7 +22,7 @@ class UsbPrinterDetector : public PrinterDetector {
   static std::unique_ptr<UsbPrinterDetector> Create();
 
   static std::unique_ptr<UsbPrinterDetector> CreateForTesting(
-      device::mojom::UsbDeviceManagerPtrInfo usb_manager_info);
+      mojo::PendingRemote<device::mojom::UsbDeviceManager> usb_manager);
 
   ~UsbPrinterDetector() override = default;
 

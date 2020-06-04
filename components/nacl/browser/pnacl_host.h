@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_checker.h"
 #include "components/nacl/browser/nacl_file_host.h"
 #include "components/nacl/common/pnacl_types.h"
@@ -180,7 +181,7 @@ class PnaclHost {
   void DeInitIfSafe();
 
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_ =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
 
   // Operations which are pending with the cache backend, which we should

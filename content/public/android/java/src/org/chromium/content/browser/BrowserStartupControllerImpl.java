@@ -6,19 +6,22 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 import android.os.StrictMode;
-import android.support.annotation.IntDef;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.base.task.PostTask;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.ServicificationStartupUma.ServicificationStartup;
@@ -37,7 +40,7 @@ import java.util.List;
  */
 @JNINamespace("content")
 public class BrowserStartupControllerImpl implements BrowserStartupController {
-    private static final String TAG = "cr.BrowserStartup";
+    private static final String TAG = "BrowserStartup";
 
     // Helper constants for {@link #executeEnqueuedCallbacks(int, boolean)}.
     @VisibleForTesting
@@ -107,8 +110,6 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     // of enqueued callbacks have been executed.
     private boolean mStartupSuccess;
 
-    private int mLibraryProcessType;
-
     // Tests may inject a method to be run instead of calling ContentMain() in order for them to
     // initialize the C++ system via another means.
     private Runnable mContentMainCallbackForTests;
@@ -130,10 +131,9 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
 
     private TracingControllerAndroidImpl mTracingController;
 
-    BrowserStartupControllerImpl(int libraryProcessType) {
+    BrowserStartupControllerImpl() {
         mAsyncStartupCallbacks = new ArrayList<>();
         mServiceManagerCallbacks = new ArrayList<>();
-        mLibraryProcessType = libraryProcessType;
         if (BuildInfo.isDebugAndroid()) {
             // Only set up the tracing broadcast receiver on debug builds of the OS. Normal tracing
             // should use the DevTools API.
@@ -162,20 +162,14 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     /**
      * Get BrowserStartupController instance, create a new one if no existing.
      *
-     * @param libraryProcessType the type of process the shared library is loaded. it must be
-     *                           LibraryProcessType.PROCESS_BROWSER or
-     *                           LibraryProcessType.PROCESS_WEBVIEW.
      * @return BrowserStartupController instance.
      */
-    public static BrowserStartupController get(int libraryProcessType) {
+    public static BrowserStartupController getInstance() {
         assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread.";
         ThreadUtils.assertOnUiThread();
         if (sInstance == null) {
-            assert LibraryProcessType.PROCESS_BROWSER == libraryProcessType
-                    || LibraryProcessType.PROCESS_WEBVIEW == libraryProcessType;
-            sInstance = new BrowserStartupControllerImpl(libraryProcessType);
+            sInstance = new BrowserStartupControllerImpl();
         }
-        assert sInstance.mLibraryProcessType == libraryProcessType : "Wrong process type";
         return sInstance;
     }
 
@@ -185,8 +179,10 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     }
 
     @Override
-    public void startBrowserProcessesAsync(boolean startGpuProcess, boolean startServiceManagerOnly,
-            final StartupCallback callback) throws ProcessInitException {
+    public void startBrowserProcessesAsync(@LibraryProcessType int libraryProcessType,
+            boolean startGpuProcess, boolean startServiceManagerOnly,
+            final StartupCallback callback) {
+        assertProcessTypeSupported(libraryProcessType);
         assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread.";
         ServicificationStartupUma.getInstance().record(ServicificationStartupUma.getStartupMode(
                 mFullBrowserStartupDone, mServiceManagerStarted, startServiceManagerOnly));
@@ -239,7 +235,10 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     }
 
     @Override
-    public void startBrowserProcessesSync(boolean singleProcess) throws ProcessInitException {
+    public void startBrowserProcessesSync(
+            @LibraryProcessType int libraryProcessType, boolean singleProcess) {
+        assertProcessTypeSupported(libraryProcessType);
+
         ServicificationStartupUma.getInstance().record(
                 ServicificationStartupUma.getStartupMode(mFullBrowserStartupDone,
                         mServiceManagerStarted, false /* startServiceManagerOnly */));
@@ -247,7 +246,10 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
         // If already started skip to checking the result
         if (!mFullBrowserStartupDone) {
             if (!mHasStartedInitializingBrowserProcess || !mPostResourceExtractionTasksCompleted) {
-                prepareToStartBrowserProcess(singleProcess, null);
+                try (ScopedSysTraceEvent e2 = ScopedSysTraceEvent.scoped(
+                             "BrowserStartupController.prepareToStartBrowserProcess")) {
+                    prepareToStartBrowserProcess(singleProcess, null);
+                }
             }
 
             boolean startedSuccessfully = true;
@@ -273,7 +275,7 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
         // Startup should now be complete
         assert mFullBrowserStartupDone;
         if (!mStartupSuccess) {
-            throw new ProcessInitException(LoaderErrors.LOADER_ERROR_NATIVE_STARTUP_FAILED);
+            throw new ProcessInitException(LoaderErrors.NATIVE_STARTUP_FAILED);
         }
     }
 
@@ -314,7 +316,7 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
 
     @VisibleForTesting
     void flushStartupTasks() {
-        nativeFlushStartupTasks();
+        BrowserStartupControllerImplJni.get().flushStartupTasks();
     }
 
     @Override
@@ -348,6 +350,20 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     public @ServicificationStartup int getStartupMode(boolean startServiceManagerOnly) {
         return ServicificationStartupUma.getStartupMode(
                 mFullBrowserStartupDone, mServiceManagerStarted, startServiceManagerOnly);
+    }
+
+    /**
+     * Asserts that library process type is one of the supported types.
+     * @param libraryProcessType the type of process the shared library is loaded. It must be
+     *                           LibraryProcessType.PROCESS_BROWSER,
+     *                           LibraryProcessType.PROCESS_WEBVIEW or
+     *                           LibraryProcessType.PROCESS_WEBLAYER.
+     */
+    private void assertProcessTypeSupported(@LibraryProcessType int libraryProcessType) {
+        assert LibraryProcessType.PROCESS_BROWSER == libraryProcessType
+                || LibraryProcessType.PROCESS_WEBVIEW == libraryProcessType
+                || LibraryProcessType.PROCESS_WEBLAYER == libraryProcessType;
+        LibraryLoader.getInstance().assertCompatibleProcessType(libraryProcessType);
     }
 
     /**
@@ -424,9 +440,9 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
     }
 
     @VisibleForTesting
-    void prepareToStartBrowserProcess(final boolean singleProcess,
-            final Runnable completionCallback) throws ProcessInitException {
-        Log.i(TAG, "Initializing chromium process, singleProcess=%b", singleProcess);
+    void prepareToStartBrowserProcess(
+            final boolean singleProcess, final Runnable completionCallback) {
+        Log.d(TAG, "Initializing chromium process, singleProcess=%b", singleProcess);
 
         // This strictmode exception is to cover the case where the browser process is being started
         // asynchronously but not in the main browser flow.  The main browser flow will trigger
@@ -437,7 +453,7 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
         try {
             // Normally Main.java will have already loaded the library asynchronously, we only need
             // to load it here if we arrived via another flow, e.g. bookmark access & sync setup.
-            LibraryLoader.getInstance().ensureInitialized(mLibraryProcessType);
+            LibraryLoader.getInstance().ensureInitialized();
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -448,7 +464,7 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
                 if (!mPostResourceExtractionTasksCompleted) {
                     // TODO(yfriedman): Remove dependency on a command line flag for this.
                     DeviceUtilsImpl.addDeviceSpecificUserAgentSwitch();
-                    nativeSetCommandLineFlags(singleProcess);
+                    BrowserStartupControllerImplJni.get().setCommandLineFlags(singleProcess);
                     mPostResourceExtractionTasksCompleted = true;
                 }
 
@@ -475,11 +491,10 @@ public class BrowserStartupControllerImpl implements BrowserStartupController {
         ServicificationStartupUma.getInstance().commit();
     }
 
-    private static native void nativeSetCommandLineFlags(boolean singleProcess);
+    @NativeMethods
+    interface Natives {
+        void setCommandLineFlags(boolean singleProcess);
 
-    // Is this an official build of Chrome? Only native code knows for sure. Official build
-    // knowledge is needed very early in process startup.
-    private static native boolean nativeIsOfficialBuild();
-
-    private static native void nativeFlushStartupTasks();
+        void flushStartupTasks();
+    }
 }

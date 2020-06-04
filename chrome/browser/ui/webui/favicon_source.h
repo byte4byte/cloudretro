@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/favicon_service.h"
 #include "content/public/browser/url_data_source.h"
@@ -23,6 +24,7 @@ class RefCountedMemory;
 
 namespace chrome {
 enum class FaviconUrlFormat;
+struct ParsedFaviconPath;
 }
 
 namespace ui {
@@ -44,9 +46,9 @@ class FaviconSource : public content::URLDataSource {
   // content::URLDataSource implementation.
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
   std::string GetMimeType(const std::string&) override;
   bool AllowCaching() override;
   bool ShouldReplaceExistingSource() override;
@@ -55,24 +57,9 @@ class FaviconSource : public content::URLDataSource {
                             int render_process_id) override;
 
  protected:
-  struct IconRequest {
-    IconRequest();
-    IconRequest(const content::URLDataSource::GotDataCallback& cb,
-                const GURL& path,
-                int size,
-                float scale);
-    IconRequest(const IconRequest& other);
-    ~IconRequest();
-
-    content::URLDataSource::GotDataCallback callback;
-    GURL request_path;
-    int size_in_dip;
-    float device_scale_factor;
-  };
-
   // Exposed for testing.
   virtual ui::NativeTheme* GetNativeTheme();
-  virtual base::RefCountedMemory* LoadIconBytes(const IconRequest& request,
+  virtual base::RefCountedMemory* LoadIconBytes(float scale_factor,
                                                 int resource_id);
 
   Profile* profile_;
@@ -86,21 +73,31 @@ class FaviconSource : public content::URLDataSource {
     NUM_SIZES
   };
 
-  // Called when favicon data is available from the history backend.
+  // Called when favicon data is available from the history backend. If
+  // |bitmap_result| is valid, returns it to caller using |callback|. Otherwise
+  // will send appropriate default icon for |size_in_dip| and |scale_factor|.
   void OnFaviconDataAvailable(
-      const IconRequest& request,
+      content::URLDataSource::GotDataCallback callback,
+      const chrome::ParsedFaviconPath& parsed,
       const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
   // Sends the 16x16 DIP 1x default favicon.
-  void SendDefaultResponse(
-      const content::URLDataSource::GotDataCallback& callback);
+  void SendDefaultResponse(content::URLDataSource::GotDataCallback callback);
+
+  // Sends back default favicon or fallback monogram.
+  void SendDefaultResponse(content::URLDataSource::GotDataCallback callback,
+                           const chrome::ParsedFaviconPath& parsed);
 
   // Sends the default favicon.
-  void SendDefaultResponse(const IconRequest& request);
+  void SendDefaultResponse(content::URLDataSource::GotDataCallback callback,
+                           int size_in_dip,
+                           float scale_factor);
 
   chrome::FaviconUrlFormat url_format_;
 
   base::CancelableTaskTracker cancelable_task_tracker_;
+
+  base::WeakPtrFactory<FaviconSource> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FaviconSource);
 };

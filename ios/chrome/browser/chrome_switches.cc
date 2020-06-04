@@ -21,6 +21,9 @@ const char kDisableIOSPasswordSuggestions[] =
 const char kDisableThirdPartyKeyboardWorkaround[] =
     "disable-third-party-keyboard-workaround";
 
+// Enables enterprise policy support.
+const char kEnableEnterprisePolicy[] = "enable-enterprise-policy";
+
 // Enables support for Handoff from Chrome on iOS to the default browser of
 // other Apple devices.
 const char kEnableIOSHandoffToOtherDevices[] =
@@ -32,6 +35,13 @@ const char kEnableSpotlightActions[] = "enable-spotlight-actions";
 // Enables the 3rd party keyboard omnibox workaround.
 const char kEnableThirdPartyKeyboardWorkaround[] =
     "enable-third-party-keyboard-workaround";
+
+// Installs the managed bookmarks policy handler.
+const char kInstallManagedBookmarksHandler[] =
+    "install-managed-bookmarks-handler";
+
+// Installs the URLBlocklist and URLAllowlist handlers.
+const char kInstallURLBlocklistHandlers[] = "install-url-blocklist-handlers";
 
 // A string used to override the default user agent with a custom one.
 const char kUserAgent[] = "user-agent";

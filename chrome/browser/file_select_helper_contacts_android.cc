@@ -8,6 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "ui/shell_dialogs/selected_file_info.h"
@@ -20,7 +21,7 @@ void FileSelectHelperContactsAndroid::FileSelectedWithExtraInfo(
     const ui::SelectedFileInfo& file,
     int index,
     void* params) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(
@@ -39,7 +40,7 @@ void FileSelectHelperContactsAndroid::ProcessContactsForAndroid(
       temp_file = base::FilePath();
   }
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(
           &FileSelectHelperContactsAndroid::ProcessContactsForAndroidOnUIThread,
@@ -53,7 +54,7 @@ void FileSelectHelperContactsAndroid::ProcessContactsForAndroidOnUIThread(
   std::vector<ui::SelectedFileInfo> files;
 
   if (temp_file.empty()) {
-    NotifyRenderFrameHostAndEnd(files);
+    ConvertToFileChooserFileInfoList(files);
     return;
   }
 
@@ -71,5 +72,5 @@ void FileSelectHelperContactsAndroid::ProcessContactsForAndroidOnUIThread(
     return;
   }
 
-  NotifyRenderFrameHostAndEnd(files);
+  ConvertToFileChooserFileInfoList(files);
 }

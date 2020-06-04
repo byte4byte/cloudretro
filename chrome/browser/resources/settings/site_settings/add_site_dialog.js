@@ -7,21 +7,38 @@
  * 'add-site-dialog' provides a dialog to add exceptions for a given Content
  * Settings category.
  */
+import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.m.js';
+import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
+import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
+import '../settings_shared_css.m.js';
+
+import {assert} from 'chrome://resources/js/assert.m.js';
+import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {loadTimeData} from '../i18n_setup.m.js';
+
+import {ContentSetting, ContentSettingsTypes, SITE_EXCEPTION_WILDCARD} from './constants.js';
+import {SiteSettingsBehavior} from './site_settings_behavior.js';
+
 Polymer({
   is: 'add-site-dialog',
+
+  _template: html`{__html_template__}`,
 
   behaviors: [SiteSettingsBehavior, WebUIListenerBehavior],
 
   properties: {
     /**
      * What kind of setting, e.g. Location, Camera, Cookies, and so on.
-     * @type {settings.ContentSettingsTypes}
+     * @type {ContentSettingsTypes}
      */
     category: String,
 
     /**
      * Whether this is about an Allow, Block, SessionOnly, or other.
-     * @type {settings.ContentSetting}
+     * @type {ContentSetting}
      */
     contentSetting: String,
 
@@ -45,7 +62,7 @@ Polymer({
   },
 
   /** @override */
-  attached: function() {
+  attached() {
     assert(this.category);
     assert(this.contentSetting);
     assert(typeof this.hasIncognito != 'undefined');
@@ -57,7 +74,7 @@ Polymer({
    * Validates that the pattern entered is valid.
    * @private
    */
-  validate_: function() {
+  validate_() {
     // If input is empty, disable the action button, but don't show the red
     // invalid message.
     if (this.$.site.value.trim() == '') {
@@ -75,7 +92,7 @@ Polymer({
   },
 
   /** @private */
-  onCancelTap_: function() {
+  onCancelTap_() {
     this.$.dialog.cancel();
   },
 
@@ -84,24 +101,42 @@ Polymer({
    * the dialog).
    * @private
    */
-  onSubmit_: function() {
+  onSubmit_() {
     assert(!this.$.add.disabled);
+    let primaryPattern = this.site_;
+    let secondaryPattern = SITE_EXCEPTION_WILDCARD;
+
+    if (this.$.thirdParties.checked) {
+      primaryPattern = SITE_EXCEPTION_WILDCARD;
+      secondaryPattern = this.site_;
+    }
+
     this.browserProxy.setCategoryPermissionForPattern(
-        this.site_, this.site_, this.category, this.contentSetting,
+        primaryPattern, secondaryPattern, this.category, this.contentSetting,
         this.$.incognito.checked);
+
     this.$.dialog.close();
   },
 
   /** @private */
-  showIncognitoSessionOnly_: function() {
+  showIncognitoSessionOnly_() {
     return this.hasIncognito && !loadTimeData.getBoolean('isGuest') &&
-        this.contentSetting != settings.ContentSetting.SESSION_ONLY;
+        this.contentSetting != ContentSetting.SESSION_ONLY;
   },
 
   /** @private */
-  hasIncognitoChanged_: function() {
+  hasIncognitoChanged_() {
     if (!this.hasIncognito) {
       this.$.incognito.checked = false;
     }
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  shouldHideThirdPartyCookieCheckbox_() {
+    return this.category !== ContentSettingsTypes.COOKIES ||
+        !loadTimeData.getBoolean('showImprovedCookieControlsForThirdParties');
   },
 });

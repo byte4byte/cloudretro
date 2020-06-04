@@ -7,6 +7,7 @@
 #include "base/mac/mac_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
@@ -46,9 +47,8 @@ void CheckForUserRemovedLoginItemOnWorkerThread() {
                                                 base::BlockingType::MAY_BLOCK);
   if (!base::mac::CheckLoginItemStatus(NULL)) {
     // There's no LoginItem, so set the kUserRemovedLoginItem pref.
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(SetUserRemovedLoginItemPrefOnUIThread));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(SetUserRemovedLoginItemPrefOnUIThread));
   }
 }
 
@@ -64,9 +64,8 @@ void EnableLaunchOnStartupOnWorkerThread(bool need_migration) {
       if (is_hidden) {
       // We already have a hidden login item, so set the kChromeCreatedLoginItem
       // flag.
-      base::PostTaskWithTraits(
-          FROM_HERE, {BrowserThread::UI},
-          base::BindOnce(SetCreatedLoginItemPrefOnUIThread));
+      base::PostTask(FROM_HERE, {BrowserThread::UI},
+                     base::BindOnce(SetCreatedLoginItemPrefOnUIThread));
       }
       // LoginItem already exists - just exit.
       return;
@@ -81,8 +80,8 @@ void EnableLaunchOnStartupOnWorkerThread(bool need_migration) {
     // before our callback is run, but the user can manually disable
     // "Open At Login" via the dock if this happens.
     base::mac::AddToLoginItems(true);  // Hide on startup.
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(SetCreatedLoginItemPrefOnUIThread));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(SetCreatedLoginItemPrefOnUIThread));
   }
 }
 
@@ -163,7 +162,7 @@ void BackgroundModeManager::DisplayClientInstalledNotification(
 
 scoped_refptr<base::SequencedTaskRunner>
 BackgroundModeManager::CreateTaskRunner() {
-  return base::CreateSequencedTaskRunnerWithTraits(
+  return base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
 }

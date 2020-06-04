@@ -4,8 +4,11 @@
 
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 
+#include <utility>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/bind_test_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
@@ -59,9 +62,7 @@ void RemoveManagedDefaultSearchPreferences(TestingProfile* profile) {
       DefaultSearchManager::kDefaultSearchProviderDataPrefName);
 }
 
-TemplateURLServiceTestUtil::TemplateURLServiceTestUtil()
-    : changed_count_(0),
-      search_terms_data_(NULL) {
+TemplateURLServiceTestUtil::TemplateURLServiceTestUtil() {
   // Make unique temp directory.
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
   profile_.reset(new TestingProfile(temp_dir_.GetPath()));
@@ -75,15 +76,15 @@ TemplateURLServiceTestUtil::TemplateURLServiceTestUtil()
   web_database_service->LoadDatabase();
 
   web_data_service_ = new KeywordWebDataService(
-      web_database_service.get(), base::ThreadTaskRunnerHandle::Get(),
-      KeywordWebDataService::ProfileErrorCallback());
-  web_data_service_->Init();
+      web_database_service.get(), base::ThreadTaskRunnerHandle::Get());
+  web_data_service_->Init(base::NullCallback());
 
   ResetModel(false);
 }
 
 TemplateURLServiceTestUtil::~TemplateURLServiceTestUtil() {
   ClearModel();
+  web_data_service_->ShutdownOnUISequence();
   profile_.reset();
 
   // Flush the message loop to make application verifiers happy.
@@ -122,23 +123,22 @@ void TemplateURLServiceTestUtil::ChangeModelToLoadState() {
 void TemplateURLServiceTestUtil::ClearModel() {
   model_->Shutdown();
   model_.reset();
-  search_terms_data_ = NULL;
 }
 
 void TemplateURLServiceTestUtil::ResetModel(bool verify_load) {
   if (model_)
     ClearModel();
-  search_terms_data_ = new TestingSearchTermsData("http://www.google.com/");
   model_.reset(new TemplateURLService(
       profile()->GetPrefs(),
-      std::unique_ptr<SearchTermsData>(search_terms_data_),
+      std::make_unique<TestingSearchTermsData>("http://www.google.com/"),
       web_data_service_.get(),
       std::unique_ptr<TemplateURLServiceClient>(
           new TestingTemplateURLServiceClient(
               HistoryServiceFactory::GetForProfileIfExists(
                   profile(), ServiceAccessType::EXPLICIT_ACCESS),
               &search_term_)),
-      NULL, NULL, base::Closure()));
+      base::BindLambdaForTesting(
+          [&] { ++dsp_set_to_google_callback_count_; })));
   model()->AddObserver(this);
   changed_count_ = 0;
   if (verify_load)
@@ -149,12 +149,6 @@ base::string16 TemplateURLServiceTestUtil::GetAndClearSearchTerm() {
   base::string16 search_term;
   search_term.swap(search_term_);
   return search_term;
-}
-
-void TemplateURLServiceTestUtil::SetGoogleBaseURL(const GURL& base_url) {
-  DCHECK(base_url.is_valid());
-  search_terms_data_->set_google_base_url(base_url.spec());
-  model_->GoogleBaseURLChanged();
 }
 
 TemplateURL* TemplateURLServiceTestUtil::AddExtensionControlledTURL(

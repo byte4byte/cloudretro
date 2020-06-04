@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/chromeos/file_system_provider/queue.h"
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/chromeos/file_system_provider/queue.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -25,9 +26,7 @@ Queue::Task::~Task() {
 }
 
 Queue::Queue(size_t max_in_parallel)
-    : max_in_parallel_(max_in_parallel),
-      next_token_(1),
-      weak_ptr_factory_(this) {
+    : max_in_parallel_(max_in_parallel), next_token_(1) {
   CHECK_LT(0u, max_in_parallel);
 }
 

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@
 #include "base/macros.h"
 #include "base/values.h"
 #include "chromeos/network/managed_state.h"
-#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom.h"
+#include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
 #include "components/onc/onc_constants.h"
 #include "url/gurl.h"
 
@@ -59,6 +60,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkState : public ManagedState {
                        const base::Value& value) override;
   bool InitialPropertiesReceived(const base::Value& properties) override;
   void GetStateProperties(base::Value* dictionary) const override;
+  bool IsActive() const override;
 
   // Called when the IPConfig properties may have changed. |properties| is
   // expected to be of type DICTIONARY.
@@ -77,6 +79,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkState : public ManagedState {
   const std::string& device_path() const { return device_path_; }
   const std::string& guid() const { return guid_; }
   const std::string& profile_path() const { return profile_path_; }
+  const GURL& probe_url() const { return probe_url_; }
   ::onc::ONCSource onc_source() const { return onc_source_; }
 
   // Provides the error for the last attempt to connect/configure the network
@@ -178,9 +181,6 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkState : public ManagedState {
   bool IsConnectingState() const;
   bool IsConnectingOrConnected() const;
 
-  // Similar to IsConnectingOrConnected but also checks activation state.
-  bool IsActive() const;
-
   // Returns true if |connection_state_| is online.
   bool IsOnline() const;
 
@@ -272,6 +272,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkState : public ManagedState {
   std::string connection_state_;
   std::string last_connection_state_;
   std::string profile_path_;
+  GURL probe_url_;
   std::vector<uint8_t> raw_ssid_;  // Unknown encoding. Not necessarily UTF-8.
   int priority_ = 0;  // kPriority, used for organizing known networks.
   ::onc::ONCSource onc_source_ = ::onc::ONC_SOURCE_UNKNOWN;

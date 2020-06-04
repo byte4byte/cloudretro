@@ -6,7 +6,7 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -15,8 +15,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/test/ui_controls.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -63,7 +63,9 @@ class CommonMenuModel : public ui::MenuModel {
 
   int GetGroupIdAt(int index) const override { return 0; }
 
-  bool GetIconAt(int index, gfx::Image* icon) override { return false; }
+  ui::ImageModel GetIconAt(int index) const override {
+    return ui::ImageModel();
+  }
 
   ui::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const override {
     return nullptr;
@@ -152,45 +154,40 @@ class TopMenuModel : public CommonMenuModel {
 }  // namespace
 
 class MenuModelAdapterTest : public ViewEventTestBase,
-                             public views::MenuButtonListener {
+                             public views::ButtonListener {
  public:
-  MenuModelAdapterTest()
-      : ViewEventTestBase(),
-        button_(nullptr),
-        menu_model_adapter_(&top_menu_model_),
-        menu_(nullptr) {}
-
-  ~MenuModelAdapterTest() override {}
+  MenuModelAdapterTest() = default;
+  ~MenuModelAdapterTest() override = default;
 
   // ViewEventTestBase implementation.
 
   void SetUp() override {
-    button_ =
-        new views::MenuButton(base::ASCIIToUTF16("Menu Adapter Test"), this);
+    ViewEventTestBase::SetUp();
 
     menu_ = menu_model_adapter_.CreateMenu();
-    menu_runner_.reset(
-        new views::MenuRunner(menu_, views::MenuRunner::HAS_MNEMONICS));
-
-    ViewEventTestBase::SetUp();
+    menu_runner_ = std::make_unique<views::MenuRunner>(
+        menu_, views::MenuRunner::HAS_MNEMONICS);
   }
 
   void TearDown() override {
-    menu_runner_ = nullptr;
-    menu_ = nullptr;
+    menu_runner_.reset();
+
     ViewEventTestBase::TearDown();
   }
 
-  views::View* CreateContentsView() override { return button_; }
+  std::unique_ptr<views::View> CreateContentsView() override {
+    auto button = std::make_unique<views::MenuButton>(
+        base::ASCIIToUTF16("Menu Adapter Test"), this);
+    button_ = button.get();
+    return button;
+  }
 
   gfx::Size GetPreferredSizeForContents() const override {
     return button_->GetPreferredSize();
   }
 
-  // views::MenuButtonListener implementation.
-  void OnMenuButtonClicked(views::Button* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override {
+  // views::ButtonListener implementation.
+  void ButtonPressed(views::Button* source, const ui::Event& event) override {
     gfx::Point screen_location;
     views::View::ConvertPointToScreen(source, &screen_location);
     gfx::Rect bounds(screen_location, source->size());
@@ -263,10 +260,10 @@ class MenuModelAdapterTest : public ViewEventTestBase,
         std::move(next));
   }
 
-  views::MenuButton* button_;
+  views::MenuButton* button_ = nullptr;
   TopMenuModel top_menu_model_;
-  views::MenuModelAdapter menu_model_adapter_;
-  views::MenuItemView* menu_;
+  views::MenuModelAdapter menu_model_adapter_{&top_menu_model_};
+  views::MenuItemView* menu_ = nullptr;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 };
 

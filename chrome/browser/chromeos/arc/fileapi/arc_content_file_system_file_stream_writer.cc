@@ -9,9 +9,11 @@
 
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/files/file.h"
 #include "base/logging.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_file_system_operation_runner_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,10 +56,9 @@ ArcContentFileSystemFileStreamWriter::ArcContentFileSystemFileStreamWriter(
     int64_t offset)
     : arc_url_(arc_url),
       offset_(offset),
-      task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
-      has_pending_operation_(false),
-      weak_ptr_factory_(this) {}
+      has_pending_operation_(false) {}
 
 ArcContentFileSystemFileStreamWriter::~ArcContentFileSystemFileStreamWriter() {
   task_runner_->PostTask(

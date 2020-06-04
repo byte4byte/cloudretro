@@ -8,6 +8,7 @@
 
 #include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "ash/public/cpp/test/shell_test_api.h"
+#include "ash/public/cpp/window_properties.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -16,6 +17,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -35,7 +37,6 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -44,7 +45,8 @@
 #include "extensions/test/background_page_watcher.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "ui/aura/window.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_policy.h"
 #include "ui/shell_dialogs/selected_file_info.h"
@@ -131,9 +133,8 @@ class MockSelectFileDialogListener : public ui::SelectFileDialog::Listener {
   DISALLOW_COPY_AND_ASSIGN(MockSelectFileDialogListener);
 };
 
-class SelectFileDialogExtensionBrowserTest
-    : public extensions::ExtensionBrowserTest,
-      public testing::WithParamInterface<bool> {
+class BaseSelectFileDialogExtensionBrowserTest
+    : public extensions::ExtensionBrowserTest {
  public:
   enum DialogButtonType {
     DIALOG_BTN_OK,
@@ -141,9 +142,8 @@ class SelectFileDialogExtensionBrowserTest
   };
 
   void SetUp() override {
-    feature_list_.InitAndEnableFeature(chromeos::features::kMyFilesVolume);
     // Create the dialog wrapper and listener objects.
-    listener_.reset(new MockSelectFileDialogListener());
+    listener_ = std::make_unique<MockSelectFileDialogListener>();
     dialog_ = new SelectFileDialogExtension(listener_.get(), NULL);
 
     // One mount point will be needed. Files app looks for the "Downloads"
@@ -191,9 +191,9 @@ class SelectFileDialogExtensionBrowserTest
     extensions::ExtensionBrowserTest::TearDown();
 
     // Delete the dialogs first since they hold a pointer to their listener.
-    dialog_ = NULL;
+    dialog_.reset();
     listener_.reset();
-    second_dialog_ = NULL;
+    second_dialog_.reset();
     second_listener_.reset();
   }
 
@@ -257,7 +257,7 @@ class SelectFileDialogExtensionBrowserTest
     ui::SelectFileDialog::FileTypeInfo file_types;
     file_types.extensions = {{"html"}};
     dialog_->SelectFile(dialog_type, base::string16() /* title */, file_path,
-                        GetParam() ? &file_types : nullptr,
+                        UseFileTypeFilter() ? &file_types : nullptr,
                         0 /* file_type_index */,
                         FILE_PATH_LITERAL("") /* default_extension */,
                         owning_window, this /* params */);
@@ -286,7 +286,7 @@ class SelectFileDialogExtensionBrowserTest
   }
 
   void TryOpeningSecondDialog(const gfx::NativeWindow& owning_window) {
-    second_listener_.reset(new MockSelectFileDialogListener());
+    second_listener_ = std::make_unique<MockSelectFileDialogListener>();
     second_dialog_ = new SelectFileDialogExtension(second_listener_.get(),
                                                    NULL);
 
@@ -326,7 +326,8 @@ class SelectFileDialogExtensionBrowserTest
       ASSERT_FALSE(dialog_->IsRunning(owning_window));
   }
 
-  base::test::ScopedFeatureList feature_list_;
+  virtual bool UseFileTypeFilter() { return false; }
+
   base::ScopedTempDir tmp_dir_;
   base::FilePath downloads_dir_;
 
@@ -335,6 +336,15 @@ class SelectFileDialogExtensionBrowserTest
 
   std::unique_ptr<MockSelectFileDialogListener> second_listener_;
   scoped_refptr<SelectFileDialogExtension> second_dialog_;
+
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Tests FileDialog with and without file filter.
+class SelectFileDialogExtensionBrowserTest
+    : public BaseSelectFileDialogExtensionBrowserTest,
+      public testing::WithParamInterface<bool> {
+  bool UseFileTypeFilter() override { return GetParam(); }
 };
 
 IN_PROC_BROWSER_TEST_P(SelectFileDialogExtensionBrowserTest, CreateAndDestroy) {
@@ -585,4 +595,54 @@ IN_PROC_BROWSER_TEST_P(SelectFileDialogExtensionBrowserTest, MultipleOpenFile) {
 
 INSTANTIATE_TEST_SUITE_P(SelectFileDialogExtensionBrowserTest,
                          SelectFileDialogExtensionBrowserTest,
+                         testing::Bool());
+
+// Tests that depend on state of flag on and off.
+class SelectFileDialogExtensionFlagTest
+    : public BaseSelectFileDialogExtensionBrowserTest,
+      public testing::WithParamInterface<bool> {
+  void SetUp() override {
+    // Use the GetParam to define the state of the feature flags.
+    if (GetParam()) {
+      feature_list_.InitAndEnableFeature(chromeos::features::kFilesNG);
+    } else {
+      feature_list_.InitAndDisableFeature(chromeos::features::kFilesNG);
+    }
+
+    BaseSelectFileDialogExtensionBrowserTest::SetUp();
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(SelectFileDialogExtensionFlagTest, DialogColoredTitle) {
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeWindow();
+  ASSERT_NE(nullptr, owning_window);
+
+  // Open the file dialog on the default path.
+  ASSERT_NO_FATAL_FAILURE(OpenDialog(ui::SelectFileDialog::SELECT_OPEN_FILE,
+                                     base::FilePath(), owning_window, ""));
+  content::RenderFrameHost* frame_host =
+      dialog_->GetRenderViewHost()->GetMainFrame();
+  aura::Window* dialog_window =
+      frame_host->GetNativeView()->GetToplevelWindow();
+  SkColor active_color = dialog_window->GetProperty(ash::kFrameActiveColorKey);
+  SkColor inactive_color =
+      dialog_window->GetProperty(ash::kFrameInactiveColorKey);
+
+  constexpr SkColor kFilesNgTitleColor = SkColorSetRGB(0xDB, 0xE2, 0xED);
+  if (GetParam()) {
+    // FilesNG enabled the title should be blue-ish grey.
+    EXPECT_EQ(active_color, kFilesNgTitleColor);
+    // Active and Inactive should have the same color.
+    EXPECT_EQ(active_color, inactive_color);
+  } else {
+    // FilesNG disabled the title should be the original color.
+    EXPECT_NE(active_color, kFilesNgTitleColor);
+    EXPECT_NE(inactive_color, kFilesNgTitleColor);
+  }
+
+  CloseDialog(DIALOG_BTN_CANCEL, owning_window);
+}
+
+INSTANTIATE_TEST_SUITE_P(SelectFileDialogExtensionFlagTest,
+                         SelectFileDialogExtensionFlagTest,
                          testing::Bool());

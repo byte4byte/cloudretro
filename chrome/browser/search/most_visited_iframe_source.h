@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "content/public/browser/url_data_source.h"
-#include "ui/base/template_expressions.h"
 
 #if defined(OS_ANDROID)
 #error "Instant is only used on desktop";
@@ -24,9 +23,9 @@ class MostVisitedIframeSource : public content::URLDataSource {
   // content::URLDataSource:
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path_and_query,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
   std::string GetMimeType(const std::string& path_and_query) override;
   bool AllowCaching() override;
   bool ShouldDenyXFrameOptions() override;
@@ -40,22 +39,19 @@ class MostVisitedIframeSource : public content::URLDataSource {
 
   // Sends unmodified resource bytes.
   void SendResource(int resource_id,
-                    const content::URLDataSource::GotDataCallback& callback,
-                    const ui::TemplateReplacements* replacements = nullptr);
+                    content::URLDataSource::GotDataCallback callback);
 
   // Sends Javascript with an expected postMessage origin interpolated.
-  void SendJSWithOrigin(
-      int resource_id,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback);
+  void SendJSWithOrigin(int resource_id,
+                        const content::WebContents::Getter& wc_getter,
+                        content::URLDataSource::GotDataCallback callback);
 
   // This is exposed for testing and should not be overridden.
   // Sets |origin| to the URL of the WebContents identified by |wc_getter|.
   // Returns true if successful and false if not, for example if the WebContents
   // does not exist
-  virtual bool GetOrigin(
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      std::string* origin) const;
+  virtual bool GetOrigin(const content::WebContents::Getter& wc_getter,
+                         std::string* origin) const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MostVisitedIframeSource);

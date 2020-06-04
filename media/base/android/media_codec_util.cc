@@ -288,17 +288,12 @@ bool MediaCodecUtil::IsAv1DecoderAvailable() {
   return IsMediaCodecAvailable() && IsDecoderSupportedByDevice(kAv1MimeType);
 }
 
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
+#if BUILDFLAG(ENABLE_PLATFORM_HEVC)
 // static
 bool MediaCodecUtil::IsHEVCDecoderAvailable() {
-  return IsMediaCodecAvailable() && IsEncoderSupportedByDevice(kHevcMimeType);
+  return IsMediaCodecAvailable() && IsDecoderSupportedByDevice(kHevcMimeType);
 }
 #endif
-
-// static
-bool MediaCodecUtil::IsH264EncoderAvailable() {
-  return IsMediaCodecAvailable() && IsEncoderSupportedByDevice(kAvcMimeType);
-}
 
 // static
 bool MediaCodecUtil::IsSurfaceViewOutputSupported() {
@@ -345,6 +340,11 @@ bool MediaCodecUtil::CanDecode(VideoCodec codec, bool is_secure) {
 // static
 bool MediaCodecUtil::CanDecode(AudioCodec codec) {
   return CanDecodeInternal(CodecToAndroidMimeType(codec), false);
+}
+
+// static
+bool MediaCodecUtil::IsH264EncoderAvailable() {
+  return IsMediaCodecAvailable() && IsEncoderSupportedByDevice(kAvcMimeType);
 }
 
 // static

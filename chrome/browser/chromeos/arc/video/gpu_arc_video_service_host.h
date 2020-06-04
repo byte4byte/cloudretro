@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_CHROMEOS_ARC_VIDEO_GPU_ARC_VIDEO_SERVICE_HOST_H_
 
 #include "base/macros.h"
-#include "components/arc/common/video.mojom.h"
+#include "components/arc/mojom/video.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 
 namespace content {
 class BrowserContext;
@@ -44,8 +44,8 @@ class GpuArcVideoServiceHost : public KeyedService,
  private:
   ArcBridgeService* const arc_bridge_service_;  // Owned by ArcServiceManager.
   std::unique_ptr<mojom::VideoAcceleratorFactory> video_accelerator_factory_;
-  mojo::BindingSet<mojom::VideoAcceleratorFactory>
-      video_accelerator_factory_bindings_;
+  mojo::ReceiverSet<mojom::VideoAcceleratorFactory>
+      video_accelerator_factory_receivers_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuArcVideoServiceHost);
 };

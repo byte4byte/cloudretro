@@ -9,10 +9,13 @@
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/process/process_metrics.h"
+#include "base/profiler/module_cache.h"
 #include "base/rand_util.h"
-#include "base/sampling_heap_profiler/module_cache.h"
 #include "base/sampling_heap_profiler/sampling_heap_profiler.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/metrics/call_stack_profile_builder.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
@@ -41,22 +44,23 @@ HeapProfilerController::~HeapProfilerController() {
 }
 
 void HeapProfilerController::Start() {
-  if (base::FeatureList::IsEnabled(
+  if (!base::FeatureList::IsEnabled(
           metrics::CallStackProfileMetricsProvider::kHeapProfilerReporting)) {
-    int sampling_rate = base::GetFieldTrialParamByFeatureAsInt(
-        metrics::CallStackProfileMetricsProvider::kHeapProfilerReporting,
-        kHeapProfilerSamplingRate, 0);
-    if (sampling_rate > 0)
-      base::SamplingHeapProfiler::Get()->SetSamplingInterval(sampling_rate);
-    base::SamplingHeapProfiler::Get()->Start();
+    return;
   }
+  int sampling_rate = base::GetFieldTrialParamByFeatureAsInt(
+      metrics::CallStackProfileMetricsProvider::kHeapProfilerReporting,
+      kHeapProfilerSamplingRate, 0);
+  if (sampling_rate > 0)
+    base::SamplingHeapProfiler::Get()->SetSamplingInterval(sampling_rate);
+  base::SamplingHeapProfiler::Get()->Start();
   ScheduleNextSnapshot(stopped_);
 }
 
 // static
 void HeapProfilerController::ScheduleNextSnapshot(
     scoped_refptr<StoppedFlag> stopped) {
-  base::PostDelayedTask(
+  base::ThreadPool::PostDelayedTask(
       FROM_HERE, {base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&HeapProfilerController::TakeSnapshot, std::move(stopped)),
       RandomInterval(kHeapCollectionInterval));
@@ -78,6 +82,12 @@ void HeapProfilerController::RetrieveAndSendSnapshot() {
   if (samples.empty())
     return;
 
+  size_t malloc_usage =
+      base::ProcessMetrics::CreateCurrentProcessMetrics()->GetMallocUsage();
+  int malloc_usage_mb = static_cast<int>(malloc_usage >> 20);
+  base::UmaHistogramMemoryLargeMB("Memory.HeapProfiler.Browser.Malloc",
+                                  malloc_usage_mb);
+
   base::ModuleCache module_cache;
   metrics::CallStackProfileParams params(
       metrics::CallStackProfileParams::BROWSER_PROCESS,
@@ -98,7 +108,10 @@ void HeapProfilerController::RetrieveAndSendSnapshot() {
         static_cast<size_t>(
             std::llround(static_cast<double>(sample.total) / sample.size)),
         1);
-    profile_builder.OnSampleCompleted(std::move(frames), sample.total, count);
+    // Heap "samples" represent allocation stacks aggregated over time so do not
+    // have a meaningful timestamp.
+    profile_builder.OnSampleCompleted(std::move(frames), base::TimeTicks(),
+                                      sample.total, count);
   }
 
   profile_builder.OnProfileCompleted(base::TimeDelta(), base::TimeDelta());

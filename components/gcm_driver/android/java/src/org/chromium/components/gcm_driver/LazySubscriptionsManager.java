@@ -7,6 +7,8 @@ package org.chromium.components.gcm_driver;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -14,8 +16,6 @@ import org.json.JSONObject;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
-import org.chromium.base.metrics.CachedMetrics;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -101,18 +101,25 @@ public class LazySubscriptionsManager {
     }
 
     /**
-     * Whether some messages are persisted for |subscriptionId| and should be
+     * Whether some messages are persisted for |subscriptionIdPrefix| and should be
      * replayed next time Chrome is running. It should be cheaper to call than
      * actually reading the stored messages. Call this method to decide whether
      * there is a need to read any persisted messages for that subscription.
-     * @param subscriptionId
+     * @param subscriptionIdPrefix
      * @return whether some messages are persisted for that subscription.
      */
-    public static boolean hasPersistedMessagesForSubscription(final String subscriptionId) {
+    public static Set<String> getSubscriptionIdsWithPersistedMessages(
+            final String subscriptionIdPrefix) {
         SharedPreferences sharedPrefs = ContextUtils.getAppSharedPreferences();
         Set<String> subscriptionsWithPersistedMessages = new HashSet<>(sharedPrefs.getStringSet(
                 SUBSCRIPTIONS_WITH_PERSISTED_MESSAGES_KEY, Collections.emptySet()));
-        return subscriptionsWithPersistedMessages.contains(subscriptionId);
+        Set<String> subscriptionsWithPersistedMessagesWithPrefix = new HashSet<String>();
+        for (String subscriptionWithPersistedMessages : subscriptionsWithPersistedMessages) {
+            if (subscriptionWithPersistedMessages.startsWith(subscriptionIdPrefix)) {
+                subscriptionsWithPersistedMessagesWithPrefix.add(subscriptionWithPersistedMessages);
+            }
+        }
+        return subscriptionsWithPersistedMessagesWithPrefix;
     }
 
     /**
@@ -207,11 +214,6 @@ public class LazySubscriptionsManager {
             if (message.getCollapseKey() != null) {
                 queueJSON = filterMessageBasedOnCollapseKey(queueJSON, message.getCollapseKey());
             }
-
-            // Use {@link CachedMetrics} so this gets reported when native is
-            // loaded instead of calling native right away.
-            new CachedMetrics.Count100HistogramSample("PushMessaging.QueuedMessagesCount")
-                    .record(queueJSON.length());
 
             // If the queue is full remove the oldest message.
             if (queueJSON.length() == MESSAGES_QUEUE_SIZE) {

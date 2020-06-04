@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "base/optional.h"
-#include "chrome/services/cups_ipp_parser/public/cpp/ipp_converter.h"
-#include "printing/backend/cups_ipp_util.h"
+#include "chrome/services/ipp_parser/public/cpp/ipp_converter.h"
+#include "printing/backend/cups_ipp_helper.h"
 
 // POD representations of HTTP/IPP objects.
 namespace cups_proxy {

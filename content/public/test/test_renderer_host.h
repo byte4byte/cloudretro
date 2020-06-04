@@ -9,14 +9,15 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/page_transition_types.h"
 
@@ -28,11 +29,17 @@ namespace aura {
 namespace test {
 class AuraTestHelper;
 }
-}
+}  // namespace aura
 
 namespace display {
 class Screen;
 }
+
+namespace net {
+namespace test {
+class MockNetworkChangeNotifier;
+}
+}  // namespace net
 
 namespace ui {
 class ScopedOleInitializer;
@@ -49,6 +56,7 @@ class RenderProcessHostFactory;
 class TestRenderFrameHostFactory;
 class TestRenderViewHostFactory;
 class TestRenderWidgetHostFactory;
+class TestNavigationURLLoaderFactory;
 class WebContents;
 struct WebPreferences;
 
@@ -84,23 +92,24 @@ class RenderFrameHostTester {
   // Gives tests access to RenderFrameHostImpl::OnDetach. Destroys |this|.
   virtual void Detach() = 0;
 
-  // Simulates a navigation stopping in the RenderFrameHost.
-  virtual void SimulateNavigationStop() = 0;
+  // Calls ProcessBeforeUnloadCompleted on this RenderFrameHost with the given
+  // parameter.
+  virtual void SimulateBeforeUnloadCompleted(bool proceed) = 0;
 
-  // Calls OnBeforeUnloadACK on this RenderFrameHost with the given parameter.
-  virtual void SendBeforeUnloadACK(bool proceed) = 0;
-
-  // Simulates the SwapOut_ACK that fires if you commit a cross-site
+  // Simulates the FrameHostMsg_Unload_ACK that fires if you commit a cross-site
   // navigation without making any network requests.
-  virtual void SimulateSwapOutACK() = 0;
+  virtual void SimulateUnloadACK() = 0;
 
   // Set the feature policy header for the RenderFrameHost for test. Currently
-  // this is limited to setting a whitelist for a single feature. This function
+  // this is limited to setting an allowlist for a single feature. This function
   // can be generalized as needed. Setting a header policy should only be done
   // once per navigation of the RFH.
   virtual void SimulateFeaturePolicyHeader(
       blink::mojom::FeaturePolicyFeature feature,
-      const std::vector<url::Origin>& whitelist) = 0;
+      const std::vector<url::Origin>& allowlist) = 0;
+
+  // Simulates the frame receiving a user activation.
+  virtual void SimulateUserActivation() = 0;
 
   // Gets all the console messages requested via
   // RenderFrameHost::AddMessageToConsole in this frame.
@@ -153,22 +162,23 @@ class RenderViewHostTestEnabler {
 #if defined(OS_ANDROID)
   std::unique_ptr<display::Screen> screen_;
 #endif
-  std::unique_ptr<base::test::ScopedTaskEnvironment> task_environment_;
+  std::unique_ptr<base::test::SingleThreadTaskEnvironment> task_environment_;
   std::unique_ptr<MockRenderProcessHostFactory> rph_factory_;
   std::unique_ptr<TestRenderViewHostFactory> rvh_factory_;
   std::unique_ptr<TestRenderFrameHostFactory> rfh_factory_;
   std::unique_ptr<TestRenderWidgetHostFactory> rwhi_factory_;
+  std::unique_ptr<TestNavigationURLLoaderFactory> loader_factory_;
 };
 
 // RenderViewHostTestHarness ---------------------------------------------------
 class RenderViewHostTestHarness : public testing::Test {
  public:
-  // Constructs a RenderViewHostTestHarness which uses |args| to initialize its
-  // TestBrowserThreadBundle.
-  template <typename... Args>
-  RenderViewHostTestHarness(Args... args)
-      : RenderViewHostTestHarness(
-            std::make_unique<TestBrowserThreadBundle>(args...)) {}
+  // Constructs a RenderViewHostTestHarness which uses |traits| to initialize
+  // its BrowserTaskEnvironment.
+  template <typename... TaskEnvironmentTraits>
+  explicit RenderViewHostTestHarness(TaskEnvironmentTraits&&... traits)
+      : RenderViewHostTestHarness(std::make_unique<BrowserTaskEnvironment>(
+            std::forward<TaskEnvironmentTraits>(traits)...)) {}
 
   ~RenderViewHostTestHarness() override;
 
@@ -233,7 +243,7 @@ class RenderViewHostTestHarness : public testing::Test {
   // It is invoked by SetUp after threads were started.
   // RenderViewHostTestHarness will take ownership of the returned
   // BrowserContext.
-  virtual BrowserContext* CreateBrowserContext();
+  virtual std::unique_ptr<BrowserContext> CreateBrowserContext();
 
   // Derived classes can override this method to have the test harness use a
   // different BrowserContext than the one owned by this class. This is most
@@ -241,10 +251,10 @@ class RenderViewHostTestHarness : public testing::Test {
   // context.
   virtual BrowserContext* GetBrowserContext();
 
-  TestBrowserThreadBundle* thread_bundle() { return thread_bundle_.get(); }
+  BrowserTaskEnvironment* task_environment() { return task_environment_.get(); }
 
 #if defined(USE_AURA)
-  aura::Window* root_window() { return aura_test_helper_->root_window(); }
+  aura::Window* root_window() { return aura_test_helper_->GetContext(); }
 #endif
 
   // Replaces the RPH being used.
@@ -254,11 +264,20 @@ class RenderViewHostTestHarness : public testing::Test {
   // The template constructor has to be in the header but it delegates to this
   // constructor to initialize all other members out-of-line.
   explicit RenderViewHostTestHarness(
-      std::unique_ptr<TestBrowserThreadBundle> thread_bundle);
+      std::unique_ptr<BrowserTaskEnvironment> task_environment);
 
-  std::unique_ptr<TestBrowserThreadBundle> thread_bundle_;
+  std::unique_ptr<BrowserTaskEnvironment> task_environment_;
 
   std::unique_ptr<ContentBrowserSanityChecker> sanity_checker_;
+
+  // TODO(crbug.com/1011275): This is a temporary work around to fix flakiness
+  // on tests. The default behavior of the network stack is to allocate a
+  // leaking SystemDnsConfigChangeNotifier. This holds on to a set of
+  // FilePathWatchers on Posix and ObjectWatchers on Windows that outlive
+  // the message queues of the task_environment_ and may post messages after
+  // their death.
+  std::unique_ptr<net::test::MockNetworkChangeNotifier>
+      network_change_notifier_;
 
   std::unique_ptr<BrowserContext> browser_context_;
 

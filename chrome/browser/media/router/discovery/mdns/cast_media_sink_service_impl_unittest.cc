@@ -19,7 +19,7 @@
 #include "components/cast_channel/cast_socket.h"
 #include "components/cast_channel/cast_socket_service.h"
 #include "components/cast_channel/cast_test_util.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -68,7 +68,7 @@ class MockObserver : public MediaSinkServiceBase::Observer {
 class CastMediaSinkServiceImplTest : public ::testing::Test {
  public:
   CastMediaSinkServiceImplTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         mock_time_task_runner_(new base::TestMockTimeTaskRunner()),
         mock_cast_socket_service_(
             new cast_channel::MockCastSocketService(mock_time_task_runner_)),
@@ -121,7 +121,7 @@ class CastMediaSinkServiceImplTest : public ::testing::Test {
 
   static std::vector<DiscoveryNetworkInfo> fake_network_info_;
 
-  const content::TestBrowserThreadBundle thread_bundle_;
+  const content::BrowserTaskEnvironment task_environment_;
   scoped_refptr<base::TestMockTimeTaskRunner> mock_time_task_runner_;
   std::unique_ptr<DiscoveryNetworkMonitor> discovery_network_monitor_ =
       DiscoveryNetworkMonitor::CreateInstanceForTest(&FakeGetNetworkInfo);
@@ -1329,58 +1329,6 @@ TEST_F(CastMediaSinkServiceImplTest, TestCreateCastSocketOpenParams) {
             open_params.connect_timeout.InSeconds());
   EXPECT_EQ(liveness_timeout_in_seconds,
             open_params.liveness_timeout.InSeconds());
-}
-
-TEST_F(CastMediaSinkServiceImplTest,
-       TestInitRetryParametersWithFeatureDisabled) {
-  // Feature not enabled.
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(kEnableCastDiscovery);
-
-  EXPECT_THAT(CastMediaSinkServiceImpl::RetryParams::GetFromFieldTrialParam(),
-              RetryParamEq(CastMediaSinkServiceImpl::RetryParams()));
-  EXPECT_THAT(CastMediaSinkServiceImpl::OpenParams::GetFromFieldTrialParam(),
-              OpenParamEq(CastMediaSinkServiceImpl::OpenParams()));
-}
-
-TEST_F(CastMediaSinkServiceImplTest, TestInitParameters) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  std::map<std::string, std::string> params;
-  params["initial_delay_in_ms"] = "2000";
-  params["max_retry_attempts"] = "20";
-  params["exponential"] = "2.0";
-
-  params["connect_timeout_in_seconds"] = "20";
-  params["ping_interval_in_seconds"] = "15";
-  params["liveness_timeout_in_seconds"] = "30";
-  params["dynamic_timeout_delta_in_seconds"] = "7";
-  scoped_feature_list.InitAndEnableFeatureWithParameters(kEnableCastDiscovery,
-                                                         params);
-
-  CastMediaSinkServiceImpl::RetryParams expected_retry_params;
-  expected_retry_params.initial_delay_in_milliseconds = 2000;
-  expected_retry_params.max_retry_attempts = 20;
-  expected_retry_params.multiply_factor = 2.0;
-  EXPECT_THAT(CastMediaSinkServiceImpl::RetryParams::GetFromFieldTrialParam(),
-              RetryParamEq(expected_retry_params));
-
-  CastMediaSinkServiceImpl::OpenParams expected_open_params;
-  expected_open_params.connect_timeout_in_seconds = 20;
-  expected_open_params.ping_interval_in_seconds = 15;
-  expected_open_params.liveness_timeout_in_seconds = 30;
-  expected_open_params.dynamic_timeout_delta_in_seconds = 7;
-  EXPECT_THAT(CastMediaSinkServiceImpl::OpenParams::GetFromFieldTrialParam(),
-              OpenParamEq(expected_open_params));
-}
-
-TEST_F(CastMediaSinkServiceImplTest, TestInitRetryParametersWithDefaultValue) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kEnableCastDiscovery);
-
-  EXPECT_THAT(CastMediaSinkServiceImpl::RetryParams::GetFromFieldTrialParam(),
-              RetryParamEq(CastMediaSinkServiceImpl::RetryParams()));
-  EXPECT_THAT(CastMediaSinkServiceImpl::OpenParams::GetFromFieldTrialParam(),
-              OpenParamEq(CastMediaSinkServiceImpl::OpenParams()));
 }
 
 }  // namespace media_router

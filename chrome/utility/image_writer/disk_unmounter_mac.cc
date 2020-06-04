@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 
 #include "base/message_loop/message_pump_mac.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,7 +19,7 @@ namespace image_writer {
 
 DiskUnmounterMac::DiskUnmounterMac() : cf_thread_("ImageWriterDiskArb") {
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_UI;
+  options.message_pump_type = base::MessagePumpType::UI;
 
   cf_thread_.StartWithOptions(options);
 }
@@ -29,13 +30,19 @@ DiskUnmounterMac::~DiskUnmounterMac() {
 }
 
 void DiskUnmounterMac::Unmount(const std::string& device_path,
-                               const base::Closure& success_continuation,
-                               const base::Closure& failure_continuation) {
+                               base::OnceClosure success_continuation,
+                               base::OnceClosure failure_continuation) {
   // Should only be used once.
   DCHECK(!original_thread_.get());
+  DCHECK(!success_continuation_);
+  DCHECK(!failure_continuation_);
+
+  DCHECK(success_continuation);
+  DCHECK(failure_continuation);
+
   original_thread_ = base::ThreadTaskRunnerHandle::Get();
-  success_continuation_ = success_continuation;
-  failure_continuation_ = failure_continuation;
+  success_continuation_ = std::move(success_continuation);
+  failure_continuation_ = std::move(failure_continuation);
 
   cf_thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&DiskUnmounterMac::UnmountOnWorker,
@@ -84,7 +91,7 @@ void DiskUnmounterMac::DiskUnmounted(DADiskRef disk,
   }
 
   disk_unmounter->original_thread_->PostTask(
-      FROM_HERE, disk_unmounter->success_continuation_);
+      FROM_HERE, std::move(disk_unmounter->success_continuation_));
 }
 
 void DiskUnmounterMac::UnmountOnWorker(const std::string& device_path) {
@@ -113,7 +120,7 @@ void DiskUnmounterMac::UnmountOnWorker(const std::string& device_path) {
 }
 
 void DiskUnmounterMac::Error() {
-  original_thread_->PostTask(FROM_HERE, failure_continuation_);
+  original_thread_->PostTask(FROM_HERE, std::move(failure_continuation_));
 }
 
 }  // namespace image_writer

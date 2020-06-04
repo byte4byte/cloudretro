@@ -15,7 +15,7 @@
 #include "ui/views/animation/bounds_animator.h"
 #include "ui/views/animation/bounds_animator_observer.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 namespace {
@@ -69,7 +69,7 @@ void AppsGridViewTestApi::LayoutToIdealBounds() {
     view_->folder_dropping_timer_.Stop();
     view_->OnFolderDroppingTimer();
   }
-  view_->bounds_animator_.Cancel();
+  view_->bounds_animator_->Cancel();
   view_->Layout();
 }
 
@@ -119,9 +119,9 @@ gfx::Rect AppsGridViewTestApi::GetItemTileRectAtVisualIndex(int page,
 }
 
 void AppsGridViewTestApi::WaitForItemMoveAnimationDone() {
-  BoundsAnimatorWaiter waiter(&view_->bounds_animator_);
+  BoundsAnimatorWaiter waiter(view_->bounds_animator_.get());
   waiter.Wait();
 }
 
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash

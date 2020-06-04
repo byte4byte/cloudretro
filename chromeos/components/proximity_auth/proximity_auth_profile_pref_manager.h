@@ -65,6 +65,8 @@ class ProximityAuthProfilePrefManager
   bool IsChromeOSLoginAllowed() const override;
   void SetIsChromeOSLoginEnabled(bool is_enabled) override;
   bool IsChromeOSLoginEnabled() const override;
+  void SetHasShownLoginDisabledMessage(bool has_shown) override;
+  bool HasShownLoginDisabledMessage() const override;
 
   // chromeos::multidevice_setup::MultiDeviceSetupClient::Observer:
   void OnFeatureStatesChanged(
@@ -93,7 +95,7 @@ class ProximityAuthProfilePrefManager
   chromeos::multidevice_setup::MultiDeviceSetupClient*
       multidevice_setup_client_ = nullptr;
 
-  base::WeakPtrFactory<ProximityAuthProfilePrefManager> weak_ptr_factory_;
+  base::WeakPtrFactory<ProximityAuthProfilePrefManager> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ProximityAuthProfilePrefManager);
 };

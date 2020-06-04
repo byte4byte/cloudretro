@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 
@@ -18,7 +19,7 @@ namespace content {
 
 class CONTENT_EXPORT TestSynchronousCompositor : public SynchronousCompositor {
  public:
-  TestSynchronousCompositor(int process_id, int routing_id);
+  explicit TestSynchronousCompositor(const viz::FrameSinkId& frame_sink_id);
   ~TestSynchronousCompositor() override;
 
   void SetClient(SynchronousCompositorClient* client);
@@ -40,6 +41,8 @@ class CONTENT_EXPORT TestSynchronousCompositor : public SynchronousCompositor {
   void SynchronouslyZoomBy(float zoom_delta,
                            const gfx::Point& anchor) override {}
   void OnComputeScroll(base::TimeTicks animate_time) override {}
+  void SetBeginFrameSource(viz::BeginFrameSource* source) override {}
+  void DidInvalidate() override {}
 
   void SetHardwareFrame(uint32_t layer_tree_frame_sink_id,
                         std::unique_ptr<viz::CompositorFrame> frame);
@@ -57,8 +60,7 @@ class CONTENT_EXPORT TestSynchronousCompositor : public SynchronousCompositor {
 
  private:
   SynchronousCompositorClient* client_;
-  const int process_id_;
-  const int routing_id_;
+  viz::FrameSinkId frame_sink_id_;
   std::unique_ptr<Frame> hardware_frame_;
   FrameAckArray frame_ack_array_;
 

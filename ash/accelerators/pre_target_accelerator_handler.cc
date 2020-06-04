@@ -33,10 +33,16 @@ bool IsSystemKey(ui::KeyboardCode key_code) {
     case ui::VKEY_VOLUME_DOWN:
     case ui::VKEY_VOLUME_UP:
     case ui::VKEY_POWER:
+    case ui::VKEY_SLEEP:
       return true;
     case ui::VKEY_MEDIA_NEXT_TRACK:
+    case ui::VKEY_MEDIA_PAUSE:
+    case ui::VKEY_MEDIA_PLAY:
     case ui::VKEY_MEDIA_PLAY_PAUSE:
     case ui::VKEY_MEDIA_PREV_TRACK:
+    case ui::VKEY_MEDIA_STOP:
+    case ui::VKEY_OEM_103:  // KEYCODE_MEDIA_REWIND
+    case ui::VKEY_OEM_104:  // KEYCODE_MEDIA_FAST_FORWARD
       return base::FeatureList::IsEnabled(media::kHardwareMediaKeyHandling);
     default:
       return false;
@@ -77,7 +83,7 @@ bool PreTargetAcceleratorHandler::CanConsumeSystemKeys(
   // Uses the top level window so if the target is a web contents window the
   // containing parent window will be checked for the property.
   aura::Window* top_level = ::wm::GetToplevelWindow(target);
-  return top_level && wm::GetWindowState(top_level)->CanConsumeSystemKeys();
+  return top_level && WindowState::Get(top_level)->CanConsumeSystemKeys();
 }
 
 bool PreTargetAcceleratorHandler::ShouldProcessAcceleratorNow(
@@ -104,7 +110,7 @@ bool PreTargetAcceleratorHandler::ShouldProcessAcceleratorNow(
   // A full screen window has a right to handle all key events including the
   // reserved ones.
   aura::Window* top_level = ::wm::GetToplevelWindow(target);
-  if (top_level && wm::GetWindowState(top_level)->IsFullscreen()) {
+  if (top_level && WindowState::Get(top_level)->IsFullscreen()) {
     // On ChromeOS, fullscreen windows are either browser or apps, which
     // send key events to a web content first, then will process keys
     // if the web content didn't consume them.

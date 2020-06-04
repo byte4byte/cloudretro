@@ -15,12 +15,16 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
+#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_interstitial.h"
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
-#include "chrome/browser/supervised_user/supervised_user_test_base.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -70,7 +74,7 @@ class InterstitialPageObserver : public content::WebContentsObserver {
 };
 
 // Tests filtering for supervised users.
-class SupervisedUserURLFilterTest : public SupervisedUserTestBase {
+class SupervisedUserURLFilterTest : public MixinBasedInProcessBrowserTest {
  public:
   // Indicates whether the interstitial should proceed or not.
   enum InterstitialAction {
@@ -121,7 +125,15 @@ class SupervisedUserURLFilterTest : public SupervisedUserTestBase {
                                     "MAP *.example.com " + host_port + "," +
                                         "MAP *.new-example.com " + host_port +
                                         "," + "MAP *.a.com " + host_port);
-    SupervisedUserTestBase::SetUpCommandLine(command_line);
+    MixinBasedInProcessBrowserTest::SetUpCommandLine(command_line);
+  }
+
+  void SetUpOnMainThread() override {
+    MixinBasedInProcessBrowserTest::SetUpOnMainThread();
+    logged_in_user_mixin_.LogInUser();
+
+    supervised_user_service_ =
+        SupervisedUserServiceFactory::GetForProfile(browser()->profile());
   }
 
   // Acts like a synchronous call to history's QueryHistory. Modified from
@@ -141,13 +153,20 @@ class SupervisedUserURLFilterTest : public SupervisedUserTestBase {
         &history_task_tracker);
     run_loop.Run();  // Will go until ...Complete calls Quit.
   }
+
+  SupervisedUserService* supervised_user_service_ = nullptr;
+
+  chromeos::LoggedInUserMixin logged_in_user_mixin_{
+      &mixin_host_, chromeos::LoggedInUserMixin::LogInType::kChild,
+      embedded_test_server(), this};
 };
 
 // Tests the filter mode in which all sites are blocked by default.
 class SupervisedUserBlockModeTest : public SupervisedUserURLFilterTest {
  public:
-  void BlockAllSites() {
-    Profile* profile = GetPrimaryUserProfile();
+  void SetUpOnMainThread() override {
+    SupervisedUserURLFilterTest::SetUpOnMainThread();
+    Profile* profile = browser()->profile();
     SupervisedUserSettingsService* supervised_user_settings_service =
         SupervisedUserSettingsServiceFactory::GetForKey(
             profile->GetProfileKey());
@@ -163,8 +182,6 @@ class TabClosingObserver : public TabStripModelObserver {
       : tab_strip_(tab_strip), contents_(contents) {
     tab_strip_->AddObserver(this);
   }
-
-  ~TabClosingObserver() override { tab_strip_->RemoveObserver(this); }
 
   void WaitForContentsClosing() {
     if (!contents_)
@@ -208,9 +225,6 @@ class TabClosingObserver : public TabStripModelObserver {
 // Navigates to a blocked URL.
 IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
                        SendAccessRequestOnBlockedURL) {
-  LogInUser(LogInType::kChild);
-  BlockAllSites();
-
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -233,9 +247,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
 // Navigates to a blocked URL in a new tab. We expect the tab to be closed
 // automatically on pressing the "back" button on the interstitial.
 IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, OpenBlockedURLInNewTab) {
-  LogInUser(LogInType::kChild);
-  BlockAllSites();
-
   TabStripModel* tab_strip = browser()->tab_strip_model();
   WebContents* prev_tab = tab_strip->GetActiveWebContents();
 
@@ -243,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, OpenBlockedURLInNewTab) {
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), test_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   // Check that we got the interstitial.
   WebContents* tab = tab_strip->GetActiveWebContents();
@@ -263,8 +274,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, OpenBlockedURLInNewTab) {
 // navigation is blocked before it commits). The expected behavior is the same
 // though: the tab should be closed when going back.
 IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockNewTabAfterLoading) {
-  LogInUser(LogInType::kChild);
-
   TabStripModel* tab_strip = browser()->tab_strip_model();
   WebContents* prev_tab = tab_strip->GetActiveWebContents();
 
@@ -272,7 +281,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockNewTabAfterLoading) {
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), test_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   // Check that there is no interstitial.
   WebContents* tab = tab_strip->GetActiveWebContents();
@@ -282,13 +291,13 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockNewTabAfterLoading) {
     // Block the current URL.
     SupervisedUserSettingsService* supervised_user_settings_service =
         SupervisedUserSettingsServiceFactory::GetForKey(
-            GetPrimaryUserProfile()->GetProfileKey());
+            browser()->profile()->GetProfileKey());
     supervised_user_settings_service->SetLocalSetting(
         supervised_users::kContentPackDefaultFilteringBehavior,
         std::make_unique<base::Value>(SupervisedUserURLFilter::BLOCK));
 
     const SupervisedUserURLFilter* filter =
-        supervised_user_service()->GetURLFilter();
+        supervised_user_service_->GetURLFilter();
     ASSERT_EQ(SupervisedUserURLFilter::BLOCK,
               filter->GetFilteringBehaviorForURL(test_url));
 
@@ -312,15 +321,13 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockNewTabAfterLoading) {
 // Tests that we don't end up canceling an interstitial (thereby closing the
 // whole tab) by attempting to show a second one above it.
 IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, DontShowInterstitialTwice) {
-  LogInUser(LogInType::kChild);
-
   TabStripModel* tab_strip = browser()->tab_strip_model();
 
   // Open URL in a new tab.
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), test_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   // Check that there is no interstitial.
   WebContents* tab = tab_strip->GetActiveWebContents();
@@ -329,13 +336,13 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, DontShowInterstitialTwice) {
   // Block the current URL.
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackDefaultFilteringBehavior,
       std::make_unique<base::Value>(SupervisedUserURLFilter::BLOCK));
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
   ASSERT_EQ(SupervisedUserURLFilter::BLOCK,
             filter->GetFilteringBehaviorForURL(test_url));
 
@@ -347,7 +354,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, DontShowInterstitialTwice) {
 
   // Trigger a no-op change to the site lists, which will notify observers of
   // the URL filter.
-  supervised_user_service()->OnSiteListUpdated();
+  supervised_user_service_->OnSiteListUpdated();
 
   EXPECT_EQ(tab, tab_strip->GetActiveWebContents());
 }
@@ -356,9 +363,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, DontShowInterstitialTwice) {
 // page.
 IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
                        NavigateFromBlockedPageToBlockedPage) {
-  LogInUser(LogInType::kChild);
-  BlockAllSites();
-
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -375,20 +379,17 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
 
 // Tests whether a visit attempt adds a special history entry.
 IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, HistoryVisitRecorded) {
-  LogInUser(LogInType::kChild);
-  BlockAllSites();
-
   GURL allowed_url("http://www.example.com/simple.html");
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
 
   // Set the host as allowed.
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetKey(allowed_url.host(), base::Value(true));
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, std::move(dict));
   EXPECT_EQ(SupervisedUserURLFilter::ALLOW,
@@ -418,7 +419,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, HistoryVisitRecorded) {
 
   // Query the history entry.
   history::HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(GetPrimaryUserProfile(),
+      HistoryServiceFactory::GetForProfile(browser()->profile(),
                                            ServiceAccessType::EXPLICIT_ACCESS);
   history::QueryOptions options;
   history::QueryResults results;
@@ -433,8 +434,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, HistoryVisitRecorded) {
 }
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, GoBackOnDontProceed) {
-  LogInUser(LogInType::kChild);
-
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Ensure navigation completes.
@@ -452,12 +451,12 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, GoBackOnDontProceed) {
   dict->SetKey(test_url.host(), base::Value(false));
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, std::move(dict));
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
   ASSERT_EQ(SupervisedUserURLFilter::BLOCK,
             filter->GetFilteringBehaviorForURL(test_url));
 
@@ -476,8 +475,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, GoBackOnDontProceed) {
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest,
                        ClosingBlockedTabDoesNotCrash) {
-  LogInUser(LogInType::kChild);
-
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Ensure navigation completes.
@@ -494,12 +491,12 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest,
   dict->SetKey(test_url.host(), base::Value(false));
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, std::move(dict));
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
   ASSERT_EQ(SupervisedUserURLFilter::BLOCK,
             filter->GetFilteringBehaviorForURL(test_url));
 
@@ -510,8 +507,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest,
 }
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockThenUnblock) {
-  LogInUser(LogInType::kChild);
-
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -525,12 +520,12 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockThenUnblock) {
   dict->SetKey(test_url.host(), base::Value(false));
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, std::move(dict));
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
   ASSERT_EQ(SupervisedUserURLFilter::BLOCK,
             filter->GetFilteringBehaviorForURL(test_url));
 
@@ -555,9 +550,6 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, BlockThenUnblock) {
 }
 
 IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, Unblock) {
-  LogInUser(LogInType::kChild);
-  BlockAllSites();
-
   GURL test_url("http://www.example.com/simple.html");
   ui_test_utils::NavigateToURL(browser(), test_url);
 
@@ -575,12 +567,12 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, Unblock) {
   dict->SetKey(test_url.host(), base::Value(true));
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(
-          GetPrimaryUserProfile()->GetProfileKey());
+          browser()->profile()->GetProfileKey());
   supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, std::move(dict));
 
   const SupervisedUserURLFilter* filter =
-      supervised_user_service()->GetURLFilter();
+      supervised_user_service_->GetURLFilter();
   EXPECT_EQ(SupervisedUserURLFilter::ALLOW,
             filter->GetFilteringBehaviorForURL(test_url.GetWithEmptyPath()));
 

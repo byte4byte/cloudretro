@@ -54,25 +54,20 @@ enum class MigrationState : int {
 // syncing down older changes.
 class UnifiedConsentService
     : public KeyedService,
-      public identity::IdentityManager::Observer,
+      public signin::IdentityManager::Observer,
       public syncer::SyncServiceObserver,
       public sync_preferences::PrefServiceSyncableObserver {
  public:
   // Initializes the service. The |service_pref_names| vector is used to track
   // pref changes during the first sync setup.
   UnifiedConsentService(sync_preferences::PrefServiceSyncable* pref_service,
-                        identity::IdentityManager* identity_manager,
+                        signin::IdentityManager* identity_manager,
                         syncer::SyncService* sync_service,
                         const std::vector<std::string>& service_pref_names);
   ~UnifiedConsentService() override;
 
   // Register the prefs used by this UnifiedConsentService.
   static void RegisterPrefs(user_prefs::PrefRegistrySyncable* registry);
-
-  // Rolls back changes made during migration. This method does nothing if the
-  // user hasn't migrated to unified consent yet.
-  static void RollbackIfNeeded(PrefService* user_pref_service,
-                               syncer::SyncService* sync_service);
 
   // Enables or disables URL-keyed anonymized data collection.
   void SetUrlKeyedAnonymizedDataCollectionEnabled(bool enabled);
@@ -109,7 +104,7 @@ class UnifiedConsentService
   void UpdateSettingsForMigration();
 
   sync_preferences::PrefServiceSyncable* pref_service_;
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   syncer::SyncService* sync_service_;
 
   // Used for tracking the service pref states during the advanced sync opt-in.

@@ -52,7 +52,6 @@ void TabCapturePerformanceTestBase::SetUp() {
   feature_list_.InitWithFeatures(
       {
           service_manager::features::kAudioServiceSandbox,
-          features::kAudioServiceAudioStreams,
           features::kAudioServiceLaunchOnStartup,
           features::kAudioServiceOutOfProcess,
       },
@@ -64,6 +63,8 @@ void TabCapturePerformanceTestBase::SetUp() {
 void TabCapturePerformanceTestBase::SetUpOnMainThread() {
   InProcessBrowserTest::SetUpOnMainThread();
 
+  best_effort_fence_.emplace();
+
   host_resolver()->AddRule("*", "127.0.0.1");
   embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
       &TabCapturePerformanceTestBase::HandleRequest, base::Unretained(this)));
@@ -74,12 +75,6 @@ void TabCapturePerformanceTestBase::SetUpOnMainThread() {
 void TabCapturePerformanceTestBase::SetUpCommandLine(
     base::CommandLine* command_line) {
   is_full_performance_run_ = command_line->HasSwitch(kFullPerformanceRunSwitch);
-
-  // In the spirit of the NoBestEffortTasksTests, it's important to add this
-  // flag to make sure best-effort tasks are not required for the success of
-  // these tests. In a performance test run, this also removes sources of
-  // variance.
-  command_line->AppendSwitch(switches::kDisableBestEffortTasks);
 
   // Note: The naming "kUseGpuInTests" is very misleading. It actually means
   // "don't use a software OpenGL implementation." Subclasses will either call
@@ -106,7 +101,7 @@ void TabCapturePerformanceTestBase::LoadExtension(
       extensions::ExtensionSystem::Get(browser()->profile())
           ->extension_service();
   extensions::UnpackedInstaller::Create(extension_service)->Load(unpacked_dir);
-  extension_ = registry_observer.WaitForExtensionReady();
+  extension_ = registry_observer.WaitForExtensionReady().get();
   CHECK(extension_);
   CHECK_EQ(kExtensionId, extension_->id());
 }

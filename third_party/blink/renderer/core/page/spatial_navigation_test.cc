@@ -5,14 +5,18 @@
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_keyboard_event.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/renderer/core/exported/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
+#include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_request.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "ui/events/keycodes/dom/dom_key.h"
@@ -68,8 +72,7 @@ class SpatialNavigationTest : public RenderingTest {
   }
 
   void UpdateAllLifecyclePhases(LocalFrameView* frame_view) {
-    frame_view->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+    frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
   }
 };
 
@@ -445,7 +448,8 @@ TEST_F(SpatialNavigationTest, PartiallyVisible) {
 
   // Do some scrolling.
   ScrollableArea* root_scroller = GetDocument().View()->GetScrollableArea();
-  root_scroller->SetScrollOffset(ScrollOffset(0, 600), kProgrammaticScroll);
+  root_scroller->SetScrollOffset(ScrollOffset(0, 600),
+                                 mojom::blink::ScrollType::kProgrammatic);
   PhysicalRect button_after_scroll = NodeRectInRootFrame(b);
   ASSERT_NE(button_in_root_frame,
             button_after_scroll);  // As we scrolled, the
@@ -616,6 +620,87 @@ TEST_F(SpatialNavigationTest, BottomOfPinchedViewport) {
   EXPECT_EQ(origin, BottomOfVisualViewport());
 }
 
+TEST_F(SpatialNavigationTest, StraightTextNoFragments) {
+  LoadAhem();
+  SetBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<style>"
+      "  body {font: 10px/10px Ahem; width: 500px}"
+      "</style>"
+      "<a href='#' id='a'>blaaaaa blaaaaa blaaaaa</a>");
+  Element* a = GetDocument().getElementById("a");
+  EXPECT_FALSE(IsFragmentedInline(*a));
+}
+
+TEST_F(SpatialNavigationTest, LineBrokenTextHasFragments) {
+  LoadAhem();
+  SetBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<style>"
+      "  body {font: 10px/10px Ahem; width: 40px}"
+      "</style>"
+      "<a href='#' id='a'>blaaaaa blaaaaa blaaaaa</a>");
+  Element* a = GetDocument().getElementById("a");
+  EXPECT_TRUE(IsFragmentedInline(*a));
+}
+
+TEST_F(SpatialNavigationTest, ManyClientRectsButNotLineBrokenText) {
+  SetBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<style>"
+      "  div {width: 20px; height: 20px;}"
+      "</style>"
+      "<a href='#' id='a'><div></div></a>");
+  Element* a = GetDocument().getElementById("a");
+  EXPECT_FALSE(IsFragmentedInline(*a));
+}
+
+TEST_F(SpatialNavigationTest, UseTheFirstFragment) {
+  LoadAhem();
+  SetBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<style>"
+      "  body {font: 10px/10px Ahem; margin: 0; width: 50px;}"
+      "</style>"
+      "<a href='#' id='a'>12345 12</a>");
+  Element* a = GetDocument().getElementById("a");
+  EXPECT_TRUE(IsFragmentedInline(*a));
+
+  // Search downards.
+  PhysicalRect origin_down = SearchOrigin(RootViewport(&GetFrame()), a,
+                                          SpatialNavigationDirection::kDown);
+  PhysicalRect origin_fragment =
+      SearchOriginFragment(NodeRectInRootFrame(a), *a->GetLayoutObject(),
+                           SpatialNavigationDirection::kDown);
+  EXPECT_EQ(origin_down, origin_fragment);
+  EXPECT_EQ(origin_down.Height(), 10);
+  EXPECT_EQ(origin_down.Width(), 50);
+  EXPECT_EQ(origin_down.X(), 0);
+  EXPECT_EQ(origin_down.Y(), 0);
+
+  // Search upwards.
+  PhysicalRect origin_up = SearchOrigin(RootViewport(&GetFrame()), a,
+                                        SpatialNavigationDirection::kUp);
+  PhysicalRect origin_fragment_up =
+      SearchOriginFragment(NodeRectInRootFrame(a), *a->GetLayoutObject(),
+                           SpatialNavigationDirection::kUp);
+  EXPECT_EQ(origin_up, origin_fragment_up);
+  EXPECT_EQ(origin_up.Height(), 10);
+  EXPECT_EQ(origin_up.Width(), 20);
+  EXPECT_EQ(origin_up.X(), 0);
+  EXPECT_EQ(origin_up.Y(), 10);
+
+  // Search from the top fragment.
+  PhysicalRect origin_left = SearchOrigin(RootViewport(&GetFrame()), a,
+                                          SpatialNavigationDirection::kLeft);
+  EXPECT_EQ(origin_left, origin_down);
+
+  // Search from the bottom fragment.
+  PhysicalRect origin_right = SearchOrigin(RootViewport(&GetFrame()), a,
+                                           SpatialNavigationDirection::kRight);
+  EXPECT_EQ(origin_right, origin_up);
+}
+
 TEST_F(SpatialNavigationTest, TopOfPinchedViewport) {
   PhysicalRect origin = SearchOrigin(RootViewport(&GetFrame()), nullptr,
                                      SpatialNavigationDirection::kDown);
@@ -677,7 +762,7 @@ class SpatialNavigationWithFocuslessModeTest
   ScopedFocuslessSpatialNavigationForTest use_focusless_mode_;
 };
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          SpatialNavigationWithFocuslessModeTest,
                          ::testing::Bool());
 
@@ -687,19 +772,19 @@ TEST_P(SpatialNavigationWithFocuslessModeTest, PressEnterKeyActiveElement) {
   Element* b = GetDocument().getElementById("b");
 
   // Move interest to button.
-  WebKeyboardEvent arrow_down{WebInputEvent::kRawKeyDown,
+  WebKeyboardEvent arrow_down{WebInputEvent::Type::kRawKeyDown,
                               WebInputEvent::kNoModifiers,
                               WebInputEvent::GetStaticTimeStampForTests()};
   arrow_down.dom_key = ui::DomKey::ARROW_DOWN;
   GetDocument().GetFrame()->GetEventHandler().KeyEvent(arrow_down);
 
-  arrow_down.SetType(WebInputEvent::kKeyUp);
+  arrow_down.SetType(WebInputEvent::Type::kKeyUp);
   GetDocument().GetFrame()->GetEventHandler().KeyEvent(arrow_down);
 
   EXPECT_FALSE(b->IsActive());
 
   // Enter key down add :active state to element.
-  WebKeyboardEvent enter{WebInputEvent::kRawKeyDown,
+  WebKeyboardEvent enter{WebInputEvent::Type::kRawKeyDown,
                          WebInputEvent::kNoModifiers,
                          WebInputEvent::GetStaticTimeStampForTests()};
   enter.dom_key = ui::DomKey::ENTER;
@@ -707,9 +792,79 @@ TEST_P(SpatialNavigationWithFocuslessModeTest, PressEnterKeyActiveElement) {
   EXPECT_TRUE(b->IsActive());
 
   // Enter key up remove :active state to element.
-  enter.SetType(WebInputEvent::kKeyUp);
+  enter.SetType(WebInputEvent::Type::kKeyUp);
   GetDocument().GetFrame()->GetEventHandler().KeyEvent(enter);
   EXPECT_FALSE(b->IsActive());
+}
+
+class FocuslessSpatialNavigationSimTest : public SimTest {
+ public:
+  FocuslessSpatialNavigationSimTest() : use_focusless_mode_(true) {}
+
+  void SetUp() override {
+    SimTest::SetUp();
+    WebView().GetPage()->GetSettings().SetSpatialNavigationEnabled(true);
+  }
+
+  void SimulateKeyPress(int dom_key) {
+    WebKeyboardEvent event{WebInputEvent::Type::kRawKeyDown,
+                           WebInputEvent::kNoModifiers,
+                           WebInputEvent::GetStaticTimeStampForTests()};
+    event.dom_key = dom_key;
+    WebView().MainFrameWidget()->HandleInputEvent(
+        WebCoalescedInputEvent(event));
+
+    if (dom_key == ui::DomKey::ENTER) {
+      event.SetType(WebInputEvent::Type::kChar);
+      WebView().MainFrameWidget()->HandleInputEvent(
+          WebCoalescedInputEvent(event));
+    }
+
+    event.SetType(WebInputEvent::Type::kKeyUp);
+    WebView().MainFrameWidget()->HandleInputEvent(
+        WebCoalescedInputEvent(event));
+  }
+
+  ScopedFocuslessSpatialNavigationForTest use_focusless_mode_;
+};
+
+// Tests that opening a <select> popup works by pressing enter from
+// "interested" mode, without being focused.
+TEST_F(FocuslessSpatialNavigationSimTest, OpenSelectPopup) {
+  // This test requires PagePopup since we're testing opening the <select> drop
+  // down so skip this test on platforms (i.e. Android) that don't use this.
+  if (!RuntimeEnabledFeatures::PagePopupEnabled())
+    return;
+
+  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameWidget()->SetFocus(true);
+  WebView().SetIsActive(true);
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+          <!DOCTYPE html>
+          <select id="target">
+            <option>A</option>
+            <option>B</option>
+            <option>C</option>
+          </select>
+      )HTML");
+  Compositor().BeginFrame();
+
+  auto* select = To<HTMLSelectElement>(GetDocument().getElementById("target"));
+  SimulateKeyPress(ui::DomKey::ARROW_DOWN);
+
+  SpatialNavigationController& spat_nav_controller =
+      GetDocument().GetPage()->GetSpatialNavigationController();
+
+  ASSERT_EQ(select, spat_nav_controller.GetInterestedElement());
+  ASSERT_NE(select, GetDocument().ActiveElement());
+  ASSERT_FALSE(select->PopupIsVisible());
+
+  // The enter key should cause the popup to open.
+  SimulateKeyPress(ui::DomKey::ENTER);
+  EXPECT_TRUE(select->PopupIsVisible());
 }
 
 }  // namespace blink

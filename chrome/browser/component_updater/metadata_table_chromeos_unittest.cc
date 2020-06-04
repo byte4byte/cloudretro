@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/component_updater/metadata_table_chromeos.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace component_updater {
@@ -19,11 +19,11 @@ constexpr char kComponent[2][11] = {"component1", "component2"};
 
 class CrOSComponentInstallerMetadataTest : public testing::Test {
  public:
-  CrOSComponentInstallerMetadataTest() {}
-  ~CrOSComponentInstallerMetadataTest() override {}
+  CrOSComponentInstallerMetadataTest() = default;
+  ~CrOSComponentInstallerMetadataTest() override = default;
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CrOSComponentInstallerMetadataTest);

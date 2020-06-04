@@ -7,7 +7,7 @@
 #include <cmath>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -125,6 +125,39 @@ TEST(AmbientLightSampleBufferTest, AverageTimeTooLate) {
   EXPECT_FALSE(
       buffer.AverageAmbientWithStdDev(tick_clock.NowTicks()).has_value());
   EXPECT_EQ(buffer.NumberOfSamplesForTesting(), 0u);
+}
+
+TEST(AmbientLightSampleBufferTest, BufferCleared) {
+  base::SimpleTestTickClock tick_clock;
+  AmbientLightSampleBuffer buffer(base::TimeDelta::FromSeconds(5));
+
+  // Save two data points and verify.
+  tick_clock.Advance(base::TimeDelta::FromSeconds(1));
+  buffer.SaveToBuffer({10, tick_clock.NowTicks()});
+
+  tick_clock.Advance(base::TimeDelta::FromSeconds(1));
+  buffer.SaveToBuffer({20, tick_clock.NowTicks()});
+
+  EXPECT_EQ(buffer.NumberOfSamplesForTesting(), 2u);
+  AlsAvgStdDev avg_std =
+      buffer.AverageAmbientWithStdDev(tick_clock.NowTicks()).value();
+
+  CheckAverageAndStdDev(avg_std, {10, 20});
+
+  // Clear buffer and verify.
+  buffer.ClearBuffer();
+  EXPECT_EQ(buffer.NumberOfSamplesForTesting(), 0u);
+  EXPECT_FALSE(
+      buffer.AverageAmbientWithStdDev(tick_clock.NowTicks()).has_value());
+
+  // Save another two data points and verify.
+  tick_clock.Advance(base::TimeDelta::FromSeconds(1));
+  buffer.SaveToBuffer({30, tick_clock.NowTicks()});
+
+  tick_clock.Advance(base::TimeDelta::FromSeconds(1));
+  buffer.SaveToBuffer({40, tick_clock.NowTicks()});
+  avg_std = buffer.AverageAmbientWithStdDev(tick_clock.NowTicks()).value();
+  CheckAverageAndStdDev(avg_std, {30, 40});
 }
 
 }  // namespace auto_screen_brightness

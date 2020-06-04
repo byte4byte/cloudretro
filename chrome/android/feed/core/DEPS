@@ -1,7 +1,0 @@
-include_rules = [
-  "+components/background_task_scheduler",
-  "+components/feature_engagement",
-  "+components/feed",
-  "+content/public/android/java/src/org/chromium/content_public",
-  "+third_party/feed"
-]

@@ -16,6 +16,7 @@
 #include "content/public/test/test_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "storage/browser/quota/quota_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -32,8 +33,12 @@ class BrowserTestBase : public testing::Test {
   BrowserTestBase();
   ~BrowserTestBase() override;
 
-  // Configures everything for an in process browser test, then invokes
-  // BrowserMain. BrowserMain ends up invoking RunTestOnMainThreadLoop.
+  // Configures everything for an in process browser test (e.g. thread pool,
+  // etc.) by invoking ContentMain (or manually on OS_ANDROID). As such all
+  // single-threaded initialization must be done before this step.
+  //
+  // ContentMain then ends up invoking RunTestOnMainThreadLoop with browser
+  // threads already running.
   void SetUp() override;
 
   // Restores state configured in SetUp.
@@ -53,6 +58,11 @@ class BrowserTestBase : public testing::Test {
 
   // Override this to disallow accesses to be production-compatible.
   virtual bool AllowFileAccessFromFiles();
+
+  // By default browser tests use hardcoded quota settings for consistency,
+  // instead of dynamically based on available disk space. Tests can override
+  // this if they want to use the production path.
+  virtual bool UseProductionQuotaSettings();
 
   // Crash the Network Service process. Should only be called when
   // out-of-process Network Service is enabled. Re-applies any added host
@@ -196,6 +206,8 @@ class BrowserTestBase : public testing::Test {
   // class to ensure that SetUp was called. If it's not called, the test will
   // not run and report a false positive result.
   bool set_up_called_;
+
+  std::unique_ptr<storage::QuotaSettings> quota_settings_;
 
   std::unique_ptr<NoRendererCrashesAssertion> no_renderer_crashes_assertion_;
 

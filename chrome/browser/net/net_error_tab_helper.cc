@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/embedder_support/pref_names.h"
 #include "components/error_page/common/net_error_info.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -22,6 +23,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "ipc/ipc_message_macros.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "net/base/net_errors.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "url/gurl.h"
@@ -63,7 +65,7 @@ void NetErrorTabHelper::RenderFrameCreated(
   if (render_frame_host->GetParent())
     return;
 
-  chrome::mojom::NetworkDiagnosticsClientAssociatedPtr client;
+  mojo::AssociatedRemote<chrome::mojom::NetworkDiagnosticsClient> client;
   render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(&client);
   client->SetCanShowNetworkDiagnosticsDialog(
       CanShowNetworkDiagnosticsDialog(web_contents()));
@@ -87,7 +89,7 @@ void NetErrorTabHelper::DidFinishNavigation(
   if (!navigation_handle->IsInMainFrame())
     return;
 
-  if (net::IsDnsError(navigation_handle->GetNetErrorCode())) {
+  if (net::IsHostnameResolutionError(navigation_handle->GetNetErrorCode())) {
     dns_error_active_ = true;
     OnMainFrameDnsError();
   }
@@ -133,8 +135,8 @@ bool NetErrorTabHelper::OnMessageReceived(
 
 NetErrorTabHelper::NetErrorTabHelper(WebContents* contents)
     : WebContentsObserver(contents),
-      network_diagnostics_bindings_(contents, this),
-      network_easter_egg_bindings_(contents, this),
+      network_diagnostics_receivers_(contents, this),
+      network_easter_egg_receivers_(contents, this),
       is_error_page_(false),
       dns_error_active_(false),
       dns_error_page_committed_(false),
@@ -213,7 +215,7 @@ void NetErrorTabHelper::OnSetIsShowingDownloadButtonInErrorPage(
 // static
 void NetErrorTabHelper::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* prefs) {
-  // prefs::kAlternateErrorPagesEnabled is registered by
+  // embedder_support::kAlternateErrorPagesEnabled is registered by
   // NavigationCorrectionTabObserver.
 
   prefs->RegisterIntegerPref(prefs::kNetworkEasterEggHighScore, 0,
@@ -226,8 +228,7 @@ void NetErrorTabHelper::InitializePref(WebContents* contents) {
   BrowserContext* browser_context = contents->GetBrowserContext();
   Profile* profile = Profile::FromBrowserContext(browser_context);
   resolve_errors_with_web_service_.Init(
-      prefs::kAlternateErrorPagesEnabled,
-      profile->GetPrefs());
+      embedder_support::kAlternateErrorPagesEnabled, profile->GetPrefs());
   easter_egg_high_score_.Init(prefs::kNetworkEasterEggHighScore,
                               profile->GetPrefs());
 }
@@ -247,7 +248,7 @@ void NetErrorTabHelper::SendInfo() {
   DVLOG(1) << "Sending status " << DnsProbeStatusToString(dns_probe_status_);
   content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
 
-  chrome::mojom::NetworkDiagnosticsClientAssociatedPtr client;
+  mojo::AssociatedRemote<chrome::mojom::NetworkDiagnosticsClient> client;
   rfh->GetRemoteAssociatedInterfaces()->GetInterface(&client);
   client->DNSProbeStatus(dns_probe_status_);
 
@@ -272,8 +273,8 @@ void NetErrorTabHelper::RunNetworkDiagnosticsHelper(
   if (!CanShowNetworkDiagnosticsDialog(web_contents()))
     return;
 
-  if (network_diagnostics_bindings_.GetCurrentTargetFrame()
-          != web_contents()->GetMainFrame()) {
+  if (network_diagnostics_receivers_.GetCurrentTargetFrame() !=
+      web_contents()->GetMainFrame()) {
     return;
   }
 

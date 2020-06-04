@@ -30,7 +30,7 @@ class UnifiedSystemTrayModel;
 class ASH_EXPORT UnifiedMessageListView
     : public views::View,
       public message_center::MessageCenterObserver,
-      public message_center::MessageView::SlideObserver,
+      public message_center::MessageView::Observer,
       public views::AnimationDelegateViews {
  public:
   // |message_center_view| can be null in unit tests.
@@ -60,7 +60,8 @@ class ASH_EXPORT UnifiedMessageListView
 
   // Count the number of notifications whose bottom position is above
   // |y_offset|. O(n) where n is number of notifications.
-  int CountNotificationsAboveY(int y_offset) const;
+  std::vector<message_center::Notification*> GetNotificationsAboveY(
+      int y_offset) const;
 
   // Returns the total number of notifications in the list.
   int GetTotalNotificationCount() const;
@@ -84,8 +85,11 @@ class ASH_EXPORT UnifiedMessageListView
   void OnNotificationRemoved(const std::string& id, bool by_user) override;
   void OnNotificationUpdated(const std::string& id) override;
 
-  // message_center::MessageView::SlideObserver:
+  // message_center::MessageView::Observer:
   void OnSlideStarted(const std::string& notification_id) override;
+  void OnCloseButtonPressed(const std::string& notification_id) override;
+  void OnSettingsButtonPressed(const std::string& notification_id) override;
+  void OnSnoozeButtonPressed(const std::string& notification_id) override;
 
   // views::AnimationDelegateViews:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -102,7 +106,8 @@ class ASH_EXPORT UnifiedMessageListView
       const message_center::Notification& notification);
 
   // Virtual for testing.
-  virtual int GetStackedNotificationCount() const;
+  virtual std::vector<message_center::Notification*> GetStackedNotifications()
+      const;
 
  private:
   friend class UnifiedMessageCenterViewTest;
@@ -175,6 +180,11 @@ class ASH_EXPORT UnifiedMessageListView
 
   // Updates the state between each Clear All animation phase.
   void UpdateClearAllAnimation();
+
+  // Returns a vector of visible notifications that is sorted in the appropriate
+  // order to be displayed. See implementation for exact sorting order.
+  std::vector<message_center::Notification*> GetSortedVisibleNotifications()
+      const;
 
   UnifiedMessageCenterView* const message_center_view_;
   UnifiedSystemTrayModel* const model_;

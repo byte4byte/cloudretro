@@ -9,16 +9,25 @@
 HELPERTOOLS=/Library/PrivilegedHelperTools
 SERVICE_NAME=org.chromium.chromoting
 CONFIG_FILE="$HELPERTOOLS/$SERVICE_NAME.json"
-SCRIPT_FILE="$HELPERTOOLS/$SERVICE_NAME.me2me.sh"
-USERS_TMP_FILE="$SCRIPT_FILE.users"
+OLD_SCRIPT_FILE="$HELPERTOOLS/$SERVICE_NAME.me2me.sh"
 PLIST=/Library/LaunchAgents/org.chromium.chromoting.plist
 PAM_CONFIG=/etc/pam.d/chrome-remote-desktop
 ENABLED_FILE="$HELPERTOOLS/$SERVICE_NAME.me2me_enabled"
 ENABLED_FILE_BACKUP="$ENABLED_FILE.backup"
 HOST_BUNDLE_NAME=@@HOST_BUNDLE_NAME@@
+HOST_SERVICE_BINARY="$HELPERTOOLS/$HOST_BUNDLE_NAME/Contents/MacOS/remoting_me2me_host_service"
+HOST_LEGACY_BUNDLE_NAME=@@HOST_LEGACY_BUNDLE_NAME@@
 HOST_EXE="$HELPERTOOLS/$HOST_BUNDLE_NAME/Contents/MacOS/remoting_me2me_host"
+USERS_TMP_FILE="$HOST_SERVICE_BINARY.users"
 
-KSADMIN=/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/MacOS/ksadmin
+# ksadmin moved from MacOS to Helpers in Keystone 1.2.13.112, 2019-11-12. A
+# symbolic link from the old location was left in place, but may not remain
+# indefinitely. Try the new location first, falling back to the old if needed.
+KSADMIN=/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/Helpers/ksadmin
+if [[ ! -x "${KSADMIN}" ]]; then
+  KSADMIN=/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/MacOS/ksadmin
+fi
+
 KSUPDATE=https://tools.google.com/service/update2
 KSPID=com.google.chrome_remote_desktop
 KSPVERSION=@@VERSION@@
@@ -66,6 +75,12 @@ if [[ -f "$ENABLED_FILE_BACKUP" ]]; then
   mv "$ENABLED_FILE_BACKUP" "$ENABLED_FILE"
 fi
 
+# If there is a backup script, restore it.
+if [[ -f "$INSTALLER_TEMP/script_backup" ]]; then
+  logger Restoring original launchd script
+  mv "$INSTALLER_TEMP/script_backup" "$OLD_SCRIPT_FILE"
+fi
+
 # Create the PAM configuration unless it already exists and has been edited.
 update_pam=1
 CONTROL_LINE="# If you edit this file, please delete this line."
@@ -94,6 +109,12 @@ fi
 
 # Run the config-upgrade tool.
 "$HOST_EXE" --upgrade-token --host-config="$CONFIG_FILE" || true
+
+# Create a symlink from the legacy .bundle name to the new .app name. This
+# allows existing references to the legacy name to continue to work, and means
+# that no changes are required to the launchd script.
+rm -rf "$HELPERTOOLS/$HOST_LEGACY_BUNDLE_NAME"
+ln -s "$HELPERTOOLS/$HOST_BUNDLE_NAME" "$HELPERTOOLS/$HOST_LEGACY_BUNDLE_NAME"
 
 # Load the service for each user for whom the service was unloaded in the
 # preflight script (this includes the root user, in case only the login screen

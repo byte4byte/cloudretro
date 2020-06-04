@@ -1,157 +1,114 @@
-Story name,Platform,Description,Disabled Platforms
-background:media:imgur,mobile,"Load http://imgur.com/gallery/hUita, then put the browser into the background.", 
-background:news:nytimes,mobile,"Load http://www.nytimes.com/2016/10/04/us/politics/vice-presidential-debate.html?_r=0, then put the browser into the background.","Android, Android_One, Android_Go, Nexus_5X"
-background:search:google,mobile,"Load https://www.google.co.uk/#q=tom+cruise+movies, then put the browser into the background.", 
-background:social:facebook,mobile,"Load https://www.facebook.com/rihanna, then put the browser into the background.", 
-background:tools:gmail,mobile,Load https://mail.google.com/mail/,Nexus_5
-browse:chrome:newtab,mobile,"Story that loads new tab page and performs searches.
-
-  Given a list of typical search queries, this story does for each of them:
-   - enter the search query on the new tab page search box
-   - read results
-   - navigates back to new tab page
-  ","Android_Webview, Nexus_5, Android_One"
-browse:chrome:omnibox,mobile,"Story that peforms search by using omnibox search provider
-
-  Loads a website and enters a search query on omnibox and navigates to default
-  search provider (google).
-  ","Android_Webview, Nexus_5X"
-browse:media:facebook_photos,mobile,"Load a photo page from Rihanna's facebook page then navigate a few next
-  photos.
-  ", 
-browse:media:flickr_infinite_scroll,desktop,Load https://www.flickr.com/explore then make a very long scroll.,Win
-browse:media:flickr_infinite_scroll,mobile,Load https://www.flickr.com/explore then make a very long scroll.,Win
-browse:media:imgur,desktop,Load http://imgur.com/gallery/5UlBN and navigate to some items/articles., 
-browse:media:imgur,mobile,Load http://imgur.com/gallery/5UlBN and navigate to some items/articles., 
-browse:media:pinterest,desktop,Load https://pinterest.com and navigate to some items/articles., 
-browse:media:tumblr,desktop,Load https://tumblr.com/search/gifs and navigate to some items/articles.,"All, Win, Linux"
-browse:media:youtube,desktop,"Load a typical YouTube video then navigate to a next few videos. Stop and
-  watch each video for a few seconds.
-  ", 
-browse:media:youtube,mobile,"Load a typical YouTube video then navigate to a next few videos. Stop and
-  watch each video for few seconds.
-  ", 
-browse:news:cnn,all,The second top website in http://www.alexa.com/topsites/category/News,"Mac, Win"
-browse:news:cricbuzz,mobile,Load http://m.cricbuzz.com and navigate to some items/articles., 
-browse:news:flipboard,desktop,Load https://flipboard.com/explore and navigate to some items/articles.,Linux
-browse:news:globo,mobile,Load http://www.globo.com and navigate to some items/articles.,Android
-browse:news:hackernews,desktop,Load https://news.ycombinator.com and navigate to some items/articles.,"Win, Mac"
-browse:news:nytimes,desktop,The third top website in http://www.alexa.com/topsites/category/News, 
-browse:news:qq,mobile,Load http://news.qq.com and navigate to some items/articles., 
-browse:news:reddit,desktop,The top website in http://www.alexa.com/topsites/category/News, 
-browse:news:reddit,mobile,The top website in http://www.alexa.com/topsites/category/News, 
-browse:news:toi,mobile,Load http://m.timesofindia.com and navigate to some items/articles.,Android
-browse:news:washingtonpost,mobile,Progressive website, 
-browse:search:google,desktop,"
-  A typical google search story:
-    _ Start at https://www.google.com/search?q=flower
-    _ Click on the wikipedia link & navigate to
-      https://en.wikipedia.org/wiki/Flower
-    _ Scroll down the wikipedia page about flower.
-    _ Back to the search main page.
-    _ Refine the search query to 'flower delivery'.
-    _ Scroll down the page.
-    _ Click the next page result of 'flower delivery'.
-    _ Scroll the search page.
-
-  ",Win
-browse:search:google_india,desktop,"
-  A typical google search story in India:
-    1. Start at https://www.google.co.in/search?q=%E0%A4%AB%E0%A5%82%E0%A4%B2`
-    2. Scroll down the page.
-    3. Refine the query & click search box, which navigates to
-    https://www.google.co.in/search?q=%E0%A4%AB%E0%A5%82%E0%A4%B2&rct=j#q=%E0%A4%AB%E0%A5%82%E0%A4%B2+%E0%A4%B5%E0%A4%BF%E0%A4%A4%E0%A4%B0%E0%A4%A3
-    4. Scroll down the page.
-    5. Click the next page result
-    6. Scroll the search result page.
-
-  ", 
-browse:shopping:amazon,mobile,Load https://www.amazon.co.in/s/?field-keywords=Mobile and navigate to some items/articles., 
-browse:shopping:avito,mobile,Load https://www.avito.ru/rossiya and navigate to some items/articles.,Nexus_6
-browse:shopping:flipkart,mobile,Load https://flipkart.com/search?q=Sunglasses and navigate to some items/articles.,Android
-browse:shopping:lazada,mobile,Load https://www.lazada.co.id/catalog/?q=Wrist+watch and navigate to some items/articles., 
-browse:social:facebook,mobile,Load https://www.facebook.com/rihanna and navigate to some items/articles.,Nexus_5
-browse:social:facebook_infinite_scroll,desktop,Load https://www.facebook.com/shakira then make a very long scroll.,Android_One
-browse:social:facebook_infinite_scroll,mobile,Load https://m.facebook.com/shakira then make a very long scroll.,Android_One
-browse:social:instagram,mobile,Load https://www.instagram.com/badgalriri/ and navigate to some items/articles., 
-browse:social:pinterest_infinite_scroll,mobile,Load https://www.pinterest.com/all then make a very long scroll.,"Android_One, Nexus_5"
-browse:social:tumblr_infinite_scroll,all,Load http://techcrunch.tumblr.com/ then make a very long scroll.,"Android_One, Nexus_5X"
-browse:social:twitter,desktop,Load https://www.twitter.com/nasa and navigate to some items/articles., 
-browse:social:twitter,mobile,Load https://www.twitter.com/nasa and navigate to some items/articles., 
-browse:social:twitter_infinite_scroll,desktop,Load https://twitter.com/taylorswift13 then make a very long scroll.,"Win, Linux, All"
-browse:tech:discourse_infinite_scroll,desktop,Load https://meta.discourse.org/t/the-official-discourse-tags-plugin-discourse-tagging/26482 then make a very long scroll., 
-browse:tech:discourse_infinite_scroll,mobile,Load https://meta.discourse.org/t/the-official-discourse-tags-plugin-discourse-tagging/26482 then make a very long scroll., 
-browse:tools:earth,desktop,"
-  Google Earth story:
-    _ Start at https://www.maps.google.com/maps
-    _ Click on the Earth link
-    _ Click ZoomIn three times, waiting for 3 sec in between.
-
-  ", 
-browse:tools:maps,desktop,"
-  Google maps story:
-    _ Start at https://www.maps.google.com/maps
-    _ Search for ""restaurents near me"" and wait for 4 sec.
-    _ Click ZoomIn two times, waiting for 3 sec in between.
-    _ Scroll the map horizontally and vertically.
-    _ Pick a restaurant and ask for directions.
-  ","Mac, Linux"
-browse:tools:maps,mobile,"Story that browses google maps mobile page
-
-  This story searches for nearby restaurants on google maps website and finds
-  directions to a chosen restaurant from search results.
-  ","Mac, Linux"
-browse_accessibility:tech:codesearch,desktop,Tests scrolling an element within a page., 
-load:chrome:blank,all,Story that loads the about:blank page., 
-load:games:alphabetty,desktop,Load https://king.com/play/alphabetty, 
-load:games:bubbles,all,"Load ""smarty bubbles"" game on famobi.com", 
-load:games:lazors,all,Load http://www8.games.mobi/games/html5/lazors/lazors.html, 
-load:games:miniclip,desktop,Load http://www.miniclip.com/games/en/,Mac
-load:games:spychase,all,Load http://playstar.mobi/games/spychase/index.php,Android_Webview
-load:media:9gag,desktop,Load https://www.9gag.com/, 
-load:media:dailymotion,all,Load https://www.dailymotion.com/video/x489k7d_street-performer-shows-off-slinky-skills_fun?autoplay=false, 
-load:media:facebook_photos,mobile,Load a page of rihanna's facebook with a photo., 
-load:media:google_images,all,Load https://www.google.co.uk/search?tbm=isch&q=love, 
-load:media:imgur,all,Load http://imgur.com/gallery/5UlBN, 
-load:media:soundcloud,all,Load https://soundcloud.com/lifeofdesiigner/desiigner-panda,Android_Webview
-load:media:youtube,all,Load https://www.youtube.com/watch?v=QGfhS1hfTWw&autoplay=false, 
-load:news:bbc,desktop,Load https://www.bbc.co.uk/news/world-asia-china-36189636, 
-load:news:cnn,all,Load http://edition.cnn.com, 
-load:news:flipboard,desktop,Load https://flipboard.com/explore, 
-load:news:hackernews,desktop,Load https://news.ycombinator.com, 
-load:news:irctc,mobile,Load https://www.irctc.co.in, 
-load:news:nytimes,desktop,Load http://www.nytimes.com, 
-load:news:nytimes,mobile,Load http://mobile.nytimes.com, 
-load:news:qq,all,Load http://news.qq.com, 
-load:news:reddit,desktop,Load https://www.reddit.com/r/news/top/?sort=top&t=week, 
-load:news:reddit,mobile,Load https://www.reddit.com/r/news/top/?sort=top&t=week, 
-load:news:washingtonpost,mobile,Load https://www.washingtonpost.com/pwa, 
-load:news:wikipedia,all,Load https://en.wikipedia.org/wiki/Science, 
-load:search:amazon,desktop,Load https://www.amazon.com/s/?field-keywords=nexus, 
-load:search:baidu,all,Load https://www.baidu.com/s?word=google, 
-load:search:ebay,all,Load https://www.ebay.com/sch/i.html?_nkw=headphones, 
-load:search:google,all,Load https://www.google.co.uk/, 
-load:search:taobao,desktop,Load https://world.taobao.com/, 
-load:search:taobao,mobile,Load http://m.intl.taobao.com/?ali_trackid, 
-load:search:yahoo,all,Load https://search.yahoo.com/search;_ylt=?p=google, 
-load:search:yandex,all,Load https://yandex.ru/touchsearch?text=science, 
-load:social:instagram,desktop,Load https://www.instagram.com/selenagomez/, 
-load:social:pinterest,desktop,Load https://uk.pinterest.com/categories/popular/, 
-load:social:twitter,mobile,Load https://www.twitter.com/nasa, 
-load:social:vk,desktop,Load https://vk.com/sbeatles, 
-load:tools:docs,all,Load a typical google doc page., 
-load:tools:drive,all,Load https://drive.google.com/drive/my-drive,"Nexus_5X, Android_Webview"
-load:tools:dropbox,all,Load https://www.dropbox.com, 
-load:tools:gmail,desktop,Load https://mail.google.com/mail/,Android
-load:tools:gmail,mobile,Load https://mail.google.com/mail/,Android
-load:tools:stackoverflow,all,Load a typical question & answer page of stackoverflow.com, 
-load:tools:weather,all,Load https://weather.com/en-GB/weather/today/l/USCA0286:1:US, 
-load_accessibility:media:wikipedia,desktop,"Wikipedia page on Accessibility. Long, but very simple, clean layout.", 
-load_accessibility:shopping:amazon,desktop,Amazon results page. Good example of a site with a data table.,Linux
-long_running:tools:gmail-background,desktop,Load https://mail.google.com/mail/ then open a new blank tab and let the loaded page stay in background for 100 seconds.,"Android_Webview, Android_Low_End"
-long_running:tools:gmail-background,mobile,Load https://mail.google.com/mail/ then open a new blank tab and let the loaded page stay in background for 100 seconds.,"Android_Webview, Android_Low_End"
-long_running:tools:gmail-foreground,desktop,Load https://mail.google.com/mail/ then let it stay in foreground for 100 seconds.,Android_Webview
-long_running:tools:gmail-foreground,mobile,Load https://mail.google.com/mail/ then let it stay in foreground for 100 seconds.,Android_Webview
-multitab:misc:typical24,desktop,"Load 24 different web sites in 24 tabs, then cycle through each tab.","Mac, Linux, ChromeOS"
-play:media:google_play_music,desktop,"Browse the songs list in music.google.com, then play a song.",All
-play:media:soundcloud,desktop,"Load soundcloud.com, search for ""Smooth Jazz"", then play a song.",Win
+AUTOGENERATED FILE DO NOT EDIT
+See //tools/perf/core/perf_data_generator.py to make changes
+Story,Description,Platforms,Tags
+background:media:imgur:2019,,mobile,2019
+background:news:nytimes:2019,,mobile,"2019,javascript_heavy"
+background:search:google:2019,,mobile,2019
+background:social:facebook:2019,,mobile,"2019,health_check"
+background:tools:gmail:2019,,mobile,"2019,health_check"
+browse:chrome:newtab:2019,Story that loads new tab page and performs searches.,mobile,"2019,emerging_market"
+browse:chrome:omnibox:2019,Story that peforms search by using omnibox search provider,mobile,"2019,emerging_market"
+browse:media:facebook_photos:2019,Load a photo page from Rihanna's facebook page then navigate a few next,mobile,"2019,emerging_market"
+browse:media:flickr_infinite_scroll:2019,,mobile,"2019,infinite_scroll"
+browse:media:googleplaystore:2018,"Navigate to the movies page of Google Play Store, scroll to the bottom,",desktop,"2018,images"
+browse:media:googleplaystore:2019,"Navigate to the movies page of Google Play Store, scroll to the bottom,",mobile,"2019,emerging_market,images"
+browse:media:imgur,,desktop,2016
+browse:media:imgur:2019,,mobile,"2019,emerging_market"
+browse:media:pinterest:2018,,desktop,2018
+browse:media:tumblr:2018,,desktop,2018
+browse:media:youtube:2019,Load a typical YouTube video then navigate to a next few videos. Stop and,"desktop,mobile","2019,emerging_market,javascript_heavy"
+browse:media:youtubetv:2019,Load a typical YouTube TV video then navigate to a next few videos. Stop,desktop,2019
+browse:news:cnn:2018,The second top website in http://www.alexa.com/topsites/category/News,"desktop,mobile","2018,health_check,javascript_heavy"
+browse:news:cricbuzz:2019,,mobile,"2019,emerging_market"
+browse:news:flipboard:2018,,desktop,2018
+browse:news:globo:2019,,mobile,"2019,emerging_market"
+browse:news:hackernews:2018,,desktop,2018
+browse:news:nytimes:2018,The third top website in http://www.alexa.com/topsites/category/News,desktop,2018
+browse:news:nytimes:2019,The third top website in http://www.alexa.com/topsites/category/News,mobile,2019
+browse:news:qq:2019,,mobile,"2019,international"
+browse:news:reddit:2018,The top website in http://www.alexa.com/topsites/category/News,desktop,2018
+browse:news:reddit:2019,,mobile,"2019,health_check"
+browse:news:toi:2019,,mobile,"2019,emerging_market"
+browse:news:washingtonpost:2019,Progressive website,mobile,2019
+browse:search:amp:2018,Story for Google's Accelerated Mobile Pages (AMP).,mobile,2018
+browse:search:amp:sxg:2019,Story for Google's Signed Exchange (SXG) Accelerated Mobile Pages (AMP).,mobile,2019
+browse:search:google:2018,A typical google search story:,desktop,2018
+browse:search:google_india:2018,A typical google search story in India:,desktop,"2018,international"
+browse:shopping:amazon:2019,,mobile,"2019,emerging_market"
+browse:shopping:avito:2019,,mobile,"2019,emerging_market"
+browse:shopping:flipkart:2019,,mobile,"2019,emerging_market"
+browse:shopping:lazada:2019,,mobile,"2019,emerging_market"
+browse:social:facebook:2019,,mobile,"2019,emerging_market"
+browse:social:facebook_infinite_scroll:2018,,"desktop,mobile","2018,infinite_scroll"
+browse:social:instagram:2019,,mobile,"2019,emerging_market"
+browse:social:pinterest_infinite_scroll:2019,,mobile,"2019,health_check,infinite_scroll"
+browse:social:tumblr_infinite_scroll:2018,,"desktop,mobile","2018,health_check,infinite_scroll,javascript_heavy"
+browse:social:twitter:2018,,desktop,2018
+browse:social:twitter:2019,,mobile,"2019,health_check"
+browse:social:twitter_infinite_scroll:2018,,desktop,"2018,infinite_scroll"
+browse:tech:discourse_infinite_scroll:2018,,"desktop,mobile","2018,infinite_scroll"
+browse:tools:docs_scrolling,Google Docs scrolling story:,desktop,"2020,javascript_heavy"
+browse:tools:earth:2020,Load Google Earth and search for the Empire State Building. Watch the,desktop,"2020,keyboard_input,wasm,webgl"
+browse:tools:maps:2019,Google maps story:,"desktop,mobile","2019,emerging_market,health_check,javascript_heavy,webgl"
+browse:tools:sheets:2019,,desktop,"2019,health_check,javascript_heavy"
+browse_accessibility:media:youtube,Tests interacting with the YouTube home page.,desktop,"2016,accessibility,keyboard_input"
+browse_accessibility:tech:codesearch:2018,Tests scrolling an element within a page.,desktop,"2018,accessibility,scroll"
+load:chrome:blank,Story that loads the about:blank page.,"desktop,mobile",2016
+load:games:alphabetty:2018,,desktop,2018
+load:games:bubbles:2019,"Load ""smarty bubbles"" game on famobi.com","desktop,mobile",2019
+load:games:lazors,,"desktop,mobile",2016
+load:games:miniclip:2018,,desktop,2018
+load:games:spychase:2018,,"desktop,mobile",2018
+load:media:9gag,,desktop,2016
+load:media:dailymotion:2019,,"desktop,mobile",2019
+load:media:facebook_photos:2018,Load a page of rihanna's facebook with a photo.,desktop,2018
+load:media:facebook_photos:2019,Load a page of rihanna's facebook with a photo.,mobile,"2019,emerging_market"
+load:media:flickr:2018,,"desktop,mobile",2018
+load:media:google_images:2018,,"desktop,mobile",2018
+load:media:imgur:2018,,"desktop,mobile",2018
+load:media:soundcloud:2018,,"desktop,mobile",2018
+load:media:youtube:2018,,"desktop,mobile","2018,emerging_market,health_check"
+load:news:bbc:2018,,desktop,2018
+load:news:bbc:2019,,mobile,2019
+load:news:cnn:2018,,"desktop,mobile","2018,health_check,javascript_heavy"
+load:news:flipboard,,desktop,2016
+load:news:hackernews:2018,,desktop,2018
+load:news:irctc:2019,,mobile,"2019,emerging_market"
+load:news:nytimes:2018,,desktop,2018
+load:news:nytimes:2019,,mobile,2019
+load:news:qq:2018,,desktop,"2018,international"
+load:news:qq:2019,,mobile,"2019,international"
+load:news:reddit:2018,,desktop,2018
+load:news:reddit:2019,,mobile,2019
+load:news:washingtonpost:2019,,mobile,2019
+load:news:wikipedia:2018,,"desktop,mobile","2018,emerging_market"
+load:search:amazon:2018,,desktop,2018
+load:search:amazon:2019,,mobile,2019
+load:search:baidu:2018,,"desktop,mobile","2018,international"
+load:search:ebay:2018,,"desktop,mobile",2018
+load:search:flipkart:2018,,desktop,"2018,international"
+load:search:google:2018,,"desktop,mobile",2018
+load:search:taobao:2018,,desktop,"2018,international"
+load:search:taobao:2019,,mobile,"2019,international"
+load:search:yahoo:2018,,"desktop,mobile",2018
+load:search:yandex:2018,,"desktop,mobile","2018,international"
+load:social:instagram:2018,,desktop,"2018,health_check"
+load:social:instagram:2019,,mobile,2019
+load:social:pinterest:2019,,"desktop,mobile","2019,javascript_heavy"
+load:social:twitter:2019,,mobile,2019
+load:social:vk:2018,,desktop,"2018,health_check,international"
+load:tools:chat:2020,,desktop,2020
+load:tools:docs:2019,Load a typical google doc page (2019).,"desktop,mobile",2019
+load:tools:drive:2019,,"desktop,mobile","2019,javascript_heavy"
+load:tools:dropbox:2019,,mobile,2019
+load:tools:gmail:2019,,"desktop,mobile","2019,health_check"
+load:tools:stackoverflow:2018,Load a typical question & answer page of stackoverflow.com,"desktop,mobile",2018
+load:tools:weather:2019,,"desktop,mobile","2019,health_check,javascript_heavy"
+load_accessibility:media:wikipedia:2018,"Wikipedia page on Accessibility. Long, but very simple, clean layout.",desktop,"2018,accessibility"
+load_accessibility:shopping:amazon:2018,Amazon results page. Good example of a site with a data table.,desktop,"2018,accessibility"
+long_running:tools:gmail-background,,"desktop,mobile",2016
+long_running:tools:gmail-foreground,,"desktop,mobile","2016,health_check"
+multitab:misc:typical24,"Load 24 different web sites in 24 tabs, then cycle through each tab.",desktop,"2016,tabs_switching"
+multitab:misc:typical24:2018,"Load 24 different web sites in 24 tabs, then cycle through each tab.",desktop,"2018,international,tabs_switching"
+play:media:google_play_music,"Browse the songs list in music.google.com, then play a song.",desktop,"2016,health_check"
+play:media:soundcloud:2018,"Load soundcloud.com, search for ""Smooth Jazz"", then play a song.",desktop,2018

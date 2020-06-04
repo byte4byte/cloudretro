@@ -40,13 +40,12 @@ public class PassphraseActivityTest {
     private Context mContext;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContext = InstrumentationRegistry.getTargetContext();
     }
 
     @After
-    public void tearDown() throws Exception {
-        // Clear ProfileSyncService in case it was mocked.
+    public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(() -> ProfileSyncService.resetForTests());
     }
 
@@ -57,12 +56,11 @@ public class PassphraseActivityTest {
     @SmallTest
     @Feature({"Sync"})
     @RetryOnFailure
-    public void testCallbackAfterBackgrounded() throws Exception {
+    public void testCallbackAfterBackgrounded() {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        SigninTestUtil.addAndSignInTestAccount();
-
-        // Override before creating the activity so we know initialized is false.
+        // Override before signing in, otherwise regular ProfileSyncService will be created.
         overrideProfileSyncService();
+        SigninTestUtil.addAndSignInTestAccount();
 
         // PassphraseActivity won't start if an account isn't set.
         Assert.assertNotNull(ChromeSigninController.get().getSignedInAccountName());
@@ -79,9 +77,12 @@ public class PassphraseActivityTest {
             // Fake sync's backend finishing its initialization.
             FakeProfileSyncService pss = (FakeProfileSyncService) ProfileSyncService.get();
             pss.setEngineInitialized(true);
-            pss.syncStateChanged();
         });
         // Nothing crashed; success!
+
+        // Finish the activity before resetting the state.
+        activity.finish();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     private PassphraseActivity launchPassphraseActivity() {

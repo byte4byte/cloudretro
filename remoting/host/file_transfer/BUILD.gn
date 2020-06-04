@@ -18,14 +18,17 @@ source_set("file_transfer") {
     "get_desktop_directory_win.cc",
   ]
 
-  public_deps = [
-    ":common",
-  ]
+  public_deps = [ ":common" ]
 
   deps = [
     "//base",
     "//remoting/protocol",
+    "//remoting/resources",
   ]
+
+  if (is_mac) {
+    libs = [ "AppKit.framework" ]
+  }
 
   if (!is_mac && !is_win) {
     sources += [ "ensure_user_no_op.cc" ]

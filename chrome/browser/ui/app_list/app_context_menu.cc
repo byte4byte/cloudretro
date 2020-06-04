@@ -4,13 +4,15 @@
 
 #include "chrome/browser/ui/app_list/app_context_menu.h"
 
+#include "ash/public/cpp/shelf_model.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/app_list/app_context_menu_delegate.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icon_types.h"
-#include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/vector_icons.h"
 
 namespace app_list {
@@ -22,8 +24,7 @@ AppContextMenu::AppContextMenu(AppContextMenuDelegate* delegate,
     : delegate_(delegate),
       profile_(profile),
       app_id_(app_id),
-      controller_(controller) {
-}
+      controller_(controller) {}
 
 AppContextMenu::~AppContextMenu() = default;
 
@@ -33,40 +34,22 @@ void AppContextMenu::GetMenuModel(GetMenuModelCallback callback) {
   std::move(callback).Run(std::move(menu_model));
 }
 
-void AppContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
-  // Show Pin/Unpin option if shelf is available.
-  if (controller_->GetPinnable(app_id()) != AppListControllerDelegate::NO_PIN) {
-    AddContextMenuOption(menu_model, ash::TOGGLE_PIN,
-                         controller_->IsAppPinned(app_id_)
-                             ? IDS_APP_LIST_CONTEXT_MENU_UNPIN
-                             : IDS_APP_LIST_CONTEXT_MENU_PIN);
-  }
-}
-
 bool AppContextMenu::IsItemForCommandIdDynamic(int command_id) const {
   return command_id == ash::TOGGLE_PIN;
 }
 
 base::string16 AppContextMenu::GetLabelForCommandId(int command_id) const {
-  if (command_id == ash::TOGGLE_PIN) {
-    // Return "{Pin to, Unpin from} shelf" or "Pinned by administrator".
-    // Note this only exists on Ash desktops.
-    if (controller_->GetPinnable(app_id()) ==
-        AppListControllerDelegate::PIN_FIXED) {
-      return l10n_util::GetStringUTF16(
-          IDS_APP_LIST_CONTEXT_MENU_PIN_ENFORCED_BY_POLICY);
-    }
-    return controller_->IsAppPinned(app_id_) ?
-        l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_UNPIN) :
-        l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_PIN);
+  DCHECK_EQ(command_id, ash::TOGGLE_PIN);
+  // Return "{Pin to, Unpin from} shelf" or "Pinned by administrator".
+  // Note this only exists on Ash desktops.
+  if (controller_->GetPinnable(app_id()) ==
+      AppListControllerDelegate::PIN_FIXED) {
+    return l10n_util::GetStringUTF16(
+        IDS_APP_LIST_CONTEXT_MENU_PIN_ENFORCED_BY_POLICY);
   }
-
-  NOTREACHED();
-  return base::string16();
-}
-
-bool AppContextMenu::IsCommandIdChecked(int command_id) const {
-  return false;
+  return controller_->IsAppPinned(app_id_)
+             ? l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_UNPIN)
+             : l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_PIN);
 }
 
 bool AppContextMenu::IsCommandIdEnabled(int command_id) const {
@@ -77,51 +60,26 @@ bool AppContextMenu::IsCommandIdEnabled(int command_id) const {
   return true;
 }
 
-void AppContextMenu::TogglePin(const std::string& shelf_app_id) {
-  DCHECK_EQ(AppListControllerDelegate::PIN_EDITABLE,
-      controller_->GetPinnable(shelf_app_id));
-  if (controller_->IsAppPinned(shelf_app_id))
-    controller_->UnpinApp(shelf_app_id);
-  else
-    controller_->PinApp(shelf_app_id);
+void AppContextMenu::ExecuteCommand(int command_id, int event_flags) {
+  switch (command_id) {
+    case ash::TOGGLE_PIN:
+      TogglePin(app_id_);
+      break;
+  }
 }
 
-void AppContextMenu::AddContextMenuOption(ui::SimpleMenuModel* menu_model,
-                                          ash::CommandId command_id,
-                                          int string_id) {
-  // Do not include disabled items.
-  if (!IsCommandIdEnabled(command_id))
-    return;
-
-  const gfx::VectorIcon& icon = GetMenuItemVectorIcon(command_id, string_id);
-  if (!icon.is_empty()) {
-    const views::MenuConfig& menu_config = views::MenuConfig::instance();
-    menu_model->AddItemWithStringIdAndIcon(
-        command_id, string_id,
-        gfx::CreateVectorIcon(icon, menu_config.touchable_icon_size,
-                              menu_config.touchable_icon_color));
-    return;
-  }
-  // Check items use default icons.
-  if (command_id == ash::USE_LAUNCH_TYPE_PINNED ||
-      command_id == ash::USE_LAUNCH_TYPE_REGULAR ||
-      command_id == ash::USE_LAUNCH_TYPE_FULLSCREEN ||
-      command_id == ash::USE_LAUNCH_TYPE_WINDOW) {
-    menu_model->AddCheckItemWithStringId(command_id, string_id);
-    return;
-  }
-  if (command_id == ash::NOTIFICATION_CONTAINER) {
-    NOTREACHED()
-        << "NOTIFICATION_CONTAINER is added by NotificationMenuController.";
-    return;
-  }
-  menu_model->AddItemWithStringId(command_id, string_id);
+ui::ImageModel AppContextMenu::GetIconForCommandId(int command_id) const {
+  DCHECK_EQ(command_id, ash::TOGGLE_PIN);
+  const gfx::VectorIcon& icon =
+      GetMenuItemVectorIcon(command_id, controller_->IsAppPinned(app_id_)
+                                            ? IDS_APP_LIST_CONTEXT_MENU_UNPIN
+                                            : IDS_APP_LIST_CONTEXT_MENU_PIN);
+  return ui::ImageModel::FromVectorIcon(icon);
 }
 
-const gfx::VectorIcon& AppContextMenu::GetMenuItemVectorIcon(
-    int command_id,
-    int string_id) const {
-  static const gfx::VectorIcon blank = {};
+// static
+const gfx::VectorIcon& AppContextMenu::GetMenuItemVectorIcon(int command_id,
+                                                             int string_id) {
   switch (command_id) {
     case ash::LAUNCH_NEW:
       if (string_id == IDS_APP_LIST_CONTEXT_MENU_NEW_WINDOW)
@@ -145,44 +103,75 @@ const gfx::VectorIcon& AppContextMenu::GetMenuItemVectorIcon(
       return views::kNewIncognitoWindowIcon;
     case ash::INSTALL:
       // Deprecated.
-      return blank;
+      return gfx::kNoneIcon;
+    case ash::SETTINGS:
+      return vector_icons::kSettingsIcon;
     case ash::USE_LAUNCH_TYPE_PINNED:
     case ash::USE_LAUNCH_TYPE_REGULAR:
     case ash::USE_LAUNCH_TYPE_FULLSCREEN:
     case ash::USE_LAUNCH_TYPE_WINDOW:
       // Check items use the default icon.
-      return blank;
+      return gfx::kNoneIcon;
     case ash::NOTIFICATION_CONTAINER:
       NOTREACHED() << "NOTIFICATION_CONTAINER does not have an icon, and it is "
                       "added to the model by NotificationMenuController.";
-      return blank;
+      return gfx::kNoneIcon;
+    case ash::SHUTDOWN_GUEST_OS:
+      return kShutdownGuestOsIcon;
     default:
       NOTREACHED();
-      return blank;
+      return gfx::kNoneIcon;
   }
 }
 
-void AppContextMenu::ExecuteCommand(int command_id, int event_flags) {
-  switch (command_id) {
-    case ash::TOGGLE_PIN:
-      TogglePin(app_id_);
-      break;
+void AppContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
+  // Show Pin/Unpin option if shelf is available.
+  if (controller_->GetPinnable(app_id()) != AppListControllerDelegate::NO_PIN) {
+    AddContextMenuOption(menu_model, ash::TOGGLE_PIN,
+                         controller_->IsAppPinned(app_id_)
+                             ? IDS_APP_LIST_CONTEXT_MENU_UNPIN
+                             : IDS_APP_LIST_CONTEXT_MENU_PIN);
   }
 }
 
-bool AppContextMenu::GetIconForCommandId(int command_id,
-                                         gfx::Image* icon) const {
-  if (command_id == ash::TOGGLE_PIN) {
-    const views::MenuConfig& menu_config = views::MenuConfig::instance();
-    *icon = gfx::Image(gfx::CreateVectorIcon(
-        GetMenuItemVectorIcon(command_id, controller_->IsAppPinned(app_id_)
-                                              ? IDS_APP_LIST_CONTEXT_MENU_UNPIN
-                                              : IDS_APP_LIST_CONTEXT_MENU_PIN),
-        menu_config.touchable_icon_size, menu_config.touchable_icon_color));
-    return true;
+void AppContextMenu::TogglePin(const std::string& shelf_app_id) {
+  DCHECK_EQ(AppListControllerDelegate::PIN_EDITABLE,
+            controller_->GetPinnable(shelf_app_id));
+  ash::ShelfModel::ScopedUserTriggeredMutation user_triggered(
+      ash::ShelfModel::Get());
+  if (controller_->IsAppPinned(shelf_app_id))
+    controller_->UnpinApp(shelf_app_id);
+  else
+    controller_->PinApp(shelf_app_id);
+}
+
+void AppContextMenu::AddContextMenuOption(ui::SimpleMenuModel* menu_model,
+                                          ash::CommandId command_id,
+                                          int string_id) {
+  // Do not include disabled items.
+  if (!IsCommandIdEnabled(command_id))
+    return;
+
+  const gfx::VectorIcon& icon = GetMenuItemVectorIcon(command_id, string_id);
+  if (!icon.is_empty()) {
+    menu_model->AddItemWithStringIdAndIcon(
+        command_id, string_id, ui::ImageModel::FromVectorIcon(icon));
+    return;
   }
-  NOTREACHED();
-  return false;
+  // Check items use default icons.
+  if (command_id == ash::USE_LAUNCH_TYPE_PINNED ||
+      command_id == ash::USE_LAUNCH_TYPE_REGULAR ||
+      command_id == ash::USE_LAUNCH_TYPE_FULLSCREEN ||
+      command_id == ash::USE_LAUNCH_TYPE_WINDOW) {
+    menu_model->AddCheckItemWithStringId(command_id, string_id);
+    return;
+  }
+  if (command_id == ash::NOTIFICATION_CONTAINER) {
+    NOTREACHED()
+        << "NOTIFICATION_CONTAINER is added by NotificationMenuController.";
+    return;
+  }
+  menu_model->AddItemWithStringId(command_id, string_id);
 }
 
 }  // namespace app_list

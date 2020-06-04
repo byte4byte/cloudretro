@@ -12,7 +12,8 @@
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
-#include "chrome/browser/image_decoder.h"
+#include "base/task/thread_pool.h"
+#include "chrome/browser/image_decoder/image_decoder.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -29,14 +30,14 @@ class IconImageRequest : public ImageDecoder::ImageRequest {
   void OnImageDecoded(const SkBitmap& decoded_image) override {
     gfx::ImageSkia image = gfx::ImageSkia::CreateFrom1xBitmap(decoded_image);
     image.MakeThreadSafe();
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(result_callback_, image));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(result_callback_, image));
     delete this;
   }
 
   void OnDecodeImageFailed() override {
     LOG(ERROR) << "Failed to decode icon image.";
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(result_callback_, base::Optional<gfx::ImageSkia>()));
     delete this;
@@ -56,7 +57,7 @@ void LoadOnBlockingPool(
   std::string data;
   if (!base::ReadFileToString(base::FilePath(icon_path), &data)) {
     LOG(ERROR) << "Failed to read icon file.";
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(result_callback, base::Optional<gfx::ImageSkia>()));
     return;
@@ -70,13 +71,13 @@ void LoadOnBlockingPool(
 }
 
 KioskAppIconLoader::KioskAppIconLoader(Delegate* delegate)
-    : delegate_(delegate), weak_factory_(this) {}
+    : delegate_(delegate) {}
 
 KioskAppIconLoader::~KioskAppIconLoader() = default;
 
 void KioskAppIconLoader::Start(const base::FilePath& icon_path) {
   scoped_refptr<base::SequencedTaskRunner> task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   task_runner->PostTask(
       FROM_HERE,

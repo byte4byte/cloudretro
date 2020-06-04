@@ -61,8 +61,7 @@ const int kTransportInfoSendDelayMs = 20;
 // XML namespace for the transport elements.
 const char kTransportNamespace[] = "google:remoting:webrtc";
 
-// Global minimum/maximum bitrates set for the PeerConnection.
-const int kMinBitrateBps = 1e6;  // 1 Mbps.
+// Global maximum bitrate set for the PeerConnection.
 const int kMaxBitrateBps = 1e8;  // 100 Mbps.
 
 // Frequency of polling for RTCStats. Polling is needed because WebRTC native
@@ -161,8 +160,8 @@ class CreateSessionDescriptionObserver
   void OnSuccess(webrtc::SessionDescriptionInterface* desc) override {
     std::move(result_callback_).Run(base::WrapUnique(desc), std::string());
   }
-  void OnFailure(const std::string& error) override {
-    std::move(result_callback_).Run(nullptr, error);
+  void OnFailure(webrtc::RTCError error) override {
+    std::move(result_callback_).Run(nullptr, error.message());
   }
 
  protected:
@@ -195,8 +194,8 @@ class SetSessionDescriptionObserver
     std::move(result_callback_).Run(true, std::string());
   }
 
-  void OnFailure(const std::string& error) override {
-    std::move(result_callback_).Run(false, error);
+  void OnFailure(webrtc::RTCError error) override {
+    std::move(result_callback_).Run(false, error.message());
   }
 
  protected:
@@ -288,8 +287,10 @@ class WebrtcTransport::PeerConnectionWrapper
 
     rtc_config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
 
+    webrtc::PeerConnectionDependencies dependencies(this);
+    dependencies.allocator = std::move(port_allocator);
     peer_connection_ = peer_connection_factory_->CreatePeerConnection(
-        rtc_config, std::move(port_allocator), nullptr, this);
+        rtc_config, std::move(dependencies));
   }
 
   ~PeerConnectionWrapper() override {
@@ -371,8 +372,7 @@ WebrtcTransport::WebrtcTransport(
     EventHandler* event_handler)
     : transport_context_(transport_context),
       event_handler_(event_handler),
-      handshake_hmac_(crypto::HMAC::SHA256),
-      weak_factory_(this) {
+      handshake_hmac_(crypto::HMAC::SHA256) {
   transport_context_->set_relay_mode(TransportContext::RelayMode::TURN);
 
   video_encoder_factory_ = new WebrtcDummyVideoEncoderFactory();
@@ -570,6 +570,7 @@ void WebrtcTransport::Close(ErrorCode error) {
 }
 
 void WebrtcTransport::ApplySessionOptions(const SessionOptions& options) {
+  transport_context_->set_session_options(options);
   base::Optional<std::string> video_codec = options.Get("Video-Codec");
   if (video_codec) {
     preferred_video_codec_ = *video_codec;
@@ -811,11 +812,6 @@ void WebrtcTransport::OnStatsDelivered(
   // (~600kbps).
   // Set the global bitrate caps in addition to the VideoSender bitrates. The
   // global caps affect the probing configuration used by b/w estimator.
-  // Setting min bitrate here enables padding.
-  //
-  // TODO(sergeyu): Padding needs to be enabled to workaround b/w estimator not
-  // handling spiky traffic patterns well. This won't be necessary with a
-  // better bandwidth estimator.
   int max_bitrate_bps = MaxBitrateForConnection();
   SetPeerConnectionBitrates(max_bitrate_bps);
   SetSenderBitrates(max_bitrate_bps);
@@ -840,7 +836,6 @@ int WebrtcTransport::MaxBitrateForConnection() {
 
 void WebrtcTransport::SetPeerConnectionBitrates(int max_bitrate_bps) {
   webrtc::BitrateSettings bitrate;
-  bitrate.min_bitrate_bps = kMinBitrateBps;
   bitrate.max_bitrate_bps = max_bitrate_bps;
   peer_connection()->SetBitrate(bitrate);
 }
@@ -866,7 +861,6 @@ void WebrtcTransport::SetSenderBitrates(int max_bitrate_bps) {
                << sender->id();
   }
 
-  parameters.encodings[0].min_bitrate_bps = kMinBitrateBps;
   parameters.encodings[0].max_bitrate_bps = max_bitrate_bps;
   webrtc::RTCError result = sender->SetParameters(parameters);
   DCHECK(result.ok()) << "SetParameters() failed: " << result.message();

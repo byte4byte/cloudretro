@@ -10,12 +10,14 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
+#include "base/location.h"
+#include "base/sequenced_task_runner.h"
 #include "build/buildflag.h"
-#include "chromeos/services/ime/public/cpp/buildflags.h"
-
-#if BUILDFLAG(ENABLE_CROS_IME_DECODER)
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/services/ime/constants.h"
 #include "chromeos/services/ime/decoder/decoder_engine.h"
-#endif
+#include "chromeos/services/ime/public/cpp/buildflags.h"
 
 namespace chromeos {
 namespace ime {
@@ -30,34 +32,24 @@ enum SimpleDownloadError {
 
 }  // namespace
 
-ImeService::ImeService(
-    mojo::PendingReceiver<service_manager::mojom::Service> receiver)
-    : service_binding_(this, std::move(receiver)) {}
+ImeService::ImeService(mojo::PendingReceiver<mojom::ImeService> receiver)
+    : receiver_(this, std::move(receiver)),
+      main_task_runner_(base::SequencedTaskRunnerHandle::Get()) {
+  input_engine_ = chromeos::features::IsImeDecoderWithSandboxEnabled()
+                      ? std::make_unique<DecoderEngine>(this)
+                      : std::make_unique<InputEngine>();
+}
 
 ImeService::~ImeService() = default;
 
-void ImeService::OnStart() {
-  binders_.Add(base::BindRepeating(&ImeService::AddInputEngineManagerReceiver,
-                                   base::Unretained(this)));
-
-  binders_.Add(base::BindRepeating(
-      &ImeService::BindPlatformAccessClientReceiver, base::Unretained(this)));
-
-  manager_receivers_.set_disconnect_handler(base::BindRepeating(
-      &ImeService::OnConnectionLost, base::Unretained(this)));
-
-#if BUILDFLAG(ENABLE_CROS_IME_DECODER)
-  input_engine_ = std::make_unique<DecoderEngine>(this);
-#else
-  input_engine_ = std::make_unique<InputEngine>();
-#endif
+void ImeService::SetPlatformAccessProvider(
+    mojo::PendingRemote<mojom::PlatformAccessProvider> provider) {
+  platform_access_.Bind(std::move(provider));
 }
 
-void ImeService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle receiver_pipe) {
-  binders_.TryBind(interface_name, &receiver_pipe);
+void ImeService::BindInputEngineManager(
+    mojo::PendingReceiver<mojom::InputEngineManager> receiver) {
+  manager_receivers_.Add(this, std::move(receiver));
 }
 
 void ImeService::ConnectToImeEngine(
@@ -72,51 +64,37 @@ void ImeService::ConnectToImeEngine(
   std::move(callback).Run(bound);
 }
 
-void ImeService::AddInputEngineManagerReceiver(
-    mojo::PendingReceiver<mojom::InputEngineManager> receiver) {
-  manager_receivers_.Add(this, std::move(receiver));
-  // TODO(https://crbug.com/837156): Reset the cleanup timer.
-}
-
-void ImeService::BindPlatformAccessClientReceiver(
-    mojo::PendingReceiver<mojom::PlatformAccessClient> receiver) {
-  if (!access_receiver_.is_bound()) {
-    access_receiver_.Bind(std::move(receiver));
-  }
-}
-
-void ImeService::SetPlatformAccessProvider(
-    mojo::PendingRemote<mojom::PlatformAccessProvider> access) {
-  platform_access_.Bind(std::move(access));
-}
-
-void ImeService::OnConnectionLost() {
-  if (manager_receivers_.empty()) {
-    service_binding_.RequestClose();
-    // TODO(https://crbug.com/837156): Set a timer to start a cleanup.
-  }
-}
-
 void ImeService::SimpleDownloadFinished(SimpleDownloadCallback callback,
                                         const base::FilePath& file) {
   if (file.empty()) {
     callback(SIMPLE_DOWNLOAD_ERROR_FAILED, "");
   } else {
-    callback(SIMPLE_DOWNLOAD_ERROR_OK, file.MaybeAsASCII().c_str());
+    // Convert downloaded file path to an whitelisted path.
+    base::FilePath target(kUserInputMethodsDirPath);
+    target = target.Append(kLanguageDataDirName).Append(file.BaseName());
+    callback(SIMPLE_DOWNLOAD_ERROR_OK, target.MaybeAsASCII().c_str());
   }
 }
 
 const char* ImeService::GetImeBundleDir() {
-  return "";
+  return kBundledInputMethodsDirPath;
 }
 
 const char* ImeService::GetImeGlobalDir() {
-  // Global IME data dir will not be supported yet.
+  // Global IME data is supported yet.
   return "";
 }
 
 const char* ImeService::GetImeUserHomeDir() {
-  return "";
+  return kUserInputMethodsDirPath;
+}
+
+void ImeService::RunInMainSequence(ImeSequencedTask task, int task_id) {
+  // This helps ensure that tasks run in the **main** SequencedTaskRunner.
+  // E.g. the Mojo Remotes are bound on the main_task_runner_, so that any task
+  // invoked Mojo call from other threads (sequences) should be posted to
+  // main_task_runner_ by this function.
+  main_task_runner_->PostTask(FROM_HERE, base::BindOnce(task, task_id));
 }
 
 int ImeService::SimpleDownloadToFile(const char* url,
@@ -124,13 +102,18 @@ int ImeService::SimpleDownloadToFile(const char* url,
                                      SimpleDownloadCallback callback) {
   if (!platform_access_.is_bound()) {
     callback(SIMPLE_DOWNLOAD_ERROR_ABORTED, "");
+    LOG(ERROR) << "Failed to download due to missing binding.";
   } else {
-    GURL download_url(url);
-    // |file_path| must be relative.
-    base::FilePath relative_file_path(file_path);
+    // Target path MUST be relative for security concerns.
+    // Compose a relative download path beased on the request.
+    base::FilePath initial_path(file_path);
+    base::FilePath relative_path(kInputMethodsDirName);
+    relative_path = relative_path.Append(kLanguageDataDirName)
+                        .Append(initial_path.BaseName());
 
+    GURL download_url(url);
     platform_access_->DownloadImeFileTo(
-        download_url, relative_file_path,
+        download_url, relative_path,
         base::BindOnce(&ImeService::SimpleDownloadFinished,
                        base::Unretained(this), std::move(callback)));
   }

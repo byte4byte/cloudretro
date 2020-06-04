@@ -9,44 +9,30 @@
 
 #import "ios/public/provider/chrome/browser/voice/logo_animation_controller.h"
 
-class WebStateList;
-@protocol ApplicationCommands;
-@protocol BrowserCommands;
-@protocol OmniboxFocuser;
-@protocol FakeboxFocuser;
-@protocol SnackbarCommands;
+namespace web {
+class WebState;
+}
+
 @protocol NewTabPageControllerDelegate;
 
 // Coordinator handling the NTP.
 @interface NewTabPageCoordinator
     : ChromeCoordinator <LogoAnimationControllerOwnerOwner>
 
-// Initializes this Coordinator with its |browserState|.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-    NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-    NS_UNAVAILABLE;
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController
-                              browserState:
-                                  (ios::ChromeBrowserState*)browserState
-    NS_UNAVAILABLE;
+// Initializes this Coordinator with its |browser|.
+- (instancetype)initWithBrowser:(Browser*)browser NS_DESIGNATED_INITIALIZER;
+
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
                                    browser:(Browser*)browser NS_UNAVAILABLE;
 
 // ViewController associated with this coordinator.
 @property(nonatomic, strong, readonly) UIViewController* viewController;
 
-// The web state list to pass to ContentSuggestionsCoordinator.
-@property(nonatomic, assign) WebStateList* webStateList;
+// Webstate associated with this coordinator.
+@property(nonatomic, assign) web::WebState* webState;
+
 // The toolbar delegate to pass to ContentSuggestionsCoordinator.
 @property(nonatomic, weak) id<NewTabPageControllerDelegate> toolbarDelegate;
-// The dispatcher to pass to ContentSuggestionsCoordinator.
-@property(nonatomic, weak) id<ApplicationCommands,
-                              BrowserCommands,
-                              OmniboxFocuser,
-                              FakeboxFocuser,
-                              SnackbarCommands>
-    dispatcher;
 
 // Returns |YES| if the coordinator is started.
 @property(nonatomic, assign, getter=isStarted) BOOL started;
@@ -56,7 +42,7 @@ class WebStateList;
 
 // Exposes content inset of contentSuggestions collectionView to ensure all of
 // content is visible under the bottom toolbar.
-@property(nonatomic) UIEdgeInsets contentInset;
+@property(nonatomic, readonly) UIEdgeInsets contentInset;
 
 // Animates the NTP fakebox to the focused position and focuses the real
 // omnibox.
@@ -68,6 +54,14 @@ class WebStateList;
 // The content offset of the scroll view.
 - (CGPoint)contentOffset;
 
+// Reloads the content of the NewTabPage.
+- (void)reload;
+
+// The location bar has lost focus.
+- (void)locationBarDidResignFirstResponder;
+
+// Tell location bar has taken focus.
+- (void)locationBarDidBecomeFirstResponder;
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_NTP_NEW_TAB_PAGE_COORDINATOR_H_

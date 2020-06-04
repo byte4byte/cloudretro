@@ -7,14 +7,18 @@ package org.chromium.content_public.browser;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcelable;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
+
+import java.util.List;
 
 /**
  * The WebContents Java wrapper to allow communicating with the native WebContents object.
@@ -152,6 +156,17 @@ public interface WebContents extends Parcelable {
     RenderWidgetHostView getRenderWidgetHostView();
 
     /**
+     * @return The WebContents that are nested within this one.
+     */
+    List<? extends WebContents> getInnerWebContents();
+
+    /**
+     * @return The WebContents Visibility. See native WebContents::GetVisibility.
+     */
+    @Visibility
+    int getVisibility();
+
+    /**
      * @return The title for the current visible page.
      */
     String getTitle();
@@ -159,7 +174,15 @@ public interface WebContents extends Parcelable {
     /**
      * @return The URL for the current visible page.
      */
-    String getVisibleUrl();
+    GURL getVisibleUrl();
+
+    /**
+     * @return The URL for the current visible page.
+     *
+     * @deprecated Please use {@link #getVisibleUrl} instead.
+     */
+    @Deprecated
+    String getVisibleUrlString();
 
     /**
      * @return The character encoding for the current visible page.
@@ -176,6 +199,14 @@ public interface WebContents extends Parcelable {
      *         document (rather than being a navigation within the same document).
      */
     boolean isLoadingToDifferentDocument();
+
+    /**
+     * Runs the beforeunload handler, if any. The tab will be closed if there's no beforeunload
+     * handler or if the user accepts closing.
+     *
+     * @param autoCancel See C++ WebContents for explanation.
+     */
+    void dispatchBeforeUnload(boolean autoCancel);
 
     /**
      * Stop any pending navigation.
@@ -223,8 +254,18 @@ public interface WebContents extends Parcelable {
      */
     boolean focusLocationBarByDefault();
 
+    /**
+     * Sets or removes page level focus.
+     * @param hasFocus Indicates if focus should be set or removed.
+     */
+    void setFocus(boolean hasFocus);
 
-     /**
+    /**
+     * @return true if the renderer is in fullscreen mode.
+     */
+    boolean isFullscreenForCurrentTab();
+
+    /**
      * Inform WebKit that Fullscreen mode has been exited by the user.
      */
     void exitFullscreen();
@@ -306,18 +347,16 @@ public interface WebContents extends Parcelable {
     void addMessageToDevToolsConsole(int level, String message);
 
     /**
-     * Post a message to a frame.
+     * Post a message to main frame.
      *
-     * @param frameName The name of the frame. If the name is null the message is posted
-     *                  to the main frame.
      * @param message   The message
      * @param targetOrigin  The target origin. If the target origin is a "*" or a
      *                  empty string, it indicates a wildcard target origin.
      * @param ports The sent message ports, if any. Pass null if there is no
      *                  message ports to pass.
      */
-    void postMessageToFrame(@Nullable String frameName, String message, String sourceOrigin,
-            String targetOrigin, @Nullable MessagePort[] ports);
+    void postMessageToMainFrame(String message, String sourceOrigin, String targetOrigin,
+            @Nullable MessagePort[] ports);
 
     /**
      * Creates a message channel for sending postMessage requests and returns the ports for
@@ -345,9 +384,9 @@ public interface WebContents extends Parcelable {
     int getThemeColor();
 
     /**
-     * @return Current page load progress on a scale of 0 to 100.
+     * @return Current page load progress on a scale of 0 to 1.
      */
-    int getLoadProgress();
+    float getLoadProgress();
 
     /**
      * Initiate extraction of text, HTML, and other information for clipping puposes (smart clip)
@@ -400,11 +439,6 @@ public interface WebContents extends Parcelable {
      * @param disable True if spatial navigation should never be used.
      */
     void setSpatialNavigationDisabled(boolean disabled);
-
-    /**
-     * Reloads all the Lo-Fi images in this WebContents.
-     */
-    void reloadLoFiImages();
 
     /**
      * Sends a request to download the given image {@link url}.
@@ -464,16 +498,16 @@ public interface WebContents extends Parcelable {
     void setSize(int width, int height);
 
     /**
-     * Gets the view size width of the WebContents. The size is in physical pixels.
+     * Gets the view size width of the WebContents.
      *
-     * @return The width of the view.
+     * @return The width of the view in dip.
      */
     int getWidth();
 
     /**
-     * Gets the view size width of the WebContents. The size is in physical pixels.
+     * Gets the view size width of the WebContents.
      *
-     * @return The width of the view.
+     * @return The width of the view in dip.
      */
     int getHeight();
 
@@ -489,4 +523,11 @@ public interface WebContents extends Parcelable {
      * Notify that web preferences needs update for various properties.
      */
     void notifyRendererPreferenceUpdate();
+
+    /**
+     * Notify that the browser controls heights have changed. Any change to the top controls height,
+     * bottom controls height, top controls min-height, and bottom controls min-height will call
+     * this. Min-height is the minimum visible height the controls can have.
+     */
+    void notifyBrowserControlsHeightChanged();
 }

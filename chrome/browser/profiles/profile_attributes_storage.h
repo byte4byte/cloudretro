@@ -51,6 +51,7 @@ class ProfileAttributesStorage
                           const base::string16& name,
                           const std::string& gaia_id,
                           const base::string16& user_name,
+                          bool is_consented_primary_account,
                           size_t icon_index,
                           const std::string& supervised_user_id,
                           const AccountId& account_id) = 0;
@@ -83,7 +84,19 @@ class ProfileAttributesStorage
   base::string16 ChooseNameForNewProfile(size_t icon_index) const;
 
   // Determines whether |name| is one of the default assigned names.
-  bool IsDefaultProfileName(const base::string16& name) const;
+  // On Desktop, if |include_check_for_legacy_profile_name| is false,
+  // |IsDefaultProfileName()| would only return true if the |name| is in the
+  // form of |Person %n| which is the new default local profile name. If
+  // |include_check_for_legacy_profile_name| is true, we will also check if name
+  // is one of the legacy profile names (e.g. Saratoga, Default user, ..).
+  // For other platforms, so far |include_check_for_legacy_profile_name|
+  // is not used.
+  bool IsDefaultProfileName(const base::string16& name,
+                            bool include_check_for_legacy_profile_name) const;
+
+  // Records statistics about profiles as would be visible in the profile picker
+  // (if we would display it in this moment).
+  void RecordProfilesState();
 
   // Returns an avatar icon index that can be assigned to a newly created
   // profile. Note that the icon may not be unique since there are a limited
@@ -118,6 +131,10 @@ class ProfileAttributesStorage
   // ProfileAttributesEntry.
   void NotifyOnProfileAvatarChanged(const base::FilePath& profile_path) const;
 
+  // Disables the periodic reporting of profile metrics, as this is causing
+  // tests to time out.
+  virtual void DisableProfileMetricsForTesting() {}
+
  protected:
   FRIEND_TEST_ALL_PREFIXES(ProfileInfoCacheTest, EntriesInAttributesStorage);
   FRIEND_TEST_ALL_PREFIXES(ProfileAttributesStorageTest,
@@ -136,7 +153,8 @@ class ProfileAttributesStorage
   void SaveAvatarImageAtPath(const base::FilePath& profile_path,
                              gfx::Image image,
                              const std::string& key,
-                             const base::FilePath& image_path);
+                             const base::FilePath& image_path,
+                             base::OnceClosure callback);
 
   PrefService* const prefs_;
   mutable std::unordered_map<base::FilePath::StringType,
@@ -178,7 +196,15 @@ class ProfileAttributesStorage
   // Called when the picture given by |file_name| has been saved to disk. Used
   // both for the GAIA profile picture and the high res avatar files.
   void OnAvatarPictureSaved(const std::string& file_name,
-                            const base::FilePath& profile_path) const;
+                            const base::FilePath& profile_path,
+                            base::OnceClosure callback,
+                            bool success) const;
+
+  // Helper function that calls SaveAvatarImageAtPath without a callback.
+  void SaveAvatarImageAtPathNoCallback(const base::FilePath& profile_path,
+                                       gfx::Image image,
+                                       const std::string& key,
+                                       const base::FilePath& image_path);
 
   // Notifies observers.
   void NotifyOnProfileHighResAvatarLoaded(

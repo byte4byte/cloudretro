@@ -10,13 +10,14 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/task_runner_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/base/network_change_notifier.h"
@@ -52,7 +53,7 @@
 
 namespace remoting {
 
-using base::test::ScopedTaskEnvironment;
+using base::test::TaskEnvironment;
 using protocol::ChannelConfig;
 
 namespace {
@@ -108,18 +109,18 @@ class ProtocolPerfTest
       public HostStatusObserver {
  public:
   ProtocolPerfTest()
-      : task_environment_(ScopedTaskEnvironment::MainThreadType::IO),
+      : task_environment_(TaskEnvironment::MainThreadType::IO),
         host_thread_("host"),
         capture_thread_("capture"),
         encode_thread_("encode"),
         decode_thread_("decode") {
     host_thread_.StartWithOptions(
-        base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+        base::Thread::Options(base::MessagePumpType::IO, 0));
     capture_thread_.Start();
     encode_thread_.Start();
     decode_thread_.Start();
 
-    network_change_notifier_ = net::NetworkChangeNotifier::Create();
+    network_change_notifier_ = net::NetworkChangeNotifier::CreateIfNeeded();
 
     desktop_environment_factory_.reset(
         new FakeDesktopEnvironmentFactory(capture_thread_.task_runner()));
@@ -154,6 +155,9 @@ class ProtocolPerfTest
   protocol::CursorShapeStub* GetCursorShapeStub() override {
     return &cursor_shape_stub_;
   }
+  protocol::KeyboardLayoutStub* GetKeyboardLayoutStub() override {
+    return nullptr;
+  }
 
   // protocol::FrameConsumer interface.
   std::unique_ptr<webrtc::DesktopFrame> AllocateFrame(
@@ -162,12 +166,12 @@ class ProtocolPerfTest
   }
 
   void DrawFrame(std::unique_ptr<webrtc::DesktopFrame> frame,
-                 const base::Closure& done) override {
+                 base::OnceClosure done) override {
     last_video_frame_ = std::move(frame);
-    if (!on_frame_task_.is_null())
+    if (on_frame_task_)
       on_frame_task_.Run();
-    if (!done.is_null())
-      done.Run();
+    if (done)
+      std::move(done).Run();
   }
 
   protocol::FrameConsumer::PixelFormat GetPixelFormat() override {
@@ -318,8 +322,8 @@ class ProtocolPerfTest
         protocol::GetSharedSecretHash(kHostId, kHostPin);
     std::unique_ptr<protocol::AuthenticatorFactory> auth_factory =
         protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
-            true, kHostOwner, kHostOwner, host_cert, key_pair,
-            std::vector<std::string>(), host_pin_hash, nullptr);
+            kHostOwner, host_cert, key_pair, std::vector<std::string>(),
+            host_pin_hash, nullptr);
     host_->SetAuthenticatorFactory(std::move(auth_factory));
 
     host_->status_monitor()->AddStatusObserver(this);
@@ -358,8 +362,8 @@ class ProtocolPerfTest
 
     protocol::ClientAuthenticationConfig client_auth_config;
     client_auth_config.host_id = kHostId;
-    client_auth_config.fetch_secret_callback =
-        base::Bind(&ProtocolPerfTest::FetchPin, base::Unretained(this));
+    client_auth_config.fetch_secret_callback = base::BindRepeating(
+        &ProtocolPerfTest::FetchPin, base::Unretained(this));
 
     video_renderer_.reset(new SoftwareVideoRenderer(this));
     video_renderer_->Initialize(*client_context_, this);
@@ -380,7 +384,7 @@ class ProtocolPerfTest
   void MeasureTotalLatency(bool use_webrtc);
   void MeasureScrollPerformance(bool use_webrtc);
 
-  ScopedTaskEnvironment task_environment_;
+  TaskEnvironment task_environment_;
 
   scoped_refptr<FakeNetworkDispatcher> fake_network_dispatcher_;
 
@@ -415,7 +419,7 @@ class ProtocolPerfTest
   bool client_connected_;
   bool host_connected_;
 
-  base::Closure on_frame_task_;
+  base::RepeatingClosure on_frame_task_;
 
   std::unique_ptr<VideoPacket> last_video_packet_;
   std::unique_ptr<webrtc::DesktopFrame> last_video_frame_;
@@ -477,8 +481,8 @@ INSTANTIATE_TEST_SUITE_P(
 void ProtocolPerfTest::MeasureTotalLatency(bool use_webrtc) {
   scoped_refptr<test::CyclicFrameGenerator> frame_generator =
       test::CyclicFrameGenerator::Create();
-  desktop_environment_factory_->set_frame_generator(
-      base::Bind(&test::CyclicFrameGenerator::GenerateFrame, frame_generator));
+  desktop_environment_factory_->set_frame_generator(base::BindRepeating(
+      &test::CyclicFrameGenerator::GenerateFrame, frame_generator));
   event_timestamp_source_ = frame_generator;
 
   StartHostAndClient(use_webrtc);
@@ -575,8 +579,8 @@ TEST_P(ProtocolPerfTest, TotalLatencyWebrtc) {
 void ProtocolPerfTest::MeasureScrollPerformance(bool use_webrtc) {
   scoped_refptr<test::ScrollFrameGenerator> frame_generator =
       new test::ScrollFrameGenerator();
-  desktop_environment_factory_->set_frame_generator(
-      base::Bind(&test::ScrollFrameGenerator::GenerateFrame, frame_generator));
+  desktop_environment_factory_->set_frame_generator(base::BindRepeating(
+      &test::ScrollFrameGenerator::GenerateFrame, frame_generator));
   event_timestamp_source_ = frame_generator;
 
   StartHostAndClient(use_webrtc);

@@ -4,8 +4,9 @@
 
 package org.chromium.chrome.browser.bookmarks;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
@@ -40,25 +41,12 @@ public class BookmarkModel extends BookmarkBridge {
      * Initialize bookmark model for last used non-incognito profile.
      */
     public BookmarkModel() {
-        this(Profile.getLastUsedProfile().getOriginalProfile());
+        this(Profile.getLastUsedRegularProfile());
     }
 
     @VisibleForTesting
     public BookmarkModel(Profile profile) {
         super(profile);
-    }
-
-    /**
-     * Clean up all the bridges. This must be called after done using this class.
-     */
-    @Override
-    public void destroy() {
-        super.destroy();
-    }
-
-    @Override
-    public boolean isBookmarkModelLoaded() {
-        return super.isBookmarkModelLoaded();
     }
 
     /**

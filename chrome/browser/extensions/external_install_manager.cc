@@ -6,17 +6,17 @@
 
 #include <string>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/external_install_error.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/features/feature_channel.h"
@@ -64,14 +64,11 @@ ExternalInstallManager::ExternalInstallManager(
     : browser_context_(browser_context),
       is_first_run_(is_first_run),
       extension_prefs_(ExtensionPrefs::Get(browser_context_)),
-      currently_visible_install_alert_(nullptr),
-      extension_registry_observer_(this) {
+      currently_visible_install_alert_(nullptr) {
   DCHECK(browser_context_);
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
   Profile* profile = Profile::FromBrowserContext(browser_context_);
   registrar_.Add(this, extensions::NOTIFICATION_EXTENSION_REMOVED,
-                 content::Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                  content::Source<Profile>(profile));
   // Populate the set of unacknowledged external extensions now. We can't just
   // rely on IsUnacknowledgedExternalExtension() for cases like
@@ -85,8 +82,15 @@ ExternalInstallManager::ExternalInstallManager(
 }
 
 ExternalInstallManager::~ExternalInstallManager() {
+  // Shutdown should have been called.
+  DCHECK(errors_.empty());
 }
 
+void ExternalInstallManager::Shutdown() {
+  // Delete all errors when the profile is shutting down, before associated
+  // services are deleted.
+  errors_.clear();
+}
 
 bool ExternalInstallManager::IsPromptingEnabled() {
   return FeatureSwitch::prompt_for_external_extensions()->IsEnabled();
@@ -223,10 +227,17 @@ void ExternalInstallManager::OnExtensionInstalled(
     content::BrowserContext* browser_context,
     const Extension* extension,
     bool is_update) {
+  ExtensionManagement* settings =
+      ExtensionManagementFactory::GetForBrowserContext(
+          Profile::FromBrowserContext(browser_context_));
+  bool is_recommended_by_policy = settings->GetInstallationMode(extension) ==
+                                  ExtensionManagement::INSTALLATION_RECOMMENDED;
   // Certain extension locations are specific enough that we can
   // auto-acknowledge any extension that came from one of them.
+  // Extensions recommended by policy can also be auto-acknowledged.
   if (Manifest::IsPolicyLocation(extension->location()) ||
-      extension->location() == Manifest::EXTERNAL_COMPONENT) {
+      extension->location() == Manifest::EXTERNAL_COMPONENT ||
+      is_recommended_by_policy) {
     AcknowledgeExternalExtension(extension->id());
     return;
   }
@@ -269,28 +280,15 @@ void ExternalInstallManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  switch (type) {
-    case extensions::NOTIFICATION_EXTENSION_REMOVED: {
-      // The error is invalidated if the extension has been loaded or removed.
-      // It's a shame we have to use the notification system (instead of the
-      // registry observer) for this, but the ExtensionUnloaded notification is
-      // not sent out if the extension is disabled (which it is here).
-      const std::string& extension_id =
-          content::Details<const Extension>(details).ptr()->id();
-      if (base::Contains(errors_, extension_id))
-        RemoveExternalInstallError(extension_id);
-      break;
-    }
-    case chrome::NOTIFICATION_PROFILE_DESTROYED:
-      DCHECK_EQ(Profile::FromBrowserContext(browser_context_),
-                content::Source<const Profile>(source).ptr());
-      // Delete all errors when the profile is shutting down, before associated
-      // services are deleted.
-      errors_.clear();
-      break;
-    default:
-      NOTREACHED();
-  }
+  DCHECK_EQ(type, extensions::NOTIFICATION_EXTENSION_REMOVED);
+  // The error is invalidated if the extension has been loaded or removed.
+  // It's a shame we have to use the notification system (instead of the
+  // registry observer) for this, but the ExtensionUnloaded notification is
+  // not sent out if the extension is disabled (which it is here).
+  const std::string& extension_id =
+      content::Details<const Extension>(details).ptr()->id();
+  if (base::Contains(errors_, extension_id))
+    RemoveExternalInstallError(extension_id);
 }
 
 }  // namespace extensions

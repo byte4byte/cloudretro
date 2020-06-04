@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
@@ -83,7 +84,8 @@ class NotificationPlatformBridgeMacTest : public BrowserWithTestWindowTest {
                                              const char* button1,
                                              const char* button2) {
     return CreateNotification(title, subtitle, origin, button1, button2,
-                              false /* require_interaction */);
+                              /*require_interaction=*/false,
+                              /*show_settings_button=*/true);
   }
 
   std::unique_ptr<Notification> CreateAlert(const char* title,
@@ -92,7 +94,8 @@ class NotificationPlatformBridgeMacTest : public BrowserWithTestWindowTest {
                                             const char* button1,
                                             const char* button2) {
     return CreateNotification(title, subtitle, origin, button1, button2,
-                              true /* require_interaction */);
+                              /*require_interaction=*/true,
+                              /*show_settings_button=*/true);
   }
 
   std::unique_ptr<Notification> CreateNotification(const char* title,
@@ -100,7 +103,8 @@ class NotificationPlatformBridgeMacTest : public BrowserWithTestWindowTest {
                                                    const char* origin,
                                                    const char* button1,
                                                    const char* button2,
-                                                   bool require_interaction) {
+                                                   bool require_interaction,
+                                                   bool show_settings_button) {
     message_center::RichNotificationData optional_fields;
     if (button1) {
       optional_fields.buttons.push_back(
@@ -109,6 +113,10 @@ class NotificationPlatformBridgeMacTest : public BrowserWithTestWindowTest {
         optional_fields.buttons.push_back(
             message_center::ButtonInfo(base::UTF8ToUTF16(button2)));
       }
+    }
+    if (show_settings_button) {
+      optional_fields.settings_button_handler =
+          message_center::SettingsButtonHandler::DELEGATE;
     }
 
     GURL url = GURL(origin);
@@ -207,6 +215,10 @@ TEST_F(NotificationPlatformBridgeMacTest, TestNotificationVerifyOrigin) {
   // If however the origin is not present the response should be fine.
   [response removeObjectForKey:notification_constants::kNotificationOrigin];
   EXPECT_TRUE(NotificationPlatformBridgeMac::VerifyNotificationData(response));
+
+  // Empty origin should be fine.
+  [response setValue:@"" forKey:notification_constants::kNotificationOrigin];
+  EXPECT_TRUE(NotificationPlatformBridgeMac::VerifyNotificationData(response));
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestDisplayNoButtons) {
@@ -230,6 +242,28 @@ TEST_F(NotificationPlatformBridgeMacTest, TestDisplayNoButtons) {
   EXPECT_NSEQ(@"Settings", [delivered_notification actionButtonTitle]);
 }
 
+TEST_F(NotificationPlatformBridgeMacTest, TestDisplayNoSettings) {
+  std::unique_ptr<Notification> notification = CreateNotification(
+      "Title", "Context", "https://gmail.com", nullptr, nullptr,
+      /*require_interaction=*/false, /*show_settings_button=*/false);
+
+  std::unique_ptr<NotificationPlatformBridgeMac> bridge(
+      new NotificationPlatformBridgeMac(notification_center(),
+                                        alert_dispatcher()));
+  bridge->Display(NotificationHandler::Type::WEB_PERSISTENT, profile(),
+                  *notification, nullptr);
+  NSArray* notifications = [notification_center() deliveredNotifications];
+
+  EXPECT_EQ(1u, [notifications count]);
+
+  NSUserNotification* delivered_notification = [notifications objectAtIndex:0];
+  EXPECT_NSEQ(@"Title", [delivered_notification title]);
+  EXPECT_NSEQ(@"Context", [delivered_notification informativeText]);
+  EXPECT_NSEQ(@"gmail.com", [delivered_notification subtitle]);
+  EXPECT_NSEQ(@"Close", [delivered_notification otherButtonTitle]);
+  EXPECT_FALSE([delivered_notification hasActionButton]);
+}
+
 TEST_F(NotificationPlatformBridgeMacTest, TestDisplayOneButton) {
   std::unique_ptr<Notification> notification = CreateBanner(
       "Title", "Context", "https://gmail.com", "Button 1", nullptr);
@@ -251,6 +285,9 @@ TEST_F(NotificationPlatformBridgeMacTest, TestDisplayOneButton) {
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestDisplayProgress) {
+  if (!NotificationPlatformBridgeMac::SupportsAlerts())
+    return;
+
   std::unique_ptr<Notification> notification =
       CreateBanner("Title", "Context", "https://gmail.com", nullptr, nullptr);
   const int kSamplePercent = 10;
@@ -328,6 +365,9 @@ TEST_F(NotificationPlatformBridgeMacTest, TestQuitRemovesNotifications) {
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestDisplayAlert) {
+  if (!NotificationPlatformBridgeMac::SupportsAlerts())
+    return;
+
   std::unique_ptr<Notification> alert =
       CreateAlert("Title", "Context", "https://gmail.com", "Button 1", nullptr);
   std::unique_ptr<NotificationPlatformBridgeMac> bridge(
@@ -340,6 +380,9 @@ TEST_F(NotificationPlatformBridgeMacTest, TestDisplayAlert) {
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestDisplayBannerAndAlert) {
+  if (!NotificationPlatformBridgeMac::SupportsAlerts())
+    return;
+
   std::unique_ptr<Notification> alert =
       CreateAlert("Title", "Context", "https://gmail.com", "Button 1", nullptr);
   std::unique_ptr<Notification> banner = CreateBanner(
@@ -356,6 +399,9 @@ TEST_F(NotificationPlatformBridgeMacTest, TestDisplayBannerAndAlert) {
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestCloseAlert) {
+  if (!NotificationPlatformBridgeMac::SupportsAlerts())
+    return;
+
   std::unique_ptr<Notification> alert =
       CreateAlert("Title", "Context", "https://gmail.com", "Button 1", nullptr);
   std::unique_ptr<NotificationPlatformBridgeMac> bridge(
@@ -371,6 +417,9 @@ TEST_F(NotificationPlatformBridgeMacTest, TestCloseAlert) {
 }
 
 TEST_F(NotificationPlatformBridgeMacTest, TestQuitRemovesBannersAndAlerts) {
+  if (!NotificationPlatformBridgeMac::SupportsAlerts())
+    return;
+
   std::unique_ptr<Notification> notification = CreateBanner(
       "Title", "Context", "https://gmail.com", "Button 1", nullptr);
   std::unique_ptr<Notification> alert =

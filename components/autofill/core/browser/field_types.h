@@ -185,9 +185,30 @@ enum ServerFieldType {
   // Text-type fields which are not usernames.
   NOT_USERNAME = 101,
 
+  // UPI/VPA is a payment method, which is stored and filled. See
+  // https://en.wikipedia.org/wiki/Unified_Payments_Interface
+  UPI_VPA = 102,
+
+  // Just the street name of an address, no house number.
+  // Currently not used by Chrome.
+  ADDRESS_HOME_STREET = 103,
+
+  // House number of an address, may be alphanumeric.
+  // Currently not used by Chrome.
+  ADDRESS_HOME_HOUSE_NUMBER = 104,
+
+  // Floor within in a building, may be alphanumeric.
+  // Currently not used by Chrome.
+  ADDRESS_HOME_FLOOR = 105,
+
+  // A catch-all for other type of subunits (only used until something more
+  // precise is defined).
+  // Currently not used by Chrome.
+  ADDRESS_HOME_OTHER_SUBUNIT = 106,
+
   // No new types can be added without a corresponding change to the Autofill
   // server.
-  MAX_VALID_FIELD_TYPE = 102,
+  MAX_VALID_FIELD_TYPE = 107,
 };
 
 // The list of all HTML autocomplete field type hints supported by Chrome.

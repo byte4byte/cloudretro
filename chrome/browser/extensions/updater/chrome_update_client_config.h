@@ -5,12 +5,11 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_UPDATER_CHROME_UPDATE_CLIENT_CONFIG_H_
 #define CHROME_BROWSER_EXTENSIONS_UPDATER_CHROME_UPDATE_CLIENT_CONFIG_H_
 
-#include <stdint.h>
-
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -65,11 +64,8 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   PrefService* GetPrefService() const override;
   update_client::ActivityDataService* GetActivityDataService() const override;
   bool IsPerUserInstall() const override;
-  std::vector<uint8_t> GetRunActionKeyHash() const override;
-  std::string GetAppGuid() const override;
   std::unique_ptr<update_client::ProtocolHandlerFactory>
   GetProtocolHandlerFactory() const override;
-  update_client::RecoveryCRXElevator GetRecoveryCRXElevator() const override;
 
  protected:
   friend class base::RefCountedThreadSafe<ChromeUpdateClientConfig>;

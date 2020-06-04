@@ -37,7 +37,7 @@ class PDFIFrameNavigationThrottleTest : public ChromeRenderViewHostTestHarness {
         ->SetAlwaysOpenPdfExternallyForTests(always_open_pdf_externally);
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
-    filter->RegisterResourceContext(profile(), profile()->GetResourceContext());
+    filter->RegisterProfile(profile());
 #endif
   }
 
@@ -110,7 +110,7 @@ TEST_F(PDFIFrameNavigationThrottleTest, InterceptPDFOnly) {
   // Load plugins to keep this test synchronous.
 #if BUILDFLAG(ENABLE_PLUGINS)
   base::RunLoop run_loop;
-  content::PluginService::GetInstance()->GetPlugins(base::BindRepeating(
+  content::PluginService::GetInstance()->GetPlugins(base::BindOnce(
       [](base::RunLoop* run_loop,
          const std::vector<content::WebPluginInfo>& plugins) {
         run_loop->Quit();

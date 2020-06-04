@@ -14,10 +14,10 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
-#include "components/safe_browsing/db/v4_database.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
-#include "components/safe_browsing/db/v4_test_util.h"
-#include "components/security_interstitials/content/unsafe_resource.h"
+#include "components/safe_browsing/core/db/v4_database.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/db/v4_test_util.h"
+#include "components/security_interstitials/core/unsafe_resource.h"
 
 namespace {
 
@@ -33,7 +33,8 @@ class FakeSafeBrowsingUIManager
 
   void DisplayBlockingPage(const UnsafeResource& resource) override {
     resource.callback_thread->PostTask(
-        FROM_HERE, base::BindOnce(resource.callback, true /* proceed */));
+        FROM_HERE, base::BindOnce(resource.callback, true /* proceed */,
+                                  true /* showed_interstitial */));
   }
 
  private:
@@ -59,8 +60,7 @@ class InsertingDatabaseFactory : public safe_browsing::TestV4DatabaseFactory {
       if (!base::Contains(*store_map, id)) {
         const base::FilePath store_path =
             base_store_path.InsertBeforeExtensionASCII(base::StringPrintf(
-                " (%d)", base::GetUniquePathNumber(
-                             base_store_path, base::FilePath::StringType())));
+                " (%d)", base::GetUniquePathNumber(base_store_path)));
         (*store_map)[id] =
             store_factory_->CreateV4Store(db_task_runner, store_path);
       }

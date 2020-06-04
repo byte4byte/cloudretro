@@ -8,7 +8,9 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/google/google_brand_code_map_chromeos.h"
 #include "chrome/common/pref_names.h"
@@ -95,11 +97,11 @@ void InitBrand(const base::Closure& callback) {
     return;
   }
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::Bind(&ReadBrandFromFile), base::Bind(&SetBrand, callback));
+      base::BindOnce(&ReadBrandFromFile), base::BindOnce(&SetBrand, callback));
 }
 
 }  // namespace chromeos

@@ -143,7 +143,7 @@ void RulesCacheDelegate::CheckIfReady() {
   if (notified_registry_ || !waiting_for_extensions_.empty())
     return;
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {rules_registry_thread_},
       base::BindOnce(&RulesRegistry::MarkReady, registry_, storage_init_time_));
   notified_registry_ = true;
@@ -199,11 +199,9 @@ void RulesCacheDelegate::ReadFromStorage(const std::string& extension_id) {
     return;
   waiting_for_extensions_.insert(extension_id);
   store->GetExtensionValue(
-      extension_id,
-      storage_key_,
-      base::Bind(&RulesCacheDelegate::ReadFromStorageCallback,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 extension_id));
+      extension_id, storage_key_,
+      base::BindOnce(&RulesCacheDelegate::ReadFromStorageCallback,
+                     weak_ptr_factory_.GetWeakPtr(), extension_id));
 }
 
 void RulesCacheDelegate::ReadFromStorageCallback(
@@ -211,10 +209,9 @@ void RulesCacheDelegate::ReadFromStorageCallback(
     std::unique_ptr<base::Value> value) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_EQ(Type::kPersistent, type_);
-  base::PostTaskWithTraits(
-      FROM_HERE, {rules_registry_thread_},
-      base::BindOnce(&RulesRegistry::DeserializeAndAddRules, registry_,
-                     extension_id, std::move(value)));
+  base::PostTask(FROM_HERE, {rules_registry_thread_},
+                 base::BindOnce(&RulesRegistry::DeserializeAndAddRules,
+                                registry_, extension_id, std::move(value)));
 
   waiting_for_extensions_.erase(extension_id);
 

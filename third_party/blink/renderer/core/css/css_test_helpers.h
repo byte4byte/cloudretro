@@ -16,6 +16,7 @@ class CSSStyleSheet;
 class CSSVariableData;
 class CSSValue;
 class CSSProperty;
+class PropertyRegistration;
 
 namespace css_test_helpers {
 
@@ -43,6 +44,10 @@ class TestStyleSheet {
   Persistent<CSSStyleSheet> style_sheet_;
 };
 
+// Create a PropertyRegistration for the given name. The syntax, initial value,
+// and inherited status are all undefined.
+PropertyRegistration* CreatePropertyRegistration(const String& name);
+
 void RegisterProperty(Document& document,
                       const String& name,
                       const String& syntax,
@@ -54,6 +59,9 @@ const CSSValue* CreateCustomIdent(AtomicString);
 const CSSValue* ParseLonghand(Document& document,
                               const CSSProperty&,
                               const String& value);
+const CSSPropertyValueSet* ParseDeclarationBlock(
+    const String& block_text,
+    CSSParserMode mode = kHTMLStandardMode);
 
 }  // namespace css_test_helpers
 }  // namespace blink

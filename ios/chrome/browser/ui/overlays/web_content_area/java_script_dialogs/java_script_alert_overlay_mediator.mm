@@ -8,9 +8,12 @@
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/overlays/public/overlay_request.h"
 #import "ios/chrome/browser/overlays/public/web_content_area/java_script_alert_overlay.h"
-#import "ios/chrome/browser/ui/alert_view_controller/alert_action.h"
-#import "ios/chrome/browser/ui/alert_view_controller/alert_consumer.h"
+#import "ios/chrome/browser/ui/alert_view/alert_action.h"
+#import "ios/chrome/browser/ui/alert_view/alert_consumer.h"
+#import "ios/chrome/browser/ui/dialogs/dialog_constants.h"
+#import "ios/chrome/browser/ui/overlays/common/alerts/alert_overlay_mediator+alert_consumer_support.h"
 #import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_dialog_blocking_action.h"
+#import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_overlay_mediator_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -19,38 +22,65 @@
 #endif
 
 @interface JavaScriptAlertOverlayMediator ()
-// The alert config.
+// The congig from the request passed on initialization.
 @property(nonatomic, readonly) JavaScriptAlertOverlayRequestConfig* config;
 @end
 
 @implementation JavaScriptAlertOverlayMediator
 
+- (instancetype)initWithRequest:(OverlayRequest*)request {
+  if (self = [super initWithRequest:request]) {
+    // Verify that the request is configured for JavaScript alerts.
+    DCHECK(request->GetConfig<JavaScriptAlertOverlayRequestConfig>());
+  }
+  return self;
+}
+
 #pragma mark - Accessors
 
-- (const JavaScriptDialogSource*)requestSource {
-  return &self.config->source();
-}
-
 - (JavaScriptAlertOverlayRequestConfig*)config {
-  return self.request->GetConfig<JavaScriptAlertOverlayRequestConfig>();
+  return self.request
+             ? self.request->GetConfig<JavaScriptAlertOverlayRequestConfig>()
+             : nullptr;
 }
 
-- (void)setConsumer:(id<AlertConsumer>)consumer {
-  if (self.consumer == consumer)
-    return;
-  [super setConsumer:consumer];
-  [self.consumer setMessage:base::SysUTF8ToNSString(self.config->message())];
+#pragma mark - OverlayRequestMediator
+
++ (const OverlayRequestSupport*)requestSupport {
+  return JavaScriptAlertOverlayRequestConfig::RequestSupport();
+}
+
+@end
+
+@implementation JavaScriptAlertOverlayMediator (AlertConsumerSupport)
+
+- (NSString*)alertTitle {
+  return GetJavaScriptDialogTitle(self.config->source(),
+                                  self.config->message());
+}
+
+- (NSString*)alertMessage {
+  return GetJavaScriptDialogMessage(self.config->source(),
+                                    self.config->message());
+}
+
+- (NSArray<AlertAction*>*)alertActions {
   __weak __typeof__(self) weakSelf = self;
-  NSMutableArray* actions = [@[ [AlertAction
+  NSMutableArray<AlertAction*>* actions = [@[ [AlertAction
       actionWithTitle:l10n_util::GetNSString(IDS_OK)
                 style:UIAlertActionStyleDefault
               handler:^(AlertAction* action) {
-                [weakSelf.delegate stopDialogForMediator:weakSelf];
+                [weakSelf.delegate stopOverlayForMediator:weakSelf];
               }] ] mutableCopy];
-  AlertAction* blockingAction = GetBlockingAlertAction(self);
+  AlertAction* blockingAction =
+      GetBlockingAlertAction(self, self.config->source());
   if (blockingAction)
     [actions addObject:blockingAction];
-  [self.consumer setActions:actions];
+  return actions;
+}
+
+- (NSString*)alertAccessibilityIdentifier {
+  return kJavaScriptDialogAccessibilityIdentifier;
 }
 
 @end

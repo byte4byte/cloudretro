@@ -7,6 +7,7 @@
 #include "ash/public/cpp/session/session_activation_observer.h"
 #include "ash/public/cpp/session/session_controller.h"
 #include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "chrome/browser/browser_process.h"
@@ -15,7 +16,7 @@
 #include "chrome/browser/chromeos/login/saml/password_expiry_notification.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chromeos/in_session_password_change/password_change_ui.h"
+#include "chrome/browser/ui/webui/chromeos/in_session_password_change/password_change_dialogs.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/auth/user_context.h"
@@ -27,6 +28,75 @@
 namespace chromeos {
 
 namespace {
+
+using PasswordSource = InSessionPasswordChangeManager::PasswordSource;
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused. This must be kept in sync with
+// SamlInSessionPasswordChangeEvent in tools/metrics/histogram/enums.xml
+enum class InSessionPasswordChangeEvent {
+  kManagerCreated = 0,
+  kNotified = 1,
+  kUrgentNotified = 2,
+  kNotifiedAlreadyExpired = 3,
+  kStartPasswordChange = 4,
+  kSamlPasswordChanged = 5,
+  kPasswordScrapeSuccess = 6,
+  kPasswordScrapePartial = 7,
+  kPasswordScrapeFailure = 8,
+  kCryptohomePasswordChangeSuccessScraped = 9,
+  kCryptohomePasswordChangeSuccessRetyped = 10,
+  kCryptohomePasswordChangeFailureScraped = 11,
+  kCryptohomePasswordChangeFailureRetyped = 12,
+  kFinishPasswordChange = 13,
+  kMaxValue = kFinishPasswordChange,
+};
+
+void RecordEvent(InSessionPasswordChangeEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("ChromeOS.SAML.InSessionPasswordChangeEvent",
+                            event);
+}
+
+void RecordNotificationShown(bool is_expired, bool show_as_urgent) {
+  if (is_expired) {
+    RecordEvent(InSessionPasswordChangeEvent::kNotifiedAlreadyExpired);
+  } else if (show_as_urgent) {
+    RecordEvent(InSessionPasswordChangeEvent::kUrgentNotified);
+  } else {
+    RecordEvent(InSessionPasswordChangeEvent::kNotified);
+  }
+}
+
+void RecordScrapingResult(bool old_password_scraped,
+                          bool new_password_scraped) {
+  if (old_password_scraped && new_password_scraped) {
+    RecordEvent(InSessionPasswordChangeEvent::kPasswordScrapeSuccess);
+  } else if (old_password_scraped || new_password_scraped) {
+    RecordEvent(InSessionPasswordChangeEvent::kPasswordScrapePartial);
+  } else {
+    RecordEvent(InSessionPasswordChangeEvent::kPasswordScrapeFailure);
+  }
+}
+
+void RecordCryptohomePasswordChangeSuccess(PasswordSource password_source) {
+  if (password_source == PasswordSource::PASSWORDS_SCRAPED) {
+    RecordEvent(
+        InSessionPasswordChangeEvent::kCryptohomePasswordChangeSuccessScraped);
+  } else {
+    RecordEvent(
+        InSessionPasswordChangeEvent::kCryptohomePasswordChangeSuccessRetyped);
+  }
+}
+
+void RecordCryptohomePasswordChangeFailure(PasswordSource password_source) {
+  if (password_source == PasswordSource::PASSWORDS_SCRAPED) {
+    RecordEvent(
+        InSessionPasswordChangeEvent::kCryptohomePasswordChangeFailureScraped);
+  } else {
+    RecordEvent(
+        InSessionPasswordChangeEvent::kCryptohomePasswordChangeFailureRetyped);
+  }
+}
 
 InSessionPasswordChangeManager* g_test_instance = nullptr;
 
@@ -42,10 +112,22 @@ const base::TimeDelta kOneHour = base::TimeDelta::FromHours(1);
 // A time delta of length one day.
 const base::TimeDelta kOneDay = base::TimeDelta::FromDays(1);
 
+// A time delta with length of a half day.
+const base::TimeDelta kHalfDay = base::TimeDelta::FromHours(12);
+
+// A time delta with length zero.
+const base::TimeDelta kZeroTime = base::TimeDelta();
+
 // When the password will expire in |kUrgentWarningDays| or less, the
 // UrgentPasswordExpiryNotification will be used - which is larger and actually
 // a dialog (not a true notification) - instead of the normal notification.
 const int kUrgentWarningDays = 3;
+
+// Rounds to the nearest day - eg plus or minus 12 hours is zero days, 12 to 36
+// hours is 1 day, -12 to -36 hours is -1 day, etc.
+inline int RoundToDays(base::TimeDelta time_delta) {
+  return (time_delta + kHalfDay).InDaysFloored();
+}
 
 }  // namespace
 
@@ -60,11 +142,10 @@ void RecheckPasswordExpiryTask::Recheck() {
 
 void RecheckPasswordExpiryTask::RecheckAfter(base::TimeDelta delay) {
   CancelPendingRecheck();
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, kRecheckTaskTraits,
-      base::BindOnce(&RecheckPasswordExpiryTask::Recheck,
-                     weak_ptr_factory_.GetWeakPtr()),
-      std::max(delay, kOneHour));
+  base::PostDelayedTask(FROM_HERE, kRecheckTaskTraits,
+                        base::BindOnce(&RecheckPasswordExpiryTask::Recheck,
+                                       weak_ptr_factory_.GetWeakPtr()),
+                        std::max(delay, kOneHour));
   // This always waits at least one hour before calling Recheck again - we don't
   // want some bug to cause this code to run every millisecond.
 }
@@ -82,6 +163,7 @@ InSessionPasswordChangeManager::CreateIfEnabled(Profile* primary_profile) {
     std::unique_ptr<InSessionPasswordChangeManager> manager =
         std::make_unique<InSessionPasswordChangeManager>(primary_profile);
     manager->MaybeShowExpiryNotification();
+    RecordEvent(InSessionPasswordChangeEvent::kManagerCreated);
     return manager;
   } else {
     // If the policy is disabled, clear the SAML password attributes.
@@ -122,9 +204,21 @@ InSessionPasswordChangeManager::~InSessionPasswordChangeManager() {
   // Remove |this| as a SessionActivationObserver.
   auto* session_controller = ash::SessionController::Get();
   if (session_controller) {
-    session_controller->AddSessionActivationObserverForAccountId(
+    session_controller->RemoveSessionActivationObserverForAccountId(
         primary_user_->GetAccountId(), this);
   }
+}
+
+// static
+void InSessionPasswordChangeManager::SetForTesting(
+    InSessionPasswordChangeManager* instance) {
+  CHECK(!g_test_instance);
+  g_test_instance = instance;
+}
+
+// static
+void InSessionPasswordChangeManager::ResetForTesting() {
+  g_test_instance = nullptr;
 }
 
 void InSessionPasswordChangeManager::MaybeShowExpiryNotification() {
@@ -148,15 +242,29 @@ void InSessionPasswordChangeManager::MaybeShowExpiryNotification() {
   // Calculate how many days until the password will expire.
   const base::TimeDelta time_until_expiry =
       attrs.expiration_time() - base::Time::Now();
-  const int less_than_n_days =
-      std::max(0, time_until_expiry.InDaysFloored() + 1);
-  const int advance_warning_days = std::max(
-      0, prefs->GetInteger(prefs::kSamlPasswordExpirationAdvanceWarningDays));
+  const int days_until_expiry = RoundToDays(time_until_expiry);
+  const int advance_warning_days =
+      prefs->GetInteger(prefs::kSamlPasswordExpirationAdvanceWarningDays);
 
-  if (less_than_n_days <= advance_warning_days) {
-    // The password is expired, or expires in less than |advance_warning_days|.
-    // So we show a notification immediately.
-    ShowExpiryNotification(less_than_n_days);
+  bool is_expired = time_until_expiry <= kZeroTime;
+  // Show notification if a) expired, or b) advance_warning_days is set > 0 and
+  // we are now within advance_warning_days of the expiry time.
+  const bool show_notification =
+      is_expired ||
+      (advance_warning_days > 0 && days_until_expiry <= advance_warning_days);
+
+  if (show_notification) {
+    // Show as urgent if urgent_warning_days is set > 0 and we are now within
+    // urgent_warning_days of the expiry time.
+    const bool show_as_urgent =
+        (urgent_warning_days_ > 0 && days_until_expiry <= urgent_warning_days_);
+    if (show_as_urgent) {
+      ShowUrgentExpiryNotification();
+    } else {
+      ShowStandardExpiryNotification(time_until_expiry);
+    }
+    RecordNotificationShown(is_expired, show_as_urgent);
+
     // We check again whether to reshow / update the notification after one day:
     recheck_task_.RecheckAfter(kOneDay);
 
@@ -172,17 +280,19 @@ void InSessionPasswordChangeManager::MaybeShowExpiryNotification() {
   }
 }
 
-void InSessionPasswordChangeManager::ShowExpiryNotification(
-    int less_than_n_days) {
+void InSessionPasswordChangeManager::ShowStandardExpiryNotification(
+    base::TimeDelta time_until_expiry) {
   // Show a notification, and reshow it each time the screen is unlocked.
   renotify_on_unlock_ = true;
+  PasswordExpiryNotification::Show(primary_profile_, time_until_expiry);
+  UrgentPasswordExpiryNotificationDialog::Dismiss();
+}
 
-  less_than_n_days = std::max(0, less_than_n_days);
-  if (less_than_n_days < urgent_warning_days_) {
-    UrgentPasswordExpiryNotificationDialog::Show(less_than_n_days);
-  } else {
-    PasswordExpiryNotification::Show(primary_profile_, less_than_n_days);
-  }
+void InSessionPasswordChangeManager::ShowUrgentExpiryNotification() {
+  // Show a notification, and reshow it each time the screen is unlocked.
+  renotify_on_unlock_ = true;
+  UrgentPasswordExpiryNotificationDialog::Show();
+  PasswordExpiryNotification::Dismiss(primary_profile_);
 }
 
 void InSessionPasswordChangeManager::DismissExpiryNotification() {
@@ -203,19 +313,26 @@ void InSessionPasswordChangeManager::OnScreenUnlocked() {
 }
 
 void InSessionPasswordChangeManager::StartInSessionPasswordChange() {
-  NotifyObservers(START_SAML_IDP_PASSWORD_CHANGE);
+  RecordEvent(InSessionPasswordChangeEvent::kStartPasswordChange);
+  NotifyObservers(Event::START_SAML_IDP_PASSWORD_CHANGE);
   DismissExpiryNotification();
-  PasswordChangeDialog::Show(primary_profile_);
+  PasswordChangeDialog::Show();
+  ConfirmPasswordChangeDialog::Dismiss();
 }
 
 void InSessionPasswordChangeManager::OnSamlPasswordChanged(
     const std::string& scraped_old_password,
     const std::string& scraped_new_password) {
-  NotifyObservers(START_SAML_IDP_PASSWORD_CHANGE);
+  RecordEvent(InSessionPasswordChangeEvent::kSamlPasswordChanged);
+  NotifyObservers(Event::SAML_IDP_PASSWORD_CHANGED);
 
   user_manager::UserManager::Get()->SaveForceOnlineSignin(
       primary_user_->GetAccountId(), true);
+  DismissExpiryNotification();
   PasswordChangeDialog::Dismiss();
+
+  RecordScrapingResult(!scraped_old_password.empty(),
+                       !scraped_new_password.empty());
 
   const bool both_passwords_scraped =
       !scraped_old_password.empty() && !scraped_new_password.empty();
@@ -227,7 +344,8 @@ void InSessionPasswordChangeManager::OnSamlPasswordChanged(
     ConfirmPasswordChangeDialog::Show(scraped_old_password,
                                       scraped_new_password,
                                       /*show_spinner_initially=*/true);
-    ChangePassword(scraped_old_password, scraped_new_password);
+    ChangePassword(scraped_old_password, scraped_new_password,
+                   PasswordSource::PASSWORDS_SCRAPED);
   } else {
     // Failed to scrape passwords - prompt for passwords immediately.
     ConfirmPasswordChangeDialog::Show(scraped_old_password,
@@ -238,8 +356,12 @@ void InSessionPasswordChangeManager::OnSamlPasswordChanged(
 
 void InSessionPasswordChangeManager::ChangePassword(
     const std::string& old_password,
-    const std::string& new_password) {
-  NotifyObservers(START_CRYPTOHOME_PASSWORD_CHANGE);
+    const std::string& new_password,
+    PasswordSource password_source) {
+  CHECK(!old_password.empty() && !new_password.empty());
+
+  password_source_ = password_source;
+  NotifyObservers(Event::START_CRYPTOHOME_PASSWORD_CHANGE);
   UserContext user_context(*primary_user_);
   user_context.SetKey(Key(new_password));
   authenticator_->MigrateKey(user_context, old_password);
@@ -255,13 +377,21 @@ void InSessionPasswordChangeManager::RemoveObserver(Observer* observer) {
 
 void InSessionPasswordChangeManager::OnAuthFailure(const AuthFailure& error) {
   VLOG(1) << "Failed to change cryptohome password: " << error.GetErrorString();
-  NotifyObservers(CRYPTOHOME_PASSWORD_CHANGE_FAILURE);
+  RecordCryptohomePasswordChangeFailure(password_source_);
+  NotifyObservers(Event::CRYPTOHOME_PASSWORD_CHANGE_FAILURE);
+}
+
+void InSessionPasswordChangeManager::OnPasswordChangeDetected() {
+  VLOG(1) << "Failed to change cryptohome password: PasswordChangeDetected";
+  RecordCryptohomePasswordChangeFailure(password_source_);
+  NotifyObservers(Event::CRYPTOHOME_PASSWORD_CHANGE_FAILURE);
 }
 
 void InSessionPasswordChangeManager::OnAuthSuccess(
     const UserContext& user_context) {
   VLOG(3) << "Cryptohome password is changed.";
-  NotifyObservers(CRYPTOHOME_PASSWORD_CHANGED);
+  RecordCryptohomePasswordChangeSuccess(password_source_);
+  NotifyObservers(Event::CRYPTOHOME_PASSWORD_CHANGED);
 
   user_manager::UserManager::Get()->SaveForceOnlineSignin(
       user_context.GetAccountId(), false);
@@ -278,6 +408,7 @@ void InSessionPasswordChangeManager::OnAuthSuccess(
   DismissExpiryNotification();
   PasswordChangeDialog::Dismiss();
   ConfirmPasswordChangeDialog::Dismiss();
+  RecordEvent(InSessionPasswordChangeEvent::kFinishPasswordChange);
 }
 
 void InSessionPasswordChangeManager::OnSessionActivated(bool activated) {
@@ -295,18 +426,6 @@ InSessionPasswordChangeManager* InSessionPasswordChangeManager::GetNullable() {
   return g_test_instance ? g_test_instance
                          : g_browser_process->platform_part()
                                ->in_session_password_change_manager();
-}
-
-// static
-void InSessionPasswordChangeManager::SetForTesting(
-    InSessionPasswordChangeManager* instance) {
-  CHECK(!g_test_instance);
-  g_test_instance = instance;
-}
-
-// static
-void InSessionPasswordChangeManager::ResetForTesting() {
-  g_test_instance = nullptr;
 }
 
 void InSessionPasswordChangeManager::NotifyObservers(Event event) {

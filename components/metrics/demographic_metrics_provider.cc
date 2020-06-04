@@ -6,54 +6,82 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/optional.h"
+#include "components/sync/base/sync_prefs.h"
+#include "components/sync/driver/sync_service.h"
+#include "third_party/metrics_proto/ukm/report.pb.h"
 
 namespace metrics {
 
-namespace {
-
-// TODO(crbug/979371): Implement this.
-// Gets user's birth year from Profile prefs that are provided by |service|.
-// Returns false if could not retrieve birth year.
-bool GetUserBirthYear(const PrefService& service, int* birth_year) {
-  *birth_year = 1990;
-  return true;
-}
-
-// TODO(crbug/979371): Implement this.
-// Gets user's gender from Profile prefs that are provided by |service|. Returns
-// false if could not retrieve birth year.
-bool GetUserGender(const PrefService& service,
-                   UserDemographicsProto::Gender* gender) {
-  *gender = UserDemographicsProto::GENDER_UNKNOWN_OR_OTHER;
-  return true;
-}
-
-}  // namespace
+// static
+const base::Feature DemographicMetricsProvider::kDemographicMetricsReporting = {
+    "DemographicMetricsReporting", base::FEATURE_ENABLED_BY_DEFAULT};
 
 DemographicMetricsProvider::DemographicMetricsProvider(
-    PrefService* pref_service)
-    : pref_service_(pref_service) {
-  // TODO(crbug/979371): Remove this log. Only there to avoid compilation error.
-  DVLOG(1) << "Using pref service instance at: " << pref_service_;
+    std::unique_ptr<ProfileClient> profile_client,
+    MetricsLogUploader::MetricServiceType metrics_service_type)
+    : profile_client_(std::move(profile_client)),
+      metrics_service_type_(metrics_service_type) {
+  DCHECK(profile_client_);
+}
+
+DemographicMetricsProvider::~DemographicMetricsProvider() {}
+
+base::Optional<syncer::UserDemographics>
+DemographicMetricsProvider::ProvideSyncedUserNoisedBirthYearAndGender() {
+  // Skip if feature disabled.
+  if (!base::FeatureList::IsEnabled(kDemographicMetricsReporting))
+    return base::nullopt;
+
+  // Skip if not exactly one Profile on disk. Having more than one Profile that
+  // is using the browser can make demographics less relevant. This approach
+  // cannot determine if there is more than 1 distinct user using the Profile.
+  if (profile_client_->GetNumberOfProfilesOnDisk() != 1) {
+    LogUserDemographicsStatusInHistogram(
+        syncer::UserDemographicsStatus::kMoreThanOneProfile);
+    return base::nullopt;
+  }
+
+  syncer::SyncService* sync_service = profile_client_->GetSyncService();
+  // Skip if no sync service.
+  if (!sync_service) {
+    LogUserDemographicsStatusInHistogram(
+        syncer::UserDemographicsStatus::kNoSyncService);
+    return base::nullopt;
+  }
+
+  syncer::UserDemographicsResult demographics_result =
+      sync_service->GetUserNoisedBirthYearAndGender(
+          profile_client_->GetNetworkTime());
+  LogUserDemographicsStatusInHistogram(demographics_result.status());
+
+  if (demographics_result.IsSuccess())
+    return demographics_result.value();
+
+  return base::nullopt;
 }
 
 void DemographicMetricsProvider::ProvideCurrentSessionData(
     ChromeUserMetricsExtension* uma_proto) {
-  // Skip if feature disabled.
-  if (!base::FeatureList::IsEnabled(kDemographicMetricsReporting))
-    return;
-
-  int birth_year;
-  if (GetUserBirthYear(*pref_service_, &birth_year))
-    uma_proto->mutable_user_demographics()->set_birth_year(birth_year);
-  UserDemographicsProto::Gender user_gender;
-  if (GetUserGender(*pref_service_, &user_gender))
-    uma_proto->mutable_user_demographics()->set_gender(user_gender);
+  ProvideSyncedUserNoisedBirthYearAndGender(uma_proto);
 }
 
-// static
-const base::Feature DemographicMetricsProvider::kDemographicMetricsReporting = {
-    "DemographicMetricsReporting", base::FEATURE_DISABLED_BY_DEFAULT};
+void DemographicMetricsProvider::
+    ProvideSyncedUserNoisedBirthYearAndGenderToReport(ukm::Report* report) {
+  ProvideSyncedUserNoisedBirthYearAndGender(report);
+}
+
+void DemographicMetricsProvider::LogUserDemographicsStatusInHistogram(
+    syncer::UserDemographicsStatus status) {
+  switch (metrics_service_type_) {
+    case MetricsLogUploader::MetricServiceType::UMA:
+      base::UmaHistogramEnumeration("UMA.UserDemographics.Status", status);
+      return;
+    case MetricsLogUploader::MetricServiceType::UKM:
+      base::UmaHistogramEnumeration("UKM.UserDemographics.Status", status);
+      return;
+  }
+  NOTREACHED();
+}
 
 }  // namespace metrics

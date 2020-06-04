@@ -10,7 +10,6 @@
 #include "chrome/browser/chromeos/app_mode/fake_cws.h"
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/mixin_based_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/test/device_state_mixin.h"
 #include "chrome/browser/chromeos/login/test/dialog_window_waiter.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/welcome_screen_handler.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/dbus/shill/shill_profile_client.h"
@@ -47,8 +47,6 @@ namespace {
 //       detail/ggaeimfdpnmlhdhpcikgoblffmkckdmn
 constexpr char kTestKioskAppId[] = "ggaeimfdpnmlhdhpcikgoblffmkckdmn";
 constexpr char kTestKioskAccountId[] = "enterprise-kiosk-app@localhost";
-
-constexpr char kTestUser[] = "test-user1@gmail.com";
 
 constexpr char kWifiServiceName[] = "stub_wifi";
 constexpr char kWifiNetworkName[] = "wifi-test-network";
@@ -98,9 +96,8 @@ class NetworkErrorScreenTest : public InProcessBrowserTest {
   std::string WifiElementSelector(const std::string& wifi_network_name) {
     return base::StrCat(
         {"$('offline-network-control').$$('#networkSelect')"
-         ".getNetworkListForTest()"
-         ".querySelector('cr-network-list-item[aria-label=\"",
-         wifi_network_name, "\"]')"});
+         ".getNetworkListItemByNameForTest('",
+         wifi_network_name, "')"});
   }
 
   void ClickOnWifiNetwork(const std::string& wifi_network_name) {
@@ -208,9 +205,7 @@ class GuestErrorScreenTest : public MixinBasedInProcessBrowserTest {
   }
 
  protected:
-  const LoginManagerMixin::TestUserInfo test_user_{
-      AccountId::FromUserEmailGaiaId(kTestUser, kTestUser)};
-  LoginManagerMixin login_manager_{&mixin_host_, {test_user_}};
+  LoginManagerMixin login_manager_{&mixin_host_};
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GuestErrorScreenTest);
@@ -219,7 +214,6 @@ class GuestErrorScreenTest : public MixinBasedInProcessBrowserTest {
 // Test that guest signin option is shown when enabled and that clicking on it
 // starts a guest session.
 IN_PROC_BROWSER_TEST_F(GuestErrorScreenTest, PRE_GuestLogin) {
-  ShowLoginWizard(OobeScreen::SCREEN_TEST_NO_WINDOW);
   GetScreen()->AllowGuestSignin(true);
   GetScreen()->SetUIState(NetworkError::UI_STATE_UPDATE);
   GetScreen()->Show();
@@ -336,7 +330,7 @@ IN_PROC_BROWSER_TEST_F(KioskErrorScreenTest, OpenCertificateConfig) {
   DialogWindowWaiter waiter(
       l10n_util::GetStringUTF16(IDS_CERTIFICATE_MANAGER_TITLE));
 
-  test::OobeJS().ClickOnPath({"error-message-md-configure-certs-button"});
+  test::OobeJS().TapOnPath({"error-message-md-configure-certs-button"});
   waiter.Wait();
 }
 

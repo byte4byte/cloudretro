@@ -4,6 +4,8 @@
 
 #include "chrome/installer/mini_installer/mini_installer_constants.h"
 
+#include "build/branding_buildflags.h"
+
 namespace mini_installer {
 
 // Various filenames and prefixes.
@@ -29,8 +31,6 @@ const wchar_t kTempPrefix[] = L"CR_";
 // ap value suffix to force subsequent updates to use the full rather than
 // differential updater.
 const wchar_t kFullInstallerSuffix[] = L"-full";
-// ap value tag for a multi-install product.
-const wchar_t kMultiInstallTag[] = L"-multi";
 
 // The resource types that would be unpacked from the mini installer.
 // Uncompressed binary.
@@ -57,7 +57,7 @@ const wchar_t kUninstallArgumentsRegistryValue[] = L"UninstallArguments";
 const wchar_t kUninstallRegistryValue[] = L"UninstallString";
 
 // Registry key paths.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // The path to the key containing each app's Clients registry key. The trailing
 // slash is required.
 const wchar_t kClientsKeyBase[] = L"Software\\Google\\Update\\Clients\\";

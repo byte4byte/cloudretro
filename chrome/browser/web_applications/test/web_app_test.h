@@ -1,43 +1,24 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEB_APPLICATIONS_TEST_WEB_APP_TEST_H_
 #define CHROME_BROWSER_WEB_APPLICATIONS_TEST_WEB_APP_TEST_H_
 
-#include "base/macros.h"
-#include "chrome/browser/web_applications/components/web_app_install_utils.h"
-#include "chrome/common/web_application_info.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "third_party/skia/include/core/SkColor.h"
-
-class GURL;
-class SkBitmap;
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace web_app {
 
-class WebAppTest : public ChromeRenderViewHostTestHarness {
- public:
-  WebAppTest();
-  ~WebAppTest() override;
+enum class ProviderType { kBookmarkApps, kWebApps };
 
-  void SetUp() override;
-
-  static SkBitmap CreateSquareIcon(int size_px, SkColor solid_color);
-
-  static WebApplicationInfo::IconInfo GenerateIconInfo(const GURL& url,
-                                                       int size_px,
-                                                       SkColor solid_color);
-
-  static void AddIconToIconsMap(const GURL& icon_url,
-                                int size_px,
-                                SkColor solid_color,
-                                IconsMap* icons_map);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebAppTest);
-};
+std::string ProviderTypeParamToString(
+    const ::testing::TestParamInfo<ProviderType>& provider_type);
 
 }  // namespace web_app
+
+// Consider to implement web app specific test harness independent of
+// RenderViewHost.
+using WebAppTest = ChromeRenderViewHostTestHarness;
 
 #endif  // CHROME_BROWSER_WEB_APPLICATIONS_TEST_WEB_APP_TEST_H_

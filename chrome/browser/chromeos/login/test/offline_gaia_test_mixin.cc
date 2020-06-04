@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/login/test/offline_gaia_test_mixin.h"
 
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/login/mixin_based_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/settings/device_settings_provider.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/network/network_state_test_helper.h"
 #include "chromeos/settings/cros_settings_names.h"
@@ -68,14 +68,14 @@ void OfflineGaiaTestMixin::GoOnline() {
   network_state_test_helper_.reset();
 }
 
-void OfflineGaiaTestMixin::SignIn(const AccountId& test_account_id,
-                                  const std::string& password) {
-  ASSERT_TRUE((test_account_id.HasAccountIdKey()));
-
-  InitOfflineLogin(test_account_id, password);
-  SubmitGaiaAuthOfflineForm(test_account_id.GetUserEmail(), password);
-  SessionStateWaiter(session_manager::SessionState::LOGGED_IN_NOT_ACTIVE)
-      .Wait();
+void OfflineGaiaTestMixin::CheckManagedStatus(bool expected_is_managed) {
+  if (expected_is_managed) {
+    test::OobeJS().ExpectVisiblePath(
+        {"gaia-signin", "offline-gaia", "managedBy"});
+  } else {
+    test::OobeJS().ExpectHiddenPath(
+        {"gaia-signin", "offline-gaia", "managedBy"});
+  }
 }
 
 void OfflineGaiaTestMixin::InitOfflineLogin(const AccountId& test_account_id,
@@ -102,7 +102,8 @@ void OfflineGaiaTestMixin::StartGaiaAuthOffline() {
 
 void OfflineGaiaTestMixin::SubmitGaiaAuthOfflineForm(
     const std::string& user_email,
-    const std::string& password) {
+    const std::string& password,
+    bool wait_for_signin) {
   test::OobeJS().ExpectVisiblePath({"gaia-signin", "offline-gaia"});
   test::OobeJS().ExpectHiddenPath({"gaia-signin", "signin-frame-dialog"});
   test::OobeJS()
@@ -116,7 +117,7 @@ void OfflineGaiaTestMixin::SubmitGaiaAuthOfflineForm(
   test::OobeJS().TypeIntoPath(user_email,
                               {"gaia-signin", "offline-gaia", "emailInput"});
   test::OobeJS().ClickOnPath(
-      {"gaia-signin", "offline-gaia", "email-input-form", "button"});
+      {"gaia-signin", "offline-gaia", "next-button"});
   test::OobeJS()
       .CreateDisplayedWaiter(false,
                              {"gaia-signin", "offline-gaia", "email-section"})
@@ -128,7 +129,11 @@ void OfflineGaiaTestMixin::SubmitGaiaAuthOfflineForm(
   test::OobeJS().TypeIntoPath(password,
                               {"gaia-signin", "offline-gaia", "passwordInput"});
   test::OobeJS().ClickOnPath(
-      {"gaia-signin", "offline-gaia", "password-input-form", "button"});
+      {"gaia-signin", "offline-gaia", "next-button"});
+  if (wait_for_signin) {
+    SessionStateWaiter(session_manager::SessionState::LOGGED_IN_NOT_ACTIVE)
+        .Wait();
+  }
 }
 
 }  // namespace chromeos

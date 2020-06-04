@@ -10,7 +10,7 @@
 #include "crypto/symmetric_key.h"
 #import "ios/web/js_messaging/crw_wk_script_message_router.h"
 #include "ios/web/js_messaging/web_frame_impl.h"
-#import "ios/web/web_state/web_state_impl.h"
+#import "ios/web/public/web_state.h"
 #import "ios/web/web_view/wk_security_origin_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -26,58 +26,11 @@ NSString* const kFrameBecameUnavailableMessageName = @"FrameBecameUnavailable";
 
 namespace web {
 
-// static
-void WebFramesManagerImpl::CreateForWebState(WebState* web_state) {
-  DCHECK(web_state);
-  if (!FromWebState(web_state))
-    web_state->SetUserData(
-        UserDataKey(), base::WrapUnique(new WebFramesManagerImpl(web_state)));
-}
-
-// static
-WebFramesManagerImpl* WebFramesManagerImpl::FromWebState(WebState* web_state) {
-  return static_cast<WebFramesManagerImpl*>(
-      WebFramesManager::FromWebState(web_state));
-}
+WebFramesManagerImpl::WebFramesManagerImpl(WebFramesManagerDelegate& delegate)
+    : delegate_(delegate), weak_factory_(this) {}
 
 WebFramesManagerImpl::~WebFramesManagerImpl() {
   RemoveAllWebFrames();
-}
-
-WebFramesManagerImpl::WebFramesManagerImpl(web::WebState* web_state)
-    : web_state_(web_state) {}
-
-void WebFramesManagerImpl::AddFrame(std::unique_ptr<WebFrame> frame) {
-  DCHECK(frame);
-  DCHECK(!frame->GetFrameId().empty());
-  if (frame->IsMainFrame()) {
-    DCHECK(!main_web_frame_);
-    main_web_frame_ = frame.get();
-  }
-  DCHECK(web_frames_.count(frame->GetFrameId()) == 0);
-  std::string frame_id = frame->GetFrameId();
-  web_frames_[frame_id] = std::move(frame);
-}
-
-void WebFramesManagerImpl::RemoveFrameWithId(const std::string& frame_id) {
-  DCHECK(!frame_id.empty());
-  // If the removed frame is a main frame, it should be the current one.
-  DCHECK(web_frames_.count(frame_id) == 0 ||
-         !web_frames_[frame_id]->IsMainFrame() ||
-         main_web_frame_ == web_frames_[frame_id].get());
-  if (web_frames_.count(frame_id) == 0) {
-    return;
-  }
-  if (main_web_frame_ && main_web_frame_->GetFrameId() == frame_id) {
-    main_web_frame_ = nullptr;
-  }
-  // The web::WebFrame destructor can call some callbacks that will try to
-  // access the frame via GetFrameWithId. This can lead to a reentrancy issue
-  // on |web_frames_|.
-  // To avoid this issue, keep the frame alive during the map operation and
-  // destroy it after.
-  auto keep_frame_alive = std::move(web_frames_[frame_id]);
-  web_frames_.erase(frame_id);
 }
 
 void WebFramesManagerImpl::RemoveAllWebFrames() {
@@ -86,12 +39,59 @@ void WebFramesManagerImpl::RemoveAllWebFrames() {
   }
 }
 
-WebFrame* WebFramesManagerImpl::GetFrameWithId(const std::string& frame_id) {
-  DCHECK(!frame_id.empty());
-  auto web_frames_it = web_frames_.find(frame_id);
-  return web_frames_it == web_frames_.end() ? nullptr
-                                            : web_frames_it->second.get();
+void WebFramesManagerImpl::RegisterExistingFrames() {
+  delegate_.GetWebState()->ExecuteJavaScript(
+      base::UTF8ToUTF16("__gCrWeb.message.getExistingFrames();"));
 }
+
+void WebFramesManagerImpl::OnWebViewUpdated(
+    WKWebView* old_web_view,
+    WKWebView* new_web_view,
+    CRWWKScriptMessageRouter* message_router) {
+  DCHECK(old_web_view != new_web_view);
+  if (old_web_view) {
+    RemoveAllWebFrames();
+    // TODO(crbug.com/956516): ScriptMessageHandlers should all be removed
+    // manually using |removeScriptMessageHandlerForName|, however this is not
+    // possible because of the cases where the WKWebViewConfiguration is purged,
+    // in these cases the message router is deleted and it will not have
+    // message handlers for the web view.
+    [message_router removeAllScriptMessageHandlersForWebView:old_web_view];
+  }
+
+  // |this| is captured inside callbacks for JS messages, so the owner of
+  // WebFramesManagerImpl must call OnWebViewUpdated(last_web_view, nil) when
+  // being destroyed, so that WebFramesManagerImpl can unregister callbacks in
+  // time. This guarantees that when callbacks are invoked, |this| is always
+  // valid.
+  if (new_web_view) {
+    // TODO(crbug.com/991950): Clean up lifecycles of WebStateImpl and
+    // CRWWebController, ensure that callbacks will always be unregistered
+    // successfully during destruction. Remove WeakPtr here and use plain "this"
+    // instead.
+    base::WeakPtr<WebFramesManagerImpl> weak_ptr = weak_factory_.GetWeakPtr();
+
+    [message_router
+        setScriptMessageHandler:^(WKScriptMessage* message) {
+          if (weak_ptr) {
+            weak_ptr->OnFrameBecameAvailable(message);
+          }
+        }
+                           name:kFrameBecameAvailableMessageName
+                        webView:new_web_view];
+    [message_router
+        setScriptMessageHandler:^(WKScriptMessage* message) {
+          DCHECK(!delegate_.GetWebState()->IsBeingDestroyed());
+          if (weak_ptr) {
+            weak_ptr->OnFrameBecameUnavailable(message);
+          }
+        }
+                           name:kFrameBecameUnavailableMessageName
+                        webView:new_web_view];
+  }
+}
+
+#pragma mark - WebFramesManager
 
 std::set<WebFrame*> WebFramesManagerImpl::GetAllWebFrames() {
   std::set<WebFrame*> frames;
@@ -105,49 +105,53 @@ WebFrame* WebFramesManagerImpl::GetMainWebFrame() {
   return main_web_frame_;
 }
 
-void WebFramesManagerImpl::RegisterExistingFrames() {
-  web_state_->ExecuteJavaScript(
-      base::UTF8ToUTF16("__gCrWeb.message.getExistingFrames();"));
+WebFrame* WebFramesManagerImpl::GetFrameWithId(const std::string& frame_id) {
+  DCHECK(!frame_id.empty());
+  auto web_frames_it = web_frames_.find(frame_id);
+  return web_frames_it == web_frames_.end() ? nullptr
+                                            : web_frames_it->second.get();
 }
 
-void WebFramesManagerImpl::OnWebViewUpdated(
-    WKWebView* old_web_view,
-    WKWebView* new_web_view,
-    CRWWKScriptMessageRouter* message_router) {
-  DCHECK(old_web_view != new_web_view);
-  if (old_web_view) {
-    [message_router
-        removeScriptMessageHandlerForName:kFrameBecameAvailableMessageName
-                                  webView:old_web_view];
-    [message_router
-        removeScriptMessageHandlerForName:kFrameBecameUnavailableMessageName
-                                  webView:old_web_view];
-  }
+#pragma mark - Private
 
-  // |this| is captured inside callbacks for JS messages, so the owner of
-  // WebFramesManagerImpl must call OnWebViewUpdated(last_web_view, nil) when
-  // being destroyed, so that WebFramesManagerImpl can unregister callbacks in
-  // time. This guarantees that when callbacks are invoked, |this| is always
-  // valid.
-  if (new_web_view) {
-    [message_router
-        setScriptMessageHandler:^(WKScriptMessage* message) {
-          this->OnFrameBecameAvailable(message);
-        }
-                           name:kFrameBecameAvailableMessageName
-                        webView:new_web_view];
-    [message_router
-        setScriptMessageHandler:^(WKScriptMessage* message) {
-          DCHECK(!web_state_->IsBeingDestroyed());
-          this->OnFrameBecameUnavailable(message);
-        }
-                           name:kFrameBecameUnavailableMessageName
-                        webView:new_web_view];
+void WebFramesManagerImpl::AddFrame(std::unique_ptr<WebFrame> frame) {
+  DCHECK(frame);
+  DCHECK(!frame->GetFrameId().empty());
+  if (frame->IsMainFrame()) {
+    DCHECK(!main_web_frame_);
+    main_web_frame_ = frame.get();
   }
+  DCHECK(web_frames_.count(frame->GetFrameId()) == 0);
+  std::string frame_id = frame->GetFrameId();
+  web_frames_[frame_id] = std::move(frame);
+
+  delegate_.OnWebFrameAvailable(GetFrameWithId(frame_id));
+}
+
+void WebFramesManagerImpl::RemoveFrameWithId(const std::string& frame_id) {
+  DCHECK(!frame_id.empty());
+  // If the removed frame is a main frame, it should be the current one.
+  DCHECK(web_frames_.count(frame_id) == 0 ||
+         !web_frames_[frame_id]->IsMainFrame() ||
+         main_web_frame_ == web_frames_[frame_id].get());
+  if (web_frames_.count(frame_id) == 0) {
+    return;
+  }
+  delegate_.OnWebFrameUnavailable(web_frames_[frame_id].get());
+  if (main_web_frame_ && main_web_frame_->GetFrameId() == frame_id) {
+    main_web_frame_ = nullptr;
+  }
+  // The web::WebFrame destructor can call some callbacks that will try to
+  // access the frame via GetFrameWithId. This can lead to a reentrancy issue
+  // on |web_frames_|.
+  // To avoid this issue, keep the frame alive during the map operation and
+  // destroy it after.
+  auto keep_frame_alive = std::move(web_frames_[frame_id]);
+  web_frames_.erase(frame_id);
 }
 
 void WebFramesManagerImpl::OnFrameBecameAvailable(WKScriptMessage* message) {
-  DCHECK(!web_state_->IsBeingDestroyed());
+  DCHECK(!delegate_.GetWebState()->IsBeingDestroyed());
   // Validate all expected message components because any frame could falsify
   // this message.
   if (![message.body isKindOfClass:[NSDictionary class]] ||
@@ -173,7 +177,7 @@ void WebFramesManagerImpl::OnFrameBecameAvailable(WKScriptMessage* message) {
 
     auto new_frame = std::make_unique<web::WebFrameImpl>(
         frame_id, message.frameInfo.mainFrame, message_frame_origin,
-        web_state_);
+        delegate_.GetWebState());
     if (frame_key) {
       new_frame->SetEncryptionKey(std::move(frame_key));
     }
@@ -186,24 +190,17 @@ void WebFramesManagerImpl::OnFrameBecameAvailable(WKScriptMessage* message) {
     }
 
     AddFrame(std::move(new_frame));
-    static_cast<WebStateImpl*>(web_state_)
-        ->OnWebFrameAvailable(GetFrameWithId(frame_id));
   }
 }
 
 void WebFramesManagerImpl::OnFrameBecameUnavailable(WKScriptMessage* message) {
-  DCHECK(!web_state_->IsBeingDestroyed());
+  DCHECK(!delegate_.GetWebState()->IsBeingDestroyed());
   if (![message.body isKindOfClass:[NSString class]]) {
     // WebController is being destroyed or message is invalid.
     return;
   }
   std::string frame_id = base::SysNSStringToUTF8(message.body);
-  WebFrame* frame = GetFrameWithId(frame_id);
-  if (frame) {
-    static_cast<WebStateImpl*>(web_state_)->OnWebFrameUnavailable(frame);
-    RemoveFrameWithId(frame_id);
-  }
+  RemoveFrameWithId(frame_id);
 }
-WEB_STATE_USER_DATA_KEY_IMPL(WebFramesManager)
 
 }  // namespace

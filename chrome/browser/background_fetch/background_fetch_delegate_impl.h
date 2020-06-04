@@ -54,10 +54,9 @@ class BackgroundFetchDelegateImpl
 
   // BackgroundFetchDelegate implementation:
   void GetIconDisplaySize(GetIconDisplaySizeCallback callback) override;
-  void GetPermissionForOrigin(
-      const url::Origin& origin,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      GetPermissionForOriginCallback callback) override;
+  void GetPermissionForOrigin(const url::Origin& origin,
+                              const content::WebContents::Getter& wc_getter,
+                              GetPermissionForOriginCallback callback) override;
   void CreateDownloadJob(base::WeakPtr<Client> client,
                          std::unique_ptr<content::BackgroundFetchDescription>
                              fetch_description) override;
@@ -94,7 +93,7 @@ class BackgroundFetchDelegateImpl
       std::unique_ptr<content::BackgroundFetchResult> result);
 
   // OfflineContentProvider implementation:
-  void OpenItem(offline_items_collection::LaunchLocation location,
+  void OpenItem(const offline_items_collection::OpenParams& open_params,
                 const offline_items_collection::ContentId& id) override;
   void RemoveItem(const offline_items_collection::ContentId& id) override;
   void CancelDownload(const offline_items_collection::ContentId& id) override;

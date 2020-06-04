@@ -10,41 +10,52 @@
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/sync_base_switches.h"
 #include "components/sync/driver/data_type_controller.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/driver/sync_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "chromeos/constants/chromeos_features.h"
 #endif
 
 class ProfileSyncServiceFactoryTest : public testing::Test {
  public:
   void SetUp() override {
+#if defined(OS_CHROMEOS)
+    app_list::AppListSyncableServiceFactory::SetUseInTesting(true);
+#endif  // defined(OS_CHROMEOS)
+    profile_ = std::make_unique<TestingProfile>();
     // Some services will only be created if there is a WebDataService.
     profile_->CreateWebDataService();
   }
 
   void TearDown() override {
+#if defined(OS_CHROMEOS)
+    app_list::AppListSyncableServiceFactory::SetUseInTesting(false);
+#endif  // defined(OS_CHROMEOS)
     base::ThreadPoolInstance::Get()->FlushForTesting();
   }
 
  protected:
-  ProfileSyncServiceFactoryTest() : profile_(new TestingProfile()) {}
+  ProfileSyncServiceFactoryTest() = default;
+  ~ProfileSyncServiceFactoryTest() override = default;
 
   // Returns the collection of default datatypes.
   std::vector<syncer::ModelType> DefaultDatatypes() {
-    static_assert(46 == syncer::ModelType::NUM_ENTRIES,
+    static_assert(41 == syncer::ModelType::NUM_ENTRIES,
                   "When adding a new type, you probably want to add it here as "
                   "well (assuming it is already enabled).");
 
@@ -66,10 +77,8 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::EXTENSIONS);
     datatypes.push_back(syncer::EXTENSION_SETTINGS);
     datatypes.push_back(syncer::APP_SETTINGS);
-    if (base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions) &&
-        base::FeatureList::IsEnabled(features::kDesktopPWAsUSS)) {
+    if (base::FeatureList::IsEnabled(features::kDesktopPWAsWithoutExtensions))
       datatypes.push_back(syncer::WEB_APPS);
-    }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if !defined(OS_ANDROID)
@@ -77,39 +86,33 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::SEARCH_ENGINES);
 #endif  // !defined(OS_ANDROID)
 
-#if BUILDFLAG(ENABLE_APP_LIST)
-    datatypes.push_back(syncer::APP_LIST);
-#endif  // BUILDFLAG(ENABLE_APP_LIST)
-
 #if defined(OS_LINUX) || defined(OS_WIN)
     datatypes.push_back(syncer::DICTIONARY);
 #endif
 
 #if defined(OS_CHROMEOS)
+    datatypes.push_back(syncer::APP_LIST);
     if (arc::IsArcAllowedForProfile(profile()))
       datatypes.push_back(syncer::ARC_PACKAGE);
+    if (chromeos::features::IsSplitSettingsSyncEnabled()) {
+      datatypes.push_back(syncer::OS_PREFERENCES);
+      datatypes.push_back(syncer::OS_PRIORITY_PREFERENCES);
+    }
     datatypes.push_back(syncer::PRINTERS);
     if (base::FeatureList::IsEnabled(switches::kSyncWifiConfigurations)) {
       datatypes.push_back(syncer::WIFI_CONFIGURATIONS);
     }
 #endif  // OS_CHROMEOS
 
-    // Common types.
+    // Common types. This excludes PASSWORDS because the password store factory
+    // is null for testing and hence no controller gets instantiated.
     datatypes.push_back(syncer::AUTOFILL);
     datatypes.push_back(syncer::AUTOFILL_PROFILE);
     datatypes.push_back(syncer::AUTOFILL_WALLET_DATA);
     datatypes.push_back(syncer::AUTOFILL_WALLET_METADATA);
     datatypes.push_back(syncer::BOOKMARKS);
     datatypes.push_back(syncer::DEVICE_INFO);
-    datatypes.push_back(syncer::FAVICON_TRACKING);
-    datatypes.push_back(syncer::FAVICON_IMAGES);
     datatypes.push_back(syncer::HISTORY_DELETE_DIRECTIVES);
-    if (!base::FeatureList::IsEnabled(switches::kSyncUSSPasswords)) {
-      // Password store factory is null for testing. For directory
-      // implementation, a controller was added anyway. For USS, no controller
-      // gets added, and hence the type isn't available.
-      datatypes.push_back(syncer::PASSWORDS);
-    }
     datatypes.push_back(syncer::PREFERENCES);
     datatypes.push_back(syncer::PRIORITY_PREFERENCES);
     datatypes.push_back(syncer::SESSIONS);
@@ -117,9 +120,8 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::TYPED_URLS);
     datatypes.push_back(syncer::USER_EVENTS);
     datatypes.push_back(syncer::USER_CONSENTS);
-    if (base::FeatureList::IsEnabled(switches::kSyncSendTabToSelf)) {
-      datatypes.push_back(syncer::SEND_TAB_TO_SELF);
-    }
+    datatypes.push_back(syncer::SEND_TAB_TO_SELF);
+    datatypes.push_back(syncer::SHARING_MESSAGE);
     return datatypes;
   }
 
@@ -150,7 +152,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
   Profile* profile() { return profile_.get(); }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
 };
 

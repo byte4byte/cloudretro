@@ -10,6 +10,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/test/test_ukm_recorder_factory.h"
+#include "cc/trees/render_frame_metadata_observer.h"
 #include "content/renderer/frame_swap_message_queue.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/gfx/buffer_types.h"
@@ -20,10 +21,6 @@ FakeCompositorDependencies::FakeCompositorDependencies() {
 }
 
 FakeCompositorDependencies::~FakeCompositorDependencies() {
-}
-
-bool FakeCompositorDependencies::IsGpuRasterizationForced() {
-  return false;
 }
 
 int FakeCompositorDependencies::GetGpuRasterizationMSAASampleCount() {
@@ -54,14 +51,14 @@ bool FakeCompositorDependencies::IsUseZoomForDSFEnabled() {
   return use_zoom_for_dsf_;
 }
 
-scoped_refptr<base::SingleThreadTaskRunner>
-FakeCompositorDependencies::GetCompositorMainThreadTaskRunner() {
-  return base::ThreadTaskRunnerHandle::Get();
+bool FakeCompositorDependencies::IsSingleThreaded() {
+  // Currently never threaded compositing in unit tests.
+  return true;
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
-FakeCompositorDependencies::GetCompositorImplThreadTaskRunner() {
-  return nullptr;  // Currently never threaded compositing in unit tests.
+FakeCompositorDependencies::GetCleanupTaskRunner() {
+  return base::ThreadTaskRunnerHandle::Get();
 }
 
 blink::scheduler::WebThreadScheduler*
@@ -83,15 +80,15 @@ FakeCompositorDependencies::CreateUkmRecorderFactory() {
 }
 
 void FakeCompositorDependencies::RequestNewLayerTreeFrameSink(
-    int widget_routing_id,
+    RenderWidget* render_widget,
     scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue,
     const GURL& url,
     LayerTreeFrameSinkCallback callback,
-    mojom::RenderFrameMetadataObserverClientRequest
-        render_frame_metadata_observer_client_request,
-    mojom::RenderFrameMetadataObserverPtr render_frame_metadata_observer_ptr,
     const char* client_name) {
-  std::move(callback).Run(cc::FakeLayerTreeFrameSink::Create3d());
+  std::unique_ptr<cc::FakeLayerTreeFrameSink> sink =
+      cc::FakeLayerTreeFrameSink::Create3d();
+  last_created_frame_sink_ = sink.get();
+  std::move(callback).Run(std::move(sink), nullptr);
 }
 
 #ifdef OS_ANDROID

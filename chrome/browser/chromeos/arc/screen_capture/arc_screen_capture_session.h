@@ -10,9 +10,10 @@
 #include <string>
 
 #include "base/macros.h"
-#include "components/arc/common/screen_capture.mojom.h"
-#include "components/viz/common/gl_helper.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "components/arc/mojom/screen_capture.mojom.h"
+#include "gpu/command_buffer/client/gl_helper.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/compositor/compositor_animation_observer.h"
 
 class ScreenCaptureNotificationUI;
@@ -26,7 +27,6 @@ struct DesktopMediaID;
 }  // namespace content
 
 namespace gfx {
-class GpuMemoryBuffer;
 class ClientNativePixmapFactory;
 class Size;
 }  // namespace gfx
@@ -40,10 +40,10 @@ namespace arc {
 class ArcScreenCaptureSession : public mojom::ScreenCaptureSession,
                                 public ui::CompositorAnimationObserver {
  public:
-  // Creates a new ScreenCaptureSession and returns the interface pointer for
-  // passing back across a Mojo pipe. This object will be automatically
-  // destructed when the Mojo connection is closed.
-  static mojom::ScreenCaptureSessionPtr Create(
+  // Creates a new ScreenCaptureSession and returns the remote for passing back
+  // across a Mojo pipe. This object will be automatically destructed when the
+  // Mojo connection is closed.
+  static mojo::PendingRemote<mojom::ScreenCaptureSession> Create(
       mojom::ScreenCaptureSessionNotifierPtr notifier,
       const std::string& display_name,
       content::DesktopMediaID desktop_id,
@@ -67,11 +67,12 @@ class ArcScreenCaptureSession : public mojom::ScreenCaptureSession,
                           const gfx::Size& size);
   ~ArcScreenCaptureSession() override;
 
-  // Does additional checks and upon success returns a valid InterfacePtr, null
-  // otherwise.
-  mojom::ScreenCaptureSessionPtr Initialize(content::DesktopMediaID desktop_id,
-                                            const std::string& display_name,
-                                            bool enable_notification);
+  // Does additional checks and upon success returns a valid remote,
+  // mojo::NullRemote() otherwise.
+  mojo::PendingRemote<mojom::ScreenCaptureSession> Initialize(
+      content::DesktopMediaID desktop_id,
+      const std::string& display_name,
+      bool enable_notification);
   // Copies the GL texture from a desktop capture to the corresponding GL
   // texture for a GPU buffer.
   void CopyDesktopTextureToGpuBuffer(
@@ -82,15 +83,12 @@ class ArcScreenCaptureSession : public mojom::ScreenCaptureSession,
   // Callback for when we perform CopyOutputRequests.
   void OnDesktopCaptured(std::unique_ptr<viz::CopyOutputResult> result);
   // Callback for completion of GL commands.
-  void QueryCompleted(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
-                      GLuint query_id,
-                      GLuint texture,
-                      GLuint id,
-                      SetOutputBufferCallback callback);
+  void QueryCompleted(GLuint query_id,
+                      std::unique_ptr<PendingBuffer> pending_buffer);
   // Callback for a user clicking Stop on the notification for screen capture.
   void NotificationStop();
 
-  mojo::Binding<mojom::ScreenCaptureSession> binding_;
+  mojo::Receiver<mojom::ScreenCaptureSession> receiver_{this};
   mojom::ScreenCaptureSessionNotifierPtr notifier_;
   gfx::Size size_;
   // aura::Window of the display being captured. This corresponds to one of
@@ -105,12 +103,12 @@ class ArcScreenCaptureSession : public mojom::ScreenCaptureSession,
   // well as never skip any output buffers.
   std::queue<std::unique_ptr<PendingBuffer>> buffer_queue_;
   std::queue<std::unique_ptr<DesktopTexture>> texture_queue_;
-  std::unique_ptr<viz::GLHelper> gl_helper_;
-  std::unique_ptr<viz::GLHelper::ScalerInterface> scaler_;
+  std::unique_ptr<gpu::GLHelper> gl_helper_;
+  std::unique_ptr<gpu::GLHelper::ScalerInterface> scaler_;
   std::unique_ptr<ScreenCaptureNotificationUI> notification_ui_;
   std::unique_ptr<gfx::ClientNativePixmapFactory> client_native_pixmap_factory_;
 
-  base::WeakPtrFactory<ArcScreenCaptureSession> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcScreenCaptureSession> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcScreenCaptureSession);
 };

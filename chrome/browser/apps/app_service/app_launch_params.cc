@@ -4,21 +4,22 @@
 
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 
-AppLaunchParams::AppLaunchParams(Profile* profile,
-                                 const std::string& app_id,
+namespace apps {
+
+AppLaunchParams::AppLaunchParams(const std::string& app_id,
                                  apps::mojom::LaunchContainer container,
                                  WindowOpenDisposition disposition,
                                  apps::mojom::AppLaunchSource source,
                                  int64_t display_id)
-    : profile(profile),
-      app_id(app_id),
+    : app_id(app_id),
       container(container),
       disposition(disposition),
       command_line(base::CommandLine::NO_PROGRAM),
       source(source),
-      display_id(display_id),
-      opener(nullptr) {}
+      display_id(display_id) {}
 
 AppLaunchParams::AppLaunchParams(const AppLaunchParams& other) = default;
 
 AppLaunchParams::~AppLaunchParams() = default;
+
+}  // namespace apps

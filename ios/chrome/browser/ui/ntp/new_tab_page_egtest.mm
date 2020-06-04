@@ -2,22 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
-#import <XCTest/XCTest.h>
-
 #import "base/test/ios/wait_util.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/chrome_switches.h"
-#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
-#include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -28,8 +22,8 @@ namespace {
 
 // Pauses until the history label has disappeared.  History should not show on
 // incognito.
-void WaitForHistoryToDisappear() {
-  [[GREYCondition
+BOOL WaitForHistoryToDisappear() {
+  return [[GREYCondition
       conditionWithName:@"Wait for history to disappear"
                   block:^BOOL {
                     NSError* error = nil;
@@ -57,10 +51,30 @@ void WaitForHistoryToDisappear() {
   [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
 }
 
+// Tests that the NTP is still displayed after loading an invalid URL.
+- (void)testNTPStayForInvalidURL {
+// TODO(crbug.com/1067813): Test won't pass on iPad device.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
+      performAction:grey_typeText(@"file://\n")];
+
+  // Make sure that the URL disappeared.
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText("file://")]
+      assertWithMatcher:grey_nil()];
+
+  // Check that the NTP is still displayed (because the fake omnibox is here).
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
+      assertWithMatcher:grey_sufficientlyVisible()];
+}
+
 // Tests that all items are accessible on the incognito page.
 - (void)testAccessibilityOnIncognitoTab {
   [ChromeEarlGrey openNewIncognitoTab];
-  WaitForHistoryToDisappear();
+  GREYAssert(WaitForHistoryToDisappear(), @"History did not disappear.");
   [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
   [ChromeEarlGrey closeAllIncognitoTabs];
 }

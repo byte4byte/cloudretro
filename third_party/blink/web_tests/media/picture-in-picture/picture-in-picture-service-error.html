@@ -22,7 +22,7 @@ class PictureInPictureServiceMock {
   }
 
   async startSession(playerId, surfaceId, naturalSize, showPlayPauseButton,
-        showMuteButton, observer, callback) {
+        observer, callback) {
     return { session: null, size: new gfx.mojom.Size() };
   }
 };
@@ -31,7 +31,7 @@ promise_test(async t => {
   new PictureInPictureServiceMock();
 
   const video = await loadVideo(document, '../content/test.ogv');
-  return promise_rejects(t, 'NotSupportedError',
+  return promise_rejects_dom(t, 'NotSupportedError',
     requestPictureInPictureWithTrustedClick(video));
 });
 </script>

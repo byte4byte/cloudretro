@@ -65,6 +65,8 @@ struct StructTraits<media_session::mojom::MediaImageBitmapDataView, SkBitmap> {
   static const base::span<const uint8_t> pixel_data(const SkBitmap& r);
   static int width(const SkBitmap& r) { return r.width(); }
   static int height(const SkBitmap& r) { return r.height(); }
+  static media_session::mojom::MediaImageBitmapColorType color_type(
+      const SkBitmap& r);
 
   static bool Read(media_session::mojom::MediaImageBitmapDataView data,
                    SkBitmap* out);
@@ -91,7 +93,7 @@ struct StructTraits<media_session::mojom::MediaPositionDataView,
     return media_position.position_;
   }
 
-  static base::Time last_updated_time(
+  static base::TimeTicks last_updated_time(
       const media_session::MediaPosition& media_position) {
     return media_position.last_updated_time_;
   }

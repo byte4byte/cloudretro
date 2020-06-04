@@ -8,10 +8,10 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/cryptohome/key.pb.h"
@@ -29,17 +28,13 @@
 #include "components/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/views/widget/widget.h"
-
-using namespace net::test_server;
 
 namespace chromeos {
 
@@ -83,10 +78,6 @@ class OobeTest : public OobeBaseTest {
 IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {
   WaitForGaiaPageLoad();
 
-  content::WindowedNotificationObserver session_start_waiter(
-      chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources());
-
   // Make the MountEx cryptohome call fail iff the |create| field is missing,
   // which simulates the real cryptohomed's behavior for the new user mount.
   FakeCryptohomeClient::Get()->set_mount_create_required(true);
@@ -96,12 +87,10 @@ IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {
       ->ShowSigninScreenForTest(FakeGaiaMixin::kFakeUserEmail,
                                 FakeGaiaMixin::kFakeUserPassword,
                                 FakeGaiaMixin::kEmptyUserServices);
-
-  session_start_waiter.Wait();
+  test::WaitForPrimaryUserSessionStart();
 
   const AccountId account_id =
-      content::Details<const user_manager::User>(session_start_waiter.details())
-          ->GetAccountId();
+      user_manager::UserManager::Get()->GetActiveUser()->GetAccountId();
   EXPECT_FALSE(
       user_manager::known_user::GetIsUsingSAMLPrincipalsAPI(account_id));
 
@@ -134,143 +123,6 @@ IN_PROC_BROWSER_TEST_F(OobeTest, Accelerator) {
                             true,    // alt
                             false);  // command
   OobeScreenWaiter(EnrollmentScreenView::kScreenId).Wait();
-}
-
-class GaiaActionButtonsTest : public OobeBaseTest {
- public:
-  GaiaActionButtonsTest() = default;
-  ~GaiaActionButtonsTest() override = default;
-
-  void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(features::kGaiaActionButtons);
-    OobeBaseTest::SetUp();
-  }
-
-  void WaitForPageLoad() {
-    WaitForGaiaPageLoad();
-    // Also wait for the javascript page to load
-    GaiaJSChecker().CreateWaiter("gaia.chromeOSLogin.initialized_")->Wait();
-  }
-
-  // A JSChecker for the GAIA Webview
-  test::JSChecker GaiaJSChecker() { return SigninFrameJS(); }
-
-  // A JSChecker for the Oobe screen
-  test::JSChecker OobeJSChecker() const { return test::OobeJS(); }
-
-  void ExpectHidden(const std::string& button) const {
-    OobeJSChecker()
-        .CreateVisibilityWaiter(false, {module_name, button})
-        ->Wait();
-  }
-
-  void ExpectVisible(const std::string& button) const {
-    OobeJSChecker().CreateVisibilityWaiter(true, {module_name, button})->Wait();
-  }
-
-  void ExpectEnabled(const std::string& button) const {
-    OobeJSChecker().CreateEnabledWaiter(true, {module_name, button})->Wait();
-  }
-
-  void ExpectDisabled(const std::string& button) const {
-    OobeJSChecker().CreateEnabledWaiter(false, {module_name, button})->Wait();
-  }
-
-  void ExpectLabel(const std::string& button, const std::string& label) const {
-    ASSERT_EQ(GetLabel(button), label);
-  }
-
-  std::string GetLabel(const std::string& button) const {
-    const std::string js_path =
-        chromeos::test::GetOobeElementPath({module_name, button});
-    return test::OobeJS().GetString(js_path + ".innerText");
-  }
-
-  void EnablePrimaryButton() {
-    GaiaJSChecker().Evaluate("sendSetPrimaryActionLabel('label')");
-    GaiaJSChecker().Evaluate("sendSetPrimaryActionEnabled(true)");
-  }
-
- private:
-  FakeGaiaMixin fake_gaia_{&mixin_host_, embedded_test_server()};
-  base::test::ScopedFeatureList scoped_feature_list_{};
-  const char* module_name = "gaia-signin";
-
-  DISALLOW_COPY_AND_ASSIGN(GaiaActionButtonsTest);
-};
-
-IN_PROC_BROWSER_TEST_F(GaiaActionButtonsTest, PrimaryActionButtonLabel) {
-  WaitForPageLoad();
-
-  // Initially the button is hidden
-  ExpectHidden("primary-action-button");
-
-  // It is shown when the label is set
-  GaiaJSChecker().Evaluate("sendSetPrimaryActionLabel('the-label')");
-  ExpectVisible("primary-action-button");
-  ExpectLabel("primary-action-button", "the-label");
-
-  // It is hidden when the label is set to nill
-  GaiaJSChecker().Evaluate("sendSetPrimaryActionLabel(null)");
-  ExpectHidden("primary-action-button");
-}
-
-IN_PROC_BROWSER_TEST_F(GaiaActionButtonsTest, PrimaryActionButtonEnabled) {
-  WaitForPageLoad();
-
-  // Initially the button is enabled
-  ExpectEnabled("primary-action-button");
-
-  // It can be disabled
-  GaiaJSChecker().Evaluate("sendSetPrimaryActionEnabled(false)");
-  ExpectDisabled("primary-action-button");
-
-  // It can be enabled
-  GaiaJSChecker().Evaluate("sendSetPrimaryActionEnabled(true)");
-  ExpectEnabled("primary-action-button");
-}
-
-IN_PROC_BROWSER_TEST_F(GaiaActionButtonsTest, SecondaryActionButtonLabel) {
-  WaitForPageLoad();
-
-  // Initially the button is hidden
-  ExpectHidden("secondary-action-button");
-
-  // It is shown when the label is set
-  GaiaJSChecker().Evaluate("sendSetSecondaryActionLabel('the-label')");
-  ExpectVisible("secondary-action-button");
-  ExpectLabel("secondary-action-button", "the-label");
-
-  // It is hidden when the label is set to nill
-  GaiaJSChecker().Evaluate("sendSetSecondaryActionLabel(null)");
-  ExpectHidden("secondary-action-button");
-}
-
-IN_PROC_BROWSER_TEST_F(GaiaActionButtonsTest, SecondaryActionButtonEnabled) {
-  WaitForPageLoad();
-
-  // Initially the button is enabled
-  ExpectEnabled("secondary-action-button");
-
-  // It can be disabled
-  GaiaJSChecker().Evaluate("sendSetSecondaryActionEnabled(false)");
-  ExpectDisabled("secondary-action-button");
-
-  // It can be enabled
-  GaiaJSChecker().Evaluate("sendSetSecondaryActionEnabled(true)");
-  ExpectEnabled("secondary-action-button");
-}
-
-IN_PROC_BROWSER_TEST_F(GaiaActionButtonsTest, SetAllActionsEnabled) {
-  WaitForPageLoad();
-
-  GaiaJSChecker().Evaluate("sendSetAllActionsEnabled(false)");
-  ExpectDisabled("primary-action-button");
-  ExpectDisabled("secondary-action-button");
-
-  GaiaJSChecker().Evaluate("sendSetAllActionsEnabled(true)");
-  ExpectEnabled("primary-action-button");
-  ExpectEnabled("secondary-action-button");
 }
 
 }  // namespace chromeos

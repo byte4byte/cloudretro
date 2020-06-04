@@ -131,8 +131,10 @@ class PowerButtonControllerTest : public PowerButtonTestBase {
   // Tap outside of the menu view to dismiss the menu.
   void TapToDismissPowerButtonMenu() {
     gfx::Rect menu_bounds = power_button_test_api_->GetMenuBoundsInScreen();
-    GetEventGenerator()->GestureTapAt(
-        gfx::Point(menu_bounds.x() - 5, menu_bounds.y() - 5));
+    gfx::Point point = menu_bounds.bottom_right();
+    point.Offset(5, 5);
+    GetEventGenerator()->GestureTapAt(point);
+
     EXPECT_FALSE(power_button_test_api_->IsMenuOpened());
   }
 
@@ -806,8 +808,20 @@ TEST_F(PowerButtonControllerTest, MenuItemsToLoginAndLockedStatus) {
   EXPECT_FALSE(power_button_test_api_->MenuHasFeedbackItem());
   TapToDismissPowerButtonMenu();
 
+  // Should have sign out and feedback items if in guest mode (or, generally,
+  // if screen locking is disabled).
+  ClearLogin();
+  Initialize(ButtonType::NORMAL, LoginStatus::GUEST);
+  OpenPowerButtonMenu();
+  EXPECT_FALSE(GetLockedState());
+  EXPECT_TRUE(power_button_test_api_->MenuHasSignOutItem());
+  EXPECT_FALSE(power_button_test_api_->MenuHasLockScreenItem());
+  EXPECT_TRUE(power_button_test_api_->MenuHasFeedbackItem());
+  TapToDismissPowerButtonMenu();
+
   // Should have sign out, lock screen and feedback items if user is logged in
   // and screen is unlocked.
+  ClearLogin();
   CreateUserSessions(1);
   Shell::Get()->UpdateAfterLoginStatusChange(LoginStatus::USER);
   OpenPowerButtonMenu();
@@ -1131,8 +1145,9 @@ class PowerButtonControllerWithPositionTest
   DISALLOW_COPY_AND_ASSIGN(PowerButtonControllerWithPositionTest);
 };
 
+// TODO(crbug.com/1010194).
 TEST_P(PowerButtonControllerWithPositionTest,
-       MenuNextToPowerButtonInTabletMode) {
+       DISABLED_MenuNextToPowerButtonInTabletMode) {
   std::string display =
       std::to_string(kDisplayWidth) + "x" + std::to_string(kDisplayHeight);
   UpdateDisplay(display);

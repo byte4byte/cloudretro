@@ -15,7 +15,7 @@
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_interface.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
 #include "third_party/blink/renderer/core/streams/test_underlying_source.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
+#include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/loader/testing/replaying_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -59,7 +60,8 @@ class BodyStreamBufferTest : public testing::Test {
       ADD_FAILURE() << "Compilation fails";
       return ScriptValue();
     }
-    return ScriptValue(script_state, script->Run(script_state->GetContext()));
+    return ScriptValue(script_state->GetIsolate(),
+                       script->Run(script_state->GetContext()));
   }
   ScriptValue EvalWithPrintingError(ScriptState* script_state, const char* s) {
     v8::TryCatch block(script_state->GetIsolate());
@@ -112,8 +114,8 @@ TEST_F(BodyStreamBufferTest, Tee) {
   src->Add(Command(Command::kData, "hello, "));
   src->Add(Command(Command::kData, "world"));
   src->Add(Command(Command::kDone));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
 
   BodyStreamBuffer* new1;
   BodyStreamBuffer* new2;
@@ -124,14 +126,16 @@ TEST_F(BodyStreamBufferTest, Tee) {
   EXPECT_FALSE(buffer->HasPendingActivity());
 
   checkpoint.Call(0);
-  new1->StartLoading(FetchDataLoader::CreateLoaderAsString(), client1,
-                     exception_state);
+  new1->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                         TextResourceDecoderOptions::CreateUTF8Decode()),
+                     client1, exception_state);
   checkpoint.Call(1);
   test::RunPendingTasks();
   checkpoint.Call(2);
 
-  new2->StartLoading(FetchDataLoader::CreateLoaderAsString(), client2,
-                     exception_state);
+  new2->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                         TextResourceDecoderOptions::CreateUTF8Decode()),
+                     client2, exception_state);
   checkpoint.Call(3);
   test::RunPendingTasks();
   checkpoint.Call(4);
@@ -154,10 +158,10 @@ TEST_F(BodyStreamBufferTest, TeeFromHandleMadeFromStream) {
       scope.GetScriptState(), underlying_source, 0);
   ASSERT_TRUE(stream);
 
-  underlying_source->Enqueue(ScriptValue(scope.GetScriptState(),
-                                         ToV8(chunk1, scope.GetScriptState())));
-  underlying_source->Enqueue(ScriptValue(scope.GetScriptState(),
-                                         ToV8(chunk2, scope.GetScriptState())));
+  underlying_source->Enqueue(
+      ScriptValue(scope.GetIsolate(), ToV8(chunk1, scope.GetScriptState())));
+  underlying_source->Enqueue(
+      ScriptValue(scope.GetIsolate(), ToV8(chunk2, scope.GetScriptState())));
   underlying_source->Close();
 
   Checkpoint checkpoint;
@@ -193,14 +197,16 @@ TEST_F(BodyStreamBufferTest, TeeFromHandleMadeFromStream) {
   EXPECT_TRUE(buffer->IsStreamDisturbed(exception_state).value_or(false));
   EXPECT_FALSE(buffer->HasPendingActivity());
 
-  new1->StartLoading(FetchDataLoader::CreateLoaderAsString(), client1,
-                     exception_state);
+  new1->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                         TextResourceDecoderOptions::CreateUTF8Decode()),
+                     client1, exception_state);
   checkpoint.Call(1);
   test::RunPendingTasks();
   checkpoint.Call(2);
 
-  new2->StartLoading(FetchDataLoader::CreateLoaderAsString(), client2,
-                     exception_state);
+  new2->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                         TextResourceDecoderOptions::CreateUTF8Decode()),
+                     client2, exception_state);
   checkpoint.Call(3);
   test::RunPendingTasks();
   checkpoint.Call(4);
@@ -213,7 +219,7 @@ TEST_F(BodyStreamBufferTest, DrainAsBlobDataHandle) {
   auto size = data->length();
   scoped_refptr<BlobDataHandle> blob_data_handle =
       BlobDataHandle::Create(std::move(data), size);
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* buffer = BodyStreamBuffer::Create(
       scope.GetScriptState(),
       MakeGarbageCollected<BlobBytesConsumer>(scope.GetExecutionContext(),
                                               blob_data_handle),
@@ -238,8 +244,8 @@ TEST_F(BodyStreamBufferTest, DrainAsBlobDataHandleReturnsNull) {
   // This BytesConsumer is not drainable.
   BytesConsumer* src = MakeGarbageCollected<ReplayingBytesConsumer>(
       scope.GetDocument().GetTaskRunner(TaskType::kNetworking));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
 
   EXPECT_FALSE(buffer->IsStreamLocked(ASSERT_NO_EXCEPTION).value_or(true));
   EXPECT_FALSE(buffer->IsStreamDisturbed(ASSERT_NO_EXCEPTION).value_or(true));
@@ -287,7 +293,7 @@ TEST_F(BodyStreamBufferTest, DrainAsFormData) {
   scoped_refptr<EncodedFormData> input_form_data =
       data->EncodeMultiPartFormData();
 
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* buffer = BodyStreamBuffer::Create(
       scope.GetScriptState(),
       MakeGarbageCollected<FormDataBytesConsumer>(scope.GetExecutionContext(),
                                                   input_form_data),
@@ -311,8 +317,8 @@ TEST_F(BodyStreamBufferTest, DrainAsFormDataReturnsNull) {
   // This BytesConsumer is not drainable.
   BytesConsumer* src = MakeGarbageCollected<ReplayingBytesConsumer>(
       scope.GetDocument().GetTaskRunner(TaskType::kNetworking));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
 
   EXPECT_FALSE(buffer->IsStreamLocked(ASSERT_NO_EXCEPTION).value_or(true));
   EXPECT_FALSE(buffer->IsStreamDisturbed(ASSERT_NO_EXCEPTION).value_or(true));
@@ -364,8 +370,8 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer) {
   src->Add(Command(Command::kWait));
   src->Add(Command(Command::kData, "hello"));
   src->Add(Command(Command::kDone));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
   buffer->StartLoading(FetchDataLoader::CreateLoaderAsArrayBuffer(), client,
                        ASSERT_NO_EXCEPTION);
 
@@ -382,7 +388,7 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer) {
   EXPECT_FALSE(buffer->HasPendingActivity());
   ASSERT_TRUE(array_buffer);
   EXPECT_EQ("hello", String(static_cast<const char*>(array_buffer->Data()),
-                            array_buffer->ByteLength()));
+                            array_buffer->ByteLengthAsSizeT()));
 }
 
 TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob) {
@@ -402,8 +408,8 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob) {
   src->Add(Command(Command::kWait));
   src->Add(Command(Command::kData, "hello"));
   src->Add(Command(Command::kDone));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
   buffer->StartLoading(FetchDataLoader::CreateLoaderAsBlobHandle("text/plain"),
                        client, ASSERT_NO_EXCEPTION);
 
@@ -436,10 +442,11 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString) {
   src->Add(Command(Command::kWait));
   src->Add(Command(Command::kData, "hello"));
   src->Add(Command(Command::kDone));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
-  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(), client,
-                       ASSERT_NO_EXCEPTION);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
+  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                           TextResourceDecoderOptions::CreateUTF8Decode()),
+                       client, ASSERT_NO_EXCEPTION);
 
   EXPECT_TRUE(buffer->IsStreamLocked(ASSERT_NO_EXCEPTION).value_or(false));
   EXPECT_TRUE(buffer->IsStreamDisturbed(ASSERT_NO_EXCEPTION).value_or(false));
@@ -464,7 +471,7 @@ TEST_F(BodyStreamBufferTest, LoadClosedHandle) {
   EXPECT_CALL(*client, DidFetchDataLoadedString(String("")));
   EXPECT_CALL(checkpoint, Call(2));
 
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* buffer = BodyStreamBuffer::Create(
       scope.GetScriptState(), BytesConsumer::CreateClosed(), nullptr);
 
   EXPECT_TRUE(buffer->IsStreamClosed(ASSERT_NO_EXCEPTION).value_or(false));
@@ -474,8 +481,9 @@ TEST_F(BodyStreamBufferTest, LoadClosedHandle) {
   EXPECT_FALSE(buffer->HasPendingActivity());
 
   checkpoint.Call(1);
-  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(), client,
-                       ASSERT_NO_EXCEPTION);
+  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                           TextResourceDecoderOptions::CreateUTF8Decode()),
+                       client, ASSERT_NO_EXCEPTION);
   checkpoint.Call(2);
 
   EXPECT_TRUE(buffer->IsStreamLocked(ASSERT_NO_EXCEPTION).value_or(false));
@@ -493,7 +501,7 @@ TEST_F(BodyStreamBufferTest, LoadErroredHandle) {
   EXPECT_CALL(*client, DidFetchDataLoadFailed());
   EXPECT_CALL(checkpoint, Call(2));
 
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* buffer = BodyStreamBuffer::Create(
       scope.GetScriptState(),
       BytesConsumer::CreateErrored(BytesConsumer::Error()), nullptr);
 
@@ -504,8 +512,9 @@ TEST_F(BodyStreamBufferTest, LoadErroredHandle) {
   EXPECT_FALSE(buffer->HasPendingActivity());
 
   checkpoint.Call(1);
-  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(), client,
-                       ASSERT_NO_EXCEPTION);
+  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                           TextResourceDecoderOptions::CreateUTF8Decode()),
+                       client, ASSERT_NO_EXCEPTION);
   checkpoint.Call(2);
 
   EXPECT_TRUE(buffer->IsStreamLocked(ASSERT_NO_EXCEPTION).value_or(false));
@@ -528,10 +537,11 @@ TEST_F(BodyStreamBufferTest, LoaderShouldBeKeptAliveByBodyStreamBuffer) {
   src->Add(Command(Command::kWait));
   src->Add(Command(Command::kData, "hello"));
   src->Add(Command(Command::kDone));
-  Persistent<BodyStreamBuffer> buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
-  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(), client,
-                       ASSERT_NO_EXCEPTION);
+  Persistent<BodyStreamBuffer> buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
+  buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(
+                           TextResourceDecoderOptions::CreateUTF8Decode()),
+                       client, ASSERT_NO_EXCEPTION);
 
   ThreadState::Current()->CollectAllGarbageForTesting();
   checkpoint.Call(1);
@@ -545,10 +555,10 @@ TEST_F(BodyStreamBufferTest, SourceShouldBeCanceledWhenCanceled) {
       MakeGarbageCollected<ReplayingBytesConsumer>(
           scope.GetDocument().GetTaskRunner(TaskType::kNetworking));
 
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), consumer, nullptr);
-  ScriptValue reason(scope.GetScriptState(),
-                     V8String(scope.GetScriptState()->GetIsolate(), "reason"));
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), consumer, nullptr);
+  ScriptValue reason(scope.GetIsolate(),
+                     V8String(scope.GetIsolate(), "reason"));
   EXPECT_FALSE(consumer->IsCancelled());
   buffer->Cancel(scope.GetScriptState(), reason);
   EXPECT_TRUE(consumer->IsCancelled());
@@ -561,8 +571,8 @@ TEST_F(BodyStreamBufferTest, NestedPull) {
   src->Add(Command(Command::kWait));
   src->Add(Command(Command::kData, "hello"));
   src->Add(Command(Command::kError));
-  Persistent<BodyStreamBuffer> buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  Persistent<BodyStreamBuffer> buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
 
   auto result =
       scope.GetScriptState()->GetContext()->Global()->CreateDataProperty(
@@ -589,8 +599,8 @@ TEST_F(BodyStreamBufferTest, NullAbortSignalIsNotAborted) {
   // This BytesConsumer is not drainable.
   BytesConsumer* src = MakeGarbageCollected<ReplayingBytesConsumer>(
       scope.GetDocument().GetTaskRunner(TaskType::kNetworking));
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, nullptr);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, nullptr);
 
   EXPECT_FALSE(buffer->IsAborted());
 }
@@ -601,8 +611,8 @@ TEST_F(BodyStreamBufferTest, AbortSignalMakesAborted) {
   BytesConsumer* src = MakeGarbageCollected<ReplayingBytesConsumer>(
       scope.GetDocument().GetTaskRunner(TaskType::kNetworking));
   auto* signal = MakeGarbageCollected<AbortSignal>(scope.GetExecutionContext());
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, signal);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, signal);
 
   EXPECT_FALSE(buffer->IsAborted());
   signal->SignalAbort();
@@ -633,8 +643,8 @@ TEST_F(BodyStreamBufferTest,
   EXPECT_CALL(checkpoint, Call(3));
 
   auto* signal = MakeGarbageCollected<AbortSignal>(scope.GetExecutionContext());
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, signal);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, signal);
 
   checkpoint.Call(1);
   signal->SignalAbort();
@@ -667,8 +677,8 @@ TEST_F(BodyStreamBufferTest, AbortAfterStartLoadingCallsDataLoaderClientAbort) {
   EXPECT_CALL(checkpoint, Call(3));
 
   auto* signal = MakeGarbageCollected<AbortSignal>(scope.GetExecutionContext());
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, signal);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, signal);
 
   checkpoint.Call(1);
   buffer->StartLoading(loader, client, ASSERT_NO_EXCEPTION);
@@ -702,8 +712,8 @@ TEST_F(BodyStreamBufferTest,
   EXPECT_CALL(checkpoint, Call(3));
 
   auto* signal = MakeGarbageCollected<AbortSignal>(scope.GetExecutionContext());
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
-      scope.GetScriptState(), src, signal);
+  BodyStreamBuffer* buffer =
+      BodyStreamBuffer::Create(scope.GetScriptState(), src, signal);
 
   checkpoint.Call(1);
   buffer->StartLoading(loader, client, ASSERT_NO_EXCEPTION);

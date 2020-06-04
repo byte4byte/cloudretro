@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_ANDROID_PASSWORDS_MANUAL_FILLING_VIEW_ANDROID_H_
 #define CHROME_BROWSER_UI_ANDROID_PASSWORDS_MANUAL_FILLING_VIEW_ANDROID_H_
 
+#include <jni.h>
 #include <vector>
 
 #include "base/android/scoped_java_ref.h"
@@ -32,13 +33,13 @@ class ManualFillingViewAndroid : public ManualFillingViewInterface {
   void CloseAccessorySheet() override;
   void SwapSheetWithKeyboard() override;
   void ShowWhenKeyboardIsVisible() override;
-  void ShowTouchToFillSheet() override;
   void Hide() override;
 
   // Called from Java via JNI:
   void OnFaviconRequested(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jstring>& j_origin,
       jint desired_size_in_px,
       const base::android::JavaParamRef<jobject>& j_callback);
   void OnFillingTriggered(
@@ -49,11 +50,15 @@ class ManualFillingViewAndroid : public ManualFillingViewInterface {
   void OnOptionSelected(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj,
                         jint selected_action);
+  void OnToggleChanged(JNIEnv* env,
+                       const base::android::JavaParamRef<jobject>& obj,
+                       jint selected_action,
+                       jboolean enabled);
 
  private:
-  void OnImageFetched(
-      const base::android::ScopedJavaGlobalRef<jobject>& j_callback,
-      const gfx::Image& image);
+  void OnImageFetched(base::android::ScopedJavaGlobalRef<jstring> j_origin,
+                      base::android::ScopedJavaGlobalRef<jobject> j_callback,
+                      const gfx::Image& image);
 
   base::android::ScopedJavaLocalRef<jobject>
   ConvertAccessorySheetDataToJavaObject(

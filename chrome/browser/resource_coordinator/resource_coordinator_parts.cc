@@ -4,8 +4,7 @@
 
 #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
 
-#include "chrome/browser/performance_manager/performance_manager.h"
-#include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
+#include "components/performance_manager/performance_manager_impl.h"
 
 namespace resource_coordinator {
 

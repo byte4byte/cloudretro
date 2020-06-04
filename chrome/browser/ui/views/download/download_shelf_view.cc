@@ -7,7 +7,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -79,24 +80,30 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
 
   auto close_button = views::CreateVectorImageButton(this);
   close_button->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
+  close_button->SetFocusForPlatform();
   close_button_ = AddChildView(std::move(close_button));
 
   accessible_alert_ = AddChildView(std::make_unique<views::View>());
 
   if (gfx::Animation::ShouldRenderRichAnimation()) {
-    new_item_animation_.SetSlideDuration(kNewItemAnimationDurationMs);
-    shelf_animation_.SetSlideDuration(kShelfAnimationDurationMs);
+    new_item_animation_.SetSlideDuration(
+        base::TimeDelta::FromMilliseconds(800));
+    shelf_animation_.SetSlideDuration(base::TimeDelta::FromMilliseconds(120));
   } else {
-    new_item_animation_.SetSlideDuration(0);
-    shelf_animation_.SetSlideDuration(0);
+    new_item_animation_.SetSlideDuration(base::TimeDelta());
+    shelf_animation_.SetSlideDuration(base::TimeDelta());
   }
 
   GetViewAccessibility().OverrideName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_DOWNLOADS_BAR));
   GetViewAccessibility().OverrideRole(ax::mojom::Role::kGroup);
 
-  mouse_watcher_.set_notify_on_exit_time(
-      base::TimeDelta::FromMilliseconds(kNotifyOnExitTimeMS));
+  // Delay 5 seconds if the mouse leaves the shelf by way of entering another
+  // window. This is much larger than the normal delay as opening a download is
+  // most likely going to trigger a new window to appear over the button. Delay
+  // a long time so that the user has a chance to quickly close the other app
+  // and return to chrome with the download shelf still open.
+  mouse_watcher_.set_notify_on_exit_time(base::TimeDelta::FromSeconds(5));
   SetID(VIEW_ID_DOWNLOAD_SHELF);
   parent->AddChildView(this);
 }
@@ -326,11 +333,8 @@ void DownloadShelfView::AddedToWidget() {
 }
 
 void DownloadShelfView::OnThemeChanged() {
+  views::AccessiblePaneView::OnThemeChanged();
   UpdateColorsFromTheme();
-}
-
-void DownloadShelfView::LinkClicked(views::Link* source, int event_flags) {
-  chrome::ShowDownloads(browser_);
 }
 
 void DownloadShelfView::ButtonPressed(

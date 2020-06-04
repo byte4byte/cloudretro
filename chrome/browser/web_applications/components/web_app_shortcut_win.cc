@@ -10,12 +10,13 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/hash/md5.h"
-#include "base/logging.h"
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -232,14 +233,10 @@ bool CreateShortcutsInPaths(const base::FilePath& web_app_path,
         continue;
     }
     if (shortcut_paths[i] != web_app_path) {
-      int unique_number = base::GetUniquePathNumber(
-          shortcut_file, base::FilePath::StringType());
-      if (unique_number == -1) {
+      shortcut_file = base::GetUniquePath(shortcut_file);
+      if (shortcut_file.empty()) {
         success = false;
         continue;
-      } else if (unique_number > 0) {
-        shortcut_file = shortcut_file.InsertBeforeExtensionASCII(
-            base::StringPrintf(" (%d)", unique_number));
       }
     }
     base::win::ShortcutProperties shortcut_properties;
@@ -365,12 +362,12 @@ namespace internals {
 
 void OnShortcutInfoLoadedForSetRelaunchDetails(
     HWND hwnd,
-    std::unique_ptr<web_app::ShortcutInfo> shortcut_info) {
+    std::unique_ptr<ShortcutInfo> shortcut_info) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Set window's icon to the one we're about to create/update in the web app
   // path. The icon cache will refresh on icon creation.
-  base::FilePath web_app_path = web_app::GetWebAppDataDirectory(
+  base::FilePath web_app_path = GetOsIntegrationResourcesDirectoryForApp(
       shortcut_info->profile_path, shortcut_info->extension_id,
       shortcut_info->url);
   base::FilePath icon_file =

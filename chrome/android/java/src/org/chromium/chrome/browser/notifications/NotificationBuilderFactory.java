@@ -4,15 +4,19 @@
 
 package org.chromium.chrome.browser.notifications;
 
-import static org.chromium.chrome.browser.ChromeFeatureList.ALLOW_REMOTE_CONTEXT_FOR_NOTIFICATIONS;
+import static org.chromium.chrome.browser.flags.ChromeFeatureList.ALLOW_REMOTE_CONTEXT_FOR_NOTIFICATIONS;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.notifications.channels.ChannelsInitializer;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
+import org.chromium.components.browser_ui.notifications.NotificationManagerProxyImpl;
+import org.chromium.components.browser_ui.notifications.NotificationMetadata;
+import org.chromium.components.browser_ui.notifications.channels.ChannelsInitializer;
 
 /**
  * Factory which supplies the appropriate type of notification builder based on Android version.
@@ -68,8 +72,8 @@ public class NotificationBuilderFactory {
         NotificationManagerProxyImpl notificationManagerProxy =
                 new NotificationManagerProxyImpl(context);
 
-        ChannelsInitializer channelsInitializer =
-                new ChannelsInitializer(notificationManagerProxy, context.getResources());
+        ChannelsInitializer channelsInitializer = new ChannelsInitializer(notificationManagerProxy,
+                ChromeChannelDefinitions.getInstance(), context.getResources());
 
         return preferCompat
                 ? new NotificationCompatBuilder(context, channelId, channelsInitializer, metadata)

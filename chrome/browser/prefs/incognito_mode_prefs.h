@@ -7,7 +7,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "build/build_config.h"
 
 class PrefService;
 class Profile;
@@ -39,12 +38,7 @@ class IncognitoModePrefs {
     AVAILABILITY_NUM_TYPES
   };
 
-  static constexpr Availability kDefaultAvailability =
-#if defined(INCOGNITO_DEFAULT_DISABLED)
-      DISABLED;
-#else
-      ENABLED;
-#endif
+  static constexpr Availability kDefaultAvailability = ENABLED;
 
   // Register incognito related preferences.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -71,12 +65,6 @@ class IncognitoModePrefs {
   // availability policies and verifies if the |profile| type is allowed to
   // open new windows.
   static bool CanOpenBrowser(Profile* profile);
-
-#if defined(OS_WIN)
-  // Calculates and caches the platform parental controls enable value on a
-  // worker thread.
-  static void InitializePlatformParentalControls();
-#endif
 
   // Returns whether parental controls have been enabled on the platform. This
   // method evaluates and caches if the platform controls have been enabled on

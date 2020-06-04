@@ -14,14 +14,13 @@
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "components/unified_consent/feature.h"
 #include "components/unified_consent/pref_names.h"
 
 namespace unified_consent {
 
 UnifiedConsentService::UnifiedConsentService(
     sync_preferences::PrefServiceSyncable* pref_service,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     syncer::SyncService* sync_service,
     const std::vector<std::string>& service_pref_names)
     : pref_service_(pref_service),
@@ -50,23 +49,6 @@ void UnifiedConsentService::RegisterPrefs(
   registry->RegisterIntegerPref(
       prefs::kUnifiedConsentMigrationState,
       static_cast<int>(MigrationState::kNotInitialized));
-}
-
-// static
-void UnifiedConsentService::RollbackIfNeeded(
-    PrefService* user_pref_service,
-    syncer::SyncService* sync_service) {
-  DCHECK(user_pref_service);
-
-  if (user_pref_service->GetInteger(prefs::kUnifiedConsentMigrationState) ==
-      static_cast<int>(MigrationState::kNotInitialized)) {
-    // If there was no migration yet, nothing has to be rolled back.
-    return;
-  }
-
-  // Clear all unified consent prefs.
-  user_pref_service->ClearPref(prefs::kUrlKeyedAnonymizedDataCollectionEnabled);
-  user_pref_service->ClearPref(prefs::kUnifiedConsentMigrationState);
 }
 
 void UnifiedConsentService::SetUrlKeyedAnonymizedDataCollectionEnabled(

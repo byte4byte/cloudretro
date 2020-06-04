@@ -86,7 +86,7 @@ class AppBannerManagerTest : public AppBannerManager {
     // Fake the call to ReportStatus here - this is usually called in
     // platform-specific code which is not exposed here.
     ReportStatus(SHOWING_WEB_APP_BANNER);
-    RecordDidShowBanner("AppBanner.WebApp.Shown");
+    RecordDidShowBanner();
 
     ASSERT_FALSE(banner_shown_.get());
     banner_shown_.reset(new bool(true));
@@ -103,8 +103,9 @@ class AppBannerManagerTest : public AppBannerManager {
     }
   }
 
-  void OnBannerPromptReply(blink::mojom::AppBannerControllerPtr controller,
-                           blink::mojom::AppBannerPromptReply reply) override {
+  void OnBannerPromptReply(
+      mojo::Remote<blink::mojom::AppBannerController> controller,
+      blink::mojom::AppBannerPromptReply reply) override {
     AppBannerManager::OnBannerPromptReply(std::move(controller), reply);
     if (on_banner_prompt_reply_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -220,7 +221,7 @@ class AppBannerManagerBrowserTest : public AppBannerManagerBrowserTestBase {
         base::BindOnce(
             base::IgnoreResult(&ui_test_utils::NavigateToURLWithDisposition),
             browser, url, WindowOpenDisposition::CURRENT_TAB,
-            ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION),
+            ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP),
         expected_will_show, expected_state);
   }
 
@@ -258,6 +259,22 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerBrowserTest,
       CreateAppBannerManager(browser()));
   RunBannerTest(browser(), manager.get(),
                 GetBannerURLWithManifest("/banners/manifest_no_type_caps.json"),
+                base::nullopt);
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerBrowserTest, WebAppBannerSvgIcon) {
+  std::unique_ptr<AppBannerManagerTest> manager(
+      CreateAppBannerManager(browser()));
+  RunBannerTest(browser(), manager.get(),
+                GetBannerURLWithManifest("/banners/manifest_svg_icon.json"),
+                base::nullopt);
+}
+
+IN_PROC_BROWSER_TEST_F(AppBannerManagerBrowserTest, WebAppBannerWebPIcon) {
+  std::unique_ptr<AppBannerManagerTest> manager(
+      CreateAppBannerManager(browser()));
+  RunBannerTest(browser(), manager.get(),
+                GetBannerURLWithManifest("/banners/manifest_webp_icon.json"),
                 base::nullopt);
 }
 

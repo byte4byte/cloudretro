@@ -6,7 +6,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/page_load_metrics/observers/histogram_suffixes.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_ANDROID)
@@ -67,46 +67,44 @@ MultiTabLoadingPageLoadMetricsObserver::OnStart(
   } while (false)
 
 void MultiTabLoadingPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_contentful_paint, GetDelegate())) {
     RECORD_HISTOGRAMS(internal::kHistogramFirstContentfulPaintSuffix,
                       timing.paint_timing->first_contentful_paint.value());
   }
 
-  if (WasStartedInBackgroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
+  if (page_load_metrics::WasStartedInBackgroundOptionalEventInForeground(
+          timing.paint_timing->first_contentful_paint, GetDelegate())) {
     RECORD_HISTOGRAMS(
         internal::kHistogramForegroundToFirstContentfulPaintSuffix,
         timing.paint_timing->first_contentful_paint.value() -
-            info.first_foreground_time.value());
+            GetDelegate().GetFirstForegroundTime().value());
   }
 }
 
 void MultiTabLoadingPageLoadMetricsObserver::
     OnFirstMeaningfulPaintInMainFrameDocument(
-        const page_load_metrics::mojom::PageLoadTiming& timing,
-        const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint, info)) {
+        const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     RECORD_HISTOGRAMS(internal::kHistogramFirstMeaningfulPaintSuffix,
                       timing.paint_timing->first_meaningful_paint.value());
   }
-  if (WasStartedInBackgroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint, info)) {
+  if (page_load_metrics::WasStartedInBackgroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     RECORD_HISTOGRAMS(
         internal::kHistogramForegroundToFirstMeaningfulPaintSuffix,
         timing.paint_timing->first_meaningful_paint.value() -
-            info.first_foreground_time.value());
+            GetDelegate().GetFirstForegroundTime().value());
   }
 }
 
 void MultiTabLoadingPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->dom_content_loaded_event_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->dom_content_loaded_event_start,
+          GetDelegate())) {
     RECORD_HISTOGRAMS(
         internal::kHistogramDOMContentLoadedEventFiredSuffix,
         timing.document_timing->dom_content_loaded_event_start.value());
@@ -118,10 +116,9 @@ void MultiTabLoadingPageLoadMetricsObserver::OnDomContentLoadedEventStart(
 }
 
 void MultiTabLoadingPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->load_event_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->load_event_start, GetDelegate())) {
     RECORD_HISTOGRAMS(internal::kHistogramLoadEventFiredSuffix,
                       timing.document_timing->load_event_start.value());
   } else {

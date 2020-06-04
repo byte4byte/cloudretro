@@ -5,13 +5,10 @@
 #import "ios/web/public/test/web_test_with_web_state.h"
 
 #include "base/ios/ios_util.h"
-#include "base/test/scoped_feature_list.h"
-#include "ios/web/common/features.h"
-#include "ios/web/js_messaging/web_frames_manager_impl.h"
 #import "ios/web/public/js_messaging/web_frame.h"
-#include "ios/web/public/js_messaging/web_frame_util.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer.h"
+#import "ios/web/public/js_messaging/web_frames_manager.h"
+#import "ios/web/public/web_state.h"
+#include "ios/web/public/web_state_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -21,13 +18,6 @@
 using testing::Truly;
 
 namespace {
-
-// WebFrameWebStateObserverInttest is parameterized on this enum to test both
-// LegacyNavigationManager and WKBasedNavigationManager.
-enum class NavigationManagerChoice {
-  LEGACY,
-  WK_BASED,
-};
 
 // Mocks WebStateObserver navigation callbacks.
 class WebStateObserverMock : public web::WebStateObserver {
@@ -52,15 +42,14 @@ bool IsMainFrame(web::WebFrame* frame) {
 // Verifies that the web frame passed to the observer is the main frame.
 ACTION_P(VerifyMainWebFrame, web_state) {
   EXPECT_EQ(web_state, arg0);
-  EXPECT_EQ(web::GetMainWebFrame(web_state), arg1);
+  EXPECT_EQ(web_state->GetWebFramesManager()->GetMainWebFrame(), arg1);
 }
 
 // Verifies that the web frame passed to the observer is a child frame.
 ACTION_P(VerifyChildWebFrame, web_state) {
   EXPECT_EQ(web_state, arg0);
 
-  web::WebFramesManagerImpl* manager =
-      web::WebFramesManagerImpl::FromWebState(web_state);
+  web::WebFramesManager* manager = web_state->GetWebFramesManager();
   auto frames = manager->GetAllWebFrames();
   EXPECT_TRUE(frames.end() != std::find(frames.begin(), frames.end(), arg1));
   EXPECT_NE(manager->GetMainWebFrame(), arg1);
@@ -69,28 +58,10 @@ ACTION_P(VerifyChildWebFrame, web_state) {
 
 namespace web {
 
-class WebFrameWebStateObserverInttest
-    : public WebTestWithWebState,
-      public ::testing::WithParamInterface<NavigationManagerChoice> {
- protected:
-  void SetUp() override {
-    if (GetParam() == NavigationManagerChoice::LEGACY) {
-      scoped_feature_list_.InitAndDisableFeature(
-          web::features::kSlimNavigationManager);
-    } else {
-      scoped_feature_list_.InitAndEnableFeature(
-          web::features::kSlimNavigationManager);
-    }
-
-    WebTestWithWebState::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
+using WebFrameWebStateObserverInttest = WebTestWithWebState;
 
 // Web frame events should be registered on HTTP navigation.
-TEST_P(WebFrameWebStateObserverInttest, SingleWebFrameHTTP) {
+TEST_F(WebFrameWebStateObserverInttest, SingleWebFrameHTTP) {
   testing::StrictMock<WebStateObserverMock> observer;
   web_state()->AddObserver(&observer);
   EXPECT_CALL(observer, WebFrameDidBecomeAvailable(web_state(), testing::_))
@@ -105,7 +76,7 @@ TEST_P(WebFrameWebStateObserverInttest, SingleWebFrameHTTP) {
 }
 
 // Web frame events should be registered on HTTPS navigation.
-TEST_P(WebFrameWebStateObserverInttest, SingleWebFrameHTTPS) {
+TEST_F(WebFrameWebStateObserverInttest, SingleWebFrameHTTPS) {
   testing::StrictMock<WebStateObserverMock> observer;
   web_state()->AddObserver(&observer);
   EXPECT_CALL(observer, WebFrameDidBecomeAvailable(web_state(), testing::_))
@@ -120,7 +91,7 @@ TEST_P(WebFrameWebStateObserverInttest, SingleWebFrameHTTPS) {
 }
 
 // Web frame event should be registered on HTTPS navigation with iframe.
-TEST_P(WebFrameWebStateObserverInttest, TwoWebFrameHTTPS) {
+TEST_F(WebFrameWebStateObserverInttest, TwoWebFrameHTTPS) {
   testing::StrictMock<WebStateObserverMock> observer;
   web_state()->AddObserver(&observer);
 
@@ -152,10 +123,5 @@ TEST_P(WebFrameWebStateObserverInttest, TwoWebFrameHTTPS) {
 
   web_state()->RemoveObserver(&observer);
 }
-
-INSTANTIATE_TEST_SUITE_P(ProgrammaticWebFrameWebStateObserverInttest,
-                         WebFrameWebStateObserverInttest,
-                         ::testing::Values(NavigationManagerChoice::LEGACY,
-                                           NavigationManagerChoice::WK_BASED));
 
 }  // namespace web

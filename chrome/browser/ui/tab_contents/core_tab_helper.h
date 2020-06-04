@@ -44,6 +44,11 @@ class CoreTabHelper : public content::WebContentsObserver,
   base::TimeTicks new_tab_start_time() const { return new_tab_start_time_; }
   int content_restrictions() const { return content_restrictions_; }
 
+  std::unique_ptr<content::WebContents> SwapWebContents(
+      std::unique_ptr<content::WebContents> new_contents,
+      bool did_start_load,
+      bool did_finish_load);
+
  private:
   explicit CoreTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<CoreTabHelper>;
@@ -57,10 +62,12 @@ class CoreTabHelper : public content::WebContentsObserver,
   void NavigationEntriesDeleted() override;
 
   void DoSearchByImageInNewTab(
-      chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame,
+      mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame>
+          chrome_render_frame,
       const GURL& src_url,
       const std::vector<uint8_t>& thumbnail_data,
-      const gfx::Size& original_size);
+      const gfx::Size& original_size,
+      const std::string& image_extension);
 
   // The time when we started to create the new tab page.  This time is from
   // before we created this WebContents.

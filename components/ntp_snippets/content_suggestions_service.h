@@ -48,7 +48,7 @@ class RemoteSuggestionsProvider;
 // them grouped into categories. There can be at most one provider per category.
 class ContentSuggestionsService : public KeyedService,
                                   public ContentSuggestionsProvider::Observer,
-                                  public identity::IdentityManager::Observer,
+                                  public signin::IdentityManager::Observer,
                                   public history::HistoryServiceObserver {
  public:
   class Observer {
@@ -97,7 +97,7 @@ class ContentSuggestionsService : public KeyedService,
 
   ContentSuggestionsService(
       State state,
-      identity::IdentityManager*
+      signin::IdentityManager*
           identity_manager,                      // Can be nullptr in unittests.
       history::HistoryService* history_service,  // Can be nullptr in unittests.
       // Can be nullptr in unittests.
@@ -206,9 +206,10 @@ class ContentSuggestionsService : public KeyedService,
   // suggestions, which are based on history from that time range. Providers
   // should immediately clear any data related to history from the specified
   // time range where the URL matches the |filter|.
-  void ClearHistory(base::Time begin,
-                    base::Time end,
-                    const base::Callback<bool(const GURL& url)>& filter);
+  void ClearHistory(
+      base::Time begin,
+      base::Time end,
+      const base::RepeatingCallback<bool(const GURL& url)>& filter);
 
   // Removes all suggestions from all caches or internal stores in all
   // providers. It does, however, not remove any suggestions from the provider's
@@ -279,7 +280,7 @@ class ContentSuggestionsService : public KeyedService,
       ContentSuggestionsProvider* provider,
       const ContentSuggestion::ID& suggestion_id) override;
 
-  // identity::IdentityManager::Observer implementation.
+  // signin::IdentityManager::Observer implementation.
   void OnPrimaryAccountSet(const CoreAccountInfo& account_info) override;
   void OnPrimaryAccountCleared(const CoreAccountInfo& account_info) override;
 
@@ -377,7 +378,7 @@ class ContentSuggestionsService : public KeyedService,
 
   // Observer for the IdentityManager. All observers are notified when the
   // signin state changes so that they can refresh their list of suggestions.
-  ScopedObserver<identity::IdentityManager, identity::IdentityManager::Observer>
+  ScopedObserver<signin::IdentityManager, signin::IdentityManager::Observer>
       identity_manager_observer_;
 
   // Observer for the HistoryService. All providers are notified when history is

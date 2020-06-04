@@ -14,7 +14,6 @@ class StubRenderWidgetHostOwnerDelegate : public RenderWidgetHostOwnerDelegate {
   void RenderWidgetDidInit() override {}
   void RenderWidgetDidClose() override {}
   void RenderWidgetDidFirstVisuallyNonEmptyPaint() override {}
-  void RenderWidgetDidCommitAndDrawCompositorFrame() override {}
   void RenderWidgetGotFocus() override {}
   void RenderWidgetLostFocus() override {}
   void RenderWidgetDidForwardMouseEvent(
@@ -25,7 +24,7 @@ class StubRenderWidgetHostOwnerDelegate : public RenderWidgetHostOwnerDelegate {
   void RequestSetBounds(const gfx::Rect& bounds) override {}
   void SetBackgroundOpaque(bool opaque) override {}
   bool IsMainFrameActive() override;
-  bool IsNeverVisible() override;
+  bool IsNeverComposited() override;
   WebPreferences GetWebkitPreferencesForWidget() override;
   FrameTreeNode* GetFocusedFrame() override;
   void ShowContextMenu(RenderFrameHost* render_frame_host,

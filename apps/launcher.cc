@@ -18,6 +18,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
+#include "components/services/app_service/public/cpp/file_handler_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -145,8 +147,8 @@ class PlatformAppPathLauncher
 
     is_directory_collector_.CollectForEntriesPaths(
         entry_paths_,
-        base::Bind(&PlatformAppPathLauncher::OnAreDirectoriesCollected, this,
-                   HasFileSystemWritePermission(app)));
+        base::BindOnce(&PlatformAppPathLauncher::OnAreDirectoriesCollected,
+                       this, HasFileSystemWritePermission(app)));
   }
 
   void LaunchWithHandler(const std::string& handler_id) {
@@ -155,7 +157,7 @@ class PlatformAppPathLauncher
   }
 
   void LaunchWithRelativePath(const base::FilePath& current_directory) {
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE,
         {base::TaskPriority::USER_VISIBLE, base::MayBlock(),
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -173,7 +175,7 @@ class PlatformAppPathLauncher
          it != entry_paths_.end(); ++it) {
       if (!DoMakePathAbsolute(current_directory, &*it)) {
         LOG(WARNING) << "Cannot make absolute path from " << it->value();
-        base::PostTaskWithTraits(
+        base::PostTask(
             FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&PlatformAppPathLauncher::LaunchWithBasicData,
                            this));
@@ -181,17 +183,16 @@ class PlatformAppPathLauncher
       }
     }
 
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&PlatformAppPathLauncher::Launch, this));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(&PlatformAppPathLauncher::Launch, this));
   }
 
   void OnFilesValid(std::unique_ptr<std::set<base::FilePath>> directory_paths) {
     mime_type_collector_.CollectForLocalPaths(
         entry_paths_,
-        base::Bind(
+        base::BindOnce(
             &PlatformAppPathLauncher::OnAreDirectoriesAndMimeTypesCollected,
-            this, base::Passed(std::move(directory_paths))));
+            this, std::move(directory_paths)));
   }
 
   void OnFilesInvalid(const base::FilePath& /* error_path */) {
@@ -224,9 +225,9 @@ class PlatformAppPathLauncher
           directory_paths.get();
       PrepareFilesForWritableApp(
           entry_paths_, context_, *directory_paths_ptr,
-          base::Bind(&PlatformAppPathLauncher::OnFilesValid, this,
-                     base::Passed(std::move(directory_paths))),
-          base::Bind(&PlatformAppPathLauncher::OnFilesInvalid, this));
+          base::BindOnce(&PlatformAppPathLauncher::OnFilesValid, this,
+                         std::move(directory_paths)),
+          base::BindOnce(&PlatformAppPathLauncher::OnFilesInvalid, this));
       return;
     }
 
@@ -252,7 +253,7 @@ class PlatformAppPathLauncher
       return;
 
     // Find file handler from the platform app for the file being opened.
-    const extensions::FileHandlerInfo* handler = NULL;
+    const FileHandlerInfo* handler = nullptr;
     if (!handler_id_.empty()) {
       handler = FileHandlerForId(*app, handler_id_);
       if (handler) {
@@ -261,7 +262,7 @@ class PlatformAppPathLauncher
             LOG(WARNING)
                 << "Extension does not provide a valid file handler for "
                 << entry_paths_[i].value();
-            handler = NULL;
+            handler = nullptr;
             break;
           }
         }
@@ -295,8 +296,8 @@ class PlatformAppPathLauncher
     if (queue->ShouldEnqueueTask(context_, app)) {
       queue->AddPendingTask(
           context_id,
-          base::Bind(&PlatformAppPathLauncher::GrantAccessToFilesAndLaunch,
-                     this));
+          base::BindOnce(&PlatformAppPathLauncher::GrantAccessToFilesAndLaunch,
+                         this));
       return;
     }
 

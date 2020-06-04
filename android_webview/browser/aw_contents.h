@@ -98,6 +98,9 @@ class AwContents : public FindHelper::Listener,
   base::android::ScopedJavaLocalRef<jobject> GetWebContents(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
+  base::android::ScopedJavaLocalRef<jobject> GetBrowserContext(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   void SetCompositorFrameConsumer(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -106,7 +109,7 @@ class AwContents : public FindHelper::Listener,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
-  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void Destroy(JNIEnv* env);
   void DocumentHasImages(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj,
                          const base::android::JavaParamRef<jobject>& message);
@@ -154,6 +157,9 @@ class AwContents : public FindHelper::Listener,
   void OnDetachedFromWindow(JNIEnv* env,
                             const base::android::JavaParamRef<jobject>& obj);
   bool IsVisible(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  bool IsDisplayingInterstitialForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   base::android::ScopedJavaLocalRef<jbyteArray> GetOpaqueState(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
@@ -215,20 +221,22 @@ class AwContents : public FindHelper::Listener,
 
   JsJavaConfiguratorHost* GetJsJavaConfiguratorHost();
 
-  base::android::ScopedJavaLocalRef<jstring> SetJsApiService(
+  base::android::ScopedJavaLocalRef<jstring> AddWebMessageListener(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
-      jboolean need_to_inject_js_object,
+      const base::android::JavaParamRef<jobject>& listener,
       const base::android::JavaParamRef<jstring>& js_object_name,
       const base::android::JavaParamRef<jobjectArray>& allowed_origins);
 
-  bool IsOriginAllowedForOnPostMessage(url::Origin& origin);
+  void RemoveWebMessageListener(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jstring>& js_object_name);
 
-  void OnPostMessage(JNIEnv* env,
-                     const base::android::JavaRef<jstring>& message,
-                     const base::android::JavaRef<jstring>& origin,
-                     jboolean is_main_frame,
-                     const base::android::JavaRef<jintArray>& ports);
+  base::android::ScopedJavaLocalRef<jobjectArray> GetJsObjectsInfo(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jclass>& clazz);
 
   bool GetViewTreeForceDarkState() { return view_tree_force_dark_state_; }
 
@@ -314,6 +322,8 @@ class AwContents : public FindHelper::Listener,
                   jboolean include_disk_files);
   void KillRenderProcess(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj);
+  // See //android_webview/docs/how-does-on-create-window-work.md for more
+  // details.
   void SetPendingWebContentsForPopup(
       std::unique_ptr<content::WebContents> pending);
   jlong ReleasePopupAwContents(JNIEnv* env,
@@ -336,6 +346,8 @@ class AwContents : public FindHelper::Listener,
   void SetDipScale(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& obj,
                    jfloat dip_scale);
+  void OnInputEvent(JNIEnv* env,
+                    const base::android::JavaParamRef<jobject>& obj);
   void SetSaveFormData(bool enabled);
 
   // Sets the java client
@@ -403,6 +415,8 @@ class AwContents : public FindHelper::Listener,
   std::unique_ptr<AwRenderViewHostExt> render_view_host_ext_;
   std::unique_ptr<FindHelper> find_helper_;
   std::unique_ptr<IconHelper> icon_helper_;
+  // See //android_webview/docs/how-does-on-create-window-work.md for more
+  // details for |pending_contents_|.
   std::unique_ptr<AwContents> pending_contents_;
   std::unique_ptr<AwPdfExporter> pdf_exporter_;
   std::unique_ptr<PermissionRequestHandler> permission_request_handler_;

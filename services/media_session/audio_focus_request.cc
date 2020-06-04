@@ -10,31 +10,28 @@ namespace media_session {
 
 AudioFocusRequest::AudioFocusRequest(
     base::WeakPtr<AudioFocusManager> owner,
-    mojom::AudioFocusRequestClientRequest request,
-    mojom::MediaSessionPtr session,
+    mojo::PendingReceiver<mojom::AudioFocusRequestClient> receiver,
+    mojo::PendingRemote<mojom::MediaSession> session,
     mojom::MediaSessionInfoPtr session_info,
     mojom::AudioFocusType audio_focus_type,
     const base::UnguessableToken& id,
     const std::string& source_name,
-    const base::UnguessableToken& group_id)
-    : metrics_helper_(source_name),
-      session_(std::move(session)),
+    const base::UnguessableToken& group_id,
+    const base::UnguessableToken& identity)
+    : session_(std::move(session)),
       session_info_(std::move(session_info)),
       audio_focus_type_(audio_focus_type),
-      binding_(this, std::move(request)),
+      receiver_(this, std::move(receiver)),
       id_(id),
       source_name_(source_name),
       group_id_(group_id),
+      identity_(identity),
       owner_(std::move(owner)) {
   // Listen for mojo errors.
-  binding_.set_connection_error_handler(base::BindOnce(
+  receiver_.set_disconnect_handler(base::BindOnce(
       &AudioFocusRequest::OnConnectionError, base::Unretained(this)));
-  session_.set_connection_error_handler(base::BindOnce(
+  session_.set_disconnect_handler(base::BindOnce(
       &AudioFocusRequest::OnConnectionError, base::Unretained(this)));
-
-  metrics_helper_.OnRequestAudioFocus(
-      AudioFocusManagerMetricsHelper::AudioFocusRequestSource::kInitial,
-      audio_focus_type);
 }
 
 AudioFocusRequest::~AudioFocusRequest() = default;
@@ -60,16 +57,9 @@ void AudioFocusRequest::RequestAudioFocus(
   owner_->RequestAudioFocusInternal(std::move(row), type);
 
   std::move(callback).Run();
-
-  metrics_helper_.OnRequestAudioFocus(
-      AudioFocusManagerMetricsHelper::AudioFocusRequestSource::kUpdate,
-      audio_focus_type_);
 }
 
 void AudioFocusRequest::AbandonAudioFocus() {
-  metrics_helper_.OnAbandonAudioFocus(
-      AudioFocusManagerMetricsHelper::AudioFocusAbandonSource::kAPI);
-
   owner_->AbandonAudioFocusInternal(id_);
 }
 
@@ -168,6 +158,17 @@ void AudioFocusRequest::PerformUIAction(mojom::MediaSessionAction action) {
   }
 }
 
+void AudioFocusRequest::GetMediaImageBitmap(
+    const MediaImage& image,
+    int minimum_size_px,
+    int desired_size_px,
+    GetMediaImageBitmapCallback callback) {
+  session_->GetMediaImageBitmap(
+      image, minimum_size_px, desired_size_px,
+      base::BindOnce(&AudioFocusRequest::OnImageDownloaded,
+                     base::Unretained(this), std::move(callback)));
+}
+
 void AudioFocusRequest::SetSessionInfo(
     mojom::MediaSessionInfoPtr session_info) {
   bool is_controllable_changed =
@@ -188,13 +189,14 @@ void AudioFocusRequest::OnConnectionError() {
 
   encountered_error_ = true;
 
-  metrics_helper_.OnAbandonAudioFocus(
-      AudioFocusManagerMetricsHelper::AudioFocusAbandonSource::
-          kConnectionError);
-
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&AudioFocusManager::AbandonAudioFocusInternal,
                                 owner_, id_));
+}
+
+void AudioFocusRequest::OnImageDownloaded(GetMediaImageBitmapCallback callback,
+                                          const SkBitmap& bitmap) {
+  std::move(callback).Run(bitmap);
 }
 
 }  // namespace media_session

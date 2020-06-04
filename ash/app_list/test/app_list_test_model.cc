@@ -18,7 +18,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/image/image_skia.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 gfx::ImageSkia CreateImageSkia(int width, int height) {
@@ -37,7 +37,8 @@ AppListTestModel::AppListTestItem::AppListTestItem(const std::string& id,
                                                    AppListTestModel* model)
     : AppListItem(id), model_(model) {
   const int icon_dimension = AppListConfig::instance().grid_icon_dimension();
-  SetIcon(CreateImageSkia(icon_dimension, icon_dimension));
+  SetIcon(ash::AppListConfigType::kShared,
+          CreateImageSkia(icon_dimension, icon_dimension));
 }
 
 AppListTestModel::AppListTestItem::~AppListTestItem() = default;
@@ -170,4 +171,4 @@ void AppListTestModel::ItemActivated(AppListTestItem* item) {
 }
 
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash

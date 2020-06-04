@@ -6,22 +6,25 @@
 
 #include <utility>
 
-#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/mojom/assistant_volume_control.mojom.h"
 #include "chromeos/services/assistant/media_session/assistant_media_session.h"
+#include "chromeos/services/assistant/public/cpp/assistant_client.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chromeos {
 namespace assistant {
 
-VolumeControlImpl::VolumeControlImpl(service_manager::Connector* connector,
-                                     AssistantMediaSession* media_session)
+VolumeControlImpl::VolumeControlImpl(AssistantMediaSession* media_session)
     : media_session_(media_session),
-      binding_(this),
       main_task_runner_(base::SequencedTaskRunnerHandle::Get()),
       weak_factory_(this) {
-  connector->BindInterface(ash::mojom::kServiceName, &volume_control_ptr_);
-  ash::mojom::VolumeObserverPtr observer;
-  binding_.Bind(mojo::MakeRequest(&observer));
-  volume_control_ptr_->AddVolumeObserver(std::move(observer));
+  AssistantClient::Get()->RequestAssistantVolumeControl(
+      volume_control_.BindNewPipeAndPassReceiver());
+  mojo::PendingRemote<ash::mojom::VolumeObserver> observer;
+  receiver_.Bind(observer.InitWithNewPipeAndPassReceiver());
+  volume_control_->AddVolumeObserver(std::move(observer));
 }
 
 VolumeControlImpl::~VolumeControlImpl() = default;
@@ -96,12 +99,12 @@ void VolumeControlImpl::SetAudioFocusOnMainThread(
 void VolumeControlImpl::SetSystemVolumeOnMainThread(float new_volume,
                                                     bool user_initiated) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
-  volume_control_ptr_->SetVolume(new_volume * 100.0, user_initiated);
+  volume_control_->SetVolume(new_volume * 100.0, user_initiated);
 }
 
 void VolumeControlImpl::SetSystemMutedOnMainThread(bool muted) {
   DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
-  volume_control_ptr_->SetMuted(muted);
+  volume_control_->SetMuted(muted);
 }
 
 }  // namespace assistant

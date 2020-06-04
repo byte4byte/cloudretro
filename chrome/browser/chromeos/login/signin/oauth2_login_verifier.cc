@@ -18,14 +18,13 @@ namespace chromeos {
 
 OAuth2LoginVerifier::OAuth2LoginVerifier(
     OAuth2LoginVerifier::Delegate* delegate,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     const CoreAccountId& primary_account_id,
     const std::string& oauthlogin_access_token)
     : delegate_(delegate),
       identity_manager_(identity_manager),
       primary_account_id_(primary_account_id),
-      access_token_(oauthlogin_access_token),
-      weak_ptr_factory_(this) {
+      access_token_(oauthlogin_access_token) {
   DCHECK(delegate);
   identity_manager_->AddObserver(this);
 }
@@ -39,7 +38,7 @@ void OAuth2LoginVerifier::VerifyUserCookies() {
 
   std::vector<gaia::ListedAccount> accounts;
   std::vector<gaia::ListedAccount> signed_out_accounts;
-  identity::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
+  signin::AccountsInCookieJarInfo accounts_in_cookie_jar_info =
       identity_manager_->GetAccountsInCookieJar();
   if (accounts_in_cookie_jar_info.accounts_are_fresh) {
     OnAccountsInCookieUpdated(
@@ -51,7 +50,7 @@ void OAuth2LoginVerifier::VerifyUserCookies() {
 void OAuth2LoginVerifier::VerifyProfileTokens() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  identity::AccountsCookieMutator::AddAccountToCookieCompletedCallback
+  signin::AccountsCookieMutator::AddAccountToCookieCompletedCallback
       completion_callback =
           base::BindOnce(&OAuth2LoginVerifier::OnAddAccountToCookieCompleted,
                          weak_ptr_factory_.GetWeakPtr());
@@ -84,7 +83,7 @@ void OAuth2LoginVerifier::OnAddAccountToCookieCompleted(
 }
 
 void OAuth2LoginVerifier::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   if (error.state() == GoogleServiceAuthError::State::NONE) {
     VLOG(1) << "ListAccounts successful.";

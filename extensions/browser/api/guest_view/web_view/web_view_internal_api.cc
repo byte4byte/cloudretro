@@ -266,7 +266,7 @@ std::unique_ptr<extensions::UserScriptList> ParseContentScripts(
 namespace extensions {
 
 bool WebViewInternalExtensionFunction::PreRunValidation(std::string* error) {
-  if (!UIThreadExtensionFunction::PreRunValidation(error))
+  if (!ExtensionFunction::PreRunValidation(error))
     return false;
 
   int instance_id = 0;
@@ -470,7 +470,7 @@ bool WebViewInternalExecuteCodeFunction::LoadFile(const std::string& file,
   if (!extension()) {
     if (LoadFileForWebUI(
             *details_->file,
-            base::Bind(
+            base::BindOnce(
                 &WebViewInternalExecuteCodeFunction::DidLoadAndLocalizeFile,
                 this, file)))
       return true;
@@ -519,7 +519,7 @@ WebViewInternalAddContentScriptsFunction::Run() {
       ParseContentScripts(params->content_script_list, extension(), host_id,
                           incognito_enabled, owner_base_url, &error);
   if (!result)
-    return RespondNow(Error(error));
+    return RespondNow(Error(std::move(error)));
 
   WebViewContentScriptManager* manager =
       WebViewContentScriptManager::Get(browser_context());
@@ -790,7 +790,7 @@ WebViewInternalLoadDataWithBaseUrlFunction::Run() {
       params->data_url, params->base_url, virtual_url, &error);
   if (successful)
     return RespondNow(NoArguments());
-  return RespondNow(Error(error));
+  return RespondNow(Error(std::move(error)));
 }
 
 WebViewInternalGoFunction::WebViewInternalGoFunction() {

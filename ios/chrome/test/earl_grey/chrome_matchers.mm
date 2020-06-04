@@ -55,8 +55,26 @@ id<GREYMatcher> HeaderWithAccessibilityLabel(NSString* label) {
   return [ChromeMatchersAppInterface headerWithAccessibilityLabel:label];
 }
 
+id<GREYMatcher> TextFieldForCellWithLabelId(int message_id) {
+  return [ChromeMatchersAppInterface textFieldForCellWithLabelID:message_id];
+}
+
+id<GREYMatcher> IconViewForCellWithLabelId(int message_id,
+                                           NSString* icon_type) {
+  return [ChromeMatchersAppInterface iconViewForCellWithLabelID:message_id
+                                                       iconType:icon_type];
+}
+
+id<GREYMatcher> PrimaryToolbar() {
+  return [ChromeMatchersAppInterface primaryToolbar];
+}
+
 id<GREYMatcher> CancelButton() {
   return [ChromeMatchersAppInterface cancelButton];
+}
+
+id<GREYMatcher> NavigationBarCancelButton() {
+  return [ChromeMatchersAppInterface navigationBarCancelButton];
 }
 
 id<GREYMatcher> CloseButton() {
@@ -157,8 +175,8 @@ id<GREYMatcher> BookmarksNavigationBarDoneButton() {
   return [ChromeMatchersAppInterface bookmarksNavigationBarDoneButton];
 }
 
-id<GREYMatcher> AccountConsistencySetupSigninButton() {
-  return [ChromeMatchersAppInterface accountConsistencySetupSigninButton];
+id<GREYMatcher> BookmarksNavigationBarBackButton() {
+  return [ChromeMatchersAppInterface bookmarksNavigationBarBackButton];
 }
 
 id<GREYMatcher> AccountConsistencyConfirmationOkButton() {
@@ -205,6 +223,34 @@ id<GREYMatcher> SyncSettingsConfirmButton() {
   return [ChromeMatchersAppInterface syncSettingsConfirmButton];
 }
 
+id<GREYMatcher> AutofillCreditCardTableView() {
+  return [ChromeMatchersAppInterface autofillCreditCardTableView];
+}
+
+id<GREYMatcher> PaymentMethodsButton() {
+  return [ChromeMatchersAppInterface paymentMethodsButton];
+}
+
+id<GREYMatcher> AddCreditCardView() {
+  return [ChromeMatchersAppInterface addCreditCardView];
+}
+
+id<GREYMatcher> AddPaymentMethodButton() {
+  return [ChromeMatchersAppInterface addPaymentMethodButton];
+}
+
+id<GREYMatcher> AddCreditCardButton() {
+  return [ChromeMatchersAppInterface addCreditCardButton];
+}
+
+id<GREYMatcher> AddCreditCardCancelButton() {
+  return [ChromeMatchersAppInterface addCreditCardCancelButton];
+}
+
+id<GREYMatcher> CreditCardScannerView() {
+  return [ChromeMatchersAppInterface creditCardScannerView];
+}
+
 id<GREYMatcher> ToolsMenuView() {
   return [ChromeMatchersAppInterface toolsMenuView];
 }
@@ -245,10 +291,6 @@ id<GREYMatcher> SettingsPrivacyTableView() {
   return [ChromeMatchersAppInterface settingsPrivacyTableView];
 }
 
-id<GREYMatcher> SettingsSyncManageSyncedDataButton() {
-  return [ChromeMatchersAppInterface settingsSyncManageSyncedDataButton];
-}
-
 id<GREYMatcher> AccountsSyncButton() {
   return [ChromeMatchersAppInterface accountsSyncButton];
 }
@@ -259,6 +301,10 @@ id<GREYMatcher> ContentSettingsButton() {
 
 id<GREYMatcher> GoogleServicesSettingsButton() {
   return [ChromeMatchersAppInterface googleServicesSettingsButton];
+}
+
+id<GREYMatcher> GoogleServicesSettingsView() {
+  return [ChromeMatchersAppInterface googleServicesSettingsView];
 }
 
 id<GREYMatcher> SettingsMenuBackButton() {
@@ -285,6 +331,10 @@ id<GREYMatcher> VoiceSearchButton() {
   return [ChromeMatchersAppInterface voiceSearchButton];
 }
 
+id<GREYMatcher> VoiceSearchInputAccessoryButton() {
+  return [ChromeMatchersAppInterface voiceSearchInputAccessoryButton];
+}
+
 id<GREYMatcher> SettingsCollectionView() {
   return [ChromeMatchersAppInterface settingsCollectionView];
 }
@@ -305,6 +355,10 @@ id<GREYMatcher> ClearSavedPasswordsButton() {
   return [ChromeMatchersAppInterface clearSavedPasswordsButton];
 }
 
+id<GREYMatcher> ClearAutofillButton() {
+  return [ChromeMatchersAppInterface clearAutofillButton];
+}
+
 id<GREYMatcher> ContentSuggestionCollectionView() {
   return [ChromeMatchersAppInterface contentSuggestionCollectionView];
 }
@@ -319,6 +373,10 @@ id<GREYMatcher> PaymentRequestPickerRow() {
 
 id<GREYMatcher> PaymentRequestPickerSearchBar() {
   return [ChromeMatchersAppInterface paymentRequestPickerSearchBar];
+}
+
+id<GREYMatcher> ReadingListMenuButton() {
+  return [ChromeMatchersAppInterface readingListMenuButton];
 }
 
 id<GREYMatcher> BookmarksMenuButton() {
@@ -415,6 +473,136 @@ id<GREYMatcher> TabGridOtherDevicesPanelButton() {
 
 id<GREYMatcher> TabGridCloseButtonForCellAtIndex(unsigned int index) {
   return [ChromeMatchersAppInterface tabGridCloseButtonForCellAtIndex:index];
+}
+
+id<GREYMatcher> SettingsPasswordMatcher() {
+  return [ChromeMatchersAppInterface settingsPasswordMatcher];
+}
+
+id<GREYMatcher> SettingsPasswordSearchMatcher() {
+  return [ChromeMatchersAppInterface settingsPasswordSearchMatcher];
+}
+
+id<GREYMatcher> SettingsProfileMatcher() {
+  return [ChromeMatchersAppInterface settingsProfileMatcher];
+}
+
+id<GREYMatcher> SettingsCreditCardMatcher() {
+  return [ChromeMatchersAppInterface settingsCreditCardMatcher];
+}
+
+id<GREYMatcher> SettingsBottomToolbarDeleteButton() {
+  return [ChromeMatchersAppInterface settingsBottomToolbarDeleteButton];
+}
+
+id<GREYMatcher> SettingsSearchEngineButton() {
+  return [ChromeMatchersAppInterface settingsSearchEngineButton];
+}
+
+id<GREYMatcher> AutofillSuggestionViewMatcher() {
+  return [ChromeMatchersAppInterface autofillSuggestionViewMatcher];
+}
+
+id<GREYMatcher> ContentViewSmallerThanScrollView() {
+  return [ChromeMatchersAppInterface contentViewSmallerThanScrollView];
+}
+
+id<GREYMatcher> AutofillSaveCardLocallyInfobar() {
+  return [ChromeMatchersAppInterface autofillSaveCardLocallyInfobar];
+}
+
+id<GREYMatcher> AutofillUploadCardInfobar() {
+  return [ChromeMatchersAppInterface autofillUploadCardInfobar];
+}
+
+id<GREYMatcher> HistoryEntry(const std::string& url, const std::string& title) {
+  return [ChromeMatchersAppInterface
+      historyEntryForURL:base::SysUTF8ToNSString(url)
+                   title:base::SysUTF8ToNSString(title)];
+}
+
+#pragma mark - Manual Fallback
+
+id<GREYMatcher> ManualFallbackFormSuggestionViewMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackFormSuggestionViewMatcher];
+}
+
+id<GREYMatcher> ManualFallbackKeyboardIconMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackKeyboardIconMatcher];
+}
+
+id<GREYMatcher> ManualFallbackPasswordIconMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackPasswordIconMatcher];
+}
+
+id<GREYMatcher> ManualFallbackPasswordTableViewMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackPasswordTableViewMatcher];
+}
+
+id<GREYMatcher> ManualFallbackPasswordSearchBarMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackPasswordSearchBarMatcher];
+}
+
+id<GREYMatcher> ManualFallbackManagePasswordsMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackManagePasswordsMatcher];
+}
+
+id<GREYMatcher> ManualFallbackOtherPasswordsMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackOtherPasswordsMatcher];
+}
+
+id<GREYMatcher> ManualFallbackOtherPasswordsDismissMatcher() {
+  return
+      [ChromeMatchersAppInterface manualFallbackOtherPasswordsDismissMatcher];
+}
+
+id<GREYMatcher> ManualFallbackPasswordButtonMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackPasswordButtonMatcher];
+}
+
+id<GREYMatcher> ManualFallbackPasswordTableViewWindowMatcher() {
+  return
+      [ChromeMatchersAppInterface manualFallbackPasswordTableViewWindowMatcher];
+}
+
+id<GREYMatcher> ManualFallbackProfilesIconMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackProfilesIconMatcher];
+}
+
+id<GREYMatcher> ManualFallbackProfilesTableViewMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackProfilesTableViewMatcher];
+}
+
+id<GREYMatcher> ManualFallbackManageProfilesMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackManageProfilesMatcher];
+}
+
+id<GREYMatcher> ManualFallbackProfileTableViewWindowMatcher() {
+  return
+      [ChromeMatchersAppInterface manualFallbackProfileTableViewWindowMatcher];
+}
+
+id<GREYMatcher> ManualFallbackCreditCardIconMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackCreditCardIconMatcher];
+}
+
+id<GREYMatcher> ManualFallbackCreditCardTableViewMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackCreditCardTableViewMatcher];
+}
+
+// Returns a matcher for the button to open password settings in manual
+id<GREYMatcher> ManualFallbackManageCreditCardsMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackManageCreditCardsMatcher];
+}
+
+// Returns a matcher for the button to add credit cards settings in manual
+id<GREYMatcher> ManualFallbackAddCreditCardsMatcher() {
+  return [ChromeMatchersAppInterface manualFallbackAddCreditCardsMatcher];
+}
+
+id<GREYMatcher> ManualFallbackCreditCardTableViewWindowMatcher() {
+  return [ChromeMatchersAppInterface
+      manualFallbackCreditCardTableViewWindowMatcher];
 }
 
 }  // namespace chrome_test_util

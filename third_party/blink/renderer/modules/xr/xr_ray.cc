@@ -8,21 +8,30 @@
 #include <cmath>
 #include <utility>
 
-#include "third_party/blink/renderer/core/geometry/dom_point_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_point_init.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_xr_ray_direction_init.h"
 #include "third_party/blink/renderer/core/geometry/dom_point_read_only.h"
 #include "third_party/blink/renderer/modules/xr/xr_rigid_transform.h"
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/gfx/geometry/quaternion.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 
+namespace {
+
+constexpr char kInvalidWComponentInOrigin[] =
+    "Origin's `w` component must be set to 1.0f!";
+constexpr char kInvalidWComponentInDirection[] =
+    "Direction's `w` component must be set to 0.0f!";
+
+}  // namespace
+
 namespace blink {
 
-XRRay::XRRay(const TransformationMatrix& matrix,
-             ExceptionState& exception_state) {
-  Set(matrix, exception_state);
+XRRay::XRRay() {
+  origin_ = DOMPointReadOnly::Create(0.0, 0.0, 0.0, 1.0);
+  direction_ = DOMPointReadOnly::Create(0.0, 0.0, -1.0, 0.0);
 }
 
 XRRay::XRRay(XRRigidTransform* transform, ExceptionState& exception_state) {
@@ -31,20 +40,27 @@ XRRay::XRRay(XRRigidTransform* transform, ExceptionState& exception_state) {
 }
 
 XRRay::XRRay(DOMPointInit* origin,
-             DOMPointInit* direction,
+             XRRayDirectionInit* direction,
              ExceptionState& exception_state) {
-  FloatPoint3D o;
-  if (origin) {
-    o = FloatPoint3D(origin->x(), origin->y(), origin->z());
-  } else {
-    o = FloatPoint3D(0.f, 0.f, 0.f);
+  DCHECK(origin);
+  DCHECK(direction);
+
+  FloatPoint3D o(origin->x(), origin->y(), origin->z());
+  FloatPoint3D d(direction->x(), direction->y(), direction->z());
+
+  if (d.length() == 0.0f) {
+    exception_state.ThrowTypeError(kUnableToNormalizeZeroLength);
+    return;
   }
 
-  FloatPoint3D d;
-  if (direction) {
-    d = FloatPoint3D(direction->x(), direction->y(), direction->z());
-  } else {
-    d = FloatPoint3D(0.f, 0.f, -1.f);
+  if (direction->w() != 0.0f) {
+    exception_state.ThrowTypeError(kInvalidWComponentInDirection);
+    return;
+  }
+
+  if (origin->w() != 1.0f) {
+    exception_state.ThrowTypeError(kInvalidWComponentInOrigin);
+    return;
   }
 
   Set(o, d, exception_state);
@@ -60,7 +76,8 @@ void XRRay::Set(const TransformationMatrix& matrix,
 }
 
 // Sets member variables from passed in |origin| and |direction|.
-// All constructors eventually invoke this method.
+// All constructors with the exception of default constructor eventually invoke
+// this method.
 // If the |direction|'s length is 0, this method will initialize direction to
 // default vector (0, 0, -1).
 void XRRay::Set(FloatPoint3D origin,
@@ -69,13 +86,7 @@ void XRRay::Set(FloatPoint3D origin,
   DVLOG(3) << __FUNCTION__ << ": origin=" << origin.ToString()
            << ", direction=" << direction.ToString();
 
-  if (direction.length() == 0.0f) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      kUnableToNormalizeZeroLength);
-    return;
-  } else {
-    direction.Normalize();
-  }
+  direction.Normalize();
 
   origin_ = DOMPointReadOnly::Create(origin.X(), origin.Y(), origin.Z(), 1.0);
   direction_ = DOMPointReadOnly::Create(direction.X(), direction.Y(),
@@ -93,28 +104,8 @@ XRRay* XRRay::Create(XRRigidTransform* transform,
   return result;
 }
 
-XRRay* XRRay::Create(ExceptionState& exception_state) {
-  auto* result = MakeGarbageCollected<XRRay>(nullptr, nullptr, exception_state);
-
-  if (exception_state.HadException()) {
-    return nullptr;
-  }
-
-  return result;
-}
-
-XRRay* XRRay::Create(DOMPointInit* origin, ExceptionState& exception_state) {
-  auto* result = MakeGarbageCollected<XRRay>(origin, nullptr, exception_state);
-
-  if (exception_state.HadException()) {
-    return nullptr;
-  }
-
-  return result;
-}
-
 XRRay* XRRay::Create(DOMPointInit* origin,
-                     DOMPointInit* direction,
+                     XRRayDirectionInit* direction,
                      ExceptionState& exception_state) {
   auto* result =
       MakeGarbageCollected<XRRay>(origin, direction, exception_state);
@@ -137,7 +128,7 @@ DOMFloat32Array* XRRay::matrix() {
   // steps:
   //    Step 1. If the operation IsDetachedBuffer on internal matrix is false,
   //    return transform’s internal matrix.
-  if (!matrix_ || !matrix_->View() || !matrix_->View()->Data()) {
+  if (!matrix_ || !matrix_->Data()) {
     // Returned matrix should represent transformation from ray originating at
     // (0,0,0) with direction (0,0,-1) into ray originating at |origin_| with
     // direction |direction_|.
@@ -184,13 +175,26 @@ DOMFloat32Array* XRRay::matrix() {
     // onto translation (i.e. translation * rotation) in column-vector notation.
     // Step 8: Set ray’s internal matrix to matrix
     matrix_ = transformationMatrixToDOMFloat32Array(matrix);
+    if (!raw_matrix_) {
+      raw_matrix_ = std::make_unique<TransformationMatrix>(matrix);
+    } else {
+      *raw_matrix_ = matrix;
+    }
   }
 
   // Step 9: Return matrix
   return matrix_;
 }
 
-void XRRay::Trace(blink::Visitor* visitor) {
+TransformationMatrix XRRay::RawMatrix() {
+  matrix();
+
+  DCHECK(raw_matrix_);
+
+  return *raw_matrix_;
+}
+
+void XRRay::Trace(Visitor* visitor) {
   visitor->Trace(origin_);
   visitor->Trace(direction_);
   visitor->Trace(matrix_);

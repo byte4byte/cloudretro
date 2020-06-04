@@ -2,14 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/web-nfc/#the-nfcrecord-dictionary
+// https://w3c.github.io/web-nfc/#dom-ndefrecord
 
-enum NDEFRecordType { "empty", "text", "url", "json", "opaque" };
-
-typedef (DOMString or unrestricted double or ArrayBuffer or Dictionary) NDEFRecordData;
-
-dictionary NDEFRecord {
-    NDEFRecordType recordType;
-    USVString mediaType;
-    NDEFRecordData data;
+[
+    RuntimeEnabled=WebNFC,
+    SecureContext,
+    Exposed=Window
+] interface NDEFRecord {
+    [CallWith=ExecutionContext, RaisesException] constructor(NDEFRecordInit recordInit);
+    readonly attribute USVString recordType;
+    readonly attribute USVString? mediaType;
+    readonly attribute USVString? id;
+    readonly attribute USVString? encoding;
+    readonly attribute USVString? lang;
+    readonly attribute DataView? data;
+    [RaisesException] sequence<NDEFRecord>? toRecords();
 };

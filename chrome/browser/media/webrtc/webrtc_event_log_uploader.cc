@@ -15,6 +15,8 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_status_code.h"
@@ -102,13 +104,14 @@ std::string MimeContentType() {
   return content_type;
 }
 
-void BindURLLoaderFactoryRequest(
-    network::mojom::URLLoaderFactoryRequest url_loader_factory_request) {
+void BindURLLoaderFactoryReceiver(
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory>
+        url_loader_factory_receiver) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory =
       g_browser_process->shared_url_loader_factory();
   DCHECK(shared_url_loader_factory);
-  shared_url_loader_factory->Clone(std::move(url_loader_factory_request));
+  shared_url_loader_factory->Clone(std::move(url_loader_factory_receiver));
 }
 
 void OnURLLoadUploadProgress(uint64_t current, uint64_t total) {
@@ -273,17 +276,16 @@ void WebRtcEventLogUploaderImpl::StartUpload(const std::string& upload_data) {
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(kUploadURL);
   resource_request->method = "POST";
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   // Create a new mojo pipe. It's safe to pass this around and use
   // immediately, even though it needs to finish initialization on the UI
   // thread.
-  network::mojom::URLLoaderFactoryPtr url_loader_factory_ptr;
-  base::PostTaskWithTraits(
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory_remote;
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(BindURLLoaderFactoryRequest,
-                     mojo::MakeRequest(&url_loader_factory_ptr)));
+      base::BindOnce(BindURLLoaderFactoryReceiver,
+                     url_loader_factory_remote.BindNewPipeAndPassReceiver()));
 
   url_loader_ = network::SimpleURLLoader::Create(
       std::move(resource_request), kWebrtcEventLogUploaderTrafficAnnotation);
@@ -294,7 +296,7 @@ void WebRtcEventLogUploaderImpl::StartUpload(const std::string& upload_data) {
   // See comment in destructor for an explanation about why using
   // base::Unretained(this) is safe here.
   url_loader_->DownloadToString(
-      url_loader_factory_ptr.get(),
+      url_loader_factory_remote.get(),
       base::BindOnce(&WebRtcEventLogUploaderImpl::OnURLLoadComplete,
                      base::Unretained(this)),
       kWebRtcEventLogMaxUploadIdBytes);

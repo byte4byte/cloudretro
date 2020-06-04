@@ -42,16 +42,15 @@ void FocusCycler::RemoveWidget(views::Widget* widget) {
 }
 
 void FocusCycler::RotateFocus(Direction direction) {
-  aura::Window* window = wm::GetActiveWindow();
+  aura::Window* window = window_util::GetActiveWindow();
   if (window) {
     views::Widget* widget = views::Widget::GetWidgetForNativeView(window);
     // First try to rotate focus within the active widget. If that succeeds,
     // we're done.
-    if (widget &&
-        widget->GetFocusManager()->RotatePaneFocus(
-            direction == BACKWARD ? views::FocusManager::kBackward
-                                  : views::FocusManager::kForward,
-            views::FocusManager::kNoWrap)) {
+    if (widget && widget->GetFocusManager()->RotatePaneFocus(
+                      direction == BACKWARD ? views::FocusManager::kBackward
+                                            : views::FocusManager::kForward,
+                      views::FocusManager::FocusCycleWrapping::kDisabled)) {
       return;
     }
   }
@@ -88,16 +87,16 @@ void FocusCycler::RotateFocus(Direction direction) {
       if (mru_windows.empty())
         break;
       auto* window = mru_windows.front();
-      wm::GetWindowState(window)->Activate();
+      WindowState::Get(window)->Activate();
       views::Widget* widget = views::Widget::GetWidgetForNativeView(window);
       if (!widget)
         break;
       views::FocusManager* focus_manager = widget->GetFocusManager();
       focus_manager->ClearFocus();
-      focus_manager->RotatePaneFocus(direction == BACKWARD
-                                         ? views::FocusManager::kBackward
-                                         : views::FocusManager::kForward,
-                                     views::FocusManager::kWrap);
+      focus_manager->RotatePaneFocus(
+          direction == BACKWARD ? views::FocusManager::kBackward
+                                : views::FocusManager::kForward,
+          views::FocusManager::FocusCycleWrapping::kEnabled);
       break;
     } else {
       if (FocusWidget(widgets_[index]))
@@ -108,7 +107,7 @@ void FocusCycler::RotateFocus(Direction direction) {
 
 bool FocusCycler::FocusWidget(views::Widget* widget) {
   // If the target is PIP window, temporarily make it activatable.
-  if (wm::GetWindowState(widget->GetNativeWindow())->IsPip())
+  if (WindowState::Get(widget->GetNativeWindow())->IsPip())
     widget->widget_delegate()->SetCanActivate(true);
 
   // Note: It is not necessary to set the focus directly to the pane since that

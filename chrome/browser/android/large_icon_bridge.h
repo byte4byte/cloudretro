@@ -18,12 +18,11 @@
 class LargeIconBridge {
  public:
   LargeIconBridge();
-  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void Destroy(JNIEnv* env);
   jboolean GetLargeIconForURL(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& j_profile,
-      const base::android::JavaParamRef<jstring>& j_page_url,
+      const base::android::JavaParamRef<jobject>& j_page_url,
       jint min_source_size_px,
       const base::android::JavaParamRef<jobject>& j_callback);
 

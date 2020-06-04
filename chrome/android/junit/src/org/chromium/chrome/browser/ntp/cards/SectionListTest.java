@@ -29,7 +29,6 @@ import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestio
 import static org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.registerCategory;
 
 import org.junit.After;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,8 +56,6 @@ import org.chromium.chrome.browser.suggestions.DestructionObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.test.support.DisableHistogramsRule;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.suggestions.ContentSuggestionsTestUtils.CategoryInfoBuilder;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
@@ -73,8 +70,6 @@ import java.util.List;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class SectionListTest {
-    @Rule
-    public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
     @Rule
     public TestRule mFeaturesProcessor = new Features.JUnitProcessor();
 
@@ -102,9 +97,6 @@ public class SectionListTest {
 
     @Before
     public void setUp() {
-        // These tests fail on touchless builds, see https://crbug.com/981870.
-        Assume.assumeFalse(FeatureUtilities.isNoTouchModeEnabled());
-
         // Ensure that NetworkChangeNotifier is initialized.
         if (!NetworkChangeNotifier.isInitialized()) {
             NetworkChangeNotifier.init();

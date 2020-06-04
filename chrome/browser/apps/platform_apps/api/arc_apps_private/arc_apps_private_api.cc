@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/profiles/profile.h"
@@ -28,7 +28,7 @@ ArcAppsPrivateAPI::GetFactoryInstance() {
 }
 
 ArcAppsPrivateAPI::ArcAppsPrivateAPI(content::BrowserContext* context)
-    : context_(context), scoped_prefs_observer_(this) {
+    : context_(context) {
   extensions::EventRouter::Get(context_)->RegisterObserver(
       this, api::arc_apps_private::OnInstalled::kEventName);
 }

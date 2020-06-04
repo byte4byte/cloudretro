@@ -40,7 +40,7 @@ class GL_EXPORT GLSurfaceEGLSurfaceControl : public GLSurfaceEGL {
   void Destroy() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
-              ColorSpace color_space,
+              const gfx::ColorSpace& color_space,
               bool has_alpha) override;
   bool IsOffscreen() override;
 
@@ -82,6 +82,7 @@ class GL_EXPORT GLSurfaceEGLSurfaceControl : public GLSurfaceEGL {
   bool SupportsPostSubBuffer() override;
   bool SupportsCommitOverlayPlanes() override;
   void SetDisplayTransform(gfx::OverlayTransform transform) override;
+  gfx::SurfaceOrigin GetOrigin() const override;
 
  private:
   ~GLSurfaceEGLSurfaceControl() override;
@@ -150,6 +151,8 @@ class GL_EXPORT GLSurfaceEGLSurfaceControl : public GLSurfaceEGL {
   void CheckPendingPresentationCallbacks();
 
   gfx::Rect ApplyDisplayInverse(const gfx::Rect& input) const;
+  const gfx::ColorSpace& GetNearestSupportedImageColorSpace(
+      GLImage* image) const;
 
   const std::string root_surface_name_;
   const std::string child_surface_name_;
@@ -200,7 +203,7 @@ class GL_EXPORT GLSurfaceEGLSurfaceControl : public GLSurfaceEGL {
   bool surface_lost_ = false;
 
   scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner_;
-  base::WeakPtrFactory<GLSurfaceEGLSurfaceControl> weak_factory_;
+  base::WeakPtrFactory<GLSurfaceEGLSurfaceControl> weak_factory_{this};
 };
 
 }  // namespace gl

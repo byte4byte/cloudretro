@@ -33,7 +33,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_decode_error_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_decode_success_callback.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_state_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_destination_node.h"
 #include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/iir_filter_node.h"
+#include "third_party/blink/renderer/modules/webaudio/inspector_helper_mixin.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/audio/audio_callback_metric_reporter.h"
 #include "third_party/blink/renderer/platform/audio/audio_io_callback.h"
@@ -59,11 +60,9 @@ namespace blink {
 class AnalyserNode;
 class AudioBuffer;
 class AudioBufferSourceNode;
-class AudioContextOptions;
 class AudioListener;
 class AudioWorklet;
 class BiquadFilterNode;
-class BaseAudioContextTracker;
 class ChannelMergerNode;
 class ChannelSplitterNode;
 class ConstantSourceNode;
@@ -93,9 +92,11 @@ class WorkerThread;
 class MODULES_EXPORT BaseAudioContext
     : public EventTargetWithInlineData,
       public ActiveScriptWrappable<BaseAudioContext>,
-      public ContextLifecycleStateObserver {
+      public ExecutionContextLifecycleStateObserver,
+      public InspectorHelperMixin {
   USING_GARBAGE_COLLECTED_MIXIN(BaseAudioContext);
   DEFINE_WRAPPERTYPEINFO();
+  USING_PRE_FINALIZER(BaseAudioContext, Dispose);
 
  public:
   // The state of an audio context.  On creation, the state is Suspended. The
@@ -105,14 +106,9 @@ class MODULES_EXPORT BaseAudioContext
   // to Suspended or Closed. Once Closed, there are no valid transitions.
   enum AudioContextState { kSuspended, kRunning, kClosed };
 
-  // Create an AudioContext for rendering to the audio hardware.
-  static BaseAudioContext* Create(Document&,
-                                  const AudioContextOptions*,
-                                  ExceptionState&);
-
   ~BaseAudioContext() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   // Is the destination node initialized and ready to handle audio?
   bool IsDestinationInitialized() const {
@@ -120,12 +116,14 @@ class MODULES_EXPORT BaseAudioContext
     return dest ? dest->GetAudioDestinationHandler().IsInitialized() : false;
   }
 
+  void Dispose();
+
   // Document notification
   void ContextLifecycleStateChanged(mojom::FrameLifecycleState) override;
-  void ContextDestroyed(ExecutionContext*) override;
+  void ContextDestroyed() override;
   bool HasPendingActivity() const override;
 
-  // Cannnot be called from the audio thread.
+  // Cannot be called from the audio thread.
   AudioDestinationNode* destination() const;
 
   size_t CurrentSampleFrame() const {
@@ -146,6 +144,10 @@ class MODULES_EXPORT BaseAudioContext
   // Warn user when connecting two nodes on a closed context. The connection
   // does nothing useful because the context is closed.
   void WarnForConnectionIfContextClosed() const;
+
+  // Return true if the destination is pulling on the audio graph.  Otherwise
+  // return false.
+  virtual bool IsPullingAudioGraph() const = 0;
 
   AudioBuffer* createBuffer(uint32_t number_of_channels,
                             uint32_t number_of_frames,
@@ -283,7 +285,7 @@ class MODULES_EXPORT BaseAudioContext
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange, kStatechange)
 
-  void StartRendering();
+  virtual void StartRendering();
 
   void NotifyStateChange();
 
@@ -316,9 +318,6 @@ class MODULES_EXPORT BaseAudioContext
   // Does nothing when the worklet global scope does not exist.
   void UpdateWorkletGlobalScopeOnRenderingThread();
 
-  // Returns a unique ID for the instance for Devtools.
-  const String& Uuid() const { return uuid_; }
-
   // Returns -1 if the destination node is unavailable or any other condition
   // occurs preventing us from determining the count.
   int32_t MaxChannelCount();
@@ -327,6 +326,15 @@ class MODULES_EXPORT BaseAudioContext
   // Returns -1 if the destination node is unavailable or any other condition
   // occurs preventing us from determining the count.
   int32_t CallbackBufferSize();
+
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
+
+  // TODO(crbug.com/1055983): Remove this when the execution context validity
+  // check is not required in the AudioNode factory methods. Returns false
+  // if the execution context does not exist.
+  bool CheckExecutionContextAndThrowIfNecessary(ExceptionState&);
 
  protected:
   enum ContextType { kRealtimeContext, kOfflineContext };
@@ -377,12 +385,7 @@ class MODULES_EXPORT BaseAudioContext
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  BaseAudioContextTracker* Tracker();
-
  private:
-  // Unique ID for each context.
-  const String uuid_;
-
   bool is_cleared_;
   void Clear();
 

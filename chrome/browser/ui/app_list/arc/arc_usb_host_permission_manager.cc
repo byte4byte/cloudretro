@@ -138,9 +138,7 @@ ArcUsbHostPermissionManager::ArcUsbHostPermissionManager(
     Profile* profile,
     ArcAppListPrefs* arc_app_list_prefs,
     ArcUsbHostBridge* arc_usb_host_bridge)
-    : profile_(profile),
-      arc_app_list_prefs_(arc_app_list_prefs),
-      weak_ptr_factory_(this) {
+    : profile_(profile), arc_app_list_prefs_(arc_app_list_prefs) {
   RestorePermissionFromChromePrefs();
   arc_app_list_prefs_->AddObserver(this);
   arc_usb_host_bridge->SetUiDelegate(this);
@@ -200,12 +198,12 @@ void ArcUsbHostPermissionManager::RestorePermissionFromChromePrefs() {
         continue;
       }
 
-      usb_access_permission_dict_.emplace(std::make_pair(
+      usb_access_permission_dict_.emplace(
           package,
           UsbDeviceEntry(std::string() /*guid*/,
                          base::UTF8ToUTF16(device_name_value->GetString()),
                          base::UTF8ToUTF16(serial_number_value->GetString()),
-                         vendor_id, product_id)));
+                         vendor_id, product_id));
     }
   }
 }
@@ -511,8 +509,7 @@ void ArcUsbHostPermissionManager::UpdateArcUsbAccessPermission(
                                          base::Value(base::Value::Type::LIST));
   }
   arc_app_list_prefs_->GetPackagePrefs(package_name, kUsbAccessPermission)
-      ->GetList()
-      .emplace_back(std::move(new_permission));
+      ->Append(std::move(new_permission));
 }
 
 void ArcUsbHostPermissionManager::ClearPermissionForTesting() {

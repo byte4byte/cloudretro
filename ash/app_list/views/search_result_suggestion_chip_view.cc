@@ -22,13 +22,12 @@
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/view_class_properties.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -36,7 +35,6 @@ constexpr SkColor kBackgroundColor = SkColorSetA(gfx::kGoogleGrey100, 0x14);
 constexpr SkColor kTextColor = gfx::kGoogleGrey100;
 constexpr SkColor kRippleColor = SkColorSetA(gfx::kGoogleGrey100, 0x0F);
 constexpr SkColor kFocusRingColor = gfx::kGoogleBlue300;
-constexpr int kFocusRingCornerRadius = 16;
 constexpr int kMaxTextWidth = 192;
 constexpr int kBlurRadius = 5;
 constexpr int kIconMarginDip = 8;
@@ -58,21 +56,19 @@ SearchResultSuggestionChipView::SearchResultSuggestionChipView(
     AppListViewDelegate* view_delegate)
     : view_delegate_(view_delegate),
       icon_view_(new views::ImageView()),
-      text_view_(new views::Label()),
-      weak_ptr_factory_(this) {
+      text_view_(new views::Label()) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
 
   SetInstallFocusRingOnFocus(true);
   focus_ring()->SetColor(kFocusRingColor);
 
   SetInkDropMode(InkDropMode::ON);
+  views::InstallPillHighlightPathGenerator(this);
 
   InitLayout();
 }
 
-SearchResultSuggestionChipView::~SearchResultSuggestionChipView() {
-  ClearResult();
-}
+SearchResultSuggestionChipView::~SearchResultSuggestionChipView() = default;
 
 void SearchResultSuggestionChipView::SetBackgroundBlurEnabled(bool enabled) {
   // Background blur is enabled if and only if layer exists.
@@ -87,6 +83,7 @@ void SearchResultSuggestionChipView::SetBackgroundBlurEnabled(bool enabled) {
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
   layer()->SetBackgroundBlur(kBlurRadius);
+  layer()->SetName("launcher/SearchResultSuggestionChip");
   SetRoundedCornersForLayer(kPreferredHeightDip / 2);
 }
 
@@ -107,8 +104,9 @@ void SearchResultSuggestionChipView::ButtonPressed(views::Button* sender,
                                view_delegate_->GetSearchModel());
   view_delegate_->OpenSearchResult(
       result()->id(), event.flags(),
-      ash::AppListLaunchedFrom::kLaunchedFromSuggestionChip,
-      ash::AppListLaunchType::kAppSearchResult, index_in_container());
+      AppListLaunchedFrom::kLaunchedFromSuggestionChip,
+      AppListLaunchType::kAppSearchResult, index_in_container(),
+      false /* launch_as_default */);
 }
 
 const char* SearchResultSuggestionChipView::GetClassName() const {
@@ -153,11 +151,6 @@ void SearchResultSuggestionChipView::OnBlur() {
   SchedulePaint();
 }
 
-void SearchResultSuggestionChipView::OnBoundsChanged(
-    const gfx::Rect& previous_bounds) {
-  UpdateFocusRingPath();
-}
-
 bool SearchResultSuggestionChipView::OnKeyPressed(const ui::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_SPACE)
     return false;
@@ -172,12 +165,6 @@ SearchResultSuggestionChipView::CreateInkDrop() {
   ink_drop->SetShowHighlightOnFocus(false);
   ink_drop->SetAutoHighlightMode(views::InkDropImpl::AutoHighlightMode::NONE);
   return std::move(ink_drop);
-}
-
-std::unique_ptr<views::InkDropMask>
-SearchResultSuggestionChipView::CreateInkDropMask() const {
-  return std::make_unique<views::RoundRectInkDropMask>(size(), gfx::InsetsF(),
-                                                       height() / 2);
 }
 
 std::unique_ptr<views::InkDropRipple>
@@ -226,23 +213,11 @@ void SearchResultSuggestionChipView::UpdateSuggestionChipView() {
   SetText(result()->title());
 
   base::string16 accessible_name = result()->title();
-  if (result()->id() == app_list::kInternalAppIdContinueReading) {
+  if (result()->id() == kInternalAppIdContinueReading) {
     accessible_name = l10n_util::GetStringFUTF16(
         IDS_APP_LIST_CONTINUE_READING_ACCESSIBILE_NAME, accessible_name);
   }
   SetAccessibleName(accessible_name);
-}
-
-void SearchResultSuggestionChipView::UpdateFocusRingPath() {
-  auto path = std::make_unique<SkPath>();
-  gfx::Rect bounds = GetLocalBounds();
-
-  // Insets ensure the focus ring will fit within the bounds of the chip once
-  // they are clipped to be rounded.
-  bounds.Inset(gfx::Insets(1));
-  path->addRoundRect(gfx::RectToSkRect(bounds), kFocusRingCornerRadius,
-                     kFocusRingCornerRadius);
-  SetProperty(views::kHighlightPathKey, path.release());
 }
 
 void SearchResultSuggestionChipView::InitLayout() {
@@ -275,6 +250,7 @@ void SearchResultSuggestionChipView::SetRoundedCornersForLayer(
     int corner_radius) {
   layer()->SetRoundedCornerRadius(
       {corner_radius, corner_radius, corner_radius, corner_radius});
+  layer()->SetIsFastRoundedCorner(true);
 }
 
-}  // namespace app_list
+}  // namespace ash

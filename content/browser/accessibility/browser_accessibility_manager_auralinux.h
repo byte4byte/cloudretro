@@ -17,14 +17,15 @@ class BrowserAccessibilityAuraLinux;
 class CONTENT_EXPORT BrowserAccessibilityManagerAuraLinux
     : public BrowserAccessibilityManager {
  public:
-  BrowserAccessibilityManagerAuraLinux(
-      const ui::AXTreeUpdate& initial_tree,
-      BrowserAccessibilityDelegate* delegate,
-      BrowserAccessibilityFactory* factory = new BrowserAccessibilityFactory());
+  BrowserAccessibilityManagerAuraLinux(const ui::AXTreeUpdate& initial_tree,
+                                       BrowserAccessibilityDelegate* delegate);
 
   ~BrowserAccessibilityManagerAuraLinux() override;
 
   static ui::AXTreeUpdate GetEmptyDocument();
+  static BrowserAccessibility* FindCommonAncestor(
+      BrowserAccessibility* object1,
+      BrowserAccessibility* object2);
 
   // Implementation of BrowserAccessibilityManager methods.
   void FireFocusEvent(BrowserAccessibility* node) override;
@@ -39,13 +40,21 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAuraLinux
   void FireNameChangedEvent(BrowserAccessibility* node);
   void FireDescriptionChangedEvent(BrowserAccessibility* node);
   void FireSubtreeCreatedEvent(BrowserAccessibility* node);
+  void OnFindInPageResult(int request_id,
+                          int match_index,
+                          int start_id,
+                          int start_offset,
+                          int end_id,
+                          int end_offset) override;
+  void OnFindInPageTermination() override;
 
  protected:
+  FRIEND_TEST_ALL_PREFIXES(BrowserAccessibilityManagerAuraLinuxTest,
+                           TestEmitChildrenChanged);
   // AXTreeObserver methods.
-  void OnStateChanged(ui::AXTree* tree,
-                      ui::AXNode* node,
-                      ax::mojom::State state,
-                      bool new_value) override;
+  void OnNodeDataWillChange(ui::AXTree* tree,
+                            const ui::AXNodeData& old_node_data,
+                            const ui::AXNodeData& new_node_data) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnAtomicUpdateFinished(
       ui::AXTree* tree,
@@ -53,6 +62,7 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAuraLinux
       const std::vector<ui::AXTreeObserver::Change>& changes) override;
 
  private:
+  bool CanEmitChildrenChanged(BrowserAccessibility* node) const;
   void FireEvent(BrowserAccessibility* node, ax::mojom::Event event);
 
   AtkObject* parent_object_;

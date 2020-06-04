@@ -8,14 +8,12 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/shared_memory.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "gpu/ipc/common/gpu_memory_buffer_impl.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/gfx/buffer_format_util.h"
 
 namespace viz {
@@ -32,17 +30,16 @@ void NotifyDestructionOnCorrectThread(
 }  // namespace
 
 ClientGpuMemoryBufferManager::ClientGpuMemoryBufferManager(
-    mojom::GpuMemoryBufferFactoryPtr gpu)
+    mojo::PendingRemote<mojom::GpuMemoryBufferFactory> gpu)
     : thread_("GpuMemoryThread"),
       gpu_memory_buffer_support_(
-          std::make_unique<gpu::GpuMemoryBufferSupport>()),
-      weak_ptr_factory_(this) {
+          std::make_unique<gpu::GpuMemoryBufferSupport>()) {
   CHECK(thread_.Start());
   // The thread is owned by this object. Which means the task will not run if
   // the object has been destroyed. So Unretained() is safe.
   thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&ClientGpuMemoryBufferManager::InitThread,
-                                base::Unretained(this), gpu.PassInterface()));
+                                base::Unretained(this), std::move(gpu)));
 }
 
 ClientGpuMemoryBufferManager::~ClientGpuMemoryBufferManager() {
@@ -53,9 +50,9 @@ ClientGpuMemoryBufferManager::~ClientGpuMemoryBufferManager() {
 }
 
 void ClientGpuMemoryBufferManager::InitThread(
-    mojom::GpuMemoryBufferFactoryPtrInfo gpu_info) {
-  gpu_.Bind(std::move(gpu_info));
-  gpu_.set_connection_error_handler(
+    mojo::PendingRemote<mojom::GpuMemoryBufferFactory> gpu_remote) {
+  gpu_.Bind(std::move(gpu_remote));
+  gpu_.set_disconnect_handler(
       base::BindOnce(&ClientGpuMemoryBufferManager::DisconnectGpuOnThread,
                      base::Unretained(this)));
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();

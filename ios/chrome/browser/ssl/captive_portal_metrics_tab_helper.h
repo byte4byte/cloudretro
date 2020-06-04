@@ -7,10 +7,10 @@
 
 #include "base/macros.h"
 #include "base/timer/timer.h"
-#include "components/captive_portal/captive_portal_detector.h"
+#include "components/captive_portal/core/captive_portal_detector.h"
 #include "ios/chrome/browser/ssl/captive_portal_metrics.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 namespace web {
 class WebState;

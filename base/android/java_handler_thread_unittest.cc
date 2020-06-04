@@ -6,6 +6,7 @@
 
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
+#include "base/task/task_observer.h"
 #include "base/test/android/java_handler_thread_helpers.h"
 #include "base/test/bind_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,11 +21,11 @@ class JavaHandlerThreadForTest : public android::JavaHandlerThread {
       base::ThreadPriority priority = base::ThreadPriority::NORMAL)
       : android::JavaHandlerThread(name, priority) {}
 
-  using android::JavaHandlerThread::task_environment;
-  using android::JavaHandlerThread::TaskEnvironment;
+  using android::JavaHandlerThread::state;
+  using android::JavaHandlerThread::State;
 };
 
-class DummyTaskObserver : public MessageLoop::TaskObserver {
+class DummyTaskObserver : public TaskObserver {
  public:
   explicit DummyTaskObserver(int num_tasks)
       : num_tasks_started_(0), num_tasks_processed_(0), num_tasks_(num_tasks) {}
@@ -36,7 +37,8 @@ class DummyTaskObserver : public MessageLoop::TaskObserver {
 
   ~DummyTaskObserver() override = default;
 
-  void WillProcessTask(const PendingTask& pending_task) override {
+  void WillProcessTask(const PendingTask& /* pending_task */,
+                       bool /* was_blocked_or_low_priority */) override {
     num_tasks_started_++;
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_ + 1);
@@ -128,7 +130,7 @@ TEST_F(JavaHandlerThreadTest, RunTasksWhileShuttingDownJavaThread) {
 
   sequence_manager::internal::SequenceManagerImpl* sequence_manager =
       static_cast<sequence_manager::internal::SequenceManagerImpl*>(
-          java_thread->task_environment()->sequence_manager.get());
+          java_thread->state()->sequence_manager.get());
 
   java_thread->task_runner()->PostTask(
       FROM_HERE, BindLambdaForTesting([&]() {

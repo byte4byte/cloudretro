@@ -18,7 +18,8 @@ class CSSPropertyTest : public PageTestBase {};
 TEST_F(CSSPropertyTest, VisitedPropertiesAreNotWebExposed) {
   for (CSSPropertyID property_id : CSSPropertyIDList()) {
     const CSSProperty& property = CSSProperty::Get(property_id);
-    EXPECT_TRUE(!property.IsVisited() || !property.IsWebExposed());
+    EXPECT_TRUE(!property.IsVisited() ||
+                !property.IsWebExposed(GetDocument().GetExecutionContext()));
   }
 }
 
@@ -38,16 +39,15 @@ TEST_F(CSSPropertyTest, GetUnvisitedPropertyFromVisited) {
   }
 }
 
-TEST_F(CSSPropertyTest, InternalEffectiveZoomNotWebExposed) {
-  const CSSProperty& property = GetCSSPropertyInternalEffectiveZoom();
-  EXPECT_FALSE(property.IsWebExposed());
-}
+TEST_F(CSSPropertyTest, InternalResetEffectiveNotWebExposed) {
+  const CSSPropertyValueSet* ua_set = css_test_helpers::ParseDeclarationBlock(
+      "zoom:-internal-reset-effective", kUASheetMode);
+  const CSSPropertyValueSet* author_set =
+      css_test_helpers::ParseDeclarationBlock("zoom:-internal-reset-effective",
+                                              kHTMLStandardMode);
 
-TEST_F(CSSPropertyTest, InternalEffectiveZoomCanBeParsed) {
-  const CSSValue* value = css_test_helpers::ParseLonghand(
-      GetDocument(), GetCSSPropertyInternalEffectiveZoom(), "1.2");
-  ASSERT_TRUE(value);
-  EXPECT_EQ("1.2", value->CssText());
+  EXPECT_TRUE(ua_set->HasProperty(CSSPropertyID::kZoom));
+  EXPECT_FALSE(author_set->HasProperty(CSSPropertyID::kZoom));
 }
 
 TEST_F(CSSPropertyTest, VisitedPropertiesCanParseValues) {
@@ -64,7 +64,7 @@ TEST_F(CSSPropertyTest, VisitedPropertiesCanParseValues) {
 
     // Get any value compatible with 'property'. The initial value will do.
     const CSSValue* initial_value = property.CSSValueFromComputedStyle(
-        *initial_style, nullptr /* layout_object */, nullptr /* node */,
+        *initial_style, nullptr /* layout_object */,
         false /* allow_visited_style */);
     ASSERT_TRUE(initial_value);
     String css_text = initial_value->CssText();
@@ -85,6 +85,20 @@ TEST_F(CSSPropertyTest, VisitedPropertiesCanParseValues) {
   // Verify that we have seen at least one visited property. If we didn't (and
   // there is no bug), it means this test can be removed.
   EXPECT_GT(num_visited, 0u);
+}
+
+TEST_F(CSSPropertyTest, Surrogates) {
+  EXPECT_EQ(&GetCSSPropertyWidth(),
+            GetCSSPropertyInlineSize().SurrogateFor(
+                TextDirection::kLtr, WritingMode::kHorizontalTb));
+  EXPECT_EQ(&GetCSSPropertyHeight(),
+            GetCSSPropertyInlineSize().SurrogateFor(TextDirection::kLtr,
+                                                    WritingMode::kVerticalRl));
+  EXPECT_EQ(&GetCSSPropertyWritingMode(),
+            GetCSSPropertyWebkitWritingMode().SurrogateFor(
+                TextDirection::kLtr, WritingMode::kHorizontalTb));
+  EXPECT_FALSE(GetCSSPropertyWidth().SurrogateFor(TextDirection::kLtr,
+                                                  WritingMode::kHorizontalTb));
 }
 
 }  // namespace blink

@@ -10,6 +10,8 @@
 #include "base/no_destructor.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "build/branding_buildflags.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_profile_service.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
@@ -19,40 +21,45 @@
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
 
 namespace {
 
-// Requests a ProxyResolvingSocketFactoryPtr on the UI thread. Note that a
-// WeakPtr of GCMProfileService is needed to detect when the KeyedService shuts
-// down, and avoid calling into |profile| which might have also been destroyed.
+// Requests a network::mojom::ProxyResolvingSocketFactory on the UI thread. Note
+// that a WeakPtr of GCMProfileService is needed to detect when the KeyedService
+// shuts down, and avoid calling into |profile| which might have also been
+// destroyed.
 void RequestProxyResolvingSocketFactoryOnUIThread(
     web::BrowserState* context,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
   if (!service)
     return;
-  context->GetProxyResolvingSocketFactory(std::move(request));
+  context->GetProxyResolvingSocketFactory(std::move(receiver));
 }
 
-// A thread-safe wrapper to request a ProxyResolvingSocketFactoryPtr.
+// A thread-safe wrapper to request a
+// network::mojom::ProxyResolvingSocketFactory.
 void RequestProxyResolvingSocketFactory(
     web::BrowserState* context,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
-  base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::UI})
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
+  base::CreateSingleThreadTaskRunner({web::WebThread::UI})
       ->PostTask(
           FROM_HERE,
           base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread, context,
-                         std::move(service), std::move(request)));
+                         std::move(service), std::move(receiver)));
 }
 
 }  // namespace
 
 // static
 gcm::GCMProfileService* IOSChromeGCMProfileServiceFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<gcm::GCMProfileService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -66,7 +73,7 @@ IOSChromeGCMProfileServiceFactory::GetInstance() {
 
 // static
 std::string IOSChromeGCMProfileServiceFactory::GetProductCategoryForSubtypes() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return "com.chrome.ios";
 #else
   return "org.chromium.ios";
@@ -88,11 +95,11 @@ IOSChromeGCMProfileServiceFactory::BuildServiceInstanceFor(
   DCHECK(!context->IsOffTheRecord());
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(context);
   return std::make_unique<gcm::GCMProfileService>(
       browser_state->GetPrefs(), browser_state->GetStatePath(),
       base::BindRepeating(&RequestProxyResolvingSocketFactory, context),
@@ -101,7 +108,7 @@ IOSChromeGCMProfileServiceFactory::BuildServiceInstanceFor(
       GetProductCategoryForSubtypes(),
       IdentityManagerFactory::GetForBrowserState(browser_state),
       base::WrapUnique(new gcm::GCMClientFactory),
-      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::UI}),
-      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}),
+      base::CreateSingleThreadTaskRunner({web::WebThread::UI}),
+      base::CreateSingleThreadTaskRunner({web::WebThread::IO}),
       blocking_task_runner);
 }

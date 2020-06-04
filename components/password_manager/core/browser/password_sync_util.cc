@@ -15,7 +15,7 @@
 #include "url/origin.h"
 
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
 
 using autofill::PasswordForm;
@@ -33,7 +33,7 @@ namespace sync_util {
 
 std::string GetSyncUsernameIfSyncingPasswords(
     const syncer::SyncService* sync_service,
-    const identity::IdentityManager* identity_manager) {
+    const signin::IdentityManager* identity_manager) {
   if (!identity_manager)
     return std::string();
 
@@ -47,11 +47,10 @@ std::string GetSyncUsernameIfSyncingPasswords(
   return identity_manager->GetPrimaryAccountInfo().email;
 }
 
-bool IsSyncAccountCredential(
-    const autofill::PasswordForm& form,
-    const syncer::SyncService* sync_service,
-    const identity::IdentityManager* identity_manager) {
-  if (!IsGaiaCredentialPage(form.signon_realm))
+bool IsSyncAccountCredential(const autofill::PasswordForm& form,
+                             const syncer::SyncService* sync_service,
+                             const signin::IdentityManager* identity_manager) {
+  if (!GURL(form.signon_realm).DomainIs("google.com"))
     return false;
 
   // The empty username can mean that Chrome did not detect it correctly. For
@@ -65,40 +64,8 @@ bool IsSyncAccountCredential(
       GetSyncUsernameIfSyncingPasswords(sync_service, identity_manager));
 }
 
-bool ShouldSavePasswordHash(const autofill::PasswordForm& form,
-                            const identity::IdentityManager* identity_manager,
-                            PrefService* prefs) {
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-  bool is_protected_credential_url =
-      gaia::IsGaiaSignonRealm(GURL(form.signon_realm)) ||
-      form.signon_realm == kGoogleChangePasswordSignonRealm ||
-      safe_browsing::MatchesPasswordProtectionLoginURL(form.origin, *prefs) ||
-      safe_browsing::MatchesPasswordProtectionChangePasswordURL(form.origin,
-                                                                *prefs);
-
-  if (!is_protected_credential_url)
-    return false;
-
-  std::string sync_email = identity_manager->GetPrimaryAccountInfo().email;
-  std::string username = base::UTF16ToUTF8(form.username_value);
-
-  if (sync_email.empty() || username.empty())
-    return false;
-
-  // Add @domain.name to the username if it is absent.
-  std::string email =
-      username + (username.find('@') == std::string::npos
-                      ? "@" + gaia::ExtractDomainName(sync_email)
-                      : std::string());
-
-  return email == sync_email;
-#else
-  return false;
-#endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
-}
-
 bool IsSyncAccountEmail(const std::string& username,
-                        const identity::IdentityManager* identity_manager) {
+                        const signin::IdentityManager* identity_manager) {
   // |identity_manager| can be null if user is not signed in.
   if (!identity_manager)
     return false;

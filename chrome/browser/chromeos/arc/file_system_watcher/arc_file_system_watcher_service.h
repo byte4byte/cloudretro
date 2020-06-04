@@ -12,7 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "components/arc/common/file_system.mojom.h"
+#include "components/arc/mojom/file_system.mojom-forward.h"
 #include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 
@@ -28,13 +28,6 @@ class BrowserContext;
 namespace arc {
 
 class ArcBridgeService;
-
-// Returns true if the file path has a media extension supported by Android.
-bool HasAndroidSupportedMediaExtension(const base::FilePath& path);
-
-// Exposed only for testing.
-extern const char* kAndroidSupportedMediaExtensions[];
-extern const int kAndroidSupportedMediaExtensionsSize;
 
 // Watches file system directories and registers newly created media files to
 // Android MediaProvider.
@@ -78,7 +71,7 @@ class ArcFileSystemWatcherService
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<ArcFileSystemWatcherService> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcFileSystemWatcherService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcFileSystemWatcherService);
 };

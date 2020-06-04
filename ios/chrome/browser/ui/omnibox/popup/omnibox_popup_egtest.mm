@@ -13,6 +13,7 @@
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 
@@ -25,10 +26,10 @@ namespace {
 // Returns the popup row containing the |url| as suggestion.
 id<GREYMatcher> PopupRowWithUrl(GURL url) {
   return grey_allOf(
-      grey_kindOfClassName(@"OmniboxPopupRow"),
+      grey_kindOfClassName(@"OmniboxPopupRowCell"),
       grey_descendant(chrome_test_util::StaticTextWithAccessibilityLabel(
           base::SysUTF8ToNSString(url.GetContent()))),
-      nil);
+      grey_sufficientlyVisible(), nil);
 }
 
 // Returns the switch to open tab element for the |url|.
@@ -107,6 +108,12 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 // Tests that tapping the switch to open tab button, switch to the open tab,
 // doesn't close the tab.
 - (void)testSwitchToOpenTab {
+// TODO(crbug.com/1067817): Test won't pass on iPad devices.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
   // Open the first page.
   GURL firstPageURL = self.testServer->GetURL(kPage1URL);
   [ChromeEarlGrey loadURL:firstPageURL];
@@ -139,6 +146,12 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Tests that the switch to open tab button isn't displayed for the current tab.
 - (void)testNotSwitchButtonOnCurrentTab {
+// TODO(crbug.com/1067817): Test won't pass on iPad devices.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
   GURL URL2 = self.testServer->GetURL(kPage2URL);
 
   // Open the first page.
@@ -162,8 +175,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 }
 
 // Tests that the incognito tabs aren't displayed as "opened" tab in the
-// non-incognito suggestions and vice-versa.
-- (void)testIncognitoSeparation {
+// non-incognito suggestions and vice-versa. TODO(crbug.com/1059464): Test is
+// flaky.
+- (void)DISABLED_testIncognitoSeparation {
   GURL URL1 = self.testServer->GetURL(kPage1URL);
   GURL URL2 = self.testServer->GetURL(kPage2URL);
   GURL URL3 = self.testServer->GetURL(kPage3URL);
@@ -191,7 +205,10 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   [ChromeEarlGrey loadURL:URL3];
   [ChromeEarlGrey waitForWebStateContainingText:kPage3];
 
-  [ChromeEarlGreyUI focusOmniboxAndType:base::SysUTF8ToNSString(URL3.host())];
+  NSString* omniboxInput =
+      [NSString stringWithFormat:@"%@:%@", base::SysUTF8ToNSString(URL3.host()),
+                                 base::SysUTF8ToNSString(URL3.port())];
+  [ChromeEarlGreyUI focusOmniboxAndType:omniboxInput];
 
   // Check that we have the switch button for the first page.
   [[EarlGrey
@@ -229,7 +246,8 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
       assertWithMatcher:grey_nil()];
 }
 
-- (void)testCloseNTPWhenSwitching {
+// TODO(crbug.com/1037651): Test fails.
+- (void)DISABLED_testCloseNTPWhenSwitching {
   // Open the first page.
   GURL URL1 = self.testServer->GetURL(kPage1URL);
   [ChromeEarlGrey loadURL:URL1];
@@ -237,8 +255,11 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
   // Open a new tab and switch to the first tab.
   [ChromeEarlGrey openNewTab];
+  NSString* omniboxInput =
+      [NSString stringWithFormat:@"%@:%@", base::SysUTF8ToNSString(URL1.host()),
+                                 base::SysUTF8ToNSString(URL1.port())];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
-      performAction:grey_typeText(base::SysUTF8ToNSString(URL1.host()))];
+      performAction:grey_typeText(omniboxInput)];
   [[EarlGrey selectElementWithMatcher:SwitchTabElementForUrl(URL1)]
       performAction:grey_tap()];
   [ChromeEarlGrey waitForWebStateContainingText:kPage1];
@@ -248,6 +269,12 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 }
 
 - (void)testDontCloseNTPWhenSwitchingWithForwardHistory {
+// TODO(crbug.com/1067817): Test won't pass on iPad devices.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
   // Open the first page.
   GURL URL1 = self.testServer->GetURL(kPage1URL);
   [ChromeEarlGrey loadURL:URL1];
@@ -273,6 +300,20 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 // Tests that switching to closed tab opens the tab in foreground, except if it
 // is from NTP without history.
 - (void)testSwitchToClosedTab {
+#if defined(CHROME_EARL_GREY_2)
+  if (@available(iOS 13, *)) {
+    if ([ChromeEarlGrey isIPadIdiom]) {
+      // TODO(crbug.com/992480):test fails on iPad.
+      EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
+    }
+  }
+#endif
+// TODO(crbug.com/1067817): Test won't pass on iPad devices.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
   GURL URL1 = self.testServer->GetURL(kPage1URL);
 
   // Open the first page.
@@ -306,8 +347,15 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 }
 
 // Tests that having multiple suggestions with corresponding opened tabs display
-// multiple buttons.
-- (void)testMultiplePageOpened {
+// multiple buttons. TODO(crbug.com/1059464): Test is flaky.
+- (void)DISABLED_testMultiplePageOpened {
+// TODO(crbug.com/1067817): Test won't pass on iPad devices.
+#if !TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_SKIPPED(@"This test doesn't pass on iPad device.");
+  }
+#endif
+
   // Open the first page.
   GURL URL1 = self.testServer->GetURL(kPage1URL);
   [ChromeEarlGrey loadURL:URL1];
@@ -321,14 +369,55 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
   // Start typing url of the two opened pages in a new tab.
   [ChromeEarlGrey openNewTab];
+  NSString* omniboxInput =
+      [NSString stringWithFormat:@"%@:%@", base::SysUTF8ToNSString(URL1.host()),
+                                 base::SysUTF8ToNSString(URL1.port())];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
-      performAction:grey_typeText(@"page")];
+      performAction:grey_typeText(omniboxInput)];
 
   // Check that both elements are displayed.
   [[EarlGrey selectElementWithMatcher:SwitchTabElementForUrl(URL1)]
       assertWithMatcher:grey_sufficientlyVisible()];
   [[EarlGrey selectElementWithMatcher:SwitchTabElementForUrl(URL2)]
       assertWithMatcher:grey_sufficientlyVisible()];
+}
+
+// Test that on iPhones, when the popup is scrolled, the keyboard is dismissed
+// but the omnibox is still expanded and the suggestions are visible.
+- (void)testScrollingDismissesKeyboardOnPhones {
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
+      performAction:grey_typeText(@"hello")];
+
+  // Matcher for a URL-what-you-typed suggestion.
+  id<GREYMatcher> row = grey_allOf(
+      grey_kindOfClassName(@"OmniboxPopupRowCell"),
+      grey_descendant(
+          chrome_test_util::StaticTextWithAccessibilityLabel(@"hello")),
+      grey_sufficientlyVisible(), nil);
+
+  [[EarlGrey selectElementWithMatcher:row]
+      assertWithMatcher:grey_sufficientlyVisible()];
+  GREYAssertTrue([ChromeEarlGrey isKeyboardShownWithError:nil],
+                 @"Keyboard Should be Shown");
+
+  // Scroll the popup.
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_accessibilityID(kOmniboxPopupTableViewAccessibilityIdentifier)]
+      performAction:grey_swipeFastInDirection(kGREYDirectionUp)];
+
+  [[EarlGrey selectElementWithMatcher:row]
+      assertWithMatcher:grey_sufficientlyVisible()];
+
+  // The keyboard should only be dismissed on phones. Ipads, even in
+  // multitasking, are considered tall enough to fit all suggestions.
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    GREYAssertTrue([ChromeEarlGrey isKeyboardShownWithError:nil],
+                   @"Keyboard Should be Shown");
+  } else {
+    GREYAssertFalse([ChromeEarlGrey isKeyboardShownWithError:nil],
+                    @"Keyboard Should not be Shown");
+  }
 }
 
 @end

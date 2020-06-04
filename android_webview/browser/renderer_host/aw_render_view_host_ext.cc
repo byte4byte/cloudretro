@@ -16,7 +16,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace android_webview {
 
@@ -134,10 +133,10 @@ void AwRenderViewHostExt::SetJsOnlineProperty(bool network_up) {
 
 void AwRenderViewHostExt::SmoothScroll(int target_x,
                                        int target_y,
-                                       uint64_t duration_ms) {
+                                       base::TimeDelta duration) {
   web_contents()->GetMainFrame()->Send(
       new AwViewMsg_SmoothScroll(web_contents()->GetMainFrame()->GetRoutingID(),
-                                 target_x, target_y, duration_ms));
+                                 target_x, target_y, duration));
 }
 
 void AwRenderViewHostExt::RenderViewHostChanged(
@@ -202,13 +201,6 @@ bool AwRenderViewHostExt::OnMessageReceived(
   IPC_END_MESSAGE_MAP()
 
   return handled;
-}
-
-void AwRenderViewHostExt::OnInterfaceRequestFromFrame(
-    content::RenderFrameHost* render_frame_host,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle* interface_pipe) {
-  registry_.TryBindInterface(interface_name, interface_pipe);
 }
 
 void AwRenderViewHostExt::OnDocumentHasImagesResponse(

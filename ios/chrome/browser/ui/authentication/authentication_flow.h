@@ -11,13 +11,21 @@
 #import "ios/chrome/browser/ui/authentication/authentication_flow_performer_delegate.h"
 
 @class AuthenticationFlowPerformer;
+class Browser;
 @protocol BrowsingDataCommands;
 @class ChromeIdentity;
 @class UIViewController;
 
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
+// Handles completion of AuthenticationFlow operations.
+@protocol AuthenticationFlowDelegate <NSObject>
+
+// Indicates that a user dialog is presented from the authentication flow.
+- (void)didPresentDialog;
+
+// Indicates that a user dialog is dismissed from the authentication flow.
+- (void)didDismissDialog;
+
+@end
 
 // |AuthenticationFlow| manages the authentication flow for a given identity.
 //
@@ -26,7 +34,8 @@ class ChromeBrowserState;
 @interface AuthenticationFlow : NSObject<AuthenticationFlowPerformerDelegate>
 
 // Designated initializer.
-// * |browserState| is the current browser state
+// * |browser| is the current browser where the authentication flow is being
+//   presented.
 // * |shouldClearData| indicates how to handle existing data when the signed in
 //   account is being switched. Possible values:
 //     * User choice: present an alert view asking the user whether the data
@@ -36,11 +45,11 @@ class ChromeBrowserState;
 // * |postSignInAction| represents the action to be taken once |identity| is
 //   signed in.
 // * |presentingViewController| is the top presented view controller.
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                            identity:(ChromeIdentity*)identity
-                     shouldClearData:(ShouldClearData)shouldClearData
-                    postSignInAction:(PostSignInAction)postSignInAction
-            presentingViewController:(UIViewController*)presentingViewController
+- (instancetype)initWithBrowser:(Browser*)browser
+                       identity:(ChromeIdentity*)identity
+                shouldClearData:(ShouldClearData)shouldClearData
+               postSignInAction:(PostSignInAction)postSignInAction
+       presentingViewController:(UIViewController*)presentingViewController
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -60,6 +69,9 @@ class ChromeBrowserState;
 
 // The dispatcher used to clear browsing data.
 @property(nonatomic, weak) id<BrowsingDataCommands> dispatcher;
+
+// The delegate.
+@property(nonatomic, weak) id<AuthenticationFlowDelegate> delegate;
 
 @end
 

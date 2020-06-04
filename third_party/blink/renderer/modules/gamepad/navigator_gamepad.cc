@@ -40,7 +40,6 @@
 #include "third_party/blink/renderer/modules/gamepad/gamepad_dispatcher.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_event.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_list.h"
-#include "third_party/blink/renderer/modules/vr/navigator_vr.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -55,20 +54,6 @@ bool IsGamepadConnectionEvent(const AtomicString& event_type) {
 bool HasConnectionEventListeners(LocalDOMWindow* window) {
   return window->HasEventListeners(event_type_names::kGamepadconnected) ||
          window->HasEventListeners(event_type_names::kGamepaddisconnected);
-}
-
-// XR-backed controllers are only exposed via this path for WebVR (not
-// WebXR). Controllers are only exposed during VR presentation, so we can
-// just check if WebVR has been used. WebXR cannot be used once WebVR has been.
-bool ShouldIncludeXrGamepads(LocalFrame* frame) {
-  if (!frame)
-    return false;
-
-  Document* document = frame->GetDocument();
-  if (!document)
-    return false;
-
-  return NavigatorVR::HasWebVrBeenUsed(*document);
 }
 
 }  // namespace
@@ -107,12 +92,21 @@ GamepadList* NavigatorGamepad::Gamepads() {
 
   // Allow gamepad button presses to qualify as user activations if the page is
   // visible.
-  if (RuntimeEnabledFeatures::UserActivationV2Enabled() && GetFrame() &&
-      GetPage() && GetPage()->IsPageVisible() &&
+  if (GetFrame() && GetPage() && GetPage()->IsPageVisible() &&
       GamepadComparisons::HasUserActivation(gamepads_)) {
-    LocalFrame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+    LocalFrame::NotifyUserActivation(GetFrame());
   }
   is_gamepads_exposed_ = true;
+
+  ExecutionContext* context = DomWindow();
+
+  if (GetFrame() && GetFrame()->IsCrossOriginToMainFrame()) {
+    UseCounter::Count(context, WebFeature::kGetGamepadsFromCrossOriginSubframe);
+  }
+
+  if (context && !context->IsSecureContext()) {
+    UseCounter::Count(context, WebFeature::kGetGamepadsFromInsecureContext);
+  }
 
   return gamepads_.Get();
 }
@@ -121,13 +115,11 @@ void NavigatorGamepad::SampleGamepads() {
   device::Gamepads gamepads;
   gamepad_dispatcher_->SampleGamepads(gamepads);
 
-  bool include_xr_gamepads = ShouldIncludeXrGamepads(GetFrame());
-
   for (uint32_t i = 0; i < device::Gamepads::kItemsLengthCap; ++i) {
     device::Gamepad& device_gamepad = gamepads.items[i];
 
-    bool hide_xr_gamepad = device_gamepad.is_xr && !include_xr_gamepads;
-    if (hide_xr_gamepad) {
+    // All WebXR gamepads should be hidden
+    if (device_gamepad.is_xr) {
       gamepads_back_->Set(i, nullptr);
     } else if (device_gamepad.connected) {
       Gamepad* gamepad = gamepads_back_->item(i);
@@ -149,14 +141,14 @@ GamepadHapticActuator* NavigatorGamepad::GetVibrationActuatorForGamepad(
     return nullptr;
   }
 
-  uint32_t pad_index = gamepad.index();
   if (!gamepad.HasVibrationActuator()) {
     return nullptr;
   }
 
+  int pad_index = gamepad.index();
+  DCHECK_GE(pad_index, 0);
   if (!vibration_actuators_[pad_index]) {
-    ExecutionContext* context =
-        DomWindow() ? DomWindow()->GetExecutionContext() : nullptr;
+    ExecutionContext* context = DomWindow();
     auto* actuator = GamepadHapticActuator::Create(context, pad_index);
     actuator->SetType(gamepad.GetVibrationActuatorType());
     vibration_actuators_[pad_index] = actuator;
@@ -164,13 +156,13 @@ GamepadHapticActuator* NavigatorGamepad::GetVibrationActuatorForGamepad(
   return vibration_actuators_[pad_index].Get();
 }
 
-void NavigatorGamepad::Trace(blink::Visitor* visitor) {
+void NavigatorGamepad::Trace(Visitor* visitor) {
   visitor->Trace(gamepads_);
   visitor->Trace(gamepads_back_);
   visitor->Trace(vibration_actuators_);
   visitor->Trace(gamepad_dispatcher_);
   Supplement<Navigator>::Trace(visitor);
-  DOMWindowClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
   PlatformEventController::Trace(visitor);
   Gamepad::Client::Trace(visitor);
 }
@@ -200,7 +192,7 @@ void NavigatorGamepad::DidUpdateData() {
 
 NavigatorGamepad::NavigatorGamepad(Navigator& navigator)
     : Supplement<Navigator>(navigator),
-      DOMWindowClient(navigator.DomWindow()),
+      ExecutionContextClient(navigator.DomWindow()),
       PlatformEventController(
           navigator.GetFrame() ? navigator.GetFrame()->GetDocument() : nullptr),
       // See https://bit.ly/2S0zRAS for task types

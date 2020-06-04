@@ -5,6 +5,7 @@
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 
 #include "base/strings/string_util.h"
+#include "build/branding_buildflags.h"
 
 namespace chromeos {
 
@@ -26,8 +27,28 @@ const int kExtensionIdLength = 32;
 
 namespace extension_ime_util {
 
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+const char kXkbExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kM17nExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kHangulExtensionId[] = "bdgdidmhaijohebebipajioienkglgfo";
+const char kMozcExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kT13nExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChinesePinyinExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChineseZhuyinExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChineseCangjieExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+#else
+const char kXkbExtensionId[] = "fgoepimhcoialccpbmpnnblemnepkkao";
+const char kM17nExtensionId[] = "jhffeifommiaekmbkkjlpmilogcfdohp";
+const char kHangulExtensionId[] = "bdgdidmhaijohebebipajioienkglgfo";
+const char kMozcExtensionId[] = "bbaiamgfapehflhememkfglaehiobjnk";
+const char kT13nExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
+const char kChinesePinyinExtensionId[] = "cpgalbafkoofkjmaeonnfijgpfennjjn";
+const char kChineseZhuyinExtensionId[] = "ekbifjdfhkmdeeajnolmgdlmkllopefi";
+const char kChineseCangjieExtensionId[] = "aeebooiibjahgpgmhkeocbeekccfknbj";
+#endif
+
 const char kBrailleImeExtensionId[] = "jddehjeebkoimngcbdkaahpobgicbffp";
-const char kBrailleImeExtensionPath[] = "chromeos/braille_ime";
+const char kBrailleImeExtensionPath[] = "chromeos/accessibility/braille_ime";
 const char kBrailleImeEngineId[] =
     "_comp_ime_jddehjeebkoimngcbdkaahpobgicbffpbraille";
 

@@ -9,7 +9,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -34,7 +36,7 @@
 #include "ui/display/screen.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/events/event.h"
-#include "ui/events/event_constants.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -1039,7 +1041,7 @@ void TryChromeDialog::OnContextInitialized() {
   params.name = "TryChromeDialog";
   popup_ = new views::Widget;
   popup_->AddObserver(this);
-  popup_->Init(params);
+  popup_->Init(std::move(params));
 
   auto contents_view = std::make_unique<ClickableView>();
   contents_view->SetBackground(

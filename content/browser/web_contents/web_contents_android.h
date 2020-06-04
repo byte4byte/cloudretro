@@ -58,7 +58,7 @@ class CONTENT_EXPORT WebContentsAndroid {
   base::android::ScopedJavaLocalRef<jstring> GetTitle(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
-  base::android::ScopedJavaLocalRef<jstring> GetVisibleURL(
+  base::android::ScopedJavaLocalRef<jobject> GetVisibleURL(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
 
@@ -67,6 +67,10 @@ class CONTENT_EXPORT WebContentsAndroid {
   bool IsLoadingToDifferentDocument(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
+
+  void DispatchBeforeUnload(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj,
+                            bool auto_cancel);
 
   void Stop(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void Cut(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
@@ -109,6 +113,9 @@ class CONTENT_EXPORT WebContentsAndroid {
   jboolean FocusLocationBarByDefault(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
+  bool IsFullscreenForCurrentTab(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   void ExitFullscreen(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& obj);
   void ScrollFocusedEditableNodeIntoView(
@@ -138,10 +145,9 @@ class CONTENT_EXPORT WebContentsAndroid {
       jint level,
       const base::android::JavaParamRef<jstring>& message);
 
-  void PostMessageToFrame(
+  void PostMessageToMainFrame(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& jframe_name,
       const base::android::JavaParamRef<jstring>& jmessage,
       const base::android::JavaParamRef<jstring>& jsource_origin,
       const base::android::JavaParamRef<jstring>& jtarget_origin,
@@ -155,8 +161,8 @@ class CONTENT_EXPORT WebContentsAndroid {
   jint GetThemeColor(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& obj);
 
-  jint GetLoadProgress(JNIEnv* env,
-                       const base::android::JavaParamRef<jobject>& obj);
+  jfloat GetLoadProgress(JNIEnv* env,
+                         const base::android::JavaParamRef<jobject>& obj);
 
   void RequestSmartClipExtract(
       JNIEnv* env,
@@ -185,9 +191,6 @@ class CONTENT_EXPORT WebContentsAndroid {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       bool disabled);
-
-  void ReloadLoFiImages(JNIEnv* env,
-                        const base::android::JavaParamRef<jobject>& obj);
 
   int DownloadImage(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
@@ -246,9 +249,19 @@ class CONTENT_EXPORT WebContentsAndroid {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
+  void NotifyBrowserControlsHeightChanged(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   base::android::ScopedJavaLocalRef<jobject> GetRenderWidgetHostView(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
+
+  base::android::ScopedJavaLocalRef<jobjectArray> GetInnerWebContents(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
+  jint GetVisibility(JNIEnv* env);
 
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 
@@ -281,7 +294,7 @@ class CONTENT_EXPORT WebContentsAndroid {
 
   base::ObserverList<DestructionObserver> destruction_observers_;
 
-  base::WeakPtrFactory<WebContentsAndroid> weak_factory_;
+  base::WeakPtrFactory<WebContentsAndroid> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsAndroid);
 };

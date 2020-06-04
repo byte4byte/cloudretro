@@ -48,8 +48,7 @@ bool IsInactiveDeskContainerId(int id) {
 ////////////////////////////////////////////////////////////////////////////////
 // AshFocusRules, public:
 
-AshFocusRules::AshFocusRules()
-    : activatable_container_ids_(GetActivatableShellWindowIds()) {}
+AshFocusRules::AshFocusRules() = default;
 
 AshFocusRules::~AshFocusRules() = default;
 
@@ -64,11 +63,11 @@ bool AshFocusRules::IsToplevelWindow(const aura::Window* window) const {
 
   // The window must exist within a container that supports activation.
   // The window cannot be blocked by a modal transient.
-  return base::Contains(activatable_container_ids_, window->parent()->id());
+  return IsActivatableShellWindowId(window->parent()->id());
 }
 
 bool AshFocusRules::SupportsChildActivation(const aura::Window* window) const {
-  return base::Contains(activatable_container_ids_, window->id());
+  return IsActivatableShellWindowId(window->id());
 }
 
 bool AshFocusRules::IsWindowConsideredVisibleForActivation(
@@ -84,7 +83,7 @@ bool AshFocusRules::IsWindowConsideredVisibleForActivation(
 
   // Minimized windows are hidden in their minimized state, but they can always
   // be activated.
-  if (wm::GetWindowState(window)->IsMinimized())
+  if (WindowState::Get(window)->IsMinimized())
     return true;
 
   if (!window->TargetVisibility())
@@ -158,10 +157,10 @@ aura::Window* AshFocusRules::GetNextActivatableWindow(
   aura::Window* root = starting_window->GetRootWindow();
   if (!root)
     root = Shell::GetRootWindowForNewWindows();
-  int container_count = activatable_container_ids_.size();
+  const auto& container_ids = GetActivatableShellWindowIds();
+  const int container_count = container_ids.size();
   for (int i = 0; i < container_count; i++) {
-    aura::Window* container =
-        Shell::GetContainer(root, activatable_container_ids_[i]);
+    aura::Window* container = Shell::GetContainer(root, container_ids[i]);
     if (container && container->Contains(starting_window)) {
       starting_container_index = i;
       break;
@@ -184,7 +183,7 @@ aura::Window* AshFocusRules::GetNextActivatableWindow(
 aura::Window* AshFocusRules::GetTopmostWindowToActivateForContainerIndex(
     int index,
     aura::Window* ignore) const {
-  const int container_id = activatable_container_ids_[index];
+  const int container_id = GetActivatableShellWindowIds()[index];
   // Inactive desk containers should be ignored, since windows in them should
   // never be returned as a next activatable window.
   if (IsInactiveDeskContainerId(container_id))
@@ -192,7 +191,7 @@ aura::Window* AshFocusRules::GetTopmostWindowToActivateForContainerIndex(
   aura::Window* window = nullptr;
   aura::Window* root = ignore ? ignore->GetRootWindow() : nullptr;
   aura::Window::Windows containers =
-      wm::GetContainersFromAllRootWindows(container_id, root);
+      GetContainersForAllRootWindows(container_id, root);
   for (aura::Window* container : containers) {
     window = GetTopmostWindowToActivateInContainer(container, ignore);
     if (window)
@@ -207,7 +206,7 @@ aura::Window* AshFocusRules::GetTopmostWindowToActivateInContainer(
   for (aura::Window::Windows::const_reverse_iterator i =
            container->children().rbegin();
        i != container->children().rend(); ++i) {
-    wm::WindowState* window_state = wm::GetWindowState(*i);
+    WindowState* window_state = WindowState::Get(*i);
     if (*i != ignore && window_state->CanActivate() &&
         !window_state->IsMinimized())
       return *i;

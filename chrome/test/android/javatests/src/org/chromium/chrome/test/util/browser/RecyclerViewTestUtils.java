@@ -4,8 +4,9 @@
 
 package org.chromium.chrome.test.util.browser;
 
-import android.support.v7.widget.RecyclerView;
 import android.view.View;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -54,7 +55,7 @@ public final class RecyclerViewTestUtils {
     }
 
     public static void waitForViewToDetach(final RecyclerView recyclerView, final View view)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         final CallbackHelper callback = new CallbackHelper();
 
         recyclerView.addOnChildAttachStateChangeListener(

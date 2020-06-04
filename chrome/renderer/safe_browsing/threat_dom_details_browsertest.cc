@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/safe_browsing/renderer/threat_dom_details.h"
+#include "components/safe_browsing/content/renderer/threat_dom_details.h"
 
 #include <memory>
 #include "base/strings/string_split.h"
@@ -10,8 +10,8 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/test/base/chrome_render_view_test.h"
-#include "components/safe_browsing/common/safe_browsing.mojom.h"
-#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/content/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/core/features.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/renderer/render_view.h"
 #include "net/base/escape.h"
@@ -55,8 +55,6 @@ TEST_F(ThreatDOMDetailsTest, Everything) {
   safe_browsing::ThreatDOMDetails::kMaxAttributes = 5;
 
   const char kUrlPrefix[] = "data:text/html;charset=utf-8,";
-  const char kMaxNodesExceededMetric[] =
-      "SafeBrowsing.ThreatReport.MaxNodesExceededInFrame";
   {
     // A page with an internal script
     std::string html = "<html><head><script></script></head></html>";
@@ -71,8 +69,6 @@ TEST_F(ThreatDOMDetailsTest, Everything) {
     EXPECT_EQ(0, param->node_id);
     EXPECT_EQ(0, param->parent_node_id);
     EXPECT_TRUE(param->child_node_ids.empty());
-
-    histograms.ExpectBucketCount(kMaxNodesExceededMetric, false, 1);
   }
 
   {
@@ -219,8 +215,6 @@ TEST_F(ThreatDOMDetailsTest, Everything) {
       EXPECT_EQ(0, param.parent_node_id);
       EXPECT_TRUE(param.child_node_ids.empty());
     }
-
-    histograms.ExpectBucketCount(kMaxNodesExceededMetric, true, 1);
   }
 
   {
@@ -248,8 +242,6 @@ TEST_F(ThreatDOMDetailsTest, Everything) {
       EXPECT_EQ(0, param.parent_node_id);
       EXPECT_TRUE(param.child_node_ids.empty());
     }
-
-    histograms.ExpectBucketCount(kMaxNodesExceededMetric, true, 1);
   }
 
   {
@@ -417,8 +409,6 @@ TEST_F(ThreatDOMDetailsTest, CaptureInnerHtmlContent) {
                                               registry_.get()));
 
   const char kUrlPrefix[] = "data:text/html;charset=utf-8,";
-  const char kMaxNodesExceededMetric[] =
-      "SafeBrowsing.ThreatReport.MaxNodesExceededInFrame";
   {
     // A page with a html element without an onclick element, html element with
     // an onclick element, an internal script. Html elements without onclick
@@ -467,7 +457,5 @@ TEST_F(ThreatDOMDetailsTest, CaptureInnerHtmlContent) {
     EXPECT_EQ(0, param->node_id);
     EXPECT_EQ(0, param->parent_node_id);
     EXPECT_TRUE(param->child_node_ids.empty());
-
-    histograms.ExpectBucketCount(kMaxNodesExceededMetric, false, 1);
   }
 }

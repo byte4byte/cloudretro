@@ -4,7 +4,8 @@
 
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 
-#include "base/logging.h"
+#include "base/bind_helpers.h"
+#include "base/check.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
@@ -17,6 +18,7 @@
 #include "components/ownership/mock_owner_key_util.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -121,6 +123,8 @@ void ScopedCrosSettingsTestHelper::StoreCachedDeviceSetting(
     OwnerSettingsServiceChromeOS::UpdateDeviceSettings(path, *value, settings);
     CHECK(settings.SerializeToString(data.mutable_policy_value()));
     CHECK(device_settings_cache::Store(data, g_browser_process->local_state()));
+    g_browser_process->local_state()->CommitPendingWrite(base::DoNothing(),
+                                                         base::DoNothing());
   }
 }
 

@@ -15,6 +15,7 @@
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_bounds_observer.h"
 #include "content/public/browser/host_zoom_map.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -26,7 +27,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/platform/aura_window_properties.h"
 #include "ui/aura/window.h"
@@ -47,8 +48,8 @@ class ChromeKeyboardContentsDelegate : public content::WebContentsDelegate,
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) override {
-    source->GetController().LoadURL(params.url, params.referrer,
-                                    params.transition, params.extra_headers);
+    source->GetController().LoadURLWithParams(
+        content::NavigationController::LoadURLParams(params));
     Observe(source);
     return source;
   }
@@ -59,20 +60,13 @@ class ChromeKeyboardContentsDelegate : public content::WebContentsDelegate,
     return false;
   }
 
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
-      content::RenderFrameHost* opener,
+  bool IsWebContentsCreationOverridden(
       content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
       content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
-      const GURL& target_url,
-      const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace) override {
-    return false;
+      const GURL& target_url) override {
+    return true;
   }
 
   void SetContentsBounds(content::WebContents* source,
@@ -111,11 +105,11 @@ class ChromeKeyboardContentsDelegate : public content::WebContentsDelegate,
     switch (event.GetType()) {
       // Scroll events are not suppressed because the menu to select IME should
       // be scrollable.
-      case blink::WebInputEvent::kGestureScrollBegin:
-      case blink::WebInputEvent::kGestureScrollEnd:
-      case blink::WebInputEvent::kGestureScrollUpdate:
-      case blink::WebInputEvent::kGestureFlingStart:
-      case blink::WebInputEvent::kGestureFlingCancel:
+      case blink::WebInputEvent::Type::kGestureScrollBegin:
+      case blink::WebInputEvent::Type::kGestureScrollEnd:
+      case blink::WebInputEvent::Type::kGestureScrollUpdate:
+      case blink::WebInputEvent::Type::kGestureFlingStart:
+      case blink::WebInputEvent::Type::kGestureFlingCancel:
         return false;
       default:
         // Stop gesture events from being passed to renderer to suppress the

@@ -22,10 +22,10 @@
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/border.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
@@ -91,7 +91,7 @@ class SearchBoxImageButton : public views::ImageButton {
 
     // Avoid drawing default dashed focus and draw customized focus in
     // OnPaintBackground();
-    SetFocusPainter(nullptr);
+    SetInstallFocusRingOnFocus(false);
 
     SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
@@ -102,6 +102,8 @@ class SearchBoxImageButton : public views::ImageButton {
     SetPreferredSize({kButtonSizeDip, kButtonSizeDip});
     SetImageHorizontalAlignment(ALIGN_CENTER);
     SetImageVerticalAlignment(ALIGN_MIDDLE);
+
+    views::InstallCircleHighlightPathGenerator(this);
   }
   ~SearchBoxImageButton() override {}
 
@@ -121,11 +123,7 @@ class SearchBoxImageButton : public views::ImageButton {
 
   void OnBlur() override { SchedulePaint(); }
 
-  // views::InkDropHost overrides:
-  std::unique_ptr<views::InkDrop> CreateInkDrop() override {
-    return CreateDefaultFloodFillInkDropImpl();
-  }
-
+  // views::InkDropHostView:
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override {
     const gfx::Point center = GetLocalBounds().CenterPoint();
     const int ripple_radius = GetInkDropRadius();
@@ -138,18 +136,13 @@ class SearchBoxImageButton : public views::ImageButton {
         GetInkDropCenterBasedOnLastEvent(), ripple_color, 1.0f);
   }
 
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override {
-    return std::make_unique<views::CircleInkDropMask>(
-        size(), GetLocalBounds().CenterPoint(), GetInkDropRadius());
-  }
-
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override {
     constexpr SkColor ripple_color = SkColorSetA(gfx::kGoogleGrey900, 0x12);
-    return std::make_unique<views::InkDropHighlight>(
-        gfx::PointF(GetLocalBounds().CenterPoint()),
-        std::make_unique<views::CircleLayerDelegate>(ripple_color,
-                                                     GetInkDropRadius()));
+    auto highlight = std::make_unique<views::InkDropHighlight>(
+        gfx::SizeF(size()), ripple_color);
+    highlight->set_visible_opacity(1.f);
+    return highlight;
   }
 
  private:
@@ -286,6 +279,7 @@ SearchBoxViewBase::SearchBoxViewBase(SearchBoxViewDelegate* delegate)
   content_container_->AddChildView(search_box_right_space_);
 
   assistant_button_ = new SearchBoxImageButton(this);
+  assistant_button_->EnableCanvasFlippingForRTLUI(false);
   // Default hidden, child class should decide if it should shown.
   assistant_button_->SetVisible(false);
   content_container_->AddChildView(assistant_button_);
@@ -308,7 +302,7 @@ void SearchBoxViewBase::Init() {
 }
 
 bool SearchBoxViewBase::HasSearch() const {
-  return !search_box_->text().empty();
+  return !search_box_->GetText().empty();
 }
 
 gfx::Rect SearchBoxViewBase::GetViewBoundsForSearchBoxContentsBounds(
@@ -444,14 +438,14 @@ void SearchBoxViewBase::OnSearchBoxFocusedChanged() {
 
 bool SearchBoxViewBase::IsSearchBoxTrimmedQueryEmpty() const {
   base::string16 trimmed_query;
-  base::TrimWhitespace(search_box_->text(), base::TrimPositions::TRIM_ALL,
+  base::TrimWhitespace(search_box_->GetText(), base::TrimPositions::TRIM_ALL,
                        &trimmed_query);
   return trimmed_query.empty();
 }
 
 void SearchBoxViewBase::ClearSearch() {
   // Avoid setting |search_box_| text to empty if it is already empty.
-  if (search_box_->text() == base::string16())
+  if (search_box_->GetText() == base::string16())
     return;
 
   search_box_->SetText(base::string16());
@@ -485,7 +479,7 @@ void SearchBoxViewBase::UpdateButtonsVisisbility() {
   DCHECK(close_button_ && assistant_button_);
 
   const bool should_show_close_button =
-      !search_box_->text().empty() ||
+      !search_box_->GetText().empty() ||
       (show_close_button_when_active_ && is_search_box_active_);
   const bool should_show_assistant_button =
       show_assistant_button_ && !should_show_close_button;
@@ -549,7 +543,7 @@ void SearchBoxViewBase::HandleSearchBoxEvent(ui::LocatedEvent* located_event) {
         GetWidget()->GetWindowBoundsInScreen().Contains(
             located_event->root_location());
     if (is_search_box_active_ || !event_is_in_searchbox_bounds ||
-        !search_box_->text().empty())
+        !search_box_->GetText().empty())
       return;
     // If the event was within the searchbox bounds and in an inactive empty
     // search box, enable the search box.

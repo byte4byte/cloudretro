@@ -12,18 +12,13 @@ FakeNetworkDeviceHandler::~FakeNetworkDeviceHandler() = default;
 
 void FakeNetworkDeviceHandler::GetDeviceProperties(
     const std::string& device_path,
-    const network_handler::DictionaryResultCallback& callback,
+    network_handler::DictionaryResultCallback callback,
     const network_handler::ErrorCallback& error_callback) const {}
 
 void FakeNetworkDeviceHandler::SetDeviceProperty(
     const std::string& device_path,
     const std::string& property_name,
     const base::Value& value,
-    const base::Closure& callback,
-    const network_handler::ErrorCallback& error_callback) {}
-
-void FakeNetworkDeviceHandler::RequestRefreshIPConfigs(
-    const std::string& device_path,
     const base::Closure& callback,
     const network_handler::ErrorCallback& error_callback) {}
 
@@ -61,6 +56,9 @@ void FakeNetworkDeviceHandler::ChangePin(
     const network_handler::ErrorCallback& error_callback) {}
 
 void FakeNetworkDeviceHandler::SetCellularAllowRoaming(bool allow_roaming) {}
+
+void FakeNetworkDeviceHandler::SetUsbEthernetMacAddressSource(
+    const std::string& source) {}
 
 void FakeNetworkDeviceHandler::SetWifiTDLSEnabled(
     const std::string& ip_or_mac_address,

@@ -122,8 +122,7 @@ ResizingHostObserver::ResizingHostObserver(
     bool restore)
     : desktop_resizer_(std::move(desktop_resizer)),
       restore_(restore),
-      now_function_(base::Bind(base::TimeTicks::Now)),
-      weak_factory_(this) {}
+      now_function_(base::Bind(base::TimeTicks::Now)) {}
 
 ResizingHostObserver::~ResizingHostObserver() {
   if (restore_)
@@ -150,8 +149,8 @@ void ResizingHostObserver::SetScreenResolution(
   if (now < next_allowed_resize) {
     deferred_resize_timer_.Start(
         FROM_HERE, next_allowed_resize - now,
-        base::Bind(&ResizingHostObserver::SetScreenResolution,
-                   weak_factory_.GetWeakPtr(), resolution));
+        base::BindOnce(&ResizingHostObserver::SetScreenResolution,
+                       weak_factory_.GetWeakPtr(), resolution));
     return;
   }
 

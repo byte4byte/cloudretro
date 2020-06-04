@@ -5,13 +5,14 @@
 package org.chromium.chrome.browser.directactions;
 
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.MenuOrKeyboardActionController;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.components.browser_ui.widget.MenuOrKeyboardActionController;
 
 import java.util.Collections;
 import java.util.HashMap;

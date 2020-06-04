@@ -11,21 +11,23 @@
 #include "chrome/browser/ui/views/intent_picker_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/intent_picker_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/page_action/omnibox_page_action_icon_container_view.h"
-#include "chrome/browser/ui/web_applications/test/bookmark_app_navigation_browsertest.h"
+#include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
+#include "chrome/browser/ui/web_applications/test/web_app_navigation_browsertest.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/web_application_info.h"
 #include "content/public/test/browser_test_utils.h"
+#include "third_party/blink/public/common/features.h"
 #include "url/gurl.h"
 
 class IntentPickerBubbleViewBrowserTest
-    : public extensions::test::BookmarkAppNavigationBrowserTest,
+    : public web_app::WebAppNavigationBrowserTest,
       public ::testing::WithParamInterface<std::string> {
  public:
   void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(features::kIntentPicker);
-
-    extensions::test::BookmarkAppNavigationBrowserTest::SetUp();
+    // TODO(schenney): Stop disabling Paint Holding. crbug.com/1001189
+    scoped_feature_list_.InitWithFeatures({features::kIntentPicker},
+                                          {blink::features::kPaintHolding});
+    web_app::WebAppNavigationBrowserTest::SetUp();
   }
 
   void OpenNewTab(const GURL& url) {
@@ -47,6 +49,12 @@ class IntentPickerBubbleViewBrowserTest
         "document.body.appendChild(iframe);");
   }
 
+  PageActionIconView* GetIntentPickerIcon() {
+    return BrowserView::GetBrowserViewForBrowser(browser())
+        ->toolbar_button_provider()
+        ->GetPageActionIconView(PageActionIconType::kIntentPicker);
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -56,7 +64,7 @@ class IntentPickerBubbleViewBrowserTest
 // bubble will only show up for android apps which is too hard to test.
 IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
                        NavigationToInScopeLinkShowsIntentPicker) {
-  InstallTestBookmarkApp();
+  InstallTestWebApp();
 
   const GURL in_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetInScopeUrlPath());
@@ -67,11 +75,7 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
       in_scope_url, base::BindOnce(&ClickLinkAndWait, web_contents,
                                    in_scope_url, LinkTarget::SELF, GetParam()));
 
-  PageActionIconView* intent_picker_view =
-      BrowserView::GetBrowserViewForBrowser(browser())
-          ->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
-          ->GetPageActionIconView(PageActionIconType::kIntentPicker);
+  PageActionIconView* intent_picker_view = GetIntentPickerIcon();
   EXPECT_TRUE(intent_picker_view->GetVisible());
 
   IntentPickerBubbleView* intent_picker =
@@ -83,7 +87,7 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
 // installed app does not show the intent picker.
 IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
                        NavigationToOutofScopeLinkDoesNotShowIntentPicker) {
-  InstallTestBookmarkApp();
+  InstallTestWebApp();
 
   const GURL out_of_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetOutOfScopeUrlPath());
@@ -103,10 +107,10 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
 IN_PROC_BROWSER_TEST_P(
     IntentPickerBubbleViewBrowserTest,
     NavigationInAppWindowToInScopeLinkDoesNotShowIntentPicker) {
-  InstallTestBookmarkApp();
+  InstallTestWebApp();
 
-  // No intent picker should be seen when first opening the bookmark app.
-  Browser* app_browser = OpenTestBookmarkApp();
+  // No intent picker should be seen when first opening the web app.
+  Browser* app_browser = OpenTestWebApp();
   EXPECT_EQ(nullptr, IntentPickerBubbleView::intent_picker_bubble());
 
   {
@@ -138,18 +142,14 @@ IN_PROC_BROWSER_TEST_P(
 // tabs.
 IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
                        IconVisibilityAfterTabSwitching) {
-  InstallTestBookmarkApp();
+  InstallTestWebApp();
 
   const GURL in_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetInScopeUrlPath());
   const GURL out_of_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetOutOfScopeUrlPath());
 
-  PageActionIconView* intent_picker_view =
-      BrowserView::GetBrowserViewForBrowser(browser())
-          ->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
-          ->GetPageActionIconView(PageActionIconType::kIntentPicker);
+  PageActionIconView* intent_picker_view = GetIntentPickerIcon();
 
   // OpenNewTab opens a new tab and focus on the new tab.
   OpenNewTab(in_scope_url);
@@ -167,18 +167,14 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
 // Tests that the navigation in iframe doesn't affect intent picker icon
 IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
                        IframeNavigationDoesNotAffectIntentPicker) {
-  InstallTestBookmarkApp();
+  InstallTestWebApp();
 
   const GURL in_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetInScopeUrlPath());
   const GURL out_of_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetOutOfScopeUrlPath());
 
-  PageActionIconView* intent_picker_view =
-      BrowserView::GetBrowserViewForBrowser(browser())
-          ->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
-          ->GetPageActionIconView(PageActionIconType::kIntentPicker);
+  PageActionIconView* intent_picker_view = GetIntentPickerIcon();
 
   OpenNewTab(out_of_scope_url);
   content::WebContents* initial_tab =
@@ -203,7 +199,7 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
 // redirects to a URL that doesn't have an installed PWA.
 IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
                        DoesNotShowIntentPickerWhenRedirectedOutOfScope) {
-  InstallTestBookmarkApp(GetOtherAppUrlHost(), /*app_scope=*/"/");
+  InstallTestWebApp(GetOtherAppUrlHost(), /*app_scope=*/"/");
 
   const GURL out_of_scope_url =
       https_server().GetURL(GetAppUrlHost(), GetOutOfScopeUrlPath());
@@ -211,11 +207,7 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
   const GURL redirect_url = https_server().GetURL(
       GetOtherAppUrlHost(), CreateServerRedirect(out_of_scope_url));
 
-  PageActionIconView* intent_picker_view =
-      BrowserView::GetBrowserViewForBrowser(browser())
-          ->toolbar_button_provider()
-          ->GetOmniboxPageActionIconContainerView()
-          ->GetPageActionIconView(PageActionIconType::kIntentPicker);
+  PageActionIconView* intent_picker_view = GetIntentPickerIcon();
 
   OpenNewTab(in_scope_url);
   EXPECT_TRUE(intent_picker_view->GetVisible());
@@ -227,6 +219,6 @@ IN_PROC_BROWSER_TEST_P(IntentPickerBubbleViewBrowserTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    /* no prefix */,
+    All,
     IntentPickerBubbleViewBrowserTest,
     testing::Values("", "noopener", "noreferrer", "nofollow"));

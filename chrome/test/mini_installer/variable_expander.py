@@ -101,6 +101,7 @@ class VariableExpander:
         *   Chrome'.
         * $LOCAL_APPDATA: the unquoted path to the Local Application Data
             folder.
+        * $LOG_FILE: "--log-file=FILE" or an empty string.
         * $MINI_INSTALLER: the unquoted path to the mini_installer.
         * $MINI_INSTALLER_BITNESS: the bitness of the mini_installer.
         * $MINI_INSTALLER_FILE_VERSION: the file version of $MINI_INSTALLER.
@@ -161,6 +162,7 @@ class VariableExpander:
         'OUTPUT_DIR': '"--output-dir=%s"' % output_dir if output_dir else '',
         'LOCAL_APPDATA': shell.SHGetFolderPath(0, shellcon.CSIDL_LOCAL_APPDATA,
                                                None, 0),
+        'LOG_FILE': '',
         'MINI_INSTALLER': mini_installer_abspath,
         'MINI_INSTALLER_FILE_VERSION': _GetFileVersion(mini_installer_abspath),
         'MINI_INSTALLER_BITNESS': _GetFileBitness(mini_installer_abspath),
@@ -254,13 +256,16 @@ class VariableExpander:
           'CHROME_ELEVATION_SERVICE_NAME_SXS': (
             'GoogleChromeCanaryElevationService'),
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME': (
-            'Google Chrome Elevation Service'),
+            'Google Chrome Elevation Service (GoogleChromeElevationService)'),
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_BETA': (
-            'Google Chrome Beta Elevation Service'),
+            'Google Chrome Beta Elevation Service'
+            ' (GoogleChromeBetaElevationService)'),
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_DEV': (
-            'Google Chrome Dev Elevation Service'),
+            'Google Chrome Dev Elevation Service'
+            ' (GoogleChromeDevElevationService)'),
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_SXS': (
-            'Google Chrome Canary Elevation Service'),
+            'Google Chrome Canary Elevation Service'
+            ' (GoogleChromeCanaryElevationService)'),
       })
     elif mini_installer_product_name == 'Chromium Installer':
       self._variable_mapping.update({
@@ -278,11 +283,17 @@ class VariableExpander:
           'CHROME_ELEVATOR_IID': ('{B88C45B9-8825-4629-B83E-77CC67D9CEED}'),
           'CHROME_ELEVATION_SERVICE_NAME': 'ChromiumElevationService',
           'CHROME_ELEVATION_SERVICE_DISPLAY_NAME': (
-            'Chromium Elevation Service'),
+            'Chromium Elevation Service (ChromiumElevationService)'),
       })
     else:
       raise KeyError("Unknown mini_installer product name '%s'" %
                      mini_installer_product_name)
+
+
+  def SetLogFile(self, log_file):
+    """Updates the value for the LOG_FILE variable"""
+    self._variable_mapping['LOG_FILE'] = (
+        '"--log-file=%s"' % log_file if log_file else '')
 
 
   def Expand(self, str):

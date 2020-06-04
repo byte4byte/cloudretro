@@ -4,19 +4,20 @@
 
 package org.chromium.chrome.browser.ntp.cards;
 
-import android.support.annotation.Nullable;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.RecyclerView.Adapter;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.RecyclerView.Adapter;
+
 import org.chromium.base.Callback;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
-import org.chromium.base.task.TaskTraits;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
+import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder.PartialBindCallback;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.CategoryStatus;
@@ -32,7 +33,8 @@ import org.chromium.chrome.browser.suggestions.DestructionObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.modelutil.ListObservable;
 
 import java.util.List;
@@ -61,6 +63,8 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
 
     private final RemoteSuggestionsStatusObserver mRemoteSuggestionsStatusObserver;
 
+    private final NewTabPageUma mNewTabPageUma;
+
     // Used to track if the NTP has loaded or not. This assumes that there's only one
     // NewTabPageAdapter per NTP. This does not fully tear down even when the main activity is
     // destroyed. This is actually convenient in mimicking the current behavior of
@@ -77,12 +81,13 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
      * @param uiConfig the NTP UI configuration, to be passed to created views.
      * @param offlinePageBridge used to determine if articles are available.
      * @param contextMenuManager used to build context menus.
+     * @param uma {@link NewTabPageUma} object recording user metrics.
      */
     public NewTabPageAdapter(SuggestionsUiDelegate uiDelegate, @Nullable View aboveTheFoldView,
             UiConfig uiConfig, OfflinePageBridge offlinePageBridge,
-            ContextMenuManager contextMenuManager) {
-        this(uiDelegate, aboveTheFoldView, uiConfig, offlinePageBridge, contextMenuManager,
-                IdentityServicesProvider.getSigninManager());
+            ContextMenuManager contextMenuManager, NewTabPageUma uma) {
+        this(uiDelegate, aboveTheFoldView, uiConfig, offlinePageBridge, contextMenuManager, uma,
+                IdentityServicesProvider.get().getSigninManager());
     }
 
     /**
@@ -95,12 +100,13 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
      * @param uiConfig the NTP UI configuration, to be passed to created views.
      * @param offlinePageBridge used to determine if articles are available.
      * @param contextMenuManager used to build context menus.
+     * @param uma {@link NewTabPageUma} object recording user metrics.
      * @param signinManager used by SectionList for SignInPromo.
      */
     @VisibleForTesting
     public NewTabPageAdapter(SuggestionsUiDelegate uiDelegate, @Nullable View aboveTheFoldView,
             UiConfig uiConfig, OfflinePageBridge offlinePageBridge,
-            ContextMenuManager contextMenuManager, SigninManager signinManager) {
+            ContextMenuManager contextMenuManager, NewTabPageUma uma, SigninManager signinManager) {
         mUiDelegate = uiDelegate;
         mContextMenuManager = contextMenuManager;
 
@@ -108,13 +114,13 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
         mUiConfig = uiConfig;
         mRoot = new InnerNode<>();
         mSections = new SectionList(mUiDelegate, offlinePageBridge, signinManager);
+        mNewTabPageUma = uma;
 
         if (mAboveTheFoldView != null) mRoot.addChildren(new AboveTheFoldItem());
         mFooter = new Footer();
 
         int sectionDelay = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.INTEREST_FEED_CONTENT_SUGGESTIONS,
-                "artificial_legacy_ntp_delay_ms", 0);
+                ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS, "artificial_legacy_ntp_delay_ms", 0);
         Runnable addSectionAndFooter = () -> {
             mRoot.addChildren(mSections);
             mRoot.addChildren(mFooter);
@@ -124,7 +130,8 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
             RecordHistogram.recordBooleanHistogram(
                     "NewTabPage.ContentSuggestions.ArtificialDelay", false);
         } else {
-            PostTask.postDelayedTask(TaskTraits.USER_BLOCKING, addSectionAndFooter, sectionDelay);
+            PostTask.postDelayedTask(
+                    UiThreadTaskTraits.USER_BLOCKING, addSectionAndFooter, sectionDelay);
             RecordHistogram.recordBooleanHistogram(
                     "NewTabPage.ContentSuggestions.ArtificialDelay", true);
         }
@@ -158,7 +165,7 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
 
             case ItemViewType.SNIPPET:
                 return new SnippetArticleViewHolder(mRecyclerView, mContextMenuManager, mUiDelegate,
-                        mUiConfig, mOfflinePageBridge);
+                        mUiConfig, mOfflinePageBridge, mNewTabPageUma);
 
             case ItemViewType.STATUS:
                 return new StatusCardViewHolder(mRecyclerView, mContextMenuManager, mUiConfig);
@@ -225,11 +232,8 @@ public class NewTabPageAdapter extends Adapter<NewTabPageViewHolder>
                 mUiDelegate.getSuggestionsSource().areRemoteSuggestionsEnabled();
         boolean isArticleSectionVisible = mSections.getSection(KnownCategories.ARTICLES) != null;
 
-        // Always hide footer when in touchless mode since the learn more link will be shown in the
-        // context menu.
         mFooter.setVisible(!SuggestionsConfig.scrollToLoad()
-                && (areRemoteSuggestionsEnabled || isArticleSectionVisible)
-                && SuggestionsConfig.isTouchless());
+                && (areRemoteSuggestionsEnabled || isArticleSectionVisible));
     }
 
     private boolean areArticlesLoading() {

@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "media/base/audio_bus.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -66,8 +65,9 @@ class MultiChannelResamplerTest
                         double expected_max_error) {
     InitializeAudioData(channels, frames);
     MultiChannelResampler resampler(
-        channels, kScaleFactor, SincResampler::kDefaultRequestSize, base::Bind(
-            &MultiChannelResamplerTest::ProvideInput, base::Unretained(this)));
+        channels, kScaleFactor, SincResampler::kDefaultRequestSize,
+        base::BindRepeating(&MultiChannelResamplerTest::ProvideInput,
+                            base::Unretained(this)));
 
     // First prime the resampler with some junk data, so we can verify Flush().
     fill_junk_values_ = true;

@@ -15,8 +15,8 @@
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/web_applications/components/install_options.h"
-#include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/external_install_options.h"
+#include "chrome/browser/web_applications/components/web_app_id.h"
 #include "url/gurl.h"
 
 namespace web_app {
@@ -24,8 +24,12 @@ namespace web_app {
 enum class InstallResultCode;
 
 class AppRegistrar;
+class AppShortcutManager;
+class FileHandlerManager;
 class InstallFinalizer;
 class WebAppUiManager;
+
+enum class RegistrationResultCode { kSuccess, kAlreadyRegistered, kTimeout };
 
 // PendingAppManager installs, uninstalls, and updates apps.
 //
@@ -40,6 +44,9 @@ class PendingAppManager {
   using RepeatingInstallCallback =
       base::RepeatingCallback<void(const GURL& app_url,
                                    InstallResultCode code)>;
+  using RegistrationCallback =
+      base::RepeatingCallback<void(const GURL& launch_url,
+                                   RegistrationResultCode code)>;
   using UninstallCallback =
       base::RepeatingCallback<void(const GURL& app_url, bool succeeded)>;
   using SynchronizeCallback =
@@ -50,10 +57,10 @@ class PendingAppManager {
   virtual ~PendingAppManager();
 
   void SetSubsystems(AppRegistrar* registrar,
+                     AppShortcutManager* shortcut_manager,
+                     FileHandlerManager* file_handler_manager,
                      WebAppUiManager* ui_manager,
                      InstallFinalizer* finalizer);
-
-  virtual void Shutdown() = 0;
 
   // Queues an installation operation with the highest priority. Essentially
   // installing the app immediately if there are no ongoing operations or
@@ -63,17 +70,18 @@ class PendingAppManager {
   //
   // Fails if the same operation has been queued before. Should only be used in
   // response to a user action e.g. the user clicked an install button.
-  virtual void Install(InstallOptions install_options,
+  virtual void Install(ExternalInstallOptions install_options,
                        OnceInstallCallback callback) = 0;
 
-  // Adds a task to the queue of operations for each InstallOptions in
+  // Adds a task to the queue of operations for each ExternalInstallOptions in
   // |install_options_list|. Runs |callback| with the URL of the corresponding
-  // InstallOptions in |install_options_list| and with the id of the installed
-  // app or an empty string if the installation fails. Runs |callback| for every
-  // completed installation - whether or not the installation actually
+  // ExternalInstallOptions in |install_options_list| and with the id of the
+  // installed app or an empty string if the installation fails. Runs |callback|
+  // for every completed installation - whether or not the installation actually
   // succeeded.
-  virtual void InstallApps(std::vector<InstallOptions> install_options_list,
-                           const RepeatingInstallCallback& callback) = 0;
+  virtual void InstallApps(
+      std::vector<ExternalInstallOptions> install_options_list,
+      const RepeatingInstallCallback& callback) = 0;
 
   // Adds a task to the queue of operations for each GURL in
   // |uninstall_urls|. Runs |callback| with the URL of the corresponding
@@ -81,11 +89,13 @@ class PendingAppManager {
   // uninstall succeeded. Runs |callback| for every completed uninstallation -
   // whether or not the uninstallation actually succeeded.
   virtual void UninstallApps(std::vector<GURL> uninstall_urls,
+                             ExternalInstallSource install_source,
                              const UninstallCallback& callback) = 0;
 
-  // Installs an app for each InstallOptions in |desired_apps_install_options|
-  // and uninstalls any apps in GetInstalledAppUrls(install_source) that are not
-  // in |desired_apps_install_options|'s URLs.
+  // Installs an app for each ExternalInstallOptions in
+  // |desired_apps_install_options| and uninstalls any apps in
+  // GetInstalledAppUrls(install_source) that are not in
+  // |desired_apps_install_options|'s URLs.
   //
   // All apps in |desired_apps_install_options| should have |install_source| as
   // their source.
@@ -96,14 +106,24 @@ class PendingAppManager {
   // Note that this returns after queueing work (installation and
   // uninstallation) to be done. It does not wait until that work is complete.
   void SynchronizeInstalledApps(
-      std::vector<InstallOptions> desired_apps_install_options,
+      std::vector<ExternalInstallOptions> desired_apps_install_options,
       ExternalInstallSource install_source,
       SynchronizeCallback callback);
 
+  void SetRegistrationCallbackForTesting(RegistrationCallback callback);
+  void ClearRegistrationCallbackForTesting();
+
+  virtual void Shutdown() = 0;
+
  protected:
   AppRegistrar* registrar() { return registrar_; }
+  AppShortcutManager* shortcut_manager() { return shortcut_manager_; }
+  FileHandlerManager* file_handler_manager() { return file_handler_manager_; }
   WebAppUiManager* ui_manager() { return ui_manager_; }
   InstallFinalizer* finalizer() { return finalizer_; }
+
+  virtual void OnRegistrationFinished(const GURL& launch_url,
+                                      RegistrationResultCode result);
 
  private:
   struct SynchronizeRequest {
@@ -131,11 +151,15 @@ class PendingAppManager {
   void OnAppSynchronized(ExternalInstallSource source, const GURL& app_url);
 
   AppRegistrar* registrar_ = nullptr;
+  AppShortcutManager* shortcut_manager_ = nullptr;
+  FileHandlerManager* file_handler_manager_ = nullptr;
   WebAppUiManager* ui_manager_ = nullptr;
   InstallFinalizer* finalizer_ = nullptr;
 
   base::flat_map<ExternalInstallSource, SynchronizeRequest>
       synchronize_requests_;
+
+  RegistrationCallback registration_callback_;
 
   base::WeakPtrFactory<PendingAppManager> weak_ptr_factory_{this};
 

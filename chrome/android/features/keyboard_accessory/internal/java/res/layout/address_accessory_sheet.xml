@@ -3,11 +3,12 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
-<android.support.v7.widget.RecyclerView
+<androidx.recyclerview.widget.RecyclerView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/addresses_sheet"
     android:fillViewport="true"
     android:layout_height="match_parent"
     android:layout_width="match_parent"
     android:clipToPadding="false"
-    android:paddingBottom="8dp"/>
+    android:paddingBottom="@dimen/keyboard_accessory_sheet_footer_trailing_margin"
+    android:background="@color/default_bg_color_elev_3"/>

@@ -11,7 +11,7 @@
 #include "base/bind_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/test/test_pending_app_manager.h"
@@ -27,10 +27,10 @@ class PendingAppManagerTest : public testing::Test {
   void Sync(std::vector<GURL> urls) {
     pending_app_manager_.ResetCounts();
 
-    std::vector<InstallOptions> install_options_list;
+    std::vector<ExternalInstallOptions> install_options_list;
     for (const auto& url : urls) {
       install_options_list.emplace_back(
-          url, LaunchContainer::kWindow,
+          url, DisplayMode::kStandalone,
           ExternalInstallSource::kInternalDefault);
     }
 
@@ -65,7 +65,7 @@ class PendingAppManagerTest : public testing::Test {
     EXPECT_EQ(installed_app_urls, urls);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   TestAppRegistrar registrar_;
   TestPendingAppManager pending_app_manager_;
 };
@@ -74,16 +74,16 @@ class PendingAppManagerTest : public testing::Test {
 // installs an app doesn't crash.
 // Regression test for https://crbug.com/962808
 TEST_F(PendingAppManagerTest, DestroyDuringInstallInSynchronize) {
-  web_app::TestAppRegistrar registrar;
+  TestAppRegistrar registrar;
   auto pending_app_manager =
       std::make_unique<TestPendingAppManager>(&registrar);
 
-  std::vector<InstallOptions> install_options_list;
+  std::vector<ExternalInstallOptions> install_options_list;
   install_options_list.emplace_back(GURL("https://foo.example"),
-                                    LaunchContainer::kWindow,
+                                    DisplayMode::kStandalone,
                                     ExternalInstallSource::kInternalDefault);
   install_options_list.emplace_back(GURL("https://bar.example"),
-                                    LaunchContainer::kWindow,
+                                    DisplayMode::kStandalone,
                                     ExternalInstallSource::kInternalDefault);
 
   pending_app_manager->SynchronizeInstalledApps(
@@ -99,15 +99,15 @@ TEST_F(PendingAppManagerTest, DestroyDuringInstallInSynchronize) {
 // uninstalls an app doesn't crash.
 // Regression test for https://crbug.com/962808
 TEST_F(PendingAppManagerTest, DestroyDuringUninstallInSynchronize) {
-  web_app::TestAppRegistrar registrar;
+  TestAppRegistrar registrar;
   auto pending_app_manager =
       std::make_unique<TestPendingAppManager>(&registrar);
 
   // Install an app that will be uninstalled next.
   {
-    std::vector<InstallOptions> install_options_list;
+    std::vector<ExternalInstallOptions> install_options_list;
     install_options_list.emplace_back(GURL("https://foo.example"),
-                                      LaunchContainer::kWindow,
+                                      DisplayMode::kStandalone,
                                       ExternalInstallSource::kInternalDefault);
     base::RunLoop run_loop;
     pending_app_manager->SynchronizeInstalledApps(
@@ -120,7 +120,8 @@ TEST_F(PendingAppManagerTest, DestroyDuringUninstallInSynchronize) {
   }
 
   pending_app_manager->SynchronizeInstalledApps(
-      std::vector<InstallOptions>(), ExternalInstallSource::kInternalDefault,
+      std::vector<ExternalInstallOptions>(),
+      ExternalInstallSource::kInternalDefault,
       // PendingAppManager gives no guarantees about whether its pending
       // callbacks will be run or not when it gets destroyed.
       base::DoNothing());

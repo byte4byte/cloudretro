@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
@@ -111,8 +111,8 @@ namespace remoting {
 class TokenValidatorFactoryImplTest : public testing::Test {
  public:
   TokenValidatorFactoryImplTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::IO) {}
 
   void SuccessCallback(const std::string& shared_secret) {
     EXPECT_FALSE(shared_secret.empty());
@@ -134,7 +134,7 @@ class TokenValidatorFactoryImplTest : public testing::Test {
   void SetUp() override {
     key_pair_ = RsaKeyPair::FromString(kTestRsaKeyPair);
     request_context_getter_ = new net::TestURLRequestContextGetter(
-        scoped_task_environment_.GetMainThreadTaskRunner(),
+        task_environment_.GetMainThreadTaskRunner(),
         std::make_unique<SetResponseURLRequestContext>());
     ThirdPartyAuthConfig config;
     config.token_url = GURL(kTokenUrl);
@@ -177,7 +177,7 @@ class TokenValidatorFactoryImplTest : public testing::Test {
     context->SetErrorResponse(failure_phase, net_error);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   scoped_refptr<RsaKeyPair> key_pair_;
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
@@ -193,8 +193,22 @@ TEST_F(TokenValidatorFactoryImplTest, Success) {
               CreateResponse(token_validator_->token_scope()));
 
   token_validator_->ValidateThirdPartyToken(
-      kToken, base::Bind(&TokenValidatorFactoryImplTest::SuccessCallback,
-                         base::Unretained(this)));
+      kToken, base::BindOnce(&TokenValidatorFactoryImplTest::SuccessCallback,
+                             base::Unretained(this)));
+  run_loop_.Run();
+}
+
+TEST_F(TokenValidatorFactoryImplTest,
+       ValidResponseWithJsonSafetyPrefix_Success) {
+  token_validator_ =
+      token_validator_factory_->CreateTokenValidator(kLocalJid, kRemoteJid);
+
+  SetResponse(net::URLRequestTestJob::test_headers(),
+              ")]}'\n" + CreateResponse(token_validator_->token_scope()));
+
+  token_validator_->ValidateThirdPartyToken(
+      kToken, base::BindOnce(&TokenValidatorFactoryImplTest::SuccessCallback,
+                             base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -205,8 +219,8 @@ TEST_F(TokenValidatorFactoryImplTest, BadToken) {
   SetResponse(net::URLRequestTestJob::test_error_headers(), std::string());
 
   token_validator_->ValidateThirdPartyToken(
-      kToken, base::Bind(&TokenValidatorFactoryImplTest::FailureCallback,
-                         base::Unretained(this)));
+      kToken, base::BindOnce(&TokenValidatorFactoryImplTest::FailureCallback,
+                             base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -218,8 +232,8 @@ TEST_F(TokenValidatorFactoryImplTest, BadScope) {
               CreateResponse(kBadScope));
 
   token_validator_->ValidateThirdPartyToken(
-      kToken, base::Bind(&TokenValidatorFactoryImplTest::FailureCallback,
-                         base::Unretained(this)));
+      kToken, base::BindOnce(&TokenValidatorFactoryImplTest::FailureCallback,
+                             base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -231,8 +245,8 @@ TEST_F(TokenValidatorFactoryImplTest, DeleteOnFailure) {
 
   token_validator_->ValidateThirdPartyToken(
       kToken,
-      base::Bind(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
+                     base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -244,8 +258,8 @@ TEST_F(TokenValidatorFactoryImplTest, DeleteOnStartError) {
 
   token_validator_->ValidateThirdPartyToken(
       kToken,
-      base::Bind(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
+                     base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -257,8 +271,8 @@ TEST_F(TokenValidatorFactoryImplTest, DeleteOnSyncReadError) {
 
   token_validator_->ValidateThirdPartyToken(
       kToken,
-      base::Bind(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
+                     base::Unretained(this)));
   run_loop_.Run();
 }
 
@@ -270,8 +284,8 @@ TEST_F(TokenValidatorFactoryImplTest, DeleteOnAsyncReadError) {
 
   token_validator_->ValidateThirdPartyToken(
       kToken,
-      base::Bind(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&TokenValidatorFactoryImplTest::DeleteOnFailureCallback,
+                     base::Unretained(this)));
   run_loop_.Run();
 }
 

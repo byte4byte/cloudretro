@@ -28,16 +28,9 @@ void HistoryProvider::DeleteMatch(const AutocompleteMatch& match) {
   // and indices to drop any data they might have stored pertaining to the URL.
   DCHECK(history_service);
   DCHECK(match.destination_url.is_valid());
-  history_service->DeleteURL(match.destination_url);
+  history_service->DeleteURLs({match.destination_url});
 
   DeleteMatchFromMatches(match);
-}
-
-// static
-bool HistoryProvider::PreventInlineAutocomplete(
-    const AutocompleteInput& input) {
-  return input.prevent_inline_autocomplete() ||
-      (!input.text().empty() && base::IsUnicodeWhitespace(input.text().back()));
 }
 
 // static

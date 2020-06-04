@@ -16,12 +16,13 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
 import org.chromium.blink.mojom.AuthenticatorStatus;
 import org.chromium.blink.mojom.PublicKeyCredentialCreationOptions;
 import org.chromium.blink.mojom.PublicKeyCredentialRequestOptions;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
@@ -83,7 +84,7 @@ public class AuthenticatorTest {
             String title = mActivityTestRule.getActivity().getActivityTab().getTitle();
 
             // Wait until the title indicates either success or failure.
-            if (!title.startsWith("Success") && !title.startsWith("Fail:")) return;
+            if (!title.startsWith("Success") && !title.startsWith("Fail")) return;
             mStatus = title;
             mCallbackHelper.notifyCalled();
         }
@@ -108,7 +109,7 @@ public class AuthenticatorTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTab.removeObserver(mUpdateWaiter);
         mTestServer.stopAndDestroyServer();
     }
@@ -120,6 +121,7 @@ public class AuthenticatorTest {
      * setting up or mocking a real APK.
      */
     @Test
+    @DisableIf.Build(sdk_is_less_than = 24)
     @MediumTest
     @Feature({"WebAuth"})
     public void testCreatePublicKeyCredential() throws Exception {
@@ -136,6 +138,7 @@ public class AuthenticatorTest {
      * setting up or mocking a real APK.
      */
     @Test
+    @DisableIf.Build(sdk_is_less_than = 24)
     @MediumTest
     @Feature({"WebAuth"})
     public void testGetPublicKeyCredential() throws Exception {
@@ -151,6 +154,7 @@ public class AuthenticatorTest {
      * This test currently expects a "false" response.
      */
     @Test
+    @DisableIf.Build(sdk_is_less_than = 24)
     @MediumTest
     @Feature({"WebAuth"})
     public void testIsUserVerifyingPlatformAuthenticatorAvailable() throws Exception {

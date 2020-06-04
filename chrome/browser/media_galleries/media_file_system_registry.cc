@@ -11,9 +11,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
@@ -41,9 +42,9 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/common/fileapi/file_system_mount_option.h"
-#include "storage/common/fileapi/file_system_types.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/common/file_system/file_system_mount_option.h"
+#include "storage/common/file_system/file_system_types.h"
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 #include "chrome/browser/media_galleries/fileapi/mtp_device_map_service.h"
@@ -311,9 +312,12 @@ class ExtensionGalleriesHost
     for (auto id = galleries.begin(); id != galleries.end(); ++id) {
       device_ids->insert(galleries_info.find(*id)->second.device_id);
     }
-    MediaStorageUtil::FilterAttachedDevices(device_ids, base::Bind(
-        &ExtensionGalleriesHost::GetMediaFileSystemsForAttachedDevices, this,
-        base::Owned(device_ids), galleries, galleries_info, callback));
+    MediaStorageUtil::FilterAttachedDevices(
+        device_ids,
+        base::BindOnce(
+            &ExtensionGalleriesHost::GetMediaFileSystemsForAttachedDevices,
+            this, base::Owned(device_ids), galleries, galleries_info,
+            callback));
   }
 
   // Checks if |gallery| is attached and if so, registers the file system and
@@ -327,9 +331,9 @@ class ExtensionGalleriesHost
     device_ids->insert(gallery.device_id);
     MediaStorageUtil::FilterAttachedDevices(
         device_ids,
-        base::Bind(&ExtensionGalleriesHost::RegisterAttachedMediaFileSystem,
-                   this, base::Owned(device_ids), gallery,
-                   base::Passed(&callback)));
+        base::BindOnce(&ExtensionGalleriesHost::RegisterAttachedMediaFileSystem,
+                       this, base::Owned(device_ids), gallery,
+                       base::Passed(&callback)));
   }
 
   // Revoke the file system for |id| if this extension has created one for |id|.
@@ -462,8 +466,8 @@ class ExtensionGalleriesHost
       rph_refs_.Reset();
       CleanUp();
     }
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                             base::BindOnce(std::move(callback), result));
+    base::PostTask(FROM_HERE, {BrowserThread::IO},
+                   base::BindOnce(std::move(callback), result));
   }
 
   std::string GetTransientIdForRemovableDeviceId(const std::string& device_id) {
@@ -556,7 +560,7 @@ void MediaFileSystemRegistry::RegisterMediaFileSystemForExtension(
 
   if (gallery == preferences->known_galleries().end() ||
       !base::Contains(permitted_galleries, pref_id)) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(std::move(callback), base::File::FILE_ERROR_NOT_FOUND));
     return;
@@ -664,7 +668,7 @@ class MediaFileSystemRegistry::MediaFileSystemContextImpl
     ExternalMountPoints::GetSystemInstance()->RevokeFileSystem(fs_name);
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&MTPDeviceMapService::RevokeMTPFileSystem,
                        base::Unretained(MTPDeviceMapService::GetInstance()),
@@ -714,7 +718,7 @@ class MediaFileSystemRegistry::MediaFileSystemContextImpl
         storage::FileSystemMountOption(),
         path);
     CHECK(result);
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&MTPDeviceMapService::RegisterMTPFileSystem,
                        base::Unretained(MTPDeviceMapService::GetInstance()),

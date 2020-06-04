@@ -20,7 +20,7 @@ MockSignedExchangeHandlerParams::MockSignedExchangeHandlerParams(
     net::Error error,
     const GURL& inner_url,
     const std::string& mime_type,
-    std::vector<std::string> response_headers,
+    std::vector<std::pair<std::string, std::string>> response_headers,
     base::Optional<net::SHA256HashValue> header_integrity,
     const base::Time& signature_expire_time)
     : outer_url(outer_url),
@@ -45,22 +45,21 @@ MockSignedExchangeHandler::MockSignedExchangeHandler(
     ExchangeHeadersCallback headers_callback)
     : header_integrity_(params.header_integrity),
       signature_expire_time_(params.signature_expire_time) {
-  network::ResourceResponseHead head;
+  auto head = network::mojom::URLResponseHead::New();
   if (params.error == net::OK) {
-    head.headers =
+    head->headers =
         base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
-    head.mime_type = params.mime_type;
-    head.headers->AddHeader(
-        base::StringPrintf("Content-type: %s", params.mime_type.c_str()));
+    head->mime_type = params.mime_type;
+    head->headers->SetHeader("Content-type", params.mime_type);
     for (const auto& header : params.response_headers)
-      head.headers->AddHeader(header);
-    head.is_signed_exchange_inner_response = true;
-    head.content_length = head.headers->GetContentLength();
+      head->headers->AddHeader(header.first, header.second);
+    head->is_signed_exchange_inner_response = true;
+    head->content_length = head->headers->GetContentLength();
   }
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(std::move(headers_callback), params.result, params.error,
-                     params.inner_url, head, std::move(body)));
+                     params.inner_url, std::move(head), std::move(body)));
 }
 
 base::Optional<net::SHA256HashValue>

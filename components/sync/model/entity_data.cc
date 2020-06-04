@@ -80,10 +80,13 @@ std::unique_ptr<base::DictionaryValue> EntityData::ToDictionaryValue() {
       std::make_unique<base::DictionaryValue>();
   dict->Set("SPECIFICS", EntitySpecificsToValue(specifics));
   ADD_TO_DICT(dict, id);
-  ADD_TO_DICT(dict, client_tag_hash);
+  ADD_TO_DICT(dict, client_tag_hash.value());
   ADD_TO_DICT(dict, originator_cache_guid);
   ADD_TO_DICT(dict, originator_client_item_id);
   ADD_TO_DICT(dict, server_defined_unique_tag);
+  // The string "NON_UNIQUE_NAME" is used in sync-internals to identify the node
+  // title.
+  dict->SetString("NON_UNIQUE_NAME", name);
   ADD_TO_DICT(dict, name);
   ADD_TO_DICT(dict, parent_id);
   ADD_TO_DICT_WITH_TRANSFORM(dict, ctime, GetTimeDebugString);

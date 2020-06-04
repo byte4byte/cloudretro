@@ -62,6 +62,10 @@ class ExtensionIconSource : public content::URLDataSource,
                          int icon_size,
                          ExtensionIconSet::MatchType match,
                          bool grayscale);
+  static GURL GetIconURL(const std::string& extension_id,
+                         int icon_size,
+                         ExtensionIconSet::MatchType match,
+                         bool grayscale);
 
   // A public utility function for accessing the bitmap of the image specified
   // by |resource_id|.
@@ -71,9 +75,9 @@ class ExtensionIconSource : public content::URLDataSource,
   std::string GetSource() override;
   std::string GetMimeType(const std::string&) override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
   bool AllowCaching() override;
 
  private:
@@ -120,15 +124,15 @@ class ExtensionIconSource : public content::URLDataSource,
   void LoadIconFailed(int request_id);
 
   // Parses and saves an ExtensionIconRequest for the URL |path| for the
-  // specified |request_id|.
+  // specified |request_id|. Takes the |callback| if it returns true.
   bool ParseData(const std::string& path,
                  int request_id,
-                 const content::URLDataSource::GotDataCallback& callback);
+                 content::URLDataSource::GotDataCallback* callback);
 
   // Stores the parameters associated with the |request_id|, making them
   // as an ExtensionIconRequest via GetData.
   void SetData(int request_id,
-               const content::URLDataSource::GotDataCallback& callback,
+               content::URLDataSource::GotDataCallback callback,
                const Extension* extension,
                bool grayscale,
                int size,

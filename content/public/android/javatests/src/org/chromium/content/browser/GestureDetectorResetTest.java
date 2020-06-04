@@ -4,8 +4,6 @@
 
 package org.chromium.content.browser;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 
@@ -20,7 +18,6 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
@@ -38,7 +35,7 @@ public class GestureDetectorResetTest {
     @Rule
     public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
 
-    private static final long WAIT_TIMEOUT_SECONDS = scaleTimeout(2);
+    private static final long WAIT_TIMEOUT_SECONDS = 2L;
     private static final String CLICK_TEST_URL = UrlUtils.encodeHtmlDataUri("<html><body>"
             + "<button id=\"button\" "
             + "  onclick=\"document.getElementById('test').textContent = 'clicked';\">"
@@ -47,14 +44,15 @@ public class GestureDetectorResetTest {
             + "<div id=\"test\">not clicked</div><br/>"
             + "</body></html>");
 
-    private static class NodeContentsIsEqualToCriteria extends Criteria {
+    private static class NodeContentsIsEqualToCriteria implements Runnable {
+        private final String mFailureReason;
         private final WebContents mWebContents;
         private final String mNodeId;
         private final String mExpectedContents;
 
         public NodeContentsIsEqualToCriteria(String failureReason, WebContents webContents,
                 String nodeId, String expectedContents) {
-            super(failureReason);
+            mFailureReason = failureReason;
             mWebContents = webContents;
             mNodeId = nodeId;
             mExpectedContents = expectedContents;
@@ -62,14 +60,14 @@ public class GestureDetectorResetTest {
         }
 
         @Override
-        public boolean isSatisfied() {
+        public void run() {
+            String contents = null;
             try {
-                String contents = DOMUtils.getNodeContents(mWebContents, mNodeId);
-                return mExpectedContents.equals(contents);
+                contents = DOMUtils.getNodeContents(mWebContents, mNodeId);
             } catch (Throwable e) {
                 Assert.fail("Failed to retrieve node contents: " + e);
-                return false;
             }
+            Assert.assertEquals(mFailureReason, mExpectedContents, contents);
         }
     }
 
@@ -77,7 +75,7 @@ public class GestureDetectorResetTest {
     }
 
     private void verifyClicksAreRegistered(String disambiguation, WebContents webContents)
-            throws InterruptedException, Exception, Throwable {
+            throws Exception, Throwable {
         // Initially the text on the page should say "not clicked".
         CriteriaHelper.pollInstrumentationThread(
                 new NodeContentsIsEqualToCriteria("The page contents is invalid " + disambiguation,

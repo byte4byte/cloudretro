@@ -14,13 +14,6 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Canvas;
 import android.os.Build;
-import android.support.annotation.Nullable;
-import android.support.v4.view.ViewCompat;
-import android.support.v4.view.animation.FastOutLinearInInterpolator;
-import android.support.v7.view.ContextThemeWrapper;
-import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.helper.ItemTouchHelper;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -30,12 +23,20 @@ import android.view.animation.Interpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
+import androidx.annotation.Nullable;
+import androidx.appcompat.view.ContextThemeWrapper;
+import androidx.core.view.ViewCompat;
+import androidx.recyclerview.widget.ItemTouchHelper;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.cards.CardViewHolder;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
 import org.chromium.chrome.browser.ntp.cards.ScrollToLoadListener;
-import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.components.browser_ui.widget.animation.Interpolators;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,7 +50,8 @@ import java.util.Set;
  * New Tab page receives focus when clicked.
  */
 public class SuggestionsRecyclerView extends RecyclerView {
-    private static final Interpolator DISMISS_INTERPOLATOR = new FastOutLinearInInterpolator();
+    private static final Interpolator DISMISS_INTERPOLATOR =
+            Interpolators.FAST_OUT_LINEAR_IN_INTERPOLATOR;
     private static final int DISMISS_ANIMATION_TIME_MS = 300;
 
     private final GestureDetector mGestureDetector;
@@ -80,8 +82,6 @@ public class SuggestionsRecyclerView extends RecyclerView {
     private UiConfig mUiConfig;
 
     private Runnable mCloseContextMenuCallback;
-
-    private boolean mIsCardBeingSwiped;
 
     public SuggestionsRecyclerView(Context context) {
         this(context, null);
@@ -406,8 +406,6 @@ public class SuggestionsRecyclerView extends RecyclerView {
         @Override
         public void onChildDraw(Canvas c, RecyclerView recyclerView, ViewHolder viewHolder,
                 float dX, float dY, int actionState, boolean isCurrentlyActive) {
-            mIsCardBeingSwiped = isCurrentlyActive && dX != 0.f;
-
             // In some cases a removed child may call this method when unrelated items are
             // interacted with (https://crbug.com/664466, b/32900699), but in that case
             // getSiblingDismissalViewHolders() below will return an empty list.
@@ -418,14 +416,6 @@ public class SuggestionsRecyclerView extends RecyclerView {
                 updateViewStateForDismiss(dX, siblingViewHolder);
             }
         }
-    }
-
-    /**
-     * Tells if one of card views is being swiped now.
-     * @return {@code true} if a card view is being swiped.
-     */
-    public boolean isCardBeingSwiped() {
-        return mIsCardBeingSwiped;
     }
 
     private List<ViewHolder> getDismissalGroupViewHolders(ViewHolder viewHolder) {

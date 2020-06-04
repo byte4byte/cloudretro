@@ -16,33 +16,12 @@ namespace chromeos {
 
 namespace cellular_setup {
 
-namespace {
-
-CellularSetupImpl::Factory* g_test_factory = nullptr;
-
-}  // namespace
-
-// static
-std::unique_ptr<CellularSetupBase> CellularSetupImpl::Factory::Create() {
-  if (g_test_factory)
-    return g_test_factory->BuildInstance();
-
-  return base::WrapUnique(new CellularSetupImpl());
-}
-
-// static
-void CellularSetupImpl::Factory::SetFactoryForTesting(Factory* test_factory) {
-  g_test_factory = test_factory;
-}
-
-CellularSetupImpl::Factory::~Factory() = default;
-
 CellularSetupImpl::CellularSetupImpl() = default;
 
 CellularSetupImpl::~CellularSetupImpl() = default;
 
 void CellularSetupImpl::StartActivation(
-    mojom::ActivationDelegatePtr delegate,
+    mojo::PendingRemote<mojom::ActivationDelegate> delegate,
     StartActivationCallback callback) {
   size_t request_id = next_request_id_;
   ++next_request_id_;
@@ -57,7 +36,7 @@ void CellularSetupImpl::StartActivation(
           network_handler->network_connection_handler(),
           network_handler->network_activation_handler());
 
-  std::move(callback).Run(ota_activator->GenerateInterfacePtr());
+  std::move(callback).Run(ota_activator->GenerateRemote());
 
   // Store the OtaActivator instance in a map indexed by request ID; once the
   // attempt has finished, the map entry will be deleted in

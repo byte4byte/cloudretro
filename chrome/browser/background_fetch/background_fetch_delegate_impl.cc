@@ -7,9 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/feature_list.h"
 #include "base/guid.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
@@ -21,6 +23,7 @@
 #include "chrome/browser/metrics/ukm_background_recorder_service.h"
 #include "chrome/browser/offline_items_collection/offline_content_aggregator_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/download/public/background_service/download_params.h"
@@ -32,6 +35,8 @@
 #include "content/public/browser/background_fetch_response.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/network/public/mojom/data_pipe_getter.mojom.h"
@@ -251,7 +256,7 @@ void BackgroundFetchDelegateImpl::GetIconDisplaySize(
 
 void BackgroundFetchDelegateImpl::GetPermissionForOrigin(
     const url::Origin& origin,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const content::WebContents::Getter& wc_getter,
     GetPermissionForOriginCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -266,6 +271,7 @@ void BackgroundFetchDelegateImpl::GetPermissionForOrigin(
     // used as the URL, and the |request_method| is set to GET.
     limiter->CanDownload(
         wc_getter, origin.GetURL(), "GET", base::nullopt,
+        false /* from_download_cross_origin_redirect */,
         base::AdaptCallbackForRepeating(base::BindOnce(
             &BackgroundFetchDelegateImpl::
                 DidGetPermissionFromDownloadRequestLimiter,
@@ -281,7 +287,7 @@ void BackgroundFetchDelegateImpl::GetPermissionForOrigin(
   // content setting.
   ContentSetting content_setting = host_content_settings_map->GetContentSetting(
       origin.GetURL(), origin.GetURL(),
-      CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+      ContentSettingsType::AUTOMATIC_DOWNLOADS,
       std::string() /* resource_identifier */);
 
   // The set of valid settings for automatic downloads is set to
@@ -343,8 +349,9 @@ void BackgroundFetchDelegateImpl::DownloadUrl(
   params.request_params.method = method;
   params.request_params.url = url;
   params.request_params.request_headers = headers;
-  params.callback = base::Bind(&BackgroundFetchDelegateImpl::OnDownloadReceived,
-                               weak_ptr_factory_.GetWeakPtr());
+  params.callback =
+      base::BindRepeating(&BackgroundFetchDelegateImpl::OnDownloadReceived,
+                          weak_ptr_factory_.GetWeakPtr());
   params.traffic_annotation =
       net::MutableNetworkTrafficAnnotationTag(traffic_annotation);
 
@@ -654,7 +661,7 @@ void BackgroundFetchDelegateImpl::UpdateOfflineItemAndUpdateObservers(
 }
 
 void BackgroundFetchDelegateImpl::OpenItem(
-    offline_items_collection::LaunchLocation location,
+    const offline_items_collection::OpenParams& open_params,
     const offline_items_collection::ContentId& id) {
   auto job_details_iter = job_details_map_.find(id.id);
   if (job_details_iter == job_details_map_.end())
@@ -918,11 +925,12 @@ void BackgroundFetchDelegateImpl::DidGetUploadData(
   request_data.body_size_bytes = blob->size;
 
   // Use a Data Pipe to transfer the blob.
-  network::mojom::DataPipeGetterPtr data_pipe_getter_ptr;
-  blink::mojom::BlobPtr blob_ptr(std::move(blob->blob));
-  blob_ptr->AsDataPipeGetter(MakeRequest(&data_pipe_getter_ptr));
+  mojo::PendingRemote<network::mojom::DataPipeGetter> data_pipe_getter_remote;
+  mojo::Remote<blink::mojom::Blob> blob_remote(std::move(blob->blob));
+  blob_remote->AsDataPipeGetter(
+      data_pipe_getter_remote.InitWithNewPipeAndPassReceiver());
   auto request_body = base::MakeRefCounted<network::ResourceRequestBody>();
-  request_body->AppendDataPipe(std::move(data_pipe_getter_ptr));
+  request_body->AppendDataPipe(std::move(data_pipe_getter_remote));
 
   std::move(callback).Run(request_body);
 }

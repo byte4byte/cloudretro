@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
 dictionary GPURenderPassColorAttachmentDescriptor {
     required GPUTextureView attachment;
-    GPUTextureView? resolveTarget = null;
+    GPUTextureView resolveTarget;
 
-    required GPULoadOp loadOp;
-    required GPUStoreOp storeOp;
-    required GPUColor clearColor;
+    required (GPULoadOp or GPUColor) loadValue;
+    GPUStoreOp storeOp = "store";
 };

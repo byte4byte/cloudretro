@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_FOREGROUND_DURATION_UKM_OBSERVER_H_
 
 #include "base/time/time.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
 // Observer responsible for appending previews information to the PLM UKM
@@ -24,20 +26,21 @@ class ForegroundDurationUKMObserver
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                          ukm::SourceId source_id) override;
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   ObservePolicy OnHidden(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   ObservePolicy OnShown() override;
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
  private:
   bool currently_in_foreground_ = false;
   base::TimeTicks last_time_shown_;
   ukm::SourceId source_id_ = ukm::kInvalidSourceId;
+  page_load_metrics::mojom::InputTiming last_page_input_timing_;
   void RecordUkmIfInForeground(base::TimeTicks end_time);
+  void RecordInputTimingMetrics(
+      ukm::builders::PageForegroundSession* ukm_builder);
 
   DISALLOW_COPY_AND_ASSIGN(ForegroundDurationUKMObserver);
 };

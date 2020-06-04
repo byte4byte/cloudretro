@@ -27,9 +27,9 @@ class SuggestionsSourceWrapper : public content::URLDataSource {
   // content::URLDataSource implementation.
   std::string GetSource() override;
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override;
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override;
   std::string GetMimeType(const std::string& path) override;
 
  private:
@@ -50,10 +50,11 @@ std::string SuggestionsSourceWrapper::GetSource() {
 }
 
 void SuggestionsSourceWrapper::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-    const content::URLDataSource::GotDataCallback& callback) {
-  suggestions_source_.StartDataRequest(path, callback);
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
+    content::URLDataSource::GotDataCallback callback) {
+  suggestions_source_.StartDataRequest(
+      content::URLDataSource::URLToRequestPath(url), std::move(callback));
 }
 
 std::string SuggestionsSourceWrapper::GetMimeType(const std::string& path) {

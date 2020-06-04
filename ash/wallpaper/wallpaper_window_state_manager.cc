@@ -6,6 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/wm/mru_window_tracker.h"
+#include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
@@ -22,9 +23,9 @@ void ActivateMruUnminimizedWindowOnActiveDesk() {
       Shell::Get()->mru_window_tracker()->BuildMruWindowList(
           DesksMruType::kActiveDesk));
   for (auto* window : mru_windows) {
-    if (wm::GetWindowState(window)->GetStateType() !=
+    if (WindowState::Get(window)->GetStateType() !=
         WindowStateType::kMinimized) {
-      wm::GetWindowState(window)->Activate();
+      WindowState::Get(window)->Activate();
       return;
     }
   }
@@ -45,7 +46,7 @@ void WallpaperWindowStateManager::MinimizeInactiveWindows(
   std::set<aura::Window*>* results =
       &user_id_hash_window_list_map_[user_id_hash];
 
-  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* active_window = window_util::GetActiveWindow();
   aura::Window::Windows windows =
       Shell::Get()->mru_window_tracker()->BuildWindowListIgnoreModal(
           kActiveDesk);
@@ -53,14 +54,14 @@ void WallpaperWindowStateManager::MinimizeInactiveWindows(
   for (aura::Window::Windows::iterator iter = windows.begin();
        iter != windows.end(); ++iter) {
     // Ignore active window and minimized windows.
-    if (*iter == active_window || wm::GetWindowState(*iter)->IsMinimized())
+    if (*iter == active_window || WindowState::Get(*iter)->IsMinimized())
       continue;
 
     if (!(*iter)->HasObserver(this))
       (*iter)->AddObserver(this);
 
     results->insert(*iter);
-    wm::GetWindowState(*iter)->Minimize();
+    WindowState::Get(*iter)->Minimize();
   }
 }
 
@@ -80,11 +81,14 @@ void WallpaperWindowStateManager::RestoreMinimizedWindows(
 
   for (std::set<aura::Window*>::iterator iter = removed_windows.begin();
        iter != removed_windows.end(); ++iter) {
-    wm::GetWindowState(*iter)->Unminimize();
+    WindowState::Get(*iter)->Unminimize();
     RemoveObserverIfUnreferenced(*iter);
   }
 
-  ActivateMruUnminimizedWindowOnActiveDesk();
+  // If the wallpaper app is closed while the desktop is in overview mode,
+  // do not activate any window, because doing so will disable overview mode.
+  if (!Shell::Get()->overview_controller()->InOverviewSession())
+    ActivateMruUnminimizedWindowOnActiveDesk();
 }
 
 void WallpaperWindowStateManager::RemoveObserverIfUnreferenced(

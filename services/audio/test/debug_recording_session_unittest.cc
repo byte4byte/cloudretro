@@ -13,16 +13,14 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/gtest_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "media/audio/audio_debug_recording_test.h"
 #include "media/audio/mock_audio_debug_recording_manager.h"
 #include "media/audio/mock_audio_manager.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "services/audio/public/mojom/constants.mojom.h"
 #include "services/audio/service.h"
 #include "services/audio/service_factory.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -71,7 +69,7 @@ class DebugRecordingFileProviderTest : public testing::Test {
 
  protected:
   mojo::Remote<mojom::DebugRecordingFileProvider> remote_file_provider_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
  private:
   std::unique_ptr<DebugRecordingSession::DebugRecordingFileProvider>
@@ -93,31 +91,33 @@ class DebugRecordingSessionTest : public media::AudioDebugRecordingTest {
 
     service_ = CreateEmbeddedService(
         static_cast<media::AudioManager*>(mock_audio_manager_.get()),
-        connector_factory_.RegisterInstance(audio::mojom::kServiceName));
+        service_remote_.BindNewPipeAndPassReceiver());
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void TearDown() override { ShutdownAudioManager(); }
 
  protected:
   std::unique_ptr<DebugRecordingSession> CreateDebugRecordingSession() {
+    mojo::PendingRemote<mojom::DebugRecording> debug_recording;
+    service_remote_->BindDebugRecording(
+        debug_recording.InitWithNewPipeAndPassReceiver());
     std::unique_ptr<DebugRecordingSession> session(
-        std::make_unique<DebugRecordingSession>(
-            base::FilePath(kBaseFileName),
-            connector_factory_.CreateConnector()));
-    scoped_task_environment_.RunUntilIdle();
+        std::make_unique<DebugRecordingSession>(base::FilePath(kBaseFileName),
+                                                std::move(debug_recording)));
+    task_environment_.RunUntilIdle();
     return session;
   }
 
   void DestroyDebugRecordingSession(
       std::unique_ptr<DebugRecordingSession> debug_recording_session) {
     debug_recording_session.reset();
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
  private:
-  service_manager::TestConnectorFactory connector_factory_;
+  mojo::Remote<mojom::AudioService> service_remote_;
   std::unique_ptr<Service> service_;
 
   DISALLOW_COPY_AND_ASSIGN(DebugRecordingSessionTest);
@@ -130,7 +130,7 @@ TEST_F(DebugRecordingFileProviderTest, CreateFileForInputStream) {
       media::AudioDebugRecordingStreamType::kInput, id,
       base::BindOnce(&DebugRecordingFileProviderTest::FileCreated,
                      base::Unretained(this)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   base::FilePath file_name(GetFileName(kInput, id));
   EXPECT_TRUE(base::PathExists(file_name));
@@ -144,7 +144,7 @@ TEST_F(DebugRecordingFileProviderTest, CreateFileForOutputStream) {
       media::AudioDebugRecordingStreamType::kOutput, id,
       base::BindOnce(&DebugRecordingFileProviderTest::FileCreated,
                      base::Unretained(this)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   base::FilePath file_name(GetFileName(kOutput, id));
   EXPECT_TRUE(base::PathExists(file_name));
@@ -161,7 +161,7 @@ TEST_F(DebugRecordingFileProviderTest, CreateFilesForVariousIds) {
         base::BindOnce(&DebugRecordingFileProviderTest::FileCreated,
                        base::Unretained(this)));
   }
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   for (uint32_t id : ids) {
     base::FilePath file_name(GetFileName(kOutput, id));
@@ -181,7 +181,7 @@ TEST_F(DebugRecordingFileProviderTest,
       id,
       base::BindOnce(&DebugRecordingFileProviderTest::FileCreated,
                      base::Unretained(this))));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   base::FilePath file_name(
       GetFileName(NumberToStringType(invalid_stream_type), id));

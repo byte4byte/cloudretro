@@ -38,11 +38,11 @@ class LocationBarBubbleDelegateView : public views::BubbleDialogDelegateView,
   };
 
   // Constructs LocationBarBubbleDelegateView. Anchors the bubble to
-  // |anchor_view| when it is not nullptr or alternatively, to |anchor_point|.
+  // |anchor_view|. If |anchor_view| is nullptr, the bubble is anchored at
+  // (0,0).
   // Registers with a fullscreen controller identified by |web_contents| to
   // close the bubble if the fullscreen state changes.
   LocationBarBubbleDelegateView(views::View* anchor_view,
-                                const gfx::Point& anchor_point,
                                 content::WebContents* web_contents);
 
   ~LocationBarBubbleDelegateView() override;
@@ -61,6 +61,8 @@ class LocationBarBubbleDelegateView : public views::BubbleDialogDelegateView,
   // content::WebContentsObserver:
   void OnVisibilityChanged(content::Visibility visibility) override;
   void WebContentsDestroyed() override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   // views::BubbleDialogDelegateView:
   gfx::Rect GetAnchorBoundsInScreen() const override;
@@ -95,9 +97,17 @@ class LocationBarBubbleDelegateView : public views::BubbleDialogDelegateView,
   // Closes the bubble.
   virtual void CloseBubble();
 
+  void set_close_on_main_frame_origin_navigation(bool close) {
+    close_on_main_frame_origin_navigation_ = close;
+  }
+
  private:
   ScopedObserver<FullscreenController, FullscreenObserver> fullscreen_observer_{
       this};
+
+  // A flag controlling bubble closure when the main frame navigates to a
+  // different origin.
+  bool close_on_main_frame_origin_navigation_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarBubbleDelegateView);
 };

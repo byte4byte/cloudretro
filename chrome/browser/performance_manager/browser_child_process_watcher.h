@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "base/process/process.h"
 #include "content/public/browser/browser_child_process_observer.h"
-#include "content/public/common/service_manager_connection.h"
 
 namespace performance_manager {
 
@@ -24,6 +23,12 @@ class BrowserChildProcessWatcher : public content::BrowserChildProcessObserver {
  public:
   BrowserChildProcessWatcher();
   ~BrowserChildProcessWatcher() override;
+
+  // Initialize this watcher.
+  void Initialize();
+
+  // Tear down this watcher and any state it's gathered.
+  void TearDown();
 
  private:
   // BrowserChildProcessObserver overrides.

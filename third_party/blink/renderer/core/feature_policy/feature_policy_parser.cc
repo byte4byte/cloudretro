@@ -4,13 +4,14 @@
 #include "third_party/blink/renderer/core/feature_policy/feature_policy_parser.h"
 
 #include <algorithm>
-#include <map>
 #include <utility>
 
 #include <bitset>
 #include "base/metrics/histogram_macros.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -43,6 +44,10 @@ ParsedFeaturePolicy FeaturePolicyParser::ParseAttribute(
                GetDefaultFeatureNameMap(), document);
 }
 
+// normally 1 char = 1 byte
+// max length to parse = 2^16 = 64 kB
+constexpr wtf_size_t MAX_LENGTH_PARSE = 1 << 16;
+
 ParsedFeaturePolicy FeaturePolicyParser::Parse(
     const String& policy,
     scoped_refptr<const SecurityOrigin> self_origin,
@@ -51,7 +56,18 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
     const FeatureNameMap& feature_names,
     FeaturePolicyParserDelegate* delegate) {
   ParsedFeaturePolicy allowlists;
-  std::bitset<static_cast<size_t>(mojom::FeaturePolicyFeature::kMaxValue) + 1>
+
+  if (policy.length() > MAX_LENGTH_PARSE) {
+    if (messages) {
+      messages->push_back("Feature policy declaration exceeds size limit(" +
+                          String::Number(policy.length()) + ">" +
+                          String::Number(MAX_LENGTH_PARSE) + ")");
+    }
+    return allowlists;
+  }
+
+  std::bitset<
+      static_cast<size_t>(mojom::blink::FeaturePolicyFeature::kMaxValue) + 1>
       features_specified;
   HashSet<FeaturePolicyAllowlistType> allowlist_types_used;
 
@@ -98,9 +114,8 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
         continue;
       }
 
-      mojom::FeaturePolicyFeature feature = feature_names.at(feature_name);
-      mojom::PolicyValueType feature_type =
-          FeaturePolicy::GetDefaultFeatureList().at(feature).second;
+      mojom::blink::FeaturePolicyFeature feature =
+          feature_names.at(feature_name);
       // If a policy has already been specified for the current feature, drop
       // the new policy.
       if (features_specified[static_cast<size_t>(feature)])
@@ -127,37 +142,12 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
       bool allowlist_includes_none = false;
       bool allowlist_includes_origin = false;
 
-      // Detect usage of UnoptimizedImagePolicies origin trial.
-      if (feature == mojom::FeaturePolicyFeature::kOversizedImages ||
-          feature == mojom::FeaturePolicyFeature::kUnoptimizedLossyImages ||
-          feature == mojom::FeaturePolicyFeature::kUnoptimizedLosslessImages ||
-          feature ==
-              mojom::FeaturePolicyFeature::kUnoptimizedLosslessImagesStrict) {
-        if (delegate) {
-          delegate->CountFeaturePolicyUsage(
-              mojom::WebFeature::kUnoptimizedImagePolicies);
-        }
-        // Don't analyze allowlists for origin trial features.
-        count_allowlist_type = false;
-      }
+      ParsedFeaturePolicyDeclaration allowlist(feature);
 
-      // Detect usage of UnsizedMediaPolicy origin trial
-      if (feature == mojom::FeaturePolicyFeature::kUnsizedMedia) {
-        if (delegate) {
-          delegate->CountFeaturePolicyUsage(
-              mojom::WebFeature::kUnsizedMediaPolicy);
-        }
-        // Don't analyze allowlists for origin trial features.
-        count_allowlist_type = false;
-      }
-
-      ParsedFeaturePolicyDeclaration allowlist(feature, feature_type);
-      // TODO(loonybear): fallback value should be parsed from the new syntax.
-      allowlist.fallback_value = GetFallbackValueForFeature(feature);
-      allowlist.opaque_value = GetFallbackValueForFeature(feature);
+      allowlist.fallback_value = false;
+      allowlist.opaque_value = false;
       features_specified.set(static_cast<size_t>(feature));
-      std::map<url::Origin, PolicyValue> values;
-      PolicyValue value = PolicyValue::CreateMaxPolicyValue(feature_type);
+
       // If a policy entry has no listed origins (e.g. "feature_name1" in
       // allow="feature_name1; feature_name2 value"), enable the feature for:
       //     a. |self_origin|, if we are parsing a header policy (i.e.,
@@ -167,46 +157,23 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
       //     c. the opaque origin of the frame, if |src_origin| is opaque.
       if (tokens.size() == 1) {
         if (!src_origin) {
-          values[self_origin->ToUrlOrigin()] = value;
+          allowlist.allowed_origins.push_back(self_origin->ToUrlOrigin());
         } else if (!src_origin->IsOpaque()) {
-          values[src_origin->ToUrlOrigin()] = value;
+          allowlist.allowed_origins.push_back(src_origin->ToUrlOrigin());
         } else {
-          allowlist.opaque_value = value;
+          allowlist.opaque_value = true;
         }
       }
 
       for (wtf_size_t i = 1; i < tokens.size(); i++) {
         if (!tokens[i].ContainsOnlyASCIIOrEmpty()) {
-          messages->push_back("Non-ASCII characters in origin.");
+          if (messages)
+            messages->push_back("Non-ASCII characters in origin.");
           continue;
         }
 
-        // Break the token into an origin and a value. Either one may be
-        // omitted.
-        PolicyValue value = PolicyValue::CreateMaxPolicyValue(feature_type);
         String origin_string = tokens[i];
-        String value_string;
-        wtf_size_t param_start = origin_string.find('(');
-        if (param_start != kNotFound) {
-          // There is a value attached to this origin
-          if (!origin_string.EndsWith(')')) {
-            // The declaration is malformed if the value is not the last part of
-            // the string.
-            if (messages)
-              messages->push_back("Unable to parse policy value.");
-            continue;
-          }
-          value_string = origin_string.Substring(
-              param_start + 1, origin_string.length() - param_start - 2);
-          origin_string = origin_string.Substring(0, param_start);
-          bool ok = false;
-          value = ParseValueForType(feature_type, value_string, &ok);
-          if (!ok) {
-            if (messages)
-              messages->push_back("Unable to parse policy value.");
-            continue;
-          }
-        }
+        DCHECK(!origin_string.IsEmpty());
 
         // Determine the target of the declaration. This may be a specific
         // origin, either explicitly written, or one of the special keywords
@@ -222,22 +189,16 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
         bool target_is_opaque = false;
         bool target_is_all = false;
 
-        // 'self' origin is used if either the origin is omitted (and there is
-        // no 'src' origin available) or the origin is exactly 'self'.
-        if ((origin_string.length() == 0 && !src_origin)) {
-          target_origin = self_origin->ToUrlOrigin();
-        } else if (EqualIgnoringASCIICase(origin_string, "'self'")) {
+        // 'self' origin is used if the origin is exactly 'self'.
+        if (EqualIgnoringASCIICase(origin_string, "'self'")) {
           target_origin = self_origin->ToUrlOrigin();
           allowlist_includes_self = true;
         }
-        // 'src' origin is used if |src_origin| is available and either the
-        // origin is omitted or is a match for 'src'. |src_origin| is only set
+        // 'src' origin is used if |src_origin| is available and the
+        // origin is a match for 'src'. |src_origin| is only set
         // when parsing an iframe allow attribute.
-        else if (src_origin &&
-                 (origin_string.length() == 0 ||
-                  EqualIgnoringASCIICase(origin_string, "'src'"))) {
-          if (origin_string.length() > 0)
-            allowlist_includes_src = true;
+        else if (src_origin && EqualIgnoringASCIICase(origin_string, "'src'")) {
+          allowlist_includes_src = true;
           if (!src_origin->IsOpaque()) {
             target_origin = src_origin->ToUrlOrigin();
           } else {
@@ -268,12 +229,12 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
 
         // Assign the value to the target origin(s).
         if (target_is_all) {
-          allowlist.fallback_value = value;
-          allowlist.opaque_value = value;
+          allowlist.fallback_value = true;
+          allowlist.opaque_value = true;
         } else if (target_is_opaque) {
-          allowlist.opaque_value = value;
+          allowlist.opaque_value = true;
         } else {
-          values[target_origin] = value;
+          allowlist.allowed_origins.push_back(target_origin);
         }
       }
 
@@ -306,16 +267,14 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
         }
       }
 
-      // Size reduction: remove all items in the allowlist whose value is the
-      // same as the fallback.
-      for (auto it = values.begin(); it != values.end();) {
-        if (it->second == allowlist.fallback_value)
-          it = values.erase(it);
-        else
-          it++;
-      }
+      // Size reduction: remove all items in the allowlist if target is all.
+      if (allowlist.fallback_value)
+        allowlist.allowed_origins.clear();
 
-      allowlist.values = std::move(values);
+      // Sort |allowed_origins| in alphabetical order.
+      std::sort(allowlist.allowed_origins.begin(),
+                allowlist.allowed_origins.end());
+
       allowlists.push_back(allowlist);
     }
   }
@@ -339,75 +298,7 @@ ParsedFeaturePolicy FeaturePolicyParser::Parse(
   return allowlists;
 }
 
-// TODO(loonybear): once the new syntax is implemented, use this method to
-// parse the policy value for each parameterized feature, and for non
-// parameterized feature (i.e. boolean-type policy value).
-PolicyValue FeaturePolicyParser::GetFallbackValueForFeature(
-    mojom::FeaturePolicyFeature feature) {
-  if (feature == mojom::FeaturePolicyFeature::kOversizedImages) {
-    return PolicyValue(2.0);
-  }
-  if (feature == mojom::FeaturePolicyFeature::kUnoptimizedLossyImages) {
-    // Lossy images default to at most 0.5 bytes per pixel.
-    return PolicyValue(0.5);
-  }
-  if (feature == mojom::FeaturePolicyFeature::kUnoptimizedLosslessImages ||
-      feature ==
-          mojom::FeaturePolicyFeature::kUnoptimizedLosslessImagesStrict) {
-    // Lossless images default to at most 1 byte per pixel.
-    return PolicyValue(1.0);
-  }
-
-  return PolicyValue(false);
-}
-
-PolicyValue FeaturePolicyParser::ParseValueForType(
-    mojom::PolicyValueType feature_type,
-    const String& value_string,
-    bool* ok) {
-  *ok = false;
-  PolicyValue value;
-  switch (feature_type) {
-    case mojom::PolicyValueType::kBool:
-      // recognize true, false
-      if (value_string.LowerASCII() == "true") {
-        value = PolicyValue(true);
-        *ok = true;
-      } else if (value_string.LowerASCII() == "false") {
-        value = PolicyValue(false);
-        *ok = true;
-      }
-      break;
-    case mojom::PolicyValueType::kDecDouble: {
-      if (value_string.LowerASCII() == "inf") {
-        value = PolicyValue::CreateMaxPolicyValue(feature_type);
-        *ok = true;
-      } else {
-        double parsed_value = value_string.ToDouble(ok);
-        if (*ok && parsed_value >= 0.0f) {
-          value = PolicyValue(parsed_value);
-        } else {
-          *ok = false;
-        }
-      }
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
-  if (!*ok)
-    return PolicyValue();
-  return value;
-}
-
-void FeaturePolicyParser::ParseValueForFuzzer(
-    blink::mojom::PolicyValueType feature_type,
-    const WTF::String& value_string) {
-  bool ok;
-  ParseValueForType(feature_type, value_string, &ok);
-}
-
-bool IsFeatureDeclared(mojom::FeaturePolicyFeature feature,
+bool IsFeatureDeclared(mojom::blink::FeaturePolicyFeature feature,
                        const ParsedFeaturePolicy& policy) {
   return std::any_of(policy.begin(), policy.end(),
                      [feature](const auto& declaration) {
@@ -415,7 +306,7 @@ bool IsFeatureDeclared(mojom::FeaturePolicyFeature feature,
                      });
 }
 
-bool RemoveFeatureIfPresent(mojom::FeaturePolicyFeature feature,
+bool RemoveFeatureIfPresent(mojom::blink::FeaturePolicyFeature feature,
                             ParsedFeaturePolicy& policy) {
   auto new_end = std::remove_if(policy.begin(), policy.end(),
                                 [feature](const auto& declaration) {
@@ -427,37 +318,34 @@ bool RemoveFeatureIfPresent(mojom::FeaturePolicyFeature feature,
   return true;
 }
 
-bool DisallowFeatureIfNotPresent(mojom::FeaturePolicyFeature feature,
+bool DisallowFeatureIfNotPresent(mojom::blink::FeaturePolicyFeature feature,
                                  ParsedFeaturePolicy& policy) {
   if (IsFeatureDeclared(feature, policy))
     return false;
-  blink::mojom::PolicyValueType feature_type =
-      blink::FeaturePolicy::GetDefaultFeatureList().at(feature).second;
-  ParsedFeaturePolicyDeclaration allowlist(feature, feature_type);
+  ParsedFeaturePolicyDeclaration allowlist(feature);
   policy.push_back(allowlist);
   return true;
 }
 
-bool AllowFeatureEverywhereIfNotPresent(mojom::FeaturePolicyFeature feature,
-                                        ParsedFeaturePolicy& policy) {
+bool AllowFeatureEverywhereIfNotPresent(
+    mojom::blink::FeaturePolicyFeature feature,
+    ParsedFeaturePolicy& policy) {
   if (IsFeatureDeclared(feature, policy))
     return false;
-  blink::mojom::PolicyValueType feature_type =
-      blink::FeaturePolicy::GetDefaultFeatureList().at(feature).second;
-  ParsedFeaturePolicyDeclaration allowlist(feature, feature_type);
-  allowlist.fallback_value.SetToMax();
-  allowlist.opaque_value.SetToMax();
+  ParsedFeaturePolicyDeclaration allowlist(feature);
+  allowlist.fallback_value = true;
+  allowlist.opaque_value = true;
   policy.push_back(allowlist);
   return true;
 }
 
-void DisallowFeature(mojom::FeaturePolicyFeature feature,
+void DisallowFeature(mojom::blink::FeaturePolicyFeature feature,
                      ParsedFeaturePolicy& policy) {
   RemoveFeatureIfPresent(feature, policy);
   DisallowFeatureIfNotPresent(feature, policy);
 }
 
-void AllowFeatureEverywhere(mojom::FeaturePolicyFeature feature,
+void AllowFeatureEverywhere(mojom::blink::FeaturePolicyFeature feature,
                             ParsedFeaturePolicy& policy) {
   RemoveFeatureIfPresent(feature, policy);
   AllowFeatureEverywhereIfNotPresent(feature, policy);
@@ -472,7 +360,7 @@ const Vector<String> GetAvailableFeatures(ExecutionContext* execution_context) {
   return available_features;
 }
 
-const String& GetNameForFeature(mojom::FeaturePolicyFeature feature) {
+const String& GetNameForFeature(mojom::blink::FeaturePolicyFeature feature) {
   for (const auto& entry : GetDefaultFeatureNameMap()) {
     if (entry.value == feature)
       return entry.key;

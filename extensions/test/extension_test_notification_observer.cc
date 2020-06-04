@@ -11,9 +11,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
-#include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 
 namespace extensions {
@@ -22,7 +20,7 @@ namespace {
 
 // A callback that returns true if the condition has been met and takes no
 // arguments.
-using ConditionCallback = base::Callback<bool(void)>;
+using ConditionCallback = base::RepeatingCallback<bool(void)>;
 
 const Extension* GetNonTerminatedExtensions(const std::string& id,
                                             content::BrowserContext* context) {
@@ -35,9 +33,9 @@ const Extension* GetNonTerminatedExtensions(const std::string& id,
 ////////////////////////////////////////////////////////////////////////////////
 // ExtensionTestNotificationObserver::NotificationSet
 
-ExtensionTestNotificationObserver::NotificationSet::NotificationSet()
-    : process_manager_observer_(this) {}
-ExtensionTestNotificationObserver::NotificationSet::~NotificationSet() {}
+ExtensionTestNotificationObserver::NotificationSet::NotificationSet() = default;
+ExtensionTestNotificationObserver::NotificationSet::~NotificationSet() =
+    default;
 
 void ExtensionTestNotificationObserver::NotificationSet::Add(
     int type,
@@ -73,10 +71,8 @@ void ExtensionTestNotificationObserver::NotificationSet::
 ExtensionTestNotificationObserver::ExtensionTestNotificationObserver(
     content::BrowserContext* context)
     : context_(context),
-      extension_installs_observed_(0),
       extension_load_errors_observed_(0),
-      crx_installers_done_observed_(0),
-      registry_observer_(this) {
+      crx_installers_done_observed_(0) {
   if (context_)
     registry_observer_.Add(ExtensionRegistry::Get(context_));
 }
@@ -94,15 +90,6 @@ void ExtensionTestNotificationObserver::WaitForNotification(
   content::WindowedNotificationObserver(
       notification_type, content::NotificationService::AllSources())
       .Wait();
-}
-
-bool ExtensionTestNotificationObserver::WaitForExtensionInstallError() {
-  int before = extension_installs_observed_;
-  content::WindowedNotificationObserver(
-      NOTIFICATION_EXTENSION_INSTALL_ERROR,
-      content::NotificationService::AllSources())
-      .Wait();
-  return extension_installs_observed_ == before;
 }
 
 bool ExtensionTestNotificationObserver::WaitForExtensionLoadError() {
@@ -204,7 +191,7 @@ void ExtensionTestNotificationObserver::WaitForCondition(
 
   std::unique_ptr<base::CallbackList<void()>::Subscription> subscription;
   if (notification_set) {
-    subscription = notification_set->callback_list().Add(base::Bind(
+    subscription = notification_set->callback_list().Add(base::BindRepeating(
         &ExtensionTestNotificationObserver::MaybeQuit, base::Unretained(this)));
   }
   run_loop.Run();
@@ -215,7 +202,7 @@ void ExtensionTestNotificationObserver::WaitForCondition(
 
 void ExtensionTestNotificationObserver::MaybeQuit() {
   if (condition_.Run())
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
 }
 
 }  // namespace extensions

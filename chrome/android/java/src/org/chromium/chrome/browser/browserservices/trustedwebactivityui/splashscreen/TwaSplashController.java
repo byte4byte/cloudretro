@@ -6,31 +6,34 @@ package org.chromium.chrome.browser.browserservices.trustedwebactivityui.splashs
 
 import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 
+import static androidx.browser.trusted.TrustedWebActivityIntentBuilder.EXTRA_SPLASH_SCREEN_PARAMS;
+
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Matrix;
-import android.os.Build;
 import android.os.Bundle;
-import android.support.customtabs.TrustedWebUtils;
-import android.support.customtabs.TrustedWebUtils.SplashScreenParamKey;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
-import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
+import androidx.browser.customtabs.TrustedWebUtils;
+import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
+import androidx.browser.trusted.splashscreens.SplashScreenParamKey;
+
+import org.chromium.base.IntentUtils;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
+import org.chromium.chrome.browser.customtabs.BaseCustomTabActivity;
+import org.chromium.chrome.browser.customtabs.CustomTabOrientationController;
 import org.chromium.chrome.browser.customtabs.TranslucentCustomTabActivity;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.InflationObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.webapps.SplashController;
 import org.chromium.chrome.browser.webapps.SplashDelegate;
-import org.chromium.chrome.browser.webapps.SplashscreenObserver;
-import org.chromium.content_public.browser.ScreenOrientationProvider;
 import org.chromium.ui.base.ActivityWindowAndroid;
+import org.chromium.ui.util.ColorUtils;
 
 import javax.inject.Inject;
 
@@ -42,7 +45,7 @@ import javax.inject.Inject;
  * - TWA client app verifies conditions for showing splash screen. If the checks pass, it shows the
  * splash screen immediately.
  * - The client passes the URI to a file with the splash image to
- * {@link android.support.customtabs.CustomTabsService}. The image is decoded and put into
+ * {@link androidx.browser.customtabs.CustomTabsService}. The image is decoded and put into
  * {@link SplashImageHolder}.
  * - The client then launches a TWA, at which point the Bitmap is already available.
  * - ChromeLauncherActivity calls {@link #handleIntent}, which starts
@@ -60,43 +63,43 @@ import javax.inject.Inject;
  * gc-ed when it finishes its job (to that end, it removes all observers it has set).
  * If these lifecycle assumptions change, consider whether @ActivityScope needs to be added.
  */
-public class TwaSplashController
-        implements InflationObserver, SplashDelegate, SplashscreenObserver {
+public class TwaSplashController implements InflationObserver, SplashDelegate {
+    // TODO(pshmakov): move this to AndroidX.
+    private static final String KEY_SHOWN_IN_CLIENT =
+            "androidx.browser.trusted.KEY_SPLASH_SCREEN_SHOWN_IN_CLIENT";
+
     private final SplashController mSplashController;
     private final Activity mActivity;
     private final ActivityWindowAndroid mActivityWindowAndroid;
     private final ActivityLifecycleDispatcher mLifecycleDispatcher;
-    private final ScreenOrientationProvider mScreenOrientationProvider;
     private final SplashImageHolder mSplashImageCache;
-    private final CustomTabIntentDataProvider mIntentDataProvider;
+    private final BrowserServicesIntentDataProvider mIntentDataProvider;
 
     @Inject
     public TwaSplashController(SplashController splashController, Activity activity,
             ActivityWindowAndroid activityWindowAndroid,
             ActivityLifecycleDispatcher lifecycleDispatcher,
-            ScreenOrientationProvider screenOrientationProvider, SplashImageHolder splashImageCache,
-            CustomTabIntentDataProvider intentDataProvider) {
+            CustomTabOrientationController orientationController,
+            SplashImageHolder splashImageCache,
+            BrowserServicesIntentDataProvider intentDataProvider) {
         mSplashController = splashController;
         mActivity = activity;
         mActivityWindowAndroid = activityWindowAndroid;
         mLifecycleDispatcher = lifecycleDispatcher;
-        mScreenOrientationProvider = screenOrientationProvider;
         mSplashImageCache = splashImageCache;
         mIntentDataProvider = intentDataProvider;
 
         long splashHideAnimationDurationMs = IntentUtils.safeGetInt(
-                getSplashScreenParamsFromIntent(), SplashScreenParamKey.FADE_OUT_DURATION_MS, 0);
+                getSplashScreenParamsFromIntent(), SplashScreenParamKey.KEY_FADE_OUT_DURATION_MS,
+                0);
+        boolean isWindowInitiallyTranslucent =
+                BaseCustomTabActivity.isWindowInitiallyTranslucent(activity);
         mSplashController.setConfig(
-                this, true /* isWindowInitiallyTranslucent */, splashHideAnimationDurationMs);
+                this, isWindowInitiallyTranslucent, splashHideAnimationDurationMs);
+        orientationController.delayOrientationRequestsIfNeeded(
+                mSplashController, isWindowInitiallyTranslucent);
 
-        mSplashController.addObserver(this);
         lifecycleDispatcher.register(this);
-
-        // Setting the screen orientation while the activity is translucent throws an exception on
-        // O (but not on O MR1). Delay setting it.
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.O) {
-            mScreenOrientationProvider.delayOrientationRequests(mActivityWindowAndroid);
-        }
     }
 
     @Override
@@ -114,8 +117,7 @@ public class TwaSplashController
     }
 
     @Override
-    public void onSplashHidden(Tab tab, @SplashController.SplashHidesReason int reason,
-            long startTimestamp, long endTimestamp) {
+    public void onSplashHidden(Tab tab, long startTimestamp, long endTimestamp) {
         mLifecycleDispatcher.unregister(this); // Unregister to get gc-ed
     }
 
@@ -132,22 +134,15 @@ public class TwaSplashController
         mSplashController.bringSplashBackToFront();
     }
 
-    @Override
-    public void onTranslucencyRemoved() {
-        mScreenOrientationProvider.runDelayedOrientationRequests(mActivityWindowAndroid);
-    }
-
-    @Override
-    public void onSplashscreenHidden(long startTimestamp, long endTimestamp) {}
-
     private void applyCustomizationsToSplashScreenView(ImageView imageView) {
         Bundle params = getSplashScreenParamsFromIntent();
 
-        int backgroundColor =
-                IntentUtils.safeGetInt(params, SplashScreenParamKey.BACKGROUND_COLOR, Color.WHITE);
+        int backgroundColor = IntentUtils.safeGetInt(params,
+                SplashScreenParamKey.KEY_BACKGROUND_COLOR, Color.WHITE);
         imageView.setBackgroundColor(ColorUtils.getOpaqueColor(backgroundColor));
 
-        int scaleTypeOrdinal = IntentUtils.safeGetInt(params, SplashScreenParamKey.SCALE_TYPE, -1);
+        int scaleTypeOrdinal = IntentUtils.safeGetInt(params,
+                SplashScreenParamKey.KEY_SCALE_TYPE, -1);
         ImageView.ScaleType[] scaleTypes = ImageView.ScaleType.values();
         ImageView.ScaleType scaleType;
         if (scaleTypeOrdinal < 0 || scaleTypeOrdinal >= scaleTypes.length) {
@@ -159,7 +154,7 @@ public class TwaSplashController
 
         if (scaleType != ImageView.ScaleType.MATRIX) return;
         float[] matrixValues = IntentUtils.safeGetFloatArray(
-                params, SplashScreenParamKey.IMAGE_TRANSFORMATION_MATRIX);
+                params, SplashScreenParamKey.KEY_IMAGE_TRANSFORMATION_MATRIX);
         if (matrixValues == null || matrixValues.length != 9) return;
         Matrix matrix = new Matrix();
         matrix.setValues(matrixValues);
@@ -167,8 +162,7 @@ public class TwaSplashController
     }
 
     private Bundle getSplashScreenParamsFromIntent() {
-        return mIntentDataProvider.getIntent().getBundleExtra(
-                TrustedWebUtils.EXTRA_SPLASH_SCREEN_PARAMS);
+        return mIntentDataProvider.getIntent().getBundleExtra(EXTRA_SPLASH_SCREEN_PARAMS);
     }
 
     /**
@@ -177,9 +171,8 @@ public class TwaSplashController
     public static boolean intentIsForTwaWithSplashScreen(Intent intent) {
         boolean isTrustedWebActivity = IntentUtils.safeGetBooleanExtra(
                 intent, TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, false);
-        boolean requestsSplashScreen = IntentUtils.safeGetParcelableExtra(
-                                               intent, TrustedWebUtils.EXTRA_SPLASH_SCREEN_PARAMS)
-                != null;
+        boolean requestsSplashScreen =
+                IntentUtils.safeGetParcelableExtra(intent, EXTRA_SPLASH_SCREEN_PARAMS) != null;
         return isTrustedWebActivity && requestsSplashScreen;
     }
 
@@ -192,7 +185,18 @@ public class TwaSplashController
     public static boolean handleIntent(Activity activity, Intent intent) {
         if (!intentIsForTwaWithSplashScreen(intent)) return false;
 
-        intent.setClassName(activity, TranslucentCustomTabActivity.class.getName());
+        Bundle params = IntentUtils.safeGetBundleExtra(
+                intent, TrustedWebActivityIntentBuilder.EXTRA_SPLASH_SCREEN_PARAMS);
+        boolean shownInClient = IntentUtils.safeGetBoolean(params, KEY_SHOWN_IN_CLIENT, true);
+        // shownInClient is "true" by default for the following reasons:
+        // - For compatibility with older clients which don't use this bundle key.
+        // - Because getting "false" when it should be "true" leads to more severe visual glitches,
+        // than vice versa.
+        if (shownInClient) {
+            // If splash screen was shown in client, we must launch a translucent activity to
+            // ensure smooth transition.
+            intent.setClassName(activity, TranslucentCustomTabActivity.class.getName());
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
         activity.startActivity(intent);
         activity.overridePendingTransition(0, 0);

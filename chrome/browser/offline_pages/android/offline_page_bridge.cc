@@ -15,13 +15,15 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "chrome/android/chrome_jni_headers/OfflinePageBridge_jni.h"
 #include "chrome/browser/android/tab_android.h"
@@ -33,10 +35,11 @@
 #include "chrome/browser/offline_pages/recent_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
+#include "chrome/browser/profiles/profile_key.h"
+#include "chrome/browser/profiles/profile_key_android.h"
 #include "components/offline_pages/core/archive_validator.h"
 #include "components/offline_pages/core/background/request_queue_results.h"
 #include "components/offline_pages/core/background/save_page_request.h"
-#include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/offline_page_client_policy.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_item.h"
@@ -305,9 +308,7 @@ std::string OfflinePageBridge::GetEncodedOriginApp(
 OfflinePageBridge::OfflinePageBridge(JNIEnv* env,
                                      SimpleFactoryKey* key,
                                      OfflinePageModel* offline_page_model)
-    : key_(key),
-      offline_page_model_(offline_page_model),
-      weak_ptr_factory_(this) {
+    : key_(key), offline_page_model_(offline_page_model) {
   ScopedJavaLocalRef<jobject> j_offline_page_bridge =
       Java_OfflinePageBridge_create(env, reinterpret_cast<jlong>(this));
   java_ref_.Reset(j_offline_page_bridge);
@@ -712,7 +713,7 @@ jboolean OfflinePageBridge::IsTemporaryNamespace(
     const base::android::JavaParamRef<jobject>& obj,
     const base::android::JavaParamRef<jstring>& j_name_space) {
   std::string name_space(ConvertJavaStringToUTF8(env, j_name_space));
-  return (offline_page_model_->GetPolicyController()->IsTemporary(name_space));
+  return GetPolicy(name_space).lifetime_type == LifetimeType::TEMPORARY;
 }
 
 ScopedJavaLocalRef<jobject> OfflinePageBridge::GetOfflinePage(
@@ -777,11 +778,11 @@ void OfflinePageBridge::GetLoadUrlParamsForOpeningMhtmlFileOrContent(
   }
 
   ScopedJavaGlobalRef<jobject> j_callback_ref(j_callback_obj);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::Bind(&ArchiveValidator::GetSizeAndComputeDigest, file_path),
-      base::Bind(&OfflinePageBridge::GetSizeAndComputeDigestDone,
-                 weak_ptr_factory_.GetWeakPtr(), j_callback_ref, url));
+      base::BindOnce(&ArchiveValidator::GetSizeAndComputeDigest, file_path),
+      base::BindOnce(&OfflinePageBridge::GetSizeAndComputeDigestDone,
+                     weak_ptr_factory_.GetWeakPtr(), j_callback_ref, url));
 }
 
 jboolean OfflinePageBridge::IsShowingTrustedOfflinePage(
@@ -812,13 +813,13 @@ void OfflinePageBridge::GetPageByOfflineIdDone(
     return;
   }
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-      base::Bind(&ArchiveValidator::ValidateFile, offline_page->file_path,
-                 offline_page->file_size, offline_page->digest),
-      base::Bind(&ValidateFileCallback, launch_location, j_callback_obj,
-                 offline_page->offline_id, offline_page->url,
-                 offline_page->file_path));
+      base::BindOnce(&ArchiveValidator::ValidateFile, offline_page->file_path,
+                     offline_page->file_size, offline_page->digest),
+      base::BindOnce(&ValidateFileCallback, launch_location, j_callback_obj,
+                     offline_page->offline_id, offline_page->url,
+                     offline_page->file_path));
 }
 
 void OfflinePageBridge::GetSizeAndComputeDigestDone(

@@ -64,11 +64,9 @@ OmniboxSuggestionIconType IconTypeFromMatchAndAnswerType(
     case AutocompleteMatchType::TAB_SEARCH_DEPRECATED:
       return DEFAULT_FAVICON;
     case AutocompleteMatchType::CONTACT_DEPRECATED:
-    case AutocompleteMatchType::SEARCH_HISTORY:
     case AutocompleteMatchType::SEARCH_OTHER_ENGINE:
     case AutocompleteMatchType::SEARCH_SUGGEST:
     case AutocompleteMatchType::SEARCH_SUGGEST_ENTITY:
-    case AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED:
     case AutocompleteMatchType::SEARCH_SUGGEST_PROFILE:
     case AutocompleteMatchType::SEARCH_SUGGEST_TAIL:
     case AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED:
@@ -76,6 +74,9 @@ OmniboxSuggestionIconType IconTypeFromMatchAndAnswerType(
     case AutocompleteMatchType::CLIPBOARD_TEXT:
     case AutocompleteMatchType::CLIPBOARD_IMAGE:
       return SEARCH;
+    case AutocompleteMatchType::SEARCH_HISTORY:
+    case AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED:
+      return SEARCH_HISTORY;
     case AutocompleteMatchType::CALCULATOR:
       return CALCULATOR;
     case AutocompleteMatchType::EXTENSION_APP_DEPRECATED:
@@ -96,7 +97,7 @@ OmniboxSuggestionIconType IconTypeFromMatchAndAnswerType(
   if (isAnswer && match.answer->second_line().image_url().is_valid()) {
     iconType = OmniboxIconTypeImage;
     imageURL = match.answer->second_line().image_url();
-  } else if (!match.image_url.empty()) {
+  } else if (!match.image_url.is_empty()) {
     iconType = OmniboxIconTypeImage;
     imageURL = GURL(match.image_url);
   } else if (!AutocompleteMatch::IsSearchType(match.type) &&

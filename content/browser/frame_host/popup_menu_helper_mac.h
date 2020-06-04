@@ -13,7 +13,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_observer.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/mojom/popup/popup.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 
 #ifdef __OBJC__
@@ -31,7 +35,6 @@ namespace content {
 class RenderFrameHost;
 class RenderFrameHostImpl;
 class RenderWidgetHostViewMac;
-struct MenuItem;
 
 class PopupMenuHelper : public RenderWidgetHostObserver {
  public:
@@ -43,7 +46,9 @@ class PopupMenuHelper : public RenderWidgetHostObserver {
   // Creates a PopupMenuHelper that will notify |render_frame_host| when a user
   // selects or cancels the popup. |delegate| is notified when the menu is
   // closed.
-  PopupMenuHelper(Delegate* delegate, RenderFrameHost* render_frame_host);
+  PopupMenuHelper(Delegate* delegate,
+                  RenderFrameHost* render_frame_host,
+                  mojo::PendingRemote<blink::mojom::ExternalPopup> popup);
   ~PopupMenuHelper() override;
   void Hide();
 
@@ -53,7 +58,7 @@ class PopupMenuHelper : public RenderWidgetHostObserver {
                      int item_height,
                      double item_font_size,
                      int selected_item,
-                     const std::vector<MenuItem>& items,
+                     std::vector<blink::mojom::MenuItemPtr> items,
                      bool right_aligned,
                      bool allow_multiple_selection);
 
@@ -71,15 +76,16 @@ class PopupMenuHelper : public RenderWidgetHostObserver {
 
   Delegate* delegate_;  // Weak. Owns |this|.
 
-  ScopedObserver<RenderWidgetHost, RenderWidgetHostObserver> observer_;
-  RenderFrameHostImpl* render_frame_host_;
-  WebMenuRunner* menu_runner_;
-  bool popup_was_hidden_;
+  ScopedObserver<RenderWidgetHost, RenderWidgetHostObserver> observer_{this};
+  base::WeakPtr<RenderFrameHostImpl> render_frame_host_;
+  mojo::Remote<blink::mojom::ExternalPopup> popup_;
+  WebMenuRunner* menu_runner_ = nil;
+  bool popup_was_hidden_ = false;
 
   // Controls whether messages can be pumped during the menu fade.
   std::unique_ptr<base::ScopedPumpMessagesInPrivateModes> pump_in_fade_;
 
-  base::WeakPtrFactory<PopupMenuHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<PopupMenuHelper> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PopupMenuHelper);
 };

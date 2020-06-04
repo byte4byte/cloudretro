@@ -23,10 +23,12 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
 #include "chrome/browser/ui/ash/launcher/launcher_controller_helper.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
-#include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_id.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -37,6 +39,9 @@
 #include "components/sync/model/string_ordinal.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "extensions/common/constants.h"
+
+using syncer::UserSelectableOsType;
+using syncer::UserSelectableType;
 
 namespace {
 
@@ -56,13 +61,25 @@ const char* kDefaultPinnedApps10Apps[] = {extension_misc::kGmailAppId,
                                           extension_misc::kGoogleSheetsAppId,
                                           extension_misc::kGoogleSlidesAppId,
                                           extension_misc::kFilesManagerAppId,
-                                          app_list::kInternalAppIdCamera,
+                                          extension_misc::kCameraAppId,
                                           extension_misc::kGooglePhotosAppId,
                                           arc::kPlayStoreAppId};
+
+const char* kTabletFormFactorDefaultPinnedApps[] = {
+    arc::kGmailAppId, extension_misc::kGoogleDocAppId, arc::kYoutubeAppId,
+    arc::kPlayStoreAppId};
 
 const char kDefaultPinnedAppsKey[] = "default";
 const char kDefaultPinnedApps7AppsKey[] = "7apps";
 const char kDefaultPinnedApps10AppsKey[] = "10apps";
+
+bool IsLegacyCameraAppId(const std::string& app_id) {
+  return app_id ==
+             "ngmkobaiicipbagcngcmilfkhejlnfci" ||  // Migration Camera App.
+         app_id == "goamfaniemdfcajgcmmflhchgkmbngka" ||  // Google Camera App.
+         app_id == "obfofkigjfamlldmipdegnjlcpincibc" ||  // Legacy Camera App.
+         app_id == "iniodglblcgmngkgdipeiclkdjjpnlbn";  // Internal Camera App.
+}
 
 bool IsAppIdArcPackage(const std::string& app_id) {
   return app_id.find('.') != app_id.npos;
@@ -105,12 +122,30 @@ struct ComparePinInfo {
   }
 };
 
+// Helper function that returns the right pref string based on device type.
+// This is required because tablet form factor devices do not sync app
+// positions and pin preferences.
+const std::string GetShelfDefaultPinLayoutPref() {
+  if (chromeos::switches::IsTabletFormFactor())
+    return prefs::kShelfDefaultPinLayoutRollsForTabletFormFactor;
+
+  return prefs::kShelfDefaultPinLayoutRolls;
+}
+
+// Returns true in case some configuration was rolled.
+bool IsAnyDefaultPinLayoutRolled(Profile* profile) {
+  const auto* layouts_rolled =
+      profile->GetPrefs()->GetList(GetShelfDefaultPinLayoutPref());
+
+  return layouts_rolled && !layouts_rolled->GetList().empty();
+}
+
 // Returns true in case default pin layout |default_pin_layout| was already
 // rolled.
 bool IsDefaultPinLayoutRolled(Profile* profile,
                               const std::string& default_pin_layout) {
   const auto* layouts_rolled =
-      profile->GetPrefs()->GetList(prefs::kShelfDefaultPinLayoutRolls);
+      profile->GetPrefs()->GetList(GetShelfDefaultPinLayoutPref());
   if (!layouts_rolled)
     return false;
 
@@ -127,8 +162,7 @@ void MarkDefaultPinLayoutRolled(Profile* profile,
                                 const std::string& default_pin_layout) {
   DCHECK(!IsDefaultPinLayoutRolled(profile, default_pin_layout));
 
-  ListPrefUpdate update(profile->GetPrefs(),
-                        prefs::kShelfDefaultPinLayoutRolls);
+  ListPrefUpdate update(profile->GetPrefs(), GetShelfDefaultPinLayoutPref());
   update->AppendString(default_pin_layout);
 }
 
@@ -142,23 +176,62 @@ bool IsSafeToApplyDefaultPinLayout(Profile* profile) {
   if (!sync_service)
     return true;
 
-  const syncer::UserSelectableTypeSet selected_sync =
-      sync_service->GetUserSettings()->GetSelectedTypes();
+  // Tablet form-factor devices do not have position sync.
+  if (chromeos::switches::IsTabletFormFactor())
+    return true;
+
+  const syncer::SyncUserSettings* settings = sync_service->GetUserSettings();
 
   // If App sync is not yet started, don't apply default pin apps once synced
   // apps is likely override it. There is a case when App sync is disabled and
   // in last case local cache is available immediately.
-  if (selected_sync.Has(syncer::UserSelectableType::kApps) &&
-      !app_list::AppListSyncableServiceFactory::GetForProfile(profile)
-           ->IsSyncing()) {
-    return false;
+  if (chromeos::features::IsSplitSettingsSyncEnabled()) {
+    if (settings->GetSelectedOsTypes().Has(UserSelectableOsType::kOsApps) &&
+        !app_list::AppListSyncableServiceFactory::GetForProfile(profile)
+             ->IsSyncing()) {
+      return false;
+    }
+  } else {
+    if (settings->GetSelectedTypes().Has(UserSelectableType::kApps) &&
+        !app_list::AppListSyncableServiceFactory::GetForProfile(profile)
+             ->IsSyncing()) {
+      return false;
+    }
   }
 
   // If shelf pin layout rolls preference is not started yet then we cannot say
   // if we rolled layout or not.
-  if (selected_sync.Has(syncer::UserSelectableType::kPreferences) &&
-      !PrefServiceSyncableFromProfile(profile)->IsSyncing()) {
+  if (chromeos::features::IsSplitSettingsSyncEnabled()) {
+    if (settings->GetSelectedOsTypes().Has(
+            UserSelectableOsType::kOsPreferences) &&
+        !PrefServiceSyncableFromProfile(profile)->IsSyncing()) {
+      return false;
+    }
+  } else {
+    if (settings->GetSelectedTypes().Has(UserSelectableType::kPreferences) &&
+        !PrefServiceSyncableFromProfile(profile)->IsSyncing()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Returns true in case |pins_from_sync_raw| is empty or represents default app
+// set |kDefaultPinnedApps| plus Chrome app.
+bool IsCurrentDefaultOrEmpty(const std::set<std::string>& pins_from_sync_raw) {
+  if (pins_from_sync_raw.empty())
+    return true;
+
+  // Chrome is explicitly pinned regardless of configuration.
+  if (pins_from_sync_raw.size() != base::size(kDefaultPinnedApps) + 1)
     return false;
+
+  if (!pins_from_sync_raw.count(extension_misc::kChromeAppId))
+    return false;
+
+  for (const char* default_app_id : kDefaultPinnedApps) {
+    if (!pins_from_sync_raw.count(default_app_id))
+      return false;
   }
 
   return true;
@@ -187,6 +260,9 @@ void RegisterChromeLauncherUserPrefs(
   registry->RegisterListPref(
       prefs::kShelfDefaultPinLayoutRolls,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+  registry->RegisterListPref(
+      prefs::kShelfDefaultPinLayoutRollsForTabletFormFactor,
+      PrefRegistry::NO_REGISTRATION_FLAGS);
 }
 
 void InitLocalPref(PrefService* prefs, const char* local, const char* synced) {
@@ -389,22 +465,55 @@ std::vector<ash::ShelfID> GetPinnedAppsFromSync(
   // Empty pins indicates that sync based pin model is used for the first
   // time. In the normal workflow we have at least Chrome browser pin info.
 
+  // Contains pins from sync regardless either real app available on device or
+  // not.
+  std::set<std::string> pins_from_sync_raw;
+
+  bool has_camera_app = false;
+  syncer::StringOrdinal legacy_camera_pinned_position;
+
   for (const auto& sync_peer : syncable_service->sync_items()) {
+    if (sync_peer.first == extension_misc::kCameraAppId) {
+      has_camera_app = true;
+    }
+
     if (!sync_peer.second->item_pin_ordinal.IsValid())
       continue;
 
-    // Don't include apps that currently do not exist on device.
+    pins_from_sync_raw.insert(sync_peer.first);
+
     if (sync_peer.first != extension_misc::kChromeAppId &&
         !helper->IsValidIDForCurrentUser(sync_peer.first)) {
+      // Don't include apps that currently do not exist on device.
+
+      // For legacy camera app which has a valid pinned position, use this
+      // position to set the camera app later.
+      if (IsLegacyCameraAppId(sync_peer.first) &&
+          !legacy_camera_pinned_position.IsValid()) {
+        legacy_camera_pinned_position = sync_peer.second->item_pin_ordinal;
+
+        // Wipe the position for legacy camera app.
+        syncable_service->SetPinPosition(sync_peer.first,
+                                         syncer::StringOrdinal());
+      }
       continue;
     }
 
-    // Prevent old app camera pinning.
-    if (IsCameraApp(sync_peer.first))
-      continue;
+    std::string pinned_app_id = sync_peer.first;
+    pin_infos.emplace_back(pinned_app_id, sync_peer.second->item_pin_ordinal);
+  }
 
-    pin_infos.emplace_back(
-        PinInfo(sync_peer.first, sync_peer.second->item_pin_ordinal));
+  syncer::StringOrdinal camera_app_position =
+      syncable_service->GetPinPosition(extension_misc::kCameraAppId);
+  // If the camera app is in the sync list with no valid position and there is a
+  // legacy camera app which has valid position, use this position for the
+  // camera app.
+  if (has_camera_app && !camera_app_position.IsValid() &&
+      legacy_camera_pinned_position.IsValid()) {
+    syncable_service->SetPinPosition(extension_misc::kCameraAppId,
+                                     legacy_camera_pinned_position);
+    pin_infos.emplace_back(extension_misc::kCameraAppId,
+                           legacy_camera_pinned_position);
   }
 
   // Make sure Chrome is always pinned.
@@ -421,8 +530,18 @@ std::vector<ash::ShelfID> GetPinnedAppsFromSync(
   // Apply default apps in case profile syncing is done. Otherwise there is a
   // risk that applied default apps would be overwritten by sync once it is
   // completed. prefs::kPolicyPinnedLauncherApps overrides any default layout.
-  std::string shelf_layout = kDefaultPinnedAppsKey;
-  if (base::FeatureList::IsEnabled(kEnableExtendedShelfLayout)) {
+  // This also limits applying experimental configuration only for users who
+  // have the default pin layout specified by |kDefaultPinnedApps| or for
+  // fresh users who have no pin information at all. Default configuration is
+  // not applied if any of experimental layout was rolled.
+  std::string shelf_layout = IsAnyDefaultPinLayoutRolled(helper->profile())
+                                 ? std::string()
+                                 : kDefaultPinnedAppsKey;
+  // Set to true in case default configuration has to be reset in order to let
+  // new layout takes effect.
+  bool reset_default_configuration = false;
+  if (base::FeatureList::IsEnabled(kEnableExtendedShelfLayout) &&
+      IsCurrentDefaultOrEmpty(pins_from_sync_raw)) {
     const int forced_shelf_layout_app_count =
         kEnableExtendedShelfLayoutParam.Get();
     switch (forced_shelf_layout_app_count) {
@@ -430,9 +549,11 @@ std::vector<ash::ShelfID> GetPinnedAppsFromSync(
         shelf_layout = kDefaultPinnedAppsKey;
         break;
       case 7:
+        reset_default_configuration = true;
         shelf_layout = kDefaultPinnedApps7AppsKey;
         break;
       case 10:
+        reset_default_configuration = true;
         shelf_layout = kDefaultPinnedApps10AppsKey;
         break;
       default:
@@ -443,14 +564,28 @@ std::vector<ash::ShelfID> GetPinnedAppsFromSync(
 
   if (!prefs->HasPrefPath(prefs::kPolicyPinnedLauncherApps) &&
       IsSafeToApplyDefaultPinLayout(helper->profile()) &&
+      !shelf_layout.empty() &&
       !IsDefaultPinLayoutRolled(helper->profile(), shelf_layout)) {
     VLOG(1) << "Roll default shelf pin layout " << shelf_layout;
+    if (reset_default_configuration) {
+      VLOG(1) << "Reset previous default configuration";
+      pin_infos.clear();
+      pin_infos.emplace_back(
+          PinInfo(extension_misc::kChromeAppId, chrome_position));
+      for (const char* default_app_id : kDefaultPinnedApps) {
+        syncable_service->SetPinPosition(default_app_id,
+                                         syncer::StringOrdinal());
+      }
+    }
     std::vector<std::string> default_app_ids;
     if (shelf_layout == kDefaultPinnedApps7AppsKey) {
       for (const char* default_app_id : kDefaultPinnedApps7Apps)
         default_app_ids.push_back(default_app_id);
     } else if (shelf_layout == kDefaultPinnedApps10AppsKey) {
       for (const char* default_app_id : kDefaultPinnedApps10Apps)
+        default_app_ids.push_back(default_app_id);
+    } else if (chromeos::switches::IsTabletFormFactor()) {
+      for (const char* default_app_id : kTabletFormFactorDefaultPinnedApps)
         default_app_ids.push_back(default_app_id);
     } else {
       for (const char* default_app_id : kDefaultPinnedApps)
@@ -502,8 +637,6 @@ void SetPinPosition(Profile* profile,
                     const ash::ShelfID& shelf_id_before,
                     const std::vector<ash::ShelfID>& shelf_ids_after) {
   DCHECK(profile);
-  // Camera apps are mapped to the internal app.
-  DCHECK(!IsCameraApp(shelf_id.app_id));
 
   const std::string& app_id = shelf_id.app_id;
   if (!shelf_id.launch_id.empty()) {

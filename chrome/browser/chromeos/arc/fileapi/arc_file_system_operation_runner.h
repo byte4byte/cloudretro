@@ -16,12 +16,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_file_system_bridge.h"
-#include "components/arc/common/file_system.mojom.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
+#include "components/arc/mojom/file_system.mojom-forward.h"
 #include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "storage/browser/fileapi/watcher_manager.h"
+#include "storage/browser/file_system/watcher_manager.h"
 
 class BrowserContextKeyedServiceFactory;
 
@@ -227,7 +227,7 @@ class ArcFileSystemOperationRunner
 
   base::ObserverList<Observer>::Unchecked observer_list_;
 
-  base::WeakPtrFactory<ArcFileSystemOperationRunner> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcFileSystemOperationRunner> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcFileSystemOperationRunner);
 };

@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "ash/lock_screen_action/lock_screen_note_launcher.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "ash/shell.h"
 #include "ash/system/power/scoped_backlights_forced_off.h"
 #include "ash/tray_action/tray_action.h"
@@ -30,8 +30,7 @@ constexpr base::TimeDelta kNoteLaunchTimeout =
 LockScreenNoteDisplayStateHandler::LockScreenNoteDisplayStateHandler(
     BacklightsForcedOffSetter* backlights_forced_off_setter)
     : backlights_forced_off_setter_(backlights_forced_off_setter),
-      backlights_forced_off_observer_(this),
-      weak_ptr_factory_(this) {
+      backlights_forced_off_observer_(this) {
   backlights_forced_off_observer_.Add(backlights_forced_off_setter_);
 }
 
@@ -70,8 +69,8 @@ void LockScreenNoteDisplayStateHandler::AttemptNoteLaunchForStylusEject() {
   DCHECK(!launch_timer_.IsRunning());
   launch_timer_.Start(
       FROM_HERE, kNoteLaunchTimeout,
-      base::Bind(&LockScreenNoteDisplayStateHandler::NoteLaunchDone,
-                 weak_ptr_factory_.GetWeakPtr(), false));
+      base::BindOnce(&LockScreenNoteDisplayStateHandler::NoteLaunchDone,
+                     weak_ptr_factory_.GetWeakPtr(), false));
 
   // Delay note launch if backlights are forced off, but the screen hasn't
   // been turned off yet - the note should be launched when the pending

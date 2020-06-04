@@ -9,26 +9,25 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
 #include "base/threading/thread_checker.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
-#include "components/arc/common/video_decode_accelerator.mojom.h"
-#include "components/arc/common/video_encode_accelerator.mojom.h"
-#include "components/arc/common/video_protected_buffer_allocator.mojom.h"
+#include "components/arc/mojom/video_decode_accelerator.mojom.h"
+#include "components/arc/mojom/video_encode_accelerator.mojom.h"
+#include "components/arc/mojom/video_protected_buffer_allocator.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_service_registry.h"
-#include "content/public/common/service_manager_connection.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace arc {
 
@@ -61,7 +60,7 @@ class VideoAcceleratorFactoryService : public mojom::VideoAcceleratorFactory {
 
   void CreateDecodeAccelerator(
       mojom::VideoDecodeAcceleratorRequest request) override {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(
             &content::BindInterfaceInGpuProcess<mojom::VideoDecodeAccelerator>,
@@ -70,7 +69,7 @@ class VideoAcceleratorFactoryService : public mojom::VideoAcceleratorFactory {
 
   void CreateEncodeAccelerator(
       mojom::VideoEncodeAcceleratorRequest request) override {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(
             &content::BindInterfaceInGpuProcess<mojom::VideoEncodeAccelerator>,
@@ -79,11 +78,10 @@ class VideoAcceleratorFactoryService : public mojom::VideoAcceleratorFactory {
 
   void CreateProtectedBufferAllocator(
       mojom::VideoProtectedBufferAllocatorRequest request) override {
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(&content::BindInterfaceInGpuProcess<
-                           mojom::VideoProtectedBufferAllocator>,
-                       std::move(request)));
+    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
+                   base::BindOnce(&content::BindInterfaceInGpuProcess<
+                                      mojom::VideoProtectedBufferAllocator>,
+                                  std::move(request)));
   }
 
  private:
@@ -132,10 +130,11 @@ void GpuArcVideoServiceHost::OnBootstrapVideoAcceleratorFactory(
       channel.TakeRemoteEndpoint().TakePlatformHandle());
   std::move(callback).Run(std::move(client_handle), pipe_name);
 
-  // The binding will be removed automatically, when the binding is destroyed.
-  video_accelerator_factory_bindings_.AddBinding(
+  // The receiver will be removed automatically, when the receiver is destroyed.
+  video_accelerator_factory_receivers_.Add(
       video_accelerator_factory_.get(),
-      mojom::VideoAcceleratorFactoryRequest(std::move(server_pipe)));
+      mojo::PendingReceiver<mojom::VideoAcceleratorFactory>(
+          std::move(server_pipe)));
 }
 
 }  // namespace arc

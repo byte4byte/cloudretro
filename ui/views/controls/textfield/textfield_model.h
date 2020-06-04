@@ -129,6 +129,9 @@ class VIEWS_EXPORT TextfieldModel {
   // will be confirmed, which may alter the specified selection range start.
   bool MoveCursorTo(const gfx::SelectionModel& cursor);
 
+  // Sugar for MoveCursorTo({0, CURSOR_FORWARD}).
+  bool MoveCursorTo(size_t pos);
+
   // Calls the corresponding function on the associated RenderText instance. Any
   // composition text will be confirmed.
   bool MoveCursorTo(const gfx::Point& point, bool select);
@@ -224,6 +227,8 @@ class VIEWS_EXPORT TextfieldModel {
 
   // Puts the text in the specified range into composition mode.
   // This method should not be called with composition text or an invalid range.
+  // The provided range is checked against the string's length, if |range| is
+  // out of bounds, the composition will be cleared.
   void SetCompositionFromExistingText(const gfx::Range& range);
 
   // Converts current composition text into final content.

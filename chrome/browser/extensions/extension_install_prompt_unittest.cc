@@ -18,7 +18,7 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/image_loader.h"
@@ -62,6 +62,16 @@ void VerifyPromptPermissionsCallback(
   quit_closure.Run();
 }
 
+void VerifyPromptWithholdingUICallback(
+    const base::Closure& quit_closure,
+    const bool should_display,
+    ExtensionInstallPromptShowParams* params,
+    const ExtensionInstallPrompt::DoneCallback& done_callback,
+    std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
+  EXPECT_EQ(should_display, prompt->ShouldDisplayWithholdingUI());
+  quit_closure.Run();
+}
+
 void SetImage(gfx::Image* image_out,
               const base::Closure& quit_closure,
               const gfx::Image& image_in) {
@@ -85,7 +95,7 @@ class ExtensionInstallPromptUnitTest : public testing::Test {
   Profile* profile() { return profile_.get(); }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstallPromptUnitTest);
@@ -202,6 +212,66 @@ TEST_F(ExtensionInstallPromptTestWithService, ExtensionInstallPromptIconsTest) {
                                  run_loop.QuitClosure(), *app_icon.bitmap()));
     run_loop.Run();
   }
+}
+
+class ExtensionInstallPromptTestWithholdingAllowed
+    : public ExtensionInstallPromptUnitTest {
+ public:
+  ExtensionInstallPromptTestWithholdingAllowed() {
+    scoped_feature_list_.InitAndEnableFeature(
+        extensions_features::kAllowWithholdingExtensionPermissionsOnInstall);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+TEST_F(ExtensionInstallPromptTestWithholdingAllowed,
+       PromptShouldShowWithholdingUI) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("test").AddPermission("<all_urls>").Build();
+  content::TestWebContentsFactory factory;
+  ExtensionInstallPrompt prompt(factory.CreateWebContents(profile()));
+  base::RunLoop run_loop;
+
+  prompt.ShowDialog(ExtensionInstallPrompt::DoneCallback(), extension.get(),
+                    nullptr,
+                    base::Bind(&VerifyPromptWithholdingUICallback,
+                               run_loop.QuitClosure(), true));
+  run_loop.Run();
+}
+
+TEST_F(ExtensionInstallPromptTestWithholdingAllowed,
+       DoesntShowForNoHostsRequested) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("no_host").AddPermission("tabs").Build();
+  content::TestWebContentsFactory factory;
+  ExtensionInstallPrompt prompt(factory.CreateWebContents(profile()));
+  base::RunLoop run_loop;
+
+  prompt.ShowDialog(ExtensionInstallPrompt::DoneCallback(), extension.get(),
+                    nullptr,
+                    base::Bind(&VerifyPromptWithholdingUICallback,
+                               run_loop.QuitClosure(), false));
+  run_loop.Run();
+}
+
+TEST_F(ExtensionInstallPromptTestWithholdingAllowed,
+       DoesntShowForWithholdingNotAllowed) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("all_hosts")
+          .AddPermission("<all_urls>")
+          .SetLocation(Manifest::EXTERNAL_POLICY)
+          .Build();
+  content::TestWebContentsFactory factory;
+  ExtensionInstallPrompt prompt(factory.CreateWebContents(profile()));
+  base::RunLoop run_loop;
+
+  prompt.ShowDialog(ExtensionInstallPrompt::DoneCallback(), extension.get(),
+                    nullptr,
+                    base::Bind(&VerifyPromptWithholdingUICallback,
+                               run_loop.QuitClosure(), false));
+  run_loop.Run();
 }
 
 }  // namespace extensions

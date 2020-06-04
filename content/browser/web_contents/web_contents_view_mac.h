@@ -21,7 +21,9 @@
 #include "content/common/drag_event_source_info.h"
 #include "content/common/web_contents_ns_view_bridge.mojom.h"
 #include "content/public/browser/visibility.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "third_party/blink/public/mojom/popup/popup.mojom.h"
 #import "ui/base/cocoa/views_hostable.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -73,15 +75,12 @@ class WebContentsViewMac : public WebContentsView,
   void FocusThroughTabTraversal(bool reverse) override;
   DropData* GetDropData() const override;
   gfx::Rect GetViewBounds() const override;
-  void CreateView(const gfx::Size& initial_size,
-                  gfx::NativeView context) override;
+  void CreateView(gfx::NativeView context) override;
   RenderWidgetHostViewBase* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host,
-      bool is_guest_view_hack) override;
+      RenderWidgetHost* render_widget_host) override;
   RenderWidgetHostViewBase* CreateViewForChildWidget(
       RenderWidgetHost* render_widget_host) override;
   void SetPageTitle(const base::string16& title) override;
-  void RenderViewCreated(RenderViewHost* host) override;
   void RenderViewReady() override;
   void RenderViewHostChanged(RenderViewHost* old_host,
                              RenderViewHost* new_host) override;
@@ -102,14 +101,14 @@ class WebContentsViewMac : public WebContentsView,
   void ShowContextMenu(RenderFrameHost* render_frame_host,
                        const ContextMenuParams& params) override;
   void ShowPopupMenu(RenderFrameHost* render_frame_host,
+                     mojo::PendingRemote<blink::mojom::ExternalPopup> popup,
                      const gfx::Rect& bounds,
                      int item_height,
                      double item_font_size,
                      int selected_item,
-                     const std::vector<MenuItem>& items,
+                     std::vector<blink::mojom::MenuItemPtr> menu_items,
                      bool right_aligned,
                      bool allow_multiple_selection) override;
-  void HidePopupMenu() override;
 
   // PopupMenuHelper::Delegate:
   void OnMenuClosed() override;
@@ -133,7 +132,7 @@ class WebContentsViewMac : public WebContentsView,
   WebDragDest* drag_dest() const { return drag_dest_.get(); }
 
   using RenderWidgetHostViewCreateFunction =
-      RenderWidgetHostViewMac* (*)(RenderWidgetHost*, bool);
+      RenderWidgetHostViewMac* (*)(RenderWidgetHost*);
 
   // Used to override the creation of RenderWidgetHostViews in tests.
   CONTENT_EXPORT static void InstallCreateHookForTests(
@@ -217,9 +216,10 @@ class WebContentsViewMac : public WebContentsView,
       in_process_ns_view_bridge_;
 
   // Mojo bindings for an out of process instance of this NSView.
-  remote_cocoa::mojom::WebContentsNSViewAssociatedPtr remote_ns_view_;
-  mojo::AssociatedBinding<remote_cocoa::mojom::WebContentsNSViewHost>
-      remote_ns_view_host_binding_;
+  mojo::AssociatedRemote<remote_cocoa::mojom::WebContentsNSView>
+      remote_ns_view_;
+  mojo::AssociatedReceiver<remote_cocoa::mojom::WebContentsNSViewHost>
+      remote_ns_view_host_receiver_{this};
 
   // Used by CloseTabAfterEventTrackingIfNeeded.
   base::WeakPtrFactory<WebContentsViewMac> deferred_close_weak_ptr_factory_;

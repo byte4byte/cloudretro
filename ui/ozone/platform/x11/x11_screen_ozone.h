@@ -6,27 +6,32 @@
 #define UI_OZONE_PLATFORM_X11_X11_SCREEN_OZONE_H_
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "ui/display/display_list.h"
-#include "ui/events/platform/platform_event_dispatcher.h"
+#include "ui/base/x/x11_display_manager.h"
+#include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/ozone/public/platform_screen.h"
 
 namespace ui {
 
-class X11WindowManagerOzone;
+class X11WindowManager;
 
 // A PlatformScreen implementation for X11.
-class X11ScreenOzone : public PlatformScreen, public PlatformEventDispatcher {
+class X11ScreenOzone : public PlatformScreen,
+                       public XEventDispatcher,
+                       public XDisplayManager::Delegate {
  public:
-  explicit X11ScreenOzone(X11WindowManagerOzone* wm, bool fetch = true);
+  X11ScreenOzone();
   ~X11ScreenOzone() override;
 
-  // PlatformScreen:
+  // Fetch display list through Xlib/XRandR
+  void Init();
+
+  // Overridden from ui::PlatformScreen:
   const std::vector<display::Display>& GetAllDisplays() const override;
   display::Display GetPrimaryDisplay() const override;
   display::Display GetDisplayForAcceleratedWidget(
@@ -40,34 +45,22 @@ class X11ScreenOzone : public PlatformScreen, public PlatformEventDispatcher {
       const gfx::Rect& match_rect) const override;
   void AddObserver(display::DisplayObserver* observer) override;
   void RemoveObserver(display::DisplayObserver* observer) override;
+  std::string GetCurrentWorkspace() override;
 
-  // PlatformEventDispatcher:
-  bool CanDispatchEvent(const ui::PlatformEvent& event) override;
-  uint32_t DispatchEvent(const ui::PlatformEvent& event) override;
+  // Overridden from ui::XEventDispatcher:
+  bool DispatchXEvent(XEvent* event) override;
 
  private:
   friend class X11ScreenOzoneTest;
 
-  void AddDisplay(const display::Display& display, bool is_primary);
-  void RemoveDisplay(const display::Display& display);
-  void FetchDisplayList();
+  // Overridden from ui::XDisplayManager::Delegate:
+  void OnXDisplayListUpdated() override;
+  float GetXDisplayScaleFactor() const override;
+
   gfx::Point GetCursorLocation() const;
 
-  X11WindowManagerOzone* const window_manager_;
-  display::DisplayList display_list_;
-
-  base::ObserverList<display::DisplayObserver> observers_;
-
-  XDisplay* const xdisplay_;
-  XID x_root_window_;
-  int64_t primary_display_index_ = 0;
-
-  // XRandR version. MAJOR * 100 + MINOR. Zero if no xrandr is present.
-  const int xrandr_version_;
-
-  // The base of the event numbers used to represent XRandr events used in
-  // decoding events regarding output add/remove.
-  int xrandr_event_base_ = 0;
+  X11WindowManager* const window_manager_;
+  std::unique_ptr<ui::XDisplayManager> x11_display_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(X11ScreenOzone);
 };

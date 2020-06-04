@@ -5,7 +5,7 @@
 #import "chrome/browser/ui/cocoa/color_chooser_mac.h"
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,9 +26,9 @@ class ColorPanelCocoaTest : public CocoaTest {
     // without this step the tests will fail complaining that not all windows
     // were closed.
     [[NSColorPanel sharedColorPanel] makeKeyAndOrderFront:nil];
-    Init();
+    MarkCurrentWindowsAsInitial();
   }
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(ColorPanelCocoaTest, ClearTargetOnEnd) {

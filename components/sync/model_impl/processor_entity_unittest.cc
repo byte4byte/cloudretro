@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/test/metrics/histogram_tester.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/non_blocking_sync_common.h"
@@ -20,7 +21,7 @@ namespace syncer {
 namespace {
 
 const char kKey[] = "key";
-const char kHash[] = "hash";
+const ClientTagHash kHash = ClientTagHash::FromHashed("hash");
 const char kId[] = "id";
 const char kName[] = "name";
 const char kValue1[] = "value1";
@@ -36,7 +37,7 @@ sync_pb::EntitySpecifics GenerateSpecifics(const std::string& name,
   return specifics;
 }
 
-std::unique_ptr<EntityData> GenerateEntityData(const std::string& hash,
+std::unique_ptr<EntityData> GenerateEntityData(const ClientTagHash& hash,
                                                const std::string& name,
                                                const std::string& value) {
   std::unique_ptr<EntityData> entity_data(new EntityData());
@@ -46,38 +47,36 @@ std::unique_ptr<EntityData> GenerateEntityData(const std::string& hash,
   return entity_data;
 }
 
-std::unique_ptr<UpdateResponseData> GenerateUpdate(
-    const ProcessorEntity& entity,
-    const std::string& hash,
-    const std::string& id,
-    const std::string& name,
-    const std::string& value,
-    const base::Time& mtime,
-    int64_t version) {
+UpdateResponseData GenerateUpdate(const ProcessorEntity& entity,
+                                  const ClientTagHash& hash,
+                                  const std::string& id,
+                                  const std::string& name,
+                                  const std::string& value,
+                                  const base::Time& mtime,
+                                  int64_t version) {
   std::unique_ptr<EntityData> data = GenerateEntityData(hash, name, value);
   data->id = id;
   data->modification_time = mtime;
-  auto update = std::make_unique<UpdateResponseData>();
-  update->entity = std::move(data);
-  update->response_version = version;
+  UpdateResponseData update;
+  update.entity = std::move(*data);
+  update.response_version = version;
   return update;
 }
 
-std::unique_ptr<UpdateResponseData> GenerateTombstone(
-    const ProcessorEntity& entity,
-    const std::string& hash,
-    const std::string& id,
-    const std::string& name,
-    const base::Time& mtime,
-    int64_t version) {
+UpdateResponseData GenerateTombstone(const ProcessorEntity& entity,
+                                     const ClientTagHash& hash,
+                                     const std::string& id,
+                                     const std::string& name,
+                                     const base::Time& mtime,
+                                     int64_t version) {
   std::unique_ptr<EntityData> data = std::make_unique<EntityData>();
   data->client_tag_hash = hash;
   data->name = name;
   data->id = id;
   data->modification_time = mtime;
-  auto update = std::make_unique<UpdateResponseData>();
-  update->entity = std::move(data);
-  update->response_version = version;
+  UpdateResponseData update;
+  update.entity = std::move(*data);
+  update.response_version = version;
   return update;
 }
 
@@ -120,9 +119,9 @@ class ProcessorEntityTest : public ::testing::Test {
 
   std::unique_ptr<ProcessorEntity> CreateSynced() {
     std::unique_ptr<ProcessorEntity> entity = CreateNew();
-    std::unique_ptr<UpdateResponseData> update =
+    UpdateResponseData update =
         GenerateUpdate(*entity, kHash, kId, kName, kValue1, ctime_, 1);
-    entity->RecordAcceptedUpdate(*update);
+    entity->RecordAcceptedUpdate(update);
     DCHECK(!entity->IsUnsynced());
     return entity;
   }
@@ -141,7 +140,7 @@ TEST_F(ProcessorEntityTest, DefaultEntity) {
   std::unique_ptr<ProcessorEntity> entity = CreateNew();
 
   EXPECT_EQ(kKey, entity->storage_key());
-  EXPECT_EQ(kHash, entity->metadata().client_tag_hash());
+  EXPECT_EQ(kHash.value(), entity->metadata().client_tag_hash());
   EXPECT_EQ("", entity->metadata().server_id());
   EXPECT_FALSE(entity->metadata().is_deleted());
   EXPECT_EQ(0, entity->metadata().sequence_number());
@@ -237,9 +236,9 @@ TEST_F(ProcessorEntityTest, NewServerItem) {
   std::unique_ptr<ProcessorEntity> entity = CreateNew();
 
   const base::Time mtime = base::Time::Now();
-  std::unique_ptr<UpdateResponseData> update =
+  UpdateResponseData update =
       GenerateUpdate(*entity, kHash, kId, kName, kValue1, mtime, 10);
-  entity->RecordAcceptedUpdate(*update);
+  entity->RecordAcceptedUpdate(update);
 
   EXPECT_EQ(kId, entity->metadata().server_id());
   EXPECT_FALSE(entity->metadata().is_deleted());
@@ -268,9 +267,9 @@ TEST_F(ProcessorEntityTest, NewServerItem_EmptyStorageKey) {
   EXPECT_EQ("", entity->storage_key());
 
   const base::Time mtime = base::Time::Now();
-  std::unique_ptr<UpdateResponseData> update =
+  UpdateResponseData update =
       GenerateUpdate(*entity, kHash, kId, kName, kValue1, mtime, 10);
-  entity->RecordAcceptedUpdate(*update);
+  entity->RecordAcceptedUpdate(update);
   entity->SetStorageKey(kKey);
   EXPECT_EQ(kKey, entity->storage_key());
 }
@@ -280,9 +279,9 @@ TEST_F(ProcessorEntityTest, NewServerTombstone) {
   std::unique_ptr<ProcessorEntity> entity = CreateNew();
 
   const base::Time mtime = base::Time::Now();
-  std::unique_ptr<UpdateResponseData> tombstone =
+  UpdateResponseData tombstone =
       GenerateTombstone(*entity, kHash, kId, kName, mtime, 1);
-  entity->RecordAcceptedUpdate(*tombstone);
+  entity->RecordAcceptedUpdate(tombstone);
 
   EXPECT_EQ(kId, entity->metadata().server_id());
   EXPECT_TRUE(entity->metadata().is_deleted());
@@ -308,9 +307,9 @@ TEST_F(ProcessorEntityTest, ServerTombstone) {
   std::unique_ptr<ProcessorEntity> entity = CreateSynced();
   // A deletion update one version later.
   const base::Time mtime = base::Time::Now();
-  std::unique_ptr<UpdateResponseData> tombstone =
+  UpdateResponseData tombstone =
       GenerateTombstone(*entity, kHash, kId, kName, mtime, 2);
-  entity->RecordAcceptedUpdate(*tombstone);
+  entity->RecordAcceptedUpdate(tombstone);
 
   EXPECT_TRUE(entity->metadata().is_deleted());
   EXPECT_EQ(0, entity->metadata().sequence_number());
@@ -576,9 +575,9 @@ TEST_F(ProcessorEntityTest, LocalCreationConflictsWithServerTombstone) {
 
   // Before anything gets committed, we receive a remote tombstone, but local
   // would usually win so the remote update is ignored.
-  std::unique_ptr<UpdateResponseData> tombstone =
+  UpdateResponseData tombstone =
       GenerateTombstone(*entity, kHash, kId, kName, base::Time::Now(), 2);
-  entity->RecordIgnoredUpdate(*tombstone);
+  entity->RecordIgnoredUpdate(tombstone);
 
   EXPECT_EQ(kId, entity->metadata().server_id());
   EXPECT_TRUE(entity->IsUnsynced());

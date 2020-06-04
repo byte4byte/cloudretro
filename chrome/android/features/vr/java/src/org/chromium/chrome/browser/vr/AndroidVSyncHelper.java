@@ -6,11 +6,12 @@ package org.chromium.chrome.browser.vr;
 
 import android.content.Context;
 import android.view.Choreographer;
-import android.view.WindowManager;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.ui.display.DisplayAndroidManager;
 
 /**
  * Helper class for interfacing with the Android Choreographer from native code.
@@ -23,7 +24,8 @@ public class AndroidVSyncHelper {
         @Override
         public void doFrame(long frameTimeNanos) {
             if (mNativeAndroidVSyncHelper == 0) return;
-            nativeOnVSync(mNativeAndroidVSyncHelper, frameTimeNanos);
+            AndroidVSyncHelperJni.get().onVSync(
+                    mNativeAndroidVSyncHelper, AndroidVSyncHelper.this, frameTimeNanos);
         }
     };
 
@@ -49,10 +51,11 @@ public class AndroidVSyncHelper {
     @CalledByNative
     private float getRefreshRate() {
         Context context = ContextUtils.getApplicationContext();
-        WindowManager windowManager =
-                (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-        return windowManager.getDefaultDisplay().getRefreshRate();
+        return DisplayAndroidManager.getDefaultDisplayForContext(context).getRefreshRate();
     }
 
-    private native void nativeOnVSync(long nativeAndroidVSyncHelper, long frameTimeNanos);
+    @NativeMethods
+    interface Natives {
+        void onVSync(long nativeAndroidVSyncHelper, AndroidVSyncHelper caller, long frameTimeNanos);
+    }
 }

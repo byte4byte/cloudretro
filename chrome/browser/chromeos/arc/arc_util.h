@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_ARC_ARC_UTIL_H_
 
 #include <stdint.h>
+#include <memory>
 
 #include "base/callback_forward.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
@@ -18,15 +19,24 @@
 // by DEPS.
 
 class AccountId;
+class GURL;
 class Profile;
+
+namespace aura {
+class Window;
+}  // namespace aura
 
 namespace base {
 class FilePath;
-}
+}  // namespace base
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace user_manager {
 class User;
-}
+}  // namespace user_manager
 
 namespace arc {
 
@@ -176,6 +186,23 @@ bool IsPlayStoreAvailable();
 // the Tos page.
 bool ShouldStartArcSilentlyForManagedProfile(const Profile* profile);
 
+// Returns an ARC window with the given task ID.
+aura::Window* GetArcWindow(int32_t task_id);
+
+// Creates a web contents for an ARC Custom Tab using the given profile and url.
+std::unique_ptr<content::WebContents> CreateArcCustomTabWebContents(
+    Profile* profile,
+    const GURL& url);
+
+// Adds a suffix to the name based on the account type. If profile is not
+// provided, then defaults to the primary user profile.
+std::string GetHistogramNameByUserType(const std::string& base_name,
+                                       const Profile* profile = nullptr);
+
+// Adds a suffix to the name based on the account type of the primary user
+// profile.
+std::string GetHistogramNameByUserTypeForPrimaryProfile(
+    const std::string& base_name);
 }  // namespace arc
 
 #endif  // CHROME_BROWSER_CHROMEOS_ARC_ARC_UTIL_H_

@@ -72,21 +72,22 @@ class TestLoopBack {
   }
   // Called from library.
   void AddExternalLoopbackAudioObserver(
-      CastMediaShlib::LoopbackAudioObserver* observer) {
+      ExternalAudioPipelineShlib::LoopbackAudioObserver* observer) {
     observers_.push_back(observer);
   }
 
   void RemoveExternalLoopbackAudioObserver(
-      CastMediaShlib::LoopbackAudioObserver* observer) {
+      ExternalAudioPipelineShlib::LoopbackAudioObserver* observer) {
     auto it = std::find(observers_.begin(), observers_.end(), observer);
     if (it != observers_.end()) {
       observers_.erase(it);
     }
+    observer->OnRemoved();
   }
 
  protected:
   // Used by derived class for FakeExternalAudioPipelineSupport.
-  std::vector<CastMediaShlib::LoopbackAudioObserver*> observers_;
+  std::vector<ExternalAudioPipelineShlib::LoopbackAudioObserver*> observers_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestLoopBack);
@@ -181,6 +182,7 @@ class FakeMixerOutputStream : public MixerOutputStream {
 
   void Stop() override {}
 
+  int GetNumChannels() override { return channels_; }
   int GetSampleRate() override { return sample_rate_; }
 
   MediaPipelineBackend::AudioDecoder::RenderingDelay GetRenderingDelay()
@@ -242,12 +244,12 @@ void ExternalAudioPipelineShlib::SetExternalMediaMuted(bool muted) {
 }
 
 void ExternalAudioPipelineShlib::AddExternalLoopbackAudioObserver(
-    CastMediaShlib::LoopbackAudioObserver* observer) {
+    LoopbackAudioObserver* observer) {
   GetTestMedia()->AddExternalLoopbackAudioObserver(observer);
 }
 
 void ExternalAudioPipelineShlib::RemoveExternalLoopbackAudioObserver(
-    CastMediaShlib::LoopbackAudioObserver* observer) {
+    LoopbackAudioObserver* observer) {
   GetTestMedia()->RemoveExternalLoopbackAudioObserver(observer);
 }
 

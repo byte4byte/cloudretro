@@ -36,8 +36,9 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/single_thread_task_runner.h"
-#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/resource_request_blocked_reason.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_info.h"
@@ -46,7 +47,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/weborigin/security_violation_reporting_policy.h"
+#include "third_party/blink/renderer/platform/weborigin/reporting_disposition.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -64,8 +65,7 @@ class WebScopedVirtualTimePauser;
 // Any processing that depends on components outside platform/loader/fetch/
 // should be implemented on a subclass of this interface, and then exposed to
 // the ResourceFetcher via this interface.
-class PLATFORM_EXPORT FetchContext
-    : public GarbageCollectedFinalized<FetchContext> {
+class PLATFORM_EXPORT FetchContext : public GarbageCollected<FetchContext> {
  public:
   FetchContext() = default;
 
@@ -75,7 +75,7 @@ class PLATFORM_EXPORT FetchContext
 
   virtual ~FetchContext() = default;
 
-  virtual void Trace(blink::Visitor*) {}
+  virtual void Trace(Visitor*) {}
 
   virtual void AddAdditionalRequestHeaders(ResourceRequest&);
 
@@ -99,6 +99,12 @@ class PLATFORM_EXPORT FetchContext
                               WebScopedVirtualTimePauser& virtual_time_pauser,
                               ResourceType);
 
+  // WARNING: |info| can be modified by the implementation of this method
+  // despite the fact that it is given as const-ref. Namely, if
+  // |worker_timing_receiver_| is set implementations may take (move out) the
+  // field.
+  // TODO(shimazu): Fix this. Eventually ResourceTimingInfo should become a mojo
+  // struct and this should take a moved-value of it.
   virtual void AddResourceTiming(const ResourceTimingInfo&);
   virtual bool AllowImage(bool, const KURL&) const { return false; }
   virtual base::Optional<ResourceRequestBlockedReason> CanRequest(
@@ -106,7 +112,7 @@ class PLATFORM_EXPORT FetchContext
       const ResourceRequest&,
       const KURL&,
       const ResourceLoaderOptions&,
-      SecurityViolationReportingPolicy,
+      ReportingDisposition,
       ResourceRequest::RedirectStatus) const {
     return ResourceRequestBlockedReason::kOther;
   }
@@ -114,7 +120,7 @@ class PLATFORM_EXPORT FetchContext
       mojom::RequestContextType,
       const KURL&,
       const ResourceLoaderOptions&,
-      SecurityViolationReportingPolicy,
+      ReportingDisposition,
       ResourceRequest::RedirectStatus) const {
     return ResourceRequestBlockedReason::kOther;
   }
@@ -137,14 +143,21 @@ class PLATFORM_EXPORT FetchContext
 
   // Determine if the request is on behalf of an advertisement. If so, return
   // true.
-  virtual bool CalculateIfAdSubresource(const ResourceRequest& resource_request,
-                                        ResourceType type) {
+  virtual bool CalculateIfAdSubresource(
+      const ResourceRequest& resource_request,
+      ResourceType type,
+      const FetchInitiatorInfo& initiator_info) {
     return false;
   }
 
   virtual WebURLRequest::PreviewsState previews_state() const {
     return WebURLRequest::kPreviewsUnspecified;
   }
+
+  // Returns a receiver corresponding to a request with |request_id|.
+  // Null if the request has not been intercepted by a service worker.
+  virtual mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
+  TakePendingWorkerTimingReceiver(int request_id);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FetchContext);

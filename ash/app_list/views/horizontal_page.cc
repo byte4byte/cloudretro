@@ -6,7 +6,7 @@
 
 #include "ui/views/focus/focus_manager.h"
 
-namespace app_list {
+namespace ash {
 
 void HorizontalPage::OnWillBeHidden() {}
 
@@ -20,7 +20,7 @@ views::View* HorizontalPage::GetLastFocusableView() {
       this, GetWidget(), true /* reverse */, false /* dont_loop */);
 }
 
-gfx::Rect HorizontalPage::GetPageBoundsForState(ash::AppListState state) const {
+gfx::Rect HorizontalPage::GetPageBoundsForState(AppListState state) const {
   return gfx::Rect(GetPreferredSize());
 }
 
@@ -36,4 +36,4 @@ HorizontalPage::HorizontalPage() = default;
 
 HorizontalPage::~HorizontalPage() = default;
 
-}  // namespace app_list
+}  // namespace ash

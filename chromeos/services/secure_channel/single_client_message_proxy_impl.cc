@@ -4,7 +4,7 @@
 
 #include "chromeos/services/secure_channel/single_client_message_proxy_impl.h"
 
-#include "base/no_destructor.h"
+#include "base/memory/ptr_util.h"
 
 namespace chromeos {
 
@@ -15,30 +15,26 @@ SingleClientMessageProxyImpl::Factory*
     SingleClientMessageProxyImpl::Factory::test_factory_ = nullptr;
 
 // static
-SingleClientMessageProxyImpl::Factory*
-SingleClientMessageProxyImpl::Factory::Get() {
-  if (test_factory_)
-    return test_factory_;
+std::unique_ptr<SingleClientMessageProxy>
+SingleClientMessageProxyImpl::Factory::Create(
+    SingleClientMessageProxy::Delegate* delegate,
+    std::unique_ptr<ClientConnectionParameters> client_connection_parameters) {
+  if (test_factory_) {
+    return test_factory_->CreateInstance(
+        delegate, std::move(client_connection_parameters));
+  }
 
-  static base::NoDestructor<Factory> factory;
-  return factory.get();
+  return base::WrapUnique(new SingleClientMessageProxyImpl(
+      delegate, std::move(client_connection_parameters)));
 }
 
 // static
-void SingleClientMessageProxyImpl::Factory::SetInstanceForTesting(
+void SingleClientMessageProxyImpl::Factory::SetFactoryForTesting(
     Factory* factory) {
   test_factory_ = factory;
 }
 
 SingleClientMessageProxyImpl::Factory::~Factory() = default;
-
-std::unique_ptr<SingleClientMessageProxy>
-SingleClientMessageProxyImpl::Factory::BuildInstance(
-    SingleClientMessageProxy::Delegate* delegate,
-    std::unique_ptr<ClientConnectionParameters> client_connection_parameters) {
-  return base::WrapUnique(new SingleClientMessageProxyImpl(
-      delegate, std::move(client_connection_parameters)));
-}
 
 SingleClientMessageProxyImpl::SingleClientMessageProxyImpl(
     SingleClientMessageProxy::Delegate* delegate,
@@ -48,8 +44,8 @@ SingleClientMessageProxyImpl::SingleClientMessageProxyImpl(
       channel_(std::make_unique<ChannelImpl>(this /* delegate */)) {
   DCHECK(client_connection_parameters_);
   client_connection_parameters_->SetConnectionSucceeded(
-      channel_->GenerateInterfacePtr(),
-      mojo::MakeRequest(&message_receiver_ptr_));
+      channel_->GenerateRemote(),
+      message_receiver_remote_.BindNewPipeAndPassReceiver());
 }
 
 SingleClientMessageProxyImpl::~SingleClientMessageProxyImpl() = default;
@@ -65,7 +61,7 @@ void SingleClientMessageProxyImpl::HandleReceivedMessage(
   if (feature != client_connection_parameters_->feature())
     return;
 
-  message_receiver_ptr_->OnMessageReceived(payload);
+  message_receiver_remote_->OnMessageReceived(payload);
 }
 
 void SingleClientMessageProxyImpl::HandleRemoteDeviceDisconnection() {
@@ -89,8 +85,8 @@ void SingleClientMessageProxyImpl::OnClientDisconnected() {
 }
 
 void SingleClientMessageProxyImpl::FlushForTesting() {
-  DCHECK(message_receiver_ptr_);
-  message_receiver_ptr_.FlushForTesting();
+  DCHECK(message_receiver_remote_);
+  message_receiver_remote_.FlushForTesting();
 }
 
 }  // namespace secure_channel

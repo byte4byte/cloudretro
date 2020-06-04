@@ -12,6 +12,7 @@
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/gcm/gcm_product_util.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
@@ -33,7 +34,8 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,29 +50,30 @@ const char kUserID[] = "user";
 void RequestProxyResolvingSocketFactoryOnUIThread(
     Profile* profile,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
   if (!service)
     return;
   return content::BrowserContext::GetDefaultStoragePartition(profile)
       ->GetNetworkContext()
-      ->CreateProxyResolvingSocketFactory(std::move(request));
+      ->CreateProxyResolvingSocketFactory(std::move(receiver));
 }
 
 void RequestProxyResolvingSocketFactory(
     Profile* profile,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread, profile,
-                     service, std::move(request)));
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread,
+                                profile, service, std::move(receiver)));
 }
 
 std::unique_ptr<KeyedService> BuildGCMProfileService(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
   return std::make_unique<gcm::GCMProfileService>(
       profile->GetPrefs(), profile->GetPath(),
@@ -82,14 +85,10 @@ std::unique_ptr<KeyedService> BuildGCMProfileService(
       gcm::GetProductCategoryForSubtypes(profile->GetPrefs()),
       IdentityManagerFactory::GetForProfile(profile),
       std::unique_ptr<gcm::GCMClientFactory>(new gcm::FakeGCMClientFactory(
-          base::CreateSingleThreadTaskRunnerWithTraits(
-              {content::BrowserThread::UI}),
-          base::CreateSingleThreadTaskRunnerWithTraits(
-              {content::BrowserThread::IO}))),
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI}),
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::IO}),
+          base::CreateSingleThreadTaskRunner({content::BrowserThread::UI}),
+          base::CreateSingleThreadTaskRunner({content::BrowserThread::IO}))),
+      base::CreateSingleThreadTaskRunner({content::BrowserThread::UI}),
+      base::CreateSingleThreadTaskRunner({content::BrowserThread::IO}),
       blocking_task_runner);
 }
 
@@ -131,7 +130,7 @@ class GCMProfileServiceTest : public testing::Test {
   GCMClient::Result send_result() const { return send_result_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   GCMProfileService* gcm_profile_service_;
   std::unique_ptr<FakeGCMAppHandler> gcm_app_handler_;
@@ -186,11 +185,9 @@ void GCMProfileServiceTest::RegisterAndWaitForCompletion(
     const std::vector<std::string>& sender_ids) {
   base::RunLoop run_loop;
   gcm_profile_service_->driver()->Register(
-      kTestAppID,
-      sender_ids,
-      base::Bind(&GCMProfileServiceTest::RegisterCompleted,
-                 base::Unretained(this),
-                 run_loop.QuitClosure()));
+      kTestAppID, sender_ids,
+      base::BindOnce(&GCMProfileServiceTest::RegisterCompleted,
+                     base::Unretained(this), run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -198,9 +195,8 @@ void GCMProfileServiceTest::UnregisterAndWaitForCompletion() {
   base::RunLoop run_loop;
   gcm_profile_service_->driver()->Unregister(
       kTestAppID,
-      base::Bind(&GCMProfileServiceTest::UnregisterCompleted,
-                 base::Unretained(this),
-                 run_loop.QuitClosure()));
+      base::BindOnce(&GCMProfileServiceTest::UnregisterCompleted,
+                     base::Unretained(this), run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -208,12 +204,9 @@ void GCMProfileServiceTest::SendAndWaitForCompletion(
     const OutgoingMessage& message) {
   base::RunLoop run_loop;
   gcm_profile_service_->driver()->Send(
-      kTestAppID,
-      kUserID,
-      message,
-      base::Bind(&GCMProfileServiceTest::SendCompleted,
-                 base::Unretained(this),
-                 run_loop.QuitClosure()));
+      kTestAppID, kUserID, message,
+      base::BindOnce(&GCMProfileServiceTest::SendCompleted,
+                     base::Unretained(this), run_loop.QuitClosure()));
   run_loop.Run();
 }
 

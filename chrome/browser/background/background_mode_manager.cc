@@ -26,6 +26,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/background/background_mode_optimizer.h"
 #include "chrome/browser/browser_process.h"
@@ -45,7 +48,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -66,7 +68,9 @@
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image_family.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/win/app_icon.h"
@@ -129,14 +133,19 @@ Browser* BackgroundModeManager::BackgroundModeData::GetBrowserWindow() {
   return BackgroundModeManager::GetBrowserWindowForProfile(profile_);
 }
 
-bool BackgroundModeManager::BackgroundModeData::HasBackgroundClient() const {
+bool BackgroundModeManager::BackgroundModeData::HasPersistentBackgroundClient()
+    const {
+  return applications_->HasPersistentBackgroundApps();
+}
+
+bool BackgroundModeManager::BackgroundModeData::HasAnyBackgroundClient() const {
   return applications_->size() > 0;
 }
 
 void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
     StatusIconMenuModel* menu,
     StatusIconMenuModel* containing_menu) {
-  if (HasBackgroundClient()) {
+  if (HasAnyBackgroundClient()) {
     // Add a menu item for each application (extension).
     for (const auto& application : *applications_) {
       gfx::ImageSkia icon = applications_->GetIcon(application.get());
@@ -149,7 +158,8 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
           base::RetainedRef(application)));
       menu->AddItem(command_id, base::UTF8ToUTF16(name));
       if (!icon.isNull())
-        menu->SetIcon(menu->GetItemCount() - 1, gfx::Image(icon));
+        menu->SetIcon(menu->GetItemCount() - 1,
+                      ui::ImageModel::FromImageSkia(icon));
 
       // Component extensions with background that do not have an options page
       // will cause this menu item to go to the extensions page with an
@@ -204,10 +214,13 @@ BackgroundModeManager::BackgroundModeData::GetNewBackgroundApps() {
       // Not found in our set yet - add it and maybe return as a previously
       // unseen extension.
       current_extensions_.insert(id);
-      // If this application has been newly loaded after the initial startup,
-      // notify the user.
-      if (applications_->is_ready())
+      // If this application has been newly loaded after the initial startup and
+      // this is a persistent background app, notify the user.
+      if (applications_->startup_done() &&
+          BackgroundApplicationListModel::IsPersistentBackgroundApp(
+              *application, profile_)) {
         new_apps.insert(application.get());
+      }
     }
   }
   return new_apps;
@@ -340,9 +353,11 @@ void BackgroundModeManager::RegisterProfile(Profile* profile) {
 void BackgroundModeManager::LaunchBackgroundApplication(
     Profile* profile,
     const Extension* extension) {
-  OpenApplication(CreateAppLaunchParamsUserContainer(
-      profile, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      extensions::AppLaunchSource::kSourceBackground));
+  apps::AppServiceProxyFactory::GetForProfile(profile)
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(CreateAppLaunchParamsUserContainer(
+          profile, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+          apps::mojom::AppLaunchSource::kSourceBackground));
 }
 
 // static
@@ -414,6 +429,7 @@ void BackgroundModeManager::OnBackgroundModeEnabledPrefChanged() {
   bool enabled = IsBackgroundModePrefEnabled();
   UMA_HISTOGRAM_BOOLEAN("BackgroundMode.BackgroundModeEnabledPrefChanged",
                         enabled);
+  UpdateEnableLaunchOnStartup();
   if (enabled)
     EnableBackgroundMode();
   else
@@ -479,8 +495,8 @@ void BackgroundModeManager::OnProfileWillBeRemoved(
     background_mode_data_.erase(it);
     // If there are no background mode profiles any longer, then turn off
     // background mode.
+    UpdateEnableLaunchOnStartup();
     if (!ShouldBeInBackgroundMode()) {
-      EnableLaunchOnStartup(false);
       EndBackgroundMode();
     }
     UpdateStatusTrayIconContextMenu();
@@ -631,7 +647,7 @@ void BackgroundModeManager::EnableBackgroundMode() {
   if (!in_background_mode_ && ShouldBeInBackgroundMode()) {
     StartBackgroundMode();
 
-    EnableLaunchOnStartup(true);
+    UpdateEnableLaunchOnStartup();
   }
 }
 
@@ -640,7 +656,6 @@ void BackgroundModeManager::DisableBackgroundMode() {
   // If background mode is currently enabled, turn it off.
   if (in_background_mode_) {
     EndBackgroundMode();
-    EnableLaunchOnStartup(false);
   }
 }
 
@@ -683,13 +698,14 @@ void BackgroundModeManager::OnClientsChanged(
   ProfileAttributesEntry* entry;
   if (profile_storage_->
       GetProfileAttributesWithPath(profile->GetPath(), &entry)) {
-    entry->SetBackgroundStatus(HasBackgroundClientForProfile(profile));
+    entry->SetBackgroundStatus(
+        HasPersistentBackgroundClientForProfile(profile));
   }
 
+  UpdateEnableLaunchOnStartup();
   if (!ShouldBeInBackgroundMode()) {
     // We've uninstalled our last background client, make sure we exit
     // background mode and no longer launch on startup.
-    EnableLaunchOnStartup(false);
     EndBackgroundMode();
   } else {
     // We have at least one background client - make sure we're in background
@@ -699,7 +715,6 @@ void BackgroundModeManager::OnClientsChanged(
       // enabled. On Mac, the platform-specific code tracks whether the user
       // has deleted a login item in the past, and if so, no login item will
       // be created (to avoid overriding the specific user action).
-      EnableLaunchOnStartup(true);
       StartBackgroundMode();
     }
 
@@ -712,24 +727,32 @@ void BackgroundModeManager::OnClientsChanged(
   }
 }
 
-bool BackgroundModeManager::HasBackgroundClient() const {
+bool BackgroundModeManager::HasPersistentBackgroundClient() const {
   for (const auto& it : background_mode_data_) {
-    if (it.second->HasBackgroundClient())
+    if (it.second->HasPersistentBackgroundClient())
       return true;
   }
   return false;
 }
 
-bool BackgroundModeManager::HasBackgroundClientForProfile(
+bool BackgroundModeManager::HasAnyBackgroundClient() const {
+  for (const auto& it : background_mode_data_) {
+    if (it.second->HasAnyBackgroundClient())
+      return true;
+  }
+  return false;
+}
+
+bool BackgroundModeManager::HasPersistentBackgroundClientForProfile(
     const Profile* profile) const {
   BackgroundModeManager::BackgroundModeData* bmd =
       GetBackgroundModeData(profile);
-  return bmd && bmd->HasBackgroundClient();
+  return bmd && bmd->HasPersistentBackgroundClient();
 }
 
 bool BackgroundModeManager::ShouldBeInBackgroundMode() const {
   return IsBackgroundModePrefEnabled() &&
-         (HasBackgroundClient() || keep_alive_for_test_);
+         (HasAnyBackgroundClient() || keep_alive_for_test_);
 }
 
 void BackgroundModeManager::OnBackgroundClientInstalled(
@@ -743,8 +766,20 @@ void BackgroundModeManager::OnBackgroundClientInstalled(
   EnableBackgroundMode();
   ResumeBackgroundMode();
 
+  ++client_installed_notifications_;
   // Notify the user that a background client has been installed.
   DisplayClientInstalledNotification(name);
+}
+
+void BackgroundModeManager::UpdateEnableLaunchOnStartup() {
+  bool new_launch_on_startup =
+      ShouldBeInBackgroundMode() && HasPersistentBackgroundClient();
+  if (launch_on_startup_enabled_ &&
+      new_launch_on_startup == *launch_on_startup_enabled_) {
+    return;
+  }
+  launch_on_startup_enabled_.emplace(new_launch_on_startup);
+  EnableLaunchOnStartup(*launch_on_startup_enabled_);
 }
 
 // Gets the image for the status tray icon, at the correct size for the current
@@ -838,7 +873,7 @@ void BackgroundModeManager::UpdateStatusTrayIconContextMenu() {
     for (auto* bmd : bmd_vector) {
       // We should only display the profile in the status icon if it has at
       // least one background app.
-      if (bmd->HasBackgroundClient()) {
+      if (bmd->HasAnyBackgroundClient()) {
         // The submenu constructor caller owns the lifetime of the submenu.
         // The containing menu does not handle the lifetime.
         submenus.push_back(std::make_unique<StatusIconMenuModel>(bmd));

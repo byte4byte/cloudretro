@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/core/db/database_manager.h"
 #include "url/gurl.h"
 
 namespace safe_browsing {
@@ -36,7 +36,8 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   //
 
   void CancelCheck(Client* client) override;
-  bool CanCheckResourceType(content::ResourceType resource_type) const override;
+  bool CanCheckResourceType(
+      blink::mojom::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
   bool ChecksAreAlwaysAsync() const override;
   bool CheckBrowseUrl(const GURL& url,
@@ -54,7 +55,6 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   bool MatchDownloadWhitelistString(const std::string& str) override;
   bool MatchDownloadWhitelistUrl(const GURL& url) override;
   bool MatchMalwareIP(const std::string& ip_address) override;
-  std::string GetSafetyNetId() const override;
   safe_browsing::ThreatSource GetThreatSource() const override;
   bool IsDownloadProtectionEnabled() const override;
   bool IsSupported() const override;
@@ -74,7 +74,7 @@ class RemoteSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
   // Requests currently outstanding.  This owns the ptrs.
   std::vector<ClientRequest*> current_requests_;
 
-  base::flat_set<content::ResourceType> resource_types_to_check_;
+  base::flat_set<blink::mojom::ResourceType> resource_types_to_check_;
 
   friend class base::RefCountedThreadSafe<RemoteSafeBrowsingDatabaseManager>;
   DISALLOW_COPY_AND_ASSIGN(RemoteSafeBrowsingDatabaseManager);

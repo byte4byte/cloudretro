@@ -7,9 +7,9 @@
 
 #include <string>
 
-#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "content/public/browser/tts_controller.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_function.h"
 
 namespace content {
 class BrowserContext;
@@ -20,42 +20,42 @@ content::TtsEventType TtsEventTypeFromString(const std::string& str);
 
 namespace extensions {
 
-class TtsSpeakFunction : public ChromeAsyncExtensionFunction {
+class TtsSpeakFunction : public ExtensionFunction {
  private:
   ~TtsSpeakFunction() override {}
-  bool RunAsync() override;
+  ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("tts.speak", TTS_SPEAK)
 };
 
-class TtsStopSpeakingFunction : public UIThreadExtensionFunction {
+class TtsStopSpeakingFunction : public ExtensionFunction {
  private:
   ~TtsStopSpeakingFunction() override {}
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("tts.stop", TTS_STOP)
 };
 
-class TtsPauseFunction : public UIThreadExtensionFunction {
+class TtsPauseFunction : public ExtensionFunction {
  private:
   ~TtsPauseFunction() override {}
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("tts.pause", TTS_PAUSE)
 };
 
-class TtsResumeFunction : public UIThreadExtensionFunction {
+class TtsResumeFunction : public ExtensionFunction {
  private:
   ~TtsResumeFunction() override {}
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("tts.resume", TTS_RESUME)
 };
 
-class TtsIsSpeakingFunction : public UIThreadExtensionFunction {
+class TtsIsSpeakingFunction : public ExtensionFunction {
  private:
   ~TtsIsSpeakingFunction() override {}
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("tts.isSpeaking", TTS_ISSPEAKING)
 };
 
-class TtsGetVoicesFunction : public UIThreadExtensionFunction {
+class TtsGetVoicesFunction : public ExtensionFunction {
  private:
   ~TtsGetVoicesFunction() override {}
   ResponseAction Run() override;

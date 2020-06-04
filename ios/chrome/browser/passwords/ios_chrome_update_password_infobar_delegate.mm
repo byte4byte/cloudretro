@@ -16,7 +16,7 @@
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
 #include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/infobars/infobar.h"
+#include "ios/chrome/browser/infobars/infobar_ios.h"
 #import "ios/chrome/browser/passwords/update_password_infobar_controller.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -56,6 +56,12 @@ IOSChromeUpdatePasswordInfoBarDelegate::
       infobar_response());
 }
 
+bool IOSChromeUpdatePasswordInfoBarDelegate::ShouldExpire(
+    const NavigationDetails& details) const {
+  return !details.is_form_submission && !details.is_redirect &&
+         ConfirmInfoBarDelegate::ShouldExpire(details);
+}
+
 IOSChromeUpdatePasswordInfoBarDelegate::IOSChromeUpdatePasswordInfoBarDelegate(
     bool is_sync_user,
     std::unique_ptr<PasswordFormManagerForUI> form_manager)
@@ -75,8 +81,8 @@ bool IOSChromeUpdatePasswordInfoBarDelegate::ShowMultipleAccounts() const {
 
 NSArray* IOSChromeUpdatePasswordInfoBarDelegate::GetAccounts() const {
   NSMutableArray* usernames = [NSMutableArray array];
-  for (const auto& match : form_to_save()->GetBestMatches()) {
-    [usernames addObject:base::SysUTF16ToNSString(match.first)];
+  for (const auto* match : form_to_save()->GetBestMatches()) {
+    [usernames addObject:base::SysUTF16ToNSString(match->username_value)];
   }
   return usernames;
 }
@@ -84,6 +90,15 @@ NSArray* IOSChromeUpdatePasswordInfoBarDelegate::GetAccounts() const {
 infobars::InfoBarDelegate::InfoBarIdentifier
 IOSChromeUpdatePasswordInfoBarDelegate::GetIdentifier() const {
   return UPDATE_PASSWORD_INFOBAR_DELEGATE_MOBILE;
+}
+
+base::string16 IOSChromeUpdatePasswordInfoBarDelegate::GetLinkText() const {
+  return ShowMultipleAccounts() ? selected_account_ : base::string16();
+}
+
+void IOSChromeUpdatePasswordInfoBarDelegate::InfoBarDismissed() {
+  DCHECK(form_to_save());
+  set_infobar_response(password_manager::metrics_util::CLICKED_CANCEL);
 }
 
 base::string16 IOSChromeUpdatePasswordInfoBarDelegate::GetMessageText() const {
@@ -113,14 +128,4 @@ bool IOSChromeUpdatePasswordInfoBarDelegate::Accept() {
   form_to_save()->Save();
   set_infobar_response(password_manager::metrics_util::CLICKED_SAVE);
   return true;
-}
-
-bool IOSChromeUpdatePasswordInfoBarDelegate::Cancel() {
-  DCHECK(form_to_save());
-  set_infobar_response(password_manager::metrics_util::CLICKED_CANCEL);
-  return true;
-}
-
-base::string16 IOSChromeUpdatePasswordInfoBarDelegate::GetLinkText() const {
-  return ShowMultipleAccounts() ? selected_account_ : base::string16();
 }

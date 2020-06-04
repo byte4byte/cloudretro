@@ -6,9 +6,11 @@
 #define UI_VIEWS_TEST_VIEWS_TEST_BASE_H_
 
 #include <memory>
+#include <utility>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -23,6 +25,7 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/test/aura_test_helper.h"
+#include "ui/aura/window_tree_host.h"
 #endif
 
 namespace views {
@@ -31,8 +34,6 @@ namespace views {
 // to drive UI events and takes care of OLE initialization for windows.
 class ViewsTestBase : public PlatformTest {
  public:
-  using ScopedTaskEnvironment = base::test::ScopedTaskEnvironment;
-
   enum class NativeWidgetType {
     // On Aura, corresponds to NativeWidgetAura.
     kDefault,
@@ -41,7 +42,19 @@ class ViewsTestBase : public PlatformTest {
     kDesktop,
   };
 
-  ViewsTestBase();
+  // Constructs a ViewsTestBase with |traits| being forwarded to its
+  // TaskEnvironment. MainThreadType always defaults to UI and must not be
+  // specified.
+  template <typename... TaskEnvironmentTraits>
+  NOINLINE explicit ViewsTestBase(TaskEnvironmentTraits&&... traits)
+      : ViewsTestBase(std::make_unique<base::test::TaskEnvironment>(
+            base::test::TaskEnvironment::MainThreadType::UI,
+            std::forward<TaskEnvironmentTraits>(traits)...)) {}
+
+  // Alternatively a subclass may pass a TaskEnvironment directly.
+  explicit ViewsTestBase(
+      std::unique_ptr<base::test::TaskEnvironment> task_environment);
+
   ~ViewsTestBase() override;
 
   // testing::Test:
@@ -55,9 +68,15 @@ class ViewsTestBase : public PlatformTest {
 
   void RunPendingMessages();
 
-  // Creates a widget of |type| with any platform specific data for use in
-  // cross-platform tests.
+  // Returns CreateParams for a widget of type |type|.  This is used by
+  // CreateParamsForTestWidget() and thus by CreateTestWidget(), and may also be
+  // used directly.  The default implementation sets the context to
+  // GetContext().
   virtual Widget::InitParams CreateParams(Widget::InitParams::Type type);
+
+  virtual std::unique_ptr<Widget> CreateTestWidget(
+      Widget::InitParams::Type type =
+          Widget::InitParams::TYPE_WINDOW_FRAMELESS);
 
   bool HasCompositingManager() const;
 
@@ -65,6 +84,9 @@ class ViewsTestBase : public PlatformTest {
   void SimulateNativeDestroy(Widget* widget);
 
  protected:
+  base::test::TaskEnvironment* task_environment() {
+    return task_environment_.get();
+  }
   TestViewsDelegate* test_views_delegate() const {
     return test_helper_->test_views_delegate();
   }
@@ -74,12 +96,6 @@ class ViewsTestBase : public PlatformTest {
     native_widget_type_ = native_widget_type;
   }
 
-  void set_scoped_task_environment(
-      std::unique_ptr<ScopedTaskEnvironment> scoped_task_environment) {
-    DCHECK(!setup_called_);
-    scoped_task_environment_ = std::move(scoped_task_environment);
-  }
-
   void set_views_delegate(std::unique_ptr<TestViewsDelegate> views_delegate) {
     DCHECK(!setup_called_);
     views_delegate_for_setup_.swap(views_delegate);
@@ -87,20 +103,17 @@ class ViewsTestBase : public PlatformTest {
 
 #if defined(USE_AURA)
   aura::Window* root_window() {
-    return aura::test::AuraTestHelper::GetInstance()->root_window();
+    return aura::test::AuraTestHelper::GetInstance()->GetContext();
   }
 
-  ui::EventSink* event_sink() {
-    return aura::test::AuraTestHelper::GetInstance()->event_sink();
-  }
+  ui::EventSink* event_sink() { return host()->event_sink(); }
 
   aura::WindowTreeHost* host() {
-    return aura::test::AuraTestHelper::GetInstance()->host();
+    return aura::test::AuraTestHelper::GetInstance()->GetHost();
   }
 #endif
 
-  // Returns a context view. In aura builds, this will be the
-  // RootWindow. Everywhere else, NULL.
+  // Returns a context view. In aura builds, this will be the RootWindow.
   gfx::NativeWindow GetContext();
 
   // Factory for creating the native widget when |native_widget_type_| is set to
@@ -109,7 +122,19 @@ class ViewsTestBase : public PlatformTest {
       const Widget::InitParams& init_params,
       internal::NativeWidgetDelegate* delegate);
 
+  // Instantiates a Widget for CreateTestWidget(), but does no other
+  // initialization.  Overriding this allows subclasses to customize the Widget
+  // subclass returned from CreateTestWidget().
+  virtual std::unique_ptr<Widget> AllocateTestWidget();
+
+  // Constructs the params for CreateTestWidget().
+  Widget::InitParams CreateParamsForTestWidget(
+      Widget::InitParams::Type type =
+          Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+
  private:
+  std::unique_ptr<base::test::TaskEnvironment> task_environment_;
+
   // Controls what type of widget will be created by default for a test (i.e.
   // when creating a Widget and leaving InitParams::native_widget unspecified).
   // kDefault will allow the system default to be used (typically
@@ -118,7 +143,6 @@ class ViewsTestBase : public PlatformTest {
   // value is ignored.
   NativeWidgetType native_widget_type_ = NativeWidgetType::kDefault;
 
-  std::unique_ptr<ScopedTaskEnvironment> scoped_task_environment_;
   std::unique_ptr<TestViewsDelegate> views_delegate_for_setup_;
   std::unique_ptr<ScopedViewsTestHelper> test_helper_;
   bool interactive_setup_called_ = false;
@@ -137,7 +161,7 @@ class ViewsTestBaseWithNativeWidgetType
     : public ViewsTestBase,
       public testing::WithParamInterface<ViewsTestBase::NativeWidgetType> {
  public:
-  ViewsTestBaseWithNativeWidgetType() = default;
+  using ViewsTestBase::ViewsTestBase;
   ~ViewsTestBaseWithNativeWidgetType() override = default;
 
   // ViewsTestBase:
@@ -155,7 +179,7 @@ class ViewsTestBaseWithNativeWidgetType
 // used either way.
 class ViewsTestWithDesktopNativeWidget : public ViewsTestBase {
  public:
-  ViewsTestWithDesktopNativeWidget() = default;
+  using ViewsTestBase::ViewsTestBase;
   ~ViewsTestWithDesktopNativeWidget() override = default;
 
   // ViewsTestBase:

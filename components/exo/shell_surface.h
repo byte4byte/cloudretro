@@ -10,6 +10,7 @@
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "components/exo/shell_surface_base.h"
+#include "ui/base/ui_base_types.h"
 
 namespace ui {
 class CompositorLock;
@@ -20,8 +21,7 @@ class Surface;
 
 // This class implements toplevel surface for which position and state are
 // managed by the shell.
-class ShellSurface : public ShellSurfaceBase,
-                     public ash::wm::WindowStateObserver {
+class ShellSurface : public ShellSurfaceBase, public ash::WindowStateObserver {
  public:
   // The |origin| is the initial position in screen coordinates. The position
   // specified as part of the geometry is relative to the shell surface.
@@ -82,11 +82,19 @@ class ShellSurface : public ShellSurfaceBase,
   // Start an interactive move of surface.
   void StartMove();
 
+  // Before widget initialization, this method will be called. Depending on the
+  // implementation, it may return true to force the surface to launch in a
+  // maximized state.
+  virtual bool ShouldAutoMaximize();
+
+  // Return the initial show state for this surface.
+  ui::WindowShowState initial_show_state() { return initial_show_state_; }
+
   // Overridden from SurfaceDelegate:
   void OnSetParent(Surface* parent, const gfx::Point& position) override;
 
   // Overridden from ShellSurfaceBase:
-  void InitializeWindowState(ash::wm::WindowState* window_state) override;
+  void InitializeWindowState(ash::WindowState* window_state) override;
   base::Optional<gfx::Rect> GetWidgetBounds() const override;
   gfx::Point GetSurfaceOrigin() const override;
 
@@ -96,10 +104,10 @@ class ShellSurface : public ShellSurfaceBase,
                              const gfx::Rect& new_bounds,
                              ui::PropertyChangeReason reason) override;
 
-  // Overridden from ash::wm::WindowStateObserver:
-  void OnPreWindowStateTypeChange(ash::wm::WindowState* window_state,
+  // Overridden from ash::WindowStateObserver:
+  void OnPreWindowStateTypeChange(ash::WindowState* window_state,
                                   ash::WindowStateType old_type) override;
-  void OnPostWindowStateTypeChange(ash::wm::WindowState* window_state,
+  void OnPostWindowStateTypeChange(ash::WindowState* window_state,
                                    ash::WindowStateType old_type) override;
 
   // Overridden from wm::ActivationChangeObserver:
@@ -164,7 +172,7 @@ class ShellSurface : public ShellSurfaceBase,
   gfx::Vector2d pending_origin_offset_accumulator_;
   int resize_component_ = HTCAPTION;  // HT constant (see ui/base/hit_test.h)
   int pending_resize_component_ = HTCAPTION;
-  ui::WindowShowState initial_show_state_ = ui::SHOW_STATE_NORMAL;
+  ui::WindowShowState initial_show_state_ = ui::SHOW_STATE_DEFAULT;
   bool ignore_window_bounds_changes_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ShellSurface);

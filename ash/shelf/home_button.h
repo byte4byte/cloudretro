@@ -38,6 +38,7 @@ class ASH_EXPORT HomeButton : public ShelfControlButton,
   // views::Button:
   void OnGestureEvent(ui::GestureEvent* event) override;
   const char* GetClassName() const override;
+  base::string16 GetTooltipText(const gfx::Point& p) const override;
 
   // ShelfButtonDelegate:
   void OnShelfButtonAboutToRequestFocusFromTabTraversal(ShelfButton* button,
@@ -45,18 +46,14 @@ class ASH_EXPORT HomeButton : public ShelfControlButton,
   void ButtonPressed(views::Button* sender,
                      const ui::Event& event,
                      views::InkDrop* ink_drop) override;
-  bool ShouldEventActivateButton(views::View* view,
-                                 const ui::Event& event) override;
 
   // Called when the availability of a long-press gesture may have changed, e.g.
   // when Assistant becomes enabled.
-  void OnVoiceInteractionAvailabilityChanged();
+  void OnAssistantAvailabilityChanged();
 
   // True if the app list is shown for the display containing this button.
   bool IsShowingAppList() const;
 
-  virtual void OnPressed(app_list::AppListShowSource show_source,
-                         base::TimeTicks time_stamp);
 
   // Returns the display which contains this view.
   int64_t GetDisplayId() const;

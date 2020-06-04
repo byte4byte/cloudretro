@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -43,9 +44,9 @@ inline constexpr bool IsDebug() {
 }
 
 inline constexpr bool IsChromeBranded() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return true;
-#elif defined(CHROMIUM_BUILD)
+#elif BUILDFLAG(CHROMIUM_BRANDING)
   return false;
 #else
   #error Only Chrome and Chromium brands are supported.
@@ -92,11 +93,7 @@ static_assert(std::is_pod<Attribute>::value, "Attribute should be POD.");
 
 std::string GetHostAttributes() {
   std::vector<std::string> result;
-  // By using ranged for-loop, MSVC throws error C3316:
-  // 'const remoting::StaticAttribute [0]':
-  // an array of unknown size cannot be used in a range-based for statement.
-  for (size_t i = 0; i < base::size(kAttributes); i++) {
-    const auto& attribute = kAttributes[i];
+  for (const auto& attribute : kAttributes) {
     DCHECK_EQ(std::string(attribute.name).find(kSeparator), std::string::npos);
     if (attribute.get_value_func()) {
       result.push_back(attribute.name);

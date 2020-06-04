@@ -15,12 +15,10 @@
 namespace signin {
 
 // AccountReconcilorDelegate specialized for Mirror.
-class MirrorAccountReconcilorDelegate
-    : public AccountReconcilorDelegate,
-      public identity::IdentityManager::Observer {
+class MirrorAccountReconcilorDelegate : public AccountReconcilorDelegate,
+                                        public IdentityManager::Observer {
  public:
-  explicit MirrorAccountReconcilorDelegate(
-      identity::IdentityManager* identity_manager);
+  explicit MirrorAccountReconcilorDelegate(IdentityManager* identity_manager);
   ~MirrorAccountReconcilorDelegate() override;
 
  protected:
@@ -28,6 +26,8 @@ class MirrorAccountReconcilorDelegate
   // TODO(sinhak): Make this private after deleting
   // |ChromeOSAccountReconcilorDelegate|.
   bool IsReconcileEnabled() const override;
+
+  IdentityManager* GetIdentityManager() const { return identity_manager_; }
 
  private:
   // AccountReconcilorDelegate:
@@ -52,7 +52,7 @@ class MirrorAccountReconcilorDelegate
   void OnPrimaryAccountCleared(
       const CoreAccountInfo& previous_primary_account_info) override;
 
-  identity::IdentityManager* identity_manager_;
+  IdentityManager* identity_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(MirrorAccountReconcilorDelegate);
 };

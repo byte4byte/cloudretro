@@ -14,12 +14,11 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.test.ScreenShooter;
+import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.ui.test.util.UiRestriction;
-
-import java.io.IOException;
 
 /**
  * Simple test to demonstrate use of ScreenShooter rule.
@@ -29,25 +28,24 @@ import java.io.IOException;
 @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE) // Tab switcher button only exists on phones.
 public class ExampleUiCaptureTest {
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public ChromeActivityTestRule<? extends ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule(ChromeTabbedActivity.class);
 
     @Rule
     public ScreenShooter mScreenShooter = new ScreenShooter();
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivityTestRule.startMainActivityFromLauncher();
     }
 
     /**
      * Capture the New Tab Page and the tab switcher.
-     * @throws IOException
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
     @Feature({"UiCatalogue"})
-    public void testCaptureNewTabPage() throws IOException, InterruptedException {
+    public void testCaptureNewTabPage() {
         mScreenShooter.shoot("NTP", ScreenShooter.TagsEnum.UiCatalogueExample);
     }
 }

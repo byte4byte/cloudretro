@@ -8,7 +8,7 @@
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
@@ -52,12 +52,12 @@ class SyncAuthManagerTest : public testing::Test {
                                              base::DoNothing());
   }
 
-  identity::IdentityTestEnvironment* identity_env() { return &identity_env_; }
+  signin::IdentityTestEnvironment* identity_env() { return &identity_env_; }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
-  identity::IdentityTestEnvironment identity_env_;
+  signin::IdentityTestEnvironment identity_env_;
 };
 
 TEST_F(SyncAuthManagerTest, ProvidesNothingInLocalSyncMode) {
@@ -72,8 +72,6 @@ TEST_F(SyncAuthManagerTest, ProvidesNothingInLocalSyncMode) {
   // methods is illegal in local Sync mode, so we don't test that.
 }
 
-// ChromeOS doesn't support sign-in/sign-out.
-#if !defined(OS_CHROMEOS)
 TEST_F(SyncAuthManagerTest, IgnoresEventsIfNotRegistered) {
   base::MockCallback<AccountStateChangedCallback> account_state_changed;
   base::MockCallback<CredentialsChangedCallback> credentials_changed;
@@ -84,7 +82,7 @@ TEST_F(SyncAuthManagerTest, IgnoresEventsIfNotRegistered) {
 
   // Fire some auth events. We haven't called RegisterForAuthNotifications, so
   // none of this should result in any callback calls.
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   // Without RegisterForAuthNotifications, the active account should always be
   // reported as empty.
@@ -93,14 +91,20 @@ TEST_F(SyncAuthManagerTest, IgnoresEventsIfNotRegistered) {
   identity_env()->SetRefreshTokenForPrimaryAccount();
   EXPECT_TRUE(
       auth_manager->GetActiveAccountInfo().account_info.account_id.empty());
+
+// ChromeOS doesn't support sign-out.
+#if !defined(OS_CHROMEOS)
   identity_env()->ClearPrimaryAccount();
   EXPECT_TRUE(
       auth_manager->GetActiveAccountInfo().account_info.account_id.empty());
+#endif  // !defined(OS_CHROMEOS)
 }
 
+// ChromeOS doesn't support sign-out.
+#if !defined(OS_CHROMEOS)
 TEST_F(SyncAuthManagerTest, ForwardsPrimaryAccountEvents) {
   // Start out already signed in before the SyncAuthManager is created.
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
   base::MockCallback<AccountStateChangedCallback> account_state_changed;
@@ -127,16 +131,50 @@ TEST_F(SyncAuthManagerTest, ForwardsPrimaryAccountEvents) {
 
   // Sign in to a different account.
   EXPECT_CALL(account_state_changed, Run());
-  std::string second_account_id =
+  CoreAccountId second_account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   EXPECT_EQ(auth_manager->GetActiveAccountInfo().account_info.account_id,
             second_account_id);
 }
 
-TEST_F(SyncAuthManagerTest, ForwardsSecondaryAccountEvents) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
+TEST_F(SyncAuthManagerTest, NotifiesOfSignoutBeforeAccessTokenIsGone) {
+  // Start out already signed in before the SyncAuthManager is created.
+  CoreAccountId account_id =
+      identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
+  base::MockCallback<AccountStateChangedCallback> account_state_changed;
+  base::MockCallback<CredentialsChangedCallback> credentials_changed;
+  auto auth_manager =
+      CreateAuthManager(account_state_changed.Get(), base::DoNothing());
+
+  auth_manager->RegisterForAuthNotifications();
+
+  ASSERT_EQ(auth_manager->GetActiveAccountInfo().account_info.account_id,
+            account_id);
+
+  auth_manager->ConnectionOpened();
+
+  // Make sure an access token is available.
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithToken(
+      "access_token", base::Time::Now() + base::TimeDelta::FromHours(1));
+  ASSERT_EQ(auth_manager->GetCredentials().access_token, "access_token");
+
+  // Sign out of the account.
+  EXPECT_CALL(account_state_changed, Run()).WillOnce([&]() {
+    // At the time the callback gets run, the access token should still be here.
+    EXPECT_FALSE(auth_manager->GetCredentials().access_token.empty());
+  });
+  identity_env()->ClearPrimaryAccount();
+  // After the signout is complete, the access token should be gone.
+  EXPECT_TRUE(
+      auth_manager->GetActiveAccountInfo().account_info.account_id.empty());
+}
+#endif  // !defined(OS_CHROMEOS)
+
+// Unconsented primary accounts (aka secondary accounts) are only supported on
+// Win/Mac/Linux.
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+TEST_F(SyncAuthManagerTest, ForwardsSecondaryAccountEvents) {
   base::MockCallback<AccountStateChangedCallback> account_state_changed;
   base::MockCallback<CredentialsChangedCallback> credentials_changed;
   EXPECT_CALL(account_state_changed, Run()).Times(0);
@@ -160,16 +198,19 @@ TEST_F(SyncAuthManagerTest, ForwardsSecondaryAccountEvents) {
 
   // Make the account primary.
   EXPECT_CALL(account_state_changed, Run());
-  identity::PrimaryAccountMutator* primary_account_mutator =
+  signin::PrimaryAccountMutator* primary_account_mutator =
       identity_env()->identity_manager()->GetPrimaryAccountMutator();
   primary_account_mutator->SetPrimaryAccount(account_info.account_id);
 
   EXPECT_TRUE(auth_manager->GetActiveAccountInfo().is_primary);
 }
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
 
+// ChromeOS doesn't support sign-out.
+#if !defined(OS_CHROMEOS)
 TEST_F(SyncAuthManagerTest, ClearsAuthErrorOnSignout) {
   // Start out already signed in before the SyncAuthManager is created.
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
   auto auth_manager = CreateAuthManager();
@@ -196,10 +237,11 @@ TEST_F(SyncAuthManagerTest, ClearsAuthErrorOnSignout) {
   EXPECT_EQ(auth_manager->GetLastAuthError().state(),
             GoogleServiceAuthError::NONE);
 }
+#endif  // !defined(OS_CHROMEOS)
 
 TEST_F(SyncAuthManagerTest, DoesNotClearAuthErrorOnSyncDisable) {
   // Start out already signed in before the SyncAuthManager is created.
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
   auto auth_manager = CreateAuthManager();
@@ -225,11 +267,10 @@ TEST_F(SyncAuthManagerTest, DoesNotClearAuthErrorOnSyncDisable) {
   EXPECT_NE(auth_manager->GetLastAuthError().state(),
             GoogleServiceAuthError::NONE);
 }
-#endif  // !OS_CHROMEOS
 
 TEST_F(SyncAuthManagerTest, ForwardsCredentialsEvents) {
   // Start out already signed in before the SyncAuthManager is created.
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
   base::MockCallback<AccountStateChangedCallback> account_state_changed;
@@ -272,7 +313,7 @@ TEST_F(SyncAuthManagerTest, ForwardsCredentialsEvents) {
 }
 
 TEST_F(SyncAuthManagerTest, RequestsAccessTokenOnSyncStartup) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -289,7 +330,7 @@ TEST_F(SyncAuthManagerTest, RequestsAccessTokenOnSyncStartup) {
 
 TEST_F(SyncAuthManagerTest,
        RetriesAccessTokenFetchWithBackoffOnTransientFailure) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -308,8 +349,82 @@ TEST_F(SyncAuthManagerTest,
             GoogleServiceAuthError::AuthErrorNone());
 }
 
+TEST_F(
+    SyncAuthManagerTest,
+    RetriesAccessTokenFetchWithBackoffOnFirstCancelTransientFailWhenDisabled) {
+  // Disable the first retry without backoff on cancellation.
+  base::test::ScopedFeatureList local_feature;
+  local_feature.InitAndDisableFeature(kSyncRetryFirstCanceledTokenFetch);
+
+  CoreAccountId account_id =
+      identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
+  auto auth_manager = CreateAuthManager();
+  auth_manager->RegisterForAuthNotifications();
+  ASSERT_EQ(auth_manager->GetActiveAccountInfo().account_info.account_id,
+            account_id);
+
+  auth_manager->ConnectionOpened();
+
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
+      GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
+
+  // Expect retry with backoff.
+  EXPECT_TRUE(auth_manager->IsRetryingAccessTokenFetchForTest());
+}
+
+TEST_F(SyncAuthManagerTest,
+       RetriesAccessTokenFetchWithoutBackoffOnceOnFirstCancelTransientFailure) {
+  CoreAccountId account_id =
+      identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
+  auto auth_manager = CreateAuthManager();
+  auth_manager->RegisterForAuthNotifications();
+  ASSERT_EQ(auth_manager->GetActiveAccountInfo().account_info.account_id,
+            account_id);
+
+  auth_manager->ConnectionOpened();
+
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
+      GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
+
+  // Expect no backoff the first time the request is canceled.
+  EXPECT_FALSE(auth_manager->IsRetryingAccessTokenFetchForTest());
+
+  // Cancel the retry as well.
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
+      GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
+
+  // Expect retry with backoff when the first retry was also canceled.
+  EXPECT_TRUE(auth_manager->IsRetryingAccessTokenFetchForTest());
+}
+
+TEST_F(SyncAuthManagerTest,
+       RetriesAccessTokenFetchOnFirstCancelTransientFailure) {
+  CoreAccountId account_id =
+      identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
+  auto auth_manager = CreateAuthManager();
+  auth_manager->RegisterForAuthNotifications();
+  ASSERT_EQ(auth_manager->GetActiveAccountInfo().account_info.account_id,
+            account_id);
+
+  auth_manager->ConnectionOpened();
+
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
+      GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
+
+  // Expect no backoff the first time the request is canceled.
+  EXPECT_FALSE(auth_manager->IsRetryingAccessTokenFetchForTest());
+
+  // Retry is a success.
+  identity_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithToken(
+      "access_token", base::Time::Now() + base::TimeDelta::FromHours(1));
+
+  ASSERT_EQ(auth_manager->GetCredentials().access_token, "access_token");
+  // Don't expect any backoff when the retry is a success.
+  EXPECT_FALSE(auth_manager->IsRetryingAccessTokenFetchForTest());
+}
+
 TEST_F(SyncAuthManagerTest, AbortsAccessTokenFetchOnPersistentFailure) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -331,7 +446,7 @@ TEST_F(SyncAuthManagerTest, AbortsAccessTokenFetchOnPersistentFailure) {
 }
 
 TEST_F(SyncAuthManagerTest, FetchesNewAccessTokenWithBackoffOnServerError) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -355,7 +470,7 @@ TEST_F(SyncAuthManagerTest, FetchesNewAccessTokenWithBackoffOnServerError) {
 }
 
 TEST_F(SyncAuthManagerTest, ExposesServerError) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -379,7 +494,7 @@ TEST_F(SyncAuthManagerTest, ExposesServerError) {
 }
 
 TEST_F(SyncAuthManagerTest, ClearsServerErrorOnSyncDisable) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -406,7 +521,7 @@ TEST_F(SyncAuthManagerTest, ClearsServerErrorOnSyncDisable) {
 }
 
 TEST_F(SyncAuthManagerTest, RequestsNewAccessTokenOnExpiry) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -436,7 +551,7 @@ TEST_F(SyncAuthManagerTest, RequestsNewAccessTokenOnExpiry) {
 }
 
 TEST_F(SyncAuthManagerTest, RequestsNewAccessTokenOnRefreshTokenUpdate) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -466,7 +581,7 @@ TEST_F(SyncAuthManagerTest, RequestsNewAccessTokenOnRefreshTokenUpdate) {
 }
 
 TEST_F(SyncAuthManagerTest, DoesNotRequestAccessTokenAutonomously) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -493,7 +608,7 @@ TEST_F(SyncAuthManagerTest, DoesNotRequestAccessTokenAutonomously) {
 }
 
 TEST_F(SyncAuthManagerTest, ClearsCredentialsOnRefreshTokenRemoval) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -530,7 +645,7 @@ TEST_F(SyncAuthManagerTest, ClearsCredentialsOnRefreshTokenRemoval) {
 }
 
 TEST_F(SyncAuthManagerTest, ClearsCredentialsOnInvalidRefreshToken) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -572,7 +687,7 @@ TEST_F(SyncAuthManagerTest, ClearsCredentialsOnInvalidRefreshToken) {
 
 TEST_F(SyncAuthManagerTest,
        RequestsAccessTokenWhenInvalidRefreshTokenResolved) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
@@ -604,7 +719,7 @@ TEST_F(SyncAuthManagerTest,
 }
 
 TEST_F(SyncAuthManagerTest, DoesNotRequestAccessTokenIfSyncInactive) {
-  std::string account_id =
+  CoreAccountId account_id =
       identity_env()->MakePrimaryAccountAvailable("test@email.com").account_id;
 
   base::MockCallback<AccountStateChangedCallback> account_state_changed;
@@ -644,10 +759,10 @@ TEST_F(SyncAuthManagerTest, DoesNotRequestAccessTokenIfSyncInactive) {
   base::RunLoop().RunUntilIdle();
 }
 
-TEST_F(SyncAuthManagerTest, IgnoresCookieJarIfFeatureDisabled) {
-  base::test::ScopedFeatureList features;
-  features.InitAndDisableFeature(switches::kSyncSupportSecondaryAccount);
-
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
+// On platforms that don't support unconsented primary accounts, the contents of
+// the cookie jar should make no difference.
+TEST_F(SyncAuthManagerTest, IgnoresCookieJar) {
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -664,10 +779,9 @@ TEST_F(SyncAuthManagerTest, IgnoresCookieJarIfFeatureDisabled) {
       auth_manager->GetActiveAccountInfo().account_info.account_id.empty());
 }
 
-TEST_F(SyncAuthManagerTest, UsesCookieJarIfFeatureEnabled) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
+#else   // defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
 
+TEST_F(SyncAuthManagerTest, UsesCookieJar) {
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -686,9 +800,6 @@ TEST_F(SyncAuthManagerTest, UsesCookieJarIfFeatureEnabled) {
 }
 
 TEST_F(SyncAuthManagerTest, DropsAccountWhenCookieGoesAway) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
-
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -712,9 +823,6 @@ TEST_F(SyncAuthManagerTest, DropsAccountWhenCookieGoesAway) {
 }
 
 TEST_F(SyncAuthManagerTest, DropsAccountWhenRefreshTokenGoesAway) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
-
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -738,9 +846,6 @@ TEST_F(SyncAuthManagerTest, DropsAccountWhenRefreshTokenGoesAway) {
 }
 
 TEST_F(SyncAuthManagerTest, PrefersPrimaryAccountOverCookie) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
-
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -764,9 +869,6 @@ TEST_F(SyncAuthManagerTest, PrefersPrimaryAccountOverCookie) {
 }
 
 TEST_F(SyncAuthManagerTest, OnlyUsesFirstCookieAccount) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(switches::kSyncSupportSecondaryAccount);
-
   auto auth_manager = CreateAuthManager();
   auth_manager->RegisterForAuthNotifications();
 
@@ -800,6 +902,7 @@ TEST_F(SyncAuthManagerTest, OnlyUsesFirstCookieAccount) {
   EXPECT_TRUE(
       auth_manager->GetActiveAccountInfo().account_info.account_id.empty());
 }
+#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID) || defined(OS_IOS)
 
 }  // namespace
 

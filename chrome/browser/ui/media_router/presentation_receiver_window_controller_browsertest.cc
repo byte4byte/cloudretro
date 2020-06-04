@@ -26,8 +26,12 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/script_executor.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/filename_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
@@ -63,24 +67,6 @@ base::FilePath GetResourceFile(base::FilePath::StringPieceType relative_path) {
   return full_path;
 }
 
-// This class waits for a WebContents it is assigned via Observe to be destroyed
-// and then quits a RunLoop it is given.  This is used in tests to wait for the
-// receiver page to be torn down in the presentation window.
-class CloseObserver final : public content::WebContentsObserver {
- public:
-  explicit CloseObserver(base::RunLoop* run_loop) : run_loop_(run_loop) {}
-
-  // content::WebContentsObserver overrides.
-  void WebContentsDestroyed() override { run_loop_->Quit(); }
-
-  using content::WebContentsObserver::Observe;
-
- private:
-  base::RunLoop* const run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(CloseObserver);
-};
-
 // This class imitates a presentation controller page from a messaging
 // standpoint.  It is registered as a controller connection for the appropriate
 // presentation ID with the LocalPresentationManager to facilitate a
@@ -88,11 +74,11 @@ class CloseObserver final : public content::WebContentsObserver {
 class FakeControllerConnection final
     : public blink::mojom::PresentationConnection {
  public:
-  FakeControllerConnection() : binding_(this) {}
+  FakeControllerConnection() {}
 
   void SendTextMessage(const std::string& message) {
-    ASSERT_TRUE(receiver_connection_.is_bound());
-    receiver_connection_->OnMessage(
+    ASSERT_TRUE(receiver_connection_remote_.is_bound());
+    receiver_connection_remote_->OnMessage(
         blink::mojom::PresentationConnectionMessage::NewMessage(message));
   }
 
@@ -104,18 +90,22 @@ class FakeControllerConnection final
   void DidClose(
       blink::mojom::PresentationConnectionCloseReason reason) override {}
 
-  blink::mojom::PresentationConnectionRequest MakeConnectionRequest() {
-    return mojo::MakeRequest(&receiver_connection_);
+  mojo::PendingReceiver<blink::mojom::PresentationConnection>
+  MakeConnectionRequest() {
+    return receiver_connection_remote_.BindNewPipeAndPassReceiver();
   }
-  blink::mojom::PresentationConnectionPtr Bind() {
-    blink::mojom::PresentationConnectionPtr connection;
-    binding_.Bind(mojo::MakeRequest(&connection));
+  mojo::PendingRemote<blink::mojom::PresentationConnection> Bind() {
+    mojo::PendingRemote<blink::mojom::PresentationConnection> connection;
+    receiver_connection_receiver_.Bind(
+        connection.InitWithNewPipeAndPassReceiver());
     return connection;
   }
 
  private:
-  mojo::Binding<blink::mojom::PresentationConnection> binding_;
-  blink::mojom::PresentationConnectionPtr receiver_connection_;
+  mojo::Receiver<blink::mojom::PresentationConnection>
+      receiver_connection_receiver_{this};
+  mojo::Remote<blink::mojom::PresentationConnection>
+      receiver_connection_remote_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeControllerConnection);
 };
@@ -255,13 +245,11 @@ IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
   receiver_window->Start(kPresentationId, presentation_url);
   ASSERT_TRUE(content::WaitForLoadStop(receiver_window->web_contents()));
 
-  base::RunLoop run_loop;
-  CloseObserver close_observer(&run_loop);
-  close_observer.Observe(receiver_window->web_contents());
-
+  content::WebContentsDestroyedWatcher destroyed_watcher(
+      receiver_window->web_contents());
   ASSERT_TRUE(content::ExecuteScript(receiver_window->web_contents(),
                                      "window.location = 'about:blank'"));
-  run_loop.Run();
+  destroyed_watcher.Wait();
 
   destroyer.AwaitTerminate(std::move(receiver_window));
 }
@@ -332,12 +320,10 @@ IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
   receiver_window->Start(kPresentationId, GURL("about:blank"));
   ASSERT_TRUE(content::WaitForLoadStop(receiver_window->web_contents()));
 
-  base::RunLoop run_loop;
-  CloseObserver close_observer(&run_loop);
-  close_observer.Observe(receiver_window->web_contents());
-
+  content::WebContentsDestroyedWatcher destroyed_watcher(
+      receiver_window->web_contents());
   CloseWindow(receiver_window.get());
-  run_loop.Run();
+  destroyed_watcher.Wait();
 
   destroyer.AwaitTerminate(std::move(receiver_window));
 }

@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/browser/ui/browser.h"
@@ -16,9 +17,11 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/http/transport_security_state.h"
+#include "net/test/cert_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/test/test_data_directory.h"
 #include "services/network/public/cpp/features.h"
 
 namespace {
@@ -27,7 +30,22 @@ namespace {
 // received by a server.
 class ExpectCTBrowserTest : public CertVerifierBrowserTest {
  public:
-  ExpectCTBrowserTest() : CertVerifierBrowserTest() {}
+  ExpectCTBrowserTest() : CertVerifierBrowserTest() {
+    feature_list_.InitWithFeatures(
+        {network::features::kExpectCTReporting,
+         net::TransportSecurityState::kDynamicExpectCTFeature},
+        {});
+
+    // Expect-CT reporting depends on actually enforcing Certificate
+    // Transparency.
+    SystemNetworkContextManager::SetEnableCertificateTransparencyForTesting(
+        true);
+  }
+
+  ~ExpectCTBrowserTest() override {
+    SystemNetworkContextManager::SetEnableCertificateTransparencyForTesting(
+        base::nullopt);
+  }
 
   void SetUpOnMainThread() override {
     run_loop_ = std::make_unique<base::RunLoop>();
@@ -96,6 +114,8 @@ class ExpectCTBrowserTest : public CertVerifierBrowserTest {
   void set_report_uri(const GURL& report_uri) { report_uri_ = report_uri; }
 
  private:
+  base::test::ScopedFeatureList feature_list_;
+
   std::unique_ptr<base::RunLoop> run_loop_;
   // The report-uri value to use in the Expect-CT header for requests handled by
   // ExpectCTHeaderRequestHandler.
@@ -107,12 +127,6 @@ class ExpectCTBrowserTest : public CertVerifierBrowserTest {
 // Tests that an Expect-CT reporter is properly set up and used for violations
 // of Expect-CT HTTP headers.
 IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest, TestDynamicExpectCTReporting) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {network::features::kExpectCTReporting,
-       net::TransportSecurityState::kDynamicExpectCTFeature},
-      {});
-
   net::EmbeddedTestServer report_server;
   report_server.RegisterRequestHandler(base::Bind(
       &ExpectCTBrowserTest::ReportRequestHandler, base::Unretained(this)));
@@ -131,7 +145,12 @@ IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest, TestDynamicExpectCTReporting) {
   scoped_refptr<net::X509Certificate> cert(test_server.GetCertificate());
   net::CertVerifyResult verify_result;
   verify_result.is_issued_by_known_root = true;
-  verify_result.verified_cert = cert;
+  // TODO(https://crbug.com/848277): Until CT is unified with cert
+  // verification, the CertVerifier needs to simulate a publicly trusted
+  // certificate that was issued prior to CT being required, so that the
+  // connection is successfully made, but an Expect-CT report is triggered.
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "expired_cert.pem");
   verify_result.cert_status = 0;
   mock_cert_verifier()->AddResultForCert(cert, verify_result, net::OK);
 
@@ -150,12 +169,6 @@ IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest, TestDynamicExpectCTReporting) {
 // Tests that Expect-CT HTTP headers are processed correctly.
 IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest,
                        TestDynamicExpectCTHeaderProcessing) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {network::features::kExpectCTReporting,
-       net::TransportSecurityState::kDynamicExpectCTFeature},
-      {});
-
   net::EmbeddedTestServer test_server(net::EmbeddedTestServer::TYPE_HTTPS);
   test_server.RegisterRequestHandler(
       base::Bind(&ExpectCTBrowserTest::ExpectCTHeaderRequestHandler,
@@ -177,7 +190,12 @@ IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest,
   scoped_refptr<net::X509Certificate> cert(test_server.GetCertificate());
   net::CertVerifyResult verify_result;
   verify_result.is_issued_by_known_root = true;
-  verify_result.verified_cert = cert;
+  // TODO(https://crbug.com/848277): Until CT is unified with cert
+  // verification, the CertVerifier needs to simulate a publicly trusted
+  // certificate that was issued prior to CT being required, so that the
+  // connection is successfully made, but an Expect-CT report is triggered.
+  verify_result.verified_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "expired_cert.pem");
   verify_result.cert_status = 0;
   mock_cert_verifier()->AddResultForCert(cert, verify_result, net::OK);
 

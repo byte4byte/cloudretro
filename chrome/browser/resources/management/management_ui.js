@@ -2,17 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.exportPath('management');
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import 'chrome://resources/cr_elements/cr_icons_css.m.js';
+import 'chrome://resources/cr_elements/cr_page_host_style_css.m.js';
+import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar.m.js';
+import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/icons.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
+import './icons.js';
+import './strings.m.js';
+
+import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {BrowserReportingResponse, Extension, ManagementBrowserProxy, ManagementBrowserProxyImpl, ReportingType, ThreatProtectionInfo} from './management_browser_proxy.js';
+// <if expr="chromeos">
+import {DeviceReportingResponse, DeviceReportingType} from './management_browser_proxy.js';
+// </if>
+
 /**
  * @typedef {{
  *   messageIds: !Array<string>,
  *   icon: string,
  * }}
  */
-management.BrowserReportingData;
+let BrowserReportingData;
 
 Polymer({
   is: 'management-ui',
+
+  _template: html`{__html_template__}`,
 
   behaviors: [
     I18nBehavior,
@@ -22,20 +43,20 @@ Polymer({
   properties: {
     /**
      * List of messages related to browser reporting.
-     * @private {?Array<!management.BrowserReportingData>}
+     * @private {?Array<!BrowserReportingData>}
      */
     browserReportingInfo_: Array,
 
     /**
      * List of messages related to browser reporting.
-     * @private {?Array<!management.Extension>}
+     * @private {?Array<!Extension>}
      */
     extensions_: Array,
 
     // <if expr="chromeos">
     /**
      * List of messages related to device reporting.
-     * @private {?Array<!management.DeviceReportingResponse>}
+     * @private {?Array<!DeviceReportingResponse>}
      */
     deviceReportingInfo_: Array,
 
@@ -66,17 +87,21 @@ Polymer({
 
     /** @private */
     extensionReportingSubtitle_: String,
+
+    /** @private {!ThreatProtectionInfo} */
+    threatProtectionInfo_: Object,
   },
 
-  /** @private {?management.ManagementBrowserProxy} */
+  /** @private {?ManagementBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
   attached() {
     document.documentElement.classList.remove('loading');
-    this.browserProxy_ = management.ManagementBrowserProxyImpl.getInstance();
+    this.browserProxy_ = ManagementBrowserProxyImpl.getInstance();
     this.updateManagedFields_();
     this.initBrowserReportingInfo_();
+    this.getThreatProtectionInfo_();
 
     this.addWebUIListener(
         'browser-reporting-info-updated',
@@ -85,6 +110,10 @@ Polymer({
     this.addWebUIListener('managed_data_changed', () => {
       this.updateManagedFields_();
     });
+
+    this.addWebUIListener(
+        'threat-protection-info-updated',
+        info => this.threatProtectionInfo_ = info);
 
     this.getExtensions_();
     // <if expr="chromeos">
@@ -100,7 +129,7 @@ Polymer({
   },
 
   /**
-   * @param {!Array<!management.BrowserReportingResponse>} reportingInfo
+   * @param {!Array<!BrowserReportingResponse>} reportingInfo
    * @private
    */
   onBrowserReportingInfoReceived_(reportingInfo) {
@@ -114,11 +143,11 @@ Polymer({
     }, {});
 
     const reportingTypeOrder = {
-      [management.ReportingType.SECURITY]: 1,
-      [management.ReportingType.EXTENSIONS]: 2,
-      [management.ReportingType.USER]: 3,
-      [management.ReportingType.USER_ACTIVITY]: 4,
-      [management.ReportingType.DEVICE]: 5,
+      [ReportingType.SECURITY]: 1,
+      [ReportingType.EXTENSIONS]: 2,
+      [ReportingType.USER]: 3,
+      [ReportingType.USER_ACTIVITY]: 4,
+      [ReportingType.DEVICE]: 5,
     };
 
     this.browserReportingInfo_ =
@@ -132,6 +161,22 @@ Polymer({
     this.browserProxy_.getExtensions().then(extensions => {
       this.extensions_ = extensions;
     });
+  },
+
+  /** @private */
+  getThreatProtectionInfo_() {
+    this.browserProxy_.getThreatProtectionInfo().then(info => {
+      this.threatProtectionInfo_ = info;
+    });
+  },
+
+  /**
+   * @return {boolean} True if there is threat protection info to show.
+   * @private
+   */
+  showThreatProtectionInfo_() {
+    return !!this.threatProtectionInfo_ &&
+        this.threatProtectionInfo_.info.length > 0;
   },
 
   // <if expr="chromeos">
@@ -160,26 +205,34 @@ Polymer({
   },
 
   /**
-   * @param {management.DeviceReportingType} reportingType
+   * @param {DeviceReportingType} reportingType
    * @return {string} The associated icon.
    * @private
    */
   getIconForDeviceReportingType_(reportingType) {
     switch (reportingType) {
-      case management.DeviceReportingType.SUPERVISED_USER:
+      case DeviceReportingType.SUPERVISED_USER:
         return 'management:supervised-user';
-      case management.DeviceReportingType.DEVICE_ACTIVITY:
+      case DeviceReportingType.DEVICE_ACTIVITY:
         return 'management:timelapse';
-      case management.DeviceReportingType.STATISTIC:
+      case DeviceReportingType.STATISTIC:
         return 'management:bar-chart';
-      case management.DeviceReportingType.DEVICE:
+      case DeviceReportingType.DEVICE:
         return 'cr:computer';
-      case management.DeviceReportingType.LOGS:
+      case DeviceReportingType.CRASH_REPORT:
+        return 'management:crash';
+      case DeviceReportingType.LOGS:
         return 'management:report';
-      case management.DeviceReportingType.PRINT:
+      case DeviceReportingType.PRINT:
         return 'cr:print';
-      case management.DeviceReportingType.CROSTINI:
+      case DeviceReportingType.CROSTINI:
         return 'management:linux';
+      case DeviceReportingType.USERNAME:
+        return 'management:account-circle';
+      case DeviceReportingType.EXTENSION:
+        return 'cr:extension';
+      case DeviceReportingType.ANDROID_APPLICATION:
+        return 'management:play-store';
       default:
         return 'cr:computer';
     }
@@ -204,21 +257,21 @@ Polymer({
   },
 
   /**
-   * @param {management.ReportingType} reportingType
+   * @param {ReportingType} reportingType
    * @returns {string} The associated icon.
    * @private
    */
   getIconForReportingType_(reportingType) {
     switch (reportingType) {
-      case management.ReportingType.SECURITY:
+      case ReportingType.SECURITY:
         return 'cr:security';
-      case management.ReportingType.DEVICE:
+      case ReportingType.DEVICE:
         return 'cr:computer';
-      case management.ReportingType.EXTENSIONS:
+      case ReportingType.EXTENSIONS:
         return 'cr:extension';
-      case management.ReportingType.USER:
+      case ReportingType.USER:
         return 'management:account-circle';
-      case management.ReportingType.USER_ACTIVITY:
+      case ReportingType.USER_ACTIVITY:
         return 'management:public';
       default:
         return 'cr:security';
@@ -232,7 +285,7 @@ Polymer({
    * @param {!CustomEvent<string>} e
    * @private
    */
-  onSearchChanged_: function(e) {
+  onSearchChanged_(e) {
     const query = e.detail;
     window.location.href =
         `chrome://settings?search=${encodeURIComponent(query)}`;

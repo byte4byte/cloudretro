@@ -30,8 +30,11 @@
 #endif
 
 #if defined(OS_IOS)
-#include "components/signin/internal/identity_manager/device_accounts_synchronizer_impl.h"
 #include "components/signin/public/identity_manager/ios/device_accounts_provider.h"
+#endif
+
+#if defined(OS_ANDROID) || defined(OS_IOS)
+#include "components/signin/internal/identity_manager/device_accounts_synchronizer_impl.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -42,7 +45,7 @@
 #include "components/signin/internal/identity_manager/primary_account_policy_manager_impl.h"
 #endif
 
-namespace identity {
+namespace signin {
 
 namespace {
 
@@ -56,7 +59,7 @@ std::unique_ptr<AccountTrackerService> BuildAccountTrackerService(
 
 std::unique_ptr<PrimaryAccountManager> BuildPrimaryAccountManager(
     SigninClient* client,
-    signin::AccountConsistencyMethod account_consistency,
+    AccountConsistencyMethod account_consistency,
     AccountTrackerService* account_tracker_service,
     ProfileOAuth2TokenService* token_service,
     PrefService* local_state) {
@@ -135,16 +138,16 @@ std::unique_ptr<IdentityManager> BuildIdentityManager(
                                  account_tracker_service.get(),
                                  token_service.get(), params->local_state);
 
-  auto primary_account_mutator =
-      std::make_unique<identity::PrimaryAccountMutatorImpl>(
-          account_tracker_service.get(), primary_account_manager.get(),
-          params->pref_service);
+  auto primary_account_mutator = std::make_unique<PrimaryAccountMutatorImpl>(
+      account_tracker_service.get(), primary_account_manager.get(),
+      params->pref_service);
 
-  std::unique_ptr<identity::AccountsMutator> accounts_mutator =
+  std::unique_ptr<AccountsMutator> accounts_mutator =
       BuildAccountsMutator(params->pref_service, account_tracker_service.get(),
                            token_service.get(), primary_account_manager.get());
 
   auto accounts_cookie_mutator = std::make_unique<AccountsCookieMutatorImpl>(
+      params->signin_client, token_service.get(),
       gaia_cookie_manager_service.get(), account_tracker_service.get());
 
   auto diagnostics_provider = std::make_unique<DiagnosticsProviderImpl>(
@@ -156,7 +159,7 @@ std::unique_ptr<IdentityManager> BuildIdentityManager(
                                  std::move(params->image_decoder));
 
   std::unique_ptr<DeviceAccountsSynchronizer> device_accounts_synchronizer;
-#if defined(OS_IOS)
+#if defined(OS_IOS) || defined(OS_ANDROID)
   device_accounts_synchronizer =
       std::make_unique<DeviceAccountsSynchronizerImpl>(
           token_service->GetDelegate());
@@ -171,4 +174,4 @@ std::unique_ptr<IdentityManager> BuildIdentityManager(
       std::move(device_accounts_synchronizer));
 }
 
-}  // namespace identity
+}  // namespace signin

@@ -57,6 +57,9 @@ class ViewsScreenLocker : public LoginScreenClient::Delegate,
       base::OnceCallback<void(bool)> callback) override;
   void HandleAuthenticateUserWithEasyUnlock(
       const AccountId& account_id) override;
+  void HandleAuthenticateUserWithChallengeResponse(
+      const AccountId& account_id,
+      base::OnceCallback<void(bool)> callback) override;
   void HandleHardlockPod(const AccountId& account_id) override;
   void HandleOnFocusPod(const AccountId& account_id) override;
   void HandleOnNoPodFocused() override;
@@ -80,7 +83,7 @@ class ViewsScreenLocker : public LoginScreenClient::Delegate,
 
  private:
   void UpdatePinKeyboardState(const AccountId& account_id);
-  void OnAllowedInputMethodsChanged();
+  void UpdateChallengeResponseAuthAvailability(const AccountId& account_id);
   void OnPinCanAuthenticate(const AccountId& account_id, bool can_authenticate);
   void OnExternalBinaryAuthTimeout();
   void OnExternalBinaryEnrollmentTimeout();
@@ -93,14 +96,6 @@ class ViewsScreenLocker : public LoginScreenClient::Delegate,
 
   // Time when lock was initiated, required for metrics.
   base::TimeTicks lock_time_;
-
-  base::Optional<AccountId> focused_pod_account_id_;
-
-  // Input Method Engine state used at lock screen.
-  scoped_refptr<input_method::InputMethodManager::State> ime_state_;
-
-  std::unique_ptr<CrosSettings::ObserverSubscription>
-      allowed_input_methods_subscription_;
 
   base::OnceCallback<void(bool)> authenticate_with_external_binary_callback_;
 
@@ -119,7 +114,8 @@ class ViewsScreenLocker : public LoginScreenClient::Delegate,
   // up to a specific timeout.
   base::OneShotTimer external_binary_timer_;
 
-  ScopedObserver<chromeos::MediaAnalyticsClient, ViewsScreenLocker>
+  ScopedObserver<chromeos::MediaAnalyticsClient,
+                 chromeos::MediaAnalyticsClient::Observer>
       scoped_observer_{this};
 
   base::WeakPtrFactory<ViewsScreenLocker> weak_factory_{this};

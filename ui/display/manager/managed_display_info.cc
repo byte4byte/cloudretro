@@ -19,6 +19,7 @@
 #include "ui/display/display.h"
 #include "ui/display/display_features.h"
 #include "ui/display/display_switches.h"
+#include "ui/display/manager/display_manager_utilities.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/size_f.h"
 
@@ -33,7 +34,7 @@ namespace {
 // Use larger than max int to catch overflow early.
 const int64_t kSynthesizedDisplayIdStart = 2200000000LL;
 
-int64_t synthesized_display_id = kSynthesizedDisplayIdStart;
+int64_t next_synthesized_display_id = kSynthesizedDisplayIdStart;
 
 const float kDpi96 = 96.0;
 
@@ -60,18 +61,13 @@ bool GetDisplayBounds(const std::string& spec,
 //  * the area in pixels in ascending order
 //  * refresh rate in descending order
 struct ManagedDisplayModeSorter {
-  explicit ManagedDisplayModeSorter(bool is_internal)
-      : is_internal(is_internal) {}
-
   bool operator()(const ManagedDisplayMode& a, const ManagedDisplayMode& b) {
-    gfx::Size size_a_dip = a.GetSizeInDIP(is_internal);
-    gfx::Size size_b_dip = b.GetSizeInDIP(is_internal);
+    gfx::Size size_a_dip = a.GetSizeInDIP();
+    gfx::Size size_b_dip = b.GetSizeInDIP();
     if (size_a_dip.GetArea() == size_b_dip.GetArea())
       return (a.refresh_rate() > b.refresh_rate());
     return (size_a_dip.GetArea() < size_b_dip.GetArea());
   }
-
-  bool is_internal;
 };
 
 }  // namespace
@@ -108,12 +104,8 @@ ManagedDisplayMode::ManagedDisplayMode(const ManagedDisplayMode& other) =
 ManagedDisplayMode& ManagedDisplayMode::operator=(
     const ManagedDisplayMode& other) = default;
 
-gfx::Size ManagedDisplayMode::GetSizeInDIP(bool is_internal) const {
+gfx::Size ManagedDisplayMode::GetSizeInDIP() const {
   gfx::SizeF size_dip(size_);
-  // DSF=1.25 is special on internal display. The screen is drawn with DSF=1.25
-  // but it doesn't affect the screen size computation.
-  if (is_internal && device_scale_factor_ == 1.25f)
-    return gfx::ToFlooredSize(size_dip);
   size_dip.Scale(1.0f / device_scale_factor_);
   return gfx::ToFlooredSize(size_dip);
 }
@@ -243,21 +235,22 @@ ManagedDisplayInfo ManagedDisplayInfo::CreateFromSpecWithID(
                            true, dm.device_scale_factor());
   }
 
-  if (id == kInvalidDisplayId)
-    id = synthesized_display_id++;
+  if (id == kInvalidDisplayId) {
+    id = next_synthesized_display_id;
+    next_synthesized_display_id = GetNextSynthesizedDisplayId(id);
+  }
   ManagedDisplayInfo display_info(
       id, base::StringPrintf("Display-%d", static_cast<int>(id)), has_overscan);
   display_info.set_device_scale_factor(device_scale_factor);
   display_info.SetRotation(rotation, Display::RotationSource::ACTIVE);
   display_info.set_zoom_factor(zoom_factor);
   display_info.SetBounds(bounds_in_native);
-#if 0
+
   if (!display_modes.size()) {
     display_modes.push_back(ManagedDisplayMode(
         display_info.size_in_pixel(), 60.0f,
         /*interlace=*/false, /*native=*/true, device_scale_factor));
   }
-#endif
 
   display_info.SetManagedDisplayModes(display_modes);
 
@@ -282,14 +275,16 @@ ManagedDisplayInfo::ManagedDisplayInfo()
       touch_support_(Display::TouchSupport::UNKNOWN),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
+      panel_orientation_(display::PanelOrientation::kNormal),
       overscan_insets_in_dip_(0, 0, 0, 0),
       zoom_factor_(1.f),
       refresh_rate_(60.f),
       is_interlaced_(false),
-      is_zoom_factor_from_ui_scale_(false),
+      from_native_platform_(false),
       native_(false),
       is_aspect_preserving_scaling_(false),
-      clear_overscan_insets_(false) {}
+      clear_overscan_insets_(false),
+      bits_per_channel_(0) {}
 
 ManagedDisplayInfo::ManagedDisplayInfo(int64_t id,
                                        const std::string& name,
@@ -302,14 +297,16 @@ ManagedDisplayInfo::ManagedDisplayInfo(int64_t id,
       touch_support_(Display::TouchSupport::UNKNOWN),
       device_scale_factor_(1.0f),
       device_dpi_(kDpi96),
+      panel_orientation_(display::PanelOrientation::kNormal),
       overscan_insets_in_dip_(0, 0, 0, 0),
       zoom_factor_(1.f),
       refresh_rate_(60.f),
       is_interlaced_(false),
-      is_zoom_factor_from_ui_scale_(false),
+      from_native_platform_(false),
       native_(false),
       is_aspect_preserving_scaling_(false),
-      clear_overscan_insets_(false) {}
+      clear_overscan_insets_(false),
+      bits_per_channel_(0) {}
 
 ManagedDisplayInfo::ManagedDisplayInfo(const ManagedDisplayInfo& other) =
     default;
@@ -325,6 +322,11 @@ void ManagedDisplayInfo::SetRotation(Display::Rotation rotation,
 
 Display::Rotation ManagedDisplayInfo::GetActiveRotation() const {
   return GetRotation(Display::RotationSource::ACTIVE);
+}
+
+Display::Rotation ManagedDisplayInfo::GetLogicalActiveRotation() const {
+  return GetRotationWithPanelOrientation(
+      GetRotation(Display::RotationSource::ACTIVE));
 }
 
 Display::Rotation ManagedDisplayInfo::GetRotation(
@@ -348,18 +350,21 @@ void ManagedDisplayInfo::Copy(const ManagedDisplayInfo& native_info) {
   DCHECK(!native_info.bounds_in_native_.IsEmpty());
   bounds_in_native_ = native_info.bounds_in_native_;
   device_dpi_ = native_info.device_dpi_;
+  panel_orientation_ = native_info.panel_orientation_,
   size_in_pixel_ = native_info.size_in_pixel_;
   is_aspect_preserving_scaling_ = native_info.is_aspect_preserving_scaling_;
   display_modes_ = native_info.display_modes_;
   maximum_cursor_size_ = native_info.maximum_cursor_size_;
-  color_space_ = native_info.color_space_;
+  display_color_spaces_ = native_info.display_color_spaces_;
+  bits_per_channel_ = native_info.bits_per_channel_;
   refresh_rate_ = native_info.refresh_rate_;
   is_interlaced_ = native_info.is_interlaced_;
+  native_ = native_info.native_;
 
   // Rotation, color_profile and overscan are given by preference,
   // or unit tests. Don't copy if this native_info came from
   // DisplayChangeObserver.
-  if (native_info.native())
+  if (native_info.from_native_platform())
     return;
   // Update the overscan_insets_in_dip_ either if the inset should be
   // cleared, or has non empty insts.
@@ -370,7 +375,6 @@ void ManagedDisplayInfo::Copy(const ManagedDisplayInfo& native_info) {
 
   rotations_ = native_info.rotations_;
   zoom_factor_ = native_info.zoom_factor_;
-  is_zoom_factor_from_ui_scale_ = native_info.is_zoom_factor_from_ui_scale_;
 }
 
 void ManagedDisplayInfo::SetBounds(const gfx::Rect& new_bounds_in_native) {
@@ -389,11 +393,20 @@ float ManagedDisplayInfo::GetEffectiveDeviceScaleFactor() const {
   return device_scale_factor_ * zoom_factor_;
 }
 
+gfx::Size ManagedDisplayInfo::GetSizeInPixelWithPanelOrientation() const {
+  gfx::Size size = bounds_in_native_.size();
+  if (panel_orientation_ == display::PanelOrientation::kLeftUp ||
+      panel_orientation_ == display::PanelOrientation::kRightUp) {
+    return gfx::Size(size.height(), size.width());
+  }
+  return size;
+}
+
 void ManagedDisplayInfo::UpdateDisplaySize() {
-  size_in_pixel_ = bounds_in_native_.size();
+  size_in_pixel_ = GetSizeInPixelWithPanelOrientation();
+
   if (!overscan_insets_in_dip_.IsEmpty()) {
-    gfx::Insets insets_in_pixel =
-        overscan_insets_in_dip_.Scale(device_scale_factor_);
+    gfx::Insets insets_in_pixel = GetOverscanInsetsInPixel();
     size_in_pixel_.Enlarge(-insets_in_pixel.width(), -insets_in_pixel.height());
   } else {
     overscan_insets_in_dip_.Set(0, 0, 0, 0);
@@ -410,14 +423,14 @@ void ManagedDisplayInfo::SetOverscanInsets(const gfx::Insets& insets_in_dip) {
 }
 
 gfx::Insets ManagedDisplayInfo::GetOverscanInsetsInPixel() const {
-  return overscan_insets_in_dip_.Scale(device_scale_factor_ * zoom_factor_);
+  return overscan_insets_in_dip_.Scale(device_scale_factor_);
 }
 
 void ManagedDisplayInfo::SetManagedDisplayModes(
     const ManagedDisplayModeList& display_modes) {
   display_modes_ = display_modes;
   std::sort(display_modes_.begin(), display_modes_.end(),
-            ManagedDisplayModeSorter(Display::IsInternalDisplayId(id_)));
+            ManagedDisplayModeSorter());
 }
 
 gfx::Size ManagedDisplayInfo::GetNativeModeSize() const {
@@ -458,8 +471,38 @@ std::string ManagedDisplayInfo::ToFullString() const {
   return ToString() + ", display_modes==" + display_modes_str;
 }
 
+Display::Rotation ManagedDisplayInfo::GetRotationWithPanelOrientation(
+    Display::Rotation rotation) const {
+  int offset = 0;
+  switch (panel_orientation_) {
+    case PanelOrientation::kNormal:
+      break;
+    case PanelOrientation::kBottomUp:
+      offset = 2;
+      break;
+    case PanelOrientation::kRightUp:
+      offset = 1;
+      break;
+    case PanelOrientation::kLeftUp:
+      offset = 3;
+      break;
+  }
+  return static_cast<Display::Rotation>((static_cast<int>(rotation) + offset) %
+                                        4);
+}
+
 void ResetDisplayIdForTest() {
-  synthesized_display_id = kSynthesizedDisplayIdStart;
+  next_synthesized_display_id = kSynthesizedDisplayIdStart;
+}
+
+int64_t GetNextSynthesizedDisplayId(int64_t id) {
+  int next_output_index = id & 0xFF;
+  next_output_index++;
+  DCHECK_GT(0x100, next_output_index);
+  int64_t base = GetDisplayIdWithoutOutputIndex(id);
+  if (id == kSynthesizedDisplayIdStart)
+    return id + 0x100 + next_output_index;
+  return base + next_output_index;
 }
 
 }  // namespace display

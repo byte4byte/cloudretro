@@ -56,8 +56,13 @@ class StructPtr {
       : ptr_(new Struct(std::forward<Args>(args)...)) {}
 
   template <typename U>
-  U To() const {
+  U To() const& {
     return TypeConverter<U, StructPtr>::Convert(*this);
+  }
+
+  template <typename U>
+  U To() && {
+    return TypeConverter<U, StructPtr>::Convert(std::move(*this));
   }
 
   void reset() { ptr_.reset(); }
@@ -127,8 +132,8 @@ class InlinedStructPtr {
     return *this;
   }
 
-  InlinedStructPtr(InlinedStructPtr&& other) { Take(&other); }
-  InlinedStructPtr& operator=(InlinedStructPtr&& other) {
+  InlinedStructPtr(InlinedStructPtr&& other) noexcept { Take(&other); }
+  InlinedStructPtr& operator=(InlinedStructPtr&& other) noexcept {
     Take(&other);
     return *this;
   }

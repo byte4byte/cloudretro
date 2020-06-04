@@ -10,15 +10,12 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/chromeos/child_accounts/parent_access_code/config_source.h"
 #include "chrome/browser/ui/ash/login_screen_client.h"
 #include "components/account_id/account_id.h"
 
 class PrefRegistrySimple;
-
-namespace base {
-class Clock;
-}  // namespace base
 
 namespace chromeos {
 namespace parent_access {
@@ -60,18 +57,18 @@ class ParentAccessService {
 
   // Checks if |access_code| is valid for the user identified by |account_id|.
   // When account_id is empty, this method checks if the |access_code| is valid
-  // for any child that was added to this device.
+  // for any child that was added to this device. |validation_time| is the time
+  // that will be used to validate the code, it will succeed if the code was
+  // valid this given time.
   bool ValidateParentAccessCode(const AccountId& account_id,
-                                const std::string& access_code);
+                                const std::string& access_code,
+                                base::Time validation_time);
 
   // Reloads config for the provided user.
   void LoadConfigForUser(const user_manager::User* user);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
-
-  // Allows to override the time for testing purposes.
-  void SetClockForTesting(base::Clock* clock);
 
  private:
   friend class base::NoDestructor<ParentAccessService>;
@@ -81,9 +78,6 @@ class ParentAccessService {
 
   // Provides configurations to be used for validation of access codes.
   ConfigSource config_source_;
-
-  // Points to the base::DefaultClock by default.
-  const base::Clock* clock_;
 
   base::ObserverList<Observer> observers_;
 

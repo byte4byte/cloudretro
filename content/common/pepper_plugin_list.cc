@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,6 +21,8 @@
 
 #ifndef __ANDROID__
 
+
+#ifdef _WIN32
 typedef std::string (*t_GetSwitchValueASCII)(const char *str);
 typedef bool (*t_HasSwitch)(const char *str);
 typedef void (*t_AppendSwitchNative)(const char *str, wchar_t *val);
@@ -40,8 +43,31 @@ void AppendSwitchNative(const char *str, wchar_t *val) {
 	  command_line.AppendSwitchNative(str, val);
 }
 
-void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch HasSwitch, t_AppendSwitchNative AppendSwitchNative);	
+void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch HasSwitch, t_AppendSwitchNative AppendSwitchNative);
 
+#else	
+typedef std::string (*t_GetSwitchValueASCII)(const char *str);
+typedef bool (*t_HasSwitch)(const char *str);
+typedef void (*t_AppendSwitchNative)(const char *str, const char *val);
+
+std::string GetSwitchValueASCII(const char *str) {
+	base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+	  return command_line.GetSwitchValueASCII(str);
+}
+bool HasSwitch(const char *str) {
+	base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+	  return command_line.HasSwitch(str);
+}
+void AppendSwitchNative(const char *str, const char *val) {
+	base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+	  command_line.AppendSwitchNative(str, val);
+}
+
+void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch HasSwitch, t_AppendSwitchNative AppendSwitchNative);
+#endif
 #endif
 //void setECEmuPath(base::CommandLine& command_line);
 

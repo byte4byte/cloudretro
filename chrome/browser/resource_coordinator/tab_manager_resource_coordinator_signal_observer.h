@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_RESOURCE_COORDINATOR_TAB_MANAGER_RESOURCE_COORDINATOR_SIGNAL_OBSERVER_H_
 
 #include "base/macros.h"
-#include "chrome/browser/performance_manager/public/graph/graph.h"
-#include "chrome/browser/performance_manager/public/graph/page_node.h"
-#include "chrome/browser/performance_manager/public/graph/process_node.h"
-#include "chrome/browser/performance_manager/public/web_contents_proxy.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
+#include "components/performance_manager/public/graph/graph.h"
+#include "components/performance_manager/public/graph/page_node.h"
+#include "components/performance_manager/public/graph/process_node.h"
+#include "components/performance_manager/public/web_contents_proxy.h"
 
 namespace resource_coordinator {
 
@@ -39,7 +39,7 @@ class TabManager::ResourceCoordinatorSignalObserver
 
   // PageNode::ObserverDefaultImpl:
   // This function run on the performance manager sequence.
-  void OnPageAlmostIdleChanged(const PageNode* page_node) override;
+  void OnIsLoadingChanged(const PageNode* page_node) override;
 
   // GraphOwned implementation:
   void OnPassedToGraph(Graph* graph) override;
@@ -55,11 +55,8 @@ class TabManager::ResourceCoordinatorSignalObserver
       const WebContentsProxy& contents_proxy,
       int64_t navigation_id);
 
-  // Equivalent to the the GraphObserver functions above, but these are the
-  // counterparts that run on the UI thread.
-  static void OnPageAlmostIdleOnUi(const base::WeakPtr<TabManager>& tab_manager,
-                                   const WebContentsProxy& contents_proxy,
-                                   int64_t navigation_id);
+  // Posted to the UI thread from the GraphObserver functions above.
+  static void OnPageStoppedLoadingOnUi(const WebContentsProxy& contents_proxy);
   static void OnExpectedTaskQueueingDurationSampleOnUi(
       const base::WeakPtr<TabManager>& tab_manager,
       const WebContentsProxy& contents_proxy,

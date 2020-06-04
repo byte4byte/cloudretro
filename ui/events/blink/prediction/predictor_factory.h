@@ -13,17 +13,17 @@ namespace input_prediction {
 
 extern const char kScrollPredictorNameLsq[];
 extern const char kScrollPredictorNameKalman[];
-extern const char kScrollPredictorNameKalmanTimeFiltered[];
 extern const char kScrollPredictorNameLinearFirst[];
 extern const char kScrollPredictorNameLinearSecond[];
+extern const char kScrollPredictorNameLinearResampling[];
 extern const char kScrollPredictorNameEmpty[];
 
 enum class PredictorType {
   kScrollPredictorTypeLsq,
   kScrollPredictorTypeKalman,
-  kScrollPredictorTypeKalmanTimeFiltered,
   kScrollPredictorTypeLinearFirst,
   kScrollPredictorTypeLinearSecond,
+  kScrollPredictorTypeLinearResampling,
   kScrollPredictorTypeEmpty
 };
 }  // namespace input_prediction
@@ -39,6 +39,12 @@ class PredictorFactory {
   // PredictorEmpty
   static std::unique_ptr<InputPredictor> GetPredictor(
       input_prediction::PredictorType predictor_type);
+
+  // Returns the feature enabled kalman predictor options
+  static unsigned int GetKalmanPredictorOptions();
+
+  // Predictor options cache
+  static unsigned int predictor_options_;
 
  private:
   PredictorFactory() = delete;

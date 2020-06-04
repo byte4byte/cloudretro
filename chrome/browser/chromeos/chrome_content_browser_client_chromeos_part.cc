@@ -4,18 +4,17 @@
 
 #include "chrome/browser/chromeos/chrome_content_browser_client_chromeos_part.h"
 
+#include "ash/public/cpp/tablet_mode.h"
 #include "base/feature_list.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/system_web_dialog_delegate.h"
 #include "chrome/common/webui_url_constants.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
@@ -73,15 +72,13 @@ bool UseDefaultFontSize(const GURL& url) {
 void OverrideWebkitPrefsForTabletMode(content::WebContents* contents,
                                       content::WebPreferences* web_prefs) {
   // Enable some mobile-like behaviors when in tablet mode on Chrome OS.
-  if (!TabletModeClient::Get() ||
-      !TabletModeClient::Get()->tablet_mode_enabled()) {
+  if (!ash::TabletMode::Get() || !ash::TabletMode::Get()->InTabletMode())
     return;
-  }
 
   // Do this only for webcontents displayed in browsers and are not of hosted
   // apps.
   auto* browser = chrome::FindBrowserWithWebContents(contents);
-  if (!browser || browser->is_app())
+  if (!browser || browser->deprecated_is_app())
     return;
 
   // Also exclude internal pages and NTPs.
@@ -100,10 +97,6 @@ void OverrideWebkitPrefsForTabletMode(content::WebContents* contents,
 void OverrideFontSize(content::WebContents* contents,
                       content::WebPreferences* web_prefs) {
   DCHECK(contents);
-  // Prior to SplitSettings, system UI font size follows browser font size.
-  if (!chromeos::features::IsSplitSettingsEnabled())
-    return;
-
   // Check the URL because |contents| may not yet be associated with a window,
   // SettingsWindowManager, etc.
   GURL url = GetURL(contents);

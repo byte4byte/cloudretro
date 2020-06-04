@@ -15,14 +15,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "chromeos/components/account_manager/account_manager.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
 
 class AccountTrackerService;
 
 namespace signin {
 class ProfileOAuth2TokenServiceDelegateChromeOS
-    : public OAuth2TokenServiceDelegate,
+    : public ProfileOAuth2TokenServiceDelegate,
       public chromeos::AccountManager::Observer,
       public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
@@ -36,7 +36,7 @@ class ProfileOAuth2TokenServiceDelegateChromeOS
       bool is_regular_profile);
   ~ProfileOAuth2TokenServiceDelegateChromeOS() override;
 
-  // OAuth2TokenServiceDelegate overrides.
+  // ProfileOAuth2TokenServiceDelegate overrides.
   std::unique_ptr<OAuth2AccessTokenFetcher> CreateAccessTokenFetcher(
       const CoreAccountId& account_id,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
@@ -66,9 +66,9 @@ class ProfileOAuth2TokenServiceDelegateChromeOS
   void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(CrOSOAuthDelegateTest,
+  FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceDelegateChromeOSTest,
                            BackOffIsTriggerredForTransientErrors);
-  FRIEND_TEST_ALL_PREFIXES(CrOSOAuthDelegateTest,
+  FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceDelegateChromeOSTest,
                            BackOffIsResetOnNetworkChange);
 
   // A utility class to keep track of |GoogleServiceAuthError|s for an account.

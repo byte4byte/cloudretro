@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
@@ -24,19 +25,19 @@
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
 #include "chrome/browser/sync_file_system/local/syncable_file_system_operation.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
-#include "storage/browser/fileapi/file_system_context.h"
-#include "storage/browser/fileapi/file_system_operation_runner.h"
-#include "storage/browser/test/mock_blob_url_request_context.h"
+#include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/file_system/file_system_context.h"
+#include "storage/browser/file_system/file_system_operation_runner.h"
+#include "storage/browser/test/mock_blob_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 
+using base::File;
 using storage::FileSystemOperation;
 using storage::FileSystemURL;
-using content::MockBlobURLRequestContext;
-using content::ScopedTextBlob;
-using base::File;
+using storage::ScopedTextBlob;
 
 namespace sync_file_system {
 
@@ -55,7 +56,7 @@ class SyncableFileOperationRunnerTest : public testing::Test {
   // Use the current thread as IO thread so that we can directly call
   // operations in the tests.
   SyncableFileOperationRunnerTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         in_memory_env_(
             leveldb_chrome::NewMemEnv("SyncableFileOperationRunnerTest")),
         file_system_(GURL("http://example.com"),
@@ -110,8 +111,8 @@ class SyncableFileOperationRunnerTest : public testing::Test {
 
   StatusCallback ExpectStatus(const base::Location& location,
                               File::Error expect) {
-    return base::Bind(&SyncableFileOperationRunnerTest::DidFinish,
-                      weak_factory_.GetWeakPtr(), location, expect);
+    return base::BindOnce(&SyncableFileOperationRunnerTest::DidFinish,
+                          weak_factory_.GetWeakPtr(), location, expect);
   }
 
   FileSystemOperation::WriteCallback GetWriteCallback(
@@ -143,7 +144,7 @@ class SyncableFileOperationRunnerTest : public testing::Test {
     return base::CreateTemporaryFileInDir(dir_.GetPath(), path);
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   base::ScopedTempDir dir_;
   std::unique_ptr<leveldb::Env> in_memory_env_;
@@ -156,7 +157,7 @@ class SyncableFileOperationRunnerTest : public testing::Test {
   size_t write_bytes_;
   bool write_complete_;
 
-  MockBlobURLRequestContext url_request_context_;
+  storage::BlobStorageContext blob_storage_context_;
 
  private:
   base::WeakPtrFactory<SyncableFileOperationRunnerTest> weak_factory_{this};
@@ -310,7 +311,7 @@ TEST_F(SyncableFileOperationRunnerTest, CopyAndMove) {
 TEST_F(SyncableFileOperationRunnerTest, Write) {
   EXPECT_EQ(File::FILE_OK, file_system_.CreateFile(URL(kFile)));
   const std::string kData("Lorem ipsum.");
-  ScopedTextBlob blob(url_request_context_, "blob:foo", kData);
+  ScopedTextBlob blob(&blob_storage_context_, "blob:foo", kData);
 
   sync_status()->StartSyncing(URL(kFile));
 

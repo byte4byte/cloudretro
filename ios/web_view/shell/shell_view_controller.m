@@ -18,8 +18,8 @@
 NSString* const kWebViewShellBackButtonAccessibilityLabel = @"Back";
 NSString* const kWebViewShellForwardButtonAccessibilityLabel = @"Forward";
 NSString* const kWebViewShellAddressFieldAccessibilityLabel = @"Address field";
-NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
-    @"WebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier";
+NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier =
+    @"WebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier";
 
 @interface ShellViewController ()<CWVDownloadTaskDelegate,
                                   CWVNavigationDelegate,
@@ -55,6 +55,9 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
 @property(nonatomic, strong, nullable)
     UIDocumentInteractionController* documentInteractionController;
 @property(nonatomic, strong) ShellAuthService* authService;
+// The newly opened popup windows e.g., by JavaScript function "window.open()",
+// HTML "<a target='_blank'>".
+@property(nonatomic, strong) NSMutableArray<CWVWebView*>* popupWebViews;
 
 - (void)back;
 - (void)forward;
@@ -82,9 +85,12 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
 @synthesize downloadFilePath = _downloadFilePath;
 @synthesize documentInteractionController = _documentInteractionController;
 @synthesize authService = _authService;
+@synthesize popupWebViews = _popupWebViews;
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+
+  self.popupWebViews = [[NSMutableArray alloc] init];
 
   // View creation.
   self.headerBackgroundView = [[UIView alloc] init];
@@ -118,6 +124,9 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [_backButton addTarget:self
                   action:@selector(back)
         forControlEvents:UIControlEventTouchUpInside];
+  [_backButton addTarget:self
+                  action:@selector(logBackStack)
+        forControlEvents:UIControlEventTouchDragOutside];
   [_backButton setAccessibilityLabel:kWebViewShellBackButtonAccessibilityLabel];
 
   [_forwardButton setImage:[UIImage imageNamed:@"ic_forward"]
@@ -126,6 +135,9 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [_forwardButton addTarget:self
                      action:@selector(forward)
            forControlEvents:UIControlEventTouchUpInside];
+  [_forwardButton addTarget:self
+                     action:@selector(logForwardStack)
+           forControlEvents:UIControlEventTouchDragOutside];
   [_forwardButton
       setAccessibilityLabel:kWebViewShellForwardButtonAccessibilityLabel];
 
@@ -138,7 +150,7 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [_menuButton setImage:[UIImage imageNamed:@"ic_menu"]
                forState:UIControlStateNormal];
   [_menuButton addTarget:self
-                  action:@selector(showMenu)
+                  action:@selector(showMainMenu)
         forControlEvents:UIControlEventTouchUpInside];
 
   _field.placeholder = @"Search or type URL";
@@ -245,13 +257,15 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   ]];
 
   [CWVWebView setUserAgentProduct:@"Dummy/1.0"];
+  CWVWebView.chromeLongPressAndForceTouchHandlingEnabled = NO;
+
+  _authService = [[ShellAuthService alloc] init];
+  CWVSyncController.dataSource = _authService;
 
   CWVWebViewConfiguration* configuration =
       [CWVWebViewConfiguration defaultConfiguration];
   configuration.syncController.delegate = self;
-  [self createWebViewWithConfiguration:configuration];
-
-  _authService = [[ShellAuthService alloc] init];
+  self.webView = [self createWebViewWithConfiguration:configuration];
 }
 
 - (UIStatusBarStyle)preferredStatusBarStyle {
@@ -279,9 +293,35 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   }
 }
 
+- (void)logBackStack {
+  if (!_webView.canGoBack) {
+    return;
+  }
+  CWVBackForwardList* list = _webView.backForwardList;
+  CWVBackForwardListItemArray* backList = list.backList;
+  for (size_t i = 0; i < backList.count; i++) {
+    CWVBackForwardListItem* item = backList[i];
+    NSLog(@"BackStack Item #%ld: <URL='%@', title='%@'>", i, item.URL,
+          item.title);
+  }
+}
+
 - (void)forward {
   if ([_webView canGoForward]) {
     [_webView goForward];
+  }
+}
+
+- (void)logForwardStack {
+  if (!_webView.canGoForward) {
+    return;
+  }
+  CWVBackForwardList* list = _webView.backForwardList;
+  CWVBackForwardListItemArray* forwardList = list.forwardList;
+  for (size_t i = 0; i < forwardList.count; i++) {
+    CWVBackForwardListItem* item = forwardList[i];
+    NSLog(@"ForwardStack Item #%ld: <URL='%@', title='%@'>", i, item.URL,
+          item.title);
   }
 }
 
@@ -293,11 +333,239 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   }
 }
 
-- (void)showMenu {
-  UIAlertController* alertController = [UIAlertController
-      alertControllerWithTitle:nil
-                       message:nil
-                preferredStyle:UIAlertControllerStyleActionSheet];
+- (void)showAddressData {
+  CWVAutofillDataManager* dataManager =
+      _webView.configuration.autofillDataManager;
+  [dataManager fetchProfilesWithCompletionHandler:^(
+                   NSArray<CWVAutofillProfile*>* _Nonnull profiles) {
+    NSMutableArray<NSString*>* descriptions = [profiles
+        valueForKey:NSStringFromSelector(@selector(debugDescription))];
+    NSString* message = [descriptions componentsJoinedByString:@"\n\n"];
+    UIAlertController* alertController = [self actionSheetWithTitle:@"Addresses"
+                                                            message:message];
+    for (CWVAutofillProfile* profile in profiles) {
+      NSString* title = [NSString
+          stringWithFormat:@"Delete %@", @([profiles indexOfObject:profile])];
+      UIAlertAction* action =
+          [UIAlertAction actionWithTitle:title
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction* action) {
+                                   [dataManager deleteProfile:profile];
+                                 }];
+      [alertController addAction:action];
+    }
+    [alertController
+        addAction:[UIAlertAction actionWithTitle:@"Done"
+                                           style:UIAlertActionStyleCancel
+                                         handler:nil]];
+
+    [self presentViewController:alertController animated:YES completion:nil];
+  }];
+}
+
+- (void)showCreditCardData {
+  CWVAutofillDataManager* dataManager =
+      _webView.configuration.autofillDataManager;
+  [dataManager fetchCreditCardsWithCompletionHandler:^(
+                   NSArray<CWVCreditCard*>* _Nonnull creditCards) {
+    NSMutableArray<NSString*>* descriptions = [creditCards
+        valueForKey:NSStringFromSelector(@selector(debugDescription))];
+    NSString* message = [descriptions componentsJoinedByString:@"\n\n"];
+    UIAlertController* alertController =
+        [self actionSheetWithTitle:@"Credit cards" message:message];
+    for (CWVCreditCard* creditCard in creditCards) {
+      // Cards from Google Play can only be deleted on the Google Pay website.
+      if (creditCard.fromGooglePay) {
+        continue;
+      }
+      NSString* title =
+          [NSString stringWithFormat:@"Delete %@",
+                                     @([creditCards indexOfObject:creditCard])];
+      UIAlertAction* action =
+          [UIAlertAction actionWithTitle:title
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction* action) {
+                                   [dataManager deleteCreditCard:creditCard];
+                                 }];
+      [alertController addAction:action];
+    }
+    __weak ShellViewController* weakSelf = self;
+    [alertController
+        addAction:[UIAlertAction
+                      actionWithTitle:@"Manage Google pay cards"
+                                style:UIAlertActionStyleDefault
+                              handler:^(UIAlertAction* action) {
+                                __weak ShellViewController* strongSelf =
+                                    weakSelf;
+                                NSString* URL;
+                                if ([CWVFlags sharedInstance]
+                                        .usesSyncAndWalletSandbox) {
+                                  URL = @"https://pay.sandbox.google.com/"
+                                        @"payments/home#paymentMethods";
+                                } else {
+                                  URL = @"https://pay.google.com/payments/"
+                                        @"home#paymentMethods";
+                                }
+                                NSURLRequest* request = [NSURLRequest
+                                    requestWithURL:[NSURL URLWithString:URL]];
+                                [strongSelf.webView loadRequest:request];
+                              }]];
+    [alertController
+        addAction:[UIAlertAction actionWithTitle:@"Done"
+                                           style:UIAlertActionStyleCancel
+                                         handler:nil]];
+    [self presentViewController:alertController animated:YES completion:nil];
+  }];
+}
+
+- (void)showPasswordData {
+  CWVAutofillDataManager* dataManager =
+      _webView.configuration.autofillDataManager;
+  [dataManager fetchPasswordsWithCompletionHandler:^(
+                   NSArray<CWVPassword*>* _Nonnull passwords) {
+    NSMutableArray<NSString*>* descriptions = [passwords
+        valueForKey:NSStringFromSelector(@selector(debugDescription))];
+    NSString* message = [descriptions componentsJoinedByString:@"\n\n"];
+
+    UIAlertController* alertController = [self actionSheetWithTitle:@"Passwords"
+                                                            message:message];
+    for (CWVPassword* password in passwords) {
+      NSString* title = [NSString
+          stringWithFormat:@"Delete %@", @([passwords indexOfObject:password])];
+      UIAlertAction* action =
+          [UIAlertAction actionWithTitle:title
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction* action) {
+                                   [dataManager deletePassword:password];
+                                 }];
+      [alertController addAction:action];
+    }
+    [alertController
+        addAction:[UIAlertAction actionWithTitle:@"Done"
+                                           style:UIAlertActionStyleCancel
+                                         handler:nil]];
+    [self presentViewController:alertController animated:YES completion:nil];
+  }];
+}
+
+- (void)showSyncMenu {
+  UIAlertController* alertController = [self actionSheetWithTitle:@"Sync menu"
+                                                          message:nil];
+
+  CWVSyncController* syncController = _webView.configuration.syncController;
+  CWVIdentity* currentIdentity = syncController.currentIdentity;
+  __weak ShellViewController* weakSelf = self;
+  if (currentIdentity) {
+    NSString* title = [NSString
+        stringWithFormat:@"Stop syncing for %@", currentIdentity.email];
+    [alertController
+        addAction:[UIAlertAction
+                      actionWithTitle:title
+                                style:UIAlertActionStyleDefault
+                              handler:^(UIAlertAction* action) {
+                                [syncController stopSyncAndClearIdentity];
+                              }]];
+
+    if (syncController.passphraseNeeded) {
+      [alertController
+          addAction:[UIAlertAction
+                        actionWithTitle:@"Unlock using passphrase"
+                                  style:UIAlertActionStyleDefault
+                                handler:^(UIAlertAction* action) {
+                                  [weakSelf showPassphraseUnlockAlert];
+                                }]];
+    } else {
+    }
+  } else {
+    for (CWVIdentity* identity in [_authService identities]) {
+      NSString* title =
+          [NSString stringWithFormat:@"Start sync with %@", identity.email];
+      [alertController
+          addAction:[UIAlertAction
+                        actionWithTitle:title
+                                  style:UIAlertActionStyleDefault
+                                handler:^(UIAlertAction* action) {
+                                  [syncController
+                                      startSyncWithIdentity:identity];
+                                }]];
+    }
+
+    NSString* sandboxTitle = [CWVFlags sharedInstance].usesSyncAndWalletSandbox
+                                 ? @"Use production sync/wallet"
+                                 : @"Use sandbox sync/wallet";
+    [alertController
+        addAction:[UIAlertAction actionWithTitle:sandboxTitle
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction* action) {
+                                           [CWVFlags sharedInstance]
+                                               .usesSyncAndWalletSandbox ^= YES;
+                                         }]];
+  }
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Show autofill data"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction* action) {
+                                         [weakSelf showAddressData];
+                                       }]];
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Show credit card data"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction* action) {
+                                         [weakSelf showCreditCardData];
+                                       }]];
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Show password data"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction* action) {
+                                         [weakSelf showPasswordData];
+                                       }]];
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                         style:UIAlertActionStyleCancel
+                                       handler:nil]];
+
+  [self presentViewController:alertController animated:YES completion:nil];
+}
+
+- (void)showPassphraseUnlockAlert {
+  UIAlertController* alertController =
+      [UIAlertController alertControllerWithTitle:@"Unlock sync"
+                                          message:@"Enter passphrase"
+                                   preferredStyle:UIAlertControllerStyleAlert];
+
+  __weak UIAlertController* weakAlertController = alertController;
+  CWVSyncController* syncController = _webView.configuration.syncController;
+  UIAlertAction* submit = [UIAlertAction
+      actionWithTitle:@"Unlock"
+                style:UIAlertActionStyleDefault
+              handler:^(UIAlertAction* action) {
+                UITextField* textField =
+                    weakAlertController.textFields.firstObject;
+                NSString* passphrase = textField.text;
+                BOOL result = [syncController unlockWithPassphrase:passphrase];
+                NSLog(@"Sync passphrase unlock result: %d", result);
+              }];
+
+  [alertController addAction:submit];
+
+  UIAlertAction* cancel =
+      [UIAlertAction actionWithTitle:@"Cancel"
+                               style:UIAlertActionStyleCancel
+                             handler:nil];
+  [alertController addAction:cancel];
+
+  [alertController
+      addTextFieldWithConfigurationHandler:^(UITextField* textField) {
+        textField.placeholder = @"passphrase";
+        textField.keyboardType = UIKeyboardTypeDefault;
+      }];
+
+  [self presentViewController:alertController animated:YES completion:nil];
+}
+
+- (void)showMainMenu {
+  UIAlertController* alertController = [self actionSheetWithTitle:@"Main menu"
+                                                          message:nil];
   [alertController
       addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                          style:UIAlertActionStyleCancel
@@ -327,7 +595,31 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
                               CWVWebViewConfiguration* configuration =
                                   weakSelf.webView.configuration;
                               [weakSelf removeWebView];
-                              [weakSelf
+                              weakSelf.webView = [weakSelf
+                                  createWebViewWithConfiguration:configuration];
+                            }]];
+
+  // Developers can choose to use system or Chrome context menu in the shell
+  // app. This will also recreate the web view.
+  BOOL chromeContextMenuEnabled =
+      CWVWebView.chromeLongPressAndForceTouchHandlingEnabled;
+  NSString* contextMenuSwitchActionTitle = [NSString
+      stringWithFormat:@"Use %@ context menu",
+                       chromeContextMenuEnabled ? @"system" : @"Chrome"];
+  [alertController
+      addAction:[UIAlertAction
+                    actionWithTitle:contextMenuSwitchActionTitle
+                              style:UIAlertActionStyleDefault
+                            handler:^(UIAlertAction* action) {
+                              CWVWebView
+                                  .chromeLongPressAndForceTouchHandlingEnabled =
+                                  !chromeContextMenuEnabled;
+                              NSLog(@"Chrome context menu is %@ now.",
+                                    !chromeContextMenuEnabled ? @"OFF" : @"ON");
+                              CWVWebViewConfiguration* configuration =
+                                  weakSelf.webView.configuration;
+                              [weakSelf removeWebView];
+                              weakSelf.webView = [weakSelf
                                   createWebViewWithConfiguration:configuration];
                             }]];
 
@@ -339,49 +631,22 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                          [weakSelf resetTranslateSettings];
                                        }]];
 
-  for (CWVIdentity* identity in [_authService identities]) {
-    NSString* title =
-        [NSString stringWithFormat:@"Start sync with %@", identity.email];
+  // Shows sync menu.
+  [alertController
+      addAction:[UIAlertAction actionWithTitle:@"Sync menu"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction* action) {
+                                         [weakSelf showSyncMenu];
+                                       }]];
+
+  if (self.downloadTask) {
     [alertController
-        addAction:[UIAlertAction
-                      actionWithTitle:title
-                                style:UIAlertActionStyleDefault
-                              handler:^(UIAlertAction* action) {
-                                CWVSyncController* syncController =
-                                    weakSelf.webView.configuration
-                                        .syncController;
-                                [syncController
-                                    startSyncWithIdentity:identity
-                                               dataSource:_authService];
-                              }]];
+        addAction:[UIAlertAction actionWithTitle:@"Cancel download"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction* action) {
+                                           [weakSelf.downloadTask cancel];
+                                         }]];
   }
-
-  [alertController
-      addAction:[UIAlertAction
-                    actionWithTitle:@"Stop sync"
-                              style:UIAlertActionStyleDefault
-                            handler:^(UIAlertAction* action) {
-                              [weakSelf.webView.configuration
-                                      .syncController stopSyncAndClearIdentity];
-                            }]];
-
-  NSString* sandboxTitle = [CWVFlags sharedInstance].usesSyncAndWalletSandbox
-                               ? @"Use production sync/wallet"
-                               : @"Use sandbox sync/wallet";
-  [alertController
-      addAction:[UIAlertAction actionWithTitle:sandboxTitle
-                                         style:UIAlertActionStyleDefault
-                                       handler:^(UIAlertAction* action) {
-                                         [CWVFlags sharedInstance]
-                                             .usesSyncAndWalletSandbox ^= YES;
-                                       }]];
-
-  [alertController
-      addAction:[UIAlertAction actionWithTitle:@"Cancel download"
-                                         style:UIAlertActionStyleDefault
-                                       handler:^(UIAlertAction* action) {
-                                         [weakSelf.downloadTask cancel];
-                                       }]];
 
   [self presentViewController:alertController animated:YES completion:nil];
 }
@@ -398,56 +663,59 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   CWVWebViewConfiguration* newConfiguration =
       wasPersistent ? [CWVWebViewConfiguration incognitoConfiguration]
                     : [CWVWebViewConfiguration defaultConfiguration];
-  [self createWebViewWithConfiguration:newConfiguration];
+  self.webView = [self createWebViewWithConfiguration:newConfiguration];
 }
 
-- (void)createWebViewWithConfiguration:(CWVWebViewConfiguration*)configuration {
-  self.webView = [[CWVWebView alloc] initWithFrame:[_contentView bounds]
-                                     configuration:configuration];
-  [_contentView addSubview:_webView];
+- (CWVWebView*)createWebViewWithConfiguration:
+    (CWVWebViewConfiguration*)configuration {
+  CWVWebView* webView = [[CWVWebView alloc] initWithFrame:[_contentView bounds]
+                                            configuration:configuration];
+  [_contentView addSubview:webView];
 
   // Gives a restoration identifier so that state restoration works.
-  _webView.restorationIdentifier = @"webView";
+  webView.restorationIdentifier = @"webView";
 
   // Configure delegates.
-  _webView.navigationDelegate = self;
-  _webView.UIDelegate = self;
+  webView.navigationDelegate = self;
+  webView.UIDelegate = self;
   _translationDelegate = [[ShellTranslationDelegate alloc] init];
-  _webView.translationController.delegate = _translationDelegate;
+  webView.translationController.delegate = _translationDelegate;
   _autofillDelegate = [[ShellAutofillDelegate alloc] init];
-  _webView.autofillController.delegate = _autofillDelegate;
+  webView.autofillController.delegate = _autofillDelegate;
 
   // Constraints.
-  _webView.translatesAutoresizingMaskIntoConstraints = NO;
+  webView.translatesAutoresizingMaskIntoConstraints = NO;
   [NSLayoutConstraint activateConstraints:@[
-    [_webView.topAnchor
+    [webView.topAnchor
         constraintEqualToAnchor:_contentView.safeAreaLayoutGuide.topAnchor],
-    [_webView.leadingAnchor
+    [webView.leadingAnchor
         constraintEqualToAnchor:_contentView.safeAreaLayoutGuide.leadingAnchor],
-    [_webView.trailingAnchor
+    [webView.trailingAnchor
         constraintEqualToAnchor:_contentView.safeAreaLayoutGuide
                                     .trailingAnchor],
-    [_webView.bottomAnchor
+    [webView.bottomAnchor
         constraintEqualToAnchor:_contentView.safeAreaLayoutGuide.bottomAnchor],
   ]];
 
-  [_webView addObserver:self
-             forKeyPath:@"canGoBack"
-                options:NSKeyValueObservingOptionNew |
-                        NSKeyValueObservingOptionInitial
-                context:nil];
-  [_webView addObserver:self
-             forKeyPath:@"canGoForward"
-                options:NSKeyValueObservingOptionNew |
-                        NSKeyValueObservingOptionInitial
-                context:nil];
-  [_webView addObserver:self
-             forKeyPath:@"loading"
-                options:NSKeyValueObservingOptionNew |
-                        NSKeyValueObservingOptionInitial
-                context:nil];
+  [webView addObserver:self
+            forKeyPath:@"canGoBack"
+               options:NSKeyValueObservingOptionNew |
+                       NSKeyValueObservingOptionInitial
+               context:nil];
+  [webView addObserver:self
+            forKeyPath:@"canGoForward"
+               options:NSKeyValueObservingOptionNew |
+                       NSKeyValueObservingOptionInitial
+               context:nil];
+  [webView addObserver:self
+            forKeyPath:@"loading"
+               options:NSKeyValueObservingOptionNew |
+                       NSKeyValueObservingOptionInitial
+               context:nil];
 
-  [_webView addScriptCommandHandler:self commandPrefix:@"test"];
+  [webView addScriptCommandHandler:self commandPrefix:@"test"];
+
+  return webView;
 }
 
 - (void)removeWebView {
@@ -468,16 +736,17 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField*)field {
-  NSString* enteredText = field.text;
-  if (![enteredText hasPrefix:@"http"]) {
+  NSURL* URL = [NSURL URLWithString:field.text];
+  if (URL.scheme.length == 0) {
+    NSString* enteredText = field.text;
     enteredText =
         [enteredText stringByAddingPercentEncodingWithAllowedCharacters:
                          [NSCharacterSet URLQueryAllowedCharacterSet]];
     enteredText = [NSString
         stringWithFormat:@"https://www.google.com/search?q=%@", enteredText];
+    URL = [NSURL URLWithString:enteredText];
   }
-  NSURLRequest* request =
-      [NSURLRequest requestWithURL:[NSURL URLWithString:enteredText]];
+  NSURLRequest* request = [NSURLRequest requestWithURL:URL];
   [_webView loadRequest:request];
   [field resignFirstResponder];
   [self updateToolbar];
@@ -493,6 +762,26 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [_field setText:[[_webView visibleURL] absoluteString]];
 }
 
+- (UIAlertController*)actionSheetWithTitle:(nullable NSString*)title
+                                   message:(nullable NSString*)message {
+  UIAlertController* alertController = [UIAlertController
+      alertControllerWithTitle:title
+                       message:message
+                preferredStyle:UIAlertControllerStyleActionSheet];
+  alertController.popoverPresentationController.sourceView = _menuButton;
+  alertController.popoverPresentationController.sourceRect =
+      CGRectMake(CGRectGetWidth(_menuButton.bounds) / 2,
+                 CGRectGetHeight(_menuButton.bounds), 1, 1);
+  return alertController;
+}
+
+- (void)closePopupWebView {
+  if (self.popupWebViews.count) {
+    [self.popupWebViews.lastObject removeFromSuperview];
+    [self.popupWebViews removeLastObject];
+  }
+}
+
 #pragma mark CWVUIDelegate methods
 
 - (CWVWebView*)webView:(CWVWebView*)webView
@@ -500,7 +789,29 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
                forNavigationAction:(CWVNavigationAction*)action {
   NSLog(@"Create new CWVWebView for %@. User initiated? %@", action.request.URL,
         action.userInitiated ? @"Yes" : @"No");
-  return nil;
+
+  CWVWebView* newWebView = [self createWebViewWithConfiguration:configuration];
+  [self.popupWebViews addObject:newWebView];
+
+  UIButton* closeWindowButton = [[UIButton alloc] init];
+  [closeWindowButton setImage:[UIImage imageNamed:@"ic_stop"]
+                     forState:UIControlStateNormal];
+  closeWindowButton.tintColor = [UIColor blackColor];
+  closeWindowButton.backgroundColor = [UIColor whiteColor];
+  [closeWindowButton addTarget:self
+                        action:@selector(closePopupWebView)
+              forControlEvents:UIControlEventTouchUpInside];
+
+  [newWebView addSubview:closeWindowButton];
+  closeWindowButton.translatesAutoresizingMaskIntoConstraints = NO;
+  [NSLayoutConstraint activateConstraints:@[
+    [closeWindowButton.topAnchor constraintEqualToAnchor:newWebView.topAnchor
+                                                constant:16.0],
+    [closeWindowButton.centerXAnchor
+        constraintEqualToAnchor:newWebView.centerXAnchor],
+  ]];
+
+  return newWebView;
 }
 
 - (void)webViewDidClose:(CWVWebView*)webView {
@@ -541,6 +852,71 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                           handler:nil]];
 
   [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)webView:(CWVWebView*)webView
+    contextMenuConfigurationForLinkWithURL:(NSURL*)linkURL
+                         completionHandler:
+                             (void (^)(UIContextMenuConfiguration*))
+                                 completionHandler API_AVAILABLE(ios(13.0)) {
+  void (^copyHandler)(UIAction*) = ^(UIAction* action) {
+    NSDictionary* item = @{
+      (NSString*)(kUTTypeURL) : linkURL.absoluteString,
+      (NSString*)(kUTTypeUTF8PlainText) :
+          [linkURL.absoluteString dataUsingEncoding:NSUTF8StringEncoding],
+    };
+    [[UIPasteboard generalPasteboard] setItems:@[ item ]];
+  };
+
+  UIContextMenuConfiguration* configuration = [UIContextMenuConfiguration
+      configurationWithIdentifier:nil
+      previewProvider:^{
+        UIViewController* controller = [[UIViewController alloc] init];
+        CGRect frame = CGRectMake(10, 200, 200, 21);
+        UILabel* label = [[UILabel alloc] initWithFrame:frame];
+        label.text = @"iOS13 Preview Page";
+        [controller.view addSubview:label];
+        return controller;
+      }
+      actionProvider:^(id _) {
+        NSArray* actions = @[
+          [UIAction actionWithTitle:@"Copy Link"
+                              image:nil
+                         identifier:nil
+                            handler:copyHandler],
+          [UIAction actionWithTitle:@"Cancel"
+                              image:nil
+                         identifier:nil
+                            handler:^(id _){
+                            }]
+        ];
+        NSString* menuTitle = [NSString
+            stringWithFormat:@"iOS13 Context Menu: %@", linkURL.absoluteString];
+        return [UIMenu menuWithTitle:menuTitle children:actions];
+      }];
+
+  completionHandler(configuration);
+}
+
+- (void)webView:(CWVWebView*)webView
+    contextMenuWillPresentForLinkWithURL:(NSURL*)linkURL
+    API_AVAILABLE(ios(13.0)) {
+  NSLog(@"webView:contextMenuWillPresentForLinkWithURL: %@",
+        linkURL.absoluteString);
+}
+
+- (void)webView:(CWVWebView*)webView
+    contextMenuForLinkWithURL:(NSURL*)linkURL
+       willCommitWithAnimator:
+           (id<UIContextMenuInteractionCommitAnimating>)animator
+    API_AVAILABLE(ios(13.0)) {
+  NSLog(@"webView:contextMenuForLinkWithURL:willCommitWithAnimator: %@",
+        linkURL.absoluteString);
+}
+
+- (void)webView:(CWVWebView*)webView
+    contextMenuDidEndForLinkWithURL:(NSURL*)linkURL API_AVAILABLE(ios(13.0)) {
+  NSLog(@"webView:contextMenuDidEndForLinkWithURL: %@", linkURL.absoluteString);
 }
 
 - (void)webView:(CWVWebView*)webView
@@ -597,7 +973,7 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [alert addTextFieldWithConfigurationHandler:^(UITextField* textField) {
     textField.text = defaultText;
     textField.accessibilityIdentifier =
-        kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier;
+        kWebViewShellJavaScriptDialogTextFieldAccessibilityIdentifier;
   }];
 
   __weak UIAlertController* weakAlert = alert;
@@ -745,9 +1121,8 @@ NSString* const kWebViewShellJavaScriptDialogTextFieldAccessibiltyIdentifier =
   NSLog(@"%@:%@", NSStringFromSelector(_cmd), error);
 }
 
-- (void)syncController:(CWVSyncController*)syncController
-    didStopSyncWithReason:(CWVStopSyncReason)reason {
-  NSLog(@"%@:%ld", NSStringFromSelector(_cmd), (long)reason);
+- (void)syncControllerDidStopSync:(CWVSyncController*)syncController {
+  NSLog(@"%@", NSStringFromSelector(_cmd));
 }
 
 @end

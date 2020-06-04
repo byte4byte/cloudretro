@@ -18,14 +18,30 @@ constexpr char kDelimiter[] = "|";
 
 bool IsValidShelfItemType(int64_t type) {
   return type == TYPE_PINNED_APP || type == TYPE_BROWSER_SHORTCUT ||
-         type == TYPE_APP || type == TYPE_DIALOG || type == TYPE_UNDEFINED;
+         type == TYPE_LACROS_BROWSER || type == TYPE_APP ||
+         type == TYPE_DIALOG || type == TYPE_UNDEFINED;
+}
+
+bool IsPinnedShelfItemType(ShelfItemType type) {
+  switch (type) {
+    case TYPE_PINNED_APP:
+    case TYPE_BROWSER_SHORTCUT:
+    case TYPE_LACROS_BROWSER:
+      return true;
+    case TYPE_APP:
+    case TYPE_DIALOG:
+    case TYPE_UNDEFINED:
+      return false;
+  }
+  NOTREACHED();
+  return false;
 }
 
 bool SamePinState(ShelfItemType a, ShelfItemType b) {
-  if ((a != TYPE_PINNED_APP && a != TYPE_APP && a != TYPE_BROWSER_SHORTCUT) ||
-      (b != TYPE_PINNED_APP && b != TYPE_APP && b != TYPE_BROWSER_SHORTCUT)) {
+  if (!IsPinnedShelfItemType(a) && a != TYPE_APP)
     return false;
-  }
+  if (!IsPinnedShelfItemType(b) && b != TYPE_APP)
+    return false;
   const bool a_unpinned = (a == TYPE_APP);
   const bool b_unpinned = (b == TYPE_APP);
   return a_unpinned == b_unpinned;

@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/security/certificate_policy_cache.h"
 #include "ios/web/public/thread/web_task_traits.h"
@@ -36,24 +37,28 @@ using web::WebThread;
 
 // Returns cert status for the given |trust|.
 - (net::CertStatus)certStatusFromTrustResult:(SecTrustResultType)trustResult
-                                 serverTrust:
-                                     (base::ScopedCFTypeRef<SecTrustRef>)trust;
+                                  trustError:(base::ScopedCFTypeRef<CFErrorRef>)
+                                                 trustError;
 
 // Decides the policy for the given |trust| which was rejected by iOS and the
 // given |host| and calls |handler| on completion. Must be called on UI thread.
 // |handler| can not be null and will be called on UI thread.
-- (void)decideLoadPolicyForRejectedTrustResult:(SecTrustResultType)trustResult
-                                   serverTrust:
-                                       (base::ScopedCFTypeRef<SecTrustRef>)trust
-                                          host:(NSString*)host
-                             completionHandler:
-                                 (web::PolicyDecisionHandler)handler;
+- (void)
+    decideLoadPolicyForRejectedTrustResult:(SecTrustResultType)trustResult
+                                trustError:(base::ScopedCFTypeRef<CFErrorRef>)
+                                               trustError
+                               serverTrust:
+                                   (base::ScopedCFTypeRef<SecTrustRef>)trust
+                                      host:(NSString*)host
+                         completionHandler:(web::PolicyDecisionHandler)handler;
 
 // Verifies the given |trust| using SecTrustRef API. |completionHandler| cannot
 // be null and will be called on UI thread or never be called if the worker task
 // can't start or complete. Must be called on UI thread.
 - (void)verifyTrust:(base::ScopedCFTypeRef<SecTrustRef>)trust
-    completionHandler:(void (^)(SecTrustResultType))completionHandler;
+    completionHandler:
+        (void (^)(SecTrustResultType,
+                  base::ScopedCFTypeRef<CFErrorRef>))completionHandler;
 
 // Returns cert accept policy for the given SecTrust result. |trustResult| must
 // not be for a valid cert. Must be called on IO thread.
@@ -87,7 +92,8 @@ using web::WebThread;
   DCHECK(completionHandler);
 
   [self verifyTrust:trust
-      completionHandler:^(SecTrustResultType trustResult) {
+      completionHandler:^(SecTrustResultType trustResult,
+                          base::ScopedCFTypeRef<CFErrorRef> trustError) {
         DCHECK_CURRENTLY_ON(WebThread::UI);
         if (trustResult == kSecTrustResultProceed ||
             trustResult == kSecTrustResultUnspecified) {
@@ -95,6 +101,7 @@ using web::WebThread;
           return;
         }
         [self decideLoadPolicyForRejectedTrustResult:trustResult
+                                          trustError:trustError
                                          serverTrust:trust
                                                 host:host
                                    completionHandler:completionHandler];
@@ -108,12 +115,13 @@ using web::WebThread;
   DCHECK(completionHandler);
 
   [self verifyTrust:trust
-      completionHandler:^(SecTrustResultType trustResult) {
+      completionHandler:^(SecTrustResultType trustResult,
+                          base::ScopedCFTypeRef<CFErrorRef> trustError) {
         web::SecurityStyle securityStyle =
             web::GetSecurityStyleFromTrustResult(trustResult);
 
-        net::CertStatus certStatus = [self certStatusFromTrustResult:trustResult
-                                                         serverTrust:trust];
+        net::CertStatus certStatus =
+            [self certStatusFromTrustResult:trustResult trustError:trustError];
         completionHandler(securityStyle, certStatus);
       }];
 }
@@ -133,18 +141,17 @@ using web::WebThread;
     DCHECK(cert);
   }
   DCHECK(cert->intermediate_buffers().empty());
-  base::PostTaskWithTraits(FROM_HERE, {WebThread::IO}, base::BindOnce(^{
-                             _certPolicyCache->AllowCertForHost(
-                                 cert.get(), base::SysNSStringToUTF8(host),
-                                 status);
-                           }));
+  base::PostTask(FROM_HERE, {WebThread::IO}, base::BindOnce(^{
+                   _certPolicyCache->AllowCertForHost(
+                       cert.get(), base::SysNSStringToUTF8(host), status);
+                 }));
 }
 
 #pragma mark - Private
 
 - (net::CertStatus)certStatusFromTrustResult:(SecTrustResultType)trustResult
-                                 serverTrust:
-                                     (base::ScopedCFTypeRef<SecTrustRef>)trust {
+                                  trustError:(base::ScopedCFTypeRef<CFErrorRef>)
+                                                 trustError {
   net::CertStatus certStatus = net::CertStatus();
   switch (trustResult) {
     case kSecTrustResultProceed:
@@ -155,7 +162,7 @@ using web::WebThread;
       break;
     default:
       certStatus |=
-          net::CertVerifyProcIOS::GetCertFailureStatusFromTrust(trust);
+          net::CertVerifyProcIOS::GetCertFailureStatusFromError(trustError);
       if (!net::IsCertStatusError(certStatus)) {
         certStatus |= net::CERT_STATUS_INVALID;
       }
@@ -163,58 +170,66 @@ using web::WebThread;
   return certStatus;
 }
 
-- (void)decideLoadPolicyForRejectedTrustResult:(SecTrustResultType)trustResult
-                                   serverTrust:
-                                       (base::ScopedCFTypeRef<SecTrustRef>)trust
-                                          host:(NSString*)host
-                             completionHandler:
-                                 (web::PolicyDecisionHandler)handler {
+- (void)
+    decideLoadPolicyForRejectedTrustResult:(SecTrustResultType)trustResult
+                                trustError:(base::ScopedCFTypeRef<CFErrorRef>)
+                                               trustError
+                               serverTrust:
+                                   (base::ScopedCFTypeRef<SecTrustRef>)trust
+                                      host:(NSString*)host
+                         completionHandler:(web::PolicyDecisionHandler)handler {
   DCHECK_CURRENTLY_ON(WebThread::UI);
   DCHECK(handler);
   TaskTraits traits{WebThread::IO, TaskShutdownBehavior::BLOCK_SHUTDOWN};
-  base::PostTaskWithTraits(FROM_HERE, traits, base::BindOnce(^{
-                             // |loadPolicyForRejectedTrustResult:certStatus:serverTrust:host:|
-                             // can only be called on IO thread.
-                             net::CertStatus certStatus =
-                                 [self certStatusFromTrustResult:trustResult
-                                                     serverTrust:trust];
+  base::PostTask(FROM_HERE, traits, base::BindOnce(^{
+                   // |loadPolicyForRejectedTrustResult:certStatus:serverTrust
+                   // :host:| can only be called on IO thread.
+                   net::CertStatus certStatus =
+                       [self certStatusFromTrustResult:trustResult
+                                            trustError:trustError];
 
-                             web::CertAcceptPolicy policy = [self
-                                 loadPolicyForRejectedTrustResult:trustResult
-                                                       certStatus:certStatus
-                                                      serverTrust:trust.get()
-                                                             host:host];
+                   web::CertAcceptPolicy policy =
+                       [self loadPolicyForRejectedTrustResult:trustResult
+                                                   certStatus:certStatus
+                                                  serverTrust:trust.get()
+                                                         host:host];
 
-                             // TODO(crbug.com/872372): This should use
-                             // PostTaskWithTraits to post to WebThread::UI with
-                             // BLOCK_SHUTDOWN once shutdown behaviors are
-                             // supported on the UI thread. BLOCK_SHUTDOWN is
-                             // necessary because WKWebView throws an exception
-                             // if the completion handler doesn't run.
-                             dispatch_async(dispatch_get_main_queue(), ^{
-                               handler(policy, certStatus);
-                             });
-                           }));
+                   // TODO(crbug.com/872372): This should use
+                   // PostTask to post to WebThread::UI with
+                   // BLOCK_SHUTDOWN once shutdown behaviors are
+                   // supported on the UI thread. BLOCK_SHUTDOWN is
+                   // necessary because WKWebView throws an exception
+                   // if the completion handler doesn't run.
+                   dispatch_async(dispatch_get_main_queue(), ^{
+                     handler(policy, certStatus);
+                   });
+                 }));
 }
 
 - (void)verifyTrust:(base::ScopedCFTypeRef<SecTrustRef>)trust
-    completionHandler:(void (^)(SecTrustResultType))completionHandler {
+    completionHandler:
+        (void (^)(SecTrustResultType,
+                  base::ScopedCFTypeRef<CFErrorRef>))completionHandler {
   DCHECK_CURRENTLY_ON(WebThread::UI);
   DCHECK(completionHandler);
   // SecTrustEvaluate performs trust evaluation synchronously, possibly making
   // network requests. The UI thread should not be blocked by that operation.
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {TaskShutdownBehavior::BLOCK_SHUTDOWN}, base::BindOnce(^{
         SecTrustResultType trustResult = kSecTrustResultInvalid;
-        if (SecTrustEvaluate(trust.get(), &trustResult) != errSecSuccess) {
+        base::ScopedCFTypeRef<CFErrorRef> trustError;
+        bool isTrusted =
+            SecTrustEvaluateWithError(trust.get(), trustError.InitializeInto());
+        if (SecTrustGetTrustResult(trust.get(), &trustResult) != errSecSuccess)
           trustResult = kSecTrustResultInvalid;
-        }
-        // TODO(crbug.com/872372): This should use PostTaskWithTraits to post to
+        DCHECK_EQ(isTrusted, (trustResult == kSecTrustResultProceed ||
+                              trustResult == kSecTrustResultUnspecified));
+        // TODO(crbug.com/872372): This should use PostTask to post to
         // WebThread::UI with BLOCK_SHUTDOWN once shutdown behaviors are
         // supported on the UI thread. BLOCK_SHUTDOWN is necessary because
         // WKWebView throws an exception if the completion handler doesn't run.
         dispatch_async(dispatch_get_main_queue(), ^{
-          completionHandler(trustResult);
+          completionHandler(trustResult, trustError);
         });
       }));
 }

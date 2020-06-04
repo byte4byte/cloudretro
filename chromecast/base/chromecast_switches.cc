@@ -113,6 +113,11 @@ const char kAudioOutputSampleRate[] = "audio-output-sample-rate";
 // Calibrated max output volume dBa for voice content at 1 meter, if known.
 const char kMaxOutputVolumeDba1m[] = "max-output-volume-dba1m";
 
+// Enable dynamically changing the channel count in the mixer depending on the
+// input streams.
+const char kMixerEnableDynamicChannelCount[] =
+    "mixer-enable-dynamic-channel-count";
+
 // Specify the start threshold frames for audio output when using our mixer.
 // This is mostly used to override the default value to a larger value, for
 // platforms that can't handle the default start threshold without running into
@@ -180,10 +185,13 @@ const char kBackGestureHorizontalThreshold[] =
 // Whether to enable detection and dispatch of a 'drag from the top' gesture.
 const char kEnableTopDragGesture[] = "enable-top-drag-gesture";
 
-// Endpoint that the mixer service listens on. On Linux/Android, this is a
-// path for a UNIX domain socket (default is /tmp/mixer-service). On other
-// platforms, this is a TCP port to listen on (on localhost) (default 12854).
+// Endpoint that the mixer service listens on. This is a path for a UNIX domain
+// socket (default is /tmp/mixer-service).
 const char kMixerServiceEndpoint[] = "mixer-service-endpoint";
+
+// TCP port that the mixer service listens on on non-Linux platforms.
+// (default 12854).
+const char kMixerServicePort[] = "mixer-service-port";
 
 extern const char kCastMemoryPressureCriticalFraction[] =
     "memory-pressure-critical-fraction";

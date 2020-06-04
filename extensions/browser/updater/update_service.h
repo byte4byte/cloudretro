@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "base/values.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/update_client/update_client.h"
 
@@ -38,45 +39,47 @@ struct ExtensionUpdateCheckParams;
 class UpdateDataProvider;
 class UpdateServiceFactory;
 
-// This service manages the autoupdate of extensions.  It should eventually
-// replace ExtensionUpdater in Chrome.
-// TODO(rockot): Replace ExtensionUpdater with this service.
+// An UpdateService provides functionality to update extensions.
+// Some methods are virtual for testing purposes.
 class UpdateService : public KeyedService,
                       update_client::UpdateClient::Observer {
  public:
   static UpdateService* Get(content::BrowserContext* context);
 
+  static void SupplyUpdateServiceForTest(UpdateService* service);
+
   void Shutdown() override;
 
-  void SendUninstallPing(const std::string& id,
-                         const base::Version& version,
-                         int reason);
+  virtual void SendUninstallPing(const std::string& id,
+                                 const base::Version& version,
+                                 int reason);
 
   // Starts an update check for each of extensions stored in |update_params|.
   // If there are any updates available, they will be downloaded, checked for
   // integrity, unpacked, and then passed off to the
   // ExtensionSystem::InstallUpdate method for install completion.
-  void StartUpdateCheck(const ExtensionUpdateCheckParams& update_params,
-                        base::OnceClosure callback);
+  virtual void StartUpdateCheck(const ExtensionUpdateCheckParams& update_params,
+                                base::OnceClosure callback);
 
   // This function verifies if the current implementation can update
   // |extension_id|.
-  bool CanUpdate(const std::string& extension_id) const;
+  virtual bool CanUpdate(const std::string& extension_id) const;
 
   // Overriden from |update_client::UpdateClient::Observer|.
   void OnEvent(Events event, const std::string& id) override;
 
   // Returns true if the update service is updating one or more extensions.
-  bool IsBusy() const { return !updating_extension_ids_.empty(); }
+  virtual bool IsBusy() const;
+
+ protected:
+  UpdateService(content::BrowserContext* context,
+                scoped_refptr<update_client::UpdateClient> update_client);
+  ~UpdateService() override;
 
  private:
   friend class ExtensionUpdateClientBaseTest;
   friend class UpdateServiceFactory;
   friend std::unique_ptr<UpdateService>::deleter_type;
-
-  UpdateService(content::BrowserContext* context,
-                scoped_refptr<update_client::UpdateClient> update_client);
-  ~UpdateService() override;
 
   // This function is executed by the update client after an update check
   // request has completed.
@@ -104,6 +107,9 @@ class UpdateService : public KeyedService,
       update_client::UpdateClient::Observer* observer);
   void HandleComponentUpdateErrorEvent(const std::string& extension_id) const;
   void HandleComponentUpdateFoundEvent(const std::string& extension_id) const;
+
+  // Get the extension Omaha attributes sent from update config.
+  base::Value GetExtensionOmahaAttributes(const std::string& extension_id);
 
  private:
   content::BrowserContext* browser_context_;

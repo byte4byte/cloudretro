@@ -4,18 +4,49 @@
 
 #include "chrome/browser/ui/ash/ambient/photo_controller_impl.h"
 
-#include "ash/public/cpp/vector_icons/vector_icons.h"
-#include "ui/gfx/color_palette.h"
-#include "ui/gfx/paint_vector_icon.h"
+#include "ash/public/cpp/assistant/assistant_image_downloader.h"
+#include "base/bind.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "components/account_id/account_id.h"
+#include "ui/gfx/image/image_skia.h"
 
-PhotoControllerImpl::PhotoControllerImpl() = default;
+PhotoControllerImpl::PhotoControllerImpl()
+    : photo_client_(PhotoClient::Create()) {}
 
 PhotoControllerImpl::~PhotoControllerImpl() = default;
 
-void PhotoControllerImpl::GetNextImage(
-    ash::PhotoController::PhotoDownloadCallback callback) {
-  // TODO(wutao): Temporarily use an icon for placeholder. Get images from
-  // Backdrop service.
-  std::move(callback).Run(gfx::CreateVectorIcon(
-      ash::kNotificationAssistantIcon, /*dip_size=*/32, gfx::kGoogleGrey700));
+void PhotoControllerImpl::GetNextImage(PhotoDownloadCallback callback) {
+  photo_client_->FetchTopicInfo(
+      base::BindOnce(&PhotoControllerImpl::OnNextImageInfoFetched,
+                     weak_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void PhotoControllerImpl::GetSettings(GetSettingsCallback callback) {
+  photo_client_->GetSettings(std::move(callback));
+}
+
+void PhotoControllerImpl::UpdateSettings(int topic_source,
+                                         UpdateSettingsCallback callback) {
+  photo_client_->UpdateSettings(topic_source, std::move(callback));
+}
+
+void PhotoControllerImpl::OnNextImageInfoFetched(
+    PhotoDownloadCallback callback,
+    const base::Optional<ash::PhotoController::Topic>& topic) {
+  if (!topic.has_value() ||
+      (topic->url.empty() && !topic->portrait_image_url.has_value())) {
+    std::move(callback).Run(/*success=*/false, gfx::ImageSkia());
+    return;
+  }
+
+  std::string image_url = topic->portrait_image_url.value_or(topic->url);
+  AccountId account_id =
+      chromeos::ProfileHelper::Get()
+          ->GetUserByProfile(ProfileManager::GetActiveUserProfile())
+          ->GetAccountId();
+  ash::AssistantImageDownloader::GetInstance()->Download(
+      account_id, GURL(image_url),
+      base::BindOnce(std::move(callback), /*success=*/true));
 }

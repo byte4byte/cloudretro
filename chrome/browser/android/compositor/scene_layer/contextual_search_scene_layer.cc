@@ -12,7 +12,6 @@
 #include "chrome/browser/android/compositor/layer/contextual_search_layer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
-#include "content/public/browser/android/compositor.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/load_flags.h"
@@ -116,8 +115,6 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jboolean search_caption_visible,
     jboolean search_bar_border_visible,
     jfloat search_bar_border_height,
-    jboolean search_bar_shadow_visible,
-    jfloat search_bar_shadow_opacity,
     jboolean quick_action_icon_visible,
     jboolean thumbnail_visible,
     jstring j_thumbnail_url,
@@ -131,7 +128,7 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jboolean progress_bar_visible,
     jfloat progress_bar_height,
     jfloat progress_bar_opacity,
-    jint progress_bar_completion,
+    jfloat progress_bar_completion,
     jfloat divider_line_visibility_percentage,
     jfloat divider_line_width,
     jfloat divider_line_height,
@@ -140,7 +137,9 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
     jboolean touch_highlight_visible,
     jfloat touch_highlight_x_offset,
     jfloat touch_highlight_width,
-    const JavaRef<jobject>& j_profile) {
+    const JavaRef<jobject>& j_profile,
+    jint rounded_bar_top_resource_id,
+    jint separator_line_color) {
   // Load the thumbnail if necessary.
   std::string thumbnail_url =
       base::android::ConvertJavaStringToUTF8(env, j_thumbnail_url);
@@ -186,15 +185,15 @@ void ContextualSearchSceneLayer::UpdateContextualSearchLayer(
       search_text_layer_min_height, search_term_opacity,
       search_term_caption_spacing, search_caption_animation_percentage,
       search_caption_visible, search_bar_border_visible,
-      search_bar_border_height, search_bar_shadow_visible,
-      search_bar_shadow_opacity, quick_action_icon_visible, thumbnail_visible,
+      search_bar_border_height, quick_action_icon_visible, thumbnail_visible,
       custom_image_visibility_percentage, bar_image_size, icon_color,
       drag_handlebar_color, arrow_icon_opacity, arrow_icon_rotation,
       close_icon_opacity, progress_bar_visible, progress_bar_height,
       progress_bar_opacity, progress_bar_completion,
       divider_line_visibility_percentage, divider_line_width,
       divider_line_height, divider_line_color, divider_line_x_offset,
-      touch_highlight_visible, touch_highlight_x_offset, touch_highlight_width);
+      touch_highlight_visible, touch_highlight_x_offset, touch_highlight_width,
+      rounded_bar_top_resource_id, separator_line_color);
 
   // Make the layer visible if it is not already.
   contextual_search_layer_->layer()->SetHideLayerAndSubtree(false);
@@ -216,7 +215,7 @@ void ContextualSearchSceneLayer::FetchThumbnail(
   fetcher_->Init(
       std::string(),
       net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
-      net::LOAD_NORMAL);
+      network::mojom::CredentialsMode::kInclude);
   fetcher_->Start(loader_factory);
 }
 

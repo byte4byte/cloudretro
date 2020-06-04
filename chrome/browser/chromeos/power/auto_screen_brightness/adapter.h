@@ -40,20 +40,6 @@ class Adapter : public AlsReader::Observer,
                 public ModelConfigLoader::Observer,
                 public PowerManagerClient::Observer {
  public:
-  // Type of curve to use.
-  // These values are persisted to logs. Entries should not be renumbered and
-  // numeric values should never be reused.
-  enum class ModelCurve {
-    // Always use the global curve.
-    kGlobal = 0,
-    // Always use the personal curve, and make no brightness adjustment until a
-    // personal curve is trained.
-    kPersonal = 1,
-    // Use the personal curve if available, else use the global curve.
-    kLatest = 2,
-    kMaxValue = kLatest
-  };
-
   // How user manual brightness change will affect Adapter.
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
@@ -86,8 +72,6 @@ class Adapter : public AlsReader::Observer,
     double darkening_log_lux_threshold = 0.6;
     double stabilization_threshold = 0.15;
 
-    ModelCurve model_curve = ModelCurve::kLatest;
-
     // Average ambient value is calculated over the past
     // |auto_brightness_als_horizon|. This is only used for brightness update,
     // which can be different from the horizon used in model training.
@@ -98,10 +82,6 @@ class Adapter : public AlsReader::Observer,
         UserAdjustmentEffect::kPauseAuto;
 
     std::string metrics_key;
-
-    // If |model_curve| is |kPersonal| then we only use a personal curve if the
-    // the model has been trained at least |min_model_iteration_count|.
-    int min_model_iteration_count = 1;
   };
 
   // These values are persisted to logs. Entries should not be renumbered and
@@ -123,7 +103,8 @@ class Adapter : public AlsReader::Observer,
     kImmediateDarkeningThresholdExceeded = 2,
     kBrightneningThresholdExceeded = 3,
     kDarkeningThresholdExceeded = 4,
-    kMaxValue = kDarkeningThresholdExceeded
+    kUpdateAfterLidReopen = 5,
+    kMaxValue = kUpdateAfterLidReopen
   };
 
   // These values are persisted to logs. Entries should not be renumbered and
@@ -150,7 +131,9 @@ class Adapter : public AlsReader::Observer,
     // Adapter should only use a personal curve that has been trained for a min
     // number of iterations.
     kWaitingForTrainedPersonalCurve = 9,
-    kMaxValue = kWaitingForTrainedPersonalCurve
+    kWaitingForReopenAls = 10,
+    kNoNewModel = 11,
+    kMaxValue = kNoNewModel
   };
 
   struct AdapterDecision {
@@ -200,6 +183,8 @@ class Adapter : public AlsReader::Observer,
   // chromeos::PowerManagerClient::Observer overrides:
   void PowerManagerBecameAvailable(bool service_is_ready) override;
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void LidEventReceived(chromeos::PowerManagerClient::LidState state,
+                        const base::TimeTicks& timestamp) override;
 
   Status GetStatusForTesting() const;
 
@@ -375,6 +360,13 @@ class Adapter : public AlsReader::Observer,
 
   Model model_;
 
+  // An indicator to tell Adapter whether a curve is available to use.
+  // It is set to false when a user changes brightness manually and the adapter
+  // isn't already disabled by a previous user adjustment.
+  // It is set to true when modeller is first initialized or when it exports a
+  // new curve.
+  bool new_model_arrived_ = false;
+
   // |average_log_ambient_lux_| is only recorded when screen brightness is
   // changed by either model or user. New thresholds will be calculated from it.
   base::Optional<double> average_log_ambient_lux_;
@@ -395,6 +387,19 @@ class Adapter : public AlsReader::Observer,
 
   // Used to record number of model-triggered brightness changes.
   int model_brightness_change_counter_ = 1;
+
+  // If lid is closed then we do not record any ambient light. If a device
+  // has no lid, it is considered as open.
+  base::Optional<bool> is_lid_closed_;
+
+  // Recent lid reopen time following a lid-closed event. Unset after the first
+  // brightness change after a recent lid-open event.
+  base::TimeTicks lid_reopen_time_;
+
+  // ALS data that arrives soon after lid is reopened tends to be inaccurate.
+  // Hence we do not store any ALS data that arrives less than
+  // |lid_open_delay_time_| from |lid_reopen_time_|.
+  base::TimeDelta lid_open_delay_time_ = base::TimeDelta::FromSeconds(2);
 
   DISALLOW_COPY_AND_ASSIGN(Adapter);
 };

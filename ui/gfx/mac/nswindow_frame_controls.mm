@@ -4,7 +4,8 @@
 
 #import "ui/gfx/mac/nswindow_frame_controls.h"
 
-#import "base/mac/sdk_forward_declarations.h"
+#import <AppKit/AppKit.h>
+
 #include "ui/gfx/geometry/size.h"
 
 namespace {
@@ -65,6 +66,7 @@ void ApplyNSWindowSizeConstraints(NSWindow* window,
   SetNSWindowCanFullscreen(window, can_fullscreen);
 
   [[window standardWindowButton:NSWindowZoomButton] setEnabled:can_fullscreen];
+  
 }
 
 }  // namespace gfx

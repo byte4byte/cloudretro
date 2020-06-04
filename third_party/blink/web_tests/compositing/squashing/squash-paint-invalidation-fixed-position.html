@@ -1,5 +1,5 @@
 <!doctype html>
-<div style="position: fixed; height: 5000px; width: 100px; background: lightblue; transform: translateZ(0)"></div>
+<div style="position: fixed; height: 5000px; width: 100px; background: lightblue; will-change: transform"></div>
 <div style="position: fixed; top: 25px; height: 100px; width: 100px; background: lightgray"></div>
 <div id="foo" style="position: fixed; top: 50px; height: 100px; width: 100px; background: lightgray"></div>
 <script src="../../resources/run-after-layout-and-paint.js"></script>
@@ -20,7 +20,7 @@ runAfterLayoutAndPaint(function() {
     document.getElementById("foo").style.background = 'red';
     
     if (window.internals)
-        output += internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS) + ' ';
+        output += internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_INVALIDATIONS) + ' ';
 
     if (window.internals)
         internals.stopTrackingRepaints(document);
@@ -33,7 +33,7 @@ runAfterLayoutAndPaint(function() {
     document.getElementById("foo").style.background = 'blue';
     
     if (window.internals)
-        output += internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS);
+        output += internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_INVALIDATIONS);
 
     if (window.internals)
         internals.stopTrackingRepaints(document);

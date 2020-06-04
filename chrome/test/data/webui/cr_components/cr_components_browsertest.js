@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "chrome/browser/ui/ui_features.h"');
+
 /**
  * Test fixture for shared Polymer components.
  * @constructor
@@ -21,16 +23,6 @@ CrComponentsBrowserTest.prototype = {
   get browsePreload() {
     throw 'subclasses should override to load a WebUI page that includes it.';
   },
-
-  /** @override */
-  runAccessibilityChecks: true,
-
-  /** @override */
-  setUp: function() {
-    PolymerTest.prototype.setUp.call(this);
-    // We aren't loading the main document.
-    this.accessibilityAuditConfig.ignoreSelectors('humanLangMissing', 'html');
-  },
 };
 
 /**
@@ -43,19 +35,39 @@ CrComponentsManagedFootnoteTest.prototype = {
   __proto__: CrComponentsBrowserTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://downloads',
+  browsePreload:
+      'chrome://resources/cr_components/managed_footnote/managed_footnote.html',
 
   /** @override */
   extraLibraries: CrComponentsBrowserTest.prototype.extraLibraries.concat([
     'managed_footnote_test.js',
   ]),
+
+  /** @override */
+  get suiteName() {
+    return managed_footnote_test.suiteName;
+  }
 };
 
-TEST_F('CrComponentsManagedFootnoteTest', 'All', function() {
-  mocha.run();
+TEST_F('CrComponentsManagedFootnoteTest', 'Hidden', function() {
+  runMochaTest(this.suiteName, managed_footnote_test.TestNames.Hidden);
+});
+
+TEST_F('CrComponentsManagedFootnoteTest', 'LoadTimeDataBrowser', function() {
+  runMochaTest(
+      this.suiteName, managed_footnote_test.TestNames.LoadTimeDataBrowser);
+});
+
+TEST_F('CrComponentsManagedFootnoteTest', 'Events', function() {
+  runMochaTest(this.suiteName, managed_footnote_test.TestNames.Events);
 });
 
 GEN('#if defined(OS_CHROMEOS)');
+
+TEST_F('CrComponentsManagedFootnoteTest', 'LoadTimeDataDevice', function() {
+  runMochaTest(
+      this.suiteName, managed_footnote_test.TestNames.LoadTimeDataDevice);
+});
 
 /**
  * @constructor
@@ -76,8 +88,7 @@ CrComponentsNetworkConfigTest.prototype = {
     '//ui/webui/resources/js/promise_resolver.js',
     '../fake_chrome_event.js',
     '../chromeos/networking_private_constants.js',
-    '../chromeos/fake_networking_private.js',
-    '../chromeos/cr_onc_strings.js',
+    '../chromeos/fake_network_config_mojom.js',
     'network_config_test.js',
   ]),
 };

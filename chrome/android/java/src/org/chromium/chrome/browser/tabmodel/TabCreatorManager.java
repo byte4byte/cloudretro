@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabState;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 
@@ -70,7 +71,7 @@ public interface TabCreatorManager {
          * @return            Whether a Tab was created successfully.
          */
         public abstract boolean createTabWithWebContents(
-                Tab parent, WebContents webContents, @TabLaunchType int type, String url);
+                @Nullable Tab parent, WebContents webContents, @TabLaunchType int type, String url);
 
         /**
          * Creates a tab around the native web contents pointer.
@@ -81,7 +82,8 @@ public interface TabCreatorManager {
          */
         public final boolean createTabWithWebContents(
                 Tab parent, WebContents webContents, @TabLaunchType int type) {
-            return createTabWithWebContents(parent, webContents, type, webContents.getVisibleUrl());
+            return createTabWithWebContents(
+                    parent, webContents, type, webContents.getVisibleUrlString());
         }
 
         /**

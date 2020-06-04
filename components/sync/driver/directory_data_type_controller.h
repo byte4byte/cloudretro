@@ -31,8 +31,8 @@ class DirectoryDataTypeController : public DataTypeController {
 
   // Directory based data types register with backend before LoadModels in
   // BeforeLoadModels. No need to do anything in RegisterWithBackend.
-  void RegisterWithBackend(base::OnceCallback<void(bool)> set_downloaded,
-                           ModelTypeConfigurer* configurer) override;
+  RegisterWithBackendResult RegisterWithBackend(
+      ModelTypeConfigurer* configurer) override;
 
   // Directory specific implementation of ActivateDataType with the
   // type specific ChangeProcessor and ModelSafeGroup.
@@ -65,7 +65,7 @@ class DirectoryDataTypeController : public DataTypeController {
  protected:
   // |dump_stack| is called when an unrecoverable error occurs.
   DirectoryDataTypeController(ModelType type,
-                              const base::Closure& dump_stack,
+                              const base::RepeatingClosure& dump_stack,
                               SyncService* sync_service,
                               ModelSafeGroup model_safe_group);
 
@@ -80,7 +80,7 @@ class DirectoryDataTypeController : public DataTypeController {
   virtual ChangeProcessor* GetChangeProcessor() const = 0;
 
   // Function to capture and upload a stack trace when an error occurs.
-  base::Closure dump_stack_;
+  base::RepeatingClosure dump_stack_;
 
  private:
   SyncService* const sync_service_;

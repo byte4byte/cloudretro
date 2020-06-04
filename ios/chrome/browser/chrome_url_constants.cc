@@ -7,14 +7,14 @@
 #include <stddef.h>
 
 #include "base/stl_util.h"
-
-const char kChromeUIScheme[] = "chrome";
+#include "ios/components/webui/web_ui_url_constants.h"
 
 const char kChromeUIChromeURLsURL[] = "chrome://chrome-urls/";
 const char kChromeUICreditsURL[] = "chrome://credits/";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
 const char kChromeUIHistoryURL[] = "chrome://history/";
 const char kChromeUIInspectURL[] = "chrome://inspect/";
+const char kChromeUIIntersitialsURL[] = "chrome://interstitials";
 const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUINTPTilesInternalsURL[] = "chrome://ntp-tiles-internals/";
 const char kChromeUIOfflineURL[] = "chrome://offline/";
@@ -23,6 +23,7 @@ const char kChromeUISuggestionsURL[] = "chrome://suggestions/";
 const char kChromeUITermsURL[] = "chrome://terms/";
 const char kChromeUIVersionURL[] = "chrome://version/";
 
+const char kChromeUIAutofillInternalsHost[] = "autofill-internals";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
 const char kChromeUICrashHost[] = "crash";
 const char kChromeUIChromeURLsHost[] = "chrome-urls";
@@ -35,6 +36,7 @@ const char kChromeUIGCMInternalsHost[] = "gcm-internals";
 const char kChromeUIHistogramHost[] = "histograms";
 const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIInspectHost[] = "inspect";
+const char kChromeUIIntersitialsHost[] = "interstitials";
 const char kChromeUINetExportHost[] = "net-export";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUINTPTilesInternalsHost[] = "ntp-tiles-internals";
@@ -43,9 +45,9 @@ const char kChromeUIOmahaHost[] = "omaha";
 const char kChromeUIPasswordManagerInternalsHost[] =
     "password-manager-internals";
 const char kChromeUIPolicyHost[] = "policy";
+const char kChromeUIPrefsInternalsHost[] = "prefs-internals";
 const char kChromeUISignInInternalsHost[] = "signin-internals";
 const char kChromeUISuggestionsHost[] = "suggestions";
-const char kChromeUISyncInternalsHost[] = "sync-internals";
 const char kChromeUITermsHost[] = "terms";
 const char kChromeUITranslateInternalsHost[] = "translate-internals";
 const char kChromeUIURLKeyedMetricsHost[] = "ukm";

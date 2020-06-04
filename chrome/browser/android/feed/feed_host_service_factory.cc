@@ -18,6 +18,7 @@
 #include "chrome/browser/offline_pages/offline_page_model_factory.h"
 #include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/common/channel_info.h"
 #include "components/feed/content/feed_host_service.h"
@@ -28,7 +29,6 @@
 #include "components/feed/core/feed_networking_host.h"
 #include "components/feed/core/feed_scheduler_host.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
@@ -66,7 +66,6 @@ FeedHostServiceFactory::FeedHostServiceFactory()
   // SimpleDependencyManager.
   DependsOn(offline_pages::PrefetchServiceFactory::GetInstance());
   DependsOn(HistoryServiceFactory::GetInstance());
-  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
 }
 
 FeedHostServiceFactory::~FeedHostServiceFactory() = default;
@@ -78,7 +77,7 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
   content::StoragePartition* storage_partition =
       content::BrowserContext::GetDefaultStoragePartition(context);
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   std::string api_key;
   if (google_apis::IsGoogleChromeAPIKeyUsed()) {
@@ -90,7 +89,7 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
   auto networking_host = std::make_unique<FeedNetworkingHost>(
       identity_manager, api_key,
       storage_partition->GetURLLoaderFactoryForBrowserProcess(),
-      base::DefaultTickClock::GetInstance());
+      base::DefaultTickClock::GetInstance(), profile->GetPrefs());
 
   auto scheduler_host = std::make_unique<FeedSchedulerHost>(
       profile->GetPrefs(), g_browser_process->local_state(),
@@ -98,8 +97,8 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
 
   base::FilePath feed_dir(profile->GetPath().Append(kFeedFolder));
   leveldb_proto::ProtoDatabaseProvider* proto_database_provider =
-      leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(
-          profile->GetProfileKey());
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetProtoDatabaseProvider();
   auto content_database =
       std::make_unique<FeedContentDatabase>(proto_database_provider, feed_dir);
   auto journal_database =
@@ -127,7 +126,7 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
   auto logging_metrics = std::make_unique<FeedLoggingMetrics>(
       base::BindRepeating(&FeedHistoryHelper::CheckURL,
                           std::move(history_helper)),
-      base::DefaultClock::GetInstance());
+      base::DefaultClock::GetInstance(), scheduler_host.get());
 
   return new FeedHostService(
       std::move(logging_metrics), std::move(networking_host),
@@ -138,6 +137,10 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
 content::BrowserContext* FeedHostServiceFactory::GetBrowserContextToUse(
     content::BrowserContext* context) const {
   return context->IsOffTheRecord() ? nullptr : context;
+}
+
+bool FeedHostServiceFactory::ServiceIsNULLWhileTesting() const {
+  return true;
 }
 
 }  // namespace feed

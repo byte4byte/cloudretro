@@ -9,9 +9,9 @@
 
 class GoogleServiceAuthError;
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}  // namespace identity
+}  // namespace signin
 
 namespace syncer {
 
@@ -27,8 +27,7 @@ struct SyncAccountInfo {
 // corresponding SyncAccountInfo. This is exposed so that autofill metrics
 // code can use it.
 SyncAccountInfo DetermineAccountToUse(
-    identity::IdentityManager* identity_manager,
-    bool allow_secondary_accounts);
+    signin::IdentityManager* identity_manager);
 
 // Returns whether |auth_error| indicates the user has locally signed out of
 // content area, rejecting credentials.

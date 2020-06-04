@@ -8,14 +8,13 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
 #include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/subprocess_metrics_provider.h"
-#include "chrome/browser/previews/previews_service.h"
 #include "chrome/browser/previews/previews_service_factory.h"
+#include "chrome/browser/previews/previews_test_util.h"
 #include "chrome/browser/previews/previews_ui_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -23,14 +22,12 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/optimization_guide/hints_component_info.h"
+#include "components/optimization_guide/hints_component_util.h"
+#include "components/optimization_guide/optimization_guide_constants.h"
 #include "components/optimization_guide/optimization_guide_features.h"
 #include "components/optimization_guide/optimization_guide_service.h"
 #include "components/optimization_guide/proto/hints.pb.h"
 #include "components/optimization_guide/test_hints_component_creator.h"
-#include "components/previews/content/previews_decider_impl.h"
-#include "components/previews/content/previews_optimization_guide.h"
-#include "components/previews/content/previews_ui_service.h"
-#include "components/previews/core/previews_constants.h"
 #include "components/previews/core/previews_features.h"
 #include "components/previews/core/previews_switches.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -40,33 +37,6 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
-
-namespace {
-
-// Retries fetching |histogram_name| until it contains at least |count| samples.
-void RetryForHistogramUntilCountReached(base::HistogramTester* histogram_tester,
-                                        const std::string& histogram_name,
-                                        size_t count) {
-  while (true) {
-    base::ThreadPoolInstance::Get()->FlushForTesting();
-    base::RunLoop().RunUntilIdle();
-
-    content::FetchHistogramsFromChildProcesses();
-    SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
-
-    const std::vector<base::Bucket> buckets =
-        histogram_tester->GetAllSamples(histogram_name);
-    size_t total_count = 0;
-    for (const auto& bucket : buckets) {
-      total_count += bucket.count;
-    }
-    if (total_count >= count) {
-      break;
-    }
-  }
-}
-
-}  // namespace
 
 class PreviewsBrowserTest : public InProcessBrowserTest {
  public:
@@ -155,11 +125,10 @@ class PreviewsBrowserTest : public InProcessBrowserTest {
   void MonitorResourceRequest(const net::test_server::HttpRequest& request) {
     // This method is called on embedded test server thread. Post the
     // information on UI thread.
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&PreviewsBrowserTest::MonitorResourceRequestOnUIThread,
                        base::Unretained(this), request));
-    base::RunLoop().RunUntilIdle();
   }
 
   void MonitorResourceRequestOnUIThread(
@@ -216,20 +185,23 @@ IN_PROC_BROWSER_TEST_F(PreviewsBrowserTest, NoScriptPreviewsDisabled) {
   histogram_tester.ExpectTotalCount("Previews.PreviewShown.NoScript", 0);
 }
 
-// This test class enables NoScriptPreviews but without OptimizationHints.
-class PreviewsNoScriptBrowserTest : public PreviewsBrowserTest {
+// This test class enables NoScriptPreviews and with OptimizationHints.
+class PreviewsNoScriptBrowserTest : public ::testing::WithParamInterface<bool>,
+                                    public PreviewsBrowserTest {
  public:
   PreviewsNoScriptBrowserTest() {}
 
   ~PreviewsNoScriptBrowserTest() override {}
 
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        {previews::features::kPreviews,
-         optimization_guide::features::kOptimizationHints,
-         previews::features::kNoScriptPreviews,
-         data_reduction_proxy::features::
-             kDataReductionProxyEnabledWithNetworkService},
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        {
+            {previews::features::kPreviews,
+             {{"override_should_show_preview_check",
+               GetParam() ? "true" : "false"}}},
+            {optimization_guide::features::kOptimizationHints, {}},
+            {previews::features::kNoScriptPreviews, {}},
+        },
         {});
     PreviewsBrowserTest::SetUp();
   }
@@ -253,22 +225,12 @@ class PreviewsNoScriptBrowserTest : public PreviewsBrowserTest {
 
     base::HistogramTester histogram_tester;
 
-    // Register a QuitClosure for when the next hint update is started below.
-    base::RunLoop run_loop;
-    PreviewsServiceFactory::GetForProfile(
-        Profile::FromBrowserContext(browser()
-                                        ->tab_strip_model()
-                                        ->GetActiveWebContents()
-                                        ->GetBrowserContext()))
-        ->previews_ui_service()
-        ->previews_decider_impl()
-        ->previews_opt_guide()
-        ->ListenForNextUpdateForTesting(run_loop.QuitClosure());
-
     g_browser_process->optimization_guide_service()->MaybeUpdateHintsComponent(
         component_info);
 
-    run_loop.Run();
+    RetryForHistogramUntilCountReached(
+        &histogram_tester,
+        optimization_guide::kComponentHintsUpdatedResultHistogramString, 1);
 
     // Navigate to |hint_setup_url| to prime the OptimizationGuide hints for the
     // url's host and ensure that they have been loaded from the store (via
@@ -276,10 +238,13 @@ class PreviewsNoScriptBrowserTest : public PreviewsBrowserTest {
     ui_test_utils::NavigateToURL(browser(), hint_setup_url);
 
     RetryForHistogramUntilCountReached(
-        &histogram_tester,
-        previews::kPreviewsOptimizationGuideOnLoadedHintResultHistogramString,
+        &histogram_tester, optimization_guide::kLoadedHintLocalHistogramString,
         1);
   }
+
+  // Returns whether the ShouldShowPreview check should have been overridden for
+  // the test case.
+  bool ShouldOverrideShouldShowPreviewCheck() const { return GetParam(); }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -287,17 +252,15 @@ class PreviewsNoScriptBrowserTest : public PreviewsBrowserTest {
       test_hints_component_creator_;
 };
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
-#define DISABLE_ON_WIN_MAC_CHROMESOS(x) DISABLED_##x
-#else
-#define DISABLE_ON_WIN_MAC_CHROMESOS(x) x
-#endif
+INSTANTIATE_TEST_SUITE_P(ShouldSkipPreview,
+                         PreviewsNoScriptBrowserTest,
+                         ::testing::Bool());
 
 // Loads a webpage that has both script and noscript tags and also requests
 // a script resource. Verifies that the noscript tag is evaluated and the
 // script resource is not loaded.
-IN_PROC_BROWSER_TEST_F(PreviewsNoScriptBrowserTest,
-                       DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsEnabled)) {
+IN_PROC_BROWSER_TEST_P(PreviewsNoScriptBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsEnabled)) {
   GURL url = https_url();
 
   // Whitelist NoScript for https_hint_setup_url()'s' host.
@@ -315,9 +278,28 @@ IN_PROC_BROWSER_TEST_F(PreviewsNoScriptBrowserTest,
                                      "Previews.PreviewShown.NoScript", 1);
 }
 
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     PreviewsNoScriptBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsEnabledButHttpRequest)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsEnabled_Incognito)) {
+  GURL url = https_url();
+
+  // Whitelist NoScript for https_hint_setup_url()'s' host.
+  SetUpNoScriptWhitelist(https_hint_setup_url());
+
+  base::HistogramTester histogram_tester;
+  Browser* incognito = CreateIncognitoBrowser();
+  ASSERT_FALSE(PreviewsServiceFactory::GetForProfile(incognito->profile()));
+  ASSERT_TRUE(PreviewsServiceFactory::GetForProfile(browser()->profile()));
+
+  ui_test_utils::NavigateToURL(incognito, url);
+
+  // Verify JS was loaded indicating that NoScript preview was not triggered.
+  EXPECT_FALSE(noscript_css_requested());
+  EXPECT_TRUE(noscript_js_requested());
+}
+
+IN_PROC_BROWSER_TEST_P(PreviewsNoScriptBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsForHttp)) {
   GURL url = http_url();
 
   // Whitelist NoScript for http_hint_setup_url() host.
@@ -325,13 +307,13 @@ IN_PROC_BROWSER_TEST_F(
 
   ui_test_utils::NavigateToURL(browser(), url);
 
-  // Verify loaded js resource but not css triggered by noscript tag.
-  EXPECT_TRUE(noscript_js_requested());
-  EXPECT_FALSE(noscript_css_requested());
+  // Verify loaded noscript tag triggered css resource but not js one.
+  EXPECT_TRUE(noscript_css_requested());
+  EXPECT_FALSE(noscript_js_requested());
 }
 
-IN_PROC_BROWSER_TEST_F(PreviewsNoScriptBrowserTest,
-                       DISABLE_ON_WIN_MAC_CHROMESOS(
+IN_PROC_BROWSER_TEST_P(PreviewsNoScriptBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(
                            NoScriptPreviewsEnabledButNoTransformDirective)) {
   GURL url = https_no_transform_url();
 
@@ -349,9 +331,9 @@ IN_PROC_BROWSER_TEST_F(PreviewsNoScriptBrowserTest,
       "Previews.CacheControlNoTransform.BlockedPreview", 5 /* NoScript */, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     PreviewsNoScriptBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsEnabledHttpRedirectToHttps)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsEnabledHttpRedirectToHttps)) {
   GURL url = redirect_url();
 
   // Whitelist NoScript for http_hint_setup_url() host.
@@ -369,9 +351,9 @@ IN_PROC_BROWSER_TEST_F(
                                      "Previews.PreviewShown.NoScript", 1);
 }
 
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     PreviewsNoScriptBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsRecordsOptOut)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsRecordsOptOut)) {
   GURL url = redirect_url();
 
   // Whitelist NoScript for http_hint_setup_url()'s' host.
@@ -396,9 +378,9 @@ IN_PROC_BROWSER_TEST_F(
                                      1);
 }
 
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     PreviewsNoScriptBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsEnabledByWhitelist)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsEnabledByWhitelist)) {
   GURL url = https_url();
 
   // Whitelist NoScript for https_hint_setup_url()'s' host.
@@ -411,9 +393,9 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_FALSE(noscript_js_requested());
 }
 
-IN_PROC_BROWSER_TEST_F(
+IN_PROC_BROWSER_TEST_P(
     PreviewsNoScriptBrowserTest,
-    DISABLE_ON_WIN_MAC_CHROMESOS(NoScriptPreviewsNotEnabledByWhitelist)) {
+    DISABLE_ON_WIN_MAC_CHROMEOS(NoScriptPreviewsNotEnabledByWhitelist)) {
   GURL url = https_url();
 
   // Whitelist random site for NoScript.
@@ -424,4 +406,66 @@ IN_PROC_BROWSER_TEST_F(
   // Verify loaded js resource but not css triggered by noscript tag.
   EXPECT_TRUE(noscript_js_requested());
   EXPECT_FALSE(noscript_css_requested());
+}
+
+IN_PROC_BROWSER_TEST_P(PreviewsNoScriptBrowserTest,
+                       DISABLE_ON_WIN_MAC_CHROMEOS(
+                           NoScriptPreviewsEnabledShouldSkipPreviewCheck)) {
+  // Set ECT to 4G so that the Preview should not be shown in the regular case.
+  g_browser_process->network_quality_tracker()
+      ->ReportEffectiveConnectionTypeForTesting(
+          net::EFFECTIVE_CONNECTION_TYPE_4G);
+
+  GURL url = https_url();
+
+  // Whitelist NoScript for https_hint_setup_url()'s' host.
+  SetUpNoScriptWhitelist(https_hint_setup_url());
+
+  base::HistogramTester histogram_tester;
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  if (ShouldOverrideShouldShowPreviewCheck()) {
+    // Verify loaded noscript tag triggered css resource but not js one.
+    EXPECT_TRUE(noscript_css_requested());
+    EXPECT_FALSE(noscript_js_requested());
+
+    // Verify info bar presented via histogram check.
+    RetryForHistogramUntilCountReached(&histogram_tester,
+                                       "Previews.PreviewShown.NoScript", 1);
+  } else {
+    // Verify loaded js resource but not css triggered by noscript tag.
+    EXPECT_TRUE(noscript_js_requested());
+    EXPECT_FALSE(noscript_css_requested());
+  }
+}
+
+// This test class disables DataSaver.
+class PreviewsDataSaverDisabledBrowserTest
+    : public PreviewsNoScriptBrowserTest {
+ public:
+  PreviewsDataSaverDisabledBrowserTest() = default;
+
+  ~PreviewsDataSaverDisabledBrowserTest() override = default;
+
+  void SetUpCommandLine(base::CommandLine* cmd) override {
+    PreviewsNoScriptBrowserTest::SetUpCommandLine(cmd);
+    cmd->RemoveSwitch("enable-spdy-proxy-auth");
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(ShouldDisablePreview,
+                         PreviewsDataSaverDisabledBrowserTest,
+                         ::testing::Bool());
+
+IN_PROC_BROWSER_TEST_P(PreviewsDataSaverDisabledBrowserTest,
+                       NoPreviewWithDataSaverDisabled) {
+  base::HistogramTester histogram_tester;
+  ui_test_utils::NavigateToURL(browser(), https_url());
+
+  // Verify loaded noscript tag triggered js file and not css file.
+  EXPECT_TRUE(noscript_js_requested());
+  EXPECT_FALSE(noscript_css_requested());
+
+  histogram_tester.ExpectTotalCount("OptimizationGuide.ApplyDecision.NoScript",
+                                    0);
 }

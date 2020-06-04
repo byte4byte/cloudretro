@@ -19,9 +19,10 @@
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/public/base/account_consistency_method.h"
+#include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
+#include "ios/web/common/web_view_creation_util.h"
 #include "ios/web/public/browser_state.h"
-#include "ios/web/public/web_state/web_state_policy_decider.h"
-#include "ios/web/public/web_view_creation_util.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
 #include "net/base/mac/url_conversions.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
@@ -60,8 +61,10 @@ class AccountConsistencyHandler : public web::WebStatePolicyDecider {
 
  private:
   // web::WebStatePolicyDecider override
-  bool ShouldAllowResponse(NSURLResponse* response,
-                           bool for_main_frame) override;
+  void ShouldAllowResponse(
+      NSURLResponse* response,
+      bool for_main_frame,
+      base::OnceCallback<void(PolicyDecision)> callback) override;
   void WebStateDestroyed() override;
 
   AccountConsistencyService* account_consistency_service_;  // Weak.
@@ -80,12 +83,16 @@ AccountConsistencyHandler::AccountConsistencyHandler(
       account_reconcilor_(account_reconcilor),
       delegate_(delegate) {}
 
-bool AccountConsistencyHandler::ShouldAllowResponse(NSURLResponse* response,
-                                                    bool for_main_frame) {
+void AccountConsistencyHandler::ShouldAllowResponse(
+    NSURLResponse* response,
+    bool for_main_frame,
+    base::OnceCallback<void(PolicyDecision)> callback) {
   NSHTTPURLResponse* http_response =
       base::mac::ObjCCast<NSHTTPURLResponse>(response);
-  if (!http_response)
-    return true;
+  if (!http_response) {
+    std::move(callback).Run(PolicyDecision::Allow());
+    return;
+  }
 
   GURL url = net::GURLWithNSURL(http_response.URL);
   if (google_util::IsGoogleDomainUrl(
@@ -101,12 +108,16 @@ bool AccountConsistencyHandler::ShouldAllowResponse(NSURLResponse* response,
         "google.com", true /* force_update_if_too_old */);
   }
 
-  if (!gaia::IsGaiaSignonRealm(url.GetOrigin()))
-    return true;
+  if (!gaia::IsGaiaSignonRealm(url.GetOrigin())) {
+    std::move(callback).Run(PolicyDecision::Allow());
+    return;
+  }
   NSString* manage_accounts_header = [[http_response allHeaderFields]
       objectForKey:@"X-Chrome-Manage-Accounts"];
-  if (!manage_accounts_header)
-    return true;
+  if (!manage_accounts_header) {
+    std::move(callback).Run(PolicyDecision::Allow());
+    return;
+  }
 
   signin::ManageAccountsParams params = signin::BuildManageAccountsParams(
       base::SysNSStringToUTF8(manage_accounts_header));
@@ -140,7 +151,7 @@ bool AccountConsistencyHandler::ShouldAllowResponse(NSURLResponse* response,
   // for the following reasons:
   // * Avoid loading a blank page in WKWebView.
   // * Avoid adding this request to history.
-  return false;
+  std::move(callback).Run(PolicyDecision::Cancel());
 }
 
 void AccountConsistencyHandler::WebStateDestroyed() {
@@ -153,7 +164,7 @@ void AccountConsistencyHandler::WebStateDestroyed() {
 
 // Designated initializer. |callback| will be called every time a navigation has
 // finished. |callback| must not be empty.
-- (instancetype)initWithCallback:(const base::Closure&)callback
+- (instancetype)initWithCallback:(const base::RepeatingClosure&)callback
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -161,10 +172,10 @@ void AccountConsistencyHandler::WebStateDestroyed() {
 
 @implementation AccountConsistencyNavigationDelegate {
   // Callback that will be called every time a navigation has finished.
-  base::Closure _callback;
+  base::RepeatingClosure _callback;
 }
 
-- (instancetype)initWithCallback:(const base::Closure&)callback {
+- (instancetype)initWithCallback:(const base::RepeatingClosure&)callback {
   self = [super init];
   if (self) {
     DCHECK(!callback.is_null());
@@ -222,7 +233,7 @@ AccountConsistencyService::AccountConsistencyService(
     PrefService* prefs,
     AccountReconcilor* account_reconcilor,
     scoped_refptr<content_settings::CookieSettings> cookie_settings,
-    identity::IdentityManager* identity_manager)
+    signin::IdentityManager* identity_manager)
     : browser_state_(browser_state),
       prefs_(prefs),
       account_reconcilor_(account_reconcilor),
@@ -370,7 +381,7 @@ void AccountConsistencyService::ApplyCookieRequests() {
         FinishedApplyingCookieRequest(false);
         return;
       }
-      // Create expiration date of Now+2y to roughly follow the APISID cookie.
+      // Create expiration date of Now+2y to roughly follow the SAPISID cookie.
       expiration_date =
           (base::Time::Now() + base::TimeDelta::FromDays(730)).ToJsTime();
       break;
@@ -425,9 +436,9 @@ WKWebView* AccountConsistencyService::GetWKWebView() {
   if (!web_view_) {
     web_view_ = BuildWKWebView();
     navigation_delegate_ = [[AccountConsistencyNavigationDelegate alloc]
-        initWithCallback:base::Bind(&AccountConsistencyService::
-                                        FinishedApplyingCookieRequest,
-                                    base::Unretained(this), true)];
+        initWithCallback:base::BindRepeating(&AccountConsistencyService::
+                                                 FinishedApplyingCookieRequest,
+                                             base::Unretained(this), true)];
     [web_view_ setNavigationDelegate:navigation_delegate_];
   }
   return web_view_;
@@ -470,10 +481,10 @@ void AccountConsistencyService::OnBrowsingDataRemoved() {
   base::DictionaryValue dict;
   prefs_->Set(kDomainsWithCookiePref, dict);
 
-  // APISID cookie has been removed, notify the GCMS.
+  // SAPISID cookie has been removed, notify the GCMS.
   // TODO(https://crbug.com/930582) : Remove the need to expose this method
   // or move it to the network::CookieManager.
-  identity_manager_->ForceTriggerOnCookieChange();
+  identity_manager_->GetAccountsCookieMutator()->ForceTriggerOnCookieChange();
 }
 
 void AccountConsistencyService::OnPrimaryAccountSet(
@@ -489,7 +500,7 @@ void AccountConsistencyService::OnPrimaryAccountCleared(
 }
 
 void AccountConsistencyService::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   AddChromeConnectedCookies();
 }

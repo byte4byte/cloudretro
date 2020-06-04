@@ -8,6 +8,7 @@
 #include "ash/public/cpp/caption_buttons/caption_button_model.h"
 #include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/public/cpp/window_properties.h"
+#include "ash/public/cpp/window_state_type.h"
 #include "base/logging.h"  // DCHECK
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/gfx/canvas.h"
@@ -24,9 +25,6 @@ using views::Widget;
 
 namespace {
 
-// This is 2x of the slide ainmation duration.
-constexpr int kColorUpdateDurationMs = 240;
-
 // Tiles an image into an area, rounding the top corners.
 void TileRoundRect(gfx::Canvas* canvas,
                    const cc::PaintFlags& flags,
@@ -42,8 +40,12 @@ void TileRoundRect(gfx::Canvas* canvas,
                        0,  // bottom-right
                        0,
                        0};  // bottom-left
+  // Antialiasing can result in blending a transparent pixel and
+  // leave non opaque alpha between the frame and the client area.
+  // Extend 1dp to make sure it's fully opaque.
+  rect.fBottom += 1;
   SkPath path;
-  path.addRoundRect(rect, radii, SkPath::kCW_Direction);
+  path.addRoundRect(rect, radii, SkPathDirection::kCW);
   canvas->DrawPath(path, flags);
 }
 
@@ -54,7 +56,7 @@ namespace ash {
 DefaultFrameHeader::ColorAnimator::ColorAnimator(
     gfx::AnimationDelegate* delegate)
     : animation_(delegate) {
-  animation_.SetSlideDuration(kColorUpdateDurationMs);
+  animation_.SetSlideDuration(base::TimeDelta::FromMilliseconds(240));
   animation_.SetTweenType(gfx::Tween::EASE_IN);
   animation_.Reset(1);
 }
@@ -105,10 +107,11 @@ void DefaultFrameHeader::SetWidthInPixels(int width_in_pixels) {
 }
 
 void DefaultFrameHeader::UpdateFrameColors() {
+  aura::Window* target_window = GetTargetWindow();
   const SkColor active_frame_color =
-      target_widget()->GetNativeWindow()->GetProperty(kFrameActiveColorKey);
+      target_window->GetProperty(kFrameActiveColorKey);
   const SkColor inactive_frame_color =
-      target_widget()->GetNativeWindow()->GetProperty(kFrameInactiveColorKey);
+      target_window->GetProperty(kFrameInactiveColorKey);
 
   bool updated = false;
   if (active_frame_color_.target_color() != active_frame_color) {
@@ -130,10 +133,10 @@ void DefaultFrameHeader::UpdateFrameColors() {
 // DefaultFrameHeader, protected:
 
 void DefaultFrameHeader::DoPaintHeader(gfx::Canvas* canvas) {
-  int corner_radius =
-      (target_widget()->IsMaximized() || target_widget()->IsFullscreen())
-          ? 0
-          : kTopCornerRadiusWhenRestored;
+  int corner_radius = IsNormalWindowStateType(
+                          GetTargetWindow()->GetProperty(kWindowStateTypeKey))
+                          ? kTopCornerRadiusWhenRestored
+                          : 0;
 
   cc::PaintFlags flags;
   flags.setColor(color_utils::AlphaBlend(
@@ -177,6 +180,10 @@ SkColor DefaultFrameHeader::GetTitleColor() const {
 
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultFrameHeader, private:
+
+aura::Window* DefaultFrameHeader::GetTargetWindow() {
+  return target_widget()->GetNativeWindow();
+}
 
 SkColor DefaultFrameHeader::GetCurrentFrameColor() const {
   return mode() == MODE_ACTIVE ? active_frame_color_.target_color()

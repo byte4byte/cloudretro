@@ -15,13 +15,14 @@
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/alert_coordinator/input_alert_coordinator.h"
 #import "ios/chrome/browser/ui/dialogs/completion_block_util.h"
+#import "ios/chrome/browser/ui/dialogs/dialog_constants.h"
 #import "ios/chrome/browser/ui/dialogs/java_script_dialog_blocking_state.h"
 #import "ios/chrome/browser/ui/dialogs/nsurl_protection_space_util.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -37,10 +38,6 @@ using completion_block_util::GetSafeJavaScriptAlertCompletion;
 using completion_block_util::GetSafeJavaScriptConfirmationCompletion;
 using completion_block_util::GetSafeJavaScriptPromptCompletion;
 using completion_block_util::GetSafeHTTPAuthCompletion;
-
-// Externed accessibility identifier.
-NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
-    @"JavaScriptDialogTextFieldAccessibiltyIdentifier";
 
 @interface DialogPresenter () <CRWWebStateObserver> {
   // Queue of WebStates which correspond to the keys in
@@ -161,6 +158,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                   mainFrameURL:webState->GetLastCommittedURL()];
   AlertCoordinator* alertCoordinator =
       [[AlertCoordinator alloc] initWithBaseViewController:self.viewController
+                                                   browser:self.browser
                                                      title:title
                                                    message:message];
 
@@ -200,6 +198,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                   mainFrameURL:webState->GetLastCommittedURL()];
   AlertCoordinator* alertCoordinator =
       [[AlertCoordinator alloc] initWithBaseViewController:self.viewController
+                                                   browser:self.browser
                                                      title:title
                                                    message:message];
 
@@ -240,6 +239,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
                                   mainFrameURL:webState->GetLastCommittedURL()];
   InputAlertCoordinator* alertCoordinator = [[InputAlertCoordinator alloc]
       initWithBaseViewController:self.viewController
+                         browser:self.browser
                            title:title
                          message:message];
 
@@ -272,7 +272,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
       addTextFieldWithConfigurationHandler:^(UITextField* textField) {
         textField.text = defaultText;
         textField.accessibilityIdentifier =
-            kJavaScriptDialogTextFieldAccessibiltyIdentifier;
+            kJavaScriptDialogTextFieldAccessibilityIdentifier;
       }];
 
   [self addDialogCoordinator:alertCoordinator forWebState:webState];
@@ -290,6 +290,7 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
 
   InputAlertCoordinator* alertCoordinator = [[InputAlertCoordinator alloc]
       initWithBaseViewController:self.viewController
+                         browser:self.browser
                            title:title
                          message:message];
 
@@ -445,6 +446,8 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
   [self.delegate dialogPresenter:self
        willShowDialogForWebState:self.presentedDialogWebState];
   [self.presentedDialogCoordinator start];
+  self.presentedDialogCoordinator.alertController.view.accessibilityIdentifier =
+      kJavaScriptDialogAccessibilityIdentifier;
 }
 
 - (void)dialogCoordinatorWasStopped:(AlertCoordinator*)coordinator {
@@ -537,10 +540,12 @@ NSString* const kJavaScriptDialogTextFieldAccessibiltyIdentifier =
     AlertCoordinator* confirmationCoordinator =
         IsIPadIdiom() ? [[AlertCoordinator alloc]
                             initWithBaseViewController:weakBaseViewController
+                                               browser:self.browser
                                                  title:nil
                                                message:confirmMessage]
                       : [[ActionSheetCoordinator alloc]
                             initWithBaseViewController:weakBaseViewController
+                                               browser:self.browser
                                                  title:nil
                                                message:confirmMessage
                                                   rect:CGRectZero

@@ -34,7 +34,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
-#include "third_party/blink/renderer/platform/graphics/dark_mode_bitmap_image_classifier.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_image_classifier.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
@@ -50,6 +50,12 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
+namespace {
+
+const int kMinImageSizeForClassification1D = 24;
+const int kMaxImageSizeForClassification1D = 100;
+
+}  // namespace
 
 int GetRepetitionCountWithPolicyOverride(int actual_count,
                                          ImageAnimationPolicy policy) {
@@ -109,8 +115,7 @@ PaintImage BitmapImage::PaintImageForTesting() {
 
 PaintImage BitmapImage::CreatePaintImage() {
   sk_sp<PaintImageGenerator> generator =
-      decoder_ ? decoder_->CreateGenerator(PaintImage::kDefaultFrameIndex)
-               : nullptr;
+      decoder_ ? decoder_->CreateGenerator() : nullptr;
   if (!generator)
     return PaintImage();
 
@@ -149,6 +154,11 @@ IntSize BitmapImage::Size() const {
 IntSize BitmapImage::SizeRespectingOrientation() const {
   UpdateSize();
   return size_respecting_orientation_;
+}
+
+bool BitmapImage::HasDefaultOrientation() const {
+  ImageOrientation orientation = CurrentFrameOrientation();
+  return orientation == kDefaultImageOrientation;
 }
 
 bool BitmapImage::GetHotSpot(IntPoint& hot_spot) const {
@@ -217,7 +227,8 @@ Image::SizeAvailability BitmapImage::DataChanged(bool all_data_received) {
       decoder_->FilenameExtension() == "jpg") {
     BitmapImageMetrics::CountImageJpegDensity(
         std::min(Size().Width(), Size().Height()),
-        ImageDensityInCentiBpp(Size(), decoder_->ByteSize()));
+        ImageDensityInCentiBpp(Size(), decoder_->ByteSize()),
+        decoder_->ByteSize());
   }
 
   // Feed all the data we've seen so far to the image decoder.
@@ -332,7 +343,8 @@ bool BitmapImage::IsSizeAvailable() {
 }
 
 PaintImage BitmapImage::PaintImageForCurrentFrame() {
-  if (cached_frame_)
+  auto alpha_type = decoder_ ? decoder_->AlphaType() : kUnknown_SkAlphaType;
+  if (cached_frame_ && cached_frame_.GetAlphaType() == alpha_type)
     return cached_frame_;
 
   cached_frame_ = CreatePaintImage();
@@ -369,20 +381,7 @@ scoped_refptr<Image> BitmapImage::ImageForDefaultFrame() {
 }
 
 bool BitmapImage::CurrentFrameKnownToBeOpaque() {
-  // If the image is animated, it is being animated by the compositor and we
-  // don't know what the current frame is.
-  // TODO(khushalsagar): We could say the image is opaque if none of the frames
-  // have alpha.
-  if (MaybeAnimated())
-    return false;
-
-  // We ask the decoder whether the image has alpha because in some cases the
-  // the correct value is known after decoding. The DeferredImageDecoder caches
-  // the accurate value from the decoded result.
-  const bool frame_has_alpha =
-      decoder_ ? decoder_->FrameHasAlphaAtIndex(PaintImage::kDefaultFrameIndex)
-               : true;
-  return !frame_has_alpha;
+  return decoder_ ? decoder_->AlphaType() == kOpaque_SkAlphaType : false;
 }
 
 bool BitmapImage::CurrentFrameIsComplete() {
@@ -443,10 +442,21 @@ void BitmapImage::SetAnimationPolicy(ImageAnimationPolicy policy) {
   ResetAnimation();
 }
 
-DarkModeClassification BitmapImage::ClassifyImageForDarkMode(
-    const FloatRect& src_rect) {
-  DarkModeBitmapImageClassifier dark_mode_bitmap_image_classifier;
-  return dark_mode_bitmap_image_classifier.Classify(*this, src_rect);
+DarkModeClassification BitmapImage::CheckTypeSpecificConditionsForDarkMode(
+    const FloatRect& dest_rect,
+    DarkModeImageClassifier* classifier) {
+  if (dest_rect.Width() < kMinImageSizeForClassification1D ||
+      dest_rect.Height() < kMinImageSizeForClassification1D)
+    return DarkModeClassification::kApplyFilter;
+
+  if (dest_rect.Width() > kMaxImageSizeForClassification1D ||
+      dest_rect.Height() > kMaxImageSizeForClassification1D) {
+    return DarkModeClassification::kDoNotApplyFilter;
+  }
+
+  classifier->SetImageType(DarkModeImageClassifier::ImageType::kBitmap);
+
+  return DarkModeClassification::kNotClassified;
 }
 
 }  // namespace blink

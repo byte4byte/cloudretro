@@ -16,6 +16,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_select_files_handler.h"
 #include "chrome/browser/chromeos/arc/fileapi/chrome_content_provider_url_util.h"
@@ -37,7 +38,7 @@
 #include "mojo/public/cpp/platform/platform_handle.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "net/base/escape.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 #include "url/gurl.h"
 
 namespace {
@@ -93,7 +94,7 @@ void GetFileSizeOnIOThread(scoped_refptr<storage::FileSystemContext> context,
       url,
       storage::FileSystemOperation::GET_METADATA_FIELD_IS_DIRECTORY |
           storage::FileSystemOperation::GET_METADATA_FIELD_SIZE,
-      base::Bind(
+      base::BindOnce(
           [](ArcFileSystemBridge::GetFileSizeCallback callback,
              base::File::Error result, const base::File::Info& file_info) {
             int64_t size = -1;
@@ -101,8 +102,8 @@ void GetFileSizeOnIOThread(scoped_refptr<storage::FileSystemContext> context,
                 file_info.size >= 0) {
               size = file_info.size;
             }
-            base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                                     base::BindOnce(std::move(callback), size));
+            base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                           base::BindOnce(std::move(callback), size));
           },
           base::Passed(&callback)));
 }
@@ -176,8 +177,7 @@ ArcFileSystemBridge::ArcFileSystemBridge(content::BrowserContext* context,
     : profile_(Profile::FromBrowserContext(context)),
       bridge_service_(bridge_service),
       select_files_handlers_manager_(
-          std::make_unique<ArcSelectFilesHandlersManager>(context)),
-      weak_ptr_factory_(this) {
+          std::make_unique<ArcSelectFilesHandlersManager>(context)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   bridge_service_->file_system()->SetHost(this);
   bridge_service_->file_system()->AddObserver(this);
@@ -249,7 +249,7 @@ void ArcFileSystemBridge::GetFileSize(const std::string& url,
       GetFileSystemContext(profile_, url_decoded);
   file_manager::util::FileSystemURLAndHandle file_system_url_and_handle =
       GetFileSystemURL(*context, url_decoded);
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&GetFileSizeOnIOThread, std::move(context),
                      file_system_url_and_handle.url, std::move(callback)));
@@ -275,7 +275,7 @@ void ArcFileSystemBridge::GetFileType(const std::string& url,
       GetFileSystemURL(*context, url_decoded);
   extensions::app_file_handler_util::GetMimeTypeForLocalPath(
       profile_, file_system_url_and_handle.url.path(),
-      base::Bind(
+      base::BindOnce(
           [](GetFileTypeCallback callback, const std::string& mime_type) {
             std::move(callback).Run(mime_type.empty()
                                         ? base::nullopt
@@ -321,7 +321,7 @@ void ArcFileSystemBridge::OpenFileToRead(const std::string& url,
     return;
   }
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&OpenDriveFSFileToRead, fs_path), std::move(callback));
 }

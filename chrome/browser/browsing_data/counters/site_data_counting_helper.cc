@@ -8,9 +8,9 @@
 #include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/browsing_data/content/browsing_data_helper.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -18,13 +18,15 @@
 #include "content/public/browser/session_storage_usage_info.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/storage_usage_info.h"
+#include "media/media_buildflags.h"
 #include "net/cookies/cookie_util.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 #include "storage/browser/quota/quota_manager.h"
+#include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -72,7 +74,7 @@ void SiteDataCountingHelper::CountAndDestroySelfWhenFinished() {
         blink::mojom::StorageType::kSyncable};
     for (auto type : types) {
       tasks_ += 1;
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {BrowserThread::IO},
           base::BindOnce(&storage::QuotaManager::GetOriginsModifiedSince,
                          quota_manager, type, begin_, origins_callback));
@@ -117,16 +119,21 @@ void SiteDataCountingHelper::CountAndDestroySelfWhenFinished() {
       BrowsingDataMediaLicenseHelper::Create(file_system_context);
   if (media_license_helper_) {
     tasks_ += 1;
-    media_license_helper_->StartFetching(base::BindRepeating(
-        &SiteDataCountingHelper::SitesWithMediaLicensesCallback,
-        base::Unretained(this)));
+    media_license_helper_->StartFetching(
+        base::BindOnce(&SiteDataCountingHelper::SitesWithMediaLicensesCallback,
+                       base::Unretained(this)));
   }
 #endif
 
   // Counting site usage data and durable permissions.
   auto* hcsm = HostContentSettingsMapFactory::GetForProfile(profile_);
   const ContentSettingsType content_settings[] = {
-      CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, CONTENT_SETTINGS_TYPE_APP_BANNER};
+    ContentSettingsType::DURABLE_STORAGE,
+    ContentSettingsType::APP_BANNER,
+#if !defined(OS_ANDROID)
+    ContentSettingsType::INSTALLED_WEB_APP_METADATA,
+#endif
+  };
   for (auto type : content_settings) {
     tasks_ += 1;
     GetOriginsFromHostContentSettignsMap(hcsm, type);
@@ -158,9 +165,9 @@ void SiteDataCountingHelper::GetCookiesCallback(
       origins.push_back(url);
     }
   }
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(&SiteDataCountingHelper::Done,
-                                          base::Unretained(this), origins));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&SiteDataCountingHelper::Done,
+                                base::Unretained(this), origins));
 }
 
 void SiteDataCountingHelper::GetQuotaOriginsCallback(
@@ -171,10 +178,9 @@ void SiteDataCountingHelper::GetQuotaOriginsCallback(
   urls.resize(origins.size());
   for (const url::Origin& origin : origins)
     urls.push_back(origin.GetURL());
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&SiteDataCountingHelper::Done, base::Unretained(this),
-                     std::move(urls)));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&SiteDataCountingHelper::Done,
+                                base::Unretained(this), std::move(urls)));
 }
 
 void SiteDataCountingHelper::GetLocalStorageUsageInfoCallback(
@@ -185,19 +191,6 @@ void SiteDataCountingHelper::GetLocalStorageUsageInfoCallback(
     if (info.last_modified >= begin_ &&
         (!policy || !policy->IsStorageProtected(info.origin.GetURL()))) {
       origins.push_back(info.origin.GetURL());
-    }
-  }
-  Done(origins);
-}
-
-void SiteDataCountingHelper::GetSessionStorageUsageInfoCallback(
-    const scoped_refptr<storage::SpecialStoragePolicy>& policy,
-    const std::vector<content::SessionStorageUsageInfo>& infos) {
-  std::vector<GURL> origins;
-  for (const auto& info : infos) {
-    // Session storage doesn't know about creation time.
-    if (!policy || !policy->IsStorageProtected(info.origin)) {
-      origins.push_back(info.origin);
     }
   }
   Done(origins);
@@ -227,7 +220,7 @@ void SiteDataCountingHelper::Done(const std::vector<GURL>& origins) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(tasks_ > 0);
   for (const GURL& origin : origins) {
-    if (BrowsingDataHelper::HasWebScheme(origin))
+    if (browsing_data::HasWebScheme(origin))
       unique_hosts_.insert(origin.host());
   }
   if (--tasks_ > 0)

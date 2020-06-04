@@ -21,7 +21,6 @@ class GlobalErrorBubbleView : public views::BubbleDialogDelegateView,
  public:
   GlobalErrorBubbleView(
       views::View* anchor_view,
-      const gfx::Rect& anchor_rect,
       views::BubbleBorder::Arrow arrow,
       Browser* browser,
       const base::WeakPtr<GlobalErrorWithStandardBubble>& error);
@@ -29,21 +28,12 @@ class GlobalErrorBubbleView : public views::BubbleDialogDelegateView,
 
   // views::WidgetDelegate implementation.
   base::string16 GetWindowTitle() const override;
-  gfx::ImageSkia GetWindowIcon() override;
-  bool ShouldShowWindowIcon() const override;
   void WindowClosing() override;
 
   // views::BubbleDialogDelegateView implementation.
   void Init() override;
   bool ShouldShowCloseButton() const override;
-  void UpdateButton(views::LabelButton* button, ui::DialogButton type) override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  int GetDialogButtons() const override;
-  int GetDefaultDialogButton() const override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  bool Cancel() override;
-  bool Accept() override;
-  bool Close() override;
+  void OnDialogInitialized() override;
 
   // GlobalErrorBubbleViewBase implementation.
   void CloseBubbleView() override;

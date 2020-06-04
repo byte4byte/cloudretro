@@ -13,9 +13,9 @@
 #include "base/values.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer_impl.h"
+#include "cc/paint/display_item_list.h"
 #include "cc/raster/playback_image_provider.h"
 #include "cc/raster/raster_buffer_provider.h"
-#include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "ui/gfx/geometry/axis_transform2d.h"
@@ -146,11 +146,10 @@ RasterizeAndRecordBenchmarkImpl::~RasterizeAndRecordBenchmarkImpl() = default;
 
 void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
     LayerTreeHostImpl* host) {
-  LayerTreeHostCommon::CallFunctionForEveryLayer(
-      host->active_tree(), [this](LayerImpl* layer) {
-        rasterize_results_.total_layers++;
-        layer->RunMicroBenchmark(this);
-      });
+  for (auto* layer : *host->active_tree()) {
+    rasterize_results_.total_layers++;
+    layer->RunMicroBenchmark(this);
+  }
 
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetDouble("rasterize_time_ms",
@@ -168,6 +167,17 @@ void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
   result->SetInteger("total_picture_layers_off_screen",
                      rasterize_results_.total_picture_layers_off_screen);
 
+  std::unique_ptr<base::DictionaryValue> lcd_text_pixels(
+      new base::DictionaryValue());
+  for (size_t i = 0; i < kLCDTextDisallowedReasonCount; i++) {
+    lcd_text_pixels->SetInteger(
+        LCDTextDisallowedReasonToString(
+            static_cast<LCDTextDisallowedReason>(i)),
+        rasterize_results_.visible_pixels_by_lcd_text_disallowed_reason[i]);
+  }
+  result->SetDictionary("visible_pixels_by_lcd_text_disallowed_reason",
+                        std::move(lcd_text_pixels));
+
   NotifyDone(std::move(result));
 }
 
@@ -181,6 +191,13 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     rasterize_results_.total_picture_layers_off_screen++;
     return;
   }
+
+  int text_pixels =
+      layer->GetRasterSource()->GetDisplayItemList()->AreaOfDrawText(
+          layer->visible_layer_rect());
+  rasterize_results_
+      .visible_pixels_by_lcd_text_disallowed_reason[static_cast<size_t>(
+          layer->lcd_text_disallowed_reason())] += text_pixels;
 
   FixedInvalidationPictureLayerTilingClient client(layer,
                                                    gfx::Rect(layer->bounds()));
@@ -232,6 +249,7 @@ RasterizeAndRecordBenchmarkImpl::RasterizeResults::RasterizeResults()
     : pixels_rasterized(0),
       pixels_rasterized_with_non_solid_color(0),
       pixels_rasterized_as_opaque(0),
+      visible_pixels_by_lcd_text_disallowed_reason{0},
       total_layers(0),
       total_picture_layers(0),
       total_picture_layers_with_no_content(0),

@@ -17,6 +17,7 @@
 #include "base/test/scoped_path_override.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/policy/core/common/policy_service.h"
 
 class ProfileInfoCache;
 class ProfileAttributesStorage;
@@ -67,7 +68,9 @@ class TestingProfileManager {
       int avatar_id,
       const std::string& supervised_user_id,
       TestingProfile::TestingFactories testing_factories,
-      base::Optional<bool> override_new_profile = base::Optional<bool>());
+      base::Optional<bool> override_new_profile = base::nullopt,
+      base::Optional<std::unique_ptr<policy::PolicyService>> policy_service =
+          base::nullopt);
 
   // Small helper for creating testing profiles. Just forwards to above.
   TestingProfile* CreateTestingProfile(const std::string& name);
@@ -102,9 +105,6 @@ class TestingProfileManager {
   // Deletes the cache instance. This is useful for testing that the cache is
   // properly persisting data.
   void DeleteProfileInfoCache();
-
-  // Sets ProfileManager's logged_in state. This is only useful on ChromeOS.
-  void SetLoggedIn(bool logged_in);
 
   // Sets the last used profile; also sets the active time to now.
   void UpdateLastUser(Profile* last_active);

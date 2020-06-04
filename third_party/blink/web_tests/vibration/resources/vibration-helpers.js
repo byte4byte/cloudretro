@@ -22,8 +22,8 @@ class MockVibrationManager {
     this.bindingSet_ =
         new mojo.BindingSet(device.mojom.VibrationManager);
 
-    this.interceptor_ = new MojoInterfaceInterceptor(
-        device.mojom.VibrationManager.name);
+    this.interceptor_ =
+        new MojoInterfaceInterceptor(device.mojom.VibrationManager.name);
     this.interceptor_.oninterfacerequest =
         e => this.bindingSet_.addBinding(this, e.handle);
     this.interceptor_.start();

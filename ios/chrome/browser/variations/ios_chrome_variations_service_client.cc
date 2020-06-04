@@ -27,9 +27,9 @@ IOSChromeVariationsServiceClient::IOSChromeVariationsServiceClient() {}
 
 IOSChromeVariationsServiceClient::~IOSChromeVariationsServiceClient() {}
 
-base::Callback<base::Version()>
+IOSChromeVariationsServiceClient::VersionCallback
 IOSChromeVariationsServiceClient::GetVersionForSimulationCallback() {
-  return base::Bind(&GetVersionForSimulation);
+  return base::BindOnce(&GetVersionForSimulation);
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
@@ -48,5 +48,10 @@ version_info::Channel IOSChromeVariationsServiceClient::GetChannel() {
 
 bool IOSChromeVariationsServiceClient::OverridesRestrictParameter(
     std::string* parameter) {
+  return false;
+}
+
+bool IOSChromeVariationsServiceClient::IsEnterprise() {
+  // TODO(crbug.com/1003846): Implement enterprise check for iOS.
   return false;
 }

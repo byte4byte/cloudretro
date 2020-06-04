@@ -12,8 +12,7 @@
 
 namespace chromeos {
 
-ScreenLockServiceProvider::ScreenLockServiceProvider()
-    : weak_ptr_factory_(this) {}
+ScreenLockServiceProvider::ScreenLockServiceProvider() {}
 
 ScreenLockServiceProvider::~ScreenLockServiceProvider() = default;
 
@@ -23,8 +22,8 @@ void ScreenLockServiceProvider::Start(
       kScreenLockServiceInterface, kScreenLockServiceShowLockScreenMethod,
       base::BindRepeating(&ScreenLockServiceProvider::ShowLockScreen,
                           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&ScreenLockServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ScreenLockServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ScreenLockServiceProvider::OnExported(const std::string& interface_name,
@@ -41,7 +40,7 @@ void ScreenLockServiceProvider::ShowLockScreen(
   // Please add any additional logic to
   // ScreenLocker::HandleShowLockScreenRequest() instead of placing it here.
   ScreenLocker::HandleShowLockScreenRequest();
-  response_sender.Run(dbus::Response::FromMethodCall(method_call));
+  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
 }
 
 }  // namespace chromeos

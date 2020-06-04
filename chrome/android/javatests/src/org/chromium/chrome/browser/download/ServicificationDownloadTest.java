@@ -19,8 +19,8 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.TestFileUtil;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ReducedModeNativeTestRule;
 import org.chromium.components.offline_items_collection.ContentId;
@@ -100,7 +100,7 @@ public final class ServicificationDownloadTest {
     }
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         RecordHistogram.setDisabledForTests(true);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mNotificationService = new MockDownloadNotificationService();
@@ -109,7 +109,7 @@ public final class ServicificationDownloadTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         RecordHistogram.setDisabledForTests(false);
     }
 
@@ -120,7 +120,6 @@ public final class ServicificationDownloadTest {
     @Test
     @LargeTest
     @Feature({"Download"})
-    @CommandLineFlags.Add({"enable-features=NetworkService"})
     public void testResumeInterruptedDownload() {
         if (useDownloadOfflineContentProvider()) return;
         mNativeTestRule.assertOnlyServiceManagerStarted();
@@ -153,7 +152,7 @@ public final class ServicificationDownloadTest {
     @Test
     @LargeTest
     @Feature({"Download"})
-    @CommandLineFlags.Add({"enable-features=NetworkService,UseDownloadOfflineContentProvider"})
+    @CommandLineFlags.Add({"enable-features=UseDownloadOfflineContentProvider"})
     public void testResumeInterruptedDownloadUsingDownloadOfflineContentProvider() {
         if (!useDownloadOfflineContentProvider()) return;
         mNativeTestRule.assertOnlyServiceManagerStarted();

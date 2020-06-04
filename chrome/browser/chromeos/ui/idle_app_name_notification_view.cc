@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/extension.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -62,7 +63,7 @@ void CreateAndShowWidget(views::WidgetDelegateView* delegate,
                    -view_size.height(), view_size.width(), view_size.height());
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_POPUP;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.ownership = views::Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET;
   params.accept_events = false;
   params.z_order = ui::ZOrderLevel::kFloatingUIElement;
@@ -71,7 +72,7 @@ void CreateAndShowWidget(views::WidgetDelegateView* delegate,
   ash_util::SetupWidgetInitParamsForContainer(
       &params, ash::kShellWindowId_SettingBubbleContainer);
   views::Widget* widget = new views::Widget;
-  widget->Init(params);
+  widget->Init(std::move(params));
   gfx::NativeView native_view = widget->GetNativeView();
   native_view->SetName("KioskIdleAppNameNotification");
 

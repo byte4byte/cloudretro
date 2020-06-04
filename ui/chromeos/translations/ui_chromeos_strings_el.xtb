@@ -30,6 +30,7 @@
 <translation id="1243314992276662751">Μεταφόρτωση</translation>
 <translation id="1249250836236328755">Είδος</translation>
 <translation id="1278813325885878377">Πληκτρολόγιο Qwerty Ουγγρικών</translation>
+<translation id="1293556467332435079">Αρχεία</translation>
 <translation id="1297922636971898492">Το Google Drive δεν είναι διαθέσιμο αυτήν τη στιγμή. Η μεταφόρτωση θα ξεκινήσει ξανά, όταν το Google Drive είναι και πάλι διαθέσιμο.</translation>
 <translation id="1307931752636661898">Δεν είναι δυνατή η προβολή αρχείων Linux</translation>
 <translation id="1310751437842832374">Μεταγραφή (mausam → ନମସ୍ତେ)</translation>
@@ -76,13 +77,12 @@
 <translation id="1829129547161959350">Πιγκουίνος</translation>
 <translation id="183183971458492120">Γίνεται φόρτωση των πληροφοριών…</translation>
 <translation id="1838709767668011582">Ιστότοπος Google</translation>
-<translation id="1839704667838141620">Αλλάξτε τον τρόπο κοινοποίησης αυτού του αρχείου</translation>
 <translation id="1844692022597038441">Αυτό το αρχείο δεν είναι διαθέσιμο εκτός σύνδεσης.</translation>
 <translation id="184633654410729720">Πληκτρολόγιο Ταϊλανδικών (Kedmanee)</translation>
 <translation id="1847880352285315359">Αποθηκεύτηκε</translation>
-<translation id="1864676585353837027">Αλλάξτε τον τρόπο με τον οποίο κοινοποιούνται αυτά τα αρχεία</translation>
 <translation id="1864756863218646478">Δεν ήταν δυνατή η εύρεση του αρχείου.</translation>
 <translation id="1921986354447415460">Πληκτρολόγιο Τουρκικών-F</translation>
+<translation id="1924372192547904021">Έγινε μορφοποίηση της συσκευής <ph name="DRIVE_NAME" /></translation>
 <translation id="1931134289871235022">Σλοβακικά</translation>
 <translation id="1933345018156373194">Αποτυχία μετακίνησης, μη αναμενόμενο σφάλμα: <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">Φινλανδικά
@@ -90,7 +90,7 @@
 <translation id="1942765061641586207">Ανάλυση εικόνας</translation>
 <translation id="1943097386230153518">Εγκατάσταση νέας υπηρεσίας</translation>
 <translation id="1947424002851288782">Πληκτρολόγιο με γερμανικούς χαρακτήρες</translation>
-<translation id="197560921582345123">Δυνατότητα επεξεργασίας</translation>
+<translation id="1972984168337863910">Ανάπτυξη πλαισίων σχολίων αρχείων</translation>
 <translation id="1984603991036629094">Αρμενικό φωνητικό πληκτρολόγιο</translation>
 <translation id="2001796770603320721">Διαχείριση στο Drive</translation>
 <translation id="2009067268969781306">Η διαμόρφωση ενός δίσκου θα διαγράψει όλα τα δεδομένα που έχουν αποθηκευτεί σε αυτόν. Δεν είναι δυνατή η αναίρεση αυτής της ενέργειας.</translation>
@@ -169,6 +169,7 @@
 <translation id="2942290791863759244">Πληκτρολόγιο Γερμανικών Neo 2</translation>
 <translation id="2943400156390503548">Διαφάνειες</translation>
 <translation id="2943503720238418293">Χρησιμοποιήστε πιο σύντομο όνομα</translation>
+<translation id="2949781154072577687">Μορφοποίηση <ph name="DRIVE_NAME" />…</translation>
 <translation id="2951236788251446349">Μέδουσα</translation>
 <translation id="2963783323012015985">Πληκτρολόγιο με τουρκικούς χαρακτήρες</translation>
 <translation id="2966459079597787514">Πληκτρολόγιο με σουηδικούς χαρακτήρες</translation>
@@ -232,6 +233,7 @@
 <translation id="3645531960514756307">Ξεκαρφίτσωμα φακέλου</translation>
 <translation id="3678559383040232393">Πληκτρολόγιο Μάλτας</translation>
 <translation id="3685122418104378273">Ο συγχρονισμός του Google Drive είναι απενεργοποιημένος από προεπιλογή όταν χρησιμοποιούνται δεδομένα κινητής τηλεφωνίας.</translation>
+<translation id="3689865792480713551">Ακύρωση <ph name="ACTIVITY_DESCRIPTION" />.</translation>
 <translation id="3726463242007121105">Δεν είναι δυνατό το άνοιγμα αυτής της συσκευής επειδή δεν υποστηρίζεται το σύστημα αρχείων της.</translation>
 <translation id="3741243925913727067">Δημιουργία αντιγράφων ασφαλείας για τις φωτογραφίες και τα βίντεο της συσκευής μέσων στο Google Drive.</translation>
 <translation id="3749289110408117711">Όνομα αρχείου</translation>
@@ -274,11 +276,9 @@
 <translation id="421017592316736757">Πρέπει να είστε συνδεδεμένοι στο διαδίκτυο για να αποκτήσετε πρόσβαση σε αυτό το αρχείο.</translation>
 <translation id="4212740939091998969">Ο φάκελος με την ονομασία "<ph name="FOLDER_NAME" />" υπάρχει ήδη. Επιλέξτε διαφορετικό όνομα.</translation>
 <translation id="4215448920900139318">Δημιουργία αντιγράφου ασφαλείας για το <ph name="FILE_COUNT" /></translation>
-<translation id="4242533952199664413">Ανοίξτε τις ρυθμίσεις</translation>
 <translation id="426015154560005552">Πληκτρολόγιο Αραβικών</translation>
 <translation id="4261901459838235729">Παρουσίαση Google</translation>
 <translation id="4290535918735525311">1 φάκελος που κοινοποιήθηκε με Linux</translation>
-<translation id="42981349822642051">Επέκταση</translation>
 <translation id="4298972503445160211">Πληκτρολόγιο με δανέζικους χαρακτήρες</translation>
 <translation id="4299729908419173967">Βραζιλιάνικα</translation>
 <translation id="4309915981827077375">Γενικές πληροφορίες</translation>
@@ -286,6 +286,7 @@
 <translation id="4336032328163998280">Αποτυχία λειτουργίας αντιγραφής. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">Πεπόνι</translation>
 <translation id="4372884569765913867">1x1</translation>
+<translation id="4394214039309501350">Εξωτερικός σύνδεσμος</translation>
 <translation id="4425149324548788773">Το Drive μου</translation>
 <translation id="4465830120256509958">Πληκτρολόγιο με βραζιλιάνικους χαρακτήρες</translation>
 <translation id="4470564870223067757">Σύνολο Χανγκίλ 2</translation>
@@ -295,7 +296,6 @@
 <translation id="4522570452068850558">Λεπτομέρειες</translation>
 <translation id="4552678318981539154">Αγοράστε περισσότερο αποθηκευτικό χώρο</translation>
 <translation id="4559767610552730302">Εφέ Bokeh</translation>
-<translation id="4568854179928172494">Ώρα τροποποίησης</translation>
 <translation id="4572815280350369984">Αρχείο <ph name="FILE_TYPE" /></translation>
 <translation id="457386861538956877">Περισσότερα...</translation>
 <translation id="4579744207439506346">Το <ph name="ENTRY_NAME" /> προστέθηκε στην επιλογή.</translation>
@@ -336,7 +336,6 @@
 <translation id="4880520557730313061">Αυτόματη επιδιόρθωση</translation>
 <translation id="4881695831933465202">Άνοιγμα</translation>
 <translation id="4886021172213954916">Πληκτρολόγιο Ταμίλ (Γραφομηχανής)</translation>
-<translation id="4892969127351273348">Δεν είναι δυνατό το άνοιγμα με την εφαρμογή <ph name="APP_NAME" /></translation>
 <translation id="4905417359854579806">Έτοιμο για δημιουργία αντιγράφων ασφαλείας για <ph name="FILE_COUNT" /> αρχεία</translation>
 <translation id="4924638091161556692">Διορθώθηκε</translation>
 <translation id="4935975195727477204">Φυτό γκαζάνια</translation>
@@ -378,7 +377,6 @@
 <translation id="5218183485292899140">Γαλλικά Ελβετίας</translation>
 <translation id="5234764350956374838">Παράβλεψη</translation>
 <translation id="5241298539944515331">Πληκτρολόγιο Βιετναμικών (VIQR)</translation>
-<translation id="52446585071384036">Προκειμένου να ανοίξετε αρχεία χρησιμοποιώντας την εφαρμογή <ph name="APP_NAME" />, πρώτα αντιγράψτε τα στον φάκελο "Αρχεία Linux".</translation>
 <translation id="5253070652067921974">Δημιουργήθηκε από</translation>
 <translation id="5257456363153333584">Λιβελλούλη</translation>
 <translation id="5262311848634918433"><ph name="MARKUP_1" />Αποκτήστε πρόσβαση στα αρχεία σας από οπουδήποτε, ακόμη και εκτός σύνδεσης.<ph name="MARKUP_2" />
@@ -438,7 +436,6 @@
 <translation id="5818003990515275822">Κορεατικά</translation>
 <translation id="5819442873484330149">Σύνολο Χανγκίλ 3 (Τελικό)</translation>
 <translation id="5833610766403489739">Αυτό το αρχείο χάθηκε κάπου. Ελέγξτε τη ρύθμιση της τοποθεσίας λήψης σας και δοκιμάστε ξανά.</translation>
-<translation id="5838051104334203064">Οι εφαρμογές Play Store δεν μπορούν να αποκτήσουν πρόσβαση σε αυτήν τη συσκευή</translation>
 <translation id="5838451609423551646">Καταργήθηκαν όλες οι καταχωρίσεις από την επιλογή.</translation>
 <translation id="5838825566232597749">Διεθνές ΗΠΑ Workman</translation>
 <translation id="5850516540536751549">Αυτός ο τύπος αρχείου δεν υποστηρίζεται. Επισκεφτείτε το <ph name="BEGIN_LINK" />Chrome Web Store<ph name="END_LINK" /> για να εντοπίσετε μια εφαρμογή που μπορεί να ανοίξει αυτόν τον τύπο αρχείου.
@@ -484,6 +481,7 @@
 <translation id="6339145975392024142">Διεθνές ΗΠΑ (PC)</translation>
 <translation id="6346310558342052870">Περιορισμένη πρόσβαση</translation>
 <translation id="6353618411602605519">Πληκτρολόγιο με κροατικούς χαρακτήρες</translation>
+<translation id="6356685157277930264">Παράθυρο πληροφοριών αρχείων</translation>
 <translation id="6358884629796491903">Δράκος</translation>
 <translation id="637062427944097960">Αυτό το αρχείο άνοιξε σε διαφορετικό προφίλ. Μεταβείτε στο προφίλ <ph name="USER_NAME" /> (<ph name="MAIL_ADDRESS" />) για να το δείτε.</translation>
 <translation id="6395575651121294044"><ph name="NUMBER_OF_FILES" /> στοιχεία</translation>
@@ -525,6 +523,7 @@
 <translation id="6878261347041253038">Πληκτρολόγιο Ντεβαναγκάρι (Φωνητικό)</translation>
 <translation id="6885780034956018177">Σαλιγκάρι</translation>
 <translation id="6896758677409633944">Αντιγραφή</translation>
+<translation id="6898028766943174120">Περισσότεροι υποφακέλοι…</translation>
 <translation id="691516599546977041">Δεν είναι δυνατή η αποθήκευση στον φάκελο <ph name="FOLDER_NAME" />. Οι επεξεργασμένες εικόνες θα αποθηκεύονται στον φάκελο Λήψεις.</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">ΗΠΑ Workman</translation>
@@ -537,6 +536,7 @@
 <translation id="696203921837389374">Ενεργοποίηση συγχρονισμού μέσω δεδομένων κινητής τηλεφωνίας</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6970230597523682626">Βουλγαρικά</translation>
+<translation id="6973630695168034713">Φάκελοι</translation>
 <translation id="6978611942794658017">Αυτό το αρχείο έχει σχεδιαστεί για έναν υπολογιστή ο οποίος χρησιμοποιεί λογισμικό Windows. Δεν είναι συμβατό με τη συσκευή σας η οποία χρησιμοποιεί Chrome OS. Αναζήτηστε μια κατάλληλη εφαρμογή αντικατάστασης στο Chrome Web Store.</translation>
 <translation id="6979158407327259162">Google Drive</translation>
 <translation id="6990081529015358884">Δεν υπάρχει ελεύθερος χώρος</translation>
@@ -587,9 +587,11 @@
 <translation id="7589661784326793847">Περιμένετε λίγο</translation>
 <translation id="7603724359189955920">Πλέγματα</translation>
 <translation id="7627790789328695202">Ωχ! Το αρχείο <ph name="FILE_NAME" /> υπάρχει ήδη. Μετονομάστε το και δοκιμάστε ξανά.</translation>
+<translation id="7628656427739290098">Ολοκληρώθηκε <ph name="PERCENT" />%.</translation>
 <translation id="7649070708921625228">Βοήθεια</translation>
 <translation id="7654209398114106148">Μετακίνηση <ph name="NUMBER_OF_ITEMS" /> στοιχείων...</translation>
 <translation id="7658239707568436148">Ακύρωση</translation>
+<translation id="7695430100978772476">Δεν ήταν δυνατή η μορφοποίηση της συσκευής <ph name="DRIVE_NAME" /></translation>
 <translation id="770015031906360009">Ελληνικά</translation>
 <translation id="7706319470528945664">Πληκτρολόγιο με πορτογαλικούς χαρακτήρες</translation>
 <translation id="7711920809702896782">Πληροφορίες εικόνας</translation>
@@ -613,7 +615,6 @@
 <translation id="7827012282502221009"><ph name="NUMBER_OF_TB" /> TB</translation>
 <translation id="7839804798877833423">Για την ανάκτηση αυτών των αρχείων θα χρησιμοποιηθούν περίπου <ph name="FILE_SIZE" /> δεδομένων κινητής τηλεφωνίας.</translation>
 <translation id="7846076177841592234">Ακύρωση επιλογής</translation>
-<translation id="7850851215703745691">Αυτά τα αρχεία του Drive δεν έχουν κοινοποιηθεί ακόμα</translation>
 <translation id="7853966320808728790">Γαλλικά BÉPO</translation>
 <translation id="7864662577698025113">Προσθήκη νέας υπηρεσίας</translation>
 <translation id="7873831373602885875">Δεν είναι δυνατή η αποθήκευση στο <ph name="FOLDER_NAME" />. Όλες οι τροποποιήσεις θα αποθηκεύονται στο <ph name="DOWNLOADS_FOLDER" />, στον φάκελο Λήψεις.</translation>
@@ -629,7 +630,6 @@
 <translation id="7969525169268594403">Σλοβενικά</translation>
 <translation id="7982283708762922719">Ύψος</translation>
 <translation id="7987485481246785146">Πληκτρολόγιο Σορανί Κουρδικών βασισμένο στα Αραβικά</translation>
-<translation id="799923393800005025">Δυνατότητα προβολής</translation>
 <translation id="8008366997883261463">Τεριέ Τζακ Ράσελ</translation>
 <translation id="8028993641010258682">Μέγεθος</translation>
 <translation id="8031722894461705849">Πληκτρολόγιο Σλοβακικών</translation>
@@ -659,6 +659,7 @@
 <translation id="8223479393428528563">Για να αποθηκεύσετε αυτά τα αρχεία για χρήση εκτός σύνδεσης, συνδεθείτε ξανά στο διαδίκτυο, κάντε δεξί κλικ στα αρχεία και ενεργοποιήστε την επιλογή <ph name="OFFLINE_CHECKBOX_NAME" />.</translation>
 <translation id="8249296373107784235">Ματαίωση</translation>
 <translation id="8261506727792406068">Διαγραφή</translation>
+<translation id="8269755669432358899">Σύμπτυξη πλαισίων σχολίων αρχείων</translation>
 <translation id="8279388322240498158">Πληκτρολόγιο Σορανί Κουρδικών βασισμένο στα Αγγλικά</translation>
 <translation id="8280151743281770066">Φωνητικό Αρμενικά</translation>
 <translation id="8294431847097064396">Πηγή</translation>
@@ -691,9 +692,8 @@
 <translation id="8569764466147087991">Επιλέξτε αρχείο για άνοιγμα</translation>
 <translation id="8579285237314169903">Γίνεται συγχρονισμός <ph name="NUMBER_OF_FILES" /> στοιχείων…</translation>
 <translation id="8600173386174225982">Η λίστα αρχείων έχει αλλάξει σε προβολή μικρογραφίας.</translation>
+<translation id="8601932370724196034">Αρχείο εικόνας Crostini</translation>
 <translation id="8669949407341943408">Μετακίνηση…</translation>
-<translation id="8671210955687109937">Δυνατότητα σχολιασμού</translation>
-<translation id="8686213429977032554">Δεν μοιράζεστε ακόμα αυτό το αρχείο του Drive</translation>
 <translation id="8698464937041809063">Σχέδιο Google</translation>
 <translation id="8714406895390098252">Ποδήλατο</translation>
 <translation id="8719721339511222681">Επιλογή <ph name="ENTRY_NAME" />.</translation>

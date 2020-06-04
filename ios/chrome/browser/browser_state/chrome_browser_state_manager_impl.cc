@@ -15,6 +15,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/prefs/pref_service.h"
@@ -27,6 +28,8 @@
 #include "ios/chrome/browser/browser_state_metrics/browser_state_metrics.h"
 #include "ios/chrome/browser/chrome_constants.h"
 #include "ios/chrome/browser/chrome_paths.h"
+#include "ios/chrome/browser/credential_provider/credential_provider_service_factory.h"
+#include "ios/chrome/browser/credential_provider/credential_provider_support.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/signin/account_consistency_service_factory.h"
 #include "ios/chrome/browser/signin/account_reconcilor_factory.h"
@@ -119,12 +122,11 @@ ChromeBrowserStateManagerImpl::~ChromeBrowserStateManagerImpl() {
   }
 }
 
-ios::ChromeBrowserState*
-ChromeBrowserStateManagerImpl::GetLastUsedBrowserState() {
+ChromeBrowserState* ChromeBrowserStateManagerImpl::GetLastUsedBrowserState() {
   return GetBrowserState(GetLastUsedBrowserStateDir(GetUserDataDir()));
 }
 
-ios::ChromeBrowserState* ChromeBrowserStateManagerImpl::GetBrowserState(
+ChromeBrowserState* ChromeBrowserStateManagerImpl::GetBrowserState(
     const base::FilePath& path) {
   // If the browser state is already loaded, just return it.
   auto iter = browser_states_.find(path);
@@ -137,7 +139,7 @@ ios::ChromeBrowserState* ChromeBrowserStateManagerImpl::GetBrowserState(
   // this profile are executed in expected order (what was previously assured by
   // the FILE thread).
   scoped_refptr<base::SequencedTaskRunner> io_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::TaskShutdownBehavior::BLOCK_SHUTDOWN, base::MayBlock()});
 
   std::unique_ptr<ChromeBrowserStateImpl> browser_state_impl(
@@ -174,23 +176,23 @@ ChromeBrowserStateManagerImpl::GetBrowserStateInfoCache() {
   return browser_state_info_cache_.get();
 }
 
-std::vector<ios::ChromeBrowserState*>
+std::vector<ChromeBrowserState*>
 ChromeBrowserStateManagerImpl::GetLoadedBrowserStates() {
-  std::vector<ios::ChromeBrowserState*> loaded_browser_states;
+  std::vector<ChromeBrowserState*> loaded_browser_states;
   for (const auto& pair : browser_states_)
     loaded_browser_states.push_back(pair.second.get());
   return loaded_browser_states;
 }
 
 void ChromeBrowserStateManagerImpl::DoFinalInit(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   DoFinalInitForServices(browser_state);
   AddBrowserStateToCache(browser_state);
 
   // Log the browser state size after a reasonable startup delay.
   base::FilePath path =
       browser_state->GetOriginalChromeBrowserState()->GetStatePath();
-  base::PostDelayedTaskWithTraits(
+  base::ThreadPool::PostDelayedTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
@@ -202,7 +204,7 @@ void ChromeBrowserStateManagerImpl::DoFinalInit(
 }
 
 void ChromeBrowserStateManagerImpl::DoFinalInitForServices(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   ios::AccountConsistencyServiceFactory::GetForBrowserState(browser_state);
   IdentityManagerFactory::GetForBrowserState(browser_state)
       ->OnNetworkInitialized();
@@ -210,16 +212,20 @@ void ChromeBrowserStateManagerImpl::DoFinalInitForServices(
   // Initialization needs to happen after the browser context is available
   // because UnifiedConsentService's dependencies needs the URL context getter.
   UnifiedConsentServiceFactory::GetForBrowserState(browser_state);
+
+  if (IsCredentialProviderExtensionSupported()) {
+    CredentialProviderServiceFactory::GetForBrowserState(browser_state);
+  }
 }
 
 void ChromeBrowserStateManagerImpl::AddBrowserStateToCache(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   DCHECK(!browser_state->IsOffTheRecord());
   BrowserStateInfoCache* cache = GetBrowserStateInfoCache();
   if (browser_state->GetStatePath().DirName() != cache->GetUserDataDir())
     return;
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state);
   CoreAccountInfo account_info = identity_manager->GetPrimaryAccountInfo();
   base::string16 username = base::UTF8ToUTF16(account_info.email);

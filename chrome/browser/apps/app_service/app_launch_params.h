@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_APPS_APP_SERVICE_APP_LAUNCH_PARAMS_H_
 
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -15,15 +16,10 @@
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
-class Profile;
-
-namespace content {
-class RenderFrameHost;
-}
+namespace apps {
 
 struct AppLaunchParams {
-  AppLaunchParams(Profile* profile,
-                  const std::string& app_id,
+  AppLaunchParams(const std::string& app_id,
                   apps::mojom::LaunchContainer container,
                   WindowOpenDisposition disposition,
                   apps::mojom::AppLaunchSource source,
@@ -32,9 +28,6 @@ struct AppLaunchParams {
   AppLaunchParams(const AppLaunchParams& other);
 
   ~AppLaunchParams();
-
-  // The profile to load the application from.
-  Profile* profile;
 
   // The app to launch.
   std::string app_id;
@@ -76,9 +69,11 @@ struct AppLaunchParams {
   // set.
   int64_t display_id;
 
-  // The frame that initiated the open. May be null. If set, the new app will
-  // have |opener| as its window.opener.
-  content::RenderFrameHost* opener;
+  // The files the application was launched with. Empty if the application was
+  // not launched with files.
+  std::vector<base::FilePath> launch_files;
 };
+
+}  // namespace apps
 
 #endif  // CHROME_BROWSER_APPS_APP_SERVICE_APP_LAUNCH_PARAMS_H_

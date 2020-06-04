@@ -16,9 +16,9 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/android/chrome_jni_headers/OfflinePageDownloadBridge_jni.h"
-#include "chrome/browser/android/download/download_controller_base.h"
 #include "chrome/browser/android/profile_key_util.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/download/android/download_controller_base.h"
 #include "chrome/browser/image_fetcher/image_decoder_impl.h"
 #include "chrome/browser/offline_items_collection/offline_content_aggregator_factory.h"
 #include "chrome/browser/offline_pages/android/downloads/offline_page_infobar_delegate.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/offline_pages/visuals_decoder_impl.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/transition_manager/full_browser_transition_manager.h"
 #include "components/download/public/common/download_url_parameters.h"
@@ -38,8 +39,8 @@
 #include "components/offline_items_collection/core/offline_content_provider.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
-#include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/downloads/download_ui_adapter.h"
+#include "components/offline_pages/core/offline_page_client_policy.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_item_utils.h"
 #include "components/offline_pages/core/offline_page_model.h"
@@ -93,9 +94,10 @@ class DownloadUIAdapterDelegate : public DownloadUIAdapter::Delegate {
   // DownloadUIAdapter::Delegate
   bool IsVisibleInUI(const ClientId& client_id) override;
   void SetUIAdapter(DownloadUIAdapter* ui_adapter) override;
-  void OpenItem(const OfflineItem& item,
-                int64_t offline_id,
-                offline_items_collection::LaunchLocation location) override;
+  void OpenItem(
+      const OfflineItem& item,
+      int64_t offline_id,
+      const offline_items_collection::OpenParams& open_params) override;
   bool MaybeSuppressNotification(const std::string& origin,
                                  const ClientId& id) override;
   void GetShareInfoForItem(const ContentId& id,
@@ -111,7 +113,7 @@ DownloadUIAdapterDelegate::DownloadUIAdapterDelegate(OfflinePageModel* model)
 
 bool DownloadUIAdapterDelegate::IsVisibleInUI(const ClientId& client_id) {
   const std::string& name_space = client_id.name_space;
-  return model_->GetPolicyController()->IsSupportedByDownload(name_space) &&
+  return GetPolicy(name_space).is_supported_by_download &&
          base::IsValidGUID(client_id.id);
 }
 
@@ -120,11 +122,12 @@ void DownloadUIAdapterDelegate::SetUIAdapter(DownloadUIAdapter* ui_adapter) {}
 void DownloadUIAdapterDelegate::OpenItem(
     const OfflineItem& item,
     int64_t offline_id,
-    offline_items_collection::LaunchLocation location) {
+    const offline_items_collection::OpenParams& open_params) {
   JNIEnv* env = AttachCurrentThread();
   Java_OfflinePageDownloadBridge_openItem(
       env, ConvertUTF8ToJavaString(env, item.page_url.spec()), offline_id,
-      static_cast<int>(location),
+      static_cast<int>(open_params.launch_location),
+      open_params.open_in_incognito,
       offline_pages::ShouldOfflinePagesInDownloadHomeOpenInCct());
 }
 
@@ -255,9 +258,9 @@ content::WebContents* GetWebContentsByFrameID(int render_process_id,
   return content::WebContents::FromRenderFrameHost(render_frame_host);
 }
 
-content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter(
+content::WebContents::Getter GetWebContentsGetter(
     content::WebContents* web_contents) {
-  // PlzNavigate: The FrameTreeNode ID should be used to access the WebContents.
+  // The FrameTreeNode ID should be used to access the WebContents.
   int frame_tree_node_id = web_contents->GetMainFrame()->GetFrameTreeNodeId();
   if (frame_tree_node_id != -1) {
     return base::Bind(content::WebContents::FromFrameTreeNodeId,
@@ -295,7 +298,7 @@ void DownloadAsFile(content::WebContents* web_contents, const GURL& url) {
 }
 
 void OnOfflinePageAcquireFileAccessPermissionDone(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    const content::WebContents::Getter& web_contents_getter,
     const ScopedJavaGlobalRef<jobject>& j_tab_ref,
     const std::string& origin,
     bool granted) {
@@ -387,7 +390,7 @@ void JNI_OfflinePageDownloadBridge_StartDownload(
 
   // Ensure that the storage permission is granted since the target file
   // is going to be placed in the public directory.
-  content::ResourceRequestInfo::WebContentsGetter web_contents_getter =
+  content::WebContents::Getter web_contents_getter =
       GetWebContentsGetter(web_contents);
   DownloadControllerBase::Get()->AcquireFileAccessPermission(
       web_contents_getter,

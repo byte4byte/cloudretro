@@ -10,13 +10,12 @@
 #include "base/memory/singleton.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
 namespace signin {
 class AccountReconcilorDelegate;
-class ConsistencyCookieManagerBase;
 }
 
 class AccountReconcilor;
@@ -35,6 +34,10 @@ class AccountReconcilorFactory : public BrowserContextKeyedServiceFactory {
   // Returns an instance of the factory singleton.
   static AccountReconcilorFactory* GetInstance();
 
+  // BrowserContextKeyedServiceFactory:
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+
  private:
   friend struct base::DefaultSingletonTraits<AccountReconcilorFactory>;
   friend class DummyAccountReconcilorWithDelegate;  // For testing.
@@ -49,11 +52,6 @@ class AccountReconcilorFactory : public BrowserContextKeyedServiceFactory {
   // BrowserContextKeyedServiceFactory:
   KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* profile) const override;
-
-  std::unique_ptr<signin::ConsistencyCookieManagerBase>
-  CreateConsistencyCookieManager(identity::IdentityManager* identity_manager,
-                                 SigninClient* signin_client,
-                                 AccountReconcilor* account_reconcilor) const;
 };
 
 #endif  // CHROME_BROWSER_SIGNIN_ACCOUNT_RECONCILOR_FACTORY_H_

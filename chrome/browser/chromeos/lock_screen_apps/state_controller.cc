@@ -6,8 +6,9 @@
 
 #include <utility>
 
+#include "ash/public/ash_interfaces.h"
 #include "ash/public/cpp/stylus_utils.h"
-#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -29,17 +30,14 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user.h"
-#include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
 #include "crypto/symmetric_key.h"
 #include "extensions/browser/api/lock_screen_data/lock_screen_item_storage.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/common/extension.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "ui/events/devices/device_data_manager.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "ui/wm/core/window_animations.h"
 
 using ash::mojom::CloseLockScreenNoteReason;
@@ -78,14 +76,7 @@ void StateController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(kDataCryptoKeyPref, "");
 }
 
-StateController::StateController()
-    : binding_(this),
-      note_window_observer_(this),
-      app_window_observer_(this),
-      session_observer_(this),
-      input_devices_observer_(this),
-      power_manager_client_observer_(this),
-      weak_ptr_factory_(this) {
+StateController::StateController() {
   DCHECK(!g_state_controller_instance);
 
   g_state_controller_instance = this;
@@ -96,13 +87,13 @@ StateController::~StateController() {
   g_state_controller_instance = nullptr;
 }
 
-void StateController::SetTrayActionPtrForTesting(
-    ash::mojom::TrayActionPtr tray_action_ptr) {
-  tray_action_ptr_ = std::move(tray_action_ptr);
+void StateController::SetTrayActionForTesting(
+    mojo::PendingRemote<ash::mojom::TrayAction> tray_action) {
+  tray_action_.Bind(std::move(tray_action));
 }
 
 void StateController::FlushTrayActionForTesting() {
-  tray_action_ptr_.FlushForTesting();
+  tray_action_.FlushForTesting();
 }
 
 void StateController::SetReadyCallbackForTesting(
@@ -135,13 +126,11 @@ void StateController::Initialize() {
 
   // The tray action ptr might be set previously if the client was being created
   // for testing.
-  if (!tray_action_ptr_) {
-    content::GetSystemConnector()->BindInterface(ash::mojom::kServiceName,
-                                                 &tray_action_ptr_);
-  }
-  ash::mojom::TrayActionClientPtr client;
-  binding_.Bind(mojo::MakeRequest(&client));
-  tray_action_ptr_->SetClient(std::move(client), lock_screen_note_state_);
+  if (!tray_action_)
+    ash::BindTrayAction(tray_action_.BindNewPipeAndPassReceiver());
+  mojo::PendingRemote<ash::mojom::TrayActionClient> client;
+  receiver_.Bind(client.InitWithNewPipeAndPassReceiver());
+  tray_action_->SetClient(std::move(client), lock_screen_note_state_);
 }
 
 void StateController::SetPrimaryProfile(Profile* profile) {
@@ -176,7 +165,7 @@ void StateController::Shutdown() {
   focus_cycler_delegate_ = nullptr;
   power_manager_client_observer_.RemoveAll();
   input_devices_observer_.RemoveAll();
-  binding_.Close();
+  receiver_.reset();
   weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
@@ -515,7 +504,7 @@ void StateController::NotifyLockScreenNoteStateChanged() {
   for (auto& observer : observers_)
     observer.OnLockScreenNoteStateChanged(lock_screen_note_state_);
 
-  tray_action_ptr_->UpdateLockScreenNoteState(lock_screen_note_state_);
+  tray_action_->UpdateLockScreenNoteState(lock_screen_note_state_);
 }
 
 }  // namespace lock_screen_apps

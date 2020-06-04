@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "ui/events/gesture_event_details.h"
+#include "base/logging.h"
 
 namespace ui {
 
@@ -19,11 +20,10 @@ GestureEventDetails::GestureEventDetails(ui::EventType type)
   DCHECK_LE(type, ET_GESTURE_TYPE_END);
 }
 
-GestureEventDetails::GestureEventDetails(
-    ui::EventType type,
-    float delta_x,
-    float delta_y,
-    ui::input_types::ScrollGranularity units)
+GestureEventDetails::GestureEventDetails(ui::EventType type,
+                                         float delta_x,
+                                         float delta_y,
+                                         ui::ScrollGranularity units)
     : type_(type),
       device_type_(GestureDeviceType::DEVICE_UNKNOWN),
       touch_points_(1) {

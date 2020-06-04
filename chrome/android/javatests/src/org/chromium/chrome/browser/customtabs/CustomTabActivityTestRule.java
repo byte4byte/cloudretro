@@ -4,21 +4,18 @@
 
 package org.chromium.chrome.browser.customtabs;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.app.Activity;
 import android.content.Intent;
 import android.support.test.InstrumentationRegistry;
 
 import org.junit.Assert;
-import org.junit.runner.Description;
-import org.junit.runners.model.Statement;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.DeferredStartupHandler;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -30,21 +27,42 @@ import java.util.concurrent.TimeoutException;
  * Custom ActivityTestRule for all instrumentation tests that require a {@link CustomTabActivity}.
  */
 public class CustomTabActivityTestRule extends ChromeActivityTestRule<CustomTabActivity> {
-    protected static final long STARTUP_TIMEOUT_MS = scaleTimeout(5) * 1000;
-    protected static final long LONG_TIMEOUT_MS = scaleTimeout(10) * 1000;
+    protected static final long STARTUP_TIMEOUT_MS = 5L * 1000;
+    protected static final long LONG_TIMEOUT_MS = 10L * 1000;
+    private static int sCustomTabId;
 
     public CustomTabActivityTestRule() {
         super(CustomTabActivity.class);
     }
 
+    public static void putCustomTabIdInIntent(Intent intent) {
+        boolean hasCustomTabId = intent.hasExtra(CustomTabsTestUtils.EXTRA_CUSTOM_TAB_ID);
+        // Intent already has a custom tab id assigned to it and we should reuse the same activity.
+        // Test relying on sending the same intent relies on using the same activity.
+        if (hasCustomTabId) return;
+
+        intent.putExtra(CustomTabsTestUtils.EXTRA_CUSTOM_TAB_ID, sCustomTabId++);
+    }
+
+    public static int getCustomTabIdFromIntent(Intent intent) {
+        return intent.getIntExtra(CustomTabsTestUtils.EXTRA_CUSTOM_TAB_ID, -1);
+    }
+
     @Override
     public void startActivityCompletely(Intent intent) {
+        putCustomTabIdInIntent(intent);
+        int currentIntentId = getCustomTabIdFromIntent(intent);
+
         Activity activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent);
         Assert.assertNotNull("Main activity did not start", activity);
         CriteriaHelper.pollUiThread(() -> {
             for (Activity runningActivity : ApplicationStatus.getRunningActivities()) {
                 if (runningActivity instanceof CustomTabActivity) {
-                    setActivity((CustomTabActivity) runningActivity);
+                    CustomTabActivity customTabActivity = (CustomTabActivity) runningActivity;
+                    final int customTabIdInActivity =
+                            getCustomTabIdFromIntent(customTabActivity.getIntent());
+                    if (currentIntentId != customTabIdInActivity) continue;
+                    setActivity(customTabActivity);
                     return true;
                 }
             }
@@ -56,7 +74,7 @@ public class CustomTabActivityTestRule extends ChromeActivityTestRule<CustomTabA
      * Start a {@link CustomTabActivity} with given {@link Intent}, and wait till a tab is
      * initialized.
      */
-    public void startCustomTabActivityWithIntent(Intent intent) throws InterruptedException {
+    public void startCustomTabActivityWithIntent(Intent intent) {
         startActivityCompletely(intent);
         waitForActivityNativeInitializationComplete();
         CriteriaHelper.pollUiThread(new Criteria("Tab never selected/initialized.") {
@@ -87,11 +105,6 @@ public class CustomTabActivityTestRule extends ChromeActivityTestRule<CustomTabA
                 CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         Assert.assertNotNull(tab);
         Assert.assertNotNull(tab.getView());
-        Assert.assertTrue(tab.isCurrentlyACustomTab());
-    }
-
-    @Override
-    public Statement apply(Statement base, Description description) {
-        return super.apply(base, description);
+        Assert.assertTrue(TabTestUtils.isCustomTab(tab));
     }
 }

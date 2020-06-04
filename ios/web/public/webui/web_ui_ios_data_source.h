@@ -6,11 +6,16 @@
 #define IOS_WEB_PUBLIC_WEBUI_WEB_UI_IOS_DATA_SOURCE_H_
 
 #include "base/callback.h"
+#include "base/containers/span.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 
 namespace base {
 class DictionaryValue;
+}
+
+namespace webui {
+struct LocalizedString;
 }
 
 namespace web {
@@ -41,11 +46,15 @@ class WebUIIOSDataSource : public base::SupportsUserData {
   virtual void AddLocalizedStrings(
       const base::DictionaryValue& localized_strings) = 0;
 
+  virtual void AddLocalizedStrings(
+      base::span<const webui::LocalizedString> strings) = 0;
+
   // Adds a boolean keyed to its name to our dictionary.
   virtual void AddBoolean(const std::string& name, bool value) = 0;
 
-  // Sets the path which will return the JSON strings.
-  virtual void SetJsonPath(const std::string& path) = 0;
+  // Call this to enable a virtual "strings.js" (or "strings.m.js" for modules)
+  // URL that provides translations and dynamic data when requested.
+  virtual void UseStringsJs() = 0;
 
   // Adds a mapping between a path name and a resource to return.
   virtual void AddResourcePath(const std::string& path, int resource_id) = 0;

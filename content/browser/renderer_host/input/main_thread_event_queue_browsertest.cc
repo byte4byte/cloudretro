@@ -27,7 +27,7 @@
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/events/event_switches.h"
 #include "ui/latency/latency_info.h"
 
@@ -89,7 +89,7 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
  protected:
   void LoadURL(const char* page_data) {
     const GURL data_url(page_data);
-    NavigateToURL(shell(), data_url);
+    EXPECT_TRUE(NavigateToURL(shell(), data_url));
 
     RenderWidgetHostImpl* host = GetWidgetHost();
     host->GetView()->SetSize(gfx::Size(400, 400));
@@ -115,18 +115,19 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
     SimulateMouseClick(shell()->web_contents(), 0,
                        blink::WebPointerProperties::Button::kLeft);
     auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-        GetWidgetHost(), blink::WebInputEvent::kMouseMove);
+        GetWidgetHost(), blink::WebInputEvent::Type::kMouseMove);
     GetWidgetHost()->ForwardMouseEvent(SyntheticWebMouseEventBuilder::Build(
-        blink::WebInputEvent::kMouseMove, 10, 10, 0));
+        blink::WebInputEvent::Type::kMouseMove, 10, 10, 0));
     GetWidgetHost()->ForwardMouseEvent(SyntheticWebMouseEventBuilder::Build(
-        blink::WebInputEvent::kMouseMove, 15, 15, 0));
+        blink::WebInputEvent::Type::kMouseMove, 15, 15, 0));
     GetWidgetHost()->ForwardMouseEvent(SyntheticWebMouseEventBuilder::Build(
-        blink::WebInputEvent::kMouseMove, 20, 25, 0));
+        blink::WebInputEvent::Type::kMouseMove, 20, 25, 0));
 
     // Runs until we get the InputMsgAck callback.
-    EXPECT_EQ(INPUT_EVENT_ACK_STATE_CONSUMED, input_msg_watcher->WaitForAck());
-    EXPECT_EQ(InputEventAckSource::MAIN_THREAD,
-              static_cast<InputEventAckSource>(
+    EXPECT_EQ(blink::mojom::InputEventResultState::kConsumed,
+              input_msg_watcher->WaitForAck());
+    EXPECT_EQ(blink::mojom::InputEventResultSource::kMainThread,
+              static_cast<blink::mojom::InputEventResultSource>(
                   input_msg_watcher->last_event_ack_source()));
 
     int mouse_move_count = 0;
@@ -157,7 +158,7 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
     SimulateMouseClick(shell()->web_contents(), 0,
                        blink::WebPointerProperties::Button::kLeft);
     auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
-        GetWidgetHost(), blink::WebInputEvent::kTouchMove);
+        GetWidgetHost(), blink::WebInputEvent::Type::kTouchMove);
 
     auto* root_view = GetWidgetHost()->GetView();
     auto* input_event_router =
@@ -166,10 +167,10 @@ class MainThreadEventQueueBrowserTest : public ContentBrowserTest {
       input_event_router->RouteTouchEvent(root_view, &event, ui::LatencyInfo());
 
     // Runs until we get the InputMsgAck callback.
-    EXPECT_EQ(INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING,
+    EXPECT_EQ(blink::mojom::InputEventResultState::kSetNonBlocking,
               input_msg_watcher->WaitForAck());
-    EXPECT_EQ(InputEventAckSource::COMPOSITOR_THREAD,
-              static_cast<InputEventAckSource>(
+    EXPECT_EQ(blink::mojom::InputEventResultSource::kCompositorThread,
+              static_cast<blink::mojom::InputEventResultSource>(
                   input_msg_watcher->last_event_ack_source()));
 
     int touch_move_count = 0;

@@ -10,15 +10,14 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/values.h"
-#include "content/shell/test_runner/test_runner_export.h"
 #include "content/shell/test_runner/tracked_dictionary.h"
 
-namespace test_runner {
+namespace content {
 
 // WebTestRuntimeFlags stores flags controlled by web tests at runtime
 // (i.e. by calling testRunner.dumpAsText() or testRunner.waitUntilDone()).
 // Changes to the flags are tracked (to help replicate them across renderers).
-class TEST_RUNNER_EXPORT WebTestRuntimeFlags {
+class WebTestRuntimeFlags {
  public:
   // Creates default flags (see also the Reset method).
   WebTestRuntimeFlags();
@@ -110,7 +109,6 @@ class TEST_RUNNER_EXPORT WebTestRuntimeFlags {
   DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(plugins_allowed)
   DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(running_insecure_content_allowed)
   DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(dump_web_content_settings_client_callbacks)
-  DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(autoplay_allowed)
 
   // If true, the test runner will write a descriptive line for each editing
   // command.
@@ -162,10 +160,6 @@ class TEST_RUNNER_EXPORT WebTestRuntimeFlags {
   // is invoked.
   DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(dump_create_view)
 
-  // If true, the test runner will output descriptive test for spellcheck
-  // execution.
-  DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(dump_spell_check_callbacks)
-
   // If true, content_shell will output text for alert(), confirm(), prompt(),
   // etc.
   DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(dump_javascript_dialogs)
@@ -176,6 +170,9 @@ class TEST_RUNNER_EXPORT WebTestRuntimeFlags {
   // Contains text passed by the test to testRunner.setCustomTextOutput.
   DEFINE_STRING_WEB_TEST_RUNTIME_FLAG(custom_text_output)
 
+  // True for web platform tests.
+  DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG(is_web_platform_tests_mode)
+
 #undef DEFINE_BOOL_WEB_TEST_RUNTIME_FLAG
 #undef DEFINE_STRING_WEB_TEST_RUNTIME_FLAG
 
@@ -185,6 +182,6 @@ class TEST_RUNNER_EXPORT WebTestRuntimeFlags {
   DISALLOW_COPY_AND_ASSIGN(WebTestRuntimeFlags);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_WEB_TEST_RUNTIME_FLAGS_H_

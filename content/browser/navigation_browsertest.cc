@@ -6,20 +6,24 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "components/network_session_configurator/common/network_switches.h"
+#include "content/browser/browser_url_handler_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/frame_host/navigation_request.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/content_navigation_policy.h"
 #include "content/common/frame_messages.h"
 #include "content/common/navigation_params.h"
 #include "content/common/view_messages.h"
@@ -27,35 +31,41 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/navigation_policy.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/navigation_handle_observer.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_navigation_throttle.h"
 #include "content/public/test/test_navigation_throttle_inserter.h"
-#include "content/public/test/url_loader_interceptor.h"
+#include "content/public/test/url_loader_monitor.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
-#include "content/shell/browser/shell_network_delegate.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "content/test/did_commit_navigation_interceptor.h"
+#include "content/test/fake_network_url_loader_factory.h"
+#include "content/test/test_content_browser_client.h"
+#include "content/test/test_render_frame_host_factory.h"
 #include "ipc/ipc_security_test_util.h"
-#include "net/base/filename_util.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "net/base/features.h"
 #include "net/base/load_flags.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
@@ -63,7 +73,9 @@
 #include "net/test/url_request/url_request_failed_job.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "url/gurl.h"
+#include "url/url_util.h"
 
 namespace content {
 
@@ -92,19 +104,10 @@ class InterceptAndCancelDidCommitProvisionalLoad
     return intercepted_messages_;
   }
 
-  std::vector<::service_manager::mojom::InterfaceProviderRequest>&
-  intercepted_requests() {
-    return intercepted_requests_;
-  }
-
-  std::vector<blink::mojom::DocumentInterfaceBrokerRequest>&
-  intercepted_broker_content_requests() {
-    return intercepted_broker_content_requests_;
-  }
-
-  std::vector<blink::mojom::DocumentInterfaceBrokerRequest>&
-  intercepted_broker_blink_requests() {
-    return intercepted_broker_blink_requests_;
+  std::vector<
+      mojo::PendingReceiver<::service_manager::mojom::InterfaceProvider>>&
+  intercepted_receivers() {
+    return intercepted_receivers_;
   }
 
  protected:
@@ -116,20 +119,10 @@ class InterceptAndCancelDidCommitProvisionalLoad
       override {
     intercepted_navigations_.push_back(navigation_request);
     intercepted_messages_.push_back(*params);
-    intercepted_requests_.push_back(
+    intercepted_receivers_.push_back(
         *interface_params
-            ? std::move((*interface_params)->interface_provider_request)
-            : nullptr);
-    intercepted_broker_content_requests_.push_back(
-        *interface_params
-            ? std::move((*interface_params)
-                            ->document_interface_broker_content_request)
-            : nullptr);
-    intercepted_broker_blink_requests_.push_back(
-        *interface_params
-            ? std::move(
-                  (*interface_params)->document_interface_broker_blink_request)
-            : nullptr);
+            ? std::move((*interface_params)->interface_provider_receiver)
+            : mojo::NullReceiver());
     if (loop_)
       loop_->Quit();
     // Do not send the message to the RenderFrameHostImpl.
@@ -141,78 +134,81 @@ class InterceptAndCancelDidCommitProvisionalLoad
   std::vector<NavigationRequest*> intercepted_navigations_;
   std::vector<::FrameHostMsg_DidCommitProvisionalLoad_Params>
       intercepted_messages_;
-  std::vector<::service_manager::mojom::InterfaceProviderRequest>
-      intercepted_requests_;
-  std::vector<blink::mojom::DocumentInterfaceBrokerRequest>
-      intercepted_broker_content_requests_;
-  std::vector<blink::mojom::DocumentInterfaceBrokerRequest>
-      intercepted_broker_blink_requests_;
+  std::vector<
+      mojo::PendingReceiver<::service_manager::mojom::InterfaceProvider>>
+      intercepted_receivers_;
   std::unique_ptr<base::RunLoop> loop_;
 };
 
-// Record every WebContentsObserver's event related to navigation. The goal is
-// to check these events happen and happen in the expected right order.
-class NavigationRecorder : public WebContentsObserver {
+class RenderFrameHostImplForHistoryBackInterceptor
+    : public RenderFrameHostImpl {
  public:
-  explicit NavigationRecorder(WebContents* web_contents)
-      : WebContentsObserver(web_contents) {}
+  using RenderFrameHostImpl::RenderFrameHostImpl;
 
-  // WebContentsObserver implementation.
-  void DidStartNavigation(NavigationHandle* navigation_handle) override {
-    records_.push_back("start " + navigation_handle->GetURL().path());
-    WakeUp();
-  }
-  void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override {
-    records_.push_back("ready-to-commit " + navigation_handle->GetURL().path());
-    WakeUp();
-  }
-  void DidFinishNavigation(NavigationHandle* navigation_handle) override {
-    records_.push_back("did-commit " + navigation_handle->GetURL().path());
-    WakeUp();
+  void GoToEntryAtOffset(int32_t offset, bool has_user_gesture) override {
+    if (quit_handler_)
+      std::move(quit_handler_).Run();
   }
 
-  void WaitForEvents(size_t numbers_of_events) {
-    while (records_.size() < numbers_of_events) {
-      loop_.reset(new base::RunLoop);
-      loop_->Run();
-      loop_.reset();
-    }
+  void set_quit_handler(base::OnceClosure handler) {
+    quit_handler_ = std::move(handler);
   }
-
-  const std::vector<std::string> records() { return records_; }
 
  private:
-  void WakeUp() {
-    if (loop_)
-      loop_->Quit();
-  }
-
-  std::unique_ptr<base::RunLoop> loop_;
-  std::vector<std::string> records_;
+  friend class RenderFrameHostFactoryForHistoryBackInterceptor;
+  base::OnceClosure quit_handler_;
 };
 
-// Used to wait for an observed IPC to be received.
-class BrowserMessageObserver : public content::BrowserMessageFilter {
- public:
-  BrowserMessageObserver(uint32_t observed_message_class,
-                         uint32_t observed_message_type)
-      : content::BrowserMessageFilter(observed_message_class),
-        observed_message_type_(observed_message_type) {}
+class RenderFrameHostFactoryForHistoryBackInterceptor
+    : public TestRenderFrameHostFactory {
+ protected:
+  std::unique_ptr<RenderFrameHostImpl> CreateRenderFrameHost(
+      SiteInstance* site_instance,
+      scoped_refptr<RenderViewHostImpl> render_view_host,
+      RenderFrameHostDelegate* delegate,
+      FrameTree* frame_tree,
+      FrameTreeNode* frame_tree_node,
+      int32_t routing_id,
+      bool renderer_initiated_creation) override {
+    return base::WrapUnique(new RenderFrameHostImplForHistoryBackInterceptor(
+        site_instance, std::move(render_view_host), delegate, frame_tree,
+        frame_tree_node, routing_id, renderer_initiated_creation));
+  }
+};
 
-  bool OnMessageReceived(const IPC::Message& message) override {
-    if (message.type() == observed_message_type_)
-      loop.Quit();
-    return false;
+// Simulate embedders of content/ keeping track of the current visible URL using
+// NavigateStateChanged() and GetVisibleURL() API.
+class EmbedderVisibleUrlTracker : public WebContentsDelegate {
+ public:
+  const GURL& url() { return url_; }
+
+  // WebContentsDelegate's implementation:
+  void NavigationStateChanged(WebContents* source,
+                              InvalidateTypes changed_flags) override {
+    if (!(changed_flags & INVALIDATE_TYPE_URL))
+      return;
+    url_ = source->GetVisibleURL();
+    if (on_url_invalidated_)
+      std::move(on_url_invalidated_).Run();
   }
 
-  void Wait() { loop.Run(); }
+  void WaitUntilUrlInvalidated() {
+    base::RunLoop loop;
+    on_url_invalidated_ = loop.QuitClosure();
+    loop.Run();
+  }
 
  private:
-  ~BrowserMessageObserver() override {}
-  uint32_t observed_message_type_;
-  base::RunLoop loop;
-  DISALLOW_COPY_AND_ASSIGN(BrowserMessageObserver);
+  GURL url_;
+  base::OnceClosure on_url_invalidated_;
 };
+
+const char* non_cacheable_html_response =
+    "HTTP/1.1 200 OK\n"
+    "cache-control: no-cache, no-store, must-revalidate\n"
+    "content-type: text/html; charset=UTF-8\n"
+    "\n"
+    "HTML content.";
 
 }  // namespace
 
@@ -220,31 +216,15 @@ class BrowserMessageObserver : public content::BrowserMessageFilter {
 // If you don't need a custom embedded test server, please use the next class
 // below (NavigationBrowserTest), it will automatically start the
 // default server.
-class NavigationBaseBrowserTest : public ContentBrowserTest,
-                                  public ::testing::WithParamInterface<bool> {
+class NavigationBaseBrowserTest : public ContentBrowserTest {
+ public:
+  NavigationBaseBrowserTest() {}
+
  protected:
   void SetUpOnMainThread() override {
-    ToggleNavigationImmediateResponse();
     host_resolver()->AddRule("*", "127.0.0.1");
   }
-
- private:
-  void ToggleNavigationImmediateResponse() {
-    if (GetParam()) {
-      feature_list.InitAndDisableFeature(
-          features::kNavigationImmediateResponseBody);
-    } else {
-      feature_list.InitAndEnableFeature(
-          features::kNavigationImmediateResponseBody);
-    }
-  }
-
-  base::test::ScopedFeatureList feature_list;
 };
-
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
-                         NavigationBaseBrowserTest,
-                         ::testing::Bool());
 
 class NavigationBrowserTest : public NavigationBaseBrowserTest {
  protected:
@@ -252,59 +232,83 @@ class NavigationBrowserTest : public NavigationBaseBrowserTest {
     NavigationBaseBrowserTest::SetUpOnMainThread();
     ASSERT_TRUE(embedded_test_server()->Start());
   }
+};
 
-  // Navigate to |url| and for each ResourceRequest record its
-  // trusted_network_isolation_key. Stop listening after |final_resource| has
-  // been detected. The output is recorded in |network_isolation_keys|.
-  void NavigateAndRecordNetworkIsolationKeys(
-      const GURL& url,
-      const GURL& final_resource,
-      bool from_renderer,
-      std::map<GURL, net::NetworkIsolationKey>* network_isolation_keys,
-      std::map<GURL, network::mojom::UpdateNetworkIsolationKeyOnRedirect>*
-          update_network_isolation_key_on_redirects) {
-    if (from_renderer)
-      EXPECT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
+class NavigationGoToEntryAtOffsetBrowserTest : public NavigationBrowserTest {
+ public:
+  void SetQuitHandlerForGoToEntryAtOffset(base::OnceClosure handler) {
+    RenderFrameHostImplForHistoryBackInterceptor* render_frame_host =
+        static_cast<RenderFrameHostImplForHistoryBackInterceptor*>(
+            shell()->web_contents()->GetMainFrame());
+    render_frame_host->set_quit_handler(std::move(handler));
+  }
 
-    base::RunLoop run_loop;
-    base::Lock lock;
+ private:
+  RenderFrameHostFactoryForHistoryBackInterceptor render_frame_host_factory_;
+};
 
-    // Intercept network requests and record them.
-    URLLoaderInterceptor interceptor(base::BindLambdaForTesting(
-        [&](URLLoaderInterceptor::RequestParams* params) -> bool {
-          base::AutoLock top_frame_origins_lock(lock);
-          (*network_isolation_keys)[params->url_request.url] =
-              params->url_request.trusted_network_isolation_key;
-          (*update_network_isolation_key_on_redirects)[params->url_request
-                                                           .url] =
-              params->url_request.update_network_isolation_key_on_redirect;
+class NetworkIsolationNavigationBrowserTest
+    : public ContentBrowserTest,
+      public ::testing::WithParamInterface<bool> {
+ public:
+  NetworkIsolationNavigationBrowserTest() {
+    if (GetParam()) {
+      feature_list_.InitAndEnableFeature(
+          net::features::kAppendFrameOriginToNetworkIsolationKey);
+    } else {
+      feature_list_.InitAndDisableFeature(
+          net::features::kAppendFrameOriginToNetworkIsolationKey);
+    }
+  }
 
-          if (params->url_request.url == final_resource)
-            run_loop.Quit();
-          return false;
-        }));
+ protected:
+  void SetUpOnMainThread() override {
+    ASSERT_TRUE(embedded_test_server()->Start());
+    ContentBrowserTest::SetUpOnMainThread();
+  }
 
-    if (from_renderer)
-      EXPECT_TRUE(NavigateToURLFromRenderer(shell(), url));
-    else
-      EXPECT_TRUE(NavigateToURL(shell(), url));
+  base::test::ScopedFeatureList feature_list_;
+};
 
-    // Wait until the last resource we care about has been requested.
-    run_loop.Run();
+INSTANTIATE_TEST_SUITE_P(All,
+                         NetworkIsolationNavigationBrowserTest,
+                         ::testing::Bool());
+
+class NavigationBrowserTestReferrerPolicy
+    : public ContentBrowserTest,
+      public ::testing::WithParamInterface<network::mojom::ReferrerPolicy> {
+ protected:
+  void SetUpOnMainThread() override {
+    ASSERT_TRUE(embedded_test_server()->Start());
+    ContentBrowserTest::SetUpOnMainThread();
+  }
+
+  network::mojom::ReferrerPolicy GetReferrerPolicy() const {
+    return GetParam();
   }
 };
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
-                         NavigationBrowserTest,
-                         ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    NavigationBrowserTestReferrerPolicy,
+    ::testing::Values(
+        network::mojom::ReferrerPolicy::kAlways,
+        network::mojom::ReferrerPolicy::kDefault,
+        network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade,
+        network::mojom::ReferrerPolicy::kNever,
+        network::mojom::ReferrerPolicy::kOrigin,
+        network::mojom::ReferrerPolicy::kOriginWhenCrossOrigin,
+        network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin,
+        network::mojom::ReferrerPolicy::kSameOrigin,
+        network::mojom::ReferrerPolicy::kStrictOrigin));
 
 // Ensure that browser initiated basic navigations work.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BrowserInitiatedNavigations) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, BrowserInitiatedNavigations) {
   // Perform a navigation with no live renderer.
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url(embedded_test_server()->GetURL("/title1.html"));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_FALSE(observer.last_initiator_origin().has_value());
@@ -320,7 +324,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BrowserInitiatedNavigations) {
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url(embedded_test_server()->GetURL("/title2.html"));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_FALSE(observer.last_initiator_origin().has_value());
@@ -336,7 +340,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BrowserInitiatedNavigations) {
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url = embedded_test_server()->GetURL("foo.com", "/title3.html");
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_FALSE(observer.last_initiator_origin().has_value());
@@ -350,13 +354,13 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BrowserInitiatedNavigations) {
 }
 
 // Ensure that renderer initiated same-site navigations work.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        RendererInitiatedSameSiteNavigation) {
   // Perform a navigation with no live renderer.
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url(embedded_test_server()->GetURL("/simple_links.html"));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_FALSE(observer.last_initiator_origin().has_value());
@@ -392,13 +396,13 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 }
 
 // Ensure that renderer initiated cross-site navigations work.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        RendererInitiatedCrossSiteNavigation) {
   // Perform a navigation with no live renderer.
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url(embedded_test_server()->GetURL("/simple_links.html"));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
   }
@@ -451,12 +455,12 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 }
 
 // Ensure navigation failures are handled.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, FailedNavigation) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, FailedNavigation) {
   // Perform a navigation with no live renderer.
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL url(embedded_test_server()->GetURL("/title1.html"));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     EXPECT_EQ(url, observer.last_navigation_url());
     EXPECT_TRUE(observer.last_navigation_succeeded());
   }
@@ -465,10 +469,9 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, FailedNavigation) {
   {
     TestNavigationObserver observer(shell()->web_contents());
     GURL error_url(embedded_test_server()->GetURL("/close-socket"));
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&net::URLRequestFailedJob::AddUrlHandler));
-    NavigateToURL(shell(), error_url);
+    base::PostTask(FROM_HERE, {BrowserThread::IO},
+                   base::BindOnce(&net::URLRequestFailedJob::AddUrlHandler));
+    EXPECT_FALSE(NavigateToURL(shell(), error_url));
     EXPECT_EQ(error_url, observer.last_navigation_url());
     NavigationEntry* entry =
         shell()->web_contents()->GetController().GetLastCommittedEntry();
@@ -477,38 +480,36 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, FailedNavigation) {
 }
 
 // Ensure that browser initiated navigations to view-source URLs works.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        ViewSourceNavigation_BrowserInitiated) {
   TestNavigationObserver observer(shell()->web_contents());
   GURL url(embedded_test_server()->GetURL("/title1.html"));
   GURL view_source_url(content::kViewSourceScheme + std::string(":") +
                        url.spec());
-  NavigateToURL(shell(), view_source_url);
+  EXPECT_TRUE(NavigateToURL(shell(), view_source_url));
   EXPECT_EQ(url, observer.last_navigation_url());
   EXPECT_TRUE(observer.last_navigation_succeeded());
 }
 
 // Ensure that content initiated navigations to view-sources URLs are blocked.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        ViewSourceNavigation_RendererInitiated) {
   TestNavigationObserver observer(shell()->web_contents());
   GURL kUrl(embedded_test_server()->GetURL("/simple_links.html"));
-  NavigateToURL(shell(), kUrl);
+  EXPECT_TRUE(NavigateToURL(shell(), kUrl));
   EXPECT_EQ(kUrl, observer.last_navigation_url());
   EXPECT_TRUE(observer.last_navigation_succeeded());
 
-  std::unique_ptr<ConsoleObserverDelegate> console_delegate(
-      new ConsoleObserverDelegate(
-          shell()->web_contents(),
-          "Not allowed to load local resource: view-source:about:blank"));
-  shell()->web_contents()->SetDelegate(console_delegate.get());
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  console_observer.SetPattern(
+      "Not allowed to load local resource: view-source:about:blank");
 
   bool success = false;
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
       shell()->web_contents(),
       "window.domAutomationController.send(clickViewSourceLink());", &success));
   EXPECT_TRUE(success);
-  console_delegate->Wait();
+  console_observer.Wait();
   // Original page shouldn't navigate away.
   EXPECT_EQ(kUrl, shell()->web_contents()->GetURL());
   EXPECT_FALSE(shell()
@@ -518,9 +519,33 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
                    ->IsViewSourceMode());
 }
 
+// Ensure that content initiated navigations to googlechrome: URLs are blocked.
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       GoogleChromeNavigation_RendererInitiated) {
+  TestNavigationObserver observer(shell()->web_contents());
+  GURL kUrl(embedded_test_server()->GetURL("/simple_links.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), kUrl));
+  EXPECT_EQ(kUrl, observer.last_navigation_url());
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  console_observer.SetPattern(
+      "Not allowed to load local resource: googlechrome://");
+
+  bool success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      shell()->web_contents(),
+      "window.domAutomationController.send(clickGoogleChromeLink());",
+      &success));
+  EXPECT_TRUE(success);
+  console_observer.Wait();
+  // Original page shouldn't navigate away.
+  EXPECT_EQ(kUrl, shell()->web_contents()->GetURL());
+}
+
 // Ensure that closing a page by running its beforeunload handler doesn't hang
 // if there's an ongoing navigation.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, UnloadDuringNavigation) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, UnloadDuringNavigation) {
   content::WindowedNotificationObserver close_observer(
       content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::Source<content::WebContents>(shell()->web_contents()));
@@ -533,13 +558,11 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, UnloadDuringNavigation) {
 }
 
 // Ensure that the referrer of a navigation is properly sanitized.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SanitizeReferrer) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, SanitizeReferrer) {
   const GURL kInsecureUrl(embedded_test_server()->GetURL("/title1.html"));
   const Referrer kSecureReferrer(
       GURL("https://secure-url.com"),
       network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade);
-  ShellNetworkDelegate::SetCancelURLRequestWithPolicyViolatingReferrerHeader(
-      true);
 
   // Navigate to an insecure url with a secure referrer with a policy of no
   // referrer on downgrades. The referrer url should be rewritten right away.
@@ -554,8 +577,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SanitizeReferrer) {
                             ->GetMainFrame()
                             ->frame_tree_node();
   ASSERT_TRUE(root->navigation_request());
-  EXPECT_EQ(GURL(),
-            root->navigation_request()->navigation_handle()->GetReferrer().url);
+  EXPECT_EQ(GURL(), root->navigation_request()->GetReferrer().url);
 
   // The navigation should commit without being blocked.
   EXPECT_TRUE(manager.WaitForResponse());
@@ -563,9 +585,59 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SanitizeReferrer) {
   EXPECT_EQ(kInsecureUrl, shell()->web_contents()->GetLastCommittedURL());
 }
 
+// Ensure the correctness of a navigation request's referrer. This is a
+// regression test for https://crbug.com/1004083.
+IN_PROC_BROWSER_TEST_P(NavigationBrowserTestReferrerPolicy, ReferrerPolicy) {
+  const GURL kDestination(embedded_test_server()->GetURL("/title1.html"));
+  const GURL kReferrerURL(embedded_test_server()->GetURL("/referrer-page"));
+  const url::Origin kReferrerOrigin = url::Origin::Create(kReferrerURL);
+
+  // It is possible that the referrer URL does not match what the policy
+  // demands (e.g., non-empty URL and kNever policy), so we'll test that the
+  // correct referrer is generated, and that the navigation succeeds.
+  const Referrer referrer(kReferrerURL, GetReferrerPolicy());
+
+  // Navigate to a resource whose destination URL is same-origin with the
+  // navigation's referrer. The final referrer should be generated correctly.
+  NavigationController::LoadURLParams load_params(kDestination);
+  load_params.referrer = referrer;
+  TestNavigationManager manager(shell()->web_contents(), kDestination);
+  shell()->web_contents()->GetController().LoadURLWithParams(load_params);
+  EXPECT_TRUE(manager.WaitForRequestStart());
+
+  // The referrer should have been sanitized.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetMainFrame()
+                            ->frame_tree_node();
+  ASSERT_TRUE(root->navigation_request());
+  switch (GetReferrerPolicy()) {
+    case network::mojom::ReferrerPolicy::kAlways:
+    case network::mojom::ReferrerPolicy::kDefault:
+    case network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade:
+    case network::mojom::ReferrerPolicy::kOriginWhenCrossOrigin:
+    case network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin:
+    case network::mojom::ReferrerPolicy::kSameOrigin:
+      EXPECT_EQ(kReferrerURL, root->navigation_request()->GetReferrer().url);
+      break;
+    case network::mojom::ReferrerPolicy::kNever:
+      EXPECT_EQ(GURL(), root->navigation_request()->GetReferrer().url);
+      break;
+    case network::mojom::ReferrerPolicy::kOrigin:
+    case network::mojom::ReferrerPolicy::kStrictOrigin:
+      EXPECT_EQ(kReferrerOrigin.GetURL(),
+                root->navigation_request()->GetReferrer().url);
+      break;
+  }
+
+  // The navigation should commit without being blocked.
+  EXPECT_TRUE(manager.WaitForResponse());
+  manager.WaitForNavigationFinished();
+  EXPECT_EQ(kDestination, shell()->web_contents()->GetLastCommittedURL());
+}
+
 // Test to verify that an exploited renderer process trying to upload a file
 // it hasn't been explicitly granted permissions to is correctly terminated.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, PostUploadIllegalFilePath) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, PostUploadIllegalFilePath) {
   GURL form_url(
       embedded_test_server()->GetURL("/form_that_posts_to_echoall.html"));
   EXPECT_TRUE(NavigateToURL(shell(), form_url));
@@ -599,7 +671,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, PostUploadIllegalFilePath) {
 
   // Revoke the access to the file and submit the form. The renderer process
   // should be terminated.
-  RenderProcessHostKillWaiter process_kill_waiter(rfh->GetProcess());
+  RenderProcessHostBadIpcMessageWaiter process_kill_waiter(rfh->GetProcess());
   ChildProcessSecurityPolicyImpl* security_policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
   security_policy->RevokeAllPermissionsForFile(rfh->GetProcess()->GetID(),
@@ -622,7 +694,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, PostUploadIllegalFilePath) {
 // Test case to verify that redirects to data: URLs are properly disallowed,
 // even when invoked through a reload.
 // See https://crbug.com/723796.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        VerifyBlockedErrorPageURL_Reload) {
   NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
       shell()->web_contents()->GetController());
@@ -654,122 +726,12 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
             controller.GetLastCommittedEntry()->GetVirtualURL());
 }
 
-class NavigationDisableWebSecurityTest : public NavigationBrowserTest {
- public:
-  NavigationDisableWebSecurityTest() {}
-
- protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Simulate a compromised renderer, otherwise the cross-origin request to
-    // file: is blocked.
-    command_line->AppendSwitch(switches::kDisableWebSecurity);
-    NavigationBrowserTest::SetUpCommandLine(command_line);
-  }
-};
-
-// Test to verify that an exploited renderer process trying to specify a
-// non-empty URL for base_url_for_data_url on navigation is correctly
-// terminated.
-// TODO(nasko): This test case belongs better in
-// security_exploit_browsertest.cc, so move it there once PlzNavigate is on
-// by default.
-IN_PROC_BROWSER_TEST_P(NavigationDisableWebSecurityTest,
-                       ValidateBaseUrlForDataUrl) {
-  GURL start_url(embedded_test_server()->GetURL("/title1.html"));
-  EXPECT_TRUE(NavigateToURL(shell(), start_url));
-
-  RenderFrameHostImpl* rfh = static_cast<RenderFrameHostImpl*>(
-      shell()->web_contents()->GetMainFrame());
-
-  GURL data_url("data:text/html,foo");
-  base::FilePath file_path = GetTestFilePath("", "simple_page.html");
-  GURL file_url = net::FilePathToFileURL(file_path);
-
-  // To get around DataUrlNavigationThrottle. Other attempts at getting around
-  // it don't work, i.e.:
-  // -if the request is made in a child frame then the frame is torn down
-  // immediately on process killing so the navigation doesn't complete
-  // -if it's classified as same document, then a DCHECK in
-  // NavigationRequest::CreateRendererInitiated fires
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kAllowContentInitiatedDataUrlNavigations);
-  // Setup a BeginNavigate IPC with non-empty base_url_for_data_url.
-  CommonNavigationParams common_params(
-      data_url, url::Origin::Create(data_url), Referrer(),
-      ui::PAGE_TRANSITION_LINK, FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT,
-      NavigationDownloadPolicy(), false /* should_replace_current_entry */,
-      file_url, /* base_url_for_data_url */
-      GURL() /* history_url_for_data_url */, PREVIEWS_UNSPECIFIED,
-      base::TimeTicks::Now() /* navigation_start */, "GET",
-      nullptr /* post_data */, base::Optional<SourceLocation>(),
-      false /* started_from_context_menu */, false /* has_user_gesture */,
-      InitiatorCSPInfo(),
-      std::vector<int>() /* initiator_origin_trial_features */,
-      std::string() /* href_translate */,
-      false /* is_history_navigation_in_new_child_frame */);
-  mojom::BeginNavigationParamsPtr begin_params =
-      mojom::BeginNavigationParams::New(
-          std::string() /* headers */, net::LOAD_NORMAL,
-          false /* skip_service_worker */,
-          blink::mojom::RequestContextType::LOCATION,
-          blink::WebMixedContentContextType::kBlockable,
-          false /* is_form_submission */,
-          false /* was_initiated_by_link_click */,
-          GURL() /* searchable_form_url */,
-          std::string() /* searchable_form_encoding */,
-          GURL() /* client_side_redirect_url */,
-          base::nullopt /* devtools_initiator_info */);
-
-  // Receiving the invalid IPC message should lead to renderer process
-  // termination.
-  RenderProcessHostKillWaiter process_kill_waiter(rfh->GetProcess());
-
-  mojom::NavigationClientAssociatedPtr navigation_client;
-  if (IsPerNavigationMojoInterfaceEnabled()) {
-    auto navigation_client_request =
-        mojo::MakeRequestAssociatedWithDedicatedPipe(&navigation_client);
-    rfh->frame_host_binding_for_testing().impl()->BeginNavigation(
-        common_params, std::move(begin_params), nullptr,
-        navigation_client.PassInterface(), nullptr);
-  } else {
-    rfh->frame_host_binding_for_testing().impl()->BeginNavigation(
-        common_params, std::move(begin_params), nullptr, nullptr, nullptr);
-  }
-  EXPECT_EQ(bad_message::RFH_BASE_URL_FOR_DATA_URL_SPECIFIED,
-            process_kill_waiter.Wait());
-
-  EXPECT_FALSE(ChildProcessSecurityPolicyImpl::GetInstance()->CanReadFile(
-      rfh->GetProcess()->GetID(), file_path));
-
-  // Reload the page to create another renderer process.
-  TestNavigationObserver tab_observer(shell()->web_contents(), 1);
-  shell()->web_contents()->GetController().Reload(ReloadType::NORMAL, false);
-  tab_observer.Wait();
-
-  // Make an XHR request to check if the page has access.
-  std::string script = base::StringPrintf(
-      "var xhr = new XMLHttpRequest()\n"
-      "xhr.open('GET', '%s', false);\n"
-      "try { xhr.send(); } catch (e) {}\n"
-      "window.domAutomationController.send(xhr.responseText);",
-      file_url.spec().c_str());
-  std::string result;
-  EXPECT_TRUE(
-      ExecuteScriptAndExtractString(shell()->web_contents(), script, &result));
-  EXPECT_TRUE(result.empty());
-}
-
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
-                         NavigationDisableWebSecurityTest,
-                         ::testing::Bool());
-
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BackFollowedByReload) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, BackFollowedByReload) {
   // First, make two history entries.
   GURL url1(embedded_test_server()->GetURL("/title1.html"));
   GURL url2(embedded_test_server()->GetURL("/title2.html"));
-  NavigateToURL(shell(), url1);
-  NavigateToURL(shell(), url2);
+  EXPECT_TRUE(NavigateToURL(shell(), url1));
+  EXPECT_TRUE(NavigateToURL(shell(), url2));
 
   // Then execute a back navigation in Javascript followed by a reload.
   TestNavigationObserver navigation_observer(shell()->web_contents());
@@ -784,7 +746,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BackFollowedByReload) {
 
 // Test that a navigation response can be entirely fetched, even after the
 // NavigationURLLoader has been deleted.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
                        FetchResponseAfterNavigationURLLoaderDeleted) {
   net::test_server::ControllableHttpResponse response(embedded_test_server(),
                                                       "/main_document");
@@ -831,145 +793,114 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
   EXPECT_EQ("\"done\"", done);
 }
 
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_P(NetworkIsolationNavigationBrowserTest,
                        BrowserNavigationNetworkIsolationKey) {
-  std::map<GURL, net::NetworkIsolationKey> network_isolation_keys;
-  std::map<GURL, network::mojom::UpdateNetworkIsolationKeyOnRedirect>
-      update_network_isolation_key_on_redirects;
   GURL url(embedded_test_server()->GetURL("/title1.html"));
   url::Origin origin = url::Origin::Create(url);
+  URLLoaderMonitor monitor({url});
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  monitor.WaitForUrls();
 
-  NavigateAndRecordNetworkIsolationKeys(
-      url, url /* final_resource */, false /* from_renderer */,
-      &network_isolation_keys, &update_network_isolation_key_on_redirects);
-  EXPECT_EQ(net::NetworkIsolationKey(origin, origin),
-            network_isolation_keys[url]);
-  EXPECT_EQ(network::mojom::UpdateNetworkIsolationKeyOnRedirect::
-                kUpdateTopFrameAndInitiatingFrameOrigin,
-            update_network_isolation_key_on_redirects[url]);
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(request->trusted_params);
+  EXPECT_TRUE(net::IsolationInfo::Create(
+                  net::IsolationInfo::RedirectMode::kUpdateTopFrame, origin,
+                  origin, net::SiteForCookies::FromOrigin(origin))
+                  .IsEqualForTesting(request->trusted_params->isolation_info));
 }
 
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
-                       RenderNavigationNetworkIsolationKey) {
-  std::map<GURL, net::NetworkIsolationKey> network_isolation_keys;
-  std::map<GURL, network::mojom::UpdateNetworkIsolationKeyOnRedirect>
-      update_network_isolation_key_on_redirects;
+IN_PROC_BROWSER_TEST_P(NetworkIsolationNavigationBrowserTest,
+                       RenderNavigationIsolationInfo) {
   GURL url(embedded_test_server()->GetURL("/title2.html"));
   url::Origin origin = url::Origin::Create(url);
+  EXPECT_TRUE(NavigateToURL(shell(), GURL("about:blank")));
+  URLLoaderMonitor monitor({url});
+  EXPECT_TRUE(NavigateToURLFromRenderer(shell(), url));
+  monitor.WaitForUrls();
 
-  NavigateAndRecordNetworkIsolationKeys(
-      url, url /* final_resource */, true /* from_renderer */,
-      &network_isolation_keys, &update_network_isolation_key_on_redirects);
-  EXPECT_EQ(net::NetworkIsolationKey(origin, origin),
-            network_isolation_keys[url]);
-  EXPECT_EQ(network::mojom::UpdateNetworkIsolationKeyOnRedirect::
-                kUpdateTopFrameAndInitiatingFrameOrigin,
-            update_network_isolation_key_on_redirects[url]);
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(request->trusted_params);
+  EXPECT_TRUE(net::IsolationInfo::Create(
+                  net::IsolationInfo::RedirectMode::kUpdateTopFrame, origin,
+                  origin, net::SiteForCookies::FromOrigin(origin))
+                  .IsEqualForTesting(request->trusted_params->isolation_info));
 }
 
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SubframeNetworkIsolationKey) {
-  std::map<GURL, net::NetworkIsolationKey> network_isolation_keys;
-  std::map<GURL, network::mojom::UpdateNetworkIsolationKeyOnRedirect>
-      update_network_isolation_key_on_redirects;
+IN_PROC_BROWSER_TEST_P(NetworkIsolationNavigationBrowserTest,
+                       SubframeIsolationInfo) {
   GURL url(embedded_test_server()->GetURL("/page_with_iframe.html"));
   GURL iframe_document = embedded_test_server()->GetURL("/title1.html");
   url::Origin origin = url::Origin::Create(url);
   url::Origin iframe_origin = url::Origin::Create(iframe_document);
+  URLLoaderMonitor monitor({iframe_document});
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  monitor.WaitForUrls();
 
-  NavigateAndRecordNetworkIsolationKeys(
-      url, iframe_document /* final_resource */, false /* from_renderer */,
-      &network_isolation_keys, &update_network_isolation_key_on_redirects);
-  EXPECT_EQ(net::NetworkIsolationKey(origin, origin),
-            network_isolation_keys[url]);
-  EXPECT_EQ(network::mojom::UpdateNetworkIsolationKeyOnRedirect::
-                kUpdateTopFrameAndInitiatingFrameOrigin,
-            update_network_isolation_key_on_redirects[url]);
-  EXPECT_EQ(net::NetworkIsolationKey(origin, iframe_origin),
-            network_isolation_keys[iframe_document]);
-  EXPECT_EQ(network::mojom::UpdateNetworkIsolationKeyOnRedirect::kDoNotUpdate,
-            update_network_isolation_key_on_redirects[iframe_document]);
+  base::Optional<network::ResourceRequest> main_frame_request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(main_frame_request.has_value());
+  ASSERT_TRUE(main_frame_request->trusted_params);
+  EXPECT_TRUE(net::IsolationInfo::Create(
+                  net::IsolationInfo::RedirectMode::kUpdateTopFrame, origin,
+                  origin, net::SiteForCookies::FromOrigin(origin))
+                  .IsEqualForTesting(
+                      main_frame_request->trusted_params->isolation_info));
+
+  base::Optional<network::ResourceRequest> iframe_request =
+      monitor.GetRequestInfo(iframe_document);
+  ASSERT_TRUE(iframe_request->trusted_params);
+  EXPECT_TRUE(
+      net::IsolationInfo::Create(
+          net::IsolationInfo::RedirectMode::kUpdateFrameOnly, origin,
+          iframe_origin, net::SiteForCookies::FromOrigin(origin))
+          .IsEqualForTesting(iframe_request->trusted_params->isolation_info));
 }
-
-// Helper class to extract the initiator values from URLLoaderFactory calls
-class InitiatorInterceptor {
- public:
-  explicit InitiatorInterceptor(const GURL& final_url) {
-    // Intercept network requests and record them.
-    interceptor_ =
-        std::make_unique<URLLoaderInterceptor>(base::BindLambdaForTesting(
-            [&final_url,
-             this](URLLoaderInterceptor::RequestParams* params) -> bool {
-              base::AutoLock initiators_lock(lock_);
-              (initiators_)[params->url_request.url] =
-                  params->url_request.request_initiator;
-
-              if (params->url_request.url == final_url)
-                run_loop_.Quit();
-              return false;
-            }));
-  }
-
-  void Run() {
-    // Wait until the last resource we care about has been requested.
-    run_loop_.Run();
-  }
-
-  // This method should be used only if the key already exists in the map.
-  const base::Optional<url::Origin>& GetInitiatorForURL(const GURL& url) const {
-    auto initiator_iterator = initiators_.find(url);
-    DCHECK(initiator_iterator != initiators_.end());
-
-    return initiator_iterator->second;
-  }
-
- private:
-  std::map<GURL, base::Optional<url::Origin>> initiators_;
-  std::unique_ptr<URLLoaderInterceptor> interceptor_;
-  base::Lock lock_;
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(InitiatorInterceptor);
-};
 
 // Tests that the initiator is not set for a browser initiated top frame
 // navigation.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BrowserNavigationInitiator) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, BrowserNavigationInitiator) {
   GURL url(embedded_test_server()->GetURL("/title1.html"));
 
-  InitiatorInterceptor test_interceptor(url);
+  URLLoaderMonitor monitor;
 
   // Perform the actual navigation.
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  test_interceptor.Run();
 
-  ASSERT_FALSE(test_interceptor.GetInitiatorForURL(url).has_value());
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(request.has_value());
+  ASSERT_FALSE(request->request_initiator.has_value());
 }
 
 // Test that the initiator is set to the starting page when a renderer initiated
 // navigation goes from the starting page to another page.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, RendererNavigationInitiator) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, RendererNavigationInitiator) {
   GURL starting_page(embedded_test_server()->GetURL("a.com", "/title1.html"));
   url::Origin starting_page_origin;
   starting_page_origin = starting_page_origin.Create(starting_page);
 
-  NavigateToURL(shell(), starting_page);
+  EXPECT_TRUE(NavigateToURL(shell(), starting_page));
 
   GURL url(embedded_test_server()->GetURL("/title2.html"));
 
-  InitiatorInterceptor test_interceptor(url);
+  URLLoaderMonitor monitor;
 
   // Perform the actual navigation.
   EXPECT_TRUE(NavigateToURLFromRenderer(shell(), url));
-  test_interceptor.Run();
 
-  EXPECT_EQ(starting_page_origin, test_interceptor.GetInitiatorForURL(url));
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(starting_page_origin, request->request_initiator);
 }
 
 // Test that the initiator is set to the starting page when a sub frame is
 // navigated by Javascript from some starting page to another page.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SubFrameJsNavigationInitiator) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, SubFrameJsNavigationInitiator) {
   GURL starting_page(embedded_test_server()->GetURL("/frame_tree/top.html"));
-  NavigateToURL(shell(), starting_page);
+  EXPECT_TRUE(NavigateToURL(shell(), starting_page));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
@@ -984,12 +915,11 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SubFrameJsNavigationInitiator) {
 
   GURL url(embedded_test_server()->GetURL("a.com", "/title1.html"));
 
-  InitiatorInterceptor test_interceptor(url);
+  URLLoaderMonitor monitor({url});
   std::string script = "location.href='" + url.spec() + "'";
 
   // Perform the actual navigation.
   EXPECT_TRUE(ExecJs(root->child_at(0)->current_frame_host(), script));
-  test_interceptor.Run();
 
   EXPECT_TRUE(
       root->current_frame_host()->render_view_host()->IsRenderViewLive());
@@ -999,18 +929,21 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, SubFrameJsNavigationInitiator) {
   url::Origin starting_page_origin;
   starting_page_origin = starting_page_origin.Create(starting_page);
 
-  EXPECT_EQ(starting_page_origin, test_interceptor.GetInitiatorForURL(url));
+  monitor.WaitForUrls();
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  EXPECT_EQ(starting_page_origin, request->request_initiator);
 }
 
 // Test that the initiator is set to the starting page when a sub frame,
 // selected by Id, is navigated by Javascript from some starting page to another
 // page.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        SubframeNavigationByTopFrameInitiator) {
   // Go to a page on a.com with an iframe that is on b.com
   GURL starting_page(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
-  NavigateToURL(shell(), starting_page);
+  EXPECT_TRUE(NavigateToURL(shell(), starting_page));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
@@ -1025,11 +958,10 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 
   GURL url(embedded_test_server()->GetURL("c.com", "/title1.html"));
 
-  InitiatorInterceptor test_interceptor(url);
+  URLLoaderMonitor monitor;
 
   // Perform the actual navigation.
   NavigateIframeToURL(shell()->web_contents(), "child-0", url);
-  test_interceptor.Run();
 
   EXPECT_TRUE(
       root->current_frame_host()->render_view_host()->IsRenderViewLive());
@@ -1039,70 +971,15 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
   url::Origin starting_page_origin;
   starting_page_origin = starting_page_origin.Create(starting_page);
 
-  EXPECT_EQ(starting_page_origin, test_interceptor.GetInitiatorForURL(url));
-}
-
-// Navigation are started in the browser process. After the headers are
-// received, the URLLoaderClient is transferred from the browser process to the
-// renderer process. This test ensures that when the the URLLoader is deleted
-// (in the browser process), the URLLoaderClient (in the renderer process) stops
-// properly.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
-                       CancelRequestAfterReadyToCommit) {
-  // This test cancels the request using the ResourceDispatchHost. With the
-  // NetworkService, it is not used so the request is not canceled.
-  // TODO(arthursonzogni): Find a way to cancel a request from the browser
-  // with the NetworkService.
-  if (base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
-
-  net::test_server::ControllableHttpResponse response(embedded_test_server(),
-                                                      "/main_document");
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  // 1) Load a new document. Commit the navigation but do not send the full
-  //    response's body.
-  GURL url(embedded_test_server()->GetURL("/main_document"));
-  TestNavigationManager navigation_manager(shell()->web_contents(), url);
-  shell()->LoadURL(url);
-
-  // Let the navigation start.
-  EXPECT_TRUE(navigation_manager.WaitForRequestStart());
-  navigation_manager.ResumeNavigation();
-
-  // The server sends the first part of the response and waits.
-  response.WaitForRequest();
-  response.Send(
-      "HTTP/1.1 200 OK\r\n"
-      "Content-Type: text/html; charset=utf-8\r\n"
-      "\r\n"
-      "<html><body> ... ");
-
-  EXPECT_TRUE(navigation_manager.WaitForResponse());
-  GlobalRequestID global_id =
-      navigation_manager.GetNavigationHandle()->GetGlobalRequestID();
-  navigation_manager.ResumeNavigation();
-
-  // The navigation commits successfully. The renderer is waiting for the
-  // response's body.
-  navigation_manager.WaitForNavigationFinished();
-
-  // 2) The ResourceDispatcherHost cancels the request.
-  auto cancel_request = [](GlobalRequestID global_id) {
-    ResourceDispatcherHostImpl* rdh =
-        static_cast<ResourceDispatcherHostImpl*>(ResourceDispatcherHost::Get());
-    rdh->CancelRequest(global_id.child_id, global_id.request_id);
-  };
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(cancel_request, global_id));
-
-  // 3) Check that the load stops properly.
-  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  base::Optional<network::ResourceRequest> request =
+      monitor.GetRequestInfo(url);
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(starting_page_origin, request->request_initiator);
 }
 
 // Data URLs can have a reference fragment like any other URLs. This test makes
 // sure it is taken into account.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, DataURLWithReferenceFragment) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, DataURLWithReferenceFragment) {
   GURL url("data:text/html,body#foo");
   EXPECT_TRUE(NavigateToURL(shell(), url));
 
@@ -1124,7 +1001,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, DataURLWithReferenceFragment) {
 // 1) Start on a document with history.length == 1.
 // 2) Create an iframe and call history.pushState at the same time.
 // 3) history.back() must work.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        IframeAndPushStateSimultaneously) {
   GURL main_url = embedded_test_server()->GetURL("/simple_page.html");
   GURL iframe_url = embedded_test_server()->GetURL("/hello.html");
@@ -1171,7 +1048,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 
 // Regression test for https://crbug.com/260144
 // Back/Forward navigation in an iframe must not stop ongoing XHR.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
                        IframeNavigationsDoNotStopXHR) {
   // A response for the XHR request. It will be delayed until the end of all the
   // navigations.
@@ -1180,7 +1057,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
   EXPECT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/title1.html"));
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
 
   DOMMessageQueue dom_message_queue(WebContents::FromRenderFrameHost(
       shell()->web_contents()->GetMainFrame()));
@@ -1264,7 +1141,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
 // is no provisional document loader which has not committed yet. We keep the
 // modified version of this test to check removing iframe from the load event
 // handler.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
                        ReplacingDocumentLoaderFiresLoadEvent) {
   net::test_server::ControllableHttpResponse main_document_response(
       embedded_test_server(), "/main_document");
@@ -1352,7 +1229,7 @@ class NavigationDownloadBrowserTest : public NavigationBaseBrowserTest {
 // 3) The request for the new navigation starts and it turns out it is a
 //    download. The navigation is dropped.
 // 4) There are no more possibilities for DidStopLoading() to be sent.
-IN_PROC_BROWSER_TEST_P(NavigationDownloadBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationDownloadBrowserTest,
                        StopLoadingAfterDroppedNavigation) {
   net::test_server::ControllableHttpResponse main_response(
       embedded_test_server(), "/main");
@@ -1386,13 +1263,9 @@ IN_PROC_BROWSER_TEST_P(NavigationDownloadBrowserTest,
   EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
 }
 
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
-                         NavigationDownloadBrowserTest,
-                         ::testing::Bool());
-
 // Renderer initiated back/forward navigation in beforeunload should not prevent
 // the user to navigate away from a website.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, HistoryBackInBeforeUnload) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, HistoryBackInBeforeUnload) {
   GURL url_1(embedded_test_server()->GetURL("/title1.html"));
   GURL url_2(embedded_test_server()->GetURL("/title2.html"));
 
@@ -1410,7 +1283,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, HistoryBackInBeforeUnload) {
 // window.setTimeout(). Thus it is executed "outside" of its beforeunload
 // handler and thus avoid basic navigation circumventions.
 // Regression test for: https://crbug.com/879965.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationGoToEntryAtOffsetBrowserTest,
                        HistoryBackInBeforeUnloadAfterSetTimeout) {
   GURL url_1(embedded_test_server()->GetURL("/title1.html"));
   GURL url_2(embedded_test_server()->GetURL("/title2.html"));
@@ -1423,14 +1296,12 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
                                       "  setTimeout(()=>history.back());"
                                       "};"));
   TestNavigationManager navigation(shell()->web_contents(), url_2);
-  auto ipc_observer = base::MakeRefCounted<BrowserMessageObserver>(
-      FrameMsgStart, FrameHostMsg_GoToEntryAtOffset::ID);
-  static_cast<RenderFrameHostImpl*>(shell()->web_contents()->GetMainFrame())
-      ->GetProcess()
-      ->AddFilter(ipc_observer.get());
 
+  base::RunLoop run_loop;
+  SetQuitHandlerForGoToEntryAtOffset(run_loop.QuitClosure());
   shell()->LoadURL(url_2);
-  ipc_observer->Wait();
+  run_loop.Run();
+
   navigation.WaitForNavigationFinished();
 
   EXPECT_TRUE(navigation.was_successful());
@@ -1438,7 +1309,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 
 // Renderer initiated back/forward navigation can't cancel an ongoing browser
 // initiated navigation if it is not user initiated.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        HistoryBackCancelPendingNavigationNoUserGesture) {
   GURL url_1(embedded_test_server()->GetURL("/title1.html"));
   GURL url_2(embedded_test_server()->GetURL("/title2.html"));
@@ -1462,7 +1333,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 
 // Renderer initiated back/forward navigation can cancel an ongoing browser
 // initiated navigation if it is user initiated.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        HistoryBackCancelPendingNavigationUserGesture) {
   GURL url_1(embedded_test_server()->GetURL("/title1.html"));
   GURL url_2(embedded_test_server()->GetURL("/title2.html"));
@@ -1589,18 +1460,16 @@ IN_PROC_BROWSER_TEST_F(PreviewsStateBrowserTest, ShouldEnablePreviewsOff) {
 // when history.pushState() and history.back() are called in a loop.
 // Failing to do so causes the browser to become unresponsive.
 // See https://crbug.com/882238
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, IPCFlood_GoToEntryAtOffset) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, IPCFlood_GoToEntryAtOffset) {
   GURL url(embedded_test_server()->GetURL("/title1.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url));
 
-  std::unique_ptr<ConsoleObserverDelegate> console_delegate(
-      new ConsoleObserverDelegate(
-          shell()->web_contents(),
-          "Throttling navigation to prevent the browser from hanging. See "
-          "https://crbug.com/882238. Command line switch "
-          "--disable-ipc-flooding-protection can be used to bypass the "
-          "protection"));
-  shell()->web_contents()->SetDelegate(console_delegate.get());
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  console_observer.SetPattern(
+      "Throttling navigation to prevent the browser from hanging. See "
+      "https://crbug.com/882238. Command line switch "
+      "--disable-ipc-flooding-protection can be used to bypass the "
+      "protection");
 
   EXPECT_TRUE(ExecuteScript(shell(), R"(
     for(let i = 0; i<1000; ++i) {
@@ -1609,7 +1478,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, IPCFlood_GoToEntryAtOffset) {
     }
   )"));
 
-  console_delegate->Wait();
+  console_observer.Wait();
 }
 
 // Ensure the renderer process doesn't send too many IPC to the browser process
@@ -1618,18 +1487,16 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, IPCFlood_GoToEntryAtOffset) {
 // TODO(arthursonzogni): Make the same test, but when the navigation is
 // requested from a remote frame.
 // See https://crbug.com/882238
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, IPCFlood_Navigation) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, IPCFlood_Navigation) {
   GURL url(embedded_test_server()->GetURL("/title1.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url));
 
-  std::unique_ptr<ConsoleObserverDelegate> console_delegate(
-      new ConsoleObserverDelegate(
-          shell()->web_contents(),
-          "Throttling navigation to prevent the browser from hanging. See "
-          "https://crbug.com/882238. Command line switch "
-          "--disable-ipc-flooding-protection can be used to bypass the "
-          "protection"));
-  shell()->web_contents()->SetDelegate(console_delegate.get());
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  console_observer.SetPattern(
+      "Throttling navigation to prevent the browser from hanging. See "
+      "https://crbug.com/882238. Command line switch "
+      "--disable-ipc-flooding-protection can be used to bypass the "
+      "protection");
 
   EXPECT_TRUE(ExecuteScript(shell(), R"(
     for(let i = 0; i<1000; ++i) {
@@ -1638,13 +1505,13 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, IPCFlood_Navigation) {
     }
   )"));
 
-  console_delegate->Wait();
+  console_observer.Wait();
 }
 
 // TODO(http://crbug.com/632514): This test currently expects opener downloads
 // go through and UMA is logged, but when the linked bug is resolved the
 // download should be disallowed.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, OpenerNavigation_DownloadPolicy) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, OpenerNavigation_DownloadPolicy) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir download_dir;
   ASSERT_TRUE(download_dir.CreateUniqueTempDir());
@@ -1655,7 +1522,8 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, OpenerNavigation_DownloadPolicy) {
               ->GetBrowserContext()
               ->GetDownloadManagerDelegate());
   delegate->SetDownloadBehaviorForTesting(download_dir.GetPath());
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html"));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
   WebContents* opener = shell()->web_contents();
 
   // Open a popup.
@@ -1677,13 +1545,15 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, OpenerNavigation_DownloadPolicy) {
       popup,
       "window.opener.location ='data:html/text;base64,'+btoa('payload');"));
   observer.WaitForFinished();
+
+  // Implies NavigationDownloadType::kOpenerCrossOrigin has 0 count.
   histograms.ExpectUniqueSample("Navigation.DownloadPolicy.LogPerPolicyApplied",
-                                NavigationDownloadType::kDefaultAllow, 1);
+                                NavigationDownloadType::kNoGesture, 1);
 }
 
 // A variation of the OpenerNavigation_DownloadPolicy test above, but uses a
 // cross-origin URL for the popup window.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
                        CrossOriginOpenerNavigation_DownloadPolicy) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir download_dir;
@@ -1695,8 +1565,8 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
               ->GetBrowserContext()
               ->GetDownloadManagerDelegate());
   delegate->SetDownloadBehaviorForTesting(download_dir.GetPath());
-  NavigateToURL(shell(),
-                embedded_test_server()->GetURL("a.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("a.com", "/title1.html")));
   WebContents* opener = shell()->web_contents();
 
   // Open a popup.
@@ -1725,27 +1595,20 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest,
 
   EXPECT_FALSE(manager.was_successful());
 
-  // Navigations downloads that go through ResourceDispatcherHost do not trigger
-  // metrics collection, since the "cancellation reason" is collapsed to a
-  // boolean before the navigation turns into a download. Just expect metrics
-  // when the network service is enabled.
-  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-    histograms.ExpectUniqueSample(
-        "Navigation.DownloadPolicy.LogPerPolicyApplied",
-        NavigationDownloadType::kOpenerCrossOrigin, 1);
-  }
+  histograms.ExpectBucketCount("Navigation.DownloadPolicy.LogPerPolicyApplied",
+                               NavigationDownloadType::kOpenerCrossOrigin, 1);
 }
 
 // Regression test for https://crbug.com/872284.
 // A NavigationThrottle cancels a download in WillProcessResponse.
 // The navigation request must be canceled and it must also cancel the network
 // request. Failing to do so resulted in the network socket being leaked.
-IN_PROC_BROWSER_TEST_P(NavigationDownloadBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationDownloadBrowserTest,
                        CancelDownloadOnResponseStarted) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/title1.html"));
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
 
   // Block every iframe in WillProcessResponse.
   content::TestNavigationThrottleInserter throttle_inserter(
@@ -1776,7 +1639,7 @@ IN_PROC_BROWSER_TEST_P(NavigationDownloadBrowserTest,
 }
 
 // Add header on redirect.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest, AddRequestHeaderOnRedirect) {
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest, AddRequestHeaderOnRedirect) {
   net::test_server::ControllableHttpResponse response_1(embedded_test_server(),
                                                         "", true);
   net::test_server::ControllableHttpResponse response_2(embedded_test_server(),
@@ -1788,12 +1651,11 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest, AddRequestHeaderOnRedirect) {
       base::BindLambdaForTesting(
           [](NavigationHandle* handle) -> std::unique_ptr<NavigationThrottle> {
             auto throttle = std::make_unique<TestNavigationThrottle>(handle);
-            NavigationHandleImpl* handle_impl =
-                static_cast<NavigationHandleImpl*>(handle);
+            NavigationRequest* request = NavigationRequest::From(handle);
             throttle->SetCallback(TestNavigationThrottle::WILL_REDIRECT_REQUEST,
-                                  base::BindLambdaForTesting([handle_impl]() {
-                                    handle_impl->SetRequestHeader(
-                                        "header_name", "header_value");
+                                  base::BindLambdaForTesting([request]() {
+                                    request->SetRequestHeader("header_name",
+                                                              "header_value");
                                   }));
             return throttle;
           }));
@@ -1814,7 +1676,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest, AddRequestHeaderOnRedirect) {
 }
 
 // Add header on request start, modify it on redirect.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
                        AddRequestHeaderModifyOnRedirect) {
   net::test_server::ControllableHttpResponse response_1(embedded_test_server(),
                                                         "", true);
@@ -1827,17 +1689,16 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
       base::BindLambdaForTesting(
           [](NavigationHandle* handle) -> std::unique_ptr<NavigationThrottle> {
             auto throttle = std::make_unique<TestNavigationThrottle>(handle);
-            NavigationHandleImpl* handle_impl =
-                static_cast<NavigationHandleImpl*>(handle);
+            NavigationRequest* request = NavigationRequest::From(handle);
             throttle->SetCallback(TestNavigationThrottle::WILL_START_REQUEST,
-                                  base::BindLambdaForTesting([handle_impl]() {
-                                    handle_impl->SetRequestHeader(
-                                        "header_name", "header_value");
+                                  base::BindLambdaForTesting([request]() {
+                                    request->SetRequestHeader("header_name",
+                                                              "header_value");
                                   }));
             throttle->SetCallback(TestNavigationThrottle::WILL_REDIRECT_REQUEST,
-                                  base::BindLambdaForTesting([handle_impl]() {
-                                    handle_impl->SetRequestHeader(
-                                        "header_name", "other_value");
+                                  base::BindLambdaForTesting([request]() {
+                                    request->SetRequestHeader("header_name",
+                                                              "other_value");
                                   }));
             return throttle;
           }));
@@ -1858,7 +1719,7 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
 }
 
 // Add header on request start, remove it on redirect.
-IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
                        AddRequestHeaderRemoveOnRedirect) {
   net::test_server::ControllableHttpResponse response_1(embedded_test_server(),
                                                         "", true);
@@ -1870,19 +1731,17 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
       shell()->web_contents(),
       base::BindLambdaForTesting(
           [](NavigationHandle* handle) -> std::unique_ptr<NavigationThrottle> {
-            NavigationHandleImpl* handle_impl =
-                static_cast<NavigationHandleImpl*>(handle);
+            NavigationRequest* request = NavigationRequest::From(handle);
             auto throttle = std::make_unique<TestNavigationThrottle>(handle);
             throttle->SetCallback(TestNavigationThrottle::WILL_START_REQUEST,
-                                  base::BindLambdaForTesting([handle_impl]() {
-                                    handle_impl->SetRequestHeader(
-                                        "header_name", "header_value");
+                                  base::BindLambdaForTesting([request]() {
+                                    request->SetRequestHeader("header_name",
+                                                              "header_value");
                                   }));
-            throttle->SetCallback(
-                TestNavigationThrottle::WILL_REDIRECT_REQUEST,
-                base::BindLambdaForTesting([handle_impl]() {
-                  handle_impl->RemoveRequestHeader("header_name");
-                }));
+            throttle->SetCallback(TestNavigationThrottle::WILL_REDIRECT_REQUEST,
+                                  base::BindLambdaForTesting([request]() {
+                                    request->RemoveRequestHeader("header_name");
+                                  }));
             return throttle;
           }));
 
@@ -1899,6 +1758,117 @@ IN_PROC_BROWSER_TEST_P(NavigationBaseBrowserTest,
   response_2.WaitForRequest();
   EXPECT_FALSE(
       base::Contains(response_2.http_request()->headers, "header_name"));
+}
+
+// Name of header used by CorsInjectingUrlLoader.
+const std::string kCorsHeaderName = "test-header";
+
+// URLLoaderThrottle that stores the last value of |kCorsHeaderName|.
+class CorsInjectingUrlLoader : public blink::URLLoaderThrottle {
+ public:
+  explicit CorsInjectingUrlLoader(std::string* last_cors_header_value)
+      : last_cors_header_value_(last_cors_header_value) {}
+
+  // blink::URLLoaderThrottle:
+  void WillStartRequest(network::ResourceRequest* request,
+                        bool* defer) override {
+    if (!request->cors_exempt_headers.GetHeader(kCorsHeaderName,
+                                                last_cors_header_value_)) {
+      last_cors_header_value_->clear();
+    }
+  }
+
+ private:
+  // See |NavigationCorsExemptBrowserTest::last_cors_header_value_| for details.
+  std::string* last_cors_header_value_;
+};
+
+// ContentBrowserClient responsible for creating CorsInjectingUrlLoader.
+class CorsContentBrowserClient : public TestContentBrowserClient {
+ public:
+  explicit CorsContentBrowserClient(std::string* last_cors_header_value)
+      : last_cors_header_value_(last_cors_header_value) {}
+
+  // ContentBrowserClient overrides:
+  std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
+  CreateURLLoaderThrottles(
+      const network::ResourceRequest& request,
+      BrowserContext* browser_context,
+      const base::RepeatingCallback<WebContents*()>& wc_getter,
+      NavigationUIData* navigation_ui_data,
+      int frame_tree_node_id) override {
+    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
+    throttles.push_back(
+        std::make_unique<CorsInjectingUrlLoader>(last_cors_header_value_));
+    return throttles;
+  }
+
+ private:
+  // See |NavigationCorsExemptBrowserTest::last_cors_header_value_| for details.
+  std::string* last_cors_header_value_;
+};
+
+class NavigationCorsExemptBrowserTest : public NavigationBaseBrowserTest {
+ public:
+  NavigationCorsExemptBrowserTest() = default;
+
+ protected:
+  const std::string& last_cors_header_value() const {
+    return last_cors_header_value_;
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ShellContentBrowserClient::set_allow_any_cors_exempt_header_for_browser(
+        true);
+    NavigationBaseBrowserTest::SetUpCommandLine(command_line);
+  }
+  void SetUpOnMainThread() override {
+    original_client_ =
+        SetBrowserClientForTesting(&cors_content_browser_client_);
+    host_resolver()->AddRule("*", "127.0.0.1");
+  }
+  void TearDownOnMainThread() override {
+    if (original_client_)
+      SetBrowserClientForTesting(original_client_);
+    ShellContentBrowserClient::set_allow_any_cors_exempt_header_for_browser(
+        false);
+  }
+
+ private:
+  // Last value of kCorsHeaderName. Set by CorsInjectingUrlLoader.
+  std::string last_cors_header_value_;
+  CorsContentBrowserClient cors_content_browser_client_{
+      &last_cors_header_value_};
+  ContentBrowserClient* original_client_ = nullptr;
+};
+
+// Verifies a header added by way of SetRequestHeader() makes it into
+// |cors_exempt_headers|.
+IN_PROC_BROWSER_TEST_F(NavigationCorsExemptBrowserTest,
+                       SetCorsExemptRequestHeader) {
+  net::test_server::ControllableHttpResponse response(embedded_test_server(),
+                                                      "", true);
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  const std::string header_value = "value";
+  content::TestNavigationThrottleInserter throttle_inserter(
+      shell()->web_contents(),
+      base::BindLambdaForTesting([header_value](NavigationHandle* handle)
+                                     -> std::unique_ptr<NavigationThrottle> {
+        NavigationRequest* request = NavigationRequest::From(handle);
+        auto throttle = std::make_unique<TestNavigationThrottle>(handle);
+        throttle->SetCallback(
+            TestNavigationThrottle::WILL_START_REQUEST,
+            base::BindLambdaForTesting([request, header_value]() {
+              request->SetCorsExemptRequestHeader(kCorsHeaderName,
+                                                  header_value);
+            }));
+        return throttle;
+      }));
+  shell()->LoadURL(embedded_test_server()->GetURL("/doc"));
+  response.WaitForRequest();
+  EXPECT_EQ(header_value, response.http_request()->headers.at(kCorsHeaderName));
+  EXPECT_EQ(header_value, last_cors_header_value());
 }
 
 struct NewWebContentsData {
@@ -1954,7 +1924,7 @@ class CreateWebContentsOnCrashObserver : public NotificationObserver {
 // This test simulates android webview's behavior in apps that handle
 // renderer crashes by synchronously creating a new WebContents and loads
 // the same page again. This reenters into content code.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, WebViewRendererKillReload) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, WebViewRendererKillReload) {
   // Webview is limited to one renderer.
   RenderProcessHost::SetMaxRendererProcessCount(1u);
 
@@ -1988,10 +1958,11 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, WebViewRendererKillReload) {
 }
 
 // Test NavigationRequest::CheckAboutSrcDoc()
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocBrowserInitiated) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, BlockedSrcDocBrowserInitiated) {
+  const char* about_srcdoc_urls[] = {"about:srcdoc", "about:srcdoc?foo",
+                                     "about:srcdoc#foo"};
   // 1. Main frame navigations to about:srcdoc and its variations are blocked.
-  for (const char* url :
-       {"about:srcdoc", "about:srcdoc?foo", "about:srcdoc#foo"}) {
+  for (const char* url : about_srcdoc_urls) {
     NavigationHandleObserver handle_observer(shell()->web_contents(),
                                              GURL(url));
     EXPECT_FALSE(NavigateToURL(shell(), GURL(url)));
@@ -2000,8 +1971,8 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocBrowserInitiated) {
     EXPECT_EQ(net::ERR_INVALID_URL, handle_observer.net_error_code());
   }
 
-  // 2. Subframe navigations to variations of about:srcdoc are blocked.
-  for (const char* url : {"about:srcdoc?foo", "about:srcdoc#foo"}) {
+  // 2. Subframe navigations to variations of about:srcdoc are not blocked.
+  for (const char* url : about_srcdoc_urls) {
     GURL main_url =
         embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html");
     EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -2012,39 +1983,24 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocBrowserInitiated) {
                              ui::PAGE_TRANSITION_FORWARD_BACK);
     WaitForLoadStop(shell()->web_contents());
     EXPECT_TRUE(handle_observer.has_committed());
-    EXPECT_TRUE(handle_observer.is_error());
-    EXPECT_EQ(net::ERR_INVALID_URL, handle_observer.net_error_code());
-  }
-
-  // 3. Subframe navigation to about:srcdoc are not blocked.
-  {
-    GURL main_url =
-        embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html");
-    EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-    NavigationHandleObserver handle_observer(shell()->web_contents(),
-                                             GURL("about::srcdoc"));
-    shell()->LoadURLForFrame(GURL("about::srcdoc"), "child-name-0",
-                             ui::PAGE_TRANSITION_FORWARD_BACK);
-    WaitForLoadStop(shell()->web_contents());
-    EXPECT_TRUE(handle_observer.has_committed());
     EXPECT_FALSE(handle_observer.is_error());
     EXPECT_EQ(net::OK, handle_observer.net_error_code());
   }
 }
 
 // Test NavigationRequest::CheckAboutSrcDoc().
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocRendererInitiated) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, BlockedSrcDocRendererInitiated) {
   EXPECT_TRUE(
       NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
   FrameTreeNode* main_frame =
       static_cast<WebContentsImpl*>(shell()->web_contents())
           ->GetFrameTree()
           ->root();
+  const char* about_srcdoc_urls[] = {"about:srcdoc", "about:srcdoc?foo",
+                                     "about:srcdoc#foo"};
 
   // 1. Main frame navigations to about:srcdoc and its variations are blocked.
-  for (const char* url :
-       {"about:srcdoc", "about:srcdoc?foo", "about:srcdoc#foo"}) {
+  for (const char* url : about_srcdoc_urls) {
     DidStartNavigationObserver start_observer(shell()->web_contents());
     NavigationHandleObserver handle_observer(shell()->web_contents(),
                                              GURL(url));
@@ -2059,8 +2015,8 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocRendererInitiated) {
     EXPECT_EQ(net::ERR_INVALID_URL, handle_observer.net_error_code());
   }
 
-  // 2. Subframe navigations to variations of about:srcdoc are blocked.
-  for (const char* url : {"about:srcdoc?foo", "about:srcdoc#foo"}) {
+  // 2. Subframe navigations to variations of about:srcdoc are not blocked.
+  for (const char* url : about_srcdoc_urls) {
     GURL main_url =
         embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html");
     EXPECT_TRUE(NavigateToURL(shell(), main_url));
@@ -2075,28 +2031,6 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocRendererInitiated) {
     EXPECT_TRUE(ExecJs(subframe, JsReplace("location.href = $1", url)));
     start_observer.Wait();
     WaitForLoadStop(shell()->web_contents());
-    EXPECT_TRUE(handle_observer.has_committed());
-    EXPECT_TRUE(handle_observer.is_error());
-    EXPECT_EQ(net::ERR_INVALID_URL, handle_observer.net_error_code());
-  }
-
-  // 3. Subframe navigation to about:srcdoc are not blocked.
-  {
-    GURL main_url =
-        embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html");
-    EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-    DidStartNavigationObserver start_observer(shell()->web_contents());
-    NavigationHandleObserver handle_observer(shell()->web_contents(),
-                                             GURL("about:srcdoc"));
-    FrameTreeNode* subframe = main_frame->child_at(0);
-    // TODO(arthursonzogni): It shouldn't be possible to navigate to
-    // about:srcdoc by executing location.href="about:srcdoc". Other web
-    // browsers like Firefox aren't allowing this.
-    EXPECT_TRUE(ExecJs(subframe, JsReplace("location.href = 'about:srcdoc'")));
-
-    start_observer.Wait();
-    WaitForLoadStop(shell()->web_contents());
 
     EXPECT_TRUE(handle_observer.has_committed());
     EXPECT_FALSE(handle_observer.is_error());
@@ -2106,9 +2040,9 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, BlockedSrcDocRendererInitiated) {
 
 // Test renderer initiated navigations to about:srcdoc are routed through the
 // browser process. It means RenderFrameHostImpl::BeginNavigation() is called.
-IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, AboutSrcDocUsesBeginNavigation) {
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, AboutSrcDocUsesBeginNavigation) {
   GURL url(embedded_test_server()->GetURL("/title1.html"));
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
 
   // If DidStartNavigation is called before DidCommitProvisionalLoad, then it
   // means the navigation was driven by the browser process, otherwise by the
@@ -2125,6 +2059,1231 @@ IN_PROC_BROWSER_TEST_P(NavigationBrowserTest, AboutSrcDocUsesBeginNavigation) {
 
   observer.Wait();      // BeginNavigation is called.
   interceptor.Wait(1);  // DidCommitNavigation is called.
+}
+
+// Regression test for https://crbug.com/996044
+//  1) Navigate an iframe to srcdoc (about:srcdoc);
+//  2) Same-document navigation to about:srcdoc#1.
+//  3) Same-document navigation to about:srcdoc#2.
+//  4) history.back() to about:srcdoc#1.
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       SrcDocWithFragmentHistoryNavigation) {
+  GURL url(embedded_test_server()->GetURL("/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  //  1) Navigate an iframe to srcdoc (about:srcdoc)
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    new Promise(async resolve => {
+      let iframe = document.createElement('iframe');
+      iframe.srcdoc = "test";
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+
+  //  2) Same-document navigation to about:srcdoc#1.
+  //  3) Same-document navigation to about:srcdoc#2.
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    let subwindow = document.querySelector('iframe').contentWindow;
+    subwindow.location.hash = "1";
+    subwindow.location.hash = "2";
+  )"));
+
+  // Inspect the session history.
+  NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
+      shell()->web_contents()->GetController());
+  ASSERT_EQ(3, controller.GetEntryCount());
+  ASSERT_EQ(2, controller.GetCurrentEntryIndex());
+
+  FrameNavigationEntry* entry[3];
+  for (int i = 0; i < 3; ++i) {
+    entry[i] = controller.GetEntryAtIndex(i)
+                   ->root_node()
+                   ->children[0]
+                   ->frame_entry.get();
+  }
+
+  EXPECT_EQ(entry[0]->url(), "about:srcdoc");
+  EXPECT_EQ(entry[1]->url(), "about:srcdoc#1");
+  EXPECT_EQ(entry[2]->url(), "about:srcdoc#2");
+
+  //  4) history.back() to about:srcdoc#1.
+  EXPECT_TRUE(ExecJs(shell(), "history.back()"));
+
+  ASSERT_EQ(3, controller.GetEntryCount());
+  ASSERT_EQ(1, controller.GetCurrentEntryIndex());
+}
+
+// Regression test for https://crbug.com/996044.
+//  1) Navigate an iframe to srcdoc (about:srcdoc).
+//  2) Cross-document navigation to about:srcdoc?1.
+//  3) Cross-document navigation to about:srcdoc?2.
+//  4) history.back() to about:srcdoc?1.
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       SrcDocWithQueryHistoryNavigation) {
+  GURL url(embedded_test_server()->GetURL("/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  //  1) Navigate an iframe to srcdoc (about:srcdoc).
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    new Promise(async resolve => {
+      let iframe = document.createElement('iframe');
+      iframe.srcdoc = "test";
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+
+  //  2) Cross-document navigation to about:srcdoc?1.
+  {
+    TestNavigationManager commit_waiter(shell()->web_contents(),
+                                        GURL("about:srcdoc?1"));
+    EXPECT_TRUE(ExecJs(shell(), R"(
+      let subwindow = document.querySelector('iframe').contentWindow;
+      subwindow.location.search = "1";
+    )"));
+    commit_waiter.WaitForNavigationFinished();
+  }
+
+  //  3) Cross-document navigation to about:srcdoc?2.
+  {
+    TestNavigationManager commit_waiter(shell()->web_contents(),
+                                        GURL("about:srcdoc?2"));
+    EXPECT_TRUE(ExecJs(shell(), R"(
+      let subwindow = document.querySelector('iframe').contentWindow;
+      subwindow.location.search = "2";
+    )"));
+    commit_waiter.WaitForNavigationFinished();
+  }
+
+  // Inspect the session history.
+  NavigationControllerImpl& controller = static_cast<NavigationControllerImpl&>(
+      shell()->web_contents()->GetController());
+  ASSERT_EQ(3, controller.GetEntryCount());
+  ASSERT_EQ(2, controller.GetCurrentEntryIndex());
+
+  FrameNavigationEntry* entry[3];
+  for (int i = 0; i < 3; ++i) {
+    entry[i] = controller.GetEntryAtIndex(i)
+                   ->root_node()
+                   ->children[0]
+                   ->frame_entry.get();
+  }
+
+  EXPECT_EQ(entry[0]->url(), "about:srcdoc");
+  EXPECT_EQ(entry[1]->url(), "about:srcdoc?1");
+  EXPECT_EQ(entry[2]->url(), "about:srcdoc?2");
+
+  //  4) history.back() to about:srcdoc#1.
+  EXPECT_TRUE(ExecJs(shell(), "history.back()"));
+
+  ASSERT_EQ(3, controller.GetEntryCount());
+  ASSERT_EQ(1, controller.GetCurrentEntryIndex());
+}
+
+// Make sure embedders are notified about visible URL changes in this scenario:
+// 1. Navigate to A.
+// 2. Navigate to B.
+// 3. Add a forward entry in the history for later (same-document).
+// 4. Start navigation to C.
+// 5. Start history cross-document navigation, cancelling 4.
+// 6. Start history same-document navigation, cancelling 5.
+//
+// Regression test for https://crbug.com/998284.
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
+                       BackForwardInOldDocumentCancelPendingNavigation) {
+  // This test expects a new request to be made when navigating back, which is
+  // not happening with back-forward cache enabled.
+  // See BackForwardCacheBrowserTest.RestoreWhilePendingCommit which covers the
+  // same scenario for back-forward cache.
+  shell()
+      ->web_contents()
+      ->GetController()
+      .GetBackForwardCache()
+      .DisableForTesting(BackForwardCacheImpl::TEST_ASSUMES_NO_CACHING);
+
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_A1(embedded_test_server(), "/A");
+  Response response_A2(embedded_test_server(), "/A");
+  Response response_B1(embedded_test_server(), "/B");
+  Response response_C1(embedded_test_server(), "/C");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL url_a = embedded_test_server()->GetURL("a.com", "/A");
+  GURL url_b = embedded_test_server()->GetURL("b.com", "/B");
+  GURL url_c = embedded_test_server()->GetURL("c.com", "/C");
+
+  EmbedderVisibleUrlTracker embedder_url_tracker;
+  shell()->web_contents()->SetDelegate(&embedder_url_tracker);
+
+  // 1. Navigate to A.
+  shell()->LoadURL(url_a);
+  response_A1.WaitForRequest();
+  response_A1.Send(non_cacheable_html_response);
+  response_A1.Done();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // 2. Navigate to B.
+  shell()->LoadURL(url_b);
+  response_B1.WaitForRequest();
+  response_B1.Send(non_cacheable_html_response);
+  response_B1.Done();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // 3. Add a forward entry in the history for later (same-document).
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), R"(
+    history.pushState({},'');
+    history.back();
+  )"));
+
+  // 4. Start navigation to C.
+  {
+    EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+  shell()->LoadURL(url_c);
+  // TODO(arthursonzogni): The embedder_url_tracker should update to url_c at
+  // this point, but we currently rely on FrameTreeNode::DidStopLoading for
+  // invalidation and it does not occur when a prior navigation is already in
+  // progress. The browser is still waiting on the same-document
+  // "history.back()" to complete.
+  {
+    EXPECT_EQ(url_c, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+  embedder_url_tracker.WaitUntilUrlInvalidated();
+  {
+    EXPECT_EQ(url_c, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_c, embedder_url_tracker.url());
+  }
+  response_C1.WaitForRequest();
+
+  // 5. Start history cross-document navigation, cancelling 4.
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), "history.back()"));
+  {
+    EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+  response_A2.WaitForRequest();
+  {
+    EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+
+  // 6. Start history same-document navigation, cancelling 5.
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), "history.forward()"));
+  {
+    EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  {
+    EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+    EXPECT_EQ(url_b, embedder_url_tracker.url());
+  }
+}
+
+// Regression test for https://crbug.com/999932.
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest, CanceledNavigationBug999932) {
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_A1(embedded_test_server(), "/A");
+  Response response_A2(embedded_test_server(), "/A");
+  Response response_B1(embedded_test_server(), "/B");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL url_a = embedded_test_server()->GetURL("a.com", "/A");
+  GURL url_b = embedded_test_server()->GetURL("b.com", "/B");
+
+  // 1. Navigate to A.
+  shell()->LoadURL(url_a);
+  response_A1.WaitForRequest();
+  response_A1.Send(non_cacheable_html_response);
+  response_A1.Done();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // 2. Start pending navigation to B.
+  shell()->LoadURL(url_b);
+  EXPECT_EQ(url_b, shell()->web_contents()->GetVisibleURL());
+  EXPECT_TRUE(shell()->web_contents()->GetController().GetPendingEntry());
+
+  // 3. Cancel (2) with renderer-initiated reload with a UserGesture.
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), "location.reload()"));
+  EXPECT_EQ(url_a, shell()->web_contents()->GetVisibleURL());
+  EXPECT_FALSE(shell()->web_contents()->GetController().GetPendingEntry());
+
+  // 4. Cancel (3) using document.open();
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), "document.open()"));
+  EXPECT_EQ(url_a, shell()->web_contents()->GetVisibleURL());
+  EXPECT_FALSE(shell()->web_contents()->GetController().GetPendingEntry());
+}
+
+// Regression test for https://crbug.com/1001283
+// 1) Load main document with CSP: script-src 'none'
+// 2) Open an about:srcdoc iframe. It inherits the CSP.
+// 3) The iframe navigates elsewhere.
+// 4) The iframe navigates back to about:srcdoc.
+// Check Javascript is never allowed.
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
+                       SrcDocCSPInheritedAfterSameSiteHistoryNavigation) {
+  using Response = net::test_server::ControllableHttpResponse;
+  Response main_document_response(embedded_test_server(), "/main_document");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL url_a = embedded_test_server()->GetURL("a.com", "/main_document");
+  GURL url_b = embedded_test_server()->GetURL("a.com", "/title1.html");
+
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern("Refused to execute inline script *");
+
+    // 1) Load main document with CSP: script-src 'none'
+    // 2) Open an about:srcdoc iframe. It inherits the CSP from its parent.
+    shell()->LoadURL(url_a);
+    main_document_response.WaitForRequest();
+    main_document_response.Send(
+        "HTTP/1.1 200 OK\n"
+        "content-type: text/html; charset=UTF-8\n"
+        "Content-Security-Policy: script-src 'none'\n"
+        "\n"
+        "<iframe name='theiframe' srcdoc='"
+        "  <script>"
+        "    console.error(\"CSP failure\");"
+        "  </script>"
+        "'>"
+        "</iframe>");
+    main_document_response.Done();
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+    // Check Javascript was blocked the first time.
+    console_observer.Wait();
+  }
+
+  // 3) The iframe navigates elsewhere.
+  shell()->LoadURLForFrame(url_b, "theiframe",
+                           ui::PAGE_TRANSITION_MANUAL_SUBFRAME);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern("Refused to execute inline script *");
+
+    // 4) The iframe navigates back to about:srcdoc.
+    shell()->web_contents()->GetController().GoBack();
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+    // Check Javascript was blocked the second time.
+    console_observer.Wait();
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
+                       SrcDocCSPInheritedAfterCrossSiteHistoryNavigation) {
+  using Response = net::test_server::ControllableHttpResponse;
+  Response main_document_response(embedded_test_server(), "/main_document");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  GURL url_a = embedded_test_server()->GetURL("a.com", "/main_document");
+  GURL url_b = embedded_test_server()->GetURL("b.com", "/title1.html");
+
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern("Refused to execute inline script *");
+
+    // 1) Load main document with CSP: script-src 'none'
+    // 2) Open an about:srcdoc iframe. It inherits the CSP from its parent.
+    shell()->LoadURL(url_a);
+    main_document_response.WaitForRequest();
+    main_document_response.Send(
+        "HTTP/1.1 200 OK\n"
+        "content-type: text/html; charset=UTF-8\n"
+        "Content-Security-Policy: script-src 'none'\n"
+        "\n"
+        "<iframe name='theiframe' srcdoc='"
+        "  <script>"
+        "    console.error(\"CSP failure\");"
+        "  </script>"
+        "'>"
+        "</iframe>");
+    main_document_response.Done();
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+    // Check Javascript was blocked the first time.
+    console_observer.Wait();
+  }
+
+  // 3) The iframe navigates elsewhere.
+  shell()->LoadURLForFrame(url_b, "theiframe",
+                           ui::PAGE_TRANSITION_MANUAL_SUBFRAME);
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern("Refused to execute inline script *");
+
+    // 4) The iframe navigates back to about:srcdoc.
+    shell()->web_contents()->GetController().GoBack();
+    EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+    // Check Javascript was blocked the second time.
+    console_observer.Wait();
+  }
+}
+
+// Tests for cookies. Provides an HTTPS server.
+class NavigationCookiesBrowserTest : public NavigationBaseBrowserTest {
+ protected:
+  NavigationCookiesBrowserTest()
+      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    NavigationBaseBrowserTest::SetUpCommandLine(command_line);
+
+    // This is necessary to use https with arbitrary hostnames.
+    command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+  }
+
+  void SetUpOnMainThread() override {
+    https_server()->AddDefaultHandlers(GetTestDataFilePath());
+    NavigationBaseBrowserTest::SetUpOnMainThread();
+  }
+
+  net::EmbeddedTestServer* https_server() { return &https_server_; }
+
+ private:
+  net::EmbeddedTestServer https_server_;
+};
+
+// Test how cookies are inherited in about:srcdoc iframes.
+//
+// Regression test: https://crbug.com/1003167.
+IN_PROC_BROWSER_TEST_F(NavigationCookiesBrowserTest, CookiesInheritedSrcDoc) {
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_1(https_server(), "/response_1");
+  Response response_2(https_server(), "/response_2");
+  Response response_3(https_server(), "/response_3");
+
+  ASSERT_TRUE(https_server()->Start());
+
+  GURL url_a(https_server()->GetURL("a.com", "/title1.html"));
+  GURL url_b(https_server()->GetURL("b.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    let iframe = document.createElement("iframe");
+    iframe.srcdoc = "foo";
+    document.body.appendChild(iframe);
+  )"));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  RenderFrameHostImpl* main_document = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderFrameHostImpl* sub_document_1 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url::kAboutSrcdocURL, sub_document_1->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_1->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_1->GetSiteInstance());
+
+  // 0. The default state doesn't contain any cookies.
+  EXPECT_EQ("", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_1, "document.cookie"));
+
+  // 1. Set a cookie in the main document, it affects its child too.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'a=0';"));
+
+  EXPECT_EQ("a=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 2. Set a cookie in the child, it affects its parent too.
+  EXPECT_TRUE(ExecJs(sub_document_1, "document.cookie = 'b=0';"));
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 3. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_1, "fetch('/response_1');"));
+  response_1.WaitForRequest();
+  EXPECT_EQ("a=0; b=0", response_1.http_request()->headers.at("Cookie"));
+
+  // 4. Navigate the iframe elsewhere.
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("location.href = $1", url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_2 =
+      main_document->child_at(0)->current_frame_host();
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 5. Set a cookie in the main document. It doesn't affect its child.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'c=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 6. Set a cookie in the child. It doesn't affect its parent.
+  EXPECT_TRUE(ExecJs(sub_document_2,
+                     "document.cookie = 'd=0; SameSite=none; Secure';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("d=0", EvalJs(sub_document_2, "document.cookie"));
+
+  // 7. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_2, "fetch('/response_2');"));
+  response_2.WaitForRequest();
+  EXPECT_EQ("d=0", response_2.http_request()->headers.at("Cookie"));
+
+  // 8. Navigate the iframe back to about:srcdoc.
+  shell()->web_contents()->GetController().GoBack();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_3 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url_a, main_document->GetLastCommittedURL());
+  EXPECT_EQ(url::kAboutSrcdocURL, sub_document_3->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_3->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_3->GetSiteInstance());
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 9. Set cookie in the main document. It should be inherited by the child.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'e=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 11. Set cookie in the child document. It should be reflected on its parent.
+  EXPECT_TRUE(ExecJs(sub_document_3, "document.cookie = 'f=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(sub_document_3, "document.cookie"));
+
+  // 12. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_3, "fetch('/response_3');"));
+  response_3.WaitForRequest();
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            response_3.http_request()->headers.at("Cookie"));
+}
+
+// Test how cookies are inherited in about:blank iframes.
+IN_PROC_BROWSER_TEST_F(NavigationCookiesBrowserTest,
+                       CookiesInheritedAboutBlank) {
+  // This test expects several cross-site navigation to happen.
+  if (!AreAllSitesIsolatedForTesting())
+    return;
+
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_1(https_server(), "/response_1");
+  Response response_2(https_server(), "/response_2");
+  Response response_3(https_server(), "/response_3");
+
+  ASSERT_TRUE(https_server()->Start());
+
+  GURL url_a(https_server()->GetURL("a.com", "/title1.html"));
+  GURL url_b(https_server()->GetURL("b.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  EXPECT_TRUE(
+      ExecJs(shell(), JsReplace("let iframe = document.createElement('iframe');"
+                                "iframe.src = $1;"
+                                "document.body.appendChild(iframe);",
+                                url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    document.querySelector('iframe').src = "about:blank"
+  )"));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  RenderFrameHostImpl* main_document = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderFrameHostImpl* sub_document_1 =
+      main_document->child_at(0)->current_frame_host();
+
+  EXPECT_EQ(url::kAboutBlankURL, sub_document_1->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_1->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_1->GetSiteInstance());
+
+  // 0. The default state doesn't contain any cookies.
+  EXPECT_EQ("", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_1, "document.cookie"));
+
+  // 1. Set a cookie in the main document, it affects its child too.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'a=0';"));
+
+  EXPECT_EQ("a=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 2. Set a cookie in the child, it affects its parent too.
+  EXPECT_TRUE(ExecJs(sub_document_1, "document.cookie = 'b=0';"));
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 3. Checks cookies are sent while requesting resources.
+  GURL url_response_1 = https_server()->GetURL("a.com", "/response_1");
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("fetch($1)", url_response_1)));
+  response_1.WaitForRequest();
+  EXPECT_EQ("a=0; b=0", response_1.http_request()->headers.at("Cookie"));
+
+  // 4. Navigate the iframe elsewhere.
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("location.href = $1", url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_2 =
+      main_document->child_at(0)->current_frame_host();
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 5. Set a cookie in the main document. It doesn't affect its child.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'c=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 6. Set a cookie in the child. It doesn't affect its parent.
+  EXPECT_TRUE(ExecJs(sub_document_2,
+                     "document.cookie = 'd=0; SameSite=none; Secure';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("d=0", EvalJs(sub_document_2, "document.cookie"));
+
+  // 7. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_2, "fetch('/response_2');"));
+  response_2.WaitForRequest();
+  EXPECT_EQ("d=0", response_2.http_request()->headers.at("Cookie"));
+
+  // 8. Navigate the iframe back to about:blank.
+  shell()->web_contents()->GetController().GoBack();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_3 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url_a, main_document->GetLastCommittedURL());
+  EXPECT_EQ(url::kAboutBlankURL, sub_document_3->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_3->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_3->GetSiteInstance());
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 9. Set cookie in the main document. It affects the iframe.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'e=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 10. Set cookie in the iframe. It affects the main frame.
+  EXPECT_TRUE(ExecJs(sub_document_3, "document.cookie = 'f=0';"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(sub_document_3, "document.cookie"));
+
+  // 11. Even if document.cookie is empty, cookies are sent.
+  EXPECT_TRUE(ExecJs(sub_document_3, "fetch('/response_3');"));
+  response_3.WaitForRequest();
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            response_3.http_request()->headers.at("Cookie"));
+}
+
+// Test how cookies are inherited in about:blank iframes.
+//
+// This is a variation of
+// NavigationCookiesBrowserTest.CookiesInheritedAboutBlank. Instead of
+// requesting an history navigation, a new navigation is requested from the main
+// frame. The navigation is cross-site instead of being same-site.
+IN_PROC_BROWSER_TEST_F(NavigationCookiesBrowserTest,
+                       CookiesInheritedAboutBlank2) {
+  // This test expects several cross-site navigation to happen.
+  if (!AreAllSitesIsolatedForTesting())
+    return;
+
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_1(https_server(), "/response_1");
+  Response response_2(https_server(), "/response_2");
+  Response response_3(https_server(), "/response_3");
+
+  ASSERT_TRUE(https_server()->Start());
+
+  GURL url_a(https_server()->GetURL("a.com", "/title1.html"));
+  GURL url_b(https_server()->GetURL("b.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  EXPECT_TRUE(
+      ExecJs(shell(), JsReplace("let iframe = document.createElement('iframe');"
+                                "iframe.src = $1;"
+                                "document.body.appendChild(iframe);",
+                                url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    document.querySelector('iframe').src = "about:blank"
+  )"));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  RenderFrameHostImpl* main_document = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderFrameHostImpl* sub_document_1 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url::kAboutBlankURL, sub_document_1->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_1->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_1->GetSiteInstance());
+
+  // 0. The default state doesn't contain any cookies.
+  EXPECT_EQ("", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_1, "document.cookie"));
+
+  // 1. Set a cookie in the main document, it affects its child too.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'a=0';"));
+
+  EXPECT_EQ("a=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 2. Set a cookie in the child, it affects its parent too.
+  EXPECT_TRUE(ExecJs(sub_document_1, "document.cookie = 'b=0';"));
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0", EvalJs(sub_document_1, "document.cookie"));
+
+  // 3. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_1, "fetch('/response_1');"));
+  response_1.WaitForRequest();
+  EXPECT_EQ("a=0; b=0", response_1.http_request()->headers.at("Cookie"));
+
+  // 4. Navigate the iframe elsewhere.
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("location.href = $1", url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_2 =
+      main_document->child_at(0)->current_frame_host();
+
+  EXPECT_EQ("a=0; b=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 5. Set a cookie in the main document. It doesn't affect its child.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'c=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("", EvalJs(sub_document_2, "document.cookie"));
+
+  // 6. Set a cookie in the child. It doesn't affect its parent.
+  EXPECT_TRUE(ExecJs(sub_document_2,
+                     "document.cookie = 'd=0; SameSite=none; Secure';"));
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("d=0", EvalJs(sub_document_2, "document.cookie"));
+
+  // 7. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_2, "fetch('/response_2');"));
+  response_2.WaitForRequest();
+  EXPECT_EQ("d=0", response_2.http_request()->headers.at("Cookie"));
+
+  // 8. Ask the top-level, a.com frame to navigate the subframe to about:blank.
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    document.querySelector('iframe').src = "about:blank";
+  )"));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_3 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url::kAboutBlankURL, sub_document_3->GetLastCommittedURL());
+  EXPECT_EQ(url::Origin::Create(url_a),
+            sub_document_3->GetLastCommittedOrigin());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_3->GetSiteInstance());
+
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 9. Set cookie in the main document.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'e=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0", EvalJs(sub_document_3, "document.cookie"));
+
+  // 10. Set cookie in the child document.
+  EXPECT_TRUE(ExecJs(sub_document_3, "document.cookie = 'f=0';"));
+
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(main_document, "document.cookie"));
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            EvalJs(sub_document_3, "document.cookie"));
+
+  // 11. Checks cookies are sent while requesting resources.
+  EXPECT_TRUE(ExecJs(sub_document_3, "fetch('/response_3');"));
+  response_3.WaitForRequest();
+  EXPECT_EQ("a=0; b=0; c=0; e=0; f=0",
+            response_3.http_request()->headers.at("Cookie"));
+}
+
+// Test how cookies are inherited in data-URL iframes.
+IN_PROC_BROWSER_TEST_F(NavigationCookiesBrowserTest, CookiesInheritedDataUrl) {
+  using Response = net::test_server::ControllableHttpResponse;
+  Response response_1(https_server(), "/response_1");
+  Response response_2(https_server(), "/response_2");
+  Response response_3(https_server(), "/response_3");
+
+  ASSERT_TRUE(https_server()->Start());
+
+  GURL url_a(https_server()->GetURL("a.com", "/title1.html"));
+  GURL url_b(https_server()->GetURL("b.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  EXPECT_TRUE(ExecJs(shell(), R"(
+    let iframe = document.createElement("iframe");
+    iframe.src = "data:text/html,";
+    document.body.appendChild(iframe);
+  )"));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  RenderFrameHostImpl* main_document = static_cast<RenderFrameHostImpl*>(
+      shell()->web_contents()->GetMainFrame());
+  RenderFrameHostImpl* sub_document_1 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ("data:text/html,", sub_document_1->GetLastCommittedURL());
+  EXPECT_TRUE(sub_document_1->GetLastCommittedOrigin().opaque());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_1->GetSiteInstance());
+
+  // 1. Writing a cookie inside a data-URL document is forbidden.
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern(
+        "*Failed to set the 'cookie' property on 'Document': Cookies are "
+        "disabled inside 'data:' URLs.*");
+    ExecuteScriptAsync(sub_document_1, "document.cookie = 'a=0';");
+    console_observer.Wait();
+  }
+
+  // 2. Reading a cookie inside a data-URL document is forbidden.
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern(
+        "*Failed to read the 'cookie' property from 'Document': Cookies are "
+        "disabled inside 'data:' URLs.*");
+    ExecuteScriptAsync(sub_document_1, "document.cookie");
+    console_observer.Wait();
+  }
+
+  // 3. Set cookie in the main document. No cookies are sent when requested from
+  // the data-URL.
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'a=0;SameSite=Lax'"));
+  EXPECT_TRUE(ExecJs(main_document, "document.cookie = 'b=0;SameSite=Strict'"));
+  GURL url_response_1 = https_server()->GetURL("a.com", "/response_1");
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("fetch($1)", url_response_1)));
+  response_1.WaitForRequest();
+  EXPECT_EQ(0u, response_1.http_request()->headers.count("Cookie"));
+
+  // 4. Navigate the iframe elsewhere and back using history navigation.
+  EXPECT_TRUE(ExecJs(sub_document_1, JsReplace("location.href = $1", url_b)));
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  shell()->web_contents()->GetController().GoBack();
+  EXPECT_TRUE(WaitForLoadStop(shell()->web_contents()));
+  RenderFrameHostImpl* sub_document_2 =
+      main_document->child_at(0)->current_frame_host();
+  EXPECT_EQ(url_a, main_document->GetLastCommittedURL());
+  EXPECT_EQ("data:text/html,", sub_document_2->GetLastCommittedURL());
+  EXPECT_TRUE(sub_document_2->GetLastCommittedOrigin().opaque());
+  EXPECT_EQ(main_document->GetSiteInstance(),
+            sub_document_2->GetSiteInstance());
+
+  // 5. Writing a cookie inside a data-URL document is still forbidden.
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern(
+        "*Failed to set the 'cookie' property on 'Document': Cookies are "
+        "disabled inside 'data:' URLs.*");
+    ExecuteScriptAsync(sub_document_2, "document.cookie = 'c=0';");
+    console_observer.Wait();
+  }
+
+  // 6. Reading a cookie inside a data-URL document is still forbidden.
+  {
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern(
+        "*Failed to read the 'cookie' property from 'Document': Cookies are "
+        "disabled inside 'data:' URLs.*");
+    ExecuteScriptAsync(sub_document_2, "document.cookie");
+    console_observer.Wait();
+  }
+
+  // 7. No cookies are sent when requested from the data-URL.
+  GURL url_response_2 = https_server()->GetURL("a.com", "/response_2");
+  EXPECT_TRUE(ExecJs(sub_document_2, JsReplace("fetch($1)", url_response_2)));
+  response_2.WaitForRequest();
+  EXPECT_EQ(0u, response_2.http_request()->headers.count("Cookie"));
+}
+
+// Tests for validating URL rewriting behavior like chrome://history to
+// chrome-native://history.
+class NavigationUrlRewriteBrowserTest : public NavigationBaseBrowserTest {
+ protected:
+  static constexpr const char* kRewriteURL = "http://a.com/rewrite";
+  static constexpr const char* kNoAccessScheme = "no-access";
+  static constexpr const char* kNoAccessURL = "no-access://testing/";
+
+  class BrowserClient : public ContentBrowserClient {
+   public:
+    void BrowserURLHandlerCreated(BrowserURLHandler* handler) override {
+      handler->AddHandlerPair(RewriteUrl,
+                              BrowserURLHandlerImpl::null_handler());
+    }
+
+    void RegisterNonNetworkNavigationURLLoaderFactories(
+        int frame_tree_node_id,
+        NonNetworkURLLoaderFactoryMap* factories) override {
+      auto url_loader_factory = std::make_unique<FakeNetworkURLLoaderFactory>(
+          "HTTP/1.1 200 OK\nContent-Type: text/html\n\n", "This is a test",
+          /* network_accessed */ true, net::OK);
+      factories->emplace(std::string(kNoAccessScheme),
+                         std::move(url_loader_factory));
+    }
+
+    bool ShouldAssignSiteForURL(const GURL& url) override {
+      return !url.SchemeIs(kNoAccessScheme);
+    }
+
+    static bool RewriteUrl(GURL* url, BrowserContext* browser_context) {
+      if (*url == GURL(kRewriteURL)) {
+        *url = GURL(kNoAccessURL);
+        return true;
+      }
+      return false;
+    }
+  };
+
+  NavigationUrlRewriteBrowserTest() {
+    url::AddStandardScheme(kNoAccessScheme, url::SCHEME_WITH_HOST);
+    url::AddNoAccessScheme(kNoAccessScheme);
+  }
+
+  void SetUpOnMainThread() override {
+    NavigationBaseBrowserTest::SetUpOnMainThread();
+    ASSERT_TRUE(embedded_test_server()->Start());
+
+    browser_client_ = std::make_unique<BrowserClient>();
+    old_browser_client_ = SetBrowserClientForTesting(browser_client_.get());
+  }
+
+  void TearDownOnMainThread() override {
+    SetBrowserClientForTesting(old_browser_client_);
+    old_browser_client_ = nullptr;
+    browser_client_.reset();
+
+    NavigationBaseBrowserTest::TearDownOnMainThread();
+  }
+
+  GURL GetRewriteToNoAccessURL() const { return GURL(kRewriteURL); }
+
+ private:
+  std::unique_ptr<BrowserClient> browser_client_;
+  ContentBrowserClient* old_browser_client_;
+  url::ScopedSchemeRegistryForTests scoped_registry_;
+};
+
+// TODO(1021779): Figure out why this fails on the kitkat-dbg builder
+// and re-enable for all platforms.
+#if defined(OS_ANDROID)
+#define DISABLE_ON_ANDROID(x) DISABLED_##x
+#else
+#define DISABLE_ON_ANDROID(x) x
+#endif
+
+// Tests navigating to a URL that gets rewritten to a "no access" URL. This
+// mimics the behavior of navigating to special URLs like chrome://newtab and
+// chrome://history which get rewritten to "no access" chrome-native:// URLs.
+IN_PROC_BROWSER_TEST_F(NavigationUrlRewriteBrowserTest,
+                       DISABLE_ON_ANDROID(RewriteToNoAccess)) {
+  // Perform an initial navigation.
+  {
+    TestNavigationObserver observer(shell()->web_contents());
+    GURL url = embedded_test_server()->GetURL("a.com", "/title1.html");
+    EXPECT_TRUE(NavigateToURL(shell(), url));
+    EXPECT_EQ(url, observer.last_navigation_url());
+    EXPECT_TRUE(observer.last_navigation_succeeded());
+    EXPECT_FALSE(observer.last_initiator_origin().has_value());
+  }
+
+  // Navigate to the URL that will get rewritten to a "no access" URL.
+  {
+    auto* web_contents = shell()->web_contents();
+    TestNavigationObserver observer(web_contents);
+
+    // Note: We are using LoadURLParams here because we need to have the
+    // initiator_origin set and NavigateToURL() does not do that.
+    NavigationController::LoadURLParams params(GetRewriteToNoAccessURL());
+    params.initiator_origin =
+        web_contents->GetMainFrame()->GetLastCommittedOrigin();
+    web_contents->GetController().LoadURLWithParams(params);
+    web_contents->Focus();
+    observer.Wait();
+
+    EXPECT_EQ(GURL(kNoAccessURL), observer.last_navigation_url());
+    EXPECT_TRUE(observer.last_navigation_succeeded());
+    EXPECT_TRUE(observer.last_initiator_origin().has_value());
+  }
+}
+
+// Update the fragment part of the URL while it is currently displaying an error
+// page. Regression test https://crbug.com/1018385
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       SameDocumentNavigationInErrorPage) {
+  WebContents* wc = shell()->web_contents();
+  NavigationHandleCommitObserver navigation_0(wc, GURL("about:srcdoc#0"));
+  NavigationHandleCommitObserver navigation_1(wc, GURL("about:srcdoc#1"));
+
+  // Big warning: about:srcdoc is not supposed to be valid browser-initiated
+  // main-frame navigation, it is currently blocked by the NavigationRequest.
+  // It is used here to reproduce bug https://crbug.com/1018385. Please avoid
+  // copying this kind of navigation in your own tests.
+  EXPECT_FALSE(NavigateToURL(shell(), GURL("about:srcdoc#0")));
+  EXPECT_FALSE(NavigateToURL(shell(), GURL("about:srcdoc#1")));
+
+  EXPECT_TRUE(navigation_0.has_committed());
+  EXPECT_TRUE(navigation_1.has_committed());
+  EXPECT_FALSE(navigation_0.was_same_document());
+  EXPECT_FALSE(navigation_1.was_same_document());
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       NonDeterministicUrlRewritesUseLastUrl) {
+  // Lambda expressions cannot be assigned to function pointers if they use
+  // captures, so track how many times the handler is called using a non-const
+  // static variable.
+  static int rewrite_count;
+  rewrite_count = 0;
+
+  BrowserURLHandler::URLHandler handler_method =
+      [](GURL* url, BrowserContext* browser_context) {
+        GURL::Replacements replace_path;
+        if (rewrite_count > 0) {
+          replace_path.SetPathStr("title2.html");
+        } else {
+          replace_path.SetPathStr("title1.html");
+        }
+        *url = url->ReplaceComponents(replace_path);
+        rewrite_count++;
+        return true;
+      };
+  BrowserURLHandler::GetInstance()->AddHandlerPair(
+      handler_method, BrowserURLHandler::null_handler());
+
+  TestNavigationObserver observer(shell()->web_contents());
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GURL(embedded_test_server()->GetURL("/virtual-url.html"))));
+  EXPECT_EQ("/title2.html", observer.last_navigation_url().path());
+  EXPECT_EQ(2, rewrite_count);
+}
+
+class DocumentPolicyBrowserTest : public NavigationBaseBrowserTest {
+ public:
+  DocumentPolicyBrowserTest() {
+    feature_list_.InitAndEnableFeature(features::kDocumentPolicy);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Test that scroll restoration can be disabled with
+// Document-Policy: force-load-at-top
+IN_PROC_BROWSER_TEST_F(DocumentPolicyBrowserTest,
+                       ScrollRestorationDisabledByDocumentPolicy) {
+  net::test_server::ControllableHttpResponse response(embedded_test_server(),
+                                                      "/target.html");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url(embedded_test_server()->GetURL("/target.html"));
+  WebContents* main_contents = shell()->web_contents();
+  RenderFrameSubmissionObserver frame_observer(main_contents);
+  TestNavigationManager navigation_manager(main_contents, url);
+
+  // Load the document with document policy force-load-at-top
+  shell()->LoadURL(url);
+  EXPECT_TRUE(navigation_manager.WaitForRequestStart());
+  navigation_manager.ResumeNavigation();
+  response.WaitForRequest();
+  response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "Document-Policy: force-load-at-top\r\n"
+      "\r\n"
+      "<p style='position: absolute; top: 10000px;'>Some text</p>");
+  response.Done();
+
+  EXPECT_TRUE(navigation_manager.WaitForResponse());
+  navigation_manager.ResumeNavigation();
+  navigation_manager.WaitForNavigationFinished();
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Scroll down the page a bit
+  EXPECT_TRUE(ExecuteScript(main_contents, "window.scrollTo(0, 1000)"));
+  frame_observer.WaitForScrollOffsetAtTop(false);
+
+  // Navigate away
+  EXPECT_TRUE(ExecuteScript(main_contents, "window.location = 'about:blank'"));
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Navigate back
+  EXPECT_TRUE(ExecuteScript(main_contents, "history.back()"));
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Wait a short amount of time to ensure the page does not scroll.
+  base::RunLoop run_loop;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
+  run_loop.Run();
+  RunUntilInputProcessed(RenderWidgetHostImpl::From(
+      main_contents->GetRenderViewHost()->GetWidget()));
+  EXPECT_TRUE(main_contents->GetMainFrame()->GetView()->IsScrollOffsetAtTop());
+}
+
+// Test that scroll restoration works as expected with
+// Document-Policy: no-force-load-at-top
+IN_PROC_BROWSER_TEST_F(DocumentPolicyBrowserTest,
+                       ScrollRestorationEnabledByDocumentPolicy) {
+  net::test_server::ControllableHttpResponse response(embedded_test_server(),
+                                                      "/target.html");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url(embedded_test_server()->GetURL("/target.html"));
+  WebContents* main_contents = shell()->web_contents();
+  RenderFrameSubmissionObserver frame_observer(main_contents);
+  TestNavigationManager navigation_manager(main_contents, url);
+
+  // Load the document with document policy no-force-load-at-top
+  shell()->LoadURL(url);
+  EXPECT_TRUE(navigation_manager.WaitForRequestStart());
+  navigation_manager.ResumeNavigation();
+  response.WaitForRequest();
+  response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "Document-Policy: no-force-load-at-top\r\n"
+      "\r\n"
+      "<p style='position: absolute; top: 10000px;'>Some text</p>");
+  response.Done();
+
+  EXPECT_TRUE(navigation_manager.WaitForResponse());
+  navigation_manager.ResumeNavigation();
+  navigation_manager.WaitForNavigationFinished();
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Scroll down the page a bit
+  EXPECT_TRUE(ExecuteScript(main_contents, "window.scrollTo(0, 1000)"));
+  frame_observer.WaitForScrollOffsetAtTop(false);
+
+  // Navigate away
+  EXPECT_TRUE(ExecuteScript(main_contents, "window.location = 'about:blank'"));
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Navigate back
+  EXPECT_TRUE(ExecuteScript(main_contents, "history.back()"));
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+
+  // Ensure scroll restoration activated
+  frame_observer.WaitForScrollOffsetAtTop(false);
+  EXPECT_FALSE(main_contents->GetMainFrame()->GetView()->IsScrollOffsetAtTop());
+}
+
+// Test that element fragment anchor scrolling can be disabled with
+// Document-Policy: force-load-at-top
+IN_PROC_BROWSER_TEST_F(DocumentPolicyBrowserTest,
+                       FragmentAnchorDisabledByDocumentPolicy) {
+  net::test_server::ControllableHttpResponse response(embedded_test_server(),
+                                                      "/target.html");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url(embedded_test_server()->GetURL("/target.html#text"));
+  WebContents* main_contents = shell()->web_contents();
+
+  // Load the target document
+  TestNavigationManager navigation_manager(main_contents, url);
+  shell()->LoadURL(url);
+
+  // Start navigation
+  EXPECT_TRUE(navigation_manager.WaitForRequestStart());
+  navigation_manager.ResumeNavigation();
+
+  // Send Document-Policy header
+  response.WaitForRequest();
+  response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "Document-Policy: force-load-at-top\r\n"
+      "\r\n"
+      "<p id='text' style='position: absolute; top: 10000px;'>Some text</p>");
+  response.Done();
+
+  EXPECT_TRUE(navigation_manager.WaitForResponse());
+  navigation_manager.ResumeNavigation();
+  navigation_manager.WaitForNavigationFinished();
+
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+  // Wait a short amount of time to ensure the page does not scroll.
+  base::RunLoop run_loop;
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
+  run_loop.Run();
+  RunUntilInputProcessed(RenderWidgetHostImpl::From(
+      main_contents->GetRenderViewHost()->GetWidget()));
+  EXPECT_TRUE(main_contents->GetMainFrame()->GetView()->IsScrollOffsetAtTop());
+}
+
+// Test that element fragment anchor scrolling works as expected with
+// Document-Policy: no-force-load-at-top
+IN_PROC_BROWSER_TEST_F(DocumentPolicyBrowserTest,
+                       FragmentAnchorEnabledByDocumentPolicy) {
+  net::test_server::ControllableHttpResponse response(embedded_test_server(),
+                                                      "/target.html");
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url(embedded_test_server()->GetURL("/target.html#text"));
+  WebContents* main_contents = shell()->web_contents();
+  RenderFrameSubmissionObserver frame_observer(main_contents);
+
+  // Load the target document
+  TestNavigationManager navigation_manager(main_contents, url);
+  shell()->LoadURL(url);
+
+  // Start navigation
+  EXPECT_TRUE(navigation_manager.WaitForRequestStart());
+  navigation_manager.ResumeNavigation();
+
+  // Send Document-Policy header
+  response.WaitForRequest();
+  response.Send(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html; charset=utf-8\r\n"
+      "Document-Policy: no-force-load-at-top\r\n"
+      "\r\n"
+      "<p id='text' style='position: absolute; top: 10000px;'>Some text</p>");
+  response.Done();
+
+  EXPECT_TRUE(navigation_manager.WaitForResponse());
+  navigation_manager.ResumeNavigation();
+  navigation_manager.WaitForNavigationFinished();
+
+  EXPECT_TRUE(WaitForLoadStop(main_contents));
+  EXPECT_TRUE(WaitForRenderFrameReady(main_contents->GetMainFrame()));
+  frame_observer.WaitForScrollOffsetAtTop(
+      /*expected_scroll_offset_at_top=*/false);
+  EXPECT_FALSE(main_contents->GetMainFrame()->GetView()->IsScrollOffsetAtTop());
 }
 
 }  // namespace content

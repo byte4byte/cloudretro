@@ -10,10 +10,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * ChildAccountInfoFetcher for the Android platform.
@@ -39,7 +42,7 @@ public final class ChildAccountInfoFetcher {
             long nativeAccountFetcherService, String accountId, String accountName) {
         mNativeAccountFetcherService = nativeAccountFetcherService;
         mAccountId = accountId;
-        mAccount = AccountManagerFacade.createAccountFromName(accountName);
+        mAccount = AccountUtils.createAccountFromName(accountName);
 
         // Register for notifications about flag changes in the future.
         mAccountFlagsChangedReceiver = new BroadcastReceiver() {
@@ -69,7 +72,7 @@ public final class ChildAccountInfoFetcher {
 
     private void fetch() {
         Log.d(TAG, "Checking child account status for %s", mAccount.name);
-        AccountManagerFacade.get().checkChildAccountStatus(
+        AccountManagerFacadeProvider.getInstance().checkChildAccountStatus(
                 mAccount, status -> setIsChildAccount(ChildAccountStatus.isChild(status)));
     }
 
@@ -81,15 +84,20 @@ public final class ChildAccountInfoFetcher {
     private void setIsChildAccount(boolean isChildAccount) {
         Log.d(TAG, "Setting child account status for %s to %s", mAccount.name,
                 Boolean.toString(isChildAccount));
-        nativeSetIsChildAccount(mNativeAccountFetcherService, mAccountId, isChildAccount);
+        ChildAccountInfoFetcherJni.get().setIsChildAccount(
+                mNativeAccountFetcherService, mAccountId, isChildAccount);
     }
 
+    @VisibleForTesting
     @CalledByNative
     private static void initializeForTests() {
         AccountManagerDelegate delegate = new SystemAccountManagerDelegate();
-        AccountManagerFacade.overrideAccountManagerFacadeForTests(delegate);
+        AccountManagerFacadeProvider.setInstanceForTests(new AccountManagerFacadeImpl(delegate));
     }
 
-    private static native void nativeSetIsChildAccount(
-            long accountFetcherServicePtr, String accountId, boolean isChildAccount);
+    @NativeMethods
+    interface Natives {
+        void setIsChildAccount(
+                long accountFetcherServicePtr, String accountId, boolean isChildAccount);
+    }
 }

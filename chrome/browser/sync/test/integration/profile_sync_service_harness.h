@@ -22,6 +22,8 @@ namespace syncer {
 class SyncSetupInProgressHandle;
 }  // namespace syncer
 
+class SyncSigninDelegate;
+
 // An instance of this class is basically our notion of a "sync client" for
 // automation purposes. It harnesses the ProfileSyncService member of the
 // profile passed to it on construction and automates certain things like setup
@@ -46,6 +48,9 @@ class ProfileSyncServiceHarness {
 
   // Signs in to a primary account without actually enabling sync the feature.
   bool SignInPrimaryAccount();
+
+  // This is similar to click the reset button on chrome.google.com/sync.
+  void ResetSyncForPrimaryAccount();
 
 #if !defined(OS_CHROMEOS)
   // Signs out of the primary account. ChromeOS doesn't have the concept of
@@ -104,11 +109,6 @@ class ProfileSyncServiceHarness {
   // Starts the sync service after a previous stop.
   bool StartSyncService();
 
-  // Returns whether this client has unsynced items. Avoid verifying false
-  // return values, because tests typically shouldn't make assumptions about
-  // other datatypes.
-  bool HasUnsyncedItems();
-
   // Calling this acts as a barrier and blocks the caller until |this| and
   // |partner| have both completed a sync cycle.  When calling this method,
   // the |partner| should be the passive responder who responds to the actions
@@ -133,7 +133,8 @@ class ProfileSyncServiceHarness {
 
   // Blocks the caller until sync setup is complete, and sync-the-feature is
   // active. Returns true if and only if sync setup completed successfully. Make
-  // sure to call SetupSync() or one of its variants before.
+  // sure to actually start sync setup (usually by calling SetupSync() or one of
+  // its variants) before.
   bool AwaitSyncSetupCompletion();
 
   // Blocks the caller until the sync transport layer is active. Returns true if
@@ -154,8 +155,8 @@ class ProfileSyncServiceHarness {
   // all corresponding datatypes). Returns true on success.
   bool DisableSyncForType(syncer::UserSelectableType type);
 
-  // Enables sync for all sync datatypes. Returns true on success.
-  bool EnableSyncForAllDatatypes();
+  // Enables sync for all registered sync datatypes. Returns true on success.
+  bool EnableSyncForRegisteredDatatypes();
 
   // Disables sync for all sync datatypes. Returns true on success.
   bool DisableSyncForAllDatatypes();
@@ -216,6 +217,9 @@ class ProfileSyncServiceHarness {
 
   // Used for logging.
   const std::string profile_debug_name_;
+
+  // Delegate to sign-in the test account across platforms.
+  std::unique_ptr<SyncSigninDelegate> signin_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceHarness);
 };

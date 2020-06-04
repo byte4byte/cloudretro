@@ -79,7 +79,6 @@ public class ImeUtils {
             } else if (inputType == TextInputType.NUMBER) {
                 // Number
                 outAttrs.inputType = InputType.TYPE_CLASS_NUMBER
-                        | InputType.TYPE_NUMBER_VARIATION_NORMAL
                         | InputType.TYPE_NUMBER_FLAG_DECIMAL;
             }
         } else {
@@ -105,8 +104,10 @@ public class ImeUtils {
                             | InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
                     break;
                 case WebTextInputMode.NUMERIC:
-                    outAttrs.inputType =
-                            InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_NORMAL;
+                    outAttrs.inputType = InputType.TYPE_CLASS_NUMBER;
+                    if (inputType == TextInputType.PASSWORD) {
+                        outAttrs.inputType |= InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+                    }
                     break;
                 case WebTextInputMode.DECIMAL:
                     outAttrs.inputType =
@@ -130,7 +131,8 @@ public class ImeUtils {
             outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
         }
 
-        if ((inputFlags & WebTextInputFlags.HAS_BEEN_PASSWORD_FIELD) != 0) {
+        if ((inputFlags & WebTextInputFlags.HAS_BEEN_PASSWORD_FIELD) != 0
+                && (outAttrs.inputType & InputType.TYPE_NUMBER_VARIATION_PASSWORD) == 0) {
             outAttrs.inputType =
                     InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
         }

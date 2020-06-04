@@ -4,9 +4,8 @@
 
 #include "ash/system/tray/actionable_view.h"
 
-#include "ash/public/cpp/ash_constants.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
@@ -16,7 +15,6 @@
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/painter.h"
-#include "ui/views/view_class_properties.h"
 
 namespace ash {
 
@@ -28,11 +26,13 @@ ActionableView::ActionableView(TrayPopupInkDropStyle ink_drop_style)
       destroyed_(nullptr),
       ink_drop_style_(ink_drop_style) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
-  set_ink_drop_base_color(kTrayPopupInkDropBaseColor);
-  set_ink_drop_visible_opacity(kTrayPopupInkDropRippleOpacity);
   set_has_ink_drop_action_on_click(false);
   set_notify_enter_exit_on_child(true);
+  // TODO(pbos): Replace the use of FocusPainter with the FocusRing (using the
+  // below HighlightPathGenerator).
+  SetInstallFocusRingOnFocus(false);
   SetFocusPainter(TrayPopupUtils::CreateFocusPainter());
+  TrayPopupUtils::InstallHighlightPathGenerator(this, ink_drop_style_);
 }
 
 ActionableView::~ActionableView() {
@@ -64,26 +64,24 @@ void ActionableView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetName(GetAccessibleName());
 }
 
-void ActionableView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  SetProperty(
-      views::kHighlightPathKey,
-      TrayPopupUtils::CreateHighlightPath(ink_drop_style_, this).release());
-  Button::OnBoundsChanged(previous_bounds);
-}
-
 std::unique_ptr<views::InkDrop> ActionableView::CreateInkDrop() {
   return TrayPopupUtils::CreateInkDrop(this);
 }
 
 std::unique_ptr<views::InkDropRipple> ActionableView::CreateInkDropRipple()
     const {
+  // TODO(minch): Do not hard code the background color. Add it as a constructor
+  // argument to ActionableView.
   return TrayPopupUtils::CreateInkDropRipple(
-      ink_drop_style_, this, GetInkDropCenterBasedOnLastEvent());
+      ink_drop_style_, this, GetInkDropCenterBasedOnLastEvent(), SK_ColorWHITE);
 }
 
 std::unique_ptr<views::InkDropHighlight>
 ActionableView::CreateInkDropHighlight() const {
-  return TrayPopupUtils::CreateInkDropHighlight(ink_drop_style_, this);
+  // TODO(minch): Do not hard code the background color. Add it as a constructor
+  // argument to ActionableView.
+  return TrayPopupUtils::CreateInkDropHighlight(ink_drop_style_, this,
+                                                SK_ColorWHITE);
 }
 
 void ActionableView::ButtonPressed(Button* sender, const ui::Event& event) {
@@ -95,16 +93,6 @@ void ActionableView::ButtonPressed(Button* sender, const ui::Event& event) {
   destroyed_ = nullptr;
 
   HandlePerformActionResult(action_performed, event);
-}
-
-ButtonListenerActionableView::ButtonListenerActionableView(
-    TrayPopupInkDropStyle ink_drop_style,
-    views::ButtonListener* listener)
-    : ActionableView(ink_drop_style), listener_(listener) {}
-
-bool ButtonListenerActionableView::PerformAction(const ui::Event& event) {
-  listener_->ButtonPressed(this, event);
-  return true;
 }
 
 }  // namespace ash

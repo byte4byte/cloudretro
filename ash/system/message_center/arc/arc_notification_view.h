@@ -9,6 +9,10 @@
 #include "base/macros.h"
 #include "ui/message_center/views/message_view.h"
 
+namespace aura {
+class Window;
+}
+
 namespace arc {
 class ArcAccessibilityHelperBridgeTest;
 }
@@ -56,7 +60,7 @@ class ArcNotificationView : public message_center::MessageView,
   void OnSnoozeButtonPressed(const ui::Event& event) override;
   void UpdateCornerRadius(int top_radius, int bottom_radius) override;
 
-  // message_center::SlideOutController::Delegate:
+  // views::SlideOutControllerDelegate:
   void OnSlideChanged(bool in_progress) override;
 
   // Overridden from views::View:
@@ -71,6 +75,9 @@ class ArcNotificationView : public message_center::MessageView,
 
   // ArcNotificationItem::Observer
   void OnItemDestroying() override;
+
+  // Returns the native container view for notification surface.
+  aura::Window* GetNativeContainerWindowForTest() const;
 
  private:
   friend class ArcNotificationContentViewTest;

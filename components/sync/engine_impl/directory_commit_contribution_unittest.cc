@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/stl_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/sync/engine_impl/cycle/directory_type_debug_info_emitter.h"
 #include "components/sync/syncable/entry.h"
 #include "components/sync/syncable/mutable_entry.h"
@@ -93,7 +93,7 @@ class DirectoryCommitContributionTest : public ::testing::Test {
 
  private:
   // Neeed to initialize the directory.
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   TestDirectorySetterUpper dir_maker_;
 };
 
@@ -239,7 +239,7 @@ TEST_F(DirectoryCommitContributionTest, DeletedBookmarksWithSpecifics) {
     sync_pb::EntitySpecifics specifics;
     sync_pb::BookmarkSpecifics* bm_specifics = specifics.mutable_bookmark();
     bm_specifics->set_url("http://www.chrome.com");
-    bm_specifics->set_title("Chrome");
+    bm_specifics->set_legacy_canonicalized_title("Chrome");
     sync_pb::MetaInfo* meta_info = bm_specifics->add_meta_info();
     meta_info->set_key("K");
     meta_info->set_value("V");
@@ -282,7 +282,7 @@ TEST_F(DirectoryCommitContributionTest, HierarchySupport_Bookmark) {
     sync_pb::EntitySpecifics specifics;
     sync_pb::BookmarkSpecifics* bm_specifics = specifics.mutable_bookmark();
     bm_specifics->set_url("http://www.chrome.com");
-    bm_specifics->set_title("Chrome");
+    bm_specifics->set_legacy_canonicalized_title("Chrome");
     e.PutSpecifics(specifics);
 
     e.PutIsDel(false);
@@ -317,7 +317,7 @@ TEST_F(DirectoryCommitContributionTest,
     sync_pb::EntitySpecifics specifics;
     sync_pb::BookmarkSpecifics* bm_specifics = specifics.mutable_bookmark();
     bm_specifics->set_url("http://www.chrome.com");
-    bm_specifics->set_title("Chrome");
+    bm_specifics->set_legacy_canonicalized_title("Chrome");
     e.PutSpecifics(specifics);
     e.PutIsDel(false);
     e.PutIsUnsynced(true);

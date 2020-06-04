@@ -20,7 +20,9 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
-import org.chromium.components.signin.AccountManagerFacade;
+import org.chromium.components.signin.AccountManagerFacadeImpl;
+import org.chromium.components.signin.AccountManagerFacadeProvider;
+import org.chromium.components.signin.AccountUtils;
 import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.signin.test.util.AccountHolder;
 import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
@@ -139,13 +141,16 @@ public class AndroidSyncSettingsTest {
     private void setupTestAccounts() {
         mAccountManager = new FakeAccountManagerDelegate(
                 FakeAccountManagerDelegate.DISABLE_PROFILE_DATA_SOURCE);
-        AccountManagerFacade.overrideAccountManagerFacadeForTests(mAccountManager);
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            AccountManagerFacadeProvider.setInstanceForTests(
+                    new AccountManagerFacadeImpl(mAccountManager));
+        });
         mAccount = addTestAccount("account@example.com");
         mAlternateAccount = addTestAccount("alternate@example.com");
     }
 
     private Account addTestAccount(String name) {
-        Account account = AccountManagerFacade.createAccountFromName(name);
+        Account account = AccountUtils.createAccountFromName(name);
         AccountHolder holder = AccountHolder.builder(account).alwaysAccept(true).build();
         mAccountManager.addAccountHolderBlocking(holder);
         return account;
@@ -174,7 +179,7 @@ public class AndroidSyncSettingsTest {
         });
     }
 
-    private void updateAccountSync(Account account) throws InterruptedException, TimeoutException {
+    private void updateAccountSync(Account account) throws TimeoutException {
         updateAccount(account);
         mCallbackHelper.waitForCallback(0, mNumberOfCallsToWait);
     }
@@ -193,7 +198,7 @@ public class AndroidSyncSettingsTest {
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testAccountInitialization() throws InterruptedException, TimeoutException {
+    public void testAccountInitialization() throws TimeoutException {
         // mAccount was set to be syncable and not have periodic syncs.
         Assert.assertEquals(1, mSyncContentResolverDelegate.mSetIsSyncableCalls.get());
         Assert.assertEquals(1, mSyncContentResolverDelegate.mRemovePeriodicSyncCalls.get());
@@ -365,7 +370,7 @@ public class AndroidSyncSettingsTest {
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testGetContractAuthority() throws Exception {
+    public void testGetContractAuthority() {
         Assert.assertEquals("The contract authority should be the package name.",
                 InstrumentationRegistry.getTargetContext().getPackageName(),
                 AndroidSyncSettings.get().getContractAuthority());
@@ -413,8 +418,7 @@ public class AndroidSyncSettingsTest {
     @Test
     @SmallTest
     @Feature({"Sync"})
-    public void testIsSyncableOnSigninAndNotOnSignout()
-            throws InterruptedException, TimeoutException {
+    public void testIsSyncableOnSigninAndNotOnSignout() throws TimeoutException {
         Assert.assertEquals(1, mSyncContentResolverDelegate.getIsSyncable(mAccount, mAuthority));
 
         updateAccountWithCallback(null, (Boolean result) -> {

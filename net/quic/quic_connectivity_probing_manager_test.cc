@@ -45,21 +45,29 @@ class MockQuicChromiumClientSession
   ~MockQuicChromiumClientSession() override {}
 
   // QuicChromiumPacketReader::Visitor interface.
-  MOCK_METHOD2(OnReadError,
-               void(int result, const DatagramClientSocket* socket));
+  MOCK_METHOD(void,
+              OnReadError,
+              (int result, const DatagramClientSocket* socket),
+              (override));
 
-  MOCK_METHOD3(OnPacket,
-               bool(const quic::QuicReceivedPacket& packet,
-                    const quic::QuicSocketAddress& local_address,
-                    const quic::QuicSocketAddress& peer_address));
+  MOCK_METHOD(bool,
+              OnPacket,
+              (const quic::QuicReceivedPacket& packet,
+               const quic::QuicSocketAddress& local_address,
+               const quic::QuicSocketAddress& peer_address),
+              (override));
 
-  MOCK_METHOD2(OnProbeFailed,
-               void(NetworkChangeNotifier::NetworkHandle network,
-                    const quic::QuicSocketAddress& peer_address));
+  MOCK_METHOD(void,
+              OnProbeFailed,
+              (NetworkChangeNotifier::NetworkHandle network,
+               const quic::QuicSocketAddress& peer_address),
+              (override));
 
-  MOCK_METHOD2(OnSendConnectivityProbingPacket,
-               bool(QuicChromiumPacketWriter* writer,
-                    const quic::QuicSocketAddress& peer_address));
+  MOCK_METHOD(bool,
+              OnSendConnectivityProbingPacket,
+              (QuicChromiumPacketWriter * writer,
+               const quic::QuicSocketAddress& peer_address),
+              (override));
 
   void OnProbeSucceeded(
       NetworkChangeNotifier::NetworkHandle network,
@@ -140,8 +148,8 @@ class QuicConnectivityProbingManagerTest : public ::testing::Test {
 
   quic::MockClock clock_;
   MockClientSocketFactory socket_factory_;
-  TestNetLog net_log_;
-  BoundTestNetLog bound_test_net_log_;
+  RecordingTestNetLog net_log_;
+  RecordingBoundTestNetLog bound_test_net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectivityProbingManagerTest);
 };
@@ -185,8 +193,7 @@ TEST_F(QuicConnectivityProbingManagerTest, ReceiveProbingResponseOnSamePath) {
   // packet for this probing.
   EXPECT_CALL(session_, OnSendConnectivityProbingPacket(_, testPeerAddress))
       .Times(0);
-  probing_manager_.OnConnectivityProbingReceived(self_address_,
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(self_address_, testPeerAddress, true);
   EXPECT_TRUE(session_.is_successfully_probed());
   EXPECT_TRUE(session_.IsProbedPathMatching(testNetworkHandle, testPeerAddress,
                                             self_address_));
@@ -237,8 +244,8 @@ TEST_F(QuicConnectivityProbingManagerTest,
   // probing response and continue waiting.
   EXPECT_CALL(session_, OnSendConnectivityProbingPacket(_, testPeerAddress))
       .Times(0);
-  probing_manager_.OnConnectivityProbingReceived(quic::QuicSocketAddress(),
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(quic::QuicSocketAddress(), testPeerAddress,
+                                    true);
   EXPECT_FALSE(session_.is_successfully_probed());
   EXPECT_EQ(1u, test_task_runner_->GetPendingTaskCount());
 
@@ -253,8 +260,7 @@ TEST_F(QuicConnectivityProbingManagerTest,
   // Finally receive the probing response on the same path.
   EXPECT_CALL(session_, OnSendConnectivityProbingPacket(_, testPeerAddress))
       .Times(0);
-  probing_manager_.OnConnectivityProbingReceived(self_address_,
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(self_address_, testPeerAddress, true);
   EXPECT_TRUE(session_.is_successfully_probed());
   EXPECT_TRUE(session_.IsProbedPathMatching(testNetworkHandle, testPeerAddress,
                                             self_address_));
@@ -307,8 +313,8 @@ TEST_F(QuicConnectivityProbingManagerTest,
   uint16_t different_port = self_address_.port() + 1;
   quic::QuicSocketAddress different_self_address(self_address_.host(),
                                                  different_port);
-  probing_manager_.OnConnectivityProbingReceived(different_self_address,
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(different_self_address, testPeerAddress,
+                                    true);
   EXPECT_EQ(1u, test_task_runner_->GetPendingTaskCount());
   // Verify that session's probed network is still not valid.
   EXPECT_FALSE(session_.is_successfully_probed());
@@ -325,8 +331,7 @@ TEST_F(QuicConnectivityProbingManagerTest,
   // address.
   EXPECT_CALL(session_, OnSendConnectivityProbingPacket(_, testPeerAddress))
       .Times(0);
-  probing_manager_.OnConnectivityProbingReceived(self_address_,
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(self_address_, testPeerAddress, true);
   // Verify that session's probed network is not valid yet.
   EXPECT_TRUE(session_.is_successfully_probed());
   EXPECT_TRUE(session_.IsProbedPathMatching(
@@ -524,8 +529,7 @@ TEST_F(QuicConnectivityProbingManagerTest,
   // successful, notify delegate and will no longer send connectivity probes.
   EXPECT_CALL(session_, OnSendConnectivityProbingPacket(_, testPeerAddress))
       .Times(0);
-  probing_manager_.OnConnectivityProbingReceived(self_address_,
-                                                 testPeerAddress);
+  probing_manager_.OnPacketReceived(self_address_, testPeerAddress, true);
 
   // Verify that session marked <kInvalidNetworkHandle, testPeerAddress> as
   // successfully probed.

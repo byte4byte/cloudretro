@@ -10,8 +10,8 @@
 
 #include "base/macros.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/mixin_based_in_process_browser_test.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
+#include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/cloud_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
@@ -65,11 +65,6 @@ class LocalPolicyTestServerMixin : public InProcessBrowserTestMixin {
                         const base::Value& recommended_policy,
                         const std::string& policy_user);
 
-  // Configures and sets expectations for enrollment flow with license
-  // selection. Non-negative values indicate number of available licenses.
-  // There should be at least one license type.
-  void ExpectAvailableLicenseCount(int perpetual, int annual, int kiosk);
-
   void ExpectTokenEnrollment(const std::string& enrollment_token,
                              const std::string& token_creator);
 
@@ -112,9 +107,21 @@ class LocalPolicyTestServerMixin : public InProcessBrowserTestMixin {
   void ConfigureFakeStatisticsForZeroTouch(
       system::ScopedFakeStatisticsProvider* provider);
 
+  // Enables the usage of keys canned into the policy test server, instead of
+  // specifying to it the test key to be used.  This must be called before
+  // starting the server.
+  void EnableCannedSigningKeys();
+
+  // Enables the automatic rotation of the policy signing keys with each policy
+  // fetch request. This must be called before starting the server, and only
+  // works when the server serves from a temporary directory.
+  void EnableAutomaticRotationOfSigningKeys();
+
  private:
   std::unique_ptr<policy::LocalPolicyTestServer> policy_test_server_;
   base::Value server_config_;
+  bool canned_signing_keys_enabled_ = false;
+  bool automatic_rotation_of_signing_keys_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(LocalPolicyTestServerMixin);
 };

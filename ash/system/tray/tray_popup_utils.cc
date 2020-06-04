@@ -13,9 +13,13 @@
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/size_range_layout.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/unfocusable_label.h"
+#include "ash/system/unified/unified_system_tray_view.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
@@ -23,11 +27,11 @@
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
-#include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/animation/square_ink_drop_ripple.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/button/toggle_button.h"
+#include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/separator.h"
@@ -105,6 +109,46 @@ void ConfigureDefaultSizeAndFlex(TriView* tri_view,
       gfx::Size(SizeRangeLayout::kAbsoluteMaxSize, kTrayPopupItemMaxHeight));
 }
 
+gfx::Insets GetInkDropInsets(TrayPopupInkDropStyle ink_drop_style) {
+  if (ink_drop_style == TrayPopupInkDropStyle::HOST_CENTERED ||
+      ink_drop_style == TrayPopupInkDropStyle::INSET_BOUNDS) {
+    return gfx::Insets(kTrayPopupInkDropInset);
+  }
+  return gfx::Insets();
+}
+
+class HighlightPathGenerator : public views::HighlightPathGenerator {
+ public:
+  explicit HighlightPathGenerator(TrayPopupInkDropStyle ink_drop_style)
+      : ink_drop_style_(ink_drop_style) {}
+
+  HighlightPathGenerator(const HighlightPathGenerator&) = delete;
+  HighlightPathGenerator& operator=(const HighlightPathGenerator&) = delete;
+
+  // views::HighlightPathGenerator:
+  base::Optional<gfx::RRectF> GetRoundRect(const gfx::RectF& rect) override {
+    gfx::RectF bounds = rect;
+    bounds.Inset(GetInkDropInsets(ink_drop_style_));
+    float corner_radius = 0.f;
+    switch (ink_drop_style_) {
+      case TrayPopupInkDropStyle::HOST_CENTERED:
+        corner_radius = std::min(bounds.width(), bounds.height()) / 2.f;
+        bounds.ClampToCenteredSize(gfx::SizeF(corner_radius, corner_radius));
+        break;
+      case TrayPopupInkDropStyle::INSET_BOUNDS:
+        corner_radius = kTrayPopupInkDropCornerRadius;
+        break;
+      case TrayPopupInkDropStyle::FILL_BOUNDS:
+        break;
+    }
+
+    return gfx::RRectF(bounds, corner_radius);
+  }
+
+ private:
+  const TrayPopupInkDropStyle ink_drop_style_;
+};
+
 }  // namespace
 
 TriView* TrayPopupUtils::CreateDefaultRowView() {
@@ -160,19 +204,17 @@ views::Label* TrayPopupUtils::CreateDefaultLabel() {
   return label;
 }
 
+UnfocusableLabel* TrayPopupUtils::CreateUnfocusableLabel() {
+  UnfocusableLabel* label = new UnfocusableLabel();
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  label->SetSubpixelRenderingEnabled(false);
+  return label;
+}
+
 views::ImageView* TrayPopupUtils::CreateMainImageView() {
   auto* image = new views::ImageView;
   image->SetPreferredSize(
       gfx::Size(kTrayPopupItemMinStartWidth, kTrayPopupItemMinHeight));
-  return image;
-}
-
-views::ImageView* TrayPopupUtils::CreateMoreImageView() {
-  auto* image = new views::ImageView;
-  image->SetPreferredSize(gfx::Size(gfx::Size(kMenuIconSize, kMenuIconSize)));
-  image->EnableCanvasFlippingForRTLUI(true);
-  image->SetImage(
-      gfx::CreateVectorIcon(kSystemMenuArrowRightIcon, kMenuIconColor));
   return image;
 }
 
@@ -186,6 +228,16 @@ views::Slider* TrayPopupUtils::CreateSlider(views::SliderListener* listener) {
 views::ToggleButton* TrayPopupUtils::CreateToggleButton(
     views::ButtonListener* listener,
     int accessible_name_id) {
+  constexpr SkColor kTrackAlpha = 0x66;
+  auto GetColor = [](bool is_on, SkAlpha alpha = SK_AlphaOPAQUE) {
+    AshColorProvider::ContentLayerType type =
+        is_on ? AshColorProvider::ContentLayerType::kProminentIconButton
+              : AshColorProvider::ContentLayerType::kTextPrimary;
+
+    return SkColorSetA(AshColorProvider::Get()->GetContentLayerColor(
+                           type, AshColorProvider::AshColorMode::kDark),
+                       alpha);
+  };
   views::ToggleButton* toggle = new views::ToggleButton(listener);
   const gfx::Size toggle_size(toggle->GetPreferredSize());
   const int vertical_padding = (kMenuButtonSize - toggle_size.height()) / 2;
@@ -194,23 +246,24 @@ views::ToggleButton* TrayPopupUtils::CreateToggleButton(
   toggle->SetBorder(views::CreateEmptyBorder(
       gfx::Insets(vertical_padding, horizontal_padding)));
   toggle->SetAccessibleName(l10n_util::GetStringUTF16(accessible_name_id));
+  toggle->SetThumbOnColor(GetColor(true));
+  toggle->SetThumbOffColor(GetColor(false));
+  toggle->SetTrackOnColor(GetColor(true, kTrackAlpha));
+  toggle->SetTrackOffColor(GetColor(false, kTrackAlpha));
   return toggle;
 }
 
 std::unique_ptr<views::Painter> TrayPopupUtils::CreateFocusPainter() {
   return views::Painter::CreateSolidFocusPainter(
-      kFocusBorderColor, kFocusBorderThickness, gfx::InsetsF());
+      UnifiedSystemTrayView::GetFocusRingColor(), kFocusBorderThickness,
+      gfx::InsetsF());
 }
 
 void TrayPopupUtils::ConfigureTrayPopupButton(views::Button* button) {
   button->SetInstallFocusRingOnFocus(true);
   button->SetFocusForPlatform();
-
   button->SetInkDropMode(views::InkDropHostView::InkDropMode::ON);
   button->set_has_ink_drop_action_on_click(true);
-  button->set_ink_drop_base_color(kTrayPopupInkDropBaseColor);
-  button->set_ink_drop_visible_opacity(kTrayPopupInkDropRippleOpacity);
-  button->set_ink_drop_highlight_opacity(kTrayPopupInkDropHighlightOpacity);
 }
 
 void TrayPopupUtils::ConfigureAsStickyHeader(views::View* view) {
@@ -237,7 +290,9 @@ views::LabelButton* TrayPopupUtils::CreateTrayPopupButton(
 views::Separator* TrayPopupUtils::CreateVerticalSeparator() {
   views::Separator* separator = new views::Separator();
   separator->SetPreferredHeight(24);
-  separator->SetColor(kMenuSeparatorColor);
+  separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kSeparator,
+      AshColorProvider::AshColorMode::kLight));
   return separator;
 }
 
@@ -248,7 +303,6 @@ std::unique_ptr<views::InkDrop> TrayPopupUtils::CreateInkDrop(
   ink_drop->SetAutoHighlightMode(
       views::InkDropImpl::AutoHighlightMode::SHOW_ON_RIPPLE);
   ink_drop->SetShowHighlightOnHover(false);
-
   return std::move(ink_drop);
 }
 
@@ -256,73 +310,38 @@ std::unique_ptr<views::InkDropRipple> TrayPopupUtils::CreateInkDropRipple(
     TrayPopupInkDropStyle ink_drop_style,
     const views::View* host,
     const gfx::Point& center_point,
-    SkColor color) {
+    SkColor background_color) {
+  const AshColorProvider::RippleAttributes ripple_attributes =
+      AshColorProvider::Get()->GetRippleAttributes(background_color);
   return std::make_unique<views::FloodFillInkDropRipple>(
-      host->size(), TrayPopupUtils::GetInkDropInsets(ink_drop_style),
-      center_point, color, kTrayPopupInkDropRippleOpacity);
+      host->size(), GetInkDropInsets(ink_drop_style), center_point,
+      ripple_attributes.base_color, ripple_attributes.inkdrop_opacity);
 }
 
 std::unique_ptr<views::InkDropHighlight> TrayPopupUtils::CreateInkDropHighlight(
     TrayPopupInkDropStyle ink_drop_style,
     const views::View* host,
-    SkColor color) {
-  const gfx::Rect bounds =
-      TrayPopupUtils::GetInkDropBounds(ink_drop_style, host);
-  std::unique_ptr<views::InkDropHighlight> highlight(
-      new views::InkDropHighlight(bounds.size(), 0,
-                                  gfx::PointF(bounds.CenterPoint()), color));
-  highlight->set_visible_opacity(kTrayPopupInkDropHighlightOpacity);
+    SkColor background_color) {
+  const AshColorProvider::RippleAttributes ripple_attributes =
+      AshColorProvider::Get()->GetRippleAttributes(background_color);
+  auto highlight = std::make_unique<views::InkDropHighlight>(
+      gfx::SizeF(host->size()), ripple_attributes.base_color);
+  highlight->set_visible_opacity(ripple_attributes.highlight_opacity);
   return highlight;
 }
 
-std::unique_ptr<SkPath> TrayPopupUtils::CreateHighlightPath(
-    TrayPopupInkDropStyle ink_drop_style,
-    const views::View* host) {
-  auto path = std::make_unique<SkPath>();
-
-  const gfx::Rect mask_bounds =
-      GetInkDropBounds(TrayPopupInkDropStyle::HOST_CENTERED, host);
-  switch (ink_drop_style) {
-    case TrayPopupInkDropStyle::HOST_CENTERED: {
-      gfx::Point center_point = mask_bounds.CenterPoint();
-      const int radius =
-          std::min(mask_bounds.width(), mask_bounds.height()) / 2;
-      path->addCircle(center_point.x(), center_point.y(), radius);
-      break;
-    }
-    case TrayPopupInkDropStyle::INSET_BOUNDS:
-      path->addRoundRect(RectToSkRect(mask_bounds),
-                         kTrayPopupInkDropCornerRadius,
-                         kTrayPopupInkDropCornerRadius);
-      break;
-    case TrayPopupInkDropStyle::FILL_BOUNDS:
-      path->addRect(RectToSkRect(mask_bounds));
-      break;
-  }
-  return path;
-}
-
-gfx::Insets TrayPopupUtils::GetInkDropInsets(
+void TrayPopupUtils::InstallHighlightPathGenerator(
+    views::View* host,
     TrayPopupInkDropStyle ink_drop_style) {
-  gfx::Insets insets;
-  if (ink_drop_style == TrayPopupInkDropStyle::HOST_CENTERED ||
-      ink_drop_style == TrayPopupInkDropStyle::INSET_BOUNDS) {
-    insets.Set(kTrayPopupInkDropInset, kTrayPopupInkDropInset,
-               kTrayPopupInkDropInset, kTrayPopupInkDropInset);
-  }
-  return insets;
-}
-
-gfx::Rect TrayPopupUtils::GetInkDropBounds(TrayPopupInkDropStyle ink_drop_style,
-                                           const views::View* host) {
-  gfx::Rect bounds = host->GetLocalBounds();
-  bounds.Inset(GetInkDropInsets(ink_drop_style));
-  return bounds;
+  views::HighlightPathGenerator::Install(
+      host, std::make_unique<HighlightPathGenerator>(ink_drop_style));
 }
 
 views::Separator* TrayPopupUtils::CreateListItemSeparator(bool left_inset) {
   views::Separator* separator = new views::Separator();
-  separator->SetColor(kMenuSeparatorColor);
+  separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kSeparator,
+      AshColorProvider::AshColorMode::kLight));
   separator->SetBorder(views::CreateEmptyBorder(
       kMenuSeparatorVerticalPadding - views::Separator::kThickness,
       left_inset
@@ -338,9 +357,17 @@ bool TrayPopupUtils::CanOpenWebUISettings() {
 }
 
 void TrayPopupUtils::InitializeAsCheckableRow(HoverHighlightView* container,
-                                              bool checked) {
+                                              bool checked,
+                                              bool enterprise_managed) {
+  const int dip_size = GetDefaultSizeOfVectorIcon(kCheckCircleIcon);
   gfx::ImageSkia check_mark =
-      CreateVectorIcon(kCheckCircleIcon, gfx::kGoogleGreenDark600);
+      CreateVectorIcon(kHollowCheckCircleIcon, dip_size, gfx::kGoogleGreen300);
+  if (enterprise_managed) {
+    gfx::ImageSkia enterprise_managed_icon = CreateVectorIcon(
+        kLoginScreenEnterpriseIcon, dip_size, gfx::kGoogleGrey100);
+    container->AddRightIcon(enterprise_managed_icon,
+                            enterprise_managed_icon.width());
+  }
   container->AddRightIcon(check_mark, check_mark.width());
   UpdateCheckMarkVisibility(container, checked);
 }
@@ -348,7 +375,7 @@ void TrayPopupUtils::InitializeAsCheckableRow(HoverHighlightView* container,
 void TrayPopupUtils::UpdateCheckMarkVisibility(HoverHighlightView* container,
                                                bool visible) {
   container->SetRightViewVisible(visible);
-  container->SetAccessiblityState(
+  container->SetAccessibilityState(
       visible ? HoverHighlightView::AccessibilityState::CHECKED_CHECKBOX
               : HoverHighlightView::AccessibilityState::UNCHECKED_CHECKBOX);
 }

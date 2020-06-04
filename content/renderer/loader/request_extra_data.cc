@@ -15,16 +15,13 @@ RequestExtraData::~RequestExtraData() = default;
 
 void RequestExtraData::CopyToResourceRequest(
     network::ResourceRequest* request) const {
-  request->is_prerendering = is_prerendering_;
   request->render_frame_id = render_frame_id_;
   request->is_main_frame = is_main_frame_;
 
-  request->allow_download = allow_download_;
   request->transition_type = transition_type_;
   request->originated_from_service_worker = originated_from_service_worker_;
 
-  request->initiated_in_secure_context = initiated_in_secure_context_;
-  request->attach_same_site_cookies = attach_same_site_cookies_;
+  request->force_ignore_site_for_cookies = force_ignore_site_for_cookies_;
 }
 
 }  // namespace content

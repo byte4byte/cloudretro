@@ -9,14 +9,12 @@
 #include "base/logging.h"
 #import "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
-#import "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
 #import "content/browser/accessibility/browser_accessibility_mac.h"
-#include "content/common/accessibility_messages.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
@@ -108,9 +106,8 @@ namespace content {
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
     const ui::AXTreeUpdate& initial_tree,
-    BrowserAccessibilityDelegate* delegate,
-    BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManagerMac(initial_tree, delegate, factory);
+    BrowserAccessibilityDelegate* delegate) {
+  return new BrowserAccessibilityManagerMac(initial_tree, delegate);
 }
 
 BrowserAccessibilityManagerMac*
@@ -120,11 +117,10 @@ BrowserAccessibilityManager::ToBrowserAccessibilityManagerMac() {
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
     const ui::AXTreeUpdate& initial_tree,
-    BrowserAccessibilityDelegate* delegate,
-    BrowserAccessibilityFactory* factory)
-    : BrowserAccessibilityManager(delegate, factory) {
+    BrowserAccessibilityDelegate* delegate)
+    : BrowserAccessibilityManager(delegate) {
   Initialize(initial_tree);
-  tree_->SetEnableExtraMacNodes(true);
+  ax_tree()->SetEnableExtraMacNodes(true);
 }
 
 BrowserAccessibilityManagerMac::~BrowserAccessibilityManagerMac() {}
@@ -142,13 +138,15 @@ ui::AXTreeUpdate BrowserAccessibilityManagerMac::GetEmptyDocument() {
 
 BrowserAccessibility* BrowserAccessibilityManagerMac::GetFocus() const {
   BrowserAccessibility* focus = BrowserAccessibilityManager::GetFocus();
+  if (!focus)
+    return nullptr;
 
   // For editable combo boxes, focus should stay on the combo box so the user
   // will not be taken out of the combo box while typing.
-  if (focus && focus->GetRole() == ax::mojom::Role::kTextFieldWithComboBox)
+  if (focus->GetRole() == ax::mojom::Role::kTextFieldWithComboBox)
     return focus;
 
-  // For other roles, follow the active descendant.
+  // Otherwise, follow the active descendant.
   return GetActiveDescendant(focus);
 }
 
@@ -183,18 +181,28 @@ void PostAnnouncementNotification(NSString* announcement) {
     NSAccessibilityAnnouncementKey : announcement,
     NSAccessibilityPriorityKey : @(NSAccessibilityPriorityLow)
   };
+  // Trigger VoiceOver speech and show on Braille display, if available.
+  // The Braille will only appear for a few seconds, and then will be replaced
+  // with the previous announcement.
   NSAccessibilityPostNotificationWithUserInfo(
       [NSApp mainWindow], NSAccessibilityAnnouncementRequestedNotification,
       notification_info);
+}
+
+// Check whether the current batch of events contains the event type.
+bool BrowserAccessibilityManagerMac::IsInGeneratedEventBatch(
+    ui::AXEventGenerator::Event event_type) const {
+  for (const auto& event : event_generator()) {
+    if (event.event_params.event == event_type)
+      return true;  // Announcement will already be handled via this event.
+  }
+  return false;
 }
 
 void BrowserAccessibilityManagerMac::FireGeneratedEvent(
     ui::AXEventGenerator::Event event_type,
     BrowserAccessibility* node) {
   BrowserAccessibilityManager::FireGeneratedEvent(event_type, node);
-  if (!node->IsNative())
-    return;
-
   auto native_node = ToBrowserAccessibilityCocoa(node);
   DCHECK(native_node);
 
@@ -226,6 +234,10 @@ void BrowserAccessibilityManagerMac::FireGeneratedEvent(
         mac_notification = NSAccessibilityLayoutCompleteNotification;
       }
       break;
+    case ui::AXEventGenerator::Event::PORTAL_ACTIVATED:
+      DCHECK(IsRootTree());
+      mac_notification = NSAccessibilityLoadCompleteNotification;
+      break;
     case ui::AXEventGenerator::Event::INVALID_STATUS_CHANGED:
       mac_notification = NSAccessibilityInvalidStatusChangedNotification;
       break;
@@ -233,6 +245,30 @@ void BrowserAccessibilityManagerMac::FireGeneratedEvent(
       if (ui::IsTableLike(node->GetRole())) {
         mac_notification = NSAccessibilitySelectedRowsChangedNotification;
       } else {
+        // VoiceOver does not read anything if selection changes on the
+        // currently focused object, and the focus did not move. Detect a
+        // selection change in a where the focus did not change.
+        BrowserAccessibility* focus = GetFocus();
+        BrowserAccessibility* container =
+            focus->PlatformGetSelectionContainer();
+
+        if (focus && node == container &&
+            container->HasState(ax::mojom::State::kMultiselectable) &&
+            !IsInGeneratedEventBatch(
+                ui::AXEventGenerator::Event::ACTIVE_DESCENDANT_CHANGED) &&
+            !IsInGeneratedEventBatch(
+                ui::AXEventGenerator::Event::FOCUS_CHANGED)) {
+          // Force announcement of current focus / activedescendant, even though
+          // it's not changing. This way, the user can hear the new selection
+          // state of the current object. Because VoiceOver ignores focus events
+          // to an already focused object, this is done by destroying the native
+          // object and creating a new one that receives focus.
+          static_cast<BrowserAccessibilityMac*>(focus)->ReplaceNativeObject();
+          // Don't fire selected children change, it will sometimes override
+          // announcement of current focus.
+          return;
+        }
+
         mac_notification = NSAccessibilitySelectedChildrenChangedNotification;
       }
       break;
@@ -336,7 +372,7 @@ void BrowserAccessibilityManagerMac::FireGeneratedEvent(
       // Use native VoiceOver support for live regions.
       base::scoped_nsobject<BrowserAccessibilityCocoa> retained_node(
           [native_node retain]);
-      base::PostDelayedTaskWithTraits(
+      base::PostDelayedTask(
           FROM_HERE, {BrowserThread::UI},
           base::BindOnce(
               [](base::scoped_nsobject<BrowserAccessibilityCocoa> node) {
@@ -430,9 +466,6 @@ void BrowserAccessibilityManagerMac::FireGeneratedEvent(
 void BrowserAccessibilityManagerMac::FireNativeMacNotification(
     NSString* mac_notification,
     BrowserAccessibility* node) {
-  if (!node->IsNative())
-    return;
-
   DCHECK(mac_notification);
   auto native_node = ToBrowserAccessibilityCocoa(node);
   DCHECK(native_node);
@@ -455,7 +488,7 @@ void BrowserAccessibilityManagerMac::OnAtomicUpdateFinished(
   std::set<const BrowserAccessibilityCocoa*> changed_editable_roots;
   for (const auto& change : changes) {
     const BrowserAccessibility* obj = GetFromAXNode(change.node);
-    if (obj && obj->IsNative() && obj->HasState(ax::mojom::State::kEditable)) {
+    if (obj && obj->HasState(ax::mojom::State::kEditable)) {
       const BrowserAccessibilityCocoa* editable_root =
           [ToBrowserAccessibilityCocoa(obj) editableAncestor];
       if (editable_root && [editable_root instanceActive])
@@ -484,10 +517,10 @@ NSDictionary* BrowserAccessibilityManagerMac::
                 forKey:NSAccessibilityTextSelectionGranularity];
   [user_info setObject:@YES forKey:NSAccessibilityTextSelectionChangedFocus];
 
-  int32_t focus_id = GetTreeData().sel_focus_object_id;
+  int32_t focus_id = ax_tree()->GetUnignoredSelection().focus_object_id;
   BrowserAccessibility* focus_object = GetFromID(focus_id);
   if (focus_object) {
-    focus_object = focus_object->GetClosestPlatformObject();
+    focus_object = focus_object->PlatformGetClosestPlatformObject();
     auto native_focus_object = ToBrowserAccessibilityCocoa(focus_object);
     if (native_focus_object && [native_focus_object instanceActive]) {
       [user_info setObject:native_focus_object

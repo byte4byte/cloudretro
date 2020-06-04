@@ -12,13 +12,15 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/lazy_task_runner.h"
+#include "base/task/lazy_thread_pool_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
+#include "build/branding_buildflags.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/install_util.h"
@@ -41,19 +43,18 @@ const int GoogleUpdateSettings::kCheckPeriodOverrideMinutesMax =
     60 * 24 * 7 * 6;
 
 const GoogleUpdateSettings::UpdatePolicy
-GoogleUpdateSettings::kDefaultUpdatePolicy =
-#if defined(GOOGLE_CHROME_BUILD)
-    GoogleUpdateSettings::AUTOMATIC_UPDATES;
+    GoogleUpdateSettings::kDefaultUpdatePolicy =
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+        GoogleUpdateSettings::AUTOMATIC_UPDATES;
 #else
-    GoogleUpdateSettings::UPDATES_DISABLED;
+        GoogleUpdateSettings::UPDATES_DISABLED;
 #endif
 
 namespace {
 
-base::LazySequencedTaskRunner g_collect_stats_consent_task_runner =
-    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(),
-                         base::TaskPriority::USER_VISIBLE,
+base::LazyThreadPoolSequencedTaskRunner g_collect_stats_consent_task_runner =
+    LAZY_THREAD_POOL_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::TaskPriority::USER_VISIBLE,
                          base::TaskShutdownBehavior::BLOCK_SHUTDOWN));
 
 // Reads the value |name| from the app's ClientState registry key in |root| into
@@ -148,7 +149,7 @@ bool InitChannelInfo(bool system_install,
   return channel_info->Initialize(key);
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // Populates |update_policy| with the UpdatePolicy enum value corresponding to a
 // DWORD read from the registry and returns true if |value| is within range.
 // If |value| is out of range, returns false without modifying |update_policy|.
@@ -167,7 +168,7 @@ bool GetUpdatePolicyFromDword(
   }
   return false;
 }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 // Returns the stats consent tristate held in the registry keys given by the two
 // functions |state_key_fn_ptr| and |state_medium_key_fn_ptr|. The state is read
@@ -216,8 +217,8 @@ bool GoogleUpdateSettings::IsSystemInstall() {
 
 base::SequencedTaskRunner*
 GoogleUpdateSettings::CollectStatsConsentTaskRunner() {
-  // TODO(fdoray): Use LazySequencedTaskRunner::GetRaw() here instead of
-  // .Get().get() when it's added to the API, http://crbug.com/730170.
+  // TODO(fdoray): Use LazyThreadPoolSequencedTaskRunner::GetRaw() here instead
+  // of .Get().get() when it's added to the API, http://crbug.com/730170.
   return g_collect_stats_consent_task_runner.Get().get();
 }
 
@@ -256,13 +257,6 @@ bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
     StoreMetricsClientInfo(metrics::ClientInfo());
 
   return (result == ERROR_SUCCESS);
-}
-
-google_update::Tristate
-GoogleUpdateSettings::GetCollectStatsConsentForBinaries() {
-  return GetCollectStatsConsentImpl(
-      &install_static::GetClientStateKeyPathForBinaries,
-      &install_static::GetClientStateMediumKeyPathForBinaries);
 }
 
 // static
@@ -392,12 +386,6 @@ bool GoogleUpdateSettings::ClearReferral() {
   return ClearGoogleUpdateStrKey(google_update::kRegReferralField);
 }
 
-bool GoogleUpdateSettings::UpdateDidRunState(bool did_run) {
-  // Written into HKCU; read by Google Update.
-  return WriteUserGoogleUpdateStrKey(google_update::kRegDidRunField,
-                                     did_run ? L"1" : L"0");
-}
-
 void GoogleUpdateSettings::UpdateInstallStatus(bool system_install,
     installer::ArchiveType archive_type, int install_return_code,
     const base::string16& product_guid) {
@@ -484,16 +472,6 @@ bool GoogleUpdateSettings::UpdateGoogleUpdateApKey(
     DCHECK_EQ(installer::UNKNOWN_ARCHIVE_TYPE, archive_type);
   }
 
-  // The mini_installer in Chrome 10 through 12 added "-multifail" to the "ap"
-  // value if "--multi-install" was on the command line. Unconditionally remove
-  // it if present.
-  // TODO(grt): Move this cleanup into mini_installer.cc's SetInstallerFlags.
-  if (value->SetMultiFailSuffix(false)) {
-    VLOG(1) << "Removed multi-install failure key; switching to channel: "
-            << value->value();
-    modified = true;
-  }
-
   if (value->ClearStage()) {
     VLOG(1) << "Removed (legacy) stage information; switching to channel: "
             << value->value();
@@ -509,7 +487,7 @@ GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
   bool found_override = false;
   UpdatePolicy update_policy = kDefaultUpdatePolicy;
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   DCHECK(!app_guid.empty());
   RegKey policy_key;
 
@@ -518,8 +496,8 @@ GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
   if (policy_key.Open(HKEY_LOCAL_MACHINE, kPoliciesKey, KEY_QUERY_VALUE) ==
           ERROR_SUCCESS) {
     DWORD value = 0;
-    base::string16 app_update_override(kUpdateOverrideValuePrefix);
-    app_guid.AppendToString(&app_update_override);
+    base::string16 app_update_override =
+        base::StrCat({kUpdateOverrideValuePrefix, app_guid});
     // First try to read and comprehend the app-specific override.
     found_override = (policy_key.ReadValueDW(app_update_override.c_str(),
                                              &value) == ERROR_SUCCESS &&
@@ -531,7 +509,7 @@ GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
       GetUpdatePolicyFromDword(value, &update_policy);
     }
   }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   if (is_overridden != NULL)
     *is_overridden = found_override;
@@ -541,7 +519,7 @@ GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
 
 // static
 bool GoogleUpdateSettings::AreAutoupdatesEnabled() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Check the auto-update check period override. If it is 0 or exceeds the
   // maximum timeout, then for all intents and purposes auto updates are
   // disabled.
@@ -558,15 +536,15 @@ bool GoogleUpdateSettings::AreAutoupdatesEnabled() {
   UpdatePolicy app_policy =
       GetAppUpdatePolicy(install_static::GetAppGuid(), nullptr);
   return app_policy == AUTOMATIC_UPDATES || app_policy == AUTO_UPDATES_ONLY;
-#else  // defined(GOOGLE_CHROME_BUILD)
+#else   // BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Chromium does not auto update.
   return false;
-#endif  // !defined(GOOGLE_CHROME_BUILD)
+#endif  // !BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 // static
 bool GoogleUpdateSettings::ReenableAutoupdates() {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   int needs_reset_count = 0;
   int did_reset_count = 0;
 

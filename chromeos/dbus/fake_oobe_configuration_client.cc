@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chromeos/dbus/constants/dbus_switches.h"
 
 namespace {
@@ -53,7 +54,7 @@ void FakeOobeConfigurationClient::CheckForOobeConfiguration(
       base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
           chromeos::switches::kFakeOobeConfiguration);
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&LoadConfigurationFile, path),
       base::BindOnce(&OnConfigurationLoaded, std::move(callback)));

@@ -5,7 +5,7 @@
 #import "ios/chrome/browser/ui/autofill/manual_fill/chip_button.h"
 
 #include "base/mac/foundation_util.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/uicolor_manualfill.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -64,8 +64,8 @@ static const CGFloat kChipVerticalMargin = 4;
 - (void)setHighlighted:(BOOL)highlighted {
   [super setHighlighted:highlighted];
   self.backgroundView.backgroundColor =
-      highlighted ? UIColor.cr_manualFillHighlightedChipColor
-                  : UIColor.cr_manualFillChipColor;
+      highlighted ? [UIColor colorNamed:kGrey300Color]
+                  : [UIColor colorNamed:kGrey100Color];
 }
 
 - (void)setEnabled:(BOOL)enabled {
@@ -84,7 +84,7 @@ static const CGFloat kChipVerticalMargin = 4;
 - (void)initializeStyling {
   _backgroundView = [[UIView alloc] init];
   _backgroundView.userInteractionEnabled = NO;
-  _backgroundView.backgroundColor = UIColor.cr_manualFillChipColor;
+  _backgroundView.backgroundColor = [UIColor colorNamed:kGrey100Color];
   _backgroundView.translatesAutoresizingMaskIntoConstraints = NO;
 
   [self addSubview:_backgroundView];
@@ -101,7 +101,7 @@ static const CGFloat kChipVerticalMargin = 4;
 
   self.translatesAutoresizingMaskIntoConstraints = NO;
 
-  [self setTitleColor:UIColor.cr_manualFillChipDarkTextColor
+  [self setTitleColor:[UIColor colorNamed:kTextPrimaryColor]
              forState:UIControlStateNormal];
   self.titleLabel.adjustsFontForContentSizeCategory = YES;
 

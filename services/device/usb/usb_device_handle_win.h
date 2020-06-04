@@ -75,13 +75,16 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   friend class UsbDeviceWin;
 
   // Constructor used to build a connection to the device.
-  UsbDeviceHandleWin(scoped_refptr<UsbDeviceWin> device, bool composite);
+  UsbDeviceHandleWin(scoped_refptr<UsbDeviceWin> device);
 
   // Constructor used to build a connection to the device's parent hub.
   UsbDeviceHandleWin(scoped_refptr<UsbDeviceWin> device,
                      base::win::ScopedHandle handle);
 
   ~UsbDeviceHandleWin() override;
+
+  void UpdateFunctionPath(int interface_number,
+                          const base::string16& function_path);
 
  private:
   class Request;
@@ -91,7 +94,16 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
     ~Interface();
 
     uint8_t interface_number;
+
+    // If this interface is part of a function then this will be the interface
+    // number of the first interface in that function. Otherwise it will be
+    // equal to |interface_number|.
     uint8_t first_interface;
+
+    // In a composite device each function has its own driver and path to open.
+    base::string16 function_path;
+    base::win::ScopedHandle function_handle;
+
     ScopedWinUsbHandle handle;
     bool claimed = false;
     uint8_t alternate_setting = 0;
@@ -107,7 +119,7 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   bool OpenInterfaceHandle(Interface* interface);
   void RegisterEndpoints(const CombinedInterfaceInfo& interface);
   void UnregisterEndpoints(const CombinedInterfaceInfo& interface);
-  WINUSB_INTERFACE_HANDLE GetInterfaceForControlTransfer(
+  Interface* GetInterfaceForControlTransfer(
       mojom::UsbControlTransferRecipient recipient,
       uint16_t index);
   void SetInterfaceAlternateSettingBlocking(uint8_t interface_number,
@@ -116,7 +128,7 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   void SetInterfaceAlternateSettingComplete(uint8_t interface_number,
                                             uint8_t alternate_setting,
                                             const ResultCallback& callback);
-  Request* MakeRequest(bool winusb_handle);
+  Request* MakeRequest(Interface* interface);
   std::unique_ptr<Request> UnlinkRequest(Request* request);
   void GotNodeConnectionInformation(TransferCallback callback,
                                     void* node_connection_info,
@@ -149,10 +161,6 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   // objects hold on to the raw handles for the purpose of calling
   // GetOverlappedResult().
   base::win::ScopedHandle hub_handle_;
-  base::win::ScopedHandle function_handle_;
-
-  // The handle returned by WinUsb_Initialize is special.
-  WINUSB_INTERFACE_HANDLE first_interface_handle_ = INVALID_HANDLE_VALUE;
 
   std::map<uint8_t, Interface> interfaces_;
   std::map<uint8_t, Endpoint> endpoints_;
@@ -161,7 +169,7 @@ class UsbDeviceHandleWin : public UsbDeviceHandle {
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
-  base::WeakPtrFactory<UsbDeviceHandleWin> weak_factory_;
+  base::WeakPtrFactory<UsbDeviceHandleWin> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UsbDeviceHandleWin);
 };

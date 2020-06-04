@@ -4,7 +4,7 @@
 
 package org.chromium.android_webview;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.chromium.base.metrics.RecordHistogram;
 
@@ -12,7 +12,11 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
 /**
- * Collect information about callbacks in Android WebView.
+ * Collect information about Android WebView usage. Adding metrics to this class can be helpful if
+ * you need to log the same metric from different call sites in different Java classes.
+ *
+ * <p>If you only need to log at a single call site, prefer calling {@link RecordHistogram} methods
+ * directly.
  */
 public class AwHistogramRecorder {
     @Retention(RetentionPolicy.SOURCE)
@@ -38,11 +42,11 @@ public class AwHistogramRecorder {
         int NUM_ENTRIES = 9;
     }
 
-    // not meant to be instantiated
-    private AwHistogramRecorder() {}
-
     public static void recordCallbackInvocation(@WebViewCallbackType int result) {
         RecordHistogram.recordEnumeratedHistogram(
                 "Android.WebView.Callback.Counts", result, WebViewCallbackType.NUM_ENTRIES);
     }
+
+    // not meant to be instantiated
+    private AwHistogramRecorder() {}
 }

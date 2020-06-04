@@ -10,6 +10,7 @@
 #include "ash/system/message_center/arc/arc_notification_content_view.h"
 #include "ash/system/message_center/arc/arc_notification_item.h"
 #include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_type.h"
@@ -155,6 +156,8 @@ void ArcNotificationView::OnSettingsButtonPressed(const ui::Event& event) {
 }
 
 void ArcNotificationView::OnSnoozeButtonPressed(const ui::Event& event) {
+  MessageView::OnSnoozeButtonPressed(event);
+
   if (item_)
     return item_->OpenSnooze();
 }
@@ -242,6 +245,10 @@ void ArcNotificationView::OnItemDestroying() {
   DCHECK(item_);
   item_->RemoveObserver(this);
   item_ = nullptr;
+}
+
+aura::Window* ArcNotificationView::GetNativeContainerWindowForTest() const {
+  return content_view_->GetNativeViewContainer();
 }
 
 }  // namespace ash

@@ -19,8 +19,6 @@ namespace chromecast {
 
 using base::android::ConvertUTF8ToJavaString;
 
-namespace shell {
-
 namespace {
 
 base::android::ScopedJavaLocalRef<jobject> CreateJavaWindow(
@@ -37,25 +35,50 @@ base::android::ScopedJavaLocalRef<jobject> CreateJavaWindow(
       ConvertUTF8ToJavaString(env, session_id));
 }
 
-}  // namespace
+constexpr char kContextInteractionId[] = "interactionId";
+constexpr char kContextConversationId[] = "conversationId";
 
-// static
-std::unique_ptr<CastContentWindow> CastContentWindow::Create(
-    const CastContentWindow::CreateParams& params) {
-  return base::WrapUnique(new CastContentWindowAndroid(params));
-}
+// Wraps the JNI gesture consumption handled callback for invocation from C++.
+class GestureConsumedCallbackWrapper {
+ public:
+  GestureConsumedCallbackWrapper(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& callback)
+      : env_(env), callback_(callback) {
+    class_ = base::android::ScopedJavaLocalRef<jclass>(
+        base::android::GetClass(env_,
+                                "org.chromium.chromecast.shell."
+                                "CastWebComponent.GestureHandledCallback"));
+    callback_method_id_ =
+        base::android::MethodID::Get<base::android::MethodID::TYPE_INSTANCE>(
+            env_, class_.obj(), "invoke", "(Z;)V");
+  }
+
+  void Invoke(bool handled) {
+    env_->CallObjectMethod(callback_.obj(), callback_method_id_, &handled);
+  }
+
+ private:
+  JNIEnv* env_;
+  const base::android::JavaParamRef<jobject>& callback_;
+  base::android::ScopedJavaLocalRef<jclass> class_;
+  jmethodID callback_method_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(GestureConsumedCallbackWrapper);
+};
+
+}  // namespace
 
 CastContentWindowAndroid::CastContentWindowAndroid(
     const CastContentWindow::CreateParams& params)
-    : delegate_(params.delegate),
+    : CastContentWindow(params),
+      activity_id_(delegate_->GetId()),
       java_window_(CreateJavaWindow(reinterpret_cast<jlong>(this),
                                     params.is_headless,
                                     params.enable_touch_input,
                                     params.is_remote_control_mode,
                                     params.turn_on_screen,
-                                    params.session_id)) {
-  DCHECK(delegate_);
-}
+                                    params.session_id)) {}
 
 CastContentWindowAndroid::~CastContentWindowAndroid() {
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -63,14 +86,13 @@ CastContentWindowAndroid::~CastContentWindowAndroid() {
 }
 
 void CastContentWindowAndroid::CreateWindowForWebContents(
-    content::WebContents* web_contents,
-    CastWindowManager* /* window_manager */,
-    CastWindowManager::WindowId /* z_order */,
+    CastWebContents* cast_web_contents,
+    mojom::ZOrder /* z_order */,
     VisibilityPriority visibility_priority) {
-  DCHECK(web_contents);
+  DCHECK(cast_web_contents);
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> java_web_contents =
-      web_contents->GetJavaWebContents();
+      cast_web_contents->web_contents()->GetJavaWebContents();
 
   Java_CastContentWindowAndroid_createWindowForWebContents(
       env, java_window_, java_web_contents,
@@ -78,11 +100,13 @@ void CastContentWindowAndroid::CreateWindowForWebContents(
 }
 
 void CastContentWindowAndroid::GrantScreenAccess() {
-  NOTIMPLEMENTED();
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_CastContentWindowAndroid_grantScreenAccess(env, java_window_);
 }
 
 void CastContentWindowAndroid::RevokeScreenAccess() {
-  NOTIMPLEMENTED();
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_CastContentWindowAndroid_revokeScreenAccess(env, java_window_);
 }
 
 void CastContentWindowAndroid::EnableTouchInput(bool enabled) {
@@ -94,17 +118,9 @@ void CastContentWindowAndroid::EnableTouchInput(bool enabled) {
 void CastContentWindowAndroid::OnActivityStopped(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller) {
-  delegate_->OnWindowDestroyed();
-}
-
-void CastContentWindowAndroid::OnKeyDown(
-    JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& jcaller,
-    int keycode) {
-  ui::KeyEvent key_event(ui::ET_KEY_PRESSED,
-                         ui::KeyboardCodeFromAndroidKeyCode(keycode),
-                         ui::EF_NONE);
-  delegate_->OnKeyEvent(key_event);
+  if (delegate_) {
+    delegate_->OnWindowDestroyed();
+  }
 }
 
 void CastContentWindowAndroid::RequestVisibility(
@@ -117,11 +133,26 @@ void CastContentWindowAndroid::RequestVisibility(
 void CastContentWindowAndroid::SetActivityContext(
     base::Value activity_context) {}
 
-void CastContentWindowAndroid::SetHostContext(base::Value host_context) {}
+void CastContentWindowAndroid::SetHostContext(base::Value host_context) {
+  auto* found_interaction_id = host_context.FindKey(kContextInteractionId);
+  auto* found_conversation_id = host_context.FindKey(kContextConversationId);
+  if (found_interaction_id && found_conversation_id) {
+    int interaction_id = found_interaction_id->GetInt();
+    std::string& conversation_id = found_conversation_id->GetString();
+    JNIEnv* env = base::android::AttachCurrentThread();
+    Java_CastContentWindowAndroid_setHostContext(
+        env, java_window_, static_cast<int>(interaction_id),
+        ConvertUTF8ToJavaString(env, conversation_id));
+  } else {
+    LOG(ERROR) << "Interaction ID or Conversation ID is not found";
+  }
+}
 
 void CastContentWindowAndroid::NotifyVisibilityChange(
     VisibilityType visibility_type) {
-  delegate_->OnVisibilityChange(visibility_type);
+  if (delegate_) {
+    delegate_->OnVisibilityChange(visibility_type);
+  }
   for (auto& observer : observer_list_) {
     observer.OnVisibilityChange(visibility_type);
   }
@@ -132,11 +163,20 @@ void CastContentWindowAndroid::RequestMoveOut() {
   Java_CastContentWindowAndroid_requestMoveOut(env, java_window_);
 }
 
-bool CastContentWindowAndroid::ConsumeGesture(
+void CastContentWindowAndroid::ConsumeGesture(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
-    int gesture_type) {
-  return delegate_->ConsumeGesture(static_cast<GestureType>(gesture_type));
+    int gesture_type,
+    const base::android::JavaParamRef<jobject>& callback) {
+  GestureConsumedCallbackWrapper wrapper(env, callback);
+  if (delegate_) {
+    delegate_->ConsumeGesture(
+        static_cast<GestureType>(gesture_type),
+        base::BindOnce(&GestureConsumedCallbackWrapper::Invoke,
+                       base::Unretained(&wrapper)));
+    return;
+  }
+  wrapper.Invoke(false);
 }
 
 void CastContentWindowAndroid::OnVisibilityChange(
@@ -149,7 +189,7 @@ void CastContentWindowAndroid::OnVisibilityChange(
 base::android::ScopedJavaLocalRef<jstring> CastContentWindowAndroid::GetId(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller) {
-  return ConvertUTF8ToJavaString(env, delegate_->GetId());
+  return ConvertUTF8ToJavaString(env, activity_id_);
 }
-}  // namespace shell
+
 }  // namespace chromecast

@@ -9,10 +9,11 @@
 
 #include "ash/login/ui/login_test_base.h"
 #include "ash/login/ui/views_utils.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "ash/shell.h"
 #include "ash/tray_action/test_tray_action_client.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/geometry/point.h"
@@ -43,7 +44,7 @@ class NoteActionLaunchButtonTest : public LoginTestBase {
     LoginTestBase::SetUp();
 
     Shell::Get()->tray_action()->SetClient(
-        tray_action_client_.CreateInterfacePtrAndBind(),
+        tray_action_client_.CreateRemoteAndBind(),
         mojom::TrayActionState::kAvailable);
   }
 

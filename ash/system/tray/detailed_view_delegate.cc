@@ -6,6 +6,7 @@
 
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_item_style.h"
@@ -21,9 +22,11 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/view_class_properties.h"
 
 namespace ash {
+
+using ContentLayerType = AshColorProvider::ContentLayerType;
+using AshColorMode = AshColorProvider::AshColorMode;
 
 namespace {
 
@@ -62,8 +65,10 @@ void ConfigureTitleTriView(TriView* tri_view, TriView::Container container) {
 class BackButton : public CustomShapeButton {
  public:
   BackButton(views::ButtonListener* listener) : CustomShapeButton(listener) {
-    gfx::ImageSkia image =
-        gfx::CreateVectorIcon(kUnifiedMenuArrowBackIcon, kUnifiedMenuIconColor);
+    gfx::ImageSkia image = gfx::CreateVectorIcon(
+        kUnifiedMenuArrowBackIcon,
+        AshColorProvider::Get()->GetContentLayerColor(
+            ContentLayerType::kIconPrimary, AshColorMode::kDark));
     SetImage(views::Button::STATE_NORMAL, image);
     SetImageHorizontalAlignment(ALIGN_RIGHT);
     SetImageVerticalAlignment(ALIGN_MIDDLE);
@@ -71,10 +76,6 @@ class BackButton : public CustomShapeButton {
         l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_PREVIOUS_MENU));
     SetBorder(views::CreateEmptyBorder(
         gfx::Insets((kTrayItemSize - image.width()) / 2)));
-
-    auto path = std::make_unique<SkPath>(
-        CreateCustomShapePath(gfx::Rect(CalculatePreferredSize())));
-    SetProperty(views::kHighlightPathKey, path.release());
   }
 
   ~BackButton() override = default;
@@ -113,9 +114,8 @@ void DetailedViewDelegate::CloseBubble() {
   tray_controller_->CloseBubble();
 }
 
-SkColor DetailedViewDelegate::GetBackgroundColor(
-    ui::NativeTheme* native_theme) {
-  return SK_ColorTRANSPARENT;
+base::Optional<SkColor> DetailedViewDelegate::GetBackgroundColor() {
+  return base::nullopt;
 }
 
 bool DetailedViewDelegate::IsOverflowIndicatorEnabled() const {
@@ -145,7 +145,8 @@ TriView* DetailedViewDelegate::CreateTitleRow(int string_id) {
 
 views::View* DetailedViewDelegate::CreateTitleSeparator() {
   views::Separator* separator = new views::Separator();
-  separator->SetColor(kUnifiedMenuSeparatorColor);
+  separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      ContentLayerType::kSeparator, AshColorMode::kDark));
   separator->SetBorder(views::CreateEmptyBorder(
       kTitleRowProgressBarHeight - views::Separator::kThickness, 0, 0, 0));
   return separator;
@@ -155,8 +156,10 @@ void DetailedViewDelegate::ShowStickyHeaderSeparator(views::View* view,
                                                      bool show_separator) {
   if (show_separator) {
     view->SetBorder(views::CreatePaddedBorder(
-        views::CreateSolidSidedBorder(0, 0, kTraySeparatorWidth, 0,
-                                      kUnifiedMenuSeparatorColor),
+        views::CreateSolidSidedBorder(
+            0, 0, kTraySeparatorWidth, 0,
+            AshColorProvider::Get()->GetContentLayerColor(
+                ContentLayerType::kSeparator, AshColorMode::kDark)),
         gfx::Insets(kMenuSeparatorVerticalPadding, 0,
                     kMenuSeparatorVerticalPadding - kTraySeparatorWidth, 0)));
   } else {
@@ -168,7 +171,8 @@ void DetailedViewDelegate::ShowStickyHeaderSeparator(views::View* view,
 
 views::Separator* DetailedViewDelegate::CreateListSubHeaderSeparator() {
   views::Separator* separator = new views::Separator();
-  separator->SetColor(kUnifiedMenuSeparatorColor);
+  separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      ContentLayerType::kSeparator, AshColorMode::kDark));
   separator->SetBorder(views::CreateEmptyBorder(
       kMenuSeparatorVerticalPadding - views::Separator::kThickness, 0, 0, 0));
   return separator;
@@ -183,8 +187,11 @@ HoverHighlightView* DetailedViewDelegate::CreateScrollListItem(
   if (icon.is_empty())
     item->AddLabelRow(text);
   else
-    item->AddIconAndLabel(gfx::CreateVectorIcon(icon, kUnifiedMenuIconColor),
-                          text);
+    item->AddIconAndLabel(
+        gfx::CreateVectorIcon(
+            icon, AshColorProvider::Get()->GetContentLayerColor(
+                      ContentLayerType::kIconPrimary, AshColorMode::kDark)),
+        text);
   return item;
 }
 

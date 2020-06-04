@@ -21,7 +21,7 @@
 #include "content/public/browser/tts_controller.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
-#include "third_party/blink/public/platform/web_speech_synthesis_constants.h"
+#include "third_party/blink/public/mojom/speech/speech_synthesis.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace constants = tts_extension_api_constants;
@@ -156,12 +156,11 @@ void TtsExtensionEventHandler::OnTtsEvent(content::TtsUtterance* utterance,
     delete this;
 }
 
-bool TtsSpeakFunction::RunAsync() {
+ExtensionFunction::ResponseAction TtsSpeakFunction::Run() {
   std::string text;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &text));
   if (text.size() > 32768) {
-    error_ = constants::kErrorUtteranceTooLong;
-    return false;
+    return RespondNow(Error(constants::kErrorUtteranceTooLong));
   }
 
   std::unique_ptr<base::DictionaryValue> options(new base::DictionaryValue());
@@ -181,8 +180,7 @@ bool TtsSpeakFunction::RunAsync() {
   if (options->HasKey(constants::kLangKey))
     EXTENSION_FUNCTION_VALIDATE(options->GetString(constants::kLangKey, &lang));
   if (!lang.empty() && !l10n_util::IsValidLocaleSyntax(lang)) {
-    error_ = constants::kErrorInvalidLang;
-    return false;
+    return RespondNow(Error(constants::kErrorInvalidLang));
   }
 
   // TODO(katie): Remove this after M73. This is just used to track how the
@@ -194,33 +192,30 @@ bool TtsSpeakFunction::RunAsync() {
   UMA_HISTOGRAM_BOOLEAN("TextToSpeech.Utterance.HasGender",
                         !gender_str.empty());
 
-  double rate = blink::kWebSpeechSynthesisDoublePrefNotSet;
+  double rate = blink::mojom::kSpeechSynthesisDoublePrefNotSet;
   if (options->HasKey(constants::kRateKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kRateKey, &rate));
     if (rate < 0.1 || rate > 10.0) {
-      error_ = constants::kErrorInvalidRate;
-      return false;
+      return RespondNow(Error(constants::kErrorInvalidRate));
     }
   }
 
-  double pitch = blink::kWebSpeechSynthesisDoublePrefNotSet;
+  double pitch = blink::mojom::kSpeechSynthesisDoublePrefNotSet;
   if (options->HasKey(constants::kPitchKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kPitchKey, &pitch));
     if (pitch < 0.0 || pitch > 2.0) {
-      error_ = constants::kErrorInvalidPitch;
-      return false;
+      return RespondNow(Error(constants::kErrorInvalidPitch));
     }
   }
 
-  double volume = blink::kWebSpeechSynthesisDoublePrefNotSet;
+  double volume = blink::mojom::kSpeechSynthesisDoublePrefNotSet;
   if (options->HasKey(constants::kVolumeKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kVolumeKey, &volume));
     if (volume < 0.0 || volume > 1.0) {
-      error_ = constants::kErrorInvalidVolume;
-      return false;
+      return RespondNow(Error(constants::kErrorInvalidVolume));
     }
   }
 
@@ -270,10 +265,10 @@ bool TtsSpeakFunction::RunAsync() {
   // send the success response to the callback now - this ensures that
   // the callback response always arrives before events, which makes
   // the behavior more predictable and easier to write unit tests for too.
-  SendResponse(true);
+  Respond(NoArguments());
 
-  content::TtsUtterance* utterance =
-      content::TtsUtterance::Create(GetProfile());
+  std::unique_ptr<content::TtsUtterance> utterance =
+      content::TtsUtterance::Create(browser_context());
   utterance->SetText(text);
   utterance->SetVoiceName(voice_name);
   utterance->SetSrcId(src_id);
@@ -288,8 +283,8 @@ bool TtsSpeakFunction::RunAsync() {
   utterance->SetEventDelegate(new TtsExtensionEventHandler(extension_id()));
 
   content::TtsController* controller = content::TtsController::GetInstance();
-  controller->SpeakOrEnqueue(utterance);
-  return true;
+  controller->SpeakOrEnqueue(std::move(utterance));
+  return AlreadyResponded();
 }
 
 ExtensionFunction::ResponseAction TtsStopSpeakingFunction::Run() {

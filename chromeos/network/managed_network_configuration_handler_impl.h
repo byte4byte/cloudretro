@@ -45,13 +45,13 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   void GetProperties(
       const std::string& userhash,
       const std::string& service_path,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback) override;
 
   void GetManagedProperties(
       const std::string& userhash,
       const std::string& service_path,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback) override;
 
   void SetProperties(
@@ -82,7 +82,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback) const override;
 
-  void SetPolicy(onc::ONCSource onc_source,
+  void SetPolicy(::onc::ONCSource onc_source,
                  const std::string& userhash,
                  const base::ListValue& network_configs_onc,
                  const base::DictionaryValue& global_network_config) override;
@@ -92,7 +92,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   const base::DictionaryValue* FindPolicyByGUID(
       const std::string userhash,
       const std::string& guid,
-      onc::ONCSource* onc_source) const override;
+      ::onc::ONCSource* onc_source) const override;
 
   const GuidToPolicyMap* GetNetworkConfigsFromPolicy(
       const std::string& userhash) const override;
@@ -103,7 +103,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   const base::DictionaryValue* FindPolicyByGuidAndProfile(
       const std::string& guid,
       const std::string& profile_path,
-      onc::ONCSource* onc_source) const override;
+      ::onc::ONCSource* onc_source) const override;
 
   bool AllowOnlyPolicyNetworksToConnect() const override;
   bool AllowOnlyPolicyNetworksToConnectIfAvailable() const override;
@@ -129,6 +129,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
  private:
   friend class AutoConnectHandlerTest;
   friend class ClientCertResolverTest;
+  friend class ManagedNetworkConfigurationHandler;
   friend class ManagedNetworkConfigurationHandlerTest;
   friend class ManagedNetworkConfigurationHandlerMockTest;
   friend class NetworkConnectionHandlerImplTest;
@@ -136,7 +137,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   friend class ProhibitedTechnologiesHandlerTest;
 
   struct Policies;
-  typedef base::Callback<void(
+  typedef base::OnceCallback<void(
       const std::string& service_path,
       std::unique_ptr<base::DictionaryValue> properties)>
       GetDevicePropertiesCallback;
@@ -148,7 +149,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
 
   ManagedNetworkConfigurationHandlerImpl();
 
-  // Handlers may be NULL in tests so long as they do not execute any paths
+  // Handlers may be null in tests so long as they do not execute any paths
   // that require the handlers.
   void Init(NetworkStateHandler* network_state_handler,
             NetworkProfileHandler* network_profile_handler,
@@ -159,14 +160,14 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   // Sends the response to the caller of GetManagedProperties.
   void SendManagedProperties(
       const std::string& userhash,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback,
       const std::string& service_path,
       std::unique_ptr<base::DictionaryValue> shill_properties);
 
   // Sends the response to the caller of GetProperties.
   void SendProperties(const std::string& userhash,
-                      const network_handler::DictionaryResultCallback& callback,
+                      network_handler::DictionaryResultCallback callback,
                       const network_handler::ErrorCallback& error_callback,
                       const std::string& service_path,
                       std::unique_ptr<base::DictionaryValue> shill_properties);
@@ -219,6 +220,13 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback);
 
+  // Sets the active proxy values in managed network configurations depending on
+  // the source of the configuration. Proxy enforced by user policy
+  // (provided by kProxy prefence) should have precedence over configurations
+  // set by ONC policy.
+  void SetManagedActiveProxyValues(const std::string& guid,
+                                   base::DictionaryValue* dictionary);
+
   // Applies policies for |userhash|. |modified_policies| must be not null and
   // contain the GUIDs of the network configurations that changed since the last
   // policy application. Returns true if policy application was started and
@@ -226,15 +234,19 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
   bool ApplyOrQueuePolicies(const std::string& userhash,
                             std::set<std::string>* modified_policies);
 
+  void set_ui_proxy_config_service(
+      UIProxyConfigService* ui_proxy_config_service);
+
   // If present, the empty string maps to the device policy.
   UserToPoliciesMap policies_by_user_;
 
   // Local references to the associated handler instances.
-  NetworkStateHandler* network_state_handler_;
-  NetworkProfileHandler* network_profile_handler_;
-  NetworkConfigurationHandler* network_configuration_handler_;
-  NetworkDeviceHandler* network_device_handler_;
-  ProhibitedTechnologiesHandler* prohibited_technologies_handler_;
+  NetworkStateHandler* network_state_handler_ = nullptr;
+  NetworkProfileHandler* network_profile_handler_ = nullptr;
+  NetworkConfigurationHandler* network_configuration_handler_ = nullptr;
+  NetworkDeviceHandler* network_device_handler_ = nullptr;
+  ProhibitedTechnologiesHandler* prohibited_technologies_handler_ = nullptr;
+  UIProxyConfigService* ui_proxy_config_service_ = nullptr;
 
   // Owns the currently running PolicyApplicators.
   UserToPolicyApplicatorMap policy_applicators_;
@@ -248,12 +260,12 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandlerImpl
 
   base::ObserverList<NetworkPolicyObserver, true>::Unchecked observers_;
 
-  bool user_policy_applied_;
-  bool device_policy_applied_;
+  bool user_policy_applied_ = false;
+  bool device_policy_applied_ = false;
 
   // For Shill client callbacks
   base::WeakPtrFactory<ManagedNetworkConfigurationHandlerImpl>
-      weak_ptr_factory_;
+      weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ManagedNetworkConfigurationHandlerImpl);
 };

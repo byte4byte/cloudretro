@@ -12,7 +12,6 @@
 #include "components/dom_distiller/core/article_entry.h"
 #include "components/dom_distiller/core/distiller.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
-#include "components/dom_distiller/core/dom_distiller_store.h"
 #include "components/dom_distiller/ios/distiller_page_factory_ios.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
@@ -31,15 +30,15 @@ class DomDistillerKeyedService : public KeyedService,
                                  public dom_distiller::DomDistillerService {
  public:
   DomDistillerKeyedService(
-      std::unique_ptr<dom_distiller::DomDistillerStoreInterface> store,
       std::unique_ptr<dom_distiller::DistillerFactory> distiller_factory,
       std::unique_ptr<dom_distiller::DistillerPageFactory>
           distiller_page_factory,
-      std::unique_ptr<dom_distiller::DistilledPagePrefs> distilled_page_prefs)
-      : DomDistillerService(std::move(store),
-                            std::move(distiller_factory),
+      std::unique_ptr<dom_distiller::DistilledPagePrefs> distilled_page_prefs,
+      std::unique_ptr<dom_distiller::DistillerUIHandle> distiller_ui_handle)
+      : DomDistillerService(std::move(distiller_factory),
                             std::move(distiller_page_factory),
-                            std::move(distilled_page_prefs)) {}
+                            std::move(distilled_page_prefs),
+                            std::move(distiller_ui_handle)) {}
 
   ~DomDistillerKeyedService() override {}
 
@@ -58,7 +57,7 @@ DomDistillerServiceFactory* DomDistillerServiceFactory::GetInstance() {
 
 // static
 DomDistillerService* DomDistillerServiceFactory::GetForBrowserState(
-    ios::ChromeBrowserState* browser_state) {
+    ChromeBrowserState* browser_state) {
   return static_cast<DomDistillerKeyedService*>(
       GetInstance()->GetServiceForBrowserState(browser_state, true));
 }
@@ -87,11 +86,12 @@ DomDistillerServiceFactory::BuildServiceInstanceFor(
           std::move(distiller_url_fetcher_factory), options);
   std::unique_ptr<DistilledPagePrefs> distilled_page_prefs =
       std::make_unique<DistilledPagePrefs>(
-          ios::ChromeBrowserState::FromBrowserState(context)->GetPrefs());
+          ChromeBrowserState::FromBrowserState(context)->GetPrefs());
 
   return std::make_unique<DomDistillerKeyedService>(
-      nullptr, std::move(distiller_factory), std::move(distiller_page_factory),
-      std::move(distilled_page_prefs));
+      std::move(distiller_factory), std::move(distiller_page_factory),
+      std::move(distilled_page_prefs),
+      /* distiller_ui_handle */ nullptr);
 }
 
 web::BrowserState* DomDistillerServiceFactory::GetBrowserStateToUse(

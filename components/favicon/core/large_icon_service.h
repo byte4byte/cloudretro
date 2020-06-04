@@ -20,8 +20,6 @@ class GURL;
 
 namespace favicon {
 
-class FaviconServerFetcherParams;
-
 // The large icon service provides methods to access large icons.
 class LargeIconService : public KeyedService {
  public:
@@ -68,14 +66,26 @@ class LargeIconService : public KeyedService {
       favicon_base::LargeIconCallback callback,
       base::CancelableTaskTracker* tracker) = 0;
 
+  // Requests the best icon for the page at |page_url|. Fallbacks to the host's
+  // favicon, and resizes the most similar bitmat to |desired_size_in_pizel| if
+  // no exact match is found.
+  virtual base::CancelableTaskTracker::TaskId
+  GetIconRawBitmapOrFallbackStyleForPageUrl(
+      const GURL& page_url,
+      int desired_size_in_pixel,
+      favicon_base::LargeIconCallback callback,
+      base::CancelableTaskTracker* tracker) = 0;
+
   // Fetches the best large icon for the page at |page_url| from a Google
   // favicon server and stores the result in the FaviconService database
   // (implemented in HistoryService). The write will be a no-op if the local
   // favicon database contains an icon for |page_url|, so clients are
   // encouraged to use GetLargeIconOrFallbackStyle() first.
   //
-  // |desired_size_in_pixel| serves only as a hint to the service, no guarantees
-  // on the fetched size are provided.
+  // A parameter in the server request representing the desired favicon size is
+  // set according solely to the device and scale factor. However, it serves
+  // only as a hint to the service, no guarantees on the fetched size are
+  // provided.
   //
   // Unless you are sure |page_url| is a public URL (known to Google Search),
   // set |may_page_url_be_private| to true. This slighty increases the chance of
@@ -99,7 +109,7 @@ class LargeIconService : public KeyedService {
   // TODO(victorvianna): Consider moving |may_page_url_be_private| and/or
   // |should_trim_page_url_path| inside the parameters struct.
   virtual void GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-      std::unique_ptr<FaviconServerFetcherParams> params,
+      const GURL& page_url,
       bool may_page_url_be_private,
       bool should_trim_page_url_path,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,

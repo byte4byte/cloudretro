@@ -15,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/platform_util.h"
@@ -23,13 +24,13 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/safe_browsing/buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
@@ -47,7 +48,7 @@
 #include "content/public/browser/site_instance.h"
 #endif
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -69,17 +70,6 @@ namespace {
 constexpr char kContactsMimeType[] = "text/json+contacts";
 #endif
 
-// Converts a list of FilePaths to a list of ui::SelectedFileInfo.
-std::vector<ui::SelectedFileInfo> FilePathListToSelectedFileInfoList(
-    const std::vector<base::FilePath>& paths) {
-  std::vector<ui::SelectedFileInfo> selected_files;
-  for (size_t i = 0; i < paths.size(); ++i) {
-    selected_files.push_back(
-        ui::SelectedFileInfo(paths[i], paths[i]));
-  }
-  return selected_files;
-}
-
 void DeleteFiles(std::vector<base::FilePath> paths) {
   for (auto& file_path : paths)
     base::DeleteFile(file_path, false);
@@ -93,7 +83,7 @@ bool IsValidProfile(Profile* profile) {
   return g_browser_process->profile_manager()->IsValidProfile(profile);
 }
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 
 bool IsDownloadAllowedBySafeBrowsing(
     safe_browsing::DownloadCheckResult result) {
@@ -117,6 +107,12 @@ bool IsDownloadAllowedBySafeBrowsing(
     // for PPAPI downloads.
     case Result::ASYNC_SCANNING:
     case Result::BLOCKED_PASSWORD_PROTECTED:
+    case Result::BLOCKED_TOO_LARGE:
+    case Result::SENSITIVE_CONTENT_BLOCK:
+    case Result::SENSITIVE_CONTENT_WARNING:
+    case Result::DEEP_SCANNED_SAFE:
+    case Result::PROMPT_FOR_SCANNING:
+    case Result::BLOCKED_UNSUPPORTED_FILE_TYPE:
       NOTREACHED();
       return true;
   }
@@ -149,8 +145,7 @@ FileSelectHelper::FileSelectHelper(Profile* profile)
       select_file_dialog_(),
       select_file_types_(),
       dialog_type_(ui::SelectFileDialog::SELECT_OPEN_FILE),
-      dialog_mode_(FileChooserParams::Mode::kOpen),
-      observer_(this) {}
+      dialog_mode_(FileChooserParams::Mode::kOpen) {}
 
 FileSelectHelper::~FileSelectHelper() {
   // There may be pending file dialogs, we need to tell them that we've gone
@@ -190,12 +185,12 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
   files.push_back(file);
 
 #if defined(OS_MACOSX)
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&FileSelectHelper::ProcessSelectedFilesMac, this, files));
 #else
-  NotifyRenderFrameHostAndEnd(files);
+  ConvertToFileChooserFileInfoList(files);
 #endif  // defined(OS_MACOSX)
 }
 
@@ -203,7 +198,7 @@ void FileSelectHelper::MultiFilesSelected(
     const std::vector<base::FilePath>& files,
     void* params) {
   std::vector<ui::SelectedFileInfo> selected_files =
-      FilePathListToSelectedFileInfoList(files);
+      ui::FilePathListToSelectedFileInfoList(files);
 
   MultiFilesSelectedWithExtraInfo(selected_files, params);
 }
@@ -218,12 +213,12 @@ void FileSelectHelper::MultiFilesSelectedWithExtraInfo(
     profile_->set_last_selected_directory(path);
   }
 #if defined(OS_MACOSX)
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&FileSelectHelper::ProcessSelectedFilesMac, this, files));
 #else
-  NotifyRenderFrameHostAndEnd(files);
+  ConvertToFileChooserFileInfoList(files);
 #endif  // defined(OS_MACOSX)
 }
 
@@ -254,7 +249,7 @@ void FileSelectHelper::LaunchConfirmationDialog(
     std::vector<ui::SelectedFileInfo> selected_files) {
   ShowFolderUploadConfirmationDialog(
       path,
-      base::BindOnce(&FileSelectHelper::NotifyRenderFrameHostAndEnd, this),
+      base::BindOnce(&FileSelectHelper::ConvertToFileChooserFileInfoList, this),
       std::move(selected_files), web_contents_);
 }
 
@@ -276,7 +271,7 @@ void FileSelectHelper::OnListDone(int error) {
   }
 
   std::vector<ui::SelectedFileInfo> selected_files =
-      FilePathListToSelectedFileInfoList(entry->results_);
+      ui::FilePathListToSelectedFileInfoList(entry->results_);
 
   if (dialog_type_ == ui::SelectFileDialog::SELECT_UPLOAD_FOLDER) {
     LaunchConfirmationDialog(entry->path_, std::move(selected_files));
@@ -294,12 +289,10 @@ void FileSelectHelper::OnListDone(int error) {
   }
 }
 
-void FileSelectHelper::NotifyRenderFrameHostAndEnd(
+void FileSelectHelper::ConvertToFileChooserFileInfoList(
     const std::vector<ui::SelectedFileInfo>& files) {
-  if (!render_frame_host_) {
-    RunFileChooserEnd();
+  if (AbortIfWebContentsDestroyed())
     return;
-  }
 
 #if defined(OS_CHROMEOS)
   if (!files.empty()) {
@@ -316,9 +309,8 @@ void FileSelectHelper::NotifyRenderFrameHostAndEnd(
             ->GetFileSystemContext();
     file_manager::util::ConvertSelectedFileInfoListToFileChooserFileInfoList(
         file_system_context, site_instance->GetSiteURL(), files,
-        base::BindOnce(
-            &FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion,
-            this));
+        base::BindOnce(&FileSelectHelper::PerformSafeBrowsingDeepScanIfNeeded,
+                       this));
     return;
   }
 #endif  // defined(OS_CHROMEOS)
@@ -331,11 +323,63 @@ void FileSelectHelper::NotifyRenderFrameHostAndEnd(
             base::FilePath(file.display_name).AsUTF16Unsafe())));
   }
 
-  NotifyRenderFrameHostAndEndAfterConversion(std::move(chooser_files));
+  PerformSafeBrowsingDeepScanIfNeeded(std::move(chooser_files));
 }
 
-void FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion(
+void FileSelectHelper::PerformSafeBrowsingDeepScanIfNeeded(
     std::vector<FileChooserFileInfoPtr> list) {
+  if (AbortIfWebContentsDestroyed())
+    return;
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+  safe_browsing::DeepScanningDialogDelegate::Data data;
+  if (safe_browsing::DeepScanningDialogDelegate::IsEnabled(
+          profile_, render_frame_host_->GetLastCommittedURL(), &data)) {
+    data.paths.reserve(list.size());
+    for (const auto& file : list)
+      data.paths.push_back(file->get_native_file()->file_path);
+
+    safe_browsing::DeepScanningDialogDelegate::ShowForWebContents(
+        web_contents_, std::move(data),
+        base::BindOnce(&FileSelectHelper::DeepScanCompletionCallback, this,
+                       std::move(list)),
+        safe_browsing::DeepScanAccessPoint::UPLOAD);
+  } else {
+    NotifyListenerAndEnd(std::move(list));
+  }
+#else
+  NotifyListenerAndEnd(std::move(list));
+#endif  // BUILDFLAG(FULL_SAFE_BROWSING)
+}
+
+#if BUILDFLAG(FULL_SAFE_BROWSING)
+void FileSelectHelper::DeepScanCompletionCallback(
+    std::vector<blink::mojom::FileChooserFileInfoPtr> list,
+    const safe_browsing::DeepScanningDialogDelegate::Data& data,
+    const safe_browsing::DeepScanningDialogDelegate::Result& result) {
+  if (AbortIfWebContentsDestroyed())
+    return;
+
+  DCHECK_EQ(data.text.size(), result.text_results.size());
+  DCHECK_EQ(data.paths.size(), result.paths_results.size());
+  DCHECK_EQ(list.size(), result.paths_results.size());
+
+  // Remove any files that did not pass the deep scan.
+  size_t i = 0;
+  for (auto it = list.begin(); it != list.end(); ++i) {
+    if (!result.paths_results[i]) {
+      it = list.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  NotifyListenerAndEnd(std::move(list));
+}
+#endif  // BUILDFLAG(FULL_SAFE_BROWSING)
+
+void FileSelectHelper::NotifyListenerAndEnd(
+    std::vector<blink::mojom::FileChooserFileInfoPtr> list) {
   listener_->FileSelected(std::move(list), base_dir_, dialog_mode_);
   listener_.reset();
 
@@ -344,7 +388,7 @@ void FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion(
 }
 
 void FileSelectHelper::DeleteTemporaryFiles() {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
@@ -362,11 +406,24 @@ void FileSelectHelper::CleanUp() {
 }
 
 bool FileSelectHelper::AbortIfWebContentsDestroyed() {
-  if (render_frame_host_ && web_contents_)
-    return false;
+  if (abort_on_missing_web_contents_in_tests_ &&
+      (render_frame_host_ == nullptr || web_contents_ == nullptr)) {
+    RunFileChooserEnd();
+    return true;
+  }
 
-  RunFileChooserEnd();
-  return true;
+  return false;
+}
+
+void FileSelectHelper::SetFileSelectListenerForTesting(
+    std::unique_ptr<content::FileSelectListener> listener) {
+  DCHECK(listener);
+  DCHECK(!listener_);
+  listener_ = std::move(listener);
+}
+
+void FileSelectHelper::DontAbortOnMissingWebContentsForTesting() {
+  abort_on_missing_web_contents_in_tests_ = false;
 }
 
 std::unique_ptr<ui::SelectFileDialog::FileTypeInfo>
@@ -500,7 +557,7 @@ void FileSelectHelper::RunFileChooser(
   content::WebContentsObserver::Observe(web_contents_);
   observer_.Add(render_frame_host_->GetRenderViewHost()->GetWidget());
 
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&FileSelectHelper::GetFileTypesInThreadPool, this,
                      std::move(params)));
@@ -519,7 +576,7 @@ void FileSelectHelper::GetFileTypesInThreadPool(FileChooserParamsPtr params) {
       params->need_local_path ? ui::SelectFileDialog::FileTypeInfo::NATIVE_PATH
                               : ui::SelectFileDialog::FileTypeInfo::ANY_PATH;
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&FileSelectHelper::GetSanitizedFilenameOnUIThread, this,
                      std::move(params)));
@@ -532,7 +589,7 @@ void FileSelectHelper::GetSanitizedFilenameOnUIThread(
 
   base::FilePath default_file_path = profile_->last_selected_directory().Append(
       GetSanitizedFileName(params->default_file_name));
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   if (params->mode == FileChooserParams::Mode::kSave) {
     CheckDownloadRequestWithSafeBrowsing(default_file_path, std::move(params));
     return;
@@ -541,10 +598,12 @@ void FileSelectHelper::GetSanitizedFilenameOnUIThread(
   RunFileChooserOnUIThread(default_file_path, std::move(params));
 }
 
-#if defined(FULL_SAFE_BROWSING)
+#if BUILDFLAG(FULL_SAFE_BROWSING)
 void FileSelectHelper::CheckDownloadRequestWithSafeBrowsing(
     const base::FilePath& default_file_path,
     FileChooserParamsPtr params) {
+// Download Protection is not supported on Android.
+#if BUILDFLAG(FULL_SAFE_BROWSING)
   safe_browsing::SafeBrowsingService* sb_service =
       g_browser_process->safe_browsing_service();
 
@@ -569,12 +628,14 @@ void FileSelectHelper::CheckDownloadRequestWithSafeBrowsing(
   GURL requestor_url = params->requestor;
   sb_service->download_protection_service()->CheckPPAPIDownloadRequest(
       requestor_url,
-      render_frame_host_? render_frame_host_->GetLastCommittedURL() : GURL(),
-      WebContents::FromRenderFrameHost(render_frame_host_),
-      default_file_path, alternate_extensions, profile_,
-      base::Bind(&InterpretSafeBrowsingVerdict,
-                 base::Bind(&FileSelectHelper::ProceedWithSafeBrowsingVerdict,
-                            this, default_file_path, base::Passed(&params))));
+      render_frame_host_ ? render_frame_host_->GetLastCommittedURL() : GURL(),
+      WebContents::FromRenderFrameHost(render_frame_host_), default_file_path,
+      alternate_extensions, profile_,
+      base::BindOnce(
+          &InterpretSafeBrowsingVerdict,
+          base::Bind(&FileSelectHelper::ProceedWithSafeBrowsingVerdict, this,
+                     default_file_path, base::Passed(&params))));
+#endif
 }
 
 void FileSelectHelper::ProceedWithSafeBrowsingVerdict(

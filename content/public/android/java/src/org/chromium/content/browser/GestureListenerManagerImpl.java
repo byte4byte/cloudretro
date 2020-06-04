@@ -13,6 +13,7 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.UserData;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.blink_public.web.WebInputEventType;
 import org.chromium.content.browser.input.ImeAdapterImpl;
 import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
@@ -48,16 +49,16 @@ public class GestureListenerManagerImpl
     private long mNativeGestureListenerManager;
 
     /**
-     * Whether a touch scroll sequence is active, used to hide text selection
+     * Whether a user scroll sequence is active, used to hide text selection
      * handles. Note that a scroll sequence will *always* bound a pinch
      * sequence, so this will also be true for the duration of a pinch gesture.
+     * A fling is also always bounded by a gesture scroll sequence so this is
+     * also true for the duration of the fling.
      */
-    private boolean mIsTouchScrollInProgress;
+    private boolean mIsGestureScrollInProgress;
 
     /**
-     * Whether a fling scroll is currently active. Used in combination with the
-     * above boolean for touch scrolling to determine if the content is
-     * "currently scrolling".
+     * Whether a fling scroll is currently active.
      */
     private boolean mHasActiveFlingScroll;
 
@@ -78,12 +79,14 @@ public class GestureListenerManagerImpl
         mIterator = mListeners.rewindableIterator();
         mViewDelegate = mWebContents.getViewAndroidDelegate();
         WindowEventObserverManager.from(mWebContents).addObserver(this);
-        mNativeGestureListenerManager = nativeInit(mWebContents);
+        mNativeGestureListenerManager = GestureListenerManagerImplJni.get().init(
+                GestureListenerManagerImpl.this, mWebContents);
     }
 
     private void resetGestureDetection() {
         if (mNativeGestureListenerManager != 0) {
-            nativeResetGestureDetection(mNativeGestureListenerManager);
+            GestureListenerManagerImplJni.get().resetGestureDetection(
+                    mNativeGestureListenerManager, GestureListenerManagerImpl.this);
         }
     }
 
@@ -104,14 +107,16 @@ public class GestureListenerManagerImpl
     @Override
     public void updateMultiTouchZoomSupport(boolean supportsMultiTouchZoom) {
         if (mNativeGestureListenerManager == 0) return;
-        nativeSetMultiTouchZoomSupportEnabled(
-                mNativeGestureListenerManager, supportsMultiTouchZoom);
+        GestureListenerManagerImplJni.get().setMultiTouchZoomSupportEnabled(
+                mNativeGestureListenerManager, GestureListenerManagerImpl.this,
+                supportsMultiTouchZoom);
     }
 
     @Override
     public void updateDoubleTapSupport(boolean supportsDoubleTap) {
         if (mNativeGestureListenerManager == 0) return;
-        nativeSetDoubleTapSupportEnabled(mNativeGestureListenerManager, supportsDoubleTap);
+        GestureListenerManagerImplJni.get().setDoubleTapSupportEnabled(
+                mNativeGestureListenerManager, GestureListenerManagerImpl.this, supportsDoubleTap);
     }
 
     /** Update all the listeners after touch down event occurred. */
@@ -148,7 +153,7 @@ public class GestureListenerManagerImpl
 
     /** Update all the listeners after scrolling end event occurred. */
     public void updateOnScrollEnd() {
-        setTouchScrollInProgress(false);
+        setGestureScrollInProgress(false);
         for (mIterator.rewind(); mIterator.hasNext();) {
             mIterator.next().onScrollEnded(verticalScrollOffset(), verticalScrollExtent());
         }
@@ -176,9 +181,6 @@ public class GestureListenerManagerImpl
     @CalledByNative
     private void onFlingEnd() {
         mHasActiveFlingScroll = false;
-        // Note that mTouchScrollInProgress should normally be false at this
-        // point, but we reset it anyway as another failsafe.
-        setTouchScrollInProgress(false);
         for (mIterator.rewind(); mIterator.hasNext();) {
             mIterator.next().onFlingEndGesture(verticalScrollOffset(), verticalScrollExtent());
         }
@@ -191,7 +193,6 @@ public class GestureListenerManagerImpl
                 if (consumed) {
                     // The view expects the fling velocity in pixels/s.
                     mHasActiveFlingScroll = true;
-                    setTouchScrollInProgress(false);
                     for (mIterator.rewind(); mIterator.hasNext();) {
                         mIterator.next().onFlingStartGesture(
                                 verticalScrollOffset(), verticalScrollExtent());
@@ -204,7 +205,7 @@ public class GestureListenerManagerImpl
                 }
                 break;
             case WebInputEventType.GESTURE_SCROLL_BEGIN:
-                setTouchScrollInProgress(true);
+                setGestureScrollInProgress(true);
                 for (mIterator.rewind(); mIterator.hasNext();) {
                     mIterator.next().onScrollStarted(
                             verticalScrollOffset(), verticalScrollExtent());
@@ -321,16 +322,17 @@ public class GestureListenerManagerImpl
     }
 
     @Override
+    @CalledByNative
     public boolean isScrollInProgress() {
-        return mIsTouchScrollInProgress || mHasActiveFlingScroll;
+        return mIsGestureScrollInProgress;
     }
 
-    private void setTouchScrollInProgress(boolean touchScrollInProgress) {
-        mIsTouchScrollInProgress = touchScrollInProgress;
+    private void setGestureScrollInProgress(boolean gestureScrollInProgress) {
+        mIsGestureScrollInProgress = gestureScrollInProgress;
 
-        // Use the active touch scroll and fling scroll signal for hiding.
-        // The animation movement by fling will naturally hide the ActionMode
-        // by invalidating its content rect.
+        // Use the active scroll signal for hiding. The animation movement by
+        // fling will naturally hide the ActionMode by invalidating its content
+        // rect.
         getSelectionPopupController().setScrollInProgress(isScrollInProgress());
     }
 
@@ -341,9 +343,9 @@ public class GestureListenerManagerImpl
     private void resetScrollInProgress() {
         if (!isScrollInProgress()) return;
 
-        final boolean touchScrollInProgress = mIsTouchScrollInProgress;
-        setTouchScrollInProgress(false);
-        if (touchScrollInProgress) updateOnScrollEnd();
+        final boolean gestureScrollInProgress = mIsGestureScrollInProgress;
+        setGestureScrollInProgress(false);
+        if (gestureScrollInProgress) updateOnScrollEnd();
         resetFlingGesture();
     }
 
@@ -368,10 +370,14 @@ public class GestureListenerManagerImpl
         return mWebContents.getRenderCoordinates().getLastFrameViewportHeightPixInt();
     }
 
-    private native long nativeInit(WebContentsImpl webContents);
-    private native void nativeResetGestureDetection(long nativeGestureListenerManager);
-    private native void nativeSetDoubleTapSupportEnabled(
-            long nativeGestureListenerManager, boolean enabled);
-    private native void nativeSetMultiTouchZoomSupportEnabled(
-            long nativeGestureListenerManager, boolean enabled);
+    @NativeMethods
+    interface Natives {
+        long init(GestureListenerManagerImpl caller, WebContentsImpl webContents);
+        void resetGestureDetection(
+                long nativeGestureListenerManager, GestureListenerManagerImpl caller);
+        void setDoubleTapSupportEnabled(long nativeGestureListenerManager,
+                GestureListenerManagerImpl caller, boolean enabled);
+        void setMultiTouchZoomSupportEnabled(long nativeGestureListenerManager,
+                GestureListenerManagerImpl caller, boolean enabled);
+    }
 }

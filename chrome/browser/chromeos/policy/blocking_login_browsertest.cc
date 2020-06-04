@@ -12,6 +12,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
+#include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -29,7 +30,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_status_code.h"
@@ -137,17 +137,13 @@ class BlockingLoginTest
     InstallAttributes::LockResult result;
     InstallAttributes::Get()->LockDevice(
         policy::DEVICE_MODE_ENTERPRISE, domain, std::string(), "100200300",
-        base::Bind(&CopyLockResult, &loop, &result));
+        base::BindOnce(&CopyLockResult, &loop, &result));
     loop.Run();
     EXPECT_EQ(InstallAttributes::LOCK_SUCCESS, result);
     RunUntilIdle();
   }
 
   void Login(const std::string& username) {
-    content::WindowedNotificationObserver session_started_observer(
-        chrome::NOTIFICATION_SESSION_STARTED,
-        content::NotificationService::AllSources());
-
     LoginDisplayHost::default_host()
         ->GetOobeUI()
         ->GetView<GaiaScreenHandler>()
@@ -155,7 +151,7 @@ class BlockingLoginTest
 
     // Wait for the session to start after submitting the credentials. This
     // will wait until all the background requests are done.
-    session_started_observer.Wait();
+    test::WaitForPrimaryUserSessionStart();
   }
 
   // Handles an HTTP request sent to the test server. This handler either

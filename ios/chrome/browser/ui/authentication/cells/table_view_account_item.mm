@@ -8,8 +8,8 @@
 #import "ios/chrome/browser/ui/settings/cells/settings_cells_constants.h"
 #include "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -53,8 +53,8 @@ const CGFloat kHorizontalErrorIconFixedSize = 25;
   if (self.shouldDisplayError) {
     cell.errorIcon.image = [[UIImage imageNamed:@"settings_error"]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    cell.errorIcon.tintColor = [UIColor colorNamed:kDestructiveTintColor];
-    cell.detailTextLabel.textColor = [UIColor colorNamed:kDestructiveTintColor];
+    cell.errorIcon.tintColor = [UIColor colorNamed:kRedColor];
+    cell.detailTextLabel.textColor = [UIColor colorNamed:kRedColor];
   } else {
     cell.errorIcon.image = nil;
     cell.detailTextLabel.textColor = UIColor.cr_secondaryLabelColor;
@@ -265,6 +265,15 @@ const CGFloat kHorizontalErrorIconFixedSize = 25;
 
 - (NSString*)accessibilityValue {
   return self.detailTextLabel.text;
+}
+
+- (NSArray<NSString*>*)accessibilityUserInputLabels {
+  NSMutableArray<NSString*>* userInputLabels = [[NSMutableArray alloc] init];
+  if (self.textLabel.text) {
+    [userInputLabels addObject:self.textLabel.text];
+  }
+
+  return userInputLabels;
 }
 
 @end

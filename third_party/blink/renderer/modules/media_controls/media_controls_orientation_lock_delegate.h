@@ -10,8 +10,8 @@
 #include "third_party/blink/public/common/screen_orientation/web_screen_orientation_lock_type.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -68,7 +68,7 @@ class MediaControlsOrientationLockDelegate final : public NativeEventListener {
 
   // NativeEventListener implementation.
   void Invoke(ExecutionContext*, Event*) override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   friend class MediaControlsOrientationLockDelegateTest;
@@ -134,7 +134,9 @@ class MediaControlsOrientationLockDelegate final : public NativeEventListener {
 
   TaskHandle lock_to_any_task_;
 
-  device::mojom::blink::ScreenOrientationListenerPtr monitor_;
+  HeapMojoRemote<device::mojom::blink::ScreenOrientationListener,
+                 HeapMojoWrapperMode::kWithoutContextObserver>
+      monitor_;
 
   base::Optional<bool> is_auto_rotate_enabled_by_user_override_for_testing_;
 

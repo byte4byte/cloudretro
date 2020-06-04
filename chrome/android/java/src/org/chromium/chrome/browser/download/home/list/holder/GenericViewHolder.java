@@ -6,14 +6,15 @@ package org.chromium.chrome.browser.download.home.list.holder;
 
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.DrawableRes;
-import android.support.v4.graphics.drawable.RoundedBitmapDrawable;
-import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+
+import androidx.annotation.DrawableRes;
+import androidx.core.graphics.drawable.RoundedBitmapDrawable;
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.browser.download.home.list.ListItem;
@@ -62,7 +63,7 @@ public class GenericViewHolder extends OfflineItemViewHolder {
             mGenericIconId = iconId;
 
             Drawable drawable = org.chromium.ui.UiUtils.getTintedDrawable(
-                    itemView.getContext(), iconId, R.color.standard_mode_tint);
+                    itemView.getContext(), iconId, R.color.default_icon_color_tint_list);
 
             mThumbnail.setUnavailableDrawable(drawable);
             mThumbnail.setWaitingDrawable(drawable);

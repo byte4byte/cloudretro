@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "components/prefs/persistent_pref_store.h"
 #include "components/prefs/pref_store_observer_mock.h"
@@ -83,8 +83,9 @@ class SegregatedPrefStoreTest
     selected_pref_names.insert(kSelectedPref);
     selected_pref_names.insert(kSharedPref);
 
-    segregated_store_ = new SegregatedPrefStore(default_store_, selected_store_,
-                                                selected_pref_names, nullptr);
+    segregated_store_ = new SegregatedPrefStore(
+        default_store_, selected_store_, selected_pref_names,
+        mojo::Remote<prefs::mojom::TrackedPreferenceValidationDelegate>());
 
     segregated_store_->AddObserver(&observer_);
   }
@@ -98,7 +99,7 @@ class SegregatedPrefStoreTest
     return std::move(read_error_delegate_);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   PrefStoreObserverMock observer_;
 
@@ -186,6 +187,32 @@ TEST_F(SegregatedPrefStoreTest, ReadValues) {
 
   ASSERT_TRUE(segregated_store_->GetValue(kSelectedPref, NULL));
   ASSERT_TRUE(segregated_store_->GetValue(kUnselectedPref, NULL));
+}
+
+TEST_F(SegregatedPrefStoreTest, RemoveValuesByPrefix) {
+  const std::string subpref_name1 = kSelectedPref;
+  const std::string subpref_name2 = std::string(kSelectedPref) + "b";
+  const std::string other_name = kUnselectedPref;
+  const std::string prefix = kSelectedPref;
+
+  selected_store_->SetValue(subpref_name1,
+                            std::make_unique<base::Value>(kValue1),
+                            WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  default_store_->SetValue(subpref_name2,
+                           std::make_unique<base::Value>(kValue2),
+                           WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  default_store_->SetValue(other_name, std::make_unique<base::Value>(kValue2),
+                           WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+
+  ASSERT_TRUE(selected_store_->GetValue(subpref_name1, nullptr));
+  ASSERT_TRUE(default_store_->GetValue(subpref_name2, nullptr));
+  ASSERT_TRUE(default_store_->GetValue(other_name, nullptr));
+
+  segregated_store_->RemoveValuesByPrefixSilently(kSelectedPref);
+
+  ASSERT_FALSE(selected_store_->GetValue(subpref_name1, nullptr));
+  ASSERT_FALSE(default_store_->GetValue(subpref_name2, nullptr));
+  ASSERT_TRUE(default_store_->GetValue(other_name, nullptr));
 }
 
 TEST_F(SegregatedPrefStoreTest, Observer) {

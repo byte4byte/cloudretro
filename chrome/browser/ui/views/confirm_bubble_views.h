@@ -15,7 +15,6 @@
 class ConfirmBubbleModel;
 
 namespace views {
-class ImageButton;
 class Label;
 }  // namespace views
 
@@ -36,13 +35,6 @@ class ConfirmBubbleViews : public views::DialogDelegateView,
  protected:
   ~ConfirmBubbleViews() override;
 
-  // views::DialogDelegate implementation.
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
-  std::unique_ptr<views::View> CreateExtraView() override;
-  bool Cancel() override;
-  bool Accept() override;
-
   // views::WidgetDelegate implementation.
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
@@ -51,16 +43,15 @@ class ConfirmBubbleViews : public views::DialogDelegateView,
   // views::ButtonListener implementation.
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // views::View implementation.
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override;
+  // views::DialogDelegateView implementation.
+  void OnDialogInitialized() override;
 
  private:
   // The model to customize this bubble view.
   std::unique_ptr<ConfirmBubbleModel> model_;
 
   views::Label* label_;
-  views::ImageButton* help_button_;
+  views::View* help_button_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmBubbleViews);
 };

@@ -44,12 +44,14 @@
 				<integer>0</integer>
 				<integer>1</integer>
 				<integer>2</integer>
+				<integer>3</integer>
 			</array>
 			<key>Titles</key>
 			<array>
 				<string>Default</string>
 				<string>Tip Command Test</string>
 				<string>Tip Move to Dock Promo</string>
+				<string>Tip Review Updated ToS</string>
 			</array>
 		</dict>
 		<dict>
@@ -93,6 +95,16 @@
 			<string>Enable Startup Crash</string>
 			<key>Key</key>
 			<string>EnableStartupCrash</string>
+			<key>DefaultValue</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Disable DCHECK Crashes</string>
+			<key>Key</key>
+			<string>DisableDCHECKCrashes</string>
 			<key>DefaultValue</key>
 			<false/>
 		</dict>
@@ -161,82 +173,6 @@
 			<string>Origin Server Host</string>
 			<key>Key</key>
 			<string>AlternateOriginServerHost</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>AutocorrectionType</key>
-			<string>No</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>Extra Flags (one per line)</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
-			<string>Append Extra Flags</string>
-			<key>Key</key>
-			<string>EnableFreeformCommandLineFlags</string>
-			<key>DefaultValue</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Flag1</string>
-			<key>Key</key>
-			<string>FreeformCommandLineFlag1</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>AutocorrectionType</key>
-			<string>No</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Flag2</string>
-			<key>Key</key>
-			<string>FreeformCommandLineFlag2</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>AutocorrectionType</key>
-			<string>No</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Flag3</string>
-			<key>Key</key>
-			<string>FreeformCommandLineFlag3</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>AutocorrectionType</key>
-			<string>No</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Flag4</string>
-			<key>Key</key>
-			<string>FreeformCommandLineFlag4</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>AutocorrectionType</key>
-			<string>No</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSTextFieldSpecifier</string>
-			<key>Title</key>
-			<string>Flag5</string>
-			<key>Key</key>
-			<string>FreeformCommandLineFlag5</string>
 			<key>DefaultValue</key>
 			<string></string>
 			<key>AutocorrectionType</key>

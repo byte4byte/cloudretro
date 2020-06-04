@@ -74,15 +74,16 @@ class ArcNotificationManager::InstanceOwner {
   InstanceOwner() = default;
   ~InstanceOwner() = default;
 
-  void SetInstancePtr(NotificationsInstancePtr instance_ptr) {
+  void SetInstanceRemote(
+      mojo::PendingRemote<arc::mojom::NotificationsInstance> instance_remote) {
     DCHECK(!channel_);
 
     channel_ =
         std::make_unique<MojoChannel<NotificationsInstance, NotificationsHost>>(
-            &holder_, std::move(instance_ptr));
+            &holder_, std::move(instance_remote));
 
     // Using base::Unretained because |this| owns |channel_|.
-    channel_->set_connection_error_handler(
+    channel_->set_disconnect_handler(
         base::BindOnce(&InstanceOwner::OnDisconnected, base::Unretained(this)));
     channel_->QueryVersion();
   }
@@ -139,8 +140,9 @@ ArcNotificationManager::~ArcNotificationManager() {
   instance_owner_.reset();
 }
 
-void ArcNotificationManager::SetInstance(NotificationsInstancePtr instance) {
-  instance_owner_->SetInstancePtr(std::move(instance));
+void ArcNotificationManager::SetInstance(
+    mojo::PendingRemote<arc::mojom::NotificationsInstance> instance_remote) {
+  instance_owner_->SetInstanceRemote(std::move(instance_remote));
 }
 
 ConnectionHolder<NotificationsInstance, NotificationsHost>*
@@ -376,6 +378,31 @@ void ArcNotificationManager::SendNotificationClickedOnChrome(
       key, ArcNotificationEvent::BODY_CLICKED);
 }
 
+void ArcNotificationManager::SendNotificationActivatedInChrome(
+    const std::string& key,
+    bool activated) {
+  if (items_.find(key) == items_.end()) {
+    VLOG(3)
+        << "Chrome requests to fire an activation event on notification (key: "
+        << key << "), but it is gone.";
+    return;
+  }
+
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      instance_owner_->holder(), SendNotificationEventToAndroid);
+
+  // On shutdown, the ARC channel may quit earlier than notifications.
+  if (!notifications_instance) {
+    VLOG(2) << "ARC Notification (key: " << key
+            << ") is (de)activated, but the ARC channel has already gone.";
+    return;
+  }
+
+  notifications_instance->SendNotificationEventToAndroid(
+      key, activated ? ArcNotificationEvent::ACTIVATED
+                     : ArcNotificationEvent::DEACTIVATED);
+}
+
 void ArcNotificationManager::CreateNotificationWindow(const std::string& key) {
   if (items_.find(key) == items_.end()) {
     VLOG(3) << "Chrome requests to create window on notification (key: " << key
@@ -548,7 +575,7 @@ void ArcNotificationManager::SetNotificationConfiguration() {
 
   NotificationConfigurationPtr configuration = NotificationConfiguration::New();
   configuration->expansion_animation =
-      ash::features::IsNotificationExpansionAnimationEnabled();
+      features::IsNotificationExpansionAnimationEnabled();
 
   notifications_instance->SetNotificationConfiguration(
       std::move(configuration));

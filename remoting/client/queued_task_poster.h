@@ -28,7 +28,7 @@ class QueuedTaskPoster {
       scoped_refptr<base::SingleThreadTaskRunner> target_task_runner);
   ~QueuedTaskPoster();
 
-  void AddTask(const base::Closure& closure);
+  void AddTask(base::OnceClosure closure);
 
  private:
   void TransferTaskQueue();
@@ -36,11 +36,11 @@ class QueuedTaskPoster {
   scoped_refptr<base::SingleThreadTaskRunner> source_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> target_task_runner_;
 
-  base::queue<base::Closure> task_queue_;
+  base::queue<base::OnceClosure> task_queue_;
 
   bool transfer_task_scheduled_ = false;
 
-  base::WeakPtrFactory<QueuedTaskPoster> weak_factory_;
+  base::WeakPtrFactory<QueuedTaskPoster> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(QueuedTaskPoster);
 };

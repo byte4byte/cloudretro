@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_base.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/one_shot_event.h"
 #include "base/single_thread_task_runner.h"
@@ -34,10 +35,10 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_constants.h"
 
@@ -53,10 +54,7 @@ ToolbarActionsModel::ToolbarActionsModel(
           extensions::ExtensionActionManager::Get(profile_)),
       actions_initialized_(false),
       highlight_type_(HIGHLIGHT_NONE),
-      has_active_bubble_(false),
-      extension_action_observer_(this),
-      extension_registry_observer_(this),
-      load_error_reporter_observer_(this) {
+      has_active_bubble_(false) {
   extensions::ExtensionSystem::Get(profile_)->ready().Post(
       FROM_HERE, base::BindOnce(&ToolbarActionsModel::OnReady,
                                 weak_ptr_factory_.GetWeakPtr()));
@@ -252,6 +250,19 @@ void ToolbarActionsModel::RemovePref(const ActionId& action_id) {
     last_known_positions_.erase(pos);
     UpdatePrefs();
   }
+
+  if (base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu)) {
+    // The extension is already unloaded at this point, and so shouldn't be in
+    // the active pinned set.
+    DCHECK(!IsActionPinned(action_id));
+    auto stored_pinned_actions = extension_prefs_->GetPinnedExtensions();
+    auto iter = std::find(stored_pinned_actions.begin(),
+                          stored_pinned_actions.end(), action_id);
+    if (iter != stored_pinned_actions.end()) {
+      stored_pinned_actions.erase(iter);
+      extension_prefs_->SetPinnedExtensions(stored_pinned_actions);
+    }
+  }
 }
 
 void ToolbarActionsModel::OnReady() {
@@ -386,6 +397,8 @@ void ToolbarActionsModel::AddAction(const ActionId& action_id) {
     if (visible_count_delta)
       SetVisibleIconCount(visible_icon_count() + visible_count_delta);
   }
+
+  UpdatePinnedActionIds();
 }
 
 void ToolbarActionsModel::RemoveAction(const ActionId& action_id) {
@@ -399,6 +412,8 @@ void ToolbarActionsModel::RemoveAction(const ActionId& action_id) {
     SetVisibleIconCount(action_ids_.size() - 1);
 
   action_ids_.erase(pos);
+
+  UpdatePinnedActionIds();
 
   // If we're in highlight mode, we also have to remove the action from
   // the highlighted list.
@@ -437,6 +452,35 @@ bool ToolbarActionsModel::IsActionPinned(const ActionId& action_id) const {
   return base::Contains(pinned_action_ids_, action_id);
 }
 
+void ToolbarActionsModel::MovePinnedAction(const ActionId& action_id,
+                                           size_t target_index) {
+  DCHECK(base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu));
+
+  auto new_pinned_action_ids = pinned_action_ids_;
+
+  auto current_position = std::find(new_pinned_action_ids.begin(),
+                                    new_pinned_action_ids.end(), action_id);
+  DCHECK(current_position != new_pinned_action_ids.end());
+
+  const bool move_to_end = size_t{target_index} >= new_pinned_action_ids.size();
+  auto target_position =
+      move_to_end ? std::prev(new_pinned_action_ids.end())
+                  : std::next(new_pinned_action_ids.begin(), target_index);
+
+  // Rotate |action_id| to be in the target position.
+  if (target_position < current_position) {
+    std::rotate(target_position, current_position, std::next(current_position));
+  } else {
+    std::rotate(current_position, std::next(current_position),
+                std::next(target_position));
+  }
+
+  extension_prefs_->SetPinnedExtensions(new_pinned_action_ids);
+  // The |pinned_action_ids_| should be updated as a result of updating the
+  // preference.
+  DCHECK(pinned_action_ids_ == new_pinned_action_ids);
+}
+
 void ToolbarActionsModel::RemoveExtension(
     const extensions::Extension* extension) {
   RemoveAction(extension->id());
@@ -459,8 +503,32 @@ void ToolbarActionsModel::InitializeActionList() {
   else
     Populate();
 
-  if (base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu))
+  if (base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu)) {
+    if (!extension_prefs_->IsPinnedExtensionsMigrationComplete() &&
+        !profile_->IsOffTheRecord()) {
+      // Migrate extensions visible in the toolbar to pinned extensions.
+      auto new_pinned_action_ids = std::vector<ActionId>(
+          action_ids_.begin(), action_ids_.begin() + visible_icon_count());
+      extension_prefs_->SetPinnedExtensions(new_pinned_action_ids);
+      extension_prefs_->MarkPinnedExtensionsMigrationComplete();
+    }
+    // Set |pinned_action_ids_| directly to avoid notifying observers that they
+    // have changed even though they haven't.
     pinned_action_ids_ = GetFilteredPinnedActionIds();
+
+    if (!profile_->IsOffTheRecord()) {
+      base::UmaHistogramCounts100("Extensions.Toolbar.PinnedExtensionCount",
+                                  pinned_action_ids_.size());
+      int percentage = 0;
+      if (!action_ids_.empty()) {
+        double percentage_double =
+            pinned_action_ids_.size() / action_ids_.size() * 100.0;
+        percentage = int{percentage_double};
+      }
+      base::UmaHistogramPercentage(
+          "Extensions.Toolbar.PinnedExtensionPercentage", percentage);
+    }
+  }
 }
 
 void ToolbarActionsModel::Populate() {
@@ -473,18 +541,14 @@ void ToolbarActionsModel::Populate() {
   std::vector<ActionId> unsorted;
 
   // Populate the lists.
-  int hidden = 0;
 
   // Add the extension action ids to all_actions.
   const extensions::ExtensionSet& extensions =
       extension_registry_->enabled_extensions();
   for (const scoped_refptr<const extensions::Extension>& extension :
        extensions) {
-    if (!ShouldAddExtension(extension.get())) {
-      if (!extension_action_api_->GetBrowserActionVisibility(extension->id()))
-        ++hidden;
+    if (!ShouldAddExtension(extension.get()))
       continue;
-    }
 
     all_actions.push_back(extension->id());
   }
@@ -537,8 +601,6 @@ void ToolbarActionsModel::Populate() {
 
   // Histogram names are prefixed with "ExtensionToolbarModel" rather than
   // "ToolbarActionsModel" for historical reasons.
-  UMA_HISTOGRAM_COUNTS_100(
-      "ExtensionToolbarModel.BrowserActionsPermanentlyHidden", hidden);
   UMA_HISTOGRAM_COUNTS_100("ExtensionToolbarModel.BrowserActionsCount",
                            action_ids_.size());
 
@@ -638,14 +700,7 @@ void ToolbarActionsModel::OnActionToolbarPrefChange() {
   if (!actions_initialized_)
     return;
 
-  if (base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu)) {
-    std::vector<ActionId> pinned_extensions = GetFilteredPinnedActionIds();
-    if (pinned_extensions != pinned_action_ids_) {
-      pinned_action_ids_ = pinned_extensions;
-      for (Observer& observer : observers_)
-        observer.OnToolbarPinnedActionsChanged();
-    }
-  }
+  UpdatePinnedActionIds();
 
   // Recalculate |last_known_positions_| to be |pref_positions| followed by
   // ones that are only in |last_known_positions_|.
@@ -762,6 +817,18 @@ bool ToolbarActionsModel::IsActionVisible(const ActionId& action_id) const {
   while (action_ids().size() > index && action_ids()[index] != action_id)
     ++index;
   return index < visible_icon_count();
+}
+
+void ToolbarActionsModel::UpdatePinnedActionIds() {
+  if (!base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu))
+    return;
+  std::vector<ActionId> pinned_extensions = GetFilteredPinnedActionIds();
+  if (pinned_extensions == pinned_action_ids_)
+    return;
+
+  pinned_action_ids_ = pinned_extensions;
+  for (Observer& observer : observers_)
+    observer.OnToolbarPinnedActionsChanged();
 }
 
 std::vector<ToolbarActionsModel::ActionId>

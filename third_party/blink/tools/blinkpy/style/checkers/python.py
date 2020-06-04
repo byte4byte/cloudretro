@@ -19,13 +19,11 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """Supports checking WebKit style in Python files."""
 
 import os
 import re
 import sys
-
 
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.path_finder import get_blink_tools_dir
@@ -90,11 +88,13 @@ class PythonChecker(object):
         ])
         return executive.run_command([
             sys.executable,
-            finder.path_from_depot_tools_base('pylint.py'),
+            finder.path_from_depot_tools_base('pylint'),
             '--output-format=parseable',
             '--rcfile=' + finder.path_from_blink_tools('blinkpy', 'pylintrc'),
             path,
-        ], env=env, error_handler=executive.ignore_error)
+        ],
+                                     env=env,
+                                     error_handler=executive.ignore_error)
 
     def _parse_pylint_output(self, output):
         # We filter out these messages because they are bugs in pylint that produce false positives.
@@ -123,7 +123,8 @@ class PythonChecker(object):
             category_and_method = match_obj.group(3).split(', ')
             category = 'pylint/' + (category_and_method[0])
             if len(category_and_method) > 1:
-                message = '[%s] %s' % (category_and_method[1], match_obj.group(4))
+                message = '[%s] %s' % (category_and_method[1],
+                                       match_obj.group(4))
             else:
                 message = match_obj.group(4)
             errors.append((line_number, category, message))

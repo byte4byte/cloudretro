@@ -8,15 +8,16 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "chrome/browser/engagement/site_engagement_score.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/push_messaging/budget.pb.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -53,8 +54,8 @@ BudgetDatabase::BudgetInfo::~BudgetInfo() = default;
 BudgetDatabase::BudgetDatabase(Profile* profile)
     : profile_(profile), clock_(base::WrapUnique(new base::DefaultClock)) {
   auto* protodb_provider =
-      leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(
-          profile->GetProfileKey());
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetProtoDatabaseProvider();
   // In incognito mode the provider service is not created.
   if (!protodb_provider)
     return;
@@ -62,7 +63,7 @@ BudgetDatabase::BudgetDatabase(Profile* profile)
   db_ = protodb_provider->GetDB<budget_service::Budget>(
       leveldb_proto::ProtoDbType::BUDGET_DATABASE,
       profile->GetPath().Append(FILE_PATH_LITERAL("BudgetDatabase")),
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}));
   db_->Init(base::BindOnce(&BudgetDatabase::OnDatabaseInit,

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/jumbo.gni")
+import("//build/config/linux/gtk/gtk.gni")
 import("//build/config/ui.gni")
 import("//ui/ozone/ozone.gni")
 
@@ -12,20 +13,51 @@ jumbo_component("x") {
   output_name = "ui_base_x"
 
   sources = [
+    "selection_utils.cc",
+    "selection_utils.h",
+    "x11_desktop_window_move_client.cc",
+    "x11_desktop_window_move_client.h",
+    "x11_display_manager.cc",
+    "x11_display_manager.h",
     "x11_display_util.cc",
     "x11_display_util.h",
     "x11_menu_list.cc",
     "x11_menu_list.h",
+    "x11_menu_registrar.cc",
+    "x11_menu_registrar.h",
+    "x11_move_loop.h",
+    "x11_move_loop_delegate.h",
     "x11_pointer_grab.cc",
     "x11_pointer_grab.h",
+    "x11_shm_image_pool.cc",
+    "x11_shm_image_pool.h",
+    "x11_software_bitmap_presenter.cc",
+    "x11_software_bitmap_presenter.h",
+    "x11_topmost_window_finder.cc",
+    "x11_topmost_window_finder.h",
     "x11_util.cc",
     "x11_util.h",
     "x11_util_internal.h",
+    "x11_whole_screen_move_loop.cc",
+    "x11_whole_screen_move_loop.h",
     "x11_window.cc",
     "x11_window.h",
-    "x11_window_event_manager.cc",
-    "x11_window_event_manager.h",
+    "x11_workspace_handler.cc",
+    "x11_workspace_handler.h",
   ]
+
+  if (is_desktop_linux) {
+    sources += [
+      "selection_owner.cc",
+      "selection_owner.h",
+      "x11_drag_context.cc",
+      "x11_drag_context.h",
+      "x11_drag_drop_client.cc",
+      "x11_drag_drop_client.h",
+      "x11_os_exchange_data_provider.cc",
+      "x11_os_exchange_data_provider.h",
+    ]
+  }
 
   configs += [
     "//build/config/linux:x11",
@@ -37,13 +69,35 @@ jumbo_component("x") {
   deps = [
     "//base",
     "//base:i18n",
+    "//net",
     "//skia",
+    "//ui/base:hit_test",
+    "//ui/base:wm_role_names",
+    "//ui/base/clipboard:clipboard_types",
+    "//ui/base/dragdrop/file_info",
     "//ui/display/util",
     "//ui/events",
     "//ui/events/devices/x11",
     "//ui/events/keycodes:x11",
+    "//ui/events/platform/x11",
     "//ui/events/x:x",
     "//ui/gfx",
     "//ui/gfx/x",
+    "//ui/platform_window/common",
+  ]
+}
+
+source_set("gl") {
+  sources = [
+    "x11_gl_egl_utility.cc",
+    "x11_gl_egl_utility.h",
+  ]
+
+  configs += [ "//third_party/khronos:khronos_headers" ]
+  deps = [
+    ":x",
+    "//base",
+    "//third_party/angle:includes",
+    "//ui/gl",
   ]
 }

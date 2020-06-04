@@ -17,12 +17,12 @@
 #include "base/sequenced_task_runner.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/download/public/common/mock_download_item.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_download_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -248,7 +248,7 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
       downloads->push_back(zero_item_.get());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   NiceMock<MockDownloadMetadataManager> manager_;
   TestingProfile profile_;
   NiceMock<content::MockDownloadManager> download_manager_;

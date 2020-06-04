@@ -23,10 +23,10 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/policy/arc_policy_bridge.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_descriptor.h"
-#include "components/arc/common/app.mojom.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "ui/base/layout.h"
@@ -97,7 +97,7 @@ class ArcAppListPrefs : public KeyedService,
     bool sticky;
     // Whether notifications are enabled for the app.
     bool notifications_enabled;
-    // Whether app is ready.
+    // Whether app is ready. Disabled and removed apps are not ready.
     bool ready;
     // Whether app was suspended by policy. It may have or may not have ready
     // state.
@@ -145,11 +145,27 @@ class ArcAppListPrefs : public KeyedService,
     virtual void OnAppRegistered(const std::string& app_id,
                                  const AppInfo& app_info) {}
     // Notifies an observer that app states have been changed.
+    //
+    // State includes the the following AppInfo fields:
+    //  - sticky
+    //  - notifications_enabled
+    //  - ready
+    //  - suspended
+    //  - show_in_launcher
+    //  - launchable
+    //
+    // In practice, only ready and suspended change over time.
     virtual void OnAppStatesChanged(const std::string& id,
                                     const AppInfo& app_info) {}
     // Notifies an observer that app was removed.
     virtual void OnAppRemoved(const std::string& id) {}
-    // Notifies an observer that app icon has been installed or updated.
+    // Notifies an observer that app icon has been installed or updated:
+    // 1. When default apps are registered.
+    // 2. When the new icon has been installed:
+    //  - App appears for the first time and we fetch the icon from Android.
+    //  - App icon was invalid or non-readable and we re-fetch it from Android.
+    //  - App was updated and we re-fetch.
+    //  - Framework version changed (e.g. NYC -> PI) and we re-fetch.
     virtual void OnAppIconUpdated(const std::string& id,
                                   const ArcAppIconDescriptor& descriptor) {}
     // Notifies an observer that the name of an app has changed.
@@ -200,6 +216,9 @@ class ArcAppListPrefs : public KeyedService,
     // in case of success.
     virtual void OnInstallationFinished(const std::string& package_name,
                                         bool success) {}
+
+    // Notifies that ArcAppListPrefs is destroyed.
+    virtual void OnArcAppListPrefsDestroyed() {}
 
    protected:
     virtual ~Observer() {}
@@ -332,6 +351,9 @@ class ArcAppListPrefs : public KeyedService,
   // 3. is not scheduled to install by sync
   // 4. Is not currently installing.
   bool IsUnknownPackage(const std::string& package_name) const;
+
+  // Returns true if the package is a default package, even it's uninstalled.
+  bool IsDefaultPackage(const std::string& package_name) const;
 
  private:
   friend class ChromeLauncherControllerTest;
@@ -572,7 +594,7 @@ class ArcAppListPrefs : public KeyedService,
   // Keeps all pending resize requests used to support legacy icons.
   std::vector<std::unique_ptr<ResizeRequest>> resize_requests_;
 
-  base::WeakPtrFactory<ArcAppListPrefs> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcAppListPrefs> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcAppListPrefs);
 };

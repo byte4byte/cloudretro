@@ -31,10 +31,10 @@ class DualBufferFrameConsumer : public protocol::FrameConsumer {
   // RenderCallback(decoded_frame, done)
   // |done| should be run after it is rendered. Can be called on any thread.
   using RenderCallback =
-      base::Callback<void(std::unique_ptr<webrtc::DesktopFrame>,
-                          const base::Closure&)>;
+      base::RepeatingCallback<void(std::unique_ptr<webrtc::DesktopFrame>,
+                                   base::OnceClosure)>;
   DualBufferFrameConsumer(
-      const RenderCallback& callback,
+      RenderCallback callback,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       PixelFormat format);
   ~DualBufferFrameConsumer() override;
@@ -48,14 +48,14 @@ class DualBufferFrameConsumer : public protocol::FrameConsumer {
   std::unique_ptr<webrtc::DesktopFrame> AllocateFrame(
       const webrtc::DesktopSize& size) override;
   void DrawFrame(std::unique_ptr<webrtc::DesktopFrame> frame,
-                 const base::Closure& done) override;
+                 base::OnceClosure done) override;
   PixelFormat GetPixelFormat() override;
 
   base::WeakPtr<DualBufferFrameConsumer> GetWeakPtr();
 
  private:
   void RunRenderCallback(std::unique_ptr<webrtc::DesktopFrame> frame,
-                 const base::Closure& done);
+                         base::OnceClosure done);
 
   std::unique_ptr<webrtc::SharedDesktopFrame> buffers_[2];
 
@@ -70,7 +70,7 @@ class DualBufferFrameConsumer : public protocol::FrameConsumer {
   PixelFormat pixel_format_;
   base::ThreadChecker thread_checker_;
   base::WeakPtr<DualBufferFrameConsumer> weak_ptr_;
-  base::WeakPtrFactory<DualBufferFrameConsumer> weak_factory_;
+  base::WeakPtrFactory<DualBufferFrameConsumer> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DualBufferFrameConsumer);
 };

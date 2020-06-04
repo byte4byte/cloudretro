@@ -141,18 +141,20 @@ LoggingDestination DetermineLoggingDestination(
   if (command_line.HasSwitch(kInvertLoggingSwitch))
     enable_logging = !enable_logging;
 
-  LoggingDestination log_mode;
-  if (enable_logging) {
+  if (!enable_logging)
+    return LOG_NONE;
+  if (command_line.HasSwitch(switches::kEnableLogging)) {
     // Let --enable-logging=stderr force only stderr, particularly useful for
     // non-debug builds where otherwise you can't get logs to stderr at all.
-    if (command_line.GetSwitchValueASCII(switches::kEnableLogging) == "stderr")
-      log_mode = LOG_TO_SYSTEM_DEBUG_LOG | LOG_TO_STDERR;
-    else
-      log_mode = kDefaultLoggingMode;
-  } else {
-    log_mode = LOG_NONE;
+    std::string logging_destination =
+        command_line.GetSwitchValueASCII(switches::kEnableLogging);
+    if (logging_destination == "stderr") {
+      return LOG_TO_SYSTEM_DEBUG_LOG | LOG_TO_STDERR;
+    } else if (logging_destination != "") {
+      PLOG(ERROR) << "Invalid logging destination: " << logging_destination;
+    }
   }
-  return log_mode;
+  return kDefaultLoggingMode;
 }
 
 #if defined(OS_CHROMEOS)
@@ -301,7 +303,7 @@ void InitChromeLogging(const base::CommandLine& command_line,
 
   LoggingSettings settings;
   settings.logging_dest = logging_dest;
-  settings.log_file = log_path.value().c_str();
+  settings.log_file_path = log_path.value().c_str();
   settings.lock_log = log_locking_state;
   settings.delete_old = delete_old_log_file;
   bool success = InitLogging(settings);

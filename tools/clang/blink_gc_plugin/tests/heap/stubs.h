@@ -25,9 +25,16 @@ public:
     T* operator->() { return 0; }
 };
 
-template<typename T> class RefPtr {
+template<typename T> class scoped_refptr {
 public:
-    ~RefPtr() { }
+    ~scoped_refptr() { }
+    operator T*() const { return 0; }
+    T* operator->() { return 0; }
+};
+
+template<typename T> class WeakPtr {
+public:
+    ~WeakPtr() { }
     operator T*() const { return 0; }
     T* operator->() { return 0; }
 };
@@ -204,15 +211,10 @@ using namespace WTF;
   virtual bool IsHeapObjectAlive(Visitor*) const override { return 0; } \
   typedef int HasUsingGarbageCollectedMixinMacro
 
-#define EAGERLY_FINALIZED() typedef int IsEagerlyFinalizedMarker
-
 template<typename T> class GarbageCollected { };
 
-template<typename T>
-class GarbageCollectedFinalized : public GarbageCollected<T> { };
-
-template<typename T>
-class RefCountedGarbageCollected : public GarbageCollectedFinalized<T> { };
+template <typename T>
+class RefCountedGarbageCollected : public GarbageCollected<T> {};
 
 template<typename T> class Member {
 public:
@@ -310,7 +312,7 @@ public:
 
 template<typename T>
 struct TraceIfNeeded {
-    static void Trace(Visitor*, T*);
+  static void Trace(Visitor*, T&);
 };
 
 }

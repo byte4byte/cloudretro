@@ -18,7 +18,6 @@ import static org.chromium.chrome.browser.keyboard_accessory.ManualFillingTestHe
 import static org.chromium.chrome.browser.keyboard_accessory.tab_layout_component.KeyboardAccessoryTabTestHelper.isKeyboardAccessoryTabLayout;
 
 import android.app.Activity;
-import android.os.Build;
 import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 import android.view.View;
@@ -29,11 +28,11 @@ import org.junit.runner.RunWith;
 
 import org.chromium.autofill.mojom.FocusedFieldType;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeWindow;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -50,7 +49,6 @@ import java.util.concurrent.TimeoutException;
  * Integration tests for autofill keyboard accessory.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/958631")
 @RetryOnFailure
 @EnableFeatures({ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY})
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
@@ -76,7 +74,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
     }
 
     private void loadTestPage(ChromeWindow.KeyboardVisibilityDelegateFactory keyboardDelegate)
-            throws InterruptedException, ExecutionException, TimeoutException {
+            throws TimeoutException {
         mHelper.loadTestPage("/chrome/test/data/autofill/autofill_test_form.html", false, false,
                 keyboardDelegate);
         ManualFillingTestHelper.createAutofillTestProfiles();
@@ -88,8 +86,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
      */
     @Test
     @MediumTest
-    public void testAutofocusedFieldDoesNotShowKeyboardAccessory()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    public void testAutofocusedFieldDoesNotShowKeyboardAccessory() throws TimeoutException {
         loadTestPage(FakeKeyboard::new);
         CriteriaHelper.pollUiThread(() -> {
             View accessory = mActivityTestRule.getActivity().findViewById(R.id.keyboard_accessory);
@@ -102,8 +99,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
      */
     @Test
     @MediumTest
-    public void testTapInputFieldShowsKeyboardAccessory()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    public void testTapInputFieldShowsKeyboardAccessory() throws TimeoutException {
         loadTestPage(FakeKeyboard::new);
         mHelper.clickNodeAndShowKeyboard("NAME_FIRST");
         mHelper.waitForKeyboardAccessoryToBeShown();
@@ -114,8 +110,8 @@ public class AutofillKeyboardAccessoryIntegrationTest {
      */
     @Test
     @MediumTest
-    public void testSwitchFieldsRescrollsKeyboardAccessory()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    @FlakyTest(message = "https://crbug.com/984489")
+    public void testSwitchFieldsRescrollsKeyboardAccessory() throws TimeoutException {
         loadTestPage(FakeKeyboard::new);
         mHelper.clickNodeAndShowKeyboard("EMAIL_ADDRESS");
         mHelper.waitForKeyboardAccessoryToBeShown(true);
@@ -141,7 +137,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
     @Test
     @MediumTest
     public void testSelectSuggestionHidesKeyboardAccessory()
-            throws ExecutionException, InterruptedException, TimeoutException {
+            throws ExecutionException, TimeoutException {
         loadTestPage(FakeKeyboard::new);
         mHelper.clickNodeAndShowKeyboard("NAME_FIRST");
         mHelper.waitForKeyboardAccessoryToBeShown(true);
@@ -154,7 +150,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
     @Test
     @MediumTest
     public void testSuggestionsCloseAccessoryWhenClicked()
-            throws ExecutionException, InterruptedException, TimeoutException {
+            throws ExecutionException, TimeoutException {
         MultiWindowUtils.getInstance().setIsInMultiWindowModeForTesting(true);
         loadTestPage(MultiWindowKeyboard::new);
         mHelper.clickNode("NAME_FIRST", FocusedFieldType.FILLABLE_NON_SEARCH_FIELD);
@@ -168,7 +164,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
     @Test
     @SmallTest
     public void testPressingBackButtonHidesAccessoryWithAutofillSuggestions()
-            throws InterruptedException, TimeoutException, ExecutionException {
+            throws TimeoutException, ExecutionException {
         loadTestPage(MultiWindowKeyboard::new);
         mHelper.clickNodeAndShowKeyboard("NAME_FIRST");
         mHelper.waitForKeyboardAccessoryToBeShown(true);
@@ -187,8 +183,7 @@ public class AutofillKeyboardAccessoryIntegrationTest {
 
     @Test
     @MediumTest
-    public void testSheetHasMinimumSizeWhenTriggeredBySuggestion()
-            throws ExecutionException, InterruptedException, TimeoutException {
+    public void testSheetHasMinimumSizeWhenTriggeredBySuggestion() throws TimeoutException {
         MultiWindowUtils.getInstance().setIsInMultiWindowModeForTesting(true);
         loadTestPage(MultiWindowKeyboard::new);
         mHelper.clickNode("NAME_FIRST", FocusedFieldType.FILLABLE_NON_SEARCH_FIELD);

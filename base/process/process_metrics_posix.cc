@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "base/allocator/buildflags.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 
@@ -101,7 +102,16 @@ void IncreaseFdLimitTo(unsigned int max_descriptors) {
 #endif  // !defined(OS_FUCHSIA)
 
 size_t GetPageSize() {
-  return getpagesize();
+  static const size_t pagesize = []() -> size_t {
+  // For more information see getpagesize(2). Portable applications should use
+  // sysconf(_SC_PAGESIZE) rather than getpagesize() if it's available.
+#if defined(_SC_PAGESIZE)
+    return sysconf(_SC_PAGESIZE);
+#else
+    return getpagesize();
+#endif
+  }();
+  return pagesize;
 }
 
 size_t ProcessMetrics::GetMallocUsage() {
@@ -111,7 +121,7 @@ size_t ProcessMetrics::GetMallocUsage() {
   return stats.size_in_use;
 #elif defined(OS_LINUX) || defined(OS_ANDROID)
   struct mallinfo minfo = mallinfo();
-#if defined(USE_TCMALLOC)
+#if BUILDFLAG(USE_TCMALLOC)
   return minfo.uordblks;
 #else
   return minfo.hblkhd + minfo.arena;

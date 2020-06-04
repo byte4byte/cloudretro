@@ -10,32 +10,39 @@
 #include "base/macros.h"
 #include "ui/views/view.h"
 
-namespace views {
-class ImageView;
-}  // namespace views
-
 namespace ash {
 
-class AmbientController;
+class AmbientBackgroundImageView;
+class AmbientViewDelegate;
 
 // View to display photos in ambient mode.
 class ASH_EXPORT PhotoView : public views::View, public PhotoModelObserver {
  public:
-  explicit PhotoView(AmbientController* ambient_controller);
+  explicit PhotoView(AmbientViewDelegate* delegate);
   ~PhotoView() override;
 
   // views::View:
   const char* GetClassName() const override;
-  void OnBoundsChanged(const gfx::Rect& prev_bounds) override;
+  void AddedToWidget() override;
 
   // PhotoModelObserver:
-  void OnImageAvailable(const gfx::ImageSkia& image) override;
+  void OnImagesChanged() override;
 
  private:
   void Init();
+  void UpdateImages();
+  void StartSlideAnimation();
+  bool CanAnimate() const;
 
-  AmbientController* ambient_controller_ = nullptr;
-  views::ImageView* image_view_;  // Owned by view hierarchy.
+  // Note that we should be careful when using |delegate_|, as there is no
+  // strong guarantee on the life cycle, especially given that the widget |this|
+  // lived in is destroyed asynchronously.
+  AmbientViewDelegate* delegate_ = nullptr;
+
+  // Image containers used for animation. Owned by view hierarchy.
+  AmbientBackgroundImageView* image_view_prev_ = nullptr;
+  AmbientBackgroundImageView* image_view_curr_ = nullptr;
+  AmbientBackgroundImageView* image_view_next_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(PhotoView);
 };

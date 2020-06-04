@@ -7,8 +7,8 @@
 
 #include "base/callback.h"
 #include "ios/web/public/deprecated/navigation_item_list.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ui/base/page_transition_types.h"
 
 namespace web {
@@ -84,6 +84,9 @@ class TestNavigationManager : public NavigationManager {
   // Returns whether LoadIfNecessary has been called.
   bool LoadIfNecessaryWasCalled();
 
+  // Returns whether Reload has been called;
+  bool ReloadWasCalled();
+
  private:
   // A list of items constructed by calling AddItem().
   web::ScopedNavigationItemList items_;
@@ -96,6 +99,7 @@ class TestNavigationManager : public NavigationManager {
   web::BrowserState* browser_state_;
   bool load_url_with_params_was_called_;
   bool load_if_necessary_was_called_;
+  bool reload_was_called_;
 };
 
 }  // namespace web

@@ -13,6 +13,7 @@
 #include "android_webview/public/browser/draw_fn.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/containers/queue.h"
+#include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -22,6 +23,10 @@ class GrVkSecondaryCBDrawContext;
 
 namespace gl {
 class GLImageAHardwareBuffer;
+}
+
+namespace gpu {
+class VulkanImage;
 }
 
 namespace android_webview {
@@ -73,6 +78,7 @@ class AwDrawFnImpl {
     sk_sp<SkImage> ahb_skimage;
     uint32_t texture_id = 0;
     uint32_t framebuffer_id = 0;
+    std::unique_ptr<gpu::VulkanImage> vulkan_image;
     GrVkImageInfo image_info;
 
     // Used to clean up Vulkan objects.

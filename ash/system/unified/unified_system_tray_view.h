@@ -58,8 +58,18 @@ class UnifiedSlidersContainerView : public views::View {
 // Note that the term "UnifiedSystemTray" refers to entire bubble containing
 // both (1) and (2).
 class ASH_EXPORT UnifiedSystemTrayView : public views::View,
-                                         public views::FocusTraversable {
+                                         public views::FocusTraversable,
+                                         public views::FocusChangeListener {
  public:
+  // Get the background color of unified system tray.
+  static SkColor GetBackgroundColor();
+
+  // Get focus ring color for system tray elements.
+  static SkColor GetFocusRingColor();
+
+  // Create background of UnifiedSystemTray with rounded corners.
+  static std::unique_ptr<views::Background> CreateBackground();
+
   UnifiedSystemTrayView(UnifiedSystemTrayController* controller,
                         bool initially_expanded);
   ~UnifiedSystemTrayView() override;
@@ -84,6 +94,11 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // before transitioning into a detailed view.
   void SaveFocus();
   void RestoreFocus();
+
+  // Set the first child view to be focused when focus is acquired.
+  // This is the first visible child unless reverse is true, in which case
+  // it is the last visible child.
+  void FocusEntered(bool reverse);
 
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
   // Otherwise, it shows intermediate state.
@@ -119,28 +134,50 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // Returns the number of visible feature pods.
   int GetVisibleFeaturePodCount() const;
 
-  // Create background of UnifiedSystemTray that is semi-transparent and has
-  // rounded corners.
-  static std::unique_ptr<views::Background> CreateBackground();
+  // Get the accessible name for the currently shown detailed view.
+  base::string16 GetDetailedViewAccessibleName() const;
+
+  // Returns true if a detailed view is being shown in the tray. (e.g Bluetooth
+  // Settings).
+  bool IsDetailedViewShown() const;
 
   // views::View:
   void OnGestureEvent(ui::GestureEvent* event) override;
   void ChildPreferredSizeChanged(views::View* child) override;
   const char* GetClassName() const override;
   views::FocusTraversable* GetFocusTraversable() override;
+  void AddedToWidget() override;
+  void RemovedFromWidget() override;
 
   // views::FocusTraversable:
   views::FocusSearch* GetFocusSearch() override;
   views::FocusTraversable* GetFocusTraversableParent() override;
   views::View* GetFocusTraversableParentView() override;
 
+  // views::FocusChangeListener:
+  void OnWillChangeFocus(views::View* before, views::View* now) override;
+  void OnDidChangeFocus(views::View* before, views::View* now) override;
+
+  FeaturePodsContainerView* feature_pods_container() {
+    return feature_pods_container_;
+  }
+
   NotificationHiddenView* notification_hidden_view_for_testing() {
     return notification_hidden_view_;
   }
 
+  View* detailed_view() { return detailed_view_container_; }
   View* detailed_view_for_testing() { return detailed_view_container_; }
 
  private:
+  friend class UnifiedMessageCenterBubbleTest;
+
+  // Get first and last focusable child views. These functions are used to
+  // figure out if we need to focus out or to set the correct focused view
+  // when focus is acquired from another widget.
+  View* GetFirstFocusableChild();
+  View* GetLastFocusableChild();
+
   class FocusSearch;
 
   double expanded_amount_;
@@ -157,7 +194,7 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   UnifiedSystemInfoView* const system_info_view_;
   views::View* const system_tray_container_;
   views::View* const detailed_view_container_;
-  UnifiedMessageCenterView* const message_center_view_;
+  UnifiedMessageCenterView* message_center_view_ = nullptr;
 
   // Null if kManagedDeviceUIRedesign is disabled.
   UnifiedManagedDeviceView* managed_device_view_ = nullptr;
@@ -169,6 +206,9 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   views::View* saved_focused_view_ = nullptr;
 
   const std::unique_ptr<FocusSearch> focus_search_;
+
+  views::FocusManager* focus_manager_ = nullptr;
+
   const std::unique_ptr<ui::EventHandler> interacted_by_tap_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(UnifiedSystemTrayView);

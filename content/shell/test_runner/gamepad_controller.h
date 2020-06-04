@@ -13,21 +13,20 @@
 #include "base/macros.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
-#include "content/shell/test_runner/test_runner_export.h"
 #include "device/gamepad/public/cpp/gamepads.h"
 #include "device/gamepad/public/mojom/gamepad.mojom.h"
 #include "device/gamepad/public/mojom/gamepad_hardware_buffer.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/buffer.h"
 
 namespace blink {
 class WebLocalFrame;
 }
 
-namespace test_runner {
+namespace content {
 
-class TEST_RUNNER_EXPORT GamepadController
-    : public base::SupportsWeakPtr<GamepadController> {
+class GamepadController : public base::SupportsWeakPtr<GamepadController> {
  public:
   GamepadController();
   ~GamepadController();
@@ -39,7 +38,7 @@ class TEST_RUNNER_EXPORT GamepadController
   class MonitorImpl : public device::mojom::GamepadMonitor {
    public:
     MonitorImpl(GamepadController* controller,
-                device::mojom::GamepadMonitorRequest request);
+                mojo::PendingReceiver<device::mojom::GamepadMonitor> receiver);
     ~MonitorImpl() override;
 
     // Returns true if this monitor has a pending connection event for the
@@ -53,12 +52,13 @@ class TEST_RUNNER_EXPORT GamepadController
     // GamepadMonitor implementation.
     void GamepadStartPolling(GamepadStartPollingCallback callback) override;
     void GamepadStopPolling(GamepadStopPollingCallback callback) override;
-    void SetObserver(device::mojom::GamepadObserverPtr observer) override;
+    void SetObserver(
+        mojo::PendingRemote<device::mojom::GamepadObserver> observer) override;
 
    private:
     GamepadController* controller_;
-    mojo::Binding<device::mojom::GamepadMonitor> binding_;
-    device::mojom::GamepadObserverPtr observer_;
+    mojo::Receiver<device::mojom::GamepadMonitor> receiver_{this};
+    mojo::Remote<device::mojom::GamepadObserver> observer_remote_;
     std::bitset<device::Gamepads::kItemsLengthCap> missed_dispatches_;
   };
 
@@ -102,6 +102,6 @@ class TEST_RUNNER_EXPORT GamepadController
   DISALLOW_COPY_AND_ASSIGN(GamepadController);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_GAMEPAD_CONTROLLER_H_

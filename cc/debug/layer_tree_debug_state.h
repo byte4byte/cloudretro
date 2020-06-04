@@ -41,11 +41,12 @@ class CC_DEBUG_EXPORT LayerTreeDebugState {
   bool show_wheel_event_handler_rects;
   bool show_scroll_event_handler_rects;
   bool show_non_fast_scrollable_rects;
+  bool show_main_thread_scrolling_reason_rects;
   bool show_layer_animation_bounds_rects;
 
   int slow_down_raster_scale_factor;
   bool rasterize_only_visible_content;
-  bool show_picture_borders;
+  bool highlight_non_lcd_text_layers;
 
   bool show_hit_test_borders;
 

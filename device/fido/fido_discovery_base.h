@@ -5,6 +5,8 @@
 #ifndef DEVICE_FIDO_FIDO_DISCOVERY_BASE_H_
 #define DEVICE_FIDO_FIDO_DISCOVERY_BASE_H_
 
+#include <vector>
+
 #include "base/component_export.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -23,13 +25,14 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDiscoveryBase {
     virtual ~Observer();
 
     // It is guaranteed that this is never invoked synchronously from Start().
-    virtual void DiscoveryStarted(FidoDiscoveryBase* discovery, bool success) {}
+    // |authenticators| is the list of authenticators discovered upon start.
+    virtual void DiscoveryStarted(
+        FidoDiscoveryBase* discovery,
+        bool success,
+        std::vector<FidoAuthenticator*> authenticators = {}) {}
 
-    // It is guaranteed that AuthenticatorAdded/AuthenticatorRemoved() will not
-    // be invoked before the client of FidoDiscoveryBase calls
-    // FidoDiscoveryBase::Start(). However, for authenticators already known to
-    // the system at that point, AuthenticatorAdded() might already be called to
-    // reported already known devices.
+    // Called after DiscoveryStarted for any devices discovered after
+    // initialization.
     virtual void AuthenticatorAdded(FidoDiscoveryBase* discovery,
                                     FidoAuthenticator* authenticator) = 0;
     virtual void AuthenticatorRemoved(FidoDiscoveryBase* discovery,
@@ -39,19 +42,22 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDiscoveryBase {
     // to pairing.
     virtual void AuthenticatorIdChanged(FidoDiscoveryBase* discovery,
                                         const std::string& previous_id,
-                                        std::string new_id) = 0;
+                                        std::string new_id) {}
 
     // Invoked when connected Bluetooth device advertises that its pairing mode
     // has changed.
     virtual void AuthenticatorPairingModeChanged(FidoDiscoveryBase* discovery,
                                                  const std::string& device_id,
-                                                 bool is_in_pairing_mode) = 0;
+                                                 bool is_in_pairing_mode) {}
   };
 
   // Start authenticator discovery. The Observer must have been set before this
   // method is invoked. DiscoveryStarted must be invoked asynchronously from
   // this method.
   virtual void Start() = 0;
+
+  // Attempts to stop discovery and returns whether stopping was successful.
+  virtual bool MaybeStop();
 
   Observer* observer() const { return observer_; }
   void set_observer(Observer* observer) {

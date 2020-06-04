@@ -39,14 +39,17 @@ class ChromeLoginPerformer : public LoginPerformer {
                          bool* wildcard_match) override;
 
  protected:
-  bool RunTrustedCheck(const base::Closure& callback) override;
-  void DidRunTrustedCheck(const base::Closure& callback);
+  bool RunTrustedCheck(base::OnceClosure callback) override;
+  // Runs |callback| unconditionally, but DidRunTrustedCheck() will only be run
+  // itself sometimes, so ownership of |callback| should not be held in the
+  // Callback pointing to DidRunTrustedCheck.
+  void DidRunTrustedCheck(base::OnceClosure* callback);
 
   void RunOnlineWhitelistCheck(const AccountId& account_id,
                                bool wildcard_match,
                                const std::string& refresh_token,
-                               const base::Closure& success_callback,
-                               const base::Closure& failure_callback) override;
+                               base::OnceClosure success_callback,
+                               base::OnceClosure failure_callback) override;
   bool AreSupervisedUsersAllowed() override;
 
   bool UseExtendedAuthenticatorForSupervisedUser(
@@ -66,13 +69,13 @@ class ChromeLoginPerformer : public LoginPerformer {
 
  private:
   void OnlineWildcardLoginCheckCompleted(
-      const base::Closure& success_callback,
-      const base::Closure& failure_callback,
+      base::OnceClosure success_callback,
+      base::OnceClosure failure_callback,
       policy::WildcardLoginChecker::Result result);
 
   // Used to verify logins that matched wildcard on the login whitelist.
   std::unique_ptr<policy::WildcardLoginChecker> wildcard_login_checker_;
-  base::WeakPtrFactory<ChromeLoginPerformer> weak_factory_;
+  base::WeakPtrFactory<ChromeLoginPerformer> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeLoginPerformer);
 };

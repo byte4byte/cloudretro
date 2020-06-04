@@ -25,7 +25,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/test_history_database.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/buildflags/buildflags.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -67,7 +67,11 @@ const char kRequireInteraction[] = "RequireInteraction";
 const char kTimeUntilCloseMillis[] = "TimeUntilClose";
 const char kTimeUntilFirstClickMillis[] = "TimeUntilFirstClick";
 const char kTimeUntilLastClickMillis[] = "TimeUntilLastClick";
-const GURL kOrigin = GURL("https://example.com");
+// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
+// function.
+GURL Origin() {
+  return GURL("https://example.com");
+}
 
 }  // namespace
 
@@ -111,7 +115,7 @@ class PlatformNotificationServiceTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
 
   std::unique_ptr<NotificationDisplayServiceTester> display_service_tester_;
@@ -250,11 +254,12 @@ TEST_F(PlatformNotificationServiceTest, RecordNotificationUkmEvent) {
                                             /* no_db= */ false));
   auto* history_service = HistoryServiceFactory::GetForProfile(
       &profile_, ServiceAccessType::EXPLICIT_ACCESS);
-  history_service->AddPage(kOrigin, base::Time::Now(), history::SOURCE_BROWSED);
+  history_service->AddPage(Origin(), base::Time::Now(),
+                           history::SOURCE_BROWSED);
 
   NotificationDatabaseData data;
   data.notification_id = "notification1";
-  data.origin = kOrigin;
+  data.origin = Origin();
   data.closed_reason = NotificationDatabaseData::ClosedReason::USER;
   data.replaced_existing_notification = true;
   data.notification_data.icon = GURL("https://icon.com");

@@ -4,7 +4,6 @@
 
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 
-#include "base/logging.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
@@ -20,7 +19,8 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
     const GURL& url,
     WebContents* web_contents,
     ui::PageTransition page_transition,
-    bool has_user_gesture) {
+    bool has_user_gesture,
+    const base::Optional<url::Origin>& initiating_origin) {
   navigation_interception::InterceptNavigationDelegate* delegate =
       navigation_interception::InterceptNavigationDelegate::Get(web_contents);
   if (!delegate)

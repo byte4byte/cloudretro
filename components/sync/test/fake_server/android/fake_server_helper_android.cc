@@ -11,11 +11,14 @@
 
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/base64.h"
 #include "base/logging.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/time.h"
-#include "components/sync/engine/net/network_resources.h"
+#include "components/sync/driver/profile_sync_service.h"
+#include "components/sync/nigori/cryptographer_impl.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/bookmark_entity_builder.h"
 #include "components/sync/test/fake_server/fake_server.h"
@@ -26,6 +29,38 @@
 #include "url/gurl.h"
 
 using base::android::JavaParamRef;
+
+namespace {
+
+// TODO(crbug.com/1046663): avoid duplicates with BuildTrustedVaultNigori() in
+// single_client_nigori_sync_test.cc (it likely means to move part of
+// encryption_helper.h/cc to components/sync/test).
+void SetTrustedVaultNigoriInFakeServer(
+    fake_server::FakeServer* fake_server,
+    const std::vector<uint8_t>& trusted_vault_key) {
+  sync_pb::NigoriSpecifics nigori;
+  nigori.set_passphrase_type(
+      sync_pb::NigoriSpecifics::TRUSTED_VAULT_PASSPHRASE);
+  nigori.set_keybag_is_frozen(true);
+
+  std::unique_ptr<syncer::CryptographerImpl> cryptographer =
+      syncer::CryptographerImpl::FromSingleKeyForTesting(
+          base::Base64Encode(trusted_vault_key));
+
+  bool encrypt_result = cryptographer->Encrypt(
+      cryptographer->ToProto().key_bag(), nigori.mutable_encryption_keybag());
+  DCHECK(encrypt_result);
+
+  std::string nigori_entity_id =
+      fake_server->GetTopLevelPermanentItemId(syncer::NIGORI);
+  DCHECK_NE(nigori_entity_id, "");
+
+  sync_pb::EntitySpecifics entity_specifics;
+  *entity_specifics.mutable_nigori() = nigori;
+  fake_server->ModifyEntitySpecifics(nigori_entity_id, entity_specifics);
+}
+
+}  // namespace
 
 FakeServerHelperAndroid::FakeServerHelperAndroid(JNIEnv* env, jobject obj) {}
 
@@ -40,25 +75,25 @@ static jlong JNI_FakeServerHelper_Init(JNIEnv* env,
 
 jlong FakeServerHelperAndroid::CreateFakeServer(
     JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  fake_server::FakeServer* fake_server = new fake_server::FakeServer();
-  return reinterpret_cast<intptr_t>(fake_server);
-}
-
-jlong FakeServerHelperAndroid::CreateNetworkResources(
-    JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    jlong fake_server) {
-  fake_server::FakeServer* fake_server_ptr =
-      reinterpret_cast<fake_server::FakeServer*>(fake_server);
-  syncer::NetworkResources* resources =
-      new fake_server::FakeServerNetworkResources(fake_server_ptr->AsWeakPtr());
-  return reinterpret_cast<intptr_t>(resources);
+    jlong profile_sync_service) {
+  fake_server::FakeServer* fake_server = new fake_server::FakeServer();
+  syncer::ProfileSyncService* sync_service =
+      reinterpret_cast<syncer::ProfileSyncService*>(profile_sync_service);
+  sync_service->OverrideNetworkForTest(
+      fake_server::CreateFakeServerHttpPostProviderFactory(
+          fake_server->AsWeakPtr()));
+  return reinterpret_cast<intptr_t>(fake_server);
 }
 
 void FakeServerHelperAndroid::DeleteFakeServer(JNIEnv* env,
                                                const JavaParamRef<jobject>& obj,
-                                               jlong fake_server) {
+                                               jlong fake_server,
+                                               jlong profile_sync_service) {
+  base::ScopedAllowBlockingForTesting scoped_allow;
+  syncer::ProfileSyncService* sync_service =
+      reinterpret_cast<syncer::ProfileSyncService*>(profile_sync_service);
+  sync_service->OverrideNetworkForTest(syncer::CreateHttpPostProviderFactory());
   fake_server::FakeServer* fake_server_ptr =
       reinterpret_cast<fake_server::FakeServer*>(fake_server);
   delete fake_server_ptr;
@@ -156,9 +191,9 @@ void FakeServerHelperAndroid::InjectUniqueClientEntity(
 
 void FakeServerHelperAndroid::SetWalletData(
     JNIEnv* env,
-    const base::android::JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& obj,
     jlong fake_server,
-    const base::android::JavaParamRef<jbyteArray>& serialized_entity) {
+    const JavaParamRef<jbyteArray>& serialized_entity) {
   fake_server::FakeServer* fake_server_ptr =
       reinterpret_cast<fake_server::FakeServer*>(fake_server);
 
@@ -254,6 +289,10 @@ void FakeServerHelperAndroid::ModifyBookmarkEntity(
       CreateBookmarkEntity(env, title, url, parent_id);
   sync_pb::SyncEntity proto;
   bookmark->SerializeAsProto(&proto);
+  // The GUID has just been regenerated in CreateBookmarkEntity(). To avoid
+  // running into a GUID mismatch, let's clear it here since it can be auto-
+  // populated by ModelTypeWorker.
+  proto.mutable_specifics()->mutable_bookmark()->clear_guid();
   fake_server_ptr->ModifyBookmarkEntity(
       base::android::ConvertJavaStringToUTF8(env, entity_id),
       base::android::ConvertJavaStringToUTF8(env, parent_id),
@@ -279,6 +318,10 @@ void FakeServerHelperAndroid::ModifyBookmarkFolderEntity(
 
   sync_pb::SyncEntity proto;
   bookmark_builder.BuildFolder()->SerializeAsProto(&proto);
+  // The GUID has just been regenerated in CreateBookmarkEntity(). To avoid
+  // running into a GUID mismatch, let's clear it here since it can be auto-
+  // populated by ModelTypeWorker.
+  proto.mutable_specifics()->mutable_bookmark()->clear_guid();
   fake_server_ptr->ModifyBookmarkEntity(
       base::android::ConvertJavaStringToUTF8(env, entity_id),
       base::android::ConvertJavaStringToUTF8(env, parent_id),
@@ -321,12 +364,25 @@ void FakeServerHelperAndroid::DeleteEntity(
     const JavaParamRef<jobject>& obj,
     jlong fake_server,
     const JavaParamRef<jstring>& id,
-    const base::android::JavaParamRef<jstring>& client_tag_hash) {
+    const JavaParamRef<jstring>& client_tag_hash) {
   fake_server::FakeServer* fake_server_ptr =
       reinterpret_cast<fake_server::FakeServer*>(fake_server);
   std::string native_id = base::android::ConvertJavaStringToUTF8(env, id);
   fake_server_ptr->InjectEntity(syncer::PersistentTombstoneEntity::CreateNew(
       native_id, base::android::ConvertJavaStringToUTF8(env, client_tag_hash)));
+}
+
+void FakeServerHelperAndroid::SetTrustedVaultNigori(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong fake_server,
+    const JavaParamRef<jbyteArray>& trusted_vault_key) {
+  std::vector<uint8_t> native_trusted_vault_key;
+  base::android::JavaByteArrayToByteVector(env, trusted_vault_key,
+                                           &native_trusted_vault_key);
+  SetTrustedVaultNigoriInFakeServer(
+      reinterpret_cast<fake_server::FakeServer*>(fake_server),
+      native_trusted_vault_key);
 }
 
 void FakeServerHelperAndroid::ClearServerData(JNIEnv* env,

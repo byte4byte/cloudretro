@@ -11,11 +11,9 @@
 #include <memory>
 #include <vector>
 
+#include "net/third_party/quiche/src/common/platform/api/quiche_string_piece.h"
 #include "net/third_party/quiche/src/spdy/core/hpack/hpack_decoder_adapter.h"
 #include "net/third_party/quiche/src/spdy/core/hpack/hpack_encoder.h"
-#include "net/third_party/quiche/src/spdy/platform/api/spdy_export.h"
-#include "net/third_party/quiche/src/spdy/platform/api/spdy_string.h"
-#include "net/third_party/quiche/src/spdy/platform/api/spdy_string_piece.h"
 
 namespace spdy {
 
@@ -26,8 +24,8 @@ class HpackFuzzUtil {
   struct GeneratorContext {
     GeneratorContext();
     ~GeneratorContext();
-    std::vector<SpdyString> names;
-    std::vector<SpdyString> values;
+    std::vector<std::string> names;
+    std::vector<std::string> values;
   };
 
   // Initializes a GeneratorContext with a random seed and name/value fixtures.
@@ -40,7 +38,7 @@ class HpackFuzzUtil {
   // upper-bounded by |sanity_bound|.
   static size_t SampleExponential(size_t mean, size_t sanity_bound);
 
-  // Holds an input SpdyString, and manages an offset into that SpdyString.
+  // Holds an input string, and manages an offset into that string.
   struct Input {
     Input();  // Initializes |offset| to zero.
     ~Input();
@@ -48,17 +46,17 @@ class HpackFuzzUtil {
     size_t remaining() { return input.size() - offset; }
     const char* ptr() { return input.data() + offset; }
 
-    SpdyString input;
+    std::string input;
     size_t offset;
   };
 
   // Returns true if the next header block was set at |out|. Returns
   // false if no input header blocks remain.
-  static bool NextHeaderBlock(Input* input, SpdyStringPiece* out);
+  static bool NextHeaderBlock(Input* input, quiche::QuicheStringPiece* out);
 
   // Returns the serialized header block length prefix for a block of
   // |block_size| bytes.
-  static SpdyString HeaderBlockPrefix(size_t block_size);
+  static std::string HeaderBlockPrefix(size_t block_size);
 
   // A FuzzerContext holds fuzzer input, as well as each of the decoder and
   // encoder stages which fuzzed header blocks are processed through.
@@ -75,8 +73,9 @@ class HpackFuzzUtil {
   // Runs |input_block| through |first_stage| and, iff that succeeds,
   // |second_stage| and |third_stage| as well. Returns whether all stages
   // processed the input without error.
-  static bool RunHeaderBlockThroughFuzzerStages(FuzzerContext* context,
-                                                SpdyStringPiece input_block);
+  static bool RunHeaderBlockThroughFuzzerStages(
+      FuzzerContext* context,
+      quiche::QuicheStringPiece input_block);
 
   // Flips random bits within |buffer|. The total number of flips is
   // |flip_per_thousand| bits for every 1,024 bytes of |buffer_length|,

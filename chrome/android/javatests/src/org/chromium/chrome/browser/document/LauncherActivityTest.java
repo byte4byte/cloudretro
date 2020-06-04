@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.document;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
@@ -27,7 +25,7 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -50,10 +48,10 @@ public class LauncherActivityTest {
             new ChromeActivityTestRule<>(ChromeActivity.class);
 
     private Context mContext;
-    private static final long DEVICE_STARTUP_TIMEOUT_MS = scaleTimeout(15000);
+    private static final long DEVICE_STARTUP_TIMEOUT_MS = 15000L;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContext = InstrumentationRegistry.getTargetContext();
     }
 

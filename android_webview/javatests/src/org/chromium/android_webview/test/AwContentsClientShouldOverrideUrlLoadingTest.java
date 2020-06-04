@@ -36,6 +36,7 @@ import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnReceivedErrorHelper;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.util.TestWebServer;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -75,30 +76,29 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mWebServer.shutdown();
     }
 
-    private void standardSetup() throws Throwable {
+    private void standardSetup() {
         setupWithProvidedContentsClient(new TestAwContentsClient());
         mShouldOverrideUrlLoadingHelper = mContentsClient.getShouldOverrideUrlLoadingHelper();
     }
 
-    private void setupWithProvidedContentsClient(TestAwContentsClient contentsClient)
-            throws Throwable {
+    private void setupWithProvidedContentsClient(TestAwContentsClient contentsClient) {
         mContentsClient = contentsClient;
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(contentsClient);
         mAwContents = mTestContainerView.getAwContents();
     }
 
-    private void clickOnLinkUsingJs() throws Throwable {
+    private void clickOnLinkUsingJs() {
         AwActivityTestRule.enableJavaScriptOnUiThread(mAwContents);
         JSUtils.clickOnLinkUsingJs(InstrumentationRegistry.getInstrumentation(), mAwContents,
                 mContentsClient.getOnEvaluateJavaScriptResultHelper(), "link");
     }
 
     // Since this value is read on the UI thread, it's simpler to set it there too.
-    void setShouldOverrideUrlLoadingReturnValueOnUiThread(final boolean value) throws Throwable {
+    void setShouldOverrideUrlLoadingReturnValueOnUiThread(final boolean value) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
                 () -> mShouldOverrideUrlLoadingHelper.setShouldOverrideUrlLoadingReturnValue(
                         value));
@@ -857,7 +857,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         clickOnLinkUsingJs();
         onPageFinishedHelper.waitForCallback(pageFinishedCount);
 
-        Assert.assertEquals(linkUrl, mAwContents.getUrl());
+        Assert.assertEquals(new GURL(linkUrl), mAwContents.getUrl());
         Assert.assertTrue("Should have a navigation history", mAwContents.canGoBack());
         NavigationHistory navHistory = mAwContents.getNavigationHistory();
         Assert.assertEquals(2, navHistory.getEntryCount());
@@ -869,7 +869,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         onPageFinishedHelper.waitForCallback(pageFinishedCount);
 
         Assert.assertFalse("Should not be able to navigate backward", mAwContents.canGoBack());
-        Assert.assertEquals(firstUrl, mAwContents.getUrl());
+        Assert.assertEquals(new GURL(firstUrl), mAwContents.getUrl());
         navHistory = mAwContents.getNavigationHistory();
         Assert.assertEquals(2, navHistory.getEntryCount());
         Assert.assertEquals(0, navHistory.getCurrentEntryIndex());
@@ -1002,7 +1002,8 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
             mContentsClient.getOnPageFinishedHelper().waitForCallback(
                     currentCallCount, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-            Assert.assertEquals(ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL, mAwContents.getUrl());
+            Assert.assertEquals(
+                    new GURL(ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL), mAwContents.getUrl());
         } finally {
             mActivityTestRule.getActivity().setIgnoreStartActivity(false);
         }
@@ -1084,7 +1085,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         verifyShouldOverrideUrlLoadingInPopup(popupPath, popupPath + "/");
     }
 
-    private final static String BAD_SCHEME = "badscheme://";
+    private static final String BAD_SCHEME = "badscheme://";
 
     // AwContentsClient handling an invalid network scheme
     private static class BadSchemeClient extends TestAwContentsClient {
@@ -1189,7 +1190,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         return popupShouldOverrideUrlLoadingHelper;
     }
 
-    private void pollTitleAs(final String title, final AwContents awContents) throws Exception {
+    private void pollTitleAs(final String title, final AwContents awContents) {
         AwActivityTestRule.pollInstrumentationThread(
                 () -> title.equals(mActivityTestRule.getTitleOnUiThread(awContents)));
     }

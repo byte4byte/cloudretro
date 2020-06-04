@@ -12,9 +12,9 @@ import android.os.Looper;
 import org.chromium.base.Callback;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.components.offline_items_collection.ContentId;
-import org.chromium.components.offline_items_collection.LaunchLocation;
 import org.chromium.components.offline_items_collection.OfflineContentProvider;
 import org.chromium.components.offline_items_collection.OfflineItem;
+import org.chromium.components.offline_items_collection.OpenParams;
 import org.chromium.components.offline_items_collection.RenameResult;
 import org.chromium.components.offline_items_collection.ShareCallback;
 import org.chromium.components.offline_items_collection.VisualsCallback;
@@ -24,16 +24,12 @@ import java.util.ArrayList;
 /** Stubs out the OfflineContentProvider. */
 public class StubbedOfflineContentProvider implements OfflineContentProvider {
     private final Handler mHandler;
-    private final CallbackHelper mAddObserverCallback;
-    private final CallbackHelper mRemoveObserverCallback;
     private final CallbackHelper mDeleteItemCallback;
     private final ArrayList<OfflineItem> mItems;
     private OfflineContentProvider.Observer mObserver;
 
     public StubbedOfflineContentProvider() {
         mHandler = new Handler(Looper.getMainLooper());
-        mAddObserverCallback = new CallbackHelper();
-        mRemoveObserverCallback = new CallbackHelper();
         mDeleteItemCallback = new CallbackHelper();
         mItems = new ArrayList<>();
     }
@@ -44,20 +40,22 @@ public class StubbedOfflineContentProvider implements OfflineContentProvider {
 
     public void addItem(OfflineItem item) {
         mItems.add(item);
+
+        ArrayList<OfflineItem> list = new ArrayList<>();
+        list.add(item);
+        mObserver.onItemsAdded(list);
     }
 
     @Override
     public void addObserver(OfflineContentProvider.Observer addedObserver) {
         assertEquals(mObserver, null);
         mObserver = addedObserver;
-        mAddObserverCallback.notifyCalled();
     }
 
     @Override
     public void removeObserver(OfflineContentProvider.Observer removedObserver) {
         assertEquals(mObserver, removedObserver);
         mObserver = null;
-        mRemoveObserverCallback.notifyCalled();
     }
 
     @Override
@@ -99,7 +97,7 @@ public class StubbedOfflineContentProvider implements OfflineContentProvider {
     }
 
     @Override
-    public void openItem(@LaunchLocation int location, ContentId id) {}
+    public void openItem(OpenParams openParams, ContentId id) {}
 
     @Override
     public void pauseDownload(ContentId id) {}

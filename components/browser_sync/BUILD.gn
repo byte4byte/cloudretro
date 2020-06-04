@@ -16,9 +16,7 @@ static_library("browser_sync") {
     "signin_confirmation_helper.h",
   ]
 
-  public_deps = [
-    "//components/sync",
-  ]
+  public_deps = [ "//components/sync" ]
 
   deps = [
     "//base",
@@ -35,14 +33,16 @@ static_library("browser_sync") {
     "//components/version_info",
     "//components/version_info:generate_version_info",
   ]
+
+  if (is_chromeos) {
+    deps += [ "//chromeos/constants" ]
+  }
 }
 
 source_set("unit_tests") {
   testonly = true
 
-  sources = [
-    "profile_sync_service_bookmark_unittest.cc",
-  ]
+  sources = []
 
   deps = [
     ":browser_sync",
@@ -86,8 +86,6 @@ static_library("test_support") {
     "//base/test:test_support",
     "//components/bookmarks/browser",
     "//components/history/core/browser",
-    "//components/signin/core/browser",
-    "//components/signin/public/base:test_support",
     "//components/sync",
     "//components/sync:test_support",
     "//components/sync_preferences:test_support",

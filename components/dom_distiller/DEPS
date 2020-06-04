@@ -4,10 +4,9 @@ include_rules = [
   "+components/pref_registry",
   "+components/prefs",
   "+components/strings/grit/components_strings.h",
-  "+components/sync/model",
-  "+components/sync/protocol",
   "+components/sync_preferences",
   "+components/variations",
+  "+crypto", # For sha256
   "+google", # For third_party/protobuf.
   "+third_party/dom_distiller_js",
   "+third_party/re2",

@@ -5,11 +5,11 @@
 #include "content/shell/test_runner/app_banner_service.h"
 #include "base/bind.h"
 
-namespace test_runner {
+namespace content {
 
-AppBannerService::AppBannerService() : binding_(this) {}
+AppBannerService::AppBannerService() = default;
 
-AppBannerService::~AppBannerService() {}
+AppBannerService::~AppBannerService() = default;
 
 void AppBannerService::ResolvePromise(const std::string& platform) {
   if (!event_.is_bound())
@@ -28,11 +28,9 @@ void AppBannerService::SendBannerPromptRequest(
   if (!controller_.is_bound())
     return;
 
-  blink::mojom::AppBannerServicePtr proxy;
-  binding_.Bind(mojo::MakeRequest(&proxy));
   controller_->BannerPromptRequest(
-      std::move(proxy), mojo::MakeRequest(&event_), platforms,
-      true /* require_gesture */,
+      receiver_.BindNewPipeAndPassRemote(), event_.BindNewPipeAndPassReceiver(),
+      platforms,
       base::BindOnce(&AppBannerService::OnBannerPromptReply,
                      base::Unretained(this), std::move(callback)));
 }
@@ -46,4 +44,4 @@ void AppBannerService::OnBannerPromptReply(
   std::move(callback).Run(reply == blink::mojom::AppBannerPromptReply::CANCEL);
 }
 
-}  // namespace test_runner
+}  // namespace content

@@ -7,9 +7,10 @@
 
 #import "base/test/ios/wait_util.h"
 #include "ios/web/public/test/element_selector.h"
-#import "ios/web/public/web_state/web_state.h"
 
 namespace web {
+class WebState;
+
 namespace test {
 
 // Enum describing loaded/blocked state of an image html element.
@@ -23,6 +24,11 @@ enum ImageStateElement {
 // Returns true if there is a web view for |web_state| that contains |text|.
 // Otherwise, returns false.
 bool IsWebViewContainingText(web::WebState* web_state, const std::string& text);
+
+// Returns true if there is a a frame from |web_state| that contains |text|.
+// This method is waiting for the duration of the JavaScript messages exchange.
+bool IsWebViewContainingTextInFrame(web::WebState* web_state,
+                                    const std::string& text);
 
 // Waits for the given web state to contain |text|. If the condition is not met
 // within |timeout| false is returned.

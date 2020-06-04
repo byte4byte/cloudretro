@@ -14,14 +14,14 @@
 #include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/process_resource_usage.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace task_manager {
@@ -33,8 +33,8 @@ namespace {
 // |render_process_host|.
 ProcessResourceUsage* CreateRendererResourcesSampler(
     content::RenderProcessHost* render_process_host) {
-  content::mojom::ResourceUsageReporterPtr service;
-  BindInterface(render_process_host, &service);
+  mojo::PendingRemote<content::mojom::ResourceUsageReporter> service;
+  render_process_host->BindReceiver(service.InitWithNewPipeAndPassReceiver());
   return new ProcessResourceUsage(std::move(service));
 }
 
@@ -49,10 +49,6 @@ base::string16 GetRendererProfileName(
 
 bool IsRendererResourceSamplingDisabled(int64_t flags) {
   return (flags & (REFRESH_TYPE_V8_MEMORY | REFRESH_TYPE_WEBCACHE_STATS)) == 0;
-}
-
-std::string GetRapporSampleName(content::WebContents* web_contents) {
-  return web_contents->GetVisibleURL().GetOrigin().spec();
 }
 
 }  // namespace
@@ -78,7 +74,6 @@ RendererTask::RendererTask(const base::string16& title,
                            content::WebContents* web_contents,
                            content::RenderProcessHost* render_process_host)
     : Task(title,
-           GetRapporSampleName(web_contents),
            icon,
            render_process_host->GetProcess().Handle()),
       web_contents_(web_contents),
@@ -88,7 +83,7 @@ RendererTask::RendererTask(const base::string16& title,
       render_process_id_(render_process_host_->GetID()),
       v8_memory_allocated_(0),
       v8_memory_used_(0),
-      webcache_stats_(blink::WebCache::ResourceTypeStats()),
+      webcache_stats_(blink::WebCacheResourceTypeStats()),
       profile_name_(GetRendererProfileName(render_process_host_)),
       termination_status_(base::TERMINATION_STATUS_STILL_RUNNING),
       termination_error_code_(0) {
@@ -104,10 +99,6 @@ RendererTask::RendererTask(const base::string16& title,
 RendererTask::~RendererTask() {
   favicon::ContentFaviconDriver::FromWebContents(web_contents())->
       RemoveObserver(this);
-}
-
-void RendererTask::UpdateRapporSampleName() {
-  set_rappor_sample_name(GetRapporSampleName(web_contents()));
 }
 
 void RendererTask::Activate() {
@@ -134,7 +125,7 @@ void RendererTask::Refresh(const base::TimeDelta& update_interval,
       renderer_resources_sampler_->GetV8MemoryAllocated());
   v8_memory_used_ = base::saturated_cast<int64_t>(
       renderer_resources_sampler_->GetV8MemoryUsed());
-  webcache_stats_ = renderer_resources_sampler_->GetWebCoreCacheStats();
+  webcache_stats_ = renderer_resources_sampler_->GetBlinkMemoryCacheStats();
 }
 
 Task::Type RendererTask::GetType() const {
@@ -159,7 +150,7 @@ base::string16 RendererTask::GetProfileName() const {
 }
 
 SessionID RendererTask::GetTabId() const {
-  return SessionTabHelper::IdForTab(web_contents_);
+  return sessions::SessionTabHelper::IdForTab(web_contents_);
 }
 
 int64_t RendererTask::GetV8MemoryAllocated() const {
@@ -174,7 +165,7 @@ bool RendererTask::ReportsWebCacheStats() const {
   return true;
 }
 
-blink::WebCache::ResourceTypeStats RendererTask::GetWebCacheStats() const {
+blink::WebCacheResourceTypeStats RendererTask::GetWebCacheStats() const {
   return webcache_stats_;
 }
 

@@ -5,9 +5,10 @@
 #include "chrome/browser/ui/webui/signin/dice_turn_sync_on_helper_delegate_impl.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/ui/browser.h"
@@ -90,16 +91,15 @@ void DiceTurnSyncOnHelperDelegateImpl::SigninDialogDelegate::
 
 DiceTurnSyncOnHelperDelegateImpl::DiceTurnSyncOnHelperDelegateImpl(
     Browser* browser)
-    : browser_(browser),
-      profile_(browser_->profile()),
-      scoped_browser_list_observer_(this),
-      scoped_login_ui_service_observer_(this) {
+    : browser_(browser), profile_(browser_->profile()) {
   DCHECK(browser);
   DCHECK(profile_);
-  scoped_browser_list_observer_.Add(BrowserList::GetInstance());
+  BrowserList::AddObserver(this);
 }
 
-DiceTurnSyncOnHelperDelegateImpl::~DiceTurnSyncOnHelperDelegateImpl() {}
+DiceTurnSyncOnHelperDelegateImpl::~DiceTurnSyncOnHelperDelegateImpl() {
+  BrowserList::RemoveObserver(this);
+}
 
 void DiceTurnSyncOnHelperDelegateImpl::ShowLoginError(
     const std::string& email,
@@ -136,7 +136,7 @@ void DiceTurnSyncOnHelperDelegateImpl::ShowSyncConfirmation(
   scoped_login_ui_service_observer_.Add(
       LoginUIServiceFactory::GetForProfile(profile_));
   browser_ = EnsureBrowser(browser_, profile_);
-  browser_->signin_view_controller()->ShowModalSyncConfirmationDialog(browser_);
+  browser_->signin_view_controller()->ShowModalSyncConfirmationDialog();
 }
 
 void DiceTurnSyncOnHelperDelegateImpl::ShowMergeSyncDataConfirmation(
@@ -144,13 +144,10 @@ void DiceTurnSyncOnHelperDelegateImpl::ShowMergeSyncDataConfirmation(
     const std::string& new_email,
     DiceTurnSyncOnHelper::SigninChoiceCallback callback) {
   DCHECK(callback);
-  content::WebContents* web_contents =
-      browser_->tab_strip_model()->GetActiveWebContents();
-  // TODO(droger): Replace Bind with BindOnce once the
-  // SigninEmailConfirmationDialog supports it.
-  SigninEmailConfirmationDialog::AskForConfirmation(
-      web_contents, profile_, previous_email, new_email,
-      base::Bind(&OnEmailConfirmation, base::Passed(std::move(callback))));
+  browser_ = EnsureBrowser(browser_, profile_);
+  browser_->signin_view_controller()->ShowModalSigninEmailConfirmationDialog(
+      previous_email, new_email,
+      base::BindOnce(&OnEmailConfirmation, std::move(callback)));
 }
 
 void DiceTurnSyncOnHelperDelegateImpl::ShowSyncSettings() {

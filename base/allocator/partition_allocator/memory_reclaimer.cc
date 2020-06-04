@@ -13,20 +13,22 @@
 
 namespace base {
 
-namespace internal {
-
-const Feature kNoPartitionAllocDecommit{"NoPartitionAllocDecommit",
-                                        FEATURE_DISABLED_BY_DEFAULT};
-const Feature kPartitionAllocPeriodicDecommit{"PartitionAllocPeriodicDecommit",
-                                              FEATURE_DISABLED_BY_DEFAULT};
-
-}  // namespace internal
-
 namespace {
 
-bool IsDeprecatedDecommitEnabled() {
-  return !(FeatureList::IsEnabled(internal::kNoPartitionAllocDecommit) ||
-           FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit));
+template <bool thread_safe>
+void Insert(std::set<internal::PartitionRootBase<thread_safe>*>* partitions,
+            internal::PartitionRootBase<thread_safe>* partition) {
+  DCHECK(partition);
+  auto it_and_whether_inserted = partitions->insert(partition);
+  DCHECK(it_and_whether_inserted.second);
+}
+
+template <bool thread_safe>
+void Remove(std::set<internal::PartitionRootBase<thread_safe>*>* partitions,
+            internal::PartitionRootBase<thread_safe>* partition) {
+  DCHECK(partition);
+  size_t erased_count = partitions->erase(partition);
+  DCHECK_EQ(1u, erased_count);
 }
 
 }  // namespace
@@ -40,20 +42,27 @@ PartitionAllocMemoryReclaimer* PartitionAllocMemoryReclaimer::Instance() {
 }
 
 void PartitionAllocMemoryReclaimer::RegisterPartition(
-    internal::PartitionRootBase* partition) {
+    internal::PartitionRootBase<internal::ThreadSafe>* partition) {
   AutoLock lock(lock_);
-  DCHECK(partition);
-  DCHECK(!timer_);
-  auto it_and_whether_inserted = partitions_.insert(partition);
-  DCHECK(it_and_whether_inserted.second);
+  Insert(&thread_safe_partitions_, partition);
+}
+
+void PartitionAllocMemoryReclaimer::RegisterPartition(
+    internal::PartitionRootBase<internal::NotThreadSafe>* partition) {
+  AutoLock lock(lock_);
+  Insert(&thread_unsafe_partitions_, partition);
 }
 
 void PartitionAllocMemoryReclaimer::UnregisterPartition(
-    internal::PartitionRootBase* partition) {
+    internal::PartitionRootBase<internal::ThreadSafe>* partition) {
   AutoLock lock(lock_);
-  DCHECK(partition);
-  size_t erased_count = partitions_.erase(partition);
-  DCHECK_EQ(1u, erased_count);
+  Remove(&thread_safe_partitions_, partition);
+}
+
+void PartitionAllocMemoryReclaimer::UnregisterPartition(
+    internal::PartitionRootBase<internal::NotThreadSafe>* partition) {
+  AutoLock lock(lock_);
+  Remove(&thread_unsafe_partitions_, partition);
 }
 
 void PartitionAllocMemoryReclaimer::Start(
@@ -63,11 +72,8 @@ void PartitionAllocMemoryReclaimer::Start(
 
   {
     AutoLock lock(lock_);
-    DCHECK(!partitions_.empty());
+    DCHECK(!thread_safe_partitions_.empty());
   }
-
-  if (!FeatureList::IsEnabled(internal::kPartitionAllocPeriodicDecommit))
-    return;
 
   // This does not need to run on the main thread, however there are a few
   // reasons to do it there:
@@ -116,20 +122,15 @@ void PartitionAllocMemoryReclaimer::Reclaim() {
 
   {
     AutoLock lock(lock_);  // Has to protect from concurrent (Un)Register calls.
-    for (auto* partition : partitions_)
+    for (auto* partition : thread_safe_partitions_)
+      partition->PurgeMemory(kFlags);
+    for (auto* partition : thread_unsafe_partitions_)
       partition->PurgeMemory(kFlags);
   }
 
   has_called_reclaim_ = true;
   if (timer.is_supported())
     total_reclaim_thread_time_ += timer.Elapsed();
-}
-
-void PartitionAllocMemoryReclaimer::DeprecatedReclaim() {
-  if (!IsDeprecatedDecommitEnabled())
-    return;
-
-  Reclaim();
 }
 
 void PartitionAllocMemoryReclaimer::RecordStatistics() {
@@ -150,7 +151,8 @@ void PartitionAllocMemoryReclaimer::ResetForTesting() {
   has_called_reclaim_ = false;
   total_reclaim_thread_time_ = TimeDelta();
   timer_ = nullptr;
-  partitions_.clear();
+  thread_safe_partitions_.clear();
+  thread_unsafe_partitions_.clear();
 }
 
 }  // namespace base

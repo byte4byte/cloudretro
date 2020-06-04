@@ -31,13 +31,48 @@ class FakeArCore : public ArCore {
       const base::span<const float> uvs) override;
   gfx::Transform GetProjectionMatrix(float near, float far) override;
   mojom::VRPosePtr Update(bool* camera_updated) override;
+  base::TimeDelta GetFrameTimestamp() override;
+
   void Pause() override;
   void Resume() override;
+
+  float GetEstimatedFloorHeight() override;
 
   bool RequestHitTest(const mojom::XRRayPtr& ray,
                       std::vector<mojom::XRHitResultPtr>* hit_results) override;
 
+  base::Optional<uint64_t> SubscribeToHitTest(
+      mojom::XRNativeOriginInformationPtr nativeOriginInformation,
+      const std::vector<mojom::EntityTypeForHitTest>& entity_types,
+      mojom::XRRayPtr ray) override;
+  base::Optional<uint64_t> SubscribeToHitTestForTransientInput(
+      const std::string& profile_name,
+      const std::vector<mojom::EntityTypeForHitTest>& entity_types,
+      mojom::XRRayPtr ray) override;
+
+  mojom::XRHitTestSubscriptionResultsDataPtr GetHitTestSubscriptionResults(
+      const gfx::Transform& mojo_from_viewer,
+      const std::vector<mojom::XRInputSourceStatePtr>& input_state) override;
+
+  void UnsubscribeFromHitTest(uint64_t subscription_id) override;
+
   mojom::XRPlaneDetectionDataPtr GetDetectedPlanesData() override;
+  mojom::XRAnchorsDataPtr GetAnchorsData() override;
+  mojom::XRLightEstimationDataPtr GetLightEstimationData() override;
+
+  void CreateAnchor(
+      const mojom::XRNativeOriginInformation& native_origin_information,
+      const mojom::Pose& native_origin_from_anchor,
+      CreateAnchorCallback callback) override;
+  void CreatePlaneAttachedAnchor(const mojom::Pose& plane_from_anchor,
+                                 uint64_t plane_id,
+                                 CreateAnchorCallback callback) override;
+
+  void ProcessAnchorCreationRequests(
+      const gfx::Transform& mojo_from_viewer,
+      const std::vector<mojom::XRInputSourceStatePtr>& input_state) override;
+
+  void DetachAnchor(uint64_t anchor_id) override;
 
   void SetCameraAspect(float aspect) { camera_aspect_ = aspect; }
 
@@ -50,6 +85,13 @@ class FakeArCore : public ArCore {
   display::Display::Rotation display_rotation_ =
       display::Display::Rotation::ROTATE_0;
   gfx::Size frame_size_;
+
+  struct FakeAnchorData {
+    gfx::Point3F position;
+    gfx::Quaternion orientation;
+  };
+
+  std::unordered_map<uint64_t, FakeAnchorData> anchors_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeArCore);
 };

@@ -4,13 +4,16 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_webgl_layer.h"
 
+#include "base/numerics/ranges.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/webgl/webgl2_rendering_context.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_framebuffer.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context.h"
-#include "third_party/blink/renderer/modules/xr/xr.h"
 #include "third_party/blink/renderer/modules/xr/xr_frame_provider.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
+#include "third_party/blink/renderer/modules/xr/xr_system.h"
 #include "third_party/blink/renderer/modules/xr/xr_view.h"
 #include "third_party/blink/renderer/modules/xr/xr_viewport.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -23,11 +26,12 @@ namespace blink {
 namespace {
 
 const double kFramebufferMinScale = 0.2;
+const uint32_t kCleanFrameWarningLimit = 5;
 
-// Because including base::ClampToRange would be a dependency violation
-double ClampToRange(const double value, const double min, const double max) {
-  return std::min(std::max(value, min), max);
-}
+const char kCleanFrameWarning[] =
+    "Note: The XRSession has completed multiple animation frames without "
+    "drawing anything to the baseLayer's framebuffer, resulting in no visible "
+    "output.";
 
 }  // namespace
 
@@ -57,28 +61,11 @@ XRWebGLLayer* XRWebGLLayer::Create(
     return nullptr;
   }
 
-  if (!webgl_context->IsXRCompatible()) {
+  if (session->immersive() && !webgl_context->IsXRCompatible()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "This context is not marked as XR compatible.");
-    return nullptr;
-  }
-
-  bool composition_disabled = initializer->compositionDisabled();
-
-  if (composition_disabled && session->immersive()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "Cannot create an XRWebGLLayer with "
-                                      "compositionDisabled for an immersive "
-                                      "XRSession.");
-    return nullptr;
-  }
-
-  if (!composition_disabled && !session->immersive()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "compositionDisabled is required when "
-                                      "creating an XRWebGLLayer for an inline "
-                                      "XRSession.");
+        "WebGL context must be marked as XR compatible in order to "
+        "use with an immersive XRSession");
     return nullptr;
   }
 
@@ -101,7 +88,9 @@ XRWebGLLayer* XRWebGLLayer::Create(
 
   double framebuffer_scale = 1.0;
 
-  if (composition_disabled) {
+  // Inline sessions don't go through the XR compositor, so they don't need to
+  // allocate a separate drawing buffer or expose a framebuffer.
+  if (!session->immersive()) {
     return MakeGarbageCollected<XRWebGLLayer>(session, webgl_context, nullptr,
                                               nullptr, framebuffer_scale,
                                               ignore_depth_values);
@@ -126,8 +115,8 @@ XRWebGLLayer* XRWebGLLayer::Create(
     // small to see or unreasonably large.
     // TODO: Would be best to have the max value communicated from the service
     // rather than limited to the native res.
-    framebuffer_scale = ClampToRange(initializer->framebufferScaleFactor(),
-                                     kFramebufferMinScale, max_scale);
+    framebuffer_scale = base::ClampToRange(
+        initializer->framebufferScaleFactor(), kFramebufferMinScale, max_scale);
   }
 
   DoubleSize framebuffers_size = session->DefaultFramebufferSize();
@@ -136,7 +125,8 @@ XRWebGLLayer* XRWebGLLayer::Create(
                        framebuffers_size.Height() * framebuffer_scale);
 
   // Create an opaque WebGL Framebuffer
-  WebGLFramebuffer* framebuffer = WebGLFramebuffer::CreateOpaque(webgl_context);
+  WebGLFramebuffer* framebuffer =
+      WebGLFramebuffer::CreateOpaque(webgl_context, want_stencil_buffer);
 
   scoped_refptr<XRWebGLDrawingBuffer> drawing_buffer =
       XRWebGLDrawingBuffer::Create(webgl_context->GetDrawingBuffer(),
@@ -161,7 +151,7 @@ XRWebGLLayer::XRWebGLLayer(XRSession* session,
                            WebGLFramebuffer* framebuffer,
                            double framebuffer_scale,
                            bool ignore_depth_values)
-    : XRLayer(session, kXRWebGLLayerType),
+    : session_(session),
       webgl_context_(webgl_context),
       framebuffer_(framebuffer),
       framebuffer_scale_(framebuffer_scale),
@@ -203,17 +193,6 @@ bool XRWebGLLayer::antialias() const {
     return drawing_buffer_->antialias();
   }
   return webgl_context_->GetDrawingBuffer()->Multisample();
-}
-
-void XRWebGLLayer::getXRWebGLRenderingContext(
-    WebGLRenderingContextOrWebGL2RenderingContext& result) const {
-  if (webgl_context_->ContextType() == Platform::kWebGL2ContextType) {
-    result.SetWebGL2RenderingContext(
-        static_cast<WebGL2RenderingContext*>(webgl_context_.Get()));
-  } else {
-    result.SetWebGLRenderingContext(
-        static_cast<WebGLRenderingContext*>(webgl_context_.Get()));
-  }
 }
 
 XRViewport* XRWebGLLayer::getViewport(XRView* view) {
@@ -299,9 +278,31 @@ void XRWebGLLayer::OnFrameEnd() {
 
     // Submit the frame to the XR compositor.
     if (session()->immersive()) {
+      bool framebuffer_dirty = framebuffer_->HaveContentsChanged();
+
+      // Not drawing to the framebuffer during a session's rAF callback is
+      // usually a sign that something is wrong, such as the app drawing to the
+      // wrong render target. Show a warning in the console if we see that
+      // happen too many times.
+      if (!framebuffer_dirty) {
+        // If the session doesn't have a pose then the framebuffer being clean
+        // may be expected, so we won't count those frames.
+        bool frame_had_pose = !!session()->MojoFromViewer();
+        if (frame_had_pose) {
+          clean_frame_count++;
+          if (clean_frame_count == kCleanFrameWarningLimit) {
+            session()->xr()->GetExecutionContext()->AddConsoleMessage(
+                MakeGarbageCollected<ConsoleMessage>(
+                    mojom::blink::ConsoleMessageSource::kRendering,
+                    mojom::blink::ConsoleMessageLevel::kWarning,
+                    kCleanFrameWarning));
+          }
+        }
+      }
+
       // Always call submit, but notify if the contents were changed or not.
-      session()->xr()->frameProvider()->SubmitWebGLLayer(
-          this, framebuffer_->HaveContentsChanged());
+      session()->xr()->frameProvider()->SubmitWebGLLayer(this,
+                                                         framebuffer_dirty);
     }
   }
 }
@@ -322,20 +323,20 @@ void XRWebGLLayer::OnResize() {
   viewports_dirty_ = true;
 }
 
-scoped_refptr<StaticBitmapImage> XRWebGLLayer::TransferToStaticBitmapImage(
-    std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
+scoped_refptr<StaticBitmapImage> XRWebGLLayer::TransferToStaticBitmapImage() {
   if (drawing_buffer_) {
-    return drawing_buffer_->TransferToStaticBitmapImage(out_release_callback);
+    return drawing_buffer_->TransferToStaticBitmapImage();
   }
   return nullptr;
 }
 
-void XRWebGLLayer::Trace(blink::Visitor* visitor) {
+void XRWebGLLayer::Trace(Visitor* visitor) {
+  visitor->Trace(session_);
   visitor->Trace(left_viewport_);
   visitor->Trace(right_viewport_);
   visitor->Trace(webgl_context_);
   visitor->Trace(framebuffer_);
-  XRLayer::Trace(visitor);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

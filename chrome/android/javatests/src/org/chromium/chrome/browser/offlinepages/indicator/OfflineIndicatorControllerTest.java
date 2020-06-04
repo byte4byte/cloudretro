@@ -18,23 +18,23 @@ import org.chromium.base.ApplicationState;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.download.DownloadActivity;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.offlinepages.ClientId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -88,7 +88,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testShowOfflineIndicatorOnNTPWhenOffline() throws Exception {
+    public void testShowOfflineIndicatorOnNTPWhenOffline() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -105,7 +105,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testShowOfflineIndicatorOnRegularPageWhenOffline() throws Exception {
+    public void testShowOfflineIndicatorOnRegularPageWhenOffline() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -122,7 +122,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testHideOfflineIndicatorWhenBackToOnline() throws Exception {
+    public void testHideOfflineIndicatorWhenBackToOnline() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -145,7 +145,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testDoNotShowSubsequentOfflineIndicatorWhenFlaky() throws Exception {
+    public void testDoNotShowSubsequentOfflineIndicatorWhenFlaky() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -182,7 +182,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnErrorPageWhenOffline() throws Exception {
+    public void testDoNotShowOfflineIndicatorOnErrorPageWhenOffline() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -233,7 +233,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnDownloadsWhenOffline() throws Exception {
+    public void testDoNotShowOfflineIndicatorOnDownloadsWhenOffline() {
         if (mActivityTestRule.getActivity().isTablet()) return;
 
         DownloadActivity downloadActivity = ActivityUtils.waitForActivity(
@@ -250,7 +250,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorOnPageLoadingWhenOffline() throws Exception {
+    public void testDoNotShowOfflineIndicatorOnPageLoadingWhenOffline() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL("/slow?1");
@@ -273,7 +273,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testReshowOfflineIndicatorWhenResumed() throws Exception {
+    public void testReshowOfflineIndicatorWhenResumed() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -300,7 +300,7 @@ public class OfflineIndicatorControllerTest {
 
     @Test
     @MediumTest
-    public void testDoNotShowOfflineIndicatorWhenTemporarilyPaused() throws Exception {
+    public void testDoNotShowOfflineIndicatorWhenTemporarilyPaused() {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         String testUrl = testServer.getURL(TEST_PAGE);
@@ -345,11 +345,11 @@ public class OfflineIndicatorControllerTest {
         });
     }
 
-    private void loadPage(String pageUrl) throws Exception {
+    private void loadPage(String pageUrl) {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
 
         mActivityTestRule.loadUrl(pageUrl);
-        Assert.assertEquals(pageUrl, tab.getUrl());
+        Assert.assertEquals(pageUrl, tab.getUrlString());
         if (mIsConnected) {
             Assert.assertFalse(isErrorPage(tab));
             Assert.assertFalse(isOfflinePage(tab));
@@ -358,7 +358,7 @@ public class OfflineIndicatorControllerTest {
         }
     }
 
-    private void loadPageWithoutWaiting(String pageUrl, String headers) throws Exception {
+    private void loadPageWithoutWaiting(String pageUrl, String headers) {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -371,7 +371,7 @@ public class OfflineIndicatorControllerTest {
         });
     }
 
-    private void waitForPageLoaded(String pageUrl) throws Exception {
+    private void waitForPageLoaded(String pageUrl) {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
         ChromeTabUtils.waitForTabPageLoaded(tab, pageUrl);
         ChromeTabUtils.waitForInteractable(tab);
@@ -383,7 +383,7 @@ public class OfflineIndicatorControllerTest {
 
         final Semaphore semaphore = new Semaphore(0);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Profile profile = Profile.getLastUsedProfile();
+            Profile profile = Profile.getLastUsedRegularProfile();
             OfflinePageBridge offlinePageBridge = OfflinePageBridge.getForProfile(profile);
             offlinePageBridge.savePage(mActivityTestRule.getWebContents(), CLIENT_ID,
                     new OfflinePageBridge.SavePageCallback() {

@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace base {
 class TickClock;
@@ -20,12 +19,9 @@ class CORE_EXPORT IdleDeadline : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  // These values are persisted to logs. Entries should not be renumbered and
-  // numeric values should never be reused.
   enum class CallbackType {
-    kCalledWhenIdle = 0,
-    kCalledByTimeout = 1,
-    kMaxValue = kCalledByTimeout
+    kCalledWhenIdle,
+    kCalledByTimeout,
   };
 
   IdleDeadline(base::TimeTicks deadline, CallbackType);

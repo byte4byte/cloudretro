@@ -13,7 +13,6 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/field_trial_params.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
@@ -33,10 +32,10 @@ namespace ml {
 namespace {
 
 constexpr size_t k20181115ModelInputVectorSize = 343;
-constexpr size_t k20190221ModelInputVectorSize = 612;
+constexpr size_t k20190521ModelInputVectorSize = 592;
 
 constexpr double k20181115ModelDefaultDimThreshold = -1.0;
-constexpr double k20190221ModelDefaultDimThreshold = -0.55;
+constexpr double k20190521ModelDefaultDimThreshold = -0.6;
 
 // Loads the preprocessor config protobuf, which will be used later to convert a
 // RankerExample to a vectorized float for inactivity score calculation. Returns
@@ -47,7 +46,7 @@ LoadExamplePreprocessorConfig() {
 
   const int res_id =
       base::FeatureList::IsEnabled(features::kSmartDimModelV3)
-          ? IDR_SMART_DIM_20190221_EXAMPLE_PREPROCESSOR_CONFIG_PB
+          ? IDR_SMART_DIM_20190521_EXAMPLE_PREPROCESSOR_CONFIG_PB
           : IDR_SMART_DIM_20181115_EXAMPLE_PREPROCESSOR_CONFIG_PB;
 
   scoped_refptr<base::RefCountedMemory> raw_config =
@@ -216,19 +215,12 @@ int ScoreToProbability(float score) {
   return prob;
 }
 
-void LogPowerMLSmartDimModelResult(SmartDimModelResult result) {
-  UMA_HISTOGRAM_ENUMERATION("PowerML.SmartDimModel.Result", result);
-}
-
-void LogPowerMLSmartDimParameterResult(SmartDimParameterResult result) {
-  UMA_HISTOGRAM_ENUMERATION("PowerML.SmartDimParameter.Result", result);
-}
 
 // Returns "dim_threshold" from experiment parameter. Also logs status to UMA.
 float GetDimThreshold() {
   const double default_threshold =
       base::FeatureList::IsEnabled(features::kSmartDimModelV3)
-          ? k20190221ModelDefaultDimThreshold
+          ? k20190521ModelDefaultDimThreshold
           : k20181115ModelDefaultDimThreshold;
   const double dim_threshold = base::GetFieldTrialParamByFeatureAsDouble(
       features::kUserActivityPrediction, "dim_threshold", default_threshold);
@@ -317,7 +309,7 @@ void SmartDimModelImpl::ShouldDim(
 
   const size_t expected_size =
       base::FeatureList::IsEnabled(features::kSmartDimModelV3)
-          ? k20190221ModelInputVectorSize
+          ? k20190521ModelInputVectorSize
           : k20181115ModelInputVectorSize;
 
   if (vectorized_features.size() != expected_size) {

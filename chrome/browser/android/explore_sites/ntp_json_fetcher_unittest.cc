@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/test/scoped_feature_list.h"
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -24,7 +23,7 @@ using testing::_;
 class NTPJsonFetcherTest : public testing::Test {
  public:
   NTPJsonFetcherTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
         https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
 
   void SetUp() {
@@ -107,7 +106,7 @@ class NTPJsonFetcherTest : public testing::Test {
 
   std::unique_ptr<NTPCatalog> catalog_;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile browser_context_;
   net::EmbeddedTestServer https_server_;
 
@@ -117,9 +116,6 @@ class NTPJsonFetcherTest : public testing::Test {
 
   // This allows us to override the URL via finch params.
   base::test::ScopedFeatureList scoped_feature_list_;
-
-  // This allows the NTPJsonFetcher to grab the JSON parsing service.
-  content::TestServiceManagerContext smc;
 };
 
 // TODO(https://crbug.com/854250): Fix the tests. They are disabled because

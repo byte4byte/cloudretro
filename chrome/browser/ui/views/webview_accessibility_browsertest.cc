@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -14,6 +14,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_tree.h"
 #include "ui/views/controls/webview/webview.h"
 #include "url/gurl.h"
@@ -73,7 +74,8 @@ class WebViewBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(WebViewBrowserTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WebViewBrowserTest, ResizeWebView) {
+// Flaky. https://crbug.com/1013805
+IN_PROC_BROWSER_TEST_F(WebViewBrowserTest, DISABLED_ResizeWebView) {
   ui_test_utils::NavigateToURL(
       browser(), https_server_.GetURL("/fixed_size_document.html"));
 

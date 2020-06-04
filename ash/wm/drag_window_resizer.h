@@ -13,7 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace ash {
 
@@ -26,11 +26,11 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
   // Creates DragWindowResizer that adds the ability of dragging windows across
   // displays to |next_window_resizer|.
   DragWindowResizer(std::unique_ptr<WindowResizer> next_window_resizer,
-                    wm::WindowState* window_state);
+                    WindowState* window_state);
   ~DragWindowResizer() override;
 
   // WindowResizer:
-  void Drag(const gfx::Point& location, int event_flags) override;
+  void Drag(const gfx::PointF& location, int event_flags) override;
   void CompleteDrag() override;
   void RevertDrag() override;
   void FlingOrSwipe(ui::GestureEvent* event) override;
@@ -45,7 +45,7 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
                            DragWindowControllerAcrossThreeDisplays);
 
   // Updates the bounds of the drag window for window dragging.
-  void UpdateDragWindow(const gfx::Point& drag_location_in_screen);
+  void UpdateDragWindow();
 
   // Returns true if we should allow the mouse pointer to warp.
   bool ShouldAllowMouseWarp();
@@ -59,12 +59,12 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
   // Shows a semi-transparent image of the window being dragged.
   std::unique_ptr<DragWindowController> drag_window_controller_;
 
-  gfx::Point last_mouse_location_;
+  gfx::PointF last_mouse_location_;
 
   // Current instance for use by the DragWindowResizerTest.
   static DragWindowResizer* instance_;
 
-  base::WeakPtrFactory<DragWindowResizer> weak_ptr_factory_;
+  base::WeakPtrFactory<DragWindowResizer> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DragWindowResizer);
 };

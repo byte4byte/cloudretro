@@ -5,25 +5,62 @@
 #include "chromeos/dbus/cros_healthd/fake_cros_healthd_client.h"
 
 #include "base/callback.h"
+#include "chromeos/services/cros_healthd/public/mojom/cros_healthd.mojom.h"
 
 namespace chromeos {
+namespace cros_healthd {
 
-FakeCrosHealthdClient::FakeCrosHealthdClient() = default;
+namespace {
 
-FakeCrosHealthdClient::FakeCrosHealthdClient(
-    mojo::PendingRemote<cros_healthd::mojom::CrosHealthdService> mock_service)
-    : mock_service_(std::move(mock_service)) {}
+// Used to track the fake instance, mirrors the instance in the base class.
+FakeCrosHealthdClient* g_instance = nullptr;
 
-FakeCrosHealthdClient::~FakeCrosHealthdClient() = default;
+}  // namespace
 
-mojo::Remote<cros_healthd::mojom::CrosHealthdService>
+FakeCrosHealthdClient::FakeCrosHealthdClient() {
+  DCHECK(!g_instance);
+  g_instance = this;
+}
+
+FakeCrosHealthdClient::~FakeCrosHealthdClient() {
+  DCHECK_EQ(this, g_instance);
+  g_instance = nullptr;
+}
+
+// static
+FakeCrosHealthdClient* FakeCrosHealthdClient::Get() {
+  return g_instance;
+}
+
+mojo::Remote<mojom::CrosHealthdServiceFactory>
 FakeCrosHealthdClient::BootstrapMojoConnection(
     base::OnceCallback<void(bool success)> result_callback) {
-  mojo::Remote<cros_healthd::mojom::CrosHealthdService> remote(
-      std::move(mock_service_));
+  mojo::Remote<mojom::CrosHealthdServiceFactory> remote(
+      receiver_.BindNewPipeAndPassRemote());
 
   std::move(result_callback).Run(/*success=*/true);
   return remote;
 }
 
+void FakeCrosHealthdClient::SetAvailableRoutinesForTesting(
+    const std::vector<mojom::DiagnosticRoutineEnum>& available_routines) {
+  fake_service_.SetAvailableRoutinesForTesting(available_routines);
+}
+
+void FakeCrosHealthdClient::SetRunRoutineResponseForTesting(
+    mojom::RunRoutineResponsePtr& response) {
+  fake_service_.SetRunRoutineResponseForTesting(response);
+}
+
+void FakeCrosHealthdClient::SetGetRoutineUpdateResponseForTesting(
+    mojom::RoutineUpdatePtr& response) {
+  fake_service_.SetGetRoutineUpdateResponseForTesting(response);
+}
+
+void FakeCrosHealthdClient::SetProbeTelemetryInfoResponseForTesting(
+    mojom::TelemetryInfoPtr& info) {
+  fake_service_.SetProbeTelemetryInfoResponseForTesting(info);
+}
+
+}  // namespace cros_healthd
 }  // namespace chromeos

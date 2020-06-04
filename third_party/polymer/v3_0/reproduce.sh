@@ -26,7 +26,9 @@ pushd "$(dirname "$0")" > /dev/null
 
 rm -rf node_modules
 
-npm install --production
+# Note: The --production flag is omitted, such that devDependencies
+# referenced later by this script are also downloaded.
+npm install
 
 rsync -c --delete --delete-excluded -r -v --prune-empty-dirs \
     --exclude-from="rsync_exclude.txt" \
@@ -82,8 +84,16 @@ if [[ ! -z "${new}${deleted}" ]]; then
   echo
 fi
 
-# TODO css_strip_prefixes.py
-# TODO rgbify_hex_vars.py
+echo 'Stripping unnecessary prefixed CSS rules...'
+python ../v1_0/css_strip_prefixes.py --file_extension=js
+
+echo 'Generating -rgb versions of --google-* vars in paper-style/colors.js...'
+python ../v1_0/rgbify_hex_vars.py --filter-prefix=google --replace \
+    components-chromium/paper-styles/color.js
+
 # TODO create components summary
-# TODO generate gn
+
+echo 'Creating GN files for interfaces and externs...'
+../v1_0/generate_gn.sh 3 # polymer_version=3
+
 # TODO find unused elements?

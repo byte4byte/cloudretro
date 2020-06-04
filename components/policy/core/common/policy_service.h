@@ -10,11 +10,14 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/observer_list_types.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/policy_export.h"
 
 namespace policy {
+
+class ConfigurationPolicyProvider;
 
 // The PolicyService merges policies from all available sources, taking into
 // account their priorities. Policy clients can retrieve policy for their domain
@@ -45,12 +48,34 @@ class POLICY_EXPORT PolicyService {
     virtual ~Observer() {}
   };
 
+  class POLICY_EXPORT ProviderUpdateObserver : public base::CheckedObserver {
+   public:
+    // Invoked when a policy update signaled by |provider| has been propagated
+    // to the PolicyService's Observers and its contents are now available
+    // through PolicyService::GetPolicies. This is intentionally also called if
+    // the policy update signaled by |provider| did not change the effective
+    // policy values. Note that multiple policy updates by |provider| can result
+    // in a single call to this function, e.g. if a subsequent policy update is
+    // signaled before the previous one has been processed by the PolicyService.
+    virtual void OnProviderUpdatePropagated(
+        ConfigurationPolicyProvider* provider) = 0;
+  };
+
   virtual ~PolicyService() {}
 
   // Observes changes to all components of the given |domain|.
   virtual void AddObserver(PolicyDomain domain, Observer* observer) = 0;
 
   virtual void RemoveObserver(PolicyDomain domain, Observer* observer) = 0;
+
+  // Observes propagation of policy updates by ConfigurationPolicyProviders.
+  virtual void AddProviderUpdateObserver(ProviderUpdateObserver* observer) = 0;
+  virtual void RemoveProviderUpdateObserver(
+      ProviderUpdateObserver* observer) = 0;
+
+  // Returns true if this PolicyService uses |provider| as one of its sources of
+  // policies.
+  virtual bool HasProvider(ConfigurationPolicyProvider* provider) const = 0;
 
   virtual const PolicyMap& GetPolicies(const PolicyNamespace& ns) const = 0;
 
@@ -71,15 +96,15 @@ class POLICY_EXPORT PolicyService {
   // Asks the PolicyService to reload policy from all available policy sources.
   // |callback| is invoked once every source has reloaded its policies, and
   // GetPolicies() is guaranteed to return the updated values at that point.
-  virtual void RefreshPolicies(const base::Closure& callback) = 0;
+  virtual void RefreshPolicies(base::OnceClosure callback) = 0;
 };
 
 // A registrar that only observes changes to particular policies within the
 // PolicyMap for the given policy namespace.
 class POLICY_EXPORT PolicyChangeRegistrar : public PolicyService::Observer {
  public:
-  typedef base::Callback<void(const base::Value*,
-                              const base::Value*)> UpdateCallback;
+  typedef base::RepeatingCallback<void(const base::Value*, const base::Value*)>
+      UpdateCallback;
 
   // Observes updates to the given (domain, component_id) namespace in the given
   // |policy_service|, and notifies |observer| whenever any of the registered

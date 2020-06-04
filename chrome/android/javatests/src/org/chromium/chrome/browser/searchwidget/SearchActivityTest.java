@@ -4,6 +4,10 @@
 
 package org.chromium.chrome.browser.searchwidget;
 
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Instrumentation;
@@ -20,16 +24,17 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Callback;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.locale.DefaultSearchEngineDialogHelperUtils;
 import org.chromium.chrome.browser.locale.DefaultSearchEnginePromoDialog;
 import org.chromium.chrome.browser.locale.DefaultSearchEnginePromoDialog.DefaultSearchEnginePromoDialogObserver;
@@ -38,6 +43,7 @@ import org.chromium.chrome.browser.omnibox.MatchClassificationStyle;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestion;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestion.MatchClassification;
+import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.searchwidget.SearchActivity.SearchActivityDelegate;
 import org.chromium.chrome.browser.tab.Tab;
@@ -51,6 +57,7 @@ import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.KeyUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,7 +78,7 @@ import java.util.concurrent.TimeoutException;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class SearchActivityTest {
-    private static final long OMNIBOX_SHOW_TIMEOUT_MS = ScalableTimeout.scaleTimeout(5000);
+    private static final long OMNIBOX_SHOW_TIMEOUT_MS = 5000L;
 
     private static class TestDelegate
             extends SearchActivityDelegate implements DefaultSearchEnginePromoDialogObserver {
@@ -138,10 +145,16 @@ public class SearchActivityTest {
     @Rule
     public MultiActivityTestRule mTestRule = new MultiActivityTestRule();
 
+    @Mock
+    VoiceRecognitionHandler mHandler;
+
     private TestDelegate mTestDelegate;
 
     @Before
     public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        doReturn(true).when(mHandler).isVoiceSearchEnabled();
+
         mTestDelegate = new TestDelegate();
         SearchActivity.setDelegateForTests(mTestDelegate);
         DefaultSearchEnginePromoDialog.setObserverForTests(mTestDelegate);
@@ -207,6 +220,38 @@ public class SearchActivityTest {
 
     @Test
     @SmallTest
+    public void testVoiceSearchBeforeNativeIsLoaded() throws Exception {
+        // Wait for the activity to load, but don't let it load the native library.
+        mTestDelegate.shouldDelayLoadingNative = true;
+        final SearchActivity searchActivity = startSearchActivity(0, /*isVoiceSearch=*/true);
+        final SearchActivityLocationBarLayout locationBar =
+                (SearchActivityLocationBarLayout) searchActivity.findViewById(
+                        R.id.search_location_bar);
+        locationBar.setVoiceRecognitionHandlerForTesting(mHandler);
+        locationBar.beginQuery(/* isVoiceSearchIntent= */ true, /* optionalText= */ null);
+        verify(mHandler, times(0))
+                .startVoiceRecognition(
+                        VoiceRecognitionHandler.VoiceInteractionSource.SEARCH_WIDGET);
+
+        mTestDelegate.shouldDelayNativeInitializationCallback.waitForCallback(0);
+        Assert.assertEquals(0, mTestDelegate.showSearchEngineDialogIfNeededCallback.getCallCount());
+        Assert.assertEquals(0, mTestDelegate.onFinishDeferredInitializationCallback.getCallCount());
+
+        // Start loading native, then let the activity finish initialization.
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> searchActivity.startDelayedNativeInitialization());
+
+        Assert.assertEquals(
+                1, mTestDelegate.shouldDelayNativeInitializationCallback.getCallCount());
+        mTestDelegate.showSearchEngineDialogIfNeededCallback.waitForCallback(0);
+        mTestDelegate.onFinishDeferredInitializationCallback.waitForCallback(0);
+
+        verify(mHandler).startVoiceRecognition(
+                VoiceRecognitionHandler.VoiceInteractionSource.SEARCH_WIDGET);
+    }
+
+    @Test
+    @SmallTest
     public void testTypeBeforeNativeIsLoaded() throws Exception {
         // Wait for the activity to load, but don't let it load the native library.
         mTestDelegate.shouldDelayLoadingNative = true;
@@ -266,7 +311,7 @@ public class SearchActivityTest {
 
         waitForChromeTabbedActivityToStart(new Callable<Void>() {
             @Override
-            public Void call() throws InterruptedException, TimeoutException {
+            public Void call() throws TimeoutException {
                 // Finish initialization.  It should notice the URL is queued up and start the
                 // browser.
                 TestThreadUtils.runOnUiThreadBlocking(
@@ -283,7 +328,7 @@ public class SearchActivityTest {
 
     @Test
     @SmallTest
-    public void testZeroSuggestBeforeNativeIsLoaded() throws Exception {
+    public void testZeroSuggestBeforeNativeIsLoaded() {
         LocaleManager.setInstanceForTest(new LocaleManager() {
             @Override
             public boolean needToCheckForSearchEnginePromo() {
@@ -294,12 +339,16 @@ public class SearchActivityTest {
         // Cache some mock results to show.
         List<MatchClassification> classifications = new ArrayList<>();
         classifications.add(new MatchClassification(0, MatchClassificationStyle.NONE));
-        OmniboxSuggestion mockSuggestion = new OmniboxSuggestion(0, true, 0, 0,
-                "https://google.com", classifications, "https://google.com", classifications, null,
-                "", "https://google.com", null, null, false, false);
-        OmniboxSuggestion mockSuggestion2 = new OmniboxSuggestion(0, true, 0, 0,
-                "https://android.com", classifications, "https://android.com", classifications,
-                null, "", "https://android.com", null, null, false, false);
+        OmniboxSuggestion mockSuggestion =
+                new OmniboxSuggestion(0, true, 0, 0, "https://google.com", classifications,
+                        "https://google.com", classifications, null, "",
+                        new GURL("https://google.com"), GURL.emptyGURL(), null, false, false, null,
+                        null, OmniboxSuggestion.INVALID_GROUP);
+        OmniboxSuggestion mockSuggestion2 =
+                new OmniboxSuggestion(0, true, 0, 0, "https://android.com", classifications,
+                        "https://android.com", classifications, null, "",
+                        new GURL("https://android.com"), GURL.emptyGURL(), null, false, false, null,
+                        null, OmniboxSuggestion.INVALID_GROUP);
         List<OmniboxSuggestion> list = new ArrayList<>();
         list.add(mockSuggestion);
         list.add(mockSuggestion2);
@@ -404,7 +453,7 @@ public class SearchActivityTest {
     public void testRealPromoDialogDismissWithoutSelection() throws Exception {
         // Start the Activity.  It should pause when the promo dialog appears.
         mTestDelegate.shouldShowRealSearchDialog = true;
-        startSearchActivity();
+        SearchActivity activity = startSearchActivity();
         mTestDelegate.shouldDelayNativeInitializationCallback.waitForCallback(0);
         mTestDelegate.showSearchEngineDialogIfNeededCallback.waitForCallback(0);
         mTestDelegate.onPromoDialogShownCallback.waitForCallback(0);
@@ -414,12 +463,24 @@ public class SearchActivityTest {
         mTestDelegate.shownPromoDialog.dismiss();
 
         // SearchActivity should realize the failure case and prevent the user from using it.
-        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
-            public Integer call() throws Exception {
-                return ApplicationStatus.getRunningActivities().size();
+            public boolean isSatisfied() {
+                List<Activity> activities = ApplicationStatus.getRunningActivities();
+                if (activities.isEmpty()) return true;
+
+                if (activities.size() != 1) {
+                    updateFailureReason("Multiple non-destroyed activities: " + activities);
+                    return false;
+                }
+                if (activities.get(0) != activity) {
+                    updateFailureReason("Remaining activity is not the search activity under test: "
+                            + activities.get(0));
+                }
+                updateFailureReason("Search activity has not called finish()");
+                return activity.isFinishing();
             }
-        }));
+        });
         Assert.assertEquals(
                 1, mTestDelegate.shouldDelayNativeInitializationCallback.getCallCount());
         Assert.assertEquals(1, mTestDelegate.showSearchEngineDialogIfNeededCallback.getCallCount());
@@ -428,7 +489,7 @@ public class SearchActivityTest {
 
     @Test
     @SmallTest
-    public void testNewIntentDiscardsQuery() throws Exception {
+    public void testNewIntentDiscardsQuery() {
         final SearchActivity searchActivity = startSearchActivity();
         setUrlBarText(searchActivity, "first query");
         final SearchActivityLocationBarLayout locationBar =
@@ -437,7 +498,7 @@ public class SearchActivityTest {
         OmniboxTestUtils.waitForOmniboxSuggestions(locationBar, OMNIBOX_SHOW_TIMEOUT_MS);
 
         // Start the Activity again by firing another copy of the same Intent.
-        SearchActivity restartedActivity = startSearchActivity(1);
+        SearchActivity restartedActivity = startSearchActivity(1, /*isVoiceSearch=*/false);
         Assert.assertEquals(searchActivity, restartedActivity);
 
         // The query should be wiped.
@@ -450,11 +511,11 @@ public class SearchActivityTest {
         });
     }
 
-    private SearchActivity startSearchActivity() throws Exception {
-        return startSearchActivity(0);
+    private SearchActivity startSearchActivity() {
+        return startSearchActivity(0, /*isVoiceSearch=*/false);
     }
 
-    private SearchActivity startSearchActivity(int expectedCallCount) throws Exception {
+    private SearchActivity startSearchActivity(int expectedCallCount, boolean isVoiceSearch) {
         final Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         ActivityMonitor searchMonitor =
                 new ActivityMonitor(SearchActivity.class.getName(), null, false);
@@ -470,7 +531,7 @@ public class SearchActivityTest {
 
         // Fire the Intent to start up the SearchActivity.
         Intent intent = new Intent();
-        SearchWidgetProvider.startSearchActivity(intent, false);
+        SearchWidgetProvider.startSearchActivity(intent, isVoiceSearch);
         Activity searchActivity = instrumentation.waitForMonitorWithTimeout(
                 searchMonitor, CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL);
         Assert.assertNotNull("Activity didn't start", searchActivity);
@@ -486,11 +547,11 @@ public class SearchActivityTest {
 
         CriteriaHelper.pollUiThread(Criteria.equals(expectedUrl, new Callable<String>() {
             @Override
-            public String call() throws Exception {
+            public String call() {
                 Tab tab = cta.getActivityTab();
                 if (tab == null) return null;
 
-                return tab.getUrl();
+                return tab.getUrlString();
             }
         }));
     }

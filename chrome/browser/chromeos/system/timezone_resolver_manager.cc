@@ -5,9 +5,11 @@
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
@@ -119,7 +121,7 @@ ServiceConfiguration GetServiceConfigurationForSigninScreen() {
 
 }  // anonymous namespace.
 
-TimeZoneResolverManager::TimeZoneResolverManager() : weak_factory_(this) {
+TimeZoneResolverManager::TimeZoneResolverManager() {
   local_state_initialized_ =
       g_browser_process->local_state()->GetInitializationStatus() ==
       PrefService::INITIALIZATION_STATUS_SUCCESS;
@@ -307,6 +309,11 @@ TimeZoneResolverManager::GetEffectiveUserTimeZoneResolveMethod(
 // static
 bool TimeZoneResolverManager::IsTimeZoneResolutionPolicyControlled() {
   return GetServiceConfigurationFromPolicy() != UNSPECIFIED;
+}
+
+// static
+bool TimeZoneResolverManager::IfServiceShouldBeRunningForSigninScreen() {
+  return GetServiceConfigurationForSigninScreen() == SHOULD_START;
 }
 
 }  // namespace system

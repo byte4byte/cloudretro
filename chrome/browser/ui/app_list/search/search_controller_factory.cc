@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
 #include "base/metrics/field_trial_params.h"
@@ -21,14 +22,18 @@
 #include "chrome/browser/ui/app_list/search/arc/arc_app_reinstall_search_provider.h"
 #include "chrome/browser/ui/app_list/search/arc/arc_app_shortcuts_search_provider.h"
 #include "chrome/browser/ui/app_list/search/arc/arc_playstore_search_provider.h"
+#include "chrome/browser/ui/app_list/search/assistant_search_provider.h"
+#include "chrome/browser/ui/app_list/search/drive_quick_access_provider.h"
 #include "chrome/browser/ui/app_list/search/launcher_search/launcher_search_provider.h"
 #include "chrome/browser/ui/app_list/search/mixer.h"
 #include "chrome/browser/ui/app_list/search/omnibox_provider.h"
+#include "chrome/browser/ui/app_list/search/os_settings_provider.h"
 #include "chrome/browser/ui/app_list/search/search_controller.h"
-#include "chrome/browser/ui/app_list/search/search_result_ranker/search_result_ranker.h"
 #include "chrome/browser/ui/app_list/search/settings_shortcut/settings_shortcut_provider.h"
+#include "chrome/browser/ui/app_list/search/zero_state_file_provider.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chromeos/services/assistant/public/cpp/features.h"
 #include "components/arc/arc_util.h"
 
 namespace app_list {
@@ -41,9 +46,13 @@ namespace {
 // in some UI, so we need to allow returning more results than actual maximum
 // number of results to be displayed in UI.
 constexpr size_t kMaxAppsGroupResults = 7;
-constexpr size_t kMaxOmniboxResults = 4;
 constexpr size_t kMaxLauncherSearchResults = 2;
+// We need twice as many ZeroState and Drive file results as we need
+// duplicates of these results for the suggestion chips.
+constexpr size_t kMaxZeroStateFileResults = 20;
+constexpr size_t kMaxDriveQuickAccessResults = 10;
 constexpr size_t kMaxAppReinstallSearchResults = 1;
+constexpr size_t kMaxOsSettingsResults = 5;
 // We show up to 6 Play Store results. However, part of Play Store results may
 // be filtered out because they may correspond to already installed Web apps. So
 // we request twice as many Play Store apps as we can show. Note that this still
@@ -56,10 +65,15 @@ constexpr size_t kMaxPlayStoreResults = 12;
 constexpr size_t kMaxAppDataResults = 4;
 constexpr size_t kMaxAppShortcutResults = 4;
 
+// Assistant provides a single search result when launcher chip integration is
+// enabled from its internal cache of conversation starters.
+constexpr size_t kMaxAssistantResults = 1;
+
 // TODO(wutao): Need UX spec.
 constexpr size_t kMaxSettingsShortcutResults = 6;
 
 constexpr float kBoostOfSettingsShortcut = 10.0f;
+// Keep in sync with value in search_result_ranker.cc.
 constexpr float kBoostOfApps = 8.0f;
 
 }  // namespace
@@ -72,7 +86,8 @@ std::unique_ptr<SearchController> CreateSearchController(
       std::make_unique<SearchController>(model_updater, list_controller,
                                          profile);
 
-  AppSearchResultRanker* app_ranker = controller->GetAppSearchResultRanker();
+  // Set up rankers for search results.
+  controller->InitializeRankers();
 
   // Add mixer groups. There are four main groups: answer card, apps
   // and omnibox. Each group has a "soft" maximum number of results. However, if
@@ -85,19 +100,29 @@ std::unique_ptr<SearchController> CreateSearchController(
   size_t answer_card_group_id = controller->AddGroup(1, 1.0, 5.0);
   size_t apps_group_id =
       controller->AddGroup(kMaxAppsGroupResults, 1.0, kBoostOfApps);
-  size_t omnibox_group_id = controller->AddGroup(kMaxOmniboxResults, 1.0, 0.0);
+  size_t omnibox_group_id = controller->AddGroup(
+      ash::AppListConfig::instance().max_search_result_list_items(), 1.0, 0.0);
 
   // Add search providers.
-  controller->AddProvider(apps_group_id, std::make_unique<AppSearchProvider>(
-                                             profile, list_controller,
-                                             base::DefaultClock::GetInstance(),
-                                             model_updater, app_ranker));
+  controller->AddProvider(
+      apps_group_id, std::make_unique<AppSearchProvider>(
+                         profile, list_controller,
+                         base::DefaultClock::GetInstance(), model_updater));
   controller->AddProvider(omnibox_group_id, std::make_unique<OmniboxProvider>(
                                                 profile, list_controller));
   if (app_list_features::IsAnswerCardEnabled()) {
     controller->AddProvider(answer_card_group_id,
                             std::make_unique<AnswerCardSearchProvider>(
                                 profile, model_updater, list_controller));
+  }
+
+  // The Assistant search provider currently only contributes search results
+  // when launcher chip integration is enabled.
+  if (chromeos::assistant::features::IsLauncherChipIntegrationEnabled()) {
+    size_t assistant_group_id = controller->AddGroup(
+        kMaxAssistantResults, /*multiplier=*/1.0, kBoostOfApps);
+    controller->AddProvider(assistant_group_id,
+                            std::make_unique<AssistantSearchProvider>());
   }
 
   // LauncherSearchProvider is added only when not in guest
@@ -152,7 +177,29 @@ std::unique_ptr<SearchController> CreateSearchController(
     controller->AddProvider(
         app_shortcut_group_id,
         std::make_unique<ArcAppShortcutsSearchProvider>(
-            kMaxAppShortcutResults, profile, list_controller, app_ranker));
+            kMaxAppShortcutResults, profile, list_controller));
+  }
+
+  // This flag controls whether files are shown alongside Omnibox recent queries
+  // in the launcher. If enabled, Omnibox recent queries have their relevance
+  // scores changed to fit with these providers.
+  if (app_list_features::IsZeroStateMixedTypesRankerEnabled()) {
+    size_t zero_state_files_group_id =
+        controller->AddGroup(kMaxZeroStateFileResults, 1.0, 0.0);
+    controller->AddProvider(zero_state_files_group_id,
+                            std::make_unique<ZeroStateFileProvider>(profile));
+    size_t drive_quick_access_group_id =
+        controller->AddGroup(kMaxDriveQuickAccessResults, 1.0, 0.0);
+    controller->AddProvider(
+        drive_quick_access_group_id,
+        std::make_unique<DriveQuickAccessProvider>(profile, controller.get()));
+  }
+
+  if (app_list_features::IsLauncherSettingsSearchEnabled()) {
+    size_t os_settings_search_group_id =
+        controller->AddGroup(kMaxOsSettingsResults, 1.0, 0.0);
+    controller->AddProvider(os_settings_search_group_id,
+                            std::make_unique<OsSettingsProvider>(profile));
   }
 
   return controller;

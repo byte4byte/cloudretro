@@ -31,9 +31,6 @@ const mockTaskHistory = /** @type {!TaskHistory} */ ({
 // Set up test components.
 function setUp() {
   // Mock LoadTimeData strings.
-  window.loadTimeData.data = {
-    DRIVE_FS_ENABLED: false,
-  };
   window.loadTimeData.getString = id => id;
 
   const mockTask = /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
@@ -50,6 +47,16 @@ function setUp() {
       },
     },
     fileManagerPrivate: {
+      DriveConnectionStateType: {
+        ONLINE: 'ONLINE',
+        OFFLINE: 'OFFLINE',
+        METERED: 'METERED',
+      },
+      DriveOfflineReason: {
+        NOT_READY: 'NOT_READY',
+        NO_NETWORK: 'NO_NETWORK',
+        NO_SERVICE: 'NO_SERVICE',
+      },
       getFileTasks: function(entries, callback) {
         setTimeout(callback.bind(null, [mockTask]), 0);
       },
@@ -95,7 +102,7 @@ function getMockFileManager() {
         };
       },
       getDriveConnectionState: function() {
-        return VolumeManagerCommon.DriveConnectionType.ONLINE;
+        return chrome.fileManagerPrivate.DriveConnectionStateType;
       },
       getVolumeInfo: function(entry) {
         return {
@@ -119,7 +126,7 @@ function getMockFileManager() {
     crostini: crostini,
   };
 
-  fileManager.crostini.init(fileManager.volumeManager);
+  fileManager.crostini.initVolumeManager(fileManager.volumeManager);
   return fileManager;
 }
 
@@ -209,11 +216,37 @@ function showDefaultTaskDialogCalled(entries, mimeTypes) {
 }
 
 /**
+ * Returns a promise that resolves when showImportCrostiniImageDialog is called.
+ *
+ * @param {!Array<!Entry>} entries Entries.
+ * @return {!Promise}
+ */
+function showImportCrostiniImageDialogIsCalled(entries) {
+  return new Promise((resolve, reject) => {
+    const fileManager = getMockFileManager();
+    fileManager.ui.importCrostiniImageDialog = {
+      showImportCrostiniImageDialog: (entry) => {
+        resolve();
+      },
+    };
+
+    FileTasks
+        .create(
+            fileManager.volumeManager, fileManager.metadataModel,
+            fileManager.directoryModel, fileManager.ui, entries, [null],
+            mockTaskHistory, fileManager.namingController, fileManager.crostini)
+        .then(tasks => {
+          tasks.executeDefault();
+        });
+  });
+}
+
+/**
  * Tests opening a .exe file.
  */
 function testToOpenExeFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.exe');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.exe');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled(
@@ -226,7 +259,7 @@ function testToOpenExeFile(callback) {
  */
 function testToOpenDmgFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.dmg');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.dmg');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled([mockEntry], 'test.dmg', 'NO_TASK_FOR_DMG'),
@@ -238,7 +271,7 @@ function testToOpenDmgFile(callback) {
  */
 function testToOpenCrxFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.crx');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.crx');
 
   reportPromise(
       showHtmlOfAlertDialogIsCalled(
@@ -251,7 +284,7 @@ function testToOpenCrxFile(callback) {
  */
 function testToOpenRtfFile(callback) {
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.rtf');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.rtf');
 
   reportPromise(
       openSuggestAppsDialogIsCalled([mockEntry], ['application/rtf']),
@@ -264,7 +297,7 @@ function testToOpenRtfFile(callback) {
 function testOpenSuggestAppsDialogWithMetadata(callback) {
   const showByExtensionAndMimeIsCalled = new Promise((resolve, reject) => {
     const mockFileSystem = new MockFileSystem('volumeId');
-    const mockEntry = new MockFileEntry(mockFileSystem, '/test.rtf');
+    const mockEntry = MockFileEntry.create(mockFileSystem, '/test.rtf');
     const fileManager = getMockFileManager();
 
     FileTasks
@@ -301,7 +334,7 @@ function testOpenSuggestAppsDialogWithMetadata(callback) {
 function testOpenSuggestAppsDialogFailure(callback) {
   const onFailureIsCalled = new Promise((resolve, reject) => {
     const mockFileSystem = new MockFileSystem('volumeId');
-    const mockEntry = new MockFileEntry(mockFileSystem, '/test');
+    const mockEntry = MockFileEntry.create(mockFileSystem, '/test');
     const fileManager = getMockFileManager();
 
     FileTasks
@@ -344,7 +377,7 @@ function testOpenTaskPicker(callback) {
   };
 
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.tiff');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.tiff');
 
   reportPromise(
       showDefaultTaskDialogCalled([mockEntry], ['image/tiff']), callback);
@@ -408,7 +441,7 @@ function testOpenWithMostRecentlyExecuted(callback) {
       };
 
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.tiff');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.tiff');
 
   const promise = new Promise((resolve, reject) => {
     const fileManager = getMockFileManager();
@@ -480,7 +513,7 @@ function testOpenZipWithZipArchiver(callback) {
       };
 
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.zip');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.zip');
 
   const promise = new Promise((resolve, reject) => {
     const fileManager = getMockFileManager();
@@ -506,41 +539,39 @@ function testOpenZipWithZipArchiver(callback) {
   reportPromise(promise, callback);
 }
 
+function setUpInstallLinuxPackage() {
+  const fileManager = getMockFileManager();
+  fileManager.volumeManager.getLocationInfo = entry => {
+    return /** @type {!EntryLocation} */ ({
+      rootType: VolumeManagerCommon.RootType.CROSTINI,
+    });
+  };
+  const fileTask = {
+    taskId: 'test-extension-id|app|install-linux-package',
+    isDefault: false,
+    isGenericFileHandler: false,
+    title: '__MSG_INSTALL_LINUX_PACKAGE__',
+  };
+  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
+    setTimeout(callback.bind(null, [fileTask]), 0);
+  };
+  return fileManager;
+}
+
 /**
  * Tests opening a .deb file. The crostini linux package install dialog should
  * be called.
  */
 function testOpenInstallLinuxPackageDialog(callback) {
-  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
-    setTimeout(
-        callback.bind(
-            null,
-            [
-              {
-                taskId: 'test-extension-id|app|install-linux-package',
-                isDefault: false,
-                isGenericFileHandler: false,
-                title: '__MSG_INSTALL_LINUX_PACKAGE__',
-              },
-            ]),
-        0);
-  };
-
+  const fileManager = setUpInstallLinuxPackage();
   const mockFileSystem = new MockFileSystem('volumeId');
-  const mockEntry = new MockFileEntry(mockFileSystem, '/test.deb');
+  const mockEntry = MockFileEntry.create(mockFileSystem, '/test.deb');
 
   const promise = new Promise((resolve, reject) => {
-    const fileManager = getMockFileManager();
     fileManager.ui.installLinuxPackageDialog = {
       showInstallLinuxPackageDialog: function(entry) {
         resolve();
       },
-    };
-
-    fileManager.volumeManager.getLocationInfo = entry => {
-      return /** @type {!EntryLocation} */ ({
-        rootType: VolumeManagerCommon.RootType.CROSTINI,
-      });
     };
 
     FileTasks
@@ -557,135 +588,26 @@ function testOpenInstallLinuxPackageDialog(callback) {
 }
 
 /**
- * Tests that opening files within the Downloads directory using a crostini app
- * displays the sharing permission dialog, which users can use to allow or deny
- * sharing the directory with crostini.
+ * Tests opening a .tini file. The import crostini image dialog should be
+ * called.
  */
-function testMaybeShareCrostiniOrShowDialog() {
-  const volumeManagerDownloads = /** @type {!VolumeManager} */ ({
-    getLocationInfo: (entry) => {
-      return /** @type {!EntryLocation} */ ({
-        rootType: entry.filesystem.name,
-      });
-    },
-  });
-
-  const mockFsDownloads = new MockFileSystem('downloads');
-  const sharedDir = new MockDirectoryEntry(mockFsDownloads, '/shared');
-  const shared = new MockFileEntry(mockFsDownloads, '/shared/file');
-
-  const crostini = createCrostiniForTest();
-  crostini.init(volumeManagerDownloads);
-  crostini.setEnabled('termina', true);
-  crostini.registerSharedPath('termina', sharedDir);
-
-  const notShared1 = new MockFileEntry(mockFsDownloads, '/notShared/file1');
-  const notShared2 = new MockFileEntry(mockFsDownloads, '/notShared/file2');
-  const otherNotShared =
-      new MockFileEntry(mockFsDownloads, '/otherNotShared/file');
-  const mockFsUnsharable = new MockFileSystem('unsharable');
-  const unsharable = new MockDirectoryEntry(mockFsUnsharable, '/unsharable');
-
-  function expect(
-      comment, entries, expectSuccess, expectedDialogTitle,
-      expectedDialogMessage) {
-    let showHtmlCalled = false;
-    function showHtml(title, message) {
-      showHtmlCalled = true;
-      assertEquals(
-          expectedDialogTitle, title,
-          'crostini share dialog title: ' + comment);
-      assertEquals(
-          expectedDialogMessage, message,
-          'crostini share dialog message: ' + comment);
-    }
-
-    const fakeFilesTask = {
-      entries_: entries,
-      crostini_: crostini,
-      ui_: {
-        alertDialog: {showHtml: showHtml},
-        confirmDialog: {showHtml: showHtml},
-      },
-      volumeManager_: volumeManagerDownloads,
-    };
-
-    const crostiniTask = /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
-      taskId: '|crostini|',
-    });
-
-    let success = false;
-    let proto = /** @type {!Object} */ (FileTasks.prototype);
-    proto.maybeShareWithCrostiniOrShowDialog_.call(
-        fakeFilesTask, crostiniTask, () => {
-          success = true;
-        });
-
-    assertEquals(expectSuccess, success, 'success: ' + comment);
-    assertEquals(expectSuccess, !showHtmlCalled, 'showHtml called:' + comment);
-  }
-
-  expect('No entries', [], true, '', '');
-
-  crostini.setEnabled('termina', false);
-  expect(
-      'Single entry, crostini-files not enabled', [notShared1], false,
-      'UNABLE_TO_OPEN_CROSTINI_TITLE', 'UNABLE_TO_OPEN_CROSTINI');
-
-  crostini.setEnabled('termina', true);
-
-  expect('Single entry, not shared', [notShared1], true, '', '');
-
-  expect('Single entry, shared', [shared], true, '', '');
-
-  expect(
-      '2 entries, not shared, same dir', [notShared1, notShared2], true, '',
-      '');
-  // Non-persistent shares should not be registered.
-  assertFalse(crostini.isPathShared('termina', notShared1));
-
-  expect(
-      '2 entries, not shared, different dir', [notShared1, otherNotShared],
-      true, '', '');
-
-  expect(
-      '2 entries, 1 not shared, different dir, not shared first',
-      [notShared1, shared], true, '', '');
-
-  expect(
-      '2 entries, 1 not shared, different dir, shared first',
-      [shared, notShared1], true, '', '');
-
-  expect(
-      '3 entries, 2 not shared, different dir',
-      [shared, notShared1, notShared2], true, '', '');
-
-  expect(
-      '2 entries, 1 not sharable', [notShared1, unsharable], false,
-      'UNABLE_TO_OPEN_CROSTINI_TITLE', 'UNABLE_TO_OPEN_CROSTINI');
-}
-
-/**
- * Tests file tasks and crostini sharing.
- */
-function testTaskRequiresCrostiniSharing() {
-  /**
-   * Returns a fileManagerPrivate.FileTask containing the given task |id|.
-   * @param {string} id
-   * @return {!chrome.fileManagerPrivate.FileTask}
-   */
-  const createTask = (id) => {
-    return /** @type {!chrome.fileManagerPrivate.FileTask} */ ({
-      taskId: id,
-    });
+function testToOpenTiniFileOpensImportCrostiniImageDialog(callback) {
+  window.chrome.fileManagerPrivate.getFileTasks = (entries, callback) => {
+    setTimeout(
+        callback.bind(
+            null,
+            [
+              {
+                taskId: 'test-extension-id|app|import-crostini-image',
+                isDefault: false,
+                isGenericFileHandler: false,
+              },
+            ]),
+        0);
   };
 
-  const crostiniOpenWithTask = createTask('app|crostini|open-with');
-  assertTrue(FileTasks.taskRequiresCrostiniSharing(crostiniOpenWithTask));
+  const mockEntry =
+      MockFileEntry.create(new MockFileSystem('testfilesystem'), '/test.tini');
 
-  const installLinuxPackageTask = createTask('appId|x|install-linux-package');
-  assertTrue(FileTasks.taskRequiresCrostiniSharing(installLinuxPackageTask));
-
-  const notRequiredOpenWithTask = createTask('appId|x|open-with');
-  assertFalse(FileTasks.taskRequiresCrostiniSharing(notRequiredOpenWithTask));
+  reportPromise(showImportCrostiniImageDialogIsCalled([mockEntry]), callback);
 }

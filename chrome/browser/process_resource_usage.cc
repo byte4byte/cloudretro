@@ -7,18 +7,18 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/public/common/resource_usage_reporter_type_converters.h"
 
 ProcessResourceUsage::ProcessResourceUsage(
-    content::mojom::ResourceUsageReporterPtr service)
+    mojo::PendingRemote<content::mojom::ResourceUsageReporter> service)
     : service_(std::move(service)), update_in_progress_(false) {
-  service_.set_connection_error_handler(
-      base::Bind(&ProcessResourceUsage::RunPendingRefreshCallbacks,
-                 base::Unretained(this)));
+  service_.set_disconnect_handler(
+      base::BindOnce(&ProcessResourceUsage::RunPendingRefreshCallbacks,
+                     base::Unretained(this)));
 }
 
 ProcessResourceUsage::~ProcessResourceUsage() {
@@ -35,7 +35,7 @@ void ProcessResourceUsage::RunPendingRefreshCallbacks() {
 
 void ProcessResourceUsage::Refresh(const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!service_ || service_.encountered_error()) {
+  if (!service_ || !service_.is_connected()) {
     if (!callback.is_null())
       base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
     return;
@@ -46,8 +46,8 @@ void ProcessResourceUsage::Refresh(const base::Closure& callback) {
 
   if (!update_in_progress_) {
     update_in_progress_ = true;
-    service_->GetUsageData(base::Bind(&ProcessResourceUsage::OnRefreshDone,
-                                      base::Unretained(this)));
+    service_->GetUsageData(base::BindOnce(&ProcessResourceUsage::OnRefreshDone,
+                                          base::Unretained(this)));
   }
 }
 
@@ -80,10 +80,10 @@ size_t ProcessResourceUsage::GetV8MemoryUsed() const {
   return 0;
 }
 
-blink::WebCache::ResourceTypeStats ProcessResourceUsage::GetWebCoreCacheStats()
-    const {
+blink::WebCacheResourceTypeStats
+ProcessResourceUsage::GetBlinkMemoryCacheStats() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (stats_ && stats_->web_cache_stats)
-    return stats_->web_cache_stats->To<blink::WebCache::ResourceTypeStats>();
+    return stats_->web_cache_stats->To<blink::WebCacheResourceTypeStats>();
   return {};
 }

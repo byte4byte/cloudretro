@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include "base/files/scoped_temp_dir.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
@@ -16,11 +17,10 @@
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/ui/toolbar/test/toolbar_test_navigation_manager.h"
 #import "ios/chrome/browser/ui/toolbar/test/toolbar_test_web_state.h"
-#import "ios/testing/ocmock_complex_type_helper.h"
 #import "ios/web/public/test/fakes/test_navigation_manager.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/test_web_thread.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #include "third_party/ocmock/gtest_support.h"
@@ -40,6 +40,10 @@ class BrowserViewControllerHelperTest : public PlatformTest {
   void SetUp() override {
     PlatformTest::SetUp();
     TestChromeBrowserState::Builder test_cbs_builder;
+
+    ASSERT_TRUE(state_dir_.CreateUniqueTempDir());
+    test_cbs_builder.SetPath(state_dir_.GetPath());
+
     chrome_browser_state_ = test_cbs_builder.Build();
     chrome_browser_state_->CreateBookmarkModel(true);
     bookmarks::test::WaitForBookmarkModelToLoad(
@@ -52,7 +56,12 @@ class BrowserViewControllerHelperTest : public PlatformTest {
     helper_ = [[BrowserViewControllerHelper alloc] init];
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  // A state directory that outlives |task_environment_| is needed because
+  // CreateHistoryService/CreateBookmarkModel use the directory to host
+  // databases. See https://crbug.com/546640 for more details.
+  base::ScopedTempDir state_dir_;
+
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
   std::unique_ptr<ToolbarTestWebState> web_state_;
   BrowserViewControllerHelper* helper_;

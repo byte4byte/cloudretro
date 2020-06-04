@@ -1,66 +1,55 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
       "name": "Scrolling Contents Layer",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='container'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='container'",
       "bounds": [100, 100],
       "drawsContent": false,
       "transform": 1
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV id='vertical' class='content'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='vertical' class='content'",
       "bounds": [10, 10],
       "drawsContent": false,
       "transform": 1
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='container'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='container'",
       "bounds": [100, 100],
       "drawsContent": false,
       "transform": 2
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV id='horizontal' class='content'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='horizontal' class='content'",
       "bounds": [10, 10],
       "drawsContent": false,
       "transform": 2
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='container'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='container'",
       "bounds": [100, 100],
       "drawsContent": false,
       "transform": 3
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV id='both' class='content'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='both' class='content'",
       "bounds": [10, 10],
       "drawsContent": false,
       "transform": 3
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV id='corner' class='container'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='corner' class='container'",
       "bounds": [100, 100],
       "drawsContent": false,
       "transform": 4
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='content'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='content'",
       "bounds": [10, 10],
       "drawsContent": false,
       "transform": 4

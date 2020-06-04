@@ -7,27 +7,15 @@
  * settings subpage (chrome://settings/captions).
  */
 (function() {
-'use strict';
-
-
-/** @type {!Array<number>} */
-const TEXT_OPACITY_RANGE = [
-  0,  5,  10, 15, 20, 25, 30, 35, 40, 45, 50,
-  55, 60, 65, 70, 75, 80, 85, 90, 95, 100
-];
-
-/**
- * @param {!Array<number>} ticks
- * @return {!Array<!cr_slider.SliderTick>}
- */
-function ticksWithLabels(ticks) {
-  return ticks.map(x => ({label: `${x}`, value: x}));
-}
 
 Polymer({
   is: 'settings-captions',
 
-  behaviors: [I18nBehavior, WebUIListenerBehavior],
+  behaviors: [
+    I18nBehavior,
+    WebUIListenerBehavior,
+    PrefsBehavior,
+  ],
 
   properties: {
     prefs: {
@@ -36,34 +24,26 @@ Polymer({
     },
 
     /**
-     * List of fonts populated by the fonts browser proxy.
-     * @private {!DropdownMenuOptionList} */
-    textFontOptions_: Object,
-
-    /**
-     * Reasonable, text opacity range.
-     * @private {!Array<!cr_slider.SliderTick>}
-     */
-    textOpacityRange_: {
-      readOnly: true,
-      type: Array,
-      value: ticksWithLabels(TEXT_OPACITY_RANGE),
-    },
-
-    /**
-     * List of options for the text size drop-down menu.
+     * List of options for the background opacity drop-down menu.
      * @type {!DropdownMenuOptionList}
      */
-    textSizeOptions_: {
+    backgroundOpacityOptions_: {
       readOnly: true,
       type: Array,
-      value: function() {
+      value() {
         return [
-          {value: '50%', name: loadTimeData.getString('verySmall')},
-          {value: '75%', name: loadTimeData.getString('small')},
-          {value: '', name: loadTimeData.getString('medium')}, // Default = 100%
-          {value: '150%', name: loadTimeData.getString('large')},
-          {value: '200%', name: loadTimeData.getString('veryLarge')},
+          {
+            value: 100, // Default
+            name: loadTimeData.getString('captionsOpacityOpaque')
+          },
+          {
+            value: 50,
+            name: loadTimeData.getString('captionsOpacitySemiTransparent')
+          },
+          {
+            value: 0,
+            name: loadTimeData.getString('captionsOpacityTransparent')
+          },
         ];
       },
     },
@@ -75,20 +55,32 @@ Polymer({
     colorOptions_: {
       readOnly: true,
       type: Array,
-      value: function() {
+      value() {
         return [
-          {value: '', name: loadTimeData.getString('captionsDefaultSetting')},
-          {value: '0,0,0', name: loadTimeData.getString('captionsColorBlack')},
+          {
+            value: '',
+            name: loadTimeData.getString('captionsDefaultSetting')
+          },
+          {
+            value: '0,0,0',
+            name: loadTimeData.getString('captionsColorBlack')
+          },
           {
             value: '255,255,255',
             name: loadTimeData.getString('captionsColorWhite')
           },
-          {value: '255,0,0', name: loadTimeData.getString('captionsColorRed')},
+          {
+            value: '255,0,0',
+            name: loadTimeData.getString('captionsColorRed')
+          },
           {
             value: '0,255,0',
             name: loadTimeData.getString('captionsColorGreen')
           },
-          {value: '0,0,255', name: loadTimeData.getString('captionsColorBlue')},
+          {
+            value: '0,0,255',
+            name: loadTimeData.getString('captionsColorBlue')
+          },
           {
             value: '255,255,0',
             name: loadTimeData.getString('captionsColorYellow')
@@ -106,13 +98,43 @@ Polymer({
     },
 
     /**
+     * List of fonts populated by the fonts browser proxy.
+     * @private {!DropdownMenuOptionList} */
+    textFontOptions_: Object,
+
+    /**
+     * List of options for the text opacity drop-down menu.
+     * @type {!DropdownMenuOptionList}
+     */
+    textOpacityOptions_: {
+      readOnly: true,
+      type: Array,
+      value() {
+        return [
+          {
+            value: 100, // Default
+            name: loadTimeData.getString('captionsOpacityOpaque')
+          },
+          {
+            value: 50,
+            name: loadTimeData.getString('captionsOpacitySemiTransparent')
+          },
+          {
+            value: 10,
+            name: loadTimeData.getString('captionsOpacityTransparent')
+          },
+        ];
+      },
+    },
+
+    /**
      * List of options for the text shadow drop-down menu.
      * @type {!DropdownMenuOptionList}
      */
     textShadowOptions_: {
       readOnly: true,
       type: Array,
-      value: function() {
+      value() {
         return [
           {value: '', name: loadTimeData.getString('captionsTextShadowNone')},
           {
@@ -135,20 +157,36 @@ Polymer({
         ];
       },
     },
+
+    /**
+     * List of options for the text size drop-down menu.
+     * @type {!DropdownMenuOptionList}
+     */
+    textSizeOptions_: {
+      readOnly: true,
+      type: Array,
+      value() {
+        return [
+          {value: '25%', name: loadTimeData.getString('verySmall')},
+          {value: '50%', name: loadTimeData.getString('small')},
+          {value: '', name: loadTimeData.getString('medium')}, // Default = 100%
+          {value: '150%', name: loadTimeData.getString('large')},
+          {value: '200%', name: loadTimeData.getString('veryLarge')},
+        ];
+      },
+    },
   },
 
   /** @private {?settings.FontsBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
-  created: function() {
+  created() {
     this.browserProxy_ = settings.FontsBrowserProxyImpl.getInstance();
   },
 
   /** @override */
-  ready: function() {
-    this.browserProxy_.observeAdvancedFontExtensionAvailable();
-
+  ready() {
     this.browserProxy_.fetchFontsData().then(this.setFontsData_.bind(this));
   },
 
@@ -156,7 +194,7 @@ Polymer({
    * @param {!FontsData} response A list of fonts.
    * @private
    */
-  setFontsData_: function(response) {
+  setFontsData_(response) {
     const fontMenuOptions =
         [{value: '', name: loadTimeData.getString('captionsDefaultSetting')}];
     for (const fontData of response.fontList) {
@@ -166,14 +204,31 @@ Polymer({
   },
 
   /**
+   * Get the font family as a CSS property value.
+   * @return {string}
+   * @private
+   */
+  getFontFamily_() {
+    const fontFamily = this.getPref('accessibility.captions.text_font').value;
+
+    // Return the preference value or the default font family for
+    // video::-webkit-media-text-track-container defined in mediaControls.css.
+    return /** @type {string} */ (fontFamily || 'sans-serif');
+  },
+
+  /**
    * Get the background color as a RGBA string.
    * @return {string}
    * @private
    */
-  computeBackgroundColor_: function() {
-    return this.formatRGAString_(
-        'prefs.accessibility.captions.background_color.value',
-        'prefs.accessibility.captions.background_opacity.value');
+  computeBackgroundColor_() {
+    const backgroundColor = this.formatRGAString_(
+        'accessibility.captions.background_color',
+        'accessibility.captions.background_opacity');
+
+    // Return the preference value or the default background color for
+    // video::cue defined in mediaControls.css.
+    return backgroundColor || 'rgba(0, 0, 0, 0.8)';
   },
 
   /**
@@ -181,10 +236,14 @@ Polymer({
    * @return {string}
    * @private
    */
-  computeTextColor_: function() {
-    return this.formatRGAString_(
-        'prefs.accessibility.captions.text_color.value',
-        'prefs.accessibility.captions.text_opacity.value');
+  computeTextColor_() {
+    const textColor = this.formatRGAString_(
+      'accessibility.captions.text_color',
+      'accessibility.captions.text_opacity');
+
+    // Return the preference value or the default text color for
+    // video::-webkit-media-text-track-container defined in mediaControls.css.
+    return textColor || 'rgba(255, 255, 255, 1)';
   },
 
   /**
@@ -196,9 +255,15 @@ Polymer({
    * @return {string} The formatted RGBA string.
    * @private
    */
-  formatRGAString_: function(colorPreference, opacityPreference) {
-    return 'rgba(' + this.get(colorPreference) + ',' +
-        parseInt(this.get(opacityPreference), 10) / 100.0 + ')';
+  formatRGAString_(colorPreference, opacityPreference) {
+    const color = this.getPref(colorPreference).value;
+
+    if (!color) {
+      return '';
+    }
+
+    return 'rgba(' + color + ',' +
+        parseInt(this.getPref(opacityPreference).value, 10) / 100.0 + ')';
   },
 
   /**
@@ -206,7 +271,7 @@ Polymer({
    * @return {string} The padding around the captions text as a percentage.
    * @private
    */
-  computePadding_: function(size) {
+  computePadding_(size) {
     if (size == '') {
       return '1%';
     }

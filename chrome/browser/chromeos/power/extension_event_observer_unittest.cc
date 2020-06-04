@@ -22,7 +22,7 @@
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
 #include "components/user_manager/scoped_user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_renderer_host.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_host_observer.h"
@@ -50,11 +50,12 @@ class ExtensionEventObserverTest : public ChromeRenderViewHostTestHarness {
     PowerManagerClient::InitializeFake();
     profile_manager_ = std::make_unique<TestingProfileManager>(
         TestingBrowserProcess::GetGlobal());
-    extension_event_observer_ = std::make_unique<ExtensionEventObserver>();
-    test_api_ = extension_event_observer_->CreateTestApi();
 
     // Must be called from ::testing::Test::SetUp.
     ASSERT_TRUE(profile_manager_->SetUp());
+
+    extension_event_observer_ = std::make_unique<ExtensionEventObserver>();
+    test_api_ = extension_event_observer_->CreateTestApi();
 
     const char kUserProfile[] = "profile1@example.com";
     const AccountId account_id(AccountId::FromUserEmail(kUserProfile));
@@ -62,9 +63,8 @@ class ExtensionEventObserverTest : public ChromeRenderViewHostTestHarness {
     fake_user_manager_->LoginUser(account_id);
     profile_ =
         profile_manager_->CreateTestingProfile(account_id.GetUserEmail());
-
-    profile_manager_->SetLoggedIn(true);
   }
+
   void TearDown() override {
     extension_event_observer_.reset();
     profile_ = NULL;

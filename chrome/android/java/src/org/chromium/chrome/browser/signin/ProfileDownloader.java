@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.signin.AccountTrackerService;
 
@@ -77,8 +78,9 @@ public class ProfileDownloader {
             ThreadUtils.assertOnUiThread();
             if (sPendingProfileDownloads == null) {
                 sPendingProfileDownloads = new PendingProfileDownloads();
-                IdentityServicesProvider.getAccountTrackerService().addSystemAccountsSeededListener(
-                        sPendingProfileDownloads);
+                IdentityServicesProvider.get()
+                        .getAccountTrackerService()
+                        .addSystemAccountsSeededListener(sPendingProfileDownloads);
             }
             return sPendingProfileDownloads;
         }
@@ -95,7 +97,7 @@ public class ProfileDownloader {
             while (numberOfPendingRequests > 0) {
                 // Pending requests here must be pre-signin request since SigninManager will wait
                 // system accounts been seeded into AccountTrackerService before finishing sign in.
-                nativeStartFetchingAccountInfoFor(
+                ProfileDownloaderJni.get().startFetchingAccountInfoFor(
                         mProfiles.get(0), mAccountIds.get(0), mImageSidePixels.get(0), true);
                 mProfiles.remove(0);
                 mAccountIds.remove(0);
@@ -121,13 +123,16 @@ public class ProfileDownloader {
     public static void startFetchingAccountInfoFor(
             Context context, String accountId, int imageSidePixels, boolean isPreSignin) {
         ThreadUtils.assertOnUiThread();
-        Profile profile = Profile.getLastUsedProfile().getOriginalProfile();
-        if (!IdentityServicesProvider.getAccountTrackerService().checkAndSeedSystemAccounts()) {
+        Profile profile = Profile.getLastUsedRegularProfile();
+        if (!IdentityServicesProvider.get()
+                        .getAccountTrackerService()
+                        .checkAndSeedSystemAccounts()) {
             PendingProfileDownloads.get(context).pendProfileDownload(
                     profile, accountId, imageSidePixels);
             return;
         }
-        nativeStartFetchingAccountInfoFor(profile, accountId, imageSidePixels, isPreSignin);
+        ProfileDownloaderJni.get().startFetchingAccountInfoFor(
+                profile, accountId, imageSidePixels, isPreSignin);
     }
 
     @CalledByNative
@@ -144,7 +149,7 @@ public class ProfileDownloader {
      * @return The profile full name if cached, or null.
      */
     public static String getCachedFullName(Profile profile) {
-        return nativeGetCachedFullNameForPrimaryAccount(profile);
+        return ProfileDownloaderJni.get().getCachedFullNameForPrimaryAccount(profile);
     }
 
     /**
@@ -152,7 +157,7 @@ public class ProfileDownloader {
      * @return The profile given name if cached, or null.
      */
     public static String getCachedGivenName(Profile profile) {
-        return nativeGetCachedGivenNameForPrimaryAccount(profile);
+        return ProfileDownloaderJni.get().getCachedGivenNameForPrimaryAccount(profile);
     }
 
     /**
@@ -160,13 +165,15 @@ public class ProfileDownloader {
      * @return The profile avatar if cached, or null.
      */
     public static Bitmap getCachedAvatar(Profile profile) {
-        return nativeGetCachedAvatarForPrimaryAccount(profile);
+        return ProfileDownloaderJni.get().getCachedAvatarForPrimaryAccount(profile);
     }
 
-    // Native methods.
-    private static native void nativeStartFetchingAccountInfoFor(
-            Profile profile, String accountId, int imageSidePixels, boolean isPreSignin);
-    private static native String nativeGetCachedFullNameForPrimaryAccount(Profile profile);
-    private static native String nativeGetCachedGivenNameForPrimaryAccount(Profile profile);
-    private static native Bitmap nativeGetCachedAvatarForPrimaryAccount(Profile profile);
+    @NativeMethods
+    interface Natives {
+        void startFetchingAccountInfoFor(
+                Profile profile, String accountId, int imageSidePixels, boolean isPreSignin);
+        String getCachedFullNameForPrimaryAccount(Profile profile);
+        String getCachedGivenNameForPrimaryAccount(Profile profile);
+        Bitmap getCachedAvatarForPrimaryAccount(Profile profile);
+    }
 }

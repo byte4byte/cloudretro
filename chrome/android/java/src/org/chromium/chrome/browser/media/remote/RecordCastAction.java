@@ -4,12 +4,11 @@
 
 package org.chromium.chrome.browser.media.remote;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.rappor.RapporServiceBridge;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.media.MediaContainerName;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -17,10 +16,28 @@ import java.lang.annotation.RetentionPolicy;
 /**
  * Record statistics on interesting cast events and actions.
  */
-@JNINamespace("remote_media")
 public class RecordCastAction {
-    // UMA histogram values for the device types the user could select.
-    // Keep in sync with the enum in uma_record_action.cc
+    /**
+     * UMA histogram value with a type of player and the result of the request to play remotely.
+     * <p>
+     * Keep in sync with enums.xml
+     */
+    @IntDef({CastPlayBackState.YT_PLAYER_SUCCESS, CastPlayBackState.YT_PLAYER_FAILURE,
+            CastPlayBackState.DEFAULT_PLAYER_SUCCESS, CastPlayBackState.DEFAULT_PLAYER_FAILURE})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface CastPlayBackState {
+        int YT_PLAYER_SUCCESS = 0;
+        int YT_PLAYER_FAILURE = 1;
+        int DEFAULT_PLAYER_SUCCESS = 2;
+        int DEFAULT_PLAYER_FAILURE = 3;
+        int NUM_ENTRIES = 4;
+    }
+
+    /**
+     * UMA histogram values for the device types the user could select.
+     * <p>
+     * Keep in sync with enums.xml
+     */
     @IntDef({DeviceType.CAST_GENERIC, DeviceType.CAST_YOUTUBE, DeviceType.NON_CAST_YOUTUBE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface DeviceType {
@@ -30,8 +47,11 @@ public class RecordCastAction {
         int NUM_ENTRIES = 3;
     }
 
-    // UMA histogram values for the fullscreen controls the user could tap.
-    // Keep in sync with the MediaCommand enum in histograms.xml
+    /**
+     * UMA histogram values for the fullscreen controls the user could tap.
+     * <p>
+     * Keep in sync with enums.xml
+     */
     @IntDef({FullScreenControls.RESUME, FullScreenControls.PAUSE, FullScreenControls.SEEK})
     @Retention(RetentionPolicy.SOURCE)
     public @interface FullScreenControls {
@@ -43,11 +63,12 @@ public class RecordCastAction {
 
     /**
      * Record the type of cast receiver we to which we are casting.
+     *
      * @param playerType the type of cast receiver.
      */
-    public static void remotePlaybackDeviceSelected(@RecordCastAction.DeviceType int playerType) {
-        if (LibraryLoader.getInstance().isInitialized())
-            nativeRecordRemotePlaybackDeviceSelected(playerType);
+    public static void remotePlaybackDeviceSelected(@DeviceType int playerType) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Cast.Sender.DeviceType", playerType, DeviceType.NUM_ENTRIES);
     }
 
     /**
@@ -56,7 +77,7 @@ public class RecordCastAction {
      * selecting the device initially.
      */
     public static void castPlayRequested() {
-        if (LibraryLoader.getInstance().isInitialized()) nativeRecordCastPlayRequested();
+        RecordUserAction.record("Cast_Sender_CastPlayRequested");
     }
 
     /**
@@ -65,8 +86,11 @@ public class RecordCastAction {
      * @param castSucceeded true if the playback succeeded, false if there was an error
      */
     public static void castDefaultPlayerResult(boolean castSucceeded) {
-        if (LibraryLoader.getInstance().isInitialized())
-            nativeRecordCastDefaultPlayerResult(castSucceeded);
+        if (castSucceeded) {
+            castPlayerResult(CastPlayBackState.DEFAULT_PLAYER_SUCCESS);
+        } else {
+            castPlayerResult(CastPlayBackState.DEFAULT_PLAYER_FAILURE);
+        }
     }
 
     /**
@@ -75,8 +99,16 @@ public class RecordCastAction {
      * @param castSucceeded true if the playback succeeded, false if there was an error
      */
     public static void castYouTubePlayerResult(boolean castSucceeded) {
-        if (LibraryLoader.getInstance().isInitialized())
-            nativeRecordCastYouTubePlayerResult(castSucceeded);
+        if (castSucceeded) {
+            castPlayerResult(CastPlayBackState.YT_PLAYER_SUCCESS);
+        } else {
+            castPlayerResult(CastPlayBackState.YT_PLAYER_FAILURE);
+        }
+    }
+
+    private static void castPlayerResult(@CastPlayBackState int result) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Cast.Sender.CastPlayerResult", result, CastPlayBackState.NUM_ENTRIES);
     }
 
     /**
@@ -86,9 +118,14 @@ public class RecordCastAction {
      * @param timeRemainingMs the remaining time in the video in milliseconds
      */
     public static void castEndedTimeRemaining(long videoLengthMs, long timeRemainingMs) {
-        if (LibraryLoader.getInstance().isInitialized()) {
-            nativeRecordCastEndedTimeRemaining((int) videoLengthMs, (int) timeRemainingMs);
+        int percentRemaining = 100;
+        if (videoLengthMs > 0) {
+            // Get the percentage of video remaining, but bucketize into groups of 10
+            // since we don't really need that granular of data.
+            percentRemaining = ((int) (10 * timeRemainingMs / videoLengthMs)) * 10;
         }
+        RecordHistogram.recordEnumeratedHistogram(
+                "Cast.Sender.CastTimeRemainingPercentage", percentRemaining, 101);
     }
 
     /**
@@ -97,8 +134,9 @@ public class RecordCastAction {
      * @param mediaType the type of the media being casted, see media/base/container_names.h for
      *            possible media types.
      */
-    public static void castMediaType(int mediaType) {
-        if (LibraryLoader.getInstance().isInitialized()) nativeRecordCastMediaType(mediaType);
+    public static void castMediaType(@MediaContainerName int mediaType) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Cast.Sender.CastMediaType", mediaType, MediaContainerName.MAX + 1);
     }
 
     /**
@@ -108,11 +146,8 @@ public class RecordCastAction {
      * @param isMediaElementAlive if the media element is alive.
      */
     public static void recordFullscreenControlsShown(boolean isMediaElementAlive) {
-        if (LibraryLoader.getInstance().isInitialized()) {
-            RecordHistogram.recordBooleanHistogram(
-                    "Cast.Sender.MediaElementPresentWhenShowFullscreenControls",
-                    isMediaElementAlive);
-        }
+        RecordHistogram.recordBooleanHistogram(
+                "Cast.Sender.MediaElementPresentWhenShowFullscreenControls", isMediaElementAlive);
     }
 
     /**
@@ -123,8 +158,6 @@ public class RecordCastAction {
      * @param isMediaElementAlive if the media element is alive.
      */
     public static void recordFullscreenControlsAction(int action, boolean isMediaElementAlive) {
-        if (!LibraryLoader.getInstance().isInitialized()) return;
-
         if (isMediaElementAlive) {
             RecordHistogram.recordEnumeratedHistogram(
                     "Cast.Sender.FullscreenControlsActionWithMediaElement", action,
@@ -137,18 +170,6 @@ public class RecordCastAction {
     }
 
     /**
-     * Record the domain and registry of the URL of the frame where the user is casting the video
-     * from using Rappor.
-     *
-     * @param url The frame URL to record the domain and registry of.
-     */
-    public static void castDomainAndRegistry(String url) {
-        if (LibraryLoader.getInstance().isInitialized()) {
-            RapporServiceBridge.sampleDomainAndRegistryFromURL("Cast.Sender.MediaFrameUrl", url);
-        }
-    }
-
-    /**
      * Record the ratio of the time the media element was detached from the remote playback session
      * to the total duration of the session (as from when the element has been attached till when
      * the session stopped or disconnected), in percents.
@@ -156,18 +177,7 @@ public class RecordCastAction {
      * @param percentage The ratio in percents.
      */
     public static void recordRemoteSessionTimeWithoutMediaElementPercentage(int percentage) {
-        if (LibraryLoader.getInstance().isInitialized()) {
-            RecordHistogram.recordPercentageHistogram(
-                    "Cast.Sender.SessionTimeWithoutMediaElementPercentage", percentage);
-        }
+        RecordHistogram.recordPercentageHistogram(
+                "Cast.Sender.SessionTimeWithoutMediaElementPercentage", percentage);
     }
-
-    // Cast sending
-    private static native void nativeRecordRemotePlaybackDeviceSelected(int deviceType);
-    private static native void nativeRecordCastPlayRequested();
-    private static native void nativeRecordCastDefaultPlayerResult(boolean castSucceeded);
-    private static native void nativeRecordCastYouTubePlayerResult(boolean castSucceeded);
-    private static native void nativeRecordCastEndedTimeRemaining(
-            int videoLengthMs, int timeRemainingMs);
-    private static native void nativeRecordCastMediaType(int mediaType);
 }

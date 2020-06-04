@@ -148,7 +148,7 @@ void DownloadTestObserver::OnDownloadUpdated(download::DownloadItem* download) {
       case ON_DANGEROUS_DOWNLOAD_ACCEPT:
         // Fake user click on "Accept".  Delay the actual click, as the
         // real UI would.
-        base::PostTaskWithTraits(
+        base::PostTask(
             FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&DownloadTestObserver::AcceptDangerousDownload,
                            weak_factory_.GetWeakPtr(), download->GetId()));
@@ -157,7 +157,7 @@ void DownloadTestObserver::OnDownloadUpdated(download::DownloadItem* download) {
       case ON_DANGEROUS_DOWNLOAD_DENY:
         // Fake a user click on "Deny".  Delay the actual click, as the
         // real UI would.
-        base::PostTaskWithTraits(
+        base::PostTask(
             FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&DownloadTestObserver::DenyDangerousDownload,
                            weak_factory_.GetWeakPtr(), download->GetId()));
@@ -311,9 +311,8 @@ void PingIOThread(int cycle, base::OnceClosure callback);
 // Helper method to post a task to IO thread to ensure remaining operations on
 // the IO thread complete.
 void PingFileThread(int cycle, base::OnceClosure callback) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&PingIOThread, cycle, std::move(callback)));
+  base::PostTask(FROM_HERE, {BrowserThread::IO},
+                 base::BindOnce(&PingIOThread, cycle, std::move(callback)));
 }
 
 // Post a task to file thread, and wait for it to be posted back on to the IO
@@ -324,8 +323,7 @@ void PingIOThread(int cycle, base::OnceClosure callback) {
     DownloadManager::GetTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&PingFileThread, cycle, std::move(callback)));
   } else {
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             std::move(callback));
+    base::PostTask(FROM_HERE, {BrowserThread::UI}, std::move(callback));
   }
 }
 
@@ -457,16 +455,18 @@ void DownloadTestItemCreationObserver::DownloadItemCreationCallback(
     base::RunLoop::QuitCurrentWhenIdleDeprecated();
 }
 
-const download::DownloadUrlParameters::OnStartedCallback
+download::DownloadUrlParameters::OnStartedCallback
 DownloadTestItemCreationObserver::callback() {
-  return base::Bind(
+  return base::BindOnce(
       &DownloadTestItemCreationObserver::DownloadItemCreationCallback, this);
 }
 
 SavePackageFinishedObserver::SavePackageFinishedObserver(
     DownloadManager* manager,
-    const base::Closure& callback)
-    : download_manager_(manager), download_(nullptr), callback_(callback) {
+    base::OnceClosure callback)
+    : download_manager_(manager),
+      download_(nullptr),
+      callback_(std::move(callback)) {
   download_manager_->AddObserver(this);
 }
 
@@ -482,7 +482,7 @@ void SavePackageFinishedObserver::OnDownloadUpdated(
     download::DownloadItem* download) {
   if (download->GetState() == download::DownloadItem::COMPLETE ||
       download->GetState() == download::DownloadItem::CANCELLED) {
-    callback_.Run();
+    std::move(callback_).Run();
   }
 }
 

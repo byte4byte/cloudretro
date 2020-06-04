@@ -26,24 +26,24 @@ class ThemeProperties {
   // browser_theme_pack.cc.
 
   enum OverwritableByUserThemeProperty {
-    COLOR_FRAME,
+    COLOR_FRAME_ACTIVE,
     COLOR_FRAME_INACTIVE,
     // Instead of using the INCOGNITO variants directly, most code should
     // use the original color ID in an incognito-aware context (such as
     // GetDefaultColor).  This comment applies to other properties tagged
     // INCOGNITO below as well.
-    COLOR_FRAME_INCOGNITO,
-    COLOR_FRAME_INCOGNITO_INACTIVE,
-    COLOR_BACKGROUND_TAB,
-    COLOR_BACKGROUND_TAB_INACTIVE,
-    COLOR_BACKGROUND_TAB_INCOGNITO,
-    COLOR_BACKGROUND_TAB_INCOGNITO_INACTIVE,
+    COLOR_FRAME_ACTIVE_INCOGNITO,
+    COLOR_FRAME_INACTIVE_INCOGNITO,
+    COLOR_TAB_BACKGROUND_INACTIVE_FRAME_ACTIVE,
+    COLOR_TAB_BACKGROUND_INACTIVE_FRAME_INACTIVE,
+    COLOR_TAB_BACKGROUND_INACTIVE_FRAME_ACTIVE_INCOGNITO,
+    COLOR_TAB_BACKGROUND_INACTIVE_FRAME_INACTIVE_INCOGNITO,
     COLOR_TOOLBAR,
-    COLOR_TAB_TEXT,
-    COLOR_BACKGROUND_TAB_TEXT,
-    COLOR_BACKGROUND_TAB_TEXT_INACTIVE,
-    COLOR_BACKGROUND_TAB_TEXT_INCOGNITO,
-    COLOR_BACKGROUND_TAB_TEXT_INCOGNITO_INACTIVE,
+    COLOR_TAB_FOREGROUND_ACTIVE_FRAME_ACTIVE,
+    COLOR_TAB_FOREGROUND_INACTIVE_FRAME_ACTIVE,
+    COLOR_TAB_FOREGROUND_INACTIVE_FRAME_INACTIVE,
+    COLOR_TAB_FOREGROUND_INACTIVE_FRAME_ACTIVE_INCOGNITO,
+    COLOR_TAB_FOREGROUND_INACTIVE_FRAME_INACTIVE_INCOGNITO,
     COLOR_BOOKMARK_TEXT,
     COLOR_NTP_BACKGROUND,
     COLOR_NTP_TEXT,
@@ -51,6 +51,8 @@ class ThemeProperties {
     COLOR_NTP_HEADER,
     COLOR_CONTROL_BUTTON_BACKGROUND,
     COLOR_TOOLBAR_BUTTON_ICON,
+    COLOR_OMNIBOX_TEXT,
+    COLOR_OMNIBOX_BACKGROUND,
 
     TINT_BUTTONS,
     TINT_FRAME,
@@ -94,6 +96,10 @@ class ThemeProperties {
     // contents.
     COLOR_TOOLBAR_CONTENT_AREA_SEPARATOR,
 
+    // The color of a toolbar button's icon when it is being hovered or pressed.
+    COLOR_TOOLBAR_BUTTON_ICON_HOVERED,
+    COLOR_TOOLBAR_BUTTON_ICON_PRESSED,
+
     // The color of a disabled toolbar button's icon.
     COLOR_TOOLBAR_BUTTON_ICON_INACTIVE,
 
@@ -108,6 +114,9 @@ class ThemeProperties {
     // shelf.
     COLOR_TOOLBAR_VERTICAL_SEPARATOR,
 
+    // Opaque base color for toolbar button ink drops.
+    COLOR_TOOLBAR_INK_DROP,
+
     // Color used for various 'shelves' and 'bars'.
     COLOR_DOWNLOAD_SHELF,
     COLOR_INFOBAR,
@@ -117,6 +126,16 @@ class ThemeProperties {
     COLOR_HOVER_CARD_NO_PREVIEW_FOREGROUND,
     COLOR_HOVER_CARD_NO_PREVIEW_BACKGROUND,
 
+    // Colors used for the active tab.
+    COLOR_TAB_BACKGROUND_ACTIVE_FRAME_ACTIVE,
+    COLOR_TAB_BACKGROUND_ACTIVE_FRAME_INACTIVE,
+    COLOR_TAB_BACKGROUND_ACTIVE_FRAME_ACTIVE_INCOGNITO,
+    COLOR_TAB_BACKGROUND_ACTIVE_FRAME_INACTIVE_INCOGNITO,
+
+    COLOR_TAB_FOREGROUND_ACTIVE_FRAME_INACTIVE,
+    COLOR_TAB_FOREGROUND_ACTIVE_FRAME_ACTIVE_INCOGNITO,
+    COLOR_TAB_FOREGROUND_ACTIVE_FRAME_INACTIVE_INCOGNITO,
+
     // The throbber colors for tabs or anything on a toolbar (currently, only
     // the download shelf). If you're adding a throbber elsewhere, such as in
     // a dialog or bubble, you likely want
@@ -124,17 +143,53 @@ class ThemeProperties {
     COLOR_TAB_THROBBER_SPINNING,
     COLOR_TAB_THROBBER_WAITING,
 
-    // Colors for the tab close button inons.
-    COLOR_TAB_CLOSE_BUTTON_ACTIVE,
-    COLOR_TAB_CLOSE_BUTTON_INACTIVE,
-    COLOR_TAB_CLOSE_BUTTON_BACKGROUND_HOVER,
-    COLOR_TAB_CLOSE_BUTTON_BACKGROUND_PRESSED,
-
     // The colors used by the various alert indicator icons in the tab.
     COLOR_TAB_ALERT_AUDIO,
     COLOR_TAB_ALERT_RECORDING,
     COLOR_TAB_PIP_PLAYING,
     COLOR_TAB_ALERT_CAPTURING,
+
+    // Note: All tab group color ids must be grouped together consecutively and
+    // grouped together by use (eg grouped by dialog, context menu etc).
+    // This permits range checking and reduces redundant code. If you change or
+    // add to any of the below color ids, change the relevant code in
+    // ThemeHelper.
+
+    // The colors used for tab groups in the tabstrip.
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_GREY,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_BLUE,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_RED,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_YELLOW,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_GREEN,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_PINK,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_PURPLE,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_ACTIVE_CYAN,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_GREY,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_BLUE,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_RED,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_YELLOW,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_GREEN,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_PINK,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_PURPLE,
+    COLOR_TAB_GROUP_TABSTRIP_FRAME_INACTIVE_CYAN,
+    // The colors used for tab groups in the bubble dialog view.
+    COLOR_TAB_GROUP_DIALOG_GREY,
+    COLOR_TAB_GROUP_DIALOG_BLUE,
+    COLOR_TAB_GROUP_DIALOG_RED,
+    COLOR_TAB_GROUP_DIALOG_YELLOW,
+    COLOR_TAB_GROUP_DIALOG_GREEN,
+    COLOR_TAB_GROUP_DIALOG_PINK,
+    COLOR_TAB_GROUP_DIALOG_PURPLE,
+    COLOR_TAB_GROUP_DIALOG_CYAN,
+    // The colors used for tab groups in the context submenu.
+    COLOR_TAB_GROUP_CONTEXT_MENU_GREY,
+    COLOR_TAB_GROUP_CONTEXT_MENU_BLUE,
+    COLOR_TAB_GROUP_CONTEXT_MENU_RED,
+    COLOR_TAB_GROUP_CONTEXT_MENU_YELLOW,
+    COLOR_TAB_GROUP_CONTEXT_MENU_GREEN,
+    COLOR_TAB_GROUP_CONTEXT_MENU_PINK,
+    COLOR_TAB_GROUP_CONTEXT_MENU_PURPLE,
+    COLOR_TAB_GROUP_CONTEXT_MENU_CYAN,
 
     // Calculated representative colors for the background of window control
     // buttons.
@@ -143,9 +198,10 @@ class ThemeProperties {
     COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_INCOGNITO_ACTIVE,
     COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_INCOGNITO_INACTIVE,
 
-    // These colors don't have constant default values. They are derived from
-    // the runtime value of other colors.
     COLOR_NTP_TEXT_LIGHT,
+    COLOR_NTP_LOGO,
+    // Color for the background of the most visited/custom link tile.
+    COLOR_NTP_SHORTCUT,
 
 #if defined(OS_WIN)
     // The color of the 1px border around the window on Windows 10.
@@ -157,14 +213,25 @@ class ThemeProperties {
     // Colors for in-product help promo bubbles.
     COLOR_FEATURE_PROMO_BUBBLE_TEXT,
     COLOR_FEATURE_PROMO_BUBBLE_BACKGROUND,
-  };
 
-  // Represents the lookup values for a theme property.
-  struct PropertyLookupPair {
-    int property_id;    // ID of the property to lookup (should never be an
-                        // incognito variant)
-    bool is_incognito;  // Whether the lookup should use the incognito value
-                        // of this property or not
+    COLOR_OMNIBOX_BACKGROUND_HOVERED,
+    COLOR_OMNIBOX_SELECTED_KEYWORD,
+    COLOR_OMNIBOX_TEXT_DIMMED,
+    COLOR_OMNIBOX_RESULTS_BG,
+    COLOR_OMNIBOX_RESULTS_BG_HOVERED,
+    COLOR_OMNIBOX_RESULTS_BG_SELECTED,
+    COLOR_OMNIBOX_RESULTS_TEXT_SELECTED,
+    COLOR_OMNIBOX_RESULTS_TEXT_DIMMED,
+    COLOR_OMNIBOX_RESULTS_TEXT_DIMMED_SELECTED,
+    COLOR_OMNIBOX_RESULTS_ICON,
+    COLOR_OMNIBOX_RESULTS_ICON_SELECTED,
+    COLOR_OMNIBOX_RESULTS_URL,
+    COLOR_OMNIBOX_RESULTS_URL_SELECTED,
+    COLOR_OMNIBOX_BUBBLE_OUTLINE,
+    COLOR_OMNIBOX_BUBBLE_OUTLINE_EXPERIMENTAL_KEYWORD_MODE,
+    COLOR_OMNIBOX_SECURITY_CHIP_DEFAULT,
+    COLOR_OMNIBOX_SECURITY_CHIP_SECURE,
+    COLOR_OMNIBOX_SECURITY_CHIP_DANGEROUS,
   };
 
   // Themes are hardcoded to draw frame images as if they start this many DIPs
@@ -194,21 +261,15 @@ class ThemeProperties {
 
   // Returns the default tint for the given tint |id| TINT_* enum value.
   // Returns an HSL value of {-1, -1, -1} if |id| is invalid.
-  static color_utils::HSL GetDefaultTint(int id, bool incognito);
+  static color_utils::HSL GetDefaultTint(int id,
+                                         bool incognito,
+                                         bool dark_mode = false);
 
   // Returns the default color for the given color |id| COLOR_* enum value.
   // Returns gfx::kPlaceholderColor if |id| is invalid.
-  static SkColor GetDefaultColor(int id, bool incognito);
-
-  // Returns the default color for the color represented by |lookup_pair|
-  // Returns gfx::kPlaceholderColor if |id| is invalid.
-  static SkColor GetDefaultColor(PropertyLookupPair lookup_pair);
-
-  // Get the PropertyLookupPair  necessary to look up a property for |input_id|
-  // in an incognito-aware context.  Returns a pair with the id to lookup
-  // (always a non-incognito variant), and a boolean representing whether
-  // |input_id| was an incognito variant of the id to lookup
-  static PropertyLookupPair GetLookupID(int input_id);
+  static SkColor GetDefaultColor(int id,
+                                 bool incognito,
+                                 bool dark_mode = false);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(ThemeProperties);

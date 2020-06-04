@@ -18,7 +18,7 @@
 
 class Profile;
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
@@ -39,7 +39,7 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
       PrefService* local_state,
       DeviceManagementService* device_management_service,
       UserCloudPolicyManager* policy_manager,
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory);
   ~UserPolicySigninService() override;
 
@@ -50,21 +50,15 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
   // token services.
   // |callback| is invoked once we have registered this device to fetch policy,
   // or once it is determined that |username| is not a managed account.
-  void RegisterForPolicyWithAccountId(
-      const std::string& username,
-      const std::string& account_id,
-      const PolicyRegistrationCallback& callback);
+  void RegisterForPolicyWithAccountId(const std::string& username,
+                                      const CoreAccountId& account_id,
+                                      PolicyRegistrationCallback callback);
 
   // Overridden from UserPolicySigninServiceBase to cancel the pending delayed
   // registration.
   void ShutdownUserCloudPolicyManager() override;
 
  private:
-  void RegisterForPolicyInternal(const std::string& username,
-                                 const std::string& account_id,
-                                 const std::string& access_token,
-                                 const PolicyRegistrationCallback& callback);
-
   void CallPolicyRegistrationCallback(std::unique_ptr<CloudPolicyClient> client,
                                       PolicyRegistrationCallback callback);
 
@@ -87,7 +81,7 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
   // The PrefService associated with the profile.
   PrefService* profile_prefs_;
 
-  base::WeakPtrFactory<UserPolicySigninService> weak_factory_;
+  base::WeakPtrFactory<UserPolicySigninService> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UserPolicySigninService);
 };

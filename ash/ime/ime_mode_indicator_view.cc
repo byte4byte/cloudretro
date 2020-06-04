@@ -49,6 +49,7 @@ class ModeIndicatorFrameView : public views::BubbleFrameView {
 ImeModeIndicatorView::ImeModeIndicatorView(const gfx::Rect& cursor_bounds,
                                            const base::string16& label)
     : cursor_bounds_(cursor_bounds), label_view_(new views::Label(label)) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
   SetCanActivate(false);
   set_accept_events(false);
   set_shadow(views::BubbleBorder::BIG_SHADOW);
@@ -68,7 +69,7 @@ void ImeModeIndicatorView::ShowAndFadeOut() {
 void ImeModeIndicatorView::OnBeforeBubbleWidgetInit(
     views::Widget::InitParams* params,
     views::Widget* widget) const {
-  aura::Window* window = wm::GetActiveWindow();
+  aura::Window* window = window_util::GetActiveWindow();
   if (window) {  // Null check for tests.
     params->parent = Shell::GetContainer(window->GetRootWindow(),
                                          kShellWindowId_SettingBubbleContainer);
@@ -85,10 +86,6 @@ gfx::Size ImeModeIndicatorView::CalculatePreferredSize() const {
 
 const char* ImeModeIndicatorView::GetClassName() const {
   return "ImeModeIndicatorView";
-}
-
-int ImeModeIndicatorView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
 }
 
 void ImeModeIndicatorView::Init() {

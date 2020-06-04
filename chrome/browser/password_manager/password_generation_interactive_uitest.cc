@@ -19,7 +19,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
-#include "components/password_manager/core/browser/new_password_form_manager.h"
+#include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/test_password_store.h"
@@ -119,8 +119,8 @@ class PasswordGenerationInteractiveTest
         ChromePasswordManagerClient::FromWebContents(WebContents());
     client->SetTestObserver(&observer_);
     // The base class should enable password generation.
-    ASSERT_NE(password_manager::NOT_SYNCING, client->GetPasswordSyncState());
-    password_manager::NewPasswordFormManager::
+    ASSERT_TRUE(client->GetPasswordFeatureManager()->IsGenerationEnabled());
+    password_manager::PasswordFormManager::
         set_wait_for_server_predictions_for_filling(false);
 
     NavigateToFile("/password/signup_form_new_password.html");
@@ -178,7 +178,7 @@ class PasswordGenerationInteractiveTest
 
   void SendKeyToPopup(ui::KeyboardCode key) {
     content::NativeWebKeyboardEvent event(
-        blink::WebKeyboardEvent::kRawKeyDown,
+        blink::WebKeyboardEvent::Type::kRawKeyDown,
         blink::WebInputEvent::kNoModifiers,
         blink::WebInputEvent::GetStaticTimeStampForTests());
     event.windows_key_code = key;
@@ -295,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       PopupShownAndDismissed) {
+                       DISABLED_PopupShownAndDismissed) {
   FocusPasswordField();
   EXPECT_TRUE(GenerationPopupShowing());
 
@@ -304,6 +304,7 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   // Popup is dismissed.
   WaitForStatus(TestPopupObserver::GenerationPopup::kHidden);
 }
+
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
                        PopupShownAndDismissedByKeyPress) {
   FocusPasswordField();
@@ -341,6 +342,55 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
 
   ASSERT_TRUE(content::ExecuteScript(frames[1], focus_script));
   EXPECT_TRUE(GenerationPopupShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
+                       GenerationTriggeredOnTap) {
+  // Tap in the middle of the field.
+  ASSERT_TRUE(content::ExecuteScriptWithoutUserGesture(
+      RenderFrameHost(),
+      "var submitRect = document.getElementById('password_field')"
+      ".getBoundingClientRect();"));
+  double y;
+  ASSERT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractDouble(
+      RenderFrameHost(),
+      "window.domAutomationController.send((submitRect.top +"
+      "submitRect.bottom) / 2);",
+      &y));
+  double x;
+  EXPECT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractDouble(
+      RenderFrameHost(),
+      "window.domAutomationController.send((submitRect.left + submitRect.right)"
+      "/ 2);",
+      &x));
+  content::SimulateTapAt(WebContents(),
+                         gfx::Point(static_cast<int>(x), static_cast<int>(y)));
+  WaitForStatus(TestPopupObserver::GenerationPopup::kShown);
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
+                       GenerationTriggeredOnClick) {
+  // Tap in the middle of the field.
+  ASSERT_TRUE(content::ExecuteScriptWithoutUserGesture(
+      RenderFrameHost(),
+      "var submitRect = document.getElementById('password_field')"
+      ".getBoundingClientRect();"));
+  double y;
+  ASSERT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractDouble(
+      RenderFrameHost(),
+      "window.domAutomationController.send((submitRect.top +"
+      "submitRect.bottom) / 2);",
+      &y));
+  double x;
+  EXPECT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractDouble(
+      RenderFrameHost(),
+      "window.domAutomationController.send((submitRect.left + submitRect.right)"
+      "/ 2);",
+      &x));
+  content::SimulateMouseClickAt(
+      WebContents(), 0, blink::WebMouseEvent::Button::kLeft,
+      gfx::Point(static_cast<int>(x), static_cast<int>(y)));
+  WaitForStatus(TestPopupObserver::GenerationPopup::kShown);
 }
 
 // https://crbug.com/791389
@@ -382,4 +432,18 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   EXPECT_EQ(1u, stored_passwords.begin()->second.size());
   EXPECT_EQ(base::UTF8ToUTF16("UN"),
             (stored_passwords.begin()->second)[0].username_value);
+}
+
+// Verify that navigating away closes the popup.
+IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
+                       NavigatingAwayClosesPopup) {
+  // Open popup.
+  FocusPasswordField();
+  EXPECT_TRUE(GenerationPopupShowing());
+
+  // Simulate navigating to a different page.
+  NavigateToFile("/password/signup_form.html");
+
+  // Check that popup is dismissed.
+  EXPECT_FALSE(GenerationPopupShowing());
 }

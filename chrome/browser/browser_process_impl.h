@@ -15,7 +15,6 @@
 #include <memory>
 #include <string>
 
-#include "base/debug/stack_trace.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
@@ -34,6 +33,10 @@
 #include "printing/buildflags/buildflags.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "services/network/public/mojom/network_service.mojom-forward.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/upgrade_detector/build_state.h"
+#endif
 
 class BatteryMetrics;
 class ChromeFeatureListCreator;
@@ -180,8 +183,10 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   component_updater::ComponentUpdateService* component_updater() override;
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   component_updater::SupervisedUserWhitelistInstaller*
   supervised_user_whitelist_installer() override;
+#endif
   MediaFileSystemRegistry* media_file_system_registry() override;
   WebRtcLogUploader* webrtc_log_uploader() override;
   network_time::NetworkTimeTracker* network_time_tracker() override;
@@ -189,9 +194,8 @@ class BrowserProcessImpl : public BrowserProcess,
   resource_coordinator::TabManager* GetTabManager() override;
   resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
       override;
-  shell_integration::DefaultWebClientState CachedDefaultWebClientState()
-      override;
-  prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
+
+  BuildState* GetBuildState() override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -225,19 +229,10 @@ class BrowserProcessImpl : public BrowserProcess,
 
   void ApplyDefaultBrowserPolicy();
 
-  void CacheDefaultWebClientState();
-
   // Methods called to control our lifetime. The browser process can be "pinned"
   // to make sure it keeps running.
   void Pin();
   void Unpin();
-
-  // |metrics_services_manager_| owns this.
-  ChromeMetricsServicesManagerClient* metrics_services_manager_client_ =
-      nullptr;
-
-  std::unique_ptr<metrics_services_manager::MetricsServicesManager>
-      metrics_services_manager_;
 
   bool created_watchdog_thread_ = false;
   std::unique_ptr<WatchDogThread> watchdog_thread_;
@@ -251,6 +246,14 @@ class BrowserProcessImpl : public BrowserProcess,
   std::unique_ptr<ProfileManager> profile_manager_;
 
   std::unique_ptr<PrefService> local_state_;
+
+  // |metrics_services_manager_| owns this.
+  ChromeMetricsServicesManagerClient* metrics_services_manager_client_ =
+      nullptr;
+
+  // Must be destroyed before |local_state_|.
+  std::unique_ptr<metrics_services_manager::MetricsServicesManager>
+      metrics_services_manager_;
 
   std::unique_ptr<network::NetworkQualityTracker> network_quality_tracker_;
 
@@ -366,18 +369,16 @@ class BrowserProcessImpl : public BrowserProcess,
   // but some users of component updater only install per-user.
   std::unique_ptr<component_updater::ComponentUpdateService> component_updater_;
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   std::unique_ptr<component_updater::SupervisedUserWhitelistInstaller>
       supervised_user_whitelist_installer_;
+#endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   std::unique_ptr<PluginsResourceService> plugins_resource_service_;
 #endif
 
   std::unique_ptr<BrowserProcessPlatformPart> platform_part_;
-
-  // TODO(eroman): Remove this when done debugging 113031. This tracks
-  // the callstack which released the final module reference count.
-  base::debug::StackTrace release_last_reference_callstack_;
 
   // Lazily initialized.
   std::unique_ptr<WebRtcLogUploader> webrtc_log_uploader_;
@@ -392,12 +393,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<gcm::GCMDriver> gcm_driver_;
 
-  shell_integration::DefaultWebClientState cached_default_web_client_state_ =
-      shell_integration::UNKNOWN_DEFAULT;
-
   std::unique_ptr<resource_coordinator::ResourceCoordinatorParts>
       resource_coordinator_parts_;
-  std::unique_ptr<prefs::InProcessPrefServiceFactory> pref_service_factory_;
 
   std::unique_ptr<SecureOriginPrefsObserver> secure_origin_prefs_observer_;
   std::unique_ptr<SiteIsolationPrefsObserver> site_isolation_prefs_observer_;
@@ -405,6 +402,8 @@ class BrowserProcessImpl : public BrowserProcess,
 #if !defined(OS_ANDROID)
   // Called to signal the process' main message loop to exit.
   base::OnceClosure quit_closure_;
+
+  BuildState build_state_;
 #endif
 
   SEQUENCE_CHECKER(sequence_checker_);

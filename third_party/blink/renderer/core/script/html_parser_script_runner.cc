@@ -27,6 +27,7 @@
 
 #include <inttypes.h>
 #include <memory>
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document_parser_timing.h"
@@ -39,7 +40,7 @@
 #include "third_party/blink/renderer/core/script/script_loader.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
 
@@ -492,6 +493,15 @@ bool HTMLParserScriptRunner::ExecuteScriptsWaitingForParsing() {
     // document has finished parsing is still not empty, repeat these substeps
     // again from substep 1.</spec>
   }
+
+  // All scripts waiting for parsing have now executed (end of spec step 3),
+  // including any force deferred syncrhonous scripts. Now resume async
+  // script execution if it was suspended by force deferral.
+  if (suspended_async_script_execution_) {
+    DCHECK(force_deferred_scripts_.IsEmpty());
+    document_->GetScriptRunner()->SetForceDeferredExecution(false);
+    suspended_async_script_execution_ = false;
+  }
   return true;
 }
 
@@ -556,6 +566,10 @@ void HTMLParserScriptRunner::RequestForceDeferredScript(
   // execute when the document has finished parsing associated with the Document
   // of the parser that created the element.
   force_deferred_scripts_.push_back(pending_script);
+  if (!suspended_async_script_execution_) {
+    document_->GetScriptRunner()->SetForceDeferredExecution(true);
+    suspended_async_script_execution_ = true;
+  }
 }
 
 // The initial steps for 'An end tag whose tag name is "script"'
@@ -649,9 +663,13 @@ void HTMLParserScriptRunner::ProcessScriptElementInternal(
 }
 
 void HTMLParserScriptRunner::RecordMetricsAtParseEnd() const {
-  // This method is called just before starting execution of force deferred
+  // This method is called just before starting execution of force defer
   // scripts in order to capture the all force deferred scripts in
   // |force_deferred_scripts_| before any are popped for execution.
+
+  if (!document_->GetFrame())
+    return;
+
   if (!force_deferred_scripts_.IsEmpty()) {
     uint32_t force_deferred_external_script_count = 0;
     for (const auto& pending_script : force_deferred_scripts_) {
@@ -664,6 +682,13 @@ void HTMLParserScriptRunner::RecordMetricsAtParseEnd() const {
       UMA_HISTOGRAM_COUNTS_100(
           "Blink.Script.ForceDeferredScripts.Mainframe.External",
           force_deferred_external_script_count);
+      if (document_->UkmRecorder()) {
+        ukm::builders::PreviewsDeferAllScript(document_->UkmSourceID())
+            .Setforce_deferred_scripts_mainframe(force_deferred_scripts_.size())
+            .Setforce_deferred_scripts_mainframe_external(
+                force_deferred_external_script_count)
+            .Record(document_->UkmRecorder());
+      }
     } else {
       UMA_HISTOGRAM_COUNTS_100("Blink.Script.ForceDeferredScripts.Subframe",
                                force_deferred_scripts_.size());

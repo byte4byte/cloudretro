@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings', function() {
+// clang-format off
+import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// clang-format on
+
   /** @interface */
-  class AppearanceBrowserProxy {
+  export class AppearanceBrowserProxy {
     /** @return {!Promise<number>} */
     getDefaultZoom() {}
 
@@ -16,22 +20,6 @@ cr.define('settings', function() {
 
     /** @return {boolean} Whether the current profile is supervised. */
     isSupervised() {}
-
-    /**
-     * @return {!Promise<boolean>} Whether the wallpaper setting row should be
-     *     visible.
-     */
-    isWallpaperSettingVisible() {}
-
-    /**
-     * @return {!Promise<boolean>} Whether the wallpaper is policy controlled.
-     */
-    isWallpaperPolicyControlled() {}
-
-    // <if expr="chromeos">
-    openWallpaperManager() {}
-
-    // </if>
 
     useDefaultTheme() {}
 
@@ -48,9 +36,9 @@ cr.define('settings', function() {
   }
 
   /**
-   * @implements {settings.AppearanceBrowserProxy}
+   * @implements {AppearanceBrowserProxy}
    */
-  class AppearanceBrowserProxyImpl {
+  export class AppearanceBrowserProxyImpl {
     /** @override */
     getDefaultZoom() {
       return new Promise(function(resolve) {
@@ -70,24 +58,6 @@ cr.define('settings', function() {
       return loadTimeData.getBoolean('isSupervised');
     }
 
-    // <if expr="chromeos">
-    /** @override */
-    isWallpaperSettingVisible() {
-      return cr.sendWithPromise('isWallpaperSettingVisible');
-    }
-
-    /** @override */
-    isWallpaperPolicyControlled() {
-      return cr.sendWithPromise('isWallpaperPolicyControlled');
-    }
-
-    /** @override */
-    openWallpaperManager() {
-      chrome.send('openWallpaperManager');
-    }
-
-    // </if>
-
     /** @override */
     useDefaultTheme() {
       chrome.send('useDefaultTheme');
@@ -103,14 +73,9 @@ cr.define('settings', function() {
 
     /** @override */
     validateStartupPage(url) {
-      return cr.sendWithPromise('validateStartupPage', url);
+      return sendWithPromise('validateStartupPage', url);
     }
   }
 
-  cr.addSingletonGetter(AppearanceBrowserProxyImpl);
+  addSingletonGetter(AppearanceBrowserProxyImpl);
 
-  return {
-    AppearanceBrowserProxy: AppearanceBrowserProxy,
-    AppearanceBrowserProxyImpl: AppearanceBrowserProxyImpl,
-  };
-});

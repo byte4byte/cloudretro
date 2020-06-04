@@ -29,12 +29,13 @@
 <translation id="1243314992276662751">Importer</translation>
 <translation id="1249250836236328755">Genre</translation>
 <translation id="1278813325885878377">Clavier QWERTY hongrois</translation>
+<translation id="1293556467332435079">Fichiers</translation>
 <translation id="1297922636971898492">Google Drive n'est pas disponible pour le moment. L'importation reprendra lorsque Google Drive sera à nouveau disponible.</translation>
 <translation id="1307931752636661898">Impossible d'afficher les fichiers Linux</translation>
 <translation id="1310751437842832374">Translittération (mausam → ନମସ୍ତେ)</translation>
 <translation id="1337036551624197047">Clavier tchèque</translation>
 <translation id="1338950911836659113">Suppression en cours...</translation>
-<translation id="1346748346194534595">Vers la droite</translation>
+<translation id="1346748346194534595">À droite</translation>
 <translation id="1351692861129622852">Importation de <ph name="FILE_COUNT" /> fichiers en cours…</translation>
 <translation id="1352103415082130575">Clavier thaï (pattachote)</translation>
 <translation id="1358735829858566124">Le fichier ou le répertoire ne sont pas utilisables.</translation>
@@ -48,7 +49,7 @@
 <translation id="1441841714100794440">Clavier vietnamien (Télex)</translation>
 <translation id="1455548678241328678">Clavier norvégien</translation>
 <translation id="1464724975715666883">Une erreur.</translation>
-<translation id="1467432559032391204">Vers la gauche</translation>
+<translation id="1467432559032391204">À gauche</translation>
 <translation id="1474339897586437869">Le fichier "<ph name="FILENAME" />" n'a pas été importé, car l'espace disponible sur Google Drive est insuffisant.</translation>
 <translation id="148466539719134488">Suisse</translation>
 <translation id="1497522201463361063">Impossible de renommer "<ph name="FILE_NAME" />". <ph name="ERROR_MESSAGE" /></translation>
@@ -75,20 +76,19 @@
 <translation id="1829129547161959350">Pingouin</translation>
 <translation id="183183971458492120">Chargement des informations…</translation>
 <translation id="1838709767668011582">Site Google</translation>
-<translation id="1839704667838141620">Modifiez le mode de partage de ce fichier.</translation>
 <translation id="1844692022597038441">Ce fichier n'est pas disponible hors connexion.</translation>
 <translation id="184633654410729720">Clavier thaï (kedmanee)</translation>
 <translation id="1847880352285315359">Enregistré</translation>
-<translation id="1864676585353837027">Modifiez le mode de partage de ces fichiers.</translation>
 <translation id="1864756863218646478">Fichier introuvable.</translation>
 <translation id="1921986354447415460">Clavier turc en F</translation>
+<translation id="1924372192547904021"><ph name="DRIVE_NAME" /> a bien été formaté</translation>
 <translation id="1931134289871235022">Slovaque</translation>
 <translation id="1933345018156373194">Échec du transfert en raison d'une erreur inattendue : <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">Finnois</translation>
 <translation id="1942765061641586207">Résolution de l'image</translation>
 <translation id="1943097386230153518">Installer un nouveau service</translation>
 <translation id="1947424002851288782">Clavier allemand</translation>
-<translation id="197560921582345123">Éditeur</translation>
+<translation id="1972984168337863910">Développer les panneaux de commentaires sur les fichiers</translation>
 <translation id="1984603991036629094">Clavier phonétique arménien</translation>
 <translation id="2001796770603320721">Gérer dans Drive</translation>
 <translation id="2009067268969781306">Le formatage d'une clé entraîne la suppression de toutes les données qui y sont stockées. Cette action est irréversible.</translation>
@@ -165,6 +165,7 @@
 <translation id="2942290791863759244">Clavier allemand NEO 2</translation>
 <translation id="2943400156390503548">Présentations</translation>
 <translation id="2943503720238418293">Utilisez un nom plus court.</translation>
+<translation id="2949781154072577687">Formatage de <ph name="DRIVE_NAME" />…</translation>
 <translation id="2951236788251446349">Méduse</translation>
 <translation id="2963783323012015985">Clavier turc</translation>
 <translation id="2966459079597787514">Clavier suédois</translation>
@@ -225,6 +226,7 @@
 <translation id="3645531960514756307">Retirer le dossier</translation>
 <translation id="3678559383040232393">Clavier maltais</translation>
 <translation id="3685122418104378273">Par défaut, la synchronisation Google Drive est désactivée lors de l'utilisation des données mobiles.</translation>
+<translation id="3689865792480713551">Annulez <ph name="ACTIVITY_DESCRIPTION" />.</translation>
 <translation id="3726463242007121105">Impossible d'ouvrir ce périphérique, car son système de fichiers n'est pas compatible.</translation>
 <translation id="3741243925913727067">Sauvegardez les photos et les vidéos de votre périphérique multimédia sur Google Drive.</translation>
 <translation id="3749289110408117711">Nom du fichier</translation>
@@ -266,11 +268,9 @@
 <translation id="421017592316736757">Pour accéder à ce fichier, vous devez être connecté à Internet.</translation>
 <translation id="4212740939091998969">Le nom "<ph name="FOLDER_NAME" />" est déjà attribué à un dossier. Veuillez en choisir un autre.</translation>
 <translation id="4215448920900139318">Sauvegarde de <ph name="FILE_COUNT" />…</translation>
-<translation id="4242533952199664413">Ouvrir les paramètres</translation>
 <translation id="426015154560005552">Clavier arabe</translation>
 <translation id="4261901459838235729">Présentation Google</translation>
 <translation id="4290535918735525311">1 dossier partagé avec Linux</translation>
-<translation id="42981349822642051">Développer</translation>
 <translation id="4298972503445160211">Clavier danois</translation>
 <translation id="4299729908419173967">brésilien</translation>
 <translation id="4309915981827077375">Informations générales</translation>
@@ -278,6 +278,7 @@
 <translation id="4336032328163998280">Échec de l'opération de copie. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">Melon</translation>
 <translation id="4372884569765913867">1 x 1</translation>
+<translation id="4394214039309501350">Lien externe</translation>
 <translation id="4425149324548788773">Mon Drive</translation>
 <translation id="4465830120256509958">Clavier brésilien</translation>
 <translation id="4470564870223067757">Hangûl, dubeol-sik</translation>
@@ -287,7 +288,6 @@
 <translation id="4522570452068850558">Détails</translation>
 <translation id="4552678318981539154">Acheter de l'espace de stockage supplémentaire</translation>
 <translation id="4559767610552730302">Bokeh</translation>
-<translation id="4568854179928172494">Heure de modification</translation>
 <translation id="4572815280350369984">Fichier <ph name="FILE_TYPE" /></translation>
 <translation id="457386861538956877">Autres...</translation>
 <translation id="4579744207439506346">Élément <ph name="ENTRY_NAME" /> ajouté à la sélection.</translation>
@@ -326,7 +326,6 @@
 <translation id="4880520557730313061">Correction automatique</translation>
 <translation id="4881695831933465202">Ouvrir</translation>
 <translation id="4886021172213954916">Clavier tamoul (machine à écrire)</translation>
-<translation id="4892969127351273348">Impossible d'ouvrir le fichier avec <ph name="APP_NAME" /></translation>
 <translation id="4905417359854579806">Prêt à sauvegarder <ph name="FILE_COUNT" /></translation>
 <translation id="4924638091161556692">Corrigé</translation>
 <translation id="4935975195727477204">Fleur de gazania</translation>
@@ -366,7 +365,6 @@
 <translation id="5218183485292899140">Français suisse</translation>
 <translation id="5234764350956374838">Ignorer</translation>
 <translation id="5241298539944515331">Clavier vietnamien (VIQR)</translation>
-<translation id="52446585071384036">Pour ouvrir un fichier avec <ph name="APP_NAME" />, copiez-le d'abord dans le dossier "Fichiers Linux".</translation>
 <translation id="5253070652067921974">Créé par</translation>
 <translation id="5257456363153333584">Libellule</translation>
 <translation id="5262311848634918433"><ph name="MARKUP_1" />Accédez à vos fichiers où que vous soyez, même hors connexion.<ph name="MARKUP_2" />
@@ -425,7 +423,6 @@
 <translation id="5818003990515275822">Coréen</translation>
 <translation id="5819442873484330149">Hangûl sebeol-sik (final)</translation>
 <translation id="5833610766403489739">Ce fichier s'est égaré. Veuillez vérifier le paramètre correspondant à votre emplacement de téléchargement, puis réessayer.</translation>
-<translation id="5838051104334203064">Les applications du Play Store n'ont pas accès à cet appareil</translation>
 <translation id="5838451609423551646">Tous les éléments sélectionnés ont été supprimés.</translation>
 <translation id="5838825566232597749">Clavier Workman international américain</translation>
 <translation id="5850516540536751549">Ce type de fichier n'est pas compatible. Veuillez accéder au <ph name="BEGIN_LINK" />Chrome Web Store<ph name="END_LINK" /> pour trouver une application qui permet de l'ouvrir.
@@ -471,6 +468,7 @@
 <translation id="6339145975392024142">Clavier international américain (PC)</translation>
 <translation id="6346310558342052870">Accès limité</translation>
 <translation id="6353618411602605519">Clavier croate</translation>
+<translation id="6356685157277930264">Fenêtre de commentaires sur les fichiers</translation>
 <translation id="6358884629796491903">Dragon</translation>
 <translation id="637062427944097960">Ce fichier est ouvert sur un autre bureau. Utilisez le compte de <ph name="USER_NAME" /> (<ph name="MAIL_ADDRESS" />) pour l'afficher.</translation>
 <translation id="6395575651121294044"><ph name="NUMBER_OF_FILES" /> éléments</translation>
@@ -484,7 +482,7 @@
 <translation id="6509122719576673235">Norvégien</translation>
 <translation id="6527303717912515753">Partager</translation>
 <translation id="653019979737152879">Synchronisation de <ph name="FILE_NAME" /> en cours…</translation>
-<translation id="6549689063733911810">Activité récente</translation>
+<translation id="6549689063733911810">Récents</translation>
 <translation id="6556866813142980365">Rétablir</translation>
 <translation id="6558280019477628686">Une erreur s'est produite. Il se peut que certains éléments n'aient pas été supprimés.</translation>
 <translation id="656398493051028875">Suppression de "<ph name="FILENAME" />" en cours...</translation>
@@ -511,6 +509,7 @@
 <translation id="6878261347041253038">Clavier dévanâgarî (phonétique)</translation>
 <translation id="6885780034956018177">Escargot</translation>
 <translation id="6896758677409633944">Copier</translation>
+<translation id="6898028766943174120">Autres sous-dossiers…</translation>
 <translation id="691516599546977041">Impossible d'enregistrer les fichiers dans le dossier <ph name="FOLDER_NAME" />. Les images modifiées seront enregistrées dans le dossier "Téléchargements".</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Clavier Workman américain</translation>
@@ -523,6 +522,7 @@
 <translation id="696203921837389374">Activer la synchronisation via les données mobiles</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6970230597523682626">Bulgare</translation>
+<translation id="6973630695168034713">Dossiers</translation>
 <translation id="6978611942794658017">Ce fichier est destiné à un ordinateur utilisant un logiciel Windows. Il n'est pas compatible avec votre appareil qui exécute Chrome OS. Veuillez chercher une application de remplacement appropriée sur le Chrome Web Store.</translation>
 <translation id="6979158407327259162">Google Drive</translation>
 <translation id="6990081529015358884">Vous avez utilisé tout l'espace de stockage.</translation>
@@ -570,9 +570,11 @@
 <translation id="7589661784326793847">Veuillez patienter un court instant.</translation>
 <translation id="7603724359189955920">Grilles</translation>
 <translation id="7627790789328695202">Le fichier <ph name="FILE_NAME" /> existe déjà. Veuillez le renommer, puis réessayer.</translation>
+<translation id="7628656427739290098"><ph name="PERCENT" /> % effectués.</translation>
 <translation id="7649070708921625228">Aide</translation>
 <translation id="7654209398114106148">Transfert de <ph name="NUMBER_OF_ITEMS" /> éléments…</translation>
 <translation id="7658239707568436148">Annuler</translation>
+<translation id="7695430100978772476">Impossible de formater <ph name="DRIVE_NAME" /></translation>
 <translation id="770015031906360009">Grec</translation>
 <translation id="7706319470528945664">Clavier portugais</translation>
 <translation id="7711920809702896782">Informations sur les fichiers image</translation>
@@ -596,7 +598,6 @@
 <translation id="7827012282502221009"><ph name="NUMBER_OF_TB" /> To</translation>
 <translation id="7839804798877833423">L'opération de récupération de ces fichiers consommera environ <ph name="FILE_SIZE" /> de données mobiles.</translation>
 <translation id="7846076177841592234">Annuler la sélection</translation>
-<translation id="7850851215703745691">Ces fichiers Drive n'ont pas encore été partagés</translation>
 <translation id="7853966320808728790">BÉPO français</translation>
 <translation id="7864662577698025113">Ajouter un service</translation>
 <translation id="7873831373602885875">Impossible d'enregistrer les modifications dans <ph name="FOLDER_NAME" />. Toutes les modifications seront enregistrées dans <ph name="DOWNLOADS_FOLDER" /> du dossier "Téléchargements".</translation>
@@ -606,13 +607,12 @@
 <translation id="7898607018410277265">Clavier gujarati (nouvelle phonétique)</translation>
 <translation id="7917972308273378936">Clavier lituanien</translation>
 <translation id="7925686952655276919">Ne pas utiliser les données mobiles pour la synchronisation</translation>
-<translation id="7928710562641958568">Éjecter l'appareil</translation>
+<translation id="7928710562641958568">Éjecter le périphérique</translation>
 <translation id="7943385054491506837">Colemak américain</translation>
 <translation id="7953739707111622108">Impossible d'ouvrir ce périphérique, car son système de fichiers n'est pas reconnu.</translation>
 <translation id="7969525169268594403">Slovène</translation>
 <translation id="7982283708762922719">Hauteur</translation>
 <translation id="7987485481246785146">Clavier kurde sorani (arabe)</translation>
-<translation id="799923393800005025">Lecteur</translation>
 <translation id="8008366997883261463">Jack Russell Terrier</translation>
 <translation id="8028993641010258682">Taille</translation>
 <translation id="8031722894461705849">Clavier slovaque</translation>
@@ -641,6 +641,7 @@
 <translation id="8223479393428528563">Pour enregistrer ces fichiers en vue d'une utilisation hors connexion, reconnectez-vous, cliquez sur les fichiers à l'aide du bouton droit de la souris, puis sélectionnez l'option <ph name="OFFLINE_CHECKBOX_NAME" />.</translation>
 <translation id="8249296373107784235">Annuler</translation>
 <translation id="8261506727792406068">Supprimer</translation>
+<translation id="8269755669432358899">Réduire les panneaux de commentaires sur les fichiers</translation>
 <translation id="8279388322240498158">Clavier kurde sorani (anglais)</translation>
 <translation id="8280151743281770066">Arménien phonétique</translation>
 <translation id="8294431847097064396">Source</translation>
@@ -671,9 +672,8 @@
 <translation id="8569764466147087991">Sélectionnez le fichier à ouvrir</translation>
 <translation id="8579285237314169903">Synchronisation de <ph name="NUMBER_OF_FILES" /> éléments en cours…</translation>
 <translation id="8600173386174225982">Les fichiers s'affichent désormais sous forme de vignettes.</translation>
+<translation id="8601932370724196034">Fichier image Crostini</translation>
 <translation id="8669949407341943408">Déplacement en cours…</translation>
-<translation id="8671210955687109937">Commentateur</translation>
-<translation id="8686213429977032554">Ce fichier Drive n'a pas encore été partagé</translation>
 <translation id="8698464937041809063">Dessin Google</translation>
 <translation id="8714406895390098252">Vélo</translation>
 <translation id="8719721339511222681">Élément <ph name="ENTRY_NAME" /> sélectionné.</translation>
@@ -717,7 +717,7 @@
 <translation id="939736085109172342">Nouveau dossier</translation>
 <translation id="942954117721265519">Pas d'image dans ce répertoire.</translation>
 <translation id="943972244133411984">Modifié par</translation>
-<translation id="945522503751344254">Envoyer le commentaire</translation>
+<translation id="945522503751344254">Envoyer un commentaire</translation>
 <translation id="947144732524271678"><ph name="ENTRY_COUNT" /> éléments sélectionnés, de <ph name="FROM_ENTRY_NAME" /> à <ph name="TO_ENTRY_NAME" />.</translation>
 <translation id="981121421437150478">Hors connexion</translation>
 <translation id="988685240266037636">Un fichier intitulé "<ph name="FILE_NAME" />" existe déjà. Voulez-vous le remplacer ?</translation>

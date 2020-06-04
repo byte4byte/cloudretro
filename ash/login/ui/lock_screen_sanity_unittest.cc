@@ -151,22 +151,22 @@ TEST_F(LockScreenSanityTest,
   // Run the browser-process authentication request. Verify that the password is
   // cleared after the ash callback handler has completed and auth has failed.
   submit_password();
-  EXPECT_FALSE(password_test_api.textfield()->text().empty());
-  EXPECT_TRUE(password_test_api.textfield()->read_only());
+  EXPECT_FALSE(password_test_api.textfield()->GetText().empty());
+  EXPECT_TRUE(password_test_api.textfield()->GetReadOnly());
   std::move(callback).Run(false);
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(password_test_api.textfield()->text().empty());
-  EXPECT_FALSE(password_test_api.textfield()->read_only());
+  EXPECT_TRUE(password_test_api.textfield()->GetText().empty());
+  EXPECT_FALSE(password_test_api.textfield()->GetReadOnly());
 
   // Repeat the above process. Verify that the password is not cleared if auth
   // succeeds.
   submit_password();
-  EXPECT_FALSE(password_test_api.textfield()->text().empty());
-  EXPECT_TRUE(password_test_api.textfield()->read_only());
+  EXPECT_FALSE(password_test_api.textfield()->GetText().empty());
+  EXPECT_TRUE(password_test_api.textfield()->GetReadOnly());
   std::move(callback).Run(true);
   base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(password_test_api.textfield()->text().empty());
-  EXPECT_TRUE(password_test_api.textfield()->read_only());
+  EXPECT_FALSE(password_test_api.textfield()->GetText().empty());
+  EXPECT_TRUE(password_test_api.textfield()->GetReadOnly());
 }
 
 // Verifies that tabbing from the lock screen will eventually focus the shelf.
@@ -396,7 +396,8 @@ TEST_F(LockScreenSanityTest, RemoveUser) {
   EXPECT_CALL(*client, OnRemoveUserWarningShown()).Times(1);
   submit();
   EXPECT_CALL(*client, RemoveUser(users()[0].basic_user_info.account_id))
-      .Times(1);
+      .Times(1)
+      .WillOnce(Invoke(this, &LoginTestBase::RemoveUser));
   submit();
 
   // Secondary auth should be gone because it is now the primary auth.
@@ -405,12 +406,12 @@ TEST_F(LockScreenSanityTest, RemoveUser) {
                   .primary_big_view()
                   ->GetCurrentUser()
                   .basic_user_info.account_id ==
-              users()[1].basic_user_info.account_id);
+              users()[0].basic_user_info.account_id);
 }
 
 TEST_F(LockScreenSanityTest, LockScreenKillsPreventsClipboardPaste) {
   {
-    ui::ScopedClipboardWriter writer(ui::ClipboardType::kCopyPaste);
+    ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kCopyPaste);
     writer.WriteText(base::UTF8ToUTF16("password"));
   }
 
@@ -423,13 +424,13 @@ TEST_F(LockScreenSanityTest, LockScreenKillsPreventsClipboardPaste) {
   ui::test::EventGenerator* generator = GetEventGenerator();
   generator->PressKey(ui::KeyboardCode::VKEY_V, ui::EF_CONTROL_DOWN);
 
-  EXPECT_TRUE(text_input->text().empty());
+  EXPECT_TRUE(text_input->GetText().empty());
 
   LockScreen::Get()->Destroy();
   text_input->RequestFocus();
   generator->PressKey(ui::KeyboardCode::VKEY_V, ui::EF_CONTROL_DOWN);
 
-  EXPECT_EQ(base::UTF8ToUTF16("password"), text_input->text());
+  EXPECT_EQ(base::UTF8ToUTF16("password"), text_input->GetText());
 }
 
 }  // namespace ash

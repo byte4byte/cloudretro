@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "base/cancelable_callback.h"
+#include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -19,6 +21,10 @@ namespace base {
 class FilePath;
 class Clock;
 }  // namespace base
+
+namespace leveldb_proto {
+class ProtoDatabaseProvider;
+}  // namespace leveldb_proto
 
 namespace media {
 
@@ -36,7 +42,9 @@ class MEDIA_EXPORT VideoDecodeStatsDBImpl : public VideoDecodeStatsDB {
   // Create an instance! |db_dir| specifies where to store LevelDB files to
   // disk. LevelDB generates a handful of files, so its recommended to provide a
   // dedicated directory to keep them isolated.
-  static std::unique_ptr<VideoDecodeStatsDBImpl> Create(base::FilePath db_dir);
+  static std::unique_ptr<VideoDecodeStatsDBImpl> Create(
+      base::FilePath db_dir,
+      leveldb_proto::ProtoDatabaseProvider* db_provider);
 
   ~VideoDecodeStatsDBImpl() override;
 
@@ -52,11 +60,12 @@ class MEDIA_EXPORT VideoDecodeStatsDBImpl : public VideoDecodeStatsDB {
  private:
   friend class VideoDecodeStatsDBImplTest;
 
+  using PendingOpId = int;
+
   // Private constructor only called by tests (friends). Production code
   // should always use the static Create() method.
   VideoDecodeStatsDBImpl(
-      std::unique_ptr<leveldb_proto::ProtoDatabase<DecodeStatsProto>> db,
-      const base::FilePath& dir);
+      std::unique_ptr<leveldb_proto::ProtoDatabase<DecodeStatsProto>> db);
 
   // Default |last_write_time| for DB entries that lack a time stamp due to
   // using an earlier version of DecodeStatsProto. Date chosen so old stats from
@@ -77,16 +86,63 @@ class MEDIA_EXPORT VideoDecodeStatsDBImpl : public VideoDecodeStatsDB {
   // regardless of how many frames were decoded.
   static bool GetEnableUnweightedEntries();
 
+  // Creates a PendingOperation using |uma_str| and adds it to |pending_ops_|
+  // map. Returns PendingOpId for newly started operation. Callers must later
+  // call CompletePendingOp() with this id to destroy the PendingOperation and
+  // finalize timing UMA.
+  PendingOpId StartPendingOp(std::string uma_str);
+
+  // Removes PendingOperation from |pending_ops_| using |op_id_| as a key. This
+  // destroys the object and triggers timing UMA.
+  void CompletePendingOp(PendingOpId op_id);
+
+  // Unified handler for timeouts of pending DB operations. PendingOperation
+  // will be notified that it timed out (to trigger timing UMA) and removed from
+  // |penidng_ops_|.
+  void OnPendingOpTimeout(PendingOpId id);
+
+  // Helper to report timing information for DB operations, including when they
+  // hang indefinitely.
+  class PendingOperation {
+   public:
+    PendingOperation(
+        std::string uma_str,
+        std::unique_ptr<base::CancelableOnceClosure> timeout_closure);
+    // Records task timing UMA if it hasn't already timed out.
+    virtual ~PendingOperation();
+
+    // Copies disallowed. Incompatible with move-only members and UMA logging in
+    // the destructor.
+    PendingOperation(const PendingOperation&) = delete;
+    PendingOperation& operator=(const PendingOperation&) = delete;
+
+    // Trigger UMA recording for timeout.
+    void OnTimeout();
+
+   private:
+    friend class VideoDecodeStatsDBImplTest;
+
+    std::string uma_str_;
+    std::unique_ptr<base::CancelableOnceClosure> timeout_closure_;
+    base::TimeTicks start_ticks_;
+  };
+
+  // Map of operation id -> outstanding PendingOperations.
+  base::flat_map<PendingOpId, std::unique_ptr<PendingOperation>> pending_ops_;
+
   // Called when the database has been initialized. Will immediately call
   // |init_cb| to forward |success|.
-  void OnInit(InitializeCB init_cb, bool success);
+  void OnInit(PendingOpId id,
+              InitializeCB init_cb,
+              leveldb_proto::Enums::InitStatus status);
 
   // Returns true if the DB is successfully initialized.
   bool IsInitialized();
 
   // Passed as the callback for |OnGotDecodeStats| by |AppendDecodeStats| to
   // update the database once we've read the existing stats entry.
-  void WriteUpdatedEntry(const VideoDescKey& key,
+  void WriteUpdatedEntry(PendingOpId op_id,
+                         const VideoDescKey& key,
                          const DecodeStatsEntry& entry,
                          AppendDecodeStatsCB append_done_cb,
                          bool read_success,
@@ -94,32 +150,45 @@ class MEDIA_EXPORT VideoDecodeStatsDBImpl : public VideoDecodeStatsDB {
 
   // Called when the database has been modified after a call to
   // |WriteUpdatedEntry|. Will run |append_done_cb| when done.
-  void OnEntryUpdated(AppendDecodeStatsCB append_done_cb, bool success);
+  void OnEntryUpdated(PendingOpId op_id,
+                      AppendDecodeStatsCB append_done_cb,
+                      bool success);
 
   // Called when GetDecodeStats() operation was performed. |get_stats_cb|
   // will be run with |success| and a |DecodeStatsEntry| created from
   // |stats_proto| or nullptr if no entry was found for the requested key.
-  void OnGotDecodeStats(GetDecodeStatsCB get_stats_cb,
+  void OnGotDecodeStats(PendingOpId op_id,
+                        GetDecodeStatsCB get_stats_cb,
                         bool success,
                         std::unique_ptr<DecodeStatsProto> stats_proto);
 
   // Internal callback for first step of ClearStats(). Will clear all stats If
   // |keys| fetched successfully.
-  void OnLoadAllKeysForClearing(base::OnceClosure clear_done_cb,
+  void OnLoadAllKeysForClearing(PendingOpId op_id,
+                                base::OnceClosure clear_done_cb,
                                 bool success,
                                 std::unique_ptr<std::vector<std::string>> keys);
 
   // Internal callback for OnLoadAllKeysForClearing(), initially triggered by
   // ClearStats(). Method simply logs |success| and runs |clear_done_cb|.
-  void OnStatsCleared(base::OnceClosure clear_done_cb, bool success);
+  void OnStatsCleared(PendingOpId op_id,
+                      base::OnceClosure clear_done_cb,
+                      bool success);
 
   // Return true if:
-  //     "now" - stats_proto.last_write_date > GeMaxDaysToKeepStats()
-  bool AreStatsExpired(const DecodeStatsProto* const stats_proto);
+  //    values aren't corrupted nonsense (e.g. way more frames dropped than
+  //    decoded, or number of frames_decoded < frames_power_efficient)
+  // &&
+  //    stats aren't expired.
+  //       ("now" - stats_proto.last_write_date > GeMaxDaysToKeepStats())
+  bool AreStatsUsable(const DecodeStatsProto* const stats_proto);
 
   void set_wall_clock_for_test(const base::Clock* tick_clock) {
     wall_clock_ = tick_clock;
   }
+
+  // Next PendingOpId for use in |pending_ops_| map. See StartPendingOp().
+  PendingOpId next_op_id_ = 0;
 
   // Indicates whether initialization is completed. Does not indicate whether it
   // was successful. Will be reset upon calling DestroyStats(). Failed
@@ -129,9 +198,6 @@ class MEDIA_EXPORT VideoDecodeStatsDBImpl : public VideoDecodeStatsDB {
   // ProtoDatabase instance. Set to nullptr if fatal database error is
   // encountered.
   std::unique_ptr<leveldb_proto::ProtoDatabase<DecodeStatsProto>> db_;
-
-  // Directory where levelDB should store database files.
-  base::FilePath db_dir_;
 
   // For getting wall-clock time. Tests may override via SetClockForTest().
   const base::Clock* wall_clock_ = nullptr;

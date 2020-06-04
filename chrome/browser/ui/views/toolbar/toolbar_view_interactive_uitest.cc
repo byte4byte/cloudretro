@@ -8,17 +8,22 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/app_menu_button_observer.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -51,7 +56,7 @@ class ToolbarViewInteractiveUITest : public AppMenuButtonObserver,
                                      public extensions::ExtensionBrowserTest,
                                      public views::WidgetObserver {
  public:
-  ToolbarViewInteractiveUITest() = default;
+  ToolbarViewInteractiveUITest();
   ~ToolbarViewInteractiveUITest() override = default;
 
   // AppMenuButtonObserver:
@@ -88,10 +93,16 @@ class ToolbarViewInteractiveUITest : public AppMenuButtonObserver,
   // InProcessBrowserTest:
   void SetUpOnMainThread() override;
 
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   bool menu_shown_ = false;
   base::OnceClosure quit_closure_;
 };
+
+ToolbarViewInteractiveUITest::ToolbarViewInteractiveUITest() {
+  scoped_feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
+}
 
 void ToolbarViewInteractiveUITest::AppMenuShown() {
   menu_shown_ = true;
@@ -151,9 +162,6 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("api_test")
                                           .AppendASCII("browser_action")
                                           .AppendASCII("basics")));
-  // Ensure the extension is fully loaded, and that the next steps will happen
-  // with a clean slate.
-  base::RunLoop().RunUntilIdle();
 
   // Set up observers that will drive the test along.
   AppMenuButton* const app_menu_button = GetAppMenuButton();
@@ -191,8 +199,8 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
   ASSERT_TRUE(toolbar_action);
   ui_test_utils::MoveMouseToCenterAndPress(
       toolbar_action, ui_controls::LEFT, ui_controls::DOWN,
-      base::BindRepeating(&ToolbarViewInteractiveUITest::StartDrag,
-                          base::Unretained(this)));
+      base::BindOnce(&ToolbarViewInteractiveUITest::StartDrag,
+                     base::Unretained(this)));
   base::RunLoop run_loop;
   set_quit_closure(run_loop.QuitWhenIdleClosure());
   run_loop.Run();
@@ -205,12 +213,11 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
 
 class ToolbarViewTest : public InProcessBrowserTest {
  public:
-  ToolbarViewTest() {}
+  ToolbarViewTest() = default;
+  ToolbarViewTest(const ToolbarViewTest&) = delete;
+  ToolbarViewTest& operator=(const ToolbarViewTest&) = delete;
 
   void RunToolbarCycleFocusTest(Browser* browser);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ToolbarViewTest);
 };
 
 void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
@@ -274,27 +281,14 @@ void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
   size_t count = ids.size();
   for (size_t i = 0; i < count - 1; i++)
     EXPECT_EQ(ids[i], reverse_ids[count - 2 - i]);
+  EXPECT_EQ(ids[count - 1], reverse_ids[count - 1]);
 }
 
-#if defined(OS_MACOSX)
-// Widget activation doesn't work on Mac: https://crbug.com/823543
-#define MAYBE_ToolbarCycleFocus DISABLED_ToolbarCycleFocus
-#else
-#define MAYBE_ToolbarCycleFocus ToolbarCycleFocus
-#endif
-IN_PROC_BROWSER_TEST_F(ToolbarViewTest, MAYBE_ToolbarCycleFocus) {
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocus) {
   RunToolbarCycleFocusTest(browser());
 }
 
-#if defined(OS_MACOSX)
-// Widget activation doesn't work on Mac: https://crbug.com/823543
-#define MAYBE_ToolbarCycleFocusWithBookmarkBar \
-  DISABLED_ToolbarCycleFocusWithBookmarkBar
-#else
-#define MAYBE_ToolbarCycleFocusWithBookmarkBar ToolbarCycleFocusWithBookmarkBar
-#endif
-IN_PROC_BROWSER_TEST_F(ToolbarViewTest,
-                       MAYBE_ToolbarCycleFocusWithBookmarkBar) {
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocusWithBookmarkBar) {
   CommandUpdater* updater = browser()->command_controller();
   updater->ExecuteCommand(IDC_SHOW_BOOKMARK_BAR);
 
@@ -311,20 +305,72 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ToolbarViewTest, BackButtonUpdate) {
-  ToolbarView* toolbar =
+  ToolbarButtonProvider* toolbar_button_provider =
       BrowserView::GetBrowserViewForBrowser(browser())->toolbar();
-  EXPECT_FALSE(toolbar->back_button()->GetEnabled());
+  EXPECT_FALSE(toolbar_button_provider->GetBackButton()->GetEnabled());
 
   // Navigate to title1.html. Back button should be enabled.
   GURL url = ui_test_utils::GetTestUrl(
       base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title1.html")));
   ui_test_utils::NavigateToURL(browser(), url);
-  EXPECT_TRUE(toolbar->back_button()->GetEnabled());
+  EXPECT_TRUE(toolbar_button_provider->GetBackButton()->GetEnabled());
 
   // Delete old navigations. Back button will be disabled.
   auto& controller =
       browser()->tab_strip_model()->GetActiveWebContents()->GetController();
   controller.DeleteNavigationEntries(base::BindRepeating(
       [&](content::NavigationEntry* entry) { return true; }));
-  EXPECT_FALSE(toolbar->back_button()->GetEnabled());
+  EXPECT_FALSE(toolbar_button_provider->GetBackButton()->GetEnabled());
+}
+
+class ToolbarViewWithExtensionsToolbarMenuTest : public ToolbarViewTest {
+ public:
+  ToolbarViewWithExtensionsToolbarMenuTest() = default;
+  ToolbarViewWithExtensionsToolbarMenuTest(
+      const ToolbarViewWithExtensionsToolbarMenuTest&) = delete;
+  ToolbarViewWithExtensionsToolbarMenuTest& operator=(
+      const ToolbarViewWithExtensionsToolbarMenuTest&) = delete;
+
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(features::kExtensionsToolbarMenu);
+    ToolbarViewTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ToolbarViewWithExtensionsToolbarMenuTest,
+                       ToolbarForRegularProfileHasExtensionsToolbarContainer) {
+  // Verify the normal browser has an extensions toolbar container.
+  ExtensionsToolbarContainer* extensions_container =
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
+          ->extensions_container();
+  EXPECT_NE(nullptr, extensions_container);
+}
+
+// TODO(crbug.com/991596): Setup test profiles properly for CrOS.
+#if defined(OS_CHROMEOS)
+#define MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer \
+  DISABLED_ToolbarForGuestHasNoExtensionsToolbarContainer
+#else
+#define MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer \
+  ToolbarForGuestHasNoExtensionsToolbarContainer
+#endif
+IN_PROC_BROWSER_TEST_F(ToolbarViewWithExtensionsToolbarMenuTest,
+                       MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer) {
+  // Verify guest browser does not have an extensions toolbar container.
+  profiles::SwitchToGuestProfile(ProfileManager::CreateCallback());
+  ui_test_utils::WaitForBrowserToOpen();
+  Profile* guest = g_browser_process->profile_manager()->GetProfileByPath(
+      ProfileManager::GetGuestProfilePath());
+  ASSERT_TRUE(guest);
+  Browser* target_browser = chrome::FindAnyBrowser(guest, true);
+  ASSERT_TRUE(target_browser);
+  ExtensionsToolbarContainer* extensions_container =
+      BrowserView::GetBrowserViewForBrowser(target_browser)
+          ->toolbar()
+          ->extensions_container();
+  EXPECT_EQ(nullptr, extensions_container);
 }

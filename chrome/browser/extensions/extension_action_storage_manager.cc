@@ -13,7 +13,6 @@
 #include "base/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -167,7 +166,8 @@ std::unique_ptr<base::DictionaryValue> DefaultsToValue(
   dict->SetString(kPopupUrlStorageKey,
                   action->GetPopupUrl(kDefaultTabId).spec());
   dict->SetString(kTitleStorageKey, action->GetTitle(kDefaultTabId));
-  dict->SetString(kBadgeTextStorageKey, action->GetBadgeText(kDefaultTabId));
+  dict->SetString(kBadgeTextStorageKey,
+                  action->GetExplicitlySetBadgeText(kDefaultTabId));
   dict->SetString(
       kBadgeBackgroundColorStorageKey,
       SkColorToRawString(action->GetBadgeBackgroundColor(kDefaultTabId)));
@@ -196,9 +196,7 @@ std::unique_ptr<base::DictionaryValue> DefaultsToValue(
 
 ExtensionActionStorageManager::ExtensionActionStorageManager(
     content::BrowserContext* context)
-    : browser_context_(context),
-      extension_action_observer_(this),
-      extension_registry_observer_(this) {
+    : browser_context_(context) {
   extension_action_observer_.Add(ExtensionActionAPI::Get(browser_context_));
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 
@@ -221,11 +219,9 @@ void ExtensionActionStorageManager::OnExtensionLoaded(
   StateStore* store = GetStateStore();
   if (store) {
     store->GetExtensionValue(
-        extension->id(),
-        kBrowserActionStorageKey,
-        base::Bind(&ExtensionActionStorageManager::ReadFromStorage,
-                   weak_factory_.GetWeakPtr(),
-                   extension->id()));
+        extension->id(), kBrowserActionStorageKey,
+        base::BindOnce(&ExtensionActionStorageManager::ReadFromStorage,
+                       weak_factory_.GetWeakPtr(), extension->id()));
   }
 }
 

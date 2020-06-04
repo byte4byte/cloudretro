@@ -13,9 +13,9 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/arc/bluetooth/bluetooth_type_converters.h"
-#include "components/arc/common/bluetooth.mojom.h"
+#include "components/arc/mojom/bluetooth.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_bluetooth_instance.h"
@@ -108,12 +108,12 @@ class ArcBluetoothBridgeTest : public testing::Test {
         nullptr, arc_bridge_service_.get());
     fake_bluetooth_instance_ = std::make_unique<FakeBluetoothInstance>();
     arc_bridge_service_->bluetooth()->SetInstance(
-        fake_bluetooth_instance_.get(), 13);
+        fake_bluetooth_instance_.get(), 16);
     base::SysInfo::SetChromeOSVersionInfoForTest(
         "CHROMEOS_ARC_ANDROID_SDK_VERSION=28", base::Time::Now());
     WaitForInstanceReady(arc_bridge_service_->bluetooth());
 
-    device::BluetoothAdapterFactory::GetAdapter(base::BindOnce(
+    device::BluetoothAdapterFactory::Get()->GetAdapter(base::BindOnce(
         &ArcBluetoothBridgeTest::OnAdapterInitialized, base::Unretained(this)));
     // We will quit the loop once we get the adapter.
     get_adapter_run_loop_.Run();
@@ -209,7 +209,7 @@ class ArcBluetoothBridgeTest : public testing::Test {
   std::unique_ptr<FakeBluetoothInstance> fake_bluetooth_instance_;
   std::unique_ptr<ArcBluetoothBridge> arc_bluetooth_bridge_;
   scoped_refptr<device::BluetoothAdapter> adapter_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop get_adapter_run_loop_;
 };
 
@@ -218,10 +218,16 @@ class ArcBluetoothBridgeTest : public testing::Test {
 // the correctness of the device properties sent via arc bridge.
 TEST_F(ArcBluetoothBridgeTest, DeviceFound) {
   EXPECT_EQ(0u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(0u,
+            fake_bluetooth_instance_->device_properties_changed_data().size());
   AddTestDevice();
-  EXPECT_EQ(5u, fake_bluetooth_instance_->device_found_data().size());
+  // Only the first one should invoke a device_found callback. The following
+  // device change events should invode the remote_device_properties callback.
+  EXPECT_EQ(1u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(4u,
+            fake_bluetooth_instance_->device_properties_changed_data().size());
   const std::vector<mojom::BluetoothPropertyPtr>& prop =
-      fake_bluetooth_instance_->device_found_data().back();
+      fake_bluetooth_instance_->device_properties_changed_data().back();
 
   EXPECT_EQ(7u, prop.size());
   EXPECT_TRUE(prop[0]->is_bdname());
@@ -249,9 +255,11 @@ TEST_F(ArcBluetoothBridgeTest, DeviceFound) {
   EXPECT_EQ(kTestRssi, prop[6]->get_remote_rssi());
 
   ChangeTestDeviceRssi(kTestRssi2);
-  EXPECT_EQ(6u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(1u, fake_bluetooth_instance_->device_found_data().size());
+  EXPECT_EQ(5u,
+            fake_bluetooth_instance_->device_properties_changed_data().size());
   const std::vector<mojom::BluetoothPropertyPtr>& prop2 =
-      fake_bluetooth_instance_->device_found_data().back();
+      fake_bluetooth_instance_->device_properties_changed_data().back();
   EXPECT_EQ(7u, prop2.size());
   EXPECT_TRUE(prop2[6]->is_remote_rssi());
   EXPECT_EQ(kTestRssi2, prop2[6]->get_remote_rssi());
@@ -262,7 +270,7 @@ TEST_F(ArcBluetoothBridgeTest, DeviceFound) {
 TEST_F(ArcBluetoothBridgeTest, LEDeviceFound) {
   EXPECT_EQ(0u, fake_bluetooth_instance_->le_device_found_data().size());
   AddTestDevice();
-  EXPECT_EQ(1u, fake_bluetooth_instance_->le_device_found_data().size());
+  EXPECT_EQ(3u, fake_bluetooth_instance_->le_device_found_data().size());
 
   const auto& le_device_found_data =
       fake_bluetooth_instance_->le_device_found_data().back();
@@ -275,7 +283,7 @@ TEST_F(ArcBluetoothBridgeTest, LEDeviceFound) {
   EXPECT_EQ(kTestRssi, le_device_found_data->rssi());
 
   ChangeTestDeviceRssi(kTestRssi2);
-  EXPECT_EQ(2u, fake_bluetooth_instance_->le_device_found_data().size());
+  EXPECT_EQ(4u, fake_bluetooth_instance_->le_device_found_data().size());
   EXPECT_EQ(kTestRssi2,
             fake_bluetooth_instance_->le_device_found_data().back()->rssi());
 }
@@ -285,7 +293,7 @@ TEST_F(ArcBluetoothBridgeTest, LEDeviceFoundForN) {
       "CHROMEOS_ARC_ANDROID_SDK_VERSION=27", base::Time::Now());
   EXPECT_EQ(0u, fake_bluetooth_instance_->le_device_found_data().size());
   AddTestDevice();
-  EXPECT_EQ(1u, fake_bluetooth_instance_->le_device_found_data().size());
+  EXPECT_EQ(3u, fake_bluetooth_instance_->le_device_found_data().size());
 
   const auto& le_device_found_data =
       fake_bluetooth_instance_->le_device_found_data().back();
@@ -309,7 +317,7 @@ TEST_F(ArcBluetoothBridgeTest, LEDeviceFoundForN) {
   EXPECT_EQ(kTestRssi, le_device_found_data->rssi());
 
   ChangeTestDeviceRssi(kTestRssi2);
-  EXPECT_EQ(2u, fake_bluetooth_instance_->le_device_found_data().size());
+  EXPECT_EQ(4u, fake_bluetooth_instance_->le_device_found_data().size());
   EXPECT_EQ(kTestRssi2,
             fake_bluetooth_instance_->le_device_found_data().back()->rssi());
 }

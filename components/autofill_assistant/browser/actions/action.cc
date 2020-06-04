@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
+#include "components/autofill_assistant/browser/client_status.h"
 
 namespace autofill_assistant {
 
@@ -94,14 +95,11 @@ std::ostream& operator<<(std::ostream& out,
     case ActionProto::ActionInfoCase::kShowDetails:
       out << "ShowDetails";
       break;
-    case ActionProto::ActionInfoCase::kReset:
-      out << "Reset";
-      break;
     case ActionProto::ActionInfoCase::kStop:
       out << "Stop";
       break;
-    case ActionProto::ActionInfoCase::kGetPaymentInformation:
-      out << "GetPaymentInformation";
+    case ActionProto::ActionInfoCase::kCollectUserData:
+      out << "CollectUserData";
       break;
     case ActionProto::ActionInfoCase::kSetAttribute:
       out << "SetAttribute";
@@ -123,6 +121,15 @@ std::ostream& operator<<(std::ostream& out,
       break;
     case ActionProto::ActionInfoCase::kPopupMessage:
       out << "PopupMessage";
+      break;
+    case ActionProto::ActionInfoCase::kWaitForDocument:
+      out << "WaitForDocument";
+      break;
+    case ActionProto::ActionInfoCase::kShowGenericUi:
+      out << "ShowGenericUi";
+      break;
+    case ActionProto::ActionInfoCase::kGeneratePasswordForFormField:
+      out << "GeneratePasswordForFormField";
       break;
     case ActionProto::ActionInfoCase::ACTION_INFO_NOT_SET:
       out << "ACTION_INFO_NOT_SET";

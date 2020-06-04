@@ -35,8 +35,7 @@ DeviceLocalAccountPolicyStore::DeviceLocalAccountPolicyStore(
                                PolicySource::POLICY_SOURCE_CLOUD),
       account_id_(account_id),
       session_manager_client_(session_manager_client),
-      device_settings_service_(device_settings_service),
-      weak_factory_(this) {}
+      device_settings_service_(device_settings_service) {}
 
 DeviceLocalAccountPolicyStore::~DeviceLocalAccountPolicyStore() {}
 
@@ -46,8 +45,9 @@ void DeviceLocalAccountPolicyStore::Load() {
 
   session_manager_client_->RetrieveDeviceLocalAccountPolicy(
       account_id_,
-      base::Bind(&DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob,
-                 weak_factory_.GetWeakPtr(), true /*validate_in_background*/));
+      base::BindOnce(&DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob,
+                     weak_factory_.GetWeakPtr(),
+                     true /*validate_in_background*/));
 }
 
 std::unique_ptr<UserCloudPolicyValidator>
@@ -154,8 +154,8 @@ void DeviceLocalAccountPolicyStore::OnPolicyToStoreValidated(
 
   session_manager_client_->StoreDeviceLocalAccountPolicy(
       account_id_, policy_blob,
-      base::Bind(&DeviceLocalAccountPolicyStore::HandleStoreResult,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DeviceLocalAccountPolicyStore::HandleStoreResult,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void DeviceLocalAccountPolicyStore::HandleStoreResult(bool success) {
@@ -237,7 +237,7 @@ void DeviceLocalAccountPolicyStore::Validate(
 
   if (validate_in_background) {
     UserCloudPolicyValidator::StartValidation(
-        std::move(validator), base::Bind(callback, key->as_string()));
+        std::move(validator), base::BindOnce(callback, key->as_string()));
   } else {
     validator->RunValidation();
 

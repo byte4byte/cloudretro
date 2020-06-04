@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/system/handle.h"
 #include "net/base/completion_once_callback.h"
-#include "storage/browser/fileapi/file_stream_writer.h"
+#include "storage/browser/file_system/file_stream_writer.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -77,7 +77,8 @@ class ArcContentFileSystemFileStreamWriter : public storage::FileStreamWriter {
   bool has_pending_operation_;
   net::CompletionOnceCallback cancel_callback_;
 
-  base::WeakPtrFactory<ArcContentFileSystemFileStreamWriter> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcContentFileSystemFileStreamWriter> weak_ptr_factory_{
+      this};
   DISALLOW_COPY_AND_ASSIGN(ArcContentFileSystemFileStreamWriter);
 };
 

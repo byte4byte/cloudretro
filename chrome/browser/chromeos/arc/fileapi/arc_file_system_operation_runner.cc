@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/optional.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -85,8 +86,7 @@ ArcFileSystemOperationRunner::ArcFileSystemOperationRunner(
     bool set_should_defer_by_events)
     : context_(context),
       arc_bridge_service_(bridge_service),
-      set_should_defer_by_events_(set_should_defer_by_events),
-      weak_ptr_factory_(this) {
+      set_should_defer_by_events_(set_should_defer_by_events) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   arc_bridge_service_->file_system()->AddObserver(this);

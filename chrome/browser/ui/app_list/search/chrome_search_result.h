@@ -15,25 +15,26 @@
 #include "chrome/browser/ui/app_list/app_list_model_updater.h"
 #include "ui/base/models/simple_menu_model.h"
 
-namespace app_list {
-class AppContextMenu;
 class TokenizedString;
 class TokenizedStringMatch;
+
+namespace app_list {
+class AppContextMenu;
 }  // namespace app_list
+
 
 // ChromeSearchResult consists of an icon, title text and details text. Title
 // and details text can have tagged ranges that are displayed differently from
 // default style.
 class ChromeSearchResult {
  public:
-  using ResultType = ash::SearchResultType;
+  using ResultType = ash::AppListSearchResultType;
   using DisplayType = ash::SearchResultDisplayType;
   using Tag = ash::SearchResultTag;
   using Tags = ash::SearchResultTags;
   using Action = ash::SearchResultAction;
   using Actions = ash::SearchResultActions;
   using DisplayIndex = ash::SearchResultDisplayIndex;
-  using DisplayLocation = ash::SearchResultDisplayLocation;
 
   ChromeSearchResult();
   virtual ~ChromeSearchResult();
@@ -48,14 +49,15 @@ class ChromeSearchResult {
   }
   const std::string& id() const { return metadata_->id; }
   DisplayType display_type() const { return metadata_->display_type; }
-  ResultType result_type() const { return metadata_->result_type; }
-  DisplayIndex display_index() const { return metadata_->display_index; }
-  DisplayLocation display_location() const {
-    return metadata_->display_location;
+  ash::AppListSearchResultType result_type() const {
+    return metadata_->result_type;
   }
+  DisplayIndex display_index() const { return metadata_->display_index; }
+  float position_priority() const { return metadata_->position_priority; }
   const Actions& actions() const { return metadata_->actions; }
   double display_score() const { return metadata_->display_score; }
   bool is_installing() const { return metadata_->is_installing; }
+  bool is_recommendation() const { return metadata_->is_recommendation; }
   const base::Optional<GURL>& query_url() const { return metadata_->query_url; }
   const base::Optional<std::string>& equivalent_result_id() const {
     return metadata_->equivalent_result_id;
@@ -80,10 +82,11 @@ class ChromeSearchResult {
   void SetDisplayType(DisplayType display_type);
   void SetResultType(ResultType result_type);
   void SetDisplayIndex(DisplayIndex display_index);
-  void SetDisplayLocation(DisplayLocation display_location);
+  void SetPositionPriority(float position_priority);
   void SetDisplayScore(double display_score);
   void SetActions(const Actions& actions);
   void SetIsOmniboxSearch(bool is_omnibox_search);
+  void SetIsRecommendation(bool is_recommendation);
   void SetIsInstalling(bool is_installing);
   void SetQueryUrl(const GURL& url);
   void SetEquivalentResutlId(const std::string& equivlanet_result_id);
@@ -124,8 +127,8 @@ class ChromeSearchResult {
 
   // Updates the result's relevance score, and sets its title and title tags,
   // based on a string match result.
-  void UpdateFromMatch(const app_list::TokenizedString& title,
-                       const app_list::TokenizedStringMatch& match);
+  void UpdateFromMatch(const TokenizedString& title,
+                       const TokenizedStringMatch& match);
 
   // Returns the context menu model for this item, or NULL if there is currently
   // no menu for the item (e.g. during install). |callback| takes the ownership
@@ -144,7 +147,7 @@ class ChromeSearchResult {
   int result_subtype() const { return metadata_->result_subtype; }
 
   // Get the type of the result, used in metrics.
-  virtual app_list::SearchResultType GetSearchResultType() const = 0;
+  virtual ash::SearchResultType GetSearchResultType() const = 0;
 
  protected:
   // These id setters should be called in derived class constructors only.

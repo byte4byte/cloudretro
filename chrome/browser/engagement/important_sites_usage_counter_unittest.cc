@@ -4,6 +4,9 @@
 
 #include "chrome/browser/engagement/important_sites_usage_counter.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -16,7 +19,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "storage/browser/test/mock_storage_client.h"
@@ -45,13 +48,13 @@ class ImportantSitesUsageCounterTest : public testing::Test {
   QuotaManager* CreateQuotaManager() {
     quota_manager_ = new QuotaManager(
         false, temp_dir_.GetPath(),
-        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}).get(),
-        nullptr, storage::GetQuotaSettingsFunc());
+        base::CreateSingleThreadTaskRunner({BrowserThread::IO}).get(), nullptr,
+        storage::GetQuotaSettingsFunc());
     return quota_manager_.get();
   }
 
-  void RegisterClient(const std::vector<content::MockOriginData>& data) {
-    auto* client = new content::MockStorageClient(
+  void RegisterClient(const std::vector<storage::MockOriginData>& data) {
+    auto* client = new storage::MockStorageClient(
         quota_manager_->proxy(), data.data(), storage::QuotaClient::kFileSystem,
         data.size());
     quota_manager_->proxy()->RegisterClient(client);
@@ -76,7 +79,7 @@ class ImportantSitesUsageCounterTest : public testing::Test {
   }
 
   void FetchCompleted(std::vector<ImportantDomainInfo> domain_info) {
-    domain_info_ = domain_info;
+    domain_info_ = std::move(domain_info);
     run_loop_->Quit();
   }
 
@@ -88,7 +91,7 @@ class ImportantSitesUsageCounterTest : public testing::Test {
   const std::vector<ImportantDomainInfo>& domain_info() { return domain_info_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
   base::ScopedTempDir temp_dir_;
   scoped_refptr<QuotaManager> quota_manager_;
@@ -102,10 +105,10 @@ TEST_F(ImportantSitesUsageCounterTest, PopulateUsage) {
   i1.registerable_domain = "example.com";
   ImportantDomainInfo i2;
   i2.registerable_domain = "somethingelse.com";
-  important_sites.push_back(i1);
-  important_sites.push_back(i2);
+  important_sites.push_back(std::move(i1));
+  important_sites.push_back(std::move(i2));
 
-  const std::vector<content::MockOriginData> origins = {
+  const std::vector<storage::MockOriginData> origins = {
       {"http://example.com/", blink::mojom::StorageType::kTemporary, 1},
       {"https://example.com/", blink::mojom::StorageType::kTemporary, 2},
       {"https://maps.example.com/", blink::mojom::StorageType::kTemporary, 4},
@@ -125,12 +128,12 @@ TEST_F(ImportantSitesUsageCounterTest, PopulateUsage) {
           ->GetDOMStorageContext();
 
   ImportantSitesUsageCounter::GetUsage(
-      important_sites, quota_manager, dom_storage_context,
+      std::move(important_sites), quota_manager, dom_storage_context,
       base::BindOnce(&ImportantSitesUsageCounterTest::FetchCompleted,
                      base::Unretained(this)));
   WaitForResult();
 
-  EXPECT_EQ(important_sites.size(), domain_info().size());
+  EXPECT_EQ(2U, domain_info().size());
   // The first important site is example.com. It uses 1B quota storage for
   // http://example.com/, 2B for https://example.com and 4B for
   // https://maps.example.com. On top of that it uses 16B local storage.

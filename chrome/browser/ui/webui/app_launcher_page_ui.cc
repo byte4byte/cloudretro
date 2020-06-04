@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/theme_handler.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -42,9 +43,13 @@ AppLauncherPageUI::AppLauncherPageUI(content::WebUI* web_ui)
   if (!GetProfile()->IsOffTheRecord()) {
     extensions::ExtensionService* service =
         extensions::ExtensionSystem::Get(GetProfile())->extension_service();
-    // We should not be launched without an ExtensionService.
+    web_app::WebAppProvider* web_app_provider =
+        web_app::WebAppProvider::Get(GetProfile());
+    DCHECK(web_app_provider);
     DCHECK(service);
-    web_ui->AddMessageHandler(std::make_unique<AppLauncherHandler>(service));
+    // We should not be launched without an ExtensionService or WebAppProvider.
+    web_ui->AddMessageHandler(
+        std::make_unique<AppLauncherHandler>(service, web_app_provider));
     web_ui->AddMessageHandler(std::make_unique<CoreAppLauncherHandler>());
     web_ui->AddMessageHandler(std::make_unique<AppIconWebUIHandler>());
     web_ui->AddMessageHandler(std::make_unique<MetricsHandler>());
@@ -99,9 +104,9 @@ std::string AppLauncherPageUI::HTMLSource::GetSource() {
 }
 
 void AppLauncherPageUI::HTMLSource::StartDataRequest(
-    const std::string& path,
-    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-    const content::URLDataSource::GotDataCallback& callback) {
+    const GURL& url,
+    const content::WebContents::Getter& wc_getter,
+    content::URLDataSource::GotDataCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   NTPResourceCache* resource = AppResourceCacheFactory::GetForProfile(profile_);
@@ -114,7 +119,7 @@ void AppLauncherPageUI::HTMLSource::StartDataRequest(
   scoped_refptr<base::RefCountedMemory> html_bytes(
       resource->GetNewTabHTML(win_type));
 
-  callback.Run(html_bytes.get());
+  std::move(callback).Run(html_bytes.get());
 }
 
 std::string AppLauncherPageUI::HTMLSource::GetMimeType(
@@ -146,4 +151,4 @@ std::string AppLauncherPageUI::HTMLSource::GetContentSecurityPolicyImgSrc() {
       "data:;";
 }
 
-AppLauncherPageUI::HTMLSource::~HTMLSource() {}
+AppLauncherPageUI::HTMLSource::~HTMLSource() = default;

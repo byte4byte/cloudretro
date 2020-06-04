@@ -1,44 +1,18 @@
-<link rel="import" href="chrome://resources/html/polymer.html">
-
-<link rel="import" href="chrome://resources/html/assert.html">
-<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
-<link rel="import" href="chrome://resources/cr_elements/cr_action_menu/cr_action_menu.html">
-<link rel="import" href="chrome://resources/cr_elements/cr_button/cr_button.html">
-<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_pref_indicator.html">
-<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
-<link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
-<link rel="import" href="chrome://resources/html/list_property_update_behavior.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-list/iron-list.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-tooltip/paper-tooltip.html">
-<link rel="import" href="../i18n_setup.html">
-<link rel="import" href="../settings_shared_css.html">
-<link rel="import" href="add_site_dialog.html">
-<link rel="import" href="constants.html">
-<link rel="import" href="edit_exception_dialog.html">
-<link rel="import" href="site_list_entry.html">
-<link rel="import" href="site_settings_behavior.html">
-<link rel="import" href="site_settings_prefs_browser_proxy.html">
-<if expr="chromeos">
-  <link rel="import" href="../multidevice_page/multidevice_browser_proxy.html">
-</if>
-
-<dom-module id="site-list">
-  <template>
-    <style include="settings-shared">
+    <style include="cr-shared-style settings-shared iron-flex">
       paper-tooltip {
         --paper-tooltip: var(--cr-tooltip);
       }
     </style>
     <div id="category">
-      <div class="settings-box first">
-        <h2 class="start">[[categoryHeader]]</h2>
+      <div class="cr-row first">
+        <h2 class="flex">[[categoryHeader]]</h2>
         <cr-button id="addSite" class="header-aligned-button"
-            hidden="[[readOnlyList]]" on-click="onAddSiteTap_">
+            hidden$="[[!showAddSiteButton_]]" on-click="onAddSiteTap_">
           $i18n{add}
         </cr-button>
       </div>
 
-      <cr-action-menu>
+      <cr-action-menu role-description="$i18n{menu}">
         <button class="dropdown-item" id="allow"
             on-click="onAllowTap_" hidden$="[[!showAllowAction_]]">
           $i18n{siteSettingsActionAllow}
@@ -77,7 +51,7 @@
                 on-show-action-menu="onShowActionMenu_" tabindex$="[[tabIndex]]"
                 first$="[[!index]]" iron-list-tab-index="[[tabIndex]]"
                 last-focused="{{lastFocused_}}" list-blurred="{{listBlurred_}}"
-                on-show-tooltip="onShowTooltip_">
+                on-show-tooltip="onShowTooltip_" focus-row-index="[[index]]">
             </site-list-entry>
           </template>
         </iron-list>
@@ -98,6 +72,3 @@
           on-close="onAddSiteDialogClosed_">
       </add-site-dialog>
     </template>
-  </template>
-  <script src="site_list.js"></script>
-</dom-module>

@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "components/arc/common/app.mojom.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace arc {
@@ -25,7 +25,7 @@ struct ArcAppShortcutItem {
   std::string shortcut_id;
 
   // The short description of this shortcut.
-  base::string16 short_label;
+  std::string short_label;
 
   // The icon for this shortcut.
   gfx::ImageSkia icon;

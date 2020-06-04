@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -294,13 +294,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 };
 
-#if defined(OS_MACOSX)
-// http://crbug.com/81451
-#define MAYBE_NormalKeyEvents DISABLED_NormalKeyEvents
-#else
-#define MAYBE_NormalKeyEvents NormalKeyEvents
-#endif
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_NormalKeyEvents) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, NormalKeyEvents) {
   static const KeyEventTestData kTestNoInput[] = {
     // a
     { ui::VKEY_A, false, false, false, false,
@@ -657,9 +651,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, ReservedAccelerators) {
 #endif
   };
 
-  content::WindowedNotificationObserver wait_for_new_tab(
-      chrome::NOTIFICATION_TAB_PARENTED,
-      content::NotificationService::AllSources());
+  ui_test_utils::TabAddedWaiter wait_for_new_tab(browser());
 
   // Press Ctrl/Cmd+T, which will open a new tab. It cannot be suppressed.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(0, kTestCtrlOrCmdT));
@@ -703,9 +695,6 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, ReservedAccelerators) {
 
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
-  // TODO(kbr): re-enable: http://crbug.com/222296
-  return;
-
   static const KeyEventTestData kTestCtrlA = {
     ui::VKEY_A, true, false, false, false,
     false, false, false, false, 4,

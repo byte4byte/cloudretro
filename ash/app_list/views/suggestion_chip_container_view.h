@@ -11,7 +11,7 @@
 #include "ash/app_list/views/search_result_suggestion_chip_view.h"
 #include "base/macros.h"
 
-namespace app_list {
+namespace ash {
 
 class ContentsView;
 
@@ -37,17 +37,27 @@ class SuggestionChipContainerView : public SearchResultContainerView {
   // Called when tablet mode starts and ends.
   void OnTabletModeChanged(bool started);
 
+  // Sets whether blur is disabled on suggestion chip views.
+  void SetBlurDisabled(bool blur_disabled);
+
  private:
-  // Returns true if update and layout should be ignored.
-  bool IgnoreUpdateAndLayout() const;
+  // Enables or disables suggestion chips blur depending on the container state.
+  void UpdateBlurState();
 
   ContentsView* contents_view_ = nullptr;  // Not owned
+  views::BoxLayout* layout_manager_ = nullptr;  // Not owned
+
+  // Whether tablet mode is active - tracked by OnTabletModeChanged().
+  bool in_tablet_mode_ = false;
+
+  // Whether suggestion chip blur has been explicitly disabled.
+  bool blur_disabled_ = false;
 
   std::vector<SearchResultSuggestionChipView*> suggestion_chip_views_;  // Owned
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionChipContainerView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_SUGGESTION_CHIP_CONTAINER_VIEW_H_

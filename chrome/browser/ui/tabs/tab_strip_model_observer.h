@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "chrome/browser/ui/tabs/tab_change_type.h"
-#include "chrome/browser/ui/tabs/tab_group_id.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "ui/base/models/list_selection_model.h"
 
 class TabStripModel;
@@ -35,14 +35,7 @@ class WebContents;
 ////////////////////////////////////////////////////////////////////////////////
 class TabStripModelChange {
  public:
-  enum Type {
-    kSelectionOnly,
-    kInserted,
-    kRemoved,
-    kMoved,
-    kReplaced,
-    kGroupChanged
-  };
+  enum Type { kSelectionOnly, kInserted, kRemoved, kMoved, kReplaced };
 
   // Base class for all changes.
   // TODO(dfried): would love to change this whole thing into a std::variant,
@@ -143,26 +136,11 @@ class TabStripModelChange {
     int index;
   };
 
-  // A WebContents' group affiliation changed from |old_group| to |new_group|.
-  struct GroupChange : public Delta {
-    // Constructors and destructor required due to Optional.
-    GroupChange();
-    GroupChange(const GroupChange& other);
-    GroupChange& operator=(const GroupChange& other);
-    ~GroupChange() override;
-
-    content::WebContents* contents;
-    int index;
-    base::Optional<TabGroupId> old_group;
-    base::Optional<TabGroupId> new_group;
-  };
-
   TabStripModelChange();
   explicit TabStripModelChange(Insert delta);
   explicit TabStripModelChange(Remove delta);
   explicit TabStripModelChange(Replace delta);
   explicit TabStripModelChange(Move delta);
-  explicit TabStripModelChange(GroupChange delta);
   ~TabStripModelChange();
 
   Type type() const { return type_; }
@@ -170,7 +148,6 @@ class TabStripModelChange {
   const Remove* GetRemove() const;
   const Move* GetMove() const;
   const Replace* GetReplace() const;
-  const GroupChange* GetGroupChange() const;
 
  private:
   TabStripModelChange(Type type, std::unique_ptr<Delta> delta);
@@ -214,6 +191,24 @@ struct TabStripSelectionChange {
   int reason = 0;
 };
 
+// Struct to carry changes to tab groups. The tab group model is independent of
+// the tab strip model, so these changes are not bundled with
+// TabStripModelChanges or TabStripSelectionChanges.
+struct TabGroupChange {
+  // A group is created when the first tab is added to it and closed when the
+  // last tab is removed from it. Whenever the set of tabs in the group changes,
+  // a kContentsChange event is fired. Whenever the group's visual data changes,
+  // such as its title or color, a kVisualsChange event is fired. Whenever the
+  // group is moved by interacting with its header, a kMoved event is fired.
+  enum Type { kCreated, kContentsChanged, kVisualsChanged, kMoved, kClosed };
+
+  TabGroupChange(tab_groups::TabGroupId group, Type type);
+  ~TabGroupChange();
+
+  tab_groups::TabGroupId group;
+  Type type;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // TabStripModelObserver
@@ -248,7 +243,7 @@ class TabStripModelObserver {
     kCloseAllCompleted = 1,
   };
 
-  // |change| is a series of changes in tabtrip model. |change| consists
+  // |change| is a series of changes in tabstrip model. |change| consists
   // of changes with same type and those changes may have caused selection or
   // activation changes. |selection| is determined by comparing the state of
   // TabStripModel before the |change| and after the |change| are applied.
@@ -257,6 +252,11 @@ class TabStripModelObserver {
   virtual void OnTabStripModelChanged(TabStripModel* tab_strip_model,
                                       const TabStripModelChange& change,
                                       const TabStripSelectionChange& selection);
+
+  // |change| is a change in the Tab Group model or metadata. These
+  // changes may cause repainting of some Tab Group UI. They are
+  // independent of the tabstrip model and do not affect any tab state.
+  virtual void OnTabGroupChanged(const TabGroupChange& change);
 
   // The specified WebContents at |index| changed in some way. |contents|
   // may be an entirely different object and the old value is no longer
@@ -277,6 +277,11 @@ class TabStripModelObserver {
   // window.
   virtual void TabBlockedStateChanged(content::WebContents* contents,
                                       int index);
+
+  // Called when the tab at |index| is added to the group with id |group|.
+  virtual void TabGroupedStateChanged(
+      base::Optional<tab_groups::TabGroupId> group,
+      int index);
 
   // The TabStripModel now no longer has any tabs. The implementer may
   // use this as a trigger to try and close the window containing the
@@ -300,11 +305,39 @@ class TabStripModelObserver {
   // |attention| is true.
   virtual void SetTabNeedsAttentionAt(int index, bool attention);
 
+  // Called when an observed TabStripModel is beginning destruction.
+  virtual void OnTabStripModelDestroyed(TabStripModel* tab_strip_model);
+
+  static void StopObservingAll(TabStripModelObserver* observer);
+  static bool IsObservingAny(TabStripModelObserver* observer);
+  static int CountObservedModels(TabStripModelObserver* observer);
+
+  // A passkey for TabStripModel to access some methods on this class - see
+  // </docs/patterns/passkey.md>.
+  class ModelPasskey {
+   private:
+    friend class TabStripModel;
+    ModelPasskey() = default;
+    ~ModelPasskey() = default;
+  };
+
+  // These methods are used by TabStripModel to notify this class of lifecycle
+  // events on the TabStripModelObserver or the TabStripModel itself. The first
+  // two are used to allow TabStripModelObserver to track which models it is
+  // observing. The third is used to allow TabStripModelObserver to clean up
+  // when an observed TabStripModel is destroyed, and to send the
+  // OnTabStripModelDestroyed notification above.
+  void StartedObserving(ModelPasskey, TabStripModel* model);
+  void StoppedObserving(ModelPasskey, TabStripModel* model);
+  void ModelDestroyed(ModelPasskey, TabStripModel* model);
+
  protected:
   TabStripModelObserver();
-  virtual ~TabStripModelObserver() {}
+  virtual ~TabStripModelObserver();
 
  private:
+  std::set<TabStripModel*> observed_models_;
+
   DISALLOW_COPY_AND_ASSIGN(TabStripModelObserver);
 };
 

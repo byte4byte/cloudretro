@@ -11,9 +11,12 @@
 #include "base/numerics/math_constants.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_gesture_recognizer.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_util.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ui/gfx/ios/uikit_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -64,23 +67,27 @@ const CGFloat kSelectionAnimationScale = 26;
 
 // The duration of the animations played when the threshold is met.
 const CGFloat kSelectionAnimationDuration = 0.5;
+
+UIColor* SelectionCircleColor() {
+  return [UIColor colorNamed:kTextfieldBackgroundColor];
+}
 }
 
 @interface SideSwipeNavigationView () {
  @private
   // Has the current swipe gone past the point where the action would trigger?
   // Will be reset to NO if it recedes before that point (ie, not a latch).
-  BOOL thresholdTriggered_;
+  BOOL _thresholdTriggered;
 
   // The back or forward sprite image.
-  UIImageView* arrowView_;
+  UIImageView* _arrowView;
 
   // The selection bubble.
-  CAShapeLayer* selectionCircleLayer_;
+  CAShapeLayer* _selectionCircleLayer;
 
   // If |NO| this is an edge gesture and navigation isn't possible. Don't show
   // arrows and bubbles and don't allow navigate.
-  BOOL canNavigate_;
+  BOOL _canNavigate;
 }
 // Returns a newly allocated and configured selection circle shape.
 - (CAShapeLayer*)newSelectionCircleLayer;
@@ -91,7 +98,7 @@ const CGFloat kSelectionAnimationDuration = 0.5;
 
 @implementation SideSwipeNavigationView
 
-@synthesize targetView = targetView_;
+@synthesize targetView = _targetView;
 
 - (instancetype)initWithFrame:(CGRect)frame
                 withDirection:(UISwipeGestureRecognizerDirection)direction
@@ -99,38 +106,35 @@ const CGFloat kSelectionAnimationDuration = 0.5;
                         image:(UIImage*)image {
   self = [super initWithFrame:frame];
   if (self) {
-    self.backgroundColor = [UIColor colorWithWhite:90.0 / 256 alpha:1.0];
+    self.backgroundColor = [UIColor colorNamed:kBackgroundColor];
 
-    canNavigate_ = canNavigate;
+    _canNavigate = canNavigate;
     if (canNavigate) {
       image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
       const CGRect imageSize = CGRectMake(0, 0, 24, 24);
-      arrowView_ = [[UIImageView alloc] initWithImage:image];
-      [arrowView_ setTintColor:[UIColor whiteColor]];
-      selectionCircleLayer_ = [self newSelectionCircleLayer];
-      [arrowView_ setFrame:imageSize];
+      _arrowView = [[UIImageView alloc] initWithImage:image];
+      _arrowView.tintColor = [UIColor colorNamed:kToolbarButtonColor];
+      _selectionCircleLayer = [self newSelectionCircleLayer];
+      [_arrowView setFrame:imageSize];
     }
 
-    UIImage* shadowImage =
-        [UIImage imageNamed:@"side_swipe_navigation_content_shadow"];
-    CGRect borderFrame =
-        CGRectMake(0, 0, shadowImage.size.width, self.frame.size.height);
-    UIImageView* border = [[UIImageView alloc] initWithFrame:borderFrame];
-    [border setImage:shadowImage];
+    CGFloat borderWidth = ui::AlignValueToUpperPixel(kToolbarSeparatorHeight);
+
+    CGRect borderFrame = CGRectMake(0, 0, borderWidth, self.frame.size.height);
+    UIView* border = [[UIView alloc] initWithFrame:borderFrame];
+    border.backgroundColor = [UIColor colorNamed:kToolbarShadowColor];
     [self addSubview:border];
     if (direction == UISwipeGestureRecognizerDirectionRight) {
-      borderFrame.origin.x = frame.size.width - shadowImage.size.width;
+      borderFrame.origin.x = frame.size.width - borderWidth;
       [border setFrame:borderFrame];
       [border setAutoresizingMask:UIViewAutoresizingFlexibleLeftMargin];
     } else {
-      [border
-          setTransform:CGAffineTransformMakeRotation(CGFloat(base::kPiDouble))];
       [border setAutoresizingMask:UIViewAutoresizingFlexibleRightMargin];
     }
 
-    [self.layer addSublayer:selectionCircleLayer_];
+    [self.layer addSublayer:_selectionCircleLayer];
     [self setClipsToBounds:YES];
-    [self addSubview:arrowView_];
+    [self addSubview:_arrowView];
   }
   return self;
 }
@@ -155,6 +159,18 @@ const CGFloat kSelectionAnimationDuration = 0.5;
   return currentPoint;
 }
 
+- (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+
+  if (@available(iOS 13, *)) {
+    if ([self.traitCollection
+            hasDifferentColorAppearanceComparedToTraitCollection:
+                previousTraitCollection]) {
+      _selectionCircleLayer.fillColor = SelectionCircleColor().CGColor;
+    }
+  }
+}
+
 - (void)updateFrameAndAnimateContents:(CGFloat)distance
                            forGesture:(SideSwipeGestureRecognizer*)gesture {
   CGFloat width = CGRectGetWidth(self.targetView.bounds);
@@ -173,10 +189,10 @@ const CGFloat kSelectionAnimationDuration = 0.5;
   // Move |selectionCircleLayer_| without animations.
   CGRect bounds = self.bounds;
   CGPoint center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-  [arrowView_ setCenter:AlignPointToPixel(center)];
+  [_arrowView setCenter:AlignPointToPixel(center)];
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
-  [selectionCircleLayer_ setPosition:center];
+  [_selectionCircleLayer setPosition:center];
   [CATransaction commit];
 
   CGFloat rotationStart = -CGFloat(base::kPiDouble) / 2;
@@ -188,29 +204,27 @@ const CGFloat kSelectionAnimationDuration = 0.5;
   CGAffineTransform rotation = CGAffineTransformMakeRotation(MapValueToRange(
       {0, kArrowThreshold}, {rotationStart, rotationEnd}, distance));
   CGFloat scale = MapValueToRange({0, kArrowThreshold}, {0, 1}, distance);
-  [arrowView_ setTransform:CGAffineTransformScale(rotation, scale, scale)];
+  [_arrowView setTransform:CGAffineTransformScale(rotation, scale, scale)];
 
   // Animate selection bubbles dpending on distance.
   [UIView beginAnimations:@"transform" context:NULL];
   [UIView setAnimationDuration:kSelectionSnappingAnimationDuration];
   if (distance < (width * kSwipeThreshold)) {
     // Scale selection down.
-    selectionCircleLayer_.transform =
+    _selectionCircleLayer.transform =
         CATransform3DMakeScale(kSelectionDownScale, kSelectionDownScale, 1);
-    selectionCircleLayer_.opacity = 0;
-    [arrowView_ setAlpha:MapValueToRange({0, 64}, {0, 1}, distance)];
-    [arrowView_ setTintColor:[UIColor whiteColor]];
-    thresholdTriggered_ = NO;
+    _selectionCircleLayer.opacity = 0;
+    [_arrowView setAlpha:MapValueToRange({0, 64}, {0, 1}, distance)];
+    _thresholdTriggered = NO;
   } else {
-    selectionCircleLayer_.transform = CATransform3DMakeScale(1, 1, 1);
-    selectionCircleLayer_.opacity = 0.75;
-    [arrowView_ setAlpha:1];
-    [arrowView_ setTintColor:self.backgroundColor];
+    _selectionCircleLayer.transform = CATransform3DMakeScale(1, 1, 1);
+    _selectionCircleLayer.opacity = 1;
+    [_arrowView setAlpha:1];
     // Trigger a small haptic blip when exceeding the threshold and mark
     // such that only one blip gets triggered.
-    if (!thresholdTriggered_) {
+    if (!_thresholdTriggered) {
       TriggerHapticFeedbackForSelectionChange();
-      thresholdTriggered_ = YES;
+      _thresholdTriggered = YES;
     }
   }
   [UIView commitAnimations];
@@ -224,11 +238,11 @@ const CGFloat kSelectionAnimationDuration = 0.5;
     // completion handler that show the original state. To avoid this flicker,
     // the animations use a fillMode forward and are not removed until the
     // transaction completion handler is executed.
-    [selectionCircleLayer_ removeAnimationForKey:@"opacity"];
-    [selectionCircleLayer_ removeAnimationForKey:@"transform"];
-    [selectionCircleLayer_ setOpacity:0];
-    [arrowView_ setAlpha:0];
-    self.backgroundColor = [UIColor whiteColor];
+    [_selectionCircleLayer removeAnimationForKey:@"opacity"];
+    [_selectionCircleLayer removeAnimationForKey:@"transform"];
+    [_selectionCircleLayer setOpacity:0];
+    [_arrowView setAlpha:0];
+    self.backgroundColor = SelectionCircleColor();
     block();
 
   }];
@@ -247,38 +261,37 @@ const CGFloat kSelectionAnimationDuration = 0.5;
   scaleAnimation.duration = kSelectionAnimationDuration;
   scaleAnimation.fillMode = kCAFillModeForwards;
   scaleAnimation.removedOnCompletion = NO;
-  [selectionCircleLayer_ addAnimation:scaleAnimation forKey:@"transform"];
+  [_selectionCircleLayer addAnimation:scaleAnimation forKey:@"transform"];
 
   CABasicAnimation* opacityAnimation =
       [CABasicAnimation animationWithKeyPath:@"opacity"];
-  opacityAnimation.fromValue = @(selectionCircleLayer_.opacity);
+  opacityAnimation.fromValue = @(_selectionCircleLayer.opacity);
   opacityAnimation.toValue = @(1);
   opacityAnimation.timingFunction = timing;
   opacityAnimation.duration = kSelectionAnimationDuration;
   opacityAnimation.fillMode = kCAFillModeForwards;
   opacityAnimation.removedOnCompletion = NO;
-  [selectionCircleLayer_ addAnimation:opacityAnimation forKey:@"opacity"];
+  [_selectionCircleLayer addAnimation:opacityAnimation forKey:@"opacity"];
 
   CABasicAnimation* positionAnimation =
       [CABasicAnimation animationWithKeyPath:@"position"];
   positionAnimation.fromValue =
-      [NSValue valueWithCGPoint:selectionCircleLayer_.position];
+      [NSValue valueWithCGPoint:_selectionCircleLayer.position];
 
   CGPoint finalPosition = CGPointMake([self.targetView superview].center.x,
-                                      selectionCircleLayer_.position.y);
+                                      _selectionCircleLayer.position.y);
   positionAnimation.toValue = [NSValue valueWithCGPoint:finalPosition];
   positionAnimation.timingFunction = timing;
   positionAnimation.duration = kSelectionAnimationDuration;
   positionAnimation.fillMode = kCAFillModeForwards;
   positionAnimation.removedOnCompletion = NO;
-  [selectionCircleLayer_ addAnimation:positionAnimation forKey:@"position"];
+  [_selectionCircleLayer addAnimation:positionAnimation forKey:@"position"];
   [CATransaction commit];
 
-  [arrowView_ setAlpha:1];
-  [arrowView_ setTintColor:self.backgroundColor];
+  [_arrowView setAlpha:1];
   [UIView animateWithDuration:kSelectionAnimationDuration
                    animations:^{
-                     [arrowView_ setAlpha:0];
+                     [_arrowView setAlpha:0];
                    }];
 }
 
@@ -302,7 +315,7 @@ const CGFloat kSelectionAnimationDuration = 0.5;
     velocityOffset = -velocityOffset;
   }
 
-  if (!canNavigate_) {
+  if (!_canNavigate) {
     // shrink distance a bit to make the drag feel springier.
     distance /= 3;
   }
@@ -325,7 +338,7 @@ const CGFloat kSelectionAnimationDuration = 0.5;
     // Ensure the actual distance traveled has met the minimum arrow threshold
     // and that the distance including expected velocity is over |threshold|.
     if (distance > kArrowThreshold && finalDistance > threshold &&
-        canNavigate_ && gesture.state == UIGestureRecognizerStateEnded) {
+        _canNavigate && gesture.state == UIGestureRecognizerStateEnded) {
       TriggerHapticFeedbackForImpact(UIImpactFeedbackStyleMedium);
 
       // Speed up the animation for higher velocity swipes.
@@ -357,7 +370,7 @@ const CGFloat kSelectionAnimationDuration = 0.5;
             base::UserMetricsAction("MobileEdgeSwipeNavigationBackCancelled"));
       }
     }
-    thresholdTriggered_ = NO;
+    _thresholdTriggered = NO;
   }
 }
 
@@ -387,7 +400,7 @@ const CGFloat kSelectionAnimationDuration = 0.5;
     }
     CGRect bounds = self.bounds;
     CGPoint center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-    [arrowView_ setCenter:AlignPointToPixel(center)];
+    [_arrowView setCenter:AlignPointToPixel(center)];
   };
   CGFloat cleanUpDelay = completed ? kSelectionAnimationDuration - duration : 0;
   [UIView animateWithDuration:duration
@@ -410,8 +423,14 @@ const CGFloat kSelectionAnimationDuration = 0.5;
   const CGRect bounds = CGRectMake(0, 0, kSelectionSize, kSelectionSize);
   CAShapeLayer* selectionCircleLayer = [[CAShapeLayer alloc] init];
   selectionCircleLayer.bounds = bounds;
-  selectionCircleLayer.backgroundColor = [[UIColor clearColor] CGColor];
-  selectionCircleLayer.fillColor = [[UIColor whiteColor] CGColor];
+  selectionCircleLayer.backgroundColor = UIColor.clearColor.CGColor;
+  if (@available(iOS 13, *)) {
+    UIColor* resolvedColor = [SelectionCircleColor()
+        resolvedColorWithTraitCollection:self.traitCollection];
+    selectionCircleLayer.fillColor = resolvedColor.CGColor;
+  } else {
+    selectionCircleLayer.fillColor = SelectionCircleColor().CGColor;
+  }
   selectionCircleLayer.opacity = 0;
   selectionCircleLayer.transform =
       CATransform3DMakeScale(kSelectionDownScale, kSelectionDownScale, 1);

@@ -11,7 +11,6 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/cronet/cronet_buildflags.h"
 #include "components/cronet/ios/test/cronet_test_base.h"
@@ -25,6 +24,10 @@
 #include "testing/gtest_mac.h"
 
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -258,6 +261,27 @@ TEST_F(HttpTest, SetUserAgentIsExact) {
       net::NSURLWithGURL(GURL(TestServer::GetEchoHeaderURL("User-Agent")));
   [Cronet setRequestFilterBlock:nil];
   NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_STREQ(kUserAgent,
+               base::SysNSStringToUTF8([delegate_ responseBody]).c_str());
+}
+
+TEST_F(HttpTest, SetUserAgentIsAllowed) {
+  NSURL* url =
+      net::NSURLWithGURL(GURL(TestServer::GetEchoHeaderURL("User-Agent")));
+  NSMutableURLRequest* mutableRequest =
+      [[NSURLRequest requestWithURL:url] mutableCopy];
+  [mutableRequest addValue:@"foo,bar" forHTTPHeaderField:@"User-Agent"];
+  NSURLSessionDataTask* task = [session_ dataTaskWithRequest:mutableRequest];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_TRUE([[delegate_ responseBody] containsString:@"foo,bar"]);
+
+  // Now check to see if the User-Agent string is restored to default when
+  // creating a new task from a request.
+  mutableRequest = [[NSURLRequest requestWithURL:url] mutableCopy];
+  task = [session_ dataTaskWithRequest:mutableRequest];
   StartDataTaskAndWaitForCompletion(task);
   EXPECT_EQ(nil, [delegate_ error]);
   EXPECT_STREQ(kUserAgent,
@@ -499,6 +523,39 @@ TEST_F(HttpTest, PostRequest) {
   NSString* response_body = [delegate_ responseBody];
   ASSERT_EQ(nil, [delegate_ error]);
   ASSERT_STREQ(base::SysNSStringToUTF8(request_body).c_str(),
+               base::SysNSStringToUTF8(response_body).c_str());
+  ASSERT_TRUE(block_used);
+}
+
+TEST_F(HttpTest, PostRequestWithLargeBody) {
+  // Create request body.
+  std::string request_body(kLargeRequestBodyBufferLength, 'z');
+  NSData* post_data = [NSData dataWithBytes:request_body.c_str()
+                                     length:request_body.length()];
+
+  // Prepare the request.
+  NSURL* url = net::NSURLWithGURL(GURL(TestServer::GetEchoRequestBodyURL()));
+  NSMutableURLRequest* request = [[NSMutableURLRequest alloc] initWithURL:url];
+  request.HTTPMethod = @"POST";
+  request.HTTPBody = post_data;
+
+  // Set the request filter to check that the request was handled by the Cronet
+  // stack.
+  __block BOOL block_used = NO;
+  [Cronet setRequestFilterBlock:^(NSURLRequest* req) {
+    block_used = YES;
+    EXPECT_EQ([req URL], url);
+    return YES;
+  }];
+
+  // Send the request and wait for the response.
+  NSURLSessionDataTask* data_task = [session_ dataTaskWithRequest:request];
+  StartDataTaskAndWaitForCompletion(data_task);
+
+  // Verify that the response from the server matches the request body.
+  NSString* response_body = [delegate_ responseBody];
+  ASSERT_EQ(nil, [delegate_ error]);
+  ASSERT_STREQ(request_body.c_str(),
                base::SysNSStringToUTF8(response_body).c_str());
   ASSERT_TRUE(block_used);
 }

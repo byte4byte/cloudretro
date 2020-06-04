@@ -4,17 +4,18 @@
 
 package org.chromium.chrome.browser.keyboard_accessory;
 
-import android.graphics.Bitmap;
-import android.support.annotation.Px;
 import android.util.SparseArray;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Callback;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.AccessorySheetData;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.Action;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.FooterCommand;
+import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.OptionToggle;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.UserInfo;
 import org.chromium.chrome.browser.keyboard_accessory.data.PropertyProvider;
 import org.chromium.chrome.browser.keyboard_accessory.data.UserInfoField;
@@ -76,8 +77,9 @@ class ManualFillingComponentBridge {
                             : "Controller has been destroyed but the bridge wasn't cleaned up!";
                         ManualFillingMetricsRecorder.recordActionSelected(
                                 AccessoryAction.GENERATE_PASSWORD_AUTOMATIC);
-                        nativeOnOptionSelected(
-                                mNativeView, AccessoryAction.GENERATE_PASSWORD_AUTOMATIC);
+                        ManualFillingComponentBridgeJni.get().onOptionSelected(mNativeView,
+                                ManualFillingComponentBridge.this,
+                                AccessoryAction.GENERATE_PASSWORD_AUTOMATIC);
                     })};
         } else {
             generationAction = new Action[0];
@@ -88,11 +90,6 @@ class ManualFillingComponentBridge {
     @CalledByNative
     void showWhenKeyboardIsVisible() {
         mManualFillingComponent.showWhenKeyboardIsVisible();
-    }
-
-    @CalledByNative
-    void showTouchToFillSheet() {
-        // TODO(crbug.com/957532): Implement this method.
     }
 
     @CalledByNative
@@ -119,13 +116,26 @@ class ManualFillingComponentBridge {
     }
 
     @CalledByNative
-    private static Object createAccessorySheetData(@AccessoryTabType int type, String title) {
-        return new AccessorySheetData(type, title);
+    private static Object createAccessorySheetData(
+            @AccessoryTabType int type, String title, String warning) {
+        return new AccessorySheetData(type, title, warning);
     }
 
     @CalledByNative
-    private Object addUserInfoToAccessorySheetData(Object objAccessorySheetData, String title) {
-        UserInfo userInfo = new UserInfo(title, this::fetchFavicon);
+    private void addOptionToggleToAccessorySheetData(Object objAccessorySheetData,
+            String displayText, boolean enabled, @AccessoryAction int accessoryAction) {
+        ((AccessorySheetData) objAccessorySheetData)
+                .setOptionToggle(new OptionToggle(displayText, enabled, on -> {
+                    assert mNativeView != 0 : "Controller was destroyed but the bridge wasn't!";
+                    ManualFillingComponentBridgeJni.get().onToggleChanged(
+                            mNativeView, ManualFillingComponentBridge.this, accessoryAction, on);
+                }));
+    }
+
+    @CalledByNative
+    private Object addUserInfoToAccessorySheetData(
+            Object objAccessorySheetData, String origin, boolean isPslMatch) {
+        UserInfo userInfo = new UserInfo(origin, isPslMatch);
         ((AccessorySheetData) objAccessorySheetData).getUserInfoList().add(userInfo);
         return userInfo;
     }
@@ -140,7 +150,8 @@ class ManualFillingComponentBridge {
                 assert mNativeView != 0 : "Controller was destroyed but the bridge wasn't!";
                 ManualFillingMetricsRecorder.recordSuggestionSelected(
                         sheetType, field.isObfuscated());
-                nativeOnFillingTriggered(mNativeView, sheetType, field);
+                ManualFillingComponentBridgeJni.get().onFillingTriggered(
+                        mNativeView, ManualFillingComponentBridge.this, sheetType, field);
             };
         }
         ((UserInfo) objUserInfo)
@@ -155,42 +166,47 @@ class ManualFillingComponentBridge {
                 .getFooterCommands()
                 .add(new FooterCommand(displayText, (footerCommand) -> {
                     assert mNativeView != 0 : "Controller was destroyed but the bridge wasn't!";
-                    nativeOnOptionSelected(mNativeView, accessoryAction);
+                    ManualFillingComponentBridgeJni.get().onOptionSelected(
+                            mNativeView, ManualFillingComponentBridge.this, accessoryAction);
                 }));
     }
 
-    public void fetchFavicon(@Px int desiredSize, Callback<Bitmap> faviconCallback) {
-        assert mNativeView != 0 : "Favicon was requested after the bridge was destroyed!";
-        nativeOnFaviconRequested(mNativeView, desiredSize, faviconCallback);
-    }
-
     @VisibleForTesting
-    public static void cachePasswordSheetData(
-            WebContents webContents, String[] userNames, String[] passwords) {
-        nativeCachePasswordSheetDataForTesting(webContents, userNames, passwords);
+    public static void cachePasswordSheetData(WebContents webContents, String[] userNames,
+            String[] passwords, boolean originBlacklisted) {
+        ManualFillingComponentBridgeJni.get().cachePasswordSheetDataForTesting(
+                webContents, userNames, passwords, originBlacklisted);
     }
 
     @VisibleForTesting
     public static void notifyFocusedFieldType(WebContents webContents, int focusedFieldType) {
-        nativeNotifyFocusedFieldTypeForTesting(webContents, focusedFieldType);
+        ManualFillingComponentBridgeJni.get().notifyFocusedFieldTypeForTesting(
+                webContents, focusedFieldType);
     }
 
     @VisibleForTesting
     public static void signalAutoGenerationStatus(WebContents webContents, boolean available) {
-        nativeSignalAutoGenerationStatusForTesting(webContents, available);
+        ManualFillingComponentBridgeJni.get().signalAutoGenerationStatusForTesting(
+                webContents, available);
     }
 
-    private native void nativeOnFaviconRequested(long nativeManualFillingViewAndroid,
-            int desiredSizeInPx, Callback<Bitmap> faviconCallback);
-    private native void nativeOnFillingTriggered(
-            long nativeManualFillingViewAndroid, int tabType, UserInfoField userInfoField);
-    private native void nativeOnOptionSelected(
-            long nativeManualFillingViewAndroid, int accessoryAction);
+    @VisibleForTesting
+    public static void disableServerPredictionsForTesting() {
+        ManualFillingComponentBridgeJni.get().disableServerPredictionsForTesting();
+    }
 
-    private static native void nativeCachePasswordSheetDataForTesting(
-            WebContents webContents, String[] userNames, String[] passwords);
-    private static native void nativeNotifyFocusedFieldTypeForTesting(
-            WebContents webContents, int focusedFieldType);
-    private static native void nativeSignalAutoGenerationStatusForTesting(
-            WebContents webContents, boolean available);
+    @NativeMethods
+    interface Natives {
+        void onFillingTriggered(long nativeManualFillingViewAndroid,
+                ManualFillingComponentBridge caller, int tabType, UserInfoField userInfoField);
+        void onOptionSelected(long nativeManualFillingViewAndroid,
+                ManualFillingComponentBridge caller, int accessoryAction);
+        void onToggleChanged(long nativeManualFillingViewAndroid,
+                ManualFillingComponentBridge caller, int accessoryAction, boolean enabled);
+        void cachePasswordSheetDataForTesting(WebContents webContents, String[] userNames,
+                String[] passwords, boolean originBlacklisted);
+        void notifyFocusedFieldTypeForTesting(WebContents webContents, int focusedFieldType);
+        void signalAutoGenerationStatusForTesting(WebContents webContents, boolean available);
+        void disableServerPredictionsForTesting();
+    }
 }

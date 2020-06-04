@@ -7,24 +7,24 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/version.h"
 #include "base/win/windows_version.h"
-#include "chrome/services/util_win/public/mojom/constants.mojom.h"
-#include "chrome/services/util_win/util_win_service.h"
+#include "chrome/services/util_win/util_win_impl.h"
 #include "components/variations/hashing.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 void VerifySystemProfileData(const metrics::SystemProfileProto& system_profile,
-                             bool expect_unhashed_value) {
+                             bool expect_unhashed_value,
+                             bool second_run) {
   if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 
@@ -35,7 +35,10 @@ void VerifySystemProfileData(const metrics::SystemProfileProto& system_profile,
 
   if (base::win::GetVersion() >= base::win::Version::WIN8) {
     bool defender_found = false;
+    uint32_t last_hash = 0xdeadbeef;
     for (const auto& av : system_profile.antivirus_product()) {
+      if (av.has_product_name_hash())
+        last_hash = av.product_name_hash();
       if (av.product_name_hash() ==
           variations::HashName(kWindowsDefender) ||
           av.product_name_hash() ==
@@ -51,7 +54,11 @@ void VerifySystemProfileData(const metrics::SystemProfileProto& system_profile,
         break;
       }
     }
-    EXPECT_TRUE(defender_found);
+    EXPECT_TRUE(defender_found)
+        << "expect_unhashed_value = " << expect_unhashed_value
+        << ", second_run = " << second_run << ", "
+        << system_profile.antivirus_product().size()
+        << " antivirus products found. Last hash is " << last_hash << ".";
   }
 }
 
@@ -60,11 +67,11 @@ void VerifySystemProfileData(const metrics::SystemProfileProto& system_profile,
 class AntiVirusMetricsProviderTest : public ::testing::TestWithParam<bool> {
  public:
   AntiVirusMetricsProviderTest()
-      : got_results_(false),
-        expect_unhashed_value_(GetParam()),
-        util_win_service_(connector_factory_.RegisterInstance(
-            chrome::mojom::kUtilWinServiceName)),
-        provider_(connector_factory_.GetDefaultConnector()) {}
+      : got_results_(false), expect_unhashed_value_(GetParam()) {
+    mojo::PendingRemote<chrome::mojom::UtilWin> remote;
+    util_win_impl_.emplace(remote.InitWithNewPipeAndPassReceiver());
+    provider_.SetRemoteUtilWinForTesting(std::move(remote));
+  }
 
   void GetMetricsCallback() {
     // Check that the callback runs on the main loop.
@@ -75,13 +82,13 @@ class AntiVirusMetricsProviderTest : public ::testing::TestWithParam<bool> {
     metrics::SystemProfileProto system_profile;
     provider_.ProvideSystemProfileMetrics(&system_profile);
 
-    VerifySystemProfileData(system_profile, expect_unhashed_value_);
+    VerifySystemProfileData(system_profile, expect_unhashed_value_, false);
     // This looks weird, but it's to make sure that reading the data out of the
     // AntiVirusMetricsProvider does not invalidate it, as the class should be
     // resilient to this.
     system_profile.Clear();
     provider_.ProvideSystemProfileMetrics(&system_profile);
-    VerifySystemProfileData(system_profile, expect_unhashed_value_);
+    VerifySystemProfileData(system_profile, expect_unhashed_value_, true);
   }
 
   // Helper function to toggle whether the ReportFullAVProductDetails feature is
@@ -98,9 +105,8 @@ class AntiVirusMetricsProviderTest : public ::testing::TestWithParam<bool> {
 
   bool got_results_;
   bool expect_unhashed_value_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  service_manager::TestConnectorFactory connector_factory_;
-  UtilWinService util_win_service_;
+  base::test::TaskEnvironment task_environment_;
+  base::Optional<UtilWinImpl> util_win_impl_;
   AntiVirusMetricsProvider provider_;
   base::test::ScopedFeatureList scoped_feature_list_;
   base::ThreadCheckerImpl thread_checker_;
@@ -118,8 +124,10 @@ TEST_P(AntiVirusMetricsProviderTest, GetMetricsFullName) {
   // The usage of base::Unretained(this) is safe here because |provider_|, who
   // owns the callback, will go away before |this|.
   provider_.AsyncInit(
-      base::Bind(&AntiVirusMetricsProviderTest::GetMetricsCallback,
-                 base::Unretained(this)));
-  scoped_task_environment_.RunUntilIdle();
+      base::BindOnce(&AntiVirusMetricsProviderTest::GetMetricsCallback,
+                     base::Unretained(this)));
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(got_results_);
 }
+
+INSTANTIATE_TEST_SUITE_P(, AntiVirusMetricsProviderTest, ::testing::Bool());

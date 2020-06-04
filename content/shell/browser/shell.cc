@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "content/shell/browser/shell.h"
-#include "chrome/browser/file_select_helper.h"
+//#include "chrome/browser/file_select_helper.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -36,12 +36,12 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
+#include "content/public/browser/presentation_receiver_flags.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/webrtc_ip_handling_policy.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
@@ -55,11 +55,8 @@
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/common/web_test/web_test_switches.h"
 #include "media/media_buildflags.h"
+#include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 #include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
-#include "third_party/blink/public/web/web_presentation_receiver_flags.h"
-#include "chrome/browser/file_select_helper.h"
-
-#include "content/public/common/file_chooser_file_info.h"
 
 namespace content {
 
@@ -338,12 +335,6 @@ Shell::Shell(std::unique_ptr<WebContents> web_contents,
   if (switches::IsRunWebTestsSwitchPresent()) {
     headless_ = !base::CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kDisableHeadlessMode);
-    // Disable occlusion tracking. In a headless shell WebContents would always
-    // behave as if they were occluded, i.e. would not render frames and would
-    // not receive input events. For non-headless mode we do not want tests
-    // running in parallel to trigger occlusion tracking.
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableBackgroundingOccludedWindowsForTesting);
   }
 
   base::CommandLine::ForCurrentProcess()->AppendSwitch("--no-sandbox");
@@ -403,7 +394,7 @@ Shell* Shell::CreateShell(std::unique_ptr<WebContents> web_contents,
   // RenderFrameCreated or RenderViewCreated instead.
   if (switches::IsRunWebTestsSwitchPresent()) {
     raw_web_contents->GetMutableRendererPrefs()->use_custom_colors = false;
-    raw_web_contents->GetRenderViewHost()->SyncRendererPrefs();
+    raw_web_contents->SyncRendererPrefs();
   }
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -438,8 +429,8 @@ void Shell::SetMainMessageLoopQuitClosure(base::OnceClosure quit_closure) {
 }
 
 void Shell::QuitMainMessageLoopForTesting() {
-  DCHECK(*g_quit_main_message_loop);
-  std::move(*g_quit_main_message_loop).Run();
+  if (*g_quit_main_message_loop)
+    std::move(*g_quit_main_message_loop).Run();
 }
 
 void Shell::SetShellCreatedCallback(
@@ -475,13 +466,12 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForcePresentationReceiverForTesting)) {
     create_params.starting_sandbox_flags =
-        blink::kPresentationReceiverSandboxFlags;
+        content::kPresentationReceiverSandboxFlags;
   }
-  create_params.initial_size = AdjustWindowSize(initial_size);
   std::unique_ptr<WebContents> web_contents =
       WebContents::Create(create_params);
   Shell* shell =
-      CreateShell(std::move(web_contents), create_params.initial_size,
+      CreateShell(std::move(web_contents), AdjustWindowSize(initial_size),
                   true /* should_set_delegate */);
   	
 	base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -510,16 +500,15 @@ Shell* Shell::CreateNewWindowWithSessionStorageNamespace(
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForcePresentationReceiverForTesting)) {
     create_params.starting_sandbox_flags =
-        blink::kPresentationReceiverSandboxFlags;
+        content::kPresentationReceiverSandboxFlags;
   }
-  create_params.initial_size = AdjustWindowSize(initial_size);
   std::map<std::string, scoped_refptr<SessionStorageNamespace>>
       session_storages;
   session_storages[""] = session_storage_namespace;
   std::unique_ptr<WebContents> web_contents =
       WebContents::CreateWithSessionStorage(create_params, session_storages);
   Shell* shell =
-      CreateShell(std::move(web_contents), create_params.initial_size,
+      CreateShell(std::move(web_contents), AdjustWindowSize(initial_size),
                   true /* should_set_delegate */);
   if (!url.is_empty())
     shell->LoadURL(url);
@@ -702,26 +691,8 @@ WebContents* Shell::OpenURLFromTab(WebContents* source,
       return nullptr;
   }
 
-  NavigationController::LoadURLParams load_url_params(params.url);
-  load_url_params.initiator_origin = params.initiator_origin;
-  load_url_params.source_site_instance = params.source_site_instance;
-  load_url_params.transition_type = params.transition;
-  load_url_params.frame_tree_node_id = params.frame_tree_node_id;
-  load_url_params.referrer = params.referrer;
-  load_url_params.redirect_chain = params.redirect_chain;
-  load_url_params.extra_headers = params.extra_headers;
-  load_url_params.is_renderer_initiated = params.is_renderer_initiated;
-  load_url_params.should_replace_current_entry =
-      params.should_replace_current_entry;
-  load_url_params.blob_url_loader_factory = params.blob_url_loader_factory;
-  load_url_params.reload_type = params.reload_type;
-
-  if (params.uses_post) {
-    load_url_params.load_type = NavigationController::LOAD_TYPE_HTTP_POST;
-    load_url_params.post_data = params.post_data;
-  }
-
-  target->GetController().LoadURLWithParams(load_url_params);
+  target->GetController().LoadURLWithParams(
+      NavigationController::LoadURLParams(params));
   return target;
 }
 
@@ -734,7 +705,7 @@ void Shell::LoadingStateChanged(WebContents* source,
 void Shell::EnterFullscreenModeForTab(
     WebContents* web_contents,
     const GURL& origin,
-    const blink::WebFullscreenOptions& options) {
+    const blink::mojom::FullscreenOptions& options) {
   ToggleFullscreenModeForTab(web_contents, true);
 }
 
@@ -763,19 +734,21 @@ bool Shell::IsFullscreenForTabOrPending(const WebContents* web_contents) {
 #endif
 }
 
-blink::WebDisplayMode Shell::GetDisplayMode(const WebContents* web_contents) {
-  // TODO: should return blink::WebDisplayModeFullscreen wherever user puts
+blink::mojom::DisplayMode Shell::GetDisplayMode(
+    const WebContents* web_contents) {
+  // TODO: should return blink::mojom::DisplayModeFullscreen wherever user puts
   // a browser window into fullscreen (not only in case of renderer-initiated
   // fullscreen mode): crbug.com/476874.
   return IsFullscreenForTabOrPending(web_contents)
-             ? blink::kWebDisplayModeFullscreen
-             : blink::kWebDisplayModeBrowser;
+             ? blink::mojom::DisplayMode::kFullscreen
+             : blink::mojom::DisplayMode::kBrowser;
 }
 
 void Shell::RequestToLockMouse(WebContents* web_contents,
                                bool user_gesture,
                                bool last_unlocked_by_target) {
-  web_contents->GotResponseToLockMouseRequest(true);
+  web_contents->GotResponseToLockMouseRequest(
+      blink::mojom::PointerLockResult::kSuccess);
 }
 
 void Shell::CloseContents(WebContents* source) {
@@ -790,16 +763,19 @@ bool Shell::CanOverscrollContent() {
 #endif
 }
 
-void Shell::DidNavigateMainFramePostCommit(WebContents* web_contents) {
-  PlatformSetAddressBarURL(web_contents->GetLastCommittedURL());
+void Shell::NavigationStateChanged(WebContents* source,
+                                   InvalidateTypes changed_flags) {
+  if (changed_flags & INVALIDATE_TYPE_URL)
+    PlatformSetAddressBarURL(source->GetVisibleURL());
 }
 
 JavaScriptDialogManager* Shell::GetJavaScriptDialogManager(
     WebContents* source) {
   if (!dialog_manager_) {
-    dialog_manager_.reset(switches::IsRunWebTestsSwitchPresent()
-                              ? new WebTestJavaScriptDialogManager
-                              : new ShellJavaScriptDialogManager);
+    if (switches::IsRunWebTestsSwitchPresent())
+      dialog_manager_ = std::make_unique<WebTestJavaScriptDialogManager>();
+    else
+      dialog_manager_ = std::make_unique<ShellJavaScriptDialogManager>();
   }
   return dialog_manager_.get();
 }
@@ -845,26 +821,28 @@ void Shell::ActivateContents(WebContents* contents) {
   contents->GetRenderViewHost()->GetWidget()->Focus();
 }
 
-std::unique_ptr<WebContents> Shell::SwapWebContents(
-    WebContents* old_contents,
-    std::unique_ptr<WebContents> new_contents,
-    bool did_start_load,
-    bool did_finish_load) {
-  DCHECK_EQ(old_contents, web_contents_.get());
-  new_contents->SetDelegate(this);
+std::unique_ptr<WebContents> Shell::ActivatePortalWebContents(
+    WebContents* predecessor_contents,
+    std::unique_ptr<WebContents> portal_contents) {
+  DCHECK_EQ(predecessor_contents, web_contents_.get());
+  portal_contents->SetDelegate(this);
   web_contents_->SetDelegate(nullptr);
-  std::swap(web_contents_, new_contents);
+  for (auto* shell_devtools_bindings :
+       ShellDevToolsBindings::GetInstancesForWebContents(
+           predecessor_contents)) {
+    shell_devtools_bindings->UpdateInspectedWebContents(portal_contents.get());
+  }
+  std::swap(web_contents_, portal_contents);
   PlatformSetContents();
-  PlatformSetAddressBarURL(web_contents_->GetLastCommittedURL());
+  PlatformSetAddressBarURL(web_contents_->GetVisibleURL());
   LoadingStateChanged(web_contents_.get(), true);
-  return new_contents;
+  return portal_contents;
 }
 
-bool Shell::ShouldAllowRunningInsecureContent(
-    content::WebContents* web_contents,
-    bool allowed_per_prefs,
-    const url::Origin& origin,
-    const GURL& resource_url) {
+bool Shell::ShouldAllowRunningInsecureContent(WebContents* web_contents,
+                                              bool allowed_per_prefs,
+                                              const url::Origin& origin,
+                                              const GURL& resource_url) {
   bool allowed_by_test = false;
   BlinkTestController* blink_test_controller = BlinkTestController::Get();
   if (blink_test_controller && switches::IsRunWebTestsSwitchPresent()) {
@@ -877,7 +855,7 @@ bool Shell::ShouldAllowRunningInsecureContent(
 }
 
 PictureInPictureResult Shell::EnterPictureInPicture(
-    content::WebContents* web_contents,
+    WebContents* web_contents,
     const viz::SurfaceId& surface_id,
     const gfx::Size& natural_size) {
   // During tests, returning success to pretend the window was created and allow

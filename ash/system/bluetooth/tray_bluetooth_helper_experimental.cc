@@ -11,50 +11,44 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/identity.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 // base::Unretained():
 //
-// Usage of `base::Unretained(this)` is safe when calling BluetoothSystemPtr
-// methods because BluetoothSystemPtr is owned by `this` and guarantees that no
-// callbacks will be run after its destruction.
+// Usage of `base::Unretained(this)` is safe when calling
+// mojo::Remote<BluetoothSystem> methods because mojo::Remote<BluetoothSystem>
+// is owned by `this` and guarantees that no callbacks will be run after its
+// destruction.
 
 namespace ash {
 
 TrayBluetoothHelperExperimental::TrayBluetoothHelperExperimental(
-    service_manager::Connector* connector)
-    : connector_(connector) {}
+    mojo::PendingRemote<device::mojom::BluetoothSystemFactory>
+        bluetooth_system_factory)
+    : bluetooth_system_factory_(std::move(bluetooth_system_factory)) {}
 
 TrayBluetoothHelperExperimental::~TrayBluetoothHelperExperimental() = default;
 
 void TrayBluetoothHelperExperimental::Initialize() {
-  device::mojom::BluetoothSystemFactoryPtr bluetooth_system_factory;
-  connector_->BindInterface(device::mojom::kServiceName,
-                            &bluetooth_system_factory);
-
-  device::mojom::BluetoothSystemClientPtr client_ptr;
-  bluetooth_system_client_binding_.Bind(mojo::MakeRequest(&client_ptr));
-
-  bluetooth_system_factory->Create(mojo::MakeRequest(&bluetooth_system_ptr_),
-                                   std::move(client_ptr));
-  bluetooth_system_ptr_->GetState(
+  bluetooth_system_factory_->Create(
+      bluetooth_system_.BindNewPipeAndPassReceiver(),
+      bluetooth_system_client_receiver_.BindNewPipeAndPassRemote());
+  bluetooth_system_->GetState(
       base::BindOnce(&TrayBluetoothHelperExperimental::OnStateChanged,
                      // See base::Unretained() note at the top.
                      base::Unretained(this)));
-  bluetooth_system_ptr_->GetScanState(
+  bluetooth_system_->GetScanState(
       base::BindOnce(&TrayBluetoothHelperExperimental::OnScanStateChanged,
                      // See base::Unretained() note at the top.
                      base::Unretained(this)));
 }
 
 void TrayBluetoothHelperExperimental::StartBluetoothDiscovering() {
-  bluetooth_system_ptr_->StartScan(base::DoNothing());
+  bluetooth_system_->StartScan(base::NullCallback());
 }
 
 void TrayBluetoothHelperExperimental::StopBluetoothDiscovering() {
-  bluetooth_system_ptr_->StopScan(base::DoNothing());
+  bluetooth_system_->StopScan(base::NullCallback());
 }
 
 void TrayBluetoothHelperExperimental::ConnectToBluetoothDevice(
@@ -68,7 +62,7 @@ TrayBluetoothHelperExperimental::GetBluetoothState() {
 }
 
 void TrayBluetoothHelperExperimental::SetBluetoothEnabled(bool enabled) {
-  bluetooth_system_ptr_->SetPowered(enabled, base::DoNothing());
+  bluetooth_system_->SetPowered(enabled, base::NullCallback());
 }
 
 bool TrayBluetoothHelperExperimental::HasBluetoothDiscoverySession() {
@@ -78,7 +72,7 @@ bool TrayBluetoothHelperExperimental::HasBluetoothDiscoverySession() {
 
 void TrayBluetoothHelperExperimental::GetBluetoothDevices(
     GetBluetoothDevicesCallback callback) const {
-  bluetooth_system_ptr_->GetAvailableDevices(std::move(callback));
+  bluetooth_system_->GetAvailableDevices(std::move(callback));
 }
 
 void TrayBluetoothHelperExperimental::OnStateChanged(

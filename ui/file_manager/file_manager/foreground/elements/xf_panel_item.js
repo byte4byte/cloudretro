@@ -26,9 +26,14 @@ class PanelItem extends HTMLElement {
     this.panelTypeDone = 2;
     this.panelTypeError = 3;
     this.panelTypeInfo = 4;
+    this.panelTypeFormatProgress = 5;
+    this.panelTypeSyncProgress = 6;
 
     /** @private {number} */
     this.panelType_ = this.panelTypeDefault;
+
+    /** @private @type {?function(Event)} */
+    this.onclick = this.onClicked_.bind(this);
 
     /** @public {?DisplayPanel} */
     this.parent = null;
@@ -57,7 +62,7 @@ class PanelItem extends HTMLElement {
     return `<style>
               .xf-panel-item {
                   align-items: center;
-                  background-color: #FFF;
+                  background-color: rgba(0,0,0,0);
                   border-radius: 4px;
                   display: flex;
                   flex-direction: row;
@@ -76,6 +81,23 @@ class PanelItem extends HTMLElement {
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
+              }
+
+              .xf-panel-label-text {
+                  outline: none;
+              }
+
+              :host([panel-type='3']) .xf-panel-label-text {
+                  display: -webkit-box;
+                  -webkit-line-clamp: 2;
+                  -webkit-box-orient: vertical;
+                  overflow: hidden;
+                  white-space: normal;
+                  width: 216px;
+              }
+
+              :host([panel-type='3']) .xf-linebreaker {
+                  display: none;
               }
 
               .xf-panel-label-text {
@@ -103,8 +125,10 @@ class PanelItem extends HTMLElement {
                   padding: 16px;
               }
 
-              xf-activity-complete {
+              iron-icon {
+                  height: 36px;
                   padding: 16px;
+                  width: 36px;
               }
 
               // TODO(crbug.com/947388) Use '--goog' prefixed CSS varables.
@@ -129,11 +153,10 @@ class PanelItem extends HTMLElement {
             <div class='xf-panel-item'>
                 <xf-circular-progress id='indicator'>
                 </xf-circular-progress>
-                <div class='xf-panel-text'>
-                    <span class='xf-panel-label-text'>
-                            Placeholder text
+                <div class='xf-panel-text' role='alert'>
+                    <span class='xf-panel-label-text' tabindex='0'>
                     </span>
-                    <br/>
+                    <br class='xf-linebreaker'/>
                 </div>
                 <div class='xf-padder-24'></div>
                 <xf-button id='secondary-action' tabindex='-1'>
@@ -147,6 +170,7 @@ class PanelItem extends HTMLElement {
 
   /**
    * Remove an element from the panel using it's id.
+   * @return {?Element}
    * @private
    */
   removePanelElementById_(id) {
@@ -154,6 +178,7 @@ class PanelItem extends HTMLElement {
     if (element) {
       element.remove();
     }
+    return element;
   }
 
   /**
@@ -169,13 +194,23 @@ class PanelItem extends HTMLElement {
 
     // Remove the indicators/buttons that can change.
     this.removePanelElementById_('#indicator');
-    this.removePanelElementById_('#primary-action');
-    this.removePanelElementById_('#secondary-action');
+    let element = this.removePanelElementById_('#primary-action');
+    if (element) {
+      element.onclick = null;
+    }
+    element = this.removePanelElementById_('#secondary-action');
+    if (element) {
+      element.onclick = null;
+    }
 
     // Mark the indicator as empty so it recreates on setAttribute.
     this.setAttribute('indicator', 'empty');
 
     const buttonSpacer = this.shadowRoot.querySelector('#button-gap');
+
+    // Default the text host to use an alert role.
+    const textHost = assert(this.shadowRoot.querySelector('.xf-panel-text'));
+    textHost.setAttribute('role', 'alert');
 
     // Setup the panel configuration for the panel type.
     // TOOD(crbug.com/947388) Simplify this switch breaking out common cases.
@@ -188,7 +223,7 @@ class PanelItem extends HTMLElement {
         this.setAttribute('indicator', 'progress');
         secondaryButton = document.createElement('xf-button');
         secondaryButton.id = 'secondary-action';
-        secondaryButton.onclick = this.onclick;
+        secondaryButton.onclick = assert(this.onclick);
         secondaryButton.dataset.category = 'cancel';
         secondaryButton.setAttribute('aria-label', '$i18n{CANCEL_LABEL}');
         buttonSpacer.insertAdjacentElement('afterend', secondaryButton);
@@ -198,7 +233,11 @@ class PanelItem extends HTMLElement {
         primaryButton = document.createElement('xf-button');
         primaryButton.id = 'primary-action';
         primaryButton.dataset.category = 'expand';
-        primaryButton.setAttribute('aria-label', '$i18n{EXPAND_LABEL}');
+        primaryButton.setAttribute(
+            'aria-label', '$i18n{FEEDBACK_EXPAND_LABEL}');
+        // Remove the 'alert' role to stop screen readers repeatedly
+        // reading each progress update.
+        textHost.setAttribute('role', '');
         buttonSpacer.insertAdjacentElement('afterend', primaryButton);
         break;
       case this.panelTypeDone:
@@ -206,20 +245,29 @@ class PanelItem extends HTMLElement {
         this.setAttribute('status', 'success');
         primaryButton = document.createElement('xf-button');
         primaryButton.id = 'primary-action';
-        primaryButton.onclick = this.onclick;
+        primaryButton.onclick = assert(this.onclick);
         primaryButton.dataset.category = 'dismiss';
         buttonSpacer.insertAdjacentElement('afterend', primaryButton);
         break;
       case this.panelTypeError:
         this.setAttribute('indicator', 'status');
         this.setAttribute('status', 'failure');
+        this.primaryText = '$i18n{FILE_ERROR_GENERIC}';
+        this.secondaryText = '';
         secondaryButton = document.createElement('xf-button');
         secondaryButton.id = 'secondary-action';
-        secondaryButton.onclick = this.onclick;
+        secondaryButton.onclick = assert(this.onclick);
         secondaryButton.dataset.category = 'dismiss';
         buttonSpacer.insertAdjacentElement('afterend', secondaryButton);
         break;
       case this.panelTypeInfo:
+        break;
+      case this.panelTypeFormatProgress:
+        this.setAttribute('indicator', 'status');
+        this.setAttribute('status', 'hard-drive');
+        break;
+      case this.panelTypeSyncProgress:
+        this.setAttribute('indicator', 'progress');
         break;
     }
 
@@ -233,6 +281,7 @@ class PanelItem extends HTMLElement {
   static get observedAttributes() {
     return [
       'count',
+      'errormark',
       'indicator',
       'panel-type',
       'primary-text',
@@ -254,14 +303,16 @@ class PanelItem extends HTMLElement {
     let indicator = null;
     /** @type {Element} */
     let textNode;
-    if (oldValue === newValue) {
-      return;
-    }
     // TODO(adanilo) Chop out each attribute handler into a function.
     switch (name) {
       case 'count':
         if (this.indicator_) {
           this.indicator_.setAttribute('label', newValue || '');
+        }
+        break;
+      case 'errormark':
+        if (this.indicator_) {
+          this.indicator_.setAttribute('errormark', newValue || '');
         }
         break;
       case 'indicator':
@@ -281,10 +332,10 @@ class PanelItem extends HTMLElement {
             }
             break;
           case 'status':
-            indicator = document.createElement('xf-activity-complete');
+            indicator = document.createElement('iron-icon');
             const status = this.getAttribute('status');
             if (status) {
-              indicator.status = status;
+              indicator.setAttribute('icon', `files36:${status}`);
             }
             break;
         }
@@ -311,13 +362,15 @@ class PanelItem extends HTMLElement {
         break;
       case 'status':
         if (this.indicator_) {
-          this.indicator_.status = newValue;
+          this.indicator_.setAttribute('icon', `files36:${newValue}`);
         }
         break;
       case 'primary-text':
         textNode = this.shadowRoot.querySelector('.xf-panel-label-text');
         if (textNode) {
           textNode.textContent = newValue;
+          // Set the aria labels for the activity and cancel button.
+          this.setAttribute('aria-label', /** @type {string} */ (newValue));
         }
         break;
       case 'secondary-text':
@@ -347,6 +400,16 @@ class PanelItem extends HTMLElement {
    */
   connectedCallback() {
     this.onclick = this.onClicked_.bind(this);
+
+    // Set click event handler references.
+    let button = this.shadowRoot.querySelector('#primary-action');
+    if (button) {
+      button.onclick = this.onclick;
+    }
+    button = this.shadowRoot.querySelector('#secondary-action');
+    if (button) {
+      button.onclick = this.onclick;
+    }
   }
 
   /**
@@ -384,7 +447,7 @@ class PanelItem extends HTMLElement {
       return;
     }
 
-    let id = assert(event.target.dataset.category);
+    const id = assert(event.target.dataset.category);
     this.signal_(id);
   }
 
@@ -397,6 +460,28 @@ class PanelItem extends HTMLElement {
   }
 
   /**
+   * Set the visibility of the error marker.
+   * @param {string} visibility Visibility value being set.
+   */
+  set errorMarkerVisibility(visibility) {
+    this.setAttribute('errormark', visibility);
+  }
+
+  /**
+   *  Getter for the visibility of the error marker.
+   */
+  get errorMarkerVisibility() {
+    // If we have an indicator on the panel, then grab the
+    // visibility value from that.
+    if (this.indicator_) {
+      return this.indicator_.errorMarkerVisibility;
+    }
+    // If there's no indicator on the panel just return the
+    // value of any attribute as a fallback.
+    return this.getAttribute('errormark');
+  }
+
+  /**
    * Setter to set the indicator type.
    * @param {string} indicator Progress (optionally large) or status.
    */
@@ -405,11 +490,25 @@ class PanelItem extends HTMLElement {
   }
 
   /**
+   *  Getter for the progress indicator.
+   */
+  get indicator() {
+    return this.getAttribute('indicator');
+  }
+
+  /**
    * Setter to set the success/failure indication.
    * @param {string} status Status value being set.
    */
   set status(status) {
     this.setAttribute('status', status);
+  }
+
+  /**
+   *  Getter for the success/failure indication.
+   */
+  get status() {
+    return this.getAttribute('status');
   }
 
   /**
@@ -437,11 +536,27 @@ class PanelItem extends HTMLElement {
   }
 
   /**
+   * Getter for the primary text on the panel.
+   * @return {string}
+   */
+  get primaryText() {
+    return this.getAttribute('primary-text');
+  }
+
+  /**
    * Setter to set the secondary text on the panel.
    * @param {string} text Text to be shown.
    */
   set secondaryText(text) {
     this.setAttribute('secondary-text', text);
+  }
+
+  /**
+   * Getter for the secondary text on the panel.
+   * @return {string}
+   */
+  get secondaryText() {
+    return this.getAttribute('secondary-text');
   }
 
   /**
@@ -472,6 +587,17 @@ class PanelItem extends HTMLElement {
    */
   get secondaryButton() {
     return this.shadowRoot.querySelector('#secondary-action');
+  }
+
+  /**
+   * Setter to replace the default aria-label on any close button.
+   * @param {string} text Text to set for the 'aria-label'.
+   */
+  set closeButtonAriaLabel(text) {
+    const action = this.shadowRoot.querySelector('#secondary-action');
+    if (action && action.dataset.category === 'cancel') {
+      action.setAttribute('aria-label', text);
+    }
   }
 }
 

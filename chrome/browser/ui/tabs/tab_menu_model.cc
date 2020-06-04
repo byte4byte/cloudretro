@@ -6,12 +6,13 @@
 
 #include "base/command_line.h"
 #include "base/metrics/user_metrics.h"
-#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_desktop_util.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
 #include "chrome/browser/ui/tabs/existing_tab_group_sub_menu_model.h"
+#include "chrome/browser/ui/tabs/existing_window_sub_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
@@ -37,18 +38,22 @@ void TabMenuModel::Build(TabStripModel* tab_strip, int index) {
           ? tab_strip->selection_model().selected_indices()
           : std::vector<int>{index};
   int num_affected_tabs = affected_indices.size();
-  AddItemWithStringId(TabStripModel::CommandNewTab, IDS_TAB_CXMENU_NEWTAB);
+  AddItemWithStringId(TabStripModel::CommandNewTabToRight,
+                      IDS_TAB_CXMENU_NEWTABTORIGHT);
   if (base::FeatureList::IsEnabled(features::kTabGroups)) {
-    AddItemWithStringId(TabStripModel::CommandAddToNewGroup,
-                        IDS_TAB_CXMENU_ADD_TAB_TO_NEW_GROUP);
-
-    // Create submenu with existing groups
     if (ExistingTabGroupSubMenuModel::ShouldShowSubmenu(tab_strip, index)) {
+      // Create submenu with existing groups
       add_to_existing_group_submenu_ =
-          std::make_unique<ExistingTabGroupSubMenuModel>(tab_strip, index);
-      AddSubMenuWithStringId(TabStripModel::CommandAddToExistingGroup,
-                             IDS_TAB_CXMENU_ADD_TAB_TO_EXISTING_GROUP,
-                             add_to_existing_group_submenu_.get());
+          std::make_unique<ExistingTabGroupSubMenuModel>(delegate(), tab_strip,
+                                                         index);
+      AddSubMenu(TabStripModel::CommandAddToExistingGroup,
+                 l10n_util::GetPluralStringFUTF16(
+                     IDS_TAB_CXMENU_ADD_TAB_TO_GROUP, num_affected_tabs),
+                 add_to_existing_group_submenu_.get());
+    } else {
+      AddItem(TabStripModel::CommandAddToNewGroup,
+              l10n_util::GetPluralStringFUTF16(
+                  IDS_TAB_CXMENU_ADD_TAB_TO_NEW_GROUP, num_affected_tabs));
     }
 
     for (size_t index = 0; index < affected_indices.size(); index++) {
@@ -59,16 +64,30 @@ void TabMenuModel::Build(TabStripModel* tab_strip, int index) {
       }
     }
   }
+
+  if (ExistingWindowSubMenuModel::ShouldShowSubmenu(tab_strip->profile())) {
+    // Create submenu with existing windows
+    add_to_existing_window_submenu_ =
+        std::make_unique<ExistingWindowSubMenuModel>(delegate(), tab_strip,
+                                                     index);
+    AddSubMenu(TabStripModel::CommandMoveToExistingWindow,
+               l10n_util::GetPluralStringFUTF16(
+                   IDS_TAB_CXMENU_MOVETOANOTHERWINDOW, num_affected_tabs),
+               add_to_existing_window_submenu_.get());
+  } else {
+    AddItem(TabStripModel::CommandMoveTabsToNewWindow,
+            l10n_util::GetPluralStringFUTF16(
+                IDS_TAB_CXMENU_MOVE_TABS_TO_NEW_WINDOW, num_affected_tabs));
+  }
+
   AddSeparator(ui::NORMAL_SEPARATOR);
   AddItemWithStringId(TabStripModel::CommandReload, IDS_TAB_CXMENU_RELOAD);
   AddItemWithStringId(TabStripModel::CommandDuplicate,
                       IDS_TAB_CXMENU_DUPLICATE);
   bool will_pin = tab_strip->WillContextMenuPin(index);
-  AddItem(TabStripModel::CommandTogglePinned,
-          will_pin ? l10n_util::GetPluralStringFUTF16(IDS_TAB_CXMENU_PIN_TAB,
-                                                      num_affected_tabs)
-                   : l10n_util::GetPluralStringFUTF16(IDS_TAB_CXMENU_UNPIN_TAB,
-                                                      num_affected_tabs));
+  AddItemWithStringId(
+      TabStripModel::CommandTogglePinned,
+      will_pin ? IDS_TAB_CXMENU_PIN_TAB : IDS_TAB_CXMENU_UNPIN_TAB);
   if (base::FeatureList::IsEnabled(features::kFocusMode)) {
     // TODO(crbug.com/941577): Allow Focus Mode in Incognito and Guest Session.
     if (!tab_strip->profile()->IsOffTheRecord()) {
@@ -94,16 +113,15 @@ void TabMenuModel::Build(TabStripModel* tab_strip, int index) {
       AddItem(TabStripModel::CommandSendTabToSelfSingleTarget,
               l10n_util::GetStringFUTF16(
                   IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-                  base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                      tab_strip->profile()))));
+                  send_tab_to_self::GetSingleTargetDeviceName(
+                      tab_strip->profile())));
 #else
-      AddItemWithIcon(
-          TabStripModel::CommandSendTabToSelfSingleTarget,
-          l10n_util::GetStringFUTF16(
-              IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-              base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                  tab_strip->profile()))),
-          *send_tab_to_self::GetImageSkia());
+      AddItemWithIcon(TabStripModel::CommandSendTabToSelfSingleTarget,
+                      l10n_util::GetStringFUTF16(
+                          IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
+                          (send_tab_to_self::GetSingleTargetDeviceName(
+                              tab_strip->profile()))),
+                      ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
       send_tab_to_self::RecordSendTabToSelfClickResult(
           send_tab_to_self::kTabMenu,
@@ -113,35 +131,26 @@ void TabMenuModel::Build(TabStripModel* tab_strip, int index) {
     } else {
       send_tab_to_self_sub_menu_model_ =
           std::make_unique<send_tab_to_self::SendTabToSelfSubMenuModel>(
-              tab_strip->GetActiveWebContents(),
+              tab_strip->GetWebContentsAt(index),
               send_tab_to_self::SendTabToSelfMenuType::kTab);
 #if defined(OS_MACOSX)
       AddSubMenuWithStringId(TabStripModel::CommandSendTabToSelf,
                              IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
                              send_tab_to_self_sub_menu_model_.get());
 #else
-      AddSubMenuWithStringIdAndIcon(TabStripModel::CommandSendTabToSelf,
-                                    IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
-                                    send_tab_to_self_sub_menu_model_.get(),
-                                    *send_tab_to_self::GetImageSkia());
+      AddSubMenuWithStringIdAndIcon(
+          TabStripModel::CommandSendTabToSelf,
+          IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
+          send_tab_to_self_sub_menu_model_.get(),
+          ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
     }
   }
 
   AddSeparator(ui::NORMAL_SEPARATOR);
-  AddItem(TabStripModel::CommandCloseTab,
-          l10n_util::GetPluralStringFUTF16(IDS_TAB_CXMENU_CLOSETAB,
-                                           num_affected_tabs));
+  AddItemWithStringId(TabStripModel::CommandCloseTab, IDS_TAB_CXMENU_CLOSETAB);
   AddItemWithStringId(TabStripModel::CommandCloseOtherTabs,
                       IDS_TAB_CXMENU_CLOSEOTHERTABS);
   AddItemWithStringId(TabStripModel::CommandCloseTabsToRight,
                       IDS_TAB_CXMENU_CLOSETABSTORIGHT);
-  AddSeparator(ui::NORMAL_SEPARATOR);
-
-  const bool is_window = tab_strip->delegate()->GetRestoreTabType() ==
-      TabStripModelDelegate::RESTORE_WINDOW;
-  AddItemWithStringId(TabStripModel::CommandRestoreTab,
-                      is_window ? IDS_RESTORE_WINDOW : IDS_RESTORE_TAB);
-  AddItemWithStringId(TabStripModel::CommandBookmarkAllTabs,
-                      IDS_TAB_CXMENU_BOOKMARK_ALL_TABS);
 }

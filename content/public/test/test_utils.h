@@ -38,7 +38,6 @@ class Value;
 namespace content {
 
 class RenderFrameHost;
-class TestServiceManagerContext;
 
 // Create an blink::mojom::FetchAPIRequestPtr with given fields.
 blink::mojom::FetchAPIRequestPtr CreateFetchAPIRequest(
@@ -65,13 +64,13 @@ void RunThisRunLoop(base::RunLoop* run_loop);
 void RunAllPendingInMessageLoop();
 
 // Deprecated: For BrowserThread::IO use
-// TestBrowserThreadBundle::RunIOThreadUntilIdle. For the main thread use
+// BrowserTaskEnvironment::RunIOThreadUntilIdle. For the main thread use
 // RunLoop. In non-unit-tests use RunLoop::QuitClosure to observe async events
 // rather than flushing entire threads.
 void RunAllPendingInMessageLoop(BrowserThread::ID thread_id);
 
 // Runs all tasks on the current thread and ThreadPool threads until idle.
-// Note: Prefer TestBrowserThreadBundle::RunUntilIdle() in unit tests.
+// Note: Prefer BrowserTaskEnvironment::RunUntilIdle() in unit tests.
 void RunAllTasksUntilIdle();
 
 // Get task to quit the given RunLoop. It allows a few generations of pending
@@ -79,7 +78,7 @@ void RunAllTasksUntilIdle();
 // Prefer RunLoop::RunUntilIdle() to this.
 // TODO(gab): Assess the need for this API (see comment on
 // RunAllPendingInMessageLoop() above).
-base::Closure GetDeferredQuitTaskForRunLoop(base::RunLoop* run_loop);
+base::OnceClosure GetDeferredQuitTaskForRunLoop(base::RunLoop* run_loop);
 
 // Executes the specified JavaScript in the specified frame, and runs a nested
 // MessageLoop. When the result is available, it is returned.
@@ -101,9 +100,6 @@ bool AreDefaultSiteInstancesEnabled();
 // the test; the flag will be read on the first real navigation.
 void IsolateAllSitesForTesting(base::CommandLine* command_line);
 
-// Resets the internal secure schemes/origins whitelist.
-void ResetSchemesAndOriginsWhitelist();
-
 // Returns a GURL constructed from the WebUI scheme and the given host.
 GURL GetWebUIURL(const std::string& host);
 
@@ -118,6 +114,9 @@ std::string GetWebUIURLString(const std::string& host);
 // WebContents. The caller should be careful when retaining the pointer, as the
 // inner WebContents will be deleted if the frame it's attached to goes away.
 WebContents* CreateAndAttachInnerContents(RenderFrameHost* rfh);
+
+// Spins a run loop until IsDocumentOnLoadCompletedInMainFrame() is true.
+void AwaitDocumentOnLoadCompleted(WebContents* web_contents);
 
 // Helper class to Run and Quit the message loop. Run and Quit can only happen
 // once per instance. Make a new instance for each use. Calling Quit after Run
@@ -153,7 +152,7 @@ class MessageLoopRunner : public base::RefCountedThreadSafe<MessageLoopRunner> {
   //   scoped_refptr<MessageLoopRunner> runner = new MessageLoopRunner;
   //   kick_off_some_api(runner->QuitClosure());
   //   runner->Run();
-  base::Closure QuitClosure();
+  base::OnceClosure QuitClosure();
 
   bool loop_running() const { return loop_running_; }
 
@@ -164,10 +163,10 @@ class MessageLoopRunner : public base::RefCountedThreadSafe<MessageLoopRunner> {
   QuitMode quit_mode_;
 
   // True when the message loop is running.
-  bool loop_running_;
+  bool loop_running_ = false;
 
   // True after closure returned by |QuitClosure| has been called.
-  bool quit_closure_called_;
+  bool quit_closure_called_ = false;
 
   base::RunLoop run_loop_;
 
@@ -205,11 +204,11 @@ class WindowedNotificationObserver : public NotificationObserver {
   // being waited for is met. For convenience, there is a choice between two
   // callback types, one that is provided with the notification source and
   // details, and one that is not.
-  typedef base::Callback<bool(const NotificationSource&,
-                              const NotificationDetails&)>
-      ConditionTestCallback;
-  typedef base::Callback<bool(void)>
-      ConditionTestCallbackWithoutSourceAndDetails;
+  using ConditionTestCallback =
+      base::RepeatingCallback<bool(const NotificationSource&,
+                                   const NotificationDetails&)>;
+  using ConditionTestCallbackWithoutSourceAndDetails =
+      base::RepeatingCallback<bool(void)>;
 
   // Set up to wait for a simple condition. The condition is met when a
   // notification of the given |notification_type| from the given |source| is
@@ -222,10 +221,10 @@ class WindowedNotificationObserver : public NotificationObserver {
   // |callback| returns |true|. The callback is invoked whenever a notification
   // of |notification_type| from any source is received.
   WindowedNotificationObserver(int notification_type,
-                               const ConditionTestCallback& callback);
+                               ConditionTestCallback callback);
   WindowedNotificationObserver(
       int notification_type,
-      const ConditionTestCallbackWithoutSourceAndDetails& callback);
+      ConditionTestCallbackWithoutSourceAndDetails callback);
 
   ~WindowedNotificationObserver() override;
 
@@ -276,7 +275,7 @@ class WindowedNotificationObserver : public NotificationObserver {
 // Include this class as a member variable in your test harness if you take
 // advantage of this functionality to ensure that the in-process utility thread
 // is torn down correctly. See http://crbug.com/316919 for more information.
-// Note: this class should be declared after the TestBrowserThreadBundle and
+// Note: this class should be declared after the BrowserTaskEnvironment and
 // ShadowingAtExitManager (if it exists) as it will need to be run before they
 // are torn down.
 class InProcessUtilityThreadHelper : public BrowserChildProcessObserver {
@@ -287,13 +286,10 @@ class InProcessUtilityThreadHelper : public BrowserChildProcessObserver {
  private:
   void JoinAllUtilityThreads();
   void CheckHasRunningChildProcess();
-  static void CheckHasRunningChildProcessOnIO(
-      const base::RepeatingClosure& quit_closure);
   void BrowserChildProcessHostDisconnected(
       const ChildProcessData& data) override;
 
-  base::RepeatingClosure quit_closure_;
-  std::unique_ptr<TestServiceManagerContext> shell_context_;
+  base::Optional<base::RunLoop> run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessUtilityThreadHelper);
 };
@@ -320,7 +316,8 @@ class RenderFrameDeletedObserver : public WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(RenderFrameDeletedObserver);
 };
 
-// Watches a WebContents and blocks until it is destroyed.
+// Watches a WebContents. Can be used to block until it is destroyed or just
+// merely report if it was destroyed.
 class WebContentsDestroyedWatcher : public WebContentsObserver {
  public:
   explicit WebContentsDestroyedWatcher(WebContents* web_contents);
@@ -329,11 +326,16 @@ class WebContentsDestroyedWatcher : public WebContentsObserver {
   // Waits until the WebContents is destroyed.
   void Wait();
 
+  // Returns whether the WebContents was destroyed.
+  bool IsDestroyed() { return destroyed_; }
+
  private:
   // Overridden WebContentsObserver methods.
   void WebContentsDestroyed() override;
 
   base::RunLoop run_loop_;
+
+  bool destroyed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsDestroyedWatcher);
 };
@@ -367,9 +369,8 @@ class EffectiveURLContentBrowserClient : public ContentBrowserClient {
  private:
   GURL GetEffectiveURL(BrowserContext* browser_context,
                        const GURL& url) override;
-  bool DoesSiteRequireDedicatedProcess(
-      BrowserOrResourceContext browser_or_resource_context,
-      const GURL& effective_site_url) override;
+  bool DoesSiteRequireDedicatedProcess(BrowserContext* browser_context,
+                                       const GURL& effective_site_url) override;
 
   GURL url_to_modify_;
   GURL url_to_return_;

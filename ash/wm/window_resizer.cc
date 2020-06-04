@@ -4,9 +4,9 @@
 
 #include "ash/wm/window_resizer.h"
 
-#include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
+#include "ash/wm/window_util.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
@@ -75,9 +75,9 @@ const int WindowResizer::kBoundsChangeDirection_Horizontal = 1;
 // static
 const int WindowResizer::kBoundsChangeDirection_Vertical = 2;
 
-WindowResizer::WindowResizer(wm::WindowState* window_state)
+WindowResizer::WindowResizer(WindowState* window_state)
     : window_state_(window_state) {
-  recorder_ = ash::CreatePresentationTimeHistogramRecorder(
+  recorder_ = CreatePresentationTimeHistogramRecorder(
       GetTarget()->layer()->GetCompositor(),
       "Ash.InteractiveWindowResize.TimeToPresent",
       "Ash.InteractiveWindowResize.TimeToPresent.MaxLatency");
@@ -146,11 +146,11 @@ aura::Window* WindowResizer::GetTarget() const {
 }
 
 gfx::Rect WindowResizer::CalculateBoundsForDrag(
-    const gfx::Point& passed_location) {
+    const gfx::PointF& passed_location) {
   if (!details().is_resizable)
     return details().initial_bounds_in_parent;
 
-  gfx::Point location = passed_location;
+  gfx::PointF location = passed_location;
   int delta_x = location.x() - details().initial_location_in_parent.x();
   int delta_y = location.y() - details().initial_location_in_parent.y();
 
@@ -183,24 +183,22 @@ gfx::Rect WindowResizer::CalculateBoundsForDrag(
     ::wm::ConvertRectFromScreen(GetTarget()->parent(), &work_area);
     if (details().size_change_direction & kBoundsChangeDirection_Horizontal) {
       if (IsRightEdge(details().window_component) &&
-          new_bounds.right() < work_area.x() + wm::kMinimumOnScreenArea) {
-        int delta =
-            work_area.x() + wm::kMinimumOnScreenArea - new_bounds.right();
+          new_bounds.right() < work_area.x() + kMinimumOnScreenArea) {
+        int delta = work_area.x() + kMinimumOnScreenArea - new_bounds.right();
         new_bounds.set_width(new_bounds.width() + delta);
-      } else if (new_bounds.x() >
-                 work_area.right() - wm::kMinimumOnScreenArea) {
+      } else if (new_bounds.x() > work_area.right() - kMinimumOnScreenArea) {
         int width =
-            new_bounds.right() - work_area.right() + wm::kMinimumOnScreenArea;
-        new_bounds.set_x(work_area.right() - wm::kMinimumOnScreenArea);
+            new_bounds.right() - work_area.right() + kMinimumOnScreenArea;
+        new_bounds.set_x(work_area.right() - kMinimumOnScreenArea);
         new_bounds.set_width(width);
       }
     }
     if (details().size_change_direction & kBoundsChangeDirection_Vertical) {
       if (!IsBottomEdge(details().window_component) &&
-          new_bounds.y() > work_area.bottom() - wm::kMinimumOnScreenArea) {
+          new_bounds.y() > work_area.bottom() - kMinimumOnScreenArea) {
         int height =
-            new_bounds.bottom() - work_area.bottom() + wm::kMinimumOnScreenArea;
-        new_bounds.set_y(work_area.bottom() - wm::kMinimumOnScreenArea);
+            new_bounds.bottom() - work_area.bottom() + kMinimumOnScreenArea;
+        new_bounds.set_y(work_area.bottom() - kMinimumOnScreenArea);
         new_bounds.set_height(height);
       } else if (details().window_component == HTBOTTOM ||
                  details().window_component == HTBOTTOMRIGHT ||
@@ -235,15 +233,16 @@ gfx::Rect WindowResizer::CalculateBoundsForDrag(
     // the |work_area| above isn't good for this check since it is the work area
     // for the current display but the window can move to a different one.
     aura::Window* parent = GetTarget()->parent();
-    gfx::Point passed_location_in_screen(passed_location);
+    gfx::PointF passed_location_in_screen(passed_location);
     ::wm::ConvertPointToScreen(parent, &passed_location_in_screen);
-    gfx::Rect near_passed_location(passed_location_in_screen, gfx::Size());
+    gfx::Rect near_passed_location(
+        gfx::ToRoundedPoint(passed_location_in_screen), gfx::Size());
     // Use a pointer location (matching the logic in DragWindowResizer) to
     // calculate the target display after the drag.
     const display::Display& display =
         display::Screen::GetScreen()->GetDisplayMatching(near_passed_location);
     gfx::Rect screen_work_area = display.work_area();
-    screen_work_area.Inset(wm::kMinimumOnScreenArea, 0);
+    screen_work_area.Inset(kMinimumOnScreenArea, 0);
     gfx::Rect new_bounds_in_screen(new_bounds);
     ::wm::ConvertRectToScreen(parent, &new_bounds_in_screen);
     if (!screen_work_area.Intersects(new_bounds_in_screen)) {

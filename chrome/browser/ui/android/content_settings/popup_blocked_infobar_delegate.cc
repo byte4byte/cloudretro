@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "chrome/browser/android/android_theme_resources.h"
-#include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -20,6 +19,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/infobars/core/infobar.h"
 #include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 // static
@@ -79,7 +79,7 @@ PopupBlockedInfoBarDelegate::PopupBlockedInfoBarDelegate(
     : ConfirmInfoBarDelegate(), num_popups_(num_popups), url_(url), map_(map) {
   content_settings::SettingInfo setting_info;
   std::unique_ptr<base::Value> setting = map->GetWebsiteSetting(
-      url, url, CONTENT_SETTINGS_TYPE_POPUPS, std::string(), &setting_info);
+      url, url, ContentSettingsType::POPUPS, std::string(), &setting_info);
   can_show_popups_ =
       setting_info.source != content_settings::SETTING_SOURCE_POLICY;
 }
@@ -94,8 +94,6 @@ int PopupBlockedInfoBarDelegate::GetButtons() const {
     return 0;
 
   int buttons = BUTTON_OK;
-  if (chrome::android::IsNoTouchModeEnabled())
-    buttons |= BUTTON_CANCEL;
 
   return buttons;
 }
@@ -118,7 +116,7 @@ bool PopupBlockedInfoBarDelegate::Accept() {
   DCHECK(can_show_popups_);
 
   // Create exceptions.
-  map_->SetNarrowestContentSetting(url_, url_, CONTENT_SETTINGS_TYPE_POPUPS,
+  map_->SetNarrowestContentSetting(url_, url_, ContentSettingsType::POPUPS,
                                    CONTENT_SETTING_ALLOW);
 
   // Launch popups.

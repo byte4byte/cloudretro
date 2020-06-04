@@ -73,6 +73,7 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
 
   void WillRecalcAssignedNodes() { ClearAssignedNodes(); }
   void DidRecalcAssignedNodes() {
+    UpdateManuallyAssignedNodesOrdering();
     UpdateFlatTreeNodeDataForAssignedNodes();
     RecalcFlatTreeChildren();
   }
@@ -83,7 +84,6 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
 
   void AttributeChanged(const AttributeModificationParams&) final;
 
-  int tabIndex() const override;
   AtomicString GetName() const;
 
   // This method can be slow because this has to traverse the children of a
@@ -104,15 +104,19 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
 
   static AtomicString NormalizeSlotName(const AtomicString&);
 
+  void RecalcStyleForSlotChildren(const StyleRecalcChange);
+
   // For User-Agent Shadow DOM
   static const AtomicString& UserAgentCustomAssignSlotName();
   static const AtomicString& UserAgentDefaultSlotName();
 
   // For imperative Shadow DOM distribution APIs
-  void assign(HeapVector<Member<Node>> nodes);
-  const HeapHashSet<Member<Node>>& AssignedNodesCandidate() const {
+  void assign(HeapVector<Member<Node>> nodes, ExceptionState&);
+  const HeapLinkedHashSet<Member<Node>>& AssignedNodesCandidates() const {
     return assigned_nodes_candidates_;
   }
+  void ClearAssignedNodesCandidates();
+  void RemoveAssignedNodeCandidate(Node&);
 
   void Trace(Visitor*) override;
 
@@ -129,13 +133,17 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
       const HeapVector<Member<Node>>& old_slotted,
       const HeapVector<Member<Node>>& new_slotted);
   static void NotifySlottedNodesOfFlatTreeChangeNaive(
-      const HeapVector<Member<Node>>& new_slotted);
+      const HeapVector<Member<Node>>& old_assigned_nodes,
+      const HeapVector<Member<Node>>& new_assigned_nodes);
   static void NotifySlottedNodesOfFlatTreeChangeByDynamicProgramming(
       const HeapVector<Member<Node>>& old_slotted,
       const HeapVector<Member<Node>>& new_slotted);
 
   void SetNeedsDistributionRecalcWillBeSetNeedsAssignmentRecalc();
+  bool CheckNodesValidity(HeapVector<Member<Node>> nodes, ExceptionState&);
 
+  // SlotAssignnment:recalc runs in tree order. Update to assigned order.
+  void UpdateManuallyAssignedNodesOrdering();
   void RecalcFlatTreeChildren();
   void UpdateFlatTreeNodeDataForAssignedNodes();
   void ClearAssignedNodesAndFlatTreeChildren();
@@ -145,8 +153,9 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
 
   bool slotchange_event_enqueued_ = false;
 
-  // For imperative Shadow DOM distribution APIs
-  HeapHashSet<Member<Node>> assigned_nodes_candidates_;
+  // For imperative Shadow DOM distribution APIs.
+  // LinkedHashSet because candidates are ordered.
+  HeapLinkedHashSet<Member<Node>> assigned_nodes_candidates_;
 
   template <typename T, wtf_size_t S>
   struct LCSArray {
@@ -194,11 +203,12 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
   }
 
   friend class HTMLSlotElementTest;
+  friend class HTMLSlotElementInDocumentTest;
 };
 
 inline const HTMLSlotElement* ToHTMLSlotElementIfSupportsAssignmentOrNull(
     const Node& node) {
-  if (auto* slot = ToHTMLSlotElementOrNull(node)) {
+  if (auto* slot = DynamicTo<HTMLSlotElement>(node)) {
     if (slot->SupportsAssignment())
       return slot;
   }

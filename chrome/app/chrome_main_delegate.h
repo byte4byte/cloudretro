@@ -11,18 +11,20 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/startup_data.h"
 #include "chrome/common/chrome_content_client.h"
 #include "content/public/app/content_main_delegate.h"
-
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-#include "chrome/browser/startup_data.h"
-#endif
 
 namespace base {
 class CommandLine;
 }
 
+namespace tracing {
+class TracingSamplerProfiler;
+}
+
 class ChromeContentBrowserClient;
+class HeapProfilerController;
 
 // Chrome implementation of ContentMainDelegate.
 class ChromeMainDelegate : public content::ContentMainDelegate {
@@ -46,11 +48,7 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
       const std::string& process_type,
       const content::MainFunctionParams& main_function_params) override;
   void ProcessExiting(const std::string& process_type) override;
-#if defined(OS_MACOSX)
-  bool ProcessRegistersWithSystemProcess(
-      const std::string& process_type) override;
-  bool DelaySandboxInitialization(const std::string& process_type) override;
-#elif defined(OS_LINUX)
+#if defined(OS_LINUX)
   void ZygoteStarting(
       std::vector<std::unique_ptr<service_manager::ZygoteForkDelegate>>*
           delegates) override;
@@ -58,13 +56,11 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
 #endif
   service_manager::ProcessType OverrideProcessType() override;
   void PreCreateMainMessageLoop() override;
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
   void PostEarlyInitialization(bool is_running_tests) override;
   bool ShouldCreateFeatureList() override;
-  void PostTaskSchedulerStart() override;
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
   void PostFieldTrialInitialization() override;
 
+  content::ContentClient* CreateContentClient() override;
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentGpuClient* CreateContentGpuClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
@@ -80,9 +76,13 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
 
   std::unique_ptr<ChromeContentBrowserClient> chrome_content_browser_client_;
 
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
   std::unique_ptr<StartupData> startup_data_;
-#endif
+
+  std::unique_ptr<tracing::TracingSamplerProfiler> tracing_sampler_profiler_;
+
+  // The controller schedules UMA heap profiles collections and forwarding down
+  // the reporting pipeline.
+  std::unique_ptr<HeapProfilerController> heap_profiler_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeMainDelegate);
 };

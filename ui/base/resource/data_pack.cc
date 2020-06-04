@@ -22,6 +22,7 @@
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "net/filter/gzip_header.h"
+#include "third_party/zlib/google/compression_utils.h"
 
 // For details of the file layout, see
 // http://dev.chromium.org/developers/design-documents/linuxresourcesandlocalizedstrings
@@ -48,6 +49,7 @@ enum LoadErrors {
   HEADER_TRUNCATED,
   WRONG_ENCODING,
   INIT_FAILED_FROM_FILE,
+  UNZIP_FAILED,
 
   LOAD_ERRORS_COUNT,
 };
@@ -83,14 +85,6 @@ void MaybePrintResourceId(uint16_t resource_id) {
     printf("Resource=%d\n", resource_id);
     resource_ids_logged->insert(resource_id);
   }
-}
-
-bool HasGzipHeader(base::StringPiece* data) {
-  net::GZipHeader header;
-  const char* header_end = nullptr;
-  net::GZipHeader::Status header_status =
-      header.ReadMore(data->data(), data->length(), &header_end);
-  return header_status == net::GZipHeader::COMPLETE_HEADER;
 }
 
 // Convenience class to write data to a file. Usage is the following:
@@ -163,6 +157,14 @@ class ScopedFileWriter {
   DISALLOW_COPY_AND_ASSIGN(ScopedFileWriter);
 };
 
+bool MmapHasGzipHeader(const base::MemoryMappedFile* mmap) {
+  net::GZipHeader header;
+  const char* header_end = nullptr;
+  net::GZipHeader::Status header_status = header.ReadMore(
+      reinterpret_cast<const char*>(mmap->data()), mmap->length(), &header_end);
+  return header_status == net::GZipHeader::COMPLETE_HEADER;
+}
+
 }  // namespace
 
 namespace ui {
@@ -209,13 +211,31 @@ class DataPack::MemoryMappedDataSource : public DataPack::DataSource {
 
   // DataPack::DataSource:
   size_t GetLength() const override { return mmap_->length(); }
-
   const uint8_t* GetData() const override { return mmap_->data(); }
 
  private:
   std::unique_ptr<base::MemoryMappedFile> mmap_;
 
   DISALLOW_COPY_AND_ASSIGN(MemoryMappedDataSource);
+};
+
+// Takes ownership of a string of uncompressed pack data.
+class DataPack::StringDataSource : public DataPack::DataSource {
+ public:
+  explicit StringDataSource(std::string&& data) : data_(std::move(data)) {}
+
+  ~StringDataSource() override {}
+
+  // DataPack::DataSource:
+  size_t GetLength() const override { return data_.size(); }
+  const uint8_t* GetData() const override {
+    return reinterpret_cast<const uint8_t*>(data_.c_str());
+  }
+
+ private:
+  const std::string data_;
+
+  DISALLOW_COPY_AND_ASSIGN(StringDataSource);
 };
 
 class DataPack::BufferDataSource : public DataPack::DataSource {
@@ -226,7 +246,6 @@ class DataPack::BufferDataSource : public DataPack::DataSource {
 
   // DataPack::DataSource:
   size_t GetLength() const override { return buffer_.length(); }
-
   const uint8_t* GetData() const override {
     return reinterpret_cast<const uint8_t*>(buffer_.data());
   }
@@ -258,8 +277,18 @@ bool DataPack::LoadFromPath(const base::FilePath& path) {
   if (!mmap->Initialize(path)) {
     DLOG(ERROR) << "Failed to mmap datapack";
     LogDataPackError(INIT_FAILED);
-    mmap.reset();
     return false;
+  }
+  if (MmapHasGzipHeader(mmap.get())) {
+    base::StringPiece compressed(reinterpret_cast<char*>(mmap->data()),
+                                 mmap->length());
+    std::string data;
+    if (!compression::GzipUncompress(compressed, &data)) {
+      LOG(ERROR) << "Failed to unzip compressed datapack: " << path;
+      LogDataPackError(UNZIP_FAILED);
+      return false;
+    }
+    return LoadImpl(std::make_unique<StringDataSource>(std::move(data)));
   }
   return LoadImpl(std::make_unique<MemoryMappedDataSource>(std::move(mmap)));
 }
@@ -389,17 +418,6 @@ bool DataPack::HasResource(uint16_t resource_id) const {
   return !!LookupEntryById(resource_id);
 }
 
-bool DataPack::IsGzipped(uint16_t resource_id, bool* is_gzipped) const {
-  DCHECK(is_gzipped);
-  if (!HasResource(resource_id))
-    return false;
-
-  base::StringPiece data;
-  CHECK(GetStringPiece(resource_id, &data));
-  *is_gzipped = HasGzipHeader(&data);
-  return true;
-}
-
 bool DataPack::GetStringPiece(uint16_t resource_id,
                               base::StringPiece* data) const {
   // It won't be hard to make this endian-agnostic, but it's not worth
@@ -429,9 +447,9 @@ bool DataPack::GetStringPiece(uint16_t resource_id,
 
   MaybePrintResourceId(resource_id);
   size_t length = next_entry->file_offset - target->file_offset;
-  data->set(reinterpret_cast<const char*>(data_source_->GetData() +
-                                          target->file_offset),
-            length);
+  *data = base::StringPiece(reinterpret_cast<const char*>(
+                                data_source_->GetData() + target->file_offset),
+                            length);
   return true;
 }
 
@@ -506,11 +524,11 @@ bool DataPack::WritePack(const base::FilePath& path,
       auto it = rev_map.find(entry.second);
       if (it != rev_map.end()) {
         // Found an alias here!
-        aliases.insert(std::make_pair(entry.first, it->second));
+        aliases.emplace(entry.first, it->second);
       } else {
         // Found a final resource.
         const auto entry_index = static_cast<uint16_t>(resource_ids.size());
-        rev_map.insert(std::make_pair(entry.second, entry_index));
+        rev_map.emplace(entry.second, entry_index);
         resource_ids.push_back(entry.first);
       }
     }
@@ -549,7 +567,7 @@ bool DataPack::WritePack(const base::FilePath& path,
 
   // Write the aliases table, if any. Note: |aliases| is an std::map,
   // ensuring values are written in increasing order.
-  for (const std::pair<uint16_t, uint16_t>& alias : aliases) {
+  for (const std::pair<const uint16_t, uint16_t>& alias : aliases) {
     file.Write(&alias, sizeof(alias));
   }
 

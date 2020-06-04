@@ -22,8 +22,11 @@ namespace content {
 class WebContents;
 }
 
-class PopupTracker;
+namespace ui {
 class ScopedVisibilityTracker;
+}
+
+class PopupTracker;
 
 // This class tracks WebContents for the purpose of logging metrics related to
 // popup openers.
@@ -61,6 +64,11 @@ class PopupOpenerTabHelper
       content::NavigationHandle* navigation_handle) override;
   void DidGetUserInteraction(const blink::WebInputEvent::Type type) override;
 
+  // Logs user popup content settings if the last committed URL is valid and
+  // we have not recorded the settings for the opener id of the helper's
+  // web contents at the time the function is called.
+  void MaybeLogPagePopupContentSettings();
+
   // Visible time for this tab until a tab-under is detected. At which point it
   // gets the visible time from the |visibility_tracker_|. Will be unset until a
   // tab-under is detected.
@@ -70,12 +78,15 @@ class PopupOpenerTabHelper
   const base::TickClock* tick_clock_;
 
   // Keeps track of the total foreground time for this tab.
-  std::unique_ptr<ScopedVisibilityTracker> visibility_tracker_;
+  std::unique_ptr<ui::ScopedVisibilityTracker> visibility_tracker_;
 
   // Measures the time this WebContents opened a popup.
   base::TimeTicks last_popup_open_time_;
 
   bool has_opened_popup_since_last_user_gesture_ = false;
+
+  // The last source id used for logging Popup_Page.
+  ukm::SourceId last_opener_source_id_ = ukm::kInvalidSourceId;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

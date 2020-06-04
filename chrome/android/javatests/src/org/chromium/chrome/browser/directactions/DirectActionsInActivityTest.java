@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.directactions;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.fail;
 
@@ -13,18 +14,23 @@ import android.os.Bundle;
 import android.support.test.filters.MediumTest;
 
 import org.hamcrest.Matchers;
+import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MetricsUtils.HistogramDelta;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
+import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 /**
@@ -38,18 +44,27 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 @TargetApi(24) // For java.util.function.Consumer.
 public class DirectActionsInActivityTest {
     @Rule
-    public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
+    public ChromeActivityTestRule<? extends ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule(ChromeTabbedActivity.class);
 
     @Rule
     public DirectActionTestRule mDirectActionRule = new DirectActionTestRule();
+
+    private UserActionTester mActionTester;
 
     private ChromeActivity getActivity() {
         return mActivityTestRule.getActivity();
     }
 
+    @After
+    public void tearDown() {
+        if (mActionTester != null) mActionTester.tearDown();
+    }
+
     @Test
     @MediumTest
     @Feature({"DirectActions"})
+    @DisabledTest(message = "crbug.com/1034712")
     public void testDirectActionsDisabled() throws Exception {
         // disableDirectActions() makes AppHooks.createDirectActionCoordinator return null. This
         // should mean that direct actions are not available.
@@ -89,16 +104,28 @@ public class DirectActionsInActivityTest {
             });
         });
 
+        mActionTester = new UserActionTester();
+
         assertThat(DirectActionTestUtils.callOnGetDirectActions(getActivity()),
                 Matchers.hasItem("test"));
+        assertThat(mActionTester.getActions(), Matchers.hasItem("Android.DirectAction.List"));
+
+        HistogramDelta unknownAction = new HistogramDelta(
+                "Android.DirectAction.Perform", DirectActionUsageHistogram.DirectActionId.UNKNOWN);
+        HistogramDelta otherAction = new HistogramDelta(
+                "Android.DirectAction.Perform", DirectActionUsageHistogram.DirectActionId.OTHER);
 
         DirectActionTestUtils.callOnPerformDirectActions(
                 getActivity(), "doesnotexist", (r) -> fail("Unexpected result: " + r));
+        assertEquals(1, unknownAction.getDelta());
+        assertEquals(0, otherAction.getDelta());
 
         Bundle result = new Bundle();
         DirectActionTestUtils.callOnPerformDirectActions(
                 getActivity(), "test", (r) -> result.putAll((Bundle) r));
         assertThat(result.keySet(), Matchers.contains("ran_test"));
+        assertEquals(1, unknownAction.getDelta());
+        assertEquals(1, otherAction.getDelta());
     }
 
     @Test

@@ -46,13 +46,10 @@ class SessionCountMatchChecker : public SingleClientStatusChangeChecker {
         verifier_(fake_server) {}
 
   // StatusChangeChecker implementation.
-  bool IsExitConditionSatisfied() override {
-    return verifier_.VerifyEntityCountByType(expected_count_, syncer::SESSIONS);
-  }
-
-  std::string GetDebugMessage() const override {
-    return "Waiting for a matching number of sessions to be refleted on the "
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    *os << "Waiting for a matching number of sessions to be refleted on the "
            "fake server.";
+    return verifier_.VerifyEntityCountByType(expected_count_, syncer::SESSIONS);
   }
 
  private:
@@ -68,7 +65,8 @@ class SessionCountMatchChecker : public SingleClientStatusChangeChecker {
 // In the second phase, we take down client 1 and while it's down upload more
 // data from client 0. That second phase will rely on polling on client 1 to
 // receive the update.
-IN_PROC_BROWSER_TEST_F(TwoClientPollingSyncTest, ShouldPollOnStartup) {
+// Flaky: crbug.com/988161
+IN_PROC_BROWSER_TEST_F(TwoClientPollingSyncTest, DISABLED_ShouldPollOnStartup) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
 
   // Choose larger interval to verify the poll-on-start logic.

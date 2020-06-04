@@ -30,6 +30,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/memory/swap_thrashing_monitor_delegate.h"
@@ -79,7 +80,7 @@ class SwapThrashingMonitor {
 
   // The task runner used to run blocking operations.
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_ =
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
 
   // The delegate responsible for measuring the swap-thrashing activity. This

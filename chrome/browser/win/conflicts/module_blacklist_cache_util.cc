@@ -12,12 +12,12 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/hash/md5.h"
-#include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/win/conflicts/module_list_filter.h"
@@ -161,6 +161,8 @@ bool WriteModuleBlacklistCache(
       sizeof(third_party_dlls::PackedListModule) * blacklisted_modules.size());
   file_contents.append(std::begin(md5_digest->a), std::end(md5_digest->a));
 
+  // TODO(1022041): Investigate if using WriteFileAtomically() in a
+  // CONTINUE_ON_SHUTDOWN sequence doesn't cause too many corrupted caches.
   return base::ImportantFileWriter::WriteFileAtomically(
       module_blacklist_cache_path, file_contents);
 }

@@ -11,6 +11,8 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.BuildConfig;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.multidex.ChromiumMultiDexInstaller;
 
 /**
@@ -20,7 +22,9 @@ public abstract class NativeBrowserTestApplication extends Application {
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
-        ContextUtils.initApplicationContext(this);
+        initApplicationContext();
+
+        setLibraryProcessType();
         if (isMainProcess() || isBrowserProcess()) {
             // We need secondary dex in order to run EmbeddedTestServer in a
             // privileged process.
@@ -30,6 +34,20 @@ public abstract class NativeBrowserTestApplication extends Application {
             CommandLine.init(new String[] {});
             ApplicationStatus.initialize(this);
         }
+    }
+
+    protected void setLibraryProcessType() {
+        LibraryLoader.getInstance().setLibraryProcessType(isBrowserProcess()
+                        ? LibraryProcessType.PROCESS_BROWSER
+                        : LibraryProcessType.PROCESS_CHILD);
+    }
+
+    /**
+     * Initializes the application context. Subclasses may want to override this if the
+     * application context is initialized elsewhere.
+     */
+    protected void initApplicationContext() {
+        ContextUtils.initApplicationContext(this);
     }
 
     protected static boolean isMainProcess() {

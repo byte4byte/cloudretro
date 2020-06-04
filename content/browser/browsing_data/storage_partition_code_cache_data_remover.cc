@@ -55,16 +55,7 @@ void StoragePartitionCodeCacheDataRemover::Remove(
       << __func__ << " called with a null callback";
   done_callback_ = std::move(done_callback);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&StoragePartitionCodeCacheDataRemover::ClearJSCodeCache,
-                     base::Unretained(this)));
-}
-
-void StoragePartitionCodeCacheDataRemover::ClearedCodeCache() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  std::move(done_callback_).Run();
-  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
+  ClearJSCodeCache();
 }
 
 void StoragePartitionCodeCacheDataRemover::ClearCache(
@@ -83,12 +74,11 @@ void StoragePartitionCodeCacheDataRemover::ClearCache(
   if (!url_predicate_.is_null()) {
     result =
         (new ConditionalCacheDeletionHelper(
-             backend,
-             ConditionalCacheDeletionHelper::CreateCustomKeyURLAndTimeCondition(
-                 std::move(url_predicate_),
-                 base::BindRepeating(
-                     &GeneratedCodeCache::GetResourceURLFromKey),
-                 begin_time_, end_time_)))
+             backend, ConditionalCacheDeletionHelper::CreateURLAndTimeCondition(
+                          std::move(url_predicate_),
+                          base::BindRepeating(
+                              &GeneratedCodeCache::GetResourceURLFromKey),
+                          begin_time_, end_time_)))
             ->DeleteAndDestroySelfWhenFinished(copyable_callback);
   } else if (begin_time_.is_null() && end_time_.is_max()) {
     result = backend->DoomAllEntries(copyable_callback);
@@ -140,11 +130,9 @@ void StoragePartitionCodeCacheDataRemover::ClearWASMCodeCache(int rv) {
 // |rv| is the returned when clearing the code cache. We don't handle
 // any errors here, so the result value is ignored.
 void StoragePartitionCodeCacheDataRemover::DoneClearCodeCache(int rv) {
-  // Notify the UI thread that we are done.
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&StoragePartitionCodeCacheDataRemover::ClearedCodeCache,
-                     base::Unretained(this)));
+  // Notify that we are done.
+  std::move(done_callback_).Run();
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 }  // namespace content

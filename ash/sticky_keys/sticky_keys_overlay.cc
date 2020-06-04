@@ -208,7 +208,7 @@ StickyKeysOverlay::StickyKeysOverlay()
       widget_size_(overlay_view_->GetPreferredSize()) {
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_POPUP;
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.accept_events = false;
   params.z_order = ui::ZOrderLevel::kFloatingUIElement;
@@ -216,7 +216,7 @@ StickyKeysOverlay::StickyKeysOverlay()
   params.parent = Shell::GetContainer(Shell::GetRootWindowForNewWindows(),
                                       kShellWindowId_OverlayContainer);
   overlay_widget_.reset(new views::Widget);
-  overlay_widget_->Init(params);
+  overlay_widget_->Init(std::move(params));
   overlay_widget_->SetVisibilityChangedAnimationsEnabled(false);
   overlay_widget_->SetContentsView(overlay_view_.get());
   overlay_widget_->GetNativeView()->SetName("StickyKeysOverlay");

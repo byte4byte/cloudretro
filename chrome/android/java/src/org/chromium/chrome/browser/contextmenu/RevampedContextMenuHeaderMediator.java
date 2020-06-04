@@ -7,24 +7,31 @@ package org.chromium.chrome.browser.contextmenu;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.ColorInt;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.view.View;
+
+import androidx.annotation.ColorInt;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.favicon.IconType;
-import org.chromium.chrome.browser.favicon.LargeIconBridge;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.performance_hints.PerformanceHintsObserver.PerformanceClass;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
+import org.chromium.chrome.browser.ui.favicon.IconType;
+import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
+import org.chromium.components.embedder_support.contextmenu.ContextMenuParams;
 import org.chromium.ui.modelutil.PropertyModel;
 
 class RevampedContextMenuHeaderMediator implements View.OnClickListener {
@@ -33,18 +40,24 @@ class RevampedContextMenuHeaderMediator implements View.OnClickListener {
     private Context mContext;
     private String mPlainUrl;
 
-    RevampedContextMenuHeaderMediator(
-            Context context, PropertyModel model, ContextMenuParams params) {
+    RevampedContextMenuHeaderMediator(Context context, PropertyModel model,
+            @PerformanceClass int performanceClass, ContextMenuParams params, Profile profile) {
         mContext = context;
         mPlainUrl = params.getUrl();
         mModel = model;
-        mModel.set(RevampedContextMenuHeaderProperties.URL_CLICK_LISTENER, this);
+        mModel.set(RevampedContextMenuHeaderProperties.TITLE_AND_URL_CLICK_LISTENER, this);
 
         if (!params.isImage() && !params.isVideo()) {
-            LargeIconBridge iconBridge = new LargeIconBridge(Profile.getLastUsedProfile());
-            iconBridge.getLargeIconForUrl(mPlainUrl,
+            LargeIconBridge iconBridge = new LargeIconBridge(profile);
+            iconBridge.getLargeIconForStringUrl(mPlainUrl,
                     context.getResources().getDimensionPixelSize(R.dimen.default_favicon_min_size),
                     this::onFaviconAvailable);
+        } else if (params.isVideo()) {
+            setVideoIcon();
+        }
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXT_MENU_PERFORMANCE_INFO)
+                && params.isAnchor()) {
+            mModel.set(RevampedContextMenuHeaderProperties.URL_PERFORMANCE_CLASS, performanceClass);
         }
     }
 
@@ -61,7 +74,7 @@ class RevampedContextMenuHeaderMediator implements View.OnClickListener {
     }
 
     /**
-     * See {@link org.chromium.chrome.browser.favicon.LargeIconBridge#getLargeIconForUrl}
+     * See {@link org.chromium.chrome.browser.ui.favicon.LargeIconBridge#getLargeIconForUrl}
      */
     private void onFaviconAvailable(@Nullable Bitmap icon, @ColorInt int fallbackColor,
             boolean isColorDefault, @IconType int iconType) {
@@ -69,6 +82,12 @@ class RevampedContextMenuHeaderMediator implements View.OnClickListener {
         if (icon == null) {
             final RoundedIconGenerator iconGenerator = createRoundedIconGenerator(fallbackColor);
             icon = iconGenerator.generateIconForUrl(mPlainUrl);
+            // generateIconForUrl might return null if the URL is empty or the domain cannot be
+            // resolved. See https://crbug.com/987101
+            // TODO(sinansahin): Handle the case where generating an icon fails.
+            if (icon == null) {
+                return;
+            }
         }
 
         final int size = mContext.getResources().getDimensionPixelSize(
@@ -87,11 +106,19 @@ class RevampedContextMenuHeaderMediator implements View.OnClickListener {
     public void onClick(View v) {
         RecordHistogram.recordBooleanHistogram("ContextMenu.URLClicked", true);
         if (mModel.get(RevampedContextMenuHeaderProperties.URL_MAX_LINES) == Integer.MAX_VALUE) {
-            boolean isEmpty =
+            // URL and title should both be expanded.
+            assert mModel.get(RevampedContextMenuHeaderProperties.TITLE_MAX_LINES)
+                    == Integer.MAX_VALUE;
+
+            final boolean isTitleEmpty =
                     TextUtils.isEmpty(mModel.get(RevampedContextMenuHeaderProperties.TITLE));
-            mModel.set(RevampedContextMenuHeaderProperties.URL_MAX_LINES, isEmpty ? 2 : 1);
+            mModel.set(RevampedContextMenuHeaderProperties.URL_MAX_LINES, isTitleEmpty ? 2 : 1);
+            final boolean isUrlEmpty =
+                    TextUtils.isEmpty(mModel.get(RevampedContextMenuHeaderProperties.URL));
+            mModel.set(RevampedContextMenuHeaderProperties.TITLE_MAX_LINES, isUrlEmpty ? 2 : 1);
         } else {
             mModel.set(RevampedContextMenuHeaderProperties.URL_MAX_LINES, Integer.MAX_VALUE);
+            mModel.set(RevampedContextMenuHeaderProperties.TITLE_MAX_LINES, Integer.MAX_VALUE);
         }
     }
 
@@ -129,6 +156,20 @@ class RevampedContextMenuHeaderMediator implements View.OnClickListener {
         canvas.drawBitmap(image, new Matrix(), paint);
 
         return bitmap;
+    }
+
+    private void setVideoIcon() {
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inMutable = true;
+        Bitmap bitmap = BitmapFactory.decodeResource(
+                mContext.getResources(), R.drawable.ic_videocam_white_24dp, options);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint();
+        paint.setColorFilter(new PorterDuffColorFilter(
+                ApiCompatibilityUtils.getColor(mContext.getResources(), R.color.default_icon_color),
+                PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(bitmap, new Matrix(), paint);
+        setHeaderImage(bitmap, false);
     }
 
     private void setHeaderImage(Bitmap bitmap, boolean isThumbnail) {

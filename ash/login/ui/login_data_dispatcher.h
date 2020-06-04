@@ -12,7 +12,7 @@
 #include "ash/ash_export.h"
 #include "ash/detachable_base/detachable_base_pairing_status.h"
 #include "ash/public/cpp/login_screen_model.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 
@@ -51,6 +51,12 @@ class ASH_EXPORT LoginDataDispatcher : public LoginScreenModel {
     // should be disabled.
     virtual void OnPinEnabledForUserChanged(const AccountId& user,
                                             bool enabled);
+
+    // Called when the challenge-response authentication should be enabled or
+    // disabled for |user|. By default, it should be disabled.
+    virtual void OnChallengeResponseAuthEnabledForUserChanged(
+        const AccountId& user,
+        bool enabled);
 
     // Called when fingerprint unlock state changes for user with |account_id|.
     virtual void OnFingerprintStateChanged(const AccountId& account_id,
@@ -91,9 +97,11 @@ class ASH_EXPORT LoginDataDispatcher : public LoginScreenModel {
 
     // Called when the system info has changed.
     virtual void OnSystemInfoChanged(bool show,
+                                     bool enforced,
                                      const std::string& os_version_label_text,
                                      const std::string& enterprise_info_text,
-                                     const std::string& bluetooth_name);
+                                     const std::string& bluetooth_name,
+                                     bool adb_sideloading_enabled);
 
     // Called when public session display name is changed for user with
     // |account_id|.
@@ -140,8 +148,6 @@ class ASH_EXPORT LoginDataDispatcher : public LoginScreenModel {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  void SetTapToUnlockEnabledForUser(const AccountId& user, bool enabled);
-
   // LoginScreenModel:
   // TODO(estade): for now, LoginScreenModel overrides are mixed with
   // non-virtual methods. More of the non-virtual methods will become a part of
@@ -150,6 +156,8 @@ class ASH_EXPORT LoginDataDispatcher : public LoginScreenModel {
   // overrides.
   void SetUserList(const std::vector<LoginUserInfo>& users) override;
   void SetPinEnabledForUser(const AccountId& user, bool enabled) override;
+  void SetChallengeResponseAuthEnabledForUser(const AccountId& user,
+                                              bool enabled) override;
   void SetFingerprintState(const AccountId& account_id,
                            FingerprintState state) override;
   void SetAvatarForUser(const AccountId& account_id,
@@ -159,16 +167,19 @@ class ASH_EXPORT LoginDataDispatcher : public LoginScreenModel {
   void EnableAuthForUser(const AccountId& account_id) override;
   void DisableAuthForUser(const AccountId& account_id,
                           const AuthDisabledData& auth_disabled_data) override;
-  void EnableTapToUnlockForUser(const AccountId& user) override;
+  void SetTapToUnlockEnabledForUser(const AccountId& user,
+                                    bool enabled) override;
   void ForceOnlineSignInForUser(const AccountId& user) override;
   void SetLockScreenNoteState(mojom::TrayActionState state);
   void ShowEasyUnlockIcon(const AccountId& user,
                           const EasyUnlockIconOptions& icon) override;
   void UpdateWarningMessage(const base::string16& message) override;
-  void SetSystemInfo(bool show_if_hidden,
+  void SetSystemInfo(bool show,
+                     bool enforced,
                      const std::string& os_version_label_text,
                      const std::string& enterprise_info_text,
-                     const std::string& bluetooth_name) override;
+                     const std::string& bluetooth_name,
+                     bool adb_sideloading_enabled) override;
   void SetPublicSessionDisplayName(const AccountId& account_id,
                                    const std::string& display_name) override;
   void SetPublicSessionLocales(const AccountId& account_id,

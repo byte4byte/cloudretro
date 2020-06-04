@@ -12,24 +12,24 @@
 #import "ios/chrome/browser/ui/infobars/infobar_constants.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
+#import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/translate/translate_infobar_language_tab_strip_view.h"
 #import "ios/chrome/browser/ui/translate/translate_infobar_language_tab_strip_view_delegate.h"
+#import "ios/chrome/browser/ui/translate/translate_infobar_view_constants.h"
 #import "ios/chrome/browser/ui/translate/translate_infobar_view_delegate.h"
 #import "ios/chrome/browser/ui/util/label_link_controller.h"
 #import "ios/chrome/browser/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+#import "ui/gfx/ios/uikit_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-const CGFloat kInfobarHeight = 54;
-
-NSString* const kTranslateInfobarViewId = @"kTranslateInfobarViewId";
 
 namespace {
 
@@ -172,7 +172,8 @@ const CGFloat kIconTrailingMargin = 12;
   // in fullscreen mode (i.e., progress == 0), thus hiding the infobar, to the
   // maximum bottom padding calculated above.
   CGFloat bottomPadding =
-      progress * (maxBottomPadding + kInfobarHeight) - kInfobarHeight;
+      progress * (maxBottomPadding + kTranslateInfobarHeight) -
+      kTranslateInfobarHeight;
 
   // If the fullscreen progress is greater than the previous progress, i.e., we
   // are exiting the fullscreen mode, update the bottom padding only if the
@@ -213,8 +214,21 @@ const CGFloat kIconTrailingMargin = 12;
                                     a11yAnnoucement);
   }
 
-  self.backgroundColor = UIColorFromRGB(kInfobarBackgroundColor);
+  self.backgroundColor = [UIColor colorNamed:kBackgroundColor];
   id<LayoutGuideProvider> safeAreaLayoutGuide = self.safeAreaLayoutGuide;
+
+  UIView* separator = [[UIView alloc] init];
+  separator.translatesAutoresizingMaskIntoConstraints = NO;
+  separator.backgroundColor = [UIColor colorNamed:kToolbarShadowColor];
+
+  [self addSubview:separator];
+  CGFloat toolbarHeight = ui::AlignValueToUpperPixel(kToolbarSeparatorHeight);
+  [NSLayoutConstraint activateConstraints:@[
+    [separator.heightAnchor constraintEqualToConstant:toolbarHeight],
+    [self.topAnchor constraintEqualToAnchor:separator.bottomAnchor],
+    [self.leadingAnchor constraintEqualToAnchor:separator.leadingAnchor],
+    [self.trailingAnchor constraintEqualToAnchor:separator.trailingAnchor],
+  ]];
 
   // The Content view. Holds all the other subviews.
   UIView* contentView = [[UIView alloc] init];
@@ -232,8 +246,7 @@ const CGFloat kIconTrailingMargin = 12;
   ]];
 
   UIImage* icon = [[UIImage imageNamed:@"translate_icon"]
-      resizableImageWithCapInsets:UIEdgeInsetsZero
-                     resizingMode:UIImageResizingModeStretch];
+      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   UIImageView* iconView = [[UIImageView alloc] initWithImage:icon];
   self.iconView = iconView;
   self.iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -291,7 +304,7 @@ const CGFloat kIconTrailingMargin = 12;
         @"iconSize" : @(kIconSize),
         @"iconLeadingMargin" : @(kIconLeadingMargin),
         @"iconTrailingMargin" : @(kIconTrailingMargin),
-        @"infobarHeight" : @(kInfobarHeight),
+        @"infobarHeight" : @(kTranslateInfobarHeight),
         @"buttonSize" : @(kButtonSize),
       });
   AddSameCenterYConstraint(contentView, self.iconView);

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "remoting/base/grpc_support/grpc_async_executor.h"
 #include "remoting/base/grpc_support/grpc_async_request.h"
 #include "third_party/grpc/src/include/grpcpp/client_context.h"
@@ -15,8 +16,7 @@
 namespace remoting {
 
 GrpcAuthenticatedExecutor::GrpcAuthenticatedExecutor(
-    OAuthTokenGetter* token_getter)
-    : weak_factory_(this) {
+    OAuthTokenGetter* token_getter) {
   DCHECK(token_getter);
   token_getter_ = token_getter;
   executor_ = std::make_unique<GrpcAsyncExecutor>();

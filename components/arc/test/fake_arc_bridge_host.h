@@ -6,7 +6,7 @@
 #define COMPONENTS_ARC_TEST_FAKE_ARC_BRIDGE_HOST_H_
 
 #include "base/macros.h"
-#include "components/arc/common/arc_bridge.mojom.h"
+#include "components/arc/mojom/arc_bridge.mojom.h"
 
 namespace arc {
 
@@ -79,6 +79,8 @@ class FakeArcBridgeHost : public mojom::ArcBridgeHost {
       mojom::RotationLockInstancePtr rotation_lock_ptr) override;
   void OnScreenCaptureInstanceReady(
       mojom::ScreenCaptureInstancePtr screen_capture_ptr) override;
+  void OnSmartCardManagerInstanceReady(
+      mojom::SmartCardManagerInstancePtr smart_card_manager_ptr) override;
   void OnStorageManagerInstanceReady(
       mojom::StorageManagerInstancePtr storage_manager_ptr) override;
   void OnTimerInstanceReady(mojom::TimerInstancePtr timer_ptr) override;

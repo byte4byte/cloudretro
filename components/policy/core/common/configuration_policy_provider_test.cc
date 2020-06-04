@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "components/policy/core/common/configuration_policy_provider.h"
 #include "components/policy/core/common/extension_policy_migrator.h"
@@ -136,7 +137,7 @@ void PolicyTestBase::SetUp() {
 }
 
 void PolicyTestBase::TearDown() {
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 bool PolicyTestBase::RegisterSchema(const PolicyNamespace& ns,
@@ -205,11 +206,11 @@ void ConfigurationPolicyProviderTest::SetUp() {
 
   provider_.reset(test_harness_->CreateProvider(
       &schema_registry_,
-      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()})));
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()})));
   provider_->Init(&schema_registry_);
   // Some providers do a reload on init. Make sure any notifications generated
   // are fired now.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   const PolicyBundle kEmptyBundle;
   EXPECT_TRUE(provider_->policies().Equals(kEmptyBundle));
@@ -226,11 +227,11 @@ void ConfigurationPolicyProviderTest::TearDown() {
 void ConfigurationPolicyProviderTest::CheckValue(
     const char* policy_name,
     const base::Value& expected_value,
-    base::Closure install_value) {
+    base::OnceClosure install_value) {
   // Install the value, reload policy and check the provider for the value.
-  install_value.Run();
+  std::move(install_value).Run();
   provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   PolicyBundle expected_bundle;
   expected_bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .Set(policy_name, test_harness_->policy_level(),
@@ -243,7 +244,7 @@ void ConfigurationPolicyProviderTest::CheckValue(
 
 TEST_P(ConfigurationPolicyProviderTest, Empty) {
   provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   const PolicyBundle kEmptyBundle;
   EXPECT_TRUE(provider_->policies().Equals(kEmptyBundle));
 }
@@ -251,44 +252,36 @@ TEST_P(ConfigurationPolicyProviderTest, Empty) {
 TEST_P(ConfigurationPolicyProviderTest, StringValue) {
   const char kTestString[] = "string_value";
   base::Value expected_value(kTestString);
-  CheckValue(test_keys::kKeyString,
-             expected_value,
-             base::Bind(&PolicyProviderTestHarness::InstallStringPolicy,
-                        base::Unretained(test_harness_.get()),
-                        test_keys::kKeyString,
-                        kTestString));
+  CheckValue(test_keys::kKeyString, expected_value,
+             base::BindOnce(&PolicyProviderTestHarness::InstallStringPolicy,
+                            base::Unretained(test_harness_.get()),
+                            test_keys::kKeyString, kTestString));
 }
 
 TEST_P(ConfigurationPolicyProviderTest, BooleanValue) {
   base::Value expected_value(true);
-  CheckValue(test_keys::kKeyBoolean,
-             expected_value,
-             base::Bind(&PolicyProviderTestHarness::InstallBooleanPolicy,
-                        base::Unretained(test_harness_.get()),
-                        test_keys::kKeyBoolean,
-                        true));
+  CheckValue(test_keys::kKeyBoolean, expected_value,
+             base::BindOnce(&PolicyProviderTestHarness::InstallBooleanPolicy,
+                            base::Unretained(test_harness_.get()),
+                            test_keys::kKeyBoolean, true));
 }
 
 TEST_P(ConfigurationPolicyProviderTest, IntegerValue) {
   base::Value expected_value(42);
-  CheckValue(test_keys::kKeyInteger,
-             expected_value,
-             base::Bind(&PolicyProviderTestHarness::InstallIntegerPolicy,
-                        base::Unretained(test_harness_.get()),
-                        test_keys::kKeyInteger,
-                        42));
+  CheckValue(test_keys::kKeyInteger, expected_value,
+             base::BindOnce(&PolicyProviderTestHarness::InstallIntegerPolicy,
+                            base::Unretained(test_harness_.get()),
+                            test_keys::kKeyInteger, 42));
 }
 
 TEST_P(ConfigurationPolicyProviderTest, StringListValue) {
   base::ListValue expected_value;
   expected_value.AppendString("first");
   expected_value.AppendString("second");
-  CheckValue(test_keys::kKeyStringList,
-             expected_value,
-             base::Bind(&PolicyProviderTestHarness::InstallStringListPolicy,
-                        base::Unretained(test_harness_.get()),
-                        test_keys::kKeyStringList,
-                        &expected_value));
+  CheckValue(test_keys::kKeyStringList, expected_value,
+             base::BindOnce(&PolicyProviderTestHarness::InstallStringListPolicy,
+                            base::Unretained(test_harness_.get()),
+                            test_keys::kKeyStringList, &expected_value));
 }
 
 TEST_P(ConfigurationPolicyProviderTest, DictionaryValue) {
@@ -317,12 +310,10 @@ TEST_P(ConfigurationPolicyProviderTest, DictionaryValue) {
   dict->Set("sublist", std::move(list));
   expected_value.Set("dictionary", std::move(dict));
 
-  CheckValue(test_keys::kKeyDictionary,
-             expected_value,
-             base::Bind(&PolicyProviderTestHarness::InstallDictionaryPolicy,
-                        base::Unretained(test_harness_.get()),
-                        test_keys::kKeyDictionary,
-                        &expected_value));
+  CheckValue(test_keys::kKeyDictionary, expected_value,
+             base::BindOnce(&PolicyProviderTestHarness::InstallDictionaryPolicy,
+                            base::Unretained(test_harness_.get()),
+                            test_keys::kKeyDictionary, &expected_value));
 }
 
 TEST_P(ConfigurationPolicyProviderTest, RefreshPolicies) {
@@ -334,7 +325,7 @@ TEST_P(ConfigurationPolicyProviderTest, RefreshPolicies) {
   provider_->AddObserver(&observer);
   EXPECT_CALL(observer, OnUpdatePolicy(provider_.get())).Times(1);
   provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   Mock::VerifyAndClearExpectations(&observer);
 
   EXPECT_TRUE(provider_->policies().Equals(bundle));
@@ -343,7 +334,7 @@ TEST_P(ConfigurationPolicyProviderTest, RefreshPolicies) {
   test_harness_->InstallStringPolicy(test_keys::kKeyString, "value");
   EXPECT_CALL(observer, OnUpdatePolicy(provider_.get())).Times(1);
   provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   Mock::VerifyAndClearExpectations(&observer);
 
   bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
@@ -352,19 +343,6 @@ TEST_P(ConfigurationPolicyProviderTest, RefreshPolicies) {
            std::make_unique<base::Value>("value"), nullptr);
   EXPECT_TRUE(provider_->policies().Equals(bundle));
   provider_->RemoveObserver(&observer);
-}
-
-class MockPolicyMigrator : public ExtensionPolicyMigrator {
- public:
-  MOCK_METHOD1(Migrate, void(PolicyBundle* bundle));
-};
-
-TEST_P(ConfigurationPolicyProviderTest, AddMigrator) {
-  MockPolicyMigrator* migrator = new MockPolicyMigrator;
-  EXPECT_CALL(*migrator, Migrate(_));
-  provider_->AddMigrator(std::unique_ptr<ExtensionPolicyMigrator>(migrator));
-  provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
 }
 
 Configuration3rdPartyPolicyProviderTest::
@@ -407,7 +385,7 @@ TEST_P(Configuration3rdPartyPolicyProviderTest, Load3rdParty) {
   test_harness_->Install3rdPartyPolicy(&policy_3rdparty);
 
   provider_->RefreshPolicies();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   PolicyMap expected_policy;
   expected_policy.Set(test_keys::kKeyDictionary, test_harness_->policy_level(),

@@ -38,12 +38,12 @@ import org.junit.runner.RunWith;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
-import org.chromium.chrome.browser.infobar.SimpleConfirmInfoBarBuilder;
-import org.chromium.chrome.browser.snackbar.Snackbar;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.infobar.SimpleConfirmInfoBarBuilder;
+import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
@@ -77,7 +77,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testAccessoryIsAvailable() throws InterruptedException {
+    public void testAccessoryIsAvailable() {
         mHelper.loadTestPage(false);
 
         assertNotNull("Controller for Manual filling should be available.",
@@ -86,8 +86,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testKeyboardAccessoryHiddenUntilKeyboardShows()
-            throws InterruptedException, TimeoutException {
+    public void testKeyboardAccessoryHiddenUntilKeyboardShows() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -102,8 +101,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testKeyboardAccessoryDisappearsWithKeyboard()
-            throws InterruptedException, TimeoutException {
+    public void testKeyboardAccessoryDisappearsWithKeyboard() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -118,8 +116,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testAccessorySheetHiddenUntilManuallyTriggered()
-            throws InterruptedException, TimeoutException {
+    public void testAccessorySheetHiddenUntilManuallyTriggered() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -139,8 +136,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testAccessorySheetHiddenWhenRefocusingField()
-            throws InterruptedException, TimeoutException {
+    public void testAccessorySheetHiddenWhenRefocusingField() throws TimeoutException {
         AtomicReference<ViewGroup.MarginLayoutParams> accessoryMargins = new AtomicReference<>();
         AtomicReference<View> accessorySheetView = new AtomicReference<>();
         mHelper.loadTestPage(false);
@@ -177,8 +173,7 @@ public class ManualFillingIntegrationTest {
     @Test
     @SmallTest
     @Features.DisableFeatures(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
-    public void testAccessoryHiddenAfterTappingAutoGenerationButton()
-            throws InterruptedException, TimeoutException {
+    public void testAccessoryHiddenAfterTappingAutoGenerationButton() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory and add the generation button.
@@ -200,7 +195,7 @@ public class ManualFillingIntegrationTest {
     @Test
     @SmallTest
     @Features.DisableFeatures(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
-    public void testHidingSheetBringsBackKeyboard() throws InterruptedException, TimeoutException {
+    public void testHidingSheetBringsBackKeyboard() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -224,8 +219,7 @@ public class ManualFillingIntegrationTest {
     @Test
     @SmallTest
     @Features.DisableFeatures({ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY})
-    public void testSelectingNonPasswordInputDismissesAccessory()
-            throws InterruptedException, TimeoutException {
+    public void testSelectingNonPasswordInputDismissesAccessory() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the password field to bring up the accessory.
@@ -241,8 +235,7 @@ public class ManualFillingIntegrationTest {
     @Test
     @SmallTest
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
-    public void testInvokingTabSwitcherHidesAccessory()
-            throws InterruptedException, TimeoutException {
+    public void testInvokingTabSwitcherHidesAccessory() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -265,8 +258,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testResumingTheAppDismissesAllInputMethods()
-            throws InterruptedException, TimeoutException {
+    public void testResumingTheAppDismissesAllInputMethods() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -305,8 +297,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testPressingBackButtonHidesAccessorySheet()
-            throws InterruptedException, TimeoutException {
+    public void testPressingBackButtonHidesAccessorySheet() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Focus the field to bring up the accessory.
@@ -327,8 +318,8 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testInfobarStaysHiddenWhileChangingFieldsWithOpenKeybaord()
-            throws InterruptedException, TimeoutException {
+    public void testInfobarStaysHiddenWhileChangingFieldsWithOpenKeyboard()
+            throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Initialize and wait for the infobar.
@@ -336,7 +327,8 @@ public class ManualFillingIntegrationTest {
         mActivityTestRule.getInfoBarContainer().addAnimationListener(listener);
         final String kInfoBarText = "SomeInfoBar";
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            SimpleConfirmInfoBarBuilder.create(mActivityTestRule.getActivity().getActivityTab(),
+            SimpleConfirmInfoBarBuilder.create(
+                    mActivityTestRule.getActivity().getActivityTab().getWebContents(),
                     InfoBarIdentifier.DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_ANDROID, kInfoBarText,
                     false);
         });
@@ -367,8 +359,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testInfobarStaysHiddenWhenOpeningSheet()
-            throws InterruptedException, TimeoutException {
+    public void testInfobarStaysHiddenWhenOpeningSheet() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Initialize and wait for the infobar.
@@ -376,7 +367,8 @@ public class ManualFillingIntegrationTest {
         mActivityTestRule.getInfoBarContainer().addAnimationListener(listener);
         final String kInfoBarText = "SomeInfoBar";
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            SimpleConfirmInfoBarBuilder.create(mActivityTestRule.getActivity().getActivityTab(),
+            SimpleConfirmInfoBarBuilder.create(
+                    mActivityTestRule.getActivity().getActivityTab().getWebContents(),
                     InfoBarIdentifier.DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_ANDROID, kInfoBarText,
                     false);
         });
@@ -412,7 +404,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testMovesUpSnackbar() throws InterruptedException, TimeoutException {
+    public void testMovesUpSnackbar() throws TimeoutException {
         final String kSnackbarText = "snackbar";
 
         mHelper.loadTestPage(false);
@@ -448,7 +440,7 @@ public class ManualFillingIntegrationTest {
 
     @Test
     @SmallTest
-    public void testInfobarReopensOnPressingBack() throws InterruptedException, TimeoutException {
+    public void testInfobarReopensOnPressingBack() throws TimeoutException {
         mHelper.loadTestPage(false);
 
         // Initialize and wait for the infobar.
@@ -456,7 +448,8 @@ public class ManualFillingIntegrationTest {
         mActivityTestRule.getInfoBarContainer().addAnimationListener(listener);
         final String kInfoBarText = "SomeInfoBar";
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            SimpleConfirmInfoBarBuilder.create(mActivityTestRule.getActivity().getActivityTab(),
+            SimpleConfirmInfoBarBuilder.create(
+                    mActivityTestRule.getActivity().getActivityTab().getWebContents(),
                     InfoBarIdentifier.DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_ANDROID, kInfoBarText,
                     false);
         });

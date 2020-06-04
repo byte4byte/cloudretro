@@ -114,7 +114,7 @@ class PageSchedulerImplTest : public testing::Test {
     auto* frame_task_queue_controller =
         scheduler->FrameTaskQueueControllerForTest();
     auto queue_traits = FrameSchedulerImpl::ThrottleableTaskQueueTraits();
-    return frame_task_queue_controller->NonLoadingTaskQueue(queue_traits);
+    return frame_task_queue_controller->GetTaskQueue(queue_traits);
   }
 
   base::TimeDelta delay_for_background_tab_freezing() const {
@@ -139,32 +139,32 @@ class PageSchedulerImplTest : public testing::Test {
     return LoadingTaskQueue()->CreateTaskRunner(TaskType::kInternalTest);
   }
 
-  scoped_refptr<MainThreadTaskQueue> NonLoadingTaskQueue(
+  scoped_refptr<MainThreadTaskQueue> GetTaskQueue(
       MainThreadTaskQueue::QueueTraits queue_traits) {
     return frame_scheduler_->FrameTaskQueueControllerForTest()
-        ->NonLoadingTaskQueue(queue_traits);
+        ->GetTaskQueue(queue_traits);
   }
 
   scoped_refptr<MainThreadTaskQueue> ThrottleableTaskQueue() {
-    return NonLoadingTaskQueue(
+    return GetTaskQueue(
         FrameSchedulerImpl::ThrottleableTaskQueueTraits());
   }
 
   scoped_refptr<MainThreadTaskQueue> LoadingTaskQueue() {
-    return frame_scheduler_->FrameTaskQueueControllerForTest()
-        ->LoadingTaskQueue();
+    return GetTaskQueue(
+        FrameSchedulerImpl::LoadingTaskQueueTraits());
   }
 
   scoped_refptr<MainThreadTaskQueue> DeferrableTaskQueue() {
-    return NonLoadingTaskQueue(FrameSchedulerImpl::DeferrableTaskQueueTraits());
+    return GetTaskQueue(FrameSchedulerImpl::DeferrableTaskQueueTraits());
   }
 
   scoped_refptr<MainThreadTaskQueue> PausableTaskQueue() {
-    return NonLoadingTaskQueue(FrameSchedulerImpl::PausableTaskQueueTraits());
+    return GetTaskQueue(FrameSchedulerImpl::PausableTaskQueueTraits());
   }
 
   scoped_refptr<MainThreadTaskQueue> UnpausableTaskQueue() {
-    return NonLoadingTaskQueue(FrameSchedulerImpl::UnpausableTaskQueueTraits());
+    return GetTaskQueue(FrameSchedulerImpl::UnpausableTaskQueueTraits());
   }
 
   bool ShouldFreezePage() { return page_scheduler_->ShouldFreezePage(); }
@@ -858,17 +858,19 @@ TEST_F(PageSchedulerImplTest, NestedMessageLoop_DETERMINISTIC_LOADING) {
       VirtualTimePolicy::kDeterministicLoading);
   EXPECT_TRUE(scheduler_->VirtualTimeAllowedToAdvance());
 
-  scheduler_->OnTaskStarted(
-      nullptr, FakeTask(),
-      FakeTaskTiming(base::TimeTicks(), base::TimeTicks()));
+  FakeTask fake_task;
+  fake_task.set_enqueue_order(
+      base::sequence_manager::EnqueueOrder::FromIntForTesting(42));
+  const base::TimeTicks start = scheduler_->real_time_domain()->Now();
+  scheduler_->OnTaskStarted(nullptr, fake_task,
+                            FakeTaskTiming(start, base::TimeTicks()));
   scheduler_->OnBeginNestedRunLoop();
   EXPECT_FALSE(scheduler_->VirtualTimeAllowedToAdvance());
 
   scheduler_->OnExitNestedRunLoop();
   EXPECT_TRUE(scheduler_->VirtualTimeAllowedToAdvance());
-  FakeTaskTiming task_timing(base::TimeTicks(),
-                             scheduler_->real_time_domain()->Now());
-  scheduler_->OnTaskCompleted(nullptr, FakeTask(), &task_timing, nullptr);
+  FakeTaskTiming task_timing(start, scheduler_->real_time_domain()->Now());
+  scheduler_->OnTaskCompleted(nullptr, fake_task, &task_timing, nullptr);
 }
 
 TEST_F(PageSchedulerImplTest, PauseTimersWhileVirtualTimeIsPaused) {
@@ -1006,9 +1008,12 @@ TEST_F(PageSchedulerImplTest,
   page_scheduler_->SetMaxVirtualTimeTaskStarvationCount(100);
   page_scheduler_->SetVirtualTimePolicy(VirtualTimePolicy::kAdvance);
 
-  scheduler_->OnTaskStarted(
-      nullptr, FakeTask(),
-      FakeTaskTiming(base::TimeTicks(), base::TimeTicks()));
+  FakeTask fake_task;
+  fake_task.set_enqueue_order(
+      base::sequence_manager::EnqueueOrder::FromIntForTesting(42));
+  const base::TimeTicks start = scheduler_->real_time_domain()->Now();
+  scheduler_->OnTaskStarted(nullptr, fake_task,
+                            FakeTaskTiming(start, base::TimeTicks()));
   scheduler_->OnBeginNestedRunLoop();
 
   int count = 0;

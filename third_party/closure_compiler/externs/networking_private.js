@@ -76,7 +76,6 @@ chrome.networkingPrivate.NetworkType = {
   VPN: 'VPN',
   WIRELESS: 'Wireless',
   WI_FI: 'WiFi',
-  WI_MAX: 'WiMAX',
 };
 
 /**
@@ -331,7 +330,7 @@ chrome.networkingPrivate.FoundNetworkProperties;
  *   Gateway: (string|undefined),
  *   IPAddress: (string|undefined),
  *   ExcludedRoutes: (!Array<string>|undefined),
- *   kIncludedRoutes: (!Array<string>|undefined),
+ *   IncludedRoutes: (!Array<string>|undefined),
  *   NameServers: (!Array<string>|undefined),
  *   SearchDomains: (!Array<string>|undefined),
  *   RoutingPrefix: (number|undefined),
@@ -647,7 +646,6 @@ chrome.networkingPrivate.ManagedThirdPartyVPNProperties;
  *   ModelID: (string|undefined),
  *   NetworkTechnology: (string|undefined),
  *   PaymentPortal: (!chrome.networkingPrivate.PaymentPortal|undefined),
- *   PRLVersion: (number|undefined),
  *   RoamingState: (string|undefined),
  *   Scanning: (boolean|undefined),
  *   ServingOperator: (!chrome.networkingPrivate.CellularProviderProperties|undefined),
@@ -683,7 +681,6 @@ chrome.networkingPrivate.CellularProperties;
  *   ModelID: (string|undefined),
  *   NetworkTechnology: (string|undefined),
  *   PaymentPortal: (!chrome.networkingPrivate.PaymentPortal|undefined),
- *   PRLVersion: (number|undefined),
  *   RoamingState: (string|undefined),
  *   Scanning: (boolean|undefined),
  *   ServingOperator: (!chrome.networkingPrivate.CellularProviderProperties|undefined),
@@ -796,7 +793,6 @@ chrome.networkingPrivate.VPNStateProperties;
  *   HexSSID: (string|undefined),
  *   HiddenSSID: (boolean|undefined),
  *   Passphrase: (string|undefined),
- *   RoamThreshold: (number|undefined),
  *   SSID: (string|undefined),
  *   Security: (string|undefined),
  *   SignalStrength: (number|undefined),
@@ -817,7 +813,6 @@ chrome.networkingPrivate.WiFiProperties;
  *   HexSSID: (!chrome.networkingPrivate.ManagedDOMString|undefined),
  *   HiddenSSID: (!chrome.networkingPrivate.ManagedBoolean|undefined),
  *   Passphrase: (!chrome.networkingPrivate.ManagedDOMString|undefined),
- *   RoamThreshold: (!chrome.networkingPrivate.ManagedLong|undefined),
  *   SSID: (!chrome.networkingPrivate.ManagedDOMString|undefined),
  *   Security: !chrome.networkingPrivate.ManagedDOMString,
  *   SignalStrength: (number|undefined),
@@ -842,31 +837,6 @@ chrome.networkingPrivate.WiFiStateProperties;
 
 /**
  * @typedef {{
- *   AutoConnect: (boolean|undefined),
- *   EAP: (!chrome.networkingPrivate.EAPProperties|undefined),
- *   SignalStrength: (number|undefined)
- * }}
- */
-chrome.networkingPrivate.WiMAXProperties;
-
-/**
- * @typedef {{
- *   AutoConnect: (!chrome.networkingPrivate.ManagedBoolean|undefined),
- *   EAP: (!chrome.networkingPrivate.ManagedEAPProperties|undefined),
- *   SignalStrength: (number|undefined)
- * }}
- */
-chrome.networkingPrivate.ManagedWiMAXProperties;
-
-/**
- * @typedef {{
- *   SignalStrength: (number|undefined)
- * }}
- */
-chrome.networkingPrivate.WiMAXStateProperties;
-
-/**
- * @typedef {{
  *   Cellular: (!chrome.networkingPrivate.CellularProperties|undefined),
  *   Ethernet: (!chrome.networkingPrivate.EthernetProperties|undefined),
  *   GUID: (string|undefined),
@@ -878,8 +848,7 @@ chrome.networkingPrivate.WiMAXStateProperties;
  *   StaticIPConfig: (!chrome.networkingPrivate.IPConfigProperties|undefined),
  *   Type: (!chrome.networkingPrivate.NetworkType|undefined),
  *   VPN: (!chrome.networkingPrivate.VPNProperties|undefined),
- *   WiFi: (!chrome.networkingPrivate.WiFiProperties|undefined),
- *   WiMAX: (!chrome.networkingPrivate.WiMAXProperties|undefined)
+ *   WiFi: (!chrome.networkingPrivate.WiFiProperties|undefined)
  * }}
  */
 chrome.networkingPrivate.NetworkConfigProperties;
@@ -906,8 +875,7 @@ chrome.networkingPrivate.NetworkConfigProperties;
  *   Tether: (!chrome.networkingPrivate.TetherProperties|undefined),
  *   Type: !chrome.networkingPrivate.NetworkType,
  *   VPN: (!chrome.networkingPrivate.VPNProperties|undefined),
- *   WiFi: (!chrome.networkingPrivate.WiFiProperties|undefined),
- *   WiMAX: (!chrome.networkingPrivate.WiMAXProperties|undefined)
+ *   WiFi: (!chrome.networkingPrivate.WiFiProperties|undefined)
  * }}
  */
 chrome.networkingPrivate.NetworkProperties;
@@ -934,8 +902,7 @@ chrome.networkingPrivate.NetworkProperties;
  *   Tether: (!chrome.networkingPrivate.TetherProperties|undefined),
  *   Type: !chrome.networkingPrivate.NetworkType,
  *   VPN: (!chrome.networkingPrivate.ManagedVPNProperties|undefined),
- *   WiFi: (!chrome.networkingPrivate.ManagedWiFiProperties|undefined),
- *   WiMAX: (!chrome.networkingPrivate.ManagedWiMAXProperties|undefined)
+ *   WiFi: (!chrome.networkingPrivate.ManagedWiFiProperties|undefined)
  * }}
  */
 chrome.networkingPrivate.ManagedProperties;
@@ -954,8 +921,7 @@ chrome.networkingPrivate.ManagedProperties;
  *   Tether: (!chrome.networkingPrivate.TetherProperties|undefined),
  *   Type: !chrome.networkingPrivate.NetworkType,
  *   VPN: (!chrome.networkingPrivate.VPNStateProperties|undefined),
- *   WiFi: (!chrome.networkingPrivate.WiFiStateProperties|undefined),
- *   WiMAX: (!chrome.networkingPrivate.WiMAXStateProperties|undefined)
+ *   WiFi: (!chrome.networkingPrivate.WiFiStateProperties|undefined)
  * }}
  */
 chrome.networkingPrivate.NetworkStateProperties;

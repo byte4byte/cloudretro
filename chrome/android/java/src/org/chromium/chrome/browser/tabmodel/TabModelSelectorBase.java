@@ -7,6 +7,10 @@ package org.chromium.chrome.browser.tabmodel;
 import org.chromium.base.ObserverList;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabCreationState;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,12 +20,11 @@ import java.util.List;
  * Implement methods shared across the different model implementations.
  */
 public abstract class TabModelSelectorBase implements TabModelSelector {
-    public static final int NORMAL_TAB_MODEL_INDEX = 0;
-    public static final int INCOGNITO_TAB_MODEL_INDEX = 1;
+    private static final int MODEL_NOT_FOUND = -1;
 
     private static TabModelSelectorObserver sObserver;
 
-    private List<TabModel> mTabModels = Collections.emptyList();
+    private List<TabModel> mTabModels = new ArrayList<>();
 
     /**
      * This is a dummy implementation intended to stub out TabModelFilterProvider before native is
@@ -29,32 +32,35 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
      */
     private TabModelFilterProvider mTabModelFilterProvider = new TabModelFilterProvider();
 
-    private int mActiveModelIndex = NORMAL_TAB_MODEL_INDEX;
-    private final ObserverList<TabModelSelectorObserver> mObservers =
-            new ObserverList<TabModelSelectorObserver>();
+    private int mActiveModelIndex;
+    private final ObserverList<TabModelSelectorObserver> mObservers = new ObserverList<>();
     private boolean mTabStateInitialized;
+    private boolean mStartIncognito;
+    private boolean mReparentingInProgress;
 
-    protected final void initialize(boolean startIncognito, TabModel... models) {
+    private final TabCreatorManager mTabCreatorManager;
+
+    protected TabModelSelectorBase(TabCreatorManager tabCreatorManager, boolean startIncognito) {
+        mTabCreatorManager = tabCreatorManager;
+        mStartIncognito = startIncognito;
+    }
+
+    protected final void initialize(TabModel... models) {
         // Only normal and incognito supported for now.
         assert mTabModels.isEmpty();
         assert models.length > 0;
-        if (startIncognito) {
-            assert models.length > INCOGNITO_TAB_MODEL_INDEX;
-        }
 
-        List<TabModel> tabModels = new ArrayList<TabModel>();
-        for (int i = 0; i < models.length; i++) {
-            tabModels.add(models[i]);
-        }
-        mActiveModelIndex = startIncognito ? INCOGNITO_TAB_MODEL_INDEX : NORMAL_TAB_MODEL_INDEX;
-        mTabModels = Collections.unmodifiableList(tabModels);
+        Collections.addAll(mTabModels, models);
+        mActiveModelIndex = getModelIndex(mStartIncognito);
+        assert mActiveModelIndex != MODEL_NOT_FOUND;
         mTabModelFilterProvider = new TabModelFilterProvider(mTabModels);
 
         TabModelObserver tabModelObserver = new EmptyTabModelObserver() {
             @Override
-            public void didAddTab(Tab tab, @TabLaunchType int type) {
+            public void didAddTab(
+                    Tab tab, @TabLaunchType int type, @TabCreationState int creationState) {
                 notifyChanged();
-                notifyNewTabCreated(tab);
+                notifyNewTabCreated(tab, creationState);
             }
 
             @Override
@@ -84,27 +90,25 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
 
     @Override
     public void selectModel(boolean incognito) {
-        TabModel previousModel = getCurrentModel();
-        mActiveModelIndex = incognito ? INCOGNITO_TAB_MODEL_INDEX : NORMAL_TAB_MODEL_INDEX;
-        TabModel newModel = getCurrentModel();
+        if (mTabModels.size() == 0) {
+            mStartIncognito = incognito;
+            return;
+        }
+        int newIndex = getModelIndex(incognito);
+        assert newIndex != MODEL_NOT_FOUND;
+        if (newIndex == mActiveModelIndex) return;
 
-        if (previousModel != newModel) {
-            for (TabModelSelectorObserver listener : mObservers) {
-                listener.onTabModelSelected(newModel, previousModel);
-            }
+        TabModel newModel = mTabModels.get(newIndex);
+        TabModel previousModel = mTabModels.get(mActiveModelIndex);
+        mActiveModelIndex = newIndex;
+        for (TabModelSelectorObserver listener : mObservers) {
+            listener.onTabModelSelected(newModel, previousModel);
         }
     }
 
     @Override
-    public TabModel getModelAt(int index) {
-        assert (index < mTabModels.size() && index >= 0) :
-            "requested index " + index + " size " + mTabModels.size();
-        return mTabModels.get(index);
-    }
-
-    @Override
     public Tab getCurrentTab() {
-        return getCurrentModel() == null ? null : TabModelUtils.getCurrentTab(getCurrentModel());
+        return TabModelUtils.getCurrentTab(getCurrentModel());
     }
 
     @Override
@@ -126,7 +130,8 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
 
     @Override
     public TabModel getCurrentModel() {
-        return getModelAt(mActiveModelIndex);
+        if (mTabModels.size() == 0) return EmptyTabModel.getInstance();
+        return mTabModels.get(mActiveModelIndex);
     }
 
     @Override
@@ -136,8 +141,16 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
 
     @Override
     public TabModel getModel(boolean incognito) {
-        int index = incognito ? INCOGNITO_TAB_MODEL_INDEX : NORMAL_TAB_MODEL_INDEX;
-        return getModelAt(index);
+        int index = getModelIndex(incognito);
+        if (index == MODEL_NOT_FOUND) return EmptyTabModel.getInstance();
+        return mTabModels.get(index);
+    }
+
+    private int getModelIndex(boolean incognito) {
+        for (int i = 0; i < mTabModels.size(); i++) {
+            if (incognito == mTabModels.get(i).isIncognito()) return i;
+        }
+        return MODEL_NOT_FOUND;
     }
 
     @Override
@@ -147,7 +160,8 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
 
     @Override
     public boolean isIncognitoSelected() {
-        return mActiveModelIndex == INCOGNITO_TAB_MODEL_INDEX;
+        if (mTabModels.size() == 0) return mStartIncognito;
+        return getCurrentModel().isIncognito();
     }
 
     @Override
@@ -156,9 +170,16 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     }
 
     @Override
+    public Tab openNewTab(
+            LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent, boolean incognito) {
+        return mTabCreatorManager.getTabCreator(incognito).createNewTab(
+                loadUrlParams, type, parent);
+    }
+
+    @Override
     public boolean closeTab(Tab tab) {
         for (int i = 0; i < getModels().size(); i++) {
-            TabModel model = getModelAt(i);
+            TabModel model = mTabModels.get(i);
             if (model.indexOf(tab) >= 0) {
                 return model.closeTab(tab);
             }
@@ -177,7 +198,7 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     @Override
     public Tab getTabById(int id) {
         for (int i = 0; i < getModels().size(); i++) {
-            Tab tab = TabModelUtils.getTabById(getModelAt(i), id);
+            Tab tab = TabModelUtils.getTabById(mTabModels.get(i), id);
             if (tab != null) return tab;
         }
         return null;
@@ -191,7 +212,7 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     @Override
     public void closeAllTabs(boolean uponExit) {
         for (int i = 0; i < getModels().size(); i++) {
-            getModelAt(i).closeAllTabs(!uponExit, uponExit);
+            mTabModels.get(i).closeAllTabs(!uponExit, uponExit);
         }
     }
 
@@ -199,7 +220,7 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     public int getTotalTabCount() {
         int count = 0;
         for (int i = 0; i < getModels().size(); i++)  {
-            count += getModelAt(i).getCount();
+            count += mTabModels.get(i).getCount();
         }
         return count;
     }
@@ -221,6 +242,7 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
      * Marks the task state being initialized and notifies observers.
      */
     public void markTabStateInitialized() {
+        if (mTabStateInitialized) return;
         mTabStateInitialized = true;
         for (TabModelSelectorObserver listener : mObservers) listener.onTabStateInitialized();
     }
@@ -239,7 +261,8 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     @Override
     public void destroy() {
         mTabModelFilterProvider.destroy();
-        for (int i = 0; i < getModels().size(); i++) getModelAt(i).destroy();
+        for (int i = 0; i < getModels().size(); i++) mTabModels.get(i).destroy();
+        mTabModels.clear();
     }
 
     /**
@@ -255,10 +278,25 @@ public abstract class TabModelSelectorBase implements TabModelSelector {
     /**
      * Notifies all the listeners that a new tab has been created.
      * @param tab The tab that has been created.
+     * @param creationSTate How the tab was created.
      */
-    private void notifyNewTabCreated(Tab tab) {
+    private void notifyNewTabCreated(Tab tab, @TabCreationState int creationState) {
         for (TabModelSelectorObserver listener : mObservers) {
-            listener.onNewTabCreated(tab);
+            listener.onNewTabCreated(tab, creationState);
         }
+    }
+
+    protected TabCreatorManager getTabCreatorManager() {
+        return mTabCreatorManager;
+    }
+
+    @Override
+    public void enterReparentingMode() {
+        mReparentingInProgress = true;
+    }
+
+    /** @see TabModelDelegate#isReparentingInProgress */
+    protected boolean isReparentingInProgress() {
+        return mReparentingInProgress;
     }
 }

@@ -9,6 +9,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/common/chrome_switches.h"
 
 namespace {
 
@@ -132,7 +133,7 @@ NotificationLaunchId::NotificationLaunchId(const std::string& input) {
   origin_url_ = GURL(tokens[4]);
 
   notification_id_.clear();
-  // Notification IDs is the rest of the string (delimeters not stripped off).
+  // Notification IDs is the rest of the string (delimiters not stripped off).
   const size_t kMinVectorSize = 5;
   for (size_t i = kMinVectorSize; i < tokens.size(); ++i) {
     if (i > kMinVectorSize)
@@ -145,7 +146,7 @@ NotificationLaunchId::NotificationLaunchId(const std::string& input) {
 }
 
 std::string NotificationLaunchId::Serialize() const {
-  // The pipe was chosen as delimeter because it is invalid for directory paths
+  // The pipe was chosen as delimiter because it is invalid for directory paths
   // and unsafe for origins -- and should therefore be encoded (as per
   // http://www.ietf.org/rfc/rfc1738.txt).
   std::string prefix;
@@ -175,4 +176,14 @@ std::string NotificationLaunchId::GetProfileIdFromLaunchId(
   // The launch_id_invalid failure is logged via HandleActivation(). We don't
   // re-log it here, which would skew the UMA failure metrics.
   return launch_id.is_valid() ? launch_id.profile_id() : std::string();
+}
+
+// static
+std::string NotificationLaunchId::GetNotificationLaunchProfileId(
+    const base::CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kNotificationLaunchId)) {
+    return NotificationLaunchId::GetProfileIdFromLaunchId(
+        command_line.GetSwitchValueNative(switches::kNotificationLaunchId));
+  }
+  return std::string();
 }

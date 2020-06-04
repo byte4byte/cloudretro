@@ -4,13 +4,9 @@
 
 package org.chromium.chrome.browser.push_messaging;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.annotation.SuppressLint;
 import android.app.Notification;
-import android.content.Context;
 import android.os.Bundle;
-import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
 import android.util.Pair;
@@ -22,23 +18,22 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Matchers;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.notifications.NotificationTestRule;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarUtil;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
-import org.chromium.chrome.test.util.browser.notifications.MockNotificationManagerProxy.NotificationEntry;
+import org.chromium.components.browser_ui.notifications.MockNotificationManagerProxy.NotificationEntry;
+import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.components.gcm_driver.GCMDriver;
 import org.chromium.components.gcm_driver.GCMMessage;
 import org.chromium.components.gcm_driver.instance_id.FakeInstanceIDWithSubtype;
@@ -68,7 +63,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     private static final String PUSH_TEST_PAGE =
             "/chrome/test/data/push_messaging/push_messaging_test_android.html";
     private static final String ABOUT_BLANK = "about:blank";
-    private static final int TITLE_UPDATE_TIMEOUT_SECONDS = (int) scaleTimeout(5);
+    private static final int TITLE_UPDATE_TIMEOUT_SECONDS = 5;
     private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
 
     private final CallbackHelper mMessageHandledHelper;
@@ -79,7 +74,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         final PushMessagingServiceObserver.Listener listener = this;
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             FakeInstanceIDWithSubtype.clearDataAndSetEnabled(true);
@@ -90,7 +85,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             PushMessagingServiceObserver.setListenerForTesting(null);
             FakeInstanceIDWithSubtype.clearDataAndSetEnabled(false);
@@ -108,7 +103,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     @Test
     @MediumTest
     @Feature({"Browser", "PushMessaging"})
-    public void testNotificationsPermissionDenied() throws InterruptedException, TimeoutException {
+    public void testNotificationsPermissionDenied() throws TimeoutException {
         // Deny Notifications permission before trying to subscribe Push.
         mNotificationTestRule.setNotificationContentSettingForOrigin(
                 ContentSettingValues.BLOCK, mEmbeddedTestServerRule.getOrigin());
@@ -134,7 +129,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     //@CommandLineFlags.Add("disable-features=ModalPermissionPrompts")
     @Test
     @DisabledTest
-    public void testPushPermissionDenied() throws InterruptedException, TimeoutException {
+    public void testPushPermissionDenied() throws TimeoutException {
         // Notifications permission should initially be prompt.
         Assert.assertEquals("\"default\"", runScriptBlocking("Notification.permission"));
 
@@ -186,8 +181,8 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     @Test
     @MediumTest
     @Feature({"Browser", "PushMessaging"})
-    @CommandLineFlags.Add("disable-features=ModalPermissionPrompts")
-    public void testPushPermissionGranted() throws InterruptedException, TimeoutException {
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
+    public void testPushPermissionGranted() throws TimeoutException {
         // Notifications permission should initially be prompt.
         Assert.assertEquals("\"default\"", runScriptBlocking("Notification.permission"));
 
@@ -212,7 +207,8 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     @MediumTest
     @Feature({"Browser", "PushMessaging"})
     @RetryOnFailure
-    public void testPushAndShowNotification() throws InterruptedException, TimeoutException {
+    @DisabledTest(message = "https://crbug.com/707528")
+    public void testPushAndShowNotification() throws TimeoutException {
         mNotificationTestRule.setNotificationContentSettingForOrigin(
                 ContentSettingValues.ALLOW, mEmbeddedTestServerRule.getOrigin());
         runScriptAndWaitForTitle("subscribePush()", "subscribe ok");
@@ -233,11 +229,12 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     @LargeTest
     @Feature({"Browser", "PushMessaging"})
     @RetryOnFailure
-    public void testDefaultNotification() throws InterruptedException, TimeoutException {
+    @DisabledTest(message = "https://crbug.com/707528")
+    public void testDefaultNotification() throws TimeoutException {
         // Start off using the tab loaded in setUp().
         Assert.assertEquals(1, mNotificationTestRule.getActivity().getCurrentTabModel().getCount());
         Tab tab = mNotificationTestRule.getActivity().getActivityTab();
-        Assert.assertEquals(mPushTestPage, tab.getUrl());
+        Assert.assertEquals(mPushTestPage, tab.getUrlString());
         Assert.assertFalse(tab.isHidden());
 
         // Set up the push subscription and capture its details.
@@ -251,7 +248,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
         mNotificationTestRule.loadUrlInNewTab(ABOUT_BLANK);
         Assert.assertEquals(2, mNotificationTestRule.getActivity().getCurrentTabModel().getCount());
         Assert.assertEquals(
-                ABOUT_BLANK, mNotificationTestRule.getActivity().getActivityTab().getUrl());
+                ABOUT_BLANK, mNotificationTestRule.getActivity().getActivityTab().getUrlString());
         Assert.assertTrue(tab.isHidden());
 
         // The first time a push event is fired and no notification is shown from the service
@@ -285,7 +282,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
     /**
      * Runs {@code script} in the current tab and returns its synchronous result in JSON format.
      */
-    private String runScriptBlocking(String script) throws InterruptedException, TimeoutException {
+    private String runScriptBlocking(String script) throws TimeoutException {
         return JavaScriptUtils.executeJavaScriptAndWaitForResult(
                 mNotificationTestRule.getWebContents(), script);
     }
@@ -294,8 +291,7 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
      * Runs {@code script} in the current tab and waits for the tab title to change to
      * {@code expectedTitle}.
      */
-    private void runScriptAndWaitForTitle(String script, String expectedTitle)
-            throws InterruptedException {
+    private void runScriptAndWaitForTitle(String script, String expectedTitle) {
         runScriptAndWaitForTitle(
                 script, expectedTitle, mNotificationTestRule.getActivity().getActivityTab());
     }
@@ -304,37 +300,28 @@ public class PushMessagingTest implements PushMessagingServiceObserver.Listener 
      * Runs {@code script} in {@code tab} and waits for the tab title to change to
      * {@code expectedTitle}.
      */
-    private void runScriptAndWaitForTitle(String script, String expectedTitle, Tab tab)
-            throws InterruptedException {
+    private void runScriptAndWaitForTitle(String script, String expectedTitle, Tab tab) {
         JavaScriptUtils.executeJavaScript(tab.getWebContents(), script);
         waitForTitle(tab, expectedTitle);
     }
 
     private void sendPushAndWaitForCallback(Pair<String, String> appIdAndSenderId)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         final String appId = appIdAndSenderId.first;
         final String senderId = appIdAndSenderId.second;
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Context context = InstrumentationRegistry.getInstrumentation()
-                                      .getTargetContext()
-                                      .getApplicationContext();
-
             Bundle extras = new Bundle();
             extras.putString("subtype", appId);
 
             GCMMessage message = new GCMMessage(senderId, extras);
-            try {
-                ChromeBrowserInitializer.getInstance(context).handleSynchronousStartup();
-                GCMDriver.dispatchMessage(message);
-            } catch (ProcessInitException e) {
-                Assert.fail("Chrome browser failed to initialize.");
-            }
+            ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
+            GCMDriver.dispatchMessage(message);
         });
         mMessageHandledHelper.waitForCallback(mMessageHandledHelper.getCallCount());
     }
 
     @SuppressWarnings("MissingFail")
-    private void waitForTitle(Tab tab, String expectedTitle) throws InterruptedException {
+    private void waitForTitle(Tab tab, String expectedTitle) {
         TabTitleObserver titleObserver = new TabTitleObserver(tab, expectedTitle);
         try {
             titleObserver.waitForTitleUpdate(TITLE_UPDATE_TIMEOUT_SECONDS);

@@ -20,8 +20,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.vr.UserFriendlyElementName;
 import org.chromium.chrome.browser.vr.VrBrowserTestFramework;
 import org.chromium.chrome.browser.vr.rules.ChromeTabbedActivityVrTestRule;
@@ -29,11 +29,10 @@ import org.chromium.chrome.browser.vr.util.NativeUiUtils;
 import org.chromium.chrome.browser.vr.util.RenderTestUtils;
 import org.chromium.chrome.browser.vr.util.VrBrowserTransitionUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.RenderTestRule;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
+import org.chromium.ui.test.util.RenderTestRule;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutionException;
 
 /**
  * Test JavaScript modal dialogs in VR.
@@ -47,18 +46,20 @@ public class VrBrowserJavaScriptModalDialogTest {
 
     @Rule
     public RenderTestRule mRenderTestRule =
-            new RenderTestRule("components/test/data/js_dialogs/render_tests");
+            new RenderTestRule.SkiaGoldBuilder()
+                    .setCorpus(RenderTestRule.Corpus.ANDROID_VR_RENDER_TESTS)
+                    .setFailOnUnsupportedConfigs(true)
+                    .build();
 
     private ChromeTabbedActivity mActivity;
     private VrBrowserTestFramework mVrBrowserTestFramework;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivity = mActivityTestRule.getActivity();
         mVrBrowserTestFramework = new VrBrowserTestFramework(mActivityTestRule);
-        mVrBrowserTestFramework.loadUrlAndAwaitInitialization(
-                VrBrowserTestFramework.getFileUrlForHtmlTestFile("2d_permission_page"),
-                PAGE_LOAD_TIMEOUT_S);
+        mVrBrowserTestFramework.loadFileAndAwaitInitialization(
+                "2d_permission_page", PAGE_LOAD_TIMEOUT_S);
         VrBrowserTransitionUtils.forceEnterVrBrowserOrFail(POLL_TIMEOUT_LONG_MS);
         NativeUiUtils.enableMockedInput();
         // Wait for any residual animations from entering VR to finish so that they don't get caught
@@ -72,8 +73,7 @@ public class VrBrowserJavaScriptModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "RenderTest"})
-    public void testAlertModalDialog()
-            throws InterruptedException, ExecutionException, IOException {
+    public void testAlertModalDialog() throws InterruptedException, IOException {
         NativeUiUtils.performActionAndWaitForUiQuiescence(() -> {
             NativeUiUtils.performActionAndWaitForVisibilityStatus(
                     UserFriendlyElementName.BROWSING_DIALOG, true /* visible */, () -> {
@@ -94,8 +94,7 @@ public class VrBrowserJavaScriptModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "RenderTest"})
-    public void testConfirmModalDialog()
-            throws InterruptedException, ExecutionException, IOException {
+    public void testConfirmModalDialog() throws InterruptedException, IOException {
         NativeUiUtils.performActionAndWaitForUiQuiescence(() -> {
             NativeUiUtils.performActionAndWaitForVisibilityStatus(
                     UserFriendlyElementName.BROWSING_DIALOG, true /* visible */, () -> {
@@ -123,8 +122,7 @@ public class VrBrowserJavaScriptModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "RenderTest"})
-    public void testPromptModalDialog()
-            throws InterruptedException, ExecutionException, IOException {
+    public void testPromptModalDialog() throws InterruptedException, IOException {
         String expectedString = "Hopefully not";
         NativeUiUtils.performActionAndWaitForUiQuiescence(() -> {
             NativeUiUtils.performActionAndWaitForVisibilityStatus(

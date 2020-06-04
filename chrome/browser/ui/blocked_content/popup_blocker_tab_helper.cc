@@ -9,7 +9,6 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/ui/android/content_settings/popup_blocked_infobar_delegate.h"
 #include "chrome/browser/ui/blocked_content/blocked_window_params.h"
 #include "chrome/browser/ui/blocked_content/list_item_position.h"
@@ -19,12 +18,15 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/render_messages.h"
+#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 
 #if defined(OS_ANDROID)
@@ -69,12 +71,23 @@ void PopupBlockerTabHelper::DidFinishNavigation(
   if (!blocked_popups_.empty()) {
     blocked_popups_.clear();
     HidePopupNotification();
+
+    // With back-forward cache we can restore the page, but |blocked_popups_|
+    // are lost here and can't be restored at the moment.
+    // Disable bfcache here to avoid potential loss of the page state.
+    web_contents()
+        ->GetController()
+        .GetBackForwardCache()
+        .DisableForRenderFrameHost(
+            navigation_handle->GetPreviousRenderFrameHostId(),
+            "PopupBlockerTabHelper");
   }
 }
 
 void PopupBlockerTabHelper::HidePopupNotification() {
   if (!web_contents()->IsBeingDestroyed()) {
-    TabSpecificContentSettings::FromWebContents(web_contents())
+    content_settings::TabSpecificContentSettings::FromWebContents(
+        web_contents())
         ->ClearPopupsBlocked();
   }
 }
@@ -91,8 +104,8 @@ void PopupBlockerTabHelper::AddBlockedPopup(
   next_id_++;
   blocked_popups_[id] = std::make_unique<BlockedRequest>(
       std::move(*params), window_features, block_type);
-  TabSpecificContentSettings::FromWebContents(web_contents())->
-      OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS);
+  content_settings::TabSpecificContentSettings::FromWebContents(web_contents())
+      ->OnContentBlocked(ContentSettingsType::POPUPS);
   manager_.NotifyObservers(id, blocked_popups_[id]->params.url);
 
 #if defined(OS_ANDROID)
@@ -129,14 +142,15 @@ void PopupBlockerTabHelper::ShowBlockedPopup(
 #endif
   if (popup->params.navigated_or_inserted_contents) {
     auto* tracker = PopupTracker::CreateForWebContents(
-        popup->params.navigated_or_inserted_contents, web_contents());
+        popup->params.navigated_or_inserted_contents, web_contents(),
+        popup->params.disposition);
     tracker->set_is_trusted(true);
 
     if (popup->params.disposition == WindowOpenDisposition::NEW_POPUP) {
       content::RenderFrameHost* host =
           popup->params.navigated_or_inserted_contents->GetMainFrame();
       DCHECK(host);
-      chrome::mojom::ChromeRenderFrameAssociatedPtr client;
+      mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> client;
       host->GetRemoteAssociatedInterfaces()->GetInterface(&client);
       client->SetWindowFeatures(popup->window_features.Clone());
     }

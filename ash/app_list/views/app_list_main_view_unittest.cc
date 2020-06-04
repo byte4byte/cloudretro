@@ -29,7 +29,7 @@
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 namespace {
@@ -47,8 +47,8 @@ class GridViewVisibleWaiter {
       return;
 
     check_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(50),
-                       base::Bind(&GridViewVisibleWaiter::OnTimerCheck,
-                                  base::Unretained(this)));
+                       base::BindRepeating(&GridViewVisibleWaiter::OnTimerCheck,
+                                           base::Unretained(this)));
     run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
     check_timer_.Stop();
@@ -102,7 +102,7 @@ class AppListMainViewTest : public views::ViewsTestBase {
         CreateParams(views::Widget::InitParams::TYPE_CONTROL);
     search_box_widget_params.parent = main_widget_->GetNativeView();
     search_box_widget_params.opacity =
-        views::Widget::InitParams::TRANSLUCENT_WINDOW;
+        views::Widget::InitParams::WindowOpacity::kTranslucent;
     search_box_widget_->Init(search_box_widget_params);
     search_box_widget_->SetContentsView(search_box_view_);
 #endif
@@ -122,16 +122,13 @@ class AppListMainViewTest : public views::ViewsTestBase {
   // |point| is in |grid_view|'s coordinates.
   AppListItemView* GetItemViewAtPointInGrid(AppsGridView* grid_view,
                                             const gfx::Point& point) {
-    const views::ViewModelT<AppListItemView>* view_model =
-        grid_view->view_model();
-    for (int i = 0; i < view_model->view_size(); ++i) {
-      views::View* view = view_model->view_at(i);
-      if (view->bounds().Contains(point)) {
-        return static_cast<AppListItemView*>(view);
-      }
-    }
-
-    return NULL;
+    const auto& entries = grid_view->view_model()->entries();
+    const auto iter = std::find_if(
+        entries.begin(), entries.end(), [&point](const auto& entry) {
+          return entry.view->bounds().Contains(point);
+        });
+    return iter == entries.end() ? nullptr
+                                 : static_cast<AppListItemView*>(iter->view);
   }
 
   void SimulateClick(views::View* view) {
@@ -303,7 +300,7 @@ TEST_F(AppListMainViewTest, DISABLED_DragLastItemFromFolderAndDropAtLastSlot) {
   EXPECT_EQ(first_slot_tile, RootViewModel()->view_at(0)->bounds());
 
   // Single item folder should be auto removed.
-  EXPECT_EQ(NULL,
+  EXPECT_EQ(nullptr,
             delegate_->GetTestModel()->FindFolderItem("single_item_folder"));
 
   // Ensure keyboard selection works on the root grid view after a reparent.
@@ -325,7 +322,7 @@ TEST_F(AppListMainViewTest, DISABLED_DragReparentItemOntoPageSwitcher) {
   const int kNumApps = 30;
 
   // Ensure we are on the apps grid view page.
-  app_list::ContentsView* contents_view = GetContentsView();
+  ContentsView* contents_view = GetContentsView();
   contents_view->SetActiveState(ash::AppListState::kStateApps);
   contents_view->Layout();
 
@@ -351,7 +348,7 @@ TEST_F(AppListMainViewTest, DISABLED_DragReparentItemOntoPageSwitcher) {
 
   // The folder should be destroyed.
   EXPECT_EQ(kNumApps + 1, RootViewModel()->view_size());
-  EXPECT_EQ(NULL,
+  EXPECT_EQ(nullptr,
             delegate_->GetTestModel()->FindFolderItem("single_item_folder"));
 }
 
@@ -413,4 +410,4 @@ TEST_F(AppListMainViewTest, DISABLED_ReparentSingleItemOntoSelf) {
 }
 
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash

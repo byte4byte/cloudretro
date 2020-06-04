@@ -9,46 +9,33 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
+#include "chrome/browser/chromeos/smb_client/smb_service.h"
+#include "chrome/browser/chromeos/smb_client/smb_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/disks/disk_mount_manager.h"
-#include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/event_logger.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
+namespace extensions {
+
 using chromeos::disks::DiskMountManager;
 using content::BrowserThread;
 namespace file_manager_private = extensions::api::file_manager_private;
-
-namespace extensions {
-
-namespace {
-
-// Does chmod o+r for the given path to ensure the file is readable from avfs.
-void EnsureReadableFilePermissionAsync(
-    const base::FilePath& path,
-    base::OnceCallback<void(drive::FileError, const base::FilePath&)>
-        callback) {
-  int mode = 0;
-  if (!base::GetPosixFilePermissions(path, &mode) ||
-      !base::SetPosixFilePermissions(path, mode | S_IROTH)) {
-    std::move(callback).Run(drive::FILE_ERROR_ACCESS_DENIED, base::FilePath());
-    return;
-  }
-  std::move(callback).Run(drive::FILE_ERROR_OK, path);
-}
-
-}  // namespace
 
 FileManagerPrivateAddMountFunction::FileManagerPrivateAddMountFunction()
     : chrome_details_(this) {}
@@ -73,131 +60,25 @@ ExtensionFunction::ResponseAction FileManagerPrivateAddMountFunction::Run() {
   if (path.empty())
     return RespondNow(Error("Invalid path"));
 
-  // Check if the source path is under Drive cache directory.
-  if (drive::util::IsUnderDriveMountPoint(path)) {
-    drive::FileSystemInterface* file_system =
-        drive::util::GetFileSystemByProfile(chrome_details_.GetProfile());
-    if (!file_system)
-      return RespondNow(Error("Drive not available"));
-
-    // Ensure that the cache file exists.
-    const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
-    file_system->GetFile(
-        drive_path,
-        base::BindOnce(
-            &FileManagerPrivateAddMountFunction::RunAfterGetDriveFile, this,
-            drive_path));
-  } else {
-    file_manager::VolumeManager* volume_manager =
-        file_manager::VolumeManager::Get(chrome_details_.GetProfile());
-    DCHECK(volume_manager);
-
-    bool is_under_downloads = false;
-    const std::vector<base::WeakPtr<file_manager::Volume>> volumes =
-        volume_manager->GetVolumeList();
-    for (const auto& volume : volumes) {
-      if (volume->type() == file_manager::VOLUME_TYPE_DOWNLOADS_DIRECTORY &&
-          volume->mount_path().IsParent(path)) {
-        is_under_downloads = true;
-        break;
-      }
-    }
-
-    if (is_under_downloads) {
-      // For files under downloads, change the file permission and make it
-      // readable from avfs/fuse if needed.
-      base::PostTaskWithTraits(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
-          base::BindOnce(&EnsureReadableFilePermissionAsync, path,
-                         google_apis::CreateRelayCallback(base::BindOnce(
-                             &FileManagerPrivateAddMountFunction::
-                                 RunAfterMarkCacheFileAsMounted,
-                             this, path.BaseName()))));
-    } else {
-      RunAfterMarkCacheFileAsMounted(
-          path.BaseName(), drive::FILE_ERROR_OK, path);
-    }
-  }
-  return RespondLater();
-}
-
-void FileManagerPrivateAddMountFunction::RunAfterGetDriveFile(
-    const base::FilePath& drive_path,
-    drive::FileError error,
-    const base::FilePath& cache_path,
-    std::unique_ptr<drive::ResourceEntry> entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (error != drive::FILE_ERROR_OK) {
-    Respond(Error(FileErrorToString(error)));
-    return;
+  // TODO(crbug.com/996549) Remove this once the old avfsd-based RAR mounter is
+  // removed.
+  std::string format = base::ToLowerASCII(path.Extension());
+  if (format == ".rar" &&
+      base::FeatureList::IsEnabled(chromeos::features::kRar2Fs)) {
+    format = ".rar2fs";
   }
-
-  drive::FileSystemInterface* const file_system =
-      drive::util::GetFileSystemByProfile(chrome_details_.GetProfile());
-  if (!file_system) {
-    Respond(Error("Drive not available"));
-    return;
-  }
-
-  file_system->IsCacheFileMarkedAsMounted(
-      drive_path, base::BindOnce(&FileManagerPrivateAddMountFunction::
-                                     RunAfterIsCacheFileMarkedAsMounted,
-                                 this, drive_path, cache_path));
-}
-
-void FileManagerPrivateAddMountFunction::RunAfterIsCacheFileMarkedAsMounted(
-    const base::FilePath& drive_path,
-    const base::FilePath& cache_path,
-    drive::FileError error,
-    bool is_marked_as_mounted) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (error != drive::FILE_ERROR_OK) {
-    Respond(Error(FileErrorToString(error)));
-    return;
-  }
-  if (is_marked_as_mounted) {
-    // When the file is already mounted, we call the mount function as usual,
-    // so that it can issue events containing the VolumeInfo, which is
-    // necessary to make the app navigate to the mounted volume.
-    RunAfterMarkCacheFileAsMounted(drive_path.BaseName(), drive::FILE_ERROR_OK,
-                                   cache_path);
-    return;
-  }
-  drive::FileSystemInterface* const file_system =
-      drive::util::GetFileSystemByProfile(chrome_details_.GetProfile());
-  if (!file_system) {
-    Respond(Error("Drive not available"));
-    return;
-  }
-  file_system->MarkCacheFileAsMounted(
-      drive_path,
-      base::BindOnce(
-          &FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted,
-          this, drive_path.BaseName()));
-}
-
-void FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
-    const base::FilePath& display_name,
-    drive::FileError error,
-    const base::FilePath& file_path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (error != drive::FILE_ERROR_OK) {
-    Respond(Error(FileErrorToString(error)));
-    return;
-  }
-
-  // Pass back the actual source path of the mount point.
-  Respond(OneArgument(std::make_unique<base::Value>(file_path.AsUTF8Unsafe())));
 
   // MountPath() takes a std::string.
   DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
   disk_mount_manager->MountPath(
-      file_path.AsUTF8Unsafe(),
-      base::FilePath(display_name.Extension()).AsUTF8Unsafe(),
-      display_name.AsUTF8Unsafe(), {}, chromeos::MOUNT_TYPE_ARCHIVE,
-      chromeos::MOUNT_ACCESS_MODE_READ_WRITE);
+      path.AsUTF8Unsafe(), format, path.BaseName().AsUTF8Unsafe(), {},
+      chromeos::MOUNT_TYPE_ARCHIVE, chromeos::MOUNT_ACCESS_MODE_READ_WRITE);
+
+  // Pass back the actual source path of the mount point.
+  return RespondNow(
+      OneArgument(std::make_unique<base::Value>(path.AsUTF8Unsafe())));
 }
 
 ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
@@ -214,8 +95,8 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
   }
   set_log_on_completion(true);
 
-  using file_manager::VolumeManager;
   using file_manager::Volume;
+  using file_manager::VolumeManager;
   VolumeManager* const volume_manager =
       VolumeManager::Get(chrome_details.GetProfile());
   DCHECK(volume_manager);
@@ -231,12 +112,8 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
   switch (volume->type()) {
     case file_manager::VOLUME_TYPE_REMOVABLE_DISK_PARTITION:
     case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE: {
-      chromeos::UnmountOptions unmount_options = chromeos::UNMOUNT_OPTIONS_NONE;
-      if (volume->is_read_only())
-        unmount_options = chromeos::UNMOUNT_OPTIONS_LAZY;
-
       DiskMountManager::GetInstance()->UnmountPath(
-          volume->mount_path().value(), unmount_options,
+          volume->mount_path().value(),
           DiskMountManager::UnmountPathCallback());
       break;
     }
@@ -254,7 +131,11 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
     }
     case file_manager::VOLUME_TYPE_CROSTINI:
       file_manager::VolumeManager::Get(chrome_details.GetProfile())
-          ->RemoveSshfsCrostiniVolume(volume->mount_path());
+          ->RemoveSshfsCrostiniVolume(volume->mount_path(), base::DoNothing());
+      break;
+    case file_manager::VOLUME_TYPE_SMB:
+      chromeos::smb_client::SmbServiceFactory::Get(chrome_details.GetProfile())
+          ->UnmountSmbFs(volume->mount_path());
       break;
     default:
       // Requested unmounting a device which is not unmountable.
@@ -262,110 +143,6 @@ ExtensionFunction::ResponseAction FileManagerPrivateRemoveMountFunction::Run() {
   }
 
   return RespondNow(NoArguments());
-}
-
-FileManagerPrivateMarkCacheAsMountedFunction::
-    FileManagerPrivateMarkCacheAsMountedFunction()
-    : chrome_details_(this) {}
-
-ExtensionFunction::ResponseAction
-FileManagerPrivateMarkCacheAsMountedFunction::Run() {
-  using file_manager_private::MarkCacheAsMounted::Params;
-  const std::unique_ptr<Params> params(Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params);
-
-  const base::FilePath path(params->source_path);
-  bool is_mounted = params->is_mounted;
-
-  if (path.empty())
-    return RespondNow(Error("Invalid path"));
-
-  if (!drive::util::IsUnderDriveMountPoint(path)) {
-    // Ignore non-drive files. Treated as success.
-    return RespondNow(NoArguments());
-  }
-
-  drive::FileSystemInterface* file_system =
-      drive::util::GetFileSystemByProfile(chrome_details_.GetProfile());
-  if (!file_system)
-    return RespondNow(Error("Drive not available"));
-
-  // Ensure that the cache file exists.
-  const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
-  file_system->GetFile(
-      drive_path,
-      base::BindOnce(
-          &FileManagerPrivateMarkCacheAsMountedFunction::RunAfterGetDriveFile,
-          this, drive_path, is_mounted));
-  return RespondLater();
-}
-
-void FileManagerPrivateMarkCacheAsMountedFunction::RunAfterGetDriveFile(
-    const base::FilePath& drive_path,
-    bool is_mounted,
-    drive::FileError error,
-    const base::FilePath& cache_path,
-    std::unique_ptr<drive::ResourceEntry> entry) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (error != drive::FILE_ERROR_OK) {
-    Respond(Error(FileErrorToString(error)));
-    return;
-  }
-
-  drive::FileSystemInterface* const file_system =
-      drive::util::GetFileSystemByProfile(chrome_details_.GetProfile());
-  if (!file_system) {
-    Respond(Error("Drive not available"));
-    return;
-  }
-
-  // TODO(yamaguchi): Check the current status of the file.
-  // Currently calling this method twice will result in error, although it
-  // doesn't give bad side effect.
-  if (is_mounted) {
-    file_system->MarkCacheFileAsMounted(
-        drive_path,
-        base::BindOnce(&FileManagerPrivateMarkCacheAsMountedFunction::
-                           RunAfterMarkCacheFileAsMounted,
-                       this));
-  } else {
-    file_system->MarkCacheFileAsUnmounted(
-        cache_path, base::Bind(&FileManagerPrivateMarkCacheAsMountedFunction::
-                                   RunAfterMarkCacheFileAsUnmounted,
-                               this));
-  }
-}
-
-void FileManagerPrivateMarkCacheAsMountedFunction::
-    RunAfterMarkCacheFileAsMounted(drive::FileError error,
-                                   const base::FilePath& file_path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  switch (error) {
-    case drive::FILE_ERROR_INVALID_OPERATION:
-    // The file was already marked as mounted. Ignore and treat as success.
-    case drive::FILE_ERROR_OK:
-      Respond(NoArguments());
-      break;
-    default:
-      Respond(Error(FileErrorToString(error)));
-  }
-}
-
-void FileManagerPrivateMarkCacheAsMountedFunction::
-    RunAfterMarkCacheFileAsUnmounted(drive::FileError error) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  switch (error) {
-    case drive::FILE_ERROR_INVALID_OPERATION:
-    // The file was already marked as unmounted. Ignore and treat as success.
-    case drive::FILE_ERROR_OK:
-      Respond(NoArguments());
-      break;
-    default:
-      Respond(Error(FileErrorToString(error)));
-  }
 }
 
 ExtensionFunction::ResponseAction

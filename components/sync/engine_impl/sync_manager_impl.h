@@ -80,14 +80,13 @@ class SyncManagerImpl
   void ConfigureSyncer(ConfigureReason reason,
                        ModelTypeSet to_download,
                        SyncFeatureState sync_feature_state,
-                       const base::Closure& ready_task) override;
+                       base::OnceClosure ready_task) override;
   void SetInvalidatorEnabled(bool invalidator_enabled) override;
   void OnIncomingInvalidation(
       ModelType type,
       std::unique_ptr<InvalidationInterface> invalidation) override;
   void AddObserver(SyncManager::Observer* observer) override;
   void RemoveObserver(SyncManager::Observer* observer) override;
-  SyncStatus GetDetailedStatus() const override;
   void SaveChanges() override;
   void ShutdownOnSyncThread() override;
   UserShare* GetUserShare() override;
@@ -117,12 +116,15 @@ class SyncManagerImpl
       const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override;
   void OnPassphraseAccepted() override;
+  void OnTrustedVaultKeyRequired() override;
+  void OnTrustedVaultKeyAccepted() override;
   void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
                                BootstrapTokenType type) override;
   void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
                                bool encrypt_everything) override;
   void OnEncryptionComplete() override;
-  void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
+  void OnCryptographerStateChanged(Cryptographer* cryptographer,
+                                   bool has_pending_keys) override;
   void OnPassphraseTypeChanged(PassphraseType type,
                                base::Time explicit_passphrase_time) override;
 
@@ -169,11 +171,6 @@ class SyncManagerImpl
   // NudgeHandler implementation.
   void NudgeForInitialDownload(ModelType type) override;
   void NudgeForCommit(ModelType type) override;
-  void NudgeForRefresh(ModelType type) override;
-
-  const SyncScheduler* scheduler() const;
-
-  static std::string GenerateCacheGUIDForTest();
 
  protected:
   // Helper functions.  Virtual for testing.
@@ -197,8 +194,6 @@ class SyncManagerImpl
     base::DictionaryValue* ToValue() const;
   };
 
-  base::TimeDelta GetNudgeDelayTimeDelta(const ModelType& model_type);
-
   using NotificationInfoMap = std::map<ModelType, NotificationInfo>;
 
   // Determine if the parents or predecessors differ between the old and new
@@ -213,10 +208,10 @@ class SyncManagerImpl
   // differ between the versions of an entry stored in |a| and |b|. A return
   // value of false means that it should be OK to ignore this change.
   bool VisiblePropertiesDiffer(const syncable::EntryKernelMutation& mutation,
-                               Cryptographer* cryptographer) const;
+                               const Cryptographer* cryptographer) const;
 
   // Opens the directory.
-  bool OpenDirectory(InitArgs* args);
+  bool OpenDirectory(const InitArgs* args);
 
   void RequestNudgeForDataTypes(const base::Location& nudge_location,
                                 ModelTypeSet type);
@@ -227,7 +222,7 @@ class SyncManagerImpl
   void SetExtraChangeRecordData(int64_t id,
                                 ModelType type,
                                 ChangeReorderBuffer* buffer,
-                                Cryptographer* cryptographer,
+                                const Cryptographer* cryptographer,
                                 const syncable::EntryKernel& original,
                                 bool existed_before,
                                 bool exists_now);
@@ -313,7 +308,7 @@ class SyncManagerImpl
 
   ProtocolEventBuffer protocol_event_buffer_;
 
-  base::Closure report_unrecoverable_error_function_;
+  base::RepeatingClosure report_unrecoverable_error_function_;
 
   SyncEncryptionHandler* sync_encryption_handler_;
 

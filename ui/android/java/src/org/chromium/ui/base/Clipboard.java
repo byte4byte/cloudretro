@@ -10,21 +10,34 @@ import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.MediaStore;
 import android.text.Html;
 import android.text.Spanned;
 import android.text.style.CharacterStyle;
 import android.text.style.ParagraphStyle;
 import android.text.style.UpdateAppearance;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.BuildInfo;
+import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.compat.ApiHelperForO;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.ui.R;
 import org.chromium.ui.widget.Toast;
+
+import java.io.IOException;
 
 /**
  * Simple proxy that provides C++ code with an access pathway to the Android clipboard.
@@ -41,6 +54,25 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
     private final ClipboardManager mClipboardManager;
 
     private long mNativeClipboard;
+
+    private ImageFileProvider mImageFileProvider;
+
+    /**
+     * Interface to be implemented for sharing image through FileProvider.
+     */
+    public interface ImageFileProvider {
+        /**
+         * Saves the given set of image bytes and provides that URI to a callback for
+         * sharing the image.
+         *
+         * @param context The context used to trigger the action.
+         * @param imageData The image data to be shared in |fileExtension| format.
+         * @param fileExtension File extension which |imageData| encoded to.
+         * @param callback A provided callback function which will act on the generated URI.
+         */
+        void storeImageAndGenerateUri(final Context context, final byte[] imageData,
+                String fileExtension, Callback<Uri> callback);
+    }
 
     /**
      * Get the singleton Clipboard instance (creating it if needed).
@@ -140,6 +172,59 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
     }
 
     /**
+     * Gets the Uri of top item on the primary clip on the Android clipboard if the mime type is
+     * image.
+     *
+     * @return an Uri if mime type is image type, or null if there is no Uri or no entries on the
+     *         primary clip.
+     */
+    public @Nullable Uri getImageUri() {
+        // getPrimaryClip() has been observed to throw unexpected exceptions for some devices (see
+        // crbug.com/654802).
+        try {
+            ClipData clipData = mClipboardManager.getPrimaryClip();
+            if (clipData == null || clipData.getItemCount() == 0) return null;
+
+            ClipDescription description = clipData.getDescription();
+            if (description == null || !description.hasMimeType("image/*")) {
+                return null;
+            }
+
+            return clipData.getItemAt(0).getUri();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @CalledByNative
+    private String getImageUriString() {
+        Uri uri = getImageUri();
+        return uri == null ? null : uri.toString();
+    }
+
+    /**
+     * Reads the Uri of top item on the primary clip on the Android clipboard, and try to get the
+     * {@link Bitmap}. for that Uri.
+     * Fetching images can result in I/O, so should not be called on UI thread.
+     *
+     * @return an {@link Bitmap} if available, otherwise null.
+     */
+    @CalledByNative
+    public Bitmap getImage() {
+        ThreadUtils.assertOnBackgroundThread();
+        try {
+            Uri uri = getImageUri();
+            if (uri == null) return null;
+
+            // TODO(crbug.com/1065914): Use ImageDecoder.decodeBitmap for API level 29 and up.
+            return MediaStore.Images.Media.getBitmap(
+                    ContextUtils.getApplicationContext().getContentResolver(), uri);
+        } catch (IOException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /**
      * Emulates the behavior of the now-deprecated
      * {@link android.text.ClipboardManager#setText(CharSequence)}, setting the
      * clipboard's current primary clip to a plain-text clip that consists of
@@ -164,6 +249,42 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
     }
 
     /**
+     * Setting the clipboard's current primary clip to an image.
+     * @param Uri The {@link Uri} will become the content of the clipboard's primary clip.
+     */
+    public void setImageUri(final Uri uri) {
+        if (uri == null) {
+            showCopyToClipboardFailureMessage();
+            return;
+        }
+
+        ContextUtils.getApplicationContext().grantUriPermission(
+                ClipboardManager.class.getCanonicalName(), uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        ClipData clip = ClipData.newUri(
+                ContextUtils.getApplicationContext().getContentResolver(), "image", uri);
+        setPrimaryClipNoException(clip);
+    }
+
+    /**
+     * Setting the clipboard's current primary clip to an image.
+     * @param imageData The image data to be shared in |extension| format.
+     * @param extension Image file extension which |imageData| encoded to.
+     */
+    @CalledByNative
+    @VisibleForTesting
+    public void setImage(final byte[] imageData, final String extension) {
+        if (mImageFileProvider == null) {
+            // Since |mImageFileProvider| is set on very early on during process init, and if
+            // setImage is called before the file provider is set, we can just drop it on the floor.
+            return;
+        }
+
+        mImageFileProvider.storeImageAndGenerateUri(
+                mContext, imageData, extension, (Uri uri) -> { setImageUri(uri); });
+    }
+
+    /**
      * Clears the Clipboard Primary clip.
      *
      */
@@ -177,14 +298,26 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
             mClipboardManager.setPrimaryClip(clip);
         } catch (Exception ex) {
             // Ignore any exceptions here as certain devices have bugs and will fail.
-            String text = mContext.getString(R.string.copy_to_clipboard_failure_message);
-            Toast.makeText(mContext, text, Toast.LENGTH_SHORT).show();
+            showCopyToClipboardFailureMessage();
         }
+    }
+
+    private void showCopyToClipboardFailureMessage() {
+        String text = mContext.getString(R.string.copy_to_clipboard_failure_message);
+        Toast.makeText(mContext, text, Toast.LENGTH_SHORT).show();
     }
 
     @CalledByNative
     private void setNativePtr(long nativeClipboard) {
         mNativeClipboard = nativeClipboard;
+    }
+
+    /**
+     * Set {@link ImageFileProvider} for sharing image.
+     * @param imageFileProvider The implementation of {@link ImageFileProvider}.
+     */
+    public void setImageFileProvider(ImageFileProvider imageFileProvider) {
+        mImageFileProvider = imageFileProvider;
     }
 
     /**
@@ -195,7 +328,9 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
     @Override
     public void onPrimaryClipChanged() {
         RecordUserAction.record("MobileClipboardChanged");
-        if (mNativeClipboard != 0) nativeOnPrimaryClipChanged(mNativeClipboard);
+        if (mNativeClipboard != 0) {
+            ClipboardJni.get().onPrimaryClipChanged(mNativeClipboard, Clipboard.this);
+        }
     }
 
     /**
@@ -223,11 +358,27 @@ public class Clipboard implements ClipboardManager.OnPrimaryClipChangedListener 
         ClipDescription clipDescription = mClipboardManager.getPrimaryClipDescription();
         if (clipDescription == null) return;
 
-        long timestamp = clipDescription.getTimestamp();
-        nativeOnPrimaryClipTimestampInvalidated(mNativeClipboard, timestamp);
+        long timestamp = ApiHelperForO.getTimestamp(clipDescription);
+        ClipboardJni.get().onPrimaryClipTimestampInvalidated(
+                mNativeClipboard, Clipboard.this, timestamp);
     }
 
-    private native void nativeOnPrimaryClipChanged(long nativeClipboardAndroid);
-    private native void nativeOnPrimaryClipTimestampInvalidated(
-            long nativeClipboardAndroid, long timestamp);
+    /**
+     * Gets the last modified timestamp observed by the native side ClipboardAndroid, not the
+     * Android framework.
+     *
+     * @return the last modified time in millisecond.
+     */
+    public long getLastModifiedTimeMs() {
+        if (mNativeClipboard == 0) return 0;
+        return ClipboardJni.get().getLastModifiedTimeToJavaTime(mNativeClipboard);
+    }
+
+    @NativeMethods
+    interface Natives {
+        void onPrimaryClipChanged(long nativeClipboardAndroid, Clipboard caller);
+        void onPrimaryClipTimestampInvalidated(
+                long nativeClipboardAndroid, Clipboard caller, long timestamp);
+        long getLastModifiedTimeToJavaTime(long nativeClipboardAndroid);
+    }
 }

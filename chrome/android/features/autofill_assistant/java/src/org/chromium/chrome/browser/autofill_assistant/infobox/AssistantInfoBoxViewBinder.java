@@ -11,6 +11,7 @@ import android.view.View;
 import android.widget.TextView;
 
 import org.chromium.chrome.autofill_assistant.R;
+import org.chromium.chrome.browser.autofill_assistant.AssistantTextUtils;
 import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -67,7 +68,10 @@ class AssistantInfoBoxViewBinder
     }
 
     private void setInfoBox(AssistantInfoBox infoBox, ViewHolder viewHolder) {
-        viewHolder.mExplanationView.setText(infoBox.getExplanation());
+        String explanation = infoBox.getExplanation();
+        AssistantTextUtils.applyVisualAppearanceTags(
+                viewHolder.mExplanationView, explanation, null);
+        viewHolder.mExplanationView.announceForAccessibility(viewHolder.mExplanationView.getText());
         if (infoBox.getImagePath().isEmpty()) {
             viewHolder.mExplanationView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
         } else {

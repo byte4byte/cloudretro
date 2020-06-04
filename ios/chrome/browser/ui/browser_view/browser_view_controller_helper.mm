@@ -12,7 +12,8 @@
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
-#import "ios/web/public/web_state/web_state.h"
+#include "ios/components/webui/web_ui_url_constants.h"
+#import "ios/web/public/web_state.h"
 
 namespace {
 bookmarks::BookmarkModel* GetBookmarkModelForWebState(
@@ -23,7 +24,7 @@ bookmarks::BookmarkModel* GetBookmarkModelForWebState(
   if (!browser_state)
     return nullptr;
   return ios::BookmarkModelFactory::GetForBrowserState(
-      ios::ChromeBrowserState::FromBrowserState(browser_state));
+      ChromeBrowserState::FromBrowserState(browser_state));
 }
 }  // namespace
 

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/location.h"
@@ -15,6 +16,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chromeos/constants/chromeos_pref_names.h"
@@ -23,8 +25,8 @@
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/protobuf/src/google/protobuf/message_lite.h"
 
@@ -74,7 +76,7 @@ const char AccountManager::kActiveDirectoryDummyToken[] = "dummy_ad_token";
 
 // static
 const char* const AccountManager::kInvalidToken =
-    OAuth2TokenServiceDelegate::kInvalidRefreshToken;
+    GaiaConstants::kInvalidRefreshToken;
 
 class AccountManager::GaiaTokenRevocationRequest : public GaiaAuthConsumer {
  public:
@@ -83,9 +85,7 @@ class AccountManager::GaiaTokenRevocationRequest : public GaiaAuthConsumer {
       AccountManager::DelayNetworkCallRunner delay_network_call_runner,
       const std::string& refresh_token,
       base::WeakPtr<AccountManager> account_manager)
-      : account_manager_(account_manager),
-        refresh_token_(refresh_token),
-        weak_factory_(this) {
+      : account_manager_(account_manager), refresh_token_(refresh_token) {
     DCHECK(!refresh_token_.empty());
     gaia_auth_fetcher_ = std::make_unique<GaiaAuthFetcher>(
         this, gaia::GaiaSource::kChromeOS, url_loader_factory);
@@ -123,7 +123,7 @@ class AccountManager::GaiaTokenRevocationRequest : public GaiaAuthConsumer {
   // Refresh token to be revoked from GAIA.
   std::string refresh_token_;
 
-  base::WeakPtrFactory<GaiaTokenRevocationRequest> weak_factory_;
+  base::WeakPtrFactory<GaiaTokenRevocationRequest> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(GaiaTokenRevocationRequest);
 };
 
@@ -152,7 +152,7 @@ AccountManager::Observer::Observer() = default;
 
 AccountManager::Observer::~Observer() = default;
 
-AccountManager::AccountManager() : weak_factory_(this) {}
+AccountManager::AccountManager() {}
 
 // static
 void AccountManager::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -161,16 +161,29 @@ void AccountManager::RegisterPrefs(PrefRegistrySimple* registry) {
       true /* default_value */);
 }
 
+void AccountManager::SetPrefService(PrefService* pref_service) {
+  DCHECK(pref_service);
+  pref_service_ = pref_service;
+}
+
+void AccountManager::Initialize(
+    const base::FilePath& home_dir,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    DelayNetworkCallRunner delay_network_call_runner) {
+  Initialize(home_dir, url_loader_factory, delay_network_call_runner,
+             base::DoNothing());
+}
+
 void AccountManager::Initialize(
     const base::FilePath& home_dir,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     DelayNetworkCallRunner delay_network_call_runner,
-    PrefService* pref_service) {
+    base::OnceClosure initialization_callback) {
   Initialize(
       home_dir, url_loader_factory, std::move(delay_network_call_runner),
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::TaskShutdownBehavior::BLOCK_SHUTDOWN, base::MayBlock()}),
-      pref_service);
+      std::move(initialization_callback));
 }
 
 void AccountManager::Initialize(
@@ -178,7 +191,7 @@ void AccountManager::Initialize(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     DelayNetworkCallRunner delay_network_call_runner,
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    PrefService* pref_service) {
+    base::OnceClosure initialization_callback) {
   VLOG(1) << "AccountManager::Initialize";
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const base::TimeTicks initialization_start_time = base::TimeTicks::Now();
@@ -189,6 +202,7 @@ void AccountManager::Initialize(
     // invocation of |Initialize| matches the one it is currently being called
     // with.
     DCHECK_EQ(home_dir, writer_->path().DirName());
+    std::move(initialization_callback).Run();
     return;
   }
 
@@ -198,7 +212,7 @@ void AccountManager::Initialize(
   task_runner_ = task_runner;
   writer_ = std::make_unique<base::ImportantFileWriter>(
       home_dir.Append(kTokensFileName), task_runner_);
-  pref_service_ = pref_service;
+  initialization_callbacks_.emplace_back(std::move(initialization_callback));
 
   PostTaskAndReplyWithResult(
       task_runner_.get(), FROM_HERE,
@@ -281,6 +295,11 @@ void AccountManager::InsertAccountsAndRunInitializationCallbacks(
 
 AccountManager::~AccountManager() {
   // AccountManager is supposed to be used as a leaky global.
+}
+
+bool AccountManager::IsInitialized() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return init_state_ == InitializationState::kInitialized;
 }
 
 void AccountManager::RunOnInitialization(base::OnceClosure closure) {
@@ -383,20 +402,18 @@ void AccountManager::RemoveAccountByEmailInternal(const std::string& email) {
 
 void AccountManager::UpsertAccount(const AccountKey& account_key,
                                    const std::string& raw_email,
-                                   const std::string& token,
-                                   bool revoke_old_token) {
+                                   const std::string& token) {
   DCHECK_NE(init_state_, InitializationState::kNotStarted);
   DCHECK(!raw_email.empty());
 
   base::OnceClosure closure = base::BindOnce(
       &AccountManager::UpsertAccountInternal, weak_factory_.GetWeakPtr(),
-      account_key, AccountInfo{raw_email, token}, revoke_old_token);
+      account_key, AccountInfo{raw_email, token});
   RunOnInitialization(std::move(closure));
 }
 
 void AccountManager::UpdateToken(const AccountKey& account_key,
-                                 const std::string& token,
-                                 bool revoke_old_token) {
+                                 const std::string& token) {
   DCHECK_NE(init_state_, InitializationState::kNotStarted);
 
   if (account_key.account_type ==
@@ -404,23 +421,21 @@ void AccountManager::UpdateToken(const AccountKey& account_key,
     DCHECK_EQ(token, kActiveDirectoryDummyToken);
   }
 
-  base::OnceClosure closure = base::BindOnce(
-      &AccountManager::UpdateTokenInternal, weak_factory_.GetWeakPtr(),
-      account_key, token, revoke_old_token);
+  base::OnceClosure closure =
+      base::BindOnce(&AccountManager::UpdateTokenInternal,
+                     weak_factory_.GetWeakPtr(), account_key, token);
   RunOnInitialization(std::move(closure));
 }
 
 void AccountManager::UpdateTokenInternal(const AccountKey& account_key,
-                                         const std::string& token,
-                                         bool revoke_old_token) {
+                                         const std::string& token) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(init_state_, InitializationState::kInitialized);
 
   auto it = accounts_.find(account_key);
   DCHECK(it != accounts_.end())
       << "UpdateToken cannot be used for adding accounts";
-  UpsertAccountInternal(account_key, AccountInfo{it->second.raw_email, token},
-                        revoke_old_token);
+  UpsertAccountInternal(account_key, AccountInfo{it->second.raw_email, token});
 }
 
 void AccountManager::UpdateEmail(const AccountKey& account_key,
@@ -442,13 +457,11 @@ void AccountManager::UpdateEmailInternal(const AccountKey& account_key,
   auto it = accounts_.find(account_key);
   DCHECK(it != accounts_.end())
       << "UpdateEmail cannot be used for adding accounts";
-  UpsertAccountInternal(account_key, AccountInfo{raw_email, it->second.token},
-                        false /* revoke_old_token */);
+  UpsertAccountInternal(account_key, AccountInfo{raw_email, it->second.token});
 }
 
 void AccountManager::UpsertAccountInternal(const AccountKey& account_key,
-                                           const AccountInfo& account,
-                                           bool revoke_old_token) {
+                                           const AccountInfo& account) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(init_state_, InitializationState::kInitialized);
   DCHECK(account_key.IsValid()) << "Invalid account_key: " << account_key;
@@ -461,7 +474,14 @@ void AccountManager::UpsertAccountInternal(const AccountKey& account_key,
 
   auto it = accounts_.find(account_key);
   if (it == accounts_.end()) {
-    // New account. Insert it.
+    // This is a new account. Insert it.
+
+    // New account insertions can only happen through a user action, which
+    // implies that |Profile| must have been fully initialized at this point.
+    // |ProfileImpl|'s constructor guarantees that
+    // |AccountManager::SetPrefService| has been called on this object, which in
+    // turn guarantees that |pref_service_| is not null.
+    DCHECK(pref_service_);
     if (!pref_service_->GetBoolean(
             chromeos::prefs::kSecondaryGoogleAccountSigninAllowed)) {
       // Secondary Account additions are disabled by policy and all flows for
@@ -483,9 +503,6 @@ void AccountManager::UpsertAccountInternal(const AccountKey& account_key,
 
   if (did_token_change) {
     NotifyTokenObservers(Account{account_key, account.raw_email});
-  }
-  if (did_token_change && revoke_old_token) {
-    MaybeRevokeTokenOnServer(account_key, old_token);
   }
 }
 

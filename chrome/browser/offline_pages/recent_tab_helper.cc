@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -97,8 +98,7 @@ struct RecentTabHelper::SnapshotProgressInfo {
 
 RecentTabHelper::RecentTabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      delegate_(new DefaultRecentTabHelperDelegate()),
-      weak_ptr_factory_(this) {
+      delegate_(new DefaultRecentTabHelperDelegate()) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
@@ -489,6 +489,7 @@ void RecentTabHelper::SavePageCallback(SnapshotProgressInfo* snapshot_info,
                                        int64_t offline_id) {
   DCHECK((snapshot_info->IsForLastN() &&
           snapshot_info->request_id == OfflinePageModel::kInvalidOfflineId) ||
+         result != SavePageResult::SUCCESS ||
          snapshot_info->request_id == offline_id)
       << "SnapshotProgressInfo(client_id=" << snapshot_info->client_id
       << ", request_id=" << snapshot_info->request_id

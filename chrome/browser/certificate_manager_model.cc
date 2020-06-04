@@ -36,6 +36,7 @@
 #include "chrome/browser/chromeos/certificate_provider/certificate_provider_service_factory.h"
 #include "chrome/browser/chromeos/policy/user_network_configuration_updater.h"
 #include "chrome/browser/chromeos/policy/user_network_configuration_updater_factory.h"
+#include "chromeos/network/onc/certificate_scope.h"
 #include "chromeos/network/policy_certificate_provider.h"
 #endif
 
@@ -219,31 +220,30 @@ class CertsSourcePlatformNSS : public CertificateManagerModel::CertsSource {
   void RefreshSlotsUnlocked() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DVLOG(1) << "refresh listing certs...";
-    cert_db_->ListCerts(base::BindOnce(&CertsSourcePlatformNSS::DidGetCerts,
-                                       weak_ptr_factory_.GetWeakPtr()));
+    cert_db_->ListCertsInfo(base::BindOnce(&CertsSourcePlatformNSS::DidGetCerts,
+                                           weak_ptr_factory_.GetWeakPtr()));
   }
 
-  void DidGetCerts(net::ScopedCERTCertificateList certs) {
+  void DidGetCerts(net::NSSCertDatabase::CertInfoList cert_info_list) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DVLOG(1) << "refresh finished for platform provided certificates";
-    std::vector<std::unique_ptr<CertificateManagerModel::CertInfo>> cert_infos;
 
-    cert_infos.reserve(certs.size());
-    for (auto& cert : certs) {
-      net::CertType type = x509_certificate_model::GetType(cert.get());
-      bool read_only = cert_db_->IsReadOnly(cert.get());
-      bool untrusted = cert_db_->IsUntrusted(cert.get());
-      bool hardware_backed = cert_db_->IsHardwareBacked(cert.get());
-      bool web_trust_anchor = cert_db_->IsWebTrustAnchor(cert.get());
-      bool device_wide = false;
-#if defined(OS_CHROMEOS)
-      device_wide = cert_db_->IsCertificateOnSystemSlot(cert.get());
-#endif
-      base::string16 name = GetName(cert.get(), hardware_backed);
+    std::vector<std::unique_ptr<CertificateManagerModel::CertInfo>> cert_infos;
+    cert_infos.reserve(cert_info_list.size());
+
+    for (auto& cert_info : cert_info_list) {
+      net::CertType type =
+          x509_certificate_model::GetType(cert_info.cert.get());
+      bool can_be_deleted = !cert_info.on_read_only_slot;
+      bool hardware_backed = cert_info.hardware_backed;
+      base::string16 name = GetName(cert_info.cert.get(), hardware_backed);
+
       cert_infos.push_back(std::make_unique<CertificateManagerModel::CertInfo>(
-          std::move(cert), type, name, read_only, untrusted,
-          CertificateManagerModel::CertInfo::Source::kPlatform,
-          web_trust_anchor, hardware_backed, device_wide));
+          /*cert=*/std::move(cert_info.cert), type, name, can_be_deleted,
+          /*untrusted=*/cert_info.untrusted,
+          /*source=*/CertificateManagerModel::CertInfo::Source::kPlatform,
+          /*web_trust_anchor=*/cert_info.web_trust_anchor, hardware_backed,
+          /*device_wide=*/cert_info.device_wide));
     }
 
     SetCertInfos(std::move(cert_infos));
@@ -299,9 +299,7 @@ class CertsSourcePolicy : public CertificateManagerModel::CertsSource,
   }
 
   // chromeos::PolicyCertificateProvider::Observer
-  void OnPolicyProvidedCertsChanged(
-      const net::CertificateList& all_server_and_authority_certs,
-      const net::CertificateList& web_trusted_certs) override {
+  void OnPolicyProvidedCertsChanged() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     Refresh();
   }
@@ -310,11 +308,13 @@ class CertsSourcePolicy : public CertificateManagerModel::CertsSource,
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     switch (mode_) {
       case Mode::kPolicyCertsWithoutWebTrust:
-        RefreshImpl(policy_certs_provider_->GetCertificatesWithoutWebTrust(),
+        RefreshImpl(policy_certs_provider_->GetCertificatesWithoutWebTrust(
+                        chromeos::onc::CertificateScope::Default()),
                     false /* policy_web_trusted */);
         break;
       case Mode::kPolicyCertsWithWebTrust:
-        RefreshImpl(policy_certs_provider_->GetWebTrustedCertificates(),
+        RefreshImpl(policy_certs_provider_->GetWebTrustedCertificates(
+                        chromeos::onc::CertificateScope::Default()),
                     true /* policy_web_trusted */);
         break;
       default:
@@ -353,8 +353,8 @@ class CertsSourcePolicy : public CertificateManagerModel::CertsSource,
       base::string16 cert_name = base::UTF8ToUTF16(
           x509_certificate_model::GetCertNameOrNickname(nss_cert.get()));
       cert_infos.push_back(std::make_unique<CertificateManagerModel::CertInfo>(
-          std::move(nss_cert), type, std::move(cert_name), true /* read_only */,
-          false /* untrusted */,
+          std::move(nss_cert), type, std::move(cert_name),
+          false /* can_be_deleted */, false /* untrusted */,
           CertificateManagerModel::CertInfo::Source::kPolicy,
           policy_web_trusted /* web_trust_anchor */,
           false /* hardware_backed */, false /* device_wide */));
@@ -377,8 +377,8 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
                         std::unique_ptr<chromeos::CertificateProvider>
                             certificate_provider_service)
       : CertsSource(certs_source_updated_callback),
-        certificate_provider_service_(std::move(certificate_provider_service)),
-        weak_ptr_factory_(this) {}
+        certificate_provider_service_(std::move(certificate_provider_service)) {
+  }
 
   void Refresh() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -421,7 +421,7 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
 
       cert_infos.push_back(std::make_unique<CertificateManagerModel::CertInfo>(
           std::move(nss_cert), net::CertType::USER_CERT /* type */,
-          display_name, true /* read_only */, false /* untrusted */,
+          display_name, false /* can_be_deleted */, false /* untrusted */,
           CertificateManagerModel::CertInfo::Source::kExtension,
           false /* web_trust_anchor */, false /* hardware_backed */,
           false /* device_wide */));
@@ -432,7 +432,7 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
 
   std::unique_ptr<chromeos::CertificateProvider> certificate_provider_service_;
 
-  base::WeakPtrFactory<CertsSourceExtensions> weak_ptr_factory_;
+  base::WeakPtrFactory<CertsSourceExtensions> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CertsSourceExtensions);
 };
@@ -444,7 +444,7 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
 CertificateManagerModel::CertInfo::CertInfo(net::ScopedCERTCertificate cert,
                                             net::CertType type,
                                             base::string16 name,
-                                            bool read_only,
+                                            bool can_be_deleted,
                                             bool untrusted,
                                             Source source,
                                             bool web_trust_anchor,
@@ -453,7 +453,7 @@ CertificateManagerModel::CertInfo::CertInfo(net::ScopedCERTCertificate cert,
     : cert_(std::move(cert)),
       type_(type),
       name_(std::move(name)),
-      read_only_(read_only),
+      can_be_deleted_(can_be_deleted),
       untrusted_(untrusted),
       source_(source),
       web_trust_anchor_(web_trust_anchor),
@@ -467,7 +467,7 @@ std::unique_ptr<CertificateManagerModel::CertInfo>
 CertificateManagerModel::CertInfo::Clone(const CertInfo* cert_info) {
   return std::make_unique<CertInfo>(
       net::x509_util::DupCERTCertificate(cert_info->cert()), cert_info->type(),
-      cert_info->name(), cert_info->read_only(), cert_info->untrusted(),
+      cert_info->name(), cert_info->can_be_deleted(), cert_info->untrusted(),
       cert_info->source(), cert_info->web_trust_anchor(),
       cert_info->hardware_backed(), cert_info->device_wide());
 }
@@ -480,7 +480,7 @@ CertificateManagerModel::Params::Params(Params&& other) = default;
 void CertificateManagerModel::Create(
     content::BrowserContext* browser_context,
     CertificateManagerModel::Observer* observer,
-    const CreationCallback& callback) {
+    CreationCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::unique_ptr<Params> params = std::make_unique<Params>();
@@ -497,11 +497,11 @@ void CertificateManagerModel::Create(
       certificate_provider_service->CreateCertificateProvider();
 #endif
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CertificateManagerModel::GetCertDBOnIOThread,
                      std::move(params), browser_context->GetResourceContext(),
-                     observer, callback));
+                     observer, std::move(callback)));
 }
 
 CertificateManagerModel::CertificateManagerModel(
@@ -673,7 +673,7 @@ bool CertificateManagerModel::Delete(CERTCertificate* cert) {
 void CertificateManagerModel::DidGetCertDBOnUIThread(
     std::unique_ptr<Params> params,
     CertificateManagerModel::Observer* observer,
-    const CreationCallback& callback,
+    CreationCallback callback,
     net::NSSCertDatabase* cert_db,
     bool is_user_db_available,
     bool is_tpm_available) {
@@ -683,14 +683,14 @@ void CertificateManagerModel::DidGetCertDBOnUIThread(
       std::make_unique<CertificateManagerModel>(std::move(params), observer,
                                                 cert_db, is_user_db_available,
                                                 is_tpm_available);
-  callback.Run(std::move(model));
+  std::move(callback).Run(std::move(model));
 }
 
 // static
 void CertificateManagerModel::DidGetCertDBOnIOThread(
     std::unique_ptr<Params> params,
     CertificateManagerModel::Observer* observer,
-    const CreationCallback& callback,
+    CreationCallback callback,
     net::NSSCertDatabase* cert_db) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -699,10 +699,10 @@ void CertificateManagerModel::DidGetCertDBOnIOThread(
 #if defined(OS_CHROMEOS)
   is_tpm_available = crypto::IsTPMTokenEnabledForNSS();
 #endif
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CertificateManagerModel::DidGetCertDBOnUIThread,
-                     std::move(params), observer, callback, cert_db,
+                     std::move(params), observer, std::move(callback), cert_db,
                      is_user_db_available, is_tpm_available));
 }
 
@@ -711,12 +711,12 @@ void CertificateManagerModel::GetCertDBOnIOThread(
     std::unique_ptr<Params> params,
     content::ResourceContext* resource_context,
     CertificateManagerModel::Observer* observer,
-    const CreationCallback& callback) {
+    CreationCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   auto did_get_cert_db_callback = base::AdaptCallbackForRepeating(
       base::BindOnce(&CertificateManagerModel::DidGetCertDBOnIOThread,
-                     std::move(params), observer, callback));
+                     std::move(params), observer, std::move(callback)));
 
   net::NSSCertDatabase* cert_db = GetNSSCertDatabaseForResourceContext(
       resource_context, did_get_cert_db_callback);

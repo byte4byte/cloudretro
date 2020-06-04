@@ -18,8 +18,9 @@
 #include "components/policy/core/common/cloud/user_info_fetcher.h"
 #include "components/policy/policy_export.h"
 #include "components/policy/proto/device_management_backend.pb.h"
+#include "google_apis/gaia/core_account_id.h"
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
@@ -46,15 +47,15 @@ class POLICY_EXPORT CloudPolicyClientRegistrationHelper
   // supplied IdentityManager to mint the new token for the userinfo
   // and DM services, using the |account_id|.
   // |callback| is invoked when the registration is complete.
-  void StartRegistration(identity::IdentityManager* identity_manager,
-                         const std::string& account_id,
-                         const base::Closure& callback);
+  void StartRegistration(signin::IdentityManager* identity_manager,
+                         const CoreAccountId& account_id,
+                         base::OnceClosure callback);
 
   // Starts the device registration with an token enrollment process.
   // |callback| is invoked when the registration is complete.
   void StartRegistrationWithEnrollmentToken(const std::string& token,
                                             const std::string& client_id,
-                                            const base::Closure& callback);
+                                            base::OnceClosure callback);
 
  private:
   class IdentityManagerHelper;
@@ -88,7 +89,7 @@ class POLICY_EXPORT CloudPolicyClientRegistrationHelper
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   CloudPolicyClient* client_;
   enterprise_management::DeviceRegisterRequest::Type registration_type_;
-  base::Closure callback_;
+  base::OnceClosure callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPolicyClientRegistrationHelper);
 };

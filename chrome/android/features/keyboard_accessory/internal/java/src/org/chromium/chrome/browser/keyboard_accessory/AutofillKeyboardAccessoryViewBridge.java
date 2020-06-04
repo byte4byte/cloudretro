@@ -9,8 +9,8 @@ import android.content.DialogInterface;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ResourceId;
 import org.chromium.chrome.browser.keyboard_accessory.data.PropertyProvider;
 import org.chromium.components.autofill.AutofillDelegate;
 import org.chromium.components.autofill.AutofillSuggestion;
@@ -41,20 +41,25 @@ public class AutofillKeyboardAccessoryViewBridge
     @Override
     public void dismissed() {
         if (mNativeAutofillKeyboardAccessory == 0) return;
-        nativeViewDismissed(mNativeAutofillKeyboardAccessory);
+        AutofillKeyboardAccessoryViewBridgeJni.get().viewDismissed(
+                mNativeAutofillKeyboardAccessory, AutofillKeyboardAccessoryViewBridge.this);
     }
 
     @Override
     public void suggestionSelected(int listIndex) {
         mManualFillingComponent.dismiss();
         if (mNativeAutofillKeyboardAccessory == 0) return;
-        nativeSuggestionSelected(mNativeAutofillKeyboardAccessory, listIndex);
+        AutofillKeyboardAccessoryViewBridgeJni.get().suggestionSelected(
+                mNativeAutofillKeyboardAccessory, AutofillKeyboardAccessoryViewBridge.this,
+                listIndex);
     }
 
     @Override
     public void deleteSuggestion(int listIndex) {
         if (mNativeAutofillKeyboardAccessory == 0) return;
-        nativeDeletionRequested(mNativeAutofillKeyboardAccessory, listIndex);
+        AutofillKeyboardAccessoryViewBridgeJni.get().deletionRequested(
+                mNativeAutofillKeyboardAccessory, AutofillKeyboardAccessoryViewBridge.this,
+                listIndex);
     }
 
     @Override
@@ -64,7 +69,8 @@ public class AutofillKeyboardAccessoryViewBridge
     public void onClick(DialogInterface dialog, int which) {
         assert which == DialogInterface.BUTTON_POSITIVE;
         if (mNativeAutofillKeyboardAccessory == 0) return;
-        nativeDeletionConfirmed(mNativeAutofillKeyboardAccessory);
+        AutofillKeyboardAccessoryViewBridgeJni.get().deletionConfirmed(
+                mNativeAutofillKeyboardAccessory, AutofillKeyboardAccessoryViewBridge.this);
     }
 
     /**
@@ -72,15 +78,9 @@ public class AutofillKeyboardAccessoryViewBridge
      * This function should be called at most one time.
      * @param nativeAutofillKeyboardAccessory Handle to the native counterpart.
      * @param windowAndroid The window on which to show the suggestions.
-     * @param animationDurationMillis If 0, do not animate. Otherwise, animation duration in each
-     *                                direction. We reverse animation to scroll the first suggestion
-     *                                (which is a hint to call attention to the accessory) out of
-     *                                the viewport at the end of the reversed animation.
-     * @param shouldLimitLabelWidth If true, limit suggestion label width to 1/2 device's width.
      */
     @CalledByNative
-    private void init(long nativeAutofillKeyboardAccessory, WindowAndroid windowAndroid,
-            int animationDurationMillis, boolean shouldLimitLabelWidth) {
+    private void init(long nativeAutofillKeyboardAccessory, WindowAndroid windowAndroid) {
         mContext = windowAndroid.getActivity().get();
         assert mContext != null;
         if (mContext instanceof ChromeActivity) {
@@ -153,16 +153,21 @@ public class AutofillKeyboardAccessoryViewBridge
     @CalledByNative
     private static void addToAutofillSuggestionArray(AutofillSuggestion[] array, int index,
             String label, String sublabel, int iconId, int suggestionId, boolean isDeletable) {
-        int drawableId = iconId == 0 ? DropdownItem.NO_ICON : ResourceId.mapToDrawableId(iconId);
+        int drawableId = iconId == 0 ? DropdownItem.NO_ICON : iconId;
         array[index] = new AutofillSuggestion(label, sublabel, drawableId,
                 false /* isIconAtStart */, suggestionId, isDeletable, false /* isMultilineLabel */,
                 false /* isBoldLabel */);
     }
 
-    private native void nativeViewDismissed(long nativeAutofillKeyboardAccessoryView);
-    private native void nativeSuggestionSelected(
-            long nativeAutofillKeyboardAccessoryView, int listIndex);
-    private native void nativeDeletionRequested(
-            long nativeAutofillKeyboardAccessoryView, int listIndex);
-    private native void nativeDeletionConfirmed(long nativeAutofillKeyboardAccessoryView);
+    @NativeMethods
+    interface Natives {
+        void viewDismissed(long nativeAutofillKeyboardAccessoryView,
+                AutofillKeyboardAccessoryViewBridge caller);
+        void suggestionSelected(long nativeAutofillKeyboardAccessoryView,
+                AutofillKeyboardAccessoryViewBridge caller, int listIndex);
+        void deletionRequested(long nativeAutofillKeyboardAccessoryView,
+                AutofillKeyboardAccessoryViewBridge caller, int listIndex);
+        void deletionConfirmed(long nativeAutofillKeyboardAccessoryView,
+                AutofillKeyboardAccessoryViewBridge caller);
+    }
 }

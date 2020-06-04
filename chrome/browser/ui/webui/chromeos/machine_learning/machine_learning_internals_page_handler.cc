@@ -7,25 +7,24 @@
 #include <string>
 #include <utility>
 
-#include "base/logging.h"
 #include "chromeos/services/machine_learning/public/cpp/service_connection.h"
 
 namespace chromeos {
 namespace machine_learning {
 
 MachineLearningInternalsPageHandler::MachineLearningInternalsPageHandler(
-    mojom::PageHandlerRequest request)
-    : binding_(this, std::move(request)) {}
+    mojo::PendingReceiver<mojom::PageHandler> receiver)
+    : receiver_(this, std::move(receiver)) {}
 
 MachineLearningInternalsPageHandler::~MachineLearningInternalsPageHandler() =
     default;
 
-void MachineLearningInternalsPageHandler::LoadModel(
-    mojom::ModelSpecPtr spec,
-    mojom::ModelRequest request,
-    LoadModelCallback callback) {
-  ServiceConnection::GetInstance()->LoadModel(
-      std::move(spec), std::move(request), std::move(callback));
+void MachineLearningInternalsPageHandler::LoadBuiltinModel(
+    mojom::BuiltinModelSpecPtr spec,
+    mojo::PendingReceiver<mojom::Model> receiver,
+    LoadBuiltinModelCallback callback) {
+  ServiceConnection::GetInstance()->LoadBuiltinModel(
+      std::move(spec), std::move(receiver), std::move(callback));
 }
 
 }  // namespace machine_learning

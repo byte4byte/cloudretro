@@ -3,14 +3,16 @@
 // found in the LICENSE file.
 package org.chromium.chrome.browser.download.home.rename;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.FileUtils;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.NativeMethods;
 
 /**
  * A class containing some utility static methods for rename.
  */
 public class RenameUtils {
-    static private boolean sIsDisabledNativeForTesting;
+    private static boolean sIsDisabledNativeForTesting;
 
     /**
      * Determine the extension of a downloaded item.
@@ -23,7 +25,7 @@ public class RenameUtils {
      */
     public static String getFileExtension(String fileName) {
         return sIsDisabledNativeForTesting ? FileUtils.getExtension(fileName)
-                                           : nativeGetFileExtension(fileName);
+                                           : RenameUtilsJni.get().getFileExtension(fileName);
     }
 
     /**
@@ -34,5 +36,8 @@ public class RenameUtils {
         sIsDisabledNativeForTesting = true;
     }
 
-    private static native String nativeGetFileExtension(String fileName);
+    @NativeMethods
+    interface Natives {
+        String getFileExtension(String fileName);
+    }
 }

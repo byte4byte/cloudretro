@@ -10,9 +10,10 @@ from core import path_util
 CLIENT_CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'binary_dependencies.json')
 
-path_util.AddTelemetryToPath()
-
-from telemetry import project_config
+with path_util.SysPath(path_util.GetTelemetryDir()):
+  from telemetry import project_config
+with path_util.SysPath(path_util.GetVariationsDir()):
+  import fieldtrial_util  # pylint: disable=import-error
 
 
 class ChromiumConfig(project_config.ProjectConfig):
@@ -29,3 +30,14 @@ class ChromiumConfig(project_config.ProjectConfig):
         top_level_dir=top_level_dir, benchmark_dirs=benchmark_dirs,
         client_configs=client_configs, default_chrome_root=default_chrome_root,
         expectations_files=expectations_files)
+
+  def AdjustStartupFlags(self, args):
+    return fieldtrial_util.MergeFeaturesAndFieldTrialsArgs(args)
+
+
+def GetDefaultChromiumConfig():
+  return ChromiumConfig(
+      benchmark_dirs=[path_util.GetOfficialBenchmarksDir(),
+                      path_util.GetContribDir()],
+      top_level_dir=path_util.GetPerfDir(),
+      expectations_files=[path_util.GetExpectationsPath()])

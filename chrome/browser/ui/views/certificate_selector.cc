@@ -30,7 +30,6 @@
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/certificate_provider/certificate_provider_service.h"
@@ -119,6 +118,10 @@ CertificateSelector::CertificateSelector(net::ClientCertIdentityList identities,
     : web_contents_(web_contents) {
   CHECK(web_contents_);
 
+  view_cert_button_ =
+      DialogDelegate::SetExtraView(views::MdTextButton::CreateSecondaryUiButton(
+          this, l10n_util::GetStringUTF16(IDS_PAGE_INFO_CERT_INFO_BUTTON)));
+
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::CONTROL));
 
@@ -163,7 +166,7 @@ CertificateSelector::CertificateSelector(net::ClientCertIdentityList identities,
   identities_ = std::move(identities);
 #endif
 
-  model_.reset(new CertificateTableModel(identities_, provider_names));
+  model_ = std::make_unique<CertificateTableModel>(identities_, provider_names);
 }
 
 CertificateSelector::~CertificateSelector() {
@@ -246,7 +249,7 @@ ui::TableModel* CertificateSelector::table_model_for_testing() const {
 }
 
 net::ClientCertIdentity* CertificateSelector::GetSelectedCert() const {
-  const int selected = table_->FirstSelectedRow();
+  const int selected = table_->GetFirstSelectedRow();
   if (selected < 0)  // Nothing is selected in |table_|.
     return nullptr;
   DCHECK_LT(static_cast<size_t>(selected), identities_.size());
@@ -254,7 +257,7 @@ net::ClientCertIdentity* CertificateSelector::GetSelectedCert() const {
 }
 
 bool CertificateSelector::Accept() {
-  const int selected = table_->FirstSelectedRow();
+  const int selected = table_->GetFirstSelectedRow();
   if (selected < 0)  // Nothing is selected in |table_|.
     return false;
 
@@ -280,14 +283,6 @@ views::View* CertificateSelector::GetInitiallyFocusedView() {
   return table_;
 }
 
-std::unique_ptr<views::View> CertificateSelector::CreateExtraView() {
-  DCHECK(!view_cert_button_);
-  auto view_cert_button = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_PAGE_INFO_CERT_INFO_BUTTON));
-  view_cert_button_ = view_cert_button.get();
-  return view_cert_button;
-}
-
 ui::ModalType CertificateSelector::GetModalType() const {
   return ui::MODAL_TYPE_CHILD;
 }
@@ -305,12 +300,12 @@ void CertificateSelector::ButtonPressed(views::Button* sender,
 }
 
 void CertificateSelector::OnSelectionChanged() {
-  GetDialogClientView()->ok_button()->SetEnabled(GetSelectedCert() != nullptr);
+  GetOkButton()->SetEnabled(GetSelectedCert() != nullptr);
 }
 
 void CertificateSelector::OnDoubleClick() {
   if (GetSelectedCert())
-    GetDialogClientView()->AcceptWindow();
+    AcceptDialog();
 }
 
 }  // namespace chrome

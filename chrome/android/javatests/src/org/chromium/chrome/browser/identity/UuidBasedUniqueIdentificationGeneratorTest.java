@@ -14,6 +14,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 @RunWith(ChromeJUnit4ClassRunner.class)
@@ -23,8 +24,9 @@ public class UuidBasedUniqueIdentificationGeneratorTest {
     private AdvancedMockContext mContext;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContext = new AdvancedMockContext(InstrumentationRegistry.getTargetContext());
+        SharedPreferencesManager.getInstance().disableKeyCheckerForTesting();
     }
 
     @Test

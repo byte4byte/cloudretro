@@ -9,7 +9,12 @@
 #include "ash/public/cpp/system_tray_focus_observer.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+
+namespace base {
+class ListValue;
+}
 
 namespace chromeos {
 class LoginAuthRecorder;
@@ -36,6 +41,9 @@ class LoginScreenClient : public ash::LoginScreenClient {
         base::OnceCallback<void(bool)> callback) = 0;
     virtual void HandleAuthenticateUserWithEasyUnlock(
         const AccountId& account_id) = 0;
+    virtual void HandleAuthenticateUserWithChallengeResponse(
+        const AccountId& account_id,
+        base::OnceCallback<void(bool)> callback) = 0;
     virtual void HandleHardlockPod(const AccountId& account_id) = 0;
     virtual void HandleOnFocusPod(const AccountId& account_id) = 0;
     virtual void HandleOnNoPodFocused() = 0;
@@ -85,8 +93,12 @@ class LoginScreenClient : public ash::LoginScreenClient {
   void EnrollUserWithExternalBinary(
       base::OnceCallback<void(bool)> callback) override;
   void AuthenticateUserWithEasyUnlock(const AccountId& account_id) override;
+  void AuthenticateUserWithChallengeResponse(
+      const AccountId& account_id,
+      base::OnceCallback<void(bool)> callback) override;
   bool ValidateParentAccessCode(const AccountId& account_id,
-                                const std::string& access_code) override;
+                                const std::string& access_code,
+                                base::Time validation_time) override;
   void HardlockPod(const AccountId& account_id) override;
   void OnFocusPod(const AccountId& account_id) override;
   void OnNoPodFocused() override;
@@ -97,8 +109,8 @@ class LoginScreenClient : public ash::LoginScreenClient {
   void OnMaxIncorrectPasswordAttempted(const AccountId& account_id) override;
   void FocusLockScreenApps(bool reverse) override;
   void FocusOobeDialog() override;
-  void ShowGaiaSignin(bool can_close,
-                      const AccountId& prefilled_account) override;
+  void ShowGaiaSignin(const AccountId& prefilled_account) override;
+  void HideGaiaSignin() override;
   void OnRemoveUserWarningShown() override;
   void RemoveUser(const AccountId& account_id) override;
   void LaunchPublicSession(const AccountId& account_id,
@@ -108,7 +120,8 @@ class LoginScreenClient : public ash::LoginScreenClient {
                                            const std::string& locale) override;
   void ShowFeedback() override;
   void ShowResetScreen() override;
-  void ShowAccountAccessHelpApp() override;
+  void ShowAccountAccessHelpApp(gfx::NativeWindow parent_window) override;
+  void ShowParentAccessHelpApp(gfx::NativeWindow parent_window) override;
   void ShowLockScreenNotificationSettings() override;
   void OnFocusLeavingSystemTray(bool reverse) override;
   void OnUserActivity() override;

@@ -6,11 +6,12 @@ package org.chromium.chrome.browser.coordinator;
 
 import android.content.Context;
 import android.os.Build;
-import android.support.design.widget.CoordinatorLayout;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.View;
+
+import androidx.coordinatorlayout.widget.CoordinatorLayout;
 
 /**
  * This class overrides {@link onResolvePointerIcon} method to correctly determine the pointer icon
@@ -20,6 +21,8 @@ import android.view.View;
 public class CoordinatorLayoutForPointer extends CoordinatorLayout {
     public CoordinatorLayoutForPointer(Context context, AttributeSet attrs) {
         super(context, attrs);
+        setFocusable(false);
+        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
 
     private boolean isWithinBoundOfView(int x, int y, View view) {

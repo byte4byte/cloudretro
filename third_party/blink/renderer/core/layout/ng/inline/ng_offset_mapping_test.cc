@@ -97,7 +97,6 @@ class NGOffsetMappingTest : public NGLayoutTest {
   void SetUp() override {
     NGLayoutTest::SetUp();
     style_ = ComputedStyle::Create();
-    style_->GetFont().Update(nullptr);
   }
 
   void SetupHtml(const char* id, String html) {
@@ -1452,6 +1451,26 @@ TEST_F(NGOffsetMappingTest, EndOfLastNonCollapsedContentWithPseudo) {
   EXPECT_EQ(Position(),
             GetOffsetMapping().EndOfLastNonCollapsedContent(position));
 }
+
+TEST_F(NGOffsetMappingTest, WordBreak) {
+  SetupHtml("t", "<div id=t>a<wbr>b</div>");
+
+  const LayoutObject& text_a = *layout_object_;
+  const LayoutObject& wbr = *text_a.NextSibling();
+  const LayoutObject& text_b = *wbr.NextSibling();
+  const NGOffsetMapping& result = GetOffsetMapping();
+
+  EXPECT_EQ((Vector<NGOffsetMappingUnit>{
+                NGOffsetMappingUnit(kIdentity, text_a, 0u, 1u, 0u, 1u),
+                NGOffsetMappingUnit(kIdentity, wbr, 0u, 1u, 1u, 2u),
+                NGOffsetMappingUnit(kIdentity, text_b, 0u, 1u, 2u, 3u)}),
+            result.GetUnits());
+
+  EXPECT_EQ((Vector<NGOffsetMappingUnit>{
+                NGOffsetMappingUnit(kIdentity, wbr, 0u, 1u, 1u, 2u)}),
+            result.GetMappingUnitsForLayoutObject(wbr));
+}
+
 // Test |GetOffsetMapping| which is available both for LayoutNG and for legacy.
 class NGOffsetMappingGetterTest : public RenderingTest,
                                   public testing::WithParamInterface<bool>,
@@ -1476,7 +1495,8 @@ TEST_P(NGOffsetMappingGetterTest, Get) {
 
   // For the purpose of this test, ensure this is laid out by each layout
   // engine.
-  DCHECK_EQ(layout_block_flow->IsLayoutNGMixin(), GetParam());
+  DCHECK_EQ(layout_block_flow->IsLayoutNGMixin(),
+            RuntimeEnabledFeatures::LayoutNGEnabled());
 
   const NGOffsetMapping* mapping =
       NGInlineNode::GetOffsetMapping(layout_block_flow);

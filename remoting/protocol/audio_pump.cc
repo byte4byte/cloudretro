@@ -227,9 +227,7 @@ AudioPump::AudioPump(
     std::unique_ptr<AudioSource> audio_source,
     std::unique_ptr<AudioEncoder> audio_encoder,
     AudioStub* audio_stub)
-    : audio_task_runner_(audio_task_runner),
-      audio_stub_(audio_stub),
-      weak_factory_(this) {
+    : audio_task_runner_(audio_task_runner), audio_stub_(audio_stub) {
   DCHECK(audio_stub_);
 
   core_.reset(new Core(weak_factory_.GetWeakPtr(), std::move(audio_source),
@@ -258,8 +256,8 @@ void AudioPump::SendAudioPacket(std::unique_ptr<AudioPacket> packet, int size) {
   DCHECK(packet);
 
   audio_stub_->ProcessAudioPacket(
-      std::move(packet),
-      base::Bind(&AudioPump::OnPacketSent, weak_factory_.GetWeakPtr(), size));
+      std::move(packet), base::BindOnce(&AudioPump::OnPacketSent,
+                                        weak_factory_.GetWeakPtr(), size));
 }
 
 void AudioPump::OnPacketSent(int size) {

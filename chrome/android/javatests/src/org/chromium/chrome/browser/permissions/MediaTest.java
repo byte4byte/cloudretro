@@ -12,14 +12,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.content_public.common.ContentSwitches;
 
 /**
@@ -60,8 +59,8 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
+    @CommandLineFlags.Add({FAKE_DEVICE})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testMicrophonePermissionsPlumbingInfoBar() throws Exception {
         testMediaPermissionsPlumbing("Mic count:", "initiate_getMicrophone()", 1, false, false);
     }
@@ -73,7 +72,7 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testMicrophoneMediaPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Mic count:", "initiate_getMicrophone()", 1, true, true);
     }
@@ -85,8 +84,8 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
+    @CommandLineFlags.Add({FAKE_DEVICE})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testCameraPermissionsPlumbingInfoBar() throws Exception {
         testMediaPermissionsPlumbing("Camera count:", "initiate_getCamera()", 1, false, false);
     }
@@ -99,7 +98,7 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testCameraPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Camera count:", "initiate_getCamera()", 1, false, true);
     }
@@ -112,8 +111,8 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "disable-features=" + PermissionTestRule.MODAL_FLAG})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
+    @CommandLineFlags.Add({FAKE_DEVICE})
+    @DisabledTest(message = "Modals are now enabled and test needs to be reworked crbug.com/935900")
     public void testCombinedPermissionsPlumbing() throws Exception {
         testMediaPermissionsPlumbing("Combined count:", "initiate_getCombined()", 1, false, false);
     }
@@ -126,7 +125,7 @@ public class MediaTest {
     @Test
     @MediumTest
     @Feature({"MediaPermissions", "Main"})
-    @CommandLineFlags.Add({FAKE_DEVICE, "enable-features=" + PermissionTestRule.MODAL_FLAG})
+    @CommandLineFlags.Add({FAKE_DEVICE})
     public void testCombinedPermissionsPlumbingDialog() throws Exception {
         testMediaPermissionsPlumbing("Combined count:", "initiate_getCombined()", 1, true, true);
     }

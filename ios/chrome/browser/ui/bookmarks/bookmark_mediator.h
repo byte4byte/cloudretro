@@ -7,25 +7,24 @@
 
 #import <UIKit/UIKit.h>
 
+class ChromeBrowserState;
+
 namespace bookmarks {
 class BookmarkNode;
 }  // namespace bookmarks
-
-namespace ios {
-class ChromeBrowserState;
-}  // namespace ios
 
 namespace user_prefs {
 class PrefRegistrySyncable;
 }  // namespace user_prefs
 
 class GURL;
+@class MDCSnackbarMessage;
 
 // Mediator for the bookmarks.
 @interface BookmarkMediator : NSObject
 
 - (instancetype)init NS_UNAVAILABLE;
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 
 // Registers the feature preferences.
@@ -34,15 +33,16 @@ class GURL;
 // Accesses the default folder for bookmarks. The default folder is Mobile
 // Bookmarks.
 + (const bookmarks::BookmarkNode*)folderForNewBookmarksInBrowserState:
-    (ios::ChromeBrowserState*)browserState;
+    (ChromeBrowserState*)browserState;
 + (void)setFolderForNewBookmarks:(const bookmarks::BookmarkNode*)folder
-                  inBrowserState:(ios::ChromeBrowserState*)browserState;
+                  inBrowserState:(ChromeBrowserState*)browserState;
 
 // Adds a bookmark with a |title| and a |URL| and display a snackbar with an
-// |editAction|.
-- (void)addBookmarkWithTitle:(NSString*)title
-                         URL:(const GURL&)URL
-                  editAction:(void (^)())editAction;
+// |editAction|. Returns a message to be displayed after the Bookmark has been
+// added.
+- (MDCSnackbarMessage*)addBookmarkWithTitle:(NSString*)title
+                                        URL:(const GURL&)URL
+                                 editAction:(void (^)())editAction;
 
 @end
 

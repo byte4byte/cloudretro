@@ -12,6 +12,8 @@
 #include "ash/session/test_session_controller_client.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/ash_test_helper.h"
+#include "ash/test_shell_delegate.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -19,10 +21,8 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/token.h"
 #include "chromeos/services/multidevice_setup/public/cpp/fake_multidevice_setup.h"
-#include "chromeos/services/multidevice_setup/public/mojom/constants.mojom.h"
 #include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/mojom/connector.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/fake_message_center.h"
 #include "ui/message_center/message_center.h"
@@ -35,9 +35,6 @@ const char kTestUserEmail[] = "test@example.com";
 const char kTestHostDeviceName[] = "Test Device";
 // This is the expected return value from GetChromeOSDeviceName() in tests.
 const char kTestDeviceType[] = "Chrome device";
-
-const base::Token kTestServiceInstanceGroup{0x0123456789abcdefull,
-                                            0xfedcba9876543210ull};
 
 class TestMessageCenter : public message_center::FakeMessageCenter {
  public:
@@ -97,28 +94,19 @@ class MultiDeviceNotificationPresenterTest : public NoSessionAshTestBase {
   MultiDeviceNotificationPresenterTest() = default;
 
   void SetUp() override {
-    NoSessionAshTestBase::SetUp();
+    fake_multidevice_setup_ =
+        std::make_unique<chromeos::multidevice_setup::FakeMultiDeviceSetup>();
+    auto delegate = std::make_unique<TestShellDelegate>();
+    delegate->SetMultiDeviceSetupBinder(base::BindRepeating(
+        &chromeos::multidevice_setup::MultiDeviceSetupBase::BindReceiver,
+        base::Unretained(fake_multidevice_setup_.get())));
+    NoSessionAshTestBase::SetUp(std::move(delegate));
 
     test_system_tray_client_ = GetSystemTrayClient();
 
-    service_manager::mojom::ConnectorRequest request;
-    connector_ = service_manager::Connector::Create(&request);
-
-    fake_multidevice_setup_ =
-        std::make_unique<chromeos::multidevice_setup::FakeMultiDeviceSetup>();
-    service_manager::Connector::TestApi test_api(connector_.get());
-    test_api.OverrideBinderForTesting(
-        service_manager::ServiceFilter::ByNameInGroup(
-            chromeos::multidevice_setup::mojom::kServiceName,
-            kTestServiceInstanceGroup),
-        chromeos::multidevice_setup::mojom::MultiDeviceSetup::Name_,
-        base::BindRepeating(
-            &chromeos::multidevice_setup::FakeMultiDeviceSetup::BindHandle,
-            base::Unretained(fake_multidevice_setup_.get())));
-
     notification_presenter_ =
         std::make_unique<MultiDeviceNotificationPresenter>(
-            &test_message_center_, connector_.get());
+            &test_message_center_);
   }
 
   void TearDown() override {
@@ -134,7 +122,7 @@ class MultiDeviceNotificationPresenterTest : public NoSessionAshTestBase {
     test_session_client->AddUserSession(
         kTestUserEmail, user_manager::USER_TYPE_REGULAR,
         true /* enable_settings */, true /* provide_pref_service */,
-        false /* is_new_profile */, kTestServiceInstanceGroup);
+        false /* is_new_profile */);
     test_session_client->SetSessionState(session_manager::SessionState::ACTIVE);
     test_session_client->SwitchActiveUser(
         AccountId::FromUserEmail(kTestUserEmail));
@@ -240,7 +228,6 @@ class MultiDeviceNotificationPresenterTest : public NoSessionAshTestBase {
   base::HistogramTester histogram_tester_;
   TestSystemTrayClient* test_system_tray_client_;
   TestMessageCenter test_message_center_;
-  std::unique_ptr<service_manager::Connector> connector_;
   std::unique_ptr<chromeos::multidevice_setup::FakeMultiDeviceSetup>
       fake_multidevice_setup_;
   std::unique_ptr<MultiDeviceNotificationPresenter> notification_presenter_;

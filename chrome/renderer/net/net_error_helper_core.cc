@@ -130,7 +130,7 @@ base::TimeDelta GetAutoReloadTime(size_t reload_count) {
 // the tab helper should start a DNS probe after receiving it).
 bool IsNetDnsError(const error_page::Error& error) {
   return error.domain() == error_page::Error::kNetErrorDomain &&
-         net::IsDnsError(error.reason());
+         net::IsHostnameResolutionError(error.reason());
 }
 
 GURL SanitizeURL(const GURL& url) {
@@ -172,7 +172,10 @@ bool ShouldUseFixUrlServiceForError(const error_page::Error& error,
     *error_param = "http404";
     return true;
   }
-  if (IsNetDnsError(error)) {
+  // Don't use the link doctor for secure DNS network errors, since the
+  // additional navigation may interfere with the captive portal probe state.
+  if (IsNetDnsError(error) &&
+      !error.resolve_error_info().is_secure_network_error) {
     *error_param = "dnserror";
     return true;
   }
@@ -396,12 +399,9 @@ void TrackClickUMA(std::string type_id) {
 }  // namespace
 
 struct NetErrorHelperCore::ErrorPageInfo {
-  ErrorPageInfo(error_page::Error error,
-                bool was_failed_post,
-                bool was_ignoring_cache)
+  ErrorPageInfo(error_page::Error error, bool was_failed_post)
       : error(error),
         was_failed_post(was_failed_post),
-        was_ignoring_cache(was_ignoring_cache),
         needs_dns_updates(false),
         needs_load_navigation_corrections(false),
         is_finished_loading(false),
@@ -410,7 +410,6 @@ struct NetErrorHelperCore::ErrorPageInfo {
   // Information about the failed page load.
   error_page::Error error;
   bool was_failed_post;
-  bool was_ignoring_cache;
 
   // Information about the status of the error page.
 
@@ -468,17 +467,24 @@ bool NetErrorHelperCore::IsReloadableError(
          // handshake_failure alert.
          // https://crbug.com/431387
          info.error.reason() != net::ERR_SSL_PROTOCOL_ERROR &&
-         // Do not trigger for XSS Auditor violations.
-         info.error.reason() != net::ERR_BLOCKED_BY_XSS_AUDITOR &&
          // Do not trigger for blacklisted URLs.
          // https://crbug.com/803839
          info.error.reason() != net::ERR_BLOCKED_BY_ADMINISTRATOR &&
          // Do not trigger for requests that were blocked by the browser itself.
          info.error.reason() != net::ERR_BLOCKED_BY_CLIENT &&
          !info.was_failed_post &&
+         // Do not trigger for this error code because it is used by Chrome
+         // while an auth prompt is being displayed.
+         info.error.reason() != net::ERR_INVALID_AUTH_CREDENTIALS &&
          // Don't auto-reload non-http/https schemas.
          // https://crbug.com/471713
-         url.SchemeIsHTTPOrHTTPS();
+         url.SchemeIsHTTPOrHTTPS() &&
+         // Don't auto reload if the error was a secure DNS network error, since
+         // the reload may interfere with the captive portal probe state.
+         // TODO(crbug.com/1016164): Explore how to allow reloads for secure DNS
+         // network errors without interfering with the captive portal probe
+         // state.
+         !info.error.resolve_error_info().is_secure_network_error;
 }
 
 NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
@@ -672,7 +678,6 @@ void NetErrorHelperCore::OnFinishLoad(FrameType frame_type) {
 void NetErrorHelperCore::PrepareErrorPage(FrameType frame_type,
                                           const error_page::Error& error,
                                           bool is_failed_post,
-                                          bool is_ignoring_cache,
                                           std::string* error_html) {
   if (frame_type == MAIN_FRAME) {
     // If navigation corrections were needed before, that should have been
@@ -680,8 +685,7 @@ void NetErrorHelperCore::PrepareErrorPage(FrameType frame_type,
     DCHECK(!committed_error_page_info_ ||
            !committed_error_page_info_->needs_load_navigation_corrections);
 
-    pending_error_page_info_.reset(
-        new ErrorPageInfo(error, is_failed_post, is_ignoring_cache));
+    pending_error_page_info_.reset(new ErrorPageInfo(error, is_failed_post));
     pending_error_page_info_->navigation_correction_params.reset(
         new NavigationCorrectionParams(navigation_correction_params_));
     PrepareErrorPageForMainFrame(pending_error_page_info_.get(), error_html);
@@ -810,8 +814,7 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
 
   pending_error_page_info_.reset(
       new ErrorPageInfo(committed_error_page_info_->error,
-                        committed_error_page_info_->was_failed_post,
-                        committed_error_page_info_->was_ignoring_cache));
+                        committed_error_page_info_->was_failed_post));
   pending_error_page_info_->navigation_correction_response =
       ParseNavigationCorrectionResponse(corrections);
 
@@ -859,11 +862,10 @@ error_page::Error NetErrorHelperCore::GetUpdatedError(
       error_info.error.stale_copy_in_cache());
 }
 
-void NetErrorHelperCore::Reload(bool bypass_cache) {
-  if (!committed_error_page_info_) {
+void NetErrorHelperCore::Reload() {
+  if (!committed_error_page_info_)
     return;
-  }
-  delegate_->ReloadPage(bypass_cache);
+  delegate_->ReloadFrame();
 }
 
 bool NetErrorHelperCore::MaybeStartAutoReloadTimer() {
@@ -899,8 +901,8 @@ void NetErrorHelperCore::StartAutoReloadTimer() {
   auto_reload_timer_->Stop();
   auto_reload_timer_->Start(
       FROM_HERE, delay,
-      base::Bind(&NetErrorHelperCore::AutoReloadTimerFired,
-                 base::Unretained(this)));
+      base::BindOnce(&NetErrorHelperCore::AutoReloadTimerFired,
+                     base::Unretained(this)));
 }
 
 void NetErrorHelperCore::AutoReloadTimerFired() {
@@ -913,7 +915,7 @@ void NetErrorHelperCore::AutoReloadTimerFired() {
 
   auto_reload_count_++;
   auto_reload_in_flight_ = true;
-  Reload(committed_error_page_info_->was_ignoring_cache);
+  Reload();
 }
 
 void NetErrorHelperCore::PauseAutoReloadTimer() {
@@ -976,7 +978,7 @@ void NetErrorHelperCore::ExecuteButtonPress(Button button) {
     case RELOAD_BUTTON:
       RecordEvent(error_page::NETWORK_ERROR_PAGE_RELOAD_BUTTON_CLICKED);
       navigation_from_button_ = RELOAD_BUTTON;
-      Reload(false);
+      Reload();
       return;
     case MORE_BUTTON:
       // Visual effects on page are handled in Javascript code.

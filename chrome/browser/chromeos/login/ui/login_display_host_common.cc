@@ -7,20 +7,24 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/arc_kiosk_controller.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/web_kiosk_controller.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/system/device_disabling_manager.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/chromeos/internet_detail_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
-#include "components/keep_alive_registry/scoped_keep_alive.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/base/ui_base_features.h"
 
 namespace chromeos {
@@ -43,19 +47,14 @@ void ScheduleCompletionCallbacks(std::vector<base::OnceClosure>&& callbacks) {
 
 }  // namespace
 
-LoginDisplayHostCommon::LoginDisplayHostCommon() : weak_factory_(this) {
-  keep_alive_.reset(
-      new ScopedKeepAlive(KeepAliveOrigin::LOGIN_DISPLAY_HOST_WEBUI,
-                          KeepAliveRestartOption::DISABLED));
-
-  // Close the login screen on NOTIFICATION_APP_TERMINATING.
+LoginDisplayHostCommon::LoginDisplayHostCommon()
+    : keep_alive_(KeepAliveOrigin::LOGIN_DISPLAY_HOST_WEBUI,
+                  KeepAliveRestartOption::DISABLED) {
+  // Close the login screen on NOTIFICATION_APP_TERMINATING (for the case where
+  // shutdown occurs before login completes).
   registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
-  // NOTIFICATION_BROWSER_OPENED is issued after browser is created, but
-  // not shown yet. Lock window has to be closed at this point so that
-  // a browser window exists and the window can acquire input focus.
-  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                 content::NotificationService::AllSources());
+  BrowserList::AddObserver(this);
 }
 
 LoginDisplayHostCommon::~LoginDisplayHostCommon() {
@@ -76,6 +75,16 @@ void LoginDisplayHostCommon::Finalize(base::OnceClosure completion_callback) {
   OnFinalize();
 }
 
+void LoginDisplayHostCommon::FinalizeImmediately() {
+  CHECK(!is_finalizing_);
+  CHECK(!shutting_down_);
+  is_finalizing_ = true;
+  shutting_down_ = true;
+  OnFinalize();
+  Cleanup();
+  delete this;
+}
+
 AppLaunchController* LoginDisplayHostCommon::GetAppLaunchController() {
   return app_launch_controller_.get();
 }
@@ -86,8 +95,7 @@ void LoginDisplayHostCommon::StartUserAdding(
   OnStartUserAdding();
 }
 
-void LoginDisplayHostCommon::StartSignInScreen(
-    const LoginScreenContext& context) {
+void LoginDisplayHostCommon::StartSignInScreen() {
   PrewarmAuthentication();
 
   const user_manager::UserList& users =
@@ -109,7 +117,12 @@ void LoginDisplayHostCommon::StartSignInScreen(
       kPolicyServiceInitializationDelayMilliseconds);
 
   // Run UI-specific logic.
-  OnStartSignInScreen(context);
+  OnStartSignInScreen();
+
+  // Inform wizard controller that login screen has started.
+  // TODO(crbug.com/1064271): Move this to OnStartSignInScreen().
+  if (WizardController::default_controller())
+    WizardController::default_controller()->LoginScreenStarted();
 
   // Enable status area after starting sign-in screen, as it may depend on the
   // UI being visible.
@@ -131,7 +144,7 @@ void LoginDisplayHostCommon::StartAppLaunch(const std::string& app_id,
   // Wait for the |CrosSettings| to become either trusted or permanently
   // untrusted.
   const CrosSettingsProvider::TrustedStatus status =
-      CrosSettings::Get()->PrepareTrustedValues(base::Bind(
+      CrosSettings::Get()->PrepareTrustedValues(base::BindOnce(
           &LoginDisplayHostCommon::StartAppLaunch, weak_factory_.GetWeakPtr(),
           app_id, diagnostic_mode, is_auto_launch));
   if (status == CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
@@ -174,7 +187,39 @@ void LoginDisplayHostCommon::StartArcKiosk(const AccountId& account_id) {
       std::make_unique<ArcKioskController>(this, GetOobeUI());
   arc_kiosk_controller_->StartArcKiosk(account_id);
 
-  OnStartArcKiosk();
+  OnStartAppLaunch();
+}
+
+void LoginDisplayHostCommon::StartWebKiosk(const AccountId& account_id) {
+  SetStatusAreaVisible(false);
+
+  // Wait for the |CrosSettings| to become either trusted or permanently
+  // untrusted.
+  const CrosSettingsProvider::TrustedStatus status =
+      CrosSettings::Get()->PrepareTrustedValues(
+          base::BindOnce(&LoginDisplayHostCommon::StartWebKiosk,
+                         weak_factory_.GetWeakPtr(), account_id));
+  if (status == CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
+    return;
+
+  if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
+    // If the |CrosSettings| are permanently untrusted, refuse to launch a
+    // single-app kiosk mode session.
+    LOG(ERROR) << "Login >> Refusing to launch single-app kiosk mode.";
+    SetStatusAreaVisible(true);
+    return;
+  }
+
+  if (system::DeviceDisablingManager::IsDeviceDisabledDuringNormalOperation()) {
+    // If the device is disabled, bail out. A device disabled screen will be
+    // shown by the DeviceDisablingManager.
+    return;
+  }
+  OnStartAppLaunch();
+
+  web_kiosk_controller_ =
+      std::make_unique<WebKioskController>(this, GetOobeUI());
+  web_kiosk_controller_->StartWebKiosk(account_id);
 }
 
 void LoginDisplayHostCommon::CompleteLogin(const UserContext& user_context) {
@@ -235,21 +280,25 @@ void LoginDisplayHostCommon::ResyncUserData() {
     GetExistingUserController()->ResyncUserData();
 }
 
+void LoginDisplayHostCommon::OnBrowserAdded(Browser* browser) {
+  // Browsers created before session start (windows opened by extensions, for
+  // example) are ignored.
+  if (session_starting_) {
+    // OnBrowserAdded is called when the browser is created, but not shown yet.
+    // Lock window has to be closed at this point so that a browser window
+    // exists and the window can acquire input focus.
+    OnBrowserCreated();
+    registrar_.RemoveAll();
+    BrowserList::RemoveObserver(this);
+  }
+}
+
 void LoginDisplayHostCommon::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_APP_TERMINATING) {
+  if (type == chrome::NOTIFICATION_APP_TERMINATING)
     ShutdownDisplayHost();
-  } else if (type == chrome::NOTIFICATION_BROWSER_OPENED && session_starting_) {
-    // Browsers created before session start (windows opened by extensions, for
-    // example) are ignored.
-    OnBrowserCreated();
-    registrar_.Remove(this, chrome::NOTIFICATION_APP_TERMINATING,
-                      content::NotificationService::AllSources());
-    registrar_.Remove(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                      content::NotificationService::AllSources());
-  }
 }
 
 void LoginDisplayHostCommon::OnCancelPasswordChangedFlow() {}
@@ -261,10 +310,9 @@ void LoginDisplayHostCommon::OnAuthPrewarmDone() {
 void LoginDisplayHostCommon::ShutdownDisplayHost() {
   if (shutting_down_)
     return;
-
-  ProfileHelper::Get()->ClearSigninProfile(base::DoNothing());
   shutting_down_ = true;
-  registrar_.RemoveAll();
+
+  Cleanup();
   base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
@@ -290,6 +338,11 @@ void LoginDisplayHostCommon::ShowGaiaDialogCommon(
     }
     LoadSigninWallpaper();
   }
+}
+void LoginDisplayHostCommon::Cleanup() {
+  ProfileHelper::Get()->ClearSigninProfile(base::DoNothing());
+  registrar_.RemoveAll();
+  BrowserList::RemoveObserver(this);
 }
 
 }  // namespace chromeos

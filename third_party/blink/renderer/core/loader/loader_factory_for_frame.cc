@@ -5,6 +5,9 @@
 #include "third_party/blink/renderer/core/loader/loader_factory_for_frame.h"
 
 #include "base/single_thread_task_runner.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -13,24 +16,22 @@
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/loader/frame_or_imported_document.h"
 #include "third_party/blink/renderer/core/loader/prefetched_signed_exchange_manager.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
-LoaderFactoryForFrame::LoaderFactoryForFrame(
-    const FrameOrImportedDocument& frame_or_imported_document)
-    : frame_or_imported_document_(frame_or_imported_document),
+LoaderFactoryForFrame::LoaderFactoryForFrame(DocumentLoader& document_loader,
+                                             Document& document)
+    : document_loader_(document_loader),
+      document_(document),
       prefetched_signed_exchange_manager_(
-          frame_or_imported_document_->GetDocumentLoader()
-              ? frame_or_imported_document_->GetDocumentLoader()
-                    ->GetPrefetchedSignedExchangeManager()
-              : nullptr) {}
+          document_loader.GetPrefetchedSignedExchangeManager()) {}
 
 void LoaderFactoryForFrame::Trace(Visitor* visitor) {
-  visitor->Trace(frame_or_imported_document_);
+  visitor->Trace(document_loader_);
+  visitor->Trace(document_);
   visitor->Trace(prefetched_signed_exchange_manager_);
   LoaderFactory::Trace(visitor);
 }
@@ -41,9 +42,13 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   WrappedResourceRequest webreq(request);
 
-  network::mojom::blink::URLLoaderFactoryPtr url_loader_factory;
+  mojo::PendingRemote<network::mojom::blink::URLLoaderFactory>
+      url_loader_factory;
   if (options.url_loader_factory) {
-    options.url_loader_factory->data->Clone(MakeRequest(&url_loader_factory));
+    mojo::Remote<network::mojom::blink::URLLoaderFactory>
+        url_loader_factory_remote(std::move(options.url_loader_factory->data));
+    url_loader_factory_remote->Clone(
+        url_loader_factory.InitWithNewPipeAndPassReceiver());
   }
   // Resolve any blob: URLs that haven't been resolved yet. The XHR and
   // fetch() API implementations resolve blob URLs earlier because there can
@@ -62,14 +67,14 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
   // disabled).
   // TODO(mek): Move the RequestContext check to the worker side's relevant
   // callsite when we make Shared Worker loading off-main-thread.
-  if (request.Url().ProtocolIs("blob") && BlobUtils::MojoBlobURLsEnabled() &&
-      !url_loader_factory &&
+  if (request.Url().ProtocolIs("blob") && !url_loader_factory &&
       request.GetRequestContext() != mojom::RequestContextType::SHARED_WORKER) {
-    frame_or_imported_document_->GetDocument().GetPublicURLManager().Resolve(
-        request.Url(), MakeRequest(&url_loader_factory));
+    document_->GetPublicURLManager().Resolve(
+        request.Url(), url_loader_factory.InitWithNewPipeAndPassReceiver());
   }
-  LocalFrame& frame = frame_or_imported_document_->GetFrame();
-  FrameScheduler* frame_scheduler = frame.GetFrameScheduler();
+  LocalFrame* frame = document_->GetFrame();
+  DCHECK(frame);
+  FrameScheduler* frame_scheduler = frame->GetFrameScheduler();
   DCHECK(frame_scheduler);
 
   // TODO(altimin): frame_scheduler->CreateResourceLoadingTaskRunnerHandle is
@@ -79,16 +84,14 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
   // resource loader handle's task runner.
   if (url_loader_factory) {
     return Platform::Current()
-        ->WrapURLLoaderFactory(url_loader_factory.PassInterface().PassHandle())
+        ->WrapURLLoaderFactory(url_loader_factory.PassPipe())
         ->CreateURLLoader(
             webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
   }
 
-  DocumentLoader& document_loader =
-      frame_or_imported_document_->GetMasterDocumentLoader();
-  if (document_loader.GetServiceWorkerNetworkProvider()) {
+  if (document_loader_->GetServiceWorkerNetworkProvider()) {
     auto loader =
-        document_loader.GetServiceWorkerNetworkProvider()->CreateURLLoader(
+        document_loader_->GetServiceWorkerNetworkProvider()->CreateURLLoader(
             webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
     if (loader)
       return loader;
@@ -100,7 +103,7 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
     if (loader)
       return loader;
   }
-  return frame.GetURLLoaderFactory()->CreateURLLoader(
+  return frame->GetURLLoaderFactory()->CreateURLLoader(
       webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
 }
 

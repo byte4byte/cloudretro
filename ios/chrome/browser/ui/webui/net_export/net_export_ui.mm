@@ -13,7 +13,7 @@
 #include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
-#include "components/grit/components_resources.h"
+#include "components/grit/dev_ui_components_resources.h"
 #include "components/net_log/net_export_file_writer.h"
 #include "components/net_log/net_export_ui_constants.h"
 #include "ios/chrome/browser/application_context.h"
@@ -24,7 +24,6 @@
 #include "ios/chrome/common/channel_info.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/webui/web_ui_ios.h"
 #include "ios/web/public/webui/web_ui_ios_data_source.h"
 #include "ios/web/public/webui/web_ui_ios_message_handler.h"
@@ -41,7 +40,7 @@ web::WebUIIOSDataSource* CreateNetExportHTMLSource() {
   web::WebUIIOSDataSource* source =
       web::WebUIIOSDataSource::Create(kChromeUINetExportHost);
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->AddResourcePath(net_log::kNetExportUIJS, IDR_NET_LOG_NET_EXPORT_JS);
   source->SetDefaultResource(IDR_NET_LOG_NET_EXPORT_HTML);
   return source;
@@ -134,7 +133,7 @@ void NetExportMessageHandler::OnEnableNotifyUIWithState(
 void NetExportMessageHandler::OnStartNetLog(const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
 
-  const base::Value::ListStorage& params = list->GetList();
+  base::Value::ConstListView params = list->GetList();
 
   // Determine the capture mode.
   net::NetLogCaptureMode capture_mode = net::NetLogCaptureMode::kDefault;
@@ -213,6 +212,6 @@ void NetExportMessageHandler::NotifyUIWithState(
 NetExportUI::NetExportUI(web::WebUIIOS* web_ui)
     : web::WebUIIOSController(web_ui) {
   web_ui->AddMessageHandler(std::make_unique<NetExportMessageHandler>());
-  web::WebUIIOSDataSource::Add(ios::ChromeBrowserState::FromWebUIIOS(web_ui),
+  web::WebUIIOSDataSource::Add(ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateNetExportHTMLSource());
 }

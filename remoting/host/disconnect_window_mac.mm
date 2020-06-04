@@ -29,6 +29,21 @@
 
 const int kMaximumConnectedNameWidthInPixels = 600;
 
+namespace {
+
+bool IsDarkMode() {
+  if (@available(macOS 10.14, *)) {
+    NSAppearanceName appearance =
+        [[NSApp effectiveAppearance] bestMatchFromAppearancesWithNames:@[
+          NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+        ]];
+    return [appearance isEqual:NSAppearanceNameDarkAqua];
+  }
+  return false;
+}
+
+}  // namespace
+
 namespace remoting {
 
 class DisconnectWindowMac : public HostWindow {
@@ -94,16 +109,16 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
 }  // namespace remoting
 
 @implementation DisconnectWindowController
-@synthesize connectedToField = connectedToField_;
-@synthesize disconnectButton = disconnectButton_;
+@synthesize connectedToField = _connectedToField;
+@synthesize disconnectButton = _disconnectButton;
 
 - (id)initWithCallback:(const base::Closure&)disconnect_callback
               username:(const std::string&)username
                 window:(NSWindow*)window {
   self = [super initWithWindow:(NSWindow*)window];
   if (self) {
-    disconnect_callback_ = disconnect_callback;
-    username_ = base::UTF8ToUTF16(username);
+    _disconnect_callback = disconnect_callback;
+    _username = base::UTF8ToUTF16(username);
   }
   return self;
 }
@@ -113,8 +128,8 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
 }
 
 - (IBAction)stopSharing:(id)sender {
-  if (!disconnect_callback_.is_null()) {
-    disconnect_callback_.Run();
+  if (!_disconnect_callback.is_null()) {
+    _disconnect_callback.Run();
   }
 }
 
@@ -123,7 +138,7 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
 }
 
 - (void)Hide {
-  disconnect_callback_.Reset();
+  _disconnect_callback.Reset();
   [self close];
 }
 
@@ -148,33 +163,33 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   self.disconnectButton.target = self;
   [self.window.contentView addSubview:self.disconnectButton];
 
-  [connectedToField_ setStringValue:l10n_util::GetNSStringF(IDS_MESSAGE_SHARED,
-                                                            username_)];
-  [disconnectButton_ setTitle:l10n_util::GetNSString(IDS_STOP_SHARING_BUTTON)];
+  [_connectedToField setStringValue:l10n_util::GetNSStringF(IDS_MESSAGE_SHARED,
+                                                            _username)];
+  [_disconnectButton setTitle:l10n_util::GetNSString(IDS_STOP_SHARING_BUTTON)];
 
   // Resize the window dynamically based on the content.
-  CGFloat oldConnectedWidth = NSWidth([connectedToField_ bounds]);
-  [connectedToField_ sizeToFit];
-  NSRect connectedToFrame = [connectedToField_ frame];
+  CGFloat oldConnectedWidth = NSWidth([_connectedToField bounds]);
+  [_connectedToField sizeToFit];
+  NSRect connectedToFrame = [_connectedToField frame];
   CGFloat newConnectedWidth = NSWidth(connectedToFrame);
 
   // Set a max width for the connected to text field.
   if (newConnectedWidth > kMaximumConnectedNameWidthInPixels) {
     newConnectedWidth = kMaximumConnectedNameWidthInPixels;
     connectedToFrame.size.width = newConnectedWidth;
-    [connectedToField_ setFrame:connectedToFrame];
+    [_connectedToField setFrame:connectedToFrame];
   }
 
-  CGFloat oldDisconnectWidth = NSWidth([disconnectButton_ bounds]);
-  [disconnectButton_ sizeToFit];
-  NSRect disconnectFrame = [disconnectButton_ frame];
+  CGFloat oldDisconnectWidth = NSWidth([_disconnectButton bounds]);
+  [_disconnectButton sizeToFit];
+  NSRect disconnectFrame = [_disconnectButton frame];
   CGFloat newDisconnectWidth = NSWidth(disconnectFrame);
 
   // Move the disconnect button appropriately.
   disconnectFrame.origin.x += newConnectedWidth - oldConnectedWidth;
   disconnectFrame.origin.y =
       (NSHeight(self.window.contentView.frame) - NSHeight(disconnectFrame)) / 2;
-  [disconnectButton_ setFrame:disconnectFrame];
+  [_disconnectButton setFrame:disconnectFrame];
 
   // Then resize the window appropriately
   NSWindow *window = [self window];
@@ -190,8 +205,8 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
         = NSMinX(disconnectFrame) - NSMaxX(connectedToFrame);
     disconnectFrame.origin.x = buttonInset;
     connectedToFrame.origin.x = NSMaxX(disconnectFrame) + buttonTextSpacing;
-    [connectedToField_ setFrame:connectedToFrame];
-    [disconnectButton_ setFrame:disconnectFrame];
+    [_connectedToField setFrame:connectedToFrame];
+    [_disconnectButton setFrame:disconnectFrame];
   }
 
   // Center the window at the bottom of the screen, above the dock (if present).
@@ -264,15 +279,28 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:bounds
                                                        xRadius:5
                                                        yRadius:5];
-  NSColor *gray = [NSColor colorWithCalibratedWhite:0.91 alpha:1.0];
-  [gray setFill];
+  NSColor* bgColor;
+  NSColor* frameColor;
+  NSColor* lineColor;
+  NSColor* lineShadowColor;
+  if (IsDarkMode()) {
+    bgColor = [NSColor colorWithCalibratedWhite:0.2 alpha:1.0];
+    frameColor = [NSColor colorWithCalibratedWhite:0.91 alpha:1.0];
+    lineColor = [NSColor colorWithCalibratedWhite:0.91 alpha:1.0];
+    lineShadowColor = [NSColor colorWithCalibratedWhite:0.32 alpha:1.0];
+  } else {
+    bgColor = [NSColor colorWithCalibratedWhite:0.91 alpha:1.0];
+    frameColor = [NSColor colorWithCalibratedRed:0.13
+                                           green:0.69
+                                            blue:0.11
+                                           alpha:1.0];
+    lineColor = [NSColor colorWithCalibratedWhite:0.70 alpha:1.0];
+    lineShadowColor = [NSColor colorWithCalibratedWhite:0.97 alpha:1.0];
+  }
+  [bgColor setFill];
   [path fill];
   [path setLineWidth:4];
-  NSColor *green = [NSColor colorWithCalibratedRed:0.13
-                                             green:0.69
-                                              blue:0.11
-                                             alpha:1.0];
-  [green setStroke];
+  [frameColor setStroke];
   [path stroke];
 
 
@@ -280,9 +308,6 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   const CGFloat kHeight = 21.0;
   const CGFloat kBaseInset = 12.0;
   const CGFloat kDragHandleWidth = 5.0;
-
-  NSColor *dark = [NSColor colorWithCalibratedWhite:0.70 alpha:1.0];
-  NSColor *light = [NSColor colorWithCalibratedWhite:0.97 alpha:1.0];
 
   // Turn off aliasing so it's nice and crisp.
   NSGraphicsContext *context = [NSGraphicsContext currentContext];
@@ -299,7 +324,7 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   path = [NSBezierPath bezierPath];
   [path moveToPoint:top];
   [path lineToPoint:bottom];
-  [dark setStroke];
+  [lineColor setStroke];
   [path stroke];
 
   top.x += 1;
@@ -307,7 +332,7 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   path = [NSBezierPath bezierPath];
   [path moveToPoint:top];
   [path lineToPoint:bottom];
-  [light setStroke];
+  [lineShadowColor setStroke];
   [path stroke];
 
   top.x += 2;
@@ -315,7 +340,7 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   path = [NSBezierPath bezierPath];
   [path moveToPoint:top];
   [path lineToPoint:bottom];
-  [dark setStroke];
+  [lineColor setStroke];
   [path stroke];
 
   top.x += 1;
@@ -323,7 +348,7 @@ std::unique_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
   path = [NSBezierPath bezierPath];
   [path moveToPoint:top];
   [path lineToPoint:bottom];
-  [light setStroke];
+  [lineShadowColor setStroke];
   [path stroke];
 
   [context setShouldAntialias:alias];

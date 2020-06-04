@@ -7,9 +7,9 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
@@ -21,26 +21,6 @@ struct PasswordForm;
 }
 
 class ManagePasswordsUIController;
-
-// Custom class is required to enable password generation.
-class CustomPasswordManagerClient : public ChromePasswordManagerClient {
- public:
-  using ChromePasswordManagerClient::ChromePasswordManagerClient;
-  static void CreateForWebContentsWithAutofillClient(
-      content::WebContents* contents,
-      autofill::AutofillClient* autofill_client);
-
-  // PasswordManagerClient:
-  password_manager::SyncState GetPasswordSyncState() const override;
-
-  void OnPaste() override;
-
-  base::string16 pasted_value() { return pasted_value_; }
-
- private:
-  // Represents the text passed to PasswordResuseManager's OnPaste() method.
-  base::string16 pasted_value_;
-};
 
 class NavigationObserver : public content::WebContentsObserver {
  public:
@@ -112,9 +92,9 @@ class BubbleObserver {
   // checks that the prompt is no longer available afterwards.
   void AcceptSavePrompt() const;
 
-  // Expecting that the prompt is shown, update |form| with the password from
-  // observed form. Checks that the prompt is no longer visible afterwards.
-  void AcceptUpdatePrompt(const autofill::PasswordForm& form) const;
+  // Expecting that the prompt is available, updates the password. At the end,
+  // checks that the prompt is no longer visible afterwards.
+  void AcceptUpdatePrompt() const;
 
   // Returns once the account chooser pops up or it's already shown.
   // |web_contents| must be the custom one returned by
@@ -155,12 +135,34 @@ class BubbleObserver {
   DISALLOW_COPY_AND_ASSIGN(BubbleObserver);
 };
 
+// A helper class that synchronously waits until the password store handles a
+// GetLogins() request.
+class PasswordStoreResultsObserver
+    : public password_manager::PasswordStoreConsumer {
+ public:
+  PasswordStoreResultsObserver();
+  ~PasswordStoreResultsObserver() override;
+
+  // Waits for OnGetPasswordStoreResults() and returns the result.
+  std::vector<std::unique_ptr<autofill::PasswordForm>> WaitForResults();
+
+ private:
+  void OnGetPasswordStoreResults(
+      std::vector<std::unique_ptr<autofill::PasswordForm>> results) override;
+
+  base::RunLoop run_loop_;
+  std::vector<std::unique_ptr<autofill::PasswordForm>> results_;
+
+  DISALLOW_COPY_AND_ASSIGN(PasswordStoreResultsObserver);
+};
+
 class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
  public:
   PasswordManagerBrowserTestBase();
   ~PasswordManagerBrowserTestBase() override;
 
   // InProcessBrowserTest:
+  void SetUpInProcessBrowserTestFixture() override;
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
 
@@ -172,6 +174,11 @@ class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
   static void SetUpOnMainThreadAndGetNewTab(
       Browser* browser,
       content::WebContents** web_contents);
+
+  // Creates a new tab with all the password manager test hooks and returns it
+  // in |web_contents|.
+  static void GetNewTab(Browser* browser, content::WebContents** web_contents);
+
   // Make sure that the password store associated with the given browser
   // processed all the previous calls, calls executed on another thread.
   static void WaitForPasswordStore(Browser* browser);
@@ -238,9 +245,17 @@ class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
   net::EmbeddedTestServer& https_test_server() { return https_test_server_; }
 
  private:
+  static void OnWillCreateBrowserContextServices(
+      content::BrowserContext* context);
+
   net::EmbeddedTestServer https_test_server_;
   // A tab with some hooks injected.
   content::WebContents* web_contents_;
+
+  std::unique_ptr<
+      base::CallbackList<void(content::BrowserContext*)>::Subscription>
+      will_create_browser_context_services_subscription_;
+
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerBrowserTestBase);
 };
 

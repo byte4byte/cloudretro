@@ -5,7 +5,6 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_UTIL_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_UTIL_H_
 
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -23,12 +22,12 @@ namespace network {
 namespace mojom {
 class NetworkContext;
 }
-}
+}  // namespace network
 
 namespace password_manager {
 class PasswordManagerDriver;
 class PasswordManagerClient;
-}
+}  // namespace password_manager
 
 namespace syncer {
 class SyncService;
@@ -49,17 +48,6 @@ password_manager::SyncState GetPasswordSyncState(
 // Reports whether passwords are synced with normal encryption, i.e. without a
 // custom passphrase.
 bool IsSyncingWithNormalEncryption(const syncer::SyncService* sync_service);
-
-// Finds the forms with a duplicate sync tags in |forms|. The first one of
-// the duplicated entries stays in |forms|, the others are moved to
-// |duplicates|.
-// |tag_groups| is optional. It will contain |forms| and |duplicates| grouped by
-// the sync tag. The first element in each group is one from |forms|. It's
-// followed by the duplicates.
-void FindDuplicates(
-    std::vector<std::unique_ptr<autofill::PasswordForm>>* forms,
-    std::vector<std::unique_ptr<autofill::PasswordForm>>* duplicates,
-    std::vector<std::vector<autofill::PasswordForm*>>* tag_groups);
 
 // Removes Android username-only credentials from |android_credentials|.
 // Transforms federated credentials into non zero-click ones.
@@ -82,7 +70,9 @@ bool ManualPasswordGenerationEnabled(
 bool ShowAllSavedPasswordsContextMenuEnabled(
     password_manager::PasswordManagerDriver* driver);
 
-// Triggers password generation flow and records the metrics.
+// Triggers password generation flow and records the metrics. If the user should
+// be asked to opt in to account storage, will trigger a reauth flow first and
+// generation will only happen on success.
 void UserTriggeredManualGenerationFromContextMenu(
     password_manager::PasswordManagerClient* password_manager_client);
 
@@ -113,17 +103,24 @@ void RemoveUselessCredentials(
 base::StringPiece GetSignonRealmWithProtocolExcluded(
     const autofill::PasswordForm& form);
 
-// Given all non-blacklisted |matches|, finds and populates
-// |best_matches_|, |preferred_match_| and |non_best_matches_| accordingly.
-// For comparing credentials the following rule is used: non-psl match is better
-// than psl match, preferred match is better than non-preferred match. In case
-// of tie, an arbitrary credential from the tied ones is chosen for
-// |best_matches| and preferred_match.
+// Given all non-blacklisted |non_federated_matches|, finds and populates
+// |non_federated_same_scheme|, |best_matches|, and |preferred_match|
+// accordingly. For comparing credentials the following rule is used: non-psl
+// match is better than psl match, most recently used match is better than other
+// matches. In case of tie, an arbitrary credential from the tied ones is chosen
+// for |best_matches| and |preferred_match|.
 void FindBestMatches(
-    std::vector<const autofill::PasswordForm*> matches,
-    std::map<base::string16, const autofill::PasswordForm*>* best_matches,
-    std::vector<const autofill::PasswordForm*>* not_best_matches,
+    const std::vector<const autofill::PasswordForm*>& non_federated_matches,
+    autofill::PasswordForm::Scheme scheme,
+    std::vector<const autofill::PasswordForm*>* non_federated_same_scheme,
+    std::vector<const autofill::PasswordForm*>* best_matches,
     const autofill::PasswordForm** preferred_match);
+
+// Returns a form with the given |username_value| from |forms|, or nullptr if
+// none exists. If multiple matches exist, returns the first one.
+const autofill::PasswordForm* FindFormByUsername(
+    const std::vector<const autofill::PasswordForm*>& forms,
+    const base::string16& username_value);
 
 // If the user submits a form, they may have used existing credentials, new
 // credentials, or modified existing credentials that should be updated.
@@ -135,7 +132,7 @@ void FindBestMatches(
 // PSL and Android matches.
 const autofill::PasswordForm* GetMatchForUpdating(
     const autofill::PasswordForm& submitted_form,
-    const std::map<base::string16, const autofill::PasswordForm*>& credentials);
+    const std::vector<const autofill::PasswordForm*>& credentials);
 
 // This method creates a blacklisted form with |digests|'s scheme, signon_realm
 // and origin. This is done to avoid storing PII and to have a normalized unique

@@ -12,10 +12,10 @@
 #include "chrome/browser/safe_browsing/test_safe_browsing_database_helper.h"
 #include "chrome/browser/subresource_filter/subresource_filter_browser_test_harness.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/safe_browsing/db/safebrowsing.pb.h"
-#include "components/safe_browsing/db/v4_embedded_test_server_util.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
-#include "components/safe_browsing/db/v4_test_util.h"
+#include "components/safe_browsing/core/db/safebrowsing.pb.h"
+#include "components/safe_browsing/core/db/v4_embedded_test_server_util.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/db/v4_test_util.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "content/public/browser/web_contents.h"
@@ -177,31 +177,10 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterInterceptingBrowserTest,
 }
 
 // Verify that the correct safebrowsing result is reported when there is a
-// redirect chain. With kSafeBrowsingSubresourceFilterConsiderRedirects, the
-// result with the highest priority should be returned.
-IN_PROC_BROWSER_TEST_F(SubresourceFilterInterceptingBrowserTest,
-                       SafeBrowsingNotificationsCheckBest) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      kSafeBrowsingSubresourceFilterConsiderRedirects);
-  ASSERT_NO_FATAL_FAILURE(
-      SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
-  GURL redirect_url(embedded_test_server()->GetURL(
-      "b.com", "/subresource_filter/frame_with_included_script.html"));
-  GURL url = InitializeSafeBrowsingForOutOfOrderResponses(
-      "a.com", redirect_url, base::TimeDelta::FromSeconds(0));
-  ui_test_utils::NavigateToURL(browser(), url);
-  EXPECT_FALSE(WasParsedScriptElementLoaded(web_contents()->GetMainFrame()));
-}
-
-// Verify that the correct safebrowsing result is reported when there is a
-// redirect chain. Without kSafeBrowsingSubresourceFilterConsiderRedirects, the
+// redirect chain. The
 // last result should be used.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterInterceptingBrowserTest,
                        SafeBrowsingNotificationsCheckLastResult) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(
-      kSafeBrowsingSubresourceFilterConsiderRedirects);
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
   GURL redirect_url(embedded_test_server()->GetURL(

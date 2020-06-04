@@ -7,10 +7,13 @@
 #include <utility>
 
 #include "base/task/post_task.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_pref_names.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager_factory.h"
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_task_traits.h"
 
 namespace chromeos {
@@ -19,12 +22,17 @@ namespace chromeos {
 CupsProxyServiceDelegateImpl::CupsProxyServiceDelegateImpl()
     : profile_(ProfileManager::GetPrimaryUserProfile()),
       printers_manager_(
-          CupsPrintersManagerFactory::GetForBrowserContext(profile_)),
-      weak_factory_(this) {
+          CupsPrintersManagerFactory::GetForBrowserContext(profile_)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 CupsProxyServiceDelegateImpl::~CupsProxyServiceDelegateImpl() = default;
+
+bool CupsProxyServiceDelegateImpl::IsPrinterAccessAllowed() const {
+  const PrefService* prefs = profile_->GetPrefs();
+  return prefs->GetBoolean(prefs::kPrintingEnabled) &&
+         prefs->GetBoolean(plugin_vm::prefs::kPluginVmPrintersAllowed);
+}
 
 base::Optional<Printer> CupsProxyServiceDelegateImpl::GetPrinter(
     const std::string& id) {
@@ -33,16 +41,25 @@ base::Optional<Printer> CupsProxyServiceDelegateImpl::GetPrinter(
 }
 
 // TODO(crbug.com/945409): Incorporate printer limit workaround.
-std::vector<Printer> CupsProxyServiceDelegateImpl::GetPrinters() {
+std::vector<Printer> CupsProxyServiceDelegateImpl::GetPrinters(
+    PrinterClass printer_class) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // TODO(crbug.com/945409): Include saved + enterprise (+ephemeral?).
-  return printers_manager_->GetPrinters(PrinterClass::kSaved);
+  return printers_manager_->GetPrinters(printer_class);
 }
 
 bool CupsProxyServiceDelegateImpl::IsPrinterInstalled(const Printer& printer) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return printers_manager_->IsPrinterInstalled(printer);
+}
+
+// Expects |printer| is known by the printers_manager_.
+void CupsProxyServiceDelegateImpl::PrinterInstalled(const Printer& printer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(GetPrinter(printer.id()));
+  printers_manager_->PrinterInstalled(
+      printer, false /* unused */, PrinterSetupSource::kMaxValue /* unused */);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -52,12 +69,12 @@ CupsProxyServiceDelegateImpl::GetIOTaskRunner() {
 
 void CupsProxyServiceDelegateImpl::SetupPrinter(
     const Printer& printer,
-    printing::PrinterSetupCallback cb) {
+    cups_proxy::SetupPrinterCallback cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Grab current runner to post |cb| to.
   auto cb_runner = base::SequencedTaskRunnerHandle::Get();
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&CupsProxyServiceDelegateImpl::SetupPrinterOnThread,
                      weak_factory_.GetWeakPtr(), printer,
@@ -68,7 +85,7 @@ void CupsProxyServiceDelegateImpl::SetupPrinter(
 void CupsProxyServiceDelegateImpl::SetupPrinterOnThread(
     const Printer& printer,
     scoped_refptr<base::SequencedTaskRunner> cb_runner,
-    printing::PrinterSetupCallback cb) {
+    cups_proxy::SetupPrinterCallback cb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Lazily grab the configurer while on the UI thread.
@@ -85,7 +102,7 @@ void CupsProxyServiceDelegateImpl::SetupPrinterOnThread(
 // |printer_configurer| unused but ensures this callback outlives it.
 void CupsProxyServiceDelegateImpl::OnSetupPrinter(
     scoped_refptr<base::SequencedTaskRunner> cb_runner,
-    printing::PrinterSetupCallback cb,
+    cups_proxy::SetupPrinterCallback cb,
     PrinterSetupResult result) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   cb_runner->PostTask(

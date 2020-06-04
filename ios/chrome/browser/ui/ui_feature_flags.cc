@@ -4,36 +4,46 @@
 
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 
-// TODO(crbug.com/893314) : Remove this flag.
-const base::Feature kClosingLastIncognitoTab{"ClosingLastIncognitoTab",
-                                             base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kBrowserContainerKeepsContentView{
-    "BrowserContainerKeepsContentView", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kOmniboxPopupShortcutIconsInZeroState{
-    "OmniboxPopupShortcutIconsInZeroState", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // TODO(crbug.com/945811): Using |-drawViewHierarchyInRect:afterScreenUpdates:|
 // has adverse flickering when taking a snapshot of the NTP while in the app
 // switcher.
 const base::Feature kSnapshotDrawView{"SnapshotDrawView",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kCopiedContentBehavior{"CopiedContentBehavior",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kSettingsRefresh{"SettingsRefresh",
                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kNewOmniboxPopupLayout{"NewOmniboxPopupLayout",
+const base::Feature kEmbedderBlockRestoreUrl{"EmbedderBlockRestoreUrl",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kDisableAnimationOnLowBattery{
+    "DisableAnimationOnLowBattery", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kVoiceOverUnstackedTabstrip{
+    "VoiceOverUnstackedTabstrip", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kForceUnstackedTabstrip{"ForceUnstackedTabstrip",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContainedBVC{"ContainedBVC",
+                                  base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kTestFeature{"TestFeature",
+                                 base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kClearSyncedData{"ClearSyncedData",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kFirstResponderSendAction{
+    "FirstResponderSendAction", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kNewSigninArchitecture{"NewSigninArchitecture",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kOmniboxUseDefaultSearchEngineFavicon{
-    "OmniboxUseDefaultSearchEngineFavicon", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kLanguageSettings{"LanguageSettings",
+const base::Feature kQRCodeGeneration{"QRCodeGeneration",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kOptionalArticleThumbnail{
-    "OptionalArticleThumbnail", base::FEATURE_DISABLED_BY_DEFAULT};
+#if defined(__IPHONE_13_4)
+const base::Feature kPointerSupport{"PointerSupport",
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
+#endif  // defined(__IPHONE_13_4)

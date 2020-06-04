@@ -6,9 +6,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "chrome/test/chromedriver/net/command_id.h"
 #include "chrome/test/chromedriver/net/timeout.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -55,12 +58,13 @@ bool SyncWebSocketImpl::Core::Connect(const GURL& url) {
   bool success = false;
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
-  // Connect with retries. The retry timeout starts at 2 seconds, with
+  // Connect with retries. The retry timeout starts at 4 seconds, with
   // exponential backoff, up to 16 seconds. The maximum total wait time is
   // about 30 seconds. (Normally, a successful connection takes only a few
-  // milliseconds on Linux and Mac, but around a second on Windows.)
+  // milliseconds on Linux and Mac, but around 2 seconds for Windows 10.)
+  // See https://crbug.com/chromedriver/3301 for Windows 10 startup times
   const int kMaxTimeout = 16;
-  for (int timeout = 2; timeout <= kMaxTimeout; timeout *= 2) {
+  for (int timeout = 4; timeout <= kMaxTimeout; timeout *= 2) {
     context_getter_->GetNetworkTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&SyncWebSocketImpl::Core::ConnectOnIO, this,
                                   url, &success, &event));
@@ -115,10 +119,30 @@ bool SyncWebSocketImpl::Core::HasNextMessage() {
   return !received_queue_.empty();
 }
 
+// TODO(johnchen) : Send messages with negative command ids to client.
+// https://crrev.com/c/1745493 is a pending CL that does this
 void SyncWebSocketImpl::Core::OnMessageReceived(const std::string& message) {
   base::AutoLock lock(lock_);
-  received_queue_.push_back(message);
+  bool send_to_chromedriver;
+  DetermineRecipient(message, &send_to_chromedriver);
+  if (send_to_chromedriver)
+    received_queue_.push_back(message);
   on_update_event_.Signal();
+}
+
+void SyncWebSocketImpl::Core::DetermineRecipient(const std::string& message,
+                                                 bool* send_to_chromedriver) {
+  base::Optional<base::Value> message_value =
+      base::JSONReader::Read(message, base::JSON_REPLACE_INVALID_CHARACTERS);
+  base::DictionaryValue* message_dict;
+  if (!message_value || !message_value->GetAsDictionary(&message_dict)) {
+    *send_to_chromedriver = true;
+    return;
+  }
+  int id;
+  *send_to_chromedriver =
+      !message_dict->HasKey("id") || (message_dict->GetInteger("id", &id) &&
+                                      CommandId::IsChromeDriverCommandId(id));
 }
 
 void SyncWebSocketImpl::Core::OnClose() {

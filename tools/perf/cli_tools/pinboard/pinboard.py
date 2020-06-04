@@ -35,34 +35,75 @@ TZ = 'America/Los_Angeles'  # MTV-time.
 
 # Only these are exported and uploaded to the Cloud Storage dataset.
 MEASUREMENTS = set([
-    'memory:chrome:renderer_processes:reported_by_chrome:v8:effective_size',
-    'timeToFirstContentfulPaint',
-    'timeToFirstMeaningfulPaint',
-    'timeToInteractive',
+    # V8 metrics.
+    'JavaScript:duration',
+    'Optimize-Background:duration',
+    'Optimize:duration',
+    'RunsPerMinute',
+    'Total-Main-Thread:duration',
     'Total:duration',
+    'V8-Only-Main-Thread:duration',
     'V8-Only:duration',
+    'memory:chrome:renderer_processes:reported_by_chrome:v8:effective_size',
+    'total:500ms_window:renderer_eqt:v8',
+
+    # Startup metrics.
+    'experimental_content_start_time',
+    'experimental_navigation_start_time',
+    'first_contentful_paint_time',
+    'messageloop_start_time',
+    'navigation_commit_time',
 ])
 
 # Compute averages over a fixed set of active stories. These may need to be
 # periodically updated.
 ACTIVE_STORIES = set([
-    'browse:chrome:newtab',
-    'browse:chrome:omnibox',
-    'browse:media:facebook_photos',
+    # v8.browsing_mobile.
+    'browse:chrome:newtab:2019',
+    'browse:chrome:omnibox:2019',
+    'browse:media:facebook_photos:2019',
+    'browse:media:flickr_infinite_scroll:2019',
     'browse:media:googleplaystore:2019',
-    'browse:media:imgur',
-    'browse:media:youtube',
-    'browse:news:cricbuzz',
-    'browse:news:toi',
-    'browse:shopping:amazon',
-    'browse:shopping:lazada',
-    'browse:social:facebook',
-    'browse:social:instagram',
-    'browse:tools:maps',
-    'load:media:facebook_photos',
-    'load:media:youtube:2018',
-    'load:news:irctc',
-    'load:news:wikipedia:2018'
+    'browse:media:imgur:2019',
+    'browse:media:youtube:2019',
+    'browse:news:cricbuzz:2019',
+    'browse:news:globo:2019',
+    'browse:news:nytimes:2019',
+    'browse:news:qq:2019',
+    'browse:news:reddit:2019',
+    'browse:news:toi:2019',
+    'browse:shopping:amazon:2019',
+    'browse:news:washingtonpost:2019',
+    'browse:search:amp:sxg:2019',
+    'browse:shopping:amazon:2019',
+    'browse:shopping:avito:2019',
+    'browse:shopping:flipkart:2019',
+    'browse:shopping:lazada:2019',
+    'browse:social:facebook:2019',
+    'browse:social:instagram:2019',
+    'browse:social:twitter:2019',
+    'browse:tools:maps:2019',
+
+    # v8.browsing_desktop.
+    'browse:news:nytimes:2018',
+    'browse:news:flipboard:2018',
+    'browse:social:facebook_infinite_scroll:2018',
+    'browse:tools:sheets:2019',
+    'browse:media:tumblr:2018',
+    'browse:tools:maps:2019',
+    'browse:social:twitter_infinite_scroll:2018',
+    'browse:tech:discourse_infinite_scroll:2018',
+    'browse:social:twitter:2018',
+    'browse:social:tumblr_infinite_scroll:2018',
+    'browse:media:googleplaystore:2018',
+    'browse:search:google:2018',
+    'browse:news:cnn:2018',
+    'browse:news:reddit:2018',
+    'browse:search:google_india:2018',
+    'browse:media:youtubetv:2019',
+
+    # Speedometer2.
+    'Speedometer2',
 ])
 
 
@@ -78,8 +119,7 @@ def StartPinpointJobs(state, date):
   item = {'revision': revision, 'timestamp': timestamp, 'jobs': []}
   configs = LoadJsonFile(JOB_CONFIGS_PATH)
   for config in configs:
-    config['start_git_hash'] = revision
-    config['end_git_hash'] = revision
+    config['base_git_hash'] = revision
     with tempfile_ext.NamedTemporaryFile() as tmp:
       json.dump(config, tmp)
       tmp.close()
@@ -88,7 +128,12 @@ def StartPinpointJobs(state, date):
           universal_newlines=True).strip()
     logging.info(output)
     assert 'https://pinpoint' in output
-    item['jobs'].append({'id': output.split('/')[-1], 'status': 'queued'})
+    bot = config['configuration']
+    item['jobs'].append({
+        'id': output.split('/')[-1],
+        'status': 'queued',
+        'bot': bot
+    })
   state.append(item)
   state.sort(key=lambda p: p['timestamp'])  # Keep items sorted by date.
 
@@ -128,9 +173,10 @@ def CollectPinpointResults(state):
 def LoadJobsState():
   """Load the latest recorded state of pinpoint jobs."""
   local_path = CachedFilePath(JOBS_STATE_FILE)
-  if os.path.exists(local_path):
+  if os.path.exists(local_path) or DownloadFromCloudStorage(local_path):
     return LoadJsonFile(local_path)
   else:
+    logging.info('No jobs state found. Creating empty state.')
     return []
 
 
@@ -150,23 +196,52 @@ def UpdateJobsState(state):
       UploadToCloudStorage(local_path)
 
 
-def AggregateAndUploadResults(state):
-  """Aggregate results collected and upload them to cloud storage."""
-  cached_results = CachedFilePath(DATASET_PKL_FILE)
-  dfs = []
-
-  if os.path.exists(cached_results):
-    # To speed things up, we take the cache computed from previous results.
-    df = pd.read_pickle(cached_results)
-    dfs.append(df)
-    known_revisions = set(df['revision'])
+def GetCachedDataset():
+  """Load the latest dataset with cached data."""
+  local_path = CachedFilePath(DATASET_PKL_FILE)
+  if os.path.exists(local_path) or DownloadFromCloudStorage(local_path):
+    return pd.read_pickle(local_path)
   else:
-    known_revisions = set()
+    return None
+
+
+def UpdateCachedDataset(df):
+  """Write back the dataset with cached data."""
+  local_path = CachedFilePath(DATASET_PKL_FILE)
+  df.to_pickle(local_path)
+  UploadToCloudStorage(local_path)
+
+
+def GetItemsToUpdate(state):
+  """Select jobs with new data to download and cached data for existing jobs.
+
+  This also filters out old revisions to keep only recent (6 months) data.
+
+  Returns:
+    new_items: A list of job items from which to get data.
+    cached_df: A DataFrame with existing cached data, may be None.
+  """
+  from_date = str(TimeAgo(months=6).date())
+  new_items = [item for item in state if item['timestamp'] > from_date]
+  df = GetCachedDataset()
+  if df is not None:
+    recent_revisions = set(item['revision'] for item in new_items)
+    df = df[df['revision'].isin(recent_revisions)]
+    known_revisions = set(df['revision'])
+    new_items = [
+        item for item in new_items if item['revision'] not in known_revisions]
+  return new_items, df
+
+
+def AggregateAndUploadResults(new_items, cached_df=None):
+  """Aggregate results collected and upload them to cloud storage."""
+  dfs = []
+  if cached_df is not None:
+    dfs.append(cached_df)
 
   found_new = False
-  for item in state:
-    if item['revision'] in known_revisions or _SkipProcessing(item):
-      # Revision is already in cache, jobs are not ready, or all have failed.
+  for item in new_items:
+    if _SkipProcessing(item):  # Jobs are not ready, or all have failed.
       continue
     if not found_new:
       logging.info('Processing data from new results:')
@@ -180,7 +255,7 @@ def AggregateAndUploadResults(state):
 
   # Otherwise update our cache and upload.
   df = pd.concat(dfs, ignore_index=True)
-  df.to_pickle(cached_results)
+  UpdateCachedDataset(df)
 
   # Drop revisions with no results and mark the last result for each metric,
   # both with/without patch, as a 'reference'. This allows making score cards
@@ -211,14 +286,15 @@ def GetRevisionResults(item):
 
   if not df.empty:
     # Aggregate over the results of individual stories.
-    df = df.groupby(['change', 'name', 'benchmark', 'unit'])['mean'].agg(
-        ['mean', 'count']).reset_index()
+    df = df.groupby(['change', 'job_id', 'name', 'benchmark',
+                     'unit'])['mean'].agg(['mean', 'count']).reset_index()
   else:
     # Otherwise build a single row with an "empty" aggregate for this revision.
     # This is needed so we can remember in the cache that this revision has
     # been processed.
     df = pd.DataFrame(index=[0])
     df['change'] = item['revision']
+    df['job_id'] = '(missing)'
     df['name'] = '(missing)'
     df['benchmark'] = '(missing)'
     df['unit'] = ''
@@ -247,8 +323,15 @@ def GetRevisionResults(item):
   df.loc[df['label'] == 'without_patch', 'timestamp'] = (
       df['timestamp'] - pd.DateOffset(years=1))
 
-  return df[['revision', 'timestamp', 'label',
-             'benchmark', 'name', 'mean', 'count']]
+  df['bot'] = 'unknown'
+  for j in item['jobs']:
+    bot = j.get('bot', 'unknown')
+    df.loc[df['job_id'].str.contains(str(j['id'])), 'bot'] = bot
+
+  return df[[
+      'revision', 'timestamp', 'bot', 'label', 'benchmark', 'name', 'mean',
+      'count'
+  ]]
 
 
 def _SkipProcessing(item):
@@ -310,13 +393,25 @@ def UploadToCloudStorage(filepath):
       filepath, posixpath.join(CLOUD_STORAGE_DIR, os.path.basename(filepath)))
 
 
+def DownloadFromCloudStorage(filepath):
+  """Get the given file from cloud storage."""
+  try:
+    gsutil.Copy(
+        posixpath.join(CLOUD_STORAGE_DIR, os.path.basename(filepath)), filepath)
+    logging.info('Downloaded copy of %s from cloud storage.', filepath)
+    return True
+  except subprocess.CalledProcessError:
+    logging.info('Failed to download copy of %s from cloud storage.', filepath)
+    return False
+
+
 def LoadJsonFile(filename):
   with open(filename) as f:
     return json.load(f)
 
 
-def Yesterday():
-  return pd.Timestamp.now(TZ) - pd.DateOffset(days=1)
+def TimeAgo(**kwargs):
+  return pd.Timestamp.now(TZ) - pd.DateOffset(**kwargs)
 
 
 def SetUpLogging(level):
@@ -346,7 +441,7 @@ def Main():
             "results, 'upload' aggregated data, or 'auto' to do all in "
             "sequence."))
   parser.add_argument(
-      '--date', type=lambda s: pd.Timestamp(s, tz=TZ), default=Yesterday(),
+      '--date', type=lambda s: pd.Timestamp(s, tz=TZ), default=TimeAgo(days=1),
       help=('Run jobs for the last commit landed on the given date (assuming '
             'MTV time). Defaults to the last commit landed yesterday.'))
   args = parser.parse_args()
@@ -354,14 +449,19 @@ def Main():
     logging.info('=== auto run for %s ===', args.date)
     args.actions = actions
 
+  cached_results_dir = CachedFilePath('job_results')
+  if not os.path.isdir(cached_results_dir):
+    os.makedirs(cached_results_dir)
+
   state = LoadJobsState()
   try:
     if 'start' in args.actions:
       StartPinpointJobs(state, args.date)
+    new_items, cached_df = GetItemsToUpdate(state)
     if 'collect' in args.actions:
-      CollectPinpointResults(state)
+      CollectPinpointResults(new_items)
   finally:
     UpdateJobsState(state)
 
   if 'upload' in args.actions:
-    AggregateAndUploadResults(state)
+    AggregateAndUploadResults(new_items, cached_df)

@@ -10,7 +10,7 @@
 
 #include "ash/accessibility/test_accessibility_controller_client.h"
 #include "ash/public/cpp/ash_switches.h"
-#include "ash/public/interfaces/tray_action.mojom.h"
+#include "ash/public/mojom/tray_action.mojom.h"
 #include "ash/shell.h"
 #include "ash/system/power/power_button_controller.h"
 #include "ash/test/ash_test_base.h"
@@ -98,7 +98,7 @@ class LockScreenNoteDisplayStateHandlerTest : public AshTestBase {
     InitializeTabletPowerButtonState();
 
     Shell::Get()->tray_action()->SetClient(
-        tray_action_client_.CreateInterfacePtrAndBind(),
+        tray_action_client_.CreateRemoteAndBind(),
         mojom::TrayActionState::kAvailable);
     Shell::Get()->tray_action()->FlushMojoForTesting();
     // Run the loop so the lock screen note display state handler picks up
@@ -240,8 +240,9 @@ TEST_F(LockScreenNoteDisplayStateHandlerTest, EjectWhenScreenOff) {
   ASSERT_FALSE(LaunchTimeoutRunning());
 }
 
+// TODO(crbug.com/1002488): Test is flaky.
 TEST_F(LockScreenNoteDisplayStateHandlerTest,
-       EjectWhenScreenOffAndNoteNotAvailable) {
+       DISABLED_EjectWhenScreenOffAndNoteNotAvailable) {
   TurnScreenOffForUserInactivity();
 
   Shell::Get()->tray_action()->UpdateLockScreenNoteState(

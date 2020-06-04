@@ -24,7 +24,7 @@ TestPendingAppManager::TestPendingAppManager(TestAppRegistrar* registrar)
       deduped_uninstall_count_(0),
       registrar_(registrar) {
   // TODO(crbug.com/973324): Wire this up to a TestInstallFinalizer.
-  SetSubsystems(registrar, nullptr, nullptr);
+  SetSubsystems(registrar, nullptr, nullptr, nullptr, nullptr);
 }
 
 TestPendingAppManager::~TestPendingAppManager() = default;
@@ -41,7 +41,7 @@ void TestPendingAppManager::SetInstallResultCode(
   install_result_code_ = result_code;
 }
 
-void TestPendingAppManager::Install(InstallOptions install_options,
+void TestPendingAppManager::Install(ExternalInstallOptions install_options,
                                     OnceInstallCallback callback) {
   // TODO(nigeltao): Add error simulation when error codes are added to the API.
   auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
@@ -68,13 +68,14 @@ void TestPendingAppManager::Install(InstallOptions install_options,
 }
 
 void TestPendingAppManager::InstallApps(
-    std::vector<InstallOptions> install_options_list,
+    std::vector<ExternalInstallOptions> install_options_list,
     const RepeatingInstallCallback& callback) {
   for (auto& install_options : install_options_list)
     Install(std::move(install_options), callback);
 }
 
 void TestPendingAppManager::UninstallApps(std::vector<GURL> uninstall_urls,
+                                          ExternalInstallSource install_source,
                                           const UninstallCallback& callback) {
   auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
   for (const auto& url : uninstall_urls) {

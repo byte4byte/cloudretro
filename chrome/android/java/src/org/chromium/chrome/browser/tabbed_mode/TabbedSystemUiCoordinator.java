@@ -5,13 +5,13 @@
 package org.chromium.chrome.browser.tabbed_mode;
 
 import android.os.Build;
-import android.support.annotation.Nullable;
 import android.view.Window;
 
-import org.chromium.base.ObservableSupplier;
+import androidx.annotation.Nullable;
+
+import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.ui.ImmersiveModeManager;
 
 /**
  * A UI coordinator that manages the system status bar and bottom navigation bar for
@@ -28,17 +28,15 @@ public class TabbedSystemUiCoordinator {
      *
      * @param window The {@link Window} associated with the containing activity.
      * @param tabModelSelector The {@link TabModelSelector} for the containing activity.
-     * @param immersiveModeManager The {@link ImmersiveModeManager} for the containing activity.
      * @param overviewModeBehaviorSupplier An {@link ObservableSupplier} for the
      *         {@link OverviewModeBehavior} associated with the containing activity.
      */
     public TabbedSystemUiCoordinator(Window window, TabModelSelector tabModelSelector,
-            @Nullable ImmersiveModeManager immersiveModeManager,
             @Nullable ObservableSupplier<OverviewModeBehavior> overviewModeBehaviorSupplier) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             assert overviewModeBehaviorSupplier != null;
             mNavigationBarColorController = new TabbedNavigationBarColorController(
-                    window, tabModelSelector, immersiveModeManager, overviewModeBehaviorSupplier);
+                    window, tabModelSelector, overviewModeBehaviorSupplier);
         }
     }
 

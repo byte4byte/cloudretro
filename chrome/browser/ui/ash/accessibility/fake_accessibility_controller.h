@@ -9,12 +9,6 @@
 #include "base/macros.h"
 
 // Fake implementation of ash's mojo AccessibilityController interface.
-//
-// This fake registers itself to ServiceManager on construction and deregisters
-// on destruction.
-//
-// Note: A ServiceManagerConnection must be initialized before constructing this
-// object. Consider using content::TestServiceManagerContext on your tests.
 class FakeAccessibilityController : ash::AccessibilityController {
  public:
   FakeAccessibilityController();
@@ -36,8 +30,6 @@ class FakeAccessibilityController : ash::AccessibilityController {
       ash::SelectToSpeakEventHandlerDelegate* delegate) override;
   void SetSwitchAccessEventHandlerDelegate(
       ash::SwitchAccessEventHandlerDelegate* delegate) override;
-  void SetSwitchAccessKeysToCapture(
-      const std::vector<int>& keys_to_capture) override;
   void SetDictationActive(bool is_active) override;
   void ToggleDictationFromSource(ash::DictationToggleSource source) override;
   void OnAutoclickScrollableBoundsFound(gfx::Rect& bounds_in_screen) override;
@@ -45,6 +37,10 @@ class FakeAccessibilityController : ash::AccessibilityController {
   base::string16 GetBatteryDescription() const override;
   void SetVirtualKeyboardVisible(bool is_visible) override;
   void NotifyAccessibilityStatusChanged() override;
+  bool IsAccessibilityFeatureVisibleInTrayMenu(
+      const std::string& path) override;
+  void SetSwitchAccessIgnoreVirtualKeyEventForTesting(
+      bool should_ignore) override;
 
  private:
   bool was_client_set_ = false;

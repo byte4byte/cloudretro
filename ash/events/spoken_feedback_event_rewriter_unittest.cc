@@ -12,15 +12,18 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/chromeos/events/event_rewriter_chromeos.h"
+#include "ui/chromeos/events/modifier_key.h"
+#include "ui/chromeos/events/pref_names.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_rewriter.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/test_event_rewriter.h"
+#include "ui/events/types/event_type.h"
 
 namespace ash {
 namespace {
@@ -53,26 +56,34 @@ class TestDelegate : public SpokenFeedbackEventRewriterDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestDelegate);
 };
 
-class SpokenFeedbackEventRewriterTest : public ash::AshTestBase {
+class SpokenFeedbackEventRewriterTest
+    : public ash::AshTestBase,
+      public ui::EventRewriterChromeOS::Delegate {
  public:
-  SpokenFeedbackEventRewriterTest() = default;
+  SpokenFeedbackEventRewriterTest() {
+    event_rewriter_chromeos_ =
+        std::make_unique<ui::EventRewriterChromeOS>(this, nullptr, false);
+    spoken_feedback_event_rewriter_ =
+        std::make_unique<SpokenFeedbackEventRewriter>(
+            event_rewriter_chromeos_.get());
+  }
 
   void SetUp() override {
     ash::AshTestBase::SetUp();
     generator_ = AshTestBase::GetEventGenerator();
-    spoken_feedback_event_rewriter_.set_delegate(&delegate_);
-    CurrentContext()->GetHost()->GetEventSource()->AddEventRewriter(
-        &spoken_feedback_event_rewriter_);
-    CurrentContext()->GetHost()->GetEventSource()->AddEventRewriter(
+    spoken_feedback_event_rewriter_->set_delegate(&delegate_);
+    GetContext()->GetHost()->GetEventSource()->AddEventRewriter(
+        spoken_feedback_event_rewriter_.get());
+    GetContext()->GetHost()->GetEventSource()->AddEventRewriter(
         &event_recorder_);
   }
 
   void TearDown() override {
-    CurrentContext()->GetHost()->GetEventSource()->RemoveEventRewriter(
+    GetContext()->GetHost()->GetEventSource()->RemoveEventRewriter(
         &event_recorder_);
-    CurrentContext()->GetHost()->GetEventSource()->RemoveEventRewriter(
-        &spoken_feedback_event_rewriter_);
-    spoken_feedback_event_rewriter_.set_delegate(nullptr);
+    GetContext()->GetHost()->GetEventSource()->RemoveEventRewriter(
+        spoken_feedback_event_rewriter_.get());
+    spoken_feedback_event_rewriter_->set_delegate(nullptr);
     generator_ = nullptr;
     ash::AshTestBase::TearDown();
   }
@@ -86,7 +97,7 @@ class SpokenFeedbackEventRewriterTest : public ash::AshTestBase {
   }
 
   void SetDelegateCaptureAllKeys(bool value) {
-    spoken_feedback_event_rewriter_.set_capture_all_keys(value);
+    spoken_feedback_event_rewriter_->set_capture_all_keys(value);
   }
 
   void ExpectCounts(size_t expected_recorded_count,
@@ -98,6 +109,11 @@ class SpokenFeedbackEventRewriterTest : public ash::AshTestBase {
     EXPECT_EQ(expected_captured_count, delegate_captured_event_count());
   }
 
+  void SetModifierRemapping(const std::string& pref_name,
+                            ui::chromeos::ModifierKey value) {
+    modifier_remapping_[pref_name] = static_cast<int>(value);
+  }
+
  protected:
   // A test spoken feedback delegate; simulates ChromeVox.
   TestDelegate delegate_;
@@ -106,9 +122,35 @@ class SpokenFeedbackEventRewriterTest : public ash::AshTestBase {
   // Records events delivered to the next event rewriter after spoken feedback.
   ui::test::TestEventRewriter event_recorder_;
 
-  SpokenFeedbackEventRewriter spoken_feedback_event_rewriter_;
+  std::unique_ptr<SpokenFeedbackEventRewriter> spoken_feedback_event_rewriter_;
+
+  std::unique_ptr<ui::EventRewriterChromeOS> event_rewriter_chromeos_;
 
  private:
+  // ui::EventRewriterChromeOS::Delegate:
+  bool RewriteModifierKeys() override { return true; }
+
+  bool GetKeyboardRemappedPrefValue(const std::string& pref_name,
+                                    int* value) const override {
+    auto it = modifier_remapping_.find(pref_name);
+    if (it == modifier_remapping_.end())
+      return false;
+
+    *value = it->second;
+    return true;
+  }
+
+  bool TopRowKeysAreFunctionKeys() const override { return false; }
+
+  bool IsExtensionCommandRegistered(ui::KeyboardCode key_code,
+                                    int flags) const override {
+    return false;
+  }
+
+  bool IsSearchKeyAcceleratorReserved() const override { return false; }
+
+  std::map<std::string, int> modifier_remapping_;
+
   DISALLOW_COPY_AND_ASSIGN(SpokenFeedbackEventRewriterTest);
 };
 
@@ -170,11 +212,11 @@ TEST_F(SpokenFeedbackEventRewriterTest, UnhandledEventsSentToOtherRewriters) {
   generator_->ReleaseKey(ui::VKEY_A, ui::EF_NONE);
   EXPECT_EQ(2, event_recorder_.events_seen());
 
-  spoken_feedback_event_rewriter_.OnUnhandledSpokenFeedbackEvent(
+  spoken_feedback_event_rewriter_->OnUnhandledSpokenFeedbackEvent(
       std::make_unique<ui::KeyEvent>(ui::ET_KEY_PRESSED, ui::VKEY_A,
                                      ui::EF_NONE));
   EXPECT_EQ(3, event_recorder_.events_seen());
-  spoken_feedback_event_rewriter_.OnUnhandledSpokenFeedbackEvent(
+  spoken_feedback_event_rewriter_->OnUnhandledSpokenFeedbackEvent(
       std::make_unique<ui::KeyEvent>(ui::ET_KEY_RELEASED, ui::VKEY_A,
                                      ui::EF_NONE));
   EXPECT_EQ(4, event_recorder_.events_seen());
@@ -227,6 +269,64 @@ TEST_F(SpokenFeedbackEventRewriterTest, KeyEventsCaptured) {
   ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
   generator_->ReleaseKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
   ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+
+  // Tab never gets captured.
+  generator_->PressKey(ui::VKEY_TAB, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+  generator_->ReleaseKey(ui::VKEY_TAB, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+
+  // A client requested capture of all keys.
+  SetDelegateCaptureAllKeys(true);
+  generator_->PressKey(ui::VKEY_A, ui::EF_NONE);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+  generator_->ReleaseKey(ui::VKEY_A, ui::EF_NONE);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+
+  // Tab never gets captured even with explicit client request for all keys.
+  generator_->PressKey(ui::VKEY_TAB, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+  generator_->ReleaseKey(ui::VKEY_TAB, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+
+  // A client requested to not capture all keys.
+  SetDelegateCaptureAllKeys(false);
+  generator_->PressKey(ui::VKEY_A, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+  generator_->ReleaseKey(ui::VKEY_A, ui::EF_NONE);
+  ExpectCounts(++recorded_count, ++delegate_count, captured_count);
+}
+
+TEST_F(SpokenFeedbackEventRewriterTest,
+       KeyEventsCapturedWithModifierRemapping) {
+  AccessibilityControllerImpl* controller =
+      Shell::Get()->accessibility_controller();
+  controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(controller->spoken_feedback_enabled());
+
+  // Initialize expected counts as variables for easier maintaiblity.
+  size_t recorded_count = 0;
+  size_t delegate_count = 0;
+  size_t captured_count = 0;
+
+  // Map Control key to Search.
+  SetModifierRemapping(prefs::kLanguageRemapControlKeyTo,
+                       ui::chromeos::ModifierKey::kSearchKey);
+
+  // Anything with Search gets captured.
+  generator_->PressKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+  // EventRewriterChromeOS actually omits the modifier flag.
+  generator_->ReleaseKey(ui::VKEY_CONTROL, 0);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+
+  // Search itself should also work.
+  generator_->PressKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+  generator_->ReleaseKey(ui::VKEY_LWIN, 0);
+  ExpectCounts(recorded_count, ++delegate_count, ++captured_count);
+
+  // Remapping should have no effect on all other expectations.
 
   // Tab never gets captured.
   generator_->PressKey(ui::VKEY_TAB, ui::EF_NONE);

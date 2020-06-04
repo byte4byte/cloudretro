@@ -7,59 +7,59 @@
 
 #include <stdint.h>
 
-#include "ash/app_list/presenter/app_list_presenter_delegate.h"
+#include "ash/app_list/app_list_presenter_delegate.h"
 #include "ash/ash_export.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_observer.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "ui/display/display_observer.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_handler.h"
-
-namespace app_list {
-class AppListPresenterImpl;
-class AppListView;
-class AppListViewDelegate;
-}  // namespace app_list
-
-namespace display {
-class Screen;
-}  // namespace display
 
 namespace ui {
 class LocatedEvent;
 }  // namespace ui
 
 namespace ash {
-
 class AppListControllerImpl;
+class AppListPresenterImpl;
+class AppListView;
+class AppListViewDelegate;
 
 // Responsible for laying out the app list UI as well as updating the Shelf
 // launch icon as the state of the app list changes. Listens to shell events
 // and touches/mouse clicks outside the app list to auto dismiss the UI or
 // update its layout as necessary.
-class ASH_EXPORT AppListPresenterDelegateImpl
-    : public app_list::AppListPresenterDelegate,
-      public ui::EventHandler,
-      public display::DisplayObserver {
+class ASH_EXPORT AppListPresenterDelegateImpl : public AppListPresenterDelegate,
+                                                public ui::EventHandler,
+                                                public display::DisplayObserver,
+                                                public ShelfObserver {
  public:
   explicit AppListPresenterDelegateImpl(AppListControllerImpl* controller);
   ~AppListPresenterDelegateImpl() override;
 
-  // app_list::AppListPresenterDelegate:
-  void SetPresenter(app_list::AppListPresenterImpl* presenter) override;
-  void Init(app_list::AppListView* view, int64_t display_id) override;
+  // AppListPresenterDelegate:
+  void SetPresenter(AppListPresenterImpl* presenter) override;
+  void Init(AppListView* view, int64_t display_id) override;
   void ShowForDisplay(int64_t display_id) override;
   void OnClosing() override;
   void OnClosed() override;
   bool IsTabletMode() const override;
-  app_list::AppListViewDelegate* GetAppListViewDelegate() override;
+  AppListViewDelegate* GetAppListViewDelegate() override;
   bool GetOnScreenKeyboardShown() override;
+  aura::Window* GetContainerForWindow(aura::Window* window) override;
   aura::Window* GetRootWindowForDisplayId(int64_t display_id) override;
   void OnVisibilityChanged(bool visible, int64_t display_id) override;
-  void OnTargetVisibilityChanged(bool visible) override;
-
+  void OnVisibilityWillChange(bool visible, int64_t display_id) override;
+  bool IsVisible(const base::Optional<int64_t>& display_id) override;
   // DisplayObserver overrides:
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
+
+  // ShelfObserver:
+  void OnBackgroundTypeChanged(ShelfBackgroundType background_type,
+                               AnimationChangeType change_type) override;
 
  private:
   void ProcessLocatedEvent(ui::LocatedEvent* event);
@@ -77,16 +77,20 @@ class ASH_EXPORT AppListPresenterDelegateImpl
   bool is_visible_ = false;
 
   // Not owned. Pointer is guaranteed to be valid while this object is alive.
-  app_list::AppListPresenterImpl* presenter_;
+  AppListPresenterImpl* presenter_;
 
   // Owned by its widget.
-  app_list::AppListView* view_ = nullptr;
+  AppListView* view_ = nullptr;
 
   // Not owned, owns this class.
   AppListControllerImpl* const controller_ = nullptr;
 
   // An observer that notifies AppListView when the display has changed.
-  ScopedObserver<display::Screen, display::DisplayObserver> display_observer_;
+  ScopedObserver<display::Screen, display::DisplayObserver> display_observer_{
+      this};
+
+  // An observer that notifies AppListView when the shelf state has changed.
+  ScopedObserver<Shelf, ShelfObserver> shelf_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AppListPresenterDelegateImpl);
 };

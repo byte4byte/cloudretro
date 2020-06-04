@@ -10,11 +10,12 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/process/kill.h"
 #include "base/process/process.h"
+#include "base/sequenced_task_runner.h"
 #include "build/build_config.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/common/result_codes.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
@@ -93,7 +94,6 @@ class ChildProcessLauncherHelper :
 
   ChildProcessLauncherHelper(
       int child_process_id,
-      BrowserThread::ID client_thread_id,
       std::unique_ptr<base::CommandLine> command_line,
       std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
       const base::WeakPtr<ChildProcessLauncher>& child_process_launcher,
@@ -102,7 +102,8 @@ class ChildProcessLauncherHelper :
       bool is_pre_warmup_required,
 #endif
       mojo::OutgoingInvitation mojo_invitation,
-      const mojo::ProcessErrorCallback& process_error_callback);
+      const mojo::ProcessErrorCallback& process_error_callback,
+      std::map<std::string, base::FilePath> files_to_preload);
 
   // The methods below are defined in the order they are called.
 
@@ -161,8 +162,6 @@ class ChildProcessLauncherHelper :
   void PostLaunchOnClientThread(ChildProcessLauncherHelper::Process process,
                                 int error_code);
 
-  int client_thread_id() const { return client_thread_id_; }
-
   // See ChildProcessLauncher::GetChildTerminationInfo for more info.
   ChildProcessTerminationInfo GetTerminationInfo(
       const ChildProcessLauncherHelper::Process& process,
@@ -185,15 +184,8 @@ class ChildProcessLauncherHelper :
       base::Process process,
       const ChildProcessLauncherPriority& priority);
 
-  static void SetRegisteredFilesForService(
-      const std::string& service_name,
-      std::map<std::string, base::FilePath> required_files);
-
-  static void ResetRegisteredFilesForTesting();
-
 #if defined(OS_ANDROID)
   void OnChildProcessStarted(JNIEnv* env,
-                             const base::android::JavaParamRef<jobject>& obj,
                              jint handle);
 
   // Dumps the stack of the child process without crashing it.
@@ -222,7 +214,7 @@ class ChildProcessLauncherHelper :
 #endif
 
   const int child_process_id_;
-  const BrowserThread::ID client_thread_id_;
+  const scoped_refptr<base::SequencedTaskRunner> client_task_runner_;
   base::TimeTicks begin_launch_time_;
   std::unique_ptr<base::CommandLine> command_line_;
   std::unique_ptr<SandboxedProcessLauncherDelegate> delegate_;
@@ -244,6 +236,7 @@ class ChildProcessLauncherHelper :
   bool terminate_on_shutdown_;
   mojo::OutgoingInvitation mojo_invitation_;
   const mojo::ProcessErrorCallback process_error_callback_;
+  const std::map<std::string, base::FilePath> files_to_preload_;
 
 #if defined(OS_MACOSX)
   std::unique_ptr<sandbox::SeatbeltExecClient> seatbelt_exec_client_;
@@ -257,7 +250,7 @@ class ChildProcessLauncherHelper :
 #endif
 
 #if defined(OS_FUCHSIA)
-  service_manager::SandboxPolicyFuchsia sandbox_policy_;
+  std::unique_ptr<service_manager::SandboxPolicyFuchsia> sandbox_policy_;
 #endif
 };
 

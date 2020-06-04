@@ -2,8 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import contextlib
 import os
 import sys
+
+
+@contextlib.contextmanager
+def SysPath(path, position=None):
+  if position is None:
+    sys.path.append(path)
+  else:
+    sys.path.insert(position, path)
+  try:
+    yield
+  finally:
+    if sys.path[-1] == path:
+      sys.path.pop()
+    else:
+      sys.path.remove(path)
 
 
 def GetChromiumSrcDir():
@@ -46,6 +62,10 @@ def GetAndroidPylibDir():
   return os.path.join(GetChromiumSrcDir(), 'build', 'android')
 
 
+def GetVariationsDir():
+  return os.path.join(GetChromiumSrcDir(), 'tools', 'variations')
+
+
 def AddTelemetryToPath():
   telemetry_path = GetTelemetryDir()
   if telemetry_path not in sys.path:
@@ -64,27 +84,11 @@ def AddPyUtilsToPath():
     sys.path.insert(1, py_utils_dir)
 
 
-def GetWprDir():
-  return os.path.join(
-      GetChromiumSrcDir(), 'third_party', 'catapult', 'telemetry',
-      'third_party', 'web-page-replay')
-
-
-def AddWprToPath():
-  wpr_path = GetWprDir()
-  if wpr_path not in sys.path:
-    sys.path.insert(1, wpr_path)
-
-
-def GetWprGoDir():
-  return os.path.join(
-      GetChromiumSrcDir(), 'third_party', 'catapult', 'web_page_replay_go')
-
-
 def AddAndroidPylibToPath():
   android_pylib_path = GetAndroidPylibDir()
   if android_pylib_path not in sys.path:
     sys.path.insert(1, android_pylib_path)
+
 
 def GetExpectationsPath():
   return os.path.join(GetPerfDir(), 'expectations.config')

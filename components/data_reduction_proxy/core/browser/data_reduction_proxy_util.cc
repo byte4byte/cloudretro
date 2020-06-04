@@ -18,8 +18,6 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
-#include "net/proxy_resolution/proxy_config.h"
-#include "net/proxy_resolution/proxy_info.h"
 
 #if defined(USE_GOOGLE_API_KEYS)
 #include "google_apis/google_api_keys.h"
@@ -123,26 +121,6 @@ GURL AddApiKeyToUrl(const GURL& url) {
   return net::AppendOrReplaceQueryParameter(new_url, "alt", "proto");
 }
 
-bool EligibleForDataReductionProxy(const net::ProxyInfo& proxy_info,
-                                   const GURL& url,
-                                   const std::string& method) {
-  return proxy_info.is_direct() && proxy_info.proxy_list().size() == 1 &&
-         !url.SchemeIsWSOrWSS() && net::HttpUtil::IsMethodIdempotent(method);
-}
-
-bool ApplyProxyConfigToProxyInfo(const net::ProxyConfig& proxy_config,
-                                 const net::ProxyRetryInfoMap& proxy_retry_info,
-                                 const GURL& url,
-                                 net::ProxyInfo* data_reduction_proxy_info) {
-  DCHECK(data_reduction_proxy_info);
-  if (proxy_config.proxy_rules().empty())
-    return false;
-  proxy_config.proxy_rules().Apply(url, data_reduction_proxy_info);
-  data_reduction_proxy_info->DeprioritizeBadProxies(proxy_retry_info);
-  return !data_reduction_proxy_info->is_empty() &&
-         !data_reduction_proxy_info->proxy_server().is_direct();
-}
-
 const char* GetSiteBreakdownOtherHostName() {
   return kOtherHostName;
 }
@@ -151,73 +129,17 @@ const char* GetSiteBreakdownOtherHostName() {
 
 namespace protobuf_parser {
 
-PageloadMetrics_EffectiveConnectionType
-ProtoEffectiveConnectionTypeFromEffectiveConnectionType(
-    net::EffectiveConnectionType effective_connection_type) {
-  switch (effective_connection_type) {
-    case net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
-    case net::EFFECTIVE_CONNECTION_TYPE_OFFLINE:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_OFFLINE;
-    case net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_SLOW_2G;
-    case net::EFFECTIVE_CONNECTION_TYPE_2G:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_2G;
-    case net::EFFECTIVE_CONNECTION_TYPE_3G:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_3G;
-    case net::EFFECTIVE_CONNECTION_TYPE_4G:
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_4G;
-    default:
-      NOTREACHED();
-      return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
-  }
-}
-
-PageloadMetrics_ConnectionType ProtoConnectionTypeFromConnectionType(
-    net::NetworkChangeNotifier::ConnectionType connection_type) {
-  switch (connection_type) {
-    case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
-      return PageloadMetrics_ConnectionType_CONNECTION_UNKNOWN;
-    case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
-      return PageloadMetrics_ConnectionType_CONNECTION_ETHERNET;
-    case net::NetworkChangeNotifier::CONNECTION_WIFI:
-      return PageloadMetrics_ConnectionType_CONNECTION_WIFI;
-    case net::NetworkChangeNotifier::CONNECTION_2G:
-      return PageloadMetrics_ConnectionType_CONNECTION_2G;
-    case net::NetworkChangeNotifier::CONNECTION_3G:
-      return PageloadMetrics_ConnectionType_CONNECTION_3G;
-    case net::NetworkChangeNotifier::CONNECTION_4G:
-      return PageloadMetrics_ConnectionType_CONNECTION_4G;
-    case net::NetworkChangeNotifier::CONNECTION_NONE:
-      return PageloadMetrics_ConnectionType_CONNECTION_NONE;
-    case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
-      return PageloadMetrics_ConnectionType_CONNECTION_BLUETOOTH;
-  }
-}
-
-net::ProxyServer::Scheme SchemeFromProxyScheme(
-    ProxyServer_ProxyScheme proxy_scheme) {
+std::string SchemeFromPrefetchScheme(
+    PrefetchProxyConfig_Proxy_Scheme proxy_scheme) {
   switch (proxy_scheme) {
-    case ProxyServer_ProxyScheme_HTTP:
-      return net::ProxyServer::SCHEME_HTTP;
-    case ProxyServer_ProxyScheme_HTTPS:
-      return net::ProxyServer::SCHEME_HTTPS;
+    case PrefetchProxyConfig_Proxy_Scheme_HTTP:
+      return "http";
+    case PrefetchProxyConfig_Proxy_Scheme_HTTPS:
+      return "https";
     default:
-      return net::ProxyServer::SCHEME_INVALID;
+      return std::string();
   }
 }
-
-ProxyServer_ProxyScheme ProxySchemeFromScheme(net::ProxyServer::Scheme scheme) {
-  switch (scheme) {
-    case net::ProxyServer::SCHEME_HTTP:
-      return ProxyServer_ProxyScheme_HTTP;
-    case net::ProxyServer::SCHEME_HTTPS:
-      return ProxyServer_ProxyScheme_HTTPS;
-    default:
-      return ProxyServer_ProxyScheme_UNSPECIFIED;
-  }
-}
-
 
 void TimeDeltaToDuration(const base::TimeDelta& time_delta,
                          Duration* duration) {

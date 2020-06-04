@@ -2,40 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import re
-
 from core import perf_benchmark
+from core import platforms
+
 from telemetry import benchmark
 from telemetry import story
 from telemetry.timeline import chrome_trace_config
 from telemetry.web_perf import timeline_based_measurement
 import page_sets
-
-
-# Track only the high-level GC stats to reduce the data load on dashboard.
-_IGNORED_V8_STATS_RE = re.compile(
-    r'_(idle_deadline_overrun|percentage_idle|outside_idle)')
-_V8_GC_HIGH_LEVEL_STATS_RE = re.compile(r'^v8-gc-('
-    r'full-mark-compactor_|'
-    r'incremental-finalize_|'
-    r'incremental-step_|'
-    r'latency-mark-compactor_|'
-    r'mark-compactor-|'
-    r'memory-mark-compactor_|'
-    r'scavenger_|'
-    r'total_)')
-
-
-def V8BrowsingShouldAddValue(name):
-  # TODO(crbug.com/775942): The "unknown_browser" is needed because of a race
-  # condition in the memory dump manager. Remove this once the bug is fixed.
-  if 'memory:chrome' in name or 'memory:unknown_browser' in name:
-    return 'renderer_processes' in name
-  if 'v8-gc' in name:
-    return (_V8_GC_HIGH_LEVEL_STATS_RE.search(name) and
-            not _IGNORED_V8_STATS_RE.search(name))
-  # Allow all other metrics.
-  return True
 
 
 def AugmentOptionsForV8BrowsingMetrics(options, enable_runtime_call_stats=True):
@@ -52,7 +26,10 @@ def AugmentOptionsForV8BrowsingMetrics(options, enable_runtime_call_stats=True):
     'webkit.console',
     # Blink categories.
     'blink_gc',
+    # Needed for the metric reported by page.
+    'blink.user_timing'
   ]
+
   options.ExtendTraceCategoryFilter(categories)
   if enable_runtime_call_stats:
     options.AddTraceCategoryFilter('disabled-by-default-v8.runtime_stats')
@@ -71,6 +48,7 @@ def AugmentOptionsForV8BrowsingMetrics(options, enable_runtime_call_stats=True):
     'expectedQueueingTimeMetric',
     'gcMetric',
     'memoryMetric',
+    'reportedByPageMetric',
   ]
   options.ExtendTimelineBasedMetric(metrics)
   if enable_runtime_call_stats:
@@ -91,11 +69,6 @@ class _V8BrowsingBenchmark(perf_benchmark.PerfBenchmark):
     AugmentOptionsForV8BrowsingMetrics(options)
     return options
 
-  @classmethod
-  def ShouldAddValue(cls, name, from_first_story_run):
-    del from_first_story_run  # unused
-    return V8BrowsingShouldAddValue(name)
-
 
 @benchmark.Info(
    emails=['mythria@chromium.org','ulan@chromium.org'],
@@ -103,7 +76,11 @@ class _V8BrowsingBenchmark(perf_benchmark.PerfBenchmark):
 class V8DesktopBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'desktop'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
+  SUPPORTED_PLATFORM_TAGS = [platforms.DESKTOP]
 
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(
@@ -120,7 +97,11 @@ class V8DesktopBrowsingBenchmark(
 class V8MobileBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'mobile'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
   SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
+  SUPPORTED_PLATFORM_TAGS = [platforms.MOBILE]
 
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(
@@ -137,7 +118,11 @@ class V8MobileBrowsingBenchmark(
 class V8FutureDesktopBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'desktop'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
+  SUPPORTED_PLATFORM_TAGS = [platforms.DESKTOP]
 
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(
@@ -155,7 +140,11 @@ class V8FutureDesktopBrowsingBenchmark(
 class V8FutureMobileBrowsingBenchmark(
     _V8BrowsingBenchmark):
   PLATFORM = 'mobile'
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
   SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]
+  SUPPORTED_PLATFORM_TAGS = [platforms.MOBILE]
 
   def SetExtraBrowserOptions(self, options):
     options.AppendExtraBrowserArgs(

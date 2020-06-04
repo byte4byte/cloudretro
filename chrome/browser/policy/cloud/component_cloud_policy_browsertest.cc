@@ -156,14 +156,14 @@ class ComponentCloudPolicyTest : public extensions::ExtensionBrowserTest {
     base::FilePath full_path;
     if (!base::PathService::Get(chrome::DIR_TEST_DATA, &full_path)) {
       ADD_FAILURE();
-      return NULL;
+      return nullptr;
     }
     scoped_refptr<const extensions::Extension> extension(
         extensions::ExtensionBrowserTest::LoadExtension(
             full_path.Append(path)));
     if (!extension.get()) {
       ADD_FAILURE();
-      return NULL;
+      return nullptr;
     }
     return extension;
   }
@@ -180,7 +180,7 @@ class ComponentCloudPolicyTest : public extensions::ExtensionBrowserTest {
 #else
     // Mock a signed-in user. This is used by the UserCloudPolicyStore to pass
     // the account id to the UserCloudPolicyValidator.
-    identity::SetPrimaryAccount(
+    signin::SetPrimaryAccount(
         IdentityManagerFactory::GetForProfile(browser()->profile()),
         PolicyBuilder::kFakeUsername);
 
@@ -219,7 +219,7 @@ class ComponentCloudPolicyTest : public extensions::ExtensionBrowserTest {
         IdentityManagerFactory::GetForProfile(browser()->profile())
             ->GetPrimaryAccountMutator();
     primary_account_mutator->ClearPrimaryAccount(
-        identity::PrimaryAccountMutator::ClearAccountsAction::kDefault,
+        signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
         signin_metrics::SIGNOUT_TEST,
         signin_metrics::SignoutDelete::IGNORE_METRIC);
   }
@@ -274,13 +274,7 @@ IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, UpdateExtensionPolicy) {
   EXPECT_TRUE(policy_listener2.WaitUntilSatisfied());
 }
 
-// Flaky on Mac. http://crbug.com/816647
-#if defined(OS_MACOSX)
-#define MAYBE_InstallNewExtension DISABLED_InstallNewExtension
-#else
-#define MAYBE_InstallNewExtension InstallNewExtension
-#endif
-IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, MAYBE_InstallNewExtension) {
+IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, InstallNewExtension) {
   event_listener_->Reply("idle");
   event_listener_.reset();
 

@@ -24,15 +24,14 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesBridge;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesCategory;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
@@ -40,6 +39,7 @@ import org.chromium.chrome.test.util.ViewUtils;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.chrome.test.util.browser.suggestions.mostvisited.FakeMostVisitedSites;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -76,7 +76,7 @@ public class TileGroupTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         mSiteSuggestionUrls = mTestServer.getURLs(FAKE_MOST_VISITED_URLS);
@@ -89,7 +89,7 @@ public class TileGroupTest {
         initializeTab();
     }
 
-    public void initializeTab() throws Exception {
+    public void initializeTab() {
         mActivityTestRule.startMainActivityWithURL(UrlConstants.NTP_URL);
         Tab mTab = mActivityTestRule.getActivity().getActivityTab();
         NewTabPageTestUtils.waitForNtpLoaded(mTab);
@@ -102,7 +102,7 @@ public class TileGroupTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -219,8 +219,7 @@ public class TileGroupTest {
         return activity.findViewById(R.id.snackbar_button);
     }
 
-    private void waitForTileRemoved(final SiteSuggestion suggestion)
-            throws TimeoutException, InterruptedException {
+    private void waitForTileRemoved(final SiteSuggestion suggestion) throws TimeoutException {
         TileGridLayout tileContainer = getTileGridLayout();
         final SuggestionsTileView removedTile = tileContainer.getTileView(suggestion);
         if (removedTile == null) return;
@@ -239,8 +238,7 @@ public class TileGroupTest {
         tileContainer.setOnHierarchyChangeListener(null);
     }
 
-    private void waitForTileAdded(final SiteSuggestion suggestion)
-            throws TimeoutException, InterruptedException {
+    private void waitForTileAdded(final SiteSuggestion suggestion) throws TimeoutException {
         TileGridLayout tileContainer = getTileGridLayout();
         if (tileContainer.getTileView(suggestion) != null) return;
 

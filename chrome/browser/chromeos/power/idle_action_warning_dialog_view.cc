@@ -21,7 +21,6 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_client_view.h"
 
 namespace chromeos {
 
@@ -34,6 +33,8 @@ const int kCountdownUpdateIntervalMs = 1000;  // 1 second.
 IdleActionWarningDialogView::IdleActionWarningDialogView(
     base::TimeTicks idle_action_time)
     : idle_action_time_(idle_action_time) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+
   SetBorder(views::CreateEmptyBorder(
       ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(views::TEXT,
                                                                  views::TEXT)));
@@ -57,8 +58,7 @@ IdleActionWarningDialogView::IdleActionWarningDialogView(
 }
 
 void IdleActionWarningDialogView::CloseDialog() {
-  update_timer_.Stop();
-  GetDialogClientView()->CancelWindow();
+  GetWidget()->Close();
 }
 
 void IdleActionWarningDialogView::Update(base::TimeTicks idle_action_time) {
@@ -84,14 +84,6 @@ bool IdleActionWarningDialogView::ShouldShowCloseButton() const {
   return false;
 }
 
-int IdleActionWarningDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
-}
-
-bool IdleActionWarningDialogView::Cancel() {
-  return !update_timer_.IsRunning();
-}
-
 gfx::Size IdleActionWarningDialogView::CalculatePreferredSize() const {
   const int default_width = views::LayoutProvider::Get()->GetDistanceMetric(
       DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
@@ -100,8 +92,7 @@ gfx::Size IdleActionWarningDialogView::CalculatePreferredSize() const {
       GetLayoutManager()->GetPreferredHeightForWidth(this, default_width));
 }
 
-IdleActionWarningDialogView::~IdleActionWarningDialogView() {
-}
+IdleActionWarningDialogView::~IdleActionWarningDialogView() = default;
 
 void IdleActionWarningDialogView::UpdateTitle() {
   GetWidget()->UpdateWindowTitle();

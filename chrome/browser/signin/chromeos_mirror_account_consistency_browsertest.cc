@@ -4,10 +4,11 @@
 
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
-#include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
@@ -15,7 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/account_id/account_id.h"
 #include "components/google/core/common/google_util.h"
 #include "components/network_session_configurator/common/network_switches.h"
@@ -34,8 +35,6 @@
 namespace {
 
 constexpr char kGaiaDomain[] = "accounts.google.com";
-constexpr char kUserEmail[] = "user@gmail.com";
-constexpr char kUserGaiaId[] = "1234567890";
 
 // Checks whether the "X-Chrome-Connected" header of a new request to Google
 // contains |expected_header_value|.
@@ -50,7 +49,7 @@ void TestMirrorRequestForProfile(net::EmbeddedTestServer* test_server,
   Browser* browser = new Browser(Browser::CreateParams(profile, true));
   ui_test_utils::NavigateToURLWithDisposition(
       browser, gaia_url, WindowOpenDisposition::SINGLETON_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   std::string inner_text;
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
@@ -69,9 +68,10 @@ class ChromeOsMirrorAccountConsistencyTest : public chromeos::LoginManagerTest {
  protected:
   ~ChromeOsMirrorAccountConsistencyTest() override {}
 
-  ChromeOsMirrorAccountConsistencyTest()
-      : LoginManagerTest(false, true /* should_initialize_webui */),
-        account_id_(AccountId::FromUserEmailGaiaId(kUserEmail, kUserGaiaId)) {}
+  ChromeOsMirrorAccountConsistencyTest() : LoginManagerTest() {
+    login_mixin_.AppendRegularUsers(1);
+    account_id_ = login_mixin_.users()[0].account_id;
+  }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     chromeos::LoginManagerTest::SetUpCommandLine(command_line);
@@ -96,7 +96,8 @@ class ChromeOsMirrorAccountConsistencyTest : public chromeos::LoginManagerTest {
     chromeos::LoginManagerTest::SetUpOnMainThread();
   }
 
-  const AccountId account_id_;
+  AccountId account_id_;
+  chromeos::LoginManagerMixin login_mixin_{&mixin_host_};
 
  protected:
   std::unique_ptr<net::EmbeddedTestServer> test_server_;
@@ -104,12 +105,6 @@ class ChromeOsMirrorAccountConsistencyTest : public chromeos::LoginManagerTest {
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeOsMirrorAccountConsistencyTest);
 };
-
-IN_PROC_BROWSER_TEST_F(ChromeOsMirrorAccountConsistencyTest,
-                       PRE_TestMirrorRequestChromeOsChildAccount) {
-  RegisterUser(account_id_);
-  chromeos::StartupUtils::MarkOobeCompleted();
-}
 
 // Mirror is enabled for child accounts.
 IN_PROC_BROWSER_TEST_F(ChromeOsMirrorAccountConsistencyTest,
@@ -143,37 +138,9 @@ IN_PROC_BROWSER_TEST_F(ChromeOsMirrorAccountConsistencyTest,
                               "consistency_enabled_by_default=false");
 }
 
-class ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled
-    : public ChromeOsMirrorAccountConsistencyTest {
- public:
-  ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled() = default;
-  ~ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled() override =
-      default;
-
-  void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(
-        chromeos::switches::kAccountManager);
-    ChromeOsMirrorAccountConsistencyTest::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(
-      ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled);
-};
-
-IN_PROC_BROWSER_TEST_F(
-    ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled,
-    PRE_TestMirrorRequestChromeOsNotChildAccount) {
-  RegisterUser(account_id_);
-  chromeos::StartupUtils::MarkOobeCompleted();
-}
-
-// Mirror is not enabled for non-child accounts.
-IN_PROC_BROWSER_TEST_F(
-    ChromeOsMirrorAccountConsistencyTestWithAccountManagerEnabled,
-    TestMirrorRequestChromeOsNotChildAccount) {
+// Mirror is enabled for non-child accounts.
+IN_PROC_BROWSER_TEST_F(ChromeOsMirrorAccountConsistencyTest,
+                       TestMirrorRequestChromeOsNotChildAccount) {
   // Not a child user.
   LoginUser(account_id_);
 

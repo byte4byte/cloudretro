@@ -42,7 +42,7 @@ const CSSValue* GetOrCreateCSSValueFrom(
   // which can be used to correctly serialize it given longhands that are
   // present in this set.
   return MakeGarbageCollected<CSSKeyframeShorthandValue>(
-      property_value_set.ImmutableCopyIfNeeded());
+      property.PropertyID(), property_value_set.ImmutableCopyIfNeeded());
 }
 
 }  // namespace
@@ -57,14 +57,13 @@ StringKeyframe::StringKeyframe(const StringKeyframe& copy_from)
 
 MutableCSSPropertyValueSet::SetResult StringKeyframe::SetCSSPropertyValue(
     const AtomicString& property_name,
-    const PropertyRegistry* registry,
     const String& value,
     SecureContextMode secure_context_mode,
     StyleSheetContents* style_sheet_contents) {
   bool is_animation_tainted = true;
   MutableCSSPropertyValueSet::SetResult result = css_property_map_->SetProperty(
-      property_name, registry, value, false, secure_context_mode,
-      style_sheet_contents, is_animation_tainted);
+      property_name, value, false, secure_context_mode, style_sheet_contents,
+      is_animation_tainted);
 
   const CSSValue* parsed_value =
       css_property_map_->GetPropertyCSSValue(property_name);
@@ -179,8 +178,9 @@ bool StringKeyframe::HasCssProperty() const {
 }
 
 void StringKeyframe::AddKeyframePropertiesToV8Object(
-    V8ObjectBuilder& object_builder) const {
-  Keyframe::AddKeyframePropertiesToV8Object(object_builder);
+    V8ObjectBuilder& object_builder,
+    Element* element) const {
+  Keyframe::AddKeyframePropertiesToV8Object(object_builder, element);
   for (const auto& entry : input_properties_) {
     const PropertyHandle& property_handle = entry.key;
     const CSSValue* property_value = entry.value;
@@ -258,6 +258,10 @@ bool StringKeyframe::CSSPropertySpecificKeyframe::
       StyleResolver::CreateCompositorKeyframeValueSnapshot(
           element, base_style, parent_style, property, value_.Get());
   return true;
+}
+
+bool StringKeyframe::CSSPropertySpecificKeyframe::IsRevert() const {
+  return value_ && value_->IsRevertValue();
 }
 
 Keyframe::PropertySpecificKeyframe*

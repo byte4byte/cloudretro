@@ -11,7 +11,7 @@
 #include "chrome/browser/task_manager/providers/task.h"
 #include "chrome/browser/task_manager/sampling/task_manager_impl.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace task_manager {
@@ -27,7 +27,6 @@ class FakeTask : public Task {
            const std::string& title,
            SessionID tab_id)
       : Task(base::ASCIIToUTF16(title),
-             "FakeTask",
              nullptr,
              base::kNullProcessHandle,
              process_id),
@@ -92,7 +91,7 @@ class TaskManagerImplTest : public testing::Test, public TaskManagerObserver {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::vector<std::unique_ptr<FakeTask>> tasks_;
   DISALLOW_COPY_AND_ASSIGN(TaskManagerImplTest);
 };
@@ -123,7 +122,12 @@ TEST_F(TaskManagerImplTest, SortingTypes) {
   AddTask(700, Task::UTILITY, "Utility Two",
           /*tab_id=*/SessionID::InvalidValue());
   AddTask(1000, Task::GUEST, "Guest", kTabId2);
-  AddTask(900, Task::WORKER, "Worker", /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::SERVICE_WORKER, "Service worker",
+          /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::SHARED_WORKER, "Shared worker",
+          /*tab_id=*/SessionID::InvalidValue());
+  AddTask(900, Task::DEDICATED_WORKER, "Dedicated worker",
+          /*tab_id=*/SessionID::InvalidValue());
   AddTask(500, Task::ZYGOTE, "Zygote", /*tab_id=*/SessionID::InvalidValue());
 
   AddTask(300, Task::RENDERER, "Subframe: Tab One (2)", kTabId1)
@@ -151,7 +155,9 @@ TEST_F(TaskManagerImplTest, SortingTypes) {
       "Extension Subframe: Tab Two\n"
       "Subframe: Tab Two\n"
       "Guest\n"
-      "Worker\n",
+      "Dedicated worker\n"
+      "Shared worker\n"
+      "Service worker\n",
       DumpSortedTasks());
 }
 

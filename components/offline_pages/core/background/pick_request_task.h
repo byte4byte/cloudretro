@@ -18,7 +18,6 @@
 
 namespace offline_pages {
 
-class ClientPolicyController;
 class OfflinerPolicy;
 class PickRequestTask;
 class RequestQueueStore;
@@ -49,7 +48,6 @@ class PickRequestTask : public Task {
 
   PickRequestTask(RequestQueueStore* store,
                   OfflinerPolicy* policy,
-                  ClientPolicyController* policy_controller,
                   RequestPickedCallback picked_callback,
                   RequestNotPickedCallback not_picked_callback,
                   RequestCountCallback request_count_callback,
@@ -59,10 +57,10 @@ class PickRequestTask : public Task {
 
   ~PickRequestTask() override;
 
+ private:
   // TaskQueue::Task implementation, starts the async chain
   void Run() override;
 
- private:
   // Step 1. get the requests
   void GetRequests();
 
@@ -101,7 +99,6 @@ class PickRequestTask : public Task {
   // Member variables, all pointers are not owned here.
   RequestQueueStore* store_;
   OfflinerPolicy* policy_;
-  ClientPolicyController* policy_controller_;
   RequestPickedCallback picked_callback_;
   RequestNotPickedCallback not_picked_callback_;
   RequestCountCallback request_count_callback_;

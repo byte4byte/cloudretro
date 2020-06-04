@@ -11,7 +11,7 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_commands.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_view_controller_delegate.h"
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
@@ -19,8 +19,13 @@ namespace ntp_snippets {
 class ContentSuggestionsService;
 }
 
+namespace web {
+class WebState;
+}
+
 @protocol ApplicationCommands;
 class AuthenticationService;
+class Browser;
 @protocol BrowserCommands;
 @class ContentSuggestionsHeaderSynchronizer;
 @class ContentSuggestionsMediator;
@@ -29,11 +34,11 @@ class AuthenticationService;
 @protocol LogoVendor;
 @protocol NTPHomeConsumer;
 @class NTPHomeMetrics;
-@protocol OmniboxFocuser;
+@protocol OmniboxCommands;
 class TemplateURLService;
 @protocol SnackbarCommands;
-class UrlLoadingService;
-class WebStateList;
+class UrlLoadingBrowserAgent;
+class VoiceSearchAvailability;
 
 // Mediator for the NTP Home panel, handling the interactions with the
 // suggestions.
@@ -43,19 +48,21 @@ class WebStateList;
                ContentSuggestionsHeaderViewControllerDelegate>
 
 - (nullable instancetype)
-    initWithWebStateList:(nonnull WebStateList*)webStateList
-      templateURLService:(nonnull TemplateURLService*)templateURLService
-       urlLoadingService:(nonnull UrlLoadingService*)urlLoadingService
-             authService:(nonnull AuthenticationService*)authService
-         identityManager:(nonnull identity::IdentityManager*)identityManager
-              logoVendor:(nonnull id<LogoVendor>)logoVendor
+           initWithWebState:(nonnull web::WebState*)webState
+         templateURLService:(nonnull TemplateURLService*)templateURLService
+                  URLLoader:(nonnull UrlLoadingBrowserAgent*)URLLoader
+                authService:(nonnull AuthenticationService*)authService
+            identityManager:(nonnull signin::IdentityManager*)identityManager
+                 logoVendor:(nonnull id<LogoVendor>)logoVendor
+    voiceSearchAvailability:
+        (nonnull VoiceSearchAvailability*)voiceSearchAvailability
     NS_DESIGNATED_INITIALIZER;
 
 - (nullable instancetype)init NS_UNAVAILABLE;
 
 // Dispatcher.
 @property(nonatomic, weak, nullable)
-    id<ApplicationCommands, BrowserCommands, OmniboxFocuser, SnackbarCommands>
+    id<ApplicationCommands, BrowserCommands, OmniboxCommands, SnackbarCommands>
         dispatcher;
 // Suggestions service used to get the suggestions.
 @property(nonatomic, assign, nonnull)
@@ -75,12 +82,20 @@ class WebStateList;
     ContentSuggestionsMediator* suggestionsMediator;
 // Consumer for this mediator.
 @property(nonatomic, weak, nullable) id<NTPHomeConsumer> consumer;
+// The browser.
+@property(nonatomic, assign, nullable) Browser* browser;
 
 // Inits the mediator.
 - (void)setUp;
 
 // Cleans the mediator.
 - (void)shutdown;
+
+// The location bar has lost focus.
+- (void)locationBarDidResignFirstResponder;
+
+// Tell location bar has taken focus.
+- (void)locationBarDidBecomeFirstResponder;
 
 @end
 

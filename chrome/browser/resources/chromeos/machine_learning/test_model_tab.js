@@ -19,11 +19,11 @@ cr.define('machine_learning_internals', function() {
   async function testExecute() {
     try {
       /**
-       * @type {chromeos.machineLearning.mojom.GraphExecutorProxy}
+       * @type {chromeos.machineLearning.mojom.GraphExecutorRemote}
        */
-      const testModelGraphExecutorProxy =
+      const testModelGraphExecutor =
           await machine_learning_internals.BrowserProxy.getInstance()
-              .prepareModel(ModelId.TEST_MODEL);
+              .prepareModel(BuiltinModelId.TEST_MODEL);
       $('test-model-status').textContent = 'Model loaded successfully!';
 
       $('test-status').textContent = '';
@@ -35,7 +35,7 @@ cr.define('machine_learning_internals', function() {
         return;
       }
       const input = makeInput(x, y);
-      const response = await testModelGraphExecutorProxy.execute(input, ['z']);
+      const response = await testModelGraphExecutor.execute(input, ['z']);
       const outputArray = response.outputs[0].data.floatList.value;
       const executeResult = machine_learning_internals.utils.enumToString(
           response.result, ExecuteResult);

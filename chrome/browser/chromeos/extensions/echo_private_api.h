@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/ui/echo_dialog_listener.h"
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "extensions/browser/extension_function.h"
 
 class PrefRegistrySimple;
 
@@ -26,8 +26,7 @@ void RegisterPrefs(PrefRegistrySimple* registry);
 
 }  // namespace chromeos
 
-class EchoPrivateGetRegistrationCodeFunction
-    : public UIThreadExtensionFunction {
+class EchoPrivateGetRegistrationCodeFunction : public ExtensionFunction {
  public:
   EchoPrivateGetRegistrationCodeFunction();
 
@@ -41,22 +40,23 @@ class EchoPrivateGetRegistrationCodeFunction
                              ECHOPRIVATE_GETREGISTRATIONCODE)
 };
 
-class EchoPrivateGetOobeTimestampFunction
-    : public ChromeAsyncExtensionFunction {
+class EchoPrivateGetOobeTimestampFunction : public ExtensionFunction {
  public:
   EchoPrivateGetOobeTimestampFunction();
 
  protected:
   ~EchoPrivateGetOobeTimestampFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
-  bool GetOobeTimestampOnFileSequence();
+  std::unique_ptr<base::Value> GetOobeTimestampOnFileSequence();
+  void RespondWithResult(std::unique_ptr<base::Value> result);
+
   DECLARE_EXTENSION_FUNCTION("echoPrivate.getOobeTimestamp",
                              ECHOPRIVATE_GETOOBETIMESTAMP)
 };
 
-class EchoPrivateSetOfferInfoFunction : public UIThreadExtensionFunction {
+class EchoPrivateSetOfferInfoFunction : public ExtensionFunction {
  public:
   EchoPrivateSetOfferInfoFunction();
 
@@ -69,7 +69,7 @@ class EchoPrivateSetOfferInfoFunction : public UIThreadExtensionFunction {
                              ECHOPRIVATE_SETOFFERINFO)
 };
 
-class EchoPrivateGetOfferInfoFunction : public UIThreadExtensionFunction {
+class EchoPrivateGetOfferInfoFunction : public ExtensionFunction {
  public:
   EchoPrivateGetOfferInfoFunction();
 
@@ -87,7 +87,7 @@ class EchoPrivateGetOfferInfoFunction : public UIThreadExtensionFunction {
 // either asks user's consent to verify the device's eligibility for the offer,
 // or informs the user that the offers redeeming is disabled.
 // It returns whether the user consent was given.
-class EchoPrivateGetUserConsentFunction : public ChromeAsyncExtensionFunction,
+class EchoPrivateGetUserConsentFunction : public ExtensionFunction,
                                           public chromeos::EchoDialogListener {
  public:
   // Type for the dialog shown callback used in tests.
@@ -104,7 +104,7 @@ class EchoPrivateGetUserConsentFunction : public ChromeAsyncExtensionFunction,
  protected:
   ~EchoPrivateGetUserConsentFunction() override;
 
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   // chromeos::EchoDialogListener overrides.

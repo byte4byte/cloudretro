@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import 'chrome://resources/cr_elements/cr_toast/cr_toast.m.js';
+// #import {MockTimer} from '../mock_timer.m.js';
+// clang-format on
+
 suite('cr-toast', function() {
   let toast;
   let mockTimer;
@@ -127,5 +132,15 @@ suite('cr-toast', function() {
 
     mockTimer.tick(duration);
     assertFalse(toast.open);
+  });
+
+  test('setting text', function() {
+    const duration = 100;
+    const text = 'foo';
+    assertEquals('', toast.textContent);
+    toast.show(undefined, text);
+    assertEquals(text, toast.textContent);
+    toast.show(duration);
+    assertEquals(text, toast.textContent);
   });
 });

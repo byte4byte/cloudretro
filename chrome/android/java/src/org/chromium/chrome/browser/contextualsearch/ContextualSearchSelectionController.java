@@ -4,15 +4,15 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
 import org.chromium.base.TimeUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial.ContextualSearchSetting;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial.ContextualSearchSwitch;
@@ -66,12 +66,13 @@ public class ContextualSearchSelectionController {
     private final float mPxToDp;
     private final Pattern mContainsWordPattern;
 
+    private ContextualSearchPolicy mPolicy;
+
     private String mSelectedText;
     private @SelectionType int mSelectionType;
     private boolean mWasTapGestureDetected;
     // Reflects whether the last tap was valid and whether we still have a tap-based selection.
     private ContextualSearchTapState mLastTapState;
-    private boolean mShouldHandleSelectionModification;
     // Whether the selection was automatically expanded due to an adjustment (e.g. Resolve).
     private boolean mDidExpandSelection;
 
@@ -99,9 +100,9 @@ public class ContextualSearchSelectionController {
     private boolean mClearingSelection;
 
     /**
-     * Whether the current selection has been adjusted or not.  If it has been adjusted we must
-     * request a resolve for this exact term rather than anything that overlaps as we get with
-     * normal expanding resolves.
+     * Whether the current selection has been adjusted or not.  If the user has adjusted the
+     * selection we must request a resolve for this exact term rather than anything that overlaps,
+     * and not expand the selection (since it was explicitly set by the user).
      */
     private boolean mIsAdjustedSelection;
 
@@ -153,6 +154,14 @@ public class ContextualSearchSelectionController {
     }
 
     /**
+     * Sets the policy handler so we can delegate policy decisions.
+     * @param policy A {@link ContextualSearchPolicy} for policy decisions.
+     */
+    public void setPolicy(ContextualSearchPolicy policy) {
+        mPolicy = policy;
+    }
+
+    /**
      * Notifies that the base page has started loading a page.
      */
     void onBasePageLoadStarted() {
@@ -172,14 +181,6 @@ public class ContextualSearchSelectionController {
      * @param reason The reason for ending the Contextual Search.
      */
     void onSearchEnded(@OverlayPanel.StateChangeReason int reason) {
-        // If the user explicitly closes the panel after establishing a selection with long press,
-        // it should not reappear until a new selection is made. This prevents the panel from
-        // reappearing when a long press selection is modified after the user has taken action to
-        // get rid of the panel. See crbug.com/489461.
-        if (shouldPreventHandlingCurrentSelectionModification(reason)) {
-            preventHandlingCurrentSelectionModification();
-        }
-
         // Long press selections should remain visible after ending a Contextual Search.
         if (mSelectionType == SelectionType.TAP) clearSelection();
     }
@@ -311,16 +312,14 @@ public class ContextualSearchSelectionController {
      * @param posXPix The x coordinate of the selection start handle.
      * @param posYPix The y coordinate of the selection start handle.
      */
-    void handleSelectionEvent(int eventType, float posXPix, float posYPix) {
+    void handleSelectionEvent(@SelectionEventType int eventType, float posXPix, float posYPix) {
         boolean shouldHandleSelection = false;
         switch (eventType) {
             case SelectionEventType.SELECTION_HANDLES_SHOWN:
                 mAreSelectionHandlesShown = true;
                 mWasTapGestureDetected = false;
-                mSelectionType = ChromeFeatureList.isEnabled(
-                                         ChromeFeatureList.CONTEXTUAL_SEARCH_LONGPRESS_RESOLVE)
-                        ? SelectionType.RESOLVING_LONG_PRESS
-                        : SelectionType.LONG_PRESS;
+                mSelectionType = mPolicy.canResolveLongpress() ? SelectionType.RESOLVING_LONG_PRESS
+                                                               : SelectionType.LONG_PRESS;
                 shouldHandleSelection = true;
                 SelectionPopupController controller = getSelectionPopupController();
                 if (controller != null) mSelectedText = controller.getSelectedText();
@@ -333,7 +332,7 @@ public class ContextualSearchSelectionController {
                 resetAllStates();
                 break;
             case SelectionEventType.SELECTION_HANDLE_DRAG_STOPPED:
-                shouldHandleSelection = mShouldHandleSelectionModification;
+                shouldHandleSelection = true;
                 mIsAdjustedSelection = true;
                 break;
             default:
@@ -355,7 +354,6 @@ public class ContextualSearchSelectionController {
      * @param type The type of selection made by the user.
      */
     private void handleSelection(String selection, @SelectionType int type) {
-        mShouldHandleSelectionModification = true;
         boolean isValidSelection = validateSelectionSuppression(selection);
         mHandler.handleSelection(selection, isValidSelection, type, mX, mY);
     }
@@ -514,39 +512,8 @@ public class ContextualSearchSelectionController {
         if (basePageWebContents != null) {
             mDidExpandSelection = true;
             basePageWebContents.adjustSelectionByCharacterOffset(
-                    selectionStartAdjust, selectionEndAdjust, /* show_selection_menu = */ false);
+                    selectionStartAdjust, selectionEndAdjust, /* showSelectionMenu= */ false);
         }
-    }
-
-    // ============================================================================================
-    // Selection Modification
-    // ============================================================================================
-
-    /**
-     * This method checks whether the selection modification should be handled. This method
-     * is needed to allow modifying selections that are occluded by the Panel.
-     * See crbug.com/489461.
-     *
-     * @param reason The reason the panel is closing.
-     * @return Whether the selection modification should be handled.
-     */
-    private boolean shouldPreventHandlingCurrentSelectionModification(
-            @OverlayPanel.StateChangeReason int reason) {
-        return getSelectionType() == SelectionType.LONG_PRESS
-                && (reason == OverlayPanel.StateChangeReason.BACK_PRESS
-                || reason == OverlayPanel.StateChangeReason.BASE_PAGE_SCROLL
-                || reason == OverlayPanel.StateChangeReason.SWIPE
-                || reason == OverlayPanel.StateChangeReason.FLING
-                || reason == OverlayPanel.StateChangeReason.CLOSE_BUTTON);
-    }
-
-    /**
-     * Temporarily prevents the controller from handling selection modification events on the
-     * current selection. Handling will be re-enabled when a new selection is made through either a
-     * tap or long press.
-     */
-    private void preventHandlingCurrentSelectionModification() {
-        mShouldHandleSelectionModification = false;
     }
 
     // ============================================================================================

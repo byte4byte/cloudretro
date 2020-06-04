@@ -31,8 +31,10 @@
 
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/accessibility/axid.h"
+#include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 
 namespace blink {
 
@@ -41,20 +43,21 @@ class AccessibleNode;
 class HTMLCanvasElement;
 class HTMLOptionElement;
 class HTMLSelectElement;
-class LayoutMenuList;
+class IntPoint;
+class LayoutRect;
 class LineLayoutItem;
 class LocalFrameView;
 
-class CORE_EXPORT AXObjectCache
-    : public GarbageCollectedFinalized<AXObjectCache>,
-      public ContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(AXObjectCache);
-
+class CORE_EXPORT AXObjectCache : public GarbageCollected<AXObjectCache> {
  public:
+  using BlinkAXEventIntentsSet = HashCountedSet<const BlinkAXEventIntent,
+                                                BlinkAXEventIntentHash,
+                                                BlinkAXEventIntentHashTraits>;
+
   static AXObjectCache* Create(Document&);
 
-  virtual ~AXObjectCache();
-  void Trace(blink::Visitor*) override;
+  virtual ~AXObjectCache() = default;
+  virtual void Trace(Visitor*) {}
 
   virtual void Dispose() = 0;
 
@@ -91,7 +94,7 @@ class CORE_EXPORT AXObjectCache
   virtual void DidInsertChildrenOfNode(Node*) = 0;
 
   // Returns true if the AXObjectCache cares about this attribute
-  virtual bool HandleAttributeChanged(const QualifiedName& attr_name,
+  virtual void HandleAttributeChanged(const QualifiedName& attr_name,
                                       Element*) = 0;
   virtual void HandleFocusedUIElementChanged(Element* old_focused_node,
                                              Element* new_focused_node) = 0;
@@ -101,19 +104,18 @@ class CORE_EXPORT AXObjectCache
   virtual void HandleTextMarkerDataAdded(Node* start, Node* end) = 0;
   virtual void HandleTextFormControlChanged(Node*) = 0;
   virtual void HandleValueChanged(Node*) = 0;
-  virtual void HandleUpdateActiveMenuOption(LayoutMenuList*,
+  virtual void HandleUpdateActiveMenuOption(LayoutObject*,
                                             int option_index) = 0;
-  virtual void DidShowMenuListPopup(LayoutMenuList*) = 0;
-  virtual void DidHideMenuListPopup(LayoutMenuList*) = 0;
+  virtual void DidShowMenuListPopup(LayoutObject*) = 0;
+  virtual void DidHideMenuListPopup(LayoutObject*) = 0;
   virtual void HandleLoadComplete(Document*) = 0;
   virtual void HandleLayoutComplete(Document*) = 0;
   virtual void HandleClicked(Node*) = 0;
-  virtual void HandleAutofillStateChanged(Element*, bool) = 0;
   virtual void HandleValidationMessageVisibilityChanged(
       const Element* form_control) = 0;
 
   // Handle any notifications which arrived while layout was dirty.
-  virtual void ProcessUpdatesAfterLayout(Document&) = 0;
+  virtual void ProcessDeferredAccessibilityEvents(Document&) = 0;
 
   // Changes to virtual Accessibility Object Model nodes.
   virtual void HandleAttributeChanged(const QualifiedName& attr_name,
@@ -151,9 +153,17 @@ class CORE_EXPORT AXObjectCache
   // Static helper functions.
   static bool IsInsideFocusableElementOrARIAWidget(const Node&);
 
+ protected:
+  friend class ScopedBlinkAXEventIntent;
+  FRIEND_TEST_ALL_PREFIXES(ScopedBlinkAXEventIntentTest, SingleIntent);
+  FRIEND_TEST_ALL_PREFIXES(ScopedBlinkAXEventIntentTest, NestedIntents);
+  FRIEND_TEST_ALL_PREFIXES(ScopedBlinkAXEventIntentTest, NestedSameIntents);
+
+  virtual BlinkAXEventIntentsSet& ActiveEventIntents() = 0;
+
  private:
   friend class AXObjectCacheBase;
-  AXObjectCache(Document&);
+  AXObjectCache() = default;
 
   static AXObjectCacheCreateFunction create_function_;
   DISALLOW_COPY_AND_ASSIGN(AXObjectCache);
@@ -161,4 +171,4 @@ class CORE_EXPORT AXObjectCache
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ACCESSIBILITY_AX_OBJECT_CACHE_H_

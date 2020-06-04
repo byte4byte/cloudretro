@@ -6,7 +6,7 @@
 
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
@@ -35,9 +35,9 @@ void OverlayLayoutManager::OnDisplayMetricsChanged(
   }
 
   for (aura::Window* child : overlay_container_->children()) {
-    wm::WindowState* window_state = wm::GetWindowState(child);
+    WindowState* window_state = WindowState::Get(child);
     if (window_state->IsFullscreen()) {
-      const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
+      const WMEvent event(WM_EVENT_WORKAREA_BOUNDS_CHANGED);
       window_state->OnWMEvent(&event);
     }
   }

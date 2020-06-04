@@ -15,15 +15,15 @@ namespace blink {
 // image paint and the largest text paint and notifying WindowPerformance
 // whenever a new LatestLargestContentfulPaint entry should be dispatched.
 class CORE_EXPORT LargestContentfulPaintCalculator final
-    : public GarbageCollectedFinalized<LargestContentfulPaintCalculator> {
+    : public GarbageCollected<LargestContentfulPaintCalculator> {
  public:
   explicit LargestContentfulPaintCalculator(WindowPerformance*);
 
-  void OnLargestImageUpdated(const ImageRecord* largest_image);
+  void UpdateLargestContentPaintIfNeeded(
+      base::Optional<base::WeakPtr<TextRecord>> largest_text,
+      base::Optional<const ImageRecord*> largest_image);
 
-  void OnLargestTextUpdated(base::WeakPtr<TextRecord> largest_text);
-
-  void Trace(blink::Visitor* visitor);
+  void Trace(Visitor* visitor);
 
  private:
   friend class LargestContentfulPaintCalculatorTest;
@@ -33,7 +33,9 @@ class CORE_EXPORT LargestContentfulPaintCalculator final
     kImage,
     kText,
   };
-  void OnLargestContentfulPaintUpdated(LargestContentType type);
+  void OnLargestImageUpdated(const ImageRecord* largest_image);
+  void OnLargestTextUpdated(base::WeakPtr<TextRecord> largest_text);
+  void UpdateLargestContentfulPaint(LargestContentType type);
 
   uint64_t LargestTextSize() {
     return largest_text_ ? largest_text_->first_size : 0u;
@@ -42,6 +44,10 @@ class CORE_EXPORT LargestContentfulPaintCalculator final
   uint64_t LargestImageSize() {
     return largest_image_ ? largest_image_->first_size : 0u;
   }
+
+  std::unique_ptr<TracedValue> TextCandidateTraceData();
+  std::unique_ptr<TracedValue> ImageCandidateTraceData();
+  std::unique_ptr<TracedValue> InvalidationTraceData();
 
   Member<WindowPerformance> window_performance_;
 
@@ -52,6 +58,8 @@ class CORE_EXPORT LargestContentfulPaintCalculator final
   // the lifetime is not dependent on that of TextPaintTimingDetector.
   std::unique_ptr<TextRecord> largest_text_;
   LargestContentType last_type_ = LargestContentType::kUnknown;
+
+  unsigned count_candidates_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(LargestContentfulPaintCalculator);
 };

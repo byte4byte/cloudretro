@@ -4,6 +4,7 @@
 
 #include "chrome/services/cups_proxy/public/cpp/cups_util.h"
 
+#include <queue>
 #include <string>
 #include <utility>
 
@@ -14,6 +15,47 @@
 #include "printing/backend/cups_jobs.h"
 
 namespace cups_proxy {
+namespace {
+
+// This comparator defines a priority_queue of printers in descending order by
+// display name.
+class DisplayNameComparator {
+ public:
+  bool operator()(const chromeos::Printer& a, const chromeos::Printer& b) {
+    return a.display_name() < b.display_name();
+  }
+};
+
+// Return the top |k| printers from |printers| sorted alphabetically by display
+// name.
+std::vector<chromeos::Printer> GetFirstKPrinters(
+    const std::vector<chromeos::Printer>& printers,
+    size_t k) {
+  auto pq =
+      std::priority_queue<chromeos::Printer, std::vector<chromeos::Printer>,
+                          DisplayNameComparator>();
+
+  // Filter through |printers|, only keeping the first |k| printers in the pq.
+  for (const chromeos::Printer& printer : printers) {
+    pq.push(printer);
+    if (pq.size() > k) {
+      pq.pop();
+    }
+  }
+
+  // We want the returned list in ascending order, so we assign to ret in
+  // reverse order.
+  std::vector<chromeos::Printer> ret;
+  ret.resize(pq.size());
+  for (int i = pq.size() - 1; i >= 0; --i) {
+    ret[i] = pq.top();
+    pq.pop();
+  }
+
+  return ret;
+}
+
+}  // namespace
 
 base::Optional<IppResponse> BuildGetDestsResponse(
     const IppRequest& request,
@@ -34,14 +76,17 @@ base::Optional<IppResponse> BuildGetDestsResponse(
   // Fill in IPP attributes.
   ret.ipp = printing::WrapIpp(ippNewResponse(request.ipp.get()));
   for (const auto& printer : printers) {
-    std::string printer_uri = printing::PrinterUriFromName(printer.id());
-
     // Setting the printer-uri.
+    std::string printer_uri = printing::PrinterUriFromName(printer.id());
     ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_TEXT,
                  "printer-uri-supported", nullptr, printer_uri.c_str());
 
-    // Setting the display name.
+    // Setting the printer uuid.
     ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_NAME, "printer-name",
+                 nullptr, printer.id().c_str());
+
+    // Setting the display name.
+    ippAddString(ret.ipp.get(), IPP_TAG_PRINTER, IPP_TAG_TEXT, "printer-info",
                  nullptr, printer.display_name().c_str());
 
     // Optional setting of the make_and_model, if known.
@@ -50,6 +95,8 @@ base::Optional<IppResponse> BuildGetDestsResponse(
                    "printer-make-and-model", nullptr,
                    printer.make_and_model().c_str());
     }
+
+    ippAddSeparator(ret.ipp.get());
   }
 
   // Add the final content length into headers
@@ -91,7 +138,7 @@ base::Optional<std::string> GetPrinterId(ipp_t* ipp) {
   // The printer id should be the last component of the resource.
   base::StringPiece uuid(resource);
   auto uuid_start = uuid.find_last_of('/');
-  if (uuid_start == base::StringPiece::npos) {
+  if (uuid_start == base::StringPiece::npos || uuid_start + 1 >= uuid.size()) {
     return base::nullopt;
   }
 
@@ -106,8 +153,26 @@ base::Optional<std::string> ParseEndpointForPrinterId(
     return base::nullopt;
   }
 
-  endpoint.remove_prefix(last_path + 1);
-  return endpoint.as_string();
+  return endpoint.substr(last_path + 1).as_string();
+}
+
+std::vector<chromeos::Printer> FilterPrintersForPluginVm(
+    const std::vector<chromeos::Printer>& saved,
+    const std::vector<chromeos::Printer>& enterprise) {
+  if (saved.size() >= kPluginVmPrinterLimit) {
+    return std::vector<chromeos::Printer>(
+        saved.begin(), saved.begin() + kPluginVmPrinterLimit);
+  }
+
+  // Filter down enterprise printers to backfill.
+  size_t num_enterprise_printers = kPluginVmPrinterLimit - saved.size();
+  auto filtered_enterprise =
+      GetFirstKPrinters(enterprise, num_enterprise_printers);
+
+  // Concatenate saved printers and filtered_enterprise to return.
+  std::vector<chromeos::Printer> ret = saved;
+  ret.insert(ret.end(), filtered_enterprise.begin(), filtered_enterprise.end());
+  return ret;
 }
 
 }  // namespace cups_proxy

@@ -5,11 +5,9 @@
 package org.chromium.chrome.browser.tabmodel;
 
 import android.app.Activity;
-import android.content.SharedPreferences;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 import android.util.Pair;
-import android.util.SparseArray;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -24,26 +22,28 @@ import org.chromium.base.task.AsyncTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.accessibility_tab_switcher.OverviewListLayout;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutHelper;
+import org.chromium.chrome.browser.flags.ActivityType;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.browser.snackbar.undo.UndoBarController;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabBuilder;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tab.TabState;
-import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStore.TabModelSelectorMetadata;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStore.TabPersistentStoreObserver;
 import org.chromium.chrome.browser.tabmodel.TestTabModelDirectory.TabModelMetaDataInfo;
-import org.chromium.chrome.browser.widget.OverviewListLayout;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
+import org.chromium.chrome.test.util.browser.tabmodel.MockTabCreator;
+import org.chromium.chrome.test.util.browser.tabmodel.MockTabCreatorManager;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
-import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -78,83 +78,6 @@ public class TabPersistentStoreTest {
         }
     }
 
-    private static class MockTabCreator extends TabCreator {
-        public final SparseArray<TabState> created;
-        public final CallbackHelper callback;
-
-        private final boolean mIsIncognito;
-        private final TabModelSelector mSelector;
-
-        public int idOfFirstCreatedTab = Tab.INVALID_TAB_ID;
-
-        public MockTabCreator(boolean incognito, TabModelSelector selector) {
-            created = new SparseArray<>();
-            callback = new CallbackHelper();
-            mIsIncognito = incognito;
-            mSelector = selector;
-        }
-
-        @Override
-        public boolean createsTabsAsynchronously() {
-            return false;
-        }
-
-        @Override
-        public Tab createNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent) {
-            Tab tab = TabBuilder.createForLazyLoad(loadUrlParams)
-                              .setIncognito(mIsIncognito)
-                              .setLaunchType(TabLaunchType.FROM_LINK)
-                              .build();
-            mSelector.getModel(mIsIncognito).addTab(tab, TabModel.INVALID_TAB_INDEX, type);
-            storeTabInfo(null, tab.getId());
-            return tab;
-        }
-
-        @Override
-        public Tab createFrozenTab(TabState state, int id, int index) {
-            Tab tab = TabBuilder.createFromFrozenState()
-                              .setId(id)
-                              .setIncognito(state.isIncognito())
-                              .build();
-            TabTestUtils.restoreFieldsFromState(tab, state);
-            mSelector.getModel(mIsIncognito).addTab(tab, index, TabLaunchType.FROM_RESTORE);
-            storeTabInfo(state, id);
-            return tab;
-        }
-
-        @Override
-        public boolean createTabWithWebContents(
-                Tab parent, WebContents webContents, @TabLaunchType int type, String url) {
-            return false;
-        }
-
-        @Override
-        public Tab launchUrl(String url, @TabLaunchType int type) {
-            return null;
-        }
-
-        private void storeTabInfo(TabState state, int id) {
-            if (created.size() == 0) idOfFirstCreatedTab = id;
-            created.put(id, state);
-            callback.notifyCalled();
-        }
-    }
-
-    private static class MockTabCreatorManager implements TabCreatorManager {
-        private MockTabCreator mRegularCreator;
-        private MockTabCreator mIncognitoCreator;
-
-        public MockTabCreatorManager(TabModelSelector selector) {
-            mRegularCreator = new MockTabCreator(false, selector);
-            mIncognitoCreator = new MockTabCreator(true, selector);
-        }
-
-        @Override
-        public MockTabCreator getTabCreator(boolean incognito) {
-            return incognito ? mIncognitoCreator : mRegularCreator;
-        }
-    }
-
     /**
      * Used when testing interactions of TabPersistentStore with real {@link TabModelImpl}s.
      */
@@ -162,11 +85,11 @@ public class TabPersistentStoreTest {
             implements TabModelDelegate {
         final TabPersistentStore mTabPersistentStore;
         final MockTabPersistentStoreObserver mTabPersistentStoreObserver;
-        private final MockTabCreatorManager mTabCreatorManager;
         private final TabModelOrderController mTabModelOrderController;
 
         public TestTabModelSelector() throws Exception {
-            mTabCreatorManager = new MockTabCreatorManager(this);
+            super(new MockTabCreatorManager(), false);
+            ((MockTabCreatorManager) getTabCreatorManager()).initialize(this);
             mTabPersistentStoreObserver = new MockTabPersistentStoreObserver();
             mTabPersistentStore =
                     TestThreadUtils.runOnUiThreadBlocking(new Callable<TabPersistentStore>() {
@@ -174,34 +97,29 @@ public class TabPersistentStoreTest {
                         public TabPersistentStore call() {
                             TabPersistencePolicy persistencePolicy =
                                     new TabbedModeTabPersistencePolicy(0, true);
-                            return new TabPersistentStore(
-                                    persistencePolicy, TestTabModelSelector.this,
-                                    mTabCreatorManager, mTabPersistentStoreObserver);
+                            return new TabPersistentStore(persistencePolicy,
+                                    TestTabModelSelector.this, getTabCreatorManager(),
+                                    mTabPersistentStoreObserver);
                         }
                     });
-            mTabModelOrderController = new TabModelOrderController(this);
+            mTabModelOrderController = new TabModelOrderControllerImpl(this);
 
             Callable<TabModelImpl> callable = new Callable<TabModelImpl>() {
                 @Override
                 public TabModelImpl call() {
-                    return new TabModelImpl(false, false, mTabCreatorManager.getTabCreator(false),
-                            mTabCreatorManager.getTabCreator(true), null, mTabModelOrderController,
-                            null, mTabPersistentStore, TestTabModelSelector.this, true);
+                    return new TabModelImpl(false, false,
+                            getTabCreatorManager().getTabCreator(false),
+                            getTabCreatorManager().getTabCreator(true), null,
+                            mTabModelOrderController, null, mTabPersistentStore,
+                            TestTabModelSelector.this, true);
                 }
             };
             TabModelImpl regularTabModel = TestThreadUtils.runOnUiThreadBlocking(callable);
             TabModel incognitoTabModel = new IncognitoTabModel(
-                    new IncognitoTabModelImplCreator(mTabCreatorManager.getTabCreator(false),
-                            mTabCreatorManager.getTabCreator(true),
-                            null, mTabModelOrderController, null, mTabPersistentStore, this));
-            initialize(false, regularTabModel, incognitoTabModel);
-        }
-
-        @Override
-        public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
-                boolean incognito) {
-            return mTabCreatorManager.getTabCreator(incognito).createNewTab(
-                    loadUrlParams, type, parent);
+                    new IncognitoTabModelImplCreator(getTabCreatorManager().getTabCreator(false),
+                            getTabCreatorManager().getTabCreator(true), null,
+                            mTabModelOrderController, null, mTabPersistentStore, this));
+            initialize(regularTabModel, incognitoTabModel);
         }
 
         @Override
@@ -230,6 +148,11 @@ public class TabPersistentStoreTest {
         @Override
         public boolean isCurrentModel(TabModel model) {
             return false;
+        }
+
+        @Override
+        public boolean isReparentingInProgress() {
+            return super.isReparentingInProgress();
         }
     }
 
@@ -289,10 +212,10 @@ public class TabPersistentStoreTest {
     /** Class for mocking out the directory containing all of the TabState files. */
     private TestTabModelDirectory mMockDirectory;
     private AdvancedMockContext mAppContext;
-    private SharedPreferences mPreferences;
+    private SharedPreferencesManager mPreferences;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             mChromeActivity = new ChromeActivity() {
                 @Override
@@ -314,6 +237,12 @@ public class TabPersistentStoreTest {
                 protected ChromeFullscreenManager createFullscreenManager() {
                     return null;
                 }
+
+                @Override
+                @ActivityType
+                public int getActivityType() {
+                    return ActivityType.TABBED;
+                }
             };
         });
 
@@ -322,14 +251,14 @@ public class TabPersistentStoreTest {
                                                       .getTargetContext()
                                                       .getApplicationContext());
         ContextUtils.initApplicationContextForTests(mAppContext);
-        mPreferences = ContextUtils.getAppSharedPreferences();
+        mPreferences = SharedPreferencesManager.getInstance();
         mMockDirectory = new TestTabModelDirectory(
                 mAppContext, "TabPersistentStoreTest", Integer.toString(SELECTOR_INDEX));
         TabPersistentStore.setBaseStateDirectoryForTests(mMockDirectory.getBaseDirectory());
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             TabWindowManager.getInstance().onActivityStateChange(
                     mChromeActivity, ActivityState.DESTROYED);
@@ -342,7 +271,7 @@ public class TabPersistentStoreTest {
             final TabPersistentStoreObserver observer) {
         return TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<TabPersistentStore>() {
             @Override
-            public TabPersistentStore call() throws Exception {
+            public TabPersistentStore call() {
                 return new TabPersistentStore(persistencePolicy, modelSelector, creatorManager,
                         observer);
             }
@@ -567,8 +496,7 @@ public class TabPersistentStoreTest {
         mMockDirectory.writeTabModelFiles(info, true);
 
         // Set to pre-fetch
-        mPreferences.edit().putInt(
-                TabPersistentStore.PREF_ACTIVE_TAB_ID, info.selectedTabId).apply();
+        mPreferences.writeInt(ChromePreferenceKeys.TABMODEL_ACTIVE_TAB_ID, info.selectedTabId);
 
         // Initialize the classes.
         MockTabModelSelector mockSelector = new MockTabModelSelector(0, 0, null);
@@ -591,13 +519,13 @@ public class TabPersistentStoreTest {
                     AsyncTask.Status.FINISHED, store.mPrefetchActiveTabTask.getStatus());
 
             // Confirm that the correct active tab ID is updated when saving state.
-            mPreferences.edit().putInt(TabPersistentStore.PREF_ACTIVE_TAB_ID, -1).apply();
+            mPreferences.writeInt(ChromePreferenceKeys.TABMODEL_ACTIVE_TAB_ID, -1);
 
             store.saveState();
         });
 
-        Assert.assertEquals(
-                info.selectedTabId, mPreferences.getInt(TabPersistentStore.PREF_ACTIVE_TAB_ID, -1));
+        Assert.assertEquals(info.selectedTabId,
+                mPreferences.readInt(ChromePreferenceKeys.TABMODEL_ACTIVE_TAB_ID, -1));
     }
 
     /**
@@ -633,6 +561,7 @@ public class TabPersistentStoreTest {
     @SmallTest
     @Feature({"TabPersistentStore"})
     @RetryOnFailure
+    @DisableIf.Build(sdk_is_greater_than = 25, message = "https://crbug.com/1017732")
     public void testUndoCloseAllTabsWritesTabListFile() throws Exception {
         final TabModelMetaDataInfo info = TestTabModelDirectory.TAB_MODEL_METADATA_V5_NO_M18;
         mMockDirectory.writeTabModelFiles(info, true);

@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/user_manager/user_manager.h"
+#include "extensions/common/constants.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -43,7 +44,7 @@ void InternalAppWindowShelfController::ActiveUserChanged(
   for (const auto& w : aura_window_to_app_window_) {
     AppWindowBase* app_window = w.second.get();
     if (app_window->shelf_id().app_id ==
-        app_list::kInternalAppIdKeyboardShortcutViewer) {
+        ash::kInternalAppIdKeyboardShortcutViewer) {
       continue;
     }
 
@@ -103,6 +104,7 @@ void InternalAppWindowShelfController::OnWindowVisibilityChanging(
     shelf_id = ash::ShelfID(plugin_vm::kPluginVmAppId);
     window->SetProperty(ash::kShelfIDKey,
                         new std::string(shelf_id.Serialize()));
+    window->SetProperty(ash::kAppIDKey, new std::string(shelf_id.app_id));
   }
 
   if (!app_list::IsInternalApp(shelf_id.app_id))
@@ -141,7 +143,7 @@ void InternalAppWindowShelfController::RegisterAppWindow(
   // Keyboard Shortcut Viewer has a global instance so it can be shared with
   // different users.
   const user_manager::User* window_owner = nullptr;
-  if (shelf_id.app_id != app_list::kInternalAppIdKeyboardShortcutViewer) {
+  if (shelf_id.app_id != ash::kInternalAppIdKeyboardShortcutViewer) {
     // Plugin VM is only allowed on the primary profile. If the user switches
     // profile while it is launching, we associate it with the primary profile,
     // which hides the window, and don't show it on the shelf.
@@ -169,10 +171,6 @@ void InternalAppWindowShelfController::RegisterAppWindow(
 
 void InternalAppWindowShelfController::AddToShelf(AppWindowBase* app_window) {
   const ash::ShelfID shelf_id = app_window->shelf_id();
-  // Internal Camera app does not have own window. Either ARC or extension
-  // window controller would add window to controller.
-  if (shelf_id.app_id == app_list::kInternalAppIdCamera)
-    return;
 
   AppWindowLauncherItemController* item_controller =
       owner()->shelf_model()->GetAppWindowLauncherItemController(shelf_id);
@@ -197,10 +195,6 @@ void InternalAppWindowShelfController::AddToShelf(AppWindowBase* app_window) {
 void InternalAppWindowShelfController::RemoveFromShelf(
     AppWindowBase* app_window) {
   const ash::ShelfID shelf_id = app_window->shelf_id();
-  // Internal Camera app does not have own window. Either ARC or extension
-  // window controller would remove window from controller.
-  if (shelf_id.app_id == app_list::kInternalAppIdCamera)
-    return;
 
   UnregisterAppWindow(app_window);
 

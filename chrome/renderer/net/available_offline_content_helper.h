@@ -11,6 +11,8 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "chrome/common/available_offline_content.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 // Notice: this file is only included on OS_ANDROID.
 
@@ -40,6 +42,10 @@ class AvailableOfflineContentHelper {
   // Abort previous requests and free the mojo connection.
   void Reset();
 
+  using Binder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<chrome::mojom::AvailableOfflineContentProvider>)>;
+  static void OverrideBinderForTesting(Binder binder);
+
  private:
   void AvailableContentReceived(
       AvailableContentCallback callback,
@@ -49,7 +55,7 @@ class AvailableOfflineContentHelper {
   // Binds |provider_| if necessary. Returns true if the provider is bound.
   bool BindProvider();
 
-  chrome::mojom::AvailableOfflineContentProviderPtr provider_;
+  mojo::Remote<chrome::mojom::AvailableOfflineContentProvider> provider_;
   // This is the result of the last FetchAvailableContent call. It is retained
   // only so that metrics can be recorded properly on call to LaunchItem().
   std::vector<chrome::mojom::AvailableOfflineContentPtr> fetched_content_;

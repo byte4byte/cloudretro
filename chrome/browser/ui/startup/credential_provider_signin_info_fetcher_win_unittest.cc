@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/startup/credential_provider_signin_info_fetcher_win.h"
+
 #include "chrome/browser/ui/startup/credential_provider_signin_dialog_win_test_data.h"
 
 #include <string>
@@ -13,7 +14,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
@@ -66,7 +67,7 @@ class CredentialProviderFetcherTest : public ::testing::Test {
   std::string valid_user_info_response_;
   std::string valid_access_token_fetch_response_;
   network::TestURLLoaderFactory test_url_loader_factory_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
  private:
   scoped_refptr<network::SharedURLLoaderFactory> shared_factory_;
@@ -109,17 +110,17 @@ void CredentialProviderFetcherTest::SetFakeResponses(
     int token_info_net_error) {
   test_url_loader_factory_.AddResponse(
       GaiaUrls::GetInstance()->oauth2_token_info_url(),
-      network::CreateResourceResponseHead(token_info_code), token_info_data,
+      network::CreateURLResponseHead(token_info_code), token_info_data,
       network::URLLoaderCompletionStatus(token_info_net_error));
 
   test_url_loader_factory_.AddResponse(
       GaiaUrls::GetInstance()->oauth_user_info_url(),
-      network::CreateResourceResponseHead(user_info_code), user_info_data,
+      network::CreateURLResponseHead(user_info_code), user_info_data,
       network::URLLoaderCompletionStatus(user_info_net_error));
 
   test_url_loader_factory_.AddResponse(
       GaiaUrls::GetInstance()->oauth2_token_url(),
-      network::CreateResourceResponseHead(access_token_fetch_code),
+      network::CreateURLResponseHead(access_token_fetch_code),
       access_token_fetch_data,
       network::URLLoaderCompletionStatus(access_token_net_error));
 }
@@ -226,7 +227,7 @@ TEST_F(CredentialProviderFetcherTest, ProperlyProvidedScopes) {
           EXPECT_THAT(GetUploadData(request),
                       ::testing::HasSubstr(base::JoinString(scopes, "+")));
         }
-        scoped_task_environment_.RunUntilIdle();
+        task_environment_.RunUntilIdle();
       }));
   RunFetcher("a,b");
 }
@@ -244,7 +245,7 @@ TEST_F(CredentialProviderFetcherTest, SpacedOutScopes) {
           EXPECT_THAT(GetUploadData(request),
                       ::testing::HasSubstr(base::JoinString(scopes, "+")));
         }
-        scoped_task_environment_.RunUntilIdle();
+        task_environment_.RunUntilIdle();
       }));
   RunFetcher(" a , b ");
 }
@@ -262,7 +263,7 @@ TEST_F(CredentialProviderFetcherTest, EmptyScopes) {
           EXPECT_THAT(GetUploadData(request),
                       ::testing::HasSubstr(base::JoinString(scopes, "+")));
         }
-        scoped_task_environment_.RunUntilIdle();
+        task_environment_.RunUntilIdle();
       }));
   RunFetcher("a,b,,");
 }
@@ -279,7 +280,7 @@ TEST_F(CredentialProviderFetcherTest, DefaultScopes) {
           EXPECT_THAT(GetUploadData(request),
                       ::testing::HasSubstr(base::JoinString(scopes, "+")));
         }
-        scoped_task_environment_.RunUntilIdle();
+        task_environment_.RunUntilIdle();
       }));
   RunFetcher("");
 }

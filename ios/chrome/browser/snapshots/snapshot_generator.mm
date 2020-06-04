@@ -23,8 +23,8 @@
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/image/image.h"
 
@@ -138,10 +138,9 @@ BOOL ViewHierarchyContainsWKWebView(UIView* view) {
 
   if (![self canTakeSnapshot]) {
     if (completion) {
-      base::PostTaskWithTraits(FROM_HERE, {web::WebThread::UI},
-                               base::BindOnce(^{
-                                 completion(nil);
-                               }));
+      base::PostTask(FROM_HERE, {web::WebThread::UI}, base::BindOnce(^{
+                       completion(nil);
+                     }));
     }
     return;
   }
@@ -154,7 +153,7 @@ BOOL ViewHierarchyContainsWKWebView(UIView* view) {
   __weak SnapshotGenerator* weakSelf = self;
   self.webState->TakeSnapshot(
       gfx::RectF(snapshotFrameInWebView),
-      base::BindOnce(^(const gfx::Image& image) {
+      base::BindRepeating(^(const gfx::Image& image) {
         UIImage* snapshot = nil;
         if (!image.IsEmpty()) {
           snapshot = [weakSelf
@@ -337,8 +336,7 @@ BOOL ViewHierarchyContainsWKWebView(UIView* view) {
 
 - (SnapshotCache*)snapshotCache {
   return SnapshotCacheFactory::GetForBrowserState(
-      ios::ChromeBrowserState::FromBrowserState(
-          self.webState->GetBrowserState()));
+      ChromeBrowserState::FromBrowserState(self.webState->GetBrowserState()));
 }
 
 #pragma mark - CRWWebStateObserver

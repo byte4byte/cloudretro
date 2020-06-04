@@ -4,12 +4,17 @@
 
 #include "third_party/blink/renderer/core/frame/csp/execution_context_csp_delegate.h"
 
+#include "services/network/public/cpp/web_sandbox_flags.h"
+#include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
+#include "third_party/blink/public/common/security_context/insecure_request_policy.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/security_policy_violation_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/csp/csp_violation_report_body.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/report.h"
@@ -29,7 +34,7 @@ ExecutionContextCSPDelegate::ExecutionContextCSPDelegate(
     ExecutionContext& execution_context)
     : execution_context_(&execution_context) {}
 
-void ExecutionContextCSPDelegate::Trace(blink::Visitor* visitor) {
+void ExecutionContextCSPDelegate::Trace(Visitor* visitor) {
   visitor->Trace(execution_context_);
   ContentSecurityPolicyDelegate::Trace(visitor);
 }
@@ -38,11 +43,16 @@ const SecurityOrigin* ExecutionContextCSPDelegate::GetSecurityOrigin() {
   return execution_context_->GetSecurityOrigin();
 }
 
+SecureContextMode ExecutionContextCSPDelegate::GetSecureContextMode() {
+  return GetSecurityContext().GetSecureContextMode();
+}
+
 const KURL& ExecutionContextCSPDelegate::Url() const {
   return execution_context_->Url();
 }
 
-void ExecutionContextCSPDelegate::SetSandboxFlags(SandboxFlags mask) {
+void ExecutionContextCSPDelegate::SetSandboxFlags(
+    network::mojom::blink::WebSandboxFlags mask) {
   // Ideally sandbox flags are determined at construction time since
   // sandbox flags influence the security origin and that influences
   // the Agent that is assigned for the ExecutionContext. Changing
@@ -60,12 +70,9 @@ void ExecutionContextCSPDelegate::SetSandboxFlags(SandboxFlags mask) {
   // already been set on the security context. Meta tags can't set them
   // and we should have already constructed the document with the correct
   // sandbox flags from CSP already.
-  WebSandboxFlags flags = GetSecurityContext().GetSandboxFlags();
+  network::mojom::blink::WebSandboxFlags flags =
+      GetSecurityContext().GetSandboxFlags();
   CHECK_EQ(flags | mask, flags);
-}
-
-void ExecutionContextCSPDelegate::SetAddressSpace(mojom::IPAddressSpace space) {
-  GetSecurityContext().SetAddressSpace(space);
 }
 
 void ExecutionContextCSPDelegate::SetRequireTrustedTypes() {
@@ -73,7 +80,7 @@ void ExecutionContextCSPDelegate::SetRequireTrustedTypes() {
 }
 
 void ExecutionContextCSPDelegate::AddInsecureRequestPolicy(
-    WebInsecureRequestPolicy policy) {
+    mojom::blink::InsecureRequestPolicy policy) {
   SecurityContext& security_context = GetSecurityContext();
 
   Document* document = GetDocument();
@@ -86,7 +93,9 @@ void ExecutionContextCSPDelegate::AddInsecureRequestPolicy(
     document->DidEnforceInsecureRequestPolicy();
 
   // Upgrade Insecure Requests: Update the set of insecure URLs to upgrade.
-  if (policy & kUpgradeInsecureRequests) {
+  if ((policy &
+       mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests) !=
+      mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone) {
     // Spec: Enforcing part of:
     // https://w3c.github.io/webappsec-upgrade-insecure-requests/#delivery
     // Step 3. Let tuple be a tuple of the protected resource’s URL's host and
@@ -173,10 +182,11 @@ void ExecutionContextCSPDelegate::PostViolationReport(
   // Construct and route the report to the ReportingContext, to be observed
   // by any ReportingObservers.
   auto* body = MakeGarbageCollected<CSPViolationReportBody>(violation_data);
-  Report* observed_report =
-      MakeGarbageCollected<Report>("csp-violation", Url().GetString(), body);
-  ReportingContext::From(document)->QueueReport(
-      observed_report, use_reporting_api ? report_endpoints : Vector<String>());
+  Report* observed_report = MakeGarbageCollected<Report>(
+      ReportType::kCSPViolation, Url().GetString(), body);
+  ReportingContext::From(execution_context_.Get())
+      ->QueueReport(observed_report,
+                    use_reporting_api ? report_endpoints : Vector<String>());
 
   if (use_reporting_api)
     return;
@@ -199,8 +209,7 @@ void ExecutionContextCSPDelegate::PostViolationReport(
                    // inconsistent.
                    : document->CompleteURLWithOverride(
                          report_endpoint, document->FallbackBaseURL());
-    PingLoader::SendViolationReport(
-        frame, url, report, PingLoader::kContentSecurityPolicyViolationReport);
+    PingLoader::SendViolationReport(frame, url, report);
   }
 }
 
@@ -223,10 +232,17 @@ void ExecutionContextCSPDelegate::ReportBlockedScriptExecutionToInspector(
 }
 
 void ExecutionContextCSPDelegate::DidAddContentSecurityPolicies(
-    const blink::WebVector<WebContentSecurityPolicy>& policies) {
-  Document* document = GetDocument();
-  if (document && document->GetFrame())
-    document->GetFrame()->Client()->DidAddContentSecurityPolicies(policies);
+    WTF::Vector<network::mojom::blink::ContentSecurityPolicyPtr> policies) {
+  auto* window = DynamicTo<LocalDOMWindow>(execution_context_.Get());
+  if (!window)
+    return;
+
+  LocalFrame* frame = window->GetFrame();
+  if (!frame)
+    return;
+
+  frame->GetLocalFrameHostRemote().DidAddContentSecurityPolicies(
+      std::move(policies));
 }
 
 SecurityContext& ExecutionContextCSPDelegate::GetSecurityContext() {
@@ -234,7 +250,8 @@ SecurityContext& ExecutionContextCSPDelegate::GetSecurityContext() {
 }
 
 Document* ExecutionContextCSPDelegate::GetDocument() {
-  return DynamicTo<Document>(execution_context_.Get());
+  auto* window = DynamicTo<LocalDOMWindow>(execution_context_.Get());
+  return window ? window->document() : nullptr;
 }
 
 void ExecutionContextCSPDelegate::DispatchViolationEventInternal(

@@ -4,16 +4,21 @@
 
 #include "chrome/browser/android/oom_intervention/oom_intervention_tab_helper.h"
 
+#include <string>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/android/oom_intervention/oom_intervention_config.h"
 #include "chrome/browser/android/oom_intervention/oom_intervention_decider.h"
 #include "chrome/browser/ui/android/infobars/near_oom_reduction_infobar.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/common/oom_intervention/oom_intervention_types.h"
 
 namespace {
@@ -31,29 +36,9 @@ void SetLastVisibleWebContents(content::WebContents* web_contents) {
   g_last_visible_web_contents = web_contents;
 }
 
-// These enums are associated with UMA. Values must be kept in sync with
-// enums.xml and must not be renumbered/reused.
-enum class NearOomDetectionEndReason {
-  OOM_PROTECTED_CRASH = 0,
-  RENDERER_GONE = 1,
-  NAVIGATION = 2,
-  COUNT,
-};
-
-void RecordNearOomDetectionEndReason(NearOomDetectionEndReason reason) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Memory.Experimental.OomIntervention.NearOomDetectionEndReason", reason,
-      NearOomDetectionEndReason::COUNT);
-}
-
 void RecordInterventionUserDecision(bool accepted) {
   UMA_HISTOGRAM_BOOLEAN("Memory.Experimental.OomIntervention.UserDecision",
                         accepted);
-}
-
-void RecordInterventionStateOnCrash(bool accepted) {
-  UMA_HISTOGRAM_BOOLEAN(
-      "Memory.Experimental.OomIntervention.InterventionStateOnCrash", accepted);
 }
 
 }  // namespace
@@ -68,9 +53,7 @@ OomInterventionTabHelper::OomInterventionTabHelper(
     : content::WebContentsObserver(web_contents),
       decider_(OomInterventionDecider::GetForBrowserContext(
           web_contents->GetBrowserContext())),
-      binding_(this),
-      scoped_observer_(this),
-      weak_ptr_factory_(this) {
+      scoped_observer_(this) {
   scoped_observer_.Add(crash_reporter::CrashMetricsReporter::GetInstance());
 }
 
@@ -157,8 +140,6 @@ void OomInterventionTabHelper::RenderProcessGone(
         "RendererGoneAfterDetectionTime",
         elapsed_time);
     ResetInterventionState();
-  } else {
-    RecordNearOomDetectionEndReason(NearOomDetectionEndReason::RENDERER_GONE);
   }
 }
 
@@ -198,9 +179,6 @@ void OomInterventionTabHelper::DidStartNavigation(
         "NavigationAfterDetectionTime",
         elapsed_time);
     ResetInterventionState();
-  } else {
-    // Monitoring but near-OOM hasn't been detected.
-    RecordNearOomDetectionEndReason(NearOomDetectionEndReason::NAVIGATION);
   }
 }
 
@@ -241,16 +219,7 @@ void OomInterventionTabHelper::OnCrashDumpProcessed(
         "OomProtectedCrashAfterDetectionTime",
         elapsed_time);
 
-    if (intervention_state_ != InterventionState::NOT_TRIGGERED) {
-      // Consider UI_SHOWN as ACCEPTED because we already triggered the
-      // intervention and the user didn't decline.
-      bool accepted = intervention_state_ != InterventionState::DECLINED;
-      RecordInterventionStateOnCrash(accepted);
-    }
     ResetInterventionState();
-  } else {
-    RecordNearOomDetectionEndReason(
-        NearOomDetectionEndReason::OOM_PROTECTED_CRASH);
   }
 
   base::TimeDelta time_since_last_navigation;
@@ -285,7 +254,7 @@ void OomInterventionTabHelper::StartMonitoringIfNeeded() {
 
   auto* config = OomInterventionConfig::GetInstance();
   if (config->should_detect_in_renderer()) {
-    if (binding_.is_bound())
+    if (receiver_.is_bound())
       return;
     StartDetectionInRenderer();
   } else if (config->is_swap_monitor_enabled()) {
@@ -323,18 +292,21 @@ void OomInterventionTabHelper::StartDetectionInRenderer() {
 
   content::RenderFrameHost* main_frame = web_contents()->GetMainFrame();
   DCHECK(main_frame);
+
+  // Connections to the renderer will not be recreated when coming out of the
+  // cache so prevent us from getting in there in the first place.
+  content::BackForwardCache::DisableForRenderFrameHost(
+      main_frame, "OomInterventionTabHelper");
+
   content::RenderProcessHost* render_process_host = main_frame->GetProcess();
   DCHECK(render_process_host);
-  content::BindInterface(render_process_host,
-                         mojo::MakeRequest(&intervention_));
-  DCHECK(!binding_.is_bound());
-  blink::mojom::OomInterventionHostPtr host;
-  binding_.Bind(mojo::MakeRequest(&host));
+  render_process_host->BindReceiver(intervention_.BindNewPipeAndPassReceiver());
+  DCHECK(!receiver_.is_bound());
   blink::mojom::DetectionArgsPtr detection_args =
       config->GetRendererOomDetectionArgs();
-  intervention_->StartDetection(std::move(host), std::move(detection_args),
-                                renderer_pause_enabled, navigate_ads_enabled,
-                                purge_v8_memory_enabled);
+  intervention_->StartDetection(
+      receiver_.BindNewPipeAndPassRemote(), std::move(detection_args),
+      renderer_pause_enabled, navigate_ads_enabled, purge_v8_memory_enabled);
 }
 
 void OomInterventionTabHelper::OnNearOomDetected() {
@@ -347,9 +319,9 @@ void OomInterventionTabHelper::OnNearOomDetected() {
   DCHECK(!renderer_detection_timer_.IsRunning());
   renderer_detection_timer_.Start(
       FROM_HERE, kRendererHighMemoryUsageDetectionWindow,
-      base::BindRepeating(&OomInterventionTabHelper::
-                              OnDetectionWindowElapsedWithoutHighMemoryUsage,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&OomInterventionTabHelper::
+                         OnDetectionWindowElapsedWithoutHighMemoryUsage,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OomInterventionTabHelper::
@@ -367,8 +339,7 @@ void OomInterventionTabHelper::ResetInterventionState() {
 
 void OomInterventionTabHelper::ResetInterfaces() {
   intervention_.reset();
-  if (binding_.is_bound())
-    binding_.Close();
+  receiver_.reset();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(OomInterventionTabHelper)

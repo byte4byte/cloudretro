@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_table.h"
@@ -103,6 +103,7 @@ void PredictorDatabaseInternal::Initialize() {
   }
 
   bool success = db_->Open(db_path_);
+  db_->Preload();
 
   if (!success)
     return;

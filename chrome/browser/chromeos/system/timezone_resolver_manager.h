@@ -80,6 +80,9 @@ class TimeZoneResolverManager : public TimeZoneResolver::Delegate {
   // thus cannot be changed by user.
   static bool IsTimeZoneResolutionPolicyControlled();
 
+  // Returns true if service should be running for the signin screen.
+  static bool IfServiceShouldBeRunningForSigninScreen();
+
  private:
   int GetTimezoneManagementSetting();
 
@@ -101,7 +104,7 @@ class TimeZoneResolverManager : public TimeZoneResolver::Delegate {
   // Becomes true after UpdateTimezoneResolver() has been called at least once.
   bool initialized_ = false;
 
-  base::WeakPtrFactory<TimeZoneResolverManager> weak_factory_;
+  base::WeakPtrFactory<TimeZoneResolverManager> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TimeZoneResolverManager);
 };

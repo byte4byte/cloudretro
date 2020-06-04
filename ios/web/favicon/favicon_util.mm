@@ -9,6 +9,7 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -25,9 +26,8 @@ bool ExtractFaviconURL(const base::DictionaryValue* favicon_url_message,
     DLOG(WARNING) << "JS message parameter not found: favicons";
     return false;
   }
-  const std::vector<base::Value>& favicons = favicons_value->GetList();
   BOOL has_favicon = NO;
-  for (const base::Value& favicon : favicons) {
+  for (const base::Value& favicon : favicons_value->GetList()) {
     if (!favicon.is_dict())
       return false;
 

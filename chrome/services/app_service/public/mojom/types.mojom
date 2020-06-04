@@ -4,8 +4,9 @@
 
 module apps.mojom;
 
+import "mojo/public/mojom/base/file_path.mojom";
 import "mojo/public/mojom/base/time.mojom";
-import "ui/gfx/image/mojo/image.mojom";
+import "ui/gfx/image/mojom/image.mojom";
 
 // Information about an app. See chrome/services/app_service/README.md.
 struct App {
@@ -17,7 +18,14 @@ struct App {
   Readiness readiness;
   string? name;
   string? short_name;
+
+  // The publisher-specific ID for this app, e.g. for Android apps, this field
+  // contains the Android package name. May be empty if AppId() should be
+  // considered as the canonical publisher ID.
+  string? publisher_id;
+
   string? description;
+  string? version;
   array<string> additional_search_terms;
   IconKey? icon_key;
   mojo_base.mojom.Time? last_launch_time;
@@ -45,6 +53,19 @@ struct App {
   OptionalBool show_in_search;
   OptionalBool show_in_management;
 
+  // Whether the app icon should add the notification badging.
+  OptionalBool has_badge;
+
+  // Paused apps cannot be launched, and any running apps that become paused
+  // will be stopped. This is independent of whether or not the app is ready to
+  // be launched (defined by the Readiness field).
+  OptionalBool paused;
+
+  // This vector stores all the intent filters defined in this app. Each
+  // intent filter defines a matching criteria for whether an intent can
+  // be handled by this app. One app can have multiple intent filters.
+  array<IntentFilter> intent_filters;
+
   // When adding new fields, also update the Merge method and other helpers in
   // chrome/services/app_service/public/cpp/app_update.*
 };
@@ -66,9 +87,11 @@ enum AppType {
   kUnknown = 0,
   kArc,        // Android app.
   kBuiltIn,    // Built-in app.
-  kCrostini,   // Linux app.
+  kCrostini,   // Linux (via Crostini) app.
   kExtension,  // Extension-backed app.
   kWeb,        // Web app.
+  kMacNative,  // Native Mac app.
+  kPluginVm,   // Plugin VM app.
 };
 
 // Whether an app is ready to launch, i.e. installed.
@@ -147,15 +170,30 @@ struct IconValue {
   bool is_placeholder_icon;
 };
 
+// Enumeration of possible app launch sources.
+// Note the enumeration is used in UMA histogram so entries
+// should not be re-ordered or removed.
 enum LaunchSource {
-  kUnknown,
-  kFromAppListGrid,              // Grid of apps, not the search box.
-  kFromAppListGridContextMenu,   // Grid of apps; context menu.
-  kFromAppListQuery,             // Query-dependent results (larger icons).
-  kFromAppListQueryContextMenu,  // Query-dependent results; context menu.
-  kFromAppListRecommendation,    // Query-less recommendations (smaller icons).
-  kFromKioskNextHome,            // Kiosk Next Home app.
-  kFromParentalControls,         // Parental Controls Settings Section.
+  kUnknown = 0,
+  kFromAppListGrid = 1,             // Grid of apps, not the search box.
+  kFromAppListGridContextMenu = 2,  // Grid of apps; context menu.
+  kFromAppListQuery = 3,            // Query-dependent results (larger icons).
+  kFromAppListQueryContextMenu = 4, // Query-dependent results; context menu.
+  kFromAppListRecommendation = 5,   // Query-less recommendations (smaller
+                                    // icons).
+  kFromParentalControls = 6,        // Parental Controls Settings Section and
+                                    // Per App time notification.
+  kFromShelf = 7,                   // Shelf.
+  kFromFileManager = 8,             // FileManager.
+  kFromLink = 9,                    // Left-licking on links in the browser.
+  kFromOmnibox = 10,                // Enter URL in the Omnibox in the browser.
+  kFromChromeInternal = 11,         // Chrome internal call.
+  kFromKeyboard = 12,               // Keyboard shortcut for opening app.
+  kFromOtherApp = 13,               // Clicking link in another app or webui.
+  kFromMenu = 14,                   // Menu.
+  kFromInstalledNotification = 15,  // Installed notification
+  kFromTest = 16,                   // Test
+  kFromArc = 17,                    // Arc.
 };
 
 enum TriState {
@@ -167,4 +205,109 @@ enum TriState {
 enum PermissionValueType {
   kBool,                       // Permission.value is a Bool (either 0 or 1).
   kTriState,                   // Permission.value is a TriState.
+};
+
+// MenuItems are used to populate context menus, e.g. in the app list or shelf.
+// Note: Some menu item types only support a subset of these item features.
+// Please update comments below (MenuItemType -> [fields expected for usage])
+// when anything changed to MenuItemType or MenuItem.
+//
+// kCommand    -> [command_id, string_id].
+// kRadio      -> [command_id, string_id, radio_group_id].
+// kSeparator  -> [command_id].
+// kSubmenu    -> [command_id, string_id, submenu].
+// kArcCommand -> [command_id, shortcut_id, label, image].
+//
+struct MenuItems {
+  array<MenuItem> items;
+};
+
+struct MenuItem {
+  MenuItemType type;                 // The type of the menu item.
+  int32 command_id;                  // The menu item command id.
+  int32 string_id;                   // The id of the menu item label.
+  array<MenuItem> submenu;           // The optional nested submenu item list.
+  int32 radio_group_id;              // The radio group id.
+  string shortcut_id;                // The shortcut id, may be empty.
+  string label;                      // The string label, may be empty.
+  gfx.mojom.ImageSkia? image;        // The image icon, may be null.
+};
+
+// The types of menu items shown in the app list or shelf.
+enum MenuItemType {
+  kCommand,    // Performs an action when selected.
+  kRadio,      // Can be selected/checked among a group of choices.
+  kSeparator,  // Shows a horizontal line separator.
+  kSubmenu,    // Presents a submenu within another menu.
+  kArcCommand, // Performs an ARC shortcut action when selected.
+};
+
+// Which component requests context menus, the app list or shelf.
+enum MenuType {
+  kAppList,
+  kShelf,
+};
+
+// The intent filter matching condition types.
+enum ConditionType {
+  kScheme,    // Matches the URL scheme (e.g. https, tel).
+  kHost,      // Matches the URL host (e.g. www.google.com).
+  kPattern,   // Matches the URL pattern (e.g. /abc/*).
+};
+
+// The pattern match type for intent filter pattern condition.
+enum PatternMatchType {
+  kNone = 0,
+  kLiteral,
+  kPrefix,
+  kGlob,
+};
+
+// For pattern type of condition, the value match will be based on the pattern
+// match type. If the match_type is kNone, then an exact match with the value
+// will be required.
+struct ConditionValue {
+  string value;
+  PatternMatchType match_type; // This will be None for non pattern conditions.
+};
+
+// The condition for an intent filter. It matches if the intent contains this
+// condition type and the corresponding value matches with any of the
+// condition_values.
+struct Condition {
+  ConditionType condition_type;
+  array<ConditionValue> condition_values;
+};
+
+// An intent filter is defined by an app, and contains a list of conditions that
+// an intent needs to match. If all conditions match, then this intent filter
+// matches against an intent.
+struct IntentFilter {
+  array<Condition> conditions;
+};
+
+// Action and resource handling request. This includes the scheme and URL at
+// the moment, and will be extended to handle MIME type and file extensions in
+// the future.
+struct Intent {
+  string? scheme; // URL scheme. e.g. https.
+  string? host;   // URL host. e.g. www.google.com.
+  string? port;   // URL host. e.g. 8080.
+  string? path;   // URL path. e.g. /abc.
+};
+
+// Represents a group of |app_ids| that is no longer preferred app of their
+// corresponding |intent_filters|.
+struct ReplacedAppPreferences {
+  map<string, array<IntentFilter>> replaced_preference;
+};
+
+// The preferred app represents by |app_id| for |intent_fitler|.
+struct PreferredApp {
+  IntentFilter intent_filter;
+  string app_id;
+};
+
+struct FilePaths {
+  array<mojo_base.mojom.FilePath> file_paths;
 };

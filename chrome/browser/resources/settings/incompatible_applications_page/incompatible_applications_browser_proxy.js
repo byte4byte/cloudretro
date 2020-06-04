@@ -2,42 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * @fileoverview A helper object used from the Incompatible Applications section
- * to interact with the browser.
- */
+// clang-format off
+import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+// clang-format on
 
-cr.exportPath('settings');
+  /**
+   * All possible actions to take on an incompatible application.
+   *
+   * Must be kept in sync with BlacklistMessageType in
+   * chrome/browser/win/conflicts/proto/module_list.proto
+   * @readonly
+   * @enum {number}
+   */
+  export const ActionTypes = {
+    UNINSTALL: 0,
+    MORE_INFO: 1,
+    UPGRADE: 2,
+  };
 
-/**
- * All possible actions to take on an incompatible application.
- *
- * Must be kept in sync with BlacklistMessageType in
- * chrome/browser/win/conflicts/proto/module_list.proto
- * @readonly
- * @enum {number}
- */
-settings.ActionTypes = {
-  UNINSTALL: 0,
-  MORE_INFO: 1,
-  UPGRADE: 2,
-};
+  /**
+   * @typedef {{
+   *   name: string,
+   *   actionType: {settings.ActionTypes},
+   *   actionUrl: string,
+   * }}
+   */
+  export let IncompatibleApplication;
 
-/**
- * @typedef {{
- *   name: string,
- *   actionType: {settings.ActionTypes},
- *   actionUrl: string,
- * }}
- */
-settings.IncompatibleApplication;
-
-cr.define('settings', function() {
   /** @interface */
-  class IncompatibleApplicationsBrowserProxy {
+  export class IncompatibleApplicationsBrowserProxy {
     /**
      * Get the list of incompatible applications.
-     * @return {!Promise<!Array<!settings.IncompatibleApplication>>}
+     * @return {!Promise<!Array<!IncompatibleApplication>>}
      */
     requestIncompatibleApplicationsList() {}
 
@@ -79,11 +75,11 @@ cr.define('settings', function() {
     getListTitlePluralString(numApplications) {}
   }
 
-  /** @implements {settings.IncompatibleApplicationsBrowserProxy} */
-  class IncompatibleApplicationsBrowserProxyImpl {
+  /** @implements {IncompatibleApplicationsBrowserProxy} */
+  export class IncompatibleApplicationsBrowserProxyImpl {
     /** @override */
     requestIncompatibleApplicationsList() {
-      return cr.sendWithPromise('requestIncompatibleApplicationsList');
+      return sendWithPromise('requestIncompatibleApplicationsList');
     }
 
     /** @override */
@@ -98,26 +94,20 @@ cr.define('settings', function() {
 
     /** @override */
     getSubtitlePluralString(numApplications) {
-      return cr.sendWithPromise('getSubtitlePluralString', numApplications);
+      return sendWithPromise('getSubtitlePluralString', numApplications);
     }
 
     /** @override */
     getSubtitleNoAdminRightsPluralString(numApplications) {
-      return cr.sendWithPromise(
+      return sendWithPromise(
           'getSubtitleNoAdminRightsPluralString', numApplications);
     }
 
     /** @override */
     getListTitlePluralString(numApplications) {
-      return cr.sendWithPromise('getListTitlePluralString', numApplications);
+      return sendWithPromise('getListTitlePluralString', numApplications);
     }
   }
 
-  cr.addSingletonGetter(IncompatibleApplicationsBrowserProxyImpl);
+  addSingletonGetter(IncompatibleApplicationsBrowserProxyImpl);
 
-  return {
-    IncompatibleApplicationsBrowserProxy: IncompatibleApplicationsBrowserProxy,
-    IncompatibleApplicationsBrowserProxyImpl:
-        IncompatibleApplicationsBrowserProxyImpl,
-  };
-});

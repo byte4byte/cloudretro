@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/optional.h"
 #include "base/stl_util.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -65,9 +65,8 @@ bool IsRunningInAppMode() {
 }
 
 bool IsRunningInForcedAppMode() {
-  return GetForcedAppModeApp().has_value() ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kForceAndroidAppMode);
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kForceAppMode);
 }
 
 bool IsRunningInForcedAppModeForApp(const std::string& app_id) {

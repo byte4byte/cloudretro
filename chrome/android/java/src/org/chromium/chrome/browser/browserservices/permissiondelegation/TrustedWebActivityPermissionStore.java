@@ -6,21 +6,29 @@ package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.support.annotation.Nullable;
-import android.support.annotation.WorkerThread;
+import android.util.Base64;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+import androidx.annotation.WorkerThread;
+import androidx.browser.trusted.Token;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.StrictModeContext;
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.browserservices.Origin;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.Origin;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Stores cached data about the permissions (currently just the notification permission) of
- * installed Trusted Web Activity Client Apps. This is used to determine what permissions to give
- * to the associated websites. TWAs are indexed by their associated Origins.
+ * Stores data about origins associated with a Trusted Web Activity for the purpose of Permission
+ * Delegation. Primarily we store (indexed by origin):
+ *
+ * - A list of all TWAs associated with an origin.
+ * - The TWA that will be used for delegation.
+ * - The permission state of the TWA that will be used for delegation.
  *
  * We did not use a similar technique to
  * {@link org.chromium.chrome.browser.webapps.WebappDataStorage}, because the data backing each
@@ -31,10 +39,9 @@ import java.util.Set;
  *
  * A key difference between this class and the
  * {@link org.chromium.chrome.browser.browserservices.ClientAppDataRegister} is that the register
- * stores data keyed by the client app, where as this class stores data keyed by the origin. There
+ * stores data keyed by the client app, whereas this class stores data keyed by the origin. There
  * may be two client apps installed for the same origin, the ClientAppDataRegister will hold two
- * entries, whereas this class will hold data for one client app that will be used for permission
- * delegation.
+ * entries, whereas this class will hold one entry.
  *
  * Lifecycle: This class is designed to be owned by
  * {@link org.chromium.chrome.browser.webapps.WebappRegistry}, get it from there, don't create your
@@ -50,10 +57,13 @@ public class TrustedWebActivityPermissionStore {
     private static final String KEY_ALL_ORIGINS = "origins";
 
     private static final String KEY_NOTIFICATION_PERMISSION_PREFIX = "notification_permission.";
+    private static final String KEY_GEOLOCATION_PERMISSION_PREFIX = "geolocation_permission.";
+    private static final String KEY_UNSUPPORTED_PERMISSION_PREFIX = "unsurpported__permission.";
     private static final String KEY_PACKAGE_NAME_PREFIX = "package_name.";
     private static final String KEY_APP_NAME_PREFIX = "app_name.";
     private static final String KEY_PRE_TWA_NOTIFICATION_PERMISSION_PREFIX
             = "pre_twa_notification_permission.";
+    private static final String KEY_ALL_DELEGATE_APPS = "all_delegate_apps.";
 
     private final SharedPreferences mPreferences;
 
@@ -77,27 +87,48 @@ public class TrustedWebActivityPermissionStore {
     }
 
     /**
-     * Whether notifications for that origin should be enabled due to a TWA. {@code null} if
-     * given origin is not linked to a TWA.
+     * Whether permission of {@link ContentSettingsType} for that origin should be enabled due to a
+     * TWA. {@code null} if given origin is not linked to a TWA.
      */
-    public Boolean areNotificationsEnabled(Origin origin) {
-        String key = createNotificationPermissionKey(origin);
+    public Boolean arePermissionEnabled(@ContentSettingsType int type, Origin origin) {
+        String key = createPermissionKey(type, origin);
         if (!mPreferences.contains(key)) return null;
         return mPreferences.getBoolean(key, false);
     }
 
     @Nullable
-    String getAppName(Origin origin) {
+    String getDelegateAppName(Origin origin) {
         return mPreferences.getString(createAppNameKey(origin), null);
     }
 
     @Nullable
-    String getPackageName(Origin origin) {
+    String getDelegatePackageName(Origin origin) {
         return mPreferences.getString(createPackageNameKey(origin), null);
     }
 
+    @Nullable
+    Set<Token> getAllDelegateApps(Origin origin) {
+        Set<String> tokens =
+                mPreferences.getStringSet(createAllDelegateAppsKey(origin), null);
+        if (tokens == null) return null;
+
+        Set<Token> result = new HashSet<>();
+        for (String tokenAsString : tokens) {
+            result.add(Token.deserialize(stringToByteArray(tokenAsString)));
+        }
+        return result;
+    }
+
+    void addDelegateApp(Origin origin, Token token) {
+        String key = createAllDelegateAppsKey(origin);
+        Set<String> allDelegateApps =
+                new HashSet<>(mPreferences.getStringSet(key, Collections.emptySet()));
+        allDelegateApps.add(byteArrayToString(token.serialize()));
+        mPreferences.edit().putStringSet(key, allDelegateApps).apply();
+    }
+
     /** Gets all the origins of registered TWAs. */
-    Set<String> getStoredOrigins() {
+    public Set<String> getStoredOrigins() {
         // In case the pre-emptive disk read in initStorage hasn't occurred by the time we actually
         // need the value.
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
@@ -116,13 +147,14 @@ public class TrustedWebActivityPermissionStore {
      * Returns whether {@code true} if state was changed, {@code false} if the provided state was
      * the same as the state beforehand.
      */
-    boolean setStateForOrigin(Origin origin, String packageName, String appName, boolean enabled) {
+    boolean setStateForOrigin(Origin origin, String packageName, String appName,
+            @ContentSettingsType int type, boolean enabled) {
         boolean modified = !getStoredOrigins().contains(origin.toString());
 
         if (!modified) {
             // Don't bother with these extra checks if we have a brand new origin.
-            boolean enabledChanged = enabled !=
-                    mPreferences.getBoolean(createNotificationPermissionKey(origin), false);
+            boolean enabledChanged =
+                    enabled != mPreferences.getBoolean(createPermissionKey(type, origin), false);
             boolean packageChanged = !packageName.equals(
                     mPreferences.getString(createPackageNameKey(origin), null));
             boolean appNameChanged = !appName.equals(
@@ -133,7 +165,7 @@ public class TrustedWebActivityPermissionStore {
         addOrigin(origin);
 
         mPreferences.edit()
-                .putBoolean(createNotificationPermissionKey(origin), enabled)
+                .putBoolean(createPermissionKey(type, origin), enabled)
                 .putString(createPackageNameKey(origin), packageName)
                 .putString(createAppNameKey(origin), appName)
                 .apply();
@@ -148,9 +180,11 @@ public class TrustedWebActivityPermissionStore {
 
         mPreferences.edit()
                 .putStringSet(KEY_ALL_ORIGINS, origins)
-                .remove(createNotificationPermissionKey(origin))
+                .remove(createPermissionKey(ContentSettingsType.NOTIFICATIONS, origin))
+                .remove(createPermissionKey(ContentSettingsType.GEOLOCATION, origin))
                 .remove(createAppNameKey(origin))
                 .remove(createPackageNameKey(origin))
+                .remove(createAllDelegateAppsKey(origin))
                 .apply();
     }
 
@@ -192,8 +226,20 @@ public class TrustedWebActivityPermissionStore {
                 .apply();
     }
 
-    private String createNotificationPermissionKey(Origin origin) {
-        return KEY_NOTIFICATION_PERMISSION_PREFIX + origin.toString();
+    private String getKeyPermissionPrefix(@ContentSettingsType int type) {
+        switch (type) {
+            case ContentSettingsType.NOTIFICATIONS:
+                return KEY_NOTIFICATION_PERMISSION_PREFIX;
+            case ContentSettingsType.GEOLOCATION:
+                return KEY_GEOLOCATION_PERMISSION_PREFIX;
+            default:
+                assert false;
+                return KEY_UNSUPPORTED_PERMISSION_PREFIX;
+        }
+    }
+
+    private String createPermissionKey(@ContentSettingsType int type, Origin origin) {
+        return getKeyPermissionPrefix(type) + origin.toString();
     }
 
     private String createNotificationPreTwaPermissionKey(Origin origin) {
@@ -206,5 +252,17 @@ public class TrustedWebActivityPermissionStore {
 
     private String createAppNameKey(Origin origin) {
         return KEY_APP_NAME_PREFIX + origin.toString();
+    }
+
+    private String createAllDelegateAppsKey(Origin origin) {
+        return KEY_ALL_DELEGATE_APPS + origin.toString();
+    }
+
+    private static byte[] stringToByteArray(String string) {
+        return Base64.decode(string, Base64.NO_WRAP | Base64.NO_PADDING);
+    }
+
+    private static String byteArrayToString(byte[] byteArray) {
+        return Base64.encodeToString(byteArray, Base64.NO_WRAP | Base64.NO_PADDING);
     }
 }

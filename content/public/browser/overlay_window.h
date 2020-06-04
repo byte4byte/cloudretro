@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/macros.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
@@ -37,12 +38,6 @@ class OverlayWindow {
     kEndOfVideo,
   };
 
-  enum MutedState {
-    kMuted = 0,
-    kUnmuted,
-    kNoAudio,
-  };
-
   OverlayWindow() = default;
   virtual ~OverlayWindow() = default;
 
@@ -62,7 +57,6 @@ class OverlayWindow {
   virtual void UpdateVideoSize(const gfx::Size& natural_size) = 0;
   virtual void SetPlaybackState(PlaybackState playback_state) = 0;
   virtual void SetAlwaysHidePlayPauseButton(bool is_visible) = 0;
-  virtual void SetMutedState(MutedState muted_state) = 0;
   virtual void SetSkipAdButtonVisibility(bool is_visible) = 0;
   virtual void SetNextTrackButtonVisibility(bool is_visible) = 0;
   virtual void SetPreviousTrackButtonVisibility(bool is_visible) = 0;

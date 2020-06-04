@@ -42,7 +42,8 @@ class FakeSyncManager : public SyncManager {
   // to include those types that didn't fail.
   FakeSyncManager(ModelTypeSet initial_sync_ended_types,
                   ModelTypeSet progress_marker_types,
-                  ModelTypeSet configure_fail_types);
+                  ModelTypeSet configure_fail_types,
+                  bool should_fail_on_init);
   ~FakeSyncManager() override;
 
   // Returns those types that have been purged from the directory since the last
@@ -89,14 +90,13 @@ class FakeSyncManager : public SyncManager {
   void ConfigureSyncer(ConfigureReason reason,
                        ModelTypeSet to_download,
                        SyncFeatureState sync_feature_state,
-                       const base::Closure& ready_task) override;
+                       base::OnceClosure ready_task) override;
   void OnIncomingInvalidation(
       ModelType type,
       std::unique_ptr<InvalidationInterface> interface) override;
   void SetInvalidatorEnabled(bool invalidator_enabled) override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
-  SyncStatus GetDetailedStatus() const override;
   void SaveChanges() override;
   void ShutdownOnSyncThread() override;
   UserShare* GetUserShare() override;
@@ -126,6 +126,7 @@ class FakeSyncManager : public SyncManager {
 
   base::ObserverList<SyncManager::Observer>::Unchecked observers_;
 
+  bool should_fail_on_init_;
   // Faked directory state.
   ModelTypeSet initial_sync_ended_types_;
   ModelTypeSet progress_marker_types_;

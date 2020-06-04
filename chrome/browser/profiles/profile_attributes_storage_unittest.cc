@@ -11,6 +11,7 @@
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -21,7 +22,8 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/account_id/account_id.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/profile_metrics/state.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -171,7 +173,7 @@ class ProfileAttributesStorageTest : public testing::Test {
         base::StringPrintf("testing_profile_gaia%" PRIuS, number_of_profiles),
         base::ASCIIToUTF16(base::StringPrintf("testing_profile_user%" PRIuS,
                                               number_of_profiles)),
-        number_of_profiles, std::string(""), EmptyAccountId());
+        true, number_of_profiles, std::string(""), EmptyAccountId());
 
     EXPECT_EQ(number_of_profiles + 1, storage()->GetNumberOfProfiles());
   }
@@ -179,7 +181,7 @@ class ProfileAttributesStorageTest : public testing::Test {
   TestingProfileManager testing_profile_manager_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   ProfileAttributesTestObserver observer_;
 };
 
@@ -208,7 +210,7 @@ TEST_F(ProfileAttributesStorageTest, AddProfile) {
   storage()->AddProfile(GetProfilePath("new_profile_path_1"),
                         base::ASCIIToUTF16("new_profile_name_1"),
                         std::string("new_profile_gaia_1"),
-                        base::ASCIIToUTF16("new_profile_username_1"), 1,
+                        base::ASCIIToUTF16("new_profile_username_1"), true, 1,
                         std::string(""), EmptyAccountId());
 
   VerifyAndResetCallExpectations();
@@ -298,7 +300,7 @@ TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
   EXPECT_EQ(path, entry->GetPath());
 
   EXPECT_CALL(observer(), OnProfileNameChanged(path, _)).Times(2);
-  TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, Name);
+  TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, LocalProfileName);
   VerifyAndResetCallExpectations();
 
   TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, ShortcutName);
@@ -307,8 +309,10 @@ TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
       ProfileAttributesEntry, entry, PasswordChangeDetectionToken);
   TEST_ACCESSORS(ProfileAttributesEntry, entry, BackgroundStatus, true, false);
 
+  EXPECT_CALL(observer(), OnProfileNameChanged(path, _)).Times(4);
   TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, GAIAName);
   TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, GAIAGivenName);
+  VerifyAndResetCallExpectations();
 
   EXPECT_CALL(observer(), OnProfileAvatarChanged(path)).Times(2);
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsUsingGAIAPicture);
@@ -458,14 +462,14 @@ TEST_F(ProfileAttributesStorageTest, AuthInfo) {
   ASSERT_TRUE(storage()->GetProfileAttributesWithPath(path, &entry));
 
   EXPECT_CALL(observer(), OnProfileAuthInfoChanged(path)).Times(1);
-  entry->SetAuthInfo("", base::string16());
+  entry->SetAuthInfo("", base::string16(), false);
   VerifyAndResetCallExpectations();
-  ASSERT_FALSE(entry->IsAuthenticated());
+  ASSERT_EQ(entry->GetSigninState(), SigninState::kNotSignedIn);
   EXPECT_EQ(base::string16(), entry->GetUserName());
   EXPECT_EQ("", entry->GetGAIAId());
 
   EXPECT_CALL(observer(), OnProfileAuthInfoChanged(path)).Times(1);
-  entry->SetAuthInfo("foo", base::ASCIIToUTF16("bar"));
+  entry->SetAuthInfo("foo", base::ASCIIToUTF16("bar"), true);
   VerifyAndResetCallExpectations();
   ASSERT_TRUE(entry->IsAuthenticated());
   EXPECT_EQ(base::ASCIIToUTF16("bar"), entry->GetUserName());
@@ -493,12 +497,14 @@ TEST_F(ProfileAttributesStorageTest, SupervisedUsersAccessors) {
   ASSERT_FALSE(entry->IsChild());
   ASSERT_TRUE(entry->IsLegacySupervised());
 
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   EXPECT_CALL(observer(), OnProfileSupervisedUserIdChanged(path)).Times(1);
   entry->SetSupervisedUserId(supervised_users::kChildAccountSUID);
   VerifyAndResetCallExpectations();
   ASSERT_TRUE(entry->IsSupervised());
   ASSERT_TRUE(entry->IsChild());
   ASSERT_FALSE(entry->IsLegacySupervised());
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 }
 
 TEST_F(ProfileAttributesStorageTest, ReSortTriggered) {
@@ -506,20 +512,20 @@ TEST_F(ProfileAttributesStorageTest, ReSortTriggered) {
 
   storage()->AddProfile(GetProfilePath("alpha_path"),
                         base::ASCIIToUTF16("alpha"), std::string("alpha_gaia"),
-                        base::ASCIIToUTF16("alpha_username"), 1,
+                        base::ASCIIToUTF16("alpha_username"), true, 1,
                         std::string(""), EmptyAccountId());
 
   storage()->AddProfile(GetProfilePath("lima_path"), base::ASCIIToUTF16("lima"),
                         std::string("lima_gaia"),
-                        base::ASCIIToUTF16("lima_username"), 1, std::string(""),
-                        EmptyAccountId());
+                        base::ASCIIToUTF16("lima_username"), true, 1,
+                        std::string(""), EmptyAccountId());
 
   ProfileAttributesEntry* entry;
   ASSERT_TRUE(storage()->GetProfileAttributesWithPath(
       GetProfilePath("alpha_path"), &entry));
 
   // Trigger a ProfileInfoCache re-sort.
-  entry->SetName(base::ASCIIToUTF16("zulu_name"));
+  entry->SetLocalProfileName(base::ASCIIToUTF16("zulu_name"));
   EXPECT_EQ(GetProfilePath("alpha_path"), entry->GetPath());
 }
 
@@ -574,19 +580,15 @@ TEST_F(ProfileAttributesStorageTest, AccessFromElsewhere) {
   ASSERT_TRUE(storage()->GetProfileAttributesWithPath(
       GetProfilePath("testing_profile_path0"), &second_entry));
 
-  first_entry->SetName(base::ASCIIToUTF16("NewName"));
+  first_entry->SetLocalProfileName(base::ASCIIToUTF16("NewName"));
   EXPECT_EQ(base::ASCIIToUTF16("NewName"), second_entry->GetName());
   EXPECT_EQ(first_entry, second_entry);
 
   // The ProfileInfoCache should also reflect the changes and its changes
   // should be reflected by the ProfileAttributesStorage.
-  size_t index = profile_info_cache()->GetIndexOfProfileWithPath(
-      GetProfilePath("testing_profile_path0"));
-  EXPECT_EQ(base::ASCIIToUTF16("NewName"),
-      profile_info_cache()->GetNameOfProfileAtIndex(index));
+  EXPECT_EQ(base::ASCIIToUTF16("NewName"), second_entry->GetName());
 
-  profile_info_cache()->SetNameOfProfileAtIndex(
-      index, base::ASCIIToUTF16("OtherNewName"));
+  second_entry->SetLocalProfileName(base::ASCIIToUTF16("OtherNewName"));
   EXPECT_EQ(base::ASCIIToUTF16("OtherNewName"), first_entry->GetName());
 }
 
@@ -617,7 +619,7 @@ TEST_F(ProfileAttributesStorageTest, ChooseAvatarIconIndexForNewProfile) {
         GetProfilePath(base::StringPrintf("testing_profile_path%" PRIuS, i));
     EXPECT_CALL(observer(), OnProfileAdded(profile_path)).Times(1);
     storage()->AddProfile(profile_path, base::string16(), std::string(),
-                          base::string16(), icon_index, std::string(),
+                          base::string16(), false, icon_index, std::string(),
                           EmptyAccountId());
     VerifyAndResetCallExpectations();
   }
@@ -690,7 +692,7 @@ TEST_F(ProfileAttributesStorageTest, DownloadHighResAvatarTest) {
   base::FilePath profile_path = GetProfilePath("path_1");
   EXPECT_CALL(observer(), OnProfileAdded(profile_path)).Times(1);
   storage()->AddProfile(profile_path, base::ASCIIToUTF16("name_1"),
-                        std::string(), base::string16(), kIconIndex,
+                        std::string(), base::string16(), false, kIconIndex,
                         std::string(), EmptyAccountId());
   ASSERT_EQ(1U, storage()->GetNumberOfProfiles());
   VerifyAndResetCallExpectations();
@@ -725,8 +727,9 @@ TEST_F(ProfileAttributesStorageTest, DownloadHighResAvatarTest) {
 
   // Simulate downloading a high-res avatar.
   ProfileAvatarDownloader avatar_downloader(
-      kIconIndex, base::Bind(&ProfileAttributesStorage::SaveAvatarImageAtPath,
-                             base::Unretained(storage()), entry->GetPath()));
+      kIconIndex,
+      base::BindOnce(&ProfileAttributesStorage::SaveAvatarImageAtPathNoCallback,
+                     base::Unretained(storage()), entry->GetPath()));
 
   // Put a real bitmap into "bitmap": a 2x2 bitmap of green 32 bit pixels.
   SkBitmap bitmap;
@@ -771,7 +774,7 @@ TEST_F(ProfileAttributesStorageTest, NothingToDownloadHighResAvatarTest) {
   base::FilePath profile_path = GetProfilePath("path_1");
   EXPECT_CALL(observer(), OnProfileAdded(profile_path)).Times(1);
   storage()->AddProfile(profile_path, base::ASCIIToUTF16("name_1"),
-                        std::string(), base::string16(), kIconIndex,
+                        std::string(), base::string16(), false, kIconIndex,
                         std::string(), EmptyAccountId());
   EXPECT_EQ(1U, storage()->GetNumberOfProfiles());
   content::RunAllTasksUntilIdle();
@@ -806,7 +809,7 @@ TEST_F(ProfileAttributesStorageTest, LoadAvatarFromDiskTest) {
   base::FilePath profile_path = GetProfilePath("path_1");
   EXPECT_CALL(observer(), OnProfileAdded(profile_path)).Times(1);
   storage()->AddProfile(profile_path, base::ASCIIToUTF16("name_1"),
-                        std::string(), base::string16(), kIconIndex,
+                        std::string(), base::string16(), false, kIconIndex,
                         std::string(), EmptyAccountId());
   EXPECT_EQ(1U, storage()->GetNumberOfProfiles());
   VerifyAndResetCallExpectations();
@@ -828,3 +831,85 @@ TEST_F(ProfileAttributesStorageTest, LoadAvatarFromDiskTest) {
   EXPECT_FALSE(base::PathExists(icon_path));
 }
 #endif
+
+TEST_F(ProfileAttributesStorageTest, ProfilesState_ActiveMultiProfile) {
+  EXPECT_EQ(0U, storage()->GetNumberOfProfiles());
+  for (size_t i = 0; i < 5; ++i)
+    AddTestingProfile();
+  EXPECT_EQ(5U, storage()->GetNumberOfProfiles());
+
+  std::vector<ProfileAttributesEntry*> entries =
+      storage()->GetAllProfilesAttributes();
+  entries[0]->SetActiveTimeToNow();
+  entries[1]->SetActiveTimeToNow();
+
+  base::HistogramTester histogram_tester;
+  storage()->RecordProfilesState();
+
+  // There are 5 profiles all together.
+  histogram_tester.ExpectTotalCount("Profile.State.Avatar_All", 5);
+  histogram_tester.ExpectTotalCount("Profile.State.Avatar_ActiveMultiProfile",
+                                    5);
+
+  // Other user segments get 0 records.
+  histogram_tester.ExpectTotalCount("Profile.State.Avatar_SingleProfile", 0);
+  histogram_tester.ExpectTotalCount("Profile.State.Avatar_LatentMultiProfile",
+                                    0);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.Avatar_LatentMultiProfileActive", 0);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.Avatar_LatentMultiProfileOthers", 0);
+}
+
+// On Android (at least on KitKat), all profiles are considered active (because
+// ActiveTime is not set in production). Thus, these test does not work.
+#if !defined(OS_ANDROID)
+TEST_F(ProfileAttributesStorageTest, ProfilesState_LatentMultiProfile) {
+  EXPECT_EQ(0U, storage()->GetNumberOfProfiles());
+  for (size_t i = 0; i < 5; ++i)
+    AddTestingProfile();
+  EXPECT_EQ(5U, storage()->GetNumberOfProfiles());
+
+  std::vector<ProfileAttributesEntry*> entries =
+      storage()->GetAllProfilesAttributes();
+  entries[0]->SetActiveTimeToNow();
+
+  base::HistogramTester histogram_tester;
+  storage()->RecordProfilesState();
+
+  // There are 5 profiles all together.
+  histogram_tester.ExpectTotalCount("Profile.State.Name_All", 5);
+  histogram_tester.ExpectTotalCount("Profile.State.Name_LatentMultiProfile", 5);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.Name_LatentMultiProfileActive", 1);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.Name_LatentMultiProfileOthers", 4);
+
+  // Other user segments get 0 records.
+  histogram_tester.ExpectTotalCount("Profile.State.Name_SingleProfile", 0);
+  histogram_tester.ExpectTotalCount("Profile.State.Name_ActiveMultiProfile", 0);
+}
+#endif
+
+TEST_F(ProfileAttributesStorageTest, ProfilesState_SingleProfile) {
+  EXPECT_EQ(0U, storage()->GetNumberOfProfiles());
+  AddTestingProfile();
+  EXPECT_EQ(1U, storage()->GetNumberOfProfiles());
+
+  base::HistogramTester histogram_tester;
+  storage()->RecordProfilesState();
+
+  // There is 1 profile all together.
+  histogram_tester.ExpectTotalCount("Profile.State.LastUsed_All", 1);
+  histogram_tester.ExpectTotalCount("Profile.State.LastUsed_SingleProfile", 1);
+
+  // Other user segments get 0 records.
+  histogram_tester.ExpectTotalCount("Profile.State.LastUsed_ActiveMultiProfile",
+                                    0);
+  histogram_tester.ExpectTotalCount("Profile.State.LastUsed_LatentMultiProfile",
+                                    0);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.LastUsed_LatentMultiProfileActive", 0);
+  histogram_tester.ExpectTotalCount(
+      "Profile.State.LastUsed_LatentMultiProfileOthers", 0);
+}

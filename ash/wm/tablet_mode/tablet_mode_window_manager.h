@@ -13,10 +13,10 @@
 
 #include "ash/ash_export.h"
 #include "ash/session/session_observer.h"
-#include "ash/shell_observer.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/overview_observer.h"
 #include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_observer.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "ui/aura/window_observer.h"
@@ -29,11 +29,8 @@ class Window;
 
 namespace ash {
 class TabletModeController;
+class TabletModeToggleFullscreenEventHandler;
 class TabletModeWindowState;
-
-namespace wm {
-class TabletModeEventHandler;
-}
 
 // A window manager which - when created - will force all windows into maximized
 // mode. Exception are panels and windows which cannot be maximized.
@@ -44,15 +41,13 @@ class TabletModeEventHandler;
 class ASH_EXPORT TabletModeWindowManager : public aura::WindowObserver,
                                            public display::DisplayObserver,
                                            public OverviewObserver,
-                                           public ShellObserver,
+                                           public SplitViewObserver,
                                            public SessionObserver {
  public:
   // This should only be created or deleted by the creator
   // (TabletModeController).
   TabletModeWindowManager();
   ~TabletModeWindowManager() override;
-
-  static aura::Window* GetTopWindow();
 
   void Init();
 
@@ -85,8 +80,9 @@ class ASH_EXPORT TabletModeWindowManager : public aura::WindowObserver,
   // OverviewObserver:
   void OnOverviewModeEndingAnimationComplete(bool canceled) override;
 
-  // ShellObserver:
-  void OnSplitViewModeEnded() override;
+  // SplitViewObserver:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
 
   // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
@@ -110,9 +106,25 @@ class ASH_EXPORT TabletModeWindowManager : public aura::WindowObserver,
  private:
   using WindowToState = std::map<aura::Window*, TabletModeWindowState*>;
 
-  // Returns the state type that |window| had before tablet mode started. If
-  // |window| is not yet tracked, returns the current state type of |window|.
-  WindowStateType GetDesktopWindowStateType(aura::Window* window) const;
+  // If |from_clamshell| is true, returns the bounds or state type that |window|
+  // had before tablet mode started. If |from_clamshell| is false, returns the
+  // current bounds or state type of |window|.
+  gfx::Rect GetWindowBoundsInScreen(aura::Window* window,
+                                    bool from_clamshell) const;
+  WindowStateType GetWindowStateType(aura::Window* window,
+                                     bool from_clamshell) const;
+
+  // Returns the windows that are going to be carried over to split view during
+  // clamshell <-> tablet transition or multi-user switch transition.
+  base::flat_map<aura::Window*, WindowStateType> GetCarryOverWindowsInSplitView(
+      bool clamshell_to_tablet) const;
+
+  // Calculates the split view divider position that will best preserve the
+  // bounds of the windows.
+  int CalculateCarryOverDividerPosition(
+      const base::flat_map<aura::Window*, WindowStateType>&
+          windows_in_splitview,
+      bool clamshell_to_tablet) const;
 
   // Maximizes all windows, except that snapped windows shall carry over to
   // split view as determined by GetCarryOverWindowsInSplitView().
@@ -172,7 +184,10 @@ class ASH_EXPORT TabletModeWindowManager : public aura::WindowObserver,
   // All accounts that have been active at least once since tablet mode started.
   base::flat_set<AccountId> accounts_since_entering_tablet_;
 
-  std::unique_ptr<wm::TabletModeEventHandler> event_handler_;
+  std::unique_ptr<TabletModeToggleFullscreenEventHandler> event_handler_;
+
+  // True when tablet mode is about to end.
+  bool is_exiting_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TabletModeWindowManager);
 };

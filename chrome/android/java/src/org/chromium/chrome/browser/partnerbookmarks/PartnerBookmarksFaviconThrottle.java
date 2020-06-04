@@ -8,9 +8,9 @@ import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
 import android.text.format.DateUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
-import org.chromium.base.metrics.RecordHistogram;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -48,9 +48,7 @@ public class PartnerBookmarksFaviconThrottle {
     @VisibleForTesting
     void init() {
         mCurrentEntries = (Map<String, Long>) mSharedPreferences.getAll();
-        RecordHistogram.recordCount100Histogram(
-                "PartnerBookmarksFaviconThrottle.NumEntries", mCurrentEntries.size());
-        mNewEntries = new HashMap<String, Long>();
+        mNewEntries = new HashMap<>();
     }
 
     /**

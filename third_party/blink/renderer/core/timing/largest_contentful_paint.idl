@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 // https://github.com/WICG/LargestContentfulPaint
-[Exposed=Window, RuntimeEnabled=LargestContentfulPaint]
+[Exposed=Window]
 interface LargestContentfulPaint : PerformanceEntry {
     readonly attribute DOMHighResTimeStamp renderTime;
-    readonly attribute DOMHighResTimeStamp responseEnd;
+    readonly attribute DOMHighResTimeStamp loadTime;
     readonly attribute unsigned long long size;
     readonly attribute DOMString id;
     readonly attribute DOMString url;

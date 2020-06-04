@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "third_party/blink/public/platform/web_layer_tree_view.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/renderer/core/events/web_input_event_conversion.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
@@ -16,6 +15,7 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/float_size.h"
@@ -69,7 +69,6 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* web_view)
       is_mobile_layout_theme_enabled_(false),
       original_default_minimum_page_scale_factor_(0),
       original_default_maximum_page_scale_factor_(0),
-      use_solid_color_scrollbar_(false),
       embedder_text_autosizing_enabled_(
           web_view->GetPage()->GetSettings().TextAutosizingEnabled()),
       embedder_device_scale_adjustment_(
@@ -107,9 +106,7 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* web_view)
           web_view->GetPage()->GetSettings().GetCookieEnabled()),
       document_cookie_disabled_(false) {}
 
-DevToolsEmulator::~DevToolsEmulator() = default;
-
-void DevToolsEmulator::Trace(blink::Visitor* visitor) {}
+void DevToolsEmulator::Trace(Visitor* visitor) {}
 
 void DevToolsEmulator::SetTextAutosizingEnabled(bool enabled) {
   embedder_text_autosizing_enabled_ = enabled;
@@ -219,7 +216,7 @@ void DevToolsEmulator::SetPrimaryHoverType(HoverType hover_type) {
     web_view_->GetPage()->GetSettings().SetPrimaryHoverType(hover_type);
 }
 
-void DevToolsEmulator::EnableDeviceEmulation(
+TransformationMatrix DevToolsEmulator::EnableDeviceEmulation(
     const WebDeviceEmulationParams& params) {
   if (device_metrics_enabled_ &&
       emulation_params_.view_size == params.view_size &&
@@ -228,7 +225,7 @@ void DevToolsEmulator::EnableDeviceEmulation(
       emulation_params_.scale == params.scale &&
       emulation_params_.viewport_offset == params.viewport_offset &&
       emulation_params_.viewport_scale == params.viewport_scale) {
-    return;
+    return ComputeRootLayerTransform();
   }
   if (emulation_params_.device_scale_factor != params.device_scale_factor ||
       !device_metrics_enabled_)
@@ -248,18 +245,19 @@ void DevToolsEmulator::EnableDeviceEmulation(
     DisableMobileEmulation();
 
   web_view_->SetCompositorDeviceScaleFactorOverride(params.device_scale_factor);
-  if (params.viewport_offset.x >= 0)
-    ForceViewport(params.viewport_offset, params.viewport_scale);
-  else
-    ResetViewport();
 
-  // TODO(dgozman): MainFrameImpl() is null when it's remote. Figure out how
-  // we end up with enabling emulation in this case.
+  // TODO(wjmaclean): Tell all local frames in the WebView's frame tree, not
+  // just a local main frame.
   if (web_view_->MainFrameImpl()) {
     if (Document* document =
             web_view_->MainFrameImpl()->GetFrame()->GetDocument())
-      document->MediaQueryAffectingValueChanged();
+      document->MediaQueryAffectingValueChanged(MediaValueChange::kOther);
   }
+
+  if (params.viewport_offset.x() >= 0)
+    return ForceViewport(params.viewport_offset, params.viewport_scale);
+  else
+    return ResetViewport();
 }
 
 void DevToolsEmulator::DisableDeviceEmulation() {
@@ -273,13 +271,17 @@ void DevToolsEmulator::DisableDeviceEmulation() {
   DisableMobileEmulation();
   web_view_->SetCompositorDeviceScaleFactorOverride(0.f);
   web_view_->SetPageScaleFactor(1.f);
-  ResetViewport();
-  // mainFrameImpl() could be null during cleanup or remote <-> local swap.
+
+  // TODO(wjmaclean): Tell all local frames in the WebView's frame tree, not
+  // just a local main frame.
   if (web_view_->MainFrameImpl()) {
     if (Document* document =
             web_view_->MainFrameImpl()->GetFrame()->GetDocument())
-      document->MediaQueryAffectingValueChanged();
+      document->MediaQueryAffectingValueChanged(MediaValueChange::kOther);
   }
+
+  TransformationMatrix matrix = ResetViewport();
+  DCHECK(matrix.IsIdentity());
 }
 
 void DevToolsEmulator::EnableMobileEmulation() {
@@ -287,8 +289,8 @@ void DevToolsEmulator::EnableMobileEmulation() {
     return;
   emulate_mobile_enabled_ = true;
   is_overlay_scrollbars_enabled_ =
-      RuntimeEnabledFeatures::OverlayScrollbarsEnabled();
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(true);
+      ScrollbarThemeSettings::OverlayScrollbarsEnabled();
+  ScrollbarThemeSettings::SetOverlayScrollbarsEnabled(true);
   is_orientation_event_enabled_ =
       RuntimeEnabledFeatures::OrientationEventEnabled();
   RuntimeEnabledFeatures::SetOrientationEventEnabled(true);
@@ -296,10 +298,8 @@ void DevToolsEmulator::EnableMobileEmulation() {
       RuntimeEnabledFeatures::MobileLayoutThemeEnabled();
   RuntimeEnabledFeatures::SetMobileLayoutThemeEnabled(true);
   ComputedStyle::InvalidateInitialStyle();
+  Page::PlatformColorsChanged();
   web_view_->GetPage()->GetSettings().SetForceAndroidOverlayScrollbar(true);
-  use_solid_color_scrollbar_ =
-      web_view_->GetPage()->GetSettings().GetUseSolidColorScrollbars();
-  web_view_->GetPage()->GetSettings().SetUseSolidColorScrollbars(true);
   web_view_->GetPage()->GetSettings().SetViewportStyle(
       WebViewportStyle::kMobile);
   web_view_->GetPage()->GetSettings().SetViewportEnabled(true);
@@ -319,8 +319,9 @@ void DevToolsEmulator::EnableMobileEmulation() {
   original_default_maximum_page_scale_factor_ =
       web_view_->DefaultMaximumPageScaleFactor();
   web_view_->SetDefaultPageScaleLimits(0.25f, 5);
-  // TODO(dgozman): MainFrameImpl() is null when it's remote. Figure out how
-  // we end up with enabling emulation in this case.
+
+  // TODO(wjmaclean): Update all local frames in the WebView's frame tree, not
+  // just a local main frame.
   if (web_view_->MainFrameImpl())
     web_view_->MainFrameImpl()->GetFrameView()->UpdateLayout();
 }
@@ -328,15 +329,14 @@ void DevToolsEmulator::EnableMobileEmulation() {
 void DevToolsEmulator::DisableMobileEmulation() {
   if (!emulate_mobile_enabled_)
     return;
-  RuntimeEnabledFeatures::SetOverlayScrollbarsEnabled(
+  ScrollbarThemeSettings::SetOverlayScrollbarsEnabled(
       is_overlay_scrollbars_enabled_);
   RuntimeEnabledFeatures::SetOrientationEventEnabled(
       is_orientation_event_enabled_);
   RuntimeEnabledFeatures::SetMobileLayoutThemeEnabled(
       is_mobile_layout_theme_enabled_);
   ComputedStyle::InvalidateInitialStyle();
-  web_view_->GetPage()->GetSettings().SetUseSolidColorScrollbars(
-      use_solid_color_scrollbar_);
+  Page::PlatformColorsChanged();
   web_view_->GetPage()->GetSettings().SetForceAndroidOverlayScrollbar(false);
   web_view_->GetPage()->GetSettings().SetViewportEnabled(false);
   web_view_->GetPage()->GetSettings().SetViewportMetaEnabled(false);
@@ -362,52 +362,30 @@ void DevToolsEmulator::DisableMobileEmulation() {
     web_view_->MainFrameImpl()->GetFrameView()->UpdateLayout();
 }
 
-void DevToolsEmulator::ForceViewport(const WebFloatPoint& position,
-                                     float scale) {
-  GraphicsLayer* container_layer =
-      web_view_->GetPage()->GetVisualViewport().ContainerLayer();
-  if (!viewport_override_) {
+TransformationMatrix DevToolsEmulator::ForceViewport(
+    const gfx::PointF& position,
+    float scale) {
+  if (!viewport_override_)
     viewport_override_ = ViewportOverride();
 
-    // Disable clipping on the visual viewport layer, to ensure the whole area
-    // is painted.
-    if (container_layer) {
-      viewport_override_->original_visual_viewport_masking =
-          container_layer->MasksToBounds();
-      container_layer->SetMasksToBounds(false);
-    }
-  }
-
-  viewport_override_->position = FloatPoint(position.x, position.y);
+  viewport_override_->position = FloatPoint(position);
   viewport_override_->scale = scale;
 
   // Move the correct (scaled) content area to show in the top left of the
   // CompositorFrame via the root transform.
-  UpdateRootLayerTransform();
+  return ComputeRootLayerTransform();
 }
 
-void DevToolsEmulator::ResetViewport() {
-  if (!viewport_override_) {
-    UpdateRootLayerTransform();
-    return;
-  }
-
-  bool original_masking = viewport_override_->original_visual_viewport_masking;
+TransformationMatrix DevToolsEmulator::ResetViewport() {
   viewport_override_ = base::nullopt;
-
-  GraphicsLayer* container_layer =
-      web_view_->GetPage()->GetVisualViewport().ContainerLayer();
-  if (container_layer)
-    container_layer->SetMasksToBounds(original_masking);
-
-  UpdateRootLayerTransform();
+  return ComputeRootLayerTransform();
 }
 
-void DevToolsEmulator::MainFrameScrollOrScaleChanged() {
+TransformationMatrix DevToolsEmulator::MainFrameScrollOrScaleChanged() {
   // Viewport override has to take current page scale and scroll offset into
   // account. Update the transform if override is active.
-  if (viewport_override_)
-    UpdateRootLayerTransform();
+  DCHECK(viewport_override_);
+  return ComputeRootLayerTransform();
 }
 
 void DevToolsEmulator::ApplyViewportOverride(TransformationMatrix* transform) {
@@ -424,9 +402,9 @@ void DevToolsEmulator::ApplyViewportOverride(TransformationMatrix* transform) {
       web_view_->MainFrame()->IsWebLocalFrame()
           ? web_view_->MainFrame()->ToWebLocalFrame()->GetScrollOffset()
           : WebSize();
-  WebFloatPoint visual_offset = web_view_->VisualViewportOffset();
-  float scroll_x = scroll_offset.width + visual_offset.x;
-  float scroll_y = scroll_offset.height + visual_offset.y;
+  gfx::PointF visual_offset = web_view_->VisualViewportOffset();
+  float scroll_x = scroll_offset.width + visual_offset.x();
+  float scroll_y = scroll_offset.height + visual_offset.y();
   transform->Translate(-viewport_override_->position.X() + scroll_x,
                        -viewport_override_->position.Y() + scroll_y);
 
@@ -435,26 +413,29 @@ void DevToolsEmulator::ApplyViewportOverride(TransformationMatrix* transform) {
   transform->Scale(1. / web_view_->PageScaleFactor());
 }
 
-void DevToolsEmulator::UpdateRootLayerTransform() {
+TransformationMatrix DevToolsEmulator::ComputeRootLayerTransform() {
   TransformationMatrix transform;
-
   // Apply device emulation transform first, so that it is affected by the
   // viewport override.
   ApplyViewportOverride(&transform);
   if (device_metrics_enabled_)
     transform.Scale(emulation_params_.scale);
-  web_view_->SetDeviceEmulationTransform(transform);
+  return transform;
 }
 
-void DevToolsEmulator::OverrideVisibleRect(const IntSize& viewport_size,
-                                           IntRect* visible_rect) const {
-  if (!viewport_override_)
+void DevToolsEmulator::OverrideVisibleRect(
+    const IntSize& viewport_size,
+    IntRect* visible_rect_in_frame) const {
+  WebLocalFrameImpl* frame = web_view_->MainFrameImpl();
+  if (!viewport_override_ || !frame)
     return;
 
   FloatSize scaled_viewport_size(viewport_size);
   scaled_viewport_size.Scale(1. / viewport_override_->scale);
-  *visible_rect = EnclosingIntRect(
+  IntRect visible_rect_in_document = EnclosingIntRect(
       FloatRect(viewport_override_->position, scaled_viewport_size));
+  *visible_rect_in_frame =
+      frame->GetFrameView()->DocumentToFrame(visible_rect_in_document);
 }
 
 float DevToolsEmulator::InputEventsScaleForEmulation() {

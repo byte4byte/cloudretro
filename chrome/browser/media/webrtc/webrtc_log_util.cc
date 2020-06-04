@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
@@ -25,7 +26,7 @@ void WebRtcLogUtil::DeleteOldWebRtcLogFilesForAllProfiles() {
       g_browser_process->profile_manager()->GetProfileAttributesStorage().
           GetAllProfilesAttributes();
   for (ProfileAttributesEntry* entry : entries) {
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
         base::BindOnce(
             &webrtc_logging::DeleteOldWebRtcLogFiles,

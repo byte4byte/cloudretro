@@ -4,29 +4,29 @@
 
 #include "chrome/browser/safe_browsing/certificate_reporting_service.h"
 
+#include <memory>
 #include <string>
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/post_task.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/test/thread_test_helper.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service_test_utils.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
-#include "chrome/browser/ssl/certificate_error_report.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/security_interstitials/content/certificate_error_report.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "crypto/rsa_private_key.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
@@ -167,7 +167,6 @@ class CertificateReportingServiceReporterOnIOThreadTest
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &test_url_loader_factory_);
 
-    message_loop_.reset(new base::MessageLoopForIO());
     event_histogram_tester_.reset(new EventHistogramTester());
   }
 
@@ -195,8 +194,8 @@ class CertificateReportingServiceReporterOnIOThreadTest
   }
 
  private:
-  std::unique_ptr<base::MessageLoopForIO> message_loop_;
-  std::unique_ptr<content::TestBrowserThread> io_thread_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
 
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
@@ -219,7 +218,7 @@ TEST_F(CertificateReportingServiceReporterOnIOThreadTest,
   const GURL kFailureURL("https://www.foo.com/");
 
   test_url_loader_factory()->AddResponse(
-      kFailureURL, network::ResourceResponseHead(), std::string(),
+      kFailureURL, network::mojom::URLResponseHead::New(), std::string(),
       network::URLLoaderCompletionStatus(net::ERR_SSL_PROTOCOL_ERROR));
 
   CertificateErrorReporter* certificate_error_reporter =
@@ -319,7 +318,7 @@ TEST_F(CertificateReportingServiceReporterOnIOThreadTest,
   const GURL kFailureURL("https://www.foo.com/");
 
   test_url_loader_factory()->AddResponse(
-      kFailureURL, network::ResourceResponseHead(), std::string(),
+      kFailureURL, network::mojom::URLResponseHead::New(), std::string(),
       network::URLLoaderCompletionStatus(net::ERR_SSL_PROTOCOL_ERROR));
 
   CertificateErrorReporter* certificate_error_reporter =
@@ -365,9 +364,9 @@ TEST_F(CertificateReportingServiceReporterOnIOThreadTest,
 class CertificateReportingServiceTest : public ::testing::Test {
  public:
   CertificateReportingServiceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
-        io_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO})) {}
+      : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD),
+        io_task_runner_(
+            base::CreateSingleThreadTaskRunner({content::BrowserThread::IO})) {}
 
   ~CertificateReportingServiceTest() override {}
 
@@ -398,6 +397,7 @@ class CertificateReportingServiceTest : public ::testing::Test {
 
     service_->Shutdown();
     service_.reset(nullptr);
+    safe_browsing::SafeBrowsingService::RegisterFactory(nullptr);
 
     histogram_test_helper_.CheckHistogram();
     event_histogram_tester_.reset();
@@ -440,7 +440,7 @@ class CertificateReportingServiceTest : public ::testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 

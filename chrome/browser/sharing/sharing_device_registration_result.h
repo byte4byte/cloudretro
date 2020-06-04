@@ -20,8 +20,12 @@ enum class SharingDeviceRegistrationResult {
   kFcmTransientError = 3,
   // Failed with FCM fatal error.
   kFcmFatalError = 4,
+  // Device has not been registered.
+  kDeviceNotRegistered = 5,
+  // Other internal error.
+  kInternalError = 6,
   // Max value for historgram.
-  kMaxValue = kFcmFatalError,
+  kMaxValue = kInternalError,
 };
 
 #endif  // CHROME_BROWSER_SHARING_SHARING_DEVICE_REGISTRATION_RESULT_H_

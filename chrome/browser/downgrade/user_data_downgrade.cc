@@ -6,156 +6,127 @@
 
 #include <string>
 
-#include "base/bind.h"
-#include "base/command_line.h"
+#include "base/check.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
-#include "chrome/browser/policy/policy_path_parser.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version.h"
-#include "chrome/installer/util/install_util.h"
-#include "content/public/browser/browser_thread.h"
+#include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/downgrade/snapshot_manager.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 
 namespace downgrade {
 
 namespace {
 
-// Return the disk cache dir override value if exists or empty path for default
-// disk cache dir.
-base::FilePath GetDiskCacheDir() {
-  base::FilePath disk_cache_dir;
-  policy::path_parser::CheckDiskCacheDirPolicy(&disk_cache_dir);
-  if (disk_cache_dir.empty()) {
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    disk_cache_dir = command_line->GetSwitchValuePath(switches::kDiskCacheDir);
+base::Version GetVersionFromFileName(const base::FilePath& path) {
+#if defined(OS_WIN)
+  // On Windows, for Unicode-aware applications, native pathnames are wchar_t
+  // arrays encoded in UTF-16.
+  return base::Version(base::UTF16ToUTF8(path.BaseName().value()));
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+  // On most platforms, native pathnames are char arrays, and the encoding
+  // may or may not be specified.  On Mac OS X, native pathnames are encoded
+  // in UTF-8.
+  return base::Version(path.BaseName().value());
+#endif  // OS_WIN
+}
+
+bool IsValidSnapshotDirectory(const base::FilePath& path) {
+  base::Version snapshot_version = GetVersionFromFileName(path);
+  return snapshot_version.IsValid() &&
+         base::PathExists(path.Append(kDowngradeLastVersionFile));
+}
+
+}  // namespace
+
+const base::FilePath::StringPieceType kDowngradeLastVersionFile(
+    FILE_PATH_LITERAL("Last Version"));
+const base::FilePath::StringPieceType kDowngradeDeleteSuffix(
+    FILE_PATH_LITERAL(".CHROME_DELETE"));
+
+const base::FilePath::StringPieceType kSnapshotsDir(
+    FILE_PATH_LITERAL("Snapshots"));
+
+base::FilePath GetLastVersionFile(const base::FilePath& user_data_dir) {
+  DCHECK(!user_data_dir.empty());
+  return user_data_dir.Append(kDowngradeLastVersionFile);
+}
+
+base::Optional<base::Version> GetLastVersion(
+    const base::FilePath& user_data_dir) {
+  DCHECK(!user_data_dir.empty());
+  std::string last_version_str;
+  if (base::ReadFileToString(GetLastVersionFile(user_data_dir),
+                             &last_version_str)) {
+    base::Version version(
+        base::TrimWhitespaceASCII(last_version_str, base::TRIM_ALL));
+    if (version.IsValid())
+      return version;
   }
+  return base::nullopt;
+}
+
+base::FilePath GetDiskCacheDir() {
+  base::FilePath disk_cache_dir =
+      g_browser_process->local_state()->GetFilePath(prefs::kDiskCacheDir);
   if (disk_cache_dir.ReferencesParent())
     return base::MakeAbsoluteFilePath(disk_cache_dir);
   return disk_cache_dir;
 }
 
-base::FilePath GetLastVersionFile(const base::FilePath& user_data_dir) {
-  return user_data_dir.Append(kDowngradeLastVersionFile);
-}
-
-// Return the temporary path that |source_path| will be renamed to later.
-base::FilePath GetTempDirNameForDelete(const base::FilePath& source_path) {
-  if (source_path.empty())
-    return base::FilePath();
-
-  base::FilePath target_path(source_path.AddExtension(kDowngradeDeleteSuffix));
-  int uniquifier =
-      base::GetUniquePathNumber(source_path, kDowngradeDeleteSuffix);
-  if (uniquifier < 0)
-    return base::FilePath();
-  if (uniquifier > 0) {
-    return target_path.InsertBeforeExtensionASCII(
-        base::StringPrintf(" (%d)", uniquifier));
-  }
-
-  return target_path;
-}
-
-// Rename the |source| directory to |target|. Create |source| directory after
-// rename if |recreate| is true.
-void RenameDirectory(const base::FilePath& source,
-                     const base::FilePath& target,
-                     bool recreate) {
-  if (!source.empty() && !target.empty() && base::Move(source, target) &&
-      recreate) {
-    base::CreateDirectory(source);
-  }
-}
-
-void DeleteAllRenamedUserDirectories(const base::FilePath& path) {
-  if (path.empty())
-    return;
-  base::FilePath dir_name = path.DirName();
-  // Does not support root directory
-  if (dir_name == path)
-    return;
-
-  base::FilePath::StringType pattern =
-      path.BaseName().value() + FILE_PATH_LITERAL("*") + kDowngradeDeleteSuffix;
-  base::FileEnumerator enumerator(dir_name, false,
-                                  base::FileEnumerator::DIRECTORIES, pattern);
-  for (base::FilePath dir = enumerator.Next(); !dir.empty();
-       dir = enumerator.Next()) {
-    base::DeleteFile(dir, true);
-  }
-}
-
-void DeleteMovedUserData(const base::FilePath& user_data_dir,
-                         const base::FilePath& disk_cache_dir) {
-  DeleteAllRenamedUserDirectories(user_data_dir);
-  DeleteAllRenamedUserDirectories(disk_cache_dir);
-}
-
-}  // namespace
-
-const base::FilePath::CharType kDowngradeLastVersionFile[] =
-    FILE_PATH_LITERAL("Last Version");
-const base::FilePath::CharType kDowngradeDeleteSuffix[] =
-    FILE_PATH_LITERAL(".CHROME_DELETE");
-
-void MoveUserDataForFirstRunAfterDowngrade() {
-  base::FilePath user_data_dir;
-  if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
-    return;
-  const base::Version current_version(chrome::kChromeVersion);
-  const base::Version downgrade_version = InstallUtil::GetDowngradeVersion();
-  if (downgrade_version.IsValid() && downgrade_version > current_version) {
-    base::FilePath disk_cache_dir(GetDiskCacheDir());
-    // Without the browser process singleton protection, the directory may be
-    // copied multiple times. In order to prevent that from happening, the temp
-    // directory's name will be computed before the Chrome Version file is
-    // read. Because the deletion will be scheduled after the singleton is
-    // acquired, the directory can only be moved twice in the worst case.
-    // Also, doing this after the downgrade version check to reduce performance
-    // cost for the normal launch.
-    base::FilePath temp_disk_cache_dir(GetTempDirNameForDelete(disk_cache_dir));
-    base::FilePath temp_user_data_dir(GetTempDirNameForDelete(user_data_dir));
-    base::Version last_version = GetLastVersion(user_data_dir);
-    if (last_version.IsValid() && last_version > current_version) {
-      // Do not recreate |disk_cache_dir| as it will be initialized later.
-      RenameDirectory(disk_cache_dir, temp_disk_cache_dir, false);
-      RenameDirectory(user_data_dir, temp_user_data_dir, true);
+base::flat_set<base::Version> GetAvailableSnapshots(
+    const base::FilePath& snapshot_dir) {
+  std::vector<base::Version> result;
+  base::FileEnumerator enumerator(snapshot_dir, false,
+                                  base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath path = enumerator.Next(); !path.empty();
+       path = enumerator.Next()) {
+    base::Version snapshot_version = GetVersionFromFileName(path);
+    if (!snapshot_version.IsValid() ||
+        !base::PathExists(path.Append(kDowngradeLastVersionFile))) {
+      continue;
     }
+    result.push_back(std::move(snapshot_version));
   }
+  return base::flat_set<base::Version>(std::move(result));
 }
 
-void UpdateLastVersion(const base::FilePath& user_data_dir) {
-  base::WriteFile(GetLastVersionFile(user_data_dir), chrome::kChromeVersion,
-                  strlen(chrome::kChromeVersion));
-}
-
-base::Version GetLastVersion(const base::FilePath& user_data_dir) {
-  std::string last_version_str;
-  if (base::ReadFileToString(GetLastVersionFile(user_data_dir),
-                             &last_version_str)) {
-    return base::Version(
-        base::TrimWhitespaceASCII(last_version_str, base::TRIM_ALL)
-            .as_string());
+std::vector<base::FilePath> GetInvalidSnapshots(
+    const base::FilePath& snapshot_dir) {
+  std::vector<base::FilePath> result;
+  base::FileEnumerator enumerator(snapshot_dir, false,
+                                  base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath path = enumerator.Next(); !path.empty();
+       path = enumerator.Next()) {
+    if (!IsValidSnapshotDirectory(path))
+      result.push_back(std::move(path));
   }
-  return base::Version();
+  return result;
 }
 
-void DeleteMovedUserDataSoon() {
-  base::FilePath user_data_dir;
-  base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  content::BrowserThread::PostBestEffortTask(
-      FROM_HERE,
-      base::CreateTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
-      base::Bind(&DeleteMovedUserData, user_data_dir, GetDiskCacheDir()));
+base::Optional<base::Version> GetSnapshotToRestore(
+    const base::Version& version,
+    const base::FilePath& user_data_dir) {
+  DCHECK(version.IsValid());
+  base::FilePath top_snapshot_dir = user_data_dir.Append(kSnapshotsDir);
+  auto available_snapshots = GetAvailableSnapshots(top_snapshot_dir);
+
+  auto upper_bound = available_snapshots.upper_bound(version);
+  if (upper_bound != available_snapshots.begin())
+    return *--upper_bound;
+  return base::nullopt;
+}
+
+void RemoveDataForProfile(base::Time delete_begin,
+                          const base::FilePath& profile_path,
+                          int remove_mask) {
+  SnapshotManager snapshot_manager(profile_path.DirName());
+  snapshot_manager.DeleteSnapshotDataForProfile(
+      delete_begin, profile_path.BaseName(), remove_mask);
 }
 
 }  // namespace downgrade

@@ -9,9 +9,11 @@
 #include <string>
 #include <vector>
 
+#include "build/build_config.h"
 #include "components/prefs/pref_member.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_buildflags.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "url/gurl.h"
 
 namespace content_settings {
@@ -42,13 +44,16 @@ extern const char kDiceResponseHeader[];
 // perform.
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin
-enum GAIAServiceType {
+// NOTE: This enum is persisted to histograms. Do not change or reorder
+// values.
+enum GAIAServiceType : int {
   GAIA_SERVICE_TYPE_NONE = 0,    // No Gaia response header.
   GAIA_SERVICE_TYPE_SIGNOUT,     // Logout all existing sessions.
   GAIA_SERVICE_TYPE_INCOGNITO,   // Open an incognito tab.
-  GAIA_SERVICE_TYPE_ADDSESSION,  // Add a secondary account.
+  GAIA_SERVICE_TYPE_ADDSESSION,  // Add or re-authenticate an account.
   GAIA_SERVICE_TYPE_SIGNUP,      // Create a new account.
   GAIA_SERVICE_TYPE_DEFAULT,     // All other cases.
+  kMaxValue = GAIA_SERVICE_TYPE_DEFAULT
 };
 
 enum class DiceAction {
@@ -71,6 +76,10 @@ struct ManageAccountsParams {
   std::string continue_url;
   // Whether the continue URL should be loaded in the same tab.
   bool is_same_tab;
+#if defined(OS_ANDROID)
+  // Whether to show consistency promo.
+  bool show_consistency_promo;
+#endif
 
   ManageAccountsParams();
   ManageAccountsParams(const ManageAccountsParams& other);
@@ -204,7 +213,7 @@ class SigninHeaderHelper {
 // added to the request to |url|.
 std::string BuildMirrorRequestCookieIfPossible(
     const GURL& url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask);
@@ -215,7 +224,7 @@ std::string BuildMirrorRequestCookieIfPossible(
 void AppendOrRemoveMirrorRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask);
@@ -227,7 +236,7 @@ void AppendOrRemoveMirrorRequestHeader(
 bool AppendOrRemoveDiceRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     bool sync_enabled,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,

@@ -32,24 +32,19 @@ class NotificationScheduleServiceImpl
   void Schedule(
       std::unique_ptr<NotificationParams> notification_params) override;
   void DeleteNotifications(SchedulerClientType type) override;
-  void GetImpressionDetail(
+  void GetClientOverview(
       SchedulerClientType,
-      ImpressionDetail::ImpressionDetailCallback callback) override;
+      ClientOverview::ClientOverviewCallback callback) override;
   NotificationBackgroundTaskScheduler::Handler*
   GetBackgroundTaskSchedulerHandler() override;
   UserActionHandler* GetUserActionHandler() override;
 
   // NotificationBackgroundTaskScheduler::Handler implementation.
-  void OnStartTask(SchedulerTaskTime task_time,
-                   TaskFinishedCallback callback) override;
-  void OnStopTask(SchedulerTaskTime task_time) override;
+  void OnStartTask(TaskFinishedCallback callback) override;
+  void OnStopTask() override;
 
   // UserActionHandler implementation.
-  void OnClick(SchedulerClientType type, const std::string& guid) override;
-  void OnActionClick(SchedulerClientType type,
-                     const std::string& guid,
-                     ActionButtonType button_type) override;
-  void OnDismiss(SchedulerClientType type, const std::string& guid) override;
+  void OnUserAction(const UserActionData& action_data) override;
 
   // Called after initialization is done.
   void OnInitialized(bool success);

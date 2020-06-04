@@ -8,6 +8,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chromoting.Preconditions;
 import org.chromium.chromoting.base.OAuthTokenFetcher;
 import org.chromium.chromoting.base.OAuthTokenFetcher.Callback;
@@ -25,8 +26,8 @@ public class JniOAuthTokenGetter {
     // a subset of Chromoting.java's TOKEN_SCOPE.) This is because the context passed to
     // OAuthTokenFetcher below is not an activity, and thus it will not be possible to show a
     // consent page requesting new scopes.
-    private static final String TOKEN_SCOPE = "oauth2:https://www.googleapis.com/auth/chromoting "
-            + "https://www.googleapis.com/auth/chromoting.directory "
+    private static final String TOKEN_SCOPE =
+            "oauth2:https://www.googleapis.com/auth/chromoting.directory "
             + "https://www.googleapis.com/auth/tachyon";
 
     private static String sAccount;
@@ -46,7 +47,7 @@ public class JniOAuthTokenGetter {
                     @Override
                     public void onTokenFetched(String token) {
                         sLatestToken = token;
-                        nativeResolveOAuthTokenCallback(
+                        JniOAuthTokenGetterJni.get().resolveOAuthTokenCallback(
                                 callbackPtr, OAuthTokenStatus.SUCCESS, sAccount, token);
                     }
 
@@ -67,7 +68,8 @@ public class JniOAuthTokenGetter {
                                 assert false : "Unreached";
                                 status = -1;
                         }
-                        nativeResolveOAuthTokenCallback(callbackPtr, status, null, null);
+                        JniOAuthTokenGetterJni.get().resolveOAuthTokenCallback(
+                                callbackPtr, status, null, null);
                     }
                 })
                 .fetch();
@@ -95,6 +97,9 @@ public class JniOAuthTokenGetter {
                 .clearAndFetch(sLatestToken);
     }
 
-    private static native void nativeResolveOAuthTokenCallback(
-            long callbackPtr, int status, String userEmail, String accessToken);
+    @NativeMethods
+    interface Natives {
+        void resolveOAuthTokenCallback(
+                long callbackPtr, int status, String userEmail, String accessToken);
+    }
 }

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/unguessable_token.h"
 #include "chromeos/services/secure_channel/fake_client_connection_parameters.h"
 #include "chromeos/services/secure_channel/fake_pending_connection_request_delegate.h"
@@ -42,7 +42,7 @@ class SecureChannelPendingBleInitiatorConnectionRequestTest
         base::MakeRefCounted<testing::NiceMock<device::MockBluetoothAdapter>>();
 
     pending_ble_initiator_request_ =
-        PendingBleInitiatorConnectionRequest::Factory::Get()->BuildInstance(
+        PendingBleInitiatorConnectionRequest::Factory::Create(
             std::move(fake_client_connection_parameters),
             ConnectionPriority::kLow,
             fake_pending_connection_request_delegate_.get(), mock_adapter_);
@@ -66,7 +66,7 @@ class SecureChannelPendingBleInitiatorConnectionRequestTest
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<FakePendingConnectionRequestDelegate>
       fake_pending_connection_request_delegate_;

@@ -20,7 +20,7 @@
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_source.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 class GURL;
 class Profile;
@@ -42,6 +42,7 @@ class RecentModel : public KeyedService {
  public:
   using GetRecentFilesCallback =
       base::OnceCallback<void(const std::vector<RecentFile>& files)>;
+  using FileType = RecentSource::FileType;
 
   ~RecentModel() override;
 
@@ -57,6 +58,7 @@ class RecentModel : public KeyedService {
   // Results might be internally cached for better performance.
   void GetRecentFiles(storage::FileSystemContext* file_system_context,
                       const GURL& origin,
+                      FileType file_type,
                       GetRecentFilesCallback callback);
 
   // KeyedService overrides:
@@ -74,8 +76,9 @@ class RecentModel : public KeyedService {
 
   void OnGetRecentFiles(size_t max_files,
                         const base::Time& cutoff_time,
+                        FileType file_type,
                         std::vector<RecentFile> files);
-  void OnGetRecentFilesCompleted();
+  void OnGetRecentFilesCompleted(FileType file_type);
   void ClearCache();
 
   void SetMaxFilesForTest(size_t max_files);
@@ -94,6 +97,9 @@ class RecentModel : public KeyedService {
   // Cached GetRecentFiles() response.
   base::Optional<std::vector<RecentFile>> cached_files_ = base::nullopt;
 
+  // File type of the cached GetRecentFiles() response.
+  FileType cached_files_type_ = FileType::kAll;
+
   // Timer to clear the cache.
   base::OneShotTimer cache_clear_timer_;
 
@@ -111,7 +117,7 @@ class RecentModel : public KeyedService {
   std::priority_queue<RecentFile, std::vector<RecentFile>, RecentFileComparator>
       intermediate_files_;
 
-  base::WeakPtrFactory<RecentModel> weak_ptr_factory_;
+  base::WeakPtrFactory<RecentModel> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RecentModel);
 };

@@ -4,21 +4,49 @@
 
 #include "chrome/browser/chromeos/wilco_dtc_supportd/mojo_utils.h"
 
+#include <cstring>
+
+#include "base/files/file.h"
+#include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
-#include "mojo/public/cpp/system/buffer.h"
+#include "base/threading/thread_restrictions.h"
+#include "base/unguessable_token.h"
+#include "mojo/public/c/system/types.h"
+#include "mojo/public/cpp/system/handle.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
 namespace chromeos {
 
-base::StringPiece GetStringPieceFromMojoHandle(
+// static
+base::StringPiece MojoUtils::GetStringPieceFromMojoHandle(
     mojo::ScopedHandle handle,
     base::ReadOnlySharedMemoryMapping* shared_memory) {
-  mojo::ScopedSharedBufferHandle buffer_handle(
-      mojo::SharedBufferHandle(handle.release().value()));
-  base::ReadOnlySharedMemoryRegion memory_region =
-      UnwrapReadOnlySharedMemoryRegion(std::move(buffer_handle));
+  DCHECK(shared_memory);
 
-  *shared_memory = memory_region.Map();
+  base::PlatformFile platform_file;
+  auto result = mojo::UnwrapPlatformFile(std::move(handle), &platform_file);
+  if (result != MOJO_RESULT_OK)
+    return base::StringPiece();
+
+  base::File file(platform_file);
+  size_t file_size = 0;
+  {
+    // TODO(b/146119375): Remove blocking operation from production code.
+    base::ScopedAllowBlocking allow_blocking;
+    file_size = file.GetLength();
+  }
+  if (file_size <= 0)
+    return base::StringPiece();
+
+  base::subtle::PlatformSharedMemoryRegion platform_region =
+      base::subtle::PlatformSharedMemoryRegion::Take(
+          base::ScopedFD(file.TakePlatformFile()),
+          base::subtle::PlatformSharedMemoryRegion::Mode::kReadOnly, file_size,
+          base::UnguessableToken::Create());
+
+  base::ReadOnlySharedMemoryRegion shm =
+      base::ReadOnlySharedMemoryRegion::Deserialize(std::move(platform_region));
+  *shared_memory = shm.Map();
   if (!shared_memory->IsValid())
     return base::StringPiece();
 
@@ -26,7 +54,8 @@ base::StringPiece GetStringPieceFromMojoHandle(
                            shared_memory->size());
 }
 
-mojo::ScopedHandle CreateReadOnlySharedMemoryMojoHandle(
+// static
+mojo::ScopedHandle MojoUtils::CreateReadOnlySharedMemoryMojoHandle(
     const std::string& content) {
   if (content.empty())
     return mojo::ScopedHandle();
@@ -37,10 +66,11 @@ mojo::ScopedHandle CreateReadOnlySharedMemoryMojoHandle(
     return mojo::ScopedHandle();
   memcpy(shm.mapping.memory(), content.data(), content.length());
 
-  mojo::ScopedSharedBufferHandle buffer_handle =
-      mojo::WrapReadOnlySharedMemoryRegion(std::move(shm.region));
-  mojo::ScopedHandle handle(mojo::Handle(buffer_handle.release().value()));
-  return handle;
+  base::subtle::PlatformSharedMemoryRegion platform_region =
+      base::ReadOnlySharedMemoryRegion::TakeHandleForSerialization(
+          std::move(shm.region));
+  return mojo::WrapPlatformFile(
+      platform_region.PassPlatformHandle().fd.release());
 }
 
 }  // namespace chromeos

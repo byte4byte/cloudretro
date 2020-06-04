@@ -228,6 +228,9 @@ class COMPONENTS_PREFS_EXPORT PrefService {
   // Removes a user pref and restores the pref to its default value.
   void ClearPref(const std::string& path);
 
+  // Removes user prefs that start with |prefix|.
+  void ClearPrefsWithPrefixSilently(const std::string& prefix);
+
   // If the path is valid (i.e., registered), update the pref value in the user
   // prefs.
   // To set the value of dictionary or list values in the pref tree use
@@ -428,8 +431,7 @@ class COMPONENTS_PREFS_EXPORT PrefService {
 
   // Sets the value for this pref path in the user pref store and informs the
   // PrefNotifier of the change.
-  void SetUserPrefValue(const std::string& path,
-                        std::unique_ptr<base::Value> new_value);
+  void SetUserPrefValue(const std::string& path, base::Value new_value);
 
   // Load preferences from storage, attempting to diagnose and handle errors.
   // This should only be called from the constructor.

@@ -4,27 +4,28 @@
 
 package org.chromium.chrome.browser.feed;
 
-import android.support.annotation.Nullable;
-
-import com.google.android.libraries.feed.api.client.scope.ProcessScope;
-import com.google.android.libraries.feed.api.client.scope.ProcessScopeBuilder;
-import com.google.android.libraries.feed.api.host.config.ApplicationInfo;
-import com.google.android.libraries.feed.api.host.config.Configuration;
-import com.google.android.libraries.feed.api.host.config.DebugBehavior;
-import com.google.android.libraries.feed.api.host.network.NetworkClient;
-import com.google.android.libraries.feed.api.host.storage.ContentStorageDirect;
-import com.google.android.libraries.feed.api.host.storage.JournalStorageDirect;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.SequencedTaskRunner;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.chrome.browser.feed.library.api.client.scope.ProcessScope;
+import org.chromium.chrome.browser.feed.library.api.client.scope.ProcessScopeBuilder;
+import org.chromium.chrome.browser.feed.library.api.host.config.ApplicationInfo;
+import org.chromium.chrome.browser.feed.library.api.host.config.Configuration;
+import org.chromium.chrome.browser.feed.library.api.host.config.DebugBehavior;
+import org.chromium.chrome.browser.feed.library.api.host.network.NetworkClient;
+import org.chromium.chrome.browser.feed.library.api.host.storage.ContentStorageDirect;
+import org.chromium.chrome.browser.feed.library.api.host.storage.JournalStorageDirect;
+import org.chromium.chrome.browser.feed.library.common.time.SystemClockImpl;
 import org.chromium.chrome.browser.feed.tooltip.BasicTooltipSupportedApi;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefChangeRegistrar;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.Profile;
-
-import java.util.concurrent.Executors;
 
 /** Holds singleton {@link ProcessScope} and some of the scope's host implementations. */
 public class FeedProcessScopeFactory {
@@ -50,6 +51,8 @@ public class FeedProcessScopeFactory {
     private static FeedScheduler sFeedScheduler;
     private static FeedOfflineIndicator sFeedOfflineIndicator;
     private static NetworkClient sTestNetworkClient;
+    private static ContentStorageDirect sTestContentStorageDirect;
+    private static JournalStorageDirect sTestJournalStorageDirect;
     private static FeedLoggingBridge sFeedLoggingBridge;
 
     /** @return The shared {@link ProcessScope} instance. Null if the Feed is disabled. */
@@ -69,6 +72,19 @@ public class FeedProcessScopeFactory {
             initialize();
         }
         return sFeedScheduler;
+    }
+
+    /**
+     * @return The {@link Runnable} to notify feed has been consumed.
+     */
+    public static Runnable getFeedConsumptionObserver() {
+        Runnable consumptionObserver = () -> {
+            FeedScheduler scheduler = getFeedScheduler();
+            if (scheduler != null) {
+                scheduler.onSuggestionConsumed();
+            }
+        };
+        return consumptionObserver;
     }
 
     /**
@@ -131,23 +147,32 @@ public class FeedProcessScopeFactory {
         sPrefChangeRegistrar.addObserver(Pref.NTP_ARTICLES_SECTION_ENABLED,
                 FeedProcessScopeFactory::articlesEnabledPrefChange);
 
-        Profile profile = Profile.getLastUsedProfile().getOriginalProfile();
+        Profile profile = Profile.getLastUsedRegularProfile();
         Configuration configHostApi = FeedConfiguration.createConfiguration();
         ApplicationInfo applicationInfo = FeedApplicationInfo.createApplicationInfo();
 
         FeedSchedulerBridge schedulerBridge = new FeedSchedulerBridge(profile);
         sFeedScheduler = schedulerBridge;
-        FeedContentStorage contentStorage = new FeedContentStorage(profile);
-        FeedJournalStorage journalStorage = new FeedJournalStorage(profile);
-        NetworkClient networkClient = sTestNetworkClient == null ?
-            new FeedNetworkBridge(profile) : sTestNetworkClient;
-        sFeedLoggingBridge = new FeedLoggingBridge(profile);
-        sProcessScope = new ProcessScopeBuilder(configHostApi, Executors.newSingleThreadExecutor(),
+        ContentStorageDirect contentStorageDirect = sTestContentStorageDirect == null
+                ? new FeedContentStorageDirect(new FeedContentStorage(profile))
+                : sTestContentStorageDirect;
+        JournalStorageDirect journalStorageDirect = sTestJournalStorageDirect == null
+                ? new FeedJournalStorageDirect(new FeedJournalStorage(profile))
+                : sTestJournalStorageDirect;
+        NetworkClient networkClient =
+                sTestNetworkClient == null ? new FeedNetworkBridge(profile) : sTestNetworkClient;
+
+        sFeedLoggingBridge = new FeedLoggingBridge(profile, new SystemClockImpl());
+
+        SequencedTaskRunner sequencedTaskRunner =
+                PostTask.createSequencedTaskRunner(TaskTraits.USER_VISIBLE_MAY_BLOCK);
+
+        sProcessScope = new ProcessScopeBuilder(configHostApi, sequencedTaskRunner::postTask,
                 sFeedLoggingBridge, networkClient, schedulerBridge, DebugBehavior.SILENT,
                 ContextUtils.getApplicationContext(), applicationInfo,
                 new BasicTooltipSupportedApi())
-                                .setContentStorage(contentStorage)
-                                .setJournalStorage(journalStorage)
+                                .setContentStorageDirect(contentStorageDirect)
+                                .setJournalStorageDirect(journalStorageDirect)
                                 .build();
         schedulerBridge.initializeFeedDependencies(sProcessScope.getRequestManager());
 
@@ -181,7 +206,10 @@ public class FeedProcessScopeFactory {
         ApplicationInfo applicationInfo =
                 new ApplicationInfo.Builder(ContextUtils.getApplicationContext()).build();
 
-        sProcessScope = new ProcessScopeBuilder(configHostApi, Executors.newSingleThreadExecutor(),
+        SequencedTaskRunner sequencedTaskRunner =
+                PostTask.createSequencedTaskRunner(TaskTraits.USER_VISIBLE_MAY_BLOCK);
+
+        sProcessScope = new ProcessScopeBuilder(configHostApi, sequencedTaskRunner::postTask,
                 sFeedLoggingBridge, networkClient, sFeedScheduler, DebugBehavior.SILENT,
                 ContextUtils.getApplicationContext(), applicationInfo,
                 new BasicTooltipSupportedApi())
@@ -200,6 +228,32 @@ public class FeedProcessScopeFactory {
         } else {
             throw(new IllegalStateException(
                     "TestNetworkClient can not be set after ProcessScope has initialized."));
+        }
+    }
+
+    /** Use supplied ContentStorageDirect instead of real one, for tests. */
+    @VisibleForTesting
+    public static void setTestContentStorageDirect(ContentStorageDirect storage) {
+        if (storage == null) {
+            sTestContentStorageDirect = null;
+        } else if (sProcessScope == null) {
+            sTestContentStorageDirect = storage;
+        } else {
+            throw new IllegalStateException(
+                    "TestContentStorageDirect can not be set after ProcessScope has initialized.");
+        }
+    }
+
+    /** Use supplied JournalStorageDirect instead of real one, for tests. */
+    @VisibleForTesting
+    public static void setTestJournalStorageDirect(JournalStorageDirect storage) {
+        if (storage == null) {
+            sTestJournalStorageDirect = null;
+        } else if (sProcessScope == null) {
+            sTestJournalStorageDirect = storage;
+        } else {
+            throw new IllegalStateException(
+                    "TestJournalStorageDirect can not be set after ProcessScope has initialized.");
         }
     }
 

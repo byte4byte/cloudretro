@@ -21,11 +21,19 @@ NSString* const kChromeInstallPath = @"/Applications/Google Chrome.app";
 NSString* const kBrandKey = @"KSBrandID";
 NSString* const kUserBrandPath = @"~~/Library/Google/Google Chrome Brand.plist";
 
+// ksadmin moved from MacOS to Helpers in Keystone 1.2.13.112, 2019-11-12. A
+// symbolic link from the old location was left in place, but may not remain
+// indefinitely. Try the new location first, falling back to the old if needed.
 NSString* const kSystemKsadminPath =
     @"/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/"
+     "Contents/Helpers/ksadmin";
+NSString* const kSystemKsadminPathOld =
+    @"/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/"
      "Contents/MacOS/ksadmin";
-
 NSString* const kUserKsadminPath =
+    @"~~/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/"
+     "Contents/Helpers/ksadmin";
+NSString* const kUserKsadminPathOld =
     @"~~/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/"
      "Contents/MacOS/ksadmin";
 
@@ -58,8 +66,8 @@ bool IsOSXVersionSupported() {
   // 10.2.
   int mac_os_x_minor_version = darwin_major_version - 4;
 
-  // Chrome is known to work on 10.9 - 10.13.
-  return mac_os_x_minor_version >= 9 && mac_os_x_minor_version <= 13;
+  // Chrome is known to work on 10.10 - 10.15.
+  return mac_os_x_minor_version >= 10 && mac_os_x_minor_version <= 15;
 }
 
 // Returns the pid/gid of the logged-in user, even if getuid() claims that the
@@ -104,11 +112,14 @@ BOOL FindChromeTicket(TicketKind kind, const passwd* user,
     *chrome_path = nil;
 
   // Don't use Objective-C 2 loop syntax, in case an installer runs on 10.4.
-  NSMutableArray* keystone_paths =
-      [NSMutableArray arrayWithObject:kSystemKsadminPath];
+  NSMutableArray* keystone_paths = [NSMutableArray
+      arrayWithObjects:kSystemKsadminPath, kSystemKsadminPathOld, nil];
   if (kind == kUserTicket) {
     [keystone_paths insertObject:AdjustHomedir(kUserKsadminPath, user->pw_dir)
                         atIndex:0];
+    [keystone_paths
+        insertObject:AdjustHomedir(kUserKsadminPathOld, user->pw_dir)
+             atIndex:1];
   }
   NSEnumerator* e = [keystone_paths objectEnumerator];
   id ks_path;
@@ -291,10 +302,10 @@ NSString* PathToFramework(NSString* app_path, NSDictionary* info_plist) {
   NSString* version = [info_plist objectForKey:@"CFBundleShortVersionString"];
   if (!version)
     return nil;
-  return [[[app_path
-      stringByAppendingPathComponent:@"Contents/Versions"]
-      stringByAppendingPathComponent:version]
-      stringByAppendingPathComponent:@"Google Chrome Framework.framework"];
+  return [NSString pathWithComponents:@[
+    app_path, @"Contents", @"Frameworks", @"Google Chrome Framework.framework",
+    @"Versions", version
+  ]];
 }
 
 NSString* PathToInstallScript(NSString* app_path, NSDictionary* info_plist) {

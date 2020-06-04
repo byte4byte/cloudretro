@@ -7,16 +7,16 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/signin/feature_flags.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_cell.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
-#include "ios/chrome/browser/ui/util/dynamic_type_util.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
+#include "ios/components/ui_util/dynamic_type_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -43,22 +43,13 @@ const CGFloat kSearchFieldTopMargin = 32;
 // Bottom margin for the search field.
 const CGFloat kNTPSearchFieldBottomPadding = 18;
 
-// Alpha for search hint text.
-const CGFloat kHintAlpha = 0.3;
-
 const CGFloat kTopSpacingMaterial = 24;
-
-const CGFloat kVoiceSearchButtonWidth = 48;
 
 // Height for the doodle frame.
 const CGFloat kGoogleSearchDoodleHeight = 120;
 
 // Height for the doodle frame when Google is not the default search engine.
 const CGFloat kNonGoogleSearchDoodleHeight = 60;
-
-// Height for the header view on tablet when Google is not the default search
-// engine.
-const CGFloat kNonGoogleSearchHeaderHeightIPad = 10;
 }
 
 namespace content_suggestions {
@@ -76,9 +67,11 @@ CGFloat doodleHeight(BOOL logoIsShowing) {
 CGFloat doodleTopMargin(BOOL toolbarPresent, CGFloat topInset) {
   if (!IsCompactWidth() && !IsCompactHeight())
     return kDoodleTopMarginRegularXRegular;
+  if (IsCompactHeight())
+    return topInset;
   return topInset + kDoodleTopMarginOther +
          AlignValueToPixel(kDoodleScaledTopMarginOther *
-                           SystemSuggestedFontSizeMultiplier());
+                           ui_util::SystemSuggestedFontSizeMultiplier());
 }
 
 CGFloat searchFieldTopMargin() {
@@ -107,13 +100,10 @@ CGFloat heightForLogoHeader(BOOL logoIsShowing,
     return headerHeight;
   }
   if (!logoIsShowing) {
-    if (IsIdentityDiscFeatureEnabled()) {
-      // Returns sufficient vertical space for the Identity Disc to be
-      // displayed.
-      return ntp_home::kIdentityAvatarDimension +
-             2 * ntp_home::kIdentityAvatarMargin;
-    }
-    return kNonGoogleSearchHeaderHeightIPad;
+    // Returns sufficient vertical space for the Identity Disc to be
+    // displayed.
+    return ntp_home::kIdentityAvatarDimension +
+           2 * ntp_home::kIdentityAvatarMargin;
   }
   if (!promoCanShow) {
     headerHeight += kTopSpacingMaterial;
@@ -131,8 +121,7 @@ void configureSearchHintLabel(UILabel* searchHintLabel,
   if (base::i18n::IsRTL()) {
     [searchHintLabel setTextAlignment:NSTextAlignmentRight];
   }
-  [searchHintLabel setTextColor:[UIColor colorWithWhite:0 alpha:kHintAlpha]];
-  searchHintLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+  searchHintLabel.textColor = [UIColor colorNamed:kTextfieldPlaceholderColor];
   searchHintLabel.adjustsFontForContentSizeCategory = YES;
   searchHintLabel.textAlignment = NSTextAlignmentCenter;
 }
@@ -142,19 +131,12 @@ void configureVoiceSearchButton(UIButton* voiceSearchButton,
   [voiceSearchButton setTranslatesAutoresizingMaskIntoConstraints:NO];
   [searchTapTarget addSubview:voiceSearchButton];
 
-  [NSLayoutConstraint activateConstraints:@[
-    [voiceSearchButton.widthAnchor
-        constraintEqualToConstant:kVoiceSearchButtonWidth],
-    [voiceSearchButton.heightAnchor
-        constraintEqualToAnchor:voiceSearchButton.widthAnchor],
-  ]];
-
   [voiceSearchButton setAdjustsImageWhenHighlighted:NO];
 
   UIImage* micImage = [[UIImage imageNamed:@"location_bar_voice"]
-      imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+      imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   [voiceSearchButton setImage:micImage forState:UIControlStateNormal];
-  voiceSearchButton.tintColor = [UIColor colorWithWhite:0 alpha:0.7];
+  voiceSearchButton.tintColor = [UIColor colorNamed:kGrey500Color];
   [voiceSearchButton setAccessibilityLabel:l10n_util::GetNSString(
                                                IDS_IOS_ACCNAME_VOICE_SEARCH)];
   [voiceSearchButton setAccessibilityIdentifier:@"Voice Search"];

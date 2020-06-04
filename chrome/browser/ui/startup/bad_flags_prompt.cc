@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/startup/bad_flags_prompt.h"
 
+#include <algorithm>
 #include <string>
 
 #include "base/base_switches.h"
@@ -23,7 +24,6 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
-#include "components/invalidation/impl/invalidation_switches.h"
 #include "components/nacl/common/buildflags.h"
 #include "components/nacl/common/nacl_switches.h"
 #include "components/network_session_configurator/common/network_switches.h"
@@ -38,11 +38,12 @@
 #include "media/media_buildflags.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "services/service_manager/sandbox/switches.h"
+#include "third_party/blink/public/common/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #else
 #include "chrome/browser/ui/browser.h"
 #endif  // OS_ANDROID
@@ -77,7 +78,6 @@ static const char* kBadFlags[] = {
     // These flags undermine HTTPS / connection security.
     switches::kDisableWebRtcEncryption,
     switches::kIgnoreCertificateErrors,
-    invalidation::switches::kSyncAllowInsecureXmppConnection,
 
     // These flags change the URLs that handle PII.
     switches::kGaiaUrl,
@@ -125,11 +125,6 @@ static const char* kBadFlags[] = {
     // updating components won't be performed until shutdown.
     switches::kDisableBestEffortTasks,
 
-    // The UI for Web Bluetooth scanning is not yet implemented. Without the
-    // UI websites can scan for bluetooth without user intervention. Show a
-    // warning until the UI is complete.
-    switches::kEnableWebBluetoothScanning,
-
     // Enables save data feature which can cause user traffic to be proxied via
     // Google's data reduction proxy servers.
     data_reduction_proxy::switches::kEnableDataReductionProxy,
@@ -137,26 +132,37 @@ static const char* kBadFlags[] = {
     // GPU sanboxing isn't implemented for the Web GPU API yet meaning it would
     // be possible to read GPU data for other Chromium processes.
     switches::kEnableUnsafeWebGPU,
+
+    // A flag to support local file based WebBundle loading, only for testing
+    // purpose.
+    switches::kTrustableWebBundleFileUrl,
 };
 #endif  // OS_ANDROID
 
 // Dangerous feature flags in about:flags for which to display a warning that
 // "stability and security will suffer".
 static const base::Feature* kBadFeatureFlagsInAboutFlags[] = {
+    &blink::features::kRawClipboard,
     &features::kAllowSignedHTTPExchangeCertsWithoutExtension,
+    &features::kWebBundlesFromNetwork,
 #if defined(OS_ANDROID)
     &chrome::android::kCommandLineOnNonRooted,
 #endif  // OS_ANDROID
 };
 
-void ShowBadFeatureFlagsInfoBar(content::WebContents* web_contents,
-                                int message_id,
-                                const base::Feature* feature) {
+void ShowBadFlagsInfoBarHelper(content::WebContents* web_contents,
+                               int message_id,
+                               base::StringPiece flag) {
+  // Animating the infobar also animates the content area size which can trigger
+  // a flood of page layout, compositing, texture reallocations, etc.  Do not
+  // animate the infobar to reduce noise in perf benchmarks because they pass
+  // --ignore-certificate-errors-spki-list.  This infobar only appears at
+  // startup so the animation isn't visible to users anyway.
   SimpleAlertInfoBarDelegate::Create(
       InfoBarService::FromWebContents(web_contents),
       infobars::InfoBarDelegate::BAD_FLAGS_INFOBAR_DELEGATE, nullptr,
-      l10n_util::GetStringFUTF16(message_id, base::UTF8ToUTF16(feature->name)),
-      false);
+      l10n_util::GetStringFUTF16(message_id, base::UTF8ToUTF16(flag)),
+      /*auto_expire=*/false, /*should_animate=*/false);
 }
 
 }  // namespace
@@ -175,8 +181,8 @@ void ShowBadFlagsPrompt(content::WebContents* web_contents) {
 
   for (const base::Feature* feature : kBadFeatureFlagsInAboutFlags) {
     if (base::FeatureList::IsEnabled(*feature)) {
-      ShowBadFeatureFlagsInfoBar(web_contents, IDS_BAD_FEATURES_WARNING_MESSAGE,
-                                 feature);
+      ShowBadFlagsInfoBarHelper(web_contents, IDS_BAD_FEATURES_WARNING_MESSAGE,
+                                feature->name);
       return;
     }
   }
@@ -189,13 +195,8 @@ void ShowBadFlagsInfoBar(content::WebContents* web_contents,
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(flag);
   if (!switch_value.empty())
     switch_value = "=" + switch_value;
-  SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents),
-      infobars::InfoBarDelegate::BAD_FLAGS_INFOBAR_DELEGATE, nullptr,
-      l10n_util::GetStringFUTF16(
-          message_id,
-          base::UTF8ToUTF16(std::string("--") + flag + switch_value)),
-      false);
+  ShowBadFlagsInfoBarHelper(web_contents, message_id,
+                            std::string("--") + flag + switch_value);
 }
 
 void MaybeShowInvalidUserDataDirWarningDialog() {

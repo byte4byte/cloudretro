@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/ui/login_web_dialog.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "content/public/browser/browser_thread.h"
@@ -81,10 +82,6 @@ void HelpAppLauncher::ShowHelpTopicDialog(Profile* profile,
   LoginWebDialog* dialog = new LoginWebDialog(
       profile, NULL, parent_window_,
       l10n_util::GetStringUTF16(IDS_LOGIN_OOBE_HELP_DIALOG_TITLE), topic_url);
-  dialog->SetDialogSize(l10n_util::GetLocalizedContentsWidthInPixels(
-                            IDS_HELP_APP_DIALOG_WIDTH_PIXELS),
-                        l10n_util::GetLocalizedContentsWidthInPixels(
-                            IDS_HELP_APP_DIALOG_HEIGHT_PIXELS));
   dialog->Show();
   // The dialog object will be deleted on dialog close.
 }

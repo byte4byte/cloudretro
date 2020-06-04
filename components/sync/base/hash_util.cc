@@ -6,30 +6,43 @@
 
 #include "base/base64.h"
 #include "base/hash/sha1.h"
+#include "components/sync/base/model_type.h"
 #include "components/sync/protocol/sync.pb.h"
 
 namespace syncer {
 
-std::string GenerateSyncableHash(ModelType model_type,
-                                 const std::string& client_tag) {
+std::string GenerateSyncableBookmarkHash(
+    const std::string& originator_cache_guid,
+    const std::string& originator_client_item_id) {
   // Blank PB with just the field in it has termination symbol,
   // handy for delimiter.
   sync_pb::EntitySpecifics serialized_type;
-  AddDefaultFieldValue(model_type, &serialized_type);
+  AddDefaultFieldValue(BOOKMARKS, &serialized_type);
   std::string hash_input;
   serialized_type.AppendToString(&hash_input);
-  hash_input.append(client_tag);
+  hash_input.append(originator_cache_guid + originator_client_item_id);
 
   std::string encode_output;
   base::Base64Encode(base::SHA1HashString(hash_input), &encode_output);
   return encode_output;
 }
 
-std::string GenerateSyncableBookmarkHash(
-    const std::string& originator_cache_guid,
-    const std::string& originator_client_item_id) {
-  return GenerateSyncableHash(
-      BOOKMARKS, originator_cache_guid + originator_client_item_id);
+std::string GetUnhashedClientTagFromAutofillWalletSpecifics(
+    const sync_pb::AutofillWalletSpecifics& specifics) {
+  switch (specifics.type()) {
+    case sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD:
+      return specifics.masked_card().id();
+    case sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS:
+      return specifics.address().id();
+    case sync_pb::AutofillWalletSpecifics::CUSTOMER_DATA:
+      return specifics.customer_data().id();
+    case sync_pb::AutofillWalletSpecifics::CREDIT_CARD_CLOUD_TOKEN_DATA:
+      return specifics.cloud_token_data().instrument_token();
+    case sync_pb::AutofillWalletSpecifics::UNKNOWN:
+      NOTREACHED();
+      return std::string();
+  }
+  return std::string();
 }
 
 }  // namespace syncer

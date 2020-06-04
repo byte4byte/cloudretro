@@ -41,8 +41,7 @@ class SupervisedUserLoginFlow
   void Launch();
   void Finish();
 
-  void OnSyncSetupDataLoaded(const std::string& token);
-  void ConfigureSync(const std::string& token);
+  void CheckPasswordChange();
   void OnPasswordChangeDataLoaded(const base::DictionaryValue* password_data);
   void OnPasswordChangeDataLoadFailed();
   void OnNewKeyAdded(std::unique_ptr<base::DictionaryValue> password_data);
@@ -54,7 +53,7 @@ class SupervisedUserLoginFlow
   bool data_loaded_ = false;
   UserContext context_;
   Profile* profile_ = nullptr;
-  base::WeakPtrFactory<SupervisedUserLoginFlow> weak_factory_;
+  base::WeakPtrFactory<SupervisedUserLoginFlow> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserLoginFlow);
 };

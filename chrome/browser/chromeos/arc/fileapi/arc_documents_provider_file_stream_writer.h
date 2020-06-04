@@ -15,8 +15,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_once_callback.h"
-#include "storage/browser/fileapi/file_stream_writer.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_stream_writer.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 class GURL;
 
@@ -51,7 +51,8 @@ class ArcDocumentsProviderFileStreamWriter : public storage::FileStreamWriter {
   std::unique_ptr<storage::FileStreamWriter> underlying_writer_;
   std::vector<base::OnceClosure> pending_operations_;
 
-  base::WeakPtrFactory<ArcDocumentsProviderFileStreamWriter> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcDocumentsProviderFileStreamWriter> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcDocumentsProviderFileStreamWriter);
 };

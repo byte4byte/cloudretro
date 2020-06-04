@@ -11,6 +11,7 @@
 #include "ash/public/cpp/session/session_activation_observer.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "chromeos/login/auth/auth_status_consumer.h"
 
 class Profile;
@@ -61,7 +62,7 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
                                        public ash::SessionActivationObserver {
  public:
   // Events in the in-session SAML password change flow.
-  enum Event {
+  enum class Event {
     // Dialog is open showing third-party IdP SAML password change page:
     START_SAML_IDP_PASSWORD_CHANGE,
     // Third party IdP SAML password is changed (but not cryptohome yet):
@@ -72,6 +73,12 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
     CRYPTOHOME_PASSWORD_CHANGE_FAILURE,
     // Change of cryptohome password complete. In session PW change complete.
     CRYPTOHOME_PASSWORD_CHANGED,
+  };
+
+  // How the passwords were able to be obtained.
+  enum class PasswordSource {
+    PASSWORDS_SCRAPED,  // Passwords were scraped during SAML password change.
+    PASSWORDS_RETYPED,  // Passwords had to be manually confirmed by user.
   };
 
   // Observers of InSessionPasswordChangeManager are notified of certain events.
@@ -95,15 +102,22 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
   explicit InSessionPasswordChangeManager(Profile* primary_profile);
   ~InSessionPasswordChangeManager() override;
 
+  // Sets the given instance as the singleton for testing.
+  static void SetForTesting(InSessionPasswordChangeManager* instance);
+  static void ResetForTesting();
+
   // Checks if the primary user's password has expired or will soon expire, and
   // shows a notification if needed. If the password will expire in the distant
   // future, posts a task to check again in the distant future.
   void MaybeShowExpiryNotification();
 
-  // Shows a password expiry notification. |less_than_n_days| should be 1 if the
-  // password expires in less than 1 day, 0 if it has already expired, etc.
-  // Negative numbers are treated the same as zero.
-  void ShowExpiryNotification(int less_than_n_days);
+  // Shows a password expiry notification. If |time_until_expiry| is zero or
+  // negative then the password has already expired.
+  void ShowStandardExpiryNotification(base::TimeDelta time_until_expiry);
+
+  // Shows an urgent password expiry notification. This notification displays
+  // a live countdown until password expiry.
+  void ShowUrgentExpiryNotification();
 
   // Dismiss password expiry notification and dismiss urgent password expiry
   // notification, if either are shown.
@@ -130,7 +144,8 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
 
   // Change cryptohome password for primary user.
   void ChangePassword(const std::string& old_password,
-                      const std::string& new_password);
+                      const std::string& new_password,
+                      PasswordSource password_source);
 
   // Handle a failure to scrape the passwords during in-session password change,
   // by showing a dialog for the user to confirm their old + new password.
@@ -141,6 +156,7 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
 
   // AuthStatusConsumer:
   void OnAuthFailure(const AuthFailure& error) override;
+  void OnPasswordChangeDetected() override;
   void OnAuthSuccess(const UserContext& user_context) override;
 
   // ash::SessionActivationObserver:
@@ -149,10 +165,6 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
 
  private:
   static InSessionPasswordChangeManager* GetNullable();
-
-  // Sets the given instance as the singleton for testing.
-  static void SetForTesting(InSessionPasswordChangeManager* instance);
-  static void ResetForTesting();
 
   void NotifyObservers(Event event);
 
@@ -163,6 +175,7 @@ class InSessionPasswordChangeManager : public AuthStatusConsumer,
   scoped_refptr<CryptohomeAuthenticator> authenticator_;
   int urgent_warning_days_;
   bool renotify_on_unlock_ = false;
+  PasswordSource password_source_ = PasswordSource::PASSWORDS_SCRAPED;
 
   friend class InSessionPasswordChangeManagerTest;
 

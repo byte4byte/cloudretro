@@ -11,10 +11,9 @@
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/grit/local_ntp_resources.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/common/previews_state.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_resource_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "ipc/ipc_message.h"
 #include "net/base/request_priority.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -47,15 +46,14 @@ class TestMostVisitedIframeSource : public MostVisitedIframeSource {
   }
 
   void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const content::URLDataSource::GotDataCallback& callback) override {}
+      const GURL& url,
+      const content::WebContents::Getter& wc_getter,
+      content::URLDataSource::GotDataCallback callback) override {}
 
   // RenderFrameHost is hard to mock in concert with everything else, so stub
   // this method out for testing.
-  bool GetOrigin(
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      std::string* origin) const override {
+  bool GetOrigin(const content::WebContents::Getter& wc_getter,
+                 std::string* origin) const override {
     if (origin_.empty())
       return false;
     *origin = origin_;
@@ -73,9 +71,9 @@ class MostVisitedIframeSourceTest : public testing::Test {
   // else happen on the IO thread. This setup is a hacky way to satisfy all
   // those constraints.
   MostVisitedIframeSourceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        instant_io_context_(NULL),
-        response_(NULL) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP),
+        instant_io_context_(nullptr),
+        response_(nullptr) {}
 
   TestMostVisitedIframeSource* source() { return source_.get(); }
 
@@ -87,13 +85,16 @@ class MostVisitedIframeSourceTest : public testing::Test {
   }
 
   void SendResource(int resource_id) {
-    source()->SendResource(resource_id, callback_);
+    source()->SendResource(
+        resource_id, base::BindOnce(&MostVisitedIframeSourceTest::SaveResponse,
+                                    base::Unretained(this)));
   }
 
   void SendJSWithOrigin(int resource_id) {
     source()->SendJSWithOrigin(
-        resource_id, content::ResourceRequestInfo::WebContentsGetter(),
-        callback_);
+        resource_id, content::WebContents::Getter(),
+        base::BindOnce(&MostVisitedIframeSourceTest::SaveResponse,
+                       base::Unretained(this)));
   }
 
   bool ShouldService(const std::string& path, int process_id) {
@@ -104,14 +105,12 @@ class MostVisitedIframeSourceTest : public testing::Test {
  private:
   void SetUp() override {
     source_ = std::make_unique<TestMostVisitedIframeSource>();
-    callback_ = base::Bind(&MostVisitedIframeSourceTest::SaveResponse,
-                           base::Unretained(this));
     instant_io_context_ = new InstantIOContext;
     InstantIOContext::SetUserDataOnIO(&resource_context_, instant_io_context_);
     source_->set_origin(kInstantOrigin);
     InstantIOContext::AddInstantProcessOnIO(instant_io_context_,
                                             kInstantRendererPID);
-    response_ = NULL;
+    response_ = nullptr;
   }
 
   void TearDown() override { source_.reset(); }
@@ -120,12 +119,11 @@ class MostVisitedIframeSourceTest : public testing::Test {
     response_ = data;
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   net::TestURLRequestContext test_url_request_context_;
   content::MockResourceContext resource_context_;
   std::unique_ptr<TestMostVisitedIframeSource> source_;
-  content::URLDataSource::GotDataCallback callback_;
   scoped_refptr<InstantIOContext> instant_io_context_;
   scoped_refptr<base::RefCountedMemory> response_;
 };

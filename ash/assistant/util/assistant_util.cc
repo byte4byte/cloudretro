@@ -4,11 +4,23 @@
 
 #include "ash/assistant/util/assistant_util.h"
 
+#include <string>
+
 #include "ash/assistant/model/assistant_ui_model.h"
+#include "base/strings/string_util.h"
+#include "chromeos/constants/devicetype.h"
+
+namespace {
+
+bool g_override_is_google_device = false;
+
+}  // namespace
 
 namespace ash {
 namespace assistant {
 namespace util {
+
+using chromeos::assistant::mojom::AssistantEntryPoint;
 
 bool IsStartingSession(AssistantVisibility new_visibility,
                        AssistantVisibility old_visibility) {
@@ -23,15 +35,15 @@ bool IsFinishingSession(AssistantVisibility new_visibility) {
 bool IsVoiceEntryPoint(AssistantEntryPoint entry_point, bool prefer_voice) {
   switch (entry_point) {
     case AssistantEntryPoint::kHotword:
-    case AssistantEntryPoint::kLauncherSearchBoxMic:
       return true;
     case AssistantEntryPoint::kHotkey:
-    case AssistantEntryPoint::kLauncherSearchBox:
+    case AssistantEntryPoint::kLauncherSearchBoxIcon:
     case AssistantEntryPoint::kLongPressLauncher:
       return prefer_voice;
     case AssistantEntryPoint::kUnspecified:
     case AssistantEntryPoint::kDeepLink:
     case AssistantEntryPoint::kLauncherSearchResult:
+    case AssistantEntryPoint::kProactiveSuggestions:
     case AssistantEntryPoint::kSetup:
     case AssistantEntryPoint::kStylus:
       return false;
@@ -42,17 +54,25 @@ bool ShouldAttemptWarmerWelcome(AssistantEntryPoint entry_point) {
   switch (entry_point) {
     case AssistantEntryPoint::kDeepLink:
     case AssistantEntryPoint::kHotword:
-    case AssistantEntryPoint::kLauncherSearchBoxMic:
+    case AssistantEntryPoint::kLauncherSearchBoxIcon:
     case AssistantEntryPoint::kLauncherSearchResult:
+    case AssistantEntryPoint::kProactiveSuggestions:
     case AssistantEntryPoint::kStylus:
       return false;
     case AssistantEntryPoint::kUnspecified:
     case AssistantEntryPoint::kHotkey:
-    case AssistantEntryPoint::kLauncherSearchBox:
     case AssistantEntryPoint::kLongPressLauncher:
     case AssistantEntryPoint::kSetup:
       return true;
   }
+}
+
+bool IsGoogleDevice() {
+  return g_override_is_google_device || chromeos::IsGoogleBrandedDevice();
+}
+
+void OverrideIsGoogleDeviceForTesting(bool is_google_device) {
+  g_override_is_google_device = is_google_device;
 }
 
 }  // namespace util

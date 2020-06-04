@@ -17,7 +17,7 @@ namespace policy {
 
 DeviceWiFiAllowedHandler::DeviceWiFiAllowedHandler(
     chromeos::CrosSettings* cros_settings)
-    : cros_settings_(cros_settings), weak_factory_(this) {
+    : cros_settings_(cros_settings) {
   wifi_policy_subscription_ = cros_settings_->AddSettingsObserver(
       chromeos::kDeviceWiFiAllowed,
       base::BindRepeating(&DeviceWiFiAllowedHandler::OnWiFiPolicyChanged,
@@ -32,8 +32,8 @@ DeviceWiFiAllowedHandler::~DeviceWiFiAllowedHandler() = default;
 void DeviceWiFiAllowedHandler::OnWiFiPolicyChanged() {
   chromeos::CrosSettingsProvider::TrustedStatus status =
       cros_settings_->PrepareTrustedValues(
-          base::BindRepeating(&DeviceWiFiAllowedHandler::OnWiFiPolicyChanged,
-                              weak_factory_.GetWeakPtr()));
+          base::BindOnce(&DeviceWiFiAllowedHandler::OnWiFiPolicyChanged,
+                         weak_factory_.GetWeakPtr()));
   if (status != chromeos::CrosSettingsProvider::TRUSTED)
     return;
 

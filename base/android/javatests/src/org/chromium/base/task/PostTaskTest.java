@@ -60,42 +60,33 @@ public class PostTaskTest {
 
     @Test
     @SmallTest
-    public void testCreateSingleThreadTaskRunner() throws Exception {
+    public void testCreateSingleThreadTaskRunner() {
         TaskRunner taskQueue = PostTask.createSingleThreadTaskRunner(TaskTraits.USER_BLOCKING);
         // A SingleThreadTaskRunner with default traits will run in the native thread pool
         // and tasks posted won't run until after the native library has loaded.
         assertNotNull(taskQueue);
-        taskQueue.destroy();
     }
 
     @Test
     @SmallTest
-    public void testCreateSequencedTaskRunner() throws Exception {
+    public void testCreateSequencedTaskRunner() {
         TaskRunner taskQueue = PostTask.createSequencedTaskRunner(TaskTraits.USER_BLOCKING);
         List<Integer> orderList = new ArrayList<>();
-        try {
-            SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 1);
-            SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 2);
-            SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 3);
-            SchedulerTestHelpers.postTaskAndBlockUntilRun(taskQueue);
-        } finally {
-            taskQueue.destroy();
-        }
+        SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 1);
+        SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 2);
+        SchedulerTestHelpers.postRecordOrderTask(taskQueue, orderList, 3);
+        SchedulerTestHelpers.postTaskAndBlockUntilRun(taskQueue);
 
         assertThat(orderList, contains(1, 2, 3));
     }
 
     @Test
     @SmallTest
-    public void testCreateTaskRunner() throws Exception {
+    public void testCreateTaskRunner() {
         TaskRunner taskQueue = PostTask.createTaskRunner(TaskTraits.USER_BLOCKING);
 
         // This should not timeout.
-        try {
-            SchedulerTestHelpers.postTaskAndBlockUntilRun(taskQueue);
-        } finally {
-            taskQueue.destroy();
-        }
+        SchedulerTestHelpers.postTaskAndBlockUntilRun(taskQueue);
     }
 
     @Test

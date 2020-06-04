@@ -7,14 +7,14 @@
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
+#include "ios/chrome/browser/overlays/public/overlay_callback_manager.h"
 #import "ios/chrome/browser/overlays/public/overlay_request.h"
 #import "ios/chrome/browser/overlays/public/overlay_response.h"
 #import "ios/chrome/browser/overlays/public/web_content_area/java_script_confirmation_overlay.h"
-#import "ios/chrome/browser/ui/alert_view_controller/alert_action.h"
-#import "ios/chrome/browser/ui/alert_view_controller/test/fake_alert_consumer.h"
+#import "ios/chrome/browser/ui/alert_view/alert_action.h"
+#import "ios/chrome/browser/ui/alert_view/test/fake_alert_consumer.h"
 #import "ios/chrome/browser/ui/dialogs/java_script_dialog_blocking_state.h"
-#import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/java_script_dialog_overlay_mediator.h"
-#import "ios/chrome/browser/ui/overlays/web_content_area/java_script_dialogs/test/java_script_dialog_overlay_mediator_test.h"
+#import "ios/chrome/browser/ui/overlays/common/alerts/test/alert_overlay_mediator_test.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "testing/gtest_mac.h"
@@ -25,7 +25,7 @@
 #endif
 
 class JavaScriptConfirmationOverlayMediatorTest
-    : public JavaScriptDialogOverlayMediatorTest {
+    : public AlertOverlayMediatorTest {
  public:
   JavaScriptConfirmationOverlayMediatorTest()
       : url_("https://chromium.test"), message_("Message") {
@@ -33,11 +33,10 @@ class JavaScriptConfirmationOverlayMediatorTest
   }
 
   // Creates a mediator and sets it for testing.
-  void CreateMediator() {
+  void CreateMediator(bool is_main_frame = true) {
     request_ = OverlayRequest::CreateWithConfig<
         JavaScriptConfirmationOverlayRequestConfig>(
-        JavaScriptDialogSource(&web_state_, url_, /*is_main_frame=*/true),
-        message_);
+        JavaScriptDialogSource(&web_state_, url_, is_main_frame), message_);
     SetMediator([[JavaScriptConfirmationOverlayMediator alloc]
         initWithRequest:request_.get()]);
   }
@@ -47,7 +46,7 @@ class JavaScriptConfirmationOverlayMediatorTest
   }
   const GURL& url() const { return url_; }
   const std::string& message() const { return message_; }
-  const OverlayRequest* request() const { return request_.get(); }
+  OverlayRequest* request() const { return request_.get(); }
 
  private:
   web::TestWebState web_state_;
@@ -56,9 +55,25 @@ class JavaScriptConfirmationOverlayMediatorTest
   std::unique_ptr<OverlayRequest> request_;
 };
 
-// Tests that the consumer values are set correctly for confirmations.
-TEST_F(JavaScriptConfirmationOverlayMediatorTest, ConfirmationSetup) {
+// Tests that the consumer values are set correctly for confirmations from the
+// main frame.
+TEST_F(JavaScriptConfirmationOverlayMediatorTest, ConfirmationSetupMainFrame) {
   CreateMediator();
+
+  // Verify the consumer values.
+  EXPECT_NSEQ(base::SysUTF8ToNSString(message()), consumer().title);
+  EXPECT_EQ(0U, consumer().textFieldConfigurations.count);
+  ASSERT_EQ(2U, consumer().actions.count);
+  EXPECT_EQ(UIAlertActionStyleDefault, consumer().actions[0].style);
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_OK), consumer().actions[0].title);
+  EXPECT_EQ(UIAlertActionStyleCancel, consumer().actions[1].style);
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_CANCEL), consumer().actions[1].title);
+}
+
+// Tests that the consumer values are set correctly for confirmations from
+// iframes.
+TEST_F(JavaScriptConfirmationOverlayMediatorTest, ConfirmationSetupIFrame) {
+  CreateMediator(/*is_main_frame=*/false);
 
   // Verify the consumer values.
   EXPECT_NSEQ(base::SysUTF8ToNSString(message()), consumer().message);
@@ -78,7 +93,7 @@ TEST_F(JavaScriptConfirmationOverlayMediatorTest,
   CreateMediator();
 
   // Verify the consumer values.
-  EXPECT_NSEQ(base::SysUTF8ToNSString(message()), consumer().message);
+  EXPECT_NSEQ(base::SysUTF8ToNSString(message()), consumer().title);
   EXPECT_EQ(0U, consumer().textFieldConfigurations.count);
   ASSERT_EQ(3U, consumer().actions.count);
   EXPECT_EQ(UIAlertActionStyleDefault, consumer().actions[0].style);
@@ -95,12 +110,13 @@ TEST_F(JavaScriptConfirmationOverlayMediatorTest,
 TEST_F(JavaScriptConfirmationOverlayMediatorTest, ConfirmResponse) {
   CreateMediator();
   ASSERT_EQ(2U, consumer().actions.count);
-  ASSERT_FALSE(!!request()->response());
+  ASSERT_FALSE(!!request()->GetCallbackManager()->GetCompletionResponse());
 
   // Execute the confirm action and verify the response.
   AlertAction* confirm_action = consumer().actions[0];
   confirm_action.handler(confirm_action);
-  OverlayResponse* confirm_response = request()->response();
+  OverlayResponse* confirm_response =
+      request()->GetCallbackManager()->GetCompletionResponse();
   ASSERT_TRUE(!!confirm_response);
   JavaScriptConfirmationOverlayResponseInfo* confirm_response_info =
       confirm_response->GetInfo<JavaScriptConfirmationOverlayResponseInfo>();
@@ -112,12 +128,13 @@ TEST_F(JavaScriptConfirmationOverlayMediatorTest, ConfirmResponse) {
 TEST_F(JavaScriptConfirmationOverlayMediatorTest, CancelResponse) {
   CreateMediator();
   ASSERT_EQ(2U, consumer().actions.count);
-  ASSERT_FALSE(!!request()->response());
+  ASSERT_FALSE(!!request()->GetCallbackManager()->GetCompletionResponse());
 
   // Execute the cancel action and verify the response.
   AlertAction* cancel_action = consumer().actions[1];
   cancel_action.handler(cancel_action);
-  OverlayResponse* cancel_response = request()->response();
+  OverlayResponse* cancel_response =
+      request()->GetCallbackManager()->GetCompletionResponse();
   ASSERT_TRUE(!!cancel_response);
   JavaScriptConfirmationOverlayResponseInfo* cancel_response_info =
       cancel_response->GetInfo<JavaScriptConfirmationOverlayResponseInfo>();

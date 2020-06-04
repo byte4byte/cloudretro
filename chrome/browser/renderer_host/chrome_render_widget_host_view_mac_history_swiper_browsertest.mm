@@ -8,7 +8,6 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
-#import "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -21,7 +20,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "third_party/blink/public/platform/web_mouse_wheel_event.h"
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/ocmock_extensions.h"
 #include "ui/events/base_event_utils.h"
@@ -102,7 +101,10 @@ class ChromeRenderWidgetHostViewMacHistorySwiperTest
     ui::SetEventTickClockForTesting(&mock_clock_);
   }
 
-  void TearDownOnMainThread() override { event_queue_.reset(); }
+  void TearDownOnMainThread() override {
+    ui::SetEventTickClockForTesting(nullptr);
+    event_queue_.reset();
+  }
 
  protected:
   // Returns the active web contents.
@@ -750,10 +752,10 @@ IN_PROC_BROWSER_TEST_F(ChromeRenderWidgetHostViewMacHistorySwiperTest,
 
   content::InputEventAckWaiter wheel_end_ack_waiter(
       GetWebContents()->GetRenderViewHost()->GetWidget(),
-      base::BindRepeating([](content::InputEventAckSource,
-                             content::InputEventAckState,
+      base::BindRepeating([](blink::mojom::InputEventResultSource,
+                             blink::mojom::InputEventResultState,
                              const blink::WebInputEvent& event) {
-        return event.GetType() == blink::WebInputEvent::kMouseWheel &&
+        return event.GetType() == blink::WebInputEvent::Type::kMouseWheel &&
                static_cast<const blink::WebMouseWheelEvent&>(event).phase ==
                    blink::WebMouseWheelEvent::kPhaseEnded;
       }));

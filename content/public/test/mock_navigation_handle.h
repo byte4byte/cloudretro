@@ -7,10 +7,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/isolation_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/blink/public/mojom/referrer.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -28,12 +31,17 @@ class MockNavigationHandle : public NavigationHandle {
   SiteInstance* GetStartingSiteInstance() override {
     return starting_site_instance_;
   }
+  SiteInstance* GetSourceSiteInstance() override {
+    return nullptr;  // Good enough for unit tests...
+  }
   bool IsInMainFrame() override {
     return render_frame_host_ ? !render_frame_host_->GetParent() : true;
   }
   MOCK_METHOD0(IsParentMainFrame, bool());
   bool IsRendererInitiated() override { return true; }
   MOCK_METHOD0(GetFrameTreeNodeId, int());
+  MOCK_METHOD0(GetPreviousRenderFrameHostId, GlobalFrameRoutingId());
+  bool IsServedFromBackForwardCache() override { return false; }
   RenderFrameHost* GetParentFrame() override {
     return render_frame_host_ ? render_frame_host_->GetParent() : nullptr;
   }
@@ -47,9 +55,7 @@ class MockNavigationHandle : public NavigationHandle {
   RestoreType GetRestoreType() override { return RestoreType::NONE; }
   const GURL& GetBaseURLForDataURL() override { return base_url_for_data_url_; }
   MOCK_METHOD0(IsPost, bool());
-  MOCK_METHOD0(GetResourceRequestBody,
-               const scoped_refptr<network::ResourceRequestBody>&());
-  const Referrer& GetReferrer() override { return referrer_; }
+  const blink::mojom::Referrer& GetReferrer() override { return referrer_; }
   MOCK_METHOD0(HasUserGesture, bool());
   ui::PageTransition GetPageTransition() override { return page_transition_; }
   MOCK_METHOD0(GetNavigationUIData, NavigationUIData*());
@@ -73,6 +79,8 @@ class MockNavigationHandle : public NavigationHandle {
   }
   MOCK_METHOD1(RemoveRequestHeader, void(const std::string&));
   MOCK_METHOD2(SetRequestHeader, void(const std::string&, const std::string&));
+  MOCK_METHOD2(SetCorsExemptRequestHeader,
+               void(const std::string&, const std::string&));
   const net::HttpResponseHeaders* GetResponseHeaders() override {
     return response_headers_.get();
   }
@@ -84,6 +92,11 @@ class MockNavigationHandle : public NavigationHandle {
       override {
     return auth_challenge_info_;
   }
+  void SetAuthChallengeInfo(const net::AuthChallengeInfo& challenge);
+  net::ResolveErrorInfo GetResolveErrorInfo() override {
+    return resolve_error_info_;
+  }
+  MOCK_METHOD0(GetIsolationInfo, net::IsolationInfo());
   MOCK_METHOD0(GetGlobalRequestID, const GlobalRequestID&());
   MOCK_METHOD0(IsDownload, bool());
   bool IsFormSubmission() override { return is_form_submission_; }
@@ -92,7 +105,10 @@ class MockNavigationHandle : public NavigationHandle {
   MOCK_METHOD0(HasPrefetchedAlternativeSubresourceSignedExchange, bool());
   bool WasResponseCached() override { return was_response_cached_; }
   const net::ProxyServer& GetProxyServer() override { return proxy_server_; }
-  MOCK_METHOD0(GetHrefTranslate, const std::string&());
+  const std::string& GetHrefTranslate() override { return href_translate_; }
+  const base::Optional<Impression>& GetImpression() override {
+    return impression_;
+  }
   const base::Optional<url::Origin>& GetInitiatorOrigin() override {
     return initiator_origin_;
   }
@@ -104,6 +120,8 @@ class MockNavigationHandle : public NavigationHandle {
   MOCK_METHOD0(FromDownloadCrossOriginRedirect, bool());
   MOCK_METHOD0(IsSameProcess, bool());
   MOCK_METHOD0(GetNavigationEntryOffset, int());
+  MOCK_METHOD1(ForceEnableOriginTrials,
+               void(const std::vector<std::string>& trials));
 
   void set_url(const GURL& url) { url_ = url; }
   void set_starting_site_instance(SiteInstance* site_instance) {
@@ -143,6 +161,12 @@ class MockNavigationHandle : public NavigationHandle {
   void set_proxy_server(const net::ProxyServer& proxy_server) {
     proxy_server_ = proxy_server;
   }
+  void set_impression(const Impression& impression) {
+    impression_ = impression;
+  }
+  void set_initiator_origin(const url::Origin& initiator_origin) {
+    initiator_origin_ = initiator_origin;
+  }
   void set_reload_type(ReloadType reload_type) { reload_type_ = reload_type; }
 
  private:
@@ -151,7 +175,7 @@ class MockNavigationHandle : public NavigationHandle {
   SiteInstance* starting_site_instance_ = nullptr;
   WebContents* web_contents_ = nullptr;
   GURL base_url_for_data_url_;
-  Referrer referrer_;
+  blink::mojom::Referrer referrer_;
   ui::PageTransition page_transition_ = ui::PAGE_TRANSITION_LINK;
   net::Error net_error_code_ = net::OK;
   RenderFrameHost* render_frame_host_ = nullptr;
@@ -163,11 +187,14 @@ class MockNavigationHandle : public NavigationHandle {
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
   base::Optional<net::SSLInfo> ssl_info_;
   base::Optional<net::AuthChallengeInfo> auth_challenge_info_;
+  net::ResolveErrorInfo resolve_error_info_;
   bool is_form_submission_ = false;
   bool was_response_cached_ = false;
   net::ProxyServer proxy_server_;
   base::Optional<url::Origin> initiator_origin_;
   ReloadType reload_type_ = content::ReloadType::NONE;
+  std::string href_translate_;
+  base::Optional<Impression> impression_;
 };
 
 }  // namespace content

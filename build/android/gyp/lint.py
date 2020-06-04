@@ -19,29 +19,28 @@ from xml.etree import ElementTree
 
 from util import build_utils
 from util import manifest_utils
+from util import md5_check
 
 _LINT_MD_URL = 'https://chromium.googlesource.com/chromium/src/+/master/build/android/docs/lint.md' # pylint: disable=line-too-long
 
 
-def _OnStaleMd5(lint_path,
-                config_path,
-                processed_config_path,
-                manifest_path,
-                result_path,
-                product_dir,
-                sources,
-                jar_path,
-                cache_dir,
-                android_sdk_version,
-                srcjars,
-                min_sdk_version,
-                manifest_package,
-                resource_sources,
-                disable=None,
-                classpath=None,
-                can_fail_build=False,
-                include_unexpected=False,
-                silent=False):
+def _RunLint(lint_path,
+             config_path,
+             processed_config_path,
+             manifest_path,
+             result_path,
+             product_dir,
+             sources,
+             cache_dir,
+             android_sdk_version,
+             srcjars,
+             min_sdk_version,
+             manifest_package,
+             resource_sources,
+             disable=None,
+             can_fail_build=False,
+             include_unexpected=False,
+             silent=False):
 
   def _RebasePath(path):
     """Returns relative path to top-level src dir.
@@ -87,11 +86,7 @@ def _OnStaleMd5(lint_path,
         location_elem = issue.getElementsByTagName('location')[0]
         path = location_elem.attributes['file'].value
         line = location_elem.getAttribute('line')
-        if line:
-          error = '%s:%s %s: %s [warning]' % (path, line, message, issue_id)
-        else:
-          # Issues in class files don't have a line number.
-          error = '%s %s: %s [warning]' % (path, message, issue_id)
+        error = '%s:%s %s: %s [warning]' % (path, line, message, issue_id)
         print(error.encode('utf-8'), file=sys.stderr)
         for attr in ['errorLine1', 'errorLine2']:
           error_line = issue.getAttribute(attr)
@@ -106,9 +101,6 @@ def _OnStaleMd5(lint_path,
         _RebasePath(lint_path), '-Werror', '--exitcode', '--showall',
         '--xml', _RebasePath(result_path),
     ]
-    if jar_path:
-      # --classpath is just for .class files for this one target.
-      cmd.extend(['--classpath', _RebasePath(jar_path)])
     if processed_config_path:
       cmd.extend(['--config', _RebasePath(processed_config_path)])
 
@@ -137,11 +129,6 @@ def _OnStaleMd5(lint_path,
     for resource_dir in resource_dirs:
       cmd.extend(['--resources', _RebasePath(resource_dir)])
 
-    if classpath:
-      # --libraries is the classpath (excluding active target).
-      cp = ':'.join(_RebasePath(p) for p in classpath)
-      cmd.extend(['--libraries', cp])
-
     # There may be multiple source files with the same basename (but in
     # different directories). It is difficult to determine what part of the path
     # corresponds to the java package, and so instead just link the source files
@@ -165,7 +152,15 @@ def _OnStaleMd5(lint_path,
         src_dir = _NewTempSubdir('SRC_ROOT')
         src_dirs.append(src_dir)
         cmd.extend(['--sources', _RebasePath(src_dir)])
-      os.symlink(os.path.abspath(src), PathInDir(src_dir, src))
+      # In cases where the build dir is outside of the src dir, this can
+      # result in trying to symlink a file to itself for this file:
+      # gen/components/version_info/android/java/org/chromium/
+      #   components/version_info/VersionConstants.java
+      src = os.path.abspath(src)
+      dst = PathInDir(src_dir, src)
+      if src == dst:
+        continue
+      os.symlink(src, dst)
 
     if srcjars:
       srcjar_paths = build_utils.ParseGnList(srcjars)
@@ -218,14 +213,17 @@ def _OnStaleMd5(lint_path,
       os.remove(result_path)
 
     env = os.environ.copy()
-    stderr_filter = None
+    stderr_filter = build_utils.FilterReflectiveAccessJavaWarnings
     if cache_dir:
       env['_JAVA_OPTIONS'] = '-Duser.home=%s' % _RebasePath(cache_dir)
       # When _JAVA_OPTIONS is set, java prints to stderr:
       # Picked up _JAVA_OPTIONS: ...
       #
       # We drop all lines that contain _JAVA_OPTIONS from the output
-      stderr_filter = lambda l: re.sub(r'.*_JAVA_OPTIONS.*\n?', '', l)
+      stderr_filter = lambda l: re.sub(
+          r'.*_JAVA_OPTIONS.*\n?',
+          '',
+          build_utils.FilterReflectiveAccessJavaWarnings(l))
 
     def fail_func(returncode, stderr):
       if returncode != 0:
@@ -236,6 +234,8 @@ def _OnStaleMd5(lint_path,
       return False
 
     try:
+      env['JAVA_HOME'] = os.path.relpath(build_utils.JAVA_HOME,
+                                         build_utils.DIR_SOURCE_ROOT)
       build_utils.CheckOutput(cmd, cwd=build_utils.DIR_SOURCE_ROOT,
                               env=env or None, stderr_filter=stderr_filter,
                               fail_func=fail_func)
@@ -292,8 +292,6 @@ def _FindInDirectories(directories, filename_filter):
 
 def main():
   parser = argparse.ArgumentParser()
-  build_utils.AddDepfileOption(parser)
-
   parser.add_argument('--lint-path', required=True,
                       help='Path to lint executable.')
   parser.add_argument('--product-dir', required=True,
@@ -318,14 +316,10 @@ def main():
                       help='Path to lint suppressions file.')
   parser.add_argument('--disable',
                       help='List of checks to disable.')
-  parser.add_argument('--jar-path',
-                      help='Jar file containing class files.')
   parser.add_argument('--java-sources-file',
                       help='File containing a list of java files.')
   parser.add_argument('--manifest-path',
                       help='Path to AndroidManifest.xml')
-  parser.add_argument('--classpath', default=[], action='append',
-                      help='GYP-list of classpath .jar files')
   parser.add_argument('--processed-config-path',
                       help='Path to processed lint suppressions file.')
   parser.add_argument('--resource-dir',
@@ -340,6 +334,7 @@ def main():
                       help='Directories containing java files.')
   parser.add_argument('--srcjars',
                       help='GN list of included srcjars.')
+  parser.add_argument('--stamp', help='Path to stamp upon success.')
   parser.add_argument(
       '--min-sdk-version',
       required=True,
@@ -361,23 +356,6 @@ def main():
   elif args.processed_config_path and not args.config_path:
     parser.error('--processed-config-path specified without --config-path')
 
-  input_paths = [
-      args.lint_path,
-      args.platform_xml_path,
-  ]
-  if args.config_path:
-    input_paths.append(args.config_path)
-  if args.jar_path:
-    input_paths.append(args.jar_path)
-  if args.manifest_path:
-    input_paths.append(args.manifest_path)
-  if sources:
-    input_paths.extend(sources)
-  classpath = []
-  for gyp_list in args.classpath:
-    classpath.extend(build_utils.ParseGnList(gyp_list))
-  input_paths.extend(classpath)
-
   resource_sources = []
   if args.resource_dir:
     # Backward compatibility with GYP
@@ -386,53 +364,30 @@ def main():
   for gyp_list in args.resource_sources:
     resource_sources += build_utils.ParseGnList(gyp_list)
 
-  for resource_source in resource_sources:
-    if os.path.isdir(resource_source):
-      input_paths.extend(build_utils.FindInDirectory(resource_source, '*'))
-    else:
-      input_paths.append(resource_source)
-
-  input_strings = [
-    args.can_fail_build,
-    args.include_unexpected_failures,
-    args.silent,
-  ]
-  if args.android_sdk_version:
-    input_strings.append(args.android_sdk_version)
-  if args.processed_config_path:
-    input_strings.append(args.processed_config_path)
-
   disable = []
   if args.disable:
     disable = build_utils.ParseGnList(args.disable)
-    input_strings.extend(disable)
 
-  output_paths = [args.result_path, args.processed_config_path]
+  _RunLint(
+      args.lint_path,
+      args.config_path,
+      args.processed_config_path,
+      args.manifest_path,
+      args.result_path,
+      args.product_dir,
+      sources,
+      args.cache_dir,
+      args.android_sdk_version,
+      args.srcjars,
+      args.min_sdk_version,
+      args.manifest_package,
+      resource_sources,
+      disable=disable,
+      can_fail_build=args.can_fail_build,
+      include_unexpected=args.include_unexpected_failures,
+      silent=args.silent)
 
-  build_utils.CallAndWriteDepfileIfStale(
-      lambda: _OnStaleMd5(args.lint_path,
-                          args.config_path,
-                          args.processed_config_path,
-                          args.manifest_path, args.result_path,
-                          args.product_dir, sources,
-                          args.jar_path,
-                          args.cache_dir,
-                          args.android_sdk_version,
-                          args.srcjars,
-                          args.min_sdk_version,
-                          args.manifest_package,
-                          resource_sources,
-                          disable=disable,
-                          classpath=classpath,
-                          can_fail_build=args.can_fail_build,
-                          include_unexpected=args.include_unexpected_failures,
-                          silent=args.silent),
-      args,
-      input_paths=input_paths,
-      input_strings=input_strings,
-      output_paths=output_paths,
-      depfile_deps=classpath,
-      add_pydeps=False)
+  build_utils.Touch(args.stamp)
 
 
 if __name__ == '__main__':

@@ -8,31 +8,34 @@ import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.Uri;
 import android.provider.Browser;
 import android.text.TextUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.BuildInfo;
-import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.snackbar.Snackbar;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.util.UrlConstants;
-import org.chromium.chrome.browser.widget.TintedDrawable;
+import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
+import org.chromium.components.browser_ui.widget.TintedDrawable;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
 
@@ -40,8 +43,7 @@ import org.chromium.ui.base.PageTransition;
  * A class holding static util functions for bookmark.
  */
 public class BookmarkUtils {
-    private static final String PREF_LAST_USED_URL = "enhanced_bookmark_last_used_url";
-    private static final String PREF_LAST_USED_PARENT = "enhanced_bookmark_last_used_parent_folder";
+    private static final String TAG = "BookmarkUtils";
 
     /**
      * If the tab has already been bookmarked, start {@link BookmarkEditActivity} for the
@@ -60,21 +62,15 @@ public class BookmarkUtils {
      */
     public static BookmarkId addOrEditBookmark(long existingBookmarkId, BookmarkModel bookmarkModel,
             Tab tab, SnackbarManager snackbarManager, Activity activity, boolean fromCustomTab) {
-        if (existingBookmarkId != Tab.INVALID_BOOKMARK_ID) {
+        if (existingBookmarkId != BookmarkId.INVALID_ID) {
             BookmarkId bookmarkId = new BookmarkId(existingBookmarkId, BookmarkType.NORMAL);
             startEditActivity(activity, bookmarkId);
             bookmarkModel.destroy();
             return bookmarkId;
         }
 
-        BookmarkId parent = getLastUsedParent(activity);
-        if (parent == null || !bookmarkModel.doesBookmarkExist(parent)) {
-            parent = bookmarkModel.getDefaultFolder();
-        }
-
-        String url = tab.getOriginalUrl();
-        BookmarkId bookmarkId = bookmarkModel.addBookmark(parent,
-                bookmarkModel.getChildCount(parent), tab.getTitle(), url);
+        BookmarkId bookmarkId =
+                addBookmarkInternal(activity, bookmarkModel, tab.getTitle(), tab.getOriginalUrl());
 
         Snackbar snackbar = null;
         if (bookmarkId == null) {
@@ -119,20 +115,35 @@ public class BookmarkUtils {
     }
 
     /**
-     * Adds a bookmark with the given title and url to the last used parent folder. Provides
-     * no visual feedback that a bookmark has been added.
-     *
-     * @param title The title of the bookmark.
-     * @param url The URL of the new bookmark.
+     * An internal version of {@link #addBookmarkSilently(Context, BookmarkModel, String, String)}.
+     * Will reset last used parent if it fails to add a bookmark
      */
-    public static BookmarkId addBookmarkSilently(
+    private static BookmarkId addBookmarkInternal(
             Context context, BookmarkModel bookmarkModel, String title, String url) {
         BookmarkId parent = getLastUsedParent(context);
-        if (parent == null || !bookmarkModel.doesBookmarkExist(parent)) {
+        BookmarkItem parentItem = null;
+        if (parent != null) {
+            parentItem = bookmarkModel.getBookmarkById(parent);
+        }
+        if (parent == null || parentItem == null || parentItem.isManaged()
+                || !parentItem.isFolder()) {
             parent = bookmarkModel.getDefaultFolder();
         }
+        BookmarkId bookmarkId =
+                bookmarkModel.addBookmark(parent, bookmarkModel.getChildCount(parent), title, url);
 
-        return bookmarkModel.addBookmark(parent, bookmarkModel.getChildCount(parent), title, url);
+        // TODO(lazzzis): remove log after bookmark sync is fixed, crbug.com/986978
+        if (bookmarkId == null) {
+            Log.e(TAG,
+                    "Failed to add bookmarks: parentTypeAndId %s, defaultFolderTypeAndId %s, "
+                            + "mobileFolderTypeAndId %s, parentEditable Managed isFolder %s,",
+                    parent, bookmarkModel.getDefaultFolder(), bookmarkModel.getMobileFolderId(),
+                    parentItem == null ? "null"
+                                       : (parentItem.isEditable() + " " + parentItem.isManaged()
+                                               + " " + parentItem.isFolder()));
+            setLastUsedParent(context, bookmarkModel.getDefaultFolder());
+        }
+        return bookmarkId;
     }
 
     /**
@@ -186,8 +197,8 @@ public class BookmarkUtils {
      * {@link #getLastUsedUrl(Context)}
      */
     static void setLastUsedUrl(Context context, String url) {
-        ContextUtils.getAppSharedPreferences().edit()
-                .putString(PREF_LAST_USED_URL, url).apply();
+        SharedPreferencesManager.getInstance().writeString(
+                ChromePreferenceKeys.BOOKMARKS_LAST_USED_URL, url);
     }
 
     /**
@@ -195,16 +206,16 @@ public class BookmarkUtils {
      */
     @VisibleForTesting
     static String getLastUsedUrl(Context context) {
-        return ContextUtils.getAppSharedPreferences().getString(
-                PREF_LAST_USED_URL, UrlConstants.BOOKMARKS_URL);
+        return SharedPreferencesManager.getInstance().readString(
+                ChromePreferenceKeys.BOOKMARKS_LAST_USED_URL, UrlConstants.BOOKMARKS_URL);
     }
 
     /**
      * Save the last used {@link BookmarkId} as a folder to put new bookmarks to.
      */
     static void setLastUsedParent(Context context, BookmarkId bookmarkId) {
-        ContextUtils.getAppSharedPreferences().edit()
-                .putString(PREF_LAST_USED_PARENT, bookmarkId.toString()).apply();
+        SharedPreferencesManager.getInstance().writeString(
+                ChromePreferenceKeys.BOOKMARKS_LAST_USED_PARENT, bookmarkId.toString());
     }
 
     /**
@@ -212,15 +223,16 @@ public class BookmarkUtils {
      *         has never selected a parent folder to use.
      */
     static BookmarkId getLastUsedParent(Context context) {
-        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
-        if (!preferences.contains(PREF_LAST_USED_PARENT)) return null;
+        SharedPreferencesManager preferences = SharedPreferencesManager.getInstance();
+        if (!preferences.contains(ChromePreferenceKeys.BOOKMARKS_LAST_USED_PARENT)) return null;
 
         return BookmarkId.getBookmarkIdFromString(
-                preferences.getString(PREF_LAST_USED_PARENT, null));
+                preferences.readString(ChromePreferenceKeys.BOOKMARKS_LAST_USED_PARENT, null));
     }
 
     /** Starts an {@link BookmarkEditActivity} for the given {@link BookmarkId}. */
     public static void startEditActivity(Context context, BookmarkId bookmarkId) {
+        RecordUserAction.record("MobileBookmarkManagerEditBookmark");
         Intent intent = new Intent(context, BookmarkEditActivity.class);
         intent.putExtra(BookmarkEditActivity.INTENT_BOOKMARK_ID, bookmarkId.toString());
         if (context instanceof BookmarkActivity) {
@@ -236,31 +248,28 @@ public class BookmarkUtils {
      * @param model Bookmarks model to manage the bookmark.
      * @param activity Activity requesting to open the bookmark.
      * @param bookmarkId ID of the bookmark to be opened.
-     * @param launchLocation Location from which the bookmark is being opened.
      * @return Whether the bookmark was successfully opened.
      */
-    public static boolean openBookmark(BookmarkModel model, Activity activity,
-            BookmarkId bookmarkId, int launchLocation) {
+    public static boolean openBookmark(
+            BookmarkModel model, Activity activity, BookmarkId bookmarkId) {
         if (model.getBookmarkById(bookmarkId) == null) return false;
 
         String url = model.getBookmarkById(bookmarkId).getUrl();
 
         RecordUserAction.record("MobileBookmarkManagerEntryOpened");
         RecordHistogram.recordEnumeratedHistogram(
-                "Stars.LaunchLocation", launchLocation, BookmarkLaunchLocation.COUNT);
-        RecordHistogram.recordEnumeratedHistogram(
                 "Bookmarks.OpenBookmarkType", bookmarkId.getType(), BookmarkType.LAST + 1);
 
-        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(activity)) {
-            // For tablets, the bookmark manager is open in a tab in the ChromeActivity. Use
-            // the ComponentName of the ChromeActivity passed into this method.
-            openUrl(activity, url, activity.getComponentName());
-        } else {
+        if (activity instanceof BookmarkActivity) {
             // For phones, the bookmark manager is a separate activity. When the activity is
             // launched, an intent extra is set specifying the parent component.
             ComponentName parentComponent = IntentUtils.safeGetParcelableExtra(
-                    activity.getIntent(), IntentHandler.EXTRA_PARENT_COMPONENT);
+                activity.getIntent(), IntentHandler.EXTRA_PARENT_COMPONENT);
             openUrl(activity, url, parentComponent);
+        } else {
+            // For tablets, the bookmark manager is open in a tab in the ChromeActivity. Use
+            // the ComponentName of the ChromeActivity passed into this method.
+            openUrl(activity, url, activity.getComponentName());
         }
 
         return true;
@@ -279,7 +288,7 @@ public class BookmarkUtils {
      * @return The tint used on the bookmark folder icon.
      */
     public static int getFolderIconTint() {
-        return R.color.standard_mode_tint;
+        return R.color.default_icon_color_tint_list;
     }
 
     private static void openUrl(Activity activity, String url, ComponentName componentName) {

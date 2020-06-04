@@ -3,17 +3,17 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
-<android.support.v7.preference.PreferenceScreen
+<PreferenceScreen
     xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <org.chromium.chrome.browser.preferences.languages.LanguageListPreference
+    <org.chromium.chrome.browser.language.settings.LanguageListPreference
         android:key="preferred_languages"
         android:layout="@layout/languages_preference"
         android:widgetLayout="@layout/accept_languages_list" />
 
-    <org.chromium.chrome.browser.preferences.ChromeSwitchPreferenceCompat
+    <org.chromium.components.browser_ui.settings.ChromeSwitchPreference
         android:key="translate_switch"
         android:summaryOn="@string/languages_offer_translate_switch"
         android:summaryOff="@string/languages_offer_translate_switch" />
 
-</android.support.v7.preference.PreferenceScreen>
+</PreferenceScreen>

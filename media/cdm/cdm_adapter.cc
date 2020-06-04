@@ -35,6 +35,7 @@
 #include "media/cdm/cdm_helpers.h"
 #include "media/cdm/cdm_type_conversion.h"
 #include "media/cdm/cdm_wrapper.h"
+#include "media/media_buildflags.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/origin.h"
@@ -178,7 +179,7 @@ void CdmAdapter::Create(
     const SessionClosedCB& session_closed_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb,
-    const CdmCreatedCB& cdm_created_cb) {
+    CdmCreatedCB cdm_created_cb) {
   DCHECK(!key_system.empty());
   DCHECK(session_message_cb);
   DCHECK(session_closed_cb);
@@ -191,7 +192,8 @@ void CdmAdapter::Create(
                      session_keys_change_cb, session_expiration_update_cb);
 
   // |cdm| ownership passed to the promise.
-  cdm->Initialize(std::make_unique<CdmInitializedPromise>(cdm_created_cb, cdm));
+  cdm->Initialize(
+      std::make_unique<CdmInitializedPromise>(std::move(cdm_created_cb), cdm));
 }
 
 CdmAdapter::CdmAdapter(
@@ -236,9 +238,9 @@ CdmAdapter::~CdmAdapter() {
   cdm_promise_adapter_.Clear();
 
   if (audio_init_cb_)
-    audio_init_cb_.Run(false);
+    std::move(audio_init_cb_).Run(false);
   if (video_init_cb_)
-    video_init_cb_.Run(false);
+    std::move(video_init_cb_).Run(false);
 }
 
 CdmWrapper* CdmAdapter::CreateCdmInstance(const std::string& key_system) {
@@ -411,37 +413,24 @@ std::unique_ptr<CallbackRegistration> CdmAdapter::RegisterEventCB(
 
 Decryptor* CdmAdapter::GetDecryptor() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-
-  // When using HW secure codecs, we cannot and should not use the CDM instance
-  // to do decrypt and/or decode. Instead, we should use the CdmProxy.
-  // TODO(xhwang): Fix External Clear Key key system to be able to set
-  // |use_hw_secure_codecs| so that we don't have to check both.
-  // TODO(xhwang): Update this logic to support transcryption.
-  if (cdm_config_.use_hw_secure_codecs || cdm_proxy_created_) {
-    DVLOG(2) << __func__ << ": GetDecryptor() returns null";
-    return nullptr;
-  }
-
   return this;
 }
 
 int CdmAdapter::GetCdmId() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  int cdm_id = helper_->GetCdmProxyCdmId();
-  DVLOG(2) << __func__ << ": cdm_id = " << cdm_id;
-  return cdm_id;
+  return CdmContext::kInvalidCdmId;
 }
 
 void CdmAdapter::RegisterNewKeyCB(StreamType stream_type,
-                                  const NewKeyCB& key_added_cb) {
+                                  NewKeyCB key_added_cb) {
   DVLOG(3) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   switch (stream_type) {
     case kAudio:
-      new_audio_key_cb_ = key_added_cb;
+      new_audio_key_cb_ = std::move(key_added_cb);
       return;
     case kVideo:
-      new_video_key_cb_ = key_added_cb;
+      new_video_key_cb_ = std::move(key_added_cb);
       return;
   }
 
@@ -450,7 +439,7 @@ void CdmAdapter::RegisterNewKeyCB(StreamType stream_type,
 
 void CdmAdapter::Decrypt(StreamType stream_type,
                          scoped_refptr<DecoderBuffer> encrypted,
-                         const DecryptCB& decrypt_cb) {
+                         DecryptCB decrypt_cb) {
   DVLOG(3) << __func__ << ": " << encrypted->AsHumanReadableString();
   DCHECK(task_runner_->BelongsToCurrentThread());
 
@@ -470,7 +459,7 @@ void CdmAdapter::Decrypt(StreamType stream_type,
 
   if (status != cdm::kSuccess) {
     DVLOG(1) << __func__ << ": status = " << status;
-    decrypt_cb.Run(ToMediaDecryptorStatus(status), nullptr);
+    std::move(decrypt_cb).Run(ToMediaDecryptorStatus(status), nullptr);
     return;
   }
 
@@ -479,7 +468,7 @@ void CdmAdapter::Decrypt(StreamType stream_type,
                               decrypted_block->DecryptedBuffer()->Size()));
   decrypted_buffer->set_timestamp(
       base::TimeDelta::FromMicroseconds(decrypted_block->Timestamp()));
-  decrypt_cb.Run(Decryptor::kSuccess, std::move(decrypted_buffer));
+  std::move(decrypt_cb).Run(Decryptor::kSuccess, std::move(decrypted_buffer));
 }
 
 void CdmAdapter::CancelDecrypt(StreamType stream_type) {
@@ -488,7 +477,7 @@ void CdmAdapter::CancelDecrypt(StreamType stream_type) {
 }
 
 void CdmAdapter::InitializeAudioDecoder(const AudioDecoderConfig& config,
-                                        const DecoderInitCB& init_cb) {
+                                        DecoderInitCB init_cb) {
   DVLOG(2) << __func__ << ": " << config.AsHumanReadableString();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!audio_init_cb_);
@@ -498,7 +487,7 @@ void CdmAdapter::InitializeAudioDecoder(const AudioDecoderConfig& config,
   if (cdm_config.codec == cdm::kUnknownAudioCodec) {
     DVLOG(1) << __func__
              << ": Unsupported config: " << config.AsHumanReadableString();
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
@@ -506,7 +495,7 @@ void CdmAdapter::InitializeAudioDecoder(const AudioDecoderConfig& config,
   if (status != cdm::kSuccess && status != cdm::kDeferredInitialization) {
     DCHECK(status == cdm::kInitializationError);
     DVLOG(1) << __func__ << ": status = " << status;
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
@@ -515,15 +504,15 @@ void CdmAdapter::InitializeAudioDecoder(const AudioDecoderConfig& config,
 
   if (status == cdm::kDeferredInitialization) {
     DVLOG(1) << "Deferred initialization in " << __func__;
-    audio_init_cb_ = init_cb;
+    audio_init_cb_ = std::move(init_cb);
     return;
   }
 
-  init_cb.Run(true);
+  std::move(init_cb).Run(true);
 }
 
 void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
-                                        const DecoderInitCB& init_cb) {
+                                        DecoderInitCB init_cb) {
   DVLOG(2) << __func__ << ": " << config.AsHumanReadableString();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!video_init_cb_);
@@ -533,7 +522,7 @@ void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
   if (config.alpha_mode() != VideoDecoderConfig::AlphaMode::kIsOpaque) {
     DVLOG(1) << __func__
              << ": Unsupported config: " << config.AsHumanReadableString();
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
@@ -544,7 +533,7 @@ void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
   if (cdm_config.codec == cdm::kUnknownVideoCodec) {
     DVLOG(1) << __func__
              << ": Unsupported config: " << config.AsHumanReadableString();
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
@@ -552,7 +541,7 @@ void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
   if (status != cdm::kSuccess && status != cdm::kDeferredInitialization) {
     DCHECK(status == cdm::kInitializationError);
     DVLOG(1) << __func__ << ": status = " << status;
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
@@ -561,11 +550,11 @@ void CdmAdapter::InitializeVideoDecoder(const VideoDecoderConfig& config,
 
   if (status == cdm::kDeferredInitialization) {
     DVLOG(1) << "Deferred initialization in " << __func__;
-    video_init_cb_ = init_cb;
+    video_init_cb_ = std::move(init_cb);
     return;
   }
 
-  init_cb.Run(true);
+  std::move(init_cb).Run(true);
 }
 
 void CdmAdapter::DecryptAndDecodeAudio(scoped_refptr<DecoderBuffer> encrypted,
@@ -869,15 +858,16 @@ void CdmAdapter::SendPlatformChallenge(const char* service_id,
   if (!cdm_config_.allow_distinctive_identifier) {
     task_runner_->PostTask(
         FROM_HERE,
-        base::BindRepeating(&CdmAdapter::OnChallengePlatformDone,
-                            weak_factory_.GetWeakPtr(), false, "", "", ""));
+        base::BindOnce(&CdmAdapter::OnChallengePlatformDone,
+                       weak_factory_.GetWeakPtr(), false, "", "", ""));
     return;
   }
 
-  helper_->ChallengePlatform(std::string(service_id, service_id_size),
-                             std::string(challenge, challenge_size),
-                             base::Bind(&CdmAdapter::OnChallengePlatformDone,
-                                        weak_factory_.GetWeakPtr()));
+  helper_->ChallengePlatform(
+      std::string(service_id, service_id_size),
+      std::string(challenge, challenge_size),
+      base::BindOnce(&CdmAdapter::OnChallengePlatformDone,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void CdmAdapter::OnChallengePlatformDone(
@@ -933,8 +923,8 @@ void CdmAdapter::QueryOutputProtectionStatus() {
 
   ReportOutputProtectionQuery();
   helper_->QueryStatus(
-      base::Bind(&CdmAdapter::OnQueryOutputProtectionStatusDone,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&CdmAdapter::OnQueryOutputProtectionStatusDone,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void CdmAdapter::OnQueryOutputProtectionStatusDone(bool success,
@@ -1048,32 +1038,16 @@ void CdmAdapter::RequestStorageId(uint32_t version) {
     DVLOG(1) << __func__ << ": Persistent state not allowed ("
              << cdm_config_.allow_persistent_state
              << ") or invalid storage ID version (" << version << ").";
-    task_runner_->PostTask(
-        FROM_HERE, base::BindRepeating(&CdmAdapter::OnStorageIdObtained,
-                                       weak_factory_.GetWeakPtr(), version,
-                                       std::vector<uint8_t>()));
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&CdmAdapter::OnStorageIdObtained,
+                                          weak_factory_.GetWeakPtr(), version,
+                                          std::vector<uint8_t>()));
     return;
   }
 
-  helper_->GetStorageId(version, base::Bind(&CdmAdapter::OnStorageIdObtained,
-                                            weak_factory_.GetWeakPtr()));
-}
-
-cdm::CdmProxy* CdmAdapter::RequestCdmProxy(cdm::CdmProxyClient* client) {
-  DVLOG(3) << __func__;
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  // CdmProxy should only be created once, at CDM initialization time.
-  if (cdm_proxy_created_ ||
-      init_promise_id_ == CdmPromiseAdapter::kInvalidPromiseId) {
-    DVLOG(1) << __func__
-             << ": CdmProxy can only be created once, and must be created "
-                "during CDM initialization.";
-    return nullptr;
-  }
-
-  cdm_proxy_created_ = true;
-  return helper_->CreateCdmProxy(client);
+  helper_->GetStorageId(version,
+                        base::BindOnce(&CdmAdapter::OnStorageIdObtained,
+                                       weak_factory_.GetWeakPtr()));
 }
 
 void CdmAdapter::OnStorageIdObtained(uint32_t version,

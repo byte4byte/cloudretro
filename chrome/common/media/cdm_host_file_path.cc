@@ -9,15 +9,16 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/bundle_locations.h"
-#include "chrome/common/chrome_constants.h"
 #endif
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 namespace {
 
@@ -43,9 +44,11 @@ void AddCdmHostFilePaths(
 #if defined(OS_WIN)
 
   static const base::FilePath::CharType* const kUnversionedFiles[] = {
-      FILE_PATH_LITERAL("chrome.exe")};
+      chrome::kBrowserProcessExecutableName};
+
   static const base::FilePath::CharType* const kVersionedFiles[] = {
-      FILE_PATH_LITERAL("chrome.dll"), FILE_PATH_LITERAL("chrome_child.dll")};
+    chrome::kBrowserResourcesDll
+  };
 
   // Find where chrome.exe is installed.
   base::FilePath chrome_exe_dir;
@@ -104,7 +107,7 @@ void AddCdmHostFilePaths(
 #endif  // defined(OS_WIN)
 }
 
-#else  // defined(GOOGLE_CHROME_BUILD)
+#else  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 void AddCdmHostFilePaths(
     std::vector<media::CdmHostFilePath>* cdm_host_file_paths) {
@@ -112,5 +115,4 @@ void AddCdmHostFilePaths(
                       "verify the host.";
 }
 
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)

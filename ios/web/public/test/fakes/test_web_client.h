@@ -26,8 +26,14 @@ class TestWebClient : public web::WebClient {
   // WebClient implementation.
   void AddAdditionalSchemes(Schemes* schemes) const override;
 
-  // Returns true for kTestWebUIScheme and kTestNativeContentScheme URL schemes.
+  // Returns true for kTestWebUIScheme URL.
   bool IsAppSpecificURL(const GURL& url) const override;
+
+  bool ShouldBlockUrlDuringRestore(const GURL& url,
+                                   WebState* web_state) const override;
+
+  void AddSerializableData(web::SerializableUserDataManager* user_data_manager,
+                           web::WebState* web_state) override;
 
   std::string GetUserAgent(UserAgentType type) const override;
 
@@ -36,7 +42,6 @@ class TestWebClient : public web::WebClient {
   base::string16 GetPluginNotSupportedText() const override;
 
   base::RefCountedMemory* GetDataResourceBytes(int id) const override;
-  bool IsDataResourceGzipped(int resource_id) const override;
 
   NSString* GetDocumentStartScriptForMainFrame(
       BrowserState* browser_state) const override;
@@ -45,8 +50,19 @@ class TestWebClient : public web::WebClient {
                              const net::SSLInfo&,
                              const GURL&,
                              bool overridable,
+                             int64_t navigation_id,
                              const base::Callback<void(bool)>&) override;
+  void PrepareErrorPage(WebState* web_state,
+                        const GURL& url,
+                        NSError* error,
+                        bool is_post,
+                        bool is_off_the_record,
+                        const base::Optional<net::SSLInfo>& info,
+                        int64_t navigation_id,
+                        base::OnceCallback<void(NSString*)> callback) override;
   UIView* GetWindowedContainer() override;
+  UserAgentType GetDefaultUserAgent(id<UITraitEnvironment> web_view,
+                                    const GURL& url) override;
 
   // Sets |plugin_not_supported_text_|.
   void SetPluginNotSupportedText(const base::string16& text);
@@ -67,6 +83,8 @@ class TestWebClient : public web::WebClient {
   }
   bool last_cert_error_overridable() { return last_cert_error_overridable_; }
 
+  void SetDefaultUserAgent(UserAgentType type) { default_user_agent_ = type; }
+
  private:
   base::string16 plugin_not_supported_text_;
   NSString* early_page_script_ = nil;
@@ -76,6 +94,7 @@ class TestWebClient : public web::WebClient {
   GURL last_cert_error_request_url_;
   bool last_cert_error_overridable_ = true;
   bool allow_certificate_errors_ = false;
+  UserAgentType default_user_agent_ = UserAgentType::MOBILE;
 };
 
 }  // namespace web

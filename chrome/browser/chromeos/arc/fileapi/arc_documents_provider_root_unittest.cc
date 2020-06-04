@@ -16,13 +16,13 @@
 #include "chrome/browser/chromeos/arc/fileapi/arc_file_system_operation_runner.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/arc/arc_service_manager.h"
-#include "components/arc/common/file_system.mojom.h"
+#include "components/arc/mojom/file_system.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_file_system_instance.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "storage/browser/fileapi/watcher_manager.h"
+#include "content/public/test/browser_task_environment.h"
+#include "storage/browser/file_system/watcher_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -198,7 +198,7 @@ class ArcDocumentsProviderRootTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   FakeFileSystemInstance fake_file_system_;
 
   // Use the same initialization/destruction order as
@@ -1045,7 +1045,7 @@ TEST_F(ArcDocumentsProviderRootTest, WatchChanged) {
     base::RunLoop run_loop;
     root_->AddWatcher(base::FilePath(FILE_PATH_LITERAL("dir")),
                       watcher_callback,
-                      base::Bind(
+                      base::BindOnce(
                           [](base::RunLoop* run_loop, base::File::Error error) {
                             run_loop->Quit();
                             EXPECT_EQ(base::File::FILE_OK, error);
@@ -1072,7 +1072,7 @@ TEST_F(ArcDocumentsProviderRootTest, WatchChanged) {
     base::RunLoop run_loop;
     root_->RemoveWatcher(
         base::FilePath(FILE_PATH_LITERAL("dir")),
-        base::Bind(
+        base::BindOnce(
             [](base::RunLoop* run_loop, base::File::Error error) {
               run_loop->Quit();
               EXPECT_EQ(base::File::FILE_OK, error);
@@ -1095,7 +1095,7 @@ TEST_F(ArcDocumentsProviderRootTest, WatchDeleted) {
     base::RunLoop run_loop;
     root_->AddWatcher(base::FilePath(FILE_PATH_LITERAL("dir")),
                       watcher_callback,
-                      base::Bind(
+                      base::BindOnce(
                           [](base::RunLoop* run_loop, base::File::Error error) {
                             run_loop->Quit();
                             EXPECT_EQ(base::File::FILE_OK, error);
@@ -1124,7 +1124,7 @@ TEST_F(ArcDocumentsProviderRootTest, WatchDeleted) {
     base::RunLoop run_loop;
     root_->RemoveWatcher(
         base::FilePath(FILE_PATH_LITERAL("dir")),
-        base::Bind(
+        base::BindOnce(
             [](base::RunLoop* run_loop, base::File::Error error) {
               run_loop->Quit();
               EXPECT_EQ(base::File::FILE_OK, error);
@@ -1138,7 +1138,7 @@ TEST_F(ArcDocumentsProviderRootTest, ResolveToContentUrl) {
   base::RunLoop run_loop;
   root_->ResolveToContentUrl(
       base::FilePath(FILE_PATH_LITERAL("dir/photo.jpg")),
-      base::Bind(
+      base::BindOnce(
           [](base::RunLoop* run_loop, const GURL& url) {
             run_loop->Quit();
             EXPECT_EQ(GURL("content://org.chromium.test/document/photo-id"),
@@ -1152,7 +1152,7 @@ TEST_F(ArcDocumentsProviderRootTest, ResolveToContentUrlRoot) {
   base::RunLoop run_loop;
   root_->ResolveToContentUrl(
       base::FilePath(FILE_PATH_LITERAL("")),
-      base::Bind(
+      base::BindOnce(
           [](base::RunLoop* run_loop, const GURL& url) {
             run_loop->Quit();
             EXPECT_EQ(GURL("content://org.chromium.test/document/root-id"),
@@ -1165,7 +1165,7 @@ TEST_F(ArcDocumentsProviderRootTest, ResolveToContentUrlRoot) {
 TEST_F(ArcDocumentsProviderRootTest, ResolveToContentUrlNoSuchFile) {
   base::RunLoop run_loop;
   root_->ResolveToContentUrl(base::FilePath(FILE_PATH_LITERAL("missing")),
-                             base::Bind(
+                             base::BindOnce(
                                  [](base::RunLoop* run_loop, const GURL& url) {
                                    run_loop->Quit();
                                    EXPECT_EQ(GURL(), url);
@@ -1180,7 +1180,7 @@ TEST_F(ArcDocumentsProviderRootTest, ResolveToContentUrlDups) {
   // order returned from FileSystemInstance.
   root_->ResolveToContentUrl(
       base::FilePath(FILE_PATH_LITERAL("dups/dup (2).mp4")),
-      base::Bind(
+      base::BindOnce(
           [](base::RunLoop* run_loop, const GURL& url) {
             run_loop->Quit();
             EXPECT_EQ(GURL("content://org.chromium.test/document/dup3-id"),

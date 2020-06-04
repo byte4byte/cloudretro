@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -66,8 +65,7 @@ class CORE_EXPORT ImageResource final
 
   ImageResource(const ResourceRequest&,
                 const ResourceLoaderOptions&,
-                ImageResourceContent*,
-                bool is_placeholder);
+                ImageResourceContent*);
   ~ImageResource() override;
 
   ImageResourceContent* GetContent();
@@ -102,7 +100,6 @@ class CORE_EXPORT ImageResource final
   void MultipartDataReceived(const char*, size_t) final;
 
   bool ShouldShowPlaceholder() const;
-  bool ShouldShowLazyImagePlaceholder() const;
 
   // If the ImageResource came from a user agent CSS stylesheet then we should
   // flag it so that it can persist beyond navigation.
@@ -111,7 +108,7 @@ class CORE_EXPORT ImageResource final
   void OnMemoryDump(WebMemoryDumpLevelOfDetail,
                     WebProcessMemoryDump*) const override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   enum class MultipartParsingState : uint8_t {

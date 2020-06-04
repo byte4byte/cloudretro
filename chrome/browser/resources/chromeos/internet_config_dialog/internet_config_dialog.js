@@ -14,22 +14,10 @@ Polymer({
   behaviors: [I18nBehavior],
 
   properties: {
-    /**
-     * Interface for networkingPrivate calls.
-     * @type {NetworkingPrivate}
-     */
-    networkingPrivate: {
-      type: Object,
-      value: chrome.networkingPrivate,
-    },
-
-    /** @private {!chrome.networkingPrivate.GlobalPolicy|undefined} */
-    globalPolicy_: Object,
-
     /** @private */
     shareAllowEnable_: {
       type: Boolean,
-      value: function() {
+      value() {
         return loadTimeData.getBoolean('shareNetworkAllowEnable');
       }
     },
@@ -37,7 +25,7 @@ Polymer({
     /** @private */
     shareDefault_: {
       type: Boolean,
-      value: function() {
+      value() {
         return loadTimeData.getBoolean('shareNetworkDefault');
       }
     },
@@ -48,16 +36,15 @@ Polymer({
      */
     guid_: String,
 
+    /**
+     * The type of network to be configured as a string. May be set initially or
+     * updated by network-config.
+     * @private
+     */
+    type_: String,
+
     /** @private */
     enableConnect_: Boolean,
-
-    /**
-     * The current properties if an existing network is being configured, or
-     * a minimal subset for a new network. Note: network-config may modify
-     * this (specifically .name).
-     * @type {!chrome.networkingPrivate.ManagedProperties}
-     */
-    managedProperties_: Object,
 
     /**
      * Set by network-config when a configuration error occurs.
@@ -70,38 +57,27 @@ Polymer({
   },
 
   /** @override */
-  attached: function() {
+  attached() {
     var dialogArgs = chrome.getVariableValue('dialogArguments');
-    var type;
     if (dialogArgs) {
       var args = JSON.parse(dialogArgs);
-      type = args.type;
-      assert(type);
+      this.type_ = args.type;
+      assert(this.type_);
       this.guid_ = args.guid || '';
     } else {
       // For debugging
       var params = new URLSearchParams(document.location.search.substring(1));
-      type = params.get('type') || 'WiFi';
+      this.type_ = params.get('type') || 'WiFi';
       this.guid_ = params.get('guid') || '';
     }
 
-    this.managedProperties_ = {
-      GUID: this.guid_,
-      Name: {Active: ''},
-      Type: /** @type {chrome.networkingPrivate.NetworkType} */ (type),
-    };
-
     this.$.networkConfig.init();
-
-    this.networkingPrivate.getGlobalPolicy(policy => {
-      this.globalPolicy_ = policy;
-    });
 
     /** @type {!CrDialogElement} */ (this.$.dialog).showModal();
   },
 
   /** @private */
-  close_: function() {
+  close_() {
     chrome.send('dialogClose');
   },
 
@@ -109,8 +85,8 @@ Polymer({
    * @return {string}
    * @private
    */
-  getDialogTitle_: function() {
-    var type = this.i18n('OncType' + this.managedProperties_.Type);
+  getDialogTitle_() {
+    var type = this.i18n('OncType' + this.type_);
     return this.i18n('internetJoinType', type);
   },
 
@@ -118,19 +94,19 @@ Polymer({
    * @return {string}
    * @private
    */
-  getError_: function() {
+  getError_() {
     if (this.i18nExists(this.error_))
       return this.i18n(this.error_);
     return this.i18n('networkErrorUnknown');
   },
 
   /** @private */
-  onCancelClick_: function() {
+  onCancelClick_() {
     this.close_();
   },
 
   /** @private */
-  onConnectClick_: function() {
+  onConnectClick_() {
     this.$.networkConfig.connect();
   },
 });

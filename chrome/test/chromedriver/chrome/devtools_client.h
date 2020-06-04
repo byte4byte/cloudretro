@@ -22,9 +22,10 @@ class WebViewImpl;
 // A DevTools client of a single DevTools debugger.
 class DevToolsClient {
  public:
-  typedef base::Callback<Status(bool* is_condition_met)> ConditionalFunc;
+  typedef base::RepeatingCallback<Status(bool* is_condition_met)>
+      ConditionalFunc;
 
-  virtual ~DevToolsClient() {}
+  virtual ~DevToolsClient() = default;
 
   virtual const std::string& GetId() = 0;
 
@@ -36,6 +37,10 @@ class DevToolsClient {
   virtual Status SendCommand(
       const std::string& method,
       const base::DictionaryValue& params) = 0;
+
+  virtual Status SendCommandFromWebSocket(const std::string& method,
+                                          const base::DictionaryValue& params,
+                                          const int client_command_id) = 0;
 
   virtual Status SendCommandWithTimeout(
       const std::string& method,

@@ -6,6 +6,7 @@
 #define CHROMEOS_NETWORK_MANAGED_NETWORK_CONFIGURATION_HANDLER_H_
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
@@ -21,11 +22,15 @@ namespace base {
 class DictionaryValue;
 class ListValue;
 class Value;
-}
+}  // namespace base
 
 namespace chromeos {
 
+class NetworkConfigurationHandler;
+class NetworkDeviceHandler;
 class NetworkPolicyObserver;
+class NetworkProfileHandler;
+class NetworkStateHandler;
 
 // The ManagedNetworkConfigurationHandler class is used to create and configure
 // networks in ChromeOS using ONC and takes care of network policies.
@@ -67,7 +72,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandler {
   virtual void GetProperties(
       const std::string& userhash,
       const std::string& service_path,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback) = 0;
 
   // Provides the managed properties of the network with |service_path| to
@@ -77,7 +82,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandler {
   virtual void GetManagedProperties(
       const std::string& userhash,
       const std::string& service_path,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback) = 0;
 
   // Sets the user's settings of an already configured network with
@@ -177,6 +182,14 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) ManagedNetworkConfigurationHandler {
 
   // Return the list of blacklisted WiFi networks (identified by HexSSIDs).
   virtual std::vector<std::string> GetBlacklistedHexSSIDs() const = 0;
+
+  static std::unique_ptr<ManagedNetworkConfigurationHandler>
+  InitializeForTesting(
+      NetworkStateHandler* network_state_handler,
+      NetworkProfileHandler* network_profile_handler,
+      NetworkDeviceHandler* network_device_handler,
+      NetworkConfigurationHandler* network_configuration_handler,
+      UIProxyConfigService* ui_proxy_config_service);
 
  private:
   DISALLOW_ASSIGN(ManagedNetworkConfigurationHandler);

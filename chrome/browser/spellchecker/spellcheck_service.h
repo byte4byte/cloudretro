@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -19,8 +20,12 @@
 #include "chrome/browser/spellchecker/spellcheck_hunspell_dictionary.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "components/spellcheck/browser/platform_spell_checker.h"
+#include "components/spellcheck/common/spellcheck.mojom-forward.h"
+#include "components/spellcheck/spellcheck_buildflags.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 class SpellCheckHostMetrics;
 
@@ -33,10 +38,7 @@ namespace content {
 class BrowserContext;
 class NotificationDetails;
 class NotificationSource;
-}
-
-namespace service_manager {
-class Identity;
+class RenderProcessHost;
 }
 
 // Encapsulates the browser side spellcheck service. There is one of these per
@@ -92,13 +94,20 @@ class SpellcheckService : public KeyedService,
   // when we do not set an event to |status_event_|.
   static bool SignalStatusEvent(EventType type);
 
+  // Get the best match of a supported accept language code for the provided
+  // language tag. Returns an empty string if no match is found. Method cannot
+  // be defined in spellcheck_common.h as it depends on l10n_util, and code
+  // under components cannot depend on ui/base.
+  static std::string GetSupportedAcceptLanguageCode(
+      const std::string& supported_language_full_tag);
+
   // Instantiates SpellCheckHostMetrics object and makes it ready for recording
   // metrics. This should be called only if the metrics recording is active.
   void StartRecordingMetrics(bool spellcheck_enabled);
 
   // Pass the renderer some basic initialization information. Note that the
   // renderer will not load Hunspell until it needs to.
-  void InitForRenderer(const service_manager::Identity& renderer_identity);
+  void InitForRenderer(content::RenderProcessHost* host);
 
   // Returns a metrics counter associated with this object,
   // or null when metrics recording is disabled.
@@ -143,14 +152,35 @@ class SpellcheckService : public KeyedService,
   void OnHunspellDictionaryDownloadFailure(
       const std::string& language) override;
 
+  // The returned pointer can be null if the current platform doesn't need a
+  // per-profile, platform-specific spell check object. Currently, only Windows
+  // requires one, and only on certain versions.
+  PlatformSpellChecker* platform_spell_checker() {
+    return platform_spell_checker_.get();
+  }
+
+  // Allows tests to override how SpellcheckService binds its interface
+  // receiver, instead of going through a RenderProcessHost by default.
+  using SpellCheckerBinder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<spellcheck::mojom::SpellChecker>)>;
+  static void OverrideBinderForTesting(SpellCheckerBinder binder);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT);
+
+  // Parses a full BCP47 language tag to return just the language subtag,
+  // optionally with a hyphen and script subtag appended.
+  static std::string GetLanguageAndScriptTag(const std::string& full_tag,
+                                             bool include_script_tag);
 
   // Attaches an event so browser tests can listen the status events.
   static void AttachStatusEvent(base::WaitableEvent* status_event);
 
   // Returns the status event type.
   static EventType GetStatusEvent();
+
+  mojo::Remote<spellcheck::mojom::SpellChecker> GetSpellCheckerForProcess(
+      content::RenderProcessHost* host);
 
   // Pass all renderers some basic initialization information.
   void InitForAllRenderers();
@@ -166,6 +196,28 @@ class SpellcheckService : public KeyedService,
   // prefs::kSpellCheckDictionaries any languages that are not in
   // prefs::kAcceptLanguages.
   void OnAcceptLanguagesChanged();
+
+  // Gets the user languages from the accept_languages pref and trims them of
+  // leading and trailing whitespaces. If |normalize_for_spellcheck| is |true|,
+  // also normalizes the format to xx or xx-YY based on the list of spell check
+  // languages supported by Hunspell. Note that if |normalize_for_spellcheck| is
+  // |true|, languages not supported by Hunspell will be returned as empty
+  // strings.
+  std::vector<std::string> GetNormalizedAcceptLanguages(
+      bool normalize_for_spellcheck = true) const;
+
+#if defined(OS_WIN)
+  // Records statistics about spell check support for the user's Chrome locales.
+  void RecordChromeLocalesStats();
+
+  // Records statistics about which spell checker supports which of the user's
+  // enabled spell check locales.
+  void RecordSpellcheckLocalesStats();
+#endif  // defined(OS_WIN)
+
+  // WindowsSpellChecker must be created before the dictionary instantiation and
+  // destroyed after dictionary destruction.
+  std::unique_ptr<PlatformSpellChecker> platform_spell_checker_;
 
   PrefChangeRegistrar pref_change_registrar_;
   content::NotificationRegistrar registrar_;

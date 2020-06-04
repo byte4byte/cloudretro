@@ -18,31 +18,46 @@
 
 namespace blink {
 
+namespace {
+
+typedef HeapVector<Member<Document>, 32> DocumentsVector;
+
+// We walk through all the frames in DOM tree order and get all the documents
+DocumentsVector GetAllDocuments(Frame* main_frame) {
+  DocumentsVector documents;
+  for (Frame* frame = main_frame; frame; frame = frame->Tree().TraverseNext()) {
+    if (auto* local_frame = DynamicTo<LocalFrame>(frame))
+      documents.push_back(local_frame->GetDocument());
+  }
+  return documents;
+}
+
+}  // namespace
+
 PageAnimator::PageAnimator(Page& page)
     : page_(page),
       servicing_animations_(false),
       updating_layout_and_style_for_painting_(false) {}
 
-void PageAnimator::Trace(blink::Visitor* visitor) {
+void PageAnimator::Trace(Visitor* visitor) {
   visitor->Trace(page_);
 }
 
 void PageAnimator::ServiceScriptedAnimations(
     base::TimeTicks monotonic_animation_start_time) {
   base::AutoReset<bool> servicing(&servicing_animations_, true);
+
+  // Once we are inside a frame's lifecycle, the AnimationClock should hold its
+  // time value until the end of the frame.
+  Clock().SetAllowedToDynamicallyUpdateTime(false);
   Clock().UpdateTime(monotonic_animation_start_time);
 
-  HeapVector<Member<Document>, 32> documents;
-  for (Frame* frame = page_->MainFrame(); frame;
-       frame = frame->Tree().TraverseNext()) {
-    if (auto* local_frame = DynamicTo<LocalFrame>(frame))
-      documents.push_back(local_frame->GetDocument());
-  }
+  DocumentsVector documents = GetAllDocuments(page_->MainFrame());
 
   for (auto& document : documents) {
     ScopedFrameBlamer frame_blamer(document->GetFrame());
     TRACE_EVENT0("blink,rail", "PageAnimator::serviceScriptedAnimations");
-    DocumentAnimations::UpdateAnimationTimingForAnimationFrame(*document);
+    document->GetDocumentAnimations().UpdateAnimationTimingForAnimationFrame();
     if (document->View()) {
       if (document->View()->ShouldThrottleRendering()) {
         document->SetCurrentFrameIsThrottled(true);
@@ -84,16 +99,29 @@ void PageAnimator::ServiceScriptedAnimations(
   page_->GetValidationMessageClient().LayoutOverlay();
 }
 
-void PageAnimator::RunPostAnimationFrameCallbacks() {
-  HeapVector<Member<Document>, 32> documents;
+void PageAnimator::PostAnimate() {
+  DocumentsVector documents;
   for (Frame* frame = page_->MainFrame(); frame;
        frame = frame->Tree().TraverseNext()) {
     if (frame->IsLocalFrame())
       documents.push_back(To<LocalFrame>(frame)->GetDocument());
   }
 
+  // Run the post-animation frame callbacks. See
+  // https://github.com/WICG/requestPostAnimationFrame
   for (auto& document : documents)
     document->RunPostAnimationFrameCallbacks();
+
+  // If we don't have an imminently incoming frame, we need to let the
+  // AnimationClock update its own time to properly service out-of-lifecycle
+  // events such as setInterval (see https://crbug.com/995806). This isn't a
+  // perfect heuristic, but at the very least we know that if there is a pending
+  // RAF we will be getting a new frame and thus don't need to unlock the clock.
+  bool next_frame_has_raf = false;
+  for (auto& document : documents)
+    next_frame_has_raf |= document->NextFrameHasPendingRAF();
+  if (!next_frame_has_raf)
+    Clock().SetAllowedToDynamicallyUpdateTime(true);
 }
 
 void PageAnimator::SetSuppressFrameRequestsWorkaroundFor704763Only(
@@ -114,27 +142,40 @@ void PageAnimator::ScheduleVisualUpdate(LocalFrame* frame) {
   page_->GetChromeClient().ScheduleAnimation(frame->View());
 }
 
-void PageAnimator::UpdateAllLifecyclePhases(
-    LocalFrame& root_frame,
-    DocumentLifecycle::LifecycleUpdateReason reason) {
+void PageAnimator::UpdateAllLifecyclePhases(LocalFrame& root_frame,
+                                            DocumentUpdateReason reason) {
   LocalFrameView* view = root_frame.View();
   base::AutoReset<bool> servicing(&updating_layout_and_style_for_painting_,
                                   true);
   view->UpdateAllLifecyclePhases(reason);
 }
 
-void PageAnimator::UpdateAllLifecyclePhasesExceptPaint(LocalFrame& root_frame) {
+void PageAnimator::UpdateAllLifecyclePhasesExceptPaint(
+    LocalFrame& root_frame,
+    DocumentUpdateReason reason) {
   LocalFrameView* view = root_frame.View();
   base::AutoReset<bool> servicing(&updating_layout_and_style_for_painting_,
                                   true);
-  view->UpdateAllLifecyclePhasesExceptPaint();
+  view->UpdateAllLifecyclePhasesExceptPaint(reason);
 }
 
-void PageAnimator::UpdateLifecycleToLayoutClean(LocalFrame& root_frame) {
+void PageAnimator::UpdateLifecycleToLayoutClean(LocalFrame& root_frame,
+                                                DocumentUpdateReason reason) {
   LocalFrameView* view = root_frame.View();
   base::AutoReset<bool> servicing(&updating_layout_and_style_for_painting_,
                                   true);
-  view->UpdateLifecycleToLayoutClean();
+  view->UpdateLifecycleToLayoutClean(reason);
+}
+
+HeapVector<Member<Animation>> PageAnimator::GetAnimations(
+    const TreeScope& tree_scope) {
+  HeapVector<Member<Animation>> animations;
+  DocumentsVector documents = GetAllDocuments(page_->MainFrame());
+  for (auto& document : documents) {
+    document->GetDocumentAnimations().GetAnimationsTargetingTreeScope(
+        animations, tree_scope);
+  }
+  return animations;
 }
 
 }  // namespace blink

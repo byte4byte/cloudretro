@@ -8,7 +8,7 @@
 #include "base/memory/ptr_util.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_controller.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -31,14 +31,13 @@ void OverscrollActionsTabHelper::SetDelegate(
     overscroll_actions_controller_ = [[OverscrollActionsController alloc]
         initWithWebViewProxy:web_state_->GetWebViewProxy()];
   }
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
   overscroll_actions_controller_.style =
       browser_state->IsOffTheRecord()
           ? OverscrollStyle::REGULAR_PAGE_INCOGNITO
           : OverscrollStyle::REGULAR_PAGE_NON_INCOGNITO;
   overscroll_actions_controller_.delegate = delegate;
-  overscroll_actions_controller_.browserState = browser_state;
 }
 
 OverscrollActionsTabHelper::OverscrollActionsTabHelper(web::WebState* web_state)

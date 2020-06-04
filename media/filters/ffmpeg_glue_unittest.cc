@@ -8,7 +8,7 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/macros.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "media/base/container_names.h"
@@ -103,7 +103,7 @@ class FFmpegGlueDestructionTest : public ::testing::Test {
 
     // |protocol_| should be destroyed before |data_|.
     protocol_.reset();
-    data_ = NULL;
+    data_.reset();
   }
 
  protected:

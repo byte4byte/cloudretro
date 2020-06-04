@@ -18,10 +18,10 @@
 #include "components/gcm_driver/gcm_connection_observer.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 
-namespace identity {
+namespace signin {
 struct AccessTokenInfo;
 class IdentityManager;
-}
+}  // namespace signin
 
 namespace base {
 class Time;
@@ -76,7 +76,7 @@ class GCMAccountTracker : public AccountTracker::Observer,
   // |account_tracker| is used to deliver information about the accounts present
   // in the browser context to |driver|.
   GCMAccountTracker(std::unique_ptr<AccountTracker> account_tracker,
-                    identity::IdentityManager* identity_manager,
+                    signin::IdentityManager* identity_manager,
                     GCMDriver* driver);
   ~GCMAccountTracker() override;
 
@@ -96,18 +96,18 @@ class GCMAccountTracker : public AccountTracker::Observer,
  private:
   friend class GCMAccountTrackerTest;
 
-  // Maps account keys to account states. Keyed by account_ids as used by
-  // OAuth2TokenService.
-  typedef std::map<std::string, AccountInfo> AccountInfos;
+  // Maps account keys to account states. Keyed by account_id as used by
+  // IdentityManager.
+  typedef std::map<CoreAccountId, AccountInfo> AccountInfos;
 
   // AccountTracker::Observer overrides.
-  void OnAccountSignInChanged(const AccountIds& ids,
+  void OnAccountSignInChanged(const CoreAccountInfo& account,
                               bool is_signed_in) override;
 
   void OnAccessTokenFetchCompleteForAccount(
-      std::string account_id,
+      CoreAccountId account_id,
       GoogleServiceAuthError error,
-      identity::AccessTokenInfo access_token_info);
+      signin::AccessTokenInfo access_token_info);
 
   // GCMConnectionObserver overrides.
   void OnConnected(const net::IPEndPoint& ip_endpoint) override;
@@ -136,13 +136,13 @@ class GCMAccountTracker : public AccountTracker::Observer,
   void GetToken(AccountInfos::iterator& account_iter);
 
   // Handling of actual sign in and sign out for accounts.
-  void OnAccountSignedIn(const AccountIds& ids);
-  void OnAccountSignedOut(const AccountIds& ids);
+  void OnAccountSignedIn(const CoreAccountInfo& account);
+  void OnAccountSignedOut(const CoreAccountInfo& account);
 
   // Account tracker.
   std::unique_ptr<AccountTracker> account_tracker_;
 
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
 
   GCMDriver* driver_;
 
@@ -156,7 +156,7 @@ class GCMAccountTracker : public AccountTracker::Observer,
   // completion or upon signout of the account for which the request is being
   // made.
   using AccountIDToTokenFetcherMap =
-      std::map<std::string, std::unique_ptr<identity::AccessTokenFetcher>>;
+      std::map<CoreAccountId, std::unique_ptr<signin::AccessTokenFetcher>>;
   AccountIDToTokenFetcherMap pending_token_requests_;
 
   // Creates weak pointers used to postpone reporting tokens. See

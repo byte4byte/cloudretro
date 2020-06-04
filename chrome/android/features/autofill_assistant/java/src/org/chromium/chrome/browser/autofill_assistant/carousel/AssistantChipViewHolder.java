@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.autofill_assistant.carousel;
 
-import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+
+import androidx.recyclerview.widget.RecyclerView.ViewHolder;
 
 import org.chromium.chrome.autofill_assistant.R;
 
@@ -30,7 +31,7 @@ public class AssistantChipViewHolder extends ViewHolder {
     public static AssistantChipViewHolder create(ViewGroup parent, int viewType) {
         LayoutInflater layoutInflater = LayoutInflater.from(parent.getContext());
         ButtonView view = null;
-        switch (viewType % AssistantChip.Type.NUM_ENTRIES) {
+        switch (viewType) {
             case AssistantChip.Type.CHIP_ASSISTIVE:
                 view = (ButtonView) layoutInflater.inflate(
                         R.layout.autofill_assistant_button_assistive, /* root= */ null);
@@ -49,21 +50,11 @@ public class AssistantChipViewHolder extends ViewHolder {
 
         view.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (viewType >= AssistantChip.Type.NUM_ENTRIES) {
-            view.setEnabled(false);
-        }
 
         return new AssistantChipViewHolder(view, viewType);
     }
 
     public static int getViewType(AssistantChip chip) {
-        // We add AssistantChip.Type.CHIP_TYPE_NUMBER to differentiate between enabled and disabled
-        // chips of the same type. Ideally, we should return a (type, disabled) tuple but
-        // RecyclerView does not allow that.
-        if (chip.isDisabled()) {
-            return chip.getType() + AssistantChip.Type.NUM_ENTRIES;
-        }
-
         return chip.getType();
     }
 
@@ -76,6 +67,9 @@ public class AssistantChipViewHolder extends ViewHolder {
     }
 
     public void bind(AssistantChip chip) {
+        mView.setEnabled(!chip.isDisabled());
+        mView.setVisibility(chip.isVisible() ? View.VISIBLE : View.GONE);
+
         String text = chip.getText();
         if (text.isEmpty()) {
             mView.getPrimaryTextView().setVisibility(View.GONE);
@@ -84,6 +78,8 @@ public class AssistantChipViewHolder extends ViewHolder {
             mView.getPrimaryTextView().setVisibility(View.VISIBLE);
         }
 
+        // Setting this view to clickable may be required for a11y to correctly announce it.
+        mView.setClickable(true);
         mView.setOnClickListener(ignoredView -> chip.getSelectedListener().run());
 
         int iconResource;
@@ -108,12 +104,10 @@ public class AssistantChipViewHolder extends ViewHolder {
 
         mView.setIcon(iconResource, /* tintWithTextColor= */ true);
 
-        // We set the content description of the icon on the whole button view if there is no text.
-        // Otherwise the text description will be used by TalkBack.
         if (iconDescriptionResource != 0 && text.isEmpty()) {
             mView.setContentDescription(mView.getContext().getString(iconDescriptionResource));
         } else {
-            mView.setContentDescription(null);
+            mView.setContentDescription(text);
         }
     }
 }

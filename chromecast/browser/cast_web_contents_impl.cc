@@ -9,18 +9,25 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/no_destructor.h"
+#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
+#include "chromecast/activity/queryable_data_host.h"
+#include "chromecast/base/cast_features.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
-#include "chromecast/common/mojom/media_playback_options.mojom.h"
+#include "chromecast/browser/queryable_data_host_cast.h"
+#include "chromecast/common/mojom/activity_url_filter.mojom.h"
 #include "chromecast/common/mojom/on_load_script_injector.mojom.h"
 #include "chromecast/common/mojom/queryable_data_store.mojom.h"
 #include "chromecast/common/queryable_data.h"
+#include "chromecast/net/connectivity_checker.h"
+#include "components/media_control/mojom/media_playback_options.mojom.h"
+#include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -29,11 +36,13 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/favicon_url.h"
-#include "content/public/common/resource_load_info.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/blink/public/mojom/favicon/favicon_url.mojom.h"
+#include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "url/gurl.h"
 
@@ -80,6 +89,46 @@ std::vector<CastWebContents*>& CastWebContents::GetAll() {
   return *instance;
 }
 
+// static
+CastWebContents* CastWebContents::FromWebContents(
+    content::WebContents* web_contents) {
+  auto& all_cast_web_contents = CastWebContents::GetAll();
+  auto it =
+      std::find_if(all_cast_web_contents.begin(), all_cast_web_contents.end(),
+                   [&web_contents](const auto* cast_web_contents) {
+                     return cast_web_contents->web_contents() == web_contents;
+                   });
+  if (it == all_cast_web_contents.end()) {
+    return nullptr;
+  }
+  return *it;
+}
+
+void CastWebContentsImpl::RenderProcessReady(content::RenderProcessHost* host) {
+  DCHECK(host->IsReady());
+  const base::Process& process = host->GetProcess();
+  for (auto& observer : observer_list_) {
+    observer.OnRenderProcessReady(process);
+  }
+}
+
+void CastWebContentsImpl::RenderProcessExited(
+    content::RenderProcessHost* host,
+    const content::ChildProcessTerminationInfo& info) {
+  RemoveRenderProcessHostObserver();
+}
+
+void CastWebContentsImpl::RenderProcessHostDestroyed(
+    content::RenderProcessHost* host) {
+  RemoveRenderProcessHostObserver();
+}
+
+void CastWebContentsImpl::RemoveRenderProcessHostObserver() {
+  if (main_process_host_)
+    main_process_host_->RemoveObserver(this);
+  main_process_host_ = nullptr;
+}
+
 CastWebContentsImpl::CastWebContentsImpl(content::WebContents* web_contents,
                                          const InitParams& init_params)
     : web_contents_(web_contents),
@@ -87,7 +136,7 @@ CastWebContentsImpl::CastWebContentsImpl(content::WebContents* web_contents,
       page_state_(PageState::IDLE),
       last_state_(PageState::IDLE),
       enabled_for_dev_(init_params.enabled_for_dev),
-      use_cma_renderer_(init_params.use_cma_renderer),
+      renderer_type_(init_params.renderer_type),
       handle_inner_contents_(init_params.handle_inner_contents),
       view_background_color_(init_params.background_color),
       remote_debugging_server_(
@@ -95,7 +144,11 @@ CastWebContentsImpl::CastWebContentsImpl(content::WebContents* web_contents,
       media_blocker_(init_params.use_media_blocker
                          ? std::make_unique<CastMediaBlocker>(web_contents_)
                          : nullptr),
+      activity_url_filter_(std::move(init_params.url_filters)),
+      main_process_host_(nullptr),
       tab_id_(init_params.is_root_window ? 0 : next_tab_id++),
+      is_websql_enabled_(init_params.enable_websql),
+      is_mixer_audio_enabled_(init_params.enable_mixer_audio),
       main_frame_loaded_(false),
       closing_(false),
       stopped_(false),
@@ -107,6 +160,12 @@ CastWebContentsImpl::CastWebContentsImpl(content::WebContents* web_contents,
   DCHECK(web_contents_);
   DCHECK(web_contents_->GetController().IsInitialNavigation());
   DCHECK(!web_contents_->IsLoading());
+  DCHECK(web_contents_->GetMainFrame());
+
+  main_process_host_ = web_contents_->GetMainFrame()->GetProcess();
+  DCHECK(main_process_host_);
+  main_process_host_->AddObserver(this);
+
   CastWebContents::GetAll().push_back(this);
   content::WebContentsObserver::Observe(web_contents_);
   if (enabled_for_dev_) {
@@ -115,8 +174,16 @@ CastWebContentsImpl::CastWebContentsImpl(content::WebContents* web_contents,
   }
 
   // TODO(yucliu): Change the flag name to kDisableCmaRenderer in a latter diff.
-  if (GetSwitchValueBoolean(switches::kDisableMojoRenderer, false)) {
-    use_cma_renderer_ = false;
+  if (GetSwitchValueBoolean(switches::kDisableMojoRenderer, false) &&
+      renderer_type_ == content::mojom::RendererType::MOJO_RENDERER) {
+    renderer_type_ = content::mojom::RendererType::DEFAULT_RENDERER;
+  }
+
+  // Provides QueryableDataHostCast if the new QueryableData bindings is not
+  // enabled.
+  if (init_params.enable_queryable_data_host) {
+    queryable_data_host_ =
+        std::make_unique<QueryableDataHostCast>(web_contents_);
   }
 }
 
@@ -124,7 +191,7 @@ CastWebContentsImpl::~CastWebContentsImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!notifying_) << "Do not destroy CastWebContents during observer "
                          "notification!";
-
+  RemoveRenderProcessHostObserver();
   DisableDebugging();
   for (auto& observer : observer_list_) {
     observer.ResetCastWebContents();
@@ -144,6 +211,25 @@ content::WebContents* CastWebContentsImpl::web_contents() const {
 CastWebContents::PageState CastWebContentsImpl::page_state() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return page_state_;
+}
+
+QueryableDataHost* CastWebContentsImpl::queryable_data_host() const {
+  return queryable_data_host_.get();
+}
+
+base::Optional<pid_t> CastWebContentsImpl::GetMainFrameRenderProcessPid()
+    const {
+  // Returns empty value if |web_contents_| is (being) destroyed or the main
+  // frame is not available yet.
+  if (!web_contents_ || !web_contents_->GetMainFrame()) {
+    return base::nullopt;
+  }
+
+  auto* rph = web_contents_->GetMainFrame()->GetProcess();
+  if (!rph || rph->GetProcess().Handle() == base::kNullProcessHandle) {
+    return base::nullopt;
+  }
+  return base::make_optional(rph->GetProcess().Handle());
 }
 
 void CastWebContentsImpl::AddRendererFeatures(
@@ -206,6 +292,21 @@ void CastWebContentsImpl::Stop(int error_code) {
   NotifyPageState();
 }
 
+void CastWebContentsImpl::SetWebVisibilityAndPaint(bool visible) {
+  if (!web_contents_)
+    return;
+  if (visible) {
+    web_contents_->WasShown();
+  } else {
+    web_contents_->WasHidden();
+  }
+  if (web_contents_->GetVisibility() != content::Visibility::VISIBLE) {
+    // Since we are managing the visibility, we need to ensure pages are
+    // unfrozen in the event this occurred while in the background.
+    web_contents_->SetPageFrozen(false);
+  }
+}
+
 void CastWebContentsImpl::BlockMediaLoading(bool blocked) {
   if (media_blocker_)
     media_blocker_->BlockMediaLoading(blocked);
@@ -219,11 +320,6 @@ void CastWebContentsImpl::BlockMediaStarting(bool blocked) {
 void CastWebContentsImpl::EnableBackgroundVideoPlayback(bool enabled) {
   if (media_blocker_)
     media_blocker_->EnableBackgroundVideoPlayback(enabled);
-}
-
-void CastWebContentsImpl::SetDelegate(CastWebContents::Delegate* delegate) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  delegate_ = delegate;
 }
 
 void CastWebContentsImpl::AllowWebAndMojoWebUiBindings() {
@@ -293,6 +389,59 @@ void CastWebContentsImpl::RemoveBeforeLoadJavaScript(base::StringPiece id) {
   }
 }
 
+// TODO(crbug.com/803242): Deprecated and will be shortly removed.
+void CastWebContentsImpl::PostMessageToMainFrame(
+    const std::string& target_origin,
+    const std::string& data,
+    std::vector<mojo::ScopedMessagePipeHandle> channels) {
+  DCHECK(!data.empty());
+
+  base::string16 data_utf16;
+  data_utf16 = base::UTF8ToUTF16(data);
+
+  // If origin is set as wildcard, no origin scoping would be applied.
+  constexpr char kWildcardOrigin[] = "*";
+  base::Optional<base::string16> target_origin_utf16;
+  if (target_origin != kWildcardOrigin)
+    target_origin_utf16 = base::UTF8ToUTF16(target_origin);
+
+  content::MessagePortProvider::PostMessageToFrame(
+      web_contents(), base::string16(), target_origin_utf16, data_utf16,
+      std::move(channels));
+}
+
+void CastWebContentsImpl::PostMessageToMainFrame(
+    const std::string& target_origin,
+    const std::string& data,
+    std::vector<blink::WebMessagePort> ports) {
+  DCHECK(!data.empty());
+
+  base::string16 data_utf16;
+  data_utf16 = base::UTF8ToUTF16(data);
+
+  // If origin is set as wildcard, no origin scoping would be applied.
+  constexpr char kWildcardOrigin[] = "*";
+  base::Optional<base::string16> target_origin_utf16;
+  if (target_origin != kWildcardOrigin)
+    target_origin_utf16 = base::UTF8ToUTF16(target_origin);
+
+  content::MessagePortProvider::PostMessageToFrame(
+      web_contents(), base::string16(), target_origin_utf16, data_utf16,
+      std::move(ports));
+}
+
+void CastWebContentsImpl::ExecuteJavaScript(
+    const base::string16& javascript,
+    base::OnceCallback<void(base::Value)> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!web_contents_ || closing_ || !main_frame_loaded_ ||
+      !web_contents_->GetMainFrame())
+    return;
+
+  web_contents_->GetMainFrame()->ExecuteJavaScript(javascript,
+                                                   std::move(callback));
+}
+
 void CastWebContentsImpl::AddObserver(CastWebContents::Observer* observer) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(observer);
@@ -305,6 +454,24 @@ void CastWebContentsImpl::RemoveObserver(CastWebContents::Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+void CastWebContentsImpl::SetEnabledForRemoteDebugging(bool enabled) {
+  DCHECK(remote_debugging_server_);
+
+  if (enabled && !enabled_for_dev_) {
+    LOG(INFO) << "Enabling dev console for CastWebContentsImpl";
+    remote_debugging_server_->EnableWebContentsForDebugging(web_contents_);
+  } else if (!enabled && enabled_for_dev_) {
+    LOG(INFO) << "Disabling dev console for CastWebContentsImpl";
+    remote_debugging_server_->DisableWebContentsForDebugging(web_contents_);
+  }
+  enabled_for_dev_ = enabled;
+
+  // Propagate setting change to inner contents.
+  for (auto& inner : inner_contents_) {
+    inner->SetEnabledForRemoteDebugging(enabled);
+  }
+}
+
 service_manager::BinderRegistry* CastWebContentsImpl::binder_registry() {
   return &binder_registry_;
 }
@@ -314,6 +481,21 @@ void CastWebContentsImpl::RegisterInterfaceProvider(
     service_manager::InterfaceProvider* interface_provider) {
   DCHECK(interface_provider);
   interface_providers_map_.emplace(interface_set, interface_provider);
+}
+
+bool CastWebContentsImpl::is_websql_enabled() {
+  return is_websql_enabled_;
+}
+
+bool CastWebContentsImpl::is_mixer_audio_enabled() {
+  return is_mixer_audio_enabled_;
+}
+
+bool CastWebContentsImpl::can_bind_interfaces() {
+  // We assume that the interface binders are owned by the delegate. This is a
+  // cheap trick so that all of the interfaces don't have to provide binder
+  // callbacks with WeakPtr.
+  return delegate_ != nullptr;
 }
 
 void CastWebContentsImpl::OnClosePageTimeout() {
@@ -343,23 +525,36 @@ void CastWebContentsImpl::RenderFrameCreated(
         render_frame_host->GetRemoteAssociatedInterfaces());
   }
 
-  chromecast::shell::mojom::FeatureManagerPtr feature_manager_ptr;
-  render_frame_host->GetRemoteInterfaces()->GetInterface(&feature_manager_ptr);
-  feature_manager_ptr->ConfigureFeatures(GetRendererFeatures());
+  mojo::Remote<chromecast::shell::mojom::FeatureManager> feature_manager_remote;
+  render_frame_host->GetRemoteInterfaces()->GetInterface(
+      feature_manager_remote.BindNewPipeAndPassReceiver());
+  feature_manager_remote->ConfigureFeatures(GetRendererFeatures());
 
-  chromecast::shell::mojom::MediaPlaybackOptionsAssociatedPtr
+  mojo::AssociatedRemote<components::media_control::mojom::MediaPlaybackOptions>
       media_playback_options;
   render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(
       &media_playback_options);
-  media_playback_options->SetUseCmaRenderer(use_cma_renderer_);
+  media_playback_options->SetRendererType(renderer_type_);
 
   // Send queryable values
-  chromecast::shell::mojom::QueryableDataStorePtr queryable_data_store_ptr;
+  mojo::Remote<chromecast::shell::mojom::QueryableDataStore>
+      queryable_data_store_remote;
   render_frame_host->GetRemoteInterfaces()->GetInterface(
-      &queryable_data_store_ptr);
+      queryable_data_store_remote.BindNewPipeAndPassReceiver());
   for (const auto& value : QueryableData::GetValues()) {
     // base::Value is not copyable.
-    queryable_data_store_ptr->Set(value.first, value.second.Clone());
+    queryable_data_store_remote->Set(value.first, value.second.Clone());
+  }
+
+  // Set up URL filter
+  if (activity_url_filter_) {
+    mojo::AssociatedRemote<chromecast::mojom::ActivityUrlFilterConfiguration>
+        activity_filter_setter;
+    render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(
+        &activity_filter_setter);
+    activity_filter_setter->SetFilter(
+        chromecast::mojom::ActivityUrlFilterCriteria::New(
+            activity_url_filter_.value()));
   }
 }
 
@@ -385,6 +580,9 @@ void CastWebContentsImpl::OnInterfaceRequestFromFrame(
     mojo::ScopedMessagePipeHandle* interface_pipe) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  if (!can_bind_interfaces()) {
+    return;
+  }
   if (binder_registry_.TryBindInterface(interface_name, interface_pipe)) {
     return;
   }
@@ -449,6 +647,26 @@ void CastWebContentsImpl::DidStartNavigation(
 
 void CastWebContentsImpl::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
+  DCHECK(navigation_handle);
+  if (!web_contents_ || closing_ || stopped_)
+    return;
+  if (!navigation_handle->IsInMainFrame())
+    return;
+
+  // Main frame has begun navigating/loading.
+  OnPageLoading();
+  start_loading_ticks_ = base::TimeTicks::Now();
+  GURL loading_url;
+  content::NavigationEntry* nav_entry =
+      web_contents()->GetController().GetVisibleEntry();
+  if (nav_entry) {
+    loading_url = nav_entry->GetVirtualURL();
+  }
+  TracePageLoadBegin(loading_url);
+  UpdatePageState();
+  DCHECK_EQ(page_state_, PageState::LOADING);
+  NotifyPageState();
+
   if (before_load_scripts_.empty())
     return;
 
@@ -456,7 +674,7 @@ void CastWebContentsImpl::ReadyToCommitNavigation(
       navigation_handle->IsSameDocument() || navigation_handle->IsErrorPage())
     return;
 
-  chromecast::shell::mojom::OnLoadScriptInjectorAssociatedPtr
+  mojo::AssociatedRemote<chromecast::shell::mojom::OnLoadScriptInjector>
       before_load_script_injector;
   navigation_handle->GetRenderFrameHost()
       ->GetRemoteAssociatedInterfaces()
@@ -501,6 +719,13 @@ void CastWebContentsImpl::DidFinishNavigation(
     }
 
     return;
+  }
+
+  // Notifies observers that the navigation of the main frame has finished.
+  if (!navigation_handle->IsErrorPage() && navigation_handle->IsInMainFrame()) {
+    for (Observer& observer : observer_list_) {
+      observer.MainFrameFinishedNavigation();
+    }
   }
 
   // Return early if we didn't navigate to an error page. Note that even if we
@@ -550,7 +775,7 @@ void CastWebContentsImpl::DidFinishLoad(
     // An error HTML page was loaded instead of the content we requested.
     LOG(ERROR) << "Failed loading page for: " << validated_url
                << "; http status code: " << http_status_code;
-    Stop(net::ERR_FAILED);
+    Stop(net::ERR_HTTP_RESPONSE_CODE_FAILURE);
     DCHECK_EQ(page_state_, PageState::ERROR);
     return;
   }
@@ -564,8 +789,7 @@ void CastWebContentsImpl::DidFinishLoad(
 void CastWebContentsImpl::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
-    int error_code,
-    const base::string16& error_description) {
+    int error_code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Only report an error if we are the main frame.  See b/8433611.
   if (render_frame_host->GetParent()) {
@@ -632,8 +856,6 @@ void CastWebContentsImpl::UpdatePageState() {
 }
 
 void CastWebContentsImpl::NotifyPageState() {
-  if (!delegate_)
-    return;
   // Don't notify if the page state didn't change.
   if (last_state_ == page_state_)
     return;
@@ -665,15 +887,21 @@ void CastWebContentsImpl::MainFrameWasResized(bool width_changed) {
 void CastWebContentsImpl::ResourceLoadComplete(
     content::RenderFrameHost* render_frame_host,
     const content::GlobalRequestID& request_id,
-    const content::mojom::ResourceLoadInfo& resource_load_info) {
+    const blink::mojom::ResourceLoadInfo& resource_load_info) {
   if (!web_contents_ || render_frame_host != web_contents_->GetMainFrame())
     return;
   int net_error = resource_load_info.net_error;
   if (net_error == net::OK)
     return;
-  LOG(ERROR) << "Resource \"" << resource_load_info.url << "\" failed to load "
+  metrics::CastMetricsHelper* metrics_helper =
+      metrics::CastMetricsHelper::GetInstance();
+  metrics_helper->RecordApplicationEventWithValue(
+      "Cast.Platform.ResourceRequestError", net_error);
+  LOG(ERROR) << "Resource \"" << resource_load_info.original_url << "\""
+             << " failed to load "
              << " with net_error=" << net_error
              << ", description=" << net::ErrorToShortString(net_error);
+  shell::CastBrowserProcess::GetInstance()->connectivity_checker()->Check();
   for (auto& observer : observer_list_) {
     observer.ResourceLoadFailed(this);
   }
@@ -683,11 +911,12 @@ void CastWebContentsImpl::InnerWebContentsCreated(
     content::WebContents* inner_web_contents) {
   if (!handle_inner_contents_ || !delegate_)
     return;
-  auto result = inner_contents_.insert(std::make_unique<CastWebContentsImpl>(
-      inner_web_contents,
-      InitParams{nullptr, enabled_for_dev_, false /* use_cma_renderer */,
-                 false /* is_root_window */, false /* handle_inner_contents */,
-                 false /* use_media_blocker */, view_background_color_}));
+  InitParams params;
+  params.delegate = delegate_;
+  params.enabled_for_dev = enabled_for_dev_;
+  params.background_color = view_background_color_;
+  auto result = inner_contents_.insert(
+      std::make_unique<CastWebContentsImpl>(inner_web_contents, params));
   delegate_->InnerContentsCreated(result.first->get(), this);
 }
 
@@ -723,7 +952,7 @@ void CastWebContentsImpl::WebContentsDestroyed() {
 }
 
 void CastWebContentsImpl::DidUpdateFaviconURL(
-    const std::vector<content::FaviconURL>& candidates) {
+    const std::vector<blink::mojom::FaviconURLPtr>& candidates) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (candidates.empty())
@@ -735,17 +964,17 @@ void CastWebContentsImpl::DidUpdateFaviconURL(
   //  2) apple-touch-icon
   //  3) icon
   for (auto& favicon : candidates) {
-    if (favicon.icon_type ==
-        content::FaviconURL::IconType::kTouchPrecomposedIcon) {
-      icon_url = favicon.icon_url;
+    if (favicon->icon_type ==
+        blink::mojom::FaviconIconType::kTouchPrecomposedIcon) {
+      icon_url = favicon->icon_url;
       break;
-    } else if ((favicon.icon_type ==
-                content::FaviconURL::IconType::kTouchIcon) &&
+    } else if ((favicon->icon_type ==
+                blink::mojom::FaviconIconType::kTouchIcon) &&
                !found_touch_icon) {
       found_touch_icon = true;
-      icon_url = favicon.icon_url;
+      icon_url = favicon->icon_url;
     } else if (!found_touch_icon) {
-      icon_url = favicon.icon_url;
+      icon_url = favicon->icon_url;
     }
   }
 

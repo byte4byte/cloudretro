@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/shill/shill_client_helper.h"
 #include "chromeos/dbus/shill/shill_property_changed_observer.h"
@@ -82,8 +82,8 @@ class ShillClientUnittestBase : public testing::Test {
 
  protected:
   // A callback to intercept and check the method call arguments.
-  typedef base::Callback<void(dbus::MessageReader* reader)>
-      ArgumentCheckCallback;
+  using ArgumentCheckCallback =
+      base::RepeatingCallback<void(dbus::MessageReader* reader)>;
 
   // Sets expectations for called method name and arguments, and sets response.
   void PrepareForMethodCall(const std::string& method_name,
@@ -173,7 +173,7 @@ class ShillClientUnittestBase : public testing::Test {
       const base::DictionaryValue& result);
 
   // A message loop to emulate asynchronous behavior.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   // The mock bus.
   scoped_refptr<dbus::MockBus> mock_bus_;
 

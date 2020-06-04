@@ -5,6 +5,7 @@
 #import "ios/chrome/app/application_delegate/user_activity_handler.h"
 
 #import <CoreSpotlight/CoreSpotlight.h>
+#import <Intents/Intents.h>
 #import <UIKit/UIKit.h>
 
 #include "base/ios/block_types.h"
@@ -18,6 +19,7 @@
 #import "ios/chrome/app/application_delegate/startup_information.h"
 #import "ios/chrome/app/application_delegate/tab_opening.h"
 #include "ios/chrome/app/application_mode.h"
+#import "ios/chrome/app/intents/OpenInChromeIntent.h"
 #import "ios/chrome/app/spotlight/actions_spotlight_manager.h"
 #import "ios/chrome/app/spotlight/spotlight_util.h"
 #include "ios/chrome/app/startup/chrome_app_startup_parameters.h"
@@ -43,8 +45,8 @@ using base::UserMetricsAction;
 
 namespace {
 // Constants for 3D touch application static shortcuts.
-NSString* const kShortcutNewTab = @"OpenNewTab";
-NSString* const kShortcutNewIncognitoTab = @"OpenIncognitoTab";
+NSString* const kShortcutNewSearch = @"OpenNewSearch";
+NSString* const kShortcutNewIncognitoSearch = @"OpenIncognitoSearch";
 NSString* const kShortcutVoiceSearch = @"OpenVoiceSearch";
 NSString* const kShortcutQRScanner = @"OpenQRScanner";
 
@@ -88,12 +90,6 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
 
     if (startupParams)
       webpageURL = net::NSURLWithGURL([startupParams externalURL]);
-
-    // Don't call continueUserActivityURL if the completePaymentRequest flag
-    // is set since the startup parameters need to be handled in
-    // -handleStartupParametersWithTabOpener:
-    if (startupParams && startupParams.completePaymentRequest)
-      return YES;
   } else if (spotlight::IsSpotlightAvailable() &&
              [userActivity.activityType
                  isEqualToString:CSSearchableItemActionType]) {
@@ -146,7 +142,25 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
                 completeURL:GURL(kChromeUINewTabURL)];
     [startupParams setPostOpeningAction:FOCUS_OMNIBOX];
     [startupInformation setStartupParameters:startupParams];
-    return YES;
+    webpageURL =
+        [NSURL URLWithString:base::SysUTF8ToNSString(kChromeUINewTabURL)];
+  } else if ([userActivity.activityType
+                 isEqualToString:@"OpenInChromeIntent"]) {
+    base::RecordAction(UserMetricsAction("IOSLaunchedByOpenInChromeIntent"));
+    OpenInChromeIntent* intent = base::mac::ObjCCastStrict<OpenInChromeIntent>(
+        userActivity.interaction.intent);
+    if (!intent.url)
+      return NO;
+
+    GURL webpageGURL(net::GURLWithNSURL(intent.url));
+    if (!webpageGURL.is_valid())
+      return NO;
+
+    AppStartupParameters* startupParams =
+        [[AppStartupParameters alloc] initWithExternalURL:webpageGURL
+                                              completeURL:webpageGURL];
+    [startupInformation setStartupParameters:startupParams];
+    webpageURL = intent.url;
   } else {
     // Do nothing for unknown activity type.
     return NO;
@@ -172,11 +186,15 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   if (applicationIsActive && ![startupInformation isPresentingFirstRunUI]) {
     // The app is already active so the applicationDidBecomeActive: method will
     // never be called. Open the requested URL immediately.
-    ApplicationMode targetMode =
+    ApplicationModeForTabOpening targetMode =
         [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationMode::INCOGNITO
-            : ApplicationMode::NORMAL;
+            ? ApplicationModeForTabOpening::INCOGNITO
+            : ApplicationModeForTabOpening::NORMAL;
     UrlLoadParams params = UrlLoadParams::InNewTab(webpageGURL);
+    if (![[startupInformation startupParameters] launchInIncognito] &&
+        [tabOpener URLIsOpenedInRegularMode:webpageGURL]) {
+      // Record metric.
+    }
     [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
                                    withUrlLoadParams:params
                                       dismissOmnibox:YES
@@ -209,7 +227,9 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
   BOOL handledShortcutItem =
       [UserActivityHandler handleShortcutItem:shortcutItem
                            startupInformation:startupInformation];
-  if (handledShortcutItem) {
+  BOOL isActive = [[UIApplication sharedApplication] applicationState] ==
+                  UIApplicationStateActive;
+  if (handledShortcutItem && isActive) {
     [UserActivityHandler
         handleStartupParametersWithTabOpener:tabOpener
                           startupInformation:startupInformation
@@ -247,13 +267,6 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
     // synchronously.
     [startupInformation setStartupParameters:nil];
   } else {
-    // Depending on the startup parameters the user may need to stay on the
-    // current tab rather than open a new one in order to complete a Payment
-    // Request. This attempts to complete any Payment Request instances on
-    // the current tab, and returns if successful.
-    if ([tabOpener shouldCompletePaymentRequestOnCurrentTab:startupInformation])
-      return;
-
     // TODO(crbug.com/935019): Exacly the same copy of this code is present in
     // +[URLOpener
     // openURL:applicationActive:options:tabOpener:startupInformation:]
@@ -262,10 +275,10 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
     // will never be called. Open the requested URL after all modal UIs have
     // been dismissed. |_startupParameters| must be retained until all deferred
     // modal UIs are dismissed and tab opened with requested URL.
-    ApplicationMode targetMode =
+    ApplicationModeForTabOpening targetMode =
         [[startupInformation startupParameters] launchInIncognito]
-            ? ApplicationMode::INCOGNITO
-            : ApplicationMode::NORMAL;
+            ? ApplicationModeForTabOpening::INCOGNITO
+            : ApplicationModeForTabOpening::NORMAL;
     GURL URL;
     GURL virtualURL;
     GURL completeURL = startupInformation.startupParameters.completeURL;
@@ -311,6 +324,11 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
       params.web_params.url = result;
     }
 
+    if (![[startupInformation startupParameters] launchInIncognito] &&
+        [tabOpener URLIsOpenedInRegularMode:params.web_params.url]) {
+      // Record metric.
+    }
+
     [tabOpener dismissModalsAndOpenSelectedTabInMode:targetMode
                                    withUrlLoadParams:params
                                       dismissOmnibox:[[startupInformation
@@ -335,30 +353,33 @@ NSString* const kShortcutQRScanner = @"OpenQRScanner";
       initWithExternalURL:GURL(kChromeUINewTabURL)
               completeURL:GURL(kChromeUINewTabURL)];
 
-  if ([shortcutItem.type isEqualToString:kShortcutNewTab]) {
-    base::RecordAction(UserMetricsAction("ApplicationShortcut.NewTabPressed"));
-    [startupInformation setStartupParameters:startupParams];
+  if ([shortcutItem.type isEqualToString:kShortcutNewSearch]) {
+    base::RecordAction(
+        UserMetricsAction("ApplicationShortcut.NewSearchPressed"));
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
-  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoTab]) {
+  } else if ([shortcutItem.type isEqualToString:kShortcutNewIncognitoSearch]) {
     base::RecordAction(
-        UserMetricsAction("ApplicationShortcut.NewIncognitoTabPressed"));
-    [startupParams setLaunchInIncognito:YES];
-    [startupInformation setStartupParameters:startupParams];
+        UserMetricsAction("ApplicationShortcut.NewIncognitoSearchPressed"));
+    startupParams.launchInIncognito = YES;
+    startupParams.postOpeningAction = FOCUS_OMNIBOX;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutVoiceSearch]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.VoiceSearchPressed"));
-    [startupParams setPostOpeningAction:START_VOICE_SEARCH];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_VOICE_SEARCH;
+    startupInformation.startupParameters = startupParams;
     return YES;
 
   } else if ([shortcutItem.type isEqualToString:kShortcutQRScanner]) {
     base::RecordAction(
         UserMetricsAction("ApplicationShortcut.ScanQRCodePressed"));
-    [startupParams setPostOpeningAction:START_QR_CODE_SCANNER];
-    [startupInformation setStartupParameters:startupParams];
+    startupParams.postOpeningAction = START_QR_CODE_SCANNER;
+    startupInformation.startupParameters = startupParams;
     return YES;
   }
 

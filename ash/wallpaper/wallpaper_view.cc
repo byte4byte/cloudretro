@@ -10,8 +10,7 @@
 #include "ash/shell.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "ash/wallpaper/wallpaper_widget_controller.h"
-#include "ash/wm/overview/overview_controller.h"
-#include "ash/wm/overview/overview_utils.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "cc/paint/render_surface_filters.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
@@ -22,6 +21,7 @@
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/window_animations.h"
 
 namespace ash {
@@ -33,12 +33,15 @@ namespace {
 // transformed to fit to the virtual screen size when laid-out. This is to avoid
 // scaling the image at painting time, then scaling it back to the screen size
 // in the compositor.
-class LayerControlView : public views::View {
+class WallpaperWidgetDelegate : public views::WidgetDelegateView {
  public:
-  explicit LayerControlView(views::View* view) {
+  explicit WallpaperWidgetDelegate(views::View* view) {
     AddChildView(view);
     view->SetPaintToLayer();
   }
+
+  // views::WidgetDelegateView:
+  bool CanMaximize() const override { return true; }
 
   // Overrides views::View.
   void Layout() override {
@@ -48,85 +51,56 @@ class LayerControlView : public views::View {
     window->parent()->StackChildAtBottom(window);
     display::Display display =
         display::Screen::GetScreen()->GetDisplayNearestWindow(window);
-
     display::ManagedDisplayInfo info =
         Shell::Get()->display_manager()->GetDisplayInfo(display.id());
 
-    DCHECK_EQ(1u, children().size());
-    views::View* child = children().front();
-    child->SetBounds(0, 0, display.size().width(), display.size().height());
-    gfx::Transform transform;
-    // Apply RTL transform explicitly becacuse Views layer code
-    // doesn't handle RTL.  crbug.com/458753.
-    transform.Translate(-child->GetMirroredX(), 0);
-    child->SetTransform(transform);
+    for (auto* child : children()) {
+      child->SetBounds(0, 0, display.size().width(), display.size().height());
+      gfx::Transform transform;
+      // Apply RTL transform explicitly becacuse Views layer code
+      // doesn't handle RTL.  crbug.com/458753.
+      transform.Translate(-child->GetMirroredX(), 0);
+      child->SetTransform(transform);
+    }
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(LayerControlView);
+  DISALLOW_COPY_AND_ASSIGN(WallpaperWidgetDelegate);
 };
 
 }  // namespace
 
-// This event handler receives events in the pre-target phase and takes care of
-// the following:
-//   - Disabling overview mode on touch release.
-//   - Disabling overview mode on mouse release.
-class PreEventDispatchHandler : public ui::EventHandler {
- public:
-  PreEventDispatchHandler() = default;
-  ~PreEventDispatchHandler() override = default;
-
- private:
-  // ui::EventHandler:
-  void OnMouseEvent(ui::MouseEvent* event) override {
-    if (event->type() == ui::ET_MOUSE_RELEASED)
-      HandleClickOrTap(event);
-  }
-
-  void OnGestureEvent(ui::GestureEvent* event) override {
-    if (event->type() == ui::ET_GESTURE_TAP)
-      HandleClickOrTap(event);
-  }
-
-  void HandleClickOrTap(ui::Event* event) {
-    CHECK_EQ(ui::EP_PRETARGET, event->phase());
-    OverviewController* controller = Shell::Get()->overview_controller();
-    if (!controller->InOverviewSession())
-      return;
-    // Events that happen while app list is sliding out during overview should
-    // be ignored to prevent overview from disappearing out from under the user.
-    if (!IsSlidingOutOverviewFromShelf())
-      controller->EndOverview();
-    event->StopPropagation();
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(PreEventDispatchHandler);
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // WallpaperView, public:
 
-WallpaperView::WallpaperView(int blur, float opacity)
-    : repaint_blur_(blur),
-      repaint_opacity_(opacity),
-      pre_dispatch_handler_(std::make_unique<PreEventDispatchHandler>()) {
+WallpaperView::WallpaperView(const WallpaperProperty& property)
+    : property_(property) {
   set_context_menu_controller(this);
-  AddPreTargetHandler(pre_dispatch_handler_.get());
 }
 
-WallpaperView::~WallpaperView() {
-  RemovePreTargetHandler(pre_dispatch_handler_.get());
+WallpaperView::~WallpaperView() = default;
+
+void WallpaperView::ClearCachedImage() {
+  small_image_.reset();
 }
 
-void WallpaperView::RepaintBlurAndOpacity(int repaint_blur,
-                                          float repaint_opacity) {
-  if (repaint_blur_ == repaint_blur && repaint_opacity_ == repaint_opacity)
+void WallpaperView::SetLockShieldEnabled(bool enabled) {
+  if (enabled == !!shield_view_)
     return;
 
-  repaint_blur_ = repaint_blur;
-  repaint_opacity_ = repaint_opacity;
-  SchedulePaint();
+  if (enabled) {
+    DCHECK(!shield_view_);
+    shield_view_ = new views::View();
+    parent()->AddChildViewAt(shield_view_, 0);
+    shield_view_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
+    shield_view_->layer()->SetColor(SK_ColorBLACK);
+    shield_view_->layer()->SetName("WallpaperViewShield");
+    shield_view_->SetBoundsRect(parent()->GetLocalBounds());
+  } else {
+    DCHECK(shield_view_);
+    parent()->RemoveChildView(shield_view_);
+    shield_view_ = nullptr;
+  }
 }
 
 const char* WallpaperView::GetClassName() const {
@@ -135,6 +109,11 @@ const char* WallpaperView::GetClassName() const {
 
 bool WallpaperView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
+}
+
+void WallpaperView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  if (shield_view_)
+    shield_view_->SetBoundsRect(parent()->GetLocalBounds());
 }
 
 void WallpaperView::ShowContextMenuForViewImpl(views::View* source,
@@ -165,23 +144,47 @@ void WallpaperView::DrawWallpaper(const gfx::ImageSkia& wallpaper,
         gfx::ImageSkia::CreateFrom1xBitmap(small_canvas.GetBitmap()));
   }
 
-  if (repaint_blur_ == 0 && repaint_opacity_ == 1.f) {
+  if (property_ == wallpaper_constants::kClear) {
     canvas->DrawImageInt(wallpaper, src.x(), src.y(), src.width(), src.height(),
                          dst.x(), dst.y(), dst.width(), dst.height(),
                          /*filter=*/true, flags);
     return;
   }
+  bool will_not_fill = width() > dst.width() || height() > dst.height();
+  // When not filling the view, we paint the small_image_ directly to the
+  // canvas.
+  float blur =
+      will_not_fill ? property_.blur_sigma : property_.blur_sigma * quality;
 
-  float blur = repaint_blur_ * quality;
   // Create the blur and brightness filter to apply to the downsampled image.
-  cc::PaintFlags filter_flags;
   cc::FilterOperations operations;
-  operations.Append(
-      cc::FilterOperation::CreateBrightnessFilter(repaint_opacity_));
+  // In tablet mode, the wallpaper already has a color filter applied in
+  // |OnPaint| so we don't need to darken here.
+  // TODO(crbug.com/944152): Merge this with the color filter in
+  // WallpaperBaseView.
+  if (!Shell::Get()->tablet_mode_controller()->InTabletMode()) {
+    operations.Append(
+        cc::FilterOperation::CreateBrightnessFilter(property_.opacity));
+  }
+
   operations.Append(cc::FilterOperation::CreateBlurFilter(
       blur, SkBlurImageFilter::kClamp_TileMode));
   sk_sp<cc::PaintFilter> filter = cc::RenderSurfaceFilters::BuildImageFilter(
       operations, gfx::SizeF(dst.size()), gfx::Vector2dF());
+
+  // If the wallpaper can't fill the desktop, paint it directly to the
+  // canvas so that it can blend the image with the rest of background
+  // correctly.
+  if (blur > 0 && will_not_fill) {
+    cc::PaintFlags filter_flags(flags);
+    filter_flags.setImageFilter(filter);
+    canvas->DrawImageInt(*small_image_, 0, 0, small_image_->width(),
+                         small_image_->height(), dst.x(), dst.y(), dst.width(),
+                         dst.height(),
+                         /*filter=*/true, filter_flags);
+    return;
+  }
+  cc::PaintFlags filter_flags;
   filter_flags.setImageFilter(filter);
 
   gfx::Canvas filtered_canvas(small_image_->size(),
@@ -205,34 +208,35 @@ void WallpaperView::DrawWallpaper(const gfx::ImageSkia& wallpaper,
                        /*filter=*/true, flags);
 }
 
-views::Widget* CreateWallpaperWidget(aura::Window* root_window,
-                                     int container_id,
-                                     int blur,
-                                     float opacity,
-                                     WallpaperView** out_wallpaper_view) {
+std::unique_ptr<views::Widget> CreateWallpaperWidget(
+    aura::Window* root_window,
+    int container_id,
+    const WallpaperProperty& property,
+    WallpaperView** out_wallpaper_view) {
   auto* controller = Shell::Get()->wallpaper_controller();
 
-  views::Widget* wallpaper_widget = new views::Widget;
+  auto wallpaper_widget = std::make_unique<views::Widget>();
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.name = "WallpaperView";
-  if (controller->GetWallpaper().isNull())
-    params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.name = "WallpaperViewWidget";
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.layer_type = ui::LAYER_NOT_DRAWN;
   params.parent = root_window->GetChildById(container_id);
-  wallpaper_widget->Init(params);
+  WallpaperView* wallpaper_view = new WallpaperView(property);
+  params.delegate = new WallpaperWidgetDelegate(wallpaper_view);
+
+  wallpaper_widget->Init(std::move(params));
   // Owned by views.
-  WallpaperView* wallpaper_view = new WallpaperView(blur, opacity);
-  wallpaper_widget->SetContentsView(new LayerControlView(wallpaper_view));
   *out_wallpaper_view = wallpaper_view;
   int animation_type =
       controller->ShouldShowInitialAnimation()
-          ? wm::WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE
-          : ::wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE;
+          ? WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE
+          : wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE;
   aura::Window* wallpaper_window = wallpaper_widget->GetNativeWindow();
   ::wm::SetWindowVisibilityAnimationType(wallpaper_window, animation_type);
 
   // Enable wallpaper transition for the following cases:
-  // 1. Initial(OOBE) wallpaper animation.
+  // 1. Initial wallpaper animation after device boot.
   // 2. Wallpaper fades in from a non empty background.
   // 3. From an empty background, chrome transit to a logged in user session.
   // 4. From an empty background, guest user logged in.

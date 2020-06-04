@@ -18,7 +18,6 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -51,7 +50,7 @@ bool IsInIFrame(const HTMLAnchorElement& anchor_element) {
   Frame* frame = anchor_element.GetDocument().GetFrame();
   while (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
     HTMLFrameOwnerElement* owner = local_frame->GetDocument()->LocalOwner();
-    if (owner && IsHTMLIFrameElement(owner))
+    if (owner && IsA<HTMLIFrameElement>(owner))
       return true;
     frame = frame->Tree().Parent();
   }
@@ -62,7 +61,7 @@ bool IsInIFrame(const HTMLAnchorElement& anchor_element) {
 bool ContainsImage(const HTMLAnchorElement& anchor_element) {
   for (Node* node = FlatTreeTraversal::FirstChild(anchor_element); node;
        node = FlatTreeTraversal::Next(*node, &anchor_element)) {
-    if (IsHTMLImageElement(*node))
+    if (IsA<HTMLImageElement>(*node))
       return true;
   }
   return false;
@@ -144,7 +143,7 @@ base::Optional<AnchorElementMetrics> AnchorElementMetrics::Create(
     return base::nullopt;
 
   AnchorElementMetrics anchor_metrics(
-      anchor_element, 0, 0, 0, 0, 0, 0, 0, IsInIFrame(*anchor_element),
+      anchor_element, 0, 0, 0, 0, 0, 0, IsInIFrame(*anchor_element),
       ContainsImage(*anchor_element), IsSameHost(*anchor_element),
       IsUrlIncrementedByOne(*anchor_element));
 
@@ -192,7 +191,6 @@ base::Optional<AnchorElementMetrics> AnchorElementMetrics::Create(
                         ->GetScrollableArea()
                         ->ContentsSize()
                         .Height();
-  float ratio_root_height = root_height / base_height;
 
   int root_scrolled =
       root_frame_view->LayoutViewport()->ScrollOffsetInt().Height();
@@ -212,7 +210,7 @@ base::Optional<AnchorElementMetrics> AnchorElementMetrics::Create(
   return AnchorElementMetrics(
       anchor_element, ratio_area, ratio_visible_area,
       ratio_distance_top_to_visible_top, ratio_distance_center_to_visible_top,
-      ratio_distance_root_top, ratio_distance_root_bottom, ratio_root_height,
+      ratio_distance_root_top, ratio_distance_root_bottom,
       IsInIFrame(*anchor_element), ContainsImage(*anchor_element),
       IsSameHost(*anchor_element), IsUrlIncrementedByOne(*anchor_element));
 }
@@ -231,7 +229,7 @@ AnchorElementMetrics::MaybeReportClickedMetricsOnClick(
   // Create metrics that don't have sizes set. The browser only records
   // metrics unrelated to sizes.
   AnchorElementMetrics anchor_metrics(
-      anchor_element, 0, 0, 0, 0, 0, 0, 0, IsInIFrame(*anchor_element),
+      anchor_element, 0, 0, 0, 0, 0, 0, IsInIFrame(*anchor_element),
       ContainsImage(*anchor_element), IsSameHost(*anchor_element),
       IsUrlIncrementedByOne(*anchor_element));
 
@@ -283,10 +281,15 @@ void AnchorElementMetrics::MaybeReportViewportMetricsOnLoad(
     if (!anchor_element.Href().ProtocolIsInHTTPFamily())
       continue;
 
-    if (anchor_element.VisibleBoundsInVisualViewport().IsEmpty() &&
-        (!anchor_element.GetDocument().GetFrame() ||
-         !GetRootDocument(anchor_element) ||
-         !IsUrlIncrementedByOne(anchor_element))) {
+    // If the anchor doesn't have a valid frame/root document, skip it.
+    if (!anchor_element.GetDocument().GetFrame() ||
+        !GetRootDocument(anchor_element)) {
+      continue;
+    }
+
+    // Only anchors with width/height should be evaluated.
+    if (!anchor_element.GetLayoutObject() ||
+        anchor_element.GetLayoutObject()->AbsoluteBoundingBoxRect().IsEmpty()) {
       continue;
     }
 
@@ -297,9 +300,9 @@ void AnchorElementMetrics::MaybeReportViewportMetricsOnLoad(
 
     anchor_elements_metrics.push_back(anchor_metric.value().CreateMetricsPtr());
 
-    // Webpages with more than 40 anchors will stop processing at the 40th
+    // Webpages with more than 100 anchors will stop processing at the 100th
     // anchor element.
-    if (anchor_elements_metrics.size() >= 40)
+    if (anchor_elements_metrics.size() >= 100)
       break;
   }
 
@@ -339,45 +342,8 @@ mojom::blink::AnchorElementMetricsPtr AnchorElementMetrics::CreateMetricsPtr()
 }
 
 void AnchorElementMetrics::RecordMetricsOnClick() const {
-  UMA_HISTOGRAM_PERCENTAGE("AnchorElementMetrics.Clicked.RatioArea",
-                           static_cast<int>(ratio_area_ * 100));
-
-  UMA_HISTOGRAM_PERCENTAGE("AnchorElementMetrics.Clicked.RatioVisibleArea",
-                           static_cast<int>(ratio_visible_area_ * 100));
-
-  UMA_HISTOGRAM_PERCENTAGE(
-      "AnchorElementMetrics.Clicked.RatioDistanceTopToVisibleTop",
-      static_cast<int>(std::min(ratio_distance_top_to_visible_top_, 1.0f) *
-                       100));
-
-  UMA_HISTOGRAM_PERCENTAGE(
-      "AnchorElementMetrics.Clicked.RatioDistanceCenterToVisibleTop",
-      static_cast<int>(std::min(ratio_distance_center_to_visible_top_, 1.0f) *
-                       100));
-
-  UMA_HISTOGRAM_COUNTS_10000(
-      "AnchorElementMetrics.Clicked.RatioDistanceRootTop",
-      static_cast<int>(std::min(ratio_distance_root_top_, 100.0f) * 100));
-
-  UMA_HISTOGRAM_COUNTS_10000(
-      "AnchorElementMetrics.Clicked.RatioDistanceRootBottom",
-      static_cast<int>(std::min(ratio_distance_root_bottom_, 100.0f) * 100));
-
-  UMA_HISTOGRAM_COUNTS_10000(
-      "AnchorElementMetrics.Clicked.RatioRootHeight",
-      static_cast<int>(std::min(ratio_root_height_, 100.0f) * 100));
-
-  UMA_HISTOGRAM_BOOLEAN("AnchorElementMetrics.Clicked.IsInIFrame",
-                        is_in_iframe_);
-
-  UMA_HISTOGRAM_BOOLEAN("AnchorElementMetrics.Clicked.ContainsImage",
-                        contains_image_);
-
   UMA_HISTOGRAM_BOOLEAN("AnchorElementMetrics.Clicked.IsSameHost",
                         is_same_host_);
-
-  UMA_HISTOGRAM_BOOLEAN("AnchorElementMetrics.Clicked.IsUrlIncrementedByOne",
-                        is_url_incremented_by_one_);
 }
 
 }  // namespace blink

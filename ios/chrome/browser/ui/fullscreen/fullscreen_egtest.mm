@@ -2,35 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <EarlGrey/EarlGrey.h>
-#import <UIKit/UIKit.h>
-#import <XCTest/XCTest.h>
-
 #include "base/bind.h"
 #include "base/ios/ios_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#import "ios/chrome/browser/ui/fullscreen/test/fullscreen_app_interface.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
+#import "ios/testing/earl_grey/earl_grey_test.h"
 #import "ios/web/common/features.h"
-#import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #import "ios/web/public/test/http_server/error_page_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
-#import "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using base::test::ios::kWaitForPageLoadTimeout;
+using base::test::ios::kWaitForJSCompletionTimeout;
+using base::test::ios::WaitUntilConditionOrTimeout;
+
+using chrome_test_util::WebStateScrollViewMatcher;
 
 namespace {
 
@@ -39,9 +39,7 @@ const int kPageHeightEM = 200;
 
 // Hides the toolbar by scrolling down.
 void HideToolbarUsingUI() {
-  [[EarlGrey
-      selectElementWithMatcher:WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionUp)];
 }
 
@@ -59,7 +57,7 @@ void AssertURLIs(const GURL& expectedURL) {
                     error:&error];
     return (error == nil);
   };
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(1.0, condition),
+  GREYAssert(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, condition),
              description);
 }
 
@@ -93,72 +91,78 @@ void AssertURLIs(const GURL& expectedURL) {
 
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 
+  // Waiting for the toolbar to be visible is not enough -- the PDF itself can
+  // take a little longer to load.  Instead, wait for an internal PDF class to
+  // appear in the view hierarchy.
+  ConditionBlock condition = ^{
+    NSError* error = nil;
+    [[EarlGrey selectElementWithMatcher:grey_kindOfClass(NSClassFromString(
+                                            @"PDFExtensionTopView"))]
+        assertWithMatcher:grey_notNil()
+                    error:&error];
+    return error == nil;
+  };
+
+  NSString* errorMessage = @"PDFExtensionTopView was not visible";
+  GREYAssert(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, condition),
+             errorMessage);
+
   // Initial y scroll positions are set to make room for the toolbar.
-  // TODO(crbug.com/618887) Replace use of specific values when API which
-  // generates these values is exposed.
-  CGFloat yOffset = [ChromeEarlGrey isIPadIdiom] ? -89.0 : -48.0;
-  if (@available(iOS 12, *)) {
-    // The safe area is included in the top inset as well as the toolbar
-    // heights.  Due to crbug.com/903635, however, this only occurs on iOS 12;
-    // pdf rendering does not correctly account for the safe area on iOS 11.
-    yOffset -=
-        chrome_test_util::GetCurrentWebState()->GetView().safeAreaInsets.top;
-  }
+  CGFloat yOffset = -[FullscreenAppInterface currentViewportInsets].top;
   DCHECK_LT(yOffset, 0);
-  [[EarlGrey
-      selectElementWithMatcher:web::WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       assertWithMatcher:grey_scrollViewContentOffset(CGPointMake(0, yOffset))];
 }
 
 // Verifies that the toolbar is not hidden when scrolling a short pdf, as the
 // entire document is visible without hiding the toolbar.
-- (void)testSmallWidePDFScroll {
+#if defined(CHROME_EARL_GREY_2)
+// TODO(crbug.com/1022029): Enable this test.
+#define MAYBE_testSmallWidePDFScroll DISABLED_testSmallWidePDFScroll
+#else
+#define MAYBE_testSmallWidePDFScroll testSmallWidePDFScroll
+#endif
+- (void)MAYBE_testSmallWidePDFScroll {
+#if defined(CHROME_EARL_GREY_1)
+  // TODO(crbug.com/1036221): EG1 Test fails on iOS 12.
+  if (!base::ios::IsRunningOnIOS13OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"EG1 Fails on iOS 12.");
+  }
+#endif
+
   web::test::SetUpFileBasedHttpServer();
   GURL URL = web::test::HttpServer::MakeUrl(
       "http://ios/testing/data/http_server_files/single_page_wide.pdf");
   [ChromeEarlGrey loadURL:URL];
 
-  // TODO(crbug.com/852393): Investigate why synchronization isn't working.  Is
-  // an animation going on forever?
-  if (@available(iOS 12, *)) {
-    [[GREYConfiguration sharedInstance]
-            setValue:@NO
-        forConfigKey:kGREYConfigKeySynchronizationEnabled];
-  }
+  {
+    // TODO(crbug.com/852393): Investigate why synchronization isn't working. Is
+    // an animation going on forever?
+    // Disabled synchonization needs only for iOS 12.
+    std::unique_ptr<ScopedSynchronizationDisabler> disabler =
+        std::make_unique<ScopedSynchronizationDisabler>();
 
-  // Test that the toolbar is still visible after a user swipes down.
-  [[EarlGrey
-      selectElementWithMatcher:WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
-      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
-  [ChromeEarlGreyUI waitForToolbarVisible:YES];
+    // Test that the toolbar is still visible after a user swipes down.
+    [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
+        performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+    [ChromeEarlGreyUI waitForToolbarVisible:YES];
 
-  // Test that the toolbar is still visible even after attempting to hide it
-  // on swipe up.
-  HideToolbarUsingUI();
-  [ChromeEarlGreyUI waitForToolbarVisible:YES];
-
-  // Reenable synchronization.
-  if (@available(iOS 12, *)) {
-    [[GREYConfiguration sharedInstance]
-            setValue:@YES
-        forConfigKey:kGREYConfigKeySynchronizationEnabled];
+    // Test that the toolbar is still visible even after attempting to hide it
+    // on swipe up.
+    HideToolbarUsingUI();
+    [ChromeEarlGreyUI waitForToolbarVisible:YES];
   }
 }
 
 // Verifies that the toolbar properly appears/disappears when scrolling up/down
 // on a PDF that is long in length and wide in width.
-- (void)testLongPDFScroll {
-  // TODO(crbug.com/904694): This test is failing on iOS11.
-  if (!base::ios::IsRunningOnIOS12OrLater())
-    EARL_GREY_TEST_DISABLED(@"Disabled on iOS 11.");
-
-// TODO(crbug.com/714329): Re-enable this test on devices.
 #if !TARGET_IPHONE_SIMULATOR
-  EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
+// TODO(crbug.com/714329): Re-enable this test on devices.
+#define MAYBE_testLongPDFScroll DISABLED_testLongPDFScroll
+#else
+#define MAYBE_testLongPDFScroll testLongPDFScroll
 #endif
-
+- (void)MAYBE_testLongPDFScroll {
   web::test::SetUpFileBasedHttpServer();
   GURL URL = web::test::HttpServer::MakeUrl(
       "http://ios/testing/data/http_server_files/two_pages.pdf");
@@ -169,9 +173,7 @@ void AssertURLIs(const GURL& expectedURL) {
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Test that the toolbar is visible after a user swipes down.
-  [[EarlGrey
-      selectElementWithMatcher:WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 
@@ -189,34 +191,21 @@ void AssertURLIs(const GURL& expectedURL) {
 
   // Hide the toolbar. The page is not long enough to dismiss the toolbar using
   // the UI so we have to zoom in.
-  const char script[] =
-      "(function(){"
-      "var metas = document.getElementsByTagName('meta');"
-      "for (var i=0; i<metas.length; i++) {"
-      "  if (metas[i].getAttribute('name') == 'viewport') {"
-      "    metas[i].setAttribute('content', 'width=10');"
-      "    return;"
-      "  }"
-      "}"
-      "document.body.innerHTML += \"<meta name='viewport' content='width=10'>\""
-      "})()";
-
-  __block bool finished = false;
-  chrome_test_util::GetCurrentWebState()->ExecuteJavaScript(
-      base::UTF8ToUTF16(script), base::BindOnce(^(const base::Value*) {
-        finished = true;
-      }));
-
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(1.0,
-                                                          ^{
-                                                            return finished;
-                                                          }),
-             @"JavaScript to hide the toolbar did not complete");
+  NSString* script = @"(function(){"
+                      "var metas = document.getElementsByTagName('meta');"
+                      "for (var i=0; i<metas.length; i++) {"
+                      "  if (metas[i].getAttribute('name') == 'viewport') {"
+                      "    metas[i].setAttribute('content', 'width=10');"
+                      "    return;"
+                      "  }"
+                      "}"
+                      "document.body.innerHTML += \"<meta name='viewport' "
+                      "content='width=10'>\""
+                      "})()";
+  [ChromeEarlGrey executeJavaScript:script];
 
   // Scroll up to be sure the toolbar can be dismissed by scrolling down.
-  [[EarlGrey
-      selectElementWithMatcher:WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
 
   // Scroll to hide the UI.
@@ -244,9 +233,7 @@ void AssertURLIs(const GURL& expectedURL) {
   HideToolbarUsingUI();
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
   // Simulate a user scroll up.
-  [[EarlGrey
-      selectElementWithMatcher:WebViewScrollView(
-                                   chrome_test_util::GetCurrentWebState())]
+  [[EarlGrey selectElementWithMatcher:WebStateScrollViewMatcher()]
       performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 }

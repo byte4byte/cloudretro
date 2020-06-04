@@ -4,24 +4,26 @@
 
 #include "ash/system/ime_menu/ime_list_view.h"
 
-#include "ash/ime/ime_controller.h"
+#include "ash/ime/ime_controller_impl.h"
 #include "ash/ime/ime_switch_type.h"
 #include "ash/keyboard/keyboard_controller_impl.h"
 #include "ash/keyboard/ui/keyboard_util.h"
 #include "ash/keyboard/virtual_keyboard_controller.h"
-#include "ash/public/interfaces/ime_info.mojom.h"
+#include "ash/public/cpp/ime_info.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
+#include "ash/style/default_color_constants.h"
 #include "ash/system/tray/actionable_view.h"
 #include "ash/system/tray/system_menu_button.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_detailed_view.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -64,7 +66,9 @@ class ImeListItemView : public ActionableView {
     // |id_label| contains the IME short name (e.g., 'US', 'GB', 'IT').
     views::Label* id_label = TrayPopupUtils::CreateDefaultLabel();
     if (use_unified_theme) {
-      id_label->SetEnabledColor(kUnifiedMenuTextColor);
+      id_label->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+          AshColorProvider::ContentLayerType::kTextPrimary,
+          AshColorProvider::AshColorMode::kDark));
       id_label->SetAutoColorReadabilityEnabled(false);
     }
     id_label->SetText(id);
@@ -159,7 +163,10 @@ class KeyboardStatusRow : public views::View {
     // The on-screen keyboard image button.
     views::ImageView* keyboard_image = TrayPopupUtils::CreateMainImageView();
     keyboard_image->SetImage(gfx::CreateVectorIcon(
-        kImeMenuOnScreenKeyboardIcon, kMenuIconSize, kMenuIconColor));
+        kImeMenuOnScreenKeyboardIcon, kMenuIconSize,
+        AshColorProvider::Get()->GetContentLayerColor(
+            AshColorProvider::ContentLayerType::kIconPrimary,
+            AshColorProvider::AshColorMode::kLight)));
     tri_view->AddView(TriView::Container::START, keyboard_image);
 
     // The on-screen keyboard label ('On-screen keyboard').
@@ -202,15 +209,15 @@ ImeListView::~ImeListView() = default;
 
 void ImeListView::Init(bool show_keyboard_toggle,
                        SingleImeBehavior single_ime_behavior) {
-  ImeController* ime_controller = Shell::Get()->ime_controller();
+  ImeControllerImpl* ime_controller = Shell::Get()->ime_controller();
   Update(ime_controller->current_ime().id, ime_controller->available_imes(),
          ime_controller->current_ime_menu_items(), show_keyboard_toggle,
          single_ime_behavior);
 }
 
 void ImeListView::Update(const std::string& current_ime_id,
-                         const std::vector<mojom::ImeInfo>& list,
-                         const std::vector<mojom::ImeMenuItem>& property_items,
+                         const std::vector<ImeInfo>& list,
+                         const std::vector<ImeMenuItem>& property_items,
                          bool show_keyboard_toggle,
                          SingleImeBehavior single_ime_behavior) {
   ResetImeListView();
@@ -256,14 +263,17 @@ void ImeListView::CloseImeListView() {
 
 void ImeListView::AppendImeListAndProperties(
     const std::string& current_ime_id,
-    const std::vector<mojom::ImeInfo>& list,
-    const std::vector<mojom::ImeMenuItem>& property_list) {
+    const std::vector<ImeInfo>& list,
+    const std::vector<ImeMenuItem>& property_list) {
   DCHECK(ime_map_.empty());
   for (size_t i = 0; i < list.size(); i++) {
     const bool selected = current_ime_id == list[i].id;
-    views::View* ime_view =
-        new ImeListItemView(this, list[i].short_name, list[i].name, selected,
-                            gfx::kGoogleGreen700, use_unified_theme_);
+    views::View* ime_view = new ImeListItemView(
+        this, list[i].short_name, list[i].name, selected,
+        AshColorProvider::Get()->DeprecatedGetContentLayerColor(
+            AshColorProvider::ContentLayerType::kProminentIconButton,
+            kProminentIconButtonColor),
+        use_unified_theme_);
     scroll_content()->AddChildView(ime_view);
     ime_map_[ime_view] = list[i].id;
 
@@ -276,11 +286,14 @@ void ImeListView::AppendImeListAndProperties(
       scroll_content()->AddChildView(
           TrayPopupUtils::CreateListItemSeparator(true));
 
+      const SkColor icon_color = AshColorProvider::Get()->GetContentLayerColor(
+          AshColorProvider::ContentLayerType::kIconPrimary,
+          AshColorProvider::AshColorMode::kLight);
       // Adds the property items.
       for (size_t i = 0; i < property_list.size(); i++) {
         ImeListItemView* property_view = new ImeListItemView(
             this, base::string16(), property_list[i].label,
-            property_list[i].checked, kMenuIconColor, use_unified_theme_);
+            property_list[i].checked, icon_color, use_unified_theme_);
         scroll_content()->AddChildView(property_view);
         property_map_[property_view] = property_list[i].key;
       }
@@ -302,7 +315,7 @@ void ImeListView::PrependKeyboardStatusRow() {
 }
 
 void ImeListView::HandleViewClicked(views::View* view) {
-  ImeController* ime_controller = Shell::Get()->ime_controller();
+  ImeControllerImpl* ime_controller = Shell::Get()->ime_controller();
   std::map<views::View*, std::string>::const_iterator ime = ime_map_.find(view);
   if (ime != ime_map_.end()) {
     base::RecordAction(base::UserMetricsAction("StatusArea_IME_SwitchMode"));

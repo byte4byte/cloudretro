@@ -67,25 +67,37 @@ void InitNetwork() {
 }
 #endif  // defined(OS_CHROMEOS)
 
-void SignInSecondaryAccount(
+AccountInfo SignInSecondaryAccount(
     Profile* profile,
     network::TestURLLoaderFactory* test_url_loader_factory,
     const std::string& email) {
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   AccountInfo account_info =
-      identity::MakeAccountAvailable(identity_manager, email);
-  identity::SetCookieAccounts(identity_manager, test_url_loader_factory,
-                              {{account_info.email, account_info.gaia}});
+      signin::MakeAccountAvailable(identity_manager, email);
+  signin::SetCookieAccounts(identity_manager, test_url_loader_factory,
+                            {{account_info.email, account_info.gaia}});
+  return account_info;
+}
+
+void SignOutSecondaryAccount(
+    Profile* profile,
+    network::TestURLLoaderFactory* test_url_loader_factory,
+    const CoreAccountId& account_id) {
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  signin::SetCookieAccounts(identity_manager, test_url_loader_factory, {});
+  signin::RemoveRefreshTokenForAccount(identity_manager, account_id);
 }
 
 #if !defined(OS_CHROMEOS)
 void MakeAccountPrimary(Profile* profile, const std::string& email) {
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   base::Optional<AccountInfo> maybe_account =
-      identity_manager->FindAccountInfoForAccountWithRefreshTokenByEmailAddress(
-          email);
+      identity_manager
+          ->FindExtendedAccountInfoForAccountWithRefreshTokenByEmailAddress(
+              email);
   DCHECK(maybe_account.has_value());
   auto* primary_account_mutator = identity_manager->GetPrimaryAccountMutator();
   primary_account_mutator->SetPrimaryAccount(maybe_account->account_id);

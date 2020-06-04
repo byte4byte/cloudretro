@@ -35,7 +35,7 @@ enum class AnswerCardState {
 
 }  // namespace
 
-namespace app_list {
+namespace ash {
 namespace test {
 
 class SearchResultPageViewTest
@@ -77,7 +77,7 @@ class SearchResultPageViewTest
     // Setting up views.
     delegate_ = std::make_unique<AppListTestViewDelegate>();
     app_list_view_ = new AppListView(delegate_.get());
-    app_list_view_->InitView(false /*is_tablet_mode*/, GetContext());
+    app_list_view_->InitView(/*is_tablet_mode=*/false, GetContext());
     app_list_view_->Show(false /*is_side_shelf*/, false /*is_tablet_mode*/);
 
     ContentsView* contents_view =
@@ -119,7 +119,7 @@ class SearchResultPageViewTest
 // Instantiate the Boolean which is used to toggle answer cards in
 // the parameterized tests.
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     SearchResultPageViewTest,
     ::testing::Values(AnswerCardState::ANSWER_CARD_OFF,
                       AnswerCardState::ANSWER_CARD_ON_WITHOUT_RESULT,
@@ -166,5 +166,37 @@ TEST_P(SearchResultPageViewTest, ResultsSorted) {
   EXPECT_EQ(tile_list_view(), view()->result_container_views()[1]);
 }
 
+TEST_P(SearchResultPageViewTest, TileResultsSortedBeforeEmptyListResults) {
+  SearchModel::SearchResults* results = GetResults();
+
+  // Add a tile result with 0 score and leave the list results empty - list
+  // result container should be sorted after tile results.
+  auto tile_result = std::make_unique<TestSearchResult>();
+  tile_result->set_display_type(ash::SearchResultDisplayType::kTile);
+  tile_result->set_display_score(0.0);
+  results->Add(std::move(tile_result));
+
+  // Adding results will schedule Update().
+  RunPendingMessages();
+
+  EXPECT_EQ(tile_list_view(), view()->result_container_views()[0]);
+}
+
+TEST_P(SearchResultPageViewTest, ListResultsSortedBeforeEmptyTileResults) {
+  SearchModel::SearchResults* results = GetResults();
+
+  // Add a list result with 0 score and leave the tile results empty - list
+  // result container should be sorted before tile results.
+  auto list_result = std::make_unique<TestSearchResult>();
+  list_result->set_display_type(ash::SearchResultDisplayType::kList);
+  list_result->set_display_score(0.0);
+  results->Add(std::move(list_result));
+
+  // Adding results will schedule Update().
+  RunPendingMessages();
+
+  EXPECT_EQ(list_view(), view()->result_container_views()[0]);
+}
+
 }  // namespace test
-}  // namespace app_list
+}  // namespace ash

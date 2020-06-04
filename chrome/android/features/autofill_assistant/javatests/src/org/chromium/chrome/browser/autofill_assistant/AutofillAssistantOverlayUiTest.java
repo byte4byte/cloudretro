@@ -12,32 +12,40 @@ import static android.support.test.espresso.matcher.ViewMatchers.isRoot;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
 
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.checkElementExists;
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.getBoundingRectForElement;
+import static org.chromium.chrome.browser.autofill_assistant.AutofillAssistantUiTestUtil.getViewport;
 import static org.chromium.content_public.browser.test.util.TestThreadUtils.runOnUiThreadBlocking;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
-import android.util.DisplayMetrics;
 
-import org.json.JSONArray;
+import androidx.annotation.Nullable;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayCoordinator;
+import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayImage;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayModel;
 import org.chromium.chrome.browser.autofill_assistant.overlay.AssistantOverlayState;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content_public.browser.test.util.TestTouchUtils;
 
 import java.util.Collections;
 import java.util.concurrent.ExecutionException;
@@ -53,10 +61,10 @@ public class AutofillAssistantOverlayUiTest {
 
     // TODO(crbug.com/806868): Create a more specific test site for overlay testing.
     private static final String TEST_PAGE =
-            "/components/test/data/autofill_assistant/autofill_assistant_target_website.html";
+            "/components/test/data/autofill_assistant/html/autofill_assistant_target_website.html";
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mTestRule.startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
                 InstrumentationRegistry.getTargetContext(),
                 mTestRule.getTestServer().getURL(TEST_PAGE)));
@@ -67,11 +75,25 @@ public class AutofillAssistantOverlayUiTest {
         return mTestRule.getWebContents();
     }
 
-    /** Creates a coordinator for use in UI tests. */
+    /** Creates a coordinator for use in UI tests with a default, non-null overlay image. */
     private AssistantOverlayCoordinator createCoordinator(AssistantOverlayModel model)
             throws ExecutionException {
+        return createCoordinator(model,
+                BitmapFactory.decodeResource(mTestRule.getActivity().getResources(),
+                        org.chromium.chrome.autofill_assistant.R.drawable.btn_close));
+    }
+
+    /** Creates a coordinator for use in UI tests with a custom overlay image. */
+    private AssistantOverlayCoordinator createCoordinator(
+            AssistantOverlayModel model, @Nullable Bitmap overlayImage) throws ExecutionException {
+        ChromeActivity activity = mTestRule.getActivity();
         return runOnUiThreadBlocking(
-                () -> new AssistantOverlayCoordinator(mTestRule.getActivity(), model));
+                ()
+                        -> new AssistantOverlayCoordinator(activity,
+                                activity.getFullscreenManager(), activity.getCompositorViewHolder(),
+                                activity.getScrim(), model,
+                                new AutofillAssistantUiTestUtil.MockImageFetcher(
+                                        overlayImage, null)));
     }
 
     /** Tests assumptions about the initial state of the infobox. */
@@ -83,7 +105,7 @@ public class AutofillAssistantOverlayUiTest {
 
         assertScrimDisplayed(false);
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(false));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(false));
     }
 
     /** Tests assumptions about the full overlay. */
@@ -97,13 +119,30 @@ public class AutofillAssistantOverlayUiTest {
                 () -> model.set(AssistantOverlayModel.STATE, AssistantOverlayState.FULL));
         assertScrimDisplayed(true);
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(true));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(true));
 
         runOnUiThreadBlocking(
                 () -> model.set(AssistantOverlayModel.STATE, AssistantOverlayState.HIDDEN));
         assertScrimDisplayed(false);
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(false));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(false));
+    }
+
+    /** Tests assumptions about the full overlay. */
+    @Test
+    @MediumTest
+    public void testFullOverlayWithImage() throws Exception {
+        AssistantOverlayModel model = new AssistantOverlayModel();
+        AssistantOverlayCoordinator coordinator = createCoordinator(model);
+
+        AssistantOverlayImage image = new AssistantOverlayImage("http://localhost/example.png", 64,
+                64, 40, "example.com", Color.parseColor("#B3FFFFFF"), 40);
+        runOnUiThreadBlocking(() -> {
+            model.set(AssistantOverlayModel.STATE, AssistantOverlayState.FULL);
+            model.set(AssistantOverlayModel.OVERLAY_IMAGE, image);
+        });
+        assertScrimDisplayed(true);
+        // TODO(b/143452916): Test that the overlay image is actually being displayed.
     }
 
     /** Tests assumptions about the partial overlay. */
@@ -118,30 +157,30 @@ public class AutofillAssistantOverlayUiTest {
                 () -> model.set(AssistantOverlayModel.STATE, AssistantOverlayState.PARTIAL));
         assertScrimDisplayed(true);
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(true));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(true));
 
-        Rect rect = getBoundingRectForElement("touch_area_one");
+        Rect rect = getBoundingRectForElement(getWebContents(), "touch_area_one");
         runOnUiThreadBlocking(()
                                       -> model.set(AssistantOverlayModel.TOUCHABLE_AREA,
                                               Collections.singletonList(new RectF(rect))));
 
         // Touchable area set, but no viewport given: equivalent to full overlay.
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(true));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(true));
 
         // Set viewport.
-        Rect viewport = getViewport();
+        Rect viewport = getViewport(getWebContents());
         runOnUiThreadBlocking(
                 () -> model.set(AssistantOverlayModel.VISUAL_VIEWPORT, new RectF(viewport)));
 
         // Now the partial overlay allows tapping the highlighted touch area.
         tapElement("touch_area_one");
-        assertThat(checkElementExists("touch_area_one"), is(false));
+        assertThat(checkElementExists(getWebContents(), "touch_area_one"), is(false));
 
         runOnUiThreadBlocking(
                 () -> model.set(AssistantOverlayModel.TOUCHABLE_AREA, Collections.emptyList()));
         tapElement("touch_area_three");
-        assertThat(checkElementExists("touch_area_three"), is(true));
+        assertThat(checkElementExists(getWebContents(), "touch_area_three"), is(true));
     }
 
     /** Scrolls a touchable area into view and then taps it. */
@@ -151,8 +190,8 @@ public class AutofillAssistantOverlayUiTest {
         AssistantOverlayModel model = new AssistantOverlayModel();
         AssistantOverlayCoordinator coordinator = createCoordinator(model);
 
-        Rect rect = getBoundingRectForElement("touch_area_two");
-        Rect viewport = getViewport();
+        Rect rect = getBoundingRectForElement(getWebContents(), "touch_area_two");
+        Rect viewport = getViewport(getWebContents());
         runOnUiThreadBlocking(() -> {
             model.set(AssistantOverlayModel.STATE, AssistantOverlayState.PARTIAL);
             model.set(AssistantOverlayModel.TOUCHABLE_AREA,
@@ -160,11 +199,53 @@ public class AutofillAssistantOverlayUiTest {
             model.set(AssistantOverlayModel.VISUAL_VIEWPORT, new RectF(viewport));
         });
         scrollIntoViewIfNeeded("touch_area_two");
-        Rect newViewport = getViewport();
+        Rect newViewport = getViewport(getWebContents());
         runOnUiThreadBlocking(
                 () -> model.set(AssistantOverlayModel.VISUAL_VIEWPORT, new RectF(newViewport)));
         tapElement("touch_area_two");
-        assertThat(checkElementExists("touch_area_two"), is(false));
+        assertThat(checkElementExists(getWebContents(), "touch_area_two"), is(false));
+    }
+
+    /**
+     * Regular overlay image test. Since there is no easy way to test whether the image is actually
+     * rendered, this is simply checking that nothing crashes.
+     */
+    @Test
+    @MediumTest
+    public void testOverlayImageDoesNotCrashIfValid() throws Exception {
+        AssistantOverlayModel model = new AssistantOverlayModel();
+        Bitmap bitmap = BitmapFactory.decodeResource(mTestRule.getActivity().getResources(),
+                org.chromium.chrome.autofill_assistant.R.drawable.btn_close);
+        assertThat(bitmap, notNullValue());
+        AssistantOverlayCoordinator coordinator =
+                createCoordinator(model, /* overlayImage = */ bitmap);
+
+        runOnUiThreadBlocking(() -> {
+            model.set(AssistantOverlayModel.STATE, AssistantOverlayState.FULL);
+            model.set(AssistantOverlayModel.OVERLAY_IMAGE,
+                    new AssistantOverlayImage("https://www.example.com/example.png", 32, 32, 12,
+                            "Text", Color.RED, 20));
+        });
+
+        assertScrimDisplayed(true);
+    }
+
+    /** Simulates what would happen if the overlay image fetcher returned null. */
+    @Test
+    @MediumTest
+    public void testOverlayDoesNotCrashIfImageFailsToLoad() throws Exception {
+        AssistantOverlayModel model = new AssistantOverlayModel();
+        AssistantOverlayCoordinator coordinator =
+                createCoordinator(model, /* overlayImage = */ null);
+
+        runOnUiThreadBlocking(() -> {
+            model.set(AssistantOverlayModel.STATE, AssistantOverlayState.FULL);
+            model.set(AssistantOverlayModel.OVERLAY_IMAGE,
+                    new AssistantOverlayImage("https://www.example.com/example.png", 32, 32, 12,
+                            "Text", Color.RED, 20));
+        });
+
+        assertScrimDisplayed(true);
     }
 
     private void assertScrimDisplayed(boolean expected) throws Exception {
@@ -187,97 +268,8 @@ public class AutofillAssistantOverlayUiTest {
         }
     }
 
-    /** Performs a single tap on the center of the specified element. */
-    private void tapElement(String elementId) throws Exception {
-        Rect coords = getAbsoluteBoundingRect(elementId);
-        float x = coords.left + 0.5f * (coords.right - coords.left);
-        float y = coords.top + 0.5f * (coords.bottom - coords.top);
-
-        // Sanity check, can only click on coordinates on screen.
-        DisplayMetrics displayMetrics = mTestRule.getActivity().getResources().getDisplayMetrics();
-        if (x < 0 || x > displayMetrics.widthPixels || y < 0 || y > displayMetrics.heightPixels) {
-            throw new IllegalArgumentException(elementId + " not on screen: tried to tap x=" + x
-                    + ", y=" + y + ", which is outside of display with w="
-                    + displayMetrics.widthPixels + ", h=" + displayMetrics.heightPixels);
-        }
-        TestTouchUtils.singleClick(InstrumentationRegistry.getInstrumentation(), x, y);
-    }
-
-    /** Computes the bounding rectangle of the specified DOM element in absolute screen space. */
-    private Rect getAbsoluteBoundingRect(String elementId) throws Exception {
-        // Get bounding rectangle in viewport space.
-        Rect elementRect = getBoundingRectForElement(elementId);
-
-        /*
-         * Conversion from viewport space to screen space is done in two steps:
-         * - First, convert viewport to compositor space (scrolling offset, multiply with factor).
-         * - Then, convert compositor space to screen space (add content offset).
-         */
-        Rect viewport = getViewport();
-        float cssToPysicalPixels =
-                (((float) mTestRule.getActivity().getCompositorViewHolder().getWidth()
-                        / (float) viewport.width()));
-
-        int[] compositorLocation = new int[2];
-        mTestRule.getActivity().getCompositorViewHolder().getLocationOnScreen(compositorLocation);
-        int offsetY = compositorLocation[1]
-                + mTestRule.getActivity().getFullscreenManager().getContentOffset();
-        return new Rect((int) ((elementRect.left - viewport.left) * cssToPysicalPixels),
-                (int) ((elementRect.top - viewport.top) * cssToPysicalPixels + offsetY),
-                (int) ((elementRect.right - viewport.left) * cssToPysicalPixels),
-                (int) ((elementRect.bottom - viewport.top) * cssToPysicalPixels + offsetY));
-    }
-
-    /**
-     * Retrieves the bounding rectangle for the specified element in the DOM tree in CSS pixel
-     * coordinates.
-     */
-    private Rect getBoundingRectForElement(String elementId) throws Exception {
-        if (!checkElementExists(elementId)) {
-            throw new IllegalArgumentException(elementId + " does not exist");
-        }
-        TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper javascriptHelper =
-                new TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper();
-        javascriptHelper.evaluateJavaScriptForTests(getWebContents(),
-                "(function() {"
-                        + " rect = document.getElementById('" + elementId
-                        + "').getBoundingClientRect();"
-                        + " return [window.scrollX + rect.left, window.scrollY + rect.top, "
-                        + "         window.scrollX + rect.right, window.scrollY + rect.bottom];"
-                        + "})()");
-        javascriptHelper.waitUntilHasValue();
-        JSONArray rectJson = new JSONArray(javascriptHelper.getJsonResultAndClear());
-        return new Rect(
-                rectJson.getInt(0), rectJson.getInt(1), rectJson.getInt(2), rectJson.getInt(3));
-    }
-
-    /** Checks whether the specified element exists in the DOM tree. */
-    private boolean checkElementExists(String elementId) throws Exception {
-        TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper javascriptHelper =
-                new TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper();
-        javascriptHelper.evaluateJavaScriptForTests(getWebContents(),
-                "(function() {"
-                        + " return [document.getElementById('" + elementId + "') != null]; "
-                        + "})()");
-        javascriptHelper.waitUntilHasValue();
-        JSONArray result = new JSONArray(javascriptHelper.getJsonResultAndClear());
-        return result.getBoolean(0);
-    }
-
-    /**
-     * Retrieves the visual viewport of the webpage in CSS pixel coordinates.
-     */
-    private Rect getViewport() throws Exception {
-        TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper javascriptHelper =
-                new TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper();
-        javascriptHelper.evaluateJavaScriptForTests(getWebContents(),
-                "(function() {"
-                        + " const v = window.visualViewport;"
-                        + " return [v.pageLeft, v.pageTop, v.width, v.height]"
-                        + "})()");
-        javascriptHelper.waitUntilHasValue();
-        JSONArray values = new JSONArray(javascriptHelper.getJsonResultAndClear());
-        return new Rect(values.getInt(0), values.getInt(1), values.getInt(2), values.getInt(3));
+    void tapElement(String elementId) throws Exception {
+        AutofillAssistantUiTestUtil.tapElement(mTestRule, elementId);
     }
 
     /**

@@ -58,7 +58,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkDeviceHandler {
   // |callback| and |error_callback|, in class description above.
   virtual void GetDeviceProperties(
       const std::string& device_path,
-      const network_handler::DictionaryResultCallback& callback,
+      network_handler::DictionaryResultCallback callback,
       const network_handler::ErrorCallback& error_callback) const = 0;
 
   // Sets the value of property |name| on device with id |device_path| to
@@ -69,14 +69,6 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkDeviceHandler {
       const std::string& device_path,
       const std::string& property_name,
       const base::Value& value,
-      const base::Closure& callback,
-      const network_handler::ErrorCallback& error_callback) = 0;
-
-  // Requests a refresh of the IP configuration for the device specified by
-  // |device_path| if it exists. This will apply any newly configured
-  // properties and renew the DHCP lease.
-  virtual void RequestRefreshIPConfigs(
-      const std::string& device_path,
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback) = 0;
 
@@ -175,6 +167,10 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkDeviceHandler {
   // Sets up MAC address randomization if available. This applies to devices
   // which become available in the future.
   virtual void SetMACAddressRandomizationEnabled(bool enabled) = 0;
+
+  // Sets up USB Ethernet MAC address source. This applies to primary enabled
+  // USB Ethernet device.
+  virtual void SetUsbEthernetMacAddressSource(const std::string& source) = 0;
 
   // Attempts to enable or disable TDLS for the specified IP or MAC address for
   // the active wifi device.

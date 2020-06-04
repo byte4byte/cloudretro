@@ -4,15 +4,17 @@
 
 package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.support.annotation.Nullable;
-import android.support.annotation.Px;
-import android.support.v4.view.ViewPager;
 import android.view.ViewStub;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import androidx.annotation.Nullable;
+import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
+import androidx.viewpager.widget.ViewPager;
+
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryViewBinder.BarItemViewHolder;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
@@ -37,6 +39,10 @@ import org.chromium.ui.modelutil.RecyclerViewAdapter;
 public class KeyboardAccessoryCoordinator {
     private final KeyboardAccessoryMediator mMediator;
     private final KeyboardAccessoryTabLayoutCoordinator mTabLayout;
+    private final PropertyModelChangeProcessor
+            .ViewBinder<PropertyModel, KeyboardAccessoryView, PropertyKey> mViewBinder;
+    private final PropertyModel mModel;
+    private KeyboardAccessoryView mView;
 
     /**
      * The keyboard accessory provides signals when to show or change the accessory sheet below it.
@@ -118,24 +124,22 @@ public class KeyboardAccessoryCoordinator {
     public KeyboardAccessoryCoordinator(KeyboardAccessoryTabLayoutCoordinator tabLayout,
             VisibilityDelegate visibilityDelegate,
             ViewProvider<KeyboardAccessoryView> viewProvider) {
-        PropertyModel model = KeyboardAccessoryProperties.defaultModelBuilder().build();
         mTabLayout = tabLayout;
-        mMediator = new KeyboardAccessoryMediator(model, visibilityDelegate,
+        mModel = KeyboardAccessoryProperties.defaultModelBuilder().build();
+        mMediator = new KeyboardAccessoryMediator(mModel, visibilityDelegate,
                 mTabLayout.getTabSwitchingDelegate(), mTabLayout.getTabLayoutCallbacks());
         if (!ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)) {
             viewProvider.whenLoaded(barView -> mTabLayout.assignNewView(barView.getTabLayout()));
         }
+        viewProvider.whenLoaded(view -> mView = view);
 
         mTabLayout.setTabObserver(mMediator);
-        PropertyModelChangeProcessor
-                .ViewBinder<PropertyModel, KeyboardAccessoryView, PropertyKey> viewBinder =
-                KeyboardAccessoryViewBinder::bind;
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)) {
-            viewBinder = KeyboardAccessoryModernViewBinder::bind;
-        }
-        LazyConstructionPropertyMcp.create(model, VISIBLE, viewProvider, viewBinder);
+        mViewBinder = ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_KEYBOARD_ACCESSORY)
+                ? KeyboardAccessoryModernViewBinder::bind
+                : KeyboardAccessoryViewBinder::bind;
+        LazyConstructionPropertyMcp.create(mModel, VISIBLE, viewProvider, mViewBinder);
         KeyboardAccessoryMetricsRecorder.registerKeyboardAccessoryModelMetricsObserver(
-                model, mTabLayout.getTabSwitchingDelegate());
+                mModel, mTabLayout.getTabSwitchingDelegate());
     }
 
     /**
@@ -211,6 +215,14 @@ public class KeyboardAccessoryCoordinator {
      */
     public void show() {
         mMediator.show();
+    }
+
+    /** Next time the accessory is closed, don't delay the closing animation. */
+    public void skipClosingAnimationOnce() {
+        mMediator.skipClosingAnimationOnce();
+        // TODO(fhorschig): Consider allow LazyConstructionPropertyMcp to propagate updates once the
+        // view exists. Currently it doesn't, so we need this ugly explicit binding.
+        if (mView != null) mViewBinder.bind(mModel, mView, SKIP_CLOSING_ANIMATION);
     }
 
     /**

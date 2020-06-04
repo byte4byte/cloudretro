@@ -8,21 +8,26 @@
 #include <string>
 #include <utility>
 
-TestImeController::TestImeController() : binding_(this) {}
-TestImeController::~TestImeController() = default;
+#include "ash/public/cpp/ime_info.h"
 
-ash::mojom::ImeControllerPtr TestImeController::CreateInterfacePtr() {
-  ash::mojom::ImeControllerPtr ptr;
-  binding_.Bind(mojo::MakeRequest(&ptr));
-  return ptr;
+ImeControllerResetterForTest::ImeControllerResetterForTest()
+    : instance_(ash::ImeController::Get()) {
+  ash::ImeController::SetInstanceForTest(nullptr);
 }
 
-void TestImeController::SetClient(ash::mojom::ImeControllerClientPtr client) {}
+ImeControllerResetterForTest::~ImeControllerResetterForTest() {
+  ash::ImeController::SetInstanceForTest(instance_);
+}
 
-void TestImeController::RefreshIme(
-    const std::string& current_ime_id,
-    std::vector<ash::mojom::ImeInfoPtr> available_imes,
-    std::vector<ash::mojom::ImeMenuItemPtr> menu_items) {
+TestImeController::TestImeController() = default;
+
+TestImeController::~TestImeController() = default;
+
+void TestImeController::SetClient(ash::ImeControllerClient* client) {}
+
+void TestImeController::RefreshIme(const std::string& current_ime_id,
+                                   std::vector<ash::ImeInfo> available_imes,
+                                   std::vector<ash::ImeMenuItem> menu_items) {
   current_ime_id_ = current_ime_id;
   available_imes_ = std::move(available_imes);
   menu_items_ = std::move(menu_items);

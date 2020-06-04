@@ -9,6 +9,7 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
@@ -91,24 +92,9 @@ AuthenticatorClientPinEntryView::AuthenticatorClientPinEntryView(
   }
 
   layout->StartRow(views::GridLayout::kFixedSize, 0);
-
-  auto error_label = std::make_unique<views::Label>(
-      base::string16(), views::style::CONTEXT_LABEL,
-      views::style::STYLE_PRIMARY);
-  error_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  error_label->SetEnabledColor(gfx::kGoogleRed500);
-  error_label_ = layout->AddView(std::move(error_label), 3 /* col_span */,
-                                 1 /* row_span */);
 }
 
 AuthenticatorClientPinEntryView::~AuthenticatorClientPinEntryView() = default;
-
-void AuthenticatorClientPinEntryView::UpdateError(const base::string16& text) {
-  error_label_->SetVisible(true);
-  error_label_->SetText(text);
-  error_label_->SizeToPreferredSize();
-  Layout();
-}
 
 void AuthenticatorClientPinEntryView::RequestFocus() {
   pin_text_field_->RequestFocus();

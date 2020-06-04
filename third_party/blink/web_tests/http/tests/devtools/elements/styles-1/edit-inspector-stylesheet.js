@@ -39,14 +39,14 @@
       ElementsTestRunner.selectNodeAndWaitForStyles('inspected', dumpStyles);
     }
 
-    function dumpStyles() {
-      ElementsTestRunner.dumpSelectedElementStyles(true, false, true);
+    async function dumpStyles() {
+      await ElementsTestRunner.dumpSelectedElementStyles(true, false, true);
       TestRunner.completeTest();
     }
   }
 
   function printContent(next) {
-    function result(content) {
+    function result({ content, error, isEncoded }) {
       TestRunner.addResult('Inspector stylesheet content:');
       TestRunner.addResult(content);
       if (next)

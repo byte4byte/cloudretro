@@ -46,72 +46,47 @@ void InitAwareNotificationScheduler::DeleteAllNotifications(
                      weak_ptr_factory_.GetWeakPtr(), type));
 }
 
-void InitAwareNotificationScheduler::GetImpressionDetail(
+void InitAwareNotificationScheduler::GetClientOverview(
     SchedulerClientType type,
-    ImpressionDetail::ImpressionDetailCallback callback) {
+    ClientOverview::ClientOverviewCallback callback) {
   if (IsReady()) {
-    impl_->GetImpressionDetail(type, std::move(callback));
+    impl_->GetClientOverview(type, std::move(callback));
     return;
   }
   MaybeCacheClosure(base::BindOnce(
-      &InitAwareNotificationScheduler::GetImpressionDetail,
+      &InitAwareNotificationScheduler::GetClientOverview,
       weak_ptr_factory_.GetWeakPtr(), type, std::move(callback)));
 }
 
 void InitAwareNotificationScheduler::OnStartTask(
-    SchedulerTaskTime task_time,
     TaskFinishedCallback callback) {
   if (IsReady()) {
-    impl_->OnStartTask(task_time, std::move(callback));
+    impl_->OnStartTask(std::move(callback));
     return;
   }
   MaybeCacheClosure(base::BindOnce(&InitAwareNotificationScheduler::OnStartTask,
-                                   weak_ptr_factory_.GetWeakPtr(), task_time,
+                                   weak_ptr_factory_.GetWeakPtr(),
                                    std::move(callback)));
 }
 
-void InitAwareNotificationScheduler::OnStopTask(SchedulerTaskTime task_time) {
+void InitAwareNotificationScheduler::OnStopTask() {
   if (IsReady()) {
-    impl_->OnStopTask(task_time);
+    impl_->OnStopTask();
     return;
   }
   MaybeCacheClosure(base::BindOnce(&InitAwareNotificationScheduler::OnStopTask,
-                                   weak_ptr_factory_.GetWeakPtr(), task_time));
+                                   weak_ptr_factory_.GetWeakPtr()));
 }
 
-void InitAwareNotificationScheduler::OnClick(SchedulerClientType type,
-                                             const std::string& guid) {
+void InitAwareNotificationScheduler::OnUserAction(
+    const UserActionData& action_data) {
   if (IsReady()) {
-    impl_->OnClick(type, guid);
+    impl_->OnUserAction(action_data);
     return;
   }
-  MaybeCacheClosure(base::BindOnce(&InitAwareNotificationScheduler::OnClick,
-                                   weak_ptr_factory_.GetWeakPtr(), type, guid));
-}
-
-void InitAwareNotificationScheduler::OnActionClick(
-    SchedulerClientType type,
-    const std::string& guid,
-    ActionButtonType button_type) {
-  if (IsReady()) {
-    impl_->OnActionClick(type, guid, button_type);
-    return;
-  }
-
   MaybeCacheClosure(
-      base::BindOnce(&InitAwareNotificationScheduler::OnActionClick,
-                     weak_ptr_factory_.GetWeakPtr(), type, guid, button_type));
-}
-
-void InitAwareNotificationScheduler::OnDismiss(SchedulerClientType type,
-                                               const std::string& guid) {
-  if (IsReady()) {
-    impl_->OnDismiss(type, guid);
-    return;
-  }
-
-  MaybeCacheClosure(base::BindOnce(&InitAwareNotificationScheduler::OnDismiss,
-                                   weak_ptr_factory_.GetWeakPtr(), type, guid));
+      base::BindOnce(&InitAwareNotificationScheduler::OnUserAction,
+                     weak_ptr_factory_.GetWeakPtr(), action_data));
 }
 
 void InitAwareNotificationScheduler::OnInitialized(InitCallback init_callback,

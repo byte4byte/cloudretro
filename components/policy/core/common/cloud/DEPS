@@ -1,4 +1,4 @@
 include_rules = [
   "+components/signin/public",
-  "+services/identity/public/cpp",
+  "+components/user_manager",
 ]

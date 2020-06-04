@@ -32,8 +32,7 @@ WifiHotspotConnector::WifiHotspotConnector(
       network_connect_(network_connect),
       timer_(std::make_unique<base::OneShotTimer>()),
       clock_(base::DefaultClock::GetInstance()),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      weak_ptr_factory_(this) {
+      task_runner_(base::ThreadTaskRunnerHandle::Get()) {
   network_state_handler_->AddObserver(this, FROM_HERE);
 }
 
@@ -84,8 +83,8 @@ void WifiHotspotConnector::ConnectToWifiHotspot(
   callback_ = callback;
   timer_->Start(FROM_HERE,
                 base::TimeDelta::FromSeconds(kConnectionTimeoutSeconds),
-                base::Bind(&WifiHotspotConnector::OnConnectionTimeout,
-                           weak_ptr_factory_.GetWeakPtr()));
+                base::BindOnce(&WifiHotspotConnector::OnConnectionTimeout,
+                               weak_ptr_factory_.GetWeakPtr()));
   connection_attempt_start_time_ = clock_->Now();
 
   // If Wi-Fi is enabled, continue with creating the configuration of the

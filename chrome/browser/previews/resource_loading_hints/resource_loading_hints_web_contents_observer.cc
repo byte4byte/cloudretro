@@ -4,6 +4,8 @@
 
 #include "chrome/browser/previews/resource_loading_hints/resource_loading_hints_web_contents_observer.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram_macros.h"
@@ -15,10 +17,12 @@
 #include "components/previews/content/previews_ui_service.h"
 #include "components/previews/content/previews_user_data.h"
 #include "components/previews/core/previews_experiments.h"
+#include "components/previews/core/previews_features.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/features.h"
@@ -36,16 +40,16 @@ ResourceLoadingHintsWebContentsObserver::
   profile_ = Profile::FromBrowserContext(web_contents->GetBrowserContext());
 }
 
-void ResourceLoadingHintsWebContentsObserver::ReadyToCommitNavigation(
+void ResourceLoadingHintsWebContentsObserver::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  // When kSendPreviewsLoadingHintsBeforeCommit is disabled, resource
-  // loading hints are sent in DidFinishNavigation.
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kSendPreviewsLoadingHintsBeforeCommit)) {
-    return;
-  }
+  ReportRedirects(navigation_handle);
+}
+
+void ResourceLoadingHintsWebContentsObserver::ReadyToCommitNavigation(
+    content::NavigationHandle* navigation_handle) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   if (!navigation_handle->IsInMainFrame() ||
       navigation_handle->IsSameDocument() || navigation_handle->IsErrorPage()) {
@@ -59,20 +63,13 @@ void ResourceLoadingHintsWebContentsObserver::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  // When kSendPreviewsLoadingHintsBeforeCommit is enabled, resource
-  // loading hints are sent in ReadyToCommitNavigation.
-  if (base::FeatureList::IsEnabled(
-          blink::features::kSendPreviewsLoadingHintsBeforeCommit)) {
-    return;
-  }
-
   if (!navigation_handle->IsInMainFrame() ||
       !navigation_handle->HasCommitted() ||
       navigation_handle->IsSameDocument() || navigation_handle->IsErrorPage()) {
     return;
   }
 
-  SendResourceLoadingHints(navigation_handle);
+  ReportRedirects(navigation_handle);
 }
 
 void ResourceLoadingHintsWebContentsObserver::SendResourceLoadingHints(
@@ -98,15 +95,9 @@ void ResourceLoadingHintsWebContentsObserver::SendResourceLoadingHints(
 
   bool is_redirect = previews_user_data->is_redirect();
 
-  blink::mojom::PreviewsResourceLoadingHintsReceiverPtr hints_receiver_ptr;
+  mojo::Remote<blink::mojom::PreviewsResourceLoadingHintsReceiver>
+      hints_receiver;
 
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kSendPreviewsLoadingHintsBeforeCommit)) {
-    // Hints should be sent only after the renderer frame has committed.
-    DCHECK(navigation_handle->HasCommitted());
-    web_contents()->GetMainFrame()->GetRemoteInterfaces()->GetInterface(
-        &hints_receiver_ptr);
-  }
   blink::mojom::PreviewsResourceLoadingHintsPtr hints_ptr =
       blink::mojom::PreviewsResourceLoadingHints::New();
 
@@ -130,16 +121,9 @@ void ResourceLoadingHintsWebContentsObserver::SendResourceLoadingHints(
   for (const std::string& hint : hints)
     hints_ptr->subresources_to_block.push_back(hint);
 
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kSendPreviewsLoadingHintsBeforeCommit)) {
-    hints_receiver_ptr->SetResourceLoadingHints(std::move(hints_ptr));
-  } else {
-    blink::mojom::PreviewsResourceLoadingHintsReceiverAssociatedPtr
-        hints_receiver_associated_ptr =
-            GetResourceLoadingHintsReceiver(navigation_handle);
-    hints_receiver_associated_ptr->SetResourceLoadingHints(
-        std::move(hints_ptr));
-  }
+  auto hints_receiver_associated =
+      GetResourceLoadingHintsReceiver(navigation_handle);
+  hints_receiver_associated->SetResourceLoadingHints(std::move(hints_ptr));
 }
 
 const std::vector<std::string> ResourceLoadingHintsWebContentsObserver::
@@ -150,16 +134,22 @@ const std::vector<std::string> ResourceLoadingHintsWebContentsObserver::
 
   PreviewsService* previews_service =
       PreviewsServiceFactory::GetForProfile(profile_);
-  previews::PreviewsUIService* previews_ui_service =
-      previews_service->previews_ui_service();
-  return previews_ui_service->GetResourceLoadingHintsResourcePatternsToBlock(
-      document_gurl);
+  previews::PreviewsOptimizationGuide* previews_optimization_guide =
+      previews_service->previews_ui_service()
+          ->previews_decider_impl()
+          ->previews_opt_guide();
+  std::vector<std::string> resource_patterns_to_block;
+  if (previews_optimization_guide) {
+    previews_optimization_guide->GetResourceLoadingHints(
+        document_gurl, &resource_patterns_to_block);
+  }
+  return resource_patterns_to_block;
 }
 
-blink::mojom::PreviewsResourceLoadingHintsReceiverAssociatedPtr
+mojo::AssociatedRemote<blink::mojom::PreviewsResourceLoadingHintsReceiver>
 ResourceLoadingHintsWebContentsObserver::GetResourceLoadingHintsReceiver(
     content::NavigationHandle* navigation_handle) {
-  blink::mojom::PreviewsResourceLoadingHintsReceiverAssociatedPtr
+  mojo::AssociatedRemote<blink::mojom::PreviewsResourceLoadingHintsReceiver>
       loading_hints_agent;
 
   if (navigation_handle->GetRenderFrameHost()
@@ -169,6 +159,35 @@ ResourceLoadingHintsWebContentsObserver::GetResourceLoadingHintsReceiver(
         ->GetInterface(&loading_hints_agent);
   }
   return loading_hints_agent;
+}
+
+void ResourceLoadingHintsWebContentsObserver::ReportRedirects(
+    content::NavigationHandle* navigation_handle) {
+  if (!previews::params::IsDeferAllScriptPreviewsEnabled())
+    return;
+
+  if (!previews::params::DetectDeferRedirectLoopsUsingCache())
+    return;
+
+  if (!navigation_handle)
+    return;
+
+  if (navigation_handle->GetRedirectChain().size() < 2)
+    return;
+
+  GURL url_front = navigation_handle->GetRedirectChain().front();
+  GURL url_back = navigation_handle->GetRedirectChain().back();
+
+  if (!url_front.is_valid() || !url_back.is_valid())
+    return;
+
+  PreviewsService* previews_service =
+      PreviewsServiceFactory::GetForProfile(profile_);
+  if (!previews_service)
+    return;
+
+  previews_service->ReportObservedRedirectWithDeferAllScriptPreview(url_front,
+                                                                    url_back);
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(ResourceLoadingHintsWebContentsObserver)

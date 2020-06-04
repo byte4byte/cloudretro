@@ -13,9 +13,11 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/power_monitor/power_monitor.h"
 #include "base/process/process.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/browser_finder.h"
 
@@ -204,7 +206,7 @@ class PowerMetricsProvider::Impl : public base::RefCountedThreadSafe<Impl> {
  private:
   friend class base::RefCountedThreadSafe<Impl>;
   Impl(base::mac::ScopedIOObject<io_object_t> connect)
-      : task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      : task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
              base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
         system_total_power_key_(connect, SMCParamStruct::SMCKey::TotalPower),
@@ -239,6 +241,7 @@ class PowerMetricsProvider::Impl : public base::RefCountedThreadSafe<Impl> {
       RecordSMC("DuringStartup");
     } else {
       RecordSMC("All");
+      RecordIsOnBattery();
       if (@available(macOS 10.10.3, *)) {
         RecordThermal();
       }
@@ -262,6 +265,13 @@ class PowerMetricsProvider::Impl : public base::RefCountedThreadSafe<Impl> {
           base::UmaHistogramCounts100000(sensor.uma_prefix + name, power_mw);
       }
     }
+  }
+
+  void RecordIsOnBattery() {
+    bool is_on_battery = false;
+    if (base::PowerMonitor::IsInitialized())
+      is_on_battery = base::PowerMonitor::IsOnBatteryPower();
+    UMA_HISTOGRAM_BOOLEAN("Power.Mac.IsOnBattery", is_on_battery);
   }
 
   void RecordThermal() API_AVAILABLE(macos(10.10.3)) {

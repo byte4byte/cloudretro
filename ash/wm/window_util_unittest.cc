@@ -8,6 +8,7 @@
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/display/screen.h"
@@ -15,7 +16,7 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
+namespace window_util {
 
 namespace {
 
@@ -57,18 +58,28 @@ TEST_F(WindowUtilTest, CenterWindow) {
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(12, 20, 100, 100)));
 
-  WindowState* window_state = GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   EXPECT_FALSE(window_state->bounds_changed_by_user());
 
   CenterWindow(window.get());
   // Centring window is considered as a user's action.
   EXPECT_TRUE(window_state->bounds_changed_by_user());
-  EXPECT_EQ("200,122 100x100", window->bounds().ToString());
-  EXPECT_EQ("200,122 100x100", window->GetBoundsInScreen().ToString());
+  if (chromeos::switches::ShouldShowShelfHotseat()) {
+    EXPECT_EQ("200,126 100x100", window->bounds().ToString());
+    EXPECT_EQ("200,126 100x100", window->GetBoundsInScreen().ToString());
+  } else {
+    EXPECT_EQ("200,122 100x100", window->bounds().ToString());
+    EXPECT_EQ("200,122 100x100", window->GetBoundsInScreen().ToString());
+  }
   window->SetBoundsInScreen(gfx::Rect(600, 0, 100, 100), GetSecondaryDisplay());
   CenterWindow(window.get());
-  EXPECT_EQ("250,122 100x100", window->bounds().ToString());
-  EXPECT_EQ("750,122 100x100", window->GetBoundsInScreen().ToString());
+  if (chromeos::switches::ShouldShowShelfHotseat()) {
+    EXPECT_EQ("250,126 100x100", window->bounds().ToString());
+    EXPECT_EQ("750,126 100x100", window->GetBoundsInScreen().ToString());
+  } else {
+    EXPECT_EQ("250,122 100x100", window->bounds().ToString());
+    EXPECT_EQ("750,122 100x100", window->GetBoundsInScreen().ToString());
+  }
 }
 
 TEST_F(WindowUtilTest, AdjustBoundsToEnsureMinimumVisibility) {
@@ -145,13 +156,6 @@ TEST_F(WindowUtilTest, MoveWindowToDisplay) {
   const int original_container_id = window->parent()->id();
   const aura::Window* original_root = window->GetRootWindow();
 
-  EXPECT_FALSE(MoveWindowToDisplay(window.get(), display::kInvalidDisplayId));
-  EXPECT_EQ(original_display_id,
-            screen->GetDisplayNearestWindow(window.get()).id());
-  EXPECT_FALSE(MoveWindowToDisplay(window.get(), original_display_id));
-  EXPECT_EQ(original_display_id,
-            screen->GetDisplayNearestWindow(window.get()).id());
-
   ASSERT_EQ(2, screen->GetNumDisplays());
   const int64_t secondary_display_id = screen->GetAllDisplays()[1].id();
   EXPECT_NE(original_display_id, secondary_display_id);
@@ -166,6 +170,38 @@ TEST_F(WindowUtilTest, MoveWindowToDisplay) {
             screen->GetDisplayNearestWindow(window.get()).id());
   EXPECT_EQ(original_container_id, window->parent()->id());
   EXPECT_EQ(original_root, window->GetRootWindow());
+}
+
+// Tests that locking and unlocking the screen does not alter the display of a
+// window moved by MoveWindowToDisplay.
+TEST_F(WindowUtilTest, MoveWindowToDisplayAndLockScreen) {
+  UpdateDisplay("500x400, 600x400");
+  auto window = CreateTestWindow(gfx::Rect(12, 20, 100, 100));
+  display::Screen* screen = display::Screen::GetScreen();
+  ASSERT_EQ(2, screen->GetNumDisplays());
+  const int64_t primary_display_id = screen->GetAllDisplays()[0].id();
+  const int64_t secondary_display_id = screen->GetAllDisplays()[1].id();
+  ASSERT_EQ(primary_display_id,
+            screen->GetDisplayNearestWindow(window.get()).id());
+
+  EXPECT_TRUE(MoveWindowToDisplay(window.get(), secondary_display_id));
+  EXPECT_EQ(secondary_display_id,
+            screen->GetDisplayNearestWindow(window.get()).id());
+
+  // Tests that after locking and unlocking the screen the window remains on the
+  // secondary display.
+  GetSessionControllerClient()->LockScreen();
+  GetSessionControllerClient()->UnlockScreen();
+  EXPECT_EQ(secondary_display_id,
+            screen->GetDisplayNearestWindow(window.get()).id());
+
+  // Move the window to the primary display. Tests that after locking and
+  // unlocking the screen the window remains on the secondary display.
+  EXPECT_TRUE(MoveWindowToDisplay(window.get(), primary_display_id));
+  GetSessionControllerClient()->LockScreen();
+  GetSessionControllerClient()->UnlockScreen();
+  EXPECT_EQ(primary_display_id,
+            screen->GetDisplayNearestWindow(window.get()).id());
 }
 
 TEST_F(WindowUtilTest, RemoveTransientDescendants) {
@@ -203,14 +239,14 @@ TEST_F(WindowUtilTest, RemoveTransientDescendants) {
 }
 
 TEST_F(WindowUtilTest,
-       HideAndMaybeMinimizeWithoutAnimationMinimizesArcWindowsBeforeHiding) {
+       MinimizeAndHideWithoutAnimationMinimizesArcWindowsBeforeHiding) {
   auto window = CreateTestWindow();
   auto* state = new FakeWindowState();
-  GetWindowState(window.get())
+  WindowState::Get(window.get())
       ->SetStateObject(std::unique_ptr<WindowState::State>(state));
 
   std::vector<aura::Window*> windows = {window.get()};
-  HideAndMaybeMinimizeWithoutAnimation(windows, /*minimize=*/true);
+  MinimizeAndHideWithoutAnimation(windows);
 
   EXPECT_FALSE(window->IsVisible());
   EXPECT_TRUE(state->was_visible_on_minimize());
@@ -220,7 +256,7 @@ TEST_F(WindowUtilTest, InteriorTargeter) {
   auto window = CreateTestWindow();
   window->SetBounds(gfx::Rect(0, 0, 100, 100));
 
-  wm::GetWindowState(window.get())->Maximize();
+  WindowState::Get(window.get())->Maximize();
   InstallResizeHandleWindowTargeterForWindow(window.get());
 
   auto* child = aura::test::CreateTestWindowWithDelegateAndType(
@@ -239,7 +275,7 @@ TEST_F(WindowUtilTest, InteriorTargeter) {
 
   // InteriorEventTargeter is now active and should pass an event at the edge to
   // its parent.
-  wm::GetWindowState(window.get())->Restore();
+  WindowState::Get(window.get())->Restore();
   {
     ui::MouseEvent mouse(ui::ET_MOUSE_MOVED, gfx::Point(0, 0), gfx::Point(0, 0),
                          ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
@@ -247,5 +283,5 @@ TEST_F(WindowUtilTest, InteriorTargeter) {
   }
 }
 
-}  // namespace wm
+}  // namespace window_util
 }  // namespace ash

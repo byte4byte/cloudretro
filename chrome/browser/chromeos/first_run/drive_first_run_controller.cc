@@ -23,7 +23,6 @@
 #include "chrome/browser/background/background_contents_service_observer.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
@@ -117,18 +116,19 @@ class DriveWebContentsManager : public content::WebContentsObserver,
 
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
-                   int error_code,
-                   const base::string16& error_description) override;
+                   int error_code) override;
 
   // content::WebContentsDelegate overrides:
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
+  bool IsWebContentsCreationOverridden(
+      content::SiteInstance* source_site_instance,
+      content::mojom::WindowContainerType window_container_type,
+      const GURL& opener_url,
+      const std::string& frame_name,
+      const GURL& target_url) override;
+  content::WebContents* CreateCustomWebContents(
       content::RenderFrameHost* opener,
       content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
-      content::mojom::WindowContainerType window_container_type,
+      bool is_new_browsing_instance,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
@@ -222,8 +222,7 @@ void DriveWebContentsManager::DidFinishNavigation(
 void DriveWebContentsManager::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
-    int error_code,
-    const base::string16& error_description) {
+    int error_code) {
   if (!render_frame_host->GetParent()) {
     LOG(WARNING) << "Failed to load WebContents to enable offline mode.";
     OnOfflineInit(false,
@@ -231,57 +230,54 @@ void DriveWebContentsManager::DidFailLoad(
   }
 }
 
-bool DriveWebContentsManager::ShouldCreateWebContents(
-    content::WebContents* web_contents,
-    content::RenderFrameHost* opener,
+bool DriveWebContentsManager::IsWebContentsCreationOverridden(
     content::SiteInstance* source_site_instance,
-    int32_t route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
     content::mojom::WindowContainerType window_container_type,
     const GURL& opener_url,
     const std::string& frame_name,
-    const GURL& target_url,
-    const std::string& partition_id,
-    content::SessionStorageNamespace* session_storage_namespace) {
+    const GURL& target_url) {
   if (window_container_type == content::mojom::WindowContainerType::NORMAL)
-    return true;
+    return false;
 
   // Check that the target URL is for the Drive app.
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile_)
           ->enabled_extensions().GetAppByURL(target_url);
-  if (!extension || extension->id() != app_id_)
-    return true;
 
+  return extension && extension->id() == app_id_;
+}
+
+content::WebContents* DriveWebContentsManager::CreateCustomWebContents(
+    content::RenderFrameHost* opener,
+    content::SiteInstance* source_site_instance,
+    bool is_new_browsing_instance,
+    const GURL& opener_url,
+    const std::string& frame_name,
+    const GURL& target_url,
+    const std::string& partition_id,
+    content::SessionStorageNamespace* session_storage_namespace) {
   // The background contents creation is normally done in Browser, but
   // because we're using a detached WebContents, we need to do it ourselves.
   BackgroundContentsService* background_contents_service =
       BackgroundContentsServiceFactory::GetForProfile(profile_);
 
-  // Prevent redirection if background contents already exists.
-  if (background_contents_service->GetAppBackgroundContents(app_id_)) {
-    return false;
+  // Only redirect if background contents does not yet exists.
+  if (!background_contents_service->GetAppBackgroundContents(app_id_)) {
+    // drive_first_run/app/manifest.json sets allow_js_access to false and
+    // therefore we are creating a new SiteInstance (and thus a new renderer
+    // process) here, so we must use MSG_ROUTING_NONE and we cannot pass the
+    // opener (similarly to how allow_js_access:false is handled in
+    // Browser::MaybeCreateBackgroundContents).
+    BackgroundContents* contents =
+        background_contents_service->CreateBackgroundContents(
+            content::SiteInstance::Create(profile_), nullptr, true, frame_name,
+            app_id_, partition_id, session_storage_namespace);
+    contents->web_contents()->GetController().LoadURL(
+        target_url, content::Referrer(), ui::PAGE_TRANSITION_LINK,
+        std::string());
   }
-  // drive_first_run/app/manifest.json sets allow_js_access to false and
-  // therefore we are creating a new SiteInstance (and thus a new renderer
-  // process) here, so we must use MSG_ROUTING_NONE and we cannot pass the
-  // opener (similarily to how allow_js_access:false is handled in
-  // Browser::MaybeCreateBackgroundContents).
-  BackgroundContents* contents =
-      background_contents_service->CreateBackgroundContents(
-          content::SiteInstance::Create(profile_), nullptr, MSG_ROUTING_NONE,
-          MSG_ROUTING_NONE, MSG_ROUTING_NONE, profile_, frame_name, app_id_,
-          partition_id, session_storage_namespace);
 
-  contents->web_contents()->GetController().LoadURL(
-      target_url,
-      content::Referrer(),
-      ui::PAGE_TRANSITION_LINK,
-      std::string());
-
-  // Return false as we already created the WebContents here.
-  return false;
+  return nullptr;
 }
 
 void DriveWebContentsManager::OnBackgroundContentsOpened(
@@ -323,9 +319,10 @@ void DriveFirstRunController::EnableOfflineMode() {
     return;
   }
 
-  extensions::ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  if (!extension_service->GetExtensionById(drive_hosted_app_id_, false)) {
+  extensions::ExtensionRegistry* extension_registry =
+      extensions::ExtensionRegistry::Get(profile_);
+  if (!extension_registry->GetExtensionById(
+          drive_hosted_app_id_, extensions::ExtensionRegistry::ENABLED)) {
     LOG(WARNING) << "Drive app is not installed.";
     OnOfflineInit(false, OUTCOME_APP_NOT_INSTALLED);
     return;
@@ -403,11 +400,11 @@ void DriveFirstRunController::OnOfflineInit(bool success, UMAOutcome outcome) {
 }
 
 void DriveFirstRunController::ShowNotification() {
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  DCHECK(service);
-  const extensions::Extension* extension =
-      service->GetExtensionById(drive_hosted_app_id_, false);
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile_);
+  DCHECK(registry);
+  const extensions::Extension* extension = registry->GetExtensionById(
+      drive_hosted_app_id_, extensions::ExtensionRegistry::ENABLED);
   DCHECK(extension);
 
   message_center::RichNotificationData data;

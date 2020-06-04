@@ -6,8 +6,9 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -18,6 +19,11 @@
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/common/webui_url_constants.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace {
 
@@ -101,10 +107,17 @@ void BluetoothChooserController::RefreshOptions() {
 }
 
 void BluetoothChooserController::OpenAdapterOffHelpUrl() const {
+#if defined(OS_CHROMEOS)
+  // Chrome OS can directly link to the OS setting to turn on the adapter.
+  chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+      GetBrowser()->profile(), chrome::kBluetoothSubPage);
+#else
+  // For other operating systems, show a help center page in a tab.
   GetBrowser()->OpenURL(content::OpenURLParams(
       GURL(chrome::kBluetoothAdapterOffHelpURL), content::Referrer(),
       WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false /* is_renderer_initialized */));
+#endif
 }
 
 base::string16 BluetoothChooserController::GetStatus() const {

@@ -16,6 +16,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/gmock_callback_support.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
@@ -28,6 +29,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::StringPiece;
+using base::test::RunOnceCallback;
 using device::BluetoothAdapter;
 using device::BluetoothDevice;
 using device::BluetoothGattCharacteristic;
@@ -343,7 +345,7 @@ WebTestBluetoothAdapterProvider::GetScanFilterCheckingAdapter() {
   // Any unexpected call results in the failure callback.
   ON_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillByDefault(RunCallbackWithResult<1 /* result_callback */>(
-          true /*is_error*/,
+          /*is_error=*/true,
           device::UMABluetoothDiscoverySessionOutcome::UNKNOWN));
 
   // We need to add a device otherwise requestDevice would reject.
@@ -359,7 +361,7 @@ WebTestBluetoothAdapterProvider::GetFailStartDiscoveryAdapter() {
 
   ON_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillByDefault(RunCallbackWithResult<1 /* result_callback */>(
-          true /*is_error*/,
+          /*is_error=*/true,
           device::UMABluetoothDiscoverySessionOutcome::UNKNOWN));
 
   return adapter;
@@ -374,12 +376,21 @@ WebTestBluetoothAdapterProvider::GetEmptyAdapter() {
 
   ON_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillByDefault(RunCallbackWithResultFunction<1 /* result_callback */>(
-          false /*is_error*/, [adapter_ptr]() {
+          /*is_error=*/false, [adapter_ptr]() {
             base::ThreadTaskRunnerHandle::Get()->PostTask(
                 FROM_HERE, base::BindOnce(&NotifyDevicesAdded,
                                           base::RetainedRef(adapter_ptr)));
 
             return device::UMABluetoothDiscoverySessionOutcome::SUCCESS;
+          }));
+
+  ON_CALL(*adapter, StopScan(_))
+      .WillByDefault(
+          Invoke([](device::BluetoothAdapter::DiscoverySessionResultCallback
+                        callback) {
+            std::move(callback).Run(
+                /*is_error=*/false,
+                device::UMABluetoothDiscoverySessionOutcome::SUCCESS);
           }));
 
   return adapter;
@@ -421,10 +432,10 @@ WebTestBluetoothAdapterProvider::GetSecondDiscoveryFindsHeartRateAdapter() {
 
   EXPECT_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillOnce(RunCallbackWithResult<1 /* result_callback */>(
-          false /*is_error*/,
+          /*is_error=*/false,
           device::UMABluetoothDiscoverySessionOutcome::SUCCESS))
       .WillOnce(RunCallbackWithResultFunction<1 /* result_callback */>(
-          false /*is_error*/, [adapter_ptr]() {
+          /*is_error=*/false, [adapter_ptr]() {
             // In the second discovery session, have the adapter discover a new
             // device, shortly after the session starts.
             base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -432,6 +443,17 @@ WebTestBluetoothAdapterProvider::GetSecondDiscoveryFindsHeartRateAdapter() {
                 base::BindOnce(&AddDevice, base::WrapRefCounted(adapter_ptr),
                                GetHeartRateDevice(adapter_ptr)));
             return device::UMABluetoothDiscoverySessionOutcome::SUCCESS;
+          }));
+
+  EXPECT_CALL(*adapter, StopScan(_)).Times(2);
+
+  ON_CALL(*adapter, StopScan(_))
+      .WillByDefault(
+          Invoke([](device::BluetoothAdapter::DiscoverySessionResultCallback
+                        callback) {
+            std::move(callback).Run(
+                /*is_error=*/false,
+                device::UMABluetoothDiscoverySessionOutcome::SUCCESS);
           }));
 
   return adapter;
@@ -478,7 +500,7 @@ WebTestBluetoothAdapterProvider::GetDeviceEventAdapter() {
 
   ON_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillByDefault(RunCallbackWithResultFunction<1 /* result_callback */>(
-          false /*is_error*/,
+          /*is_error=*/false,
           [adapter_ptr, changing_battery_ptr, discovery_generic_access_ptr]() {
             if (adapter_ptr->GetDevices().size() == 4) {
               // Post task to add NewGlucoseDevice.
@@ -509,6 +531,15 @@ WebTestBluetoothAdapterProvider::GetDeviceEventAdapter() {
             return device::UMABluetoothDiscoverySessionOutcome::SUCCESS;
           }));
 
+  ON_CALL(*adapter, StopScan(_))
+      .WillByDefault(
+          Invoke([](device::BluetoothAdapter::DiscoverySessionResultCallback
+                        callback) {
+            std::move(callback).Run(
+                /*is_error=*/false,
+                device::UMABluetoothDiscoverySessionOutcome::SUCCESS);
+          }));
+
   return adapter;
 }
 
@@ -528,7 +559,7 @@ WebTestBluetoothAdapterProvider::GetDevicesRemovedAdapter() {
 
   ON_CALL(*adapter, StartScanWithFilter_(_, _))
       .WillByDefault(RunCallbackWithResultFunction<1 /* result_callback */>(
-          false /*is_error*/, [adapter_ptr, connected_hr_address]() {
+          /*is_error=*/false, [adapter_ptr, connected_hr_address]() {
             if (adapter_ptr->GetDevices().size() == 1) {
               // Post task to add NewGlucoseDevice.
               auto glucose_device(GetBaseDevice(
@@ -888,7 +919,7 @@ WebTestBluetoothAdapterProvider::GetServicesDiscoveredAfterReconnectionAdapter(
   // Gatt connection. When called after after IsGattDiscoveryComplete runs
   // success callback with a new Gatt connection and notifies of services
   // discovered.
-  ON_CALL(*device, CreateGattConnection(_, _))
+  ON_CALL(*device, CreateGattConnection_(_, _))
       .WillByDefault(RunCallbackWithResult<0 /* success_callback */>(
           [adapter_ptr, device_ptr]() {
             std::vector<BluetoothRemoteGattService*> services =
@@ -954,14 +985,15 @@ scoped_refptr<NiceMockBluetoothAdapter> WebTestBluetoothAdapterProvider::
                                  BluetoothUUID(kHealthThermometerUUID)})));
   NiceMockBluetoothDevice* device_ptr = device.get();
 
-  ON_CALL(*device, CreateGattConnection(_, _))
-      .WillByDefault(Invoke(
-          [adapter_ptr, device_ptr](
-              const BluetoothDevice::GattConnectionCallback& callback,
-              const BluetoothDevice::ConnectErrorCallback& error_callback) {
+  ON_CALL(*device, CreateGattConnection_(_, _))
+      .WillByDefault(
+          Invoke([adapter_ptr, device_ptr](
+                     BluetoothDevice::GattConnectionCallback& callback,
+                     BluetoothDevice::ConnectErrorCallback& error_callback) {
             device_ptr->SetConnected(true);
-            callback.Run(std::make_unique<NiceMockBluetoothGattConnection>(
-                adapter_ptr, device_ptr->GetAddress()));
+            std::move(callback).Run(
+                std::make_unique<NiceMockBluetoothGattConnection>(
+                    adapter_ptr, device_ptr->GetAddress()));
             device_ptr->RunPendingCallbacks();
           }));
 
@@ -1038,9 +1070,9 @@ scoped_refptr<NiceMockBluetoothAdapter> WebTestBluetoothAdapterProvider::
                   error_callback) {
             base::OnceClosure pending;
             if (succeeds) {
-              pending = base::BindOnce(std::move(callback),
-                                       base::Passed(GetBaseGATTNotifySession(
-                                           measurement_ptr->GetWeakPtr())));
+              pending = base::BindOnce(
+                  std::move(callback),
+                  GetBaseGATTNotifySession(measurement_ptr->GetWeakPtr()));
             } else {
               pending =
                   base::BindOnce(std::move(error_callback),
@@ -1128,14 +1160,15 @@ scoped_refptr<NiceMockBluetoothAdapter> WebTestBluetoothAdapterProvider::
                                  BluetoothUUID(kHealthThermometerUUID)})));
   NiceMockBluetoothDevice* device_ptr = device.get();
 
-  ON_CALL(*device, CreateGattConnection(_, _))
-      .WillByDefault(Invoke(
-          [adapter_ptr, device_ptr](
-              const BluetoothDevice::GattConnectionCallback& callback,
-              const BluetoothDevice::ConnectErrorCallback& error_callback) {
+  ON_CALL(*device, CreateGattConnection_(_, _))
+      .WillByDefault(
+          Invoke([adapter_ptr, device_ptr](
+                     BluetoothDevice::GattConnectionCallback& callback,
+                     BluetoothDevice::ConnectErrorCallback& error_callback) {
             device_ptr->SetConnected(true);
-            callback.Run(std::make_unique<NiceMockBluetoothGattConnection>(
-                adapter_ptr, device_ptr->GetAddress()));
+            std::move(callback).Run(
+                std::make_unique<NiceMockBluetoothGattConnection>(
+                    adapter_ptr, device_ptr->GetAddress()));
             device_ptr->RunPendingCallbacks();
           }));
 
@@ -1285,7 +1318,7 @@ WebTestBluetoothAdapterProvider::GetBaseDevice(
       .WillByDefault(
           Invoke(device.get(), &MockBluetoothDevice::GetMockService));
 
-  ON_CALL(*device, CreateGattConnection(_, _))
+  ON_CALL(*device, CreateGattConnection_(_, _))
       .WillByDefault(RunCallback<1 /* error_callback */>(
           BluetoothDevice::ERROR_UNSUPPORTED_DEVICE));
 
@@ -1325,7 +1358,7 @@ WebTestBluetoothAdapterProvider::GetConnectableDevice(
 
   MockBluetoothDevice* device_ptr = device.get();
 
-  ON_CALL(*device, CreateGattConnection(_, _))
+  ON_CALL(*device, CreateGattConnection_(_, _))
       .WillByDefault(RunCallbackWithResult<0 /* success_callback */>(
           [adapter, device_ptr]() {
             device_ptr->SetConnected(true);
@@ -1351,8 +1384,8 @@ WebTestBluetoothAdapterProvider::GetUnconnectableDevice(
   auto device(
       GetBaseDevice(adapter, device_name, uuids, makeMACAddress(error_code)));
 
-  ON_CALL(*device, CreateGattConnection(_, _))
-      .WillByDefault(RunCallback<1 /* error_callback */>(error_code));
+  ON_CALL(*device, CreateGattConnection_(_, _))
+      .WillByDefault(RunOnceCallback<1 /* error_callback */>(error_code));
 
   return device;
 }

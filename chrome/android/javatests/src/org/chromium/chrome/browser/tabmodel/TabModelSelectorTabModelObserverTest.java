@@ -18,6 +18,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserverTestRule.TabModelSelectorTestTabModel;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -46,7 +47,7 @@ public class TabModelSelectorTabModelObserverTest {
 
     @Test
     @SmallTest
-    public void testAlreadyInitializedSelector() throws InterruptedException, TimeoutException {
+    public void testAlreadyInitializedSelector() throws TimeoutException {
         final CallbackHelper registrationCompleteCallback = new CallbackHelper();
         TabModelSelectorTabModelObserver observer =
                 TestThreadUtils.runOnUiThreadBlockingNoException(
@@ -63,8 +64,8 @@ public class TabModelSelectorTabModelObserverTest {
     @Test
     @UiThreadTest
     @SmallTest
-    public void testUninitializedSelector() throws InterruptedException, TimeoutException {
-        mSelector = new TabModelSelectorBase() {
+    public void testUninitializedSelector() throws TimeoutException {
+        mSelector = new TabModelSelectorBase(null, false) {
             @Override
             public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
@@ -79,8 +80,7 @@ public class TabModelSelectorTabModelObserverTest {
                         registrationCompleteCallback.notifyCalled();
                     }
                 };
-        mSelector.initialize(
-                false, mTestRule.getNormalTabModel(), mTestRule.getIncognitoTabModel());
+        mSelector.initialize(mTestRule.getNormalTabModel(), mTestRule.getIncognitoTabModel());
         registrationCompleteCallback.waitForCallback(0);
         assertAllModelsHaveObserver(mSelector, observer);
     }

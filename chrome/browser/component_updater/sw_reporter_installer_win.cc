@@ -16,14 +16,15 @@
 #include "base/base64.h"
 #include "base/base_paths.h"
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -36,6 +37,7 @@
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_controller_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/reporter_runner_win.h"
@@ -81,7 +83,7 @@ const base::FilePath::CharType kSwReporterExeName[] =
 
 // SwReporter is normally only registered in official builds.  However, to
 // enable testing in chromium build bots, test code can set this to true.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 bool is_sw_reporter_enabled = true;
 #else
 bool is_sw_reporter_enabled = false;
@@ -89,7 +91,10 @@ bool is_sw_reporter_enabled = false;
 
 // Callback function to be called once the registration of the component
 // is complete.  This is used only in tests.
-base::OnceClosure* registration_cb_for_testing = new base::OnceClosure();
+base::OnceClosure& GetRegistrationCBForTesting() {
+  static base::NoDestructor<base::OnceClosure> registration_cb_for_testing;
+  return *registration_cb_for_testing;
+}
 
 void SRTHasCompleted(SRTCompleted value) {
   UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.Cleaner.HasCompleted", value,
@@ -127,9 +132,8 @@ void ReportUploadsWithUma(const base::string16& upload_results) {
   UMA_HISTOGRAM_BOOLEAN("SoftwareReporter.LastUploadResult", last_result);
 }
 
-void ReportExperimentError(SoftwareReporterExperimentError error) {
-  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.ExperimentErrors", error,
-                            SW_REPORTER_EXPERIMENT_ERROR_MAX);
+void ReportConfigurationError(SoftwareReporterConfigurationError error) {
+  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.ConfigurationErrors", error);
 }
 
 // Ensures |str| contains only alphanumeric characters and characters from
@@ -167,7 +171,7 @@ bool GetOptionalBehaviour(
   if (invocation_params->Get(behaviour_name, &value)) {
     bool enable_behaviour = false;
     if (!value->GetAsBoolean(&enable_behaviour)) {
-      ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+      ReportConfigurationError(kBadParams);
       return false;
     }
     if (enable_behaviour)
@@ -190,7 +194,7 @@ bool ExtractInvocationSequenceFromManifest(
   base::Value* launch_params = nullptr;
   if (manifest->Get("launch_params", &launch_params) &&
       !launch_params->GetAsList(&parameter_list)) {
-    ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+    ReportConfigurationError(kBadParams);
     return false;
   }
 
@@ -213,7 +217,7 @@ bool ExtractInvocationSequenceFromManifest(
   for (const auto& iter : *parameter_list) {
     const base::DictionaryValue* invocation_params = nullptr;
     if (!iter.GetAsDictionary(&invocation_params)) {
-      ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+      ReportConfigurationError(kBadParams);
       return false;
     }
 
@@ -227,7 +231,7 @@ bool ExtractInvocationSequenceFromManifest(
     std::string suffix;
     if (!invocation_params->GetString("suffix", &suffix) ||
         !ValidateString(suffix, std::string(), kMaxSuffixLength)) {
-      ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+      ReportConfigurationError(kBadParams);
       return false;
     }
 
@@ -236,7 +240,7 @@ bool ExtractInvocationSequenceFromManifest(
     // it's ok if it's an empty list or a list of empty strings.)
     const base::ListValue* arguments = nullptr;
     if (!invocation_params->GetList("arguments", &arguments)) {
-      ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+      ReportConfigurationError(kBadParams);
       return false;
     }
 
@@ -244,7 +248,7 @@ bool ExtractInvocationSequenceFromManifest(
     for (const auto& value : *arguments) {
       base::string16 argument;
       if (!value.GetAsString(&argument)) {
-        ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS);
+        ReportConfigurationError(kBadParams);
         return false;
       }
       if (!argument.empty())
@@ -360,7 +364,7 @@ SwReporterInstallerPolicy::GetInstallerAttributes() const {
     constexpr char kTagParam[] = "tag";
     if (tag.empty() ||
         !ValidateString(tag, kExtraAttributeChars, kMaxAttributeLength)) {
-      ReportExperimentError(SW_REPORTER_EXPERIMENT_ERROR_BAD_TAG);
+      ReportConfigurationError(kBadTag);
       attributes[kTagParam] = "missing_tag";
     } else {
       attributes[kTagParam] = tag;
@@ -403,7 +407,7 @@ void SwReporterOnDemandFetcher::OnEvent(Events event, const std::string& id) {
 }
 
 void RegisterSwReporterComponent(ComponentUpdateService* cus) {
-  base::ScopedClosureRunner runner(std::move(*registration_cb_for_testing));
+  base::ScopedClosureRunner runner(std::move(GetRegistrationCBForTesting()));
 
   // Don't install the component if not allowed by policy.  This prevents
   // downloads and background scans.
@@ -415,14 +419,14 @@ void RegisterSwReporterComponent(ComponentUpdateService* cus) {
   // Once the component is ready and browser startup is complete, run
   // |safe_browsing::OnSwReporterReady|.
   auto lambda = [](safe_browsing::SwReporterInvocationSequence&& invocations) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE,
         {content::BrowserThread::UI, base::TaskPriority::BEST_EFFORT},
         base::BindOnce(
             &safe_browsing::ChromeCleanerController::OnSwReporterReady,
             base::Unretained(
                 safe_browsing::ChromeCleanerController::GetInstance()),
-            base::Passed(&invocations)));
+            std::move(invocations)));
   };
 
   // Install the component.
@@ -434,7 +438,7 @@ void RegisterSwReporterComponent(ComponentUpdateService* cus) {
 void SetRegisterSwReporterComponentCallbackForTesting(
     base::OnceClosure registration_cb) {
   is_sw_reporter_enabled = true;
-  *registration_cb_for_testing = std::move(registration_cb);
+  GetRegistrationCBForTesting() = std::move(registration_cb);
 }
 
 void RegisterPrefsForSwReporter(PrefRegistrySimple* registry) {

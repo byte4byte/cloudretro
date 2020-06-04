@@ -13,7 +13,10 @@
 #include "chrome/common/renderer_configuration.mojom.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "content/public/renderer/render_thread_observer.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
+#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/renderer/chromeos_delayed_callback_group.h"
@@ -24,7 +27,7 @@ class ResourceDispatcherDelegate;
 }
 
 namespace visitedlink {
-class VisitedLinkSlave;
+class VisitedLinkReader;
 }
 
 // This class filters the incoming control messages (i.e. ones not destined for
@@ -42,7 +45,8 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
                            public base::RefCountedThreadSafe<ChromeOSListener> {
    public:
     static scoped_refptr<ChromeOSListener> Create(
-        chrome::mojom::ChromeOSListenerRequest chromeos_listener_request);
+        mojo::PendingReceiver<chrome::mojom::ChromeOSListener>
+            chromeos_listener_receiver);
 
     // Is the merge session still running?
     bool IsMergeSessionRunning() const;
@@ -61,13 +65,13 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
     ChromeOSListener();
     ~ChromeOSListener() override;
 
-    void BindOnIOThread(
-        chrome::mojom::ChromeOSListenerRequest chromeos_listener_request);
+    void BindOnIOThread(mojo::PendingReceiver<chrome::mojom::ChromeOSListener>
+                            chromeos_listener_receiver);
 
     scoped_refptr<DelayedCallbackGroup> session_merged_callbacks_;
     bool merge_session_running_ GUARDED_BY(lock_);
     mutable base::Lock lock_;
-    mojo::Binding<chrome::mojom::ChromeOSListener> binding_;
+    mojo::Receiver<chrome::mojom::ChromeOSListener> receiver_{this};
 
     DISALLOW_COPY_AND_ASSIGN(ChromeOSListener);
   };
@@ -86,8 +90,8 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
   // |ChromeRenderThreadObserver|.
   const RendererContentSettingRules* content_setting_rules() const;
 
-  visitedlink::VisitedLinkSlave* visited_link_slave() {
-    return visited_link_slave_.get();
+  visitedlink::VisitedLinkReader* visited_link_reader() {
+    return visited_link_reader_.get();
   }
 
 #if defined(OS_CHROMEOS)
@@ -104,26 +108,25 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
       blink::AssociatedInterfaceRegistry* associated_interfaces) override;
 
   // chrome::mojom::RendererConfiguration:
-  void SetInitialConfiguration(bool is_incognito_process,
-                               chrome::mojom::ChromeOSListenerRequest
-                                   chromeos_listener_request) override;
+  void SetInitialConfiguration(
+      bool is_incognito_process,
+      mojo::PendingReceiver<chrome::mojom::ChromeOSListener>
+          chromeos_listener_receiver) override;
   void SetConfiguration(chrome::mojom::DynamicParamsPtr params) override;
   void SetContentSettingRules(
       const RendererContentSettingRules& rules) override;
-  void SetFieldTrialGroup(const std::string& trial_name,
-                          const std::string& group_name) override;
-
   void OnRendererConfigurationAssociatedRequest(
-      chrome::mojom::RendererConfigurationAssociatedRequest request);
+      mojo::PendingAssociatedReceiver<chrome::mojom::RendererConfiguration>
+          receiver);
 
   static bool is_incognito_process_;
   std::unique_ptr<content::ResourceDispatcherDelegate> resource_delegate_;
   RendererContentSettingRules content_setting_rules_;
 
-  std::unique_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
+  std::unique_ptr<visitedlink::VisitedLinkReader> visited_link_reader_;
 
-  mojo::AssociatedBindingSet<chrome::mojom::RendererConfiguration>
-      renderer_configuration_bindings_;
+  mojo::AssociatedReceiverSet<chrome::mojom::RendererConfiguration>
+      renderer_configuration_receivers_;
 
 #if defined(OS_CHROMEOS)
   // Only set if the Chrome OS merge session was running when the renderer

@@ -26,13 +26,13 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_registry.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "storage/browser/fileapi/async_file_util.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/async_file_util.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/test/test_file_system_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,7 +47,7 @@ const ProviderId kProviderId = ProviderId::CreateFromExtensionId(kExtensionId);
 // Logs callbacks invocations on the file stream reader.
 class EventLogger {
  public:
-  EventLogger() : weak_ptr_factory_(this) {}
+  EventLogger() {}
   virtual ~EventLogger() {}
 
   void OnRead(int result) { results_.push_back(result); }
@@ -61,7 +61,7 @@ class EventLogger {
 
  private:
   std::vector<int64_t> results_;
-  base::WeakPtrFactory<EventLogger> weak_ptr_factory_;
+  base::WeakPtrFactory<EventLogger> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(EventLogger);
 };
@@ -117,7 +117,7 @@ class FileSystemProviderFileStreamReader : public testing::Test {
     ASSERT_TRUE(wrong_file_url_.is_valid());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir data_dir_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* profile_;     // Owned by TestingProfileManager.
@@ -137,7 +137,7 @@ TEST_F(FileSystemProviderFileStreamReader, Read_AllAtOnce) {
 
   const int result =
       reader.Read(io_buffer.get(), *fake_file_->metadata->size,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -160,7 +160,7 @@ TEST_F(FileSystemProviderFileStreamReader, Read_WrongFile) {
 
   const int result =
       reader.Read(io_buffer.get(), *fake_file_->metadata->size,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -179,9 +179,8 @@ TEST_F(FileSystemProviderFileStreamReader, Read_InChunks) {
     scoped_refptr<net::IOBuffer> io_buffer =
         base::MakeRefCounted<net::IOBuffer>(1);
     const int result =
-        reader.Read(io_buffer.get(),
-                    1,
-                    base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+        reader.Read(io_buffer.get(), 1,
+                    base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
     EXPECT_EQ(net::ERR_IO_PENDING, result);
     base::RunLoop().RunUntilIdle();
     ASSERT_EQ(offset + 1, static_cast<int64_t>(logger.results().size()));
@@ -205,9 +204,8 @@ TEST_F(FileSystemProviderFileStreamReader, Read_Slice) {
       base::MakeRefCounted<net::IOBuffer>(length);
 
   const int result =
-      reader.Read(io_buffer.get(),
-                  length,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+      reader.Read(io_buffer.get(), length,
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -233,9 +231,8 @@ TEST_F(FileSystemProviderFileStreamReader, Read_Beyond) {
       base::MakeRefCounted<net::IOBuffer>(length);
 
   const int result =
-      reader.Read(io_buffer.get(),
-                  length,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+      reader.Read(io_buffer.get(), length,
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -257,7 +254,7 @@ TEST_F(FileSystemProviderFileStreamReader, Read_ModifiedFile) {
       base::checked_cast<size_t>(*fake_file_->metadata->size));
   const int result =
       reader.Read(io_buffer.get(), *fake_file_->metadata->size,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
 
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
@@ -276,7 +273,7 @@ TEST_F(FileSystemProviderFileStreamReader, Read_ExpectedModificationTimeNull) {
       base::checked_cast<size_t>(*fake_file_->metadata->size));
   const int result =
       reader.Read(io_buffer.get(), *fake_file_->metadata->size,
-                  base::Bind(&EventLogger::OnRead, logger.GetWeakPtr()));
+                  base::BindOnce(&EventLogger::OnRead, logger.GetWeakPtr()));
 
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
@@ -296,7 +293,7 @@ TEST_F(FileSystemProviderFileStreamReader, GetLength) {
                           *fake_file_->metadata->modification_time);
 
   const int result = reader.GetLength(
-      base::Bind(&EventLogger::OnGetLength, logger.GetWeakPtr()));
+      base::BindOnce(&EventLogger::OnGetLength, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -313,7 +310,7 @@ TEST_F(FileSystemProviderFileStreamReader, GetLength_WrongFile) {
                           *fake_file_->metadata->modification_time);
 
   const int result = reader.GetLength(
-      base::Bind(&EventLogger::OnGetLength, logger.GetWeakPtr()));
+      base::BindOnce(&EventLogger::OnGetLength, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -328,7 +325,7 @@ TEST_F(FileSystemProviderFileStreamReader, GetLength_ModifiedFile) {
   FileStreamReader reader(NULL, file_url_, initial_offset, base::Time::Max());
 
   const int result = reader.GetLength(
-      base::Bind(&EventLogger::OnGetLength, logger.GetWeakPtr()));
+      base::BindOnce(&EventLogger::OnGetLength, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 
@@ -344,7 +341,7 @@ TEST_F(FileSystemProviderFileStreamReader,
   FileStreamReader reader(NULL, file_url_, initial_offset, base::Time());
 
   const int result = reader.GetLength(
-      base::Bind(&EventLogger::OnGetLength, logger.GetWeakPtr()));
+      base::BindOnce(&EventLogger::OnGetLength, logger.GetWeakPtr()));
   EXPECT_EQ(net::ERR_IO_PENDING, result);
   base::RunLoop().RunUntilIdle();
 

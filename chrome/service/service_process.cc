@@ -17,7 +17,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -25,7 +25,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -52,7 +53,6 @@
 #include "net/url_request/url_fetcher.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -169,13 +169,13 @@ bool ServiceProcess::Initialize(base::OnceClosure quit_closure,
 
   // The NetworkChangeNotifier must be created after ThreadPool because it
   // posts tasks to it.
-  network_change_notifier_ = net::NetworkChangeNotifier::Create();
+  network_change_notifier_ = net::NetworkChangeNotifier::CreateIfNeeded();
   network_connection_tracker_ =
       std::make_unique<InProcessNetworkConnectionTracker>();
 
   // Initialize the IO and FILE threads.
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
+  options.message_pump_type = base::MessagePumpType::IO;
   io_thread_.reset(new ServiceIOThread("ServiceProcess_IO"));
   if (!io_thread_->StartWithOptions(options)) {
     NOTREACHED();
@@ -197,7 +197,7 @@ bool ServiceProcess::Initialize(base::OnceClosure quit_closure,
       user_data_dir.Append(chrome::kServiceStateFileName);
   service_prefs_ = std::make_unique<ServiceProcessPrefs>(
       pref_path,
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN})
           .get());
   service_prefs_->ReadPrefs();
@@ -221,7 +221,6 @@ bool ServiceProcess::Initialize(base::OnceClosure quit_closure,
     if (locale.empty())
       locale = kDefaultServiceProcessLocale;
   }
-  ui::MaterialDesignController::Initialize();
   ui::ResourceBundle::InitSharedInstanceWithLocale(
       locale, NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
 
@@ -238,15 +237,15 @@ bool ServiceProcess::Initialize(base::OnceClosure quit_closure,
 
   ipc_server_.reset(new ServiceIPCServer(this /* client */, io_task_runner(),
                                          &shutdown_event_));
-  ipc_server_->binder_registry().AddInterface(
-      base::Bind(&cloud_print::CloudPrintMessageHandler::Create, this));
+  ipc_server_->binder_registry().AddInterface(base::BindRepeating(
+      &cloud_print::CloudPrintMessageHandler::Create, this));
   ipc_server_->Init();
 
   // After the IPC server has started we signal that the service process is
   // ready.
   if (!service_process_state_->SignalReady(
           io_task_runner().get(),
-          base::Bind(&ServiceProcess::Terminate, base::Unretained(this)))) {
+          base::BindOnce(&ServiceProcess::Terminate, base::Unretained(this)))) {
     return false;
   }
 

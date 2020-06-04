@@ -4,7 +4,7 @@
 
 #include "ash/public/cpp/tablet_mode.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace ash {
 
@@ -26,7 +26,8 @@ TabletMode::~TabletMode() {
   g_instance = nullptr;
 }
 
-TabletMode::Waiter::Waiter(bool enable) : enable_(enable) {
+TabletMode::Waiter::Waiter(bool enable)
+    : enable_(enable), run_loop_(base::RunLoop::Type::kNestableTasksAllowed) {
   if (TabletMode::Get()->InTabletMode() == enable_)
     run_loop_.Quit();
   else

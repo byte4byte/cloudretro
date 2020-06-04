@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/paint/element_timing_utils.h"
-#include "third_party/blink/renderer/core/style/style_image.h"
+#include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
@@ -29,13 +29,11 @@ IsExplicitlyRegisteredForTiming(const LayoutObject* layout_object) {
   if (!element)
     return false;
 
-  // If the element has no 'elementtiming' attribute or an empty value, do not
+  // If the element has no 'elementtiming' attribute, do not
   // generate timing entries for the element. See
   // https://wicg.github.io/element-timing/#sec-modifications-DOM for report
   // vs. ignore criteria.
-  const AtomicString& attr =
-      element->FastGetAttribute(html_names::kElementtimingAttr);
-  return !attr.IsEmpty();
+  return element->FastHasAttribute(html_names::kElementtimingAttr);
 }
 
 }  // namespace internal
@@ -60,9 +58,31 @@ ImageElementTiming& ImageElementTiming::From(LocalDOMWindow& window) {
 }
 
 ImageElementTiming::ImageElementTiming(LocalDOMWindow& window)
-    : Supplement<LocalDOMWindow>(window) {
-  DCHECK(RuntimeEnabledFeatures::ElementTimingEnabled(
-      GetSupplementable()->document()));
+    : Supplement<LocalDOMWindow>(window) {}
+
+void ImageElementTiming::NotifyImageFinished(
+    const LayoutObject& layout_object,
+    const ImageResourceContent* cached_image) {
+  if (!internal::IsExplicitlyRegisteredForTiming(&layout_object))
+    return;
+
+  const auto& insertion_result = images_notified_.insert(
+      std::make_pair(&layout_object, cached_image), ImageInfo());
+  if (insertion_result.is_new_entry)
+    insertion_result.stored_value->value.load_time_ = base::TimeTicks::Now();
+}
+
+void ImageElementTiming::NotifyBackgroundImageFinished(
+    const StyleFetchedImage* style_image) {
+  const auto& insertion_result =
+      background_image_timestamps_.insert(style_image, base::TimeTicks());
+  if (insertion_result.is_new_entry)
+    insertion_result.stored_value->value = base::TimeTicks::Now();
+}
+
+base::TimeTicks ImageElementTiming::GetBackgroundImageLoadTime(
+    const StyleFetchedImage* style_image) {
+  return background_image_timestamps_.at(style_image);
 }
 
 void ImageElementTiming::NotifyImagePainted(
@@ -74,11 +94,14 @@ void ImageElementTiming::NotifyImagePainted(
   if (!internal::IsExplicitlyRegisteredForTiming(layout_object))
     return;
 
-  auto result =
-      images_notified_.insert(std::make_pair(layout_object, cached_image));
-  if (result.is_new_entry && cached_image) {
+  auto it = images_notified_.find(std::make_pair(layout_object, cached_image));
+  // It is possible that the pair is not in |images_notified_|. See
+  // https://crbug.com/1027948
+  if (it != images_notified_.end() && !it->value.is_painted_ && cached_image) {
+    it->value.is_painted_ = true;
     NotifyImagePaintedInternal(layout_object->GetNode(), *layout_object,
-                               *cached_image, current_paint_chunk_properties);
+                               *cached_image, current_paint_chunk_properties,
+                               it->value.load_time_, nullptr);
   }
 }
 
@@ -86,7 +109,9 @@ void ImageElementTiming::NotifyImagePaintedInternal(
     Node* node,
     const LayoutObject& layout_object,
     const ImageResourceContent& cached_image,
-    const PropertyTreeState& current_paint_chunk_properties) {
+    const PropertyTreeState& current_paint_chunk_properties,
+    base::TimeTicks load_time,
+    const IntRect* image_border) {
   LocalFrame* frame = GetSupplementable()->GetFrame();
   DCHECK(frame == layout_object.GetDocument().GetFrame());
   DCHECK(node);
@@ -110,8 +135,13 @@ void ImageElementTiming::NotifyImagePaintedInternal(
   if (!layout_object.HasNonZeroEffectiveOpacity())
     return;
 
+  RespectImageOrientationEnum respect_orientation =
+      LayoutObject::ShouldRespectImageOrientation(&layout_object);
+
   FloatRect intersection_rect = ElementTimingUtils::ComputeIntersectionRect(
-      frame, layout_object.FirstFragment().VisualRect(),
+      frame,
+      image_border ? *image_border
+                   : layout_object.FragmentsVisualRectBoundingBox(),
       current_paint_chunk_properties);
   const AtomicString attr =
       element->FastGetAttribute(html_names::kElementtimingAttr);
@@ -123,22 +153,35 @@ void ImageElementTiming::NotifyImagePaintedInternal(
   DCHECK(layout_object.GetDocument().GetSecurityOrigin());
   // It's ok to expose rendering timestamp for data URIs so exclude those from
   // the Timing-Allow-Origin check.
-  if (!url.ProtocolIsData() &&
-      !Performance::PassesTimingAllowCheck(
-          cached_image.GetResponse(),
+  if (!url.ProtocolIsData()) {
+    bool timing_allow_check = false;
+    // Use the TimingAllowPassed() check from the response if OutOfBlinkCors is
+    // enabled. If it is not enabled then that flag is not computed, so use to
+    // the single PassesTimingAllowCheck(), which is incorrect because it does
+    // not check the full redirect chain. See crbug.com/1003943.
+    if (RuntimeEnabledFeatures::OutOfBlinkCorsEnabled()) {
+      timing_allow_check = cached_image.GetResponse().TimingAllowPassed();
+    } else {
+      bool response_tainting_not_basic = false;
+      bool tainted_origin_flag = false;
+      timing_allow_check = Performance::PassesTimingAllowCheck(
+          cached_image.GetResponse(), cached_image.GetResponse(),
           *layout_object.GetDocument().GetSecurityOrigin(),
-          &layout_object.GetDocument())) {
-    WindowPerformance* performance =
-        DOMWindowPerformance::performance(*GetSupplementable());
-    if (performance) {
-      // Create an entry with a |startTime| of 0.
-      performance->AddElementTiming(
-          ImagePaintString(), url.GetString(), intersection_rect,
-          base::TimeTicks(), cached_image.LoadResponseEnd(), attr,
-          cached_image.IntrinsicSize(kDoNotRespectImageOrientation), id,
-          element);
+          layout_object.GetDocument().GetExecutionContext(),
+          &response_tainting_not_basic, &tainted_origin_flag);
     }
-    return;
+    if (!timing_allow_check) {
+      WindowPerformance* performance =
+          DOMWindowPerformance::performance(*GetSupplementable());
+      if (performance) {
+        // Create an entry with a |startTime| of 0.
+        performance->AddElementTiming(
+            ImagePaintString(), url.GetString(), intersection_rect,
+            base::TimeTicks(), load_time, attr,
+            cached_image.IntrinsicSize(respect_orientation), id, element);
+      }
+      return;
+    }
   }
 
   // If the image URL is a data URL ("data:image/..."), then the |name| of the
@@ -149,8 +192,8 @@ void ImageElementTiming::NotifyImagePaintedInternal(
                                 ? url.GetString().Left(kInlineImageMaxChars)
                                 : url.GetString();
   element_timings_.emplace_back(MakeGarbageCollected<ElementTimingInfo>(
-      image_url, intersection_rect, cached_image.LoadResponseEnd(), attr,
-      cached_image.IntrinsicSize(kDoNotRespectImageOrientation), id, element));
+      image_url, intersection_rect, load_time, attr,
+      cached_image.IntrinsicSize(respect_orientation), id, element));
   // Only queue a swap promise when |element_timings_| was empty. All of the
   // records in |element_timings_| will be processed when the promise succeeds
   // or fails, and at that time the vector is cleared.
@@ -164,8 +207,9 @@ void ImageElementTiming::NotifyImagePaintedInternal(
 
 void ImageElementTiming::NotifyBackgroundImagePainted(
     Node* node,
-    const StyleImage* background_image,
-    const PropertyTreeState& current_paint_chunk_properties) {
+    const StyleFetchedImage* background_image,
+    const PropertyTreeState& current_paint_chunk_properties,
+    const IntRect& image_border) {
   DCHECK(node);
   DCHECK(background_image);
 
@@ -180,15 +224,22 @@ void ImageElementTiming::NotifyBackgroundImagePainted(
   if (!cached_image || !cached_image->IsLoaded())
     return;
 
-  auto result =
-      images_notified_.insert(std::make_pair(layout_object, cached_image));
-  if (result.is_new_entry) {
-    NotifyImagePaintedInternal(node, *layout_object, *cached_image,
-                               current_paint_chunk_properties);
+  auto it = background_image_timestamps_.find(background_image);
+  DCHECK(it != background_image_timestamps_.end());
+
+  ImageInfo& info =
+      images_notified_
+          .insert(std::make_pair(layout_object, cached_image), ImageInfo())
+          .stored_value->value;
+  if (!info.is_painted_) {
+    info.is_painted_ = true;
+    NotifyImagePaintedInternal(layout_object->GetNode(), *layout_object,
+                               *cached_image, current_paint_chunk_properties,
+                               it->value, &image_border);
   }
 }
 
-void ImageElementTiming::ReportImagePaintSwapTime(WebWidgetClient::SwapResult,
+void ImageElementTiming::ReportImagePaintSwapTime(WebSwapResult,
                                                   base::TimeTicks timestamp) {
   WindowPerformance* performance =
       DOMWindowPerformance::performance(*GetSupplementable());
@@ -209,8 +260,9 @@ void ImageElementTiming::NotifyImageRemoved(const LayoutObject* layout_object,
   images_notified_.erase(std::make_pair(layout_object, image));
 }
 
-void ImageElementTiming::Trace(blink::Visitor* visitor) {
+void ImageElementTiming::Trace(Visitor* visitor) {
   visitor->Trace(element_timings_);
+  visitor->Trace(background_image_timestamps_);
   Supplement<LocalDOMWindow>::Trace(visitor);
 }
 

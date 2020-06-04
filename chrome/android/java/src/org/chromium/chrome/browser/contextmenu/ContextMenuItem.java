@@ -5,10 +5,8 @@
 package org.chromium.chrome.browser.contextmenu;
 
 import android.content.Context;
-import android.graphics.drawable.Drawable;
-import android.support.annotation.IdRes;
 
-import org.chromium.base.Callback;
+import androidx.annotation.IdRes;
 
 /**
  * An interface to get information of context menu.
@@ -28,9 +26,7 @@ public interface ContextMenuItem {
     CharSequence getTitle(Context context);
 
     /**
-     * Gets the {@link Drawable} icon of a context menu item asynchronously.
-     * @param context The context required to get the icon from resources.
-     * @param callback The {@link Callback} used to show the icon when it is ready.
+     * Turn on a flag indicating the menu item should show an in-product help label.
      */
-    void getDrawableAsync(Context context, Callback<Drawable> callback);
+    default void setShowInProductHelp() {}
 }

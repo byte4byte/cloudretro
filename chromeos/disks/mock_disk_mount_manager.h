@@ -43,10 +43,8 @@ class MockDiskMountManager : public DiskMountManager {
                     const std::vector<std::string>&,
                     MountType,
                     MountAccessMode));
-  MOCK_METHOD3(UnmountPath,
-               void(const std::string&,
-                    UnmountOptions,
-                    DiskMountManager::UnmountPathCallback));
+  MOCK_METHOD2(UnmountPath,
+               void(const std::string&, DiskMountManager::UnmountPathCallback));
   MOCK_METHOD1(RemountAllRemovableDrives, void(MountAccessMode));
   MOCK_METHOD3(FormatMountedDevice,
                void(const std::string&,
@@ -117,7 +115,7 @@ class MockDiskMountManager : public DiskMountManager {
   void NotifyDiskChanged(DiskEvent event, const Disk* disk);
 
   // The list of observers.
-  base::ObserverList<DiskMountManager::Observer>::Unchecked observers_;
+  base::ObserverList<DiskMountManager::Observer> observers_;
 
   // The list of disks found.
   DiskMountManager::DiskMap disks_;

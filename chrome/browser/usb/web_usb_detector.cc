@@ -11,6 +11,7 @@
 #include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/net/referrer.h"
 #include "chrome/browser/notifications/system_notification_helper.h"
@@ -25,13 +26,11 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/url_formatter/elide_url.h"
 #include "components/vector_icons/vector_icons.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/device_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/origin_util.h"
 #include "device/base/features.h"
-#include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -104,8 +103,8 @@ class WebUsbNotificationDelegate : public TabStripModelObserver,
         landing_page_(landing_page),
         notification_id_(notification_id),
         disposition_(WEBUSB_NOTIFICATION_CLOSED),
-        browser_tab_strip_tracker_(this, nullptr, nullptr) {
-    browser_tab_strip_tracker_.Init();
+        browser_tab_strip_tracker_(base::in_place_t(), this, nullptr) {
+    browser_tab_strip_tracker_->Init();
   }
 
   void OnTabStripModelChanged(
@@ -159,7 +158,7 @@ class WebUsbNotificationDelegate : public TabStripModelObserver,
       disposition_ = WEBUSB_NOTIFICATION_CLOSED_BY_USER;
     RecordNotificationClosure(disposition_);
 
-    browser_tab_strip_tracker_.StopObservingAndSendOnBrowserRemoved();
+    browser_tab_strip_tracker_.reset();
     if (detector_)
       detector_->RemoveNotification(notification_id_);
   }
@@ -171,16 +170,16 @@ class WebUsbNotificationDelegate : public TabStripModelObserver,
   GURL landing_page_;
   std::string notification_id_;
   WebUsbNotificationClosed disposition_;
-  BrowserTabStripTracker browser_tab_strip_tracker_;
+  base::Optional<BrowserTabStripTracker> browser_tab_strip_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUsbNotificationDelegate);
 };
 
 }  // namespace
 
-WebUsbDetector::WebUsbDetector() : client_binding_(this) {}
+WebUsbDetector::WebUsbDetector() = default;
 
-WebUsbDetector::~WebUsbDetector() {}
+WebUsbDetector::~WebUsbDetector() = default;
 
 void WebUsbDetector::Initialize() {
 #if defined(OS_WIN)
@@ -191,22 +190,19 @@ void WebUsbDetector::Initialize() {
     return;
 #endif  // defined(OS_WIN)
 
-  SCOPED_UMA_HISTOGRAM_TIMER("WebUsb.DetectorInitialization");
   // Tests may set a fake manager.
   if (!device_manager_) {
-    // Request UsbDeviceManagerPtr from DeviceService.
-    content::GetSystemConnector()->BindInterface(
-        device::mojom::kServiceName, mojo::MakeRequest(&device_manager_));
+    // Receive mojo::Remote<UsbDeviceManager> from DeviceService.
+    content::GetDeviceService().BindUsbDeviceManager(
+        device_manager_.BindNewPipeAndPassReceiver());
   }
   DCHECK(device_manager_);
-  device_manager_.set_connection_error_handler(base::BindOnce(
+  device_manager_.set_disconnect_handler(base::BindOnce(
       &WebUsbDetector::OnDeviceManagerConnectionError, base::Unretained(this)));
 
   // Listen for added/removed device events.
-  DCHECK(!client_binding_);
-  device::mojom::UsbDeviceManagerClientAssociatedPtrInfo client;
-  client_binding_.Bind(mojo::MakeRequest(&client));
-  device_manager_->SetClient(std::move(client));
+  DCHECK(!client_receiver_.is_bound());
+  device_manager_->SetClient(client_receiver_.BindNewEndpointAndPassRemote());
 }
 
 void WebUsbDetector::OnDeviceAdded(
@@ -275,16 +271,16 @@ void WebUsbDetector::OnDeviceRemoved(
 
 void WebUsbDetector::OnDeviceManagerConnectionError() {
   device_manager_.reset();
-  client_binding_.Close();
+  client_receiver_.reset();
 
   // Try to reconnect the device manager.
   Initialize();
 }
 
 void WebUsbDetector::SetDeviceManagerForTesting(
-    device::mojom::UsbDeviceManagerPtr fake_device_manager) {
+    mojo::PendingRemote<device::mojom::UsbDeviceManager> fake_device_manager) {
   DCHECK(!device_manager_);
-  DCHECK(!client_binding_);
+  DCHECK(!client_receiver_.is_bound());
   DCHECK(fake_device_manager);
-  device_manager_ = std::move(fake_device_manager);
+  device_manager_.Bind(std::move(fake_device_manager));
 }

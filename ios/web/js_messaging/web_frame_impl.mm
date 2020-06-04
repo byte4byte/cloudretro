@@ -9,6 +9,8 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/json/json_writer.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,7 +19,6 @@
 #include "crypto/aead.h"
 #include "crypto/random.h"
 #include "ios/web/public/thread/web_task_traits.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -42,7 +43,7 @@ WebFrameImpl::WebFrameImpl(const std::string& frame_id,
   DCHECK(web_state);
   web_state->AddObserver(this);
 
-  web_state->AddScriptCommandCallback(
+  subscription_ = web_state->AddScriptCommandCallback(
       base::BindRepeating(&WebFrameImpl::OnJavaScriptReply,
                           base::Unretained(this), base::Unretained(web_state)),
       GetScriptCommandPrefix());
@@ -86,6 +87,36 @@ bool WebFrameImpl::CanCallJavaScriptFunction() const {
   return is_main_frame_ || frame_key_;
 }
 
+const std::string WebFrameImpl::EncryptPayload(
+    base::DictionaryValue payload,
+    const std::string& additiona_data) {
+  crypto::Aead aead(crypto::Aead::AES_256_GCM);
+  aead.Init(&frame_key_->key());
+
+  std::string payload_json;
+  base::JSONWriter::Write(payload, &payload_json);
+  std::string payload_iv;
+  crypto::RandBytes(base::WriteInto(&payload_iv, aead.NonceLength() + 1),
+                    aead.NonceLength());
+  std::string payload_ciphertext;
+  if (!aead.Seal(payload_json, payload_iv, additiona_data,
+                 &payload_ciphertext)) {
+    LOG(ERROR) << "Error sealing message payload for WebFrame.";
+    return std::string();
+  }
+  std::string encoded_payload_iv;
+  base::Base64Encode(payload_iv, &encoded_payload_iv);
+  std::string encoded_payload;
+  base::Base64Encode(payload_ciphertext, &encoded_payload);
+
+  std::string payload_string;
+  base::DictionaryValue payload_dict;
+  payload_dict.SetKey("payload", base::Value(encoded_payload));
+  payload_dict.SetKey("iv", base::Value(encoded_payload_iv));
+  base::JSONWriter::Write(payload_dict, &payload_string);
+  return payload_string;
+}
+
 bool WebFrameImpl::CallJavaScriptFunction(
     const std::string& name,
     const std::vector<base::Value>& parameters,
@@ -102,36 +133,28 @@ bool WebFrameImpl::CallJavaScriptFunction(
                                      reply_with_result);
   }
 
-  base::DictionaryValue message;
-  message.SetKey("messageId", base::Value(message_id));
-  message.SetKey("replyWithResult", base::Value(reply_with_result));
-  message.SetKey("functionName", base::Value(name));
+  base::DictionaryValue message_payload;
+  message_payload.SetKey("messageId", base::Value(message_id));
+  message_payload.SetKey("replyWithResult", base::Value(reply_with_result));
+  const std::string& encrypted_message_json =
+      EncryptPayload(std::move(message_payload), std::string());
+
+  base::DictionaryValue function_payload;
+  function_payload.SetKey("functionName", base::Value(name));
   base::ListValue parameters_value(parameters);
-  message.SetKey("parameters", std::move(parameters_value));
+  function_payload.SetKey("parameters", std::move(parameters_value));
+  const std::string& encrypted_function_json = EncryptPayload(
+      std::move(function_payload), base::NumberToString(message_id));
 
-  std::string json;
-  base::JSONWriter::Write(message, &json);
-
-  crypto::Aead aead(crypto::Aead::AES_256_GCM);
-  aead.Init(&frame_key_->key());
-
-  std::string iv;
-  crypto::RandBytes(base::WriteInto(&iv, aead.NonceLength() + 1),
-                    aead.NonceLength());
-
-  std::string ciphertext;
-  if (!aead.Seal(json, iv, /*additional_data=*/nullptr, &ciphertext)) {
-    LOG(ERROR) << "Error sealing message for WebFrame.";
+  if (encrypted_message_json.empty() || encrypted_function_json.empty()) {
+    // Sealing the payload failed.
     return false;
   }
 
-  std::string encoded_iv;
-  base::Base64Encode(iv, &encoded_iv);
-  std::string encoded_message;
-  base::Base64Encode(ciphertext, &encoded_message);
-  std::string script = base::StringPrintf(
-      "__gCrWeb.message.routeMessage('%s', '%s', '%s')",
-      encoded_message.c_str(), encoded_iv.c_str(), frame_id_.c_str());
+  std::string script =
+      base::StringPrintf("__gCrWeb.message.routeMessage(%s, %s, '%s')",
+                         encrypted_message_json.c_str(),
+                         encrypted_function_json.c_str(), frame_id_.c_str());
   GetWebState()->ExecuteJavaScript(base::UTF8ToUTF16(script));
 
   return true;
@@ -156,7 +179,7 @@ bool WebFrameImpl::CallJavaScriptFunction(
       std::move(callback), std::move(timeout_callback));
   pending_requests_[message_id] = std::move(callbacks);
 
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {web::WebThread::UI},
       pending_requests_[message_id]->timeout_callback->callback(), timeout);
   bool called =
@@ -269,7 +292,6 @@ void WebFrameImpl::OnJavaScriptReply(web::WebState* web_state,
 
 void WebFrameImpl::DetachFromWebState() {
   if (web_state_) {
-    web_state_->RemoveScriptCommandCallback(GetScriptCommandPrefix());
     web_state_->RemoveObserver(this);
     web_state_ = nullptr;
   }

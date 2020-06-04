@@ -20,6 +20,7 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -29,6 +30,7 @@
 #include "rlz/lib/rlz_lib.h"
 #include "rlz/lib/rlz_value_store.h"
 #include "rlz/lib/string_utils.h"
+#include "rlz/lib/time_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
@@ -260,9 +262,9 @@ void ShutdownCheck(scoped_refptr<RefCountedWaitableEvent> event) {
   // How frequently the financial ping thread should check
   // the shutdown condition?
   const base::TimeDelta kInterval = base::TimeDelta::FromMilliseconds(500);
-  base::PostDelayedTaskWithTraits(FROM_HERE, {base::TaskPriority::BEST_EFFORT},
-                                  base::BindOnce(&ShutdownCheck, event),
-                                  kInterval);
+  base::ThreadPool::PostDelayedTask(
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT},
+      base::BindOnce(&ShutdownCheck, event), kInterval);
 }
 #endif
 
@@ -306,7 +308,7 @@ void PingRlzServer(std::string url,
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(url);
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   auto url_loader = network::SimpleURLLoader::Create(
       std::move(resource_request), traffic_annotation);
@@ -390,14 +392,14 @@ FinancialPing::PingResponse FinancialPing::PingServer(const char* request,
 
   base::subtle::Release_Store(&g_cancelShutdownCheck, 0);
 
-  base::PostTaskWithTraits(FROM_HERE, {base::TaskPriority::BEST_EFFORT},
-                           base::BindOnce(&ShutdownCheck, event));
+  base::ThreadPool::PostTask(FROM_HERE, {base::TaskPriority::BEST_EFFORT},
+                             base::BindOnce(&ShutdownCheck, event));
 
   // PingRlzServer must be run in a separate sequence so that the TimedWait()
   // call below does not block the URL fetch response from being handled by
   // the URL delegate.
   scoped_refptr<base::SequencedTaskRunner> background_runner(
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
            base::TaskPriority::BEST_EFFORT}));
   background_runner->PostTask(FROM_HERE,
@@ -470,23 +472,6 @@ bool FinancialPing::ClearLastPingTime(Product product) {
   if (!store || !store->HasAccess(RlzValueStore::kWriteAccess))
     return false;
   return store->ClearPingTime(product);
-}
-
-int64_t FinancialPing::GetSystemTimeAsInt64() {
-#if defined(OS_WIN)
-  FILETIME now_as_file_time;
-  // Relative to Jan 1, 1601 (UTC).
-  GetSystemTimeAsFileTime(&now_as_file_time);
-
-  LARGE_INTEGER integer;
-  integer.HighPart = now_as_file_time.dwHighDateTime;
-  integer.LowPart = now_as_file_time.dwLowDateTime;
-  return integer.QuadPart;
-#else
-  // Seconds since epoch (Jan 1, 1970).
-  double now_seconds = base::Time::Now().ToDoubleT();
-  return static_cast<int64_t>(now_seconds * 1000 * 1000 * 10);
-#endif
 }
 
 #if defined(RLZ_NETWORK_IMPLEMENTATION_CHROME_NET)

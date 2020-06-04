@@ -30,7 +30,8 @@ namespace ui {
 
 gfx::Vector2dF FlingBooster::GetVelocityForFlingStart(
     const blink::WebGestureEvent& fling_start) {
-  DCHECK_EQ(blink::WebInputEvent::kGestureFlingStart, fling_start.GetType());
+  DCHECK_EQ(blink::WebInputEvent::Type::kGestureFlingStart,
+            fling_start.GetType());
   gfx::Vector2dF velocity(fling_start.data.fling_start.velocity_x,
                           fling_start.data.fling_start.velocity_y);
   TRACE_EVENT2("input", "FlingBooster::GetVelocityForFlingStart", "vx",
@@ -58,17 +59,28 @@ void FlingBooster::ObserveGestureEvent(const WebGestureEvent& gesture_event) {
   if (previous_fling_starting_velocity_.IsZero())
     return;
 
-  // Gestures from a different source should prevent boosting.
-  if (gesture_event.SourceDevice() != source_device_)
+  // If a cutoff time is set (we're waiting for a boost) and we've now exceeded
+  // it, reset the booster since we're not going to boost the current gesture.
+  if (!cutoff_time_for_boost_.is_null() &&
+      gesture_event.TimeStamp() > cutoff_time_for_boost_) {
+    TRACE_EVENT_INSTANT0("input", "Timeout", TRACE_EVENT_SCOPE_THREAD);
     Reset();
+    return;
+  }
+
+  // Gestures from a different source should prevent boosting.
+  if (gesture_event.SourceDevice() != source_device_) {
+    Reset();
+    return;
+  }
 
   switch (gesture_event.GetType()) {
-    case WebInputEvent::kGestureScrollBegin: {
+    case WebInputEvent::Type::kGestureScrollBegin: {
       cutoff_time_for_boost_ =
           gesture_event.TimeStamp() + kFlingBoostTimeoutDelay;
       break;
     }
-    case WebInputEvent::kGestureScrollUpdate: {
+    case WebInputEvent::Type::kGestureScrollUpdate: {
       if (gesture_event.data.scroll_update.inertial_phase ==
           WebGestureEvent::InertialPhaseState::kMomentum) {
         return;
@@ -76,12 +88,6 @@ void FlingBooster::ObserveGestureEvent(const WebGestureEvent& gesture_event) {
 
       if (cutoff_time_for_boost_.is_null())
         return;
-
-      if (gesture_event.TimeStamp() > cutoff_time_for_boost_) {
-        TRACE_EVENT_INSTANT0("input", "Timeout", TRACE_EVENT_SCOPE_THREAD);
-        Reset();
-        return;
-      }
 
       // If the user scrolls in a direction counter to the current scroll, don't
       // boost.
@@ -118,11 +124,11 @@ void FlingBooster::ObserveGestureEvent(const WebGestureEvent& gesture_event) {
           gesture_event.TimeStamp() + kFlingBoostTimeoutDelay;
       break;
     }
-    case WebInputEvent::kGestureScrollEnd: {
+    case WebInputEvent::Type::kGestureScrollEnd: {
       previous_boosting_scroll_timestamp_ = base::TimeTicks();
       break;
     }
-    case WebInputEvent::kGestureFlingCancel: {
+    case WebInputEvent::Type::kGestureFlingCancel: {
       if (gesture_event.data.fling_cancel.prevent_boosting) {
         TRACE_EVENT_INSTANT0("input", "GFC PreventBoosting",
                              TRACE_EVENT_SCOPE_THREAD);
@@ -144,12 +150,14 @@ void FlingBooster::ObserveProgressFling(
     const gfx::Vector2dF& current_velocity) {
   TRACE_EVENT2("input", "FlingBooster::ObserveProgressFling", "vx",
                current_velocity.x(), "vy", current_velocity.y());
-  DCHECK(!previous_fling_starting_velocity_.IsZero());
+  if (previous_fling_starting_velocity_.IsZero())
+    return;
   current_fling_velocity_ = current_velocity;
 }
 
 bool FlingBooster::ShouldBoostFling(const WebGestureEvent& fling_start_event) {
-  DCHECK_EQ(WebInputEvent::kGestureFlingStart, fling_start_event.GetType());
+  DCHECK_EQ(WebInputEvent::Type::kGestureFlingStart,
+            fling_start_event.GetType());
   if (previous_fling_starting_velocity_.IsZero()) {
     TRACE_EVENT_INSTANT0("input", "No Boost - NoActiveFling",
                          TRACE_EVENT_SCOPE_THREAD);

@@ -11,7 +11,7 @@
 namespace chromeos {
 class CrosSettings;
 class OwnerSettingsServiceChromeOS;
-}
+}  // namespace chromeos
 
 namespace policy {
 
@@ -38,6 +38,23 @@ struct ArcKioskAppBasicInfo {
   std::string display_name_;
 };
 
+struct WebKioskAppBasicInfo {
+  WebKioskAppBasicInfo(const std::string& url,
+                       const std::string& title,
+                       const std::string& icon_url);
+  WebKioskAppBasicInfo();
+  ~WebKioskAppBasicInfo();
+
+  const std::string& url() const { return url_; }
+  const std::string& title() const { return title_; }
+  const std::string& icon_url() const { return icon_url_; }
+
+ private:
+  std::string url_;
+  std::string title_;
+  std::string icon_url_;
+};
+
 // This must match DeviceLocalAccountInfoProto.AccountType in
 // chrome_device_policy.proto.
 struct DeviceLocalAccount {
@@ -51,6 +68,8 @@ struct DeviceLocalAccount {
     TYPE_ARC_KIOSK_APP,
     // SAML public session account
     TYPE_SAML_PUBLIC_SESSION,
+    // An account that serves as a container for a single full-screen web app.
+    TYPE_WEB_KIOSK_APP,
     // Sentinel, must be last.
     TYPE_COUNT
   };
@@ -60,6 +79,8 @@ struct DeviceLocalAccount {
                      const std::string& kiosk_app_id,
                      const std::string& kiosk_app_update_url);
   DeviceLocalAccount(const ArcKioskAppBasicInfo& arc_kiosk_app_info,
+                     const std::string& account_id);
+  DeviceLocalAccount(const WebKioskAppBasicInfo& app_info,
                      const std::string& account_id);
   DeviceLocalAccount(const DeviceLocalAccount& other);
   ~DeviceLocalAccount();
@@ -88,6 +109,7 @@ struct DeviceLocalAccount {
   std::string kiosk_app_update_url;
 
   ArcKioskAppBasicInfo arc_kiosk_app_info;
+  WebKioskAppBasicInfo web_kiosk_app_info;
 };
 
 std::string GenerateDeviceLocalAccountUserId(const std::string& account_id,

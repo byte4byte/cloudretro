@@ -12,14 +12,14 @@ import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.SystemClock;
+import android.util.Pair;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -36,7 +36,9 @@ public class DecoderService extends Service {
     static final String KEY_FILE_DESCRIPTOR = "file_descriptor";
     static final String KEY_FILE_PATH = "file_path";
     static final String KEY_IMAGE_BITMAP = "image_bitmap";
-    static final String KEY_SIZE = "size";
+    static final String KEY_WIDTH = "width";
+    static final String KEY_RATIO = "ratio";
+    static final String KEY_FULL_WIDTH = "full_width";
     static final String KEY_SUCCESS = "success";
     static final String KEY_DECODE_TIME = "decode_time";
 
@@ -48,32 +50,34 @@ public class DecoderService extends Service {
 
     @Override
     public void onCreate() {
+        Log.i(TAG, "Decoder service process started");
+
         // DecoderService does not require flags, but LibraryLoader.ensureInitialized() checks for
         // --enable-low-end-device-mode. Rather than forwarding the flags from the browser process,
         // just assume no flags.
         if (!CommandLine.isInitialized()) {
             CommandLine.init(null);
         }
-        try {
-            // The decoder service relies on PathUtils.
-            PostTask.runSynchronously(UiThreadTaskTraits.DEFAULT, () -> {
-                PathUtils.setPrivateDataDirectorySuffix(
-                        ChromeApplication.PRIVATE_DATA_DIRECTORY_SUFFIX);
-            });
 
-            LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_CHILD);
-            nativeInitializePhotoPickerSandbox();
+        // The decoder service relies on PathUtils.
+        PostTask.runSynchronously(UiThreadTaskTraits.DEFAULT, () -> {
+            PathUtils.setPrivateDataDirectorySuffix(
+                    ChromeApplication.PRIVATE_DATA_DIRECTORY_SUFFIX);
+        });
 
-            mNativeLibraryAndSandboxInitialized = true;
-        } catch (ProcessInitException e) {
-            Log.e(TAG, "Unable to initialize the native library and sandbox", e);
-        }
+        LibraryLoader.getInstance().ensureInitialized();
+        DecoderServiceJni.get().initializePhotoPickerSandbox();
+
+        mNativeLibraryAndSandboxInitialized = true;
 
         super.onCreate();
+
+        Log.i(TAG, "Decoder service process initialized");
     }
 
     @Override
     public IBinder onBind(Intent intent) {
+        Log.i(TAG, "Decoder process binding");
         return mBinder;
     }
 
@@ -82,11 +86,13 @@ public class DecoderService extends Service {
         public void decodeImage(Bundle payload, IDecoderServiceCallback callback) {
             Bundle bundle = null;
             String filePath = "";
-            int size = 0;
+            int width = 0;
+            boolean fullWidth = false;
             try {
                 filePath = payload.getString(KEY_FILE_PATH);
                 ParcelFileDescriptor pfd = payload.getParcelable(KEY_FILE_DESCRIPTOR);
-                size = payload.getInt(KEY_SIZE);
+                width = payload.getInt(KEY_WIDTH);
+                fullWidth = payload.getBoolean(KEY_FULL_WIDTH);
 
                 // Setup a minimum viable response to parent process. Will be fleshed out
                 // further below.
@@ -95,7 +101,7 @@ public class DecoderService extends Service {
                 bundle.putBoolean(KEY_SUCCESS, false);
 
                 if (!mNativeLibraryAndSandboxInitialized) {
-                    Log.e(TAG, "Decode failed %s (size: %d): no sandbox", filePath, size);
+                    Log.e(TAG, "Decode failed %s (width: %d): no sandbox", filePath, width);
                     sendReply(callback, bundle); // Sends SUCCESS == false;
                     return;
                 }
@@ -103,17 +109,19 @@ public class DecoderService extends Service {
                 FileDescriptor fd = pfd.getFileDescriptor();
 
                 long begin = SystemClock.elapsedRealtime();
-                Bitmap bitmap = BitmapUtils.decodeBitmapFromFileDescriptor(fd, size);
+                Pair<Bitmap, Float> decodedBitmap =
+                        BitmapUtils.decodeBitmapFromFileDescriptor(fd, width, fullWidth);
                 long decodeTime = SystemClock.elapsedRealtime() - begin;
 
                 try {
                     pfd.close();
                 } catch (IOException e) {
-                    Log.e(TAG, "Closing failed " + filePath + " (size: " + size + ") " + e);
+                    Log.e(TAG, "Closing failed " + filePath + " (width: " + width + ") " + e);
                 }
 
+                Bitmap bitmap = decodedBitmap != null ? decodedBitmap.first : null;
                 if (bitmap == null) {
-                    Log.e(TAG, "Decode failed " + filePath + " (size: " + size + ")");
+                    Log.e(TAG, "Decode failed " + filePath + " (width: " + width + ")");
                     sendReply(callback, bundle); // Sends SUCCESS == false;
                     return;
                 }
@@ -124,8 +132,10 @@ public class DecoderService extends Service {
                 // descriptor. In the receiving process it will just leave the bitmap on
                 // ashmem since it's immutable and carry on.
                 bundle.putParcelable(KEY_IMAGE_BITMAP, bitmap);
+                bundle.putFloat(KEY_RATIO, decodedBitmap.second);
                 bundle.putBoolean(KEY_SUCCESS, true);
                 bundle.putLong(KEY_DECODE_TIME, decodeTime);
+                bundle.putBoolean(KEY_FULL_WIDTH, payload.getBoolean(KEY_FULL_WIDTH));
                 sendReply(callback, bundle);
                 bitmap.recycle();
             } catch (Exception e) {
@@ -133,7 +143,7 @@ public class DecoderService extends Service {
                 // decoding a photo, it is better UX to eat the exception instead of showing
                 // a crash dialog and discarding other requests that have already been sent.
                 Log.e(TAG,
-                        "Unexpected error during decoding " + filePath + " (size: " + size + ") "
+                        "Unexpected error during decoding " + filePath + " (width: " + width + ") "
                                 + e);
 
                 if (bundle != null) sendReply(callback, bundle);
@@ -149,7 +159,10 @@ public class DecoderService extends Service {
         }
     };
 
-    // Initializes the seccomp-bpf sandbox when it's supported by the device. Records the sandbox
-    // status to the Android.SeccompStatus.PhotoPickerSandbox histogram.
-    private static native void nativeInitializePhotoPickerSandbox();
+    @NativeMethods
+    interface Natives {
+        // Initializes the seccomp-bpf sandbox when it's supported by the device. Records the
+        // sandbox status to the Android.SeccompStatus.PhotoPickerSandbox histogram.
+        void initializePhotoPickerSandbox();
+    }
 }

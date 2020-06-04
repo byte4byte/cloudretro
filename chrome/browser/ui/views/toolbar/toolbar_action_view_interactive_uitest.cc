@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -15,6 +15,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
+#include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/extensions/extension_context_menu_controller.h"
 #include "chrome/browser/ui/views/frame/app_menu_button_observer.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller_interactive_uitest.h"
@@ -114,7 +116,9 @@ void TestOverflowedToolbarAction(Browser* browser,
 // Tests the context menu of an overflowed action.
 void TestWhileContextMenuOpen(Browser* browser,
                               ToolbarActionView* context_menu_action) {
-  views::MenuItemView* menu_root = context_menu_action->menu_for_testing();
+  views::MenuItemView* menu_root =
+      context_menu_action->context_menu_controller_for_testing()
+          ->menu_for_testing();
   ASSERT_TRUE(menu_root);
   ASSERT_TRUE(menu_root->GetSubmenu());
   EXPECT_TRUE(menu_root->GetSubmenu()->IsShowing());
@@ -174,6 +178,10 @@ class ToolbarActionViewInteractiveUITest
     : public extensions::ExtensionBrowserTest {
  protected:
   ToolbarActionViewInteractiveUITest();
+  ToolbarActionViewInteractiveUITest(
+      const ToolbarActionViewInteractiveUITest&) = delete;
+  ToolbarActionViewInteractiveUITest& operator=(
+      const ToolbarActionViewInteractiveUITest&) = delete;
   ~ToolbarActionViewInteractiveUITest() override;
 
   // extensions::ExtensionBrowserTest:
@@ -181,7 +189,7 @@ class ToolbarActionViewInteractiveUITest
   void TearDownOnMainThread() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ToolbarActionViewInteractiveUITest);
+  base::test::ScopedFeatureList feature_list_;
 };
 
 ToolbarActionViewInteractiveUITest::ToolbarActionViewInteractiveUITest() {}
@@ -190,6 +198,7 @@ ToolbarActionViewInteractiveUITest::~ToolbarActionViewInteractiveUITest() {}
 void ToolbarActionViewInteractiveUITest::SetUpCommandLine(
     base::CommandLine* command_line) {
   extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
+  feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
   ToolbarActionsBar::disable_animations_for_testing_ = true;
 }
 
@@ -243,9 +252,11 @@ IN_PROC_BROWSER_TEST_F(ToolbarActionViewInteractiveUITest,
   EXPECT_TRUE(listener.WaitUntilSatisfied());
 }
 
-#if defined(OS_CHROMEOS)
-// TODO(pkasting): https://crbug.com/911374 Menu controller thinks the mouse is
-// already down when handling the left click.
+#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_LINUX)
+// TODO(pkasting): https://crbug.com/911374 On ChromeOS, menu controller thinks
+// the mouse is already down when handling the left click.
+// TODO(https://crbug.com/1046028): Fails on Windows 7.
+// TODO(https://crbug.com/955316): Flaky on linux.
 #define MAYBE_TestContextMenuOnOverflowedAction \
   DISABLED_TestContextMenuOnOverflowedAction
 #else
@@ -275,7 +286,8 @@ IN_PROC_BROWSER_TEST_F(ToolbarActionViewInteractiveUITest,
     extension_service()->AddExtension(extension.get());
   }
 
-  const auto* const actions_bar = browser()->window()->GetToolbarActionsBar();
+  const auto* const actions_bar =
+      ToolbarActionsBar::FromBrowserWindow(browser()->window());
   ASSERT_EQ(16u, actions_bar->toolbar_actions_unordered().size());
 
   // Reduce visible count to 0 so that all actions are overflowed.
@@ -311,15 +323,8 @@ IN_PROC_BROWSER_TEST_F(ToolbarActionViewInteractiveUITest,
 
 // Tests that clicking on the toolbar action a second time when the action is
 // already open results in closing the popup, and doesn't re-open it.
-#if defined(OS_MACOSX)
-// Focusing or input is not completely working on Mac: http://crbug.com/824418
-#define MAYBE_DoubleClickToolbarActionToClose \
-    DISABLED_DoubleClickToolbarActionToClose
-#else
-#define MAYBE_DoubleClickToolbarActionToClose DoubleClickToolbarActionToClose
-#endif
 IN_PROC_BROWSER_TEST_F(ToolbarActionViewInteractiveUITest,
-                       MAYBE_DoubleClickToolbarActionToClose) {
+                       DoubleClickToolbarActionToClose) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("ui").AppendASCII("browser_action_popup")));
   base::RunLoop().RunUntilIdle();  // Ensure the extension is fully loaded.

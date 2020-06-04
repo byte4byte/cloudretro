@@ -14,10 +14,12 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_impl_io_data.h"
+#include "chrome/browser/profiles/profile_io_data_handle.h"
 #include "chrome/common/buildflags.h"
 #include "components/keyed_service/core/simple_factory_key.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -78,6 +80,7 @@ class ProfileImpl : public Profile {
   content::BrowserPluginGuestManager* GetGuestManager() override;
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
+  content::StorageNotificationService* GetStorageNotificationService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
       override;
@@ -87,19 +90,13 @@ class ProfileImpl : public Profile {
       override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
-  net::URLRequestContextGetter* CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) override;
-  net::URLRequestContextGetter* CreateMediaRequestContext() override;
   void SetCorsOriginAccessListForOrigin(
       const url::Origin& source_origin,
       std::vector<network::mojom::CorsOriginPatternPtr> allow_patterns,
       std::vector<network::mojom::CorsOriginPatternPtr> block_patterns,
       base::OnceClosure closure) override;
   content::SharedCorsOriginAccessList* GetSharedCorsOriginAccessList() override;
-  std::unique_ptr<service_manager::Service> HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
+  bool ShouldEnableOutOfBlinkCors() override;
   std::string GetMediaDeviceIDSalt() override;
   download::InProgressDownloadManager* RetriveInProgressDownloadManager()
       override;
@@ -114,18 +111,25 @@ class ProfileImpl : public Profile {
   std::string GetProfileUserName() const override;
   ProfileType GetProfileType() const override;
   base::FilePath GetPath() override;
+  base::Time GetCreationTime() const override;
   bool IsOffTheRecord() override;
   bool IsOffTheRecord() const override;
+  const OTRProfileID& GetOTRProfileID() const override;
   base::FilePath GetPath() const override;
-  Profile* GetOffTheRecordProfile() override;
-  void DestroyOffTheRecordProfile() override;
-  bool HasOffTheRecordProfile() override;
+  // TODO(https://crbug.com/1033903): Remove the default value.
+  Profile* GetOffTheRecordProfile(
+      const OTRProfileID& otr_profile_id = OTRProfileID::PrimaryID()) override;
+  std::vector<Profile*> GetAllOffTheRecordProfiles() override;
+  void DestroyOffTheRecordProfile(Profile* otr_profile) override;
+  // TODO(https://crbug.com/1033903): Remove the default value.
+  bool HasOffTheRecordProfile(
+      const OTRProfileID& otr_profile_id = OTRProfileID::PrimaryID()) override;
+  bool HasAnyOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
   const Profile* GetOriginalProfile() const override;
   bool IsSupervised() const override;
   bool IsChild() const override;
   bool IsLegacySupervised() const override;
-  bool IsIndependentOffTheRecordProfile() override;
   bool AllowsBrowserWindows() const override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
@@ -147,7 +151,6 @@ class ProfileImpl : public Profile {
   policy::ProfilePolicyConnector* GetProfilePolicyConnector() override;
   const policy::ProfilePolicyConnector* GetProfilePolicyConnector()
       const override;
-  net::URLRequestContextGetter* GetRequestContext() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   bool IsSameProfile(Profile* profile) override;
   base::Time GetStartTime() const override;
@@ -167,6 +170,8 @@ class ProfileImpl : public Profile {
   void InitChromeOSPreferences() override;
 #endif  // defined(OS_CHROMEOS)
 
+  void SetCreationTimeForTesting(base::Time creation_time) override;
+
  private:
 #if defined(OS_CHROMEOS)
   friend class chromeos::KioskTest;
@@ -183,6 +188,7 @@ class ProfileImpl : public Profile {
   ProfileImpl(const base::FilePath& path,
               Delegate* delegate,
               CreateMode create_mode,
+              base::Time path_creation_time,
               scoped_refptr<base::SequencedTaskRunner> io_task_runner);
 
 #if defined(OS_ANDROID)
@@ -215,11 +221,16 @@ class ProfileImpl : public Profile {
   void UpdateAvatarInStorage();
   void UpdateIsEphemeralInStorage();
 
+  // Called to initialize Data Reduction Proxy.
+  void InitializeDataReductionProxy();
+
   policy::ConfigurationPolicyProvider* configuration_policy_provider();
 
   PrefChangeRegistrar pref_change_registrar_;
 
   base::FilePath path_;
+
+  base::Time path_creation_time_;
 
   // Task runner used for file access in the profile path.
   scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
@@ -265,7 +276,7 @@ class ProfileImpl : public Profile {
   // See comment in GetOffTheRecordPrefs. Field exists so something owns the
   // dummy.
   std::unique_ptr<sync_preferences::PrefServiceSyncable> dummy_otr_prefs_;
-  ProfileImplIOData::Handle io_data_;
+  ProfileIODataHandle io_data_;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   scoped_refptr<ExtensionSpecialStoragePolicy>
       extension_special_storage_policy_;
@@ -279,7 +290,7 @@ class ProfileImpl : public Profile {
   base::OneShotTimer create_session_service_timer_;
 #endif
 
-  std::unique_ptr<Profile> off_the_record_profile_;
+  std::map<OTRProfileID, std::unique_ptr<Profile>> otr_profiles_;
 
   // See GetStartTime for details.
   base::Time start_time_;
@@ -317,6 +328,8 @@ class ProfileImpl : public Profile {
 
   scoped_refptr<content::SharedCorsOriginAccessList>
       shared_cors_origin_access_list_;
+
+  base::Optional<bool> cors_legacy_mode_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImpl);
 };

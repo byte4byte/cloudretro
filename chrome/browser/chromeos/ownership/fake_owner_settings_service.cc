@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chromeos/tpm/install_attributes.h"
@@ -31,8 +31,7 @@ FakeOwnerSettingsService::FakeOwnerSettingsService(
       set_management_settings_result_(true),
       settings_provider_(provider) {}
 
-FakeOwnerSettingsService::~FakeOwnerSettingsService() {
-}
+FakeOwnerSettingsService::~FakeOwnerSettingsService() = default;
 
 bool FakeOwnerSettingsService::IsOwner() {
   return !InstallAttributes::Get()->IsEnterpriseManaged() &&
@@ -44,15 +43,6 @@ bool FakeOwnerSettingsService::Set(const std::string& setting,
   CHECK(settings_provider_);
   settings_provider_->Set(setting, value);
   return true;
-}
-
-void FakeOwnerSettingsService::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!ignore_profile_creation_notifications_)
-    OwnerSettingsServiceChromeOS::Observe(type, source, details);
 }
 
 }  // namespace chromeos

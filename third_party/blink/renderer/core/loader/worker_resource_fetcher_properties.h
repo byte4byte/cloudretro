@@ -49,11 +49,14 @@ class WorkerResourceFetcherProperties final : public ResourceFetcherProperties {
   scheduler::FrameStatus GetFrameStatus() const override {
     return scheduler::FrameStatus::kNone;
   }
+  const KURL& WebBundlePhysicalUrl() const override;
+  int GetOutstandingThrottledLimit() const override;
 
  private:
   const Member<WorkerOrWorkletGlobalScope> global_scope_;
   const Member<const FetchClientSettingsObject> fetch_client_settings_object_;
   const scoped_refptr<WebWorkerFetchContext> web_context_;
+  const int outstanding_throttled_limit_;
 };
 
 }  // namespace blink

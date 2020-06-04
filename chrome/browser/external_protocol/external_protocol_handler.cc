@@ -7,8 +7,9 @@
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
@@ -22,10 +23,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/escape.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if !defined(OS_ANDROID)
-#include "chrome/browser/sharing/click_to_call/click_to_call_sharing_dialog_controller.h"
+#include "chrome/browser/sharing/click_to_call/click_to_call_ui_controller.h"
 #include "chrome/browser/sharing/click_to_call/click_to_call_utils.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -42,16 +45,28 @@ ExternalProtocolHandler::Delegate* g_external_protocol_handler_delegate =
     nullptr;
 
 constexpr const char* kDeniedSchemes[] = {
-    "afp", "data", "disk", "disks",
+    "afp",
+    "data",
+    "disk",
+    "disks",
     // ShellExecuting file:///C:/WINDOWS/system32/notepad.exe will simply
     // execute the file specified!  Hopefully we won't see any "file" schemes
     // because we think of file:// URLs as handled URLs, but better to be safe
     // than to let an attacker format the user's hard drive.
-    "file", "hcp", "javascript", "ms-help", "nntp", "res", "shell", "vbscript",
+    "file",
+    "hcp",
+    "ie.http",
+    "javascript",
+    "ms-help",
+    "nntp",
+    "res",
+    "shell",
+    "vbscript",
     // view-source is a special case in chrome. When it comes through an
     // iframe or a redirect, it looks like an external protocol, but we don't
     // want to shellexecute it.
-    "view-source", "vnd.ms.radio",
+    "view-source",
+    "vnd.ms.radio",
 };
 
 constexpr const char* kAllowedSchemes[] = {
@@ -72,11 +87,13 @@ scoped_refptr<shell_integration::DefaultProtocolClientWorker> CreateShellWorker(
 
 ExternalProtocolHandler::BlockState GetBlockStateWithDelegate(
     const std::string& scheme,
+    const url::Origin* initiating_origin,
     ExternalProtocolHandler::Delegate* delegate,
     Profile* profile) {
   if (delegate)
     return delegate->GetBlockState(scheme, profile);
-  return ExternalProtocolHandler::GetBlockState(scheme, profile);
+  return ExternalProtocolHandler::GetBlockState(scheme, initiating_origin,
+                                                profile);
 }
 
 void RunExternalProtocolDialogWithDelegate(
@@ -84,15 +101,16 @@ void RunExternalProtocolDialogWithDelegate(
     content::WebContents* web_contents,
     ui::PageTransition page_transition,
     bool has_user_gesture,
+    const base::Optional<url::Origin>& initiating_origin,
     ExternalProtocolHandler::Delegate* delegate) {
   DCHECK(web_contents);
   if (delegate) {
     delegate->RunExternalProtocolDialog(url, web_contents, page_transition,
-                                        has_user_gesture);
+                                        has_user_gesture, initiating_origin);
     return;
   }
   ExternalProtocolHandler::RunExternalProtocolDialog(
-      url, web_contents, page_transition, has_user_gesture);
+      url, web_contents, page_transition, has_user_gesture, initiating_origin);
 }
 
 void LaunchUrlWithoutSecurityCheckWithDelegate(
@@ -112,7 +130,7 @@ void LaunchUrlWithoutSecurityCheckWithDelegate(
   platform_util::OpenExternal(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()), url);
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   // If the protocol navigation occurs in a new tab, close it.
   // Avoid calling CloseContents if the tab is not in this browser's tab strip
   // model; this can happen if the protocol was initiated by something
@@ -137,6 +155,7 @@ void OnDefaultProtocolClientWorkerFinished(
     bool prompt_user,
     ui::PageTransition page_transition,
     bool has_user_gesture,
+    const base::Optional<url::Origin>& initiating_origin,
     ExternalProtocolHandler::Delegate* delegate,
     shell_integration::DefaultWebClientState state) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -152,13 +171,14 @@ void OnDefaultProtocolClientWorkerFinished(
   // handling flow).
   bool chrome_is_default_handler = state == shell_integration::IS_DEFAULT;
 
-#if !defined(OS_ANDROID)
-  if (web_contents &&
-      ShouldOfferClickToCall(web_contents->GetBrowserContext(), escaped_url)) {
+  // On ChromeOS, Click to Call is integrated into the external protocol dialog.
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+  if (web_contents && ShouldOfferClickToCallForURL(
+                          web_contents->GetBrowserContext(), escaped_url)) {
     // Handle tel links by opening the Click to Call dialog. This will call back
     // into LaunchUrlWithoutSecurityCheck if the user selects a system handler.
-    ClickToCallSharingDialogController::ShowDialog(web_contents, escaped_url,
-                                                   chrome_is_default_handler);
+    ClickToCallUiController::ShowDialog(web_contents, initiating_origin,
+                                        escaped_url, chrome_is_default_handler);
     return;
   }
 #endif
@@ -179,8 +199,9 @@ void OnDefaultProtocolClientWorkerFinished(
     // Ask the user if they want to allow the protocol. This will call
     // LaunchUrlWithoutSecurityCheck if the user decides to accept the
     // protocol.
-    RunExternalProtocolDialogWithDelegate(
-        escaped_url, web_contents, page_transition, has_user_gesture, delegate);
+    RunExternalProtocolDialogWithDelegate(escaped_url, web_contents,
+                                          page_transition, has_user_gesture,
+                                          initiating_origin, delegate);
     return;
   }
 
@@ -198,9 +219,16 @@ void ExternalProtocolHandler::SetDelegateForTesting(Delegate* delegate) {
   g_external_protocol_handler_delegate = delegate;
 }
 
-// static
+bool ExternalProtocolHandler::MayRememberAllowDecisionsForThisOrigin(
+    const url::Origin* initiating_origin) {
+  return initiating_origin &&
+         network::IsOriginPotentiallyTrustworthy(*initiating_origin);
+}
+
+// static.
 ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
     const std::string& scheme,
+    const url::Origin* initiating_origin,
     Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -229,15 +257,20 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
 
   PrefService* profile_prefs = profile->GetPrefs();
   if (profile_prefs) {  // May be NULL during testing.
-    const base::DictionaryValue* update_excluded_schemas_profile =
-        profile_prefs->GetDictionary(prefs::kExcludedSchemes);
-    bool should_block;
-    // Ignore stored block decisions. These are now not possible through the UI,
-    // and previous block decisions should be ignored to allow users to recover
-    // from accidental blocks.
-    if (update_excluded_schemas_profile->GetBoolean(scheme, &should_block) &&
-        !should_block) {
-      return DONT_BLOCK;
+    if (MayRememberAllowDecisionsForThisOrigin(initiating_origin)) {
+      // Check if there is a matching {Origin+Protocol} pair exemption:
+      const base::DictionaryValue* allowed_origin_protocol_pairs =
+          profile_prefs->GetDictionary(
+              prefs::kProtocolHandlerPerOriginAllowedProtocols);
+      const base::Value* allowed_protocols_for_origin =
+          allowed_origin_protocol_pairs->FindDictKey(
+              initiating_origin->Serialize());
+      if (allowed_protocols_for_origin) {
+        base::Optional<bool> allow =
+            allowed_protocols_for_origin->FindBoolKey(scheme);
+        if (allow.has_value() && allow.value())
+          return DONT_BLOCK;
+      }
     }
   }
 
@@ -245,30 +278,58 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
 }
 
 // static
-void ExternalProtocolHandler::SetBlockState(const std::string& scheme,
-                                            BlockState state,
-                                            Profile* profile) {
+// This is only called when the "remember" check box is selected from the
+// External Protocol Prompt dialog, and that check box is only shown when there
+// is a non-empty, potentially-trustworthy initiating origin.
+void ExternalProtocolHandler::SetBlockState(
+    const std::string& scheme,
+    const url::Origin& initiating_origin,
+    BlockState state,
+    Profile* profile) {
   // Setting the state to BLOCK is no longer supported through the UI.
   DCHECK_NE(state, BLOCK);
 
   // Set in the stored prefs.
-  PrefService* profile_prefs = profile->GetPrefs();
-  if (profile_prefs) {  // May be NULL during testing.
-    DictionaryPrefUpdate update_excluded_schemas_profile(
-        profile_prefs, prefs::kExcludedSchemes);
-    if (state == DONT_BLOCK)
-      update_excluded_schemas_profile->SetBoolean(scheme, false);
-    else
-      update_excluded_schemas_profile->Remove(scheme, nullptr);
+  if (MayRememberAllowDecisionsForThisOrigin(&initiating_origin)) {
+    PrefService* profile_prefs = profile->GetPrefs();
+    if (profile_prefs) {  // May be NULL during testing.
+      DictionaryPrefUpdate update_allowed_origin_protocol_pairs(
+          profile_prefs, prefs::kProtocolHandlerPerOriginAllowedProtocols);
+
+      const std::string serialized_origin = initiating_origin.Serialize();
+      base::Value* allowed_protocols_for_origin =
+          update_allowed_origin_protocol_pairs->FindDictKey(serialized_origin);
+      if (!allowed_protocols_for_origin) {
+        update_allowed_origin_protocol_pairs->SetKey(
+            serialized_origin, base::Value(base::Value::Type::DICTIONARY));
+        allowed_protocols_for_origin =
+            update_allowed_origin_protocol_pairs->FindDictKey(
+                serialized_origin);
+      }
+      if (state == DONT_BLOCK) {
+        allowed_protocols_for_origin->SetBoolKey(scheme, true);
+      } else {
+        allowed_protocols_for_origin->RemoveKey(scheme);
+        if (allowed_protocols_for_origin->DictEmpty())
+          update_allowed_origin_protocol_pairs->RemoveKey(serialized_origin);
+      }
+    }
+  }
+
+  if (g_external_protocol_handler_delegate) {
+    g_external_protocol_handler_delegate->OnSetBlockState(
+        scheme, initiating_origin, state);
   }
 }
 
 // static
-void ExternalProtocolHandler::LaunchUrl(const GURL& url,
-                                        int render_process_host_id,
-                                        int render_view_routing_id,
-                                        ui::PageTransition page_transition,
-                                        bool has_user_gesture) {
+void ExternalProtocolHandler::LaunchUrl(
+    const GURL& url,
+    int render_process_host_id,
+    int render_view_routing_id,
+    ui::PageTransition page_transition,
+    bool has_user_gesture,
+    const base::Optional<url::Origin>& initiating_origin) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Escape the input scheme to be sure that the command does not
@@ -286,7 +347,8 @@ void ExternalProtocolHandler::LaunchUrl(const GURL& url,
   if (web_contents)  // Maybe NULL during testing.
     profile = Profile::FromBrowserContext(web_contents->GetBrowserContext());
   BlockState block_state = GetBlockStateWithDelegate(
-      escaped_url.scheme(), g_external_protocol_handler_delegate, profile);
+      escaped_url.scheme(), base::OptionalOrNullptr(initiating_origin),
+      g_external_protocol_handler_delegate, profile);
   if (block_state == BLOCK) {
     if (g_external_protocol_handler_delegate)
       g_external_protocol_handler_delegate->BlockRequest();
@@ -295,12 +357,27 @@ void ExternalProtocolHandler::LaunchUrl(const GURL& url,
 
   g_accept_requests = false;
 
+  base::Optional<url::Origin> initiating_origin_or_precursor;
+  if (initiating_origin) {
+    // Transform the initiating origin to its precursor origin if it is
+    // opaque. |initiating_origin| is shown in the UI to attribute the external
+    // protocol request to a particular site, and showing an opaque origin isn't
+    // useful.
+    if (initiating_origin->opaque()) {
+      initiating_origin_or_precursor = url::Origin::Create(
+          initiating_origin->GetTupleOrPrecursorTupleIfOpaque().GetURL());
+    } else {
+      initiating_origin_or_precursor = initiating_origin;
+    }
+  }
+
   // The worker creates tasks with references to itself and puts them into
   // message loops.
   shell_integration::DefaultWebClientWorkerCallback callback = base::Bind(
       &OnDefaultProtocolClientWorkerFinished, escaped_url,
       render_process_host_id, render_view_routing_id, block_state == UNKNOWN,
-      page_transition, has_user_gesture, g_external_protocol_handler_delegate);
+      page_transition, has_user_gesture, initiating_origin_or_precursor,
+      g_external_protocol_handler_delegate);
 
   // Start the check process running. This will send tasks to a worker task
   // runner and when the answer is known will send the result back to
@@ -348,11 +425,12 @@ void ExternalProtocolHandler::RecordHandleStateMetrics(bool checkbox_selected,
 
 // static
 void ExternalProtocolHandler::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
+  registry->RegisterDictionaryPref(
+      prefs::kProtocolHandlerPerOriginAllowedProtocols);
 }
 
 // static
 void ExternalProtocolHandler::ClearData(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
-  prefs->ClearPref(prefs::kExcludedSchemes);
+  prefs->ClearPref(prefs::kProtocolHandlerPerOriginAllowedProtocols);
 }

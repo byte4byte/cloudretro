@@ -23,22 +23,36 @@ namespace chrome_test_util {
 id<GREYAction> LongPressElementForContextMenu(ElementSelector* selector,
                                               bool triggers_context_menu);
 
+// Action to scroll a web element described by the given |selector| to visible
+// on the current web state.
+id<GREYAction> ScrollElementToVisible(ElementSelector* selector);
+
 // Action to turn the switch of a SettingsSwitchCell to the given |on| state.
 id<GREYAction> TurnSettingsSwitchOn(BOOL on);
 
 // Action to turn the switch of a SyncSwitchCell to the given |on| state.
 id<GREYAction> TurnSyncSwitchOn(BOOL on);
 
+// Action to tap a web element described by the given |selector| on the current
+// web state.
+id<GREYAction> TapWebElement(ElementSelector* selector);
+
 // Action to tap a web element with id equal to |element_id| on the current web
 // state.
-id<GREYAction> TapWebElement(const std::string& element_id);
+id<GREYAction> TapWebElementWithId(const std::string& element_id);
 
 // Action to tap a web element in iframe with the given |element_id| on the
 // current web state. iframe is an immediate child of the main frame with the
 // given index. The action fails if target iframe has a different origin from
 // the main frame.
-id<GREYAction> TapWebElementInFrame(const std::string& element_id,
-                                    const int frame_index);
+id<GREYAction> TapWebElementWithIdInFrame(const std::string& element_id,
+                                          const int frame_index);
+
+// Action to scroll to top of a UIScrollView.
+// On iOS 13 the settings menu appears as a card that can be dismissed with a
+// downward swipe, for this reason we need to swipe up programmatically to
+// avoid dismissing the VC.
+id<GREYAction> ScrollToTop();
 
 }  // namespace chrome_test_util
 

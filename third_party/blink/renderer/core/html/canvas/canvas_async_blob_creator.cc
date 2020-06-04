@@ -17,8 +17,8 @@
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/platform/graphics/image_data_buffer.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder_utils.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
@@ -26,7 +26,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/skia/include/core/SkSurface.h"
 
 namespace blink {
@@ -129,6 +129,15 @@ void RecordScaledDurationHistogram(ImageEncodingMimeType mime_type,
   }
 }
 
+SkColorType GetColorTypeForConversion(SkColorType color_type) {
+  if (color_type == kRGBA_8888_SkColorType ||
+      color_type == kBGRA_8888_SkColorType) {
+    return color_type;
+  }
+
+  return kN32_SkColorType;
+}
+
 }  // anonymous namespace
 
 CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
@@ -176,6 +185,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
 
   sk_sp<SkImage> skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
   DCHECK(skia_image);
+  DCHECK(!skia_image->isTextureBacked());
 
   // If image is lazy decoded, call readPixels() to trigger decoding.
   if (skia_image->isLazyGenerated()) {
@@ -191,7 +201,9 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
   // covnert to the requested color space and pixel format.
   if (function_type_ != kHTMLCanvasConvertToBlobPromise) {
     if (skia_image->colorSpace()) {
-      image_ = image_->ConvertToColorSpace(SkColorSpace::MakeSRGB());
+      image_ = image_->ConvertToColorSpace(
+          SkColorSpace::MakeSRGB(),
+          GetColorTypeForConversion(skia_image->colorType()));
       skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
     }
 
@@ -212,12 +224,13 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
       DCHECK(skia_image->colorSpace());
     }
 
-    SkColorType target_color_type = kN32_SkColorType;
+    SkColorType target_color_type =
+        GetColorTypeForConversion(skia_image->colorType());
     if (encode_options_->pixelFormat() == kRGBA16ImagePixelFormatName)
       target_color_type = kRGBA_F16_SkColorType;
     // We can do color space and color type conversion together.
     if (needs_color_space_conversion) {
-      image_ = StaticBitmapImage::Create(skia_image);
+      image_ = UnacceleratedStaticBitmapImage::Create(skia_image);
       image_ = image_->ConvertToColorSpace(blob_color_space, target_color_type);
       skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
     } else if (skia_image->colorType() != target_color_type) {
@@ -231,7 +244,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
                             info.minRowBytes());
       skia_image->readPixels(src_data_f16, 0, 0);
       skia_image = SkImage::MakeFromRaster(src_data_f16, nullptr, nullptr);
-      image_ = StaticBitmapImage::Create(skia_image);
+      image_ = UnacceleratedStaticBitmapImage::Create(skia_image);
     }
 
     if (skia_image->peekPixels(&src_data_))
@@ -296,8 +309,11 @@ void CanvasAsyncBlobCreator::ScheduleAsyncBlobCreation(const double& quality) {
   // deadlines (6.7s or 13s) bypass the web test running deadline (6s)
   // and result in timeouts on different tests. We use
   // enforce_idle_encoding_for_test_ to test idle encoding in unit tests.
+  // We also don't use idle tasks in workers because the short idle periods are
+  // not implemented, so the idle task can take a long time even when the thread
+  // is not busy.
   bool use_idle_encoding =
-      (mime_type_ != kMimeTypeWebp) &&
+      WTF::IsMainThread() && (mime_type_ != kMimeTypeWebp) &&
       (enforce_idle_encoding_for_test_ ||
        !RuntimeEnabledFeatures::NoIdleEncodingForWebTestsEnabled());
 

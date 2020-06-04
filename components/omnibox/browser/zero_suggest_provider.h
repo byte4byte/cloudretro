@@ -20,7 +20,7 @@
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 
 class AutocompleteProviderListener;
-class HistoryURLProvider;
+class PrefRegistrySimple;
 
 namespace base {
 class Value;
@@ -30,9 +30,6 @@ namespace network {
 class SimpleURLLoader;
 }
 
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
 
 // Autocomplete provider for searches based on the current URL.
 //
@@ -45,8 +42,8 @@ class PrefRegistrySyncable;
 // omnibox text and suggestions.
 class ZeroSuggestProvider : public BaseSearchProvider {
  public:
-  // Fixed parameter values corresponding to each possible ZeroSuggestVariant,
-  // which also corresponds to each ZeroSuggestProvider::ResultType.
+  // ZeroSuggestVariant field trial param values corresponding to each
+  // ZeroSuggestProvider::ResultType.
   // Public for testing.
   static const char kNoneVariant[];
   static const char kRemoteNoUrlVariant[];
@@ -55,11 +52,10 @@ class ZeroSuggestProvider : public BaseSearchProvider {
 
   // Creates and returns an instance of this provider.
   static ZeroSuggestProvider* Create(AutocompleteProviderClient* client,
-                                     HistoryURLProvider* history_url_provider,
                                      AutocompleteProviderListener* listener);
 
   // Registers a preference used to cache zero suggest results.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
   // AutocompleteProvider:
   void Start(const AutocompleteInput& input, bool minimal_changes) override;
@@ -78,12 +74,23 @@ class ZeroSuggestProvider : public BaseSearchProvider {
     current_page_classification_ = classification;
   }
 
+  // Returns the list of experiment stats corresponding to the latest |results_|
+  // to be logged to SearchboxStats as part of a GWS experiment, if any.
+  const SearchSuggestionParser::ExperimentStats& experiment_stats() const {
+    return results_.experiment_stats;
+  }
+
+  // Returns the map of suggestion group Ids to headers corresponding to the
+  // latest |results_|.
+  const SearchSuggestionParser::HeadersMap& headers_map() const {
+    return results_.headers_map;
+  }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ZeroSuggestProviderTest, TypeOfResultToRun);
   FRIEND_TEST_ALL_PREFIXES(ZeroSuggestProviderTest,
                            TestStartWillStopForSomeInput);
   ZeroSuggestProvider(AutocompleteProviderClient* client,
-                      HistoryURLProvider* history_url_provider,
                       AutocompleteProviderListener* listener);
 
   ~ZeroSuggestProvider() override;
@@ -114,7 +121,7 @@ class ZeroSuggestProvider : public BaseSearchProvider {
       const SearchSuggestionParser::SuggestResult& result) const override;
   void RecordDeletionResult(bool success) override;
 
-  // Called when loading is complete.
+  // Called when the network request for suggestions has completed.
   void OnURLLoadComplete(const network::SimpleURLLoader* source,
                          std::unique_ptr<std::string> response_body);
 
@@ -131,12 +138,6 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   // The return value is true only when |results_| changed.
   bool UpdateResults(const std::string& json_data);
 
-  // Adds AutocompleteMatches for each of the suggestions in |results| to
-  // |map|.
-  void AddSuggestResultsToMap(
-      const SearchSuggestionParser::SuggestResults& results,
-      MatchMap* map);
-
   // Returns an AutocompleteMatch for a navigational suggestion |navigation|.
   AutocompleteMatch NavigationToMatch(
       const SearchSuggestionParser::NavigationResult& navigation);
@@ -146,10 +147,10 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   // received.
   void ConvertResultsToAutocompleteMatches();
 
-  // Returns an AutocompleteMatch for the current URL. The match should be in
+  // Returns an AutocompleteMatch for the current text. The match should be in
   // the top position so that pressing enter has the effect of reloading the
   // page.
-  AutocompleteMatch MatchForCurrentURL();
+  AutocompleteMatch MatchForCurrentText();
 
   // When the user is in the Most Visited field trial, we ask the TopSites
   // service for the most visited URLs. It then calls back to this function to
@@ -180,9 +181,6 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   ResultType TypeOfResultToRun(const GURL& current_url,
                                const GURL& suggest_url);
 
-  // Used for efficiency when creating the verbatim match.  Can be null.
-  HistoryURLProvider* history_url_provider_;
-
   AutocompleteProviderListener* listener_;
 
   // The result type that is currently being processed by provider.
@@ -209,8 +207,9 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   // Loader used to retrieve results.
   std::unique_ptr<network::SimpleURLLoader> loader_;
 
-  // Suggestion for the current URL.
-  AutocompleteMatch current_url_match_;
+  // The verbatim match for the current text, whether it's a URL or search query
+  // (which can occur for Query in Omnibox / Query Refinements).
+  AutocompleteMatch current_text_match_;
 
   // Contains suggest and navigation results as well as relevance parsed from
   // the response for the most recent zero suggest input URL.

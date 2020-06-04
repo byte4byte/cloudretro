@@ -16,7 +16,7 @@
 #include "chrome/browser/chromeos/arc/icon_decode_request.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_test.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace arc {
@@ -41,7 +41,7 @@ class ArcAppShortcutsRequestTest : public testing::Test {
   std::unique_ptr<TestingProfile> profile_;
   ArcAppTest arc_app_test_;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcAppShortcutsRequestTest);
 };
@@ -61,7 +61,7 @@ TEST_F(ArcAppShortcutsRequestTest, Basic) {
   DCHECK(items);
   for (size_t i = 0; i < items->size(); ++i) {
     EXPECT_EQ(base::StringPrintf("ShortLabel %zu", i),
-              base::UTF16ToUTF8(items->at(i).short_label));
+              items->at(i).short_label);
     EXPECT_EQ(base::StringPrintf("ShortcutId %zu", i),
               items->at(i).shortcut_id);
   }

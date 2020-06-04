@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/views/test/view_event_test_base.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
 namespace views {
@@ -35,7 +35,7 @@ class MenuRunner;
 // MenuItemView prevents repeated activation of a menu by clicks too
 // close in time.
 class MenuTestBase : public ViewEventTestBase,
-                     public views::MenuButtonListener,
+                     public views::ButtonListener,
                      public views::MenuDelegate {
  public:
   MenuTestBase();
@@ -71,21 +71,19 @@ class MenuTestBase : public ViewEventTestBase,
   // ViewEventTestBase implementation.
   void SetUp() override;
   void TearDown() override;
-  views::View* CreateContentsView() override;
+  std::unique_ptr<views::View> CreateContentsView() override;
   void DoTestOnMessageLoop() override;
   gfx::Size GetPreferredSizeForContents() const override;
 
-  // views::MenuButtonListener implementation
-  void OnMenuButtonClicked(views::Button* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override;
+  // views::ButtonListener implementation
+  void ButtonPressed(views::Button* source, const ui::Event& event) override;
 
   // views::MenuDelegate implementation
   void ExecuteCommand(int id) override;
 
  private:
-  views::MenuButton* button_;
-  views::MenuItemView* menu_;
+  views::MenuButton* button_ = nullptr;
+  views::MenuItemView* menu_ = nullptr;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
   // The command id of the last pressed menu item since the menu was opened.

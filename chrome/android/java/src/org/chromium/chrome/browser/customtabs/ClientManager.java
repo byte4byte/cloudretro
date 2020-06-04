@@ -13,35 +13,37 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
-import android.support.annotation.NonNull;
-import android.support.customtabs.CustomTabsCallback;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsService.Relation;
-import android.support.customtabs.CustomTabsSessionToken;
-import android.support.customtabs.PostMessageServiceConnection;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.util.SparseBooleanArray;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsService.Relation;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.PostMessageServiceConnection;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.browserservices.OriginVerifier;
 import org.chromium.chrome.browser.browserservices.OriginVerifier.OriginVerificationListener;
 import org.chromium.chrome.browser.browserservices.PostMessageHandler;
 import org.chromium.chrome.browser.installedapp.InstalledAppProviderImpl;
-import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.chrome.browser.installedapp.PackageManagerDelegate;
+import org.chromium.components.embedder_support.util.Origin;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
+import org.chromium.url.URI;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -185,7 +187,6 @@ class ClientManager {
         private boolean mAllowParallelRequest;
         private boolean mAllowResourcePrefetch;
         private boolean mShouldGetPageLoadMetrics;
-        private boolean mShouldHideTopBar;
 
         public SessionParams(Context context, int uid, CustomTabsCallback customTabsCallback,
                 DisconnectCallback callback, PostMessageHandler postMessageHandler,
@@ -476,13 +477,14 @@ class ClientManager {
             }
         };
 
-        params.originVerifier = new OriginVerifier(params.getPackageName(), relation);
+        params.originVerifier =
+                new OriginVerifier(params.getPackageName(), relation, /* webContents= */ null);
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
                 () -> { params.originVerifier.start(listener, origin); });
         if (relation == CustomTabsService.RELATION_HANDLE_ALL_URLS
                 && InstalledAppProviderImpl.isAppInstalledAndAssociatedWithOrigin(
-                           params.getPackageName(), URI.create(origin.toString()),
-                           ContextUtils.getApplicationContext().getPackageManager())) {
+                        params.getPackageName(), URI.create(origin.toString()),
+                        new PackageManagerDelegate())) {
             params.mLinkedOrigins.add(origin);
         }
         return true;
@@ -622,26 +624,6 @@ class ClientManager {
     }
 
     /**
-     * @return Whether the CCT TopBar should be hidden on dynamic module managed URLs
-     * for a given session.
-     */
-    public synchronized boolean shouldHideTopBarOnModuleManagedUrlsForSession(
-            CustomTabsSessionToken session) {
-        SessionParams params = mSessionParams.get(session);
-        return params != null && params.mShouldHideTopBar;
-    }
-
-    /**
-     * Sets whether the CCT TopBar should be hidden on dynamic module managed URLs
-     * for a given session.
-     */
-    public synchronized void setHideCCTTopBarOnModuleManagedUrls(
-            CustomTabsSessionToken session, boolean hide) {
-        SessionParams params = mSessionParams.get(session);
-        if (params != null) params.mShouldHideTopBar = hide;
-    }
-
-    /**
      * @return Whether the session is using the default parameters (that is, don't ignore
      *         fragments and don't speculate loads on cellular connections).
      */
@@ -713,6 +695,14 @@ class ClientManager {
     public synchronized boolean shouldGetPageLoadMetrics(CustomTabsSessionToken session) {
         SessionParams params = mSessionParams.get(session);
         return params != null ? params.mShouldGetPageLoadMetrics : false;
+    }
+
+    /**
+     * Returns the uid associated with the session, {@code -1} if there is no matching session.
+     */
+    public synchronized int getUidForSession(CustomTabsSessionToken session) {
+        SessionParams params = mSessionParams.get(session);
+        return params != null ? params.uid : -1;
     }
 
     /**

@@ -11,10 +11,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/one_shot_event.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -60,7 +61,7 @@ void CheckExtensionDirectory(const base::FilePath& path,
   // Clean up temporary files left if Chrome crashed or quit in the middle
   // of an extension install.
   if (basename.value() == file_util::kTempDirectoryName) {
-    base::DeleteFile(path, true);  // Recursive.
+    base::DeleteFileRecursively(path);
     return;
   }
 
@@ -74,7 +75,7 @@ void CheckExtensionDirectory(const base::FilePath& path,
 
   // Delete directories that aren't valid IDs.
   if (extension_id.empty()) {
-    base::DeleteFile(path, true);  // Recursive.
+    base::DeleteFileRecursively(path);
     return;
   }
 
@@ -85,7 +86,7 @@ void CheckExtensionDirectory(const base::FilePath& path,
   // move on. This can legitimately happen when an uninstall does not
   // complete, for example, when a plugin is in use at uninstall time.
   if (iter_pair.first == iter_pair.second) {
-    base::DeleteFile(path, true);  // Recursive.
+    base::DeleteFileRecursively(path);
     return;
   }
 
@@ -103,7 +104,7 @@ void CheckExtensionDirectory(const base::FilePath& path,
       }
     }
     if (!known_version)
-      base::DeleteFile(version_dir, true);  // Recursive.
+      base::DeleteFileRecursively(version_dir);
   }
 }
 
@@ -230,8 +231,7 @@ void ExtensionGarbageCollector::GarbageCollectIsolatedStorageIfNeeded() {
        ++iter) {
     if (AppIsolationInfo::HasIsolatedStorage(iter->get())) {
       active_paths->insert(
-          content::BrowserContext::GetStoragePartitionForSite(
-              context_, util::GetSiteForExtensionId((*iter)->id(), context_))
+          util::GetStoragePartitionForExtensionId((*iter)->id(), context_)
               ->GetPath());
     }
   }
@@ -240,7 +240,7 @@ void ExtensionGarbageCollector::GarbageCollectIsolatedStorageIfNeeded() {
   installs_delayed_for_gc_ = true;
   content::BrowserContext::GarbageCollectStoragePartitions(
       context_, std::move(active_paths),
-      base::Bind(
+      base::BindOnce(
           &ExtensionGarbageCollector::OnGarbageCollectIsolatedStorageFinished,
           weak_factory_.GetWeakPtr()));
 }

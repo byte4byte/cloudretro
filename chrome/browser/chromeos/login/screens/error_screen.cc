@@ -10,6 +10,10 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/certificate_manager_dialog.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
@@ -27,8 +31,6 @@
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -76,7 +78,8 @@ constexpr const char ErrorScreen::kUserActionNetworkConnected[] =
     "network-connected";
 
 ErrorScreen::ErrorScreen(ErrorScreenView* view)
-    : BaseScreen(ErrorScreenView::kScreenId), view_(view), weak_factory_(this) {
+    : BaseScreen(ErrorScreenView::kScreenId, OobeScreenPriority::DEFAULT),
+      view_(view) {
   network_state_informer_ = new NetworkStateInformer();
   network_state_informer_->Init();
   NetworkHandler::Get()->network_connection_handler()->AddObserver(this);
@@ -148,8 +151,8 @@ void ErrorScreen::SetParentScreen(OobeScreenId parent_screen) {
   // Not really used on JS side yet so no need to propagate to screen context.
 }
 
-void ErrorScreen::SetHideCallback(const base::Closure& on_hide) {
-  on_hide_callback_.reset(new base::Closure(on_hide));
+void ErrorScreen::SetHideCallback(base::OnceClosure on_hide) {
+  on_hide_callback_ = std::move(on_hide);
 }
 
 void ErrorScreen::ShowCaptivePortal() {
@@ -162,6 +165,11 @@ void ErrorScreen::ShowCaptivePortal() {
 void ErrorScreen::ShowConnectingIndicator(bool show) {
   if (view_)
     view_->SetShowConnectingIndicator(show);
+}
+
+void ErrorScreen::SetIsPersistentError(bool is_persistent) {
+  if (view_)
+    view_->SetIsPersistentError(is_persistent);
 }
 
 ErrorScreen::ConnectRequestCallbackSubscription
@@ -190,23 +198,23 @@ void ErrorScreen::DoShow() {
 void ErrorScreen::DoHide() {
   LOG(WARNING) << "Network error screen message is hidden";
   if (on_hide_callback_) {
-    on_hide_callback_->Run();
-    on_hide_callback_.reset();
+    std::move(on_hide_callback_).Run();
+    on_hide_callback_ = base::OnceClosure();
   }
   network_portal_detector::GetInstance()->SetStrategy(
       PortalDetectorStrategy::STRATEGY_ID_LOGIN_SCREEN);
 }
 
-void ErrorScreen::Show() {
+void ErrorScreen::ShowImpl() {
   if (!on_hide_callback_) {
-    SetHideCallback(base::Bind(&ErrorScreen::DefaultHideCallback,
-                               weak_factory_.GetWeakPtr()));
+    SetHideCallback(base::BindOnce(&ErrorScreen::DefaultHideCallback,
+                                   weak_factory_.GetWeakPtr()));
   }
   if (view_)
     view_->Show();
 }
 
-void ErrorScreen::Hide() {
+void ErrorScreen::HideImpl() {
   if (view_)
     view_->Hide();
 }
@@ -293,11 +301,12 @@ void ErrorScreen::OnDiagnoseButtonClicked() {
       IDR_CONNECTIVITY_DIAGNOSTICS_MANIFEST,
       base::FilePath(extension_misc::kConnectivityDiagnosticsPath));
 
-  OpenApplication(
-      AppLaunchParams(profile, extension_id,
-                      extensions::LaunchContainer::kLaunchContainerWindow,
-                      WindowOpenDisposition::NEW_WINDOW,
-                      extensions::AppLaunchSource::kSourceChromeInternal));
+  apps::AppServiceProxyFactory::GetForProfile(profile)
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(apps::AppLaunchParams(
+          extension_id, apps::mojom::LaunchContainer::kLaunchContainerWindow,
+          WindowOpenDisposition::NEW_WINDOW,
+          apps::mojom::AppLaunchSource::kSourceChromeInternal));
   KioskAppManager::Get()->InitSession(profile, extension_id);
 
   LoginDisplayHost::default_host()->Finalize(base::BindOnce(
@@ -328,8 +337,8 @@ void ErrorScreen::StartGuestSessionAfterOwnershipCheck(
   // Make sure to disallow guest login if it's explicitly disabled.
   CrosSettingsProvider::TrustedStatus trust_status =
       CrosSettings::Get()->PrepareTrustedValues(
-          base::Bind(&ErrorScreen::StartGuestSessionAfterOwnershipCheck,
-                     weak_factory_.GetWeakPtr(), ownership_status));
+          base::BindOnce(&ErrorScreen::StartGuestSessionAfterOwnershipCheck,
+                         weak_factory_.GetWeakPtr(), ownership_status));
   switch (trust_status) {
     case CrosSettingsProvider::TEMPORARILY_UNTRUSTED:
       // Wait for a callback.

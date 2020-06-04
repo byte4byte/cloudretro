@@ -3,10 +3,7 @@
 // found in the LICENSE file.
 #include "components/password_manager/core/browser/credential_manager_impl.h"
 
-#include <memory>
 #include <string>
-#include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/metrics/user_metrics.h"
@@ -27,7 +24,7 @@ void RunGetCallback(GetCallback callback, const CredentialInfo& info) {
 }  // namespace
 
 CredentialManagerImpl::CredentialManagerImpl(PasswordManagerClient* client)
-    : client_(client) {
+    : client_(client), leak_delegate_(client) {
   auto_signin_enabled_.Init(prefs::kCredentialsEnableAutosignin,
                             client_->GetPrefs());
 }
@@ -47,14 +44,17 @@ void CredentialManagerImpl::Store(const CredentialInfo& credential,
   std::move(callback).Run();
 
   const GURL origin = GetLastCommittedURL();
-  if (!client_->IsSavingAndFillingEnabled(origin) ||
-      !client_->OnCredentialManagerUsed())
+  if (!client_->IsSavingAndFillingEnabled(origin))
     return;
 
   client_->NotifyStorePasswordCalled();
 
   std::unique_ptr<autofill::PasswordForm> form(
       CreatePasswordFormFromCredentialInfo(credential, origin));
+
+  // Check whether a stored password credential was leaked.
+  if (credential.type == CredentialType::CREDENTIAL_TYPE_PASSWORD)
+    leak_delegate_.StartLeakCheck(*form);
 
   std::string signon_realm = origin.GetOrigin().spec();
   PasswordStore::FormDigest observed_digest(
@@ -78,8 +78,7 @@ void CredentialManagerImpl::PreventSilentAccess(
   std::move(callback).Run();
 
   PasswordStore* store = GetPasswordStore();
-  if (!store || !client_->IsSavingAndFillingEnabled(GetLastCommittedURL()) ||
-      !client_->OnCredentialManagerUsed())
+  if (!store || !client_->IsSavingAndFillingEnabled(GetLastCommittedURL()))
     return;
 
   if (!pending_require_user_mediation_) {
@@ -113,8 +112,7 @@ void CredentialManagerImpl::Get(CredentialMediationRequirement mediation,
 
   // Return an empty credential if the current page has TLS errors, or if the
   // page is being prerendered.
-  if (!client_->IsFillingEnabled(GetLastCommittedURL()) ||
-      !client_->OnCredentialManagerUsed()) {
+  if (!client_->IsFillingEnabled(GetLastCommittedURL())) {
     std::move(callback).Run(CredentialManagerError::SUCCESS, CredentialInfo());
     LogCredentialManagerGetResult(
         metrics_util::CredentialManagerGetResult::kNone, mediation);
@@ -131,7 +129,7 @@ void CredentialManagerImpl::Get(CredentialMediationRequirement mediation,
   }
 
   pending_request_.reset(new CredentialManagerPendingRequestTask(
-      this, base::Bind(&RunGetCallback, base::Passed(&callback)), mediation,
+      this, base::BindOnce(&RunGetCallback, std::move(callback)), mediation,
       include_passwords, federations));
   // This will result in a callback to
   // PendingRequestTask::OnGetPasswordStoreResults().
@@ -156,22 +154,20 @@ GURL CredentialManagerImpl::GetOrigin() const {
   return GetLastCommittedURL().GetOrigin();
 }
 
-void CredentialManagerImpl::SendCredential(
-    const SendCredentialCallback& send_callback,
-    const CredentialInfo& info) {
+void CredentialManagerImpl::SendCredential(SendCredentialCallback send_callback,
+                                           const CredentialInfo& info) {
   DCHECK(pending_request_);
-  DCHECK(send_callback == pending_request_->send_callback());
 
   if (password_manager_util::IsLoggingActive(client_)) {
     CredentialManagerLogger(client_->GetLogManager())
         .LogSendCredential(GetLastCommittedURL(), info.type);
   }
-  send_callback.Run(info);
+  std::move(send_callback).Run(info);
   pending_request_.reset();
 }
 
 void CredentialManagerImpl::SendPasswordForm(
-    const SendCredentialCallback& send_callback,
+    SendCredentialCallback send_callback,
     CredentialMediationRequirement mediation,
     const autofill::PasswordForm* form) {
   CredentialInfo info;
@@ -198,7 +194,7 @@ void CredentialManagerImpl::SendPasswordForm(
     metrics_util::LogCredentialManagerGetResult(
         metrics_util::CredentialManagerGetResult::kNone, mediation);
   }
-  SendCredential(send_callback, info);
+  SendCredential(std::move(send_callback), info);
 }
 
 PasswordManagerClient* CredentialManagerImpl::client() const {
@@ -206,7 +202,7 @@ PasswordManagerClient* CredentialManagerImpl::client() const {
 }
 
 PasswordStore* CredentialManagerImpl::GetPasswordStore() {
-  return client_ ? client_->GetPasswordStore() : nullptr;
+  return client_ ? client_->GetProfilePasswordStore() : nullptr;
 }
 
 void CredentialManagerImpl::DoneRequiringUserMediation() {

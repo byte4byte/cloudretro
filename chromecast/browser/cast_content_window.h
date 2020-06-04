@@ -8,17 +8,19 @@
 #include <memory>
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
-#include "chromecast/graphics/cast_window_manager.h"
+#include "chromecast/browser/cast_web_contents.h"
 #include "chromecast/graphics/gestures/cast_gesture_handler.h"
-#include "content/public/browser/web_contents.h"
+#include "chromecast/ui/back_gesture_router.h"
+#include "chromecast/ui/mojom/media_control_ui.mojom.h"
+#include "chromecast/ui/mojom/ui_service.mojom.h"
 #include "ui/events/event.h"
 
 namespace chromecast {
-namespace shell {
 
 // Describes visual context of the window within the UI.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chromecast.shell
@@ -32,11 +34,16 @@ enum class VisibilityType {
   // Window occupies a portion of the screen, supporting user interaction.
   PARTIAL_OUT = 2,
 
-  // Window is hidden, and cannot be interacted with via touch.
+  // Window is hidden after dismissal by back gesture, and cannot be interacted
+  // with via touch.
   HIDDEN = 3,
 
   // Window is being displayed as a small visible tile.
-  TILE = 4
+  TILE = 4,
+
+  // Window is covered by other activities and cannot be interacted with via
+  // touch.
+  TRANSIENTLY_HIDDEN = 5
 };
 
 // Represents requested activity windowing behavior. Behavior includes:
@@ -94,8 +101,7 @@ class CastContentWindow {
     // Notify window destruction.
     virtual void OnWindowDestroyed() {}
 
-    // Notifies that a key event was triggered on the window.
-    virtual void OnKeyEvent(const ui::KeyEvent& key_event) {}
+    using GestureHandledCallback = base::OnceCallback<void(bool)>;
 
     // Check to see if the gesture can be handled by the delegate. This is
     // called prior to ConsumeGesture().
@@ -110,9 +116,10 @@ class CastContentWindow {
     virtual void CancelGesture(GestureType gesture_type,
                                const gfx::Point& touch_location) {}
 
-    // Consume and handle a completed UI gesture. Returns whether the gesture
-    // was handled or not.
-    virtual bool ConsumeGesture(GestureType gesture_type) = 0;
+    // Consume and handle a completed UI gesture. Invokes the callback with a
+    // boolean indicating whether the gesture was handled or not.
+    virtual void ConsumeGesture(GestureType gesture_type,
+                                GestureHandledCallback handled_callback) = 0;
 
     // Notify visibility change for this window.
     virtual void OnVisibilityChange(VisibilityType visibility_type) {}
@@ -126,8 +133,10 @@ class CastContentWindow {
 
   // The parameters used to create a CastContentWindow instance.
   struct CreateParams {
-    // The delegate for the CastContentWindow. Must be non-null.
-    Delegate* delegate = nullptr;
+    // The delegate for the CastContentWindow. Must be non-null. If the delegate
+    // is destroyed before CastContentWindow, the WeakPtr will be invalidated on
+    // the main UI thread.
+    base::WeakPtr<Delegate> delegate = nullptr;
 
     // True if this CastContentWindow is for a headless build.
     bool is_headless = false;
@@ -149,6 +158,8 @@ class CastContentWindow {
         CastGestureHandler::Priority::NONE;
 
     CreateParams();
+    CreateParams(const CreateParams& other);
+    ~CreateParams();
   };
 
   class Observer : public base::CheckedObserver {
@@ -160,23 +171,18 @@ class CastContentWindow {
     ~Observer() override {}
   };
 
-  // Creates the platform specific CastContentWindow. |delegate| should outlive
-  // the created CastContentWindow.
-  static std::unique_ptr<CastContentWindow> Create(const CreateParams& params);
-
-  CastContentWindow();
+  explicit CastContentWindow(const CreateParams& params);
   virtual ~CastContentWindow();
 
-  // Creates a full-screen window for |web_contents| and displays it if screen
-  // access has been granted.
-  // |web_contents| should outlive this CastContentWindow.
-  // |window_manager| should outlive this CastContentWindow.
+  // Creates a full-screen window for |cast_web_contents| and displays it if
+  // screen access has been granted. |cast_web_contents| must outlive the
+  // CastContentWindow. |z_order| is provided so that windows which share the
+  // same parent have a well-defined order.
   // TODO(seantopping): This method probably shouldn't exist; this class should
   // use RAII instead.
   virtual void CreateWindowForWebContents(
-      content::WebContents* web_contents,
-      CastWindowManager* window_manager,
-      CastWindowManager::WindowId z_order,
+      CastWebContents* cast_web_contents,
+      mojom::ZOrder z_order,
       VisibilityPriority visibility_priority) = 0;
 
   // Allows the window to be shown on the screen. The window cannot be shown on
@@ -212,15 +218,22 @@ class CastContentWindow {
   // screen.
   virtual void RequestMoveOut() = 0;
 
+  // Media control interface. Non-null on Aura platforms.
+  virtual mojom::MediaControlUi* media_controls();
+
+  // Registers this as a delegate to BackGestureRouter.
+  virtual void RegisterBackGestureRouter(
+      ::chromecast::BackGestureRouter* gesture_router) {}
+
   // Observer interface:
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
  protected:
+  base::WeakPtr<Delegate> delegate_;
   base::ObserverList<Observer> observer_list_;
 };
 
-}  // namespace shell
 }  // namespace chromecast
 
 #endif  // CHROMECAST_BROWSER_CAST_CONTENT_WINDOW_H_

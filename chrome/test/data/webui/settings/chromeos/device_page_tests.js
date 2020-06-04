@@ -8,8 +8,10 @@ cr.define('device_page_tests', function() {
     DevicePage: 'device page',
     Display: 'display',
     Keyboard: 'keyboard',
+    NightLight: 'night light',
     Pointers: 'pointers',
     Power: 'power',
+    Storage: 'storage',
     Stylus: 'stylus',
   };
 
@@ -28,6 +30,8 @@ cr.define('device_page_tests', function() {
     this.noteTakingApps_ = [];
     this.setPreferredAppCount_ = 0;
     this.setAppOnLockScreenCount_ = 0;
+
+    this.lastHighlightedDisplayId_ = '-1';
   }
 
   TestDevicePageBrowserProxy.prototype = {
@@ -71,8 +75,12 @@ cr.define('device_page_tests', function() {
     },
 
     /** @override */
-    setIdleBehavior: function(behavior) {
-      this.idleBehavior_ = behavior;
+    setIdleBehavior: function(behavior, whenOnAc) {
+      if (whenOnAc) {
+        this.acIdleBehavior_ = behavior;
+      } else {
+        this.batteryIdleBehavior_ = behavior;
+      }
     },
 
     /** @override */
@@ -134,6 +142,11 @@ cr.define('device_page_tests', function() {
       });
 
       this.scheduleLockScreenAppsUpdated_();
+    },
+
+    /** @override */
+    highlightDisplay: function(id) {
+      this.lastHighlightedDisplayId_ = id;
     },
 
     // Test interface:
@@ -209,6 +222,13 @@ cr.define('device_page_tests', function() {
   function getFakePrefs() {
     return {
       ash: {
+        ambient_color: {
+          enabled: {
+            key: 'ash.ambient_color.enabled',
+            type: chrome.settingsPrivate.PrefType.BOOLEAN,
+            value: false,
+          },
+        },
         night_light: {
           enabled: {
             key: 'ash.night_light.enabled',
@@ -278,8 +298,23 @@ cr.define('device_page_tests', function() {
             type: chrome.settingsPrivate.PrefType.BOOLEAN,
             value: false,
           },
+          acceleration: {
+            key: 'settings.touchpad.acceleration',
+            type: chrome.settingsPrivate.PrefType.BOOLEAN,
+            value: true,
+          },
+          scroll_acceleration: {
+            key: 'settings.touchpad.scroll_acceleration',
+            type: chrome.settingsPrivate.PrefType.BOOLEAN,
+            value: true,
+          },
           sensitivity2: {
             key: 'settings.touchpad.sensitivity2',
+            type: chrome.settingsPrivate.PrefType.NUMBER,
+            value: 3,
+          },
+          scroll_sensitivity: {
+            key: 'settings.touchpad.scroll_sensitivity',
             type: chrome.settingsPrivate.PrefType.NUMBER,
             value: 3,
           },
@@ -295,8 +330,23 @@ cr.define('device_page_tests', function() {
             type: chrome.settingsPrivate.PrefType.BOOLEAN,
             value: false,
           },
+          acceleration: {
+            key: 'settings.mouse.acceleration',
+            type: chrome.settingsPrivate.PrefType.BOOLEAN,
+            value: true,
+          },
+          scroll_acceleration: {
+            key: 'settings.mouse.scroll_acceleration',
+            type: chrome.settingsPrivate.PrefType.BOOLEAN,
+            value: true,
+          },
           sensitivity2: {
             key: 'settings.mouse.sensitivity2',
+            type: chrome.settingsPrivate.PrefType.NUMBER,
+            value: 4,
+          },
+          scroll_sensitivity: {
+            key: 'settings.mouse.scroll_sensitivity',
             type: chrome.settingsPrivate.PrefType.NUMBER,
             value: 4,
           },
@@ -374,7 +424,7 @@ cr.define('device_page_tests', function() {
       settings.display.systemDisplayApi = fakeSystemDisplay;
 
       PolymerTest.clearBody();
-      settings.navigateTo(settings.routes.BASIC);
+      settings.Router.getInstance().navigateTo(settings.routes.BASIC);
 
       devicePage = document.createElement('settings-device-page');
       devicePage.prefs = getFakePrefs();
@@ -395,25 +445,62 @@ cr.define('device_page_tests', function() {
     function showAndGetDeviceSubpage(subpage, expectedRoute) {
       const row = assert(devicePage.$$(`#main #${subpage}Row`));
       row.click();
-      assertEquals(expectedRoute, settings.getCurrentRoute());
+      assertEquals(
+          expectedRoute, settings.Router.getInstance().getCurrentRoute());
       const page = devicePage.$$('settings-' + subpage);
       assert(page);
       return Promise.resolve(page);
     }
 
+    /** @param {number} n The number of the display to add. */
+    function addDisplay(n) {
+      const display = {
+        id: 'fakeDisplayId' + n,
+        name: 'fakeDisplayName' + n,
+        mirroring: '',
+        isPrimary: n == 1,
+        isInternal: n == 1,
+        rotation: 0,
+        modes: [{
+          deviceScaleFactor: 1.0,
+          widthInNativePixels: 1920,
+          heightInNativePixels: 1080,
+          width: 1920,
+          height: 1080,
+        }],
+        bounds: {
+          left: 0,
+          top: 0,
+          width: 1920,
+          height: 1080,
+        },
+        availableDisplayZoomFactors: [1, 1.25, 1.5, 2],
+      };
+      fakeSystemDisplay.addDisplayForTest(display);
+    }
+
     /**
-     * @param {settings.IdleBehavior} idleBehavior
-     * @param {boolean} idleControlled
+     * @param {!Array<!settings.IdleBehavior>} possibleAcIdleBehaviors
+     * @param {!Array<!settings.IdleBehavior>} possibleBatteryIdleBehaviors
+     * @param {settings.IdleBehavior} currAcIdleBehavior
+     * @param {settings.IdleBehavior} currBatteryIdleBehavior
+     * @param {boolean} acIdleManaged
+     * @param {boolean} batteryIdleManaged
      * @param {settings.LidClosedBehavior} lidClosedBehavior
      * @param {boolean} lidClosedControlled
      * @param {boolean} hasLid
      */
     function sendPowerManagementSettings(
-        idleBehavior, idleControlled, lidClosedBehavior, lidClosedControlled,
-        hasLid) {
+        possibleAcIdleBehaviors, possibleBatteryIdleBehaviors,
+        currAcIdleBehavior, currBatteryIdleBehavior, acIdleManaged,
+        batteryIdleManaged, lidClosedBehavior, lidClosedControlled, hasLid) {
       cr.webUIListenerCallback('power-management-settings-changed', {
-        idleBehavior: idleBehavior,
-        idleControlled: idleControlled,
+        possibleAcIdleBehaviors: possibleAcIdleBehaviors,
+        possibleBatteryIdleBehaviors: possibleBatteryIdleBehaviors,
+        currentAcIdleBehavior: currAcIdleBehavior,
+        currentBatteryIdleBehavior: currBatteryIdleBehavior,
+        acIdleManaged: acIdleManaged,
+        batteryIdleManaged: batteryIdleManaged,
         lidClosedBehavior: lidClosedBehavior,
         lidClosedControlled: lidClosedControlled,
         hasLid: hasLid,
@@ -435,15 +522,11 @@ cr.define('device_page_tests', function() {
      * @param {!HTMLElement} pointersPage
      * @param {boolean} expected
      */
-    function expectNaturalScrollValue(pointersPage, expected) {
-      const naturalScrollOff = pointersPage.$$('cr-radio-button[name="false"]');
-      const naturalScrollOn = pointersPage.$$('cr-radio-button[name="true"]');
-      assertTrue(!!naturalScrollOff);
-      assertTrue(!!naturalScrollOn);
-
-      expectEquals(!expected, naturalScrollOff.checked);
-      expectEquals(expected, naturalScrollOn.checked);
-      expectEquals(
+    function expectReverseScrollValue(pointersPage, expected) {
+      const reverseScrollToggle =
+          pointersPage.$$('#enableReverseScrollingToggle');
+      assertEquals(expected, reverseScrollToggle.checked);
+      expectNotEquals(
           expected, devicePage.prefs.settings.touchpad.natural_scroll.value);
     }
 
@@ -471,21 +554,27 @@ cr.define('device_page_tests', function() {
       });
 
       test('subpage responds to pointer attach/detach', function() {
-        assertEquals(settings.routes.POINTERS, settings.getCurrentRoute());
+        assertEquals(
+            settings.routes.POINTERS,
+            settings.Router.getInstance().getCurrentRoute());
         assertLT(0, pointersPage.$$('#mouse').offsetHeight);
         assertLT(0, pointersPage.$$('#touchpad').offsetHeight);
         assertLT(0, pointersPage.$$('#mouse h2').offsetHeight);
         assertLT(0, pointersPage.$$('#touchpad h2').offsetHeight);
 
         cr.webUIListenerCallback('has-touchpad-changed', false);
-        assertEquals(settings.routes.POINTERS, settings.getCurrentRoute());
+        assertEquals(
+            settings.routes.POINTERS,
+            settings.Router.getInstance().getCurrentRoute());
         assertLT(0, pointersPage.$$('#mouse').offsetHeight);
         assertEquals(0, pointersPage.$$('#touchpad').offsetHeight);
         assertEquals(0, pointersPage.$$('#mouse h2').offsetHeight);
         assertEquals(0, pointersPage.$$('#touchpad h2').offsetHeight);
 
         cr.webUIListenerCallback('has-mouse-changed', false);
-        assertEquals(settings.routes.DEVICE, settings.getCurrentRoute());
+        assertEquals(
+            settings.routes.DEVICE,
+            settings.Router.getInstance().getCurrentRoute());
         assertEquals(0, devicePage.$$('#main #pointersRow').offsetHeight);
 
         cr.webUIListenerCallback('has-touchpad-changed', true);
@@ -500,7 +589,8 @@ cr.define('device_page_tests', function() {
 
               cr.webUIListenerCallback('has-mouse-changed', true);
               assertEquals(
-                  settings.routes.POINTERS, settings.getCurrentRoute());
+                  settings.routes.POINTERS,
+                  settings.Router.getInstance().getCurrentRoute());
               assertLT(0, pointersPage.$$('#mouse').offsetHeight);
               assertLT(0, pointersPage.$$('#touchpad').offsetHeight);
               assertLT(0, pointersPage.$$('#mouse h2').offsetHeight);
@@ -540,51 +630,32 @@ cr.define('device_page_tests', function() {
       });
 
       test('link doesn\'t activate control', function() {
-        expectNaturalScrollValue(pointersPage, false);
+        expectReverseScrollValue(pointersPage, true);
 
         // Tapping the link shouldn't enable the radio button.
-        const naturalScrollOff =
-            pointersPage.$$('cr-radio-button[name="false"]');
-        const naturalScrollOn = pointersPage.$$('cr-radio-button[name="true"]');
-        const a = naturalScrollOn.querySelector('a');
-
+        const reverseScrollLabel =
+            pointersPage.$$('#enableReverseScrollingLabel');
+        const a = reverseScrollLabel.$.container.querySelector('a');
+        expectTrue(!!a);
         // Prevent actually opening a link, which would block test.
         a.removeAttribute('href');
-
         a.click();
-        expectNaturalScrollValue(pointersPage, false);
+        expectReverseScrollValue(pointersPage, true);
 
-        naturalScrollOn.click();
-        expectNaturalScrollValue(pointersPage, true);
+        // Check specifically clicking toggle changes pref.
+        const reverseScrollToggle =
+            pointersPage.$$('#enableReverseScrollingToggle');
+        reverseScrollToggle.click();
+        expectReverseScrollValue(pointersPage, false);
         devicePage.set('prefs.settings.touchpad.natural_scroll.value', false);
-        expectNaturalScrollValue(pointersPage, false);
+        expectReverseScrollValue(pointersPage, true);
 
-        /**
-         * MockInteraction's pressEnter does not sufficiently set all key-event
-         * properties.
-         * @param {!HTMLElement} element
-         * @param {string} keyCode
-         * @param {string} keyName
-         */
-        function triggerKeyEvents(element, keyCode, keyName) {
-          ['keydown', 'keypress', 'keyup'].forEach(event => {
-            MockInteractions.keyEventOn(
-                element, event, keyCode, undefined, keyName);
-          });
-        }
-
-        // Enter on the link shouldn't enable the radio button either.
-        triggerKeyEvents(a, 'Enter', 'Enter');
-        PolymerTest.flushTasks();
-        expectNaturalScrollValue(pointersPage, false);
-
-        pointersPage.$$('settings-radio-group').selected = '';
-        const falseRadio = pointersPage.$$('cr-radio-button[name="false"]');
-        assertTrue(!!falseRadio);
-        assertFalse(falseRadio.checked);
-        triggerKeyEvents(naturalScrollOff, 'Space', ' ');
-        PolymerTest.flushTasks();
-        expectNaturalScrollValue(pointersPage, false);
+        // Check specifically clicking the row changes pref.
+        const reverseScrollSettings = pointersPage.$$('#reverseScrollRow');
+        reverseScrollToggle.click();
+        expectReverseScrollValue(pointersPage, false);
+        devicePage.set('prefs.settings.touchpad.natural_scroll.value', false);
+        expectReverseScrollValue(pointersPage, true);
       });
     });
 
@@ -592,15 +663,14 @@ cr.define('device_page_tests', function() {
       const name = k => `prefs.settings.language.${k}.value`;
       const get = k => devicePage.get(name(k));
       const set = (k, v) => devicePage.set(name(k), v);
-      let collapse;
       // Open the keyboard subpage.
-      let keyboardPage =
+      const keyboardPage =
           await showAndGetDeviceSubpage('keyboard', settings.routes.KEYBOARD);
       // Initially, the optional keys are hidden.
       expectFalse(!!keyboardPage.$$('#capsLockKey'));
 
       // Pretend no internal keyboard is available.
-      let keyboardParams = {
+      const keyboardParams = {
         'showCapsLock': false,
         'showExternalMetaKey': false,
         'showAppleCommandKey': false,
@@ -665,7 +735,7 @@ cr.define('device_page_tests', function() {
       expectTrue(!!keyboardPage.$$('#externalCommandKey'));
       expectTrue(!!keyboardPage.$$('#assistantKey'));
 
-      collapse = keyboardPage.$$('iron-collapse');
+      const collapse = keyboardPage.$$('iron-collapse');
       assertTrue(!!collapse);
       expectTrue(collapse.opened);
 
@@ -684,18 +754,18 @@ cr.define('device_page_tests', function() {
 
       // Test sliders change when prefs change.
       set('xkb_auto_repeat_delay_r2', 1500);
-      await PolymerTest.flushTasks();
+      await test_util.flushTasks();
       expectEquals(1500, keyboardPage.$$('#delaySlider').pref.value);
       set('xkb_auto_repeat_interval_r2', 2000);
-      await PolymerTest.flushTasks();
+      await test_util.flushTasks();
       expectEquals(2000, keyboardPage.$$('#repeatRateSlider').pref.value);
 
       // Test sliders round to nearest value when prefs change.
       set('xkb_auto_repeat_delay_r2', 600);
-      await PolymerTest.flushTasks();
+      await test_util.flushTasks();
       expectEquals(500, keyboardPage.$$('#delaySlider').pref.value);
       set('xkb_auto_repeat_interval_r2', 45);
-      await PolymerTest.flushTasks();
+      await test_util.flushTasks();
       expectEquals(50, keyboardPage.$$('#repeatRateSlider').pref.value);
 
       set('xkb_auto_repeat_enabled_r2', false);
@@ -710,26 +780,8 @@ cr.define('device_page_tests', function() {
     });
 
     test(assert(TestNames.Display), function() {
-      const addDisplay = function(n) {
-        const display = {
-          id: 'fakeDisplayId' + n,
-          name: 'fakeDisplayName' + n,
-          mirroring: '',
-          isPrimary: n == 1,
-          rotation: 0,
-          modes: [],
-          bounds: {
-            left: 0,
-            top: 0,
-            width: 1920,
-            height: 1080,
-          },
-          availableDisplayZoomFactors: [1, 1.25, 1.5, 2],
-        };
-        fakeSystemDisplay.addDisplayForTest(display);
-      };
-
       let displayPage;
+      const browserProxy = settings.DevicePageBrowserProxyImpl.getInstance();
       return Promise
           .all([
             // Get the display sub-page.
@@ -748,6 +800,9 @@ cr.define('device_page_tests', function() {
                       true, true, displayPage.displays));
                   expectFalse(displayPage.showUnifiedDesktop_(
                       false, false, displayPage.displays));
+                  expectEquals(
+                      displayPage.invalidDisplayId_,
+                      browserProxy.lastHighlightedDisplayId_);
                 }),
             // Wait for the initial call to getInfo.
             fakeSystemDisplay.getInfoCalled.promise,
@@ -779,6 +834,18 @@ cr.define('device_page_tests', function() {
             expectFalse(displayPage.showUnifiedDesktop_(
                 false, false, displayPage.displays));
 
+            // Sanity check the first display is internal.
+            expectTrue(displayPage.displays[0].isInternal);
+
+            // Ambient EQ only shown when enabled.
+            expectTrue(displayPage.showAmbientColorSetting_(
+                true, displayPage.displays[0]));
+            expectFalse(displayPage.showAmbientColorSetting_(
+                false, displayPage.displays[0]));
+
+            // Verify that the arrangement section is not shown.
+            expectEquals(null, displayPage.$$('#arrangement-section'));
+
             // Add a second display.
             addDisplay(2);
             fakeSystemDisplay.onDisplayChanged.callListeners();
@@ -802,11 +869,30 @@ cr.define('device_page_tests', function() {
             expectTrue(displayPage.showMirror_(false, displayPage.displays));
             expectFalse(displayPage.isMirrored_(displayPage.displays));
 
+            // Set display identification highlights for the selected display as
+            // there are now multiple displays.
+            expectEquals(
+                displayPage.displays[0].id,
+                browserProxy.lastHighlightedDisplayId_);
+
             // Verify unified desktop only shown when enabled.
             expectTrue(displayPage.showUnifiedDesktop_(
                 true, true, displayPage.displays));
             expectFalse(displayPage.showUnifiedDesktop_(
                 false, false, displayPage.displays));
+
+            // Sanity check the second display is not internal.
+            expectFalse(displayPage.displays[1].isInternal);
+
+            // Ambient EQ never shown on non-internal display regardless of
+            // whether it is enabled.
+            expectFalse(displayPage.showAmbientColorSetting_(
+                true, displayPage.displays[1]));
+            expectFalse(displayPage.showAmbientColorSetting_(
+                false, displayPage.displays[1]));
+
+            // Verify that the arrangement section is shown.
+            expectTrue(!!displayPage.$$('#arrangement-section'));
 
             // Select the second display and make it primary. Also change the
             // orientation of the second display.
@@ -841,6 +927,12 @@ cr.define('device_page_tests', function() {
                 displayPage.displays[1].id, displayPage.primaryDisplayId);
             expectEquals(90, displayPage.displays[1].rotation);
 
+            // Change the display that display identification highlight renders
+            // on to the newly selected display.
+            expectEquals(
+                displayPage.displays[1].id,
+                browserProxy.lastHighlightedDisplayId_);
+
             // Mirror the displays.
             displayPage.onMirroredTap_({target: {blur: function() {}}});
             fakeSystemDisplay.onDisplayChanged.callListeners();
@@ -863,6 +955,15 @@ cr.define('device_page_tests', function() {
             expectTrue(displayPage.showMirror_(false, displayPage.displays));
             expectTrue(displayPage.isMirrored_(displayPage.displays));
 
+            // setSelectedDisplay is called on a new display id even though no
+            // display identification highlight is generated in mirrored mode.
+            expectEquals(
+                displayPage.displays[0].id,
+                browserProxy.lastHighlightedDisplayId_);
+
+            // Verify that the arrangement section is shown while mirroring.
+            expectTrue(!!displayPage.$$('#arrangement-section'));
+
             // Ensure that the zoom value remains unchanged while draggging.
             function pointerEvent(eventType, ratio) {
               const crSlider = displayPage.$.displaySizeSlider.$.slider;
@@ -881,7 +982,57 @@ cr.define('device_page_tests', function() {
             expectEquals(1, displayPage.selectedZoomPref_.value);
             pointerEvent('pointerup', 0);
             expectEquals(1.25, displayPage.selectedZoomPref_.value);
+
+            // Navigate out of the display page.
+            return showAndGetDeviceSubpage('power', settings.routes.POWER);
+          })
+          .then(function() {
+            // Moving out of the display page should set selected display to
+            // invalid.
+            expectEquals(
+                displayPage.invalidDisplayId_,
+                browserProxy.lastHighlightedDisplayId_);
+
+            // Navigate back to the display page.
+            return showAndGetDeviceSubpage('display', settings.routes.DISPLAY);
+          })
+          .then(function() {
+            // Moving back into the display page should call setSelectedDisplay
+            // with selectedDisplay_.
+            expectEquals(
+                displayPage.selectedDisplay.id,
+                browserProxy.lastHighlightedDisplayId_);
           });
+    });
+
+    test(assert(TestNames.NightLight), async function() {
+      // Set up a single display.
+      const displayPage =
+          await showAndGetDeviceSubpage('display', settings.routes.DISPLAY);
+      await fakeSystemDisplay.getInfoCalled.promise;
+      addDisplay(1);
+      fakeSystemDisplay.onDisplayChanged.callListeners();
+      await fakeSystemDisplay.getInfoCalled.promise;
+      await fakeSystemDisplay.getLayoutCalled.promise;
+      expectEquals(1, displayPage.displays.length);
+
+      const temperature = displayPage.$$('#nightLightTemperatureDiv');
+      const schedule = displayPage.$$('#nightLightScheduleTypeDropDown');
+
+      // Night Light is off, so temperature is hidden. Schedule is always shown.
+      expectTrue(temperature.hidden);
+      expectFalse(schedule.hidden);
+
+      // Enable Night Light. Use an atomic update of |displayPage.prefs| so
+      // Polymer notices the change.
+      const newPrefs = getFakePrefs();
+      newPrefs.ash.night_light.enabled.value = true;
+      displayPage.prefs = newPrefs;
+      Polymer.dom.flush();
+
+      // Night Light is on, so temperature is visible.
+      expectFalse(temperature.hidden);
+      expectFalse(schedule.hidden);
     });
 
     suite(assert(TestNames.Power), function() {
@@ -900,36 +1051,12 @@ cr.define('device_page_tests', function() {
             isLowPowerCharger);
       }
 
-      suite('no power settings', function() {
-        suiteSetup(function() {
-          // Never show power settings.
-          loadTimeData.overrideValues({
-            enablePowerSettings: false,
-          });
-        });
-
-        test('power row hidden', function() {
-          assertEquals(null, devicePage.$$('#powerRow'));
-          assertEquals(
-              0,
-              settings.DevicePageBrowserProxyImpl.getInstance()
-                  .updatePowerStatusCalled_);
-        });
-      });
-
       suite('power settings', function() {
         let powerPage;
         let powerSourceRow;
         let powerSourceSelect;
-        let idleSelect;
+        let acIdleSelect;
         let lidClosedToggle;
-
-        suiteSetup(function() {
-          // Always show power settings.
-          loadTimeData.overrideValues({
-            enablePowerSettings: true,
-          });
-        });
 
         setup(function() {
           return showAndGetDeviceSubpage('power', settings.routes.POWER)
@@ -942,7 +1069,7 @@ cr.define('device_page_tests', function() {
                     settings.DevicePageBrowserProxyImpl.getInstance()
                         .updatePowerStatusCalled_);
 
-                idleSelect = assert(powerPage.$$('#idleSelect'));
+                acIdleSelect = assert(powerPage.$$('#acIdleSelect'));
                 lidClosedToggle = assert(powerPage.$$('#lidClosedToggle'));
 
                 assertEquals(
@@ -950,8 +1077,19 @@ cr.define('device_page_tests', function() {
                     settings.DevicePageBrowserProxyImpl.getInstance()
                         .requestPowerManagementSettingsCalled_);
                 sendPowerManagementSettings(
+                    [
+                      settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                      settings.IdleBehavior.DISPLAY_OFF,
+                      settings.IdleBehavior.DISPLAY_ON
+                    ],
+                    [
+                      settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                      settings.IdleBehavior.DISPLAY_OFF,
+                      settings.IdleBehavior.DISPLAY_ON
+                    ],
                     settings.IdleBehavior.DISPLAY_OFF_SLEEP,
-                    false /* idleControlled */,
+                    settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                    false /* acIdleManaged */, false /* batteryIdleManaged */,
                     settings.LidClosedBehavior.SUSPEND,
                     false /* lidClosedControlled */, true /* hasLid */);
               });
@@ -971,6 +1109,9 @@ cr.define('device_page_tests', function() {
 
           // Power source row is hidden since there's no battery.
           assertTrue(powerSourceRow.hidden);
+          // Idle settings while on battery should not be visible if the
+          // battery is not present.
+          assertEquals(null, powerPage.$$('#batteryIdleSettingBox'));
         });
 
         test('power sources', function() {
@@ -1046,24 +1187,59 @@ cr.define('device_page_tests', function() {
               settings.DevicePageBrowserProxyImpl.getInstance().powerSourceId_);
         });
 
-        test('set idle behavior', function() {
-          selectValue(idleSelect, settings.IdleBehavior.DISPLAY_ON);
+        test('set AC idle behavior', function() {
+          selectValue(acIdleSelect, settings.IdleBehavior.DISPLAY_ON);
           expectEquals(
               settings.IdleBehavior.DISPLAY_ON,
-              settings.DevicePageBrowserProxyImpl.getInstance().idleBehavior_);
+              settings.DevicePageBrowserProxyImpl.getInstance()
+                  .acIdleBehavior_);
+        });
 
-          selectValue(idleSelect, settings.IdleBehavior.DISPLAY_OFF);
-          expectEquals(
-              settings.IdleBehavior.DISPLAY_OFF,
-              settings.DevicePageBrowserProxyImpl.getInstance().idleBehavior_);
+        test('set battery idle behavior', function() {
+          return new Promise(function(resolve) {
+                   // Indicate battery presence so that idle settings box while
+                   // on battery is visible.
+                   const batteryStatus = {
+                     present: true,
+                     charging: false,
+                     calculating: false,
+                     percent: 50,
+                     statusText: '5 hours left',
+                   };
+                   cr.webUIListenerCallback(
+                       'battery-status-changed',
+                       Object.assign({}, batteryStatus));
+                   powerPage.async(resolve);
+                 })
+              .then(function() {
+                const batteryIdleSelect =
+                    assert(powerPage.$$('#batteryIdleSelect'));
+                selectValue(
+                    batteryIdleSelect, settings.IdleBehavior.DISPLAY_ON);
+                expectEquals(
+                    settings.IdleBehavior.DISPLAY_ON,
+                    settings.DevicePageBrowserProxyImpl.getInstance()
+                        .batteryIdleBehavior_);
+              });
         });
 
         test('set lid behavior', function() {
           const sendLid = function(lidBehavior) {
             sendPowerManagementSettings(
-                settings.IdleBehavior.DISPLAY_OFF, false /* idleControlled */,
-                lidBehavior, false /* lidClosedControlled */,
-                true /* hasLid */);
+                [
+                  settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                  settings.IdleBehavior.DISPLAY_OFF,
+                  settings.IdleBehavior.DISPLAY_ON
+                ],
+                [
+                  settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                  settings.IdleBehavior.DISPLAY_OFF,
+                  settings.IdleBehavior.DISPLAY_ON
+                ],
+                settings.IdleBehavior.DISPLAY_OFF,
+                settings.IdleBehavior.DISPLAY_OFF, false /* acIdleManaged */,
+                false /* batteryIdleManaged */, lidBehavior,
+                false /* lidClosedControlled */, true /* hasLid */);
           };
 
           sendLid(settings.LidClosedBehavior.SUSPEND);
@@ -1088,19 +1264,55 @@ cr.define('device_page_tests', function() {
 
         test('display idle and lid behavior', function() {
           return new Promise(function(resolve) {
+                   // Send power management settings first.
                    sendPowerManagementSettings(
+                       [
+                         settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                         settings.IdleBehavior.DISPLAY_OFF,
+                         settings.IdleBehavior.DISPLAY_ON
+                       ],
+                       [
+                         settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                         settings.IdleBehavior.DISPLAY_OFF,
+                         settings.IdleBehavior.DISPLAY_ON
+                       ],
                        settings.IdleBehavior.DISPLAY_ON,
-                       false /* idleControlled */,
+                       settings.IdleBehavior.DISPLAY_OFF,
+                       false /* acIdleManaged */,
+                       false /* batteryIdleManaged */,
                        settings.LidClosedBehavior.DO_NOTHING,
                        false /* lidClosedControlled */, true /* hasLid */);
                    powerPage.async(resolve);
                  })
               .then(function() {
+                // Indicate battery presence so that battery idle settings
+                // box becomes visible. Default option should be selected
+                // properly even when battery idle settings box is stamped
+                // later.
+                const batteryStatus = {
+                  present: true,
+                  charging: false,
+                  calculating: false,
+                  percent: 50,
+                  statusText: '5 hours left',
+                };
+                cr.webUIListenerCallback(
+                    'battery-status-changed', Object.assign({}, batteryStatus));
+                return new Promise(function(resolve) {
+                  powerPage.async(resolve);
+                });
+              })
+              .then(function() {
+                const batteryIdleSelect =
+                    assert(powerPage.$$('#batteryIdleSelect'));
                 expectEquals(
                     settings.IdleBehavior.DISPLAY_ON.toString(),
-                    idleSelect.value);
-                expectFalse(idleSelect.disabled);
-                expectEquals(null, powerPage.$$('#idleControlledIndicator'));
+                    acIdleSelect.value);
+                expectEquals(
+                    settings.IdleBehavior.DISPLAY_OFF.toString(),
+                    batteryIdleSelect.value);
+                expectFalse(acIdleSelect.disabled);
+                expectEquals(null, powerPage.$$('#acIdleManagedIndicator'));
                 expectEquals(
                     loadTimeData.getString('powerLidSleepLabel'),
                     lidClosedToggle.label);
@@ -1109,8 +1321,19 @@ cr.define('device_page_tests', function() {
               })
               .then(function() {
                 sendPowerManagementSettings(
+                    [
+                      settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                      settings.IdleBehavior.DISPLAY_OFF,
+                      settings.IdleBehavior.DISPLAY_ON
+                    ],
+                    [
+                      settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                      settings.IdleBehavior.DISPLAY_OFF,
+                      settings.IdleBehavior.DISPLAY_ON
+                    ],
                     settings.IdleBehavior.DISPLAY_OFF,
-                    false /* idleControlled */,
+                    settings.IdleBehavior.DISPLAY_ON, false /* acIdleManaged */,
+                    false /* batteryIdleManaged */,
                     settings.LidClosedBehavior.SUSPEND,
                     false /* lidClosedControlled */, true /* hasLid */);
                 return new Promise(function(resolve) {
@@ -1118,11 +1341,19 @@ cr.define('device_page_tests', function() {
                 });
               })
               .then(function() {
+                const batteryIdleSelect =
+                    assert(powerPage.$$('#batteryIdleSelect'));
                 expectEquals(
                     settings.IdleBehavior.DISPLAY_OFF.toString(),
-                    idleSelect.value);
-                expectFalse(idleSelect.disabled);
-                expectEquals(null, powerPage.$$('#idleControlledIndicator'));
+                    acIdleSelect.value);
+                expectEquals(
+                    settings.IdleBehavior.DISPLAY_ON.toString(),
+                    batteryIdleSelect.value);
+                expectFalse(acIdleSelect.disabled);
+                expectFalse(batteryIdleSelect.disabled);
+                expectEquals(null, powerPage.$$('#acIdleManagedIndicator'));
+                expectEquals(
+                    null, powerPage.$$('#batteryIdleManagedIndicator'));
                 expectEquals(
                     loadTimeData.getString('powerLidSleepLabel'),
                     lidClosedToggle.label);
@@ -1131,21 +1362,44 @@ cr.define('device_page_tests', function() {
               });
         });
 
-        test('display controlled idle and lid behavior', function() {
-          // When settings are controlled, the controls should be disabled and
+        test('display managed idle and lid behavior', function() {
+          // When settings are managed, the controls should be disabled and
           // the indicators should be shown.
           return new Promise(function(resolve) {
+                   // Indicate battery presence so that idle settings box while
+                   // on battery is visible.
+                   const batteryStatus = {
+                     present: true,
+                     charging: false,
+                     calculating: false,
+                     percent: 50,
+                     statusText: '5 hours left',
+                   };
+                   cr.webUIListenerCallback(
+                       'battery-status-changed',
+                       Object.assign({}, batteryStatus));
                    sendPowerManagementSettings(
-                       settings.IdleBehavior.OTHER, true /* idleControlled */,
+                       [settings.IdleBehavior.OTHER],
+                       [settings.IdleBehavior.OTHER],
+                       settings.IdleBehavior.OTHER, settings.IdleBehavior.OTHER,
+                       true /* acIdleManaged */, true /* batteryIdleManaged */,
                        settings.LidClosedBehavior.SHUT_DOWN,
                        true /* lidClosedControlled */, true /* hasLid */);
                    powerPage.async(resolve);
                  })
               .then(function() {
+                const batteryIdleSelect =
+                    assert(powerPage.$$('#batteryIdleSelect'));
                 expectEquals(
-                    settings.IdleBehavior.OTHER.toString(), idleSelect.value);
-                expectTrue(idleSelect.disabled);
-                expectNotEquals(null, powerPage.$$('#idleControlledIndicator'));
+                    settings.IdleBehavior.OTHER.toString(), acIdleSelect.value);
+                expectEquals(
+                    settings.IdleBehavior.OTHER.toString(),
+                    batteryIdleSelect.value);
+                expectTrue(acIdleSelect.disabled);
+                expectTrue(batteryIdleSelect.disabled);
+                expectNotEquals(null, powerPage.$$('#acIdleManagedIndicator'));
+                expectNotEquals(
+                    null, powerPage.$$('#batteryIdleManagedIndicator'));
                 expectEquals(
                     loadTimeData.getString('powerLidShutDownLabel'),
                     lidClosedToggle.label);
@@ -1154,8 +1408,11 @@ cr.define('device_page_tests', function() {
               })
               .then(function() {
                 sendPowerManagementSettings(
+                    [settings.IdleBehavior.DISPLAY_OFF],
+                    [settings.IdleBehavior.DISPLAY_OFF],
                     settings.IdleBehavior.DISPLAY_OFF,
-                    true /* idleControlled */,
+                    settings.IdleBehavior.DISPLAY_OFF,
+                    false /* acIdleManaged */, false /* batteryIdleManaged */,
                     settings.LidClosedBehavior.STOP_SESSION,
                     true /* lidClosedControlled */, true /* hasLid */);
                 return new Promise(function(resolve) {
@@ -1163,11 +1420,19 @@ cr.define('device_page_tests', function() {
                 });
               })
               .then(function() {
+                const batteryIdleSelect =
+                    assert(powerPage.$$('#batteryIdleSelect'));
                 expectEquals(
                     settings.IdleBehavior.DISPLAY_OFF.toString(),
-                    idleSelect.value);
-                expectTrue(idleSelect.disabled);
-                expectNotEquals(null, powerPage.$$('#idleControlledIndicator'));
+                    acIdleSelect.value);
+                expectEquals(
+                    settings.IdleBehavior.DISPLAY_OFF.toString(),
+                    batteryIdleSelect.value);
+                expectTrue(acIdleSelect.disabled);
+                expectTrue(batteryIdleSelect.disabled);
+                expectEquals(null, powerPage.$$('#acIdleManagedIndicator'));
+                expectEquals(
+                    null, powerPage.$$('#batteryIdleManagedIndicator'));
                 expectEquals(
                     loadTimeData.getString('powerLidSignOutLabel'),
                     lidClosedToggle.label);
@@ -1180,8 +1445,20 @@ cr.define('device_page_tests', function() {
           return new Promise(function(resolve) {
                    expectFalse(powerPage.$$('#lidClosedToggle').hidden);
                    sendPowerManagementSettings(
+                       [
+                         settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                         settings.IdleBehavior.DISPLAY_OFF,
+                         settings.IdleBehavior.DISPLAY_ON
+                       ],
+                       [
+                         settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                         settings.IdleBehavior.DISPLAY_OFF,
+                         settings.IdleBehavior.DISPLAY_ON
+                       ],
                        settings.IdleBehavior.DISPLAY_OFF_SLEEP,
-                       false /* idleControlled */,
+                       settings.IdleBehavior.DISPLAY_OFF_SLEEP,
+                       false /* acIdleManaged */,
+                       false /* batteryIdleManaged */,
                        settings.LidClosedBehavior.SUSPEND,
                        false /* lidClosedControlled */, false /* hasLid */);
                    powerPage.async(resolve);
@@ -1190,6 +1467,28 @@ cr.define('device_page_tests', function() {
                 expectTrue(powerPage.$$('#lidClosedToggle').hidden);
               });
         });
+
+        test(
+            'hide display controlled battery idle behavior when battery not present',
+            function() {
+              return new Promise(function(resolve) {
+                       const batteryStatus = {
+                         present: false,
+                         charging: false,
+                         calculating: false,
+                         percent: -1,
+                         statusText: '',
+                       };
+                       cr.webUIListenerCallback(
+                           'battery-status-changed',
+                           Object.assign({}, batteryStatus));
+                       Polymer.dom.flush();
+                       powerPage.async(resolve);
+                     })
+                  .then(function() {
+                    expectEquals(null, powerPage.$$('#batteryIdleSettingBox'));
+                  });
+            });
       });
     });
 
@@ -1727,6 +2026,189 @@ cr.define('device_page_tests', function() {
                   'prefs.settings.restore_last_lock_screen_note.value', true);
               expectTrue(keepLastNoteOnLockScreenToggle().checked);
             });
+      });
+    });
+
+    suite(assert(TestNames.Storage), function() {
+      /** @type {!Element} */
+      let storagePage;
+
+      /**
+       * Simulate storage size stat callback.
+       * @param {string} availableSize
+       * @param {string} usedSize
+       * @param {number} usedRatio
+       * @param {number} spaceState
+       */
+      function sendStorageSizeStat(
+          usedSize, availableSize, usedRatio, spaceState) {
+        cr.webUIListenerCallback('storage-size-stat-changed', {
+          usedSize: usedSize,
+          availableSize: availableSize,
+          usedRatio: usedRatio,
+          spaceState: spaceState,
+        });
+        Polymer.dom.flush();
+      }
+
+      /**
+       * @param {?Element} element
+       * @return {boolean}
+       */
+      function isHidden(element) {
+        return !element ||
+            (element.offsetWidth == 0 && element.offsetHeight == 0);
+      }
+
+      /**
+       * @param {string} id
+       * @return {string}
+       */
+      function getStorageItemLabelFromId(id) {
+        const rowItem = storagePage.$$('#' + id).shadowRoot;
+        return rowItem.querySelector('#label').innerText;
+      }
+
+      /**
+       * @param {string} id
+       * @return {string}
+       */
+      function getStorageItemSubLabelFromId(id) {
+        const rowItem = storagePage.$$('#' + id).shadowRoot;
+        return rowItem.querySelector('#subLabel').innerText;
+      }
+
+      suiteSetup(function() {
+        // Disable animations so sub-pages open within one event loop.
+        testing.Test.disableAnimationsAndTransitions();
+      });
+
+      setup(function() {
+        // Avoid unwanted callbacks by disabling storage computations when the
+        // storage page is loaded.
+        registerMessageCallback(
+            'updateStorageInfo', null /* message handler */,
+            () => {} /* callback */);
+
+        return showAndGetDeviceSubpage('storage', settings.routes.STORAGE)
+            .then(function(page) {
+              storagePage = page;
+              storagePage.stopPeriodicUpdate_();
+            });
+      });
+
+      test('storage stats size', async function() {
+        // Low available storage space.
+        sendStorageSizeStat(
+            '9.1 GB', '0.9 GB', 0.91, settings.StorageSpaceState.LOW);
+        assertEquals('91%', storagePage.$.inUseLabelArea.style.width);
+        assertEquals('9%', storagePage.$.availableLabelArea.style.width);
+        assertFalse(isHidden(storagePage.$$('#lowMessage')));
+        assertTrue(isHidden(storagePage.$$('#criticallyLowMessage')));
+        assertTrue(!!storagePage.$$('#bar.space-low'));
+        assertFalse(!!storagePage.$$('#bar.space-critically-low'));
+        assertEquals(
+            '9.1 GB',
+            storagePage.$.inUseLabelArea.querySelector('.storage-size')
+                .innerText);
+        assertEquals(
+            '0.9 GB',
+            storagePage.$.availableLabelArea.querySelector('.storage-size')
+                .innerText);
+
+        // Critically low available storage space.
+        sendStorageSizeStat(
+            '9.7 GB', '0.3 GB', 0.97,
+            settings.StorageSpaceState.CRITICALLY_LOW);
+        assertEquals('97%', storagePage.$.inUseLabelArea.style.width);
+        assertEquals('3%', storagePage.$.availableLabelArea.style.width);
+        assertTrue(isHidden(storagePage.$$('#lowMessage')));
+        assertFalse(isHidden(storagePage.$$('#criticallyLowMessage')));
+        assertFalse(!!storagePage.$$('#bar.space-low'));
+        assertTrue(!!storagePage.$$('#bar.space-critically-low'));
+        assertEquals(
+            '9.7 GB',
+            storagePage.$.inUseLabelArea.querySelector('.storage-size')
+                .innerText);
+        assertEquals(
+            '0.3 GB',
+            storagePage.$.availableLabelArea.querySelector('.storage-size')
+                .innerText);
+
+        // Normal storage usage.
+        sendStorageSizeStat(
+            '2.5 GB', '7.5 GB', 0.25, settings.StorageSpaceState.NORMAL);
+        assertEquals('25%', storagePage.$.inUseLabelArea.style.width);
+        assertEquals('75%', storagePage.$.availableLabelArea.style.width);
+        assertTrue(isHidden(storagePage.$$('#lowMessage')));
+        assertTrue(isHidden(storagePage.$$('#criticallyLowMessage')));
+        assertFalse(!!storagePage.$$('#bar.space-low'));
+        assertFalse(!!storagePage.$$('#bar.space-critically-low'));
+        assertEquals(
+            '2.5 GB',
+            storagePage.$.inUseLabelArea.querySelector('.storage-size')
+                .innerText);
+        assertEquals(
+            '7.5 GB',
+            storagePage.$.availableLabelArea.querySelector('.storage-size')
+                .innerText);
+      });
+
+      test('system size', async function() {
+        assertEquals('System', storagePage.$$('#systemSizeLabel').innerText);
+        assertEquals(
+            'Calculating…', storagePage.$$('#systemSizeSubLabel').innerText);
+
+        // Send system size callback.
+        cr.webUIListenerCallback('storage-system-size-changed', '8.4 GB');
+        Polymer.dom.flush();
+        assertEquals('8.4 GB', storagePage.$$('#systemSizeSubLabel').innerText);
+
+        // In guest mode, the system row should be hidden.
+        storagePage.isGuest_ = true;
+        Polymer.dom.flush();
+        assertTrue(isHidden(storagePage.$$('#systemSize')));
+      });
+
+      test('apps extensions size', async function() {
+        assertEquals(
+            'Apps and extensions', getStorageItemLabelFromId('appsSize'));
+        assertEquals('Calculating…', getStorageItemSubLabelFromId('appsSize'));
+
+        // Send apps size callback.
+        cr.webUIListenerCallback('storage-apps-size-changed', '59.5 KB');
+        Polymer.dom.flush();
+        assertEquals('59.5 KB', getStorageItemSubLabelFromId('appsSize'));
+      });
+
+      test('other users size', async function() {
+        // The other users row is visible by default, displaying
+        // "calculating...".
+        assertFalse(isHidden(storagePage.$$('#otherUsersSize')));
+        assertEquals(
+            'Other users', getStorageItemLabelFromId('otherUsersSize'));
+        assertEquals(
+            'Calculating…', getStorageItemSubLabelFromId('otherUsersSize'));
+
+        // Simulate absence of other users.
+        cr.webUIListenerCallback(
+            'storage-other-users-size-changed', '0 B', true);
+        Polymer.dom.flush();
+        assertTrue(isHidden(storagePage.$$('#otherUsersSize')));
+
+        // Send other users callback with a size that is not null.
+        cr.webUIListenerCallback(
+            'storage-other-users-size-changed', '322 MB', false);
+        Polymer.dom.flush();
+        assertFalse(isHidden(storagePage.$$('#otherUsersSize')));
+        assertEquals('322 MB', getStorageItemSubLabelFromId('otherUsersSize'));
+
+        // If the user is in Guest mode, the row is not visible.
+        storagePage.isGuest_ = true;
+        cr.webUIListenerCallback(
+            'storage-other-users-size-changed', '322 MB', false);
+        Polymer.dom.flush();
+        assertTrue(isHidden(storagePage.$$('#otherUsersSize')));
       });
     });
   });

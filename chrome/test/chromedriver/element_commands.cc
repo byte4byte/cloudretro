@@ -26,6 +26,7 @@
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
+#include "chrome/test/chromedriver/constants/version.h"
 #include "chrome/test/chromedriver/element_util.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/util.h"
@@ -34,6 +35,12 @@
 const int kFlickTouchEventsPerSecond = 30;
 const std::set<std::string> textControlTypes = {"text", "search", "tel", "url",
                                                 "password"};
+const std::set<std::string> inputControlTypes = {
+    "text",           "search", "url",   "tel",   "email",
+    "password",       "date",   "month", "week",  "time",
+    "datetime-local", "number", "range", "color", "file"};
+
+const std::set<std::string> nontypeableControlTypes = {"color"};
 
 namespace {
 
@@ -201,8 +208,8 @@ Status ExecuteClickElement(Session* session,
     events.push_back(MouseEvent(kReleasedMouseEventType, kLeftMouseButton,
                                 location.x, location.y,
                                 session->sticky_modifiers, 1, 1));
-    status =
-        web_view->DispatchMouseEvents(events, session->GetCurrentFrameId());
+    status = web_view->DispatchMouseEvents(events, session->GetCurrentFrameId(),
+                                           false);
     if (status.IsOk())
       session->mouse_position = location;
     return status;
@@ -226,7 +233,7 @@ Status ExecuteTouchSingleTap(Session* session,
         TouchEvent(kTouchStart, location.x, location.y));
     events.push_back(
         TouchEvent(kTouchEnd, location.x, location.y));
-    return web_view->DispatchTouchEvents(events);
+    return web_view->DispatchTouchEvents(events, false);
   }
   return web_view->SynthesizeTapGesture(location.x, location.y, 1, false);
 }
@@ -287,7 +294,7 @@ Status ExecuteFlick(Session* session,
     return Status(kInvalidArgument, "'speed' must be a positive integer");
 
   status = web_view->DispatchTouchEvent(
-      TouchEvent(kTouchStart, location.x, location.y));
+      TouchEvent(kTouchStart, location.x, location.y), false);
   if (status.IsError())
     return status;
 
@@ -301,16 +308,16 @@ Status ExecuteFlick(Session* session,
       (offset * kFlickTouchEventsPerSecond) / speed;
   for (int i = 0; i < total_events; i++) {
     status = web_view->DispatchTouchEvent(
-        TouchEvent(kTouchMove,
-                   location.x + xoffset_per_event * i,
-                   location.y + yoffset_per_event * i));
+        TouchEvent(kTouchMove, location.x + xoffset_per_event * i,
+                   location.y + yoffset_per_event * i),
+        false);
     if (status.IsError())
       return status;
     base::PlatformThread::Sleep(
         base::TimeDelta::FromMilliseconds(1000 / kFlickTouchEventsPerSecond));
   }
   return web_view->DispatchTouchEvent(
-      TouchEvent(kTouchEnd, location.x + xoffset, location.y + yoffset));
+      TouchEvent(kTouchEnd, location.x + xoffset, location.y + yoffset), false);
 }
 
 Status ExecuteClearElement(Session* session,
@@ -321,6 +328,56 @@ Status ExecuteClearElement(Session* session,
   Status status = CheckElement(element_id);
   if (status.IsError())
     return status;
+
+  std::string tag_name;
+  status = GetElementTagName(session, web_view, element_id, &tag_name);
+  if (status.IsError())
+    return status;
+  std::string element_type;
+  bool is_input_control = false;
+
+  if (tag_name == "input") {
+    std::unique_ptr<base::Value> get_element_type;
+    status = GetElementAttribute(session, web_view, element_id, "type",
+                                 &get_element_type);
+    if (status.IsError())
+      return status;
+    if (get_element_type->GetAsString(&element_type))
+      element_type = base::ToLowerASCII(element_type);
+
+    is_input_control =
+        inputControlTypes.find(element_type) != inputControlTypes.end();
+  }
+
+  bool is_text = tag_name == "textarea";
+  bool is_content_editable = false;
+  if (!is_text && !is_input_control) {
+    std::unique_ptr<base::Value> get_content_editable;
+    base::ListValue args;
+    args.Append(CreateElement(element_id));
+    status = web_view->CallFunction(session->GetCurrentFrameId(),
+                                    "element => element.isContentEditable",
+                                    args, &get_content_editable);
+    if (status.IsError())
+      return status;
+    get_content_editable->GetAsBoolean(&is_content_editable);
+  }
+
+  std::unique_ptr<base::Value> get_readonly;
+  bool is_readonly = false;
+  base::DictionaryValue params_readOnly;
+  if (!is_content_editable) {
+    params_readOnly.SetString("name", "readOnly");
+    status = ExecuteGetElementProperty(session, web_view, element_id,
+                                       params_readOnly, &get_readonly);
+    get_readonly->GetAsBoolean(&is_readonly);
+    if (status.IsError())
+      return status;
+  }
+  bool is_editable =
+      (is_input_control || is_text || is_content_editable) && !is_readonly;
+  if (!is_editable)
+    return Status(kInvalidElementState);
   // Scrolling to element is done by webdriver::atoms::CLEAR
   bool is_displayed = false;
   base::TimeTicks start_time = base::TimeTicks::Now();
@@ -338,12 +395,11 @@ Status ExecuteClearElement(Session* session,
   }
   static bool isClearWarningNotified = false;
   if (!isClearWarningNotified) {
-    std::string messageClearWarning =
-        "\n\t=== NOTE: ===\n"
-        "\tThe Clear command in ChromeDriver 2.43 and above\n"
-        "\thas been updated to conform to the current standard,\n"
-        "\tincluding raising blur event after clearing.\n";
-    VLOG(0) << messageClearWarning;
+    VLOG(0) << "\n\t=== NOTE: ===\n"
+            << "\tThe Clear command in " << kChromeDriverProductShortName
+            << " 2.43 and above\n"
+            << "\thas been updated to conform to the current standard,\n"
+            << "\tincluding raising blur event after clearing.\n";
     isClearWarningNotified = true;
   }
   base::ListValue args;
@@ -365,8 +421,8 @@ Status ExecuteSendKeysToElement(Session* session,
     return status;
   const base::ListValue* key_list;
   base::ListValue key_list_local;
+  const base::Value* text = nullptr;
   if (session->w3c_compliant) {
-    const base::Value* text;
     if (!params.Get("text", &text) || !text->is_string())
       return Status(kInvalidArgument, "'text' must be a string");
     key_list_local.Set(0, std::make_unique<base::Value>(text->Clone()));
@@ -390,6 +446,8 @@ Status ExecuteSendKeysToElement(Session* session,
   if (get_element_type->GetAsString(&element_type))
     element_type = base::ToLowerASCII(element_type);
   bool is_file = element_type == "file";
+  bool is_nontypeable = nontypeableControlTypes.find(element_type) !=
+                        nontypeableControlTypes.end();
 
   if (is_input && is_file) {
     if (session->strict_file_interactability) {
@@ -441,6 +499,23 @@ Status ExecuteSendKeysToElement(Session* session,
     std::unique_ptr<base::DictionaryValue> element(CreateElement(element_id));
     return web_view->SetFileInputFiles(session->GetCurrentFrameId(), *element,
                                        paths, multiple);
+  } else if (session->w3c_compliant && is_input && is_nontypeable) {
+    // Special handling for non-typeable inputs is only included in W3C Spec
+    // The Spec calls for returning element not interactable if the element
+    // has no value property, but this is included for all input elements, so
+    // no check is needed here.
+
+    // text is set only when session.w3c_compliant, so confirm here
+    DCHECK(text != nullptr);
+    base::ListValue args;
+    args.Append(CreateElement(element_id));
+    args.AppendString(text->GetString());
+    std::unique_ptr<base::Value> result;
+    // Set value to text as given by user; if this does not match the defined
+    // format for the input type, results are not defined
+    return web_view->CallFunction(session->GetCurrentFrameId(),
+                                  "(element, text) => element.value = text",
+                                  args, &result);
   } else {
     std::unique_ptr<base::Value> get_content_editable;
     base::ListValue args;
@@ -688,9 +763,11 @@ Status ExecuteGetElementRect(Session* session,
     return status;
 
   std::unique_ptr<base::Value> size;
-  web_view->CallFunction(session->GetCurrentFrameId(),
-                         webdriver::atoms::asString(webdriver::atoms::GET_SIZE),
-                         args, &size);
+  status = web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      webdriver::atoms::asString(webdriver::atoms::GET_SIZE), args, &size);
+  if (status.IsError())
+    return status;
 
   // do type conversions
   base::DictionaryValue* size_dict;
@@ -843,15 +920,18 @@ Status ExecuteElementScreenshot(Session* session,
       "({x: document.documentElement.scrollLeft || document.body.scrollLeft,"
       "  y: document.documentElement.scrollTop || document.body.scrollTop,"
       "  height: document.documentElement.clientHeight,"
-      "  width: document.documentElement.clientWidth})",
-      &browser_info);
+      "  width: document.documentElement.clientWidth,"
+      "  device_pixel_ratio: window.devicePixelRatio})",
+      false, &browser_info);
   if (status.IsError())
     return status;
 
-  int scroll_left = browser_info->FindKey("x")->GetInt();
-  int scroll_top = browser_info->FindKey("y")->GetInt();
+  double scroll_left = browser_info->FindKey("x")->GetDouble();
+  double scroll_top = browser_info->FindKey("y")->GetDouble();
   double viewport_height = browser_info->FindKey("height")->GetDouble();
   double viewport_width = browser_info->FindKey("width")->GetDouble();
+  double device_pixel_ratio =
+         browser_info->FindKey("device_pixel_ratio")->GetDouble();
 
   std::unique_ptr<base::DictionaryValue> clip_dict =
       base::DictionaryValue::From(std::move(clip));
@@ -861,14 +941,14 @@ Status ExecuteElementScreenshot(Session* session,
   // element, but its x and y are relative to containing frame. We replace them
   // with the x and y relative to top-level document origin, as expected by
   // CaptureScreenshot.
-  clip_dict->SetInteger("x", location.x + scroll_left);
-  clip_dict->SetInteger("y", location.y + scroll_top);
-  clip_dict->SetDouble("scale", 1.0);
+  clip_dict->SetDouble("x", location.x + scroll_left);
+  clip_dict->SetDouble("y", location.y + scroll_top);
+  clip_dict->SetDouble("scale", 1 / device_pixel_ratio);
   // Crop screenshot by viewport if element is larger than viewport
-  clip_dict->SetInteger(
+  clip_dict->SetDouble(
       "height",
       std::min(viewport_height, clip_dict->FindKey("height")->GetDouble()));
-  clip_dict->SetInteger(
+  clip_dict->SetDouble(
       "width",
       std::min(viewport_width, clip_dict->FindKey("width")->GetDouble()));
   base::DictionaryValue screenshot_params;

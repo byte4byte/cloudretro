@@ -20,7 +20,7 @@
 #include "chrome/browser/chromeos/fileapi/recent_file.h"
 #include "chrome/browser/chromeos/fileapi/recent_model.h"
 #include "chrome/browser/chromeos/fileapi/recent_source.h"
-#include "storage/browser/fileapi/file_system_operation.h"
+#include "storage/browser/file_system/file_system_operation.h"
 
 namespace chromeos {
 
@@ -79,7 +79,7 @@ class RecentDiskSource : public RecentSource {
   std::priority_queue<RecentFile, std::vector<RecentFile>, RecentFileComparator>
       recent_files_;
 
-  base::WeakPtrFactory<RecentDiskSource> weak_ptr_factory_;
+  base::WeakPtrFactory<RecentDiskSource> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RecentDiskSource);
 };

@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/lock.h"
@@ -21,10 +22,10 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "ui/base/x/x11_display_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/x/x11.h"
-#include "ui/gfx/x/x11_connection.h"
 #include "ui/gfx/x/x11_types.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -243,7 +244,7 @@ class SGIVideoSyncThread : public base::Thread,
   }
 
   static Display* GetDisplayImpl() {
-    static Display* display = gfx::OpenNewXDisplay();
+    static Display* display = gfx::CloneXDisplay(gfx::GetXDisplay());
     return display;
   }
 
@@ -312,32 +313,29 @@ class SGIVideoSyncProviderThreadShim {
   }
 
   void GetVSyncParameters(gfx::VSyncProvider::UpdateVSyncCallback callback) {
-    base::TimeTicks now;
-    {
-      // Don't allow |window_| destruction while we're probing vsync.
-      base::AutoLock locked(vsync_lock_);
+    // Don't allow |window_| destruction while we're probing vsync.
+    base::AutoLock locked(vsync_lock_);
 
-      if (!vsync_thread_->GetGLXContext() || cancel_vsync_flag_.IsSet())
-        return;
+    if (!vsync_thread_->GetGLXContext() || cancel_vsync_flag_.IsSet())
+      return;
 
-      glXMakeContextCurrent(vsync_thread_->GetDisplay(), glx_window_,
-                            glx_window_, vsync_thread_->GetGLXContext());
+    base::TimeDelta interval = ui::GetPrimaryDisplayRefreshIntervalFromXrandr(
+        vsync_thread_->GetDisplay());
 
-      unsigned int retrace_count = 0;
-      if (glXWaitVideoSyncSGI(1, 0, &retrace_count) != 0)
-        return;
+    glXMakeContextCurrent(vsync_thread_->GetDisplay(), glx_window_, glx_window_,
+                          vsync_thread_->GetGLXContext());
 
-      TRACE_EVENT_INSTANT0("gpu", "vblank", TRACE_EVENT_SCOPE_THREAD);
-      now = base::TimeTicks::Now();
+    unsigned int retrace_count = 0;
+    if (glXWaitVideoSyncSGI(1, 0, &retrace_count) != 0)
+      return;
 
-      glXMakeContextCurrent(vsync_thread_->GetDisplay(), 0, 0, nullptr);
-    }
+    base::TimeTicks now = base::TimeTicks::Now();
+    TRACE_EVENT_INSTANT0("gpu", "vblank", TRACE_EVENT_SCOPE_THREAD);
 
-    const base::TimeDelta kDefaultInterval =
-        base::TimeDelta::FromSeconds(1) / 60;
+    glXMakeContextCurrent(vsync_thread_->GetDisplay(), 0, 0, nullptr);
 
-    task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback), now, kDefaultInterval));
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(std::move(callback), now, interval));
   }
 
  private:
@@ -441,10 +439,6 @@ bool GLSurfaceGLX::InitializeOneOff() {
   // http://crbug.com/245466
   setenv("force_s3tc_enable", "true", 1);
 
-  // SGIVideoSyncProviderShim (if instantiated) will issue X commands on
-  // it's own thread.
-  gfx::InitializeThreadedX11();
-
   if (!gfx::GetXDisplay()) {
     LOG(ERROR) << "XOpenDisplay failed.";
     return false;
@@ -461,7 +455,10 @@ bool GLSurfaceGLX::InitializeOneOff() {
     return false;
   }
 
-  const auto& visual_info = gl::GLVisualPickerGLX::GetInstance()->rgba_visual();
+  auto* visual_picker = gl::GLVisualPickerGLX::GetInstance();
+  XVisualInfo visual_info = visual_picker->rgba_visual();
+  if (!visual_info.visual)
+    visual_info = visual_picker->system_visual();
   g_visual = visual_info.visual;
   g_depth = visual_info.depth;
   g_colormap =
@@ -532,8 +529,23 @@ void GLSurfaceGLX::ShutdownOneOff() {
 }
 
 // static
+std::string GLSurfaceGLX::QueryGLXExtensions() {
+  Display* display = gfx::GetXDisplay();
+  const int screen = (display ? DefaultScreen(display) : 0);
+  const char* extensions = glXQueryExtensionsString(display, screen);
+  if (extensions) {
+    return std::string(extensions);
+  }
+  return "";
+}
+
+// static
 const char* GLSurfaceGLX::GetGLXExtensions() {
-  return glXQueryExtensionsString(gfx::GetXDisplay(), 0);
+  static base::NoDestructor<std::string> glx_extensions("");
+  if (glx_extensions->empty()) {
+    *glx_extensions = QueryGLXExtensions();
+  }
+  return glx_extensions->c_str();
 }
 
 // static
@@ -692,7 +704,7 @@ void NativeViewGLSurfaceGLX::Destroy() {
 
 bool NativeViewGLSurfaceGLX::Resize(const gfx::Size& size,
                                     float scale_factor,
-                                    ColorSpace color_space,
+                                    const gfx::ColorSpace& color_space,
                                     bool has_alpha) {
   size_ = size;
   glXWaitGL();
@@ -747,10 +759,6 @@ void* NativeViewGLSurfaceGLX::GetConfig() {
 
 GLSurfaceFormat NativeViewGLSurfaceGLX::GetFormat() {
   return GLSurfaceFormat();
-}
-
-unsigned long NativeViewGLSurfaceGLX::GetCompatibilityKey() {
-  return XVisualIDFromVisual(g_visual);
 }
 
 gfx::SwapResult NativeViewGLSurfaceGLX::PostSubBuffer(
@@ -885,10 +893,6 @@ void* UnmappedNativeViewGLSurfaceGLX::GetConfig() {
 
 GLSurfaceFormat UnmappedNativeViewGLSurfaceGLX::GetFormat() {
   return GLSurfaceFormat();
-}
-
-unsigned long UnmappedNativeViewGLSurfaceGLX::GetCompatibilityKey() {
-  return XVisualIDFromVisual(g_visual);
 }
 
 UnmappedNativeViewGLSurfaceGLX::~UnmappedNativeViewGLSurfaceGLX() {

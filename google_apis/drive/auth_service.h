@@ -29,13 +29,13 @@ class AuthServiceObserver;
 // (IdentityManager) and provides OAuth2 token refresh infrastructure.
 // All public functions must be called on UI thread.
 class AuthService : public AuthServiceInterface,
-                    public identity::IdentityManager::Observer {
+                    public signin::IdentityManager::Observer {
  public:
   // |url_loader_factory| is used to perform authentication with
   // SimpleURLLoader.
   //
   // |scopes| specifies OAuth2 scopes.
-  AuthService(identity::IdentityManager* identity_manager,
+  AuthService(signin::IdentityManager* identity_manager,
               const CoreAccountId& account_id,
               scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
               const std::vector<std::string>& scopes);
@@ -44,7 +44,7 @@ class AuthService : public AuthServiceInterface,
   // Overriden from AuthServiceInterface:
   void AddObserver(AuthServiceObserver* observer) override;
   void RemoveObserver(AuthServiceObserver* observer) override;
-  void StartAuthentication(const AuthStatusCallback& callback) override;
+  void StartAuthentication(AuthStatusCallback callback) override;
   bool HasAccessToken() const override;
   bool HasRefreshToken() const override;
   const std::string& access_token() const override;
@@ -63,11 +63,11 @@ class AuthService : public AuthServiceInterface,
 
   // Called when authentication request from StartAuthentication() is
   // completed.
-  void OnAuthCompleted(const AuthStatusCallback& callback,
+  void OnAuthCompleted(AuthStatusCallback callback,
                        DriveApiErrorCode error,
                        const std::string& access_token);
 
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   CoreAccountId account_id_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   bool has_refresh_token_;
@@ -78,7 +78,7 @@ class AuthService : public AuthServiceInterface,
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<AuthService> weak_ptr_factory_;
+  base::WeakPtrFactory<AuthService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AuthService);
 };

@@ -54,8 +54,6 @@ struct MouseEvent {
   int buttons;
   // |click_count| should not be negative.
   int click_count;
-  OriginType origin;
-  std::string element_id;
   PointerType pointer_type;
 };
 
@@ -69,6 +67,7 @@ enum TouchEventType {
 };
 
 struct TouchEvent {
+  TouchEvent();
   TouchEvent(TouchEventType type,
              int x,
              int y);
@@ -78,13 +77,11 @@ struct TouchEvent {
   TouchEventType type;
   int x;
   int y;
-  OriginType origin;
   double radiusX;
   double radiusY;
   double rotationAngle;
   double force;
   int id;
-  std::string element_id;
   bool dispatch;
 };
 

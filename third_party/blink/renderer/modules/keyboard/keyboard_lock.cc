@@ -4,11 +4,12 @@
 
 #include "third_party/blink/renderer/modules/keyboard/keyboard_lock.h"
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
@@ -37,33 +38,31 @@ constexpr char kKeyboardLockRequestFailedErrorMsg[] =
 }  // namespace
 
 KeyboardLock::KeyboardLock(ExecutionContext* context)
-    : ContextLifecycleObserver(context) {}
+    : ExecutionContextClient(context), service_(context) {}
 
 KeyboardLock::~KeyboardLock() = default;
 
 ScriptPromise KeyboardLock::lock(ScriptState* state,
-                                 const Vector<String>& keycodes) {
+                                 const Vector<String>& keycodes,
+                                 ExceptionState& exception_state) {
   DCHECK(state);
 
   if (!IsLocalFrameAttached()) {
-    return ScriptPromise::RejectWithDOMException(
-        state,
-        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
-                                           kKeyboardLockFrameDetachedErrorMsg));
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kKeyboardLockFrameDetachedErrorMsg);
+    return ScriptPromise();
   }
 
   if (!CalledFromSupportedContext(ExecutionContext::From(state))) {
-    return ScriptPromise::RejectWithDOMException(
-        state,
-        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
-                                           kKeyboardLockChildFrameErrorMsg));
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kKeyboardLockChildFrameErrorMsg);
+    return ScriptPromise();
   }
 
   if (!EnsureServiceConnected()) {
-    return ScriptPromise::RejectWithDOMException(
-        state,
-        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
-                                           kKeyboardLockRequestFailedErrorMsg));
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      kKeyboardLockRequestFailedErrorMsg);
+    return ScriptPromise();
   }
 
   request_keylock_resolver_ =
@@ -94,15 +93,16 @@ bool KeyboardLock::IsLocalFrameAttached() {
 }
 
 bool KeyboardLock::EnsureServiceConnected() {
-  if (!service_) {
+  if (!service_.is_bound()) {
     LocalFrame* frame = GetFrame();
     if (!frame) {
       return false;
     }
     // See https://bit.ly/2S0zRAS for task types.
-    frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(
-        &service_, frame->GetTaskRunner(TaskType::kMiscPlatformAPI)));
-    DCHECK(service_);
+    frame->GetBrowserInterfaceBroker().GetInterface(
+        service_.BindNewPipeAndPassReceiver(
+            frame->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+    DCHECK(service_.is_bound());
   }
 
   return true;
@@ -155,9 +155,10 @@ void KeyboardLock::LockRequestFinished(
   request_keylock_resolver_ = nullptr;
 }
 
-void KeyboardLock::Trace(blink::Visitor* visitor) {
+void KeyboardLock::Trace(Visitor* visitor) {
+  visitor->Trace(service_);
   visitor->Trace(request_keylock_resolver_);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

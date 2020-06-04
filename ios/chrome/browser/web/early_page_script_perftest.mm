@@ -8,8 +8,8 @@
 #include "base/timer/elapsed_timer.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/test/base/perf_test_ios.h"
+#import "ios/web/common/web_view_creation_util.h"
 #import "ios/web/public/test/js_test_util.h"
-#import "ios/web/public/web_view_creation_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -22,7 +22,7 @@ namespace {
 class EarlyPageScriptPerfTest : public PerfTest {
  protected:
   EarlyPageScriptPerfTest() : PerfTest("Early Page Script for WKWebView") {
-    std::unique_ptr<ios::ChromeBrowserState> browser_state =
+    std::unique_ptr<ChromeBrowserState> browser_state =
         TestChromeBrowserState::Builder().Build();
     // |web_view| already has the script injected. |web_view_| is a bare
     // WKWebView, which will be used for script execution testing performance.

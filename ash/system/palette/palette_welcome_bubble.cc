@@ -6,13 +6,13 @@
 
 #include <memory>
 
+#include "ash/assistant/util/assistant_util.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/palette/palette_tray.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "ui/aura/window.h"
@@ -36,6 +36,7 @@ class PaletteWelcomeBubble::WelcomeBubbleView
  public:
   WelcomeBubbleView(views::View* anchor, views::BubbleBorder::Arrow arrow)
       : views::BubbleDialogDelegateView(anchor, arrow) {
+    DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
     set_close_on_deactivate(true);
     SetCanActivate(false);
     set_accept_events(true);
@@ -59,7 +60,7 @@ class PaletteWelcomeBubble::WelcomeBubbleView
   void Init() override {
     SetLayoutManager(std::make_unique<views::FillLayout>());
     auto* label = new views::Label(l10n_util::GetStringUTF16(
-        chromeos::switches::IsAssistantEnabled()
+        assistant::util::IsGoogleDevice()
             ? IDS_ASH_STYLUS_WARM_WELCOME_BUBBLE_WITH_ASSISTANT_DESCRIPTION
             : IDS_ASH_STYLUS_WARM_WELCOME_BUBBLE_DESCRIPTION));
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -67,8 +68,6 @@ class PaletteWelcomeBubble::WelcomeBubbleView
     label->SizeToFit(kBubbleContentLabelPreferredWidthDp);
     AddChildView(label);
   }
-
-  int GetDialogButtons() const override { return ui::DIALOG_BUTTON_NONE; }
 
   // views::View:
   const char* GetClassName() const override { return "WelcomeBubbleView"; }

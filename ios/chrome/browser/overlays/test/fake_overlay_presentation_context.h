@@ -37,28 +37,41 @@ class FakeOverlayPresentationContext : public OverlayPresentationContext {
   void SimulateDismissalForRequest(OverlayRequest* request,
                                    OverlayDismissalReason reason);
 
-  // Setter for whether the context is active.
-  void SetIsActive(bool active);
+  void SetPresentationCapabilities(UIPresentationCapabilities capabilities);
 
   // OverlayUIDelegate:
   void AddObserver(OverlayPresentationContextObserver* observer) override;
   void RemoveObserver(OverlayPresentationContextObserver* observer) override;
-  bool IsActive() const override;
-  void ShowOverlayUI(OverlayPresenter* presenter,
-                     OverlayRequest* request,
+  UIPresentationCapabilities GetPresentationCapabilities() const override;
+  bool CanShowUIForRequest(
+      OverlayRequest* request,
+      UIPresentationCapabilities capabilities) const override;
+  bool CanShowUIForRequest(OverlayRequest* request) const override;
+  bool IsShowingOverlayUI() const override;
+  void PrepareToShowOverlayUI(OverlayRequest* request) override;
+  void ShowOverlayUI(OverlayRequest* request,
+                     OverlayPresentationCallback presentation_callback,
                      OverlayDismissalCallback dismissal_callback) override;
-  void HideOverlayUI(OverlayPresenter* presenter,
-                     OverlayRequest* request) override;
-  void CancelOverlayUI(OverlayPresenter* presenter,
-                       OverlayRequest* request) override;
+  void HideOverlayUI(OverlayRequest* request) override;
+  void CancelOverlayUI(OverlayRequest* request) override;
 
  private:
-  // The presentation states for each OverlayRequest.
-  std::map<OverlayRequest*, PresentationState> presentation_states_;
-  // The callbacks for each OverlayRequest.
-  std::map<OverlayRequest*, OverlayDismissalCallback> overlay_callbacks_;
-  // Whether the context is active.
-  bool active_ = true;
+  // Struct used to store state for the fake presentation context.
+  struct FakeUIState {
+    FakeUIState();
+    ~FakeUIState();
+
+    PresentationState presentation_state = PresentationState::kNotPresented;
+    OverlayDismissalCallback dismissal_callback;
+  };
+
+  // The UI states for each request.
+  std::map<OverlayRequest*, FakeUIState> states_;
+
+  UIPresentationCapabilities capabilities_ =
+      static_cast<UIPresentationCapabilities>(
+          UIPresentationCapabilities::kContained |
+          UIPresentationCapabilities::kPresented);
 
   base::ObserverList<OverlayPresentationContextObserver,
                      /* check_empty= */ true>

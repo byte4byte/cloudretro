@@ -36,7 +36,8 @@ jboolean JNI_TemplateUrl_IsPrepopulatedOrCreatedByPolicy(
     jlong template_url_ptr) {
   TemplateURL* template_url = ToTemplateURL(template_url_ptr);
   return template_url->prepopulate_id() > 0 ||
-         template_url->created_by_policy();
+         template_url->created_by_policy() ||
+         template_url->created_from_play_api();
 }
 
 jlong JNI_TemplateUrl_GetLastVisitedTime(JNIEnv* env, jlong template_url_ptr) {
@@ -53,4 +54,10 @@ ScopedJavaLocalRef<jobject> CreateTemplateUrlAndroid(
     JNIEnv* env,
     const TemplateURL* template_url) {
   return Java_TemplateUrl_create(env, reinterpret_cast<intptr_t>(template_url));
+}
+
+ScopedJavaLocalRef<jstring> JNI_TemplateUrl_GetURL(JNIEnv* env,
+                                                   jlong template_url_ptr) {
+  TemplateURL* template_url = ToTemplateURL(template_url_ptr);
+  return base::android::ConvertUTF8ToJavaString(env, template_url->url());
 }

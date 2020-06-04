@@ -14,33 +14,25 @@ namespace features {
 COMPONENT_EXPORT(BLINK_FEATURES)
 extern const base::Feature kResamplingScrollEvents;
 
+// Enables filtering of predicted scroll events on compositor thread.
+COMPONENT_EXPORT(BLINK_FEATURES)
+extern const base::Feature kFilteringScrollPrediction;
+
+// Enables changing the influence of acceleration based on change of direction.
+COMPONENT_EXPORT(BLINK_FEATURES)
+extern const base::Feature kKalmanHeuristics;
+
+// Enables discarding the prediction if the predicted direction is opposite from
+// the current direction.
+COMPONENT_EXPORT(BLINK_FEATURES)
+extern const base::Feature kKalmanDirectionCutOff;
+
 // This feature allows native ET_MOUSE_EXIT events to be passed
 // through to blink as mouse leave events. Traditionally these events were
 // converted to mouse move events due to a number of inconsistencies on
 // the native platforms. crbug.com/450631
 COMPONENT_EXPORT(BLINK_FEATURES)
 extern const base::Feature kSendMouseLeaveEvents;
-
-// When enabled, this feature prevents Blink from changing the hover state and
-// dispatching mouse enter/exit events for elements under the mouse after the
-// layout under the mouse cursor is changed.
-COMPONENT_EXPORT(BLINK_FEATURES)
-extern const base::Feature kUpdateHoverFromLayoutChangeAtBeginFrame;
-
-// When enabled, this feature prevents Blink from changing the hover state and
-// dispatching mouse enter/exit events for elements under the mouse as the page
-// is scrolled.
-COMPONENT_EXPORT(BLINK_FEATURES)
-extern const base::Feature kUpdateHoverFromScrollAtBeginFrame;
-
-// Enables handling touch events in compositor using impl side touch action
-// knowledge.
-COMPONENT_EXPORT(BLINK_FEATURES)
-extern const base::Feature kCompositorTouchAction;
-
-// Enables fallback cursor mode for dpad devices.
-COMPONENT_EXPORT(BLINK_FEATURES)
-extern const base::Feature kFallbackCursorMode;
 
 // When enabled, this feature prevent blink sending key event to web unless it
 // is on installed PWA.

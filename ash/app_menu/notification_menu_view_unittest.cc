@@ -28,9 +28,8 @@ namespace {
 // The app id used in tests.
 constexpr char kTestAppId[] = "test-app-id";
 
-class MockNotificationMenuController
-    : public message_center::SlideOutController::Delegate,
-      public NotificationMenuView::Delegate {
+class MockNotificationMenuController : public views::SlideOutControllerDelegate,
+                                       public NotificationMenuView::Delegate {
  public:
   MockNotificationMenuController() = default;
   ~MockNotificationMenuController() override = default;
@@ -106,7 +105,7 @@ class NotificationMenuViewTest : public views::ViewsTestBase {
     init_params.ownership =
         views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     init_params.activatable = views::Widget::InitParams::ACTIVATABLE_YES;
-    widget_->Init(init_params);
+    widget_->Init(std::move(init_params));
     widget_->SetContentsView(notification_menu_view_.get());
     widget_->SetSize(notification_menu_view_->GetPreferredSize());
     widget_->Show();

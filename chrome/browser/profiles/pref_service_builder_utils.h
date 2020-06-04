@@ -12,7 +12,8 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/preferences/public/mojom/tracked_preference_validation_delegate.mojom-forward.h"
 
 class PrefStore;
 class SimpleFactoryKey;
@@ -52,7 +53,7 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreatePrefService(
     PrefStore* extension_pref_store,
     policy::PolicyService* policy_service,
     policy::ChromeBrowserPolicyConnector* browser_policy_connector,
-    prefs::mojom::TrackedPreferenceValidationDelegatePtr
+    mojo::PendingRemote<prefs::mojom::TrackedPreferenceValidationDelegate>
         pref_validation_delegate,
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
     SimpleFactoryKey* key,

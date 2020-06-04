@@ -5,7 +5,7 @@
 #import "ios/chrome/browser/ui/elements/chrome_activity_overlay_coordinator.h"
 
 #import "ios/chrome/browser/ui/elements/chrome_activity_overlay_view_controller.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -20,7 +20,7 @@
 @implementation ChromeActivityOverlayCoordinator
 
 - (void)start {
-  if (self.chromeActivityOverlayViewController)
+  if (self.chromeActivityOverlayViewController || self.started)
     return;
 
   self.chromeActivityOverlayViewController =
@@ -40,15 +40,17 @@
       addSubview:self.chromeActivityOverlayViewController.view];
   [self.chromeActivityOverlayViewController
       didMoveToParentViewController:self.baseViewController];
+  self.started = YES;
 }
 
 - (void)stop {
-  if (!self.chromeActivityOverlayViewController)
+  if (!self.chromeActivityOverlayViewController || !self.started)
     return;
   [self.chromeActivityOverlayViewController willMoveToParentViewController:nil];
   [self.chromeActivityOverlayViewController.view removeFromSuperview];
   [self.chromeActivityOverlayViewController removeFromParentViewController];
   self.chromeActivityOverlayViewController = nil;
+  self.started = NO;
 }
 
 @end

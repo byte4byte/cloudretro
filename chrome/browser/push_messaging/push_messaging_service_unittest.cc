@@ -16,7 +16,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
@@ -27,7 +26,8 @@
 #include "components/gcm_driver/fake_gcm_client_factory.h"
 #include "components/gcm_driver/fake_gcm_profile_service.h"
 #include "components/gcm_driver/gcm_profile_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/permissions/permission_manager.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom.h"
 
@@ -71,7 +71,7 @@ class PushMessagingTestingProfile : public TestingProfile {
     return PushMessagingServiceFactory::GetForProfile(this);
   }
 
-  PermissionManager* GetPermissionControllerDelegate() override {
+  permissions::PermissionManager* GetPermissionControllerDelegate() override {
     return PermissionManagerFactory::GetForProfile(this);
   }
 
@@ -93,7 +93,7 @@ class PushMessagingServiceTest : public ::testing::Test {
     HostContentSettingsMap* host_content_settings_map =
         HostContentSettingsMapFactory::GetForProfile(&profile_);
     host_content_settings_map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW);
+        ContentSettingsType::NOTIFICATIONS, CONTENT_SETTING_ALLOW);
 
     // Override the GCM Profile service so that we can send fake messages.
     gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactory(
@@ -143,13 +143,12 @@ class PushMessagingServiceTest : public ::testing::Test {
   PushMessagingTestingProfile* profile() { return &profile_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   PushMessagingTestingProfile profile_;
 
 #if defined(OS_ANDROID)
   instance_id::InstanceIDAndroid::ScopedBlockOnAsyncTasksForTesting
       block_async_;
-  instance_id::ScopedUseFakeInstanceIDAndroid use_fake_;
 #endif  // OS_ANDROID
 };
 
@@ -178,9 +177,9 @@ TEST_F(PushMessagingServiceTest, PayloadEncryptionTest) {
 
   push_service->SubscribeFromWorker(
       origin, kTestServiceWorkerId, std::move(options),
-      base::Bind(&PushMessagingServiceTest::DidRegister, base::Unretained(this),
-                 &subscription_id, &endpoint, &p256dh, &auth,
-                 run_loop.QuitClosure()));
+      base::BindOnce(&PushMessagingServiceTest::DidRegister,
+                     base::Unretained(this), &subscription_id, &endpoint,
+                     &p256dh, &auth, run_loop.QuitClosure()));
 
   EXPECT_EQ(0u, subscription_id.size());  // this must be asynchronous
 

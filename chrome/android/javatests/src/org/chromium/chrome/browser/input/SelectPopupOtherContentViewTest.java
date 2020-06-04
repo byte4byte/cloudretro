@@ -17,8 +17,8 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.WebContentsFactory;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.embedder_support.view.ContentView;
@@ -88,8 +88,7 @@ public class SelectPopupOtherContentViewTest {
     @LargeTest
     @Feature({"Browser"})
     @RetryOnFailure
-    public void testPopupNotClosedByOtherContentView()
-            throws InterruptedException, Exception, Throwable {
+    public void testPopupNotClosedByOtherContentView() throws Exception, Throwable {
         // Load the test page.
         mActivityTestRule.startMainActivityWithURL(SELECT_URL);
 

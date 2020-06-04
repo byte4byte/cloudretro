@@ -8,7 +8,7 @@
 
 #include "chrome/browser/autofill/strike_database_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/autofill/payments/autofill_ui_util.h"
+#include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_bubble.h"
 #include "chrome/browser/ui/autofill/payments/payments_ui_constants.h"
 #include "chrome/browser/ui/browser.h"
@@ -45,6 +45,7 @@ void LocalCardMigrationBubbleControllerImpl::ShowBubble(
     return;
 
   is_reshow_ = false;
+  should_add_strikes_on_bubble_close_ = true;
   local_card_migration_bubble_closure_ =
       std::move(local_card_migration_bubble_closure);
 
@@ -102,9 +103,7 @@ void LocalCardMigrationBubbleControllerImpl::OnCancelButtonClicked() {
 void LocalCardMigrationBubbleControllerImpl::OnBubbleClosed() {
   local_card_migration_bubble_ = nullptr;
   UpdateLocalCardMigrationIcon();
-  if (should_add_strikes_on_bubble_close_ &&
-      base::FeatureList::IsEnabled(
-          features::kAutofillLocalCardMigrationUsesStrikeSystemV2)) {
+  if (should_add_strikes_on_bubble_close_) {
     should_add_strikes_on_bubble_close_ = false;
     AddStrikesForBubbleClose();
   }
@@ -116,6 +115,11 @@ base::TimeDelta LocalCardMigrationBubbleControllerImpl::Elapsed() const {
 
 void LocalCardMigrationBubbleControllerImpl::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillEnableStickyPaymentsBubble)) {
+    return;
+  }
+
   if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
     return;
 
@@ -174,19 +178,23 @@ void LocalCardMigrationBubbleControllerImpl::ShowBubbleImplementation() {
 
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   local_card_migration_bubble_ =
-      browser->window()->ShowLocalCardMigrationBubble(web_contents(), this,
-                                                      is_reshow_);
+      browser->window()
+          ->GetAutofillBubbleHandler()
+          ->ShowLocalCardMigrationBubble(web_contents(), this, is_reshow_);
   DCHECK(local_card_migration_bubble_);
   UpdateLocalCardMigrationIcon();
-  timer_.reset(new base::ElapsedTimer());
+  timer_ = std::make_unique<base::ElapsedTimer>();
 
   AutofillMetrics::LogLocalCardMigrationBubbleOfferMetric(
       AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_SHOWN, is_reshow_);
 }
 
 void LocalCardMigrationBubbleControllerImpl::UpdateLocalCardMigrationIcon() {
-  ::autofill::UpdatePageActionIcon(PageActionIconType::kLocalCardMigration,
-                                   web_contents());
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  if (browser) {
+    browser->window()->UpdatePageActionIcon(
+        PageActionIconType::kLocalCardMigration);
+  }
 }
 
 void LocalCardMigrationBubbleControllerImpl::AddStrikesForBubbleClose() {

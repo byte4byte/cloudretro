@@ -6,9 +6,11 @@
 
 #include "base/sampling_heap_profiler/sampling_heap_profiler.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "components/metrics/call_stack_profile_builder.h"
+#include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/sampled_profile.pb.h"
 
@@ -21,8 +23,8 @@
 
 class HeapProfilerControllerTest : public testing::Test {
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW};
+  base::test::TaskEnvironment task_environment{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
 };
 
 TEST_F(HeapProfilerControllerTest, MAYBE_EmptyProfileIsNotEmitted) {
@@ -34,7 +36,7 @@ TEST_F(HeapProfilerControllerTest, MAYBE_EmptyProfileIsNotEmitted) {
           }));
   controller.Start();
 
-  scoped_task_environment.FastForwardBy(base::TimeDelta::FromDays(365));
+  task_environment.FastForwardBy(base::TimeDelta::FromDays(365));
 }
 
 // Sampling profiler is not capable of unwinding stack on Android under tests.
@@ -67,13 +69,13 @@ TEST_F(HeapProfilerControllerTest, ProfileCollectionsScheduler) {
       controller.reset();
   };
 
-  base::SamplingHeapProfiler::Init();
-  auto* profiler = base::SamplingHeapProfiler::Get();
-  profiler->SetSamplingInterval(1024);
-  profiler->Start();
-
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      metrics::CallStackProfileMetricsProvider::kHeapProfilerReporting);
   metrics::CallStackProfileBuilder::SetBrowserProcessReceiverCallback(
       base::BindLambdaForTesting(check_profile));
+  base::SamplingHeapProfiler::Get()->SetSamplingInterval(1024);
+
   controller->Start();
 
   auto* sampler = base::PoissonAllocationSampler::Get();
@@ -83,7 +85,7 @@ TEST_F(HeapProfilerControllerTest, ProfileCollectionsScheduler) {
   sampler->RecordAlloc(reinterpret_cast<void*>(0x7331), kAllocationSize,
                        base::PoissonAllocationSampler::kMalloc, nullptr);
 
-  scoped_task_environment.FastForwardUntilNoTasksRemain();
+  task_environment.FastForwardUntilNoTasksRemain();
   EXPECT_LE(kSnapshotsToCollect, profile_count);
 }
 #endif

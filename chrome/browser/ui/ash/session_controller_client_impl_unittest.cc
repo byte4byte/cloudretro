@@ -23,7 +23,7 @@
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#include "chrome/browser/ui/ash/assistant/assistant_client.h"
+#include "chrome/browser/ui/ash/assistant/assistant_client_impl.h"
 #include "chrome/browser/ui/ash/test_session_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -35,8 +35,7 @@
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/cert/x509_certificate.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
@@ -113,8 +112,8 @@ class SessionControllerClientImplTest : public testing::Test {
     user_manager_ = new TestChromeUserManager;
     user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
         base::WrapUnique(user_manager_));
-    // Initialize AssistantClient singleton.
-    assistant_client_ = std::make_unique<AssistantClient>();
+    // Initialize AssistantClientImpl singleton.
+    assistant_client_ = std::make_unique<AssistantClientImpl>();
 
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
@@ -144,12 +143,17 @@ class SessionControllerClientImplTest : public testing::Test {
 
   // Add and log in a user to the session.
   void UserAddedToSession(const AccountId& account_id) {
-    user_manager()->AddUser(account_id);
+    const user_manager::User* user = user_manager()->AddUser(account_id);
     session_manager_.CreateSession(
         account_id,
         chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
             account_id.GetUserEmail()),
         false);
+
+    // Simulate that user profile is loaded.
+    CreateTestingProfile(user);
+    session_manager_.NotifyUserProfileLoaded(account_id);
+
     session_manager_.SetSessionState(SessionState::ACTIVE);
   }
 
@@ -185,10 +189,9 @@ class SessionControllerClientImplTest : public testing::Test {
     return profile;
   }
 
-  content::TestBrowserThreadBundle threads_;
-  content::TestServiceManagerContext context_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
-  std::unique_ptr<AssistantClient> assistant_client_;
+  std::unique_ptr<AssistantClientImpl> assistant_client_;
   session_manager::SessionManager session_manager_;
   chromeos::SessionTerminationManager session_termination_manager_;
 
@@ -322,9 +325,7 @@ TEST_F(SessionControllerClientImplTest,
   net::CertificateList certificates;
   certificates.push_back(
       net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem"));
-  service->OnPolicyProvidedCertsChanged(
-      certificates /* all_server_and_authority_certs */,
-      certificates /* trust_anchors */);
+  service->SetPolicyTrustAnchorsForTesting(/*trust_anchors=*/certificates);
   EXPECT_TRUE(service->has_policy_certificates());
   EXPECT_EQ(ash::AddUserSessionPolicy::ERROR_NOT_ALLOWED_PRIMARY_USER,
             SessionControllerClientImpl::GetAddUserSessionPolicy());
@@ -419,7 +420,7 @@ TEST_F(SessionControllerClientImplTest, SendUserSession) {
   const AccountId account_id(
       AccountId::FromUserEmailGaiaId("user@test.com", "5555555555"));
   const user_manager::User* user = user_manager()->AddUser(account_id);
-  TestingProfile* user_profile = CreateTestingProfile(user);
+  CreateTestingProfile(user);
   session_manager_.CreateSession(
       account_id,
       chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
@@ -430,15 +431,39 @@ TEST_F(SessionControllerClientImplTest, SendUserSession) {
   // User session was sent.
   EXPECT_EQ(1, session_controller.update_user_session_count());
   ASSERT_TRUE(session_controller.last_user_session());
-  EXPECT_EQ(content::BrowserContext::GetServiceInstanceGroupFor(user_profile),
-            session_controller.last_user_session()
-                ->user_info.service_instance_group.value());
 
   // Simulate a request for an update where nothing changed.
   client.SendUserSession(*user_manager()->GetLoggedInUsers()[0]);
 
   // Session was not updated because nothing changed.
   EXPECT_EQ(1, session_controller.update_user_session_count());
+}
+
+TEST_F(SessionControllerClientImplTest, SetUserSessionOrder) {
+  // Create an object to test and connect it to our test interface.
+  SessionControllerClientImpl client;
+  TestSessionController session_controller;
+  client.Init();
+
+  // User session order is not sent.
+  EXPECT_EQ(0, session_controller.set_user_session_order_count());
+
+  // Simulate a not-signed-in user has the user image changed.
+  const AccountId not_signed_in(
+      AccountId::FromUserEmailGaiaId("not_signed_in@test.com", "12345"));
+  user_manager::User* not_signed_in_user =
+      user_manager()->AddUser(not_signed_in);
+  user_manager()->NotifyUserImageChanged(*not_signed_in_user);
+
+  // User session order should not be sent.
+  EXPECT_EQ(0, session_controller.set_user_session_order_count());
+
+  // Simulate login.
+  UserAddedToSession(
+      AccountId::FromUserEmailGaiaId("signed_in@test.com", "67890"));
+
+  // User session order is sent after the sign-in.
+  EXPECT_EQ(1, session_controller.set_user_session_order_count());
 }
 
 TEST_F(SessionControllerClientImplTest, SupervisedUser) {
@@ -464,12 +489,6 @@ TEST_F(SessionControllerClientImplTest, SupervisedUser) {
       chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
           "child@test.com"),
       false);
-  session_manager_.SetSessionState(SessionState::ACTIVE);
-
-  // The session controller received session info and user session.
-  EXPECT_LT(0u, session_controller.last_user_session()->session_id);
-  EXPECT_EQ(user_manager::USER_TYPE_SUPERVISED,
-            session_controller.last_user_session()->user_info.type);
 
   // Simulate profile creation after login.
   TestingProfile* user_profile = CreateTestingProfile(user);
@@ -482,8 +501,15 @@ TEST_F(SessionControllerClientImplTest, SupervisedUser) {
                    "parent2@test.com");
 
   // Simulate the notification that the profile is ready.
-  client.OnLoginUserProfilePrepared(user_profile);
-  base::RunLoop().RunUntilIdle();  // For PostTask and mojo interface.
+  session_manager_.NotifyUserProfileLoaded(account_id);
+
+  // User session could only be made active after user profile is loaded.
+  session_manager_.SetSessionState(SessionState::ACTIVE);
+
+  // The session controller received session info and user session.
+  EXPECT_LT(0u, session_controller.last_user_session()->session_id);
+  EXPECT_EQ(user_manager::USER_TYPE_SUPERVISED,
+            session_controller.last_user_session()->user_info.type);
 
   // The custodians were sent over the mojo interface.
   EXPECT_EQ("parent1@test.com",
@@ -515,11 +541,13 @@ TEST_F(SessionControllerClientImplTest, UserPrefsChange) {
       chromeos::ProfileHelper::GetUserIdHashByUserIdForTesting(
           account_id.GetUserEmail()),
       false);
-  session_manager_.SetSessionState(SessionState::ACTIVE);
 
   // Simulate the notification that the profile is ready.
   TestingProfile* const user_profile = CreateTestingProfile(user);
-  client.OnLoginUserProfilePrepared(user_profile);
+  session_manager_.NotifyUserProfileLoaded(account_id);
+
+  // User session could only be made active after user profile is loaded.
+  session_manager_.SetSessionState(SessionState::ACTIVE);
 
   // Manipulate user prefs and verify SessionController is updated.
   PrefService* const user_prefs = user_profile->GetPrefs();

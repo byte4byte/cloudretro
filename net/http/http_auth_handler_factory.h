@@ -14,7 +14,7 @@
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
-#include "net/http/http_negotiate_auth_system.h"
+#include "net/http/http_auth_mechanism.h"
 #include "net/http/url_security_manager.h"
 #include "net/net_buildflags.h"
 
@@ -127,12 +127,6 @@ class NET_EXPORT HttpAuthHandlerFactory {
       HostResolver* host_resolver,
       std::unique_ptr<HttpAuthHandler>* handler);
 
-  // Factory callback to create the auth system used for Negotiate
-  // authentication.
-  using NegotiateAuthSystemFactory =
-      base::RepeatingCallback<std::unique_ptr<net::HttpNegotiateAuthSystem>(
-          const net::HttpAuthPreferences*)>;
-
   // Creates a standard HttpAuthHandlerRegistryFactory. The caller is
   // responsible for deleting the factory.
   // The default factory supports Basic, Digest, NTLM, and Negotiate schemes.
@@ -141,15 +135,14 @@ class NET_EXPORT HttpAuthHandlerFactory {
   // used by the Negotiate authentication handler.
   static std::unique_ptr<HttpAuthHandlerRegistryFactory> CreateDefault(
       const HttpAuthPreferences* prefs = nullptr
-#if (defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_CHROMEOS)) || \
-    defined(OS_FUCHSIA)
+#if BUILDFLAG(USE_EXTERNAL_GSSAPI)
       ,
       const std::string& gssapi_library_name = ""
 #endif
 #if BUILDFLAG(USE_KERBEROS)
       ,
-      NegotiateAuthSystemFactory negotiate_auth_system_factory =
-          NegotiateAuthSystemFactory()
+      HttpAuthMechanismFactory negotiate_auth_system_factory =
+          HttpAuthMechanismFactory()
 #endif
   );
 
@@ -204,15 +197,14 @@ class NET_EXPORT HttpAuthHandlerRegistryFactory
   static std::unique_ptr<HttpAuthHandlerRegistryFactory> Create(
       const HttpAuthPreferences* prefs,
       const std::vector<std::string>& auth_schemes
-#if (defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_CHROMEOS)) || \
-    defined(OS_FUCHSIA)
+#if BUILDFLAG(USE_EXTERNAL_GSSAPI)
       ,
       const std::string& gssapi_library_name = ""
 #endif
 #if BUILDFLAG(USE_KERBEROS)
       ,
-      NegotiateAuthSystemFactory negotiate_auth_system_factory =
-          NegotiateAuthSystemFactory()
+      HttpAuthMechanismFactory negotiate_auth_system_factory =
+          HttpAuthMechanismFactory()
 #endif
   );
 

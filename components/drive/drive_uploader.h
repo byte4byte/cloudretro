@@ -16,6 +16,8 @@
 #include "base/threading/thread_checker.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "google_apis/drive/drive_api_error_codes.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
 
 class GURL;
@@ -36,11 +38,10 @@ class DriveServiceInterface;
 // |upload_location| will be returned when the uploading process is started but
 // terminated before the completion due to some errors. It can be used to
 // resume it.
-typedef base::Callback<void(
+using UploadCompletionCallback = base::OnceCallback<void(
     google_apis::DriveApiErrorCode error,
     const GURL& upload_location,
-    std::unique_ptr<google_apis::FileResource> resource_entry)>
-    UploadCompletionCallback;
+    std::unique_ptr<google_apis::FileResource> resource_entry)>;
 
 class DriveUploaderInterface {
  public:
@@ -84,8 +85,8 @@ class DriveUploaderInterface {
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 
   // Uploads an existing file (a file that already exists on Drive).
   //
@@ -103,8 +104,8 @@ class DriveUploaderInterface {
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 
   // Resumes the uploading process terminated before the completion.
   // |upload_location| should be the one returned via UploadCompletionCallback
@@ -116,16 +117,17 @@ class DriveUploaderInterface {
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 };
 
 class DriveUploader : public DriveUploaderInterface {
  public:
   // In unittest, the |wake_lock_provider| is set as nullptr.
-  DriveUploader(DriveServiceInterface* drive_service,
-                const scoped_refptr<base::TaskRunner>& blocking_task_runner,
-                device::mojom::WakeLockProviderPtr wake_lock_provider);
+  DriveUploader(
+      DriveServiceInterface* drive_service,
+      const scoped_refptr<base::TaskRunner>& blocking_task_runner,
+      mojo::PendingRemote<device::mojom::WakeLockProvider> wake_lock_provider);
 
   ~DriveUploader() override;
 
@@ -138,35 +140,36 @@ class DriveUploader : public DriveUploaderInterface {
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
   google_apis::CancelCallback UploadExistingFile(
       const std::string& resource_id,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
   google_apis::CancelCallback ResumeUploadFile(
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
 
  private:
   class RefCountedBatchRequest;
   struct UploadFileInfo;
-  typedef base::Callback<void(std::unique_ptr<UploadFileInfo> upload_file_info)>
+  typedef base::OnceCallback<void(
+      std::unique_ptr<UploadFileInfo> upload_file_info)>
       StartInitiateUploadCallback;
 
   // Starts uploading a file with |upload_file_info|.
   google_apis::CancelCallback StartUploadFile(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      const StartInitiateUploadCallback& start_initiate_upload_callback);
+      StartInitiateUploadCallback start_initiate_upload_callback);
   void StartUploadFileAfterGetFileSize(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      const StartInitiateUploadCallback& start_initiate_upload_callback,
+      StartInitiateUploadCallback start_initiate_upload_callback,
       bool get_file_size_result);
 
   // Checks file size and call InitiateUploadNewFile or MultipartUploadNewFile
@@ -211,7 +214,7 @@ class DriveUploader : public DriveUploaderInterface {
       std::unique_ptr<UploadFileInfo> upload_file_info,
       const google_apis::UploadRangeResponse& response,
       std::unique_ptr<google_apis::FileResource> entry);
-  void OnUploadProgress(const google_apis::ProgressCallback& callback,
+  void OnUploadProgress(google_apis::ProgressCallback callback,
                         int64_t start_position,
                         int64_t total_size,
                         int64_t progress_of_chunk,
@@ -227,6 +230,8 @@ class DriveUploader : public DriveUploaderInterface {
       google_apis::DriveApiErrorCode error,
       std::unique_ptr<google_apis::FileResource> entry);
 
+  device::mojom::WakeLockProvider* GetWakeLockProvider();
+
   // The class is expected to run on UI thread.
   base::ThreadChecker thread_checker_;
 
@@ -237,7 +242,7 @@ class DriveUploader : public DriveUploaderInterface {
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
   scoped_refptr<RefCountedBatchRequest> current_batch_request_;
 
-  device::mojom::WakeLockProviderPtr wake_lock_provider_;
+  mojo::Remote<device::mojom::WakeLockProvider> wake_lock_provider_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

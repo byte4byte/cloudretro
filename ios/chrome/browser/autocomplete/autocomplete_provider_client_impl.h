@@ -9,9 +9,7 @@
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 namespace unified_consent {
 class UrlKeyedDataCollectionConsentHelper;
@@ -25,8 +23,7 @@ class ComponentUpdateService;
 // AutocompleteProviderClient interface.
 class AutocompleteProviderClientImpl : public AutocompleteProviderClient {
  public:
-  explicit AutocompleteProviderClientImpl(
-      ios::ChromeBrowserState* browser_state);
+  explicit AutocompleteProviderClientImpl(ChromeBrowserState* browser_state);
   ~AutocompleteProviderClientImpl() override;
 
   // AutocompleteProviderClient implementation.
@@ -54,9 +51,6 @@ class AutocompleteProviderClientImpl : public AutocompleteProviderClient {
   std::string GetEmbedderRepresentationOfAboutScheme() const override;
   std::vector<base::string16> GetBuiltinURLs() override;
   std::vector<base::string16> GetBuiltinsToProvideAsUserTypes() override;
-  // GetCurrentVisitTimestamp is only used by the contextual zero suggest
-  // suggestions for desktop users. This implementation returns base::Time().
-  base::Time GetCurrentVisitTimestamp() const override;
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override;
   bool IsOffTheRecord() const override;
@@ -79,7 +73,7 @@ class AutocompleteProviderClientImpl : public AutocompleteProviderClient {
                         const AutocompleteInput* input) override;
 
  private:
-  ios::ChromeBrowserState* browser_state_;
+  ChromeBrowserState* browser_state_;
   AutocompleteSchemeClassifierImpl scheme_classifier_;
   std::unique_ptr<unified_consent::UrlKeyedDataCollectionConsentHelper>
       url_consent_helper_;

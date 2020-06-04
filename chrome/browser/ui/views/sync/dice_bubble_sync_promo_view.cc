@@ -7,7 +7,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
@@ -24,15 +25,16 @@ DiceBubbleSyncPromoView::DiceBubbleSyncPromoView(
     Profile* profile,
     BubbleSyncPromoDelegate* delegate,
     signin_metrics::AccessPoint access_point,
-    int no_accounts_promo_message_resource_id,
     int accounts_promo_message_resource_id,
     bool signin_button_prominent,
     int text_style)
-    : views::View(), delegate_(delegate) {
-  DCHECK(AccountConsistencyModeManager::IsDiceEnabledForProfile(profile));
+    : delegate_(delegate) {
+  DCHECK(!profile->IsGuestSession());
+  AccountInfo account;
+  // Signin promos can be shown in incognito, they use an empty account list.
+  if (profile->IsRegularProfile())
+    account = signin_ui_util::GetSingleAccountForDicePromos(profile);
 
-  std::vector<AccountInfo> accounts =
-      signin_ui_util::GetAccountsForDicePromos(profile);
   // Always show the accounts promo message for now.
   const int title_resource_id = accounts_promo_message_resource_id;
 
@@ -52,25 +54,22 @@ DiceBubbleSyncPromoView::DiceBubbleSyncPromoView(
     AddChildView(title);
   }
 
-  if (accounts.empty()) {
+  if (account.IsEmpty()) {
     signin_button_view_ =
         new DiceSigninButtonView(this, signin_button_prominent);
   } else {
-    gfx::Image account_icon = accounts[0].account_image;
+    gfx::Image account_icon = account.account_image;
     if (account_icon.IsEmpty()) {
       account_icon = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           profiles::GetPlaceholderAvatarIconResourceID());
     }
-    signin_button_view_ = new DiceSigninButtonView(
-        accounts[0], account_icon, this, /*show_drop_down_arrow=*/false,
-        /*use_account_name_as_title=*/true);
-
-    // Store account information for submenu.
-    accounts_for_submenu_.assign(accounts.begin() + 1, accounts.end());
+    signin_button_view_ =
+        new DiceSigninButtonView(account, account_icon, this,
+                                 /*use_account_name_as_title=*/true);
   }
   signin_metrics::RecordSigninImpressionUserActionForAccessPoint(access_point);
   signin_metrics::RecordSigninImpressionWithAccountUserActionForAccessPoint(
-      access_point, !accounts.empty() /* with_account */);
+      access_point, !account.IsEmpty() /* with_account */);
   AddChildView(signin_button_view_);
 }
 
@@ -83,21 +82,6 @@ void DiceBubbleSyncPromoView::ButtonPressed(views::Button* sender,
                signin_button_view_->account());
     return;
   }
-
-  if (sender == signin_button_view_->drop_down_arrow()) {
-    // Display a submenu listing the GAIA web accounts (except the first one).
-    // Using base::Unretained(this) is safe here because |dice_accounts_menu_|
-    // is owned by |DiceBubbleSyncPromoView|, i.e. |this|.
-    dice_accounts_menu_ = std::make_unique<DiceAccountsMenu>(
-        accounts_for_submenu_,
-        base::BindOnce(&DiceBubbleSyncPromoView::EnableSync,
-                       base::Unretained(this),
-                       false /* is_default_promo_account */));
-    dice_accounts_menu_->Show(signin_button_view_,
-                              signin_button_view_->drop_down_arrow());
-    return;
-  }
-
   NOTREACHED();
 }
 

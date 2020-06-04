@@ -39,7 +39,7 @@ class TetherDisconnectorImpl : public TetherDisconnector {
 
   void DisconnectFromNetwork(
       const std::string& tether_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback,
       const TetherSessionCompletionLogger::SessionCompletionReason&
           session_completion_reason) override;
@@ -50,7 +50,7 @@ class TetherDisconnectorImpl : public TetherDisconnector {
   void DisconnectActiveWifiConnection(
       const std::string& tether_network_guid,
       const std::string& wifi_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback);
 
   ActiveHost* active_host_;
@@ -60,7 +60,7 @@ class TetherDisconnectorImpl : public TetherDisconnector {
   DeviceIdTetherNetworkGuidMap* device_id_tether_network_guid_map_;
   TetherSessionCompletionLogger* tether_session_completion_logger_;
 
-  base::WeakPtrFactory<TetherDisconnectorImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<TetherDisconnectorImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TetherDisconnectorImpl);
 };

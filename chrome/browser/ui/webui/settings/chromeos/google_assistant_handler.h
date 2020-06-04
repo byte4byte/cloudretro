@@ -10,9 +10,7 @@
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/services/assistant/public/mojom/settings.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
-
-class Profile;
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace chromeos {
 namespace settings {
@@ -20,7 +18,7 @@ namespace settings {
 class GoogleAssistantHandler : public ::settings::SettingsPageUIHandler,
                                chromeos::CrasAudioHandler::AudioObserver {
  public:
-  explicit GoogleAssistantHandler(Profile* profile);
+  GoogleAssistantHandler();
   ~GoogleAssistantHandler() override;
 
   void RegisterMessages() override;
@@ -43,13 +41,11 @@ class GoogleAssistantHandler : public ::settings::SettingsPageUIHandler,
   // Bind to assistant settings manager.
   void BindAssistantSettingsManager();
 
-  Profile* const profile_;
-
-  assistant::mojom::AssistantSettingsManagerPtr settings_manager_;
+  mojo::Remote<assistant::mojom::AssistantSettingsManager> settings_manager_;
 
   bool pending_hotword_update_ = false;
 
-  base::WeakPtrFactory<GoogleAssistantHandler> weak_factory_;
+  base::WeakPtrFactory<GoogleAssistantHandler> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(GoogleAssistantHandler);
 };

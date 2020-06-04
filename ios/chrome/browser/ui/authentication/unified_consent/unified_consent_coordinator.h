@@ -5,7 +5,7 @@
 #ifndef IOS_CHROME_BROWSER_UI_AUTHENTICATION_UNIFIED_CONSENT_UNIFIED_CONSENT_COORDINATOR_H_
 #define IOS_CHROME_BROWSER_UI_AUTHENTICATION_UNIFIED_CONSENT_UNIFIED_CONSENT_COORDINATOR_H_
 
-#import <UIKit/UIKit.h>
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 
 #include <vector>
 
@@ -42,7 +42,7 @@
 // All the string ids displayed by the view are available with
 // |consentStringIds| and |openSettingsStringId|. Those can be used to record
 // the consent agreed by the user.
-@interface UnifiedConsentCoordinator : NSObject
+@interface UnifiedConsentCoordinator : ChromeCoordinator
 
 @property(nonatomic, weak) id<UnifiedConsentCoordinatorDelegate> delegate;
 // Identity selected by the user to sign-in. By default, the first identity from
@@ -60,9 +60,11 @@
 @property(nonatomic, readonly) BOOL isScrolledToBottom;
 // Returns YES if the user tapped on the setting link.
 @property(nonatomic, readonly) BOOL settingsLinkWasTapped;
-
-// Starts this coordinator.
-- (void)start;
+// If YES, the UI elements are disabled.
+// TODO(crbug.com/1003737): This should be implemented with
+// ActivityOverlayCoordinator when all the cleanup will be done in
+// ChromeSigninViewController.
+@property(nonatomic, assign, getter=isUIDisabled) BOOL uiDisabled;
 
 // List of string ids used for the user consent. The string ids order matches
 // the way they appear on the screen.

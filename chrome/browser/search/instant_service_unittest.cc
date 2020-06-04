@@ -8,12 +8,17 @@
 
 #include "base/files/file_util.h"
 #include "base/path_service.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search/background/ntp_background_service.h"
 #include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/search/instant_unittest_base.h"
 #include "chrome/browser/search/ntp_features.h"
+#include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/search/instant_types.h"
@@ -22,6 +27,7 @@
 #include "components/ntp_tiles/ntp_tile.h"
 #include "components/ntp_tiles/section_type.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/native_theme/test_native_theme.h"
@@ -31,7 +37,7 @@ namespace {
 
 class MockInstantServiceObserver : public InstantServiceObserver {
  public:
-  MOCK_METHOD1(ThemeInfoChanged, void(const ThemeBackgroundInfo&));
+  MOCK_METHOD1(NtpThemeChanged, void(const NtpTheme&));
   MOCK_METHOD1(MostVisitedInfoChanged, void(const InstantMostVisitedInfo&));
 };
 
@@ -41,8 +47,27 @@ base::DictionaryValue GetBackgroundInfoAsDict(const GURL& background_url) {
   background_info.SetKey("attribution_line_1", base::Value(std::string()));
   background_info.SetKey("attribution_line_2", base::Value(std::string()));
   background_info.SetKey("attribution_action_url", base::Value(std::string()));
-
+  background_info.SetKey("collection_id", base::Value(std::string()));
+  background_info.SetKey("resume_token", base::Value(std::string()));
+  background_info.SetKey("refresh_timestamp", base::Value(0));
   return background_info;
+}
+
+base::Time GetReferenceTime() {
+  base::Time::Exploded exploded_reference_time;
+  exploded_reference_time.year = 2019;
+  exploded_reference_time.month = 1;
+  exploded_reference_time.day_of_month = 1;
+  exploded_reference_time.day_of_week = 1;
+  exploded_reference_time.hour = 0;
+  exploded_reference_time.minute = 0;
+  exploded_reference_time.second = 0;
+  exploded_reference_time.millisecond = 0;
+
+  base::Time out_time;
+  EXPECT_TRUE(
+      base::Time::FromLocalExploded(exploded_reference_time, &out_time));
+  return out_time;
 }
 
 class MockInstantService : public InstantService {
@@ -51,7 +76,7 @@ class MockInstantService : public InstantService {
   ~MockInstantService() override = default;
 
   MOCK_METHOD0(ResetCustomLinks, bool());
-  MOCK_METHOD0(ResetCustomBackgroundThemeInfo, void());
+  MOCK_METHOD0(ResetCustomBackgroundNtpTheme, void());
 };
 
 bool CheckBackgroundColor(SkColor color,
@@ -126,7 +151,7 @@ TEST_F(InstantServiceTest, DoesToggleShortcutsVisibility) {
   EXPECT_TRUE(instant_service_->ToggleShortcutsVisibility(false));
   EXPECT_FALSE(pref_service->GetBoolean(prefs::kNtpShortcutsVisible));
   EXPECT_FALSE(instant_service_->most_visited_info_->is_visible);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   // Show shortcuts, and check that a notification was sent.
   EXPECT_CALL(mock_observer, MostVisitedInfoChanged(testing::_)).Times(1);
@@ -183,11 +208,10 @@ TEST_F(InstantServiceTest, SetCustomBackgroundURL) {
   const GURL kUrl("https://www.foo.com");
 
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, std::string(), std::string(), GURL());
+  instant_service_->SetCustomBackgroundInfo(kUrl, "", "", GURL(), "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrl, theme_info->custom_background_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrl, theme->custom_background_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 }
 
@@ -196,40 +220,37 @@ TEST_F(InstantServiceTest, SetCustomBackgroundURLInvalidURL) {
   const GURL kInvalidUrl("foo");
   const GURL kValidUrl("https://www.foo.com");
   instant_service_->AddValidBackdropUrlForTesting(kValidUrl);
-  instant_service_->SetCustomBackgroundURL(kValidUrl);
+  instant_service_->SetCustomBackgroundInfo(kValidUrl, "", "", GURL(), "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kValidUrl.spec(), theme_info->custom_background_url.spec());
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kValidUrl.spec(), theme->custom_background_url.spec());
 
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kInvalidUrl, std::string(), std::string(), GURL());
+  instant_service_->SetCustomBackgroundInfo(kInvalidUrl, "", "", GURL(), "");
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(std::string(), theme_info->custom_background_url.spec());
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ("", theme->custom_background_url.spec());
   EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
 }
 
-TEST_F(InstantServiceTest, SetCustomBackgroundURLWithAttributions) {
+TEST_F(InstantServiceTest, SetCustomBackgroundInfo) {
   ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
   const GURL kUrl("https://www.foo.com");
   const std::string kAttributionLine1 = "foo";
   const std::string kAttributionLine2 = "bar";
   const GURL kActionUrl("https://www.bar.com");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kActionUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, kActionUrl, "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrl, theme_info->custom_background_url);
-  EXPECT_EQ(kAttributionLine1,
-            theme_info->custom_background_attribution_line_1);
-  EXPECT_EQ(kAttributionLine2,
-            theme_info->custom_background_attribution_line_2);
-  EXPECT_EQ(kActionUrl, theme_info->custom_background_attribution_action_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrl, theme->custom_background_url);
+  EXPECT_EQ(kAttributionLine1, theme->custom_background_attribution_line_1);
+  EXPECT_EQ(kAttributionLine2, theme->custom_background_attribution_line_2);
+  EXPECT_EQ(kActionUrl, theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 }
 
-TEST_F(InstantServiceTest, ChangingSearchProviderClearsThemeInfoAndPref) {
+TEST_F(InstantServiceTest, ChangingSearchProviderClearsNtpThemeAndPref) {
   ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
   const GURL kUrl("https://www.foo.com");
   const std::string kAttributionLine1 = "foo";
@@ -238,36 +259,34 @@ TEST_F(InstantServiceTest, ChangingSearchProviderClearsThemeInfoAndPref) {
 
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kActionUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, kActionUrl, "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrl, theme_info->custom_background_url);
-  EXPECT_EQ(kAttributionLine1,
-            theme_info->custom_background_attribution_line_1);
-  EXPECT_EQ(kAttributionLine2,
-            theme_info->custom_background_attribution_line_2);
-  EXPECT_EQ(kActionUrl, theme_info->custom_background_attribution_action_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrl, theme->custom_background_url);
+  EXPECT_EQ(kAttributionLine1, theme->custom_background_attribution_line_1);
+  EXPECT_EQ(kAttributionLine2, theme->custom_background_attribution_line_2);
+  EXPECT_EQ(kActionUrl, theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
   SetUserSelectedDefaultSearchProvider("https://www.search.com");
-  instant_service_->UpdateThemeInfo();
+  instant_service_->UpdateNtpTheme();
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_url);
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_1);
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_2);
-  EXPECT_EQ(GURL(), theme_info->custom_background_attribution_action_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_url);
+  EXPECT_EQ("", theme->custom_background_attribution_line_1);
+  EXPECT_EQ("", theme->custom_background_attribution_line_2);
+  EXPECT_EQ(GURL(), theme->custom_background_attribution_action_url);
   EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
 
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
-  instant_service_->UpdateThemeInfo();
+  instant_service_->UpdateNtpTheme();
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_url);
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_1);
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_2);
-  EXPECT_EQ(GURL(), theme_info->custom_background_attribution_action_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_url);
+  EXPECT_EQ("", theme->custom_background_attribution_line_1);
+  EXPECT_EQ("", theme->custom_background_attribution_line_2);
+  EXPECT_EQ(GURL(), theme->custom_background_attribution_action_url);
   EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
 }
 
@@ -284,7 +303,7 @@ TEST_F(InstantServiceTest, LocalBackgroundImageCopyCreated) {
 
   instant_service_->SelectLocalBackgroundImage(path);
 
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   bool file_exists = base::PathExists(copy_path);
 
@@ -304,9 +323,9 @@ TEST_F(InstantServiceTest,
   base::WriteFile(path, "background_image", 16);
 
   SetUserSelectedDefaultSearchProvider("https://www.search.com");
-  instant_service_->UpdateThemeInfo();
+  instant_service_->UpdateNtpTheme();
 
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   bool file_exists = base::PathExists(path);
 
@@ -327,10 +346,10 @@ TEST_F(InstantServiceTest, SettingUrlRemovesLocalBackgroundImageCopy) {
   base::WriteFile(path, "background_image", 16);
 
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURL(kUrl);
-  instant_service_->UpdateThemeInfo();
+  instant_service_->SetCustomBackgroundInfo(kUrl, "", "", GURL(), "");
+  instant_service_->UpdateNtpTheme();
 
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   bool file_exists = base::PathExists(path);
 
@@ -350,38 +369,36 @@ TEST_F(InstantServiceTest, CustomBackgroundAttributionActionUrlReset) {
 
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kHttpsActionUrl);
+  instant_service_->SetCustomBackgroundInfo(
+      kUrl, kAttributionLine1, kAttributionLine2, kHttpsActionUrl, "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kHttpsActionUrl,
-            theme_info->custom_background_attribution_action_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kHttpsActionUrl, theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kHttpActionUrl);
+  instant_service_->SetCustomBackgroundInfo(
+      kUrl, kAttributionLine1, kAttributionLine2, kHttpActionUrl, "");
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_attribution_action_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kHttpsActionUrl);
+  instant_service_->SetCustomBackgroundInfo(
+      kUrl, kAttributionLine1, kAttributionLine2, kHttpsActionUrl, "");
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kHttpsActionUrl,
-            theme_info->custom_background_attribution_action_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kHttpsActionUrl, theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, GURL());
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, GURL(), "");
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_attribution_action_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_attribution_action_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 }
 
-TEST_F(InstantServiceTest, UpdatingPrefUpdatesThemeInfo) {
+TEST_F(InstantServiceTest, UpdatingPrefUpdatesNtpTheme) {
   ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
   const GURL kUrlFoo("https://www.foo.com");
   const GURL kUrlBar("https://www.bar.com");
@@ -392,16 +409,16 @@ TEST_F(InstantServiceTest, UpdatingPrefUpdatesThemeInfo) {
       prefs::kNtpCustomBackgroundDict,
       std::make_unique<base::Value>(GetBackgroundInfoAsDict(kUrlFoo)));
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrlFoo, theme_info->custom_background_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrlFoo, theme->custom_background_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
   pref_service->SetUserPref(
       prefs::kNtpCustomBackgroundDict,
       std::make_unique<base::Value>(GetBackgroundInfoAsDict(kUrlBar)));
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrlBar, theme_info->custom_background_url);
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrlBar, theme->custom_background_url);
   EXPECT_EQ(false,
             pref_service->GetBoolean(prefs::kNtpCustomBackgroundLocalToDevice));
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
@@ -421,10 +438,10 @@ TEST_F(InstantServiceTest, SetLocalImage) {
   base::ThreadPoolInstance::Get()->FlushForTesting();
 
   instant_service_->SelectLocalBackgroundImage(path);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_TRUE(base::StartsWith(theme_info->custom_background_url.spec(),
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_TRUE(base::StartsWith(theme->custom_background_url.spec(),
                                chrome::kChromeSearchLocalNtpBackgroundUrl,
                                base::CompareCase::SENSITIVE));
   EXPECT_TRUE(
@@ -432,7 +449,7 @@ TEST_F(InstantServiceTest, SetLocalImage) {
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 }
 
-TEST_F(InstantServiceTest, SyncPrefOverridesLocalImage) {
+TEST_F(InstantServiceTest, SyncPrefOverridesAndRemovesLocalImage) {
   ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
   const GURL kUrl("https://www.foo.com/");
 
@@ -446,21 +463,23 @@ TEST_F(InstantServiceTest, SyncPrefOverridesLocalImage) {
   base::ThreadPoolInstance::Get()->FlushForTesting();
 
   instant_service_->SelectLocalBackgroundImage(path);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   EXPECT_TRUE(
       pref_service->GetBoolean(prefs::kNtpCustomBackgroundLocalToDevice));
+  EXPECT_TRUE(base::PathExists(path));
 
   // Update theme info via Sync.
   pref_service->SetUserPref(
       prefs::kNtpCustomBackgroundDict,
       std::make_unique<base::Value>(GetBackgroundInfoAsDict(kUrl)));
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kUrl, theme_info->custom_background_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kUrl, theme->custom_background_url);
   EXPECT_FALSE(
       pref_service->GetBoolean(prefs::kNtpCustomBackgroundLocalToDevice));
+  EXPECT_FALSE(base::PathExists(path));
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 }
 
@@ -474,42 +493,44 @@ TEST_F(InstantServiceTest, ValidateBackdropUrls) {
   instant_service_->AddValidBackdropUrlForTesting(kBackdropUrl1);
   instant_service_->AddValidBackdropUrlForTesting(kBackdropUrl2);
 
-  instant_service_->SetCustomBackgroundURL(kBackdropUrl1);
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kBackdropUrl1, theme_info->custom_background_url);
+  instant_service_->SetCustomBackgroundInfo(kBackdropUrl1, "", "", GURL(), "");
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kBackdropUrl1, theme->custom_background_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURL(kNonBackdropUrl1);
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_url);
+  instant_service_->SetCustomBackgroundInfo(kNonBackdropUrl1, "", "", GURL(),
+                                            "");
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_url);
   EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURL(kBackdropUrl2);
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(kBackdropUrl2, theme_info->custom_background_url);
+  instant_service_->SetCustomBackgroundInfo(kBackdropUrl2, "", "", GURL(), "");
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kBackdropUrl2, theme->custom_background_url);
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
 
-  instant_service_->SetCustomBackgroundURL(kNonBackdropUrl2);
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_EQ(GURL(), theme_info->custom_background_url);
+  instant_service_->SetCustomBackgroundInfo(kNonBackdropUrl2, "", "", GURL(),
+                                            "");
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(GURL(), theme->custom_background_url);
   EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
 }
 
-TEST_F(InstantServiceTest, TestNoThemeInfo) {
-  instant_service_->theme_info_ = nullptr;
-  EXPECT_NE(nullptr, instant_service_->GetInitializedThemeInfo());
+TEST_F(InstantServiceTest, TestNoNtpTheme) {
+  instant_service_->theme_ = nullptr;
+  EXPECT_NE(nullptr, instant_service_->GetInitializedNtpTheme());
 
-  instant_service_->theme_info_ = nullptr;
-  // As |FallbackToDefaultThemeInfo| uses |theme_info_| it should initialize it
+  instant_service_->theme_ = nullptr;
+  // As |FallbackToDefaultNtpTheme| uses |theme_| it should initialize it
   // otherwise the test should crash.
-  instant_service_->FallbackToDefaultThemeInfo();
-  EXPECT_NE(nullptr, instant_service_->theme_info_);
+  instant_service_->FallbackToDefaultNtpTheme();
+  EXPECT_NE(nullptr, instant_service_->theme_);
 }
 
 TEST_F(InstantServiceTest, TestResetToDefault) {
   MockInstantService mock_instant_service_(profile());
   EXPECT_CALL(mock_instant_service_, ResetCustomLinks());
-  EXPECT_CALL(mock_instant_service_, ResetCustomBackgroundThemeInfo());
+  EXPECT_CALL(mock_instant_service_, ResetCustomBackgroundNtpTheme());
   mock_instant_service_.ResetToDefault();
 }
 
@@ -537,15 +558,13 @@ TEST_F(InstantServiceTest, LocalImageDoesNotHaveAttribution) {
       profile()->GetTestingPrefService();
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kActionUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, kActionUrl, "");
 
-  ThemeBackgroundInfo* theme_info = instant_service_->GetInitializedThemeInfo();
-  ASSERT_EQ(kAttributionLine1,
-            theme_info->custom_background_attribution_line_1);
-  ASSERT_EQ(kAttributionLine2,
-            theme_info->custom_background_attribution_line_2);
-  ASSERT_EQ(kActionUrl, theme_info->custom_background_attribution_action_url);
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  ASSERT_EQ(kAttributionLine1, theme->custom_background_attribution_line_1);
+  ASSERT_EQ(kAttributionLine2, theme->custom_background_attribution_line_2);
+  ASSERT_EQ(kActionUrl, theme->custom_background_attribution_action_url);
   ASSERT_TRUE(instant_service_->IsCustomBackgroundSet());
 
   base::FilePath profile_path = profile()->GetPath();
@@ -555,18 +574,18 @@ TEST_F(InstantServiceTest, LocalImageDoesNotHaveAttribution) {
   base::ThreadPoolInstance::Get()->FlushForTesting();
 
   instant_service_->SelectLocalBackgroundImage(path);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
-  theme_info = instant_service_->GetInitializedThemeInfo();
-  EXPECT_TRUE(base::StartsWith(theme_info->custom_background_url.spec(),
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_TRUE(base::StartsWith(theme->custom_background_url.spec(),
                                chrome::kChromeSearchLocalNtpBackgroundUrl,
                                base::CompareCase::SENSITIVE));
   EXPECT_TRUE(
       pref_service->GetBoolean(prefs::kNtpCustomBackgroundLocalToDevice));
   EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_1);
-  EXPECT_EQ(std::string(), theme_info->custom_background_attribution_line_2);
-  EXPECT_EQ(GURL(), theme_info->custom_background_attribution_action_url);
+  EXPECT_EQ("", theme->custom_background_attribution_line_1);
+  EXPECT_EQ("", theme->custom_background_attribution_line_2);
+  EXPECT_EQ(GURL(), theme->custom_background_attribution_action_url);
 }
 
 TEST_F(InstantServiceTest, TestUpdateCustomBackgroundColor) {
@@ -582,7 +601,7 @@ TEST_F(InstantServiceTest, TestUpdateCustomBackgroundColor) {
   // Background color will not update if no background is set.
   instant_service_->UpdateCustomBackgroundColorAsync(
       base::TimeTicks::Now(), image, image_fetcher::RequestMetadata());
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(CheckBackgroundColor(
       SK_ColorRED,
       pref_service->GetDictionary(prefs::kNtpCustomBackgroundDict)));
@@ -594,13 +613,13 @@ TEST_F(InstantServiceTest, TestUpdateCustomBackgroundColor) {
 
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kActionUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, kActionUrl, "");
 
   // Background color will not update if background timestamp has changed.
   instant_service_->UpdateCustomBackgroundColorAsync(
       base::TimeTicks::Now(), image, image_fetcher::RequestMetadata());
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(CheckBackgroundColor(
       SK_ColorRED,
       pref_service->GetDictionary(prefs::kNtpCustomBackgroundDict)));
@@ -609,7 +628,7 @@ TEST_F(InstantServiceTest, TestUpdateCustomBackgroundColor) {
   instant_service_->UpdateCustomBackgroundColorAsync(
       instant_service_->GetBackgroundUpdatedTimestampForTesting(), image,
       image_fetcher::RequestMetadata());
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_TRUE(CheckBackgroundColor(
       SK_ColorRED,
       pref_service->GetDictionary(prefs::kNtpCustomBackgroundDict)));
@@ -638,20 +657,168 @@ TEST_F(InstantServiceTest, LocalImageDoesNotUpdateCustomBackgroundColor) {
 
   SetUserSelectedDefaultSearchProvider("{google:baseURL}");
   instant_service_->AddValidBackdropUrlForTesting(kUrl);
-  instant_service_->SetCustomBackgroundURLWithAttributions(
-      kUrl, kAttributionLine1, kAttributionLine2, kActionUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, kAttributionLine1,
+                                            kAttributionLine2, kActionUrl, "");
   base::TimeTicks time_set =
       instant_service_->GetBackgroundUpdatedTimestampForTesting();
 
   instant_service_->SelectLocalBackgroundImage(path);
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
 
   // Background color will not update if a local image was uploaded in the
   // meantime.
   instant_service_->UpdateCustomBackgroundColorAsync(
       time_set, image, image_fetcher::RequestMetadata());
-  thread_bundle()->RunUntilIdle();
+  task_environment()->RunUntilIdle();
   EXPECT_FALSE(CheckBackgroundColor(
       SK_ColorRED,
       pref_service->GetDictionary(prefs::kNtpCustomBackgroundDict)));
+}
+
+TEST_F(InstantServiceTest, SetCustomBackgroundCollectionId) {
+  ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
+  const std::string kInvalidId("aarrtt");
+  const std::string kValidId("art");
+
+  // A valid id should update the pref/background.
+  CollectionImage image;
+  image.collection_id = kValidId;
+  image.image_url = GURL("https://www.test.com/");
+  instant_service_->SetNextCollectionImageForTesting(image);
+
+  instant_service_->AddValidBackdropCollectionForTesting(kValidId);
+  instant_service_->SetCustomBackgroundInfo(GURL(), "", "", GURL(), kValidId);
+  task_environment()->RunUntilIdle();
+
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kValidId, theme->collection_id);
+  EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
+
+  // An invalid id should clear the pref/background.
+  CollectionImage image2;
+  instant_service_->SetNextCollectionImageForTesting(image2);
+  instant_service_->SetCustomBackgroundInfo(GURL(), "", "", GURL(), kInvalidId);
+  task_environment()->RunUntilIdle();
+
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(std::string(), theme->collection_id);
+  EXPECT_FALSE(instant_service_->IsCustomBackgroundSet());
+}
+
+TEST_F(InstantServiceTest, CollectionIdTakePriorityOverBackgroundURL) {
+  ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
+  const std::string kValidId("art");
+  const GURL kUrl("https://www.foo.com/");
+
+  CollectionImage image;
+  image.collection_id = kValidId;
+  image.image_url = GURL("https://www.test.com/");
+  instant_service_->SetNextCollectionImageForTesting(image);
+  instant_service_->AddValidBackdropUrlForTesting(kUrl);
+  instant_service_->AddValidBackdropCollectionForTesting(kValidId);
+
+  instant_service_->SetCustomBackgroundInfo(kUrl, "", "", GURL(), kValidId);
+  task_environment()->RunUntilIdle();
+
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kValidId, theme->collection_id);
+  EXPECT_EQ("https://www.test.com/", theme->custom_background_url);
+  EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
+}
+
+TEST_F(InstantServiceTest, RefreshesBackgroundAfter24Hours) {
+  ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
+  const std::string kValidId("art");
+  const GURL kImageUrl1("https://www.test.com/1/");
+  const GURL kImageUrl2("https://www.test.com/2/");
+
+  instant_service_->SetClockForTesting(clock_);
+  clock_->SetNow(GetReferenceTime());
+
+  // A valid id should update the pref/background.
+  CollectionImage image;
+  image.collection_id = kValidId;
+  image.image_url = kImageUrl1;
+  instant_service_->SetNextCollectionImageForTesting(image);
+
+  instant_service_->AddValidBackdropCollectionForTesting(kValidId);
+  instant_service_->SetCustomBackgroundInfo(GURL(), "", "", GURL(), kValidId);
+  task_environment()->RunUntilIdle();
+
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(kValidId, theme->collection_id);
+  EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
+
+  CollectionImage image2;
+  image2.collection_id = kValidId;
+  image2.image_url = kImageUrl2;
+  instant_service_->SetNextCollectionImageForTesting(image2);
+
+  // Should not refresh background.
+  theme = instant_service_->GetInitializedNtpTheme();
+  task_environment()->RunUntilIdle();
+  EXPECT_EQ(kValidId, theme->collection_id);
+  EXPECT_EQ(kImageUrl1, theme->custom_background_url);
+  EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
+
+  clock_->Advance(base::TimeDelta::FromHours(25));
+
+  // Should refresh background after >24 hours.
+  theme = instant_service_->GetInitializedNtpTheme();
+  task_environment()->RunUntilIdle();
+  EXPECT_EQ(kValidId, theme->collection_id);
+  EXPECT_EQ(kImageUrl2, theme->custom_background_url);
+  EXPECT_TRUE(instant_service_->IsCustomBackgroundSet());
+}
+
+TEST_F(InstantServiceTest, SetNTPElementsNtpTheme) {
+  const auto& theme_provider =
+      ThemeService::GetThemeProviderForProfile(profile());
+  SkColor default_text_color =
+      theme_provider.GetColor(ThemeProperties::COLOR_NTP_TEXT);
+  SkColor default_logo_color =
+      theme_provider.GetColor(ThemeProperties::COLOR_NTP_LOGO);
+  SkColor default_shortcut_color =
+      theme_provider.GetColor(ThemeProperties::COLOR_NTP_SHORTCUT);
+
+  ASSERT_FALSE(instant_service_->IsCustomBackgroundSet());
+
+  // Check defaults when no theme and no custom backgrounds is set.
+  NtpTheme* theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_EQ(default_text_color, theme->text_color);
+  EXPECT_FALSE(theme->logo_alternate);
+  EXPECT_EQ(default_logo_color, theme->logo_color);
+  EXPECT_EQ(default_shortcut_color, theme->shortcut_color);
+
+  // Install colors, theme update should trigger SetNTPElementsNtpTheme() and
+  // update NTP themed elements info.
+  ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile());
+  content::WindowedNotificationObserver theme_change_observer(
+      chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+      content::Source<ThemeService>(theme_service));
+  theme_service->BuildAutogeneratedThemeFromColor(SK_ColorRED);
+  theme_change_observer.Wait();
+
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_NE(default_text_color, theme->text_color);
+  EXPECT_TRUE(theme->logo_alternate);
+  EXPECT_NE(default_logo_color, theme->logo_color);
+  EXPECT_NE(default_shortcut_color, theme->shortcut_color);
+
+  // Setting a custom background should call SetNTPElementsNtpTheme() and
+  // update NTP themed elements info.
+  const GURL kUrl("https://www.foo.com");
+  instant_service_->AddValidBackdropUrlForTesting(kUrl);
+  instant_service_->SetCustomBackgroundInfo(kUrl, "", "", GURL(), "");
+  ASSERT_TRUE(instant_service_->IsCustomBackgroundSet());
+
+  theme = instant_service_->GetInitializedNtpTheme();
+  EXPECT_NE(default_text_color, theme->text_color);
+  EXPECT_TRUE(theme->logo_alternate);
+  EXPECT_EQ(default_logo_color, theme->logo_color);
+  // The shortcut color with a background set should always use the light mode
+  // default regardless of system setting.
+  EXPECT_EQ(ThemeProperties::GetDefaultColor(
+                ThemeProperties::COLOR_NTP_SHORTCUT, false),
+            theme->shortcut_color);
 }

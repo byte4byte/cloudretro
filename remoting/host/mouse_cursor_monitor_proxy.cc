@@ -37,8 +37,7 @@ class MouseCursorMonitorProxy::Core
  private:
   // webrtc::MouseCursorMonitor::Callback implementation.
   void OnMouseCursor(webrtc::MouseCursor* mouse_cursor) override;
-  void OnMouseCursorPosition(webrtc::MouseCursorMonitor::CursorState state,
-                             const webrtc::DesktopVector& position) override;
+  void OnMouseCursorPosition(const webrtc::DesktopVector& position) override;
 
   base::ThreadChecker thread_checker_;
 
@@ -103,19 +102,18 @@ void MouseCursorMonitorProxy::Core::OnMouseCursor(webrtc::MouseCursor* cursor) {
 }
 
 void MouseCursorMonitorProxy::Core::OnMouseCursorPosition(
-    webrtc::MouseCursorMonitor::CursorState state,
     const webrtc::DesktopVector& position) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   caller_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&MouseCursorMonitorProxy::OnMouseCursorPosition,
-                                proxy_, state, position));
+                                proxy_, position));
 }
 
 MouseCursorMonitorProxy::MouseCursorMonitorProxy(
     scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
     const webrtc::DesktopCaptureOptions& options)
-    : capture_task_runner_(capture_task_runner), weak_factory_(this) {
+    : capture_task_runner_(capture_task_runner) {
   core_.reset(new Core(weak_factory_.GetWeakPtr()));
   capture_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&Core::CreateMouseCursorMonitor,
@@ -155,10 +153,9 @@ void MouseCursorMonitorProxy::OnMouseCursor(
 }
 
 void MouseCursorMonitorProxy::OnMouseCursorPosition(
-    CursorState state,
     const webrtc::DesktopVector& position) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  callback_->OnMouseCursorPosition(state, position);
+  callback_->OnMouseCursorPosition(position);
 }
 
 }  // namespace remoting

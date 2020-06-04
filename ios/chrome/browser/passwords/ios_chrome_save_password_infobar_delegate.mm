@@ -116,6 +116,15 @@ bool IsUpdateInfobar(PasswordInfobarType infobar_type) {
 
 using password_manager::PasswordFormManagerForUI;
 
+// static
+IOSChromeSavePasswordInfoBarDelegate*
+IOSChromeSavePasswordInfoBarDelegate::FromInfobarDelegate(
+    infobars::InfoBarDelegate* delegate) {
+  return delegate->GetIdentifier() == SAVE_PASSWORD_INFOBAR_DELEGATE_MOBILE
+             ? static_cast<IOSChromeSavePasswordInfoBarDelegate*>(delegate)
+             : nullptr;
+}
+
 IOSChromeSavePasswordInfoBarDelegate::IOSChromeSavePasswordInfoBarDelegate(
     bool is_sync_user,
     bool password_update,
@@ -177,7 +186,7 @@ base::string16 IOSChromeSavePasswordInfoBarDelegate::GetButtonLabel(
         return IsPasswordUpdate()
                    ? base::string16()
                    : l10n_util::GetStringUTF16(
-                         IDS_IOS_PASSWORD_MANAGER_MODAL_BLACKLIST_BUTTON);
+                         IDS_IOS_PASSWORD_MANAGER_MODAL_BLOCK_BUTTON);
       }
       case BUTTON_NONE:
         NOTREACHED();
@@ -186,7 +195,7 @@ base::string16 IOSChromeSavePasswordInfoBarDelegate::GetButtonLabel(
   } else {
     return l10n_util::GetStringUTF16(
         (button == BUTTON_OK) ? IDS_IOS_PASSWORD_MANAGER_SAVE_BUTTON
-                              : IDS_IOS_PASSWORD_MANAGER_BLACKLIST_BUTTON);
+                              : IDS_IOS_PASSWORD_MANAGER_BLOCK_BUTTON);
   }
 }
 
@@ -207,9 +216,15 @@ bool IOSChromeSavePasswordInfoBarDelegate::Cancel() {
   return true;
 }
 
+void IOSChromeSavePasswordInfoBarDelegate::InfoBarDismissed() {
+  DCHECK(form_to_save());
+  set_infobar_response(password_manager::metrics_util::CLICKED_CANCEL);
+}
+
 bool IOSChromeSavePasswordInfoBarDelegate::ShouldExpire(
     const NavigationDetails& details) const {
-  return !details.is_redirect && ConfirmInfoBarDelegate::ShouldExpire(details);
+  return !details.is_form_submission && !details.is_redirect &&
+         ConfirmInfoBarDelegate::ShouldExpire(details);
 }
 
 void IOSChromeSavePasswordInfoBarDelegate::UpdateCredentials(
@@ -224,7 +239,8 @@ void IOSChromeSavePasswordInfoBarDelegate::UpdateCredentials(
 
 void IOSChromeSavePasswordInfoBarDelegate::InfobarPresenting(bool automatic) {
   DCHECK(IsInfobarUIRebootEnabled());
-  DCHECK(!infobar_presenting_);
+  if (infobar_presenting_)
+    return;
 
   RecordPresentationMetrics(form_to_save(), current_password_saved_,
                             IsUpdateInfobar(infobar_type_), automatic);
@@ -233,7 +249,8 @@ void IOSChromeSavePasswordInfoBarDelegate::InfobarPresenting(bool automatic) {
 
 void IOSChromeSavePasswordInfoBarDelegate::InfobarDismissed() {
   DCHECK(IsInfobarUIRebootEnabled());
-  DCHECK(infobar_presenting_);
+  if (!infobar_presenting_)
+    return;
 
   RecordDismissalMetrics(form_to_save(), infobar_response(),
                          IsUpdateInfobar(infobar_type_));

@@ -440,16 +440,9 @@ class SitePerProcessTextInputManagerTest : public InProcessBrowserTest {
 // creates a sequence of tab presses and verifies that after each key press, the
 // TextInputState.value reflects that of the focused input, i.e., the
 // TextInputManager is correctly tracking TextInputState across frames.
-// Flaky on chromeOS; https://crbug.com/704994.
-#if defined(OS_CHROMEOS)
-#define MAYBE_TrackStateWhenSwitchingFocusedFrames \
-  DISABLED_TrackStateWhenSwitchingFocusedFrames
-#else
-#define MAYBE_TrackStateWhenSwitchingFocusedFrames \
-  TrackStateWhenSwitchingFocusedFrames
-#endif
+// Flaky on ChromeOS, Linux, Mac, and Windows; https://crbug.com/704994.
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       MAYBE_TrackStateWhenSwitchingFocusedFrames) {
+                       DISABLED_TrackStateWhenSwitchingFocusedFrames) {
   CreateIframePage("a(a,b,c(a,b,d(e, f)),g)");
   std::vector<std::string> values{
       "main",     "node_a",   "node_b",     "node_c",     "node_c_a",
@@ -1141,6 +1134,14 @@ class InputMethodObserverForShowIme : public InputMethodObserverBase {
 // |TextInputState.show_ime_if_needed| is true. This should happen even when
 // the TextInputState has not changed (according to the platform), e.g., in
 // aura when receiving two consecutive updates with same |TextInputState.type|.
+
+// This test is disabled on Windows because we have removed TryShow/TryHide API
+// calls and replaced it with TSF input pane policy which is a policy applied by
+// text service framework on Windows based on whether TSF edit control has focus
+// or not. On Windows we have implemented TSF1 on Chromium that takes care of
+// IME compositions, handwriting panels, SIP visibility etc. Please see
+// (https://crbug.com/1007958) for more details.
+#if !defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
                        CorrectlyShowVirtualKeyboardIfEnabled) {
   // We only need the <iframe> page to create RWHV.
@@ -1166,9 +1167,6 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 
   // Set |TextInputState.show_ime_if_needed| to true. Expect IME.
   sender.SetShowVirtualKeyboardIfEnabled(true);
-#if defined(OS_WIN)
-  sender.SetLastPointerType(ui::EventPointerType::POINTER_TYPE_TOUCH);
-#endif
   EXPECT_TRUE(send_and_check_show_ime());
 
   // Send the same message. Expect IME (no change).
@@ -1186,16 +1184,12 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   sender.SetShowVirtualKeyboardIfEnabled(true);
   EXPECT_TRUE(send_and_check_show_ime());
 
-#if defined(OS_WIN)
-  // Set input type to mouse. Expect no IME.
-  sender.SetLastPointerType(ui::EventPointerType::POINTER_TYPE_MOUSE);
-  EXPECT_FALSE(send_and_check_show_ime());
-#endif
-
   // Set |TextInputState.type| to ui::TEXT_INPUT_TYPE_NONE. Expect no IME.
   sender.SetType(ui::TEXT_INPUT_TYPE_NONE);
   EXPECT_FALSE(send_and_check_show_ime());
 }
+#endif  // OS_WIN
+
 #endif  // USE_AURA
 
 // Ensure that a cross-process subframe can utilize keyboard edit commands.
@@ -1377,10 +1371,8 @@ class TestBrowserClient : public ChromeContentBrowserClient {
 
   // ContentBrowserClient overrides.
   void RenderProcessWillLaunch(
-      content::RenderProcessHost* process_host,
-      service_manager::mojom::ServiceRequest* service_request) override {
-    ChromeContentBrowserClient::RenderProcessWillLaunch(process_host,
-                                                        service_request);
+      content::RenderProcessHost* process_host) override {
+    ChromeContentBrowserClient::RenderProcessWillLaunch(process_host);
     filters_.push_back(
         new content::TestTextInputClientMessageFilter(process_host));
   }
@@ -1490,8 +1482,7 @@ IN_PROC_BROWSER_TEST_F(
 
         // Quit the run loop on IO to make sure the message handler of
         // TextInputClientMac has successfully run on UI thread.
-        base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                                 callback_on_io);
+        base::PostTask(FROM_HERE, {content::BrowserThread::IO}, callback_on_io);
       },
       child_process_id, child_frame_routing_id,
       test_complete_waiter.QuitClosure()));
@@ -1560,8 +1551,7 @@ IN_PROC_BROWSER_TEST_F(
 
         // Quit the run loop on IO to make sure the message handler of
         // TextInputClientMac has successfully run on UI thread.
-        base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                                 callback_on_io);
+        base::PostTask(FROM_HERE, {content::BrowserThread::IO}, callback_on_io);
       },
       main_frame_process_id, main_frame_routing_id,
       test_complete_waiter.QuitClosure()));

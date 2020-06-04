@@ -33,8 +33,6 @@ source_set("signin") {
     "identity_manager_factory.cc",
     "identity_manager_factory.h",
     "identity_manager_factory_observer.h",
-    "identity_service_creator.cc",
-    "identity_service_creator.h",
     "ios_chrome_signin_client.h",
     "ios_chrome_signin_client.mm",
     "ios_chrome_signin_status_metrics_provider_delegate.cc",
@@ -63,13 +61,11 @@ source_set("signin") {
     "//components/pref_registry",
     "//components/prefs",
     "//components/signin/core/browser",
-    "//components/signin/internal/identity_manager",  # TODO(crbug.com/974198): remove once closed
     "//components/signin/ios/browser",
     "//components/signin/ios/browser:active_state_manager",
     "//components/signin/public/identity_manager",
     "//components/signin/public/identity_manager/ios",
     "//components/sync",
-    "//components/unified_consent",
     "//google_apis",
     "//ios/chrome/browser",
     "//ios/chrome/browser/bookmarks:bookmarks_utils",
@@ -84,9 +80,8 @@ source_set("signin") {
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/signin",
     "//ios/web/common",
+    "//ios/web/common:web_view_creation_util",
     "//net",
-    "//services/identity:lib",
-    "//services/service_manager/public/mojom",
     "//url",
   ]
 }
@@ -97,10 +92,7 @@ source_set("feature_flags") {
     "feature_flags.h",
     "feature_flags.mm",
   ]
-  deps = [
-    "//base",
-    "//components/unified_consent",
-  ]
+  deps = [ "//base" ]
 }
 
 source_set("test_support") {
@@ -117,8 +109,7 @@ source_set("test_support") {
     "//base",
     "//components/image_fetcher/core:test_support",
     "//components/keyed_service/core",
-    "//components/signin/core/browser",
-    "//components/signin/ios/browser",
+    "//components/signin/public/base",
     "//components/signin/public/base:test_support",
     "//components/signin/public/identity_manager:test_support",
     "//ios/chrome/browser/browser_state",
@@ -146,15 +137,12 @@ source_set("unit_tests") {
     "//base",
     "//components/pref_registry",
     "//components/prefs",
-    "//components/signin/core/browser",
-    "//components/signin/ios/browser",
     "//components/signin/public/base:test_support",
     "//components/signin/public/identity_manager",
     "//components/signin/public/identity_manager:test_support",
     "//components/sync:test_support",
     "//components/sync_preferences",
     "//components/sync_preferences:test_support",
-    "//components/unified_consent",
     "//google_apis",
     "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state:browser_state_impl",

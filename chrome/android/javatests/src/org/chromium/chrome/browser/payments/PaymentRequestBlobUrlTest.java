@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.TimeoutException;
@@ -28,7 +28,7 @@ public class PaymentRequestBlobUrlTest {
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void test() throws InterruptedException, TimeoutException {
+    public void test() throws TimeoutException {
         mPaymentRequestTestRule.openPageAndClickNode("buy");
         mPaymentRequestTestRule.assertWaitForPageScaleFactorMatch(2);
         mPaymentRequestTestRule.expectResultContains(

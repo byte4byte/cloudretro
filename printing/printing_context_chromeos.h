@@ -10,7 +10,9 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "printing/backend/cups_connection.h"
+#include "printing/backend/cups_deleters.h"
 #include "printing/backend/cups_printer.h"
 #include "printing/printing_context.h"
 
@@ -42,8 +44,6 @@ class PRINTING_EXPORT PrintingContextChromeos : public PrintingContext {
   Result StreamData(const std::vector<char>& buffer);
 
  private:
-  using ScopedCupsOption = std::unique_ptr<cups_option_t, OptionDeleter>;
-
   // Lazily initializes |printer_|.
   Result InitializeDevice(const std::string& device);
 

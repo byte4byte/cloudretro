@@ -7,37 +7,30 @@
 #import "base/ios/block_types.h"
 #include "base/metrics/user_metrics.h"
 #include "components/signin/public/base/signin_metrics.h"
-#include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/first_run/first_run_configuration.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
+#include "ios/chrome/browser/main/browser.h"
+#import "ios/chrome/browser/ui/authentication/signin/signin_utils.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
+#import "ios/chrome/browser/ui/first_run/first_run_constants.h"
 #import "ios/chrome/browser/ui/first_run/first_run_util.h"
-#import "ios/chrome/browser/ui/promos/signin_promo_view_controller.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
-#import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/web/public/web_state/web_state.h"
-
 #import "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-NSString* const kSignInButtonAccessibilityIdentifier =
-    @"SignInButtonAccessibilityIdentifier";
-NSString* const kSignInSkipButtonAccessibilityIdentifier =
-    @"SkipButtonAccessibilityIdentifier";
 
 @interface FirstRunChromeSigninViewController ()<
     ChromeSigninViewControllerDelegate> {
-  __weak TabModel* _tabModel;
   FirstRunConfiguration* _firstRunConfig;
   __weak ChromeIdentity* _identity;
   BOOL _hasRecordedSigninStarted;
@@ -46,26 +39,28 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
 // Presenter for showing sync-related UI.
 @property(nonatomic, readonly, weak) id<SyncPresenter> presenter;
 
+// The Browser this object was initialized with.
+@property(nonatomic, readonly) Browser* browser;
+
 @end
 
 @implementation FirstRunChromeSigninViewController
-@synthesize presenter = _presenter;
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
-                            tabModel:(TabModel*)tabModel
-                      firstRunConfig:(FirstRunConfiguration*)firstRunConfig
-                      signInIdentity:(ChromeIdentity*)identity
-                           presenter:(id<SyncPresenter>)presenter
-                          dispatcher:(id<ApplicationCommands>)dispatcher {
+- (instancetype)initWithBrowser:(Browser*)browser
+                 firstRunConfig:(FirstRunConfiguration*)firstRunConfig
+                 signInIdentity:(ChromeIdentity*)identity
+                      presenter:(id<SyncPresenter>)presenter
+                     dispatcher:(id<ApplicationCommands, BrowsingDataCommands>)
+                                    dispatcher {
+  DCHECK(browser);
   self = [super
-       initWithBrowserState:browserState
-                accessPoint:signin_metrics::AccessPoint::ACCESS_POINT_START_PAGE
-                promoAction:signin_metrics::PromoAction::
-                                PROMO_ACTION_NO_SIGNIN_PROMO
-             signInIdentity:identity
-                 dispatcher:dispatcher];
+      initWithBrowser:browser
+          accessPoint:signin_metrics::AccessPoint::ACCESS_POINT_START_PAGE
+          promoAction:signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO
+       signInIdentity:identity
+           dispatcher:dispatcher];
   if (self) {
-    _tabModel = tabModel;
+    _browser = browser;
     _firstRunConfig = firstRunConfig;
     _identity = identity;
     _presenter = presenter;
@@ -74,18 +69,9 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
   return self;
 }
 
-- (void)dealloc {
-  self.delegate = nil;
-  _tabModel = nil;
-}
-
 - (void)viewDidLoad {
   [super viewDidLoad];
   [self.navigationController setNavigationBarHidden:YES];
-  self.primaryButton.accessibilityIdentifier =
-      kSignInButtonAccessibilityIdentifier;
-  self.secondaryButton.accessibilityIdentifier =
-      kSignInSkipButtonAccessibilityIdentifier;
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -103,7 +89,7 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
 
   // Save the version number to prevent showing the SSO Recall promo on the next
   // cold start.
-  [SigninPromoViewController recordVersionSeen];
+  SigninRecordVersionSeen();
 }
 
 - (BOOL)shouldAutorotate {
@@ -112,7 +98,8 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
 
 - (void)finishFirstRunAndDismissWithCompletion:(ProceduralBlock)completion {
   DCHECK(self.presentingViewController);
-  web::WebState* currentWebState = _tabModel.webStateList->GetActiveWebState();
+  web::WebState* currentWebState =
+      self.browser->GetWebStateList()->GetActiveWebState();
   FinishFirstRun(self.browserState, currentWebState, _firstRunConfig,
                  self.presenter);
   [self.presentingViewController dismissViewControllerAnimated:YES
@@ -121,6 +108,12 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
                                                       if (completion)
                                                         completion();
                                                     }];
+}
+
+#pragma mark Superclass overrides
+
+- (UIColor*)backgroundColor {
+  return [UIColor colorNamed:kBackgroundColor];
 }
 
 #pragma mark ChromeSigninViewControllerDelegate
@@ -180,14 +173,11 @@ NSString* const kSignInSkipButtonAccessibilityIdentifier =
     // Save a reference to the presentingViewController since this view
     // controller will be dismissed.
     __weak UIViewController* baseViewController = self.presentingViewController;
-    __weak id<ApplicationCommands> dispatcher = self.dispatcher;
+    __weak id<ApplicationCommands, BrowsingDataCommands> dispatcher =
+        self.dispatcher;
     completion = ^{
-      if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
-        [dispatcher
-            showAdvancedSigninSettingsFromViewController:baseViewController];
-      } else {
-        [dispatcher showAccountsSettingsFromViewController:baseViewController];
-      }
+      [dispatcher
+          showAdvancedSigninSettingsFromViewController:baseViewController];
     };
   }
   [self finishFirstRunAndDismissWithCompletion:completion];

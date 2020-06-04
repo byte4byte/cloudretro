@@ -409,6 +409,11 @@ void PrefService::ClearPref(const std::string& path) {
   user_pref_store_->RemoveValue(path, GetWriteFlags(pref));
 }
 
+void PrefService::ClearPrefsWithPrefixSilently(const std::string& prefix) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  user_pref_store_->RemoveValuesByPrefixSilently(prefix);
+}
+
 void PrefService::ClearMutableValues() {
   user_pref_store_->ClearMutableValues();
 }
@@ -465,34 +470,32 @@ void PrefService::RemovePrefObserverAllPrefs(PrefObserver* obs) {
 }
 
 void PrefService::Set(const std::string& path, const base::Value& value) {
-  SetUserPrefValue(path, value.CreateDeepCopy());
+  SetUserPrefValue(path, value.Clone());
 }
 
 void PrefService::SetBoolean(const std::string& path, bool value) {
-  SetUserPrefValue(path, std::make_unique<base::Value>(value));
+  SetUserPrefValue(path, base::Value(value));
 }
 
 void PrefService::SetInteger(const std::string& path, int value) {
-  SetUserPrefValue(path, std::make_unique<base::Value>(value));
+  SetUserPrefValue(path, base::Value(value));
 }
 
 void PrefService::SetDouble(const std::string& path, double value) {
-  SetUserPrefValue(path, std::make_unique<base::Value>(value));
+  SetUserPrefValue(path, base::Value(value));
 }
 
 void PrefService::SetString(const std::string& path, const std::string& value) {
-  SetUserPrefValue(path, std::make_unique<base::Value>(value));
+  SetUserPrefValue(path, base::Value(value));
 }
 
 void PrefService::SetFilePath(const std::string& path,
                               const base::FilePath& value) {
-  SetUserPrefValue(
-      path, base::Value::ToUniquePtrValue(base::CreateFilePathValue(value)));
+  SetUserPrefValue(path, base::CreateFilePathValue(value));
 }
 
 void PrefService::SetInt64(const std::string& path, int64_t value) {
-  SetUserPrefValue(path,
-                   base::Value::ToUniquePtrValue(util::Int64ToValue(value)));
+  SetUserPrefValue(path, util::Int64ToValue(value));
 }
 
 int64_t PrefService::GetInt64(const std::string& path) const {
@@ -503,8 +506,7 @@ int64_t PrefService::GetInt64(const std::string& path) const {
 }
 
 void PrefService::SetUint64(const std::string& path, uint64_t value) {
-  SetUserPrefValue(path,
-                   std::make_unique<base::Value>(base::NumberToString(value)));
+  SetUserPrefValue(path, base::Value(base::NumberToString(value)));
 }
 
 uint64_t PrefService::GetUint64(const std::string& path) const {
@@ -523,8 +525,7 @@ uint64_t PrefService::GetUint64(const std::string& path) const {
 }
 
 void PrefService::SetTime(const std::string& path, base::Time value) {
-  SetUserPrefValue(path,
-                   base::Value::ToUniquePtrValue(util::TimeToValue(value)));
+  SetUserPrefValue(path, util::TimeToValue(value));
 }
 
 base::Time PrefService::GetTime(const std::string& path) const {
@@ -535,8 +536,7 @@ base::Time PrefService::GetTime(const std::string& path) const {
 }
 
 void PrefService::SetTimeDelta(const std::string& path, base::TimeDelta value) {
-  SetUserPrefValue(
-      path, base::Value::ToUniquePtrValue(util::TimeDeltaToValue(value)));
+  SetUserPrefValue(path, util::TimeDeltaToValue(value));
 }
 
 base::TimeDelta PrefService::GetTimeDelta(const std::string& path) const {
@@ -604,7 +604,7 @@ void PrefService::ReportUserPrefChanged(
 }
 
 void PrefService::SetUserPrefValue(const std::string& path,
-                                   std::unique_ptr<base::Value> new_value) {
+                                   base::Value new_value) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   const Preference* pref = FindPreference(path);
@@ -612,14 +612,15 @@ void PrefService::SetUserPrefValue(const std::string& path,
     NOTREACHED() << "Trying to write an unregistered pref: " << path;
     return;
   }
-  if (pref->GetType() != new_value->type()) {
+  if (pref->GetType() != new_value.type()) {
     NOTREACHED() << "Trying to set pref " << path << " of type "
-                 << pref->GetType() << " to value of type "
-                 << new_value->type();
+                 << pref->GetType() << " to value of type " << new_value.type();
     return;
   }
 
-  user_pref_store_->SetValue(path, std::move(new_value), GetWriteFlags(pref));
+  user_pref_store_->SetValue(
+      path, base::Value::ToUniquePtrValue(std::move(new_value)),
+      GetWriteFlags(pref));
 }
 
 void PrefService::UpdateCommandLinePrefStore(PrefStore* command_line_store) {

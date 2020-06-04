@@ -16,13 +16,25 @@
 #include "base/strings/string_piece.h"
 #include "components/url_pattern_index/url_pattern.h"
 #include "components/url_pattern_index/url_rule_test_support.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
 namespace url_pattern_index {
 
-using namespace testing;
+using testing::kAnchorNone;
+using testing::kAnyParty;
+using testing::kBoundary;
+using testing::kDocument;
+using testing::kFont;
+using testing::kImage;
+using testing::kNoActivation;
+using testing::kScript;
+using testing::kSubdomain;
+using testing::kSubstring;
+using testing::kThirdParty;
+using testing::MakeUrlRule;
 
 class UrlPatternIndexTest : public ::testing::Test {
  public:
@@ -31,15 +43,18 @@ class UrlPatternIndexTest : public ::testing::Test {
  protected:
   bool AddUrlRule(const proto::UrlRule& rule) {
     auto offset = SerializeUrlRule(rule, flat_builder_.get(), &domain_map_);
-    if (offset.o)
+    if (offset.o) {
+      indexed_rules_count_++;
       index_builder_->IndexUrlRule(offset);
+    }
     return !!offset.o;
   }
 
   void AddSimpleUrlRule(std::string pattern,
                         uint32_t id,
                         uint32_t priority,
-                        uint8_t options) {
+                        uint8_t options,
+                        uint16_t element_types) {
     auto pattern_offset = flat_builder_->CreateString(pattern);
 
     flat::UrlRuleBuilder rule_builder(*flat_builder_);
@@ -47,9 +62,12 @@ class UrlPatternIndexTest : public ::testing::Test {
     rule_builder.add_url_pattern(pattern_offset);
     rule_builder.add_id(id);
     rule_builder.add_priority(priority);
+    rule_builder.add_element_types(element_types);
     auto rule_offset = rule_builder.Finish();
 
     index_builder_->IndexUrlRule(rule_offset);
+
+    indexed_rules_count_++;
   }
 
   void Finish() {
@@ -59,26 +77,43 @@ class UrlPatternIndexTest : public ::testing::Test {
     const flat::UrlPatternIndex* flat_index =
         flat::GetUrlPatternIndex(flat_builder_->GetBufferPointer());
     index_matcher_.reset(new UrlPatternIndexMatcher(flat_index));
+
+    ASSERT_EQ(indexed_rules_count_, index_matcher_->GetRulesCount());
   }
 
   const flat::UrlRule* FindMatch(
       base::StringPiece url_string,
       base::StringPiece document_origin_string = base::StringPiece(),
-      proto::ElementType element_type = kOther,
+      proto::ElementType element_type = testing::kOther,
       proto::ActivationType activation_type = kNoActivation,
       bool disable_generic_rules = false) const {
     const GURL url(url_string);
-    const url::Origin document_origin = GetOrigin(document_origin_string);
+    const url::Origin document_origin =
+        testing::GetOrigin(document_origin_string);
     return index_matcher_->FindMatch(
         url, document_origin, element_type, activation_type,
-        IsThirdParty(url, document_origin), disable_generic_rules,
+        testing::IsThirdParty(url, document_origin), disable_generic_rules,
         UrlPatternIndexMatcher::FindRuleStrategy::kAny);
+  }
+
+  std::vector<const flat::UrlRule*> FindAllMatches(
+      base::StringPiece url_string,
+      base::StringPiece document_origin_string,
+      proto::ElementType element_type,
+      proto::ActivationType activation_type,
+      bool disable_generic_rules) const {
+    const GURL url(url_string);
+    const url::Origin document_origin =
+        testing::GetOrigin(document_origin_string);
+    return index_matcher_->FindAllMatches(
+        url, document_origin, element_type, activation_type,
+        testing::IsThirdParty(url, document_origin), disable_generic_rules);
   }
 
   const flat::UrlRule* FindHighestPriorityMatch(
       base::StringPiece url_string) const {
     return index_matcher_->FindMatch(
-        GURL(url_string), url::Origin(), kOther /*element_type*/,
+        GURL(url_string), url::Origin(), testing::kOther /*element_type*/,
         kNoActivation /*activation_type*/, true /*is_third_party*/,
         false /*disable_generic_rules*/,
         UrlPatternIndexMatcher::FindRuleStrategy::
@@ -99,9 +134,11 @@ class UrlPatternIndexTest : public ::testing::Test {
     flat_builder_.reset(new flatbuffers::FlatBufferBuilder());
     index_builder_.reset(new UrlPatternIndexBuilder(flat_builder_.get()));
     domain_map_.clear();
+    indexed_rules_count_ = 0;
   }
 
  private:
+  size_t indexed_rules_count_ = 0;
   std::unique_ptr<flatbuffers::FlatBufferBuilder> flat_builder_;
   std::unique_ptr<UrlPatternIndexBuilder> index_builder_;
   std::unique_ptr<UrlPatternIndexMatcher> index_matcher_;
@@ -155,9 +192,10 @@ TEST_F(UrlPatternIndexTest, CaseSensitivity) {
   uint8_t common_options = flat::OptionFlag_APPLIES_TO_FIRST_PARTY |
                            flat::OptionFlag_APPLIES_TO_THIRD_PARTY;
   AddSimpleUrlRule("case-insensitive", 0 /* id */, 0 /* priority */,
-                   common_options | flat::OptionFlag_IS_CASE_INSENSITIVE);
+                   common_options | flat::OptionFlag_IS_CASE_INSENSITIVE,
+                   flat::ElementType_ANY);
   AddSimpleUrlRule("case-sensitive", 0 /* id */, 0 /* priority */,
-                   common_options);
+                   common_options, flat::ElementType_ANY);
   Finish();
 
   EXPECT_TRUE(FindMatch("http://abc.com/type=CASE-insEnsitIVe"));
@@ -291,9 +329,10 @@ TEST_F(UrlPatternIndexTest, OneRuleWithThirdParty) {
       {"ex.com", kThirdParty, "http://ex.com/path?k=v", "http://exmpl.org",
        true},
       {"ex.com", kThirdParty, "http://ex.com/path?k=v", "http://ex.com", false},
-      {"ex.com", kFirstParty, "http://ex.com/path?k=v", "http://ex.com", true},
-      {"ex.com", kFirstParty, "http://ex.com/path?k=v", "http://exmpl.com",
-       false},
+      {"ex.com", testing::kFirstParty, "http://ex.com/path?k=v",
+       "http://ex.com", true},
+      {"ex.com", testing::kFirstParty, "http://ex.com/path?k=v",
+       "http://exmpl.com", false},
       {"ex.com", kAnyParty, "http://ex.com/path?k=v", "http://ex.com", true},
       {"ex.com", kAnyParty, "http://ex.com/path?k=v", "http://exmpl.com", true},
       {"ex.com", kThirdParty, "http://subdomain.ex.com", "http://ex.com",
@@ -428,7 +467,7 @@ TEST_F(UrlPatternIndexTest, OneRuleWithDomainList) {
                  << "; DocumentOrigin: " << test_case.document_origin);
 
     auto rule = MakeUrlRule(UrlPattern(kUrl, kSubstring));
-    AddDomains(test_case.domains, &rule);
+    testing::AddDomains(test_case.domains, &rule);
     ASSERT_TRUE(AddUrlRule(rule));
     Finish();
 
@@ -458,7 +497,7 @@ TEST_F(UrlPatternIndexTest, OneRuleWithLongDomainList) {
   }
 
   auto rule = MakeUrlRule(UrlPattern(kUrl, kSubstring));
-  AddDomains(domains, &rule);
+  testing::AddDomains(domains, &rule);
   ASSERT_TRUE(AddUrlRule(rule));
   Finish();
 
@@ -481,7 +520,7 @@ TEST_F(UrlPatternIndexTest, OneRuleWithLongDomainList) {
 }
 
 TEST_F(UrlPatternIndexTest, OneRuleWithElementTypes) {
-  constexpr auto kAll = kAllElementTypes;
+  constexpr auto kAll = testing::kAllElementTypes;
   const struct {
     const char* url_pattern;
     int32_t element_types;
@@ -491,7 +530,8 @@ TEST_F(UrlPatternIndexTest, OneRuleWithElementTypes) {
     bool expect_match;
   } kTestCases[] = {
       {"ex.com", kAll, "http://ex.com/img.jpg", kImage, true},
-      {"ex.com", kAll & ~kPopup, "http://ex.com/img", kPopup, false},
+      {"ex.com", kAll & ~testing::kPopup, "http://ex.com/img", testing::kPopup,
+       false},
 
       {"ex.com", kImage, "http://ex.com/img.jpg", kImage, true},
       {"ex.com", kAll & ~kImage, "http://ex.com/img.jpg", kImage, false},
@@ -508,8 +548,8 @@ TEST_F(UrlPatternIndexTest, OneRuleWithElementTypes) {
 
       {"ex.com", kAll, "http://ex.com", proto::ELEMENT_TYPE_OTHER, true},
       {"ex.com", kAll, "http://ex.com", proto::ELEMENT_TYPE_UNSPECIFIED, false},
-      {"ex.com", kWebSocket, "ws://ex.com", proto::ELEMENT_TYPE_WEBSOCKET,
-       true},
+      {"ex.com", testing::kWebSocket, "ws://ex.com",
+       proto::ELEMENT_TYPE_WEBSOCKET, true},
   };
 
   for (const auto& test_case : kTestCases) {
@@ -526,7 +566,7 @@ TEST_F(UrlPatternIndexTest, OneRuleWithElementTypes) {
     Finish();
 
     EXPECT_EQ(test_case.expect_match,
-              !!FindMatch(test_case.url, nullptr /* document_origin_string */,
+              !!FindMatch(test_case.url, "" /* document_origin_string */,
                           test_case.element_type));
     Reset();
   }
@@ -545,10 +585,11 @@ TEST_F(UrlPatternIndexTest, OneRuleWithActivationTypes) {
       {"xample.com", kDocument, "http://example.com", kDocument, true},
       {"exampl.com", kDocument, "http://example.com", kDocument, false},
 
-      {"example.com", kGenericBlock, "http://example.com", kDocument, false},
-      {"example.com", kDocument, "http://example.com", kNoActivation, false},
-      {"example.com", kGenericBlock, "http://example.com", kNoActivation,
+      {"example.com", testing::kGenericBlock, "http://example.com", kDocument,
        false},
+      {"example.com", kDocument, "http://example.com", kNoActivation, false},
+      {"example.com", testing::kGenericBlock, "http://example.com",
+       kNoActivation, false},
 
       // Invalid GURL.
       {"example.com", kDocument, "http;//example.com", kDocument, false},
@@ -569,16 +610,16 @@ TEST_F(UrlPatternIndexTest, OneRuleWithActivationTypes) {
     ASSERT_TRUE(AddUrlRule(rule));
     Finish();
 
-    EXPECT_EQ(test_case.expect_match,
-              !!FindMatch(test_case.document_url,
-                          nullptr /* parent_document_origin */, kNoElement,
-                          test_case.activation_type));
+    EXPECT_EQ(
+        test_case.expect_match,
+        !!FindMatch(test_case.document_url, "" /* parent_document_origin */,
+                    testing::kNoElement, test_case.activation_type));
     EXPECT_EQ(test_case.expect_match,
               !!FindMatch(test_case.document_url, "http://example.com/",
-                          kNoElement, test_case.activation_type));
+                          testing::kNoElement, test_case.activation_type));
     EXPECT_EQ(test_case.expect_match,
               !!FindMatch(test_case.document_url, "http://xmpl.com/",
-                          kNoElement, test_case.activation_type));
+                          testing::kNoElement, test_case.activation_type));
     Reset();
   }
 }
@@ -586,21 +627,73 @@ TEST_F(UrlPatternIndexTest, OneRuleWithActivationTypes) {
 TEST_F(UrlPatternIndexTest, OneRuleWithElementAndActivationTypes) {
   auto rule = MakeUrlRule(UrlPattern("allow.ex.com", kSubstring));
   rule.set_semantics(proto::RULE_SEMANTICS_WHITELIST);
-  rule.set_element_types(kSubdocument);
+  rule.set_element_types(testing::kSubdocument);
   rule.set_activation_types(kDocument);
   ASSERT_TRUE(AddUrlRule(rule));
   Finish();
 
   EXPECT_FALSE(FindMatch("http://allow.ex.com"));
-  EXPECT_TRUE(FindMatch("http://allow.ex.com",
-                        nullptr /*document_origin_string */, kSubdocument));
+  EXPECT_TRUE(FindMatch("http://allow.ex.com", "" /*document_origin_string */,
+                        testing::kSubdocument));
 
-  EXPECT_FALSE(FindMatch("http://allow.ex.com",
-                         nullptr /* document_origin_string */, kNoElement,
-                         kGenericBlock));
-  EXPECT_TRUE(FindMatch("http://allow.ex.com",
-                        nullptr /* document_origin_string */, kNoElement,
-                        kDocument));
+  EXPECT_FALSE(FindMatch("http://allow.ex.com", "" /* document_origin_string */,
+                         testing::kNoElement, testing::kGenericBlock));
+  EXPECT_TRUE(FindMatch("http://allow.ex.com", "" /* document_origin_string */,
+                        testing::kNoElement, kDocument));
+}
+
+// Test that FindAllMatches will return the correct number of UrlRule matches
+// for incoming requests.
+TEST_F(UrlPatternIndexTest, MultipleRuleMatches) {
+  const struct {
+    uint32_t id;
+    const char* url_pattern;
+    uint16_t element_types;
+  } kRules[] = {{0, "ex1", flat::ElementType_ANY},
+                {1, "ex1", flat::ElementType_IMAGE},
+                {2, "ex1", flat::ElementType_IMAGE | flat::ElementType_FONT},
+                {3, "ex12", flat::ElementType_ANY},
+                {4, "google", flat::ElementType_ANY},
+                {5, "google", flat::ElementType_IMAGE}};
+
+  for (const auto& rule_data : kRules) {
+    AddSimpleUrlRule(rule_data.url_pattern, rule_data.id, 0 /* priority */,
+                     flat::OptionFlag_APPLIES_TO_FIRST_PARTY |
+                         flat::OptionFlag_APPLIES_TO_THIRD_PARTY,
+                     rule_data.element_types);
+  }
+  Finish();
+
+  const struct {
+    const char* url;
+    proto::ElementType element_type;
+    std::vector<uint32_t> expected_matched_ids;
+  } kTestCases[] = {{"http://ex1.com", proto::ELEMENT_TYPE_OTHER, {0}},
+                    {"http://ex1.com/font", kFont, {0, 2}},
+                    {"http://ex1.com/img", kImage, {0, 1, 2}},
+                    {"http://ex12.com", proto::ELEMENT_TYPE_OTHER, {0, 3}},
+                    {"http://ex12.com/img", kImage, {0, 1, 2, 3}},
+                    {"http://google.com", proto::ELEMENT_TYPE_OTHER, {4}},
+                    {"http://google.com/img", kImage, {4, 5}},
+                    {"http://ex12google.com/img", kImage, {0, 1, 2, 3, 4, 5}},
+                    {"http://nomatch.com/img", kImage, {}}};
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "UrlPattern: " << test_case.url << "; ElementTypes: "
+                 << static_cast<int>(test_case.element_type));
+
+    std::vector<uint32_t> actual_matched_ids;
+    std::vector<const flat::UrlRule*> matched_rules = FindAllMatches(
+        test_case.url, "" /* document_origin_string */, test_case.element_type,
+        kNoActivation, false /* disable_generic_rules */);
+
+    for (const auto* rule : matched_rules)
+      actual_matched_ids.push_back(rule->id());
+
+    EXPECT_THAT(actual_matched_ids, ::testing::UnorderedElementsAreArray(
+                                        test_case.expected_matched_ids));
+  }
 }
 
 TEST_F(UrlPatternIndexTest, MatchWithDisableGenericRules) {
@@ -620,7 +713,7 @@ TEST_F(UrlPatternIndexTest, MatchWithDisableGenericRules) {
 
   for (const auto& rule_data : kRules) {
     auto rule = MakeUrlRule(UrlPattern(rule_data.url_pattern, kSubstring));
-    AddDomains(rule_data.domains, &rule);
+    testing::AddDomains(rule_data.domains, &rule);
     ASSERT_TRUE(AddUrlRule(rule))
         << "UrlPattern: " << rule_data.url_pattern
         << "; Domains: " << ::testing::PrintToString(rule_data.domains);
@@ -664,12 +757,13 @@ TEST_F(UrlPatternIndexTest, MatchWithDisableGenericRules) {
                  << "UrlPattern: " << test_case.url
                  << "; DocumentOrigin: " << test_case.document_origin);
 
-    EXPECT_EQ(test_case.expect_match_with_disable_generic_rules,
-              !!FindMatch(test_case.url, test_case.document_origin, kOther,
-                          kNoActivation, kDisableGenericRules));
+    EXPECT_EQ(
+        test_case.expect_match_with_disable_generic_rules,
+        !!FindMatch(test_case.url, test_case.document_origin, testing::kOther,
+                    kNoActivation, kDisableGenericRules));
     EXPECT_EQ(test_case.expect_match_with_enable_all_rules,
-              !!FindMatch(test_case.url, test_case.document_origin, kOther,
-                          kNoActivation, kEnableAllRules));
+              !!FindMatch(test_case.url, test_case.document_origin,
+                          testing::kOther, kNoActivation, kEnableAllRules));
   }
 }
 
@@ -682,7 +776,7 @@ TEST_F(UrlPatternIndexTest, RulesWithUnsupportedTypes) {
       {0, proto::ACTIVATION_TYPE_MAX << 1},
       {proto::ELEMENT_TYPE_MAX << 1, proto::ACTIVATION_TYPE_MAX << 1},
 
-      {kPopup, 0},
+      {testing::kPopup, 0},
       {0, proto::ACTIVATION_TYPE_ELEMHIDE},
       {0, proto::ACTIVATION_TYPE_GENERICHIDE},
       {0, proto::ACTIVATION_TYPE_ELEMHIDE | proto::ACTIVATION_TYPE_GENERICHIDE},
@@ -711,7 +805,7 @@ TEST_F(UrlPatternIndexTest, RulesWithSupportedAndUnsupportedTypes) {
     int activation_types;
   } kRules[] = {
       {kImage | (proto::ELEMENT_TYPE_MAX << 1), 0},
-      {kScript | kPopup, 0},
+      {kScript | testing::kPopup, 0},
       {0, kDocument | (proto::ACTIVATION_TYPE_MAX << 1)},
   };
 
@@ -727,14 +821,15 @@ TEST_F(UrlPatternIndexTest, RulesWithSupportedAndUnsupportedTypes) {
   }
   Finish();
 
-  EXPECT_TRUE(FindMatch("http://example.com/", nullptr, kImage));
-  EXPECT_TRUE(FindMatch("http://example.com/", nullptr, kScript));
-  EXPECT_FALSE(FindMatch("http://example.com/", nullptr, kPopup));
+  EXPECT_TRUE(FindMatch("http://example.com/", "", kImage));
+  EXPECT_TRUE(FindMatch("http://example.com/", "", kScript));
+  EXPECT_FALSE(FindMatch("http://example.com/", "", testing::kPopup));
   EXPECT_FALSE(FindMatch("http://example.com/"));
 
-  EXPECT_TRUE(FindMatch("http://example.com", nullptr, kNoElement, kDocument));
-  EXPECT_FALSE(
-      FindMatch("http://example.com", nullptr, kNoElement, kGenericBlock));
+  EXPECT_TRUE(
+      FindMatch("http://example.com", "", testing::kNoElement, kDocument));
+  EXPECT_FALSE(FindMatch("http://example.com", "", testing::kNoElement,
+                         testing::kGenericBlock));
 }
 
 TEST_F(UrlPatternIndexTest, FindMatchReturnsCorrectRules) {
@@ -789,7 +884,8 @@ TEST_F(UrlPatternIndexTest, FindMatchHighestPriority) {
     for (size_t j = 0; j < i; j++) {
       AddSimpleUrlRule(pattern, id, priorities[j],
                        flat::OptionFlag_APPLIES_TO_FIRST_PARTY |
-                           flat::OptionFlag_APPLIES_TO_THIRD_PARTY);
+                           flat::OptionFlag_APPLIES_TO_THIRD_PARTY,
+                       flat::ElementType_ANY);
       id++;
     }
   }

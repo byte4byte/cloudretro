@@ -23,6 +23,10 @@ int64_t TestAppListControllerDelegate::GetAppListDisplayId() {
 
 void TestAppListControllerDelegate::DismissView() {}
 
+gfx::NativeWindow TestAppListControllerDelegate::GetAppListWindow() {
+  return nullptr;
+}
+
 bool TestAppListControllerDelegate::IsAppPinned(const std::string& app_id) {
   return false;
 }
@@ -42,18 +46,12 @@ bool TestAppListControllerDelegate::IsAppOpen(const std::string& app_id) const {
   return false;
 }
 
-bool TestAppListControllerDelegate::CanDoShowAppInfoFlow() {
-  return false;
-}
-
 void TestAppListControllerDelegate::DoShowAppInfoFlow(
     Profile* profile,
     const std::string& extension_id) {
 }
 
-void TestAppListControllerDelegate::CreateNewWindow(Profile* profile,
-                                                    bool incognito) {
-}
+void TestAppListControllerDelegate::CreateNewWindow(bool incognito) {}
 
 void TestAppListControllerDelegate::OpenURL(Profile* profile,
                                             const GURL& url,

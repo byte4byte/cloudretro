@@ -6,8 +6,8 @@
 
 #include "ash/frame/non_client_frame_view_ash.h"
 #include "ash/public/cpp/ash_constants.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/test/shell_test_api.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -18,6 +18,7 @@
 #include "ash/wm/workspace/workspace_event_handler_test_helper.h"
 #include "ash/wm/workspace_controller.h"
 #include "ash/wm/workspace_controller_test_api.h"
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -141,8 +142,8 @@ TEST_F(MultiWindowResizeControllerTest, IsOverWindows) {
   params1.delegate = new TestWidgetDelegate;
   params1.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params1.bounds = gfx::Rect(100, 200);
-  params1.context = CurrentContext();
-  w1->Init(params1);
+  params1.context = GetContext();
+  w1->Init(std::move(params1));
   w1->Show();
 
   std::unique_ptr<views::Widget> w2(new views::Widget);
@@ -150,8 +151,8 @@ TEST_F(MultiWindowResizeControllerTest, IsOverWindows) {
   params2.delegate = new TestWidgetDelegate;
   params2.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params2.bounds = gfx::Rect(100, 0, 100, 100);
-  params2.context = CurrentContext();
-  w2->Init(params2);
+  params2.context = GetContext();
+  w2->Init(std::move(params2));
   w2->Show();
 
   std::unique_ptr<views::Widget> w3(new views::Widget);
@@ -159,8 +160,8 @@ TEST_F(MultiWindowResizeControllerTest, IsOverWindows) {
   params3.delegate = new TestWidgetDelegate;
   params3.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params3.bounds = gfx::Rect(100, 100, 100, 100);
-  params3.context = CurrentContext();
-  w3->Init(params3);
+  params3.context = GetContext();
+  w3->Init(std::move(params3));
   w3->Show();
 
   ui::test::EventGenerator* generator = GetEventGenerator();
@@ -321,23 +322,23 @@ TEST_F(MultiWindowResizeControllerTest, Three) {
   generator->PressLeftButton();
 
   // Test that when drag starts, drag details are created for each window.
-  EXPECT_TRUE(wm::GetWindowState(w1.get())->is_dragged());
-  EXPECT_TRUE(wm::GetWindowState(w2.get())->is_dragged());
-  EXPECT_TRUE(wm::GetWindowState(w3.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w1.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w2.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w3.get())->is_dragged());
   // Test the window components for each window.
-  EXPECT_EQ(wm::GetWindowState(w1.get())->drag_details()->window_component,
+  EXPECT_EQ(WindowState::Get(w1.get())->drag_details()->window_component,
             HTRIGHT);
-  EXPECT_EQ(wm::GetWindowState(w2.get())->drag_details()->window_component,
+  EXPECT_EQ(WindowState::Get(w2.get())->drag_details()->window_component,
             HTLEFT);
-  EXPECT_EQ(wm::GetWindowState(w3.get())->drag_details()->window_component,
+  EXPECT_EQ(WindowState::Get(w3.get())->drag_details()->window_component,
             HTLEFT);
 
   generator->MoveMouseTo(bounds.x() + 11, bounds.y() + 10);
 
   // Drag details should exist during dragging.
-  EXPECT_TRUE(wm::GetWindowState(w1.get())->is_dragged());
-  EXPECT_TRUE(wm::GetWindowState(w2.get())->is_dragged());
-  EXPECT_TRUE(wm::GetWindowState(w3.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w1.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w2.get())->is_dragged());
+  EXPECT_TRUE(WindowState::Get(w3.get())->is_dragged());
 
   EXPECT_TRUE(HasTarget(w3.get()));
 
@@ -347,9 +348,9 @@ TEST_F(MultiWindowResizeControllerTest, Three) {
   EXPECT_TRUE(IsShowing());
 
   // Test that drag details are correctly deleted after dragging.
-  EXPECT_FALSE(wm::GetWindowState(w1.get())->is_dragged());
-  EXPECT_FALSE(wm::GetWindowState(w2.get())->is_dragged());
-  EXPECT_FALSE(wm::GetWindowState(w3.get())->is_dragged());
+  EXPECT_FALSE(WindowState::Get(w1.get())->is_dragged());
+  EXPECT_FALSE(WindowState::Get(w2.get())->is_dragged());
+  EXPECT_FALSE(WindowState::Get(w3.get())->is_dragged());
 
   generator->PressLeftButton();
 }
@@ -553,14 +554,14 @@ TEST_F(MultiWindowResizeControllerTest, MakeWindowNonResizeable) {
 
 namespace {
 
-class TestWindowStateDelegate : public wm::WindowStateDelegate {
+class TestWindowStateDelegate : public WindowStateDelegate {
  public:
   TestWindowStateDelegate() = default;
   ~TestWindowStateDelegate() override = default;
 
-  // wm::WindowStateDelegate:
+  // WindowStateDelegate:
   void OnDragStarted(int component) override { component_ = component; }
-  void OnDragFinished(bool cancel, const gfx::Point& location) override {
+  void OnDragFinished(bool cancel, const gfx::PointF& location) override {
     location_ = location;
   }
 
@@ -570,14 +571,14 @@ class TestWindowStateDelegate : public wm::WindowStateDelegate {
     return result;
   }
 
-  gfx::Point GetLocationAndReset() {
-    gfx::Point p = location_;
+  gfx::PointF GetLocationAndReset() {
+    gfx::PointF p = location_;
     location_.SetPoint(0, 0);
     return p;
   }
 
  private:
-  gfx::Point location_;
+  gfx::PointF location_;
   int component_ = -1;
   DISALLOW_COPY_AND_ASSIGN(TestWindowStateDelegate);
 };
@@ -587,22 +588,22 @@ class TestWindowStateDelegate : public wm::WindowStateDelegate {
 // Tests dragging to resize two snapped windows.
 TEST_F(MultiWindowResizeControllerTest, TwoSnappedWindows) {
   UpdateDisplay("400x300");
-  const int bottom_inset = 300 - ShelfConstants::shelf_size();
+  const int bottom_inset = 300 - ShelfConfig::Get()->shelf_size();
   // Create two snapped windows, one left snapped, one right snapped.
   aura::test::TestWindowDelegate delegate1;
   std::unique_ptr<aura::Window> w1(CreateTestWindowInShellWithDelegate(
       &delegate1, -1, gfx::Rect(100, 100, 100, 100)));
   delegate1.set_window_component(HTRIGHT);
-  wm::WindowState* w1_state = wm::GetWindowState(w1.get());
-  const wm::WMEvent snap_left(wm::WM_EVENT_SNAP_LEFT);
+  WindowState* w1_state = WindowState::Get(w1.get());
+  const WMEvent snap_left(WM_EVENT_SNAP_LEFT);
   w1_state->OnWMEvent(&snap_left);
   EXPECT_EQ(WindowStateType::kLeftSnapped, w1_state->GetStateType());
   aura::test::TestWindowDelegate delegate2;
   std::unique_ptr<aura::Window> w2(CreateTestWindowInShellWithDelegate(
       &delegate2, -2, gfx::Rect(100, 100, 100, 100)));
   delegate2.set_window_component(HTRIGHT);
-  wm::WindowState* w2_state = wm::GetWindowState(w2.get());
-  const wm::WMEvent snap_right(wm::WM_EVENT_SNAP_RIGHT);
+  WindowState* w2_state = WindowState::Get(w2.get());
+  const WMEvent snap_right(WM_EVENT_SNAP_RIGHT);
   w2_state->OnWMEvent(&snap_right);
   EXPECT_EQ(WindowStateType::kRightSnapped, w2_state->GetStateType());
   EXPECT_EQ(0.5f, *w1_state->snapped_width_ratio());
@@ -645,7 +646,7 @@ TEST_F(MultiWindowResizeControllerTest, TwoSnappedWindows) {
 
   // Dragging should call the WindowStateDelegate.
   EXPECT_EQ(HTRIGHT, window_state_delegate1->GetComponentAndReset());
-  EXPECT_EQ(gfx::Point(300, resize_widget_center.y()),
+  EXPECT_EQ(gfx::PointF(300, resize_widget_center.y()),
             window_state_delegate1->GetLocationAndReset());
 }
 

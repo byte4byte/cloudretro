@@ -10,8 +10,8 @@
 #include "base/memory/ptr_util.h"
 #include "chromecast/browser/renderer_prelauncher.h"
 #include "content/public/browser/site_instance.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -32,14 +32,6 @@ using ::testing::Return;
 using ::testing::StrictMock;
 
 namespace chromecast {
-
-namespace {
-
-const GURL kUrl1("https://www.one.com");
-const GURL kUrl2("https://www.two.com");
-const GURL kUrl3("https://www.three.com");
-
-}  // namespace
 
 class MockPrelauncher : public RendererPrelauncher {
  public:
@@ -70,13 +62,15 @@ class LRURendererCacheTest : public testing::Test {
     lru_cache_->SetFactoryForTesting(&factory_);
   }
 
-  content::TestBrowserThreadBundle threads_;
+  content::BrowserTaskEnvironment task_environment_;
   content::TestBrowserContext browser_context_;
   MockFactory factory_;
   std::unique_ptr<LRURendererCache> lru_cache_;
 };
 
 TEST_F(LRURendererCacheTest, SimpleTakeAndRelease) {
+  const GURL kUrl("https://www.one.com");
+
   lru_cache_ = std::make_unique<LRURendererCache>(&browser_context_, 1);
   SetFactory();
   MockPrelauncher* p1;
@@ -84,34 +78,36 @@ TEST_F(LRURendererCacheTest, SimpleTakeAndRelease) {
 
   // Don't return a prelauncher the first time, since the cache is empty.
   EXPECT_CALL(factory_, Create(_, _)).Times(0);
-  taken = lru_cache_->TakeRendererPrelauncher(kUrl1);
+  taken = lru_cache_->TakeRendererPrelauncher(kUrl);
   ASSERT_FALSE(taken);
   // Cache: []
   // In-use: [ 1 ]
 
   // Releasing the prelauncher will cache it and prelaunch for later use.
-  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
-  lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl);
+  lru_cache_->ReleaseRendererPrelauncher(kUrl);
+  task_environment_.RunUntilIdle();
   // Cache: [ 1 ]
   // In-use: []
 
   // Get the cached prelauncher.
-  taken = lru_cache_->TakeRendererPrelauncher(kUrl1);
+  taken = lru_cache_->TakeRendererPrelauncher(kUrl);
   ASSERT_TRUE(taken);
-  ASSERT_TRUE(taken->IsForURL(kUrl1));
+  ASSERT_TRUE(taken->IsForURL(kUrl));
   // Cache: [ ]
   // In-use: [ 1 ]
 
   // Return the prelauncher again, it should be cached the same as before.
-  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
-  lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl);
+  lru_cache_->ReleaseRendererPrelauncher(kUrl);
+  task_environment_.RunUntilIdle();
   // Cache: [ 1 ]
   // In-use: []
 }
 
 TEST_F(LRURendererCacheTest, SimpleCacheEviction) {
+  const GURL kUrl("https://www.one.com");
+
   lru_cache_ = std::make_unique<LRURendererCache>(&browser_context_, 1);
   SetFactory();
   MockPrelauncher* p1;
@@ -119,24 +115,27 @@ TEST_F(LRURendererCacheTest, SimpleCacheEviction) {
 
   // Fill the cache.
   EXPECT_CALL(factory_, Create(_, _)).Times(0);
-  taken = lru_cache_->TakeRendererPrelauncher(kUrl1);
+  taken = lru_cache_->TakeRendererPrelauncher(kUrl);
   ASSERT_FALSE(taken);
-  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
-  lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl);
+  lru_cache_->ReleaseRendererPrelauncher(kUrl);
+  task_environment_.RunUntilIdle();
   // Cache: [ 1 ]
   // In-use: []
 
   // Taking a different prelauncher destroys the cached one.
   EXPECT_CALL(factory_, Create(_, _)).Times(0);
   EXPECT_EVICTION(p1);
-  taken = lru_cache_->TakeRendererPrelauncher(kUrl2);
+  taken = lru_cache_->TakeRendererPrelauncher(GURL("https://www.two.com"));
   ASSERT_FALSE(taken);
   // Cache: [ ]
   // In-use: [ 2 ]
 }
 
 TEST_F(LRURendererCacheTest, CapacityOne) {
+  const GURL kUrl1("https://www.one.com");
+  const GURL kUrl2("https://www.two.com");
+
   lru_cache_ = std::make_unique<LRURendererCache>(&browser_context_, 1);
   SetFactory();
   MockPrelauncher* p1;
@@ -153,7 +152,7 @@ TEST_F(LRURendererCacheTest, CapacityOne) {
   // Releasing the prelauncher will cache it and prelaunch for later use.
   EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
   lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 1 ]
   // In-use: []
 
@@ -167,7 +166,7 @@ TEST_F(LRURendererCacheTest, CapacityOne) {
   // Return the prelauncher again, it should be cached the same as before.
   EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
   lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 1 ]
   // In-use: []
 
@@ -183,7 +182,7 @@ TEST_F(LRURendererCacheTest, CapacityOne) {
   // Return prelauncher 2, it should be cached.
   EXPECT_CREATE_AND_PRELAUNCH(p2, kUrl2);
   lru_cache_->ReleaseRendererPrelauncher(kUrl2);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 2 ]
   // In-use: [ ]
   taken = lru_cache_->TakeRendererPrelauncher(kUrl2);
@@ -195,7 +194,7 @@ TEST_F(LRURendererCacheTest, CapacityOne) {
   // Return prelauncher 2 once more, it will be cached.
   EXPECT_CREATE_AND_PRELAUNCH(p2, kUrl2);
   lru_cache_->ReleaseRendererPrelauncher(kUrl2);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 2 ]
   // In-use: [ ]
 
@@ -218,12 +217,16 @@ TEST_F(LRURendererCacheTest, CapacityOne) {
   // since there's still exactly 1 renderer in-use.
   EXPECT_CALL(factory_, Create(_, _)).Times(0);
   lru_cache_->ReleaseRendererPrelauncher(kUrl2);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ ]
   // In-use: [ 1 ]
 }
 
 TEST_F(LRURendererCacheTest, CapacityTwo) {
+  const GURL kUrl1("https://www.one.com");
+  const GURL kUrl2("https://www.two.com");
+  const GURL kUrl3("https://www.three.com");
+
   lru_cache_ = std::make_unique<LRURendererCache>(&browser_context_, 2);
   SetFactory();
   MockPrelauncher* p1;
@@ -246,16 +249,16 @@ TEST_F(LRURendererCacheTest, CapacityTwo) {
   // Don't cache renderer 3 since there are still 2 in use.
   EXPECT_CALL(factory_, Create(_, _)).Times(0);
   lru_cache_->ReleaseRendererPrelauncher(kUrl3);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // In-use: [ 1, 2 ]
 
   // Fill the cache with remaining 2 renderers.
   EXPECT_CREATE_AND_PRELAUNCH(p2, kUrl2);
   lru_cache_->ReleaseRendererPrelauncher(kUrl2);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
   lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 1, 2 ]
   // In-use: [ ]
 
@@ -269,7 +272,7 @@ TEST_F(LRURendererCacheTest, CapacityTwo) {
   // Return renderer 1.
   EXPECT_CREATE_AND_PRELAUNCH(p1, kUrl1);
   lru_cache_->ReleaseRendererPrelauncher(kUrl1);
-  threads_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   // Cache: [ 1, 2 ]
   // In-use: [ ]
 

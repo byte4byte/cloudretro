@@ -45,14 +45,14 @@ ImportantSitesUsageCounter::~ImportantSitesUsageCounter() {}
 void ImportantSitesUsageCounter::RunAndDestroySelfWhenFinished() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   tasks_ += 1;
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&ImportantSitesUsageCounter::GetQuotaUsageOnIOThread,
                      base::Unretained(this)));
   tasks_ += 1;
   dom_storage_context_->GetLocalStorageUsage(
-      base::Bind(&ImportantSitesUsageCounter::ReceiveLocalStorageUsage,
-                 base::Unretained(this)));
+      base::BindOnce(&ImportantSitesUsageCounter::ReceiveLocalStorageUsage,
+                     base::Unretained(this)));
 }
 
 void ImportantSitesUsageCounter::GetQuotaUsageOnIOThread() {
@@ -65,7 +65,7 @@ void ImportantSitesUsageCounter::GetQuotaUsageOnIOThread() {
 void ImportantSitesUsageCounter::ReceiveQuotaUsageOnIOThread(
     std::vector<storage::UsageInfo> usage_infos) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&ImportantSitesUsageCounter::ReceiveQuotaUsage,
                      base::Unretained(this), std::move(usage_infos)));

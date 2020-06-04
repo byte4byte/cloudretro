@@ -57,16 +57,15 @@ net::NetworkTrafficAnnotationTag CreateNetworkTrafficAnnotationTag() {
 
 GeneralAudienceBrowsingService::GeneralAudienceBrowsingService(
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory)
-    : shared_url_loader_factory_(shared_url_loader_factory),
-      general_audience_browsing_api_key_observer_binding_(this) {
-  mojom::GeneralAudienceBrowsingAPIKeyObserverPtr observer_ptr;
-  general_audience_browsing_api_key_observer_binding_.Bind(
-      mojo::MakeRequest(&observer_ptr));
-  content::GetSystemConnector()->BindInterface(
+    : shared_url_loader_factory_(shared_url_loader_factory) {
+  content::GetSystemConnector()->Connect(
       mojom::kChromecastServiceName,
-      &general_audience_browsing_api_key_subject_ptr_);
-  general_audience_browsing_api_key_subject_ptr_
-      ->AddGeneralAudienceBrowsingAPIKeyObserver(std::move(observer_ptr));
+      general_audience_browsing_api_key_subject_remote_
+          .BindNewPipeAndPassReceiver());
+  general_audience_browsing_api_key_subject_remote_
+      ->AddGeneralAudienceBrowsingAPIKeyObserver(
+          general_audience_browsing_api_key_observer_receiver_
+              .BindNewPipeAndPassRemote());
 }
 
 GeneralAudienceBrowsingService::~GeneralAudienceBrowsingService() = default;
@@ -105,7 +104,7 @@ GeneralAudienceBrowsingService::CreateSafeSearchURLChecker() {
   return std::make_unique<safe_search_api::URLChecker>(
       std::make_unique<safe_search_api::SafeSearchURLCheckerClient>(
           shared_url_loader_factory_, CreateNetworkTrafficAnnotationTag(),
-          std::string(), api_key_),
+          api_key_),
       /* cache size */ 1000);
 }
 

@@ -4,7 +4,7 @@
 
 /**
  * @fileoverview
- * 'os-settings-search-page' contains assistant settings.
+ * 'os-settings-search-page' contains search and assistant settings.
  */
 Polymer({
   is: 'os-settings-search-page',
@@ -14,24 +14,71 @@ Polymer({
   properties: {
     prefs: Object,
 
+    /**
+     * List of default search engines available.
+     * @private {!Array<!SearchEngine>}
+     */
+    searchEngines_: {
+      type: Array,
+      value() {
+        return [];
+      }
+    },
+
+    /** @private Filter applied to search engines. */
+    searchEnginesFilter_: String,
+
     /** @type {?Map<string, string>} */
     focusConfig_: Object,
+
+    /** @private Can be disallowed due to flag, policy, locale, etc. */
+    isAssistantAllowed_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isAssistantAllowed');
+      },
+    },
+  },
+
+  /** @private {?settings.SearchEnginesBrowserProxy} */
+  browserProxy_: null,
+
+  /** @override */
+  created() {
+    this.browserProxy_ = settings.SearchEnginesBrowserProxyImpl.getInstance();
   },
 
   /** @override */
-  ready: function() {
-    assert(loadTimeData.getBoolean('isAssistantAllowed'));
+  ready() {
+    const updateSearchEngines = searchEngines => {
+      this.set('searchEngines_', searchEngines.defaults);
+    };
+    this.browserProxy_.getSearchEnginesList().then(updateSearchEngines);
+    cr.addWebUIListener('search-engines-changed', updateSearchEngines);
+
     this.focusConfig_ = new Map();
     if (settings.routes.GOOGLE_ASSISTANT) {
       this.focusConfig_.set(
-          settings.routes.GOOGLE_ASSISTANT.path,
-          '#assistantSubpageTrigger .subpage-arrow');
+          settings.routes.GOOGLE_ASSISTANT.path, '#assistantSubpageTrigger');
     }
   },
 
   /** @private */
-  onGoogleAssistantTap_: function() {
-    settings.navigateTo(settings.routes.GOOGLE_ASSISTANT);
+  onChange_() {
+    const select = /** @type {!HTMLSelectElement} */ (this.$$('select'));
+    const searchEngine = this.searchEngines_[select.selectedIndex];
+    this.browserProxy_.setDefaultSearchEngine(searchEngine.modelIndex);
+  },
+
+  /** @private */
+  onDisableExtension_() {
+    this.fire('refresh-pref', 'default_search_provider.enabled');
+  },
+
+  /** @private */
+  onGoogleAssistantTap_() {
+    assert(this.isAssistantAllowed_);
+    settings.Router.getInstance().navigateTo(settings.routes.GOOGLE_ASSISTANT);
   },
 
   /**
@@ -39,9 +86,27 @@ Polymer({
    * @return {string}
    * @private
    */
-  getAssistantEnabledDisabledLabel_: function(toggleValue) {
+  getAssistantEnabledDisabledLabel_(toggleValue) {
     return this.i18n(
         toggleValue ? 'searchGoogleAssistantEnabled' :
                       'searchGoogleAssistantDisabled');
+  },
+
+  /**
+   * @param {!chrome.settingsPrivate.PrefObject} pref
+   * @return {boolean}
+   * @private
+   */
+  isDefaultSearchControlledByPolicy_(pref) {
+    return pref.controlledBy == chrome.settingsPrivate.ControlledBy.USER_POLICY;
+  },
+
+  /**
+   * @param {!chrome.settingsPrivate.PrefObject} pref
+   * @return {boolean}
+   * @private
+   */
+  isDefaultSearchEngineEnforced_(pref) {
+    return pref.enforcement == chrome.settingsPrivate.Enforcement.ENFORCED;
   },
 });

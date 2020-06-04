@@ -4,10 +4,11 @@
 
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/extension_service_test_with_install.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/permissions_test_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
@@ -61,7 +62,30 @@ void InitializeExtensionPermissions(Profile* profile,
   updater.GrantActivePermissions(&extension);
 }
 
-using ScriptingPermissionsModifierUnitTest = ExtensionServiceTestBase;
+void CheckActiveHostPermissions(
+    const Extension& extension,
+    const std::vector<std::string>& explicit_hosts,
+    const std::vector<std::string>& scriptable_hosts) {
+  EXPECT_THAT(GetExplicitPatternsAsStrings(extension),
+              testing::UnorderedElementsAreArray(explicit_hosts));
+  EXPECT_THAT(GetScriptablePatternsAsStrings(extension),
+              testing::UnorderedElementsAreArray(scriptable_hosts));
+}
+
+void CheckWithheldHostPermissions(
+    const Extension& extension,
+    const std::vector<std::string>& explicit_hosts,
+    const std::vector<std::string>& scriptable_hosts) {
+  const PermissionsData* permissions_data = extension.permissions_data();
+  EXPECT_THAT(GetPatternsAsStrings(
+                  permissions_data->withheld_permissions().explicit_hosts()),
+              testing::UnorderedElementsAreArray(explicit_hosts));
+  EXPECT_THAT(GetPatternsAsStrings(
+                  permissions_data->withheld_permissions().scriptable_hosts()),
+              testing::UnorderedElementsAreArray(scriptable_hosts));
+}
+
+using ScriptingPermissionsModifierUnitTest = ExtensionServiceTestWithInstall;
 
 }  // namespace
 
@@ -88,52 +112,296 @@ TEST_F(ScriptingPermissionsModifierUnitTest, GrantAndWithholdHostPermissions) {
 
     PermissionsUpdater(profile()).InitializePermissions(extension.get());
 
-    const PermissionsData* permissions_data = extension->permissions_data();
-
     ScriptingPermissionsModifier modifier(profile(), extension);
     ASSERT_TRUE(modifier.CanAffectExtension());
 
     // By default, all permissions are granted.
-    EXPECT_THAT(GetScriptablePatternsAsStrings(*extension),
-                testing::UnorderedElementsAreArray(test_case));
-    EXPECT_THAT(GetExplicitPatternsAsStrings(*extension),
-                testing::UnorderedElementsAreArray(test_case));
-    EXPECT_TRUE(
-        permissions_data->withheld_permissions().scriptable_hosts().is_empty());
-    EXPECT_TRUE(
-        permissions_data->withheld_permissions().explicit_hosts().is_empty());
+    {
+      SCOPED_TRACE("Initial state");
+      CheckActiveHostPermissions(*extension, test_case, test_case);
+      CheckWithheldHostPermissions(*extension, {}, {});
+    }
 
     // Then, withhold host permissions.
     modifier.SetWithholdHostPermissions(true);
-
-    // Note: We don't use URLPatternSet::is_empty() here, since
-    // chrome://favicon/ can still be present in the set (it's not really a
-    // host permission and isn't withheld). GetPatternsAsStrings() ignores
-    // chrome://favicon.
-    EXPECT_THAT(GetScriptablePatternsAsStrings(*extension), testing::IsEmpty());
-    EXPECT_THAT(GetExplicitPatternsAsStrings(*extension), testing::IsEmpty());
-
-    EXPECT_THAT(
-        GetPatternsAsStrings(
-            permissions_data->withheld_permissions().scriptable_hosts()),
-        testing::UnorderedElementsAreArray(test_case));
-    EXPECT_THAT(GetPatternsAsStrings(
-                    permissions_data->withheld_permissions().explicit_hosts()),
-                testing::UnorderedElementsAreArray(test_case));
+    {
+      SCOPED_TRACE("After setting to withhold");
+      CheckActiveHostPermissions(*extension, {}, {});
+      CheckWithheldHostPermissions(*extension, test_case, test_case);
+    }
 
     // Finally, re-grant the withheld permissions.
     modifier.SetWithholdHostPermissions(false);
 
     // We should be back to our initial state - all requested permissions are
     // granted.
-    EXPECT_THAT(GetScriptablePatternsAsStrings(*extension),
-                testing::UnorderedElementsAreArray(test_case));
-    EXPECT_THAT(GetExplicitPatternsAsStrings(*extension),
-                testing::UnorderedElementsAreArray(test_case));
-    EXPECT_TRUE(
-        permissions_data->withheld_permissions().scriptable_hosts().is_empty());
-    EXPECT_TRUE(
-        permissions_data->withheld_permissions().explicit_hosts().is_empty());
+    {
+      SCOPED_TRACE("After setting to not withhold");
+      CheckActiveHostPermissions(*extension, test_case, test_case);
+      CheckWithheldHostPermissions(*extension, {}, {});
+    }
+  }
+}
+
+// Tests that with the creation flag present, requested host permissions are
+// withheld on installation, but still allow for individual permissions to be
+// granted, or all permissions be set back to not being withheld by default.
+TEST_F(ScriptingPermissionsModifierUnitTest, WithholdHostPermissionsOnInstall) {
+  InitializeEmptyExtensionService();
+
+  constexpr char kHostGoogle[] = "https://google.com/*";
+  constexpr char kHostChromium[] = "https://chromium.org/*";
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("a")
+          .AddPermissions({kHostGoogle, kHostChromium})
+          .AddContentScript("foo.js", {kHostGoogle})
+          .SetLocation(Manifest::INTERNAL)
+          .AddFlags(Extension::WITHHOLD_PERMISSIONS)
+          .Build();
+
+  // Initialize the permissions and have the prefs built and stored.
+  PermissionsUpdater(profile()).InitializePermissions(extension.get());
+  ExtensionPrefs::Get(profile())->OnExtensionInstalled(
+      extension.get(), Extension::State::ENABLED, syncer::StringOrdinal(), "");
+
+  ScriptingPermissionsModifier modifier(profile(), extension);
+  ASSERT_TRUE(modifier.CanAffectExtension());
+
+  // With the flag present, permissions should have been withheld.
+  {
+    SCOPED_TRACE("Initial state");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium},
+                                 {kHostGoogle});
+  }
+
+  // Grant one of the permissions manually.
+  modifier.GrantHostPermission(GURL(kHostChromium));
+
+  {
+    SCOPED_TRACE("After granting single");
+    CheckActiveHostPermissions(*extension, {kHostChromium}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle}, {kHostGoogle});
+  }
+
+  // Finally, re-grant the withheld permissions.
+  modifier.SetWithholdHostPermissions(false);
+
+  // All requested permissions should now be granted granted.
+  {
+    SCOPED_TRACE("After setting to not withhold");
+    CheckActiveHostPermissions(*extension, {kHostGoogle, kHostChromium},
+                               {kHostGoogle});
+    CheckWithheldHostPermissions(*extension, {}, {});
+  }
+}
+
+// Tests that reloading an extension after withholding host permissions on
+// installation retains the correct state and any changes that have been made
+// since installation.
+TEST_F(ScriptingPermissionsModifierUnitTest,
+       WithholdOnInstallPreservedOnReload) {
+  InitializeEmptyExtensionService();
+
+  constexpr char kHostGoogle[] = "https://google.com/*";
+  constexpr char kHostChromium[] = "https://chromium.org/*";
+  TestExtensionDir test_extension_dir;
+  test_extension_dir.WriteManifest(
+      R"({
+           "name": "foo",
+           "manifest_version": 2,
+           "version": "1",
+           "permissions": ["https://google.com/*", "https://chromium.org/*"]
+         })");
+  ChromeTestExtensionLoader loader(profile());
+  loader.add_creation_flag(Extension::WITHHOLD_PERMISSIONS);
+  loader.set_pack_extension(true);
+  scoped_refptr<const Extension> extension =
+      loader.LoadExtension(test_extension_dir.UnpackedPath());
+  // Cache the ID, since the extension will be invalidated across reloads.
+  ExtensionId extension_id = extension->id();
+
+  auto reload_extension = [this, &extension_id]() {
+    TestExtensionRegistryObserver observer(ExtensionRegistry::Get(profile()));
+    service()->ReloadExtension(extension_id);
+    return observer.WaitForExtensionLoaded();
+  };
+
+  // Permissions start withheld due to creation flag and remain withheld after
+  // reload.
+  {
+    SCOPED_TRACE("Initial state");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Reload after initial state");
+    extension = reload_extension();
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  // Grant one of the permissions and check it persists after reload.
+  ScriptingPermissionsModifier(profile(), extension)
+      .GrantHostPermission(GURL(kHostGoogle));
+  {
+    SCOPED_TRACE("Granting single");
+    CheckActiveHostPermissions(*extension, {kHostGoogle}, {});
+    CheckWithheldHostPermissions(*extension, {kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Reload after granting single");
+    extension = reload_extension();
+    CheckActiveHostPermissions(*extension, {kHostGoogle}, {});
+    CheckWithheldHostPermissions(*extension, {kHostChromium}, {});
+  }
+
+  // Set permissions not to be withheld at all and check it persists after
+  // reload.
+  ScriptingPermissionsModifier(profile(), extension)
+      .SetWithholdHostPermissions(false);
+  {
+    SCOPED_TRACE("Setting to not withhold");
+    CheckActiveHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+    CheckWithheldHostPermissions(*extension, {}, {});
+  }
+
+  {
+    SCOPED_TRACE("Reload after setting to not withhold");
+    extension = reload_extension();
+    CheckActiveHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+    CheckWithheldHostPermissions(*extension, {}, {});
+  }
+
+  // Finally, set permissions to be withheld again and check it persists after
+  // reload.
+  ScriptingPermissionsModifier(profile(), extension)
+      .SetWithholdHostPermissions(true);
+  {
+    SCOPED_TRACE("Setting back to withhold");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Reload after setting back to withhold");
+    extension = reload_extension();
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+}
+
+// Tests that updating an extension after withholding host permissions on
+// installation retains the correct state and any changes that have been made
+// since installation.
+TEST_F(ScriptingPermissionsModifierUnitTest,
+       WithholdOnInstallPreservedOnUpdate) {
+  InitializeEmptyExtensionService();
+
+  constexpr char kHostGoogle[] = "https://google.com/*";
+  constexpr char kHostChromium[] = "https://chromium.org/*";
+  TestExtensionDir test_extension_dir;
+  constexpr char kManifestTemplate[] =
+      R"({
+           "name": "foo",
+           "manifest_version": 2,
+           "version": "%s",
+           "permissions": ["https://google.com/*", "https://chromium.org/*"]
+         })";
+
+  test_extension_dir.WriteManifest(base::StringPrintf(kManifestTemplate, "1"));
+  // We need to use a pem file here for consistent update IDs.
+  const base::FilePath pem_path =
+      data_dir().AppendASCII("permissions/update.pem");
+  scoped_refptr<const Extension> extension = PackAndInstallCRX(
+      test_extension_dir.UnpackedPath(), pem_path, INSTALL_NEW,
+      Extension::WITHHOLD_PERMISSIONS, Manifest::Location::INTERNAL);
+  // Cache the ID, since the extension will be invalidated across updates.
+  ExtensionId extension_id = extension->id();
+  // Hold onto references for the extension dirs so they don't get deleted
+  // outside the lambda.
+  std::vector<std::unique_ptr<TestExtensionDir>> extension_dirs;
+
+  auto update_extension = [this, &extension_id, &pem_path, &kManifestTemplate,
+                           &extension_dirs](const char* version) {
+    auto update_version = std::make_unique<TestExtensionDir>();
+    update_version->WriteManifest(
+        base::StringPrintf(kManifestTemplate, version));
+    PackCRXAndUpdateExtension(extension_id, update_version->UnpackedPath(),
+                              pem_path, ENABLED);
+    scoped_refptr<const Extension> updated_extension =
+        registry()->GetInstalledExtension(extension_id);
+
+    EXPECT_EQ(version, updated_extension->version().GetString());
+    extension_dirs.push_back(std::move(update_version));
+    return updated_extension;
+  };
+
+  // Permissions start withheld due to creation flag and remain withheld after
+  // update.
+  {
+    SCOPED_TRACE("Initial state");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Update after initial state");
+    extension = update_extension("2");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  // Grant one of the permissions and check it persists after update.
+  ScriptingPermissionsModifier(profile(), extension)
+      .GrantHostPermission(GURL(kHostGoogle));
+  {
+    SCOPED_TRACE("Granting single");
+    CheckActiveHostPermissions(*extension, {kHostGoogle}, {});
+    CheckWithheldHostPermissions(*extension, {kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Update after granting single");
+    extension = update_extension("3");
+    CheckActiveHostPermissions(*extension, {kHostGoogle}, {});
+    CheckWithheldHostPermissions(*extension, {kHostChromium}, {});
+  }
+
+  // Set permissions not to be withheld at all and check it persists after
+  // update.
+  ScriptingPermissionsModifier(profile(), extension)
+      .SetWithholdHostPermissions(false);
+  {
+    SCOPED_TRACE("Setting to not withhold");
+    CheckActiveHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+    CheckWithheldHostPermissions(*extension, {}, {});
+  }
+
+  {
+    SCOPED_TRACE("Update after setting to not withhold");
+    extension = update_extension("4");
+    CheckActiveHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+    CheckWithheldHostPermissions(*extension, {}, {});
+  }
+
+  // Finally, set permissions to be withheld again and check it persists after
+  // update.
+  ScriptingPermissionsModifier(profile(), extension)
+      .SetWithholdHostPermissions(true);
+  {
+    SCOPED_TRACE("Setting back to withhold");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
+  }
+
+  {
+    SCOPED_TRACE("Update after setting back to withhold");
+    extension = update_extension("5");
+    CheckActiveHostPermissions(*extension, {}, {});
+    CheckWithheldHostPermissions(*extension, {kHostGoogle, kHostChromium}, {});
   }
 }
 
@@ -308,7 +576,7 @@ TEST_F(ScriptingPermissionsModifierUnitTest,
   {
     TestExtensionRegistryObserver observer(ExtensionRegistry::Get(profile()));
     service()->ReloadExtension(extension->id());
-    extension = base::WrapRefCounted(observer.WaitForExtensionLoaded());
+    extension = observer.WaitForExtensionLoaded();
   }
   EXPECT_TRUE(extension->permissions_data()
                   ->active_permissions()
@@ -404,6 +672,96 @@ TEST_F(ScriptingPermissionsModifierUnitTest,
   ScriptingPermissionsModifier modifier(profile(), extension.get());
   modifier.RemoveAllGrantedHostPermissions();
   EXPECT_THAT(GetEffectivePatternsAsStrings(*extension), testing::IsEmpty());
+}
+
+// Tests that HasBroadGrantedHostPermissions detects cases where there is a
+// granted permission that is sufficiently broad enough to be counted as akin to
+// <all_urls> type permissions.
+TEST_F(ScriptingPermissionsModifierUnitTest, HasBroadGrantedHostPermissions) {
+  InitializeEmptyExtensionService();
+
+  struct {
+    std::vector<std::string> hosts;
+    bool expected_broad_permissions;
+  } test_cases[] = {{{}, false},
+                    {{"https://www.google.com/*"}, false},
+                    {{"https://www.google.com/*", "*://chromium.org/*"}, false},
+                    {{"*://*.google.*/*"}, false},
+                    {{"<all_urls>"}, true},
+                    {{"https://*/*"}, true},
+                    {{"*://*/*"}, true},
+                    {{"https://www.google.com/*", "<all_urls>"}, true}};
+
+  for (const auto& test_case : test_cases) {
+    std::string test_case_name = base::JoinString(test_case.hosts, ",");
+    SCOPED_TRACE(test_case_name);
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("test: " + test_case_name)
+            .AddPermission("<all_urls>")
+            .Build();
+    ScriptingPermissionsModifier modifier(profile(), extension.get());
+
+    modifier.SetWithholdHostPermissions(true);
+
+    EXPECT_FALSE(modifier.HasBroadGrantedHostPermissions());
+
+    std::string error;
+    bool allow_file_access = false;
+    URLPatternSet patterns;
+    patterns.Populate(test_case.hosts, Extension::kValidHostPermissionSchemes,
+                      allow_file_access, &error);
+    permissions_test_util::GrantRuntimePermissionsAndWaitForCompletion(
+        profile(), *extension,
+        PermissionSet(APIPermissionSet(), ManifestPermissionSet(),
+                      std::move(patterns), URLPatternSet()));
+
+    EXPECT_EQ(test_case.expected_broad_permissions,
+              modifier.HasBroadGrantedHostPermissions());
+  }
+}
+
+// Tests RemoveBroadGrantedHostPermissions only removes the broad permissions
+// and leaves others intact.
+TEST_F(ScriptingPermissionsModifierUnitTest,
+       RemoveBroadGrantedHostPermissions) {
+  InitializeEmptyExtensionService();
+
+  const GURL google_com = GURL("https://google.com/*");
+  const GURL example_com = GURL("https://example.com/*");
+
+  // Define a list of broad patters that should give access to both URLs.
+  std::string broad_patterns[] = {"https://*/*", "<all_urls>",
+                                  "https://*.com/*"};
+
+  for (const auto& broad_pattern : broad_patterns) {
+    SCOPED_TRACE(broad_pattern);
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("test: " + broad_pattern)
+            .AddPermission("<all_urls>")
+            .Build();
+    ScriptingPermissionsModifier modifier(profile(), extension.get());
+
+    modifier.SetWithholdHostPermissions(true);
+
+    // Explicitly grant google.com and the broad pattern.
+    modifier.GrantHostPermission(google_com);
+    const URLPattern pattern(Extension::kValidHostPermissionSchemes,
+                             broad_pattern);
+    permissions_test_util::GrantRuntimePermissionsAndWaitForCompletion(
+        profile(), *extension,
+        PermissionSet(APIPermissionSet(), ManifestPermissionSet(),
+                      URLPatternSet({pattern}), URLPatternSet()));
+
+    EXPECT_TRUE(modifier.HasGrantedHostPermission(google_com));
+    EXPECT_TRUE(modifier.HasGrantedHostPermission(example_com));
+
+    // Now removing the broad patterns should leave it only with the explicit
+    // google permission.
+    modifier.RemoveBroadGrantedHostPermissions();
+    EXPECT_TRUE(modifier.HasGrantedHostPermission(google_com));
+    EXPECT_FALSE(modifier.HasGrantedHostPermission(example_com));
+    EXPECT_FALSE(modifier.HasBroadGrantedHostPermissions());
+  }
 }
 
 // Tests granting runtime permissions for a full host when the extension only

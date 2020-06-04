@@ -14,8 +14,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
+#include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/sync/base/sync_mode.h"
 #include "components/sync/model/model_error.h"
 #include "components/sync/model/model_type_store.h"
 #include "components/sync/model/model_type_sync_bridge.h"
@@ -28,6 +30,8 @@ class DeviceInfoSpecifics;
 
 namespace syncer {
 
+class DeviceInfoPrefs;
+
 // Sync bridge implementation for DEVICE_INFO model type. Handles storage of
 // device info and associated sync metadata, applying/merging foreign changes,
 // and allows public read access.
@@ -38,10 +42,17 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
       std::unique_ptr<MutableLocalDeviceInfoProvider>
           local_device_info_provider,
       OnceModelTypeStoreFactory store_factory,
-      std::unique_ptr<ModelTypeChangeProcessor> change_processor);
+      std::unique_ptr<ModelTypeChangeProcessor> change_processor,
+      std::unique_ptr<DeviceInfoPrefs> device_info_prefs);
   ~DeviceInfoSyncBridge() override;
 
   LocalDeviceInfoProvider* GetLocalDeviceInfoProvider();
+
+  // Refresh local copy of device info in memory, and informs sync of the
+  // change. Used when the caller knows a property of local device info has
+  // changed (e.g. SharingInfo), and must be sync-ed to other devices as soon as
+  // possible, without waiting for the periodic commits.
+  void RefreshLocalDeviceInfo();
 
   // ModelTypeSyncBridge implementation.
   void OnSyncStarting(const DataTypeActivationRequest& request) override;
@@ -67,6 +78,7 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
   int CountActiveDevices() const override;
+  bool IsRecentLocalCacheGuid(const std::string& cache_guid) const override;
 
   // For testing only.
   bool IsPulseTimerRunningForTest() const;
@@ -85,12 +97,18 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   bool DeleteSpecifics(const std::string& tag,
                        ModelTypeStore::WriteBatch* batch);
 
+  // Returns the device name based on |sync_mode_|. For transport only mode,
+  // the device model name is returned. For full sync mode,
+  // |local_personalizable_device_name_| is returned.
+  std::string GetLocalClientName() const;
+
   // Notify all registered observers.
   void NotifyObservers();
 
   // Methods used as callbacks given to DataTypeStore.
   void OnStoreCreated(const base::Optional<syncer::ModelError>& error,
                       std::unique_ptr<ModelTypeStore> store);
+  void OnHardwareInfoRetrieved(base::SysInfo::HardwareInfo hardware_info);
   void OnReadAllData(std::unique_ptr<ClientIdToSpecifics> all_data,
                      std::unique_ptr<std::string> session_name,
                      const base::Optional<syncer::ModelError>& error);
@@ -123,12 +141,20 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   // allow unit tests to control expected results.
   int CountActiveDevices(const base::Time now) const;
 
+  // Deletes locally old data and metadata entries without issuing tombstones.
+  void ExpireOldEntries();
+
   const std::unique_ptr<MutableLocalDeviceInfoProvider>
       local_device_info_provider_;
 
   std::string local_cache_guid_;
-  std::string local_session_name_;
+  std::string local_personalizable_device_name_;
   ClientIdToSpecifics all_data_;
+
+  // TODO(crbug.com/1019689): Replace hardware info with a custom data type.
+  base::SysInfo::HardwareInfo local_hardware_info_;
+
+  base::Optional<SyncMode> sync_mode_;
 
   // Registered observers, not owned.
   base::ObserverList<Observer, true>::Unchecked observers_;
@@ -138,6 +164,8 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
 
   // Used to update our local device info once every pulse interval.
   base::OneShotTimer pulse_timer_;
+
+  const std::unique_ptr<DeviceInfoPrefs> device_info_prefs_;
 
   base::WeakPtrFactory<DeviceInfoSyncBridge> weak_ptr_factory_{this};
 

@@ -14,7 +14,7 @@
 #include "base/task/post_task.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
 #include "chrome/browser/subresource_filter/chrome_subresource_filter_client.h"
@@ -24,7 +24,8 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/fake_safe_browsing_database_manager.h"
 #include "components/subresource_filter/content/browser/subresource_filter_safe_browsing_activation_throttle.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
@@ -34,7 +35,7 @@
 #include "content/public/test/test_renderer_host.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/web/web_triggering_event_info.h"
+#include "third_party/blink/public/common/navigation/triggering_event_info.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
@@ -74,7 +75,10 @@ class SafeBrowsingTriggeredPopupBlockerTest
     scoped_feature_list_ = DefaultFeatureList();
     PopupBlockerTabHelper::CreateForWebContents(web_contents());
     InfoBarService::CreateForWebContents(web_contents());
-    TabSpecificContentSettings::CreateForWebContents(web_contents());
+    content_settings::TabSpecificContentSettings::CreateForWebContents(
+        web_contents(),
+        std::make_unique<chrome::TabSpecificContentSettingsDelegate>(
+            web_contents()));
     popup_blocker_ =
         SafeBrowsingTriggeredPopupBlocker::FromWebContents(web_contents());
   }
@@ -151,41 +155,9 @@ struct RedirectSamplesAndResults {
   bool expect_strong_blocker;
 };
 
+// We always make our decision to trigger on the last entry in the chain.
 TEST_F(SafeBrowsingTriggeredPopupBlockerTest,
-       MatchOnSafeBrowsingWithRedirectDetection) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      subresource_filter::kSafeBrowsingSubresourceFilterConsiderRedirects);
-
-  GURL enforce_url("https://example.enforce");
-  GURL warning_url("https://example.warning");
-  GURL regular_url("https://example.regular");
-  MarkUrlAsAbusiveEnforce(enforce_url);
-  MarkUrlAsAbusiveWarning(warning_url);
-
-  const RedirectSamplesAndResults kTestCases[] = {
-      {enforce_url, regular_url, true},  {regular_url, enforce_url, true},
-      {warning_url, enforce_url, true},  {enforce_url, warning_url, true},
-      {regular_url, warning_url, false}, {warning_url, regular_url, false}};
-
-  for (const auto& test_case : kTestCases) {
-    std::unique_ptr<content::NavigationSimulator> simulator =
-        content::NavigationSimulator::CreateRendererInitiated(
-            test_case.initial_url, web_contents()->GetMainFrame());
-    simulator->Start();
-    simulator->Redirect(test_case.redirect_url);
-    simulator->Commit();
-    EXPECT_EQ(test_case.expect_strong_blocker,
-              popup_blocker()->ShouldApplyAbusivePopupBlocker());
-  }
-}
-
-TEST_F(SafeBrowsingTriggeredPopupBlockerTest,
-       MatchOnSafeBrowsingWithoutRedirectDetection) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(
-      subresource_filter::kSafeBrowsingSubresourceFilterConsiderRedirects);
-
+       MatchOnSafeBrowsingWithRedirectChain) {
   GURL enforce_url("https://example.enforce");
   GURL warning_url("https://example.warning");
   GURL regular_url("https://example.regular");
@@ -236,13 +208,13 @@ TEST_F(SafeBrowsingTriggeredPopupBlockerTest,
       ui::PAGE_TRANSITION_LINK, true /* is_renderer_initiated */);
   params.user_gesture = true;
   params.triggering_event_info =
-      blink::WebTriggeringEventInfo::kFromUntrustedEvent;
+      blink::TriggeringEventInfo::kFromUntrustedEvent;
 
   NavigateParams nav_params(profile(), popup_url, ui::PAGE_TRANSITION_LINK);
   nav_params.FillNavigateParamsFromOpenURLParams(params);
   nav_params.source_contents = web_contents();
   nav_params.user_gesture = true;
-  MaybeBlockPopup(web_contents(), base::nullopt, &nav_params, &params,
+  MaybeBlockPopup(web_contents(), nullptr, &nav_params, &params,
                   blink::mojom::WindowFeatures());
 
   EXPECT_EQ(1u, PopupBlockerTabHelper::FromWebContents(web_contents())
@@ -263,14 +235,13 @@ TEST_F(SafeBrowsingTriggeredPopupBlockerTest,
       popup_url, content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_LINK, true /* is_renderer_initiated */);
   params.user_gesture = true;
-  params.triggering_event_info =
-      blink::WebTriggeringEventInfo::kFromTrustedEvent;
+  params.triggering_event_info = blink::TriggeringEventInfo::kFromTrustedEvent;
 
   NavigateParams nav_params(profile(), popup_url, ui::PAGE_TRANSITION_LINK);
   nav_params.FillNavigateParamsFromOpenURLParams(params);
   nav_params.source_contents = web_contents();
   nav_params.user_gesture = true;
-  MaybeBlockPopup(web_contents(), base::nullopt, &nav_params, &params,
+  MaybeBlockPopup(web_contents(), nullptr, &nav_params, &params,
                   blink::mojom::WindowFeatures());
 
   EXPECT_EQ(0u, PopupBlockerTabHelper::FromWebContents(web_contents())
@@ -464,8 +435,6 @@ TEST_F(SafeBrowsingTriggeredPopupBlockerTest,
 TEST_F(SafeBrowsingTriggeredPopupBlockerTest, EnforcementRedirectPosition) {
   // Turn on the feature to perform safebrowsing on redirects.
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      subresource_filter::kSafeBrowsingSubresourceFilterConsiderRedirects);
 
   const GURL enforce_url("https://enforce.test/");
   const GURL warn_url("https://warn.test/");

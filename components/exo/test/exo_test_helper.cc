@@ -13,6 +13,7 @@
 #include "components/exo/buffer.h"
 #include "components/exo/client_controlled_shell_surface.h"
 #include "components/exo/display.h"
+#include "components/exo/input_method_surface.h"
 #include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
 #include "components/exo/xdg_shell_surface.h"
@@ -63,14 +64,21 @@ void HandleBoundsChangedRequest(ClientControlledShellSurface* shell_surface,
   ASSERT_TRUE(display_id != display::kInvalidDisplayId);
 
   auto* window_state =
-      ash::wm::GetWindowState(shell_surface->GetWidget()->GetNativeWindow());
+      ash::WindowState::Get(shell_surface->GetWidget()->GetNativeWindow());
 
   if (!shell_surface->host_window()->GetRootWindow())
     return;
+
   display::Display target_display;
   const display::Screen* screen = display::Screen::GetScreen();
 
   if (!screen->GetDisplayWithDisplayId(display_id, &target_display)) {
+    return;
+  }
+
+  // Don't change the bounds in maximize/fullscreen/pinned state.
+  if (window_state->IsMaximizedOrFullscreenOrPinned() &&
+      requested_state == window_state->GetStateType()) {
     return;
   }
 
@@ -81,6 +89,7 @@ void HandleBoundsChangedRequest(ClientControlledShellSurface* shell_surface,
   if (requested_state != window_state->GetStateType()) {
     DCHECK(requested_state == ash::WindowStateType::kLeftSnapped ||
            requested_state == ash::WindowStateType::kRightSnapped);
+
     if (requested_state == ash::WindowStateType::kLeftSnapped)
       shell_surface->SetSnappedToLeft();
     else
@@ -107,7 +116,7 @@ ExoTestWindow::ExoTestWindow(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_buffer,
   surface_->Attach(buffer_.get());
   surface_->Commit();
 
-  ash::wm::CenterWindow(shell_surface_->GetWidget()->GetNativeWindow());
+  ash::CenterWindow(shell_surface_->GetWidget()->GetNativeWindow());
 }
 
 ExoTestWindow::ExoTestWindow(ExoTestWindow&& other) {
@@ -155,6 +164,22 @@ ExoTestHelper::CreateClientControlledShellSurface(Surface* surface,
                            : ash::desks_util::GetActiveDeskContainerId();
   auto shell_surface = Display().CreateClientControlledShellSurface(
       surface, container,
+      WMHelper::GetInstance()->GetDefaultDeviceScaleFactor());
+
+  shell_surface->set_state_changed_callback(base::BindRepeating(
+      &HandleWindowStateRequest, base::Unretained(shell_surface.get())));
+
+  shell_surface->set_bounds_changed_callback(
+      base::BindRepeating(&HandleBoundsChangedRequest, shell_surface.get()));
+
+  return shell_surface;
+}
+
+std::unique_ptr<InputMethodSurface> ExoTestHelper::CreateInputMethodSurface(
+    Surface* surface,
+    InputMethodSurfaceManager* surface_manager) {
+  auto shell_surface = std::make_unique<InputMethodSurface>(
+      surface_manager, surface,
       WMHelper::GetInstance()->GetDefaultDeviceScaleFactor());
 
   shell_surface->set_state_changed_callback(base::BindRepeating(

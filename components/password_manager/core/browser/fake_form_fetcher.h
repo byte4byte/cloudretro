@@ -5,10 +5,11 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_FAKE_FORM_FETCHER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_FAKE_FORM_FETCHER_H_
 
-#include <set>
 #include <vector>
 
 #include "base/macros.h"
+#include "base/observer_list.h"
+#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/form_fetcher.h"
 #include "components/password_manager/core/browser/statistics_table.h"
 
@@ -36,6 +37,9 @@ class FakeFormFetcher : public FormFetcher {
 
   void RemoveConsumer(Consumer* consumer) override;
 
+  // Only sets the internal state to WAITING, no call to PasswordStore.
+  void Fetch() override;
+
   // Returns State::WAITING if Fetch() was called after any Set* calls, and
   // State::NOT_WAITING otherwise.
   State GetState() const override;
@@ -48,14 +52,25 @@ class FakeFormFetcher : public FormFetcher {
     stats_ = stats;
   }
 
+  void set_scheme(autofill::PasswordForm::Scheme scheme) { scheme_ = scheme; }
+
   std::vector<const autofill::PasswordForm*> GetNonFederatedMatches()
       const override;
 
   std::vector<const autofill::PasswordForm*> GetFederatedMatches()
       const override;
 
-  std::vector<const autofill::PasswordForm*> GetBlacklistedMatches()
+  bool IsBlacklisted() const override;
+  bool IsMovingBlocked(const autofill::GaiaIdHash& destination,
+                       const base::string16& username) const override;
+
+  const std::vector<const autofill::PasswordForm*>& GetAllRelevantMatches()
       const override;
+
+  const std::vector<const autofill::PasswordForm*>& GetBestMatches()
+      const override;
+
+  const autofill::PasswordForm* GetPreferredMatch() const override;
 
   void set_federated(
       const std::vector<const autofill::PasswordForm*>& federated) {
@@ -66,24 +81,25 @@ class FakeFormFetcher : public FormFetcher {
   void SetNonFederated(
       const std::vector<const autofill::PasswordForm*>& non_federated);
 
-  void SetBlacklisted(
-      const std::vector<const autofill::PasswordForm*>& blacklisted);
+  void SetBlacklisted(bool is_blacklisted);
 
   void NotifyFetchCompleted();
-
-  // Only sets the internal state to WAITING, no call to PasswordStore.
-  void Fetch() override;
 
   // Returns a new FakeFormFetcher.
   std::unique_ptr<FormFetcher> Clone() override;
 
  private:
-  std::set<Consumer*> consumers_;
+  base::ObserverList<Consumer> consumers_;
   State state_ = State::NOT_WAITING;
+  autofill::PasswordForm::Scheme scheme_ =
+      autofill::PasswordForm::Scheme::kHtml;
   std::vector<InteractionsStats> stats_;
   std::vector<const autofill::PasswordForm*> non_federated_;
   std::vector<const autofill::PasswordForm*> federated_;
-  std::vector<const autofill::PasswordForm*> blacklisted_;
+  std::vector<const autofill::PasswordForm*> non_federated_same_scheme_;
+  std::vector<const autofill::PasswordForm*> best_matches_;
+  const autofill::PasswordForm* preferred_match_ = nullptr;
+  bool is_blacklisted_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FakeFormFetcher);
 };

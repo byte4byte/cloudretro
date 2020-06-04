@@ -10,26 +10,22 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/mock_grammar_check.h"
-#include "content/shell/test_runner/test_runner.h"
-#include "content/shell/test_runner/web_test_delegate.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_text_checking_completion.h"
 #include "third_party/blink/public/web/web_text_checking_result.h"
 
-namespace test_runner {
+namespace content {
 
-SpellCheckClient::SpellCheckClient(TestRunner* test_runner)
-    : last_requested_text_checking_completion_(nullptr),
-      test_runner_(test_runner) {
-  DCHECK(test_runner);
-}
+SpellCheckClient::SpellCheckClient(blink::WebLocalFrame* frame)
+    : frame_(frame) {}
 
-SpellCheckClient::~SpellCheckClient() {}
-
-void SpellCheckClient::SetDelegate(WebTestDelegate* delegate) {
-  delegate_ = delegate;
+SpellCheckClient::~SpellCheckClient() {
+  // v8::Persistent will leak on destroy, due to the default
+  // NonCopyablePersistentTraits (it claims this may change in the future).
+  resolved_callback_.Reset();
 }
 
 void SpellCheckClient::SetEnabled(bool enabled) {
@@ -41,7 +37,6 @@ void SpellCheckClient::Reset() {
   resolved_callback_.Reset();
 }
 
-// blink::WebSpellCheckClient
 bool SpellCheckClient::IsSpellCheckingEnabled() const {
   // Ensure that the spellchecker code paths are always tested in web tests.
   return true;
@@ -84,8 +79,10 @@ void SpellCheckClient::RequestCheckingOfText(
   if (spell_check_.HasInCache(text)) {
     FinishLastTextCheck();
   } else {
-    delegate_->PostTask(base::BindOnce(&SpellCheckClient::FinishLastTextCheck,
-                                       weak_factory_.GetWeakPtr()));
+    frame_->GetTaskRunner(blink::TaskType::kInternalTest)
+        ->PostTask(FROM_HERE,
+                   base::BindOnce(&SpellCheckClient::FinishLastTextCheck,
+                                  weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -121,9 +118,6 @@ void SpellCheckClient::FinishLastTextCheck() {
   last_requested_text_checking_completion_->DidFinishCheckingText(results);
   last_requested_text_checking_completion_.reset();
   RequestResolved();
-
-  if (test_runner_->shouldDumpSpellCheckCallbacks())
-    delegate_->PrintMessage("SpellCheckEvent: FinishLastTextCheck\n");
 }
 
 void SpellCheckClient::SetSpellCheckResolvedCallback(
@@ -142,20 +136,15 @@ void SpellCheckClient::RequestResolved() {
   v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
 
-  blink::WebFrame* frame = test_runner_->MainFrame();
-  if (!frame || frame->IsWebRemoteFrame())
-    return;
-  blink::WebLocalFrame* local_frame = frame->ToWebLocalFrame();
-
-  v8::Local<v8::Context> context = local_frame->MainWorldScriptContext();
+  v8::Local<v8::Context> context = frame_->MainWorldScriptContext();
   if (context.IsEmpty())
     return;
 
   v8::Context::Scope context_scope(context);
 
-  local_frame->CallFunctionEvenIfScriptDisabled(
+  frame_->CallFunctionEvenIfScriptDisabled(
       v8::Local<v8::Function>::New(isolate, resolved_callback_),
       context->Global(), 0, nullptr);
 }
 
-}  // namespace test_runner
+}  // namespace content

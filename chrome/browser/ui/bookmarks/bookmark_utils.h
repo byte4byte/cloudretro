@@ -64,14 +64,6 @@ bool IsAppsShortcutEnabled(Profile* profile);
 // Returns true if the Apps shortcut should be displayed in the bookmark bar.
 bool ShouldShowAppsShortcutInBookmarkBar(Profile* profile);
 
-// Whether the menu item and shortcut to bookmark a page should be removed from
-// the user interface.
-bool ShouldRemoveBookmarkThisPageUI(Profile* profile);
-
-// Whether the menu item and shortcut to bookmark open pages should be removed
-// from the user interface.
-bool ShouldRemoveBookmarkOpenPagesUI(Profile* profile);
-
 // Returns the drag operations for the specified node.
 int GetBookmarkDragOperation(content::BrowserContext* browser_context,
                              const bookmarks::BookmarkNode* node);

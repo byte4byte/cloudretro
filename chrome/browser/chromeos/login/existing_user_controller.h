@@ -15,22 +15,24 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
 #include "chrome/browser/chromeos/login/screens/encryption_migration_mode.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
-#include "chrome/browser/chromeos/policy/minimum_version_policy_handler.h"
 #include "chrome/browser/chromeos/policy/pre_signin_policy_fetcher.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chromeos/login/auth/login_performer.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/account_id/account_id.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "third_party/cros_system_api/dbus/cryptohome/dbus-constants.h"
@@ -58,17 +60,20 @@ class NetworkStateHelper;
 // ExistingUserController is used to handle login when someone has already
 // logged into the machine. ExistingUserController is created and owned by
 // LoginDisplayHost.
-class ExistingUserController
-    : public LoginDisplay::Delegate,
-      public content::NotificationObserver,
-      public LoginPerformer::Delegate,
-      public UserSessionManagerDelegate,
-      public ArcKioskAppManager::ArcKioskAppManagerObserver,
-      public policy::MinimumVersionPolicyHandler::Observer {
+class ExistingUserController : public LoginDisplay::Delegate,
+                               public content::NotificationObserver,
+                               public LoginPerformer::Delegate,
+                               public KioskAppManagerObserver,
+                               public UserSessionManagerDelegate,
+                               public user_manager::UserManager::Observer {
  public:
   // Returns the current existing user controller fetched from the current
   // LoginDisplayHost instance.
   static ExistingUserController* current_controller();
+
+  // Registers the pref for ManagedGuestSessionAutoLaunchNotificationReduced
+  // policy.
+  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
   // All UI initialization is deferred till Init() call.
   ExistingUserController();
@@ -116,16 +121,16 @@ class ExistingUserController
                               const std::string& given_name);
   bool IsUserWhitelisted(const AccountId& account_id);
 
+  // user_manager::UserManager::Observer:
+  void LocalStateChanged(user_manager::UserManager* user_manager) override;
+
   // content::NotificationObserver implementation.
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // ArcKioskAppManager::ArcKioskAppManagerObserver overrides.
-  void OnArcKioskAppsChanged() override;
-
-  // policy::MinimumVersionPolicyHandler::Observer overrides.
-  void OnMinimumVersionStateChanged() override;
+  // KioskAppManagerObserver overrides.
+  void OnKioskAppsSettingsChanged() override;
 
   // Set a delegate that we will pass AuthStatusConsumer events to.
   // Used for testing.
@@ -146,6 +151,7 @@ class ExistingUserController
   friend class ExistingUserControllerAutoLoginTest;
   friend class ExistingUserControllerPublicSessionTest;
   friend class MockLoginPerformerDelegate;
+  friend class ExistingUserControllerForcedOnlineAuthTest;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 
@@ -155,6 +161,7 @@ class ExistingUserController
   void LoginAsPublicSession(const UserContext& user_context);
   void LoginAsKioskApp(const std::string& app_id, bool diagnostic_mode);
   void LoginAsArcKioskApp(const AccountId& account_id);
+  void LoginAsWebKioskApp(const AccountId& account_id);
   // Retrieve public session and ARC kiosk auto-login policy and update the
   // timer.
   void ConfigureAutoLogin();
@@ -243,6 +250,14 @@ class ExistingUserController
 
   // Updates the |login_display_| attached to this controller.
   void UpdateLoginDisplay(const user_manager::UserList& users);
+
+  // Check if login screen will need to be refreshed when saml online login
+  // policy is set.
+  bool ForceOnlineFlagChanged(const user_manager::UserList& users);
+
+  // Refresh login screen.
+  void CheckSamlOfflineTimeLimitAndUpdateLoginDisplay(
+      const user_manager::UserList& users);
 
   // Sends an accessibility alert event to extension listeners.
   void SendAccessibilityAlert(const std::string& alert_text);
@@ -377,9 +392,9 @@ class ExistingUserController
   bool password_changed_ = false;
 
   // Set in OnLoginSuccess. Before that use LoginPerformer::auth_mode().
-  // Initialized with AUTH_MODE_EXTENSION as more restricted mode.
+  // Initialized with |kExternal| as more restricted mode.
   LoginPerformer::AuthorizationMode auth_mode_ =
-      LoginPerformer::AUTH_MODE_EXTENSION;
+      LoginPerformer::AuthorizationMode::kExternal;
 
   // Indicates use of local (not GAIA) authentication.
   bool auth_flow_offline_ = false;
@@ -390,6 +405,10 @@ class ExistingUserController
 
   // Timer for the interval to wait for the reboot after TPM error UI was shown.
   base::OneShotTimer reboot_timer_;
+
+  // Timer to update login screen when SAMLOfflineSigninTimeLimit policy forces
+  // online user authentication.
+  std::unique_ptr<base::OneShotTimer> screen_refresh_timer_;
 
   std::unique_ptr<login::NetworkStateHelper> network_state_helper_;
 
@@ -405,8 +424,6 @@ class ExistingUserController
       local_account_auto_login_id_subscription_;
   std::unique_ptr<CrosSettings::ObserverSubscription>
       local_account_auto_login_delay_subscription_;
-  std::unique_ptr<policy::MinimumVersionPolicyHandler>
-      minimum_version_policy_handler_;
 
   std::unique_ptr<OAuth2TokenInitializer> oauth2_token_initializer_;
 
@@ -416,8 +433,11 @@ class ExistingUserController
   // the store is not yet initialized when the login is attempted.
   std::unique_ptr<PolicyStoreLoadWaiter> policy_store_waiter_;
 
+  ScopedObserver<user_manager::UserManager, user_manager::UserManager::Observer>
+      observed_user_manager_{this};
+
   // Factory of callbacks.
-  base::WeakPtrFactory<ExistingUserController> weak_factory_;
+  base::WeakPtrFactory<ExistingUserController> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExistingUserController);
 };

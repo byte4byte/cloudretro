@@ -38,17 +38,7 @@ void UpgradeDetector::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAttemptedToEnableAutoupdate, false);
 }
 
-UpgradeDetector::UpgradeDetector(const base::Clock* clock,
-                                 const base::TickClock* tick_clock)
-    : clock_(clock),
-      tick_clock_(tick_clock),
-      upgrade_available_(UPGRADE_AVAILABLE_NONE),
-      best_effort_experiment_updates_available_(false),
-      critical_experiment_updates_available_(false),
-      critical_update_acknowledged_(false),
-      idle_check_timer_(tick_clock_),
-      upgrade_notification_stage_(UPGRADE_ANNOYANCE_NONE),
-      notify_upgrade_(false) {
+void UpgradeDetector::Init() {
   // Not all tests provide a PrefService for local_state().
   PrefService* local_state = g_browser_process->local_state();
   if (local_state) {
@@ -62,7 +52,27 @@ UpgradeDetector::UpgradeDetector(const base::Clock* clock,
   }
 }
 
-UpgradeDetector::~UpgradeDetector() {}
+void UpgradeDetector::Shutdown() {
+  idle_check_timer_.Stop();
+  pref_change_registrar_.RemoveAll();
+}
+
+UpgradeDetector::UpgradeDetector(const base::Clock* clock,
+                                 const base::TickClock* tick_clock)
+    : clock_(clock),
+      tick_clock_(tick_clock),
+      upgrade_available_(UPGRADE_AVAILABLE_NONE),
+      best_effort_experiment_updates_available_(false),
+      critical_experiment_updates_available_(false),
+      critical_update_acknowledged_(false),
+      idle_check_timer_(tick_clock_),
+      upgrade_notification_stage_(UPGRADE_ANNOYANCE_NONE),
+      notify_upgrade_(false) {}
+
+UpgradeDetector::~UpgradeDetector() {
+  // Ensure that Shutdown() was called.
+  DCHECK(pref_change_registrar_.IsEmpty());
+}
 
 void UpgradeDetector::NotifyOutdatedInstall() {
   for (auto& observer : observer_list_)
@@ -84,10 +94,23 @@ base::TimeDelta UpgradeDetector::GetRelaunchNotificationPeriod() {
       local_state->FindPreference(prefs::kRelaunchNotificationPeriod);
   const int value = preference->GetValue()->GetInt();
   // Enforce the preference's documented minimum value.
-  static constexpr base::TimeDelta kMinValue = base::TimeDelta::FromHours(1);
+  constexpr base::TimeDelta kMinValue = base::TimeDelta::FromHours(1);
   if (preference->IsDefaultValue() || value < kMinValue.InMilliseconds())
     return base::TimeDelta();
   return base::TimeDelta::FromMilliseconds(value);
+}
+
+// static
+bool UpgradeDetector::IsRelaunchNotificationPolicyEnabled() {
+  // Not all tests provide a PrefService for local_state().
+  auto* local_state = g_browser_process->local_state();
+  if (!local_state)
+    return false;
+
+  // "Chrome menu only" means that the policy is disabled.
+  constexpr int kChromeMenuOnly = 0;
+  return local_state->GetInteger(prefs::kRelaunchNotification) !=
+         kChromeMenuOnly;
 }
 
 void UpgradeDetector::NotifyUpgrade() {

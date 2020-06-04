@@ -20,6 +20,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient.AwWebResourceRequest;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -46,7 +47,7 @@ public class AwNetworkConfigurationTest {
     private EmbeddedTestServer mTestServer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mContentsClient = new TestAwContentsClient();
         mTestContainerView = mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = mTestContainerView.getAwContents();
@@ -65,12 +66,13 @@ public class AwNetworkConfigurationTest {
             String url = mTestServer.getURL("/android_webview/test/data/hello_world.html");
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
-            // TODO(ntfschr): update this assertion whenever
-            // https://android.googlesource.com/platform/external/conscrypt/+/1d6a0b8453054b7dd703693f2ce2896ae061aee3
-            // rolls into an Android release, as this will mean Android intends to distrust SHA1
-            // (http://crbug.com/919749).
-            Assert.assertEquals("We should not have received any SSL errors", count,
-                    onReceivedSslErrorHelper.getCallCount());
+            if (BuildInfo.isAtLeastQ()) {
+                Assert.assertEquals("We should generate an SSL error on >= Q", count + 1,
+                        onReceivedSslErrorHelper.getCallCount());
+            } else {
+                Assert.assertEquals("We should not have received any SSL errors on < Q", count,
+                        onReceivedSslErrorHelper.getCallCount());
+            }
         } finally {
             mTestServer.stopAndDestroyServer();
         }

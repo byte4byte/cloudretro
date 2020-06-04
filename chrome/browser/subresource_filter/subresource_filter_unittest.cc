@@ -10,8 +10,8 @@
 #include "chrome/browser/subresource_filter/subresource_filter_content_settings_manager.h"
 #include "chrome/browser/subresource_filter/subresource_filter_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "components/safe_browsing/db/util.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/db/util.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/content_activation_list_utils.h"
 #include "components/subresource_filter/content/browser/fake_safe_browsing_database_manager.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
@@ -228,33 +228,32 @@ TEST_F(SubresourceFilterTest, NotifySafeBrowsing) {
        subresource_filter::ActivationList::SUBRESOURCE_FILTER,
        false},
       {AdBlockOnAbusiveSitesTest::kDisabled,
-       {{{Type::ABUSIVE, Level::ENFORCE}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::ABUSIVE, Level::ENFORCE}},
        subresource_filter::ActivationList::NONE,
        false},
       {AdBlockOnAbusiveSitesTest::kDisabled,
-       {{{Type::ABUSIVE, Level::WARN}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::ABUSIVE, Level::WARN}},
        subresource_filter::ActivationList::NONE,
        false},
       {AdBlockOnAbusiveSitesTest::kDisabled,
-       {{{Type::BETTER_ADS, Level::ENFORCE}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::BETTER_ADS, Level::ENFORCE}},
        subresource_filter::ActivationList::BETTER_ADS,
        false},
       {AdBlockOnAbusiveSitesTest::kDisabled,
-       {{{Type::BETTER_ADS, Level::WARN}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::BETTER_ADS, Level::WARN}},
        subresource_filter::ActivationList::BETTER_ADS,
        true},
       {AdBlockOnAbusiveSitesTest::kDisabled,
-       {{{Type::BETTER_ADS, Level::ENFORCE}, {Type::ABUSIVE, Level::ENFORCE}},
-        base::KEEP_FIRST_OF_DUPES},
+       {{Type::BETTER_ADS, Level::ENFORCE}, {Type::ABUSIVE, Level::ENFORCE}},
        subresource_filter::ActivationList::BETTER_ADS,
        false},
       // AdBlockOnAbusiveSitesTest::kEnabled
       {AdBlockOnAbusiveSitesTest::kEnabled,
-       {{{Type::ABUSIVE, Level::ENFORCE}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::ABUSIVE, Level::ENFORCE}},
        subresource_filter::ActivationList::ABUSIVE,
        false},
       {AdBlockOnAbusiveSitesTest::kEnabled,
-       {{{Type::ABUSIVE, Level::WARN}}, base::KEEP_FIRST_OF_DUPES},
+       {{Type::ABUSIVE, Level::WARN}},
        subresource_filter::ActivationList::ABUSIVE,
        true}};
 

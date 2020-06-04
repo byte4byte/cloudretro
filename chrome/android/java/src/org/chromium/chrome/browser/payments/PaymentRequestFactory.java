@@ -4,10 +4,10 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -17,6 +17,7 @@ import org.chromium.components.payments.OriginSecurityChecker;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.mojo.system.MojoException;
+import org.chromium.mojo.system.MojoResult;
 import org.chromium.payments.mojom.CanMakePaymentQueryResult;
 import org.chromium.payments.mojom.HasEnrolledInstrumentQueryResult;
 import org.chromium.payments.mojom.PaymentDetails;
@@ -47,7 +48,8 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
 
         @Override
         public void init(PaymentRequestClient client, PaymentMethodData[] methodData,
-                PaymentDetails details, PaymentOptions options) {
+                PaymentDetails details, PaymentOptions options,
+                boolean unusedGooglePayBridgeEligible) {
             mClient = client;
         }
 
@@ -64,7 +66,7 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
         public void updateWith(PaymentDetails details) {}
 
         @Override
-        public void noUpdatedPaymentDetails() {}
+        public void onPaymentDetailsNotUpdated() {}
 
         @Override
         public void abort() {}
@@ -76,7 +78,7 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
         public void retry(PaymentValidationErrors errors) {}
 
         @Override
-        public void canMakePayment(boolean legacyMode) {
+        public void canMakePayment() {
             if (mClient != null) {
                 mClient.onCanMakePayment(CanMakePaymentQueryResult.CANNOT_MAKE_PAYMENT);
             }
@@ -109,8 +111,9 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
 
         @Override
         public String getInvalidSslCertificateErrorMessage(WebContents webContents) {
-            if (!OriginSecurityChecker.isSchemeCryptographic(webContents.getLastCommittedUrl()))
+            if (!OriginSecurityChecker.isSchemeCryptographic(webContents.getLastCommittedUrl())) {
                 return null;
+            }
             return SslValidityChecker.getInvalidSslCertificateErrorMessage(webContents);
         }
 
@@ -141,6 +144,12 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
 
     @Override
     public PaymentRequest createImpl() {
+        if (!mRenderFrameHost.isPaymentFeaturePolicyEnabled()) {
+            mRenderFrameHost.getRemoteInterfaces().onConnectionError(
+                    new MojoException(MojoResult.PERMISSION_DENIED));
+            return null;
+        }
+
         if (!ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_PAYMENTS)) {
             return new InvalidPaymentRequest();
         }

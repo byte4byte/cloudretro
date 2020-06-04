@@ -8,20 +8,13 @@
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 
 // A fake ChromeIdentity used for testing.
-@interface FakeChromeIdentity : ChromeIdentity
+@interface FakeChromeIdentity : ChromeIdentity <NSSecureCoding>
 
 // Returns a ChromeIdentity based on |email|, |gaiaID| and |name|.
 // The |hashedGaiaID| property will be derived from |name|.
 + (FakeChromeIdentity*)identityWithEmail:(NSString*)email
                                   gaiaID:(NSString*)gaiaID
                                     name:(NSString*)name;
-
-// Returns a ChromeIdentity based on |email|, |gaiaID|, |name| and
-// |hostedDomain|. The |hashedGaiaID| property will be derived from |name|.
-+ (FakeChromeIdentity*)identityWithEmail:(NSString*)email
-                                  gaiaID:(NSString*)gaiaID
-                                    name:(NSString*)name
-                            hostedDomain:(NSString*)hostedDomain;
 
 @end
 

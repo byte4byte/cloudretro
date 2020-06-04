@@ -13,6 +13,7 @@
 #include "base/path_service.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -138,7 +139,7 @@ bool StartupUtils::IsDeviceRegistered() {
       g_browser_process->local_state()->GetInteger(prefs::kDeviceRegistered);
   if (value > 0) {
     // Recreate flag file in case it was lost.
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&CreateOobeCompleteFlagFile));
     return true;
@@ -159,11 +160,11 @@ bool StartupUtils::IsDeviceRegistered() {
 void StartupUtils::MarkDeviceRegistered(base::OnceClosure done_callback) {
   SaveIntegerPreferenceForced(prefs::kDeviceRegistered, 1);
   if (done_callback.is_null()) {
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&CreateOobeCompleteFlagFile));
   } else {
-    base::PostTaskWithTraitsAndReply(
+    base::ThreadPool::PostTaskAndReply(
         FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&CreateOobeCompleteFlagFile), std::move(done_callback));
   }

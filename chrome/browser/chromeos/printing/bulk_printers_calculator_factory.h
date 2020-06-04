@@ -8,54 +8,48 @@
 #include <map>
 #include <memory>
 
-#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 
 class AccountId;
-class Profile;
 
 namespace chromeos {
 
 class BulkPrintersCalculator;
 
-// Dispenses BulkPrintersCalculator objects based on account id.  Access to this
-// object should be sequenced.
+// Dispenses BulkPrintersCalculator objects based on account id or for device
+// context.  Access to this object should be sequenced.
 class BulkPrintersCalculatorFactory {
  public:
+  // It never returns nullptr.
   static BulkPrintersCalculatorFactory* Get();
 
+  BulkPrintersCalculatorFactory();
+  ~BulkPrintersCalculatorFactory();
+
   // Returns a WeakPtr to the BulkPrintersCalculator registered for
-  // |account_id|. If an BulkPrintersCalculator does not exist, one will be
-  // created for |account_id|. The returned object remains valid until
-  // RemoveForUserId or Shutdown is called.
+  // |account_id|.
+  // If requested BulkPrintersCalculator does not exist, the object is
+  // created and registered. The returned object remains valid until
+  // RemoveForUserId or Shutdown is called. It never returns nullptr.
   base::WeakPtr<BulkPrintersCalculator> GetForAccountId(
       const AccountId& account_id);
 
-  // Returns a WeakPtr to the BulkPrintersCalculator registered for |profile|
-  // which could be null if |profile| does not map to a valid AccountId. The
-  // returned object remains valid until RemoveForUserId or Shutdown is called.
-  base::WeakPtr<BulkPrintersCalculator> GetForProfile(Profile* profile);
-
-  // Returns a WeakPtr to the BulkPrintersCalculator registered for the device.
+  // Returns a pointer to the BulkPrintersCalculator registered for the device.
+  // If requested BulkPrintersCalculator does not exist, the object is
+  // created and registered. The returned object remains valid until Shutdown is
+  // called. Returns nullptr if called after Shutdown or during unit tests.
   base::WeakPtr<BulkPrintersCalculator> GetForDevice();
 
   // Deletes the BulkPrintersCalculator registered for |account_id|.
   void RemoveForUserId(const AccountId& account_id);
 
-  // Tear down all BulkPrintersCalculator created for users/profiles.
-  void ShutdownProfiles();
-
-  // Tear down BulkPrintersCalculator created for the device.
-  void ShutdownForDevice();
+  // Tear down all BulkPrintersCalculator objects.
+  void Shutdown();
 
  private:
-  friend struct base::LazyInstanceTraitsBase<BulkPrintersCalculatorFactory>;
-
-  BulkPrintersCalculatorFactory();
-  ~BulkPrintersCalculatorFactory();
-
+  bool shutdown_ = false;
   std::map<AccountId, std::unique_ptr<BulkPrintersCalculator>>
       printers_by_user_;
   std::unique_ptr<BulkPrintersCalculator> device_printers_;

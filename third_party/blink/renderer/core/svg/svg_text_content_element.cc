@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_item.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_text_query.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
@@ -60,8 +61,7 @@ class SVGAnimatedTextLength final : public SVGAnimatedLength {
                           SVGLength::Initial::kUnitlessZero) {}
 
   SVGLengthTearOff* baseVal() override {
-    SVGTextContentElement* text_content_element =
-        ToSVGTextContentElement(ContextElement());
+    auto* text_content_element = To<SVGTextContentElement>(ContextElement());
     if (!text_content_element->TextLengthIsSpecifiedByUser())
       BaseValue()->NewValueSpecifiedUnits(
           CSSPrimitiveValue::UnitType::kNumber,
@@ -85,19 +85,21 @@ SVGTextContentElement::SVGTextContentElement(const QualifiedName& tag_name,
   AddToPropertyMap(length_adjust_);
 }
 
-void SVGTextContentElement::Trace(blink::Visitor* visitor) {
+void SVGTextContentElement::Trace(Visitor* visitor) {
   visitor->Trace(text_length_);
   visitor->Trace(length_adjust_);
   SVGGraphicsElement::Trace(visitor);
 }
 
 unsigned SVGTextContentElement::getNumberOfChars() {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   return SVGTextQuery(GetLayoutObject()).NumberOfCharacters();
 }
 
 float SVGTextContentElement::getComputedTextLength() {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   return SVGTextQuery(GetLayoutObject()).TextLength();
 }
 
@@ -105,7 +107,8 @@ float SVGTextContentElement::getSubStringLength(
     unsigned charnum,
     unsigned nchars,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   unsigned number_of_chars = getNumberOfChars();
   if (charnum >= number_of_chars) {
@@ -125,7 +128,8 @@ float SVGTextContentElement::getSubStringLength(
 SVGPointTearOff* SVGTextContentElement::getStartPositionOfChar(
     unsigned charnum,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
@@ -143,7 +147,8 @@ SVGPointTearOff* SVGTextContentElement::getStartPositionOfChar(
 SVGPointTearOff* SVGTextContentElement::getEndPositionOfChar(
     unsigned charnum,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
@@ -161,7 +166,8 @@ SVGPointTearOff* SVGTextContentElement::getEndPositionOfChar(
 SVGRectTearOff* SVGTextContentElement::getExtentOfChar(
     unsigned charnum,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
@@ -178,7 +184,8 @@ SVGRectTearOff* SVGTextContentElement::getExtentOfChar(
 float SVGTextContentElement::getRotationOfChar(
     unsigned charnum,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
@@ -194,7 +201,8 @@ float SVGTextContentElement::getRotationOfChar(
 int SVGTextContentElement::getCharNumAtPosition(
     SVGPointTearOff* point,
     ExceptionState& exception_state) {
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   return SVGTextQuery(GetLayoutObject())
       .CharacterNumberAtPosition(point->Target()->Value());
 }
@@ -280,10 +288,8 @@ SVGTextContentElement* SVGTextContentElement::ElementFromLineLayoutItem(
       (!line_layout_item.IsSVGText() && !line_layout_item.IsSVGInline()))
     return nullptr;
 
-  auto* element = To<SVGElement>(line_layout_item.GetNode());
-  DCHECK(element);
-  return IsSVGTextContentElement(*element) ? ToSVGTextContentElement(element)
-                                           : nullptr;
+  DCHECK(line_layout_item.GetNode());
+  return DynamicTo<SVGTextContentElement>(line_layout_item.GetNode());
 }
 
 }  // namespace blink

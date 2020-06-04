@@ -7,6 +7,7 @@
 
 #include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
+#include "media/base/buffering_state.h"
 #include "media/base/media_status.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/video_decoder_config.h"
@@ -17,7 +18,7 @@ namespace media {
 
 // Interface used by Renderer, AudioRenderer, VideoRenderer and
 // MediaPlayerRenderer implementations to notify their clients.
-class RendererClient {
+class MEDIA_EXPORT RendererClient {
  public:
   // Executed if any error was encountered after Renderer initialization.
   virtual void OnError(PipelineStatus status) = 0;
@@ -28,8 +29,10 @@ class RendererClient {
   // Executed periodically with rendering statistics.
   virtual void OnStatisticsUpdate(const PipelineStatistics& stats) = 0;
 
-  // Executed when buffering state is changed.
-  virtual void OnBufferingStateChange(BufferingState state) = 0;
+  // Executed when buffering state is changed. |reason| indicates the cause of
+  // the state change, when known.
+  virtual void OnBufferingStateChange(BufferingState state,
+                                      BufferingStateChangeReason reason) = 0;
 
   // Executed whenever the Renderer is waiting because of |reason|.
   virtual void OnWaiting(WaitingReason reason) = 0;
@@ -46,6 +49,16 @@ class RendererClient {
   // Executed for the first video frame and whenever opacity changes.
   // Only used if media stream contains a video track.
   virtual void OnVideoOpacityChange(bool opaque) = 0;
+
+  // Returns true if video stream is available in the media resource.
+  // TODO(crbug.com/988535): Used by AudioRendererImpl.  This can be removed
+  // when the bug is resolved.
+  virtual bool IsVideoStreamAvailable();
+
+  // Called when the bucketed frames per second has changed.  |fps| will be
+  // unset if the frame rate is unstable.  The duration used for the frame rate
+  // is based on the wall clock time, not the media time.
+  virtual void OnVideoFrameRateChange(base::Optional<int> fps) = 0;
 };
 
 }  // namespace media

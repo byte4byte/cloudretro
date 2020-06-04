@@ -26,6 +26,7 @@
 #include "chrome/common/net/x509_certificate_model_nss.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/web_contents.h"
 #include "net/cert/x509_util_nss.h"
@@ -267,7 +268,7 @@ std::string CertificateViewerDialog::GetDialogArgs() const {
 
     // Add this node to the children list for the next iteration.
     children = base::Value(base::Value::Type::LIST);
-    children.GetList().push_back(std::move(cert_node));
+    children.Append(std::move(cert_node));
     ++index;
   }
   // Set the last node as the top of the certificate hierarchy.
@@ -278,9 +279,7 @@ std::string CertificateViewerDialog::GetDialogArgs() const {
   return data;
 }
 
-void CertificateViewerDialog::OnDialogShown(
-    content::WebUI* webui,
-    content::RenderViewHost* render_view_host) {
+void CertificateViewerDialog::OnDialogShown(content::WebUI* webui) {
   webui_ = webui;
 }
 
@@ -311,18 +310,19 @@ CertificateViewerDialogHandler::~CertificateViewerDialogHandler() {
 void CertificateViewerDialogHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "exportCertificate",
-      base::BindRepeating(&CertificateViewerDialogHandler::ExportCertificate,
-                          base::Unretained(this)));
+      base::BindRepeating(
+          &CertificateViewerDialogHandler::HandleExportCertificate,
+          base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "requestCertificateFields",
       base::BindRepeating(
-          &CertificateViewerDialogHandler::RequestCertificateFields,
+          &CertificateViewerDialogHandler::HandleRequestCertificateFields,
           base::Unretained(this)));
 }
 
-void CertificateViewerDialogHandler::ExportCertificate(
+void CertificateViewerDialogHandler::HandleExportCertificate(
     const base::ListValue* args) {
-  int cert_index = GetCertificateIndex(args);
+  int cert_index = GetCertificateIndex(args->GetList()[0].GetInt());
   if (cert_index < 0)
     return;
 
@@ -334,9 +334,11 @@ void CertificateViewerDialogHandler::ExportCertificate(
                        cert_chain_.end());
 }
 
-void CertificateViewerDialogHandler::RequestCertificateFields(
+void CertificateViewerDialogHandler::HandleRequestCertificateFields(
     const base::ListValue* args) {
-  int cert_index = GetCertificateIndex(args);
+  AllowJavascript();
+  const base::Value& callback_id = args->GetList()[0];
+  int cert_index = GetCertificateIndex(args->GetList()[1].GetInt());
   if (cert_index < 0)
     return;
 
@@ -453,17 +455,12 @@ void CertificateViewerDialogHandler::RequestCertificateFields(
           .Build());
 
   // Send certificate information to javascript.
-  web_ui()->CallJavascriptFunctionUnsafe("cert_viewer.getCertificateFields",
-                                         root_list);
+  ResolveJavascriptCallback(callback_id, root_list);
 }
 
 int CertificateViewerDialogHandler::GetCertificateIndex(
-    const base::ListValue* args) const {
-  int cert_index;
-  double val;
-  if (!(args->GetDouble(0, &val)))
-    return -1;
-  cert_index = static_cast<int>(val);
+    int requested_index) const {
+  int cert_index = requested_index;
   if (cert_index < 0 || cert_index >= static_cast<int>(cert_chain_.size()))
     return -1;
   return cert_index;

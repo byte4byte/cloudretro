@@ -7,7 +7,7 @@ package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BAR_ITEMS;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryAction;
@@ -73,7 +73,9 @@ class KeyboardAccessoryMetricsRecorder {
             if (propertyKey == KeyboardAccessoryProperties.BOTTOM_OFFSET_PX
                     || propertyKey == KeyboardAccessoryProperties.KEYBOARD_TOGGLE_VISIBLE
                     || propertyKey == KeyboardAccessoryProperties.SHEET_TITLE
-                    || propertyKey == KeyboardAccessoryProperties.SHOW_KEYBOARD_CALLBACK) {
+                    || propertyKey == KeyboardAccessoryProperties.SHOW_KEYBOARD_CALLBACK
+                    || propertyKey == KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION
+                    || propertyKey == KeyboardAccessoryProperties.DISABLE_ANIMATIONS_FOR_TESTING) {
                 return;
             }
             assert false : "Every property update needs to be handled explicitly!";

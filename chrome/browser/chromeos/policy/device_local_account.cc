@@ -30,6 +30,8 @@ const char kPublicAccountDomainPrefix[] = "public-accounts";
 const char kKioskAppAccountDomainPrefix[] = "kiosk-apps";
 const char kArcKioskAppAccountDomainPrefix[] = "arc-kiosk-apps";
 const char kSAMLPublicAccountDomainPrefix[] = "saml-public-accounts";
+const char kWebKioskAppAccountDomainPrefix[] = "web-kiosk-apps";
+
 const char kDeviceLocalAccountDomainSuffix[] = ".device-local.localhost";
 
 }  // namespace
@@ -57,6 +59,15 @@ bool ArcKioskAppBasicInfo::operator==(const ArcKioskAppBasicInfo& other) const {
          this->display_name_ == other.display_name_;
 }
 
+WebKioskAppBasicInfo::WebKioskAppBasicInfo(const std::string& url,
+                                           const std::string& title,
+                                           const std::string& icon_url)
+    : url_(url), title_(title), icon_url_(icon_url) {}
+
+WebKioskAppBasicInfo::WebKioskAppBasicInfo() {}
+
+WebKioskAppBasicInfo::~WebKioskAppBasicInfo() {}
+
 DeviceLocalAccount::DeviceLocalAccount(Type type,
                                        const std::string& account_id,
                                        const std::string& kiosk_app_id,
@@ -65,8 +76,7 @@ DeviceLocalAccount::DeviceLocalAccount(Type type,
       account_id(account_id),
       user_id(GenerateDeviceLocalAccountUserId(account_id, type)),
       kiosk_app_id(kiosk_app_id),
-      kiosk_app_update_url(kiosk_app_update_url) {
-}
+      kiosk_app_update_url(kiosk_app_update_url) {}
 
 DeviceLocalAccount::DeviceLocalAccount(
     const ArcKioskAppBasicInfo& arc_kiosk_app_info,
@@ -76,11 +86,18 @@ DeviceLocalAccount::DeviceLocalAccount(
       user_id(GenerateDeviceLocalAccountUserId(account_id, type)),
       arc_kiosk_app_info(arc_kiosk_app_info) {}
 
+DeviceLocalAccount::DeviceLocalAccount(
+    const WebKioskAppBasicInfo& web_kiosk_app_info,
+    const std::string& account_id)
+    : type(DeviceLocalAccount::TYPE_WEB_KIOSK_APP),
+      account_id(account_id),
+      user_id(GenerateDeviceLocalAccountUserId(account_id, type)),
+      web_kiosk_app_info(web_kiosk_app_info) {}
+
 DeviceLocalAccount::DeviceLocalAccount(const DeviceLocalAccount& other) =
     default;
 
-DeviceLocalAccount::~DeviceLocalAccount() {
-}
+DeviceLocalAccount::~DeviceLocalAccount() {}
 
 std::string GenerateDeviceLocalAccountUserId(const std::string& account_id,
                                              DeviceLocalAccount::Type type) {
@@ -97,6 +114,9 @@ std::string GenerateDeviceLocalAccountUserId(const std::string& account_id,
       break;
     case DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION:
       domain_prefix = kSAMLPublicAccountDomainPrefix;
+      break;
+    case DeviceLocalAccount::TYPE_WEB_KIOSK_APP:
+      domain_prefix = kWebKioskAppAccountDomainPrefix;
       break;
     case DeviceLocalAccount::TYPE_COUNT:
       NOTREACHED();
@@ -139,6 +159,11 @@ bool IsDeviceLocalAccountUser(const std::string& user_id,
   if (domain_prefix == kSAMLPublicAccountDomainPrefix) {
     if (type)
       *type = DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION;
+    return true;
+  }
+  if (domain_prefix == kWebKioskAppAccountDomainPrefix) {
+    if (type)
+      *type = DeviceLocalAccount::TYPE_WEB_KIOSK_APP;
     return true;
   }
 
@@ -186,6 +211,19 @@ void SetDeviceLocalAccounts(chromeos::OwnerSettingsServiceChromeOS* service,
         entry->SetKey(
             chromeos::kAccountsPrefDeviceLocalAccountsKeyArcKioskDisplayName,
             base::Value(it->arc_kiosk_app_info.display_name()));
+      }
+    } else if (it->type == DeviceLocalAccount::TYPE_WEB_KIOSK_APP) {
+      entry->SetKey(chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskUrl,
+                    base::Value(it->web_kiosk_app_info.url()));
+      if (!it->web_kiosk_app_info.title().empty()) {
+        entry->SetKey(
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskTitle,
+            base::Value(it->web_kiosk_app_info.title()));
+      }
+      if (!it->web_kiosk_app_info.icon_url().empty()) {
+        entry->SetKey(
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskIconUrl,
+            base::Value(it->web_kiosk_app_info.icon_url()));
       }
     }
     list.Append(std::move(entry));
@@ -242,22 +280,23 @@ std::vector<DeviceLocalAccount> GetDeviceLocalAccounts(
         accounts.push_back(DeviceLocalAccount(
             DeviceLocalAccount::TYPE_PUBLIC_SESSION, account_id, "", ""));
         break;
+      case DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION:
+        accounts.push_back(DeviceLocalAccount(
+            DeviceLocalAccount::TYPE_SAML_PUBLIC_SESSION, account_id, "", ""));
+        break;
       case DeviceLocalAccount::TYPE_KIOSK_APP: {
         std::string kiosk_app_id;
         std::string kiosk_app_update_url;
-        if (type == DeviceLocalAccount::TYPE_KIOSK_APP) {
-          if (!entry->GetStringWithoutPathExpansion(
-                  chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
-                  &kiosk_app_id)) {
-            LOG(ERROR)
-                << "Missing app ID in device-local account entry at index " << i
-                << ".";
-            continue;
-          }
-          entry->GetStringWithoutPathExpansion(
-              chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
-              &kiosk_app_update_url);
+        if (!entry->GetStringWithoutPathExpansion(
+                chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppId,
+                &kiosk_app_id)) {
+          LOG(ERROR) << "Missing app ID in device-local account entry at index "
+                     << i << ".";
+          continue;
         }
+        entry->GetStringWithoutPathExpansion(
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
+            &kiosk_app_update_url);
 
         accounts.push_back(
             DeviceLocalAccount(DeviceLocalAccount::TYPE_KIOSK_APP, account_id,
@@ -292,7 +331,30 @@ std::vector<DeviceLocalAccount> GetDeviceLocalAccounts(
         accounts.push_back(DeviceLocalAccount(arc_kiosk_app, account_id));
         break;
       }
-      case DeviceLocalAccount::TYPE_COUNT:
+      case DeviceLocalAccount::TYPE_WEB_KIOSK_APP: {
+        std::string url;
+        std::string title;
+        std::string icon_url;
+        if (!entry->GetStringWithoutPathExpansion(
+                chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskUrl,
+                &url)) {
+          LOG(ERROR) << "Missing install url in Web kiosk type device-local "
+                        "account at index "
+                     << i << ".";
+          continue;
+        }
+
+        entry->GetStringWithoutPathExpansion(
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskTitle, &title);
+        entry->GetStringWithoutPathExpansion(
+            chromeos::kAccountsPrefDeviceLocalAccountsKeyWebKioskIconUrl,
+            &icon_url);
+
+        accounts.push_back(DeviceLocalAccount(
+            WebKioskAppBasicInfo(url, title, icon_url), account_id));
+        break;
+      }
+      default:
         NOTREACHED();
     }
   }

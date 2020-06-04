@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/base/pref_names.h"
@@ -59,8 +59,7 @@ ACTION_P3(InvokeOnConfigureDone, sync_service, error_callback, result) {
 class ProfileSyncServiceStartupTest : public testing::Test {
  public:
   ProfileSyncServiceStartupTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME),
+      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         sync_prefs_(profile_sync_service_bundle_.pref_service()) {
     profile_sync_service_bundle_.identity_test_env()
         ->SetAutomaticIssueOfAccessTokens(true);
@@ -138,11 +137,11 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   void FastForwardUntilNoTasksRemain() {
-    scoped_task_environment_.FastForwardUntilNoTasksRemain();
+    task_environment_.FastForwardUntilNoTasksRemain();
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ProfileSyncServiceBundle profile_sync_service_bundle_;
   SyncPrefs sync_prefs_;
   std::unique_ptr<ProfileSyncService> sync_service_;
@@ -165,9 +164,10 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   // Should not actually start, rather just clean things up and wait
   // to be enabled.
   sync_service()->Initialize();
-  EXPECT_EQ(SyncService::DISABLE_REASON_NOT_SIGNED_IN |
-                SyncService::DISABLE_REASON_USER_CHOICE,
-            sync_service()->GetDisableReasons());
+  EXPECT_EQ(
+      SyncService::DisableReasonSet(SyncService::DISABLE_REASON_NOT_SIGNED_IN,
+                                    SyncService::DISABLE_REASON_USER_CHOICE),
+      sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
             sync_service()->GetTransportState());
 
@@ -181,8 +181,9 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   sync_service()->GetUserSettings()->SetSyncRequested(true);
   auto sync_blocker = sync_service()->GetSetupInProgressHandle();
   EXPECT_FALSE(sync_service()->IsEngineInitialized());
-  EXPECT_EQ(SyncService::DISABLE_REASON_NOT_SIGNED_IN,
-            sync_service()->GetDisableReasons());
+  EXPECT_EQ(
+      SyncService::DisableReasonSet(SyncService::DISABLE_REASON_NOT_SIGNED_IN),
+      sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
             sync_service()->GetTransportState());
 
@@ -191,7 +192,7 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   // Now we're signed in, so the engine can start. Engine initialization is
   // immediate in this test, so we bypass the INITIALIZING state.
   EXPECT_TRUE(sync_service()->IsEngineInitialized());
-  EXPECT_EQ(SyncService::DISABLE_REASON_NONE,
+  EXPECT_EQ(SyncService::DisableReasonSet(),
             sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::PENDING_DESIRED_CONFIGURATION,
             sync_service()->GetTransportState());
@@ -218,7 +219,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   EXPECT_CALL(*data_type_manager, Configure(_, _));
   ON_CALL(*data_type_manager, state())
       .WillByDefault(Return(DataTypeManager::CONFIGURED));
-  sync_service()->GetUserSettings()->SetFirstSetupComplete();
+  sync_service()->GetUserSettings()->SetFirstSetupComplete(
+      syncer::SyncFirstSetupCompleteSource::BASIC_FLOW);
 
   // This should have fully enabled sync.
   EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
@@ -274,7 +276,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartInvalidCredentials) {
   // state. It'll take either a browser restart or a full sign-out+sign-in to
   // get out of this.
   EXPECT_TRUE(sync_service()->HasUnrecoverableError());
-  EXPECT_EQ(SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR,
+  EXPECT_EQ(SyncService::DisableReasonSet(
+                SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR),
             sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
             sync_service()->GetTransportState());
@@ -414,7 +417,7 @@ TEST_F(ProfileSyncServiceStartupTest, StartRecoverDatatypePrefs) {
   // Clear the datatype preference fields (simulating bug 154940).
   pref_service()->ClearPref(prefs::kSyncKeepEverythingSynced);
   for (UserSelectableType type : UserSelectableTypeSet::All()) {
-    pref_service()->ClearPref(SyncPrefs::GetPrefNameForTypeForTesting(type));
+    pref_service()->ClearPref(SyncPrefs::GetPrefNameForType(type));
   }
 
   sync_prefs()->SetFirstSetupComplete();
@@ -471,7 +474,8 @@ TEST_F(ProfileSyncServiceStartupTest, ManagedStartup) {
   EXPECT_CALL(*component_factory(), CreateDataTypeManager(_, _, _, _, _, _))
       .Times(0);
   sync_service()->Initialize();
-  EXPECT_EQ(SyncService::DISABLE_REASON_ENTERPRISE_POLICY,
+  EXPECT_EQ(SyncService::DisableReasonSet(
+                SyncService::DISABLE_REASON_ENTERPRISE_POLICY),
             sync_service()->GetDisableReasons());
 }
 
@@ -492,7 +496,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   // this test).
   sync_service()->Initialize();
   EXPECT_TRUE(sync_service()->IsEngineInitialized());
-  EXPECT_EQ(SyncService::DISABLE_REASON_NONE,
+  EXPECT_EQ(SyncService::DisableReasonSet(),
             sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::ACTIVE,
             sync_service()->GetTransportState());
@@ -506,7 +510,8 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   EXPECT_CALL(*data_type_manager, Stop(DISABLE_SYNC));
 
   sync_prefs()->SetManagedForTest(true);
-  ASSERT_EQ(SyncService::DISABLE_REASON_ENTERPRISE_POLICY,
+  ASSERT_EQ(SyncService::DisableReasonSet(
+                SyncService::DISABLE_REASON_ENTERPRISE_POLICY),
             sync_service()->GetDisableReasons());
   EXPECT_FALSE(sync_service()->IsEngineInitialized());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
@@ -527,7 +532,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
 
   sync_prefs()->SetManagedForTest(false);
 
-  ASSERT_EQ(SyncService::DISABLE_REASON_NONE,
+  ASSERT_EQ(SyncService::DisableReasonSet(),
             sync_service()->GetDisableReasons());
 
   EXPECT_TRUE(sync_service()->IsEngineInitialized());
@@ -559,7 +564,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartFailure) {
   ON_CALL(*data_type_manager, IsNigoriEnabled()).WillByDefault(Return(true));
   sync_service()->Initialize();
   EXPECT_TRUE(sync_service()->HasUnrecoverableError());
-  EXPECT_EQ(SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR,
+  EXPECT_EQ(SyncService::DisableReasonSet(
+                SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR),
             sync_service()->GetDisableReasons());
 }
 
@@ -576,7 +582,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartDownloadFailed) {
 
   auto sync_blocker = sync_service()->GetSetupInProgressHandle();
   sync_blocker.reset();
-  EXPECT_EQ(SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR,
+  EXPECT_EQ(SyncService::DisableReasonSet(
+                SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR),
             sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
             sync_service()->GetTransportState());
@@ -599,34 +606,35 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
 
   // Note: Deferred startup is only enabled if SESSIONS is among the preferred
   // data types.
-  CreateSyncService(ProfileSyncService::MANUAL_START, ModelTypeSet(SESSIONS));
+  CreateSyncService(ProfileSyncService::MANUAL_START,
+                    ModelTypeSet(SESSIONS, TYPED_URLS));
   sync_service()->Initialize();
 
   // There is no signed-in user, so also nobody has decided that Sync should be
   // started.
-  EXPECT_EQ(SyncService::DISABLE_REASON_NOT_SIGNED_IN |
-                SyncService::DISABLE_REASON_USER_CHOICE,
-            sync_service()->GetDisableReasons());
+  EXPECT_EQ(
+      SyncService::DisableReasonSet(SyncService::DISABLE_REASON_NOT_SIGNED_IN,
+                                    SyncService::DISABLE_REASON_USER_CHOICE),
+      sync_service()->GetDisableReasons());
   EXPECT_EQ(SyncService::TransportState::DISABLED,
             sync_service()->GetTransportState());
 
-  // Sign in. Now Sync-the-transport could start, but gets deferred by default.
+  // Sign in. Now Sync-the-transport can start. Since this was triggered by an
+  // explicit user event, deferred startup is bypassed.
   // Sync-the-feature still doesn't start until the user says they want it.
+  EXPECT_CALL(*sync_engine, Initialize(_));
   SimulateTestUserSignin();
-  EXPECT_EQ(SyncService::DISABLE_REASON_USER_CHOICE,
-            sync_service()->GetDisableReasons());
-  EXPECT_EQ(SyncService::TransportState::START_DEFERRED,
+  EXPECT_EQ(
+      SyncService::DisableReasonSet(SyncService::DISABLE_REASON_USER_CHOICE),
+      sync_service()->GetDisableReasons());
+  EXPECT_EQ(SyncService::TransportState::INITIALIZING,
             sync_service()->GetTransportState());
   EXPECT_FALSE(sync_service()->IsSyncFeatureEnabled());
 
-  // Once we give the service a prod by initiating Sync setup, it'll start and
-  // initialize the engine. Since this is the initial Sync start, this will not
-  // be deferred.
-  EXPECT_CALL(*sync_engine, Initialize(_));
+  // Initiate Sync (the feature) setup before the engine initializes itself in
+  // transport mode.
   sync_service()->GetUserSettings()->SetSyncRequested(true);
   auto setup_in_progress_handle = sync_service()->GetSetupInProgressHandle();
-  EXPECT_EQ(SyncService::TransportState::INITIALIZING,
-            sync_service()->GetTransportState());
 
   // Once the engine calls back and says it's initialized, we're just waiting
   // for the user to finish the initial configuration (choosing data types etc.)
@@ -634,8 +642,7 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
   ON_CALL(*sync_engine, IsInitialized()).WillByDefault(Return(true));
   sync_service()->OnEngineInitialized(ModelTypeSet(), WeakHandle<JsBackend>(),
                                       WeakHandle<DataTypeDebugInfoListener>(),
-                                      "test-guid", "test-birthday",
-                                      "test-bag-of-chips",
+                                      "test-birthday", "test-bag-of-chips",
                                       /*success=*/true);
   ASSERT_TRUE(sync_service()->IsEngineInitialized());
   EXPECT_EQ(SyncService::TransportState::PENDING_DESIRED_CONFIGURATION,
@@ -646,7 +653,8 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceFirstTime) {
   // configuring the data types. Just marking the initial setup as complete
   // isn't enough though, because setup is still considered in progress (we
   // haven't released the setup-in-progress handle).
-  sync_service()->GetUserSettings()->SetFirstSetupComplete();
+  sync_service()->GetUserSettings()->SetFirstSetupComplete(
+      syncer::SyncFirstSetupCompleteSource::BASIC_FLOW);
   EXPECT_EQ(SyncService::TransportState::PENDING_DESIRED_CONFIGURATION,
             sync_service()->GetTransportState());
   EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
@@ -693,7 +701,8 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceNthTime) {
 
   // Note: Deferred startup is only enabled if SESSIONS is among the preferred
   // data types.
-  CreateSyncService(ProfileSyncService::MANUAL_START, ModelTypeSet(SESSIONS));
+  CreateSyncService(ProfileSyncService::MANUAL_START,
+                    ModelTypeSet(SESSIONS, TYPED_URLS));
   sync_service()->Initialize();
 
   // Nothing is preventing Sync from starting, but it should be deferred so as
@@ -714,8 +723,7 @@ TEST_F(ProfileSyncServiceStartupTest, FullStartupSequenceNthTime) {
   ON_CALL(*sync_engine, IsInitialized()).WillByDefault(Return(true));
   sync_service()->OnEngineInitialized(ModelTypeSet(), WeakHandle<JsBackend>(),
                                       WeakHandle<DataTypeDebugInfoListener>(),
-                                      "test-guid", "test-birthday",
-                                      "test-bag-of-chips",
+                                      "test-birthday", "test-bag-of-chips",
                                       /*success=*/true);
   ON_CALL(*data_type_manager, state())
       .WillByDefault(Return(DataTypeManager::CONFIGURING));

@@ -27,6 +27,7 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
+class BrowserWindow;
 class ToolbarActionsBarDelegate;
 class ToolbarActionsBarObserver;
 class ToolbarActionViewController;
@@ -84,6 +85,10 @@ class ToolbarActionsBar : public ExtensionsContainer,
                     Browser* browser,
                     ToolbarActionsBar* main_bar);
   ~ToolbarActionsBar() override;
+
+  // Gets the ToolbarActionsBar from the given BrowserWindow. This method is
+  // essentially deprecated. Use BrowserWindow::GetExtensionsContainer instead.
+  static ToolbarActionsBar* FromBrowserWindow(BrowserWindow* window);
 
   // Registers profile preferences.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -148,11 +153,6 @@ class ToolbarActionsBar : public ExtensionsContainer,
 
   // Updates all the toolbar actions.
   void Update();
-
-  // Shows the popup for the action with |id|, returning true if a popup is
-  // shown. If |grant_active_tab| is true, then active tab permissions should
-  // be given to the action (only do this if this is through a user action).
-  bool ShowToolbarActionPopup(const std::string& id, bool grant_active_tab);
 
   // Sets the width for the overflow menu rows.
   void SetOverflowRowWidth(int width);
@@ -234,6 +234,8 @@ class ToolbarActionsBar : public ExtensionsContainer,
   ToolbarActionViewController* GetPoppedOutAction() const override;
   bool IsActionVisibleOnToolbar(
       const ToolbarActionViewController* action) const override;
+  extensions::ExtensionContextMenuModel::ButtonVisibility GetActionVisibility(
+      const ToolbarActionViewController* action) const override;
   void UndoPopOut() override;
   void SetPopupOwner(ToolbarActionViewController* popup_owner) override;
   void HideActivePopup() override;
@@ -241,6 +243,7 @@ class ToolbarActionsBar : public ExtensionsContainer,
   void PopOutAction(ToolbarActionViewController* action,
                     bool is_sticky,
                     const base::Closure& closure) override;
+  bool ShowToolbarActionPopupForAPICall(const std::string& id) override;
   void ShowToolbarActionBubble(
       std::unique_ptr<ToolbarActionsBarBubbleDelegate> bubble) override;
   void ShowToolbarActionBubbleAsync(
@@ -360,8 +363,6 @@ class ToolbarActionsBar : public ExtensionsContainer,
   // The index of the action currently being dragged, or |base::nullopt| if
   // no drag is in progress.
   base::Optional<size_t> index_of_dragged_item_;
-
-  ScopedObserver<TabStripModel, TabStripModelObserver> tab_strip_observer_;
 
   base::ObserverList<ToolbarActionsBarObserver>::Unchecked observers_;
 

@@ -8,7 +8,7 @@
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/process/process_handle.h"
 #include "base/test/metrics/user_action_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -17,11 +17,10 @@
 #include "components/metrics/file_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
-#include "components/metrics/test_enabled_state_provider.h"
+#include "components/metrics/test/test_enabled_state_provider.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/ukm/ukm_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_service_manager_context.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -32,7 +31,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/assistant/buildflags.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/login/login_state/login_state.h"
 #endif
@@ -55,8 +53,6 @@ class ChromeMetricsServiceClientTest : public testing::Test {
             &ChromeMetricsServiceClientTest::LoadFakeClientInfoBackup,
             base::Unretained(this)));
     ASSERT_TRUE(profile_manager_.SetUp());
-    service_manager_context_ =
-        std::make_unique<content::TestServiceManagerContext>();
 #if defined(OS_CHROMEOS)
     // ChromeOs Metrics Provider require g_login_state and power manager client
     // initialized before they can be instantiated.
@@ -70,7 +66,6 @@ class ChromeMetricsServiceClientTest : public testing::Test {
     chromeos::LoginState::Shutdown();
     chromeos::PowerManagerClient::Shutdown();
 #endif  // defined(OS_CHROMEOS)
-    service_manager_context_.reset();
   }
 
  protected:
@@ -80,13 +75,12 @@ class ChromeMetricsServiceClientTest : public testing::Test {
     return std::make_unique<metrics::ClientInfo>();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingPrefServiceSimple prefs_;
   TestingProfileManager profile_manager_;
   base::UserActionTester user_action_runner_;
   std::unique_ptr<metrics::MetricsStateManager> metrics_state_manager_;
   metrics::TestEnabledStateProvider enabled_state_provider_;
-  std::unique_ptr<content::TestServiceManagerContext> service_manager_context_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeMetricsServiceClientTest);
@@ -156,21 +150,21 @@ TEST_F(ChromeMetricsServiceClientTest, TestRegisterMetricsServiceProviders) {
   size_t expected_providers = 3;
 
   // This is the number of metrics providers that are outside any #if macros.
-  expected_providers += 17;
+  expected_providers += 21;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   expected_providers++;  // ExtensionsMetricsProvider.
 #endif                   // defined(ENABLE_EXTENSIONS)
 
 #if defined(OS_ANDROID)
-  // AndroidMetricsProvider and PageLoadMetricsProvider.
-  expected_providers += 2;
+  // AndroidMetricsProvider, ChromeAndroidMetricsProvider, and
+  // PageLoadMetricsProvider.
+  expected_providers += 3;
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
-  // GoogleUpdateMetricsProviderWin, WatcherMetricsProviderWin and
-  // AntiVirusMetricsProvider.
-  expected_providers += 3;
+  // GoogleUpdateMetricsProviderWin and AntiVirusMetricsProvider.
+  expected_providers += 2;
 #endif  // defined(OS_WIN)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -179,17 +173,16 @@ TEST_F(ChromeMetricsServiceClientTest, TestRegisterMetricsServiceProviders) {
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 #if defined(OS_CHROMEOS)
-#if BUILDFLAG(ENABLE_CROS_ASSISTANT)
-  expected_providers++;  // AssistantServiceMetricsProvider.
-#endif                   // BUILDFLAG(ENABLE_CROS_ASSISTANT)
+  // AssistantServiceMetricsProvider,
   // ChromeOSMetricsProvider, SigninStatusMetricsProviderChromeOS,
   // PrinterMetricsProvider, and HashedLoggingMetricsProvider.
-  expected_providers += 4;
+  expected_providers += 5;
 #endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS)
   // ChromeSigninStatusMetricsProvider (for non ChromeOS).
-  expected_providers++;
+  // AccessibilityMetricsProvider
+  expected_providers += 2;
 #endif  // !defined(OS_CHROMEOS)
 
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)

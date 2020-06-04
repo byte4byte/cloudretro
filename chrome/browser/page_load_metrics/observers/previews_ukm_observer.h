@@ -9,15 +9,15 @@
 #include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "components/optimization_guide/proto/hints.pb.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "components/previews/core/previews_black_list.h"
 #include "components/previews/core/previews_experiments.h"
 
 namespace content {
 class NavigationHandle;
 class WebContents;
-}
+}  // namespace content
 
 namespace previews {
 
@@ -35,13 +35,11 @@ class PreviewsUKMObserver : public page_load_metrics::PageLoadMetricsObserver {
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                          ukm::SourceId source_id) override;
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   ObservePolicy OnHidden(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
+  void OnComplete(
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
   void OnEventOccurred(const void* const event_key) override;
   ObservePolicy ShouldObserveMimeType(
       const std::string& mime_type) const override;
@@ -57,10 +55,7 @@ class PreviewsUKMObserver : public page_load_metrics::PageLoadMetricsObserver {
   virtual bool IsOfflinePreview(content::WebContents* web_contents) const;
 
  private:
-  void RecordMetrics(const page_load_metrics::PageLoadExtraInfo& info);
-  void RecordPreviewsTypes(const page_load_metrics::PageLoadExtraInfo& info);
-  void RecordOptimizationGuideInfo(
-      const page_load_metrics::PageLoadExtraInfo& info);
+  void RecordPreviewsTypes();
 
   // The preview type that was actually committed and seen by the user.
   PreviewsType committed_preview_;
@@ -87,9 +82,6 @@ class PreviewsUKMObserver : public page_load_metrics::PageLoadMetricsObserver {
       defer_all_script_eligibility_reason_;
   base::Optional<previews::PreviewsEligibilityReason>
       offline_eligibility_reason_;
-  CoinFlipHoldbackResult coin_flip_result_ = CoinFlipHoldbackResult::kNotSet;
-  base::Optional<base::TimeDelta> navigation_restart_penalty_;
-  base::Optional<std::string> serialized_hint_version_string_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

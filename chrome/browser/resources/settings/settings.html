@@ -1,5 +1,6 @@
 <!doctype html>
-<html dir="$i18n{textdirection}" lang="$i18n{language}" class="loading">
+<html dir="$i18n{textdirection}" lang="$i18n{language}" class="loading"
+    $i18n{a11yenhanced}>
 <head>
   <meta charset="utf-8">
   <title>$i18n{settings}</title>
@@ -22,6 +23,12 @@
       content: '';
       display: block;
       height: var(--md-toolbar-height);
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
     }
   </style>
 </head>

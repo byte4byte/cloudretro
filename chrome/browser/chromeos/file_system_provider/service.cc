@@ -23,11 +23,12 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "storage/browser/fileapi/external_mount_points.h"
-#include "storage/common/fileapi/file_system_mount_option.h"
+#include "storage/browser/file_system/external_mount_points.h"
+#include "storage/common/file_system/file_system_mount_option.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -42,8 +43,7 @@ Service::Service(Profile* profile,
                  extensions::ExtensionRegistry* extension_registry)
     : profile_(profile),
       extension_registry_(extension_registry),
-      registry_(new Registry(profile)),
-      weak_ptr_factory_(this) {
+      registry_(new Registry(profile)) {
   extension_registry_->AddObserver(this);
 }
 
@@ -252,10 +252,9 @@ bool Service::RequestUnmount(const ProviderId& provider_id,
   if (file_system_it == file_system_map_.end())
     return false;
 
-  file_system_it->second->RequestUnmount(
-      base::Bind(&Service::OnRequestUnmountStatus,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 file_system_it->second->GetFileSystemInfo()));
+  file_system_it->second->RequestUnmount(base::BindOnce(
+      &Service::OnRequestUnmountStatus, weak_ptr_factory_.GetWeakPtr(),
+      file_system_it->second->GetFileSystemInfo()));
   return true;
 }
 

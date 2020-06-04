@@ -28,18 +28,13 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) MockNetworkDeviceHandler
   MOCK_CONST_METHOD3(
       GetDeviceProperties,
       void(const std::string& device_path,
-           const network_handler::DictionaryResultCallback& callback,
+           network_handler::DictionaryResultCallback callback,
            const network_handler::ErrorCallback& error_callback));
 
   MOCK_METHOD5(SetDeviceProperty,
                void(const std::string& device_path,
                     const std::string& property_name,
                     const base::Value& value,
-                    const base::Closure& callback,
-                    const network_handler::ErrorCallback& error_callback));
-
-  MOCK_METHOD3(RequestRefreshIPConfigs,
-               void(const std::string& device_path,
                     const base::Closure& callback,
                     const network_handler::ErrorCallback& error_callback));
 
@@ -79,6 +74,9 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) MockNetworkDeviceHandler
   MOCK_METHOD1(SetCellularAllowRoaming, void(bool allow_roaming));
 
   MOCK_METHOD1(SetMACAddressRandomizationEnabled, void(bool enabled));
+
+  MOCK_METHOD1(SetUsbEthernetMacAddressSource,
+               void(const std::string& enabled));
 
   MOCK_METHOD4(SetWifiTDLSEnabled,
                void(const std::string& ip_or_mac_address,

@@ -5,10 +5,7 @@
 #include "extensions/test/test_extension_dir.h"
 
 #include "base/files/file_util.h"
-#include "base/json/json_writer.h"
-#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/test/values_test_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "extensions/browser/extension_creator.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,13 +28,6 @@ void TestExtensionDir::WriteManifest(base::StringPiece manifest) {
   WriteFile(FILE_PATH_LITERAL("manifest.json"), manifest);
 }
 
-void TestExtensionDir::WriteManifestWithSingleQuotes(
-    base::StringPiece manifest) {
-  std::string double_quotes;
-  base::ReplaceChars(manifest.data(), "'", "\"", &double_quotes);
-  WriteManifest(double_quotes);
-}
-
 void TestExtensionDir::WriteFile(const base::FilePath::StringType& filename,
                                  base::StringPiece contents) {
   base::ScopedAllowBlockingForTesting allow_blocking;
@@ -47,20 +37,12 @@ void TestExtensionDir::WriteFile(const base::FilePath::StringType& filename,
 }
 
 base::FilePath TestExtensionDir::Pack() {
-  return PackWithPem(base::StringPiece());
-}
-
-base::FilePath TestExtensionDir::PackWithPem(base::StringPiece pem) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   ExtensionCreator creator;
   base::FilePath crx_path =
       crx_dir_.GetPath().Append(FILE_PATH_LITERAL("ext.crx"));
   base::FilePath pem_path =
       crx_dir_.GetPath().Append(FILE_PATH_LITERAL("ext.pem"));
-
-  if (!pem.empty())
-    base::WriteFile(pem_path, pem.data(), pem.size());
-
   base::FilePath pem_in_path, pem_out_path;
   if (base::PathExists(pem_path))
     pem_in_path = pem_path;
@@ -79,7 +61,7 @@ base::FilePath TestExtensionDir::PackWithPem(base::StringPiece pem) {
   return crx_path;
 }
 
-base::FilePath TestExtensionDir::UnpackedPath() {
+base::FilePath TestExtensionDir::UnpackedPath() const {
   base::ScopedAllowBlockingForTesting allow_blocking;
   // We make this absolute because it's possible that dir_ contains a symlink as
   // part of it's path. When UnpackedInstaller::GetAbsolutePath() runs as part

@@ -54,16 +54,23 @@ class BleAdvertiserImpl : public BleAdvertiser {
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<BleAdvertiser> BuildInstance(
+    static std::unique_ptr<BleAdvertiser> Create(
         Delegate* delegate,
         BleServiceDataHelper* ble_service_data_helper,
         BleSynchronizerBase* ble_synchronizer_base,
         TimerFactory* timer_factory,
         scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner =
             base::SequencedTaskRunnerHandle::Get());
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<BleAdvertiser> CreateInstance(
+        Delegate* delegate,
+        BleServiceDataHelper* ble_service_data_helper,
+        BleSynchronizerBase* ble_synchronizer_base,
+        TimerFactory* timer_factory,
+        scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner) = 0;
 
    private:
     static Factory* test_factory_;
@@ -157,7 +164,7 @@ class BleAdvertiserImpl : public BleAdvertiser {
   base::flat_set<DeviceIdPair>
       requests_already_removed_due_to_failed_advertisement_;
 
-  base::WeakPtrFactory<BleAdvertiserImpl> weak_factory_;
+  base::WeakPtrFactory<BleAdvertiserImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BleAdvertiserImpl);
 };

@@ -12,11 +12,11 @@
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/sync/base/data_type_histogram.h"
 #include "components/sync/driver/configure_context.h"
+#include "components/sync/driver/sync_merge_result.h"
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/model_type_configurer.h"
 #include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/data_type_error_handler_impl.h"
-#include "components/sync/model/sync_merge_result.h"
 
 namespace syncer {
 namespace {
@@ -43,22 +43,38 @@ SyncStopMetadataFate TakeStrictestMetadataFate(SyncStopMetadataFate fate1,
 
 }  // namespace
 
+ModelTypeController::ModelTypeController(ModelType type)
+    : DataTypeController(type) {}
+
 ModelTypeController::ModelTypeController(
     ModelType type,
-    std::unique_ptr<ModelTypeControllerDelegate> delegate_on_disk)
-    : DataTypeController(type) {
-  delegate_map_.emplace(STORAGE_ON_DISK, std::move(delegate_on_disk));
+    std::unique_ptr<ModelTypeControllerDelegate> delegate_for_full_sync_mode)
+    : ModelTypeController(type) {
+  InitModelTypeController(std::move(delegate_for_full_sync_mode), nullptr);
 }
 
 ModelTypeController::ModelTypeController(
     ModelType type,
-    std::unique_ptr<ModelTypeControllerDelegate> delegate_on_disk,
-    std::unique_ptr<ModelTypeControllerDelegate> delegate_in_memory)
-    : ModelTypeController(type, std::move(delegate_on_disk)) {
-  delegate_map_.emplace(STORAGE_IN_MEMORY, std::move(delegate_in_memory));
+    std::unique_ptr<ModelTypeControllerDelegate> delegate_for_full_sync_mode,
+    std::unique_ptr<ModelTypeControllerDelegate> delegate_for_transport_mode)
+    : ModelTypeController(type) {
+  InitModelTypeController(std::move(delegate_for_full_sync_mode),
+                          std::move(delegate_for_transport_mode));
 }
 
 ModelTypeController::~ModelTypeController() {}
+
+void ModelTypeController::InitModelTypeController(
+    std::unique_ptr<ModelTypeControllerDelegate> delegate_for_full_sync_mode,
+    std::unique_ptr<ModelTypeControllerDelegate> delegate_for_transport_mode) {
+  DCHECK(delegate_map_.empty());
+  delegate_map_.emplace(SyncMode::kFull,
+                        std::move(delegate_for_full_sync_mode));
+  if (delegate_for_transport_mode) {
+    delegate_map_.emplace(SyncMode::kTransportOnly,
+                          std::move(delegate_for_transport_mode));
+  }
+}
 
 std::unique_ptr<DataTypeActivationResponse>
 ModelTypeController::ActivateManuallyForNigori() {
@@ -84,8 +100,8 @@ void ModelTypeController::LoadModels(
   DCHECK(model_load_callback);
   DCHECK_EQ(NOT_RUNNING, state_);
 
-  auto it = delegate_map_.find(configure_context.storage_option);
-  DCHECK(it != delegate_map_.end());
+  auto it = delegate_map_.find(configure_context.sync_mode);
+  DCHECK(it != delegate_map_.end()) << ModelTypeToString(type());
   delegate_ = it->second.get();
   DCHECK(delegate_);
 
@@ -100,7 +116,7 @@ void ModelTypeController::LoadModels(
                           base::AsWeakPtr(this), SyncError::DATATYPE_ERROR));
   request.authenticated_account_id = configure_context.authenticated_account_id;
   request.cache_guid = configure_context.cache_guid;
-  request.storage_option = configure_context.storage_option;
+  request.sync_mode = configure_context.sync_mode;
   request.configuration_start_time = configure_context.configuration_start_time;
 
   // Note that |request.authenticated_account_id| may be empty for local sync.
@@ -114,23 +130,22 @@ void ModelTypeController::LoadModels(
 
 void ModelTypeController::BeforeLoadModels(ModelTypeConfigurer* configurer) {}
 
-void ModelTypeController::RegisterWithBackend(
-    base::OnceCallback<void(bool)> set_downloaded,
-    ModelTypeConfigurer* configurer) {
+DataTypeController::RegisterWithBackendResult
+ModelTypeController::RegisterWithBackend(ModelTypeConfigurer* configurer) {
   DCHECK(CalledOnValidThread());
   if (activated_)
-    return;
+    return REGISTRATION_IGNORED;
   DCHECK(configurer);
   DCHECK(activation_response_);
   DCHECK_EQ(MODEL_LOADED, state_);
-  // Inform the DataTypeManager whether our initial download is complete.
-  std::move(set_downloaded)
-      .Run(activation_response_->model_type_state.initial_sync_done());
+  bool initial_sync_done =
+      activation_response_->model_type_state.initial_sync_done();
   // Pass activation context to ModelTypeRegistry, where ModelTypeWorker gets
   // created and connected with the delegate (processor).
   configurer->ActivateNonBlockingDataType(type(),
                                           std::move(activation_response_));
   activated_ = true;
+  return initial_sync_done ? TYPE_ALREADY_DOWNLOADED : TYPE_NOT_YET_DOWNLOADED;
 }
 
 void ModelTypeController::StartAssociating(StartCallback start_callback) {
@@ -245,20 +260,15 @@ void ModelTypeController::RecordMemoryUsageAndCountsHistograms() {
   delegate_->RecordMemoryUsageAndCountsHistograms();
 }
 
+ModelTypeControllerDelegate*
+ModelTypeController::GetDelegateForTransportModeForTest() {
+  auto it = delegate_map_.find(SyncMode::kTransportOnly);
+  return it != delegate_map_.end() ? it->second.get() : nullptr;
+}
+
 void ModelTypeController::ReportModelError(SyncError::ErrorType error_type,
                                            const ModelError& error) {
   DCHECK(CalledOnValidThread());
-
-  // TODO(crbug.com/890729): This is obviously misplaced/misnamed as we report
-  // run-time failures as well. Rename the histogram to ConfigureResult and
-  // report it only after startup (also for success).
-  if (state_ != NOT_RUNNING) {
-#define PER_DATA_TYPE_MACRO(type_str)                            \
-  UMA_HISTOGRAM_ENUMERATION("Sync." type_str "ConfigureFailure", \
-                            UNRECOVERABLE_ERROR, MAX_CONFIGURE_RESULT);
-    SYNC_DATA_TYPE_HISTOGRAM(type());
-#undef PER_DATA_TYPE_MACRO
-  }
 
   switch (state_) {
     case MODEL_LOADED:
@@ -298,22 +308,14 @@ void ModelTypeController::ReportModelError(SyncError::ErrorType error_type,
 
 void ModelTypeController::RecordStartFailure() const {
   DCHECK(CalledOnValidThread());
-  // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
-  // This is not strongly typed because historically, ModelTypeToHistogramInt()
-  // defines quite a different order from the type() enum.
   UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures2",
-                            ModelTypeToHistogramInt(type()),
-                            static_cast<int>(ModelType::NUM_ENTRIES));
+                            ModelTypeHistogramValue(type()));
 }
 
 void ModelTypeController::RecordRunFailure() const {
   DCHECK(CalledOnValidThread());
-  // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
-  // This is not strongly typed because historically, ModelTypeToHistogramInt()
-  // defines quite a different order from the type() enum.
   UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeRunFailures2",
-                            ModelTypeToHistogramInt(type()),
-                            static_cast<int>(ModelType::NUM_ENTRIES));
+                            ModelTypeHistogramValue(type()));
 }
 
 void ModelTypeController::OnDelegateStarted(

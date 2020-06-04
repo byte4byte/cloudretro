@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include "services/content/public/cpp/test/fake_navigable_contents_factory.h"
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "net/http/http_response_headers.h"
 #include "services/content/public/cpp/navigable_contents.h"
 #include "services/content/public/cpp/navigable_contents_observer.h"
@@ -34,7 +35,7 @@ class FakeNavigableContentsFactoryTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   mojo::Remote<mojom::NavigableContentsFactory> remote_factory_;
   FakeNavigableContentsFactory factory_;
@@ -153,8 +154,8 @@ TEST_F(FakeNavigableContentsFactoryTest, CustomHeaders) {
   const std::string kTestHeaderValue2 = "bananas";
   auto test_headers =
       base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
-  test_headers->AddHeader(kTestHeader1 + ": " + kTestHeaderValue1);
-  test_headers->AddHeader(kTestHeader2 + ": " + kTestHeaderValue2);
+  test_headers->SetHeader(kTestHeader1, kTestHeaderValue1);
+  test_headers->SetHeader(kTestHeader2, kTestHeaderValue2);
   contents_impl.set_default_response_headers(test_headers);
 
   const GURL kTestUrl("https://www.google.com/");

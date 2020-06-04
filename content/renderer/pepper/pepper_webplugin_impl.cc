@@ -13,6 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/pepper/message_channel.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -23,10 +24,12 @@
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/var_tracker.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/mojom/input/focus_type.mojom.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
-#include "third_party/blink/public/platform/web_point.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
@@ -38,13 +41,14 @@
 #include "third_party/blink/public/web/web_print_params.h"
 #include "third_party/blink/public/web/web_print_preset_options.h"
 #include "third_party/blink/public/web/web_print_scaling_option.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
 
 using ppapi::V8ObjectVar;
 using blink::WebPlugin;
 using blink::WebPluginContainer;
 using blink::WebPluginParams;
-using blink::WebPoint;
 using blink::WebPrintParams;
 using blink::WebRect;
 using blink::WebSize;
@@ -189,6 +193,10 @@ v8::Local<v8::Object> PepperWebPluginImpl::V8ScriptableObject(
   return result;
 }
 
+bool PepperWebPluginImpl::SupportsKeyboardFocus() const {
+  return instance_ && instance_->SupportsKeyboardFocus();
+}
+
 void PepperWebPluginImpl::Paint(cc::PaintCanvas* canvas, const WebRect& rect) {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
@@ -207,23 +215,38 @@ void PepperWebPluginImpl::UpdateGeometry(
 }
 
 void PepperWebPluginImpl::UpdateFocus(bool focused,
-                                      blink::WebFocusType focus_type) {
+                                      blink::mojom::FocusType focus_type) {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
-  if (instance_)
+  if (instance_) {
     instance_->SetWebKitFocus(focused);
+
+    if (focused && instance_->SupportsKeyboardFocus()) {
+      int modifiers = blink::WebInputEvent::kNoModifiers;
+      if (focus_type == blink::mojom::FocusType::kBackward)
+        modifiers |= blink::WebInputEvent::kShiftKey;
+      // As part of focus management for plugin, blink brings plugin to focus
+      // but does not forward the tab event to plugin. Hence simulating tab
+      // event here to enable seamless tabbing across UI & plugin.
+      blink::WebKeyboardEvent simulated_event(blink::WebInputEvent::kKeyDown,
+                                              modifiers, base::TimeTicks());
+      simulated_event.windows_key_code = ui::KeyboardCode::VKEY_TAB;
+      ui::Cursor cursor;
+      instance_->HandleInputEvent(simulated_event, &cursor);
+    }
+  }
 }
 
 void PepperWebPluginImpl::UpdateVisibility(bool visible) {}
 
 blink::WebInputEventResult PepperWebPluginImpl::HandleInputEvent(
     const blink::WebCoalescedInputEvent& coalesced_event,
-    blink::WebCursorInfo& cursor_info) {
+    ui::Cursor* cursor) {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
   if (!instance_ || instance_->FlashIsFullscreenOrPending())
     return blink::WebInputEventResult::kNotHandled;
-  return instance_->HandleCoalescedInputEvent(coalesced_event, &cursor_info)
+  return instance_->HandleCoalescedInputEvent(coalesced_event, cursor)
              ? blink::WebInputEventResult::kHandledApplication
              : blink::WebInputEventResult::kNotHandled;
 }
@@ -321,8 +344,8 @@ bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
       return false;
 
     if (!clipboard_) {
-      blink::Platform::Current()->GetConnector()->BindInterface(
-          blink::Platform::Current()->GetBrowserServiceName(), &clipboard_);
+      blink::Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+          clipboard_.BindNewPipeAndPassReceiver());
     }
     base::string16 markup;
     base::string16 text;
@@ -347,11 +370,11 @@ bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
       return false;
 
     if (!clipboard_) {
-      blink::Platform::Current()->GetConnector()->BindInterface(
-          blink::Platform::Current()->GetBrowserServiceName(), &clipboard_);
+      blink::Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+          clipboard_.BindNewPipeAndPassReceiver());
     }
     base::string16 text;
-    clipboard_->ReadText(ui::ClipboardType::kCopyPaste, &text);
+    clipboard_->ReadText(ui::ClipboardBuffer::kCopyPaste, &text);
 
     instance_->ReplaceSelection(base::UTF16ToUTF8(text));
     return true;
@@ -384,7 +407,7 @@ bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
   return false;
 }
 
-WebURL PepperWebPluginImpl::LinkAtPosition(const WebPoint& position) const {
+WebURL PepperWebPluginImpl::LinkAtPosition(const gfx::Point& position) const {
   // Re-entrancy may cause JS to try to execute script on the plugin before it
   // is fully initialized. See: crbug.com/715747.
   if (!instance_)
@@ -453,6 +476,14 @@ bool PepperWebPluginImpl::GetPrintPresetOptionsFromDocument(
   if (!instance_)
     return false;
   return instance_->GetPrintPresetOptionsFromDocument(preset_options);
+}
+
+bool PepperWebPluginImpl::IsPdfPlugin() {
+  // Re-entrancy may cause JS to try to execute script on the plugin before it
+  // is fully initialized. See: crbug.com/715747.
+  if (!instance_)
+    return false;
+  return instance_->IsPdfPlugin();
 }
 
 bool PepperWebPluginImpl::CanRotateView() {

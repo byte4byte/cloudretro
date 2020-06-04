@@ -8,19 +8,11 @@
 #include <string>
 #include <utility>
 
-#include "ash/public/interfaces/ime_controller.mojom.h"
-
 namespace ash {
 
-TestImeControllerClient::TestImeControllerClient() : binding_(this) {}
+TestImeControllerClient::TestImeControllerClient() = default;
 
 TestImeControllerClient::~TestImeControllerClient() = default;
-
-mojom::ImeControllerClientPtr TestImeControllerClient::CreateInterfacePtr() {
-  mojom::ImeControllerClientPtr ptr;
-  binding_.Bind(mojo::MakeRequest(&ptr));
-  return ptr;
-}
 
 void TestImeControllerClient::SwitchToNextIme() {
   ++next_ime_count_;
@@ -44,7 +36,7 @@ void TestImeControllerClient::SetCapsLockEnabled(bool enabled) {
 }
 
 void TestImeControllerClient::OverrideKeyboardKeyset(
-    chromeos::input_method::mojom::ImeKeyset keyset,
+    chromeos::input_method::ImeKeyset keyset,
     OverrideKeyboardKeysetCallback callback) {
   last_keyset_ = keyset;
   std::move(callback).Run();

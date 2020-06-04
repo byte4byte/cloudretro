@@ -26,7 +26,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -73,10 +73,12 @@ class NeverRunsExternalProtocolHandlerDelegate
 
   void BlockRequest() override {}
 
-  void RunExternalProtocolDialog(const GURL& url,
-                                 content::WebContents* web_contents,
-                                 ui::PageTransition page_transition,
-                                 bool has_user_gesture) override {
+  void RunExternalProtocolDialog(
+      const GURL& url,
+      content::WebContents* web_contents,
+      ui::PageTransition page_transition,
+      bool has_user_gesture,
+      const base::Optional<url::Origin>& initiating_origin) override {
     NOTREACHED();
   }
 
@@ -102,7 +104,7 @@ bool FakeSafeBrowsingDatabaseManager::CheckBrowseUrl(
     return true;
   }
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&FakeSafeBrowsingDatabaseManager::OnCheckBrowseURLDone,
                      this, gurl, client));
@@ -118,7 +120,7 @@ bool FakeSafeBrowsingDatabaseManager::ChecksAreAlwaysAsync() const {
 }
 
 bool FakeSafeBrowsingDatabaseManager::CanCheckResourceType(
-    content::ResourceType /* resource_type */) const {
+    blink::mojom::ResourceType /* resource_type */) const {
   return true;
 }
 
@@ -168,13 +170,6 @@ TestPrerenderContents::~TestPrerenderContents() {
       << " (Expected: " << NameFromFinalStatus(expected_final_status_)
       << ", Actual: " << NameFromFinalStatus(final_status()) << ")";
 
-  // Prerendering RenderViewHosts should be hidden before the first
-  // navigation, so this should be happen for every PrerenderContents for
-  // which a RenderViewHost is created, regardless of whether or not it's
-  // used.
-  if (new_render_view_host_)
-    EXPECT_TRUE(was_hidden_);
-
   // A used PrerenderContents will only be destroyed when we swap out
   // WebContents, at the end of a navigation caused by a call to
   // NavigateToURLImpl().
@@ -210,9 +205,9 @@ void TestPrerenderContents::RenderWidgetHostVisibilityChanged(
 
   if (!became_visible) {
     was_hidden_ = true;
-  } else if (became_visible && was_hidden_) {
-    // Once hidden, a prerendered RenderViewHost should only be shown after
-    // being removed from the PrerenderContents for display.
+  } else {
+    // A prerendered RenderViewHost should only be shown after being removed
+    // from the PrerenderContents for display.
     EXPECT_FALSE(GetRenderViewHost());
     was_shown_ = true;
   }
@@ -610,13 +605,28 @@ GURL PrerenderInProcessBrowserTest::ServeLoaderURL(
     const std::string& loader_path,
     const std::string& replacement_variable,
     const GURL& url_to_prerender,
-    const std::string& loader_query) {
+    const std::string& loader_query,
+    const std::string& hostname_alternative) {
   base::StringPairs replacement_text;
   replacement_text.push_back(
       make_pair(replacement_variable, url_to_prerender.spec()));
   std::string replacement_path = net::test_server::GetFilePathWithReplacements(
       loader_path, replacement_text);
   return src_server()->GetURL(replacement_path + loader_query);
+}
+
+GURL PrerenderInProcessBrowserTest::ServeLoaderURLWithHostname(
+    const std::string& loader_path,
+    const std::string& replacement_variable,
+    const GURL& url_to_prerender,
+    const std::string& loader_query,
+    const std::string& hostname) {
+  base::StringPairs replacement_text;
+  replacement_text.push_back(
+      make_pair(replacement_variable, url_to_prerender.spec()));
+  std::string replacement_path = net::test_server::GetFilePathWithReplacements(
+      loader_path, replacement_text);
+  return src_server()->GetURL(hostname, replacement_path + loader_query);
 }
 
 void PrerenderInProcessBrowserTest::MonitorResourceRequest(

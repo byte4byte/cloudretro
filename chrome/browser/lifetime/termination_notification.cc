@@ -59,22 +59,22 @@ void NotifyAndTerminate(bool fast_path, RebootPolicy reboot_policy) {
     // or else signal the session manager to log out.
     chromeos::UpdateEngineClient* update_engine_client =
         chromeos::DBusThreadManager::Get()->GetUpdateEngineClient();
-    if (update_engine_client->GetLastStatus().status ==
-            chromeos::UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT ||
+    if (update_engine_client->GetLastStatus().current_operation() ==
+            update_engine::Operation::UPDATED_NEED_REBOOT ||
         reboot_policy == RebootPolicy::kForceReboot) {
       update_engine_client->RebootAfterUpdate();
     } else if (chrome::IsAttemptingShutdown()) {
       // Don't ask SessionManager to stop session if the shutdown request comes
       // from session manager.
-      chromeos::SessionTerminationManager::Get()->StopSession();
+      chromeos::SessionTerminationManager::Get()->StopSession(
+          login_manager::SessionStopReason::REQUEST_FROM_SESSION_MANAGER);
     }
   } else {
     if (chrome::IsAttemptingShutdown()) {
       // If running the Chrome OS build, but we're not on the device, act
       // as if we received signal from SessionManager.
-      base::PostTaskWithTraits(
-          FROM_HERE, {content::BrowserThread::UI},
-          base::BindOnce(&chrome::ExitIgnoreUnloadHandlers));
+      base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                     base::BindOnce(&chrome::ExitIgnoreUnloadHandlers));
     }
   }
 #endif

@@ -24,12 +24,12 @@ Polymer({
     },
 
     /**
+     * TODO(dpapad): Restore actual type !PrivacyPageVisibility after this file
+     * is no longer reused by chrome://os-settings.
      * Dictionary defining page visibility.
-     * @type {!PrivacyPageVisibility}
+     * @type {!Object}
      */
     pageVisibility: Object,
-
-    unifiedConsentEnabled: Boolean,
 
     /** @type {settings.SyncStatus} */
     syncStatus: Object,
@@ -40,7 +40,7 @@ Polymer({
     /** @private {chrome.settingsPrivate.PrefObject} */
     metricsReportingPref_: {
       type: Object,
-      value: function() {
+      value() {
         // TODO(dbeam): this is basically only to appease PrefControlBehavior.
         // Maybe add a no-validate attribute instead? This makes little sense.
         return /** @type {chrome.settingsPrivate.PrefObject} */ ({});
@@ -49,11 +49,43 @@ Polymer({
 
     /** @private */
     showRestart_: Boolean,
+
+    /** @private */
+    showRestartToast_: Boolean,
     // </if>
+
+    /** @private */
+    showSignoutDialog_: Boolean,
+
+    /** @private */
+    privacySettingsRedesignEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('privacySettingsRedesignEnabled');
+      },
+    },
+
+    /** @private */
+    syncFirstSetupInProgress_: {
+      type: Boolean,
+      value: false,
+      computed: 'computeSyncFirstSetupInProgress_(syncStatus)',
+    },
+  },
+
+  /** @private {?settings.PrivacyPageBrowserProxy} */
+  browserProxy_: null,
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  computeSyncFirstSetupInProgress_() {
+    return !!this.syncStatus && !!this.syncStatus.firstSetupInProgress;
   },
 
   /** @override */
-  ready: function() {
+  ready() {
     this.browserProxy_ = settings.PrivacyPageBrowserProxyImpl.getInstance();
 
     // <if expr="_google_chrome and not chromeos">
@@ -65,16 +97,16 @@ Polymer({
 
   // <if expr="_google_chrome and not chromeos">
   /** @private */
-  onMetricsReportingChange_: function() {
+  onMetricsReportingChange_() {
     const enabled = this.$.metricsReportingControl.checked;
     this.browserProxy_.setMetricsReportingEnabled(enabled);
   },
 
   /**
-   * @param {!MetricsReporting} metricsReporting
+   * @param {!settings.MetricsReporting} metricsReporting
    * @private
    */
-  setMetricsReportingPref_: function(metricsReporting) {
+  setMetricsReportingPref_(metricsReporting) {
     const hadPreviousPref = this.metricsReportingPref_.value !== undefined;
     const pref = {
       key: '',
@@ -97,15 +129,6 @@ Polymer({
       this.showRestart_ = true;
     }
   },
-
-  /**
-   * @param {!Event} e
-   * @private
-   */
-  onRestartTap_: function(e) {
-    e.stopPropagation();
-    settings.LifetimeBrowserProxyImpl.getInstance().restart();
-  },
   // </if>
 
   // <if expr="_google_chrome">
@@ -113,7 +136,7 @@ Polymer({
    * @param {!Event} event
    * @private
    */
-  onUseSpellingServiceToggle_: function(event) {
+  onUseSpellingServiceToggle_(event) {
     // If turning on using the spelling service, automatically turn on
     // spellcheck so that the spelling service can run.
     if (event.target.checked) {
@@ -126,22 +149,58 @@ Polymer({
    * @return {boolean}
    * @private
    */
-  showSpellCheckControl_: function() {
-    return !this.unifiedConsentEnabled ||
-        (!!this.prefs.spellcheck &&
-         /** @type {!Array<string>} */
-         (this.prefs.spellcheck.dictionaries.value).length > 0);
+  showSpellCheckControl_() {
+    return (
+        !!this.prefs.spellcheck &&
+        /** @type {!Array<string>} */
+        (this.prefs.spellcheck.dictionaries.value).length > 0);
   },
 
   /**
    * @return {boolean}
    * @private
    */
-  shouldShowDriveSuggest_: function() {
+  shouldShowDriveSuggest_() {
     return loadTimeData.getBoolean('driveSuggestAvailable') &&
-        !!this.unifiedConsentEnabled && !!this.syncStatus &&
-        !!this.syncStatus.signedIn &&
+        !!this.syncStatus && !!this.syncStatus.signedIn &&
         this.syncStatus.statusAction !== settings.StatusAction.REAUTHENTICATE;
+  },
+
+  /** @private */
+  onSigninAllowedChange_() {
+    if (this.syncStatus.signedIn && !this.$$('#signinAllowedToggle').checked) {
+      // Switch the toggle back on and show the signout dialog.
+      this.$$('#signinAllowedToggle').checked = true;
+      this.showSignoutDialog_ = true;
+    } else {
+      /** @type {!SettingsToggleButtonElement} */ (
+          this.$$('#signinAllowedToggle'))
+          .sendPrefChange();
+      this.showRestartToast_ = true;
+    }
+  },
+
+  /** @private */
+  onSignoutDialogClosed_() {
+    if (/** @type {!SettingsSignoutDialogElement} */ (
+            this.$$('settings-signout-dialog'))
+            .wasConfirmed()) {
+      this.$$('#signinAllowedToggle').checked = false;
+      /** @type {!SettingsToggleButtonElement} */ (
+          this.$$('#signinAllowedToggle'))
+          .sendPrefChange();
+      this.showRestartToast_ = true;
+    }
+    this.showSignoutDialog_ = false;
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onRestartTap_(e) {
+    e.stopPropagation();
+    settings.LifetimeBrowserProxyImpl.getInstance().restart();
   },
 });
 })();

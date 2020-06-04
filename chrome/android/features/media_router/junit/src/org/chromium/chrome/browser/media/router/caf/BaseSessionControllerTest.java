@@ -18,8 +18,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import android.content.Context;
-import android.support.v7.media.MediaRouteSelector;
-import android.support.v7.media.MediaRouter;
+
+import androidx.mediarouter.media.MediaRouteSelector;
+import androidx.mediarouter.media.MediaRouter;
 
 import com.google.android.gms.cast.CastDevice;
 import com.google.android.gms.cast.CastMediaControlIntent;
@@ -162,6 +163,18 @@ public class BaseSessionControllerTest {
 
         mController.onSessionEnded();
         verify(mNotificationController).onSessionEnded();
+    }
+
+    @Test
+    public void testSessionLifecyleNotNotifiedAfterCallbackRemoved() {
+        mController.removeCallback(mNotificationController);
+
+        mController.attachToCastSession(mCastSession);
+        mController.onSessionStarted();
+        verify(mNotificationController, never()).onSessionStarted();
+
+        mController.onSessionEnded();
+        verify(mNotificationController, never()).onSessionEnded();
     }
 
     @Test

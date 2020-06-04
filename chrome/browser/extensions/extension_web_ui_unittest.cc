@@ -15,7 +15,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/favicon_base/favicon_callback.h"
 #include "components/favicon_base/favicon_types.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -63,7 +63,7 @@ class ExtensionWebUITest : public testing::Test {
 
   std::unique_ptr<TestingProfile> profile_;
   ExtensionService* extension_service_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
 #if defined OS_CHROMEOS
   chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
@@ -183,7 +183,7 @@ TEST_F(ExtensionWebUITest, TestRemovingDuplicateEntriesForHosts) {
       base::Value newtab(base::Value::Type::DICTIONARY);
       newtab.SetKey("entry", base::Value(newtab_url.spec()));
       newtab.SetKey("active", base::Value(true));
-      newtab_list.GetList().push_back(std::move(newtab));
+      newtab_list.Append(std::move(newtab));
     }
     {
       base::Value newtab(base::Value::Type::DICTIONARY);
@@ -191,7 +191,7 @@ TEST_F(ExtensionWebUITest, TestRemovingDuplicateEntriesForHosts) {
           "entry",
           base::Value(extension->GetResourceURL("oldtab.html").spec()));
       newtab.SetKey("active", base::Value(true));
-      newtab_list.GetList().push_back(std::move(newtab));
+      newtab_list.Append(std::move(newtab));
     }
 
     all_overrides->SetKey("newtab", std::move(newtab_list));
@@ -237,8 +237,8 @@ TEST_F(ExtensionWebUITest, TestFaviconAlwaysAvailable) {
   base::RunLoop run_loop;
   ExtensionWebUI::GetFaviconForURL(
       profile_.get(), kExtensionManifestURL,
-      base::BindRepeating(set_favicon_results, &favicon_results,
-                          run_loop.QuitClosure()));
+      base::BindOnce(set_favicon_results, &favicon_results,
+                     run_loop.QuitClosure()));
 
   run_loop.Run();
   EXPECT_FALSE(favicon_results.empty());

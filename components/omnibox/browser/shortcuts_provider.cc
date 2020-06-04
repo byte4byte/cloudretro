@@ -68,10 +68,14 @@ struct ShortcutMatch {
         type(static_cast<AutocompleteMatch::Type>(shortcut->match_core.type)) {}
 
   int relevance;
+  // To satisfy |CompareWithDemoteByType<>::operator()|.
+  size_t subrelevance = 0;
   GURL stripped_destination_url;
   const ShortcutsDatabase::Shortcut* shortcut;
   base::string16 contents;
   AutocompleteMatch::Type type;
+
+  AutocompleteMatch::Type GetDemotionType() const { return type; }
 };
 
 // Sorts |matches| by destination, taking into account demotions based on
@@ -153,7 +157,7 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
   // second call to DeleteShortcutsWithURL(), which is harmless.
   history::HistoryService* const history_service = client_->GetHistoryService();
   DCHECK(history_service);
-  history_service->DeleteURL(url);
+  history_service->DeleteURLs({url});
 }
 
 ShortcutsProvider::~ShortcutsProvider() {
@@ -294,13 +298,15 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
                        base::StrCat({base::UTF16ToUTF8(match.keyword), " "}),
                        base::CompareCase::INSENSITIVE_ASCII);
   if (is_search_type) {
+    const TemplateURL* template_url =
+        client_->GetTemplateURLService()->GetDefaultSearchProvider();
     match.from_keyword =
-        // Either the match is not from the default search provider:
-        match.keyword != client_->GetTemplateURLService()
-                             ->GetDefaultSearchProvider()
-                             ->keyword() ||
-        // Or it is, but keyword mode was invoked explicitly and the keyword
-        // in the input is also of the default search provider.
+        // Either the default search provider is disabled,
+        !template_url ||
+        // or the match is not from the default search provider,
+        match.keyword != template_url->keyword() ||
+        // or keyword mode was invoked explicitly and the keyword in the input
+        // is also of the default search provider.
         (input.prefer_keyword() && keyword_matches);
   }
   // True if input is in keyword mode and the match is a URL suggestion or the
@@ -328,9 +334,7 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
       if (inline_autocomplete_offset != base::string16::npos) {
         match.inline_autocompletion =
             match.fill_into_edit.substr(inline_autocomplete_offset);
-        match.allowed_to_be_default_match =
-            !HistoryProvider::PreventInlineAutocomplete(input) ||
-            match.inline_autocompletion.empty();
+        match.SetAllowedToBeDefault(input);
       }
     }
   }

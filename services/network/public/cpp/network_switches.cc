@@ -56,9 +56,6 @@ const char kNetLogCaptureMode[] = "net-log-capture-mode";
 // for the format.
 const char kSSLKeyLogFile[] = "ssl-key-log-file";
 
-// Don't send HTTP-Referer headers.
-const char kNoReferrers[] = "no-referrers";
-
 // Allows overriding the list of restricted ports by passing a comma-separated
 // list of port numbers.
 const char kExplicitlyAllowedPorts[] = "explicitly-allowed-ports";
@@ -72,6 +69,26 @@ const char kExplicitlyAllowedPorts[] = "explicitly-allowed-ports";
 // --unsafely-treat-insecure-origin-as-secure=http://a.test,http://b.test
 const char kUnsafelyTreatInsecureOriginAsSecure[] =
     "unsafely-treat-insecure-origin-as-secure";
+
+// Disable OOR-CORS in child processes regardless of the base::Feature flag.
+const char kForceToDisableOutOfBlinkCors[] = "disable-oor-cors";
+
+// Manually sets additional Trust Tokens key commitments in the network service
+// to the given value, which should be a JSON dictionary satisfying the
+// requirements of TrustTokenKeyCommitmentParser::ParseMultipleIssuers.
+//
+// These keys are available in addition to keys provided by the most recent call
+// to TrustTokenKeyCommitments::Set.
+//
+// For issuers with keys provided through both the command line and
+// TrustTokenKeyCommitments::Set, the keys provided through the command line
+// take precedence. This is because someone testing manually might want to pass
+// additional keys via the command line to a real Chrome release with the
+// component updater enabled, and it would be surprising if the manually-passed
+// keys were overwritten some time after startup when the component updater
+// runs.
+const char kAdditionalTrustTokenKeyCommitments[] =
+    "additional-trust-token-key-commitments";
 
 }  // namespace switches
 

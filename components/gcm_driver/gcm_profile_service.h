@@ -18,6 +18,7 @@
 #include "components/gcm_driver/gcm_buildflags.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/version_info/version_info.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
 
 class PrefService;
@@ -26,7 +27,7 @@ namespace base {
 class SequencedTaskRunner;
 }
 
-namespace identity {
+namespace signin {
 class IdentityManager;
 }
 
@@ -44,35 +45,31 @@ class GCMDriver;
 class GCMProfileService : public KeyedService {
  public:
   using GetProxyResolvingFactoryCallback = base::RepeatingCallback<void(
-      network::mojom::ProxyResolvingSocketFactoryRequest)>;
+      mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>;
 
 #if BUILDFLAG(USE_GCM_FROM_PLATFORM)
   GCMProfileService(
       base::FilePath path,
-      scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+      scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
 #else
   GCMProfileService(
       PrefService* prefs,
       base::FilePath path,
-      base::RepeatingCallback<
-          void(base::WeakPtr<GCMProfileService>,
-               network::mojom::ProxyResolvingSocketFactoryRequest)>
+      base::RepeatingCallback<void(
+          base::WeakPtr<GCMProfileService>,
+          mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
           get_socket_factory_callback,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       network::NetworkConnectionTracker* network_connection_tracker,
       version_info::Channel channel,
       const std::string& product_category_for_subtypes,
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       std::unique_ptr<GCMClientFactory> gcm_client_factory,
       const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
 #endif
   ~GCMProfileService() override;
-
-  // Returns whether GCM is enabled.
-  static bool IsGCMEnabled(PrefService* prefs);
 
   // KeyedService:
   void Shutdown() override;
@@ -90,7 +87,7 @@ class GCMProfileService : public KeyedService {
   std::unique_ptr<GCMDriver> driver_;
 
 #if !BUILDFLAG(USE_GCM_FROM_PLATFORM)
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 

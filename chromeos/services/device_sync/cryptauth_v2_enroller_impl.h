@@ -44,14 +44,19 @@ class CryptAuthV2EnrollerImpl : public CryptAuthV2Enroller {
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<CryptAuthV2Enroller> BuildInstance(
+    static std::unique_ptr<CryptAuthV2Enroller> Create(
         CryptAuthKeyRegistry* key_registry,
         CryptAuthClientFactory* client_factory,
         std::unique_ptr<base::OneShotTimer> timer =
             std::make_unique<base::OneShotTimer>());
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<CryptAuthV2Enroller> CreateInstance(
+        CryptAuthKeyRegistry* key_registry,
+        CryptAuthClientFactory* client_factory,
+        std::unique_ptr<base::OneShotTimer> timer) = 0;
 
    private:
     static Factory* test_factory_;
@@ -72,7 +77,7 @@ class CryptAuthV2EnrollerImpl : public CryptAuthV2Enroller {
 
   static base::Optional<base::TimeDelta> GetTimeoutForState(State state);
   static base::Optional<CryptAuthEnrollmentResult::ResultCode>
-  ResultCodeErrorFromState(State state);
+  ResultCodeErrorFromTimeoutDuringState(State state);
 
   // CryptAuthV2Enroller:
   void OnAttemptStarted(
@@ -91,6 +96,7 @@ class CryptAuthV2EnrollerImpl : public CryptAuthV2Enroller {
                           std::unique_ptr<base::OneShotTimer> timer);
 
   void SetState(State state);
+  void OnTimeout();
 
   // Constructs a SyncKeysRequest with information about every key bundle
   // contained in CryptAuthKeyBundle::AllEnrollableNames().
@@ -137,13 +143,15 @@ class CryptAuthV2EnrollerImpl : public CryptAuthV2Enroller {
       const std::string& session_id,
       const base::flat_map<CryptAuthKeyBundle::Name, cryptauthv2::KeyDirective>&
           new_key_directives,
-      const base::flat_map<CryptAuthKeyBundle::Name, CryptAuthKey>& new_keys,
+      const base::flat_map<CryptAuthKeyBundle::Name,
+                           base::Optional<CryptAuthKey>>& new_keys,
       const base::Optional<CryptAuthKey>& client_ephemeral_dh);
 
   void OnEnrollKeysSuccess(
       const base::flat_map<CryptAuthKeyBundle::Name, cryptauthv2::KeyDirective>&
           new_key_directives,
-      const base::flat_map<CryptAuthKeyBundle::Name, CryptAuthKey>& new_keys,
+      const base::flat_map<CryptAuthKeyBundle::Name,
+                           base::Optional<CryptAuthKey>>& new_keys,
       const cryptauthv2::EnrollKeysResponse& response);
 
   void OnEnrollKeysFailure(NetworkRequestError error);
@@ -157,6 +165,9 @@ class CryptAuthV2EnrollerImpl : public CryptAuthV2Enroller {
   std::unique_ptr<base::OneShotTimer> timer_;
 
   State state_ = State::kNotStarted;
+
+  // The time of the last state change. Used for execution time metrics.
+  base::TimeTicks last_state_change_timestamp_;
 
   // The new ClientDirective from SyncKeysResponse. This value is stored in the
   // CryptAuthEnrollmentResult which is passed to the

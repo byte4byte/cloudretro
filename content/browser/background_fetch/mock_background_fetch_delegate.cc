@@ -38,7 +38,7 @@ MockBackgroundFetchDelegate::TestResponseBuilder::AddResponseHeader(
     const std::string& name,
     const std::string& value) {
   DCHECK(response_);
-  response_->headers->AddHeader(name + ": " + value);
+  response_->headers->AddHeader(name, value);
   return *this;
 }
 
@@ -67,7 +67,7 @@ MockBackgroundFetchDelegate::~MockBackgroundFetchDelegate() {}
 
 void MockBackgroundFetchDelegate::GetPermissionForOrigin(
     const url::Origin& origin,
-    const ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const WebContents::Getter& wc_getter,
     GetPermissionForOriginCallback callback) {
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,

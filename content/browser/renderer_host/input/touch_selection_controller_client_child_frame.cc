@@ -12,6 +12,7 @@
 #include "content/public/browser/touch_selection_controller_client_manager.h"
 #include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/pointer/touch_editing_controller.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/strings/grit/ui_strings.h"
 
@@ -44,11 +45,21 @@ void TouchSelectionControllerClientChildFrame::
   // TODO(wjmaclean): Get the transform between the views to lower the
   // overhead here, instead of calling the transform functions four times.
   transformed_selection_start.SetEdge(
-      rwhv_->TransformPointToRootCoordSpaceF(selection_start_.edge_top()),
-      rwhv_->TransformPointToRootCoordSpaceF(selection_start_.edge_bottom()));
+      rwhv_->TransformPointToRootCoordSpaceF(selection_start_.edge_start()),
+      rwhv_->TransformPointToRootCoordSpaceF(selection_start_.edge_end()));
+  transformed_selection_start.SetVisibleEdge(
+      rwhv_->TransformPointToRootCoordSpaceF(
+          selection_start_.visible_edge_start()),
+      rwhv_->TransformPointToRootCoordSpaceF(
+          selection_start_.visible_edge_end()));
   transformed_selection_end.SetEdge(
-      rwhv_->TransformPointToRootCoordSpaceF(selection_end_.edge_top()),
-      rwhv_->TransformPointToRootCoordSpaceF(selection_end_.edge_bottom()));
+      rwhv_->TransformPointToRootCoordSpaceF(selection_end_.edge_start()),
+      rwhv_->TransformPointToRootCoordSpaceF(selection_end_.edge_end()));
+  transformed_selection_end.SetVisibleEdge(
+      rwhv_->TransformPointToRootCoordSpaceF(
+          selection_end_.visible_edge_start()),
+      rwhv_->TransformPointToRootCoordSpaceF(
+          selection_end_.visible_edge_end()));
 
   manager_->UpdateClientSelectionBounds(transformed_selection_start,
                                         transformed_selection_end, this, this);
@@ -140,14 +151,14 @@ bool TouchSelectionControllerClientChildFrame::IsCommandIdEnabled(
 
   bool has_selection = !rwhv_->GetSelectedText().empty();
   switch (command_id) {
-    case IDS_APP_CUT:
+    case ui::TouchEditable::kCut:
       return editable && readable && has_selection;
-    case IDS_APP_COPY:
+    case ui::TouchEditable::kCopy:
       return readable && has_selection;
-    case IDS_APP_PASTE: {
+    case ui::TouchEditable::kPaste: {
       base::string16 result;
       ui::Clipboard::GetForCurrentThread()->ReadText(
-          ui::ClipboardType::kCopyPaste, &result);
+          ui::ClipboardBuffer::kCopyPaste, &result);
       return editable && !result.empty();
     }
     default:
@@ -164,13 +175,13 @@ void TouchSelectionControllerClientChildFrame::ExecuteCommand(int command_id,
     return;
 
   switch (command_id) {
-    case IDS_APP_CUT:
+    case ui::TouchEditable::kCut:
       host_delegate->Cut();
       break;
-    case IDS_APP_COPY:
+    case ui::TouchEditable::kCopy:
       host_delegate->Copy();
       break;
-    case IDS_APP_PASTE:
+    case ui::TouchEditable::kPaste:
       host_delegate->Paste();
       break;
     default:
@@ -181,7 +192,7 @@ void TouchSelectionControllerClientChildFrame::ExecuteCommand(int command_id,
 
 void TouchSelectionControllerClientChildFrame::RunContextMenu() {
   gfx::RectF anchor_rect =
-      manager_->GetTouchSelectionController()->GetRectBetweenBounds();
+      manager_->GetTouchSelectionController()->GetVisibleRectBetweenBounds();
   gfx::PointF anchor_point =
       gfx::PointF(anchor_rect.CenterPoint().x(), anchor_rect.y());
   gfx::PointF origin = rwhv_->TransformPointToRootCoordSpaceF(gfx::PointF());
@@ -199,13 +210,11 @@ void TouchSelectionControllerClientChildFrame::RunContextMenu() {
 }
 
 bool TouchSelectionControllerClientChildFrame::ShouldShowQuickMenu() {
-  NOTREACHED();
-  return false;
+  return true;
 }
 
 base::string16 TouchSelectionControllerClientChildFrame::GetSelectedText() {
-  NOTREACHED();
-  return base::string16();
+  return rwhv_->GetSelectedText();
 }
 
 }  // namespace content

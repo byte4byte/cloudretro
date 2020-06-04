@@ -16,12 +16,11 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/views/controls/menu/menu_types.h"
 
-namespace app_list {
+namespace ash {
 
 // A class wrapping menu operations for apps in AppListView. Responsible for
 // building, running, and recording histograms.
-class APP_LIST_EXPORT AppListMenuModelAdapter
-    : public ash::AppMenuModelAdapter {
+class APP_LIST_EXPORT AppListMenuModelAdapter : public AppMenuModelAdapter {
  public:
   // The kinds of apps which show menus. This enum is used to record
   // metrics, if a new value is added make sure to modify
@@ -66,6 +65,6 @@ class APP_LIST_EXPORT AppListMenuModelAdapter
   DISALLOW_COPY_AND_ASSIGN(AppListMenuModelAdapter);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_APP_LIST_MENU_MODEL_ADAPTER_H_

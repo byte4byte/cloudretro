@@ -7,33 +7,26 @@
 
 #import <WebKit/WebKit.h>
 
-#include "ios/web/public/referrer.h"
+#include "ios/web/public/navigation/referrer.h"
+#import "ios/web/web_state/ui/crw_web_view_handler.h"
+#import "ios/web/web_state/ui/crw_web_view_handler_delegate.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
-@class WKWebView;
 @class CRWWebRequestController;
 @class CRWWKNavigationHandler;
-@class CRWLegacyNativeContentController;
 
 namespace web {
 class NavigationContextImpl;
-class WebStateImpl;
-class UserInteractionState;
 }  // namespace web
 
-@protocol CRWWebRequestControllerDelegate <NSObject>
+@protocol CRWWebRequestControllerDelegate <CRWWebViewHandlerDelegate>
 
 // The delegate should stop loading the page.
 - (void)webRequestControllerStopLoading:
     (CRWWebRequestController*)requestController;
 
-// The delegate will create a web view if it's not yet created.
-- (void)webRequestControllerEnsureWebViewCreated:
-    (CRWWebRequestController*)requestController;
-
-// The delegate is called when a page (native or web) has actually started
-// loading.
+// The delegate is called when a page has actually started loading.
 - (void)webRequestControllerDidStartLoading:
     (CRWWebRequestController*)requestController;
 
@@ -42,31 +35,16 @@ class UserInteractionState;
     didCompleteLoadWithSuccess:(BOOL)loadSuccess
                     forContext:(web::NavigationContextImpl*)context;
 
-// Asks proxy to disconnect scroll proxy if needed.
-- (void)webRequestControllerDisconnectScrollViewProxy:
-    (CRWWebRequestController*)requestController;
-
-// Asks the delegate for the associated |UserInteractionState|.
-- (web::UserInteractionState*)webRequestControllerUserInteractionState:
-    (CRWWebRequestController*)requestController;
-
-// Asks the delegate for the associated |CRWLegacyNativeContentController|.
-- (CRWLegacyNativeContentController*)
-    webRequestControllerLegacyNativeContentController:
-        (CRWWebRequestController*)requestController;
-
-// Tells the delegate to record the state (scroll position, form values,
-// whatever can be harvested) from the current page into the current session
-// entry.
-- (void)webRequestControllerRecordStateInHistory:
+// Asks proxy to disable back forward navigation gestures until the current (in
+// this case restore) navigation is complete.  This is necessary as restore
+// can trigger a large number of navigations, and when back/forward is enabled
+// this can lead to an unbounded memory spike.
+- (void)webRequestControllerDisableNavigationGesturesUntilFinishNavigation:
     (CRWWebRequestController*)requestController;
 
 // Tells the delegate to restores the state for current page from session
 // history.
 - (void)webRequestControllerRestoreStateFromHistory:
-    (CRWWebRequestController*)requestController;
-
-- (WKWebView*)webRequestControllerWebView:
     (CRWWebRequestController*)requestController;
 
 - (CRWWKNavigationHandler*)webRequestControllerNavigationHandler:
@@ -76,19 +54,9 @@ class UserInteractionState;
 
 // Controller in charge of preparing and handling web requests for the delegate,
 // which should be |CRWWebController|.
-@interface CRWWebRequestController : NSObject
+@interface CRWWebRequestController : CRWWebViewHandler
 
 @property(nonatomic, weak) id<CRWWebRequestControllerDelegate> delegate;
-
-- (instancetype)initWithWebState:(web::WebStateImpl*)webState
-    NS_DESIGNATED_INITIALIZER;
-
-- (instancetype)init NS_UNAVAILABLE;
-
-// Instructs the receiver to close. This should be called when the receiver's
-// owner is being destroyed. The state of the receiver will be set to
-// "isBeingDestroyed" after this is called.
-- (void)close;
 
 // Checks if a load request of the current navigation item should proceed. If
 // this returns |YES|, caller should create a webView and call
@@ -116,6 +84,7 @@ class UserInteractionState;
 // Calls |registerLoadRequestForURL| with empty referrer and link or client
 // redirect transition based on user interaction state. Returns navigation
 // context for this request.
+// TODO(crbug.com/1038303): Remove |placeholderNavigation|.
 - (std::unique_ptr<web::NavigationContextImpl>)
     registerLoadRequestForURL:(const GURL&)URL
        sameDocumentNavigation:(BOOL)sameDocumentNavigation
@@ -125,6 +94,7 @@ class UserInteractionState;
 
 // Creates a page change request and registers it with the navigation handler.
 // Returns navigation context for this request.
+// TODO(crbug.com/1038303): Remove |placeholderNavigation|.
 - (std::unique_ptr<web::NavigationContextImpl>)
     registerLoadRequestForURL:(const GURL&)requestURL
                      referrer:(const web::Referrer&)referrer

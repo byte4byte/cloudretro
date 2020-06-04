@@ -10,7 +10,7 @@
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/memory/memory_kills_histogram.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace memory {
@@ -29,7 +29,7 @@ base::HistogramBase* GetOOMKillsCountHistogram() {
 
 class MemoryKillsMonitorTest : public testing::Test {
  private:
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 TEST_F(MemoryKillsMonitorTest, TestHistograms) {
@@ -158,12 +158,13 @@ TEST_F(MemoryKillsMonitorTest, TestHistograms) {
   }
 
   // Call StartMonitoring multiple times.
-  base::PlatformThreadId tid1 = g_memory_kills_monitor_unittest_instance
-                                    ->non_joinable_worker_thread_->tid();
+  base::DelegateSimpleThread* thread1 = g_memory_kills_monitor_unittest_instance
+                                            ->non_joinable_worker_thread_.get();
+  EXPECT_NE(nullptr, thread1);
   g_memory_kills_monitor_unittest_instance->StartMonitoring();
-  base::PlatformThreadId tid2 = g_memory_kills_monitor_unittest_instance
-                                    ->non_joinable_worker_thread_->tid();
-  EXPECT_EQ(tid1, tid2);
+  base::DelegateSimpleThread* thread2 = g_memory_kills_monitor_unittest_instance
+                                            ->non_joinable_worker_thread_.get();
+  EXPECT_EQ(thread1, thread2);
 
   lmk_count_histogram = GetLowMemoryKillsCountHistogram();
   ASSERT_TRUE(lmk_count_histogram);

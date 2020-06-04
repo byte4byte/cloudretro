@@ -5,42 +5,52 @@
 #ifndef IOS_WEB_VIEW_INTERNAL_PASSWORDS_CWV_PASSWORD_CONTROLLER_H_
 #define IOS_WEB_VIEW_INTERNAL_PASSWORDS_CWV_PASSWORD_CONTROLLER_H_
 
-#import "ios/web/public/web_state/web_state.h"
-
 #import <Foundation/Foundation.h>
+
+#include <memory>
 
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, CWVPasswordUserDecision);
 @class CWVAutofillSuggestion;
 @class CWVPasswordController;
+@class CWVPassword;
+
+namespace ios_web_view {
+class WebViewPasswordManagerClient;
+class WebViewPasswordManagerDriver;
+}  // namespace ios_web_view
+
+namespace password_manager {
+class PasswordManager;
+}  // namespace password_manager
+
+namespace web {
+class WebState;
+}  // namespace web
 
 // Internal protocol to receive callbacks related to password autofilling.
 @protocol CWVPasswordControllerDelegate
 
-// Called when user needs to decide on whether or not to save the
-// password for |username|.
+// Called when user needs to decide on whether or not to save the |password|.
 // This can happen when user is successfully logging into a web site with a new
 // username.
 // Pass user decision to |decisionHandler|. This block should be called only
 // once if user made the decision, or not get called if user ignores the prompt.
 - (void)passwordController:(CWVPasswordController*)passwordController
-    decidePasswordSavingPolicyForUsername:(NSString*)username
-                          decisionHandler:
-                              (void (^)(CWVPasswordUserDecision decision))
-                                  decisionHandler;
+    decideSavePolicyForPassword:(CWVPassword*)password
+                decisionHandler:
+                    (void (^)(CWVPasswordUserDecision decision))decisionHandler;
 
-// Called when user needs to decide on whether or not to update the
-// password for |username|.
+// Called when user needs to decide on whether or not to update the |password|.
 // This can happen when user is successfully logging into a web site with a new
 // password and an existing username.
 // Pass user decision to |decisionHandler|. This block should be called only
 // once if user made the decision, or not get called if user ignores the prompt.
 - (void)passwordController:(CWVPasswordController*)passwordController
-    decidePasswordUpdatingPolicyForUsername:(NSString*)username
-                            decisionHandler:
-                                (void (^)(CWVPasswordUserDecision decision))
-                                    decisionHandler;
+    decideUpdatePolicyForPassword:(CWVPassword*)password
+                  decisionHandler:(void (^)(CWVPasswordUserDecision decision))
+                                      decisionHandler;
 
 @end
 
@@ -48,12 +58,20 @@ typedef NS_ENUM(NSInteger, CWVPasswordUserDecision);
 // autofilling password forms.
 @interface CWVPasswordController : NSObject
 
-// Creates a new password controller with the given |webState|.
 // |delegate| is used to receive password autofill suggestion callbacks.
+@property(nonatomic, weak, nullable) id<CWVPasswordControllerDelegate> delegate;
+
+// Creates a new password controller with the given |webState|.
 - (instancetype)initWithWebState:(web::WebState*)webState
-                     andDelegate:
-                         (nullable id<CWVPasswordControllerDelegate>)delegate
-    NS_DESIGNATED_INITIALIZER;
+                 passwordManager:
+                     (std::unique_ptr<password_manager::PasswordManager>)
+                         passwordManager
+           passwordManagerClient:
+               (std::unique_ptr<ios_web_view::WebViewPasswordManagerClient>)
+                   passwordManagerClient
+           passwordManagerDriver:
+               (std::unique_ptr<ios_web_view::WebViewPasswordManagerDriver>)
+                   passwordManagerDriver NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 

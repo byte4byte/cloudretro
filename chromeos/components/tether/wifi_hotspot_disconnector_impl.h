@@ -37,26 +37,24 @@ class WifiHotspotDisconnectorImpl : public WifiHotspotDisconnector {
   // WifiHotspotDisconnector:
   void DisconnectFromWifiHotspot(
       const std::string& wifi_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback) override;
 
  private:
   void OnSuccessfulWifiDisconnect(
       const std::string& wifi_network_guid,
       const std::string& wifi_network_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback);
   void OnFailedWifiDisconnect(
       const std::string& wifi_network_guid,
       const std::string& wifi_network_path,
-      const base::Closure& success_callback,
       const network_handler::StringResultCallback& error_callback,
       const std::string& error_name,
       std::unique_ptr<base::DictionaryValue> error_data);
   void CleanUpAfterWifiDisconnection(
-      bool success,
       const std::string& wifi_network_path,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback);
 
   NetworkConnectionHandler* network_connection_handler_;
@@ -64,7 +62,7 @@ class WifiHotspotDisconnectorImpl : public WifiHotspotDisconnector {
   PrefService* pref_service_;
   NetworkConfigurationRemover* network_configuration_remover_;
 
-  base::WeakPtrFactory<WifiHotspotDisconnectorImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<WifiHotspotDisconnectorImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WifiHotspotDisconnectorImpl);
 };

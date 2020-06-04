@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -47,10 +47,10 @@ class TestTransportEventHandler : public WebrtcTransport::EventHandler {
 
   // All callbacks must be set before the test handler is passed to a Transport
   // object.
-  void set_connecting_callback(const base::Closure& callback) {
+  void set_connecting_callback(const base::RepeatingClosure& callback) {
     connecting_callback_ = callback;
   }
-  void set_connected_callback(const base::Closure& callback) {
+  void set_connected_callback(const base::RepeatingClosure& callback) {
     connected_callback_ = callback;
   }
   void set_error_callback(const ErrorCallback& callback) {
@@ -87,8 +87,8 @@ class TestTransportEventHandler : public WebrtcTransport::EventHandler {
       scoped_refptr<webrtc::MediaStreamInterface> stream) override {}
 
  private:
-  base::Closure connecting_callback_;
-  base::Closure connected_callback_;
+  base::RepeatingClosure connecting_callback_;
+  base::RepeatingClosure connected_callback_;
   ErrorCallback error_callback_;
   IncomingChannelCallback incoming_channel_callback_;
 
@@ -100,13 +100,13 @@ class TestMessagePipeEventHandler : public MessagePipe::EventHandler {
   TestMessagePipeEventHandler() = default;
   ~TestMessagePipeEventHandler() override = default;
 
-  void set_open_callback(const base::Closure& callback) {
+  void set_open_callback(const base::RepeatingClosure& callback) {
     open_callback_ = callback;
   }
-  void set_message_callback(const base::Closure& callback) {
+  void set_message_callback(const base::RepeatingClosure& callback) {
     message_callback_ = callback;
   }
-  void set_closed_callback(const base::Closure& callback) {
+  void set_closed_callback(const base::RepeatingClosure& callback) {
     closed_callback_ = callback;
   }
 
@@ -136,9 +136,9 @@ class TestMessagePipeEventHandler : public MessagePipe::EventHandler {
 
  private:
   bool is_open_ = false;
-  base::Closure open_callback_;
-  base::Closure message_callback_;
-  base::Closure closed_callback_;
+  base::RepeatingClosure open_callback_;
+  base::RepeatingClosure message_callback_;
+  base::RepeatingClosure closed_callback_;
 
   std::list<std::unique_ptr<CompoundBuffer>> received_messages_;
 
@@ -150,8 +150,7 @@ class TestMessagePipeEventHandler : public MessagePipe::EventHandler {
 class WebrtcTransportTest : public testing::Test {
  public:
   WebrtcTransportTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {
     jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
     network_settings_ =
         NetworkSettings(NetworkSettings::NAT_TRAVERSAL_OUTGOING);
@@ -233,8 +232,8 @@ class WebrtcTransportTest : public testing::Test {
     run_loop_.reset(new base::RunLoop());
     run_loop_->Run();
 
-    host_event_handler_.set_connected_callback(base::Closure());
-    client_event_handler_.set_connected_callback(base::Closure());
+    host_event_handler_.set_connected_callback({});
+    client_event_handler_.set_connected_callback({});
 
     EXPECT_EQ(OK, client_error_);
     EXPECT_EQ(OK, host_error_);
@@ -297,7 +296,7 @@ class WebrtcTransportTest : public testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
   NetworkSettings network_settings_;
@@ -355,7 +354,7 @@ TEST_F(WebrtcTransportTest, DataStream) {
 
   TextEvent message;
   message.set_text("Hello");
-  host_message_pipe_->Send(&message, base::Closure());
+  host_message_pipe_->Send(&message, {});
 
   run_loop_.reset(new base::RunLoop());
   client_message_pipe_event_handler_.set_message_callback(

@@ -17,14 +17,14 @@
 
 namespace blink {
 
-class Document;
 class KURL;
+class LocalDOMWindow;
 class TextResourceDecoder;
 
 // Helper class to download a Web Manifest. When an instance is created, the
 // caller need to call Start() and wait for the passed callback to be executed.
 // If the fetch fails, the callback will be called with two empty objects.
-class ManifestFetcher final : public GarbageCollectedFinalized<ManifestFetcher>,
+class ManifestFetcher final : public GarbageCollected<ManifestFetcher>,
                               public ThreadableLoaderClient {
   USING_GARBAGE_COLLECTED_MIXIN(ManifestFetcher);
   // This will be called asynchronously after the URL has been fetched,
@@ -38,7 +38,7 @@ class ManifestFetcher final : public GarbageCollectedFinalized<ManifestFetcher>,
   explicit ManifestFetcher(const KURL& url);
   ~ManifestFetcher() override;
 
-  void Start(Document& document,
+  void Start(LocalDOMWindow& window,
              bool use_credentials,
              ManifestFetcher::Callback callback);
   void Cancel();

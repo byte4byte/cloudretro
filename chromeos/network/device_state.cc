@@ -110,8 +110,18 @@ bool DeviceState::PropertyChanged(const std::string& key,
     // calls to IPConfigPropertiesChanged.
     ip_configs_.Clear();
     return false;  // No actual state change.
+  } else if (key == shill::kLinkUpProperty) {
+    return GetBooleanValue(key, value, &link_up_);
+  } else if (key == shill::kDeviceBusTypeProperty) {
+    return GetStringValue(key, value, &device_bus_type_);
+  } else if (key == shill::kUsbEthernetMacAddressSourceProperty) {
+    return GetStringValue(key, value, &mac_address_source_);
   }
   return false;
+}
+
+bool DeviceState::IsActive() const {
+  return true;
 }
 
 void DeviceState::IPConfigPropertiesChanged(const std::string& ip_config_path,

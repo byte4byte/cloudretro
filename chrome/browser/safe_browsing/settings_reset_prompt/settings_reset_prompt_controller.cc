@@ -8,11 +8,12 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "base/notreached.h"
 #include "base/time/time.h"
 #include "chrome/browser/profile_resetter/brandcoded_default_settings.h"
 #include "chrome/browser/profile_resetter/profile_resetter.h"
@@ -89,11 +90,6 @@ base::string16 SettingsResetPromptController::GetWindowTitle() const {
 
   NOTREACHED();
   return base::string16();
-}
-
-base::string16 SettingsResetPromptController::GetButtonLabel() const {
-  return l10n_util::GetStringUTF16(
-      IDS_SETTINGS_RESET_PROMPT_ACCEPT_BUTTON_LABEL);
 }
 
 base::string16 SettingsResetPromptController::GetMainText() const {

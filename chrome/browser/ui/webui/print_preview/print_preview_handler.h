@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_PRINT_PREVIEW_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_PRINT_PREVIEW_PRINT_PREVIEW_HANDLER_H_
 
-#include <map>
 #include <memory>
-#include <set>
 #include <string>
 
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -18,10 +18,13 @@
 #include "base/timer/timer.h"
 #include "chrome/common/buildflags.h"
 #include "components/prefs/pref_service.h"
+#include "components/printing/common/print.mojom.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "printing/backend/print_backend.h"
 #include "printing/buildflags/buildflags.h"
+#include "printing/print_job_constants.h"
 
 namespace base {
 class DictionaryValue;
@@ -38,19 +41,9 @@ class PdfPrinterHandler;
 class PrinterHandler;
 class PrintPreviewUI;
 
-// Must match print_preview.PrinterType in
-// chrome/browser/resources/print_preview/native_layer.js
-enum PrinterType {
-  kPrivetPrinter,
-  kExtensionPrinter,
-  kPdfPrinter,
-  kLocalPrinter,
-  kCloudPrinter
-};
-
 // The handler for Javascript messages related to the print preview dialog.
 class PrintPreviewHandler : public content::WebUIMessageHandler,
-                            public identity::IdentityManager::Observer {
+                            public signin::IdentityManager::Observer {
  public:
   PrintPreviewHandler();
   ~PrintPreviewHandler() override;
@@ -62,7 +55,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
 
   // IdentityManager::Observer implementation.
   void OnAccountsInCookieUpdated(
-      const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+      const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
       const GoogleServiceAuthError& error) override;
 
   // Called when print preview failed. |request_id| identifies the request that
@@ -104,10 +97,6 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
                             int preview_uid,
                             int preview_request_id);
 
-  int regenerate_preview_request_count() const {
-    return regenerate_preview_request_count_;
-  }
-
   // Notifies PDF Printer Handler that |path| was selected. Used for tests.
   void FileSelectedForTesting(const base::FilePath& path,
                               int index,
@@ -144,13 +133,11 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewPdfGeneratedBrowserTest,
                            MANUAL_DummyTest);
   friend class PrintPreviewHandlerTest;
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, InitialSettingsSimple);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
-                           InitialSettingsEnableHeaderFooter);
-  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
-                           InitialSettingsDisableHeaderFooter);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPrinters);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetNoDenyListPrinters);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPrinterCapabilities);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
+                           GetNoDenyListPrinterCapabilities);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, Print);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, GetPreview);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, SendPreviewUpdates);
@@ -167,6 +154,10 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   PrintPreviewUI* print_preview_ui() const;
 
   PrefService* GetPrefs() const;
+
+  // Checks policy preferences for a deny list of printer types and initializes
+  // the set that stores them.
+  void ReadPrinterTypeDenyListFromPrefs();
 
   // Whether the the handler should be receiving messages from the renderer to
   // forward to the Print Preview JS in response to preview request with id
@@ -242,9 +233,13 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // preview is displayed.
   void HandleGetInitialSettings(const base::ListValue* args);
 
-#if defined(OS_CHROMEOS)
-  // Opens printer settings in the Chrome OS Settings App.
+  // Opens printer settings in the Chrome OS Settings App or the
+  // chrome://settings page.
   void HandleOpenPrinterSettings(const base::ListValue* args);
+
+#if defined(OS_CHROMEOS)
+  // Gets the EULA URL.
+  void HandleGetEulaUrl(const base::ListValue* args);
 #endif
 
   void SendInitialSettings(const std::string& callback_id,
@@ -254,6 +249,9 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   // Send OAuth2 access token.
   void SendAccessToken(const std::string& callback_id,
                        const std::string& access_token);
+
+  // Send the EULA URL;
+  void SendEulaUrl(const std::string& callback_id, const std::string& eula_url);
 #endif
 
   // Sends the printer capabilities to the Web UI. |settings_info| contains
@@ -268,7 +266,8 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
                         const std::string& printer_name,
                         base::Value settings_info);
 
-  // Send the PDF data to the cloud to print.
+  // Send the PDF data to Print Preview so that it can be sent to the cloud
+  // print server to print.
   void SendCloudPrintJob(const std::string& callback_id,
                          const base::RefCountedMemory* data);
 
@@ -311,18 +310,23 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   void OnPrintResult(const std::string& callback_id,
                      const base::Value& error);
 
+#if defined(OS_CHROMEOS)
+  // Called to initiate a status request for a printer.
+  void HandleRequestPrinterStatusUpdate(const base::ListValue* args);
+
+  // Invokes Web UI Listener "printer-status-update" with new printer status.
+  void OnPrinterStatusUpdated(const base::Value& cups_printer_status);
+#endif
+
   // A count of how many requests received to regenerate preview data.
   // Initialized to 0 then incremented and emitted to a histogram.
-  int regenerate_preview_request_count_;
-
-  // A count of how many requests received to show manage printers dialog.
-  int manage_printers_dialog_request_count_;
+  int regenerate_preview_request_count_ = 0;
 
   // Whether we have already logged a failed print preview.
-  bool reported_failed_preview_;
+  bool reported_failed_preview_ = false;
 
   // Whether we have already logged the number of printers this session.
-  bool has_logged_printers_count_;
+  bool has_logged_printers_count_ = false;
 
   // Whether Google Cloud Print is enabled for the active profile.
   bool cloud_print_enabled_ = false;
@@ -337,11 +341,7 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
 
   // Pointer to the identity manager service so that print preview can listen
   // for GAIA cookie changes.
-  identity::IdentityManager* identity_manager_;
-
-  // Handles requests for cloud printers. Created lazily by calling
-  // GetPrinterHandler().
-  std::unique_ptr<PrinterHandler> cloud_printer_handler_;
+  signin::IdentityManager* identity_manager_ = nullptr;
 
   // Handles requests for extension printers. Created lazily by calling
   // GetPrinterHandler().
@@ -360,10 +360,16 @@ class PrintPreviewHandler : public content::WebUIMessageHandler,
   std::unique_ptr<PrinterHandler> local_printer_handler_;
 
   // Maps preview request ids to callbacks.
-  std::map<int, std::string> preview_callbacks_;
+  base::flat_map<int, std::string> preview_callbacks_;
 
   // Set of preview request ids for failed previews.
-  std::set<int> preview_failures_;
+  base::flat_set<int> preview_failures_;
+
+  // Set of printer types on the deny list.
+  base::flat_set<PrinterType> printer_type_deny_list_;
+
+  // Used to transmit mojo interface method calls to the associated receiver.
+  mojo::AssociatedRemote<mojom::PrintRenderFrame> print_render_frame_;
 
   base::WeakPtrFactory<PrintPreviewHandler> weak_factory_{this};
 

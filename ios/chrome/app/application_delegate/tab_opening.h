@@ -11,9 +11,12 @@
 #include "ui/base/page_transition_types.h"
 
 @class AppState;
+class GURL;
 @class TabModel;
 @protocol StartupInformation;
 struct UrlLoadParams;
+
+enum class ApplicationModeForTabOpening { NORMAL, INCOGNITO, CURRENT };
 
 // Protocol for object that can open new tabs during application launch.
 @protocol TabOpening<NSObject>
@@ -22,7 +25,8 @@ struct UrlLoadParams;
 // then opens either a normal or incognito tab with |url|. After opening |url|,
 // run completion |handler| if it is not nil. After Tab is opened the virtual
 // URL is set to the pending navigation item.
-- (void)dismissModalsAndOpenSelectedTabInMode:(ApplicationMode)targetMode
+- (void)dismissModalsAndOpenSelectedTabInMode:
+            (ApplicationModeForTabOpening)targetMode
                             withUrlLoadParams:
                                 (const UrlLoadParams&)urlLoadParams
                                dismissOmnibox:(BOOL)dismissOmnibox
@@ -44,10 +48,8 @@ struct UrlLoadParams;
 - (ProceduralBlock)completionBlockForTriggeringAction:
     (NTPTabOpeningPostOpeningAction)action;
 
-// Attempts to complete a Payment Request flow with a payment response from a
-// a third party app. Returns whether or not this operation was successful.
-- (BOOL)shouldCompletePaymentRequestOnCurrentTab:
-    (id<StartupInformation>)startupInformation;
+// Whether the |URL| is already opened, in regular mode.
+- (BOOL)URLIsOpenedInRegularMode:(const GURL&)URL;
 
 @end
 

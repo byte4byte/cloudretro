@@ -17,9 +17,9 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
-#include "ash/tray_action/tray_action.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "ui/display/display.h"
@@ -46,7 +46,7 @@ LockContentsView* LockScreen::TestApi::contents_view() const {
 }
 
 LockScreen::LockScreen(ScreenType type) : type_(type) {
-  tray_action_observer_.Add(ash::Shell::Get()->tray_action());
+  tray_action_observer_.Add(Shell::Get()->tray_action());
   saved_clipboard_ = ui::Clipboard::TakeForCurrentThread();
 }
 
@@ -119,9 +119,9 @@ bool LockScreen::HasInstance() {
 
 void LockScreen::Destroy() {
   LoginScreenController::AuthenticationStage authentication_stage =
-      ash::Shell::Get()->login_screen_controller()->authentication_stage();
+      Shell::Get()->login_screen_controller()->authentication_stage();
   base::debug::Alias(&authentication_stage);
-  if (ash::Shell::Get()->login_screen_controller()->authentication_stage() !=
+  if (Shell::Get()->login_screen_controller()->authentication_stage() !=
       authentication_stage) {
     LOG(FATAL) << "Unexpected authentication stage "
                << static_cast<int>(authentication_stage);
@@ -146,7 +146,7 @@ void LockScreen::FocusPreviousUser() {
 }
 
 void LockScreen::ShowParentAccessDialog() {
-  contents_view_->ShowParentAccessDialog(true);
+  contents_view_->ShowParentAccessDialog();
 }
 
 void LockScreen::OnLockScreenNoteStateChanged(mojom::TrayActionState state) {

@@ -45,6 +45,9 @@ const char kAccessibilityVirtualKeyboardEnabled[] =
 const char kAccessibilityMonoAudioEnabled[] = "settings.a11y.mono_audio";
 // A boolean pref which determines whether autoclick is enabled.
 const char kAccessibilityAutoclickEnabled[] = "settings.a11y.autoclick";
+// A boolean pref which determines whether the accessibility shortcuts are
+// enabled or not.
+const char kAccessibilityShortcutsEnabled[] = "settings.a11y.shortcuts_enabled";
 // An integer pref which determines time in ms between when the mouse cursor
 // stops and when an autoclick event is triggered.
 const char kAccessibilityAutoclickDelayMs[] =
@@ -74,13 +77,19 @@ const char kAccessibilityCaretHighlightEnabled[] =
 // A boolean pref which determines whether cursor highlighting is enabled.
 const char kAccessibilityCursorHighlightEnabled[] =
     "settings.a11y.cursor_highlight";
+// A boolean pref which determines whether floating accessibility menu is
+// enabled.
+const char kAccessibilityFloatingMenuEnabled[] = "settings.a11y.floating_menu";
+// Floating a11y menu position, a FloatingMenuPosition;
+const char kAccessibilityFloatingMenuPosition[] =
+    "settings.a11y.floating_menu_position";
 // A boolean pref which determines whether focus highlighting is enabled.
 const char kAccessibilityFocusHighlightEnabled[] =
     "settings.a11y.focus_highlight";
 // A boolean pref which determines whether select-to-speak is enabled.
 const char kAccessibilitySelectToSpeakEnabled[] =
     "settings.a11y.select_to_speak";
-// A boolean pref which determines whether switch access is enabled.
+// A boolean pref which determines whether Switch Access is enabled.
 const char kAccessibilitySwitchAccessEnabled[] =
     "settings.a11y.switch_access.enabled";
 // A pref that stores the key code for the "select" action.
@@ -102,18 +111,42 @@ const char kAccessibilitySwitchAccessPreviousKeyCodes[] =
 const char kAccessibilitySwitchAccessPreviousSetting[] =
     "settings.a11y.switch_access.previous.setting";
 // A boolean pref which determines whether auto-scanning is enabled within
-// switch access.
+// Switch Access.
 const char kAccessibilitySwitchAccessAutoScanEnabled[] =
     "settings.a11y.switch_access.auto_scan.enabled";
 // An integer pref which determines time delay in ms before automatically
 // scanning forward (when auto-scan is enabled).
 const char kAccessibilitySwitchAccessAutoScanSpeedMs[] =
     "settings.a11y.switch_access.auto_scan.speed_ms";
+// An integer pref which determines time delay in ms before automatically
+// scanning forward while navigating the keyboard (when auto-scan is
+// enabled).
+const char kAccessibilitySwitchAccessAutoScanKeyboardSpeedMs[] =
+    "settings.a11y.switch_access.auto_scan.keyboard.speed_ms";
+// A boolean pref which, if set, indicates that shelf navigation buttons (home,
+// back and overview button) should be shown in tablet mode. Note that shelf
+// buttons might be shown even if the pref value is false - for example, if
+// spoken feedback, autoclick or switch access are enabled.
+const char kAccessibilityTabletModeShelfNavigationButtonsEnabled[] =
+    "settings.a11y.tablet_mode_shelf_nav_buttons_enabled";
 // A boolean pref which determines whether dictation is enabled.
 const char kAccessibilityDictationEnabled[] = "settings.a11y.dictation";
 // A boolean pref which determines whether the accessibility menu shows
 // regardless of the state of a11y features.
 const char kShouldAlwaysShowAccessibilityMenu[] = "settings.a11y.enable_menu";
+
+// A dictionary storing the number of times and most recent time all contextual
+// tooltips have been shown.
+const char kContextualTooltips[] = "settings.contextual_tooltip.shown_info";
+
+// A list containing the stored virtual desks names in the same order of the
+// desks in the overview desks bar. This list will be used to restore the desks,
+// their order, and their names for the primary user on first signin. If a desk
+// hasn't been renamed by the user (i.e. it uses one of the default
+// automatically-assigned desk names such as "Desk 1", "Desk 2", ... etc.), its
+// name will appear in this list as an empty string. The desk names are stored
+// as UTF8 strings.
+const char kDesksNamesList[] = "ash.desks.desks_names_list";
 
 // A boolean pref storing the enabled status of the Docked Magnifier feature.
 const char kDockedMagnifierEnabled[] = "ash.docked_magnifier.enabled";
@@ -139,8 +172,9 @@ const char kDictationAcceleratorDialogHasBeenAccepted[] =
     "settings.a11y.dictation_accelerator_dialog_has_been_accepted";
 // A boolean pref which indicates whether the display rotation confirmation
 // dialog has ever been shown.
-const char kDisplayRotationAcceleratorDialogHasBeenAccepted[] =
-    "settings.a11y.display_rotation_accelerator_dialog_has_been_accepted";
+// Renamed 10/2019 to force reset the pref to false.
+const char kDisplayRotationAcceleratorDialogHasBeenAccepted2[] =
+    "settings.a11y.display_rotation_accelerator_dialog_has_been_accepted2";
 
 // A dictionary pref that stores the mixed mirror mode parameters.
 const char kDisplayMixedMirrorModeParams[] =
@@ -149,6 +183,9 @@ const char kDisplayMixedMirrorModeParams[] =
 const char kDisplayPowerState[] = "settings.display.power_state";
 // A dictionary pref that stores per display preferences.
 const char kDisplayProperties[] = "settings.display.properties";
+// Boolean controlling whether privacy screen is enabled.
+const char kDisplayPrivacyScreenEnabled[] =
+    "settings.display.privacy_screen_enabled";
 // A dictionary pref that specifies the state of the rotation lock, and the
 // display orientation, for the internal display.
 const char kDisplayRotationLock[] = "settings.display.rotation_lock";
@@ -164,6 +201,11 @@ const char kExternalDisplayMirrorInfo[] =
 // Its key is the ID of the display and its value is a dictionary for the
 // layout/offset information.
 const char kSecondaryDisplays[] = "settings.display.secondary_displays";
+
+// A boolean pref storing whether the gesture education notification has ever
+// been shown to the user, which we use to stop showing it again.
+const char kGestureEducationNotificationShown[] =
+    "ash.gesture_education.notification_shown";
 
 // A boolean pref which stores whether a stylus has been seen before.
 const char kHasSeenStylus[] = "ash.has_seen_stylus";
@@ -190,6 +232,9 @@ const char kMessageCenterLockScreenMode[] =
 const char kMessageCenterLockScreenModeShow[] = "show";
 const char kMessageCenterLockScreenModeHide[] = "hide";
 const char kMessageCenterLockScreenModeHideSensitive[] = "hideSensitive";
+
+// A boolean pref storing the enabled status of the ambient color feature.
+const char kAmbientColorEnabled[] = "ash.ambient_color.enabled";
 
 // A boolean pref storing the enabled status of the NightLight feature.
 const char kNightLightEnabled[] = "ash.night_light.enabled";
@@ -222,6 +267,11 @@ const char kNightLightCustomEndTime[] = "ash.night_light.custom_end_time";
 // geoposition to calculate the sunset / sunrise times.
 const char kNightLightCachedLatitude[] = "ash.night_light.cached_latitude";
 const char kNightLightCachedLongitude[] = "ash.night_light.cached_longitude";
+
+// A boolean pref storing whether the AutoNightLight notification has ever been
+// dismissed by the user, which we use to stop showing it again.
+const char kAutoNightLightNotificationDismissed[] =
+    "ash.auto_night_light.notification_dismissed";
 
 // Whether the Chrome OS lock screen is allowed.
 const char kAllowScreenLock[] = "allow_screen_lock";
@@ -322,6 +372,10 @@ const char kPowerSmartDimEnabled[] = "power.smart_dim_enabled";
 
 // Boolean controlling whether ALS logging is enabled.
 const char kPowerAlsLoggingEnabled[] = "power.als_logging_enabled";
+
+// Boolean controlling whether the settings is enabled. This pref is intended to
+// be set only by policy not by user.
+const char kOsSettingsEnabled[] = "os_settings_enabled";
 
 // |kShelfAlignment| and |kShelfAutoHideBehavior| have a local variant. The
 // local variant is not synced and is used if set. If the local variant is not
@@ -459,8 +513,15 @@ const char kAssistantPrivacyInfoShownInLauncher[] =
 const char kAssistantPrivacyInfoDismissedInLauncher[] =
     "ash.launcher.assistant_privacy_info_dismissed";
 
-// A boolean pref that indicates whether lock screen media keys are enabled.
-const char kLockScreenMediaKeysEnabled[] = "ash.lock_screen_media_keys_enabled";
+// A boolean pref that indicates whether lock screen media controls are enabled.
+// Controlled by user policy.
+const char kLockScreenMediaControlsEnabled[] =
+    "ash.lock_screen_media_controls_enabled";
+
+// A boolean pref which is true if touchpad reverse scroll is enabled.
+const char kNaturalScroll[] = "settings.touchpad.natural_scroll";
+// A boolean pref which is true if mouse reverse scroll is enabled.
+const char kMouseReverseScroll[] = "settings.mouse.reverse_scroll";
 
 // NOTE: New prefs should start with the "ash." prefix. Existing prefs moved
 // into this file should not be renamed, since they may be synced.

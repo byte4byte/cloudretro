@@ -10,6 +10,9 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
+#include "ui/display/manager/display_manager.h"
+#include "ui/display/screen.h"
+#include "ui/display/test/display_manager_test_api.h"
 
 namespace ash {
 namespace accelerators {
@@ -21,8 +24,8 @@ TEST_F(AcceleratorCommandsTest, ToggleMinimized) {
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
   std::unique_ptr<aura::Window> window2(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  wm::WindowState* window_state1 = wm::GetWindowState(window1.get());
-  wm::WindowState* window_state2 = wm::GetWindowState(window2.get());
+  WindowState* window_state1 = WindowState::Get(window1.get());
+  WindowState* window_state2 = WindowState::Get(window2.get());
   window_state1->Activate();
   window_state2->Activate();
 
@@ -47,24 +50,24 @@ TEST_F(AcceleratorCommandsTest, ToggleMinimized) {
 TEST_F(AcceleratorCommandsTest, ToggleMaximized) {
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   window_state->Activate();
 
   // When not in fullscreen, accelerators::ToggleMaximized toggles Maximized.
   EXPECT_FALSE(window_state->IsMaximized());
-  accelerators::ToggleMaximized();
+  ToggleMaximized();
   EXPECT_TRUE(window_state->IsMaximized());
-  accelerators::ToggleMaximized();
+  ToggleMaximized();
   EXPECT_FALSE(window_state->IsMaximized());
 
   // When in fullscreen accelerators::ToggleMaximized gets out of fullscreen.
   EXPECT_FALSE(window_state->IsFullscreen());
-  accelerators::ToggleFullscreen();
+  ToggleFullscreen();
   EXPECT_TRUE(window_state->IsFullscreen());
-  accelerators::ToggleMaximized();
+  ToggleMaximized();
   EXPECT_FALSE(window_state->IsFullscreen());
   EXPECT_FALSE(window_state->IsMaximized());
-  accelerators::ToggleMaximized();
+  ToggleMaximized();
   EXPECT_FALSE(window_state->IsFullscreen());
   EXPECT_TRUE(window_state->IsMaximized());
 }
@@ -72,14 +75,65 @@ TEST_F(AcceleratorCommandsTest, ToggleMaximized) {
 TEST_F(AcceleratorCommandsTest, Unpin) {
   std::unique_ptr<aura::Window> window1(
       CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
-  wm::WindowState* window_state1 = wm::GetWindowState(window1.get());
+  WindowState* window_state1 = WindowState::Get(window1.get());
   window_state1->Activate();
 
-  wm::PinWindow(window1.get(), /* trusted */ false);
+  window_util::PinWindow(window1.get(), /* trusted */ false);
   EXPECT_TRUE(window_state1->IsPinned());
 
   UnpinWindow();
   EXPECT_FALSE(window_state1->IsPinned());
+}
+
+TEST_F(AcceleratorCommandsTest, CycleSwapPrimaryDisplay) {
+  display::test::DisplayManagerTestApi(display_manager())
+      .SetFirstDisplayAsInternalDisplay();
+  UpdateDisplay("800x600,800x600,800x600");
+
+  display::DisplayIdList id_list = display_manager()->GetCurrentDisplayIdList();
+
+  ShiftPrimaryDisplay();
+  int64_t primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[1], primary_id);
+
+  ShiftPrimaryDisplay();
+  primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[2], primary_id);
+
+  ShiftPrimaryDisplay();
+  primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[0], primary_id);
+}
+
+TEST_F(AcceleratorCommandsTest, CycleMixedMirrorModeSwapPrimaryDisplay) {
+  UpdateDisplay("300x400,400x500,500x600");
+  display::DisplayIdList id_list = display_manager()->GetCurrentDisplayIdList();
+
+  // Turn on mixed mirror mode. (Mirror from the first display to the second
+  // display)
+  display::DisplayIdList dst_ids;
+  dst_ids.emplace_back(id_list[1]);
+  base::Optional<display::MixedMirrorModeParams> mixed_params(
+      base::in_place, id_list[0], dst_ids);
+
+  display_manager()->SetMirrorMode(display::MirrorMode::kMixed, mixed_params);
+
+  EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
+  EXPECT_EQ(id_list[0], display_manager()->mirroring_source_id());
+  EXPECT_TRUE(display_manager()->mixed_mirror_mode_params());
+  EXPECT_EQ(2U, display_manager()->GetNumDisplays());
+
+  ShiftPrimaryDisplay();
+  int64_t primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[2], primary_id);
+
+  ShiftPrimaryDisplay();
+  primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[0], primary_id);
+
+  ShiftPrimaryDisplay();
+  primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_EQ(id_list[2], primary_id);
 }
 
 }  // namespace accelerators

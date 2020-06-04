@@ -27,7 +27,7 @@
         android:layout_marginTop="10dp" />
 
     <!-- An editable text field for the name of the home screen icon. -->
-    <org.chromium.chrome.browser.widget.AlertDialogEditText
+    <org.chromium.components.browser_ui.widget.text.AlertDialogEditText
         android:id="@+id/text"
         android:inputType="text"
         android:layout_width="match_parent"
@@ -36,7 +36,8 @@
         android:singleLine="true"
         android:paddingTop="0dp"
         android:layout_marginTop="10dp"
-        android:layout_marginStart="48dp" />
+        android:layout_marginStart="48dp"
+        android:visibility="invisible"/>
 
     <!-- The layout used for apps. -->
     <LinearLayout
@@ -64,7 +65,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingBottom="2dp"
-            android:textAppearance="@style/TextAppearance.BlackBody" />
+            android:textAppearance="@style/TextAppearance.TextMedium.Secondary" />
 
         <!-- The rating bar used for Play Store app ratings for native apps.
              Displayed in place of the origin. -->

@@ -5,25 +5,29 @@
 package org.chromium.chrome.browser.payments;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
-import android.support.v7.content.res.AppCompatResources;
 import android.text.TextUtils;
 import android.util.JsonWriter;
 
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
+import androidx.appcompat.content.res.AppCompatResources;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.FullCardRequestDelegate;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.NormalizedAddressRequestDelegate;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.components.payments.ErrorStrings;
+import org.chromium.components.payments.PayerData;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
 import org.chromium.payments.mojom.PaymentMethodData;
+import org.chromium.payments.mojom.PaymentOptions;
+import org.chromium.payments.mojom.PaymentShippingOption;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -37,8 +41,8 @@ import java.util.Set;
 /**
  * The locally stored credit card payment instrument.
  */
-public class AutofillPaymentInstrument extends PaymentInstrument
-        implements FullCardRequestDelegate, NormalizedAddressRequestDelegate {
+public class AutofillPaymentInstrument
+        extends PaymentApp implements FullCardRequestDelegate, NormalizedAddressRequestDelegate {
     // Bit field values are identical to CreditCardCompletionStatus fields in
     // autofill_card_validation.h. Please modify autofill_card_validation.h after changing these
     // bits since missing fields on both Android and Desktop are recorded in the same UMA metric:
@@ -58,12 +62,14 @@ public class AutofillPaymentInstrument extends PaymentInstrument
     }
 
     private final WebContents mWebContents;
-    private final boolean mIsMatchingMerchantsRequestedCardType;
     private CreditCard mCard;
     private String mSecurityCode;
-    @Nullable private AutofillProfile mBillingAddress;
-    @Nullable private String mMethodName;
-    @Nullable private InstrumentDetailsCallback mCallback;
+    @Nullable
+    private AutofillProfile mBillingAddress;
+    @Nullable
+    private String mMethodName;
+    @Nullable
+    private InstrumentDetailsCallback mCallback;
     private boolean mIsWaitingForBillingNormalization;
     private boolean mIsWaitingForFullCardDetails;
     private boolean mHasValidNumberAndName;
@@ -76,21 +82,15 @@ public class AutofillPaymentInstrument extends PaymentInstrument
      * @param billingAddress                 The billing address for the card.
      * @param methodName                     The payment method name, e.g., "basic-card", "visa",
      *                                       amex", or null.
-     * @param matchesMerchantCardTypeExactly Whether the card type (credit, debit, prepaid) matches
-     *                                       the type that the merchant has requested exactly. This
-     *                                       should be false for unknown card types, if the merchant
-     *                                       cannot accept some card types.
      */
     public AutofillPaymentInstrument(WebContents webContents, CreditCard card,
-            @Nullable AutofillProfile billingAddress, @Nullable String methodName,
-            boolean matchesMerchantCardTypeExactly) {
+            @Nullable AutofillProfile billingAddress, @Nullable String methodName) {
         super(card.getGUID(), card.getObfuscatedNumber(), card.getName(), null);
         mWebContents = webContents;
         mCard = card;
         mBillingAddress = billingAddress;
         mIsEditable = true;
         mMethodName = methodName;
-        mIsMatchingMerchantsRequestedCardType = matchesMerchantCardTypeExactly;
 
         Context context = ChromeActivity.fromWebContents(mWebContents);
         if (context == null) return;
@@ -121,28 +121,14 @@ public class AutofillPaymentInstrument extends PaymentInstrument
     }
 
     @Override
-    public boolean isExactlyMatchingMerchantRequest() {
-        return mIsMatchingMerchantsRequestedCardType;
-    }
-
-    @Override
     public boolean isValidForPaymentMethodData(String method, PaymentMethodData data) {
         boolean isSupportedMethod = super.isValidForPaymentMethodData(method, data);
         if (!isSupportedMethod) return false;
 
-        int cardType = getCard().getCardType();
-        String cardIssuerNetwork = getCard().getBasicCardIssuerNetwork();
-        if (BasicCardUtils.isBasicCardTypeSpecified(data)) {
-            Set<Integer> targetCardTypes = BasicCardUtils.convertBasicCardToTypes(data);
-            targetCardTypes.remove(CardType.UNKNOWN);
-            assert targetCardTypes.size() > 0;
-            if (!targetCardTypes.contains(cardType)) return false;
-        }
-
         if (BasicCardUtils.isBasicCardNetworkSpecified(data)) {
             Set<String> targetCardNetworks = BasicCardUtils.convertBasicCardToNetworks(data);
             assert targetCardNetworks.size() > 0;
-            if (!targetCardNetworks.contains(cardIssuerNetwork)) return false;
+            if (!targetCardNetworks.contains(getCard().getBasicCardIssuerNetwork())) return false;
         }
         return true;
     }
@@ -155,12 +141,19 @@ public class AutofillPaymentInstrument extends PaymentInstrument
 
     @Override
     public boolean canMakePayment() {
-        return mHasValidNumberAndName; // Ignore absence of billing address.
+        return PaymentsExperimentalFeatures.isEnabled(
+                       ChromeFeatureList.STRICT_HAS_ENROLLED_AUTOFILL_INSTRUMENT)
+                ? strictCanMakePayment()
+                : mHasValidNumberAndName;
+    }
+
+    public boolean strictCanMakePayment() {
+        return getMissingFields() == CompletionStatus.COMPLETE && mHaveRequestedAutofillData;
     }
 
     @Override
     public boolean canPreselect() {
-        return mIsComplete && mIsMatchingMerchantsRequestedCardType;
+        return mIsComplete;
     }
 
     @Override
@@ -168,8 +161,8 @@ public class AutofillPaymentInstrument extends PaymentInstrument
             String unusedOrigin, String unusedIFrameOrigin, byte[][] unusedCertificateChain,
             Map<String, PaymentMethodData> unusedMethodDataMap, PaymentItem unusedTotal,
             List<PaymentItem> unusedDisplayItems,
-            Map<String, PaymentDetailsModifier> unusedModifiers,
-            InstrumentDetailsCallback callback) {
+            Map<String, PaymentDetailsModifier> unusedModifiers, PaymentOptions paymentOptions,
+            List<PaymentShippingOption> shippingOptions, InstrumentDetailsCallback callback) {
         // The billing address should never be null for a credit card at this point.
         assert mBillingAddress != null;
         assert AutofillAddress.checkAddressCompletionStatus(
@@ -280,7 +273,7 @@ public class AutofillPaymentInstrument extends PaymentInstrument
             mSecurityCode = "";
         }
 
-        mCallback.onInstrumentDetailsReady(mMethodName, stringWriter.toString());
+        mCallback.onInstrumentDetailsReady(mMethodName, stringWriter.toString(), new PayerData());
         mCallback = null;
     }
 
@@ -421,6 +414,12 @@ public class AutofillPaymentInstrument extends PaymentInstrument
         return mCard;
     }
 
+    /** @return The billing address associated with this payment instrument. */
+    @Nullable
+    public AutofillProfile getBillingProfile() {
+        return mBillingAddress;
+    }
+
     @Override
     public String getPreviewString(String labelSeparator, int maxLength) {
         StringBuilder previewString = new StringBuilder(getLabel());
@@ -438,14 +437,17 @@ public class AutofillPaymentInstrument extends PaymentInstrument
     /** @return a bit vector of the card's missing fields. */
     public int getMissingFields() {
         int missingFields = CompletionStatus.COMPLETE;
-        if (mBillingAddress == null)
+        if (mBillingAddress == null) {
             missingFields |= CompletionStatus.CREDIT_CARD_NO_BILLING_ADDRESS;
-        if (!mCard.hasValidCreditCardExpirationDate())
+        }
+        if (!mCard.hasValidCreditCardExpirationDate()) {
             missingFields |= CompletionStatus.CREDIT_CARD_EXPIRED;
+        }
 
         if (mCard.getIsLocal()) {
-            if (TextUtils.isEmpty(mCard.getName()))
+            if (TextUtils.isEmpty(mCard.getName())) {
                 missingFields |= CompletionStatus.CREDIT_CARD_NO_CARDHOLDER;
+            }
 
             if (PersonalDataManager.getInstance().getBasicCardIssuerNetwork(
                         mCard.getNumber().toString(), true)
@@ -453,9 +455,6 @@ public class AutofillPaymentInstrument extends PaymentInstrument
                 missingFields |= CompletionStatus.CREDIT_CARD_NO_NUMBER;
             }
         }
-
-        if (!mIsMatchingMerchantsRequestedCardType)
-            missingFields |= CompletionStatus.CREDIT_CARD_TYPE_MISMATCH;
 
         return missingFields;
     }

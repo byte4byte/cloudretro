@@ -9,10 +9,9 @@
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -24,28 +23,12 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user_info.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #endif
-
-namespace {
-
-// Given a |browser| that's an app or popup window, checks if it's hosting the
-// settings page.
-bool IsChromeSettingsAppOrPopupWindow(Browser* browser) {
-  DCHECK(browser);
-  content::WebContents* web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-  if (!web_contents)
-    return false;
-  const GURL& gurl = web_contents->GetURL();
-  return gurl.SchemeIs(content::kChromeUIScheme) &&
-         gurl.host_piece() == chrome::kChromeUISettingsHost;
-}
-
-}  // namespace
 
 SystemMenuModelBuilder::SystemMenuModelBuilder(
     ui::AcceleratorProvider* provider,
@@ -70,7 +53,7 @@ void SystemMenuModelBuilder::Init() {
 void SystemMenuModelBuilder::BuildMenu(ui::SimpleMenuModel* model) {
   // We add the menu items in reverse order so that insertion_index never needs
   // to change.
-  if (browser()->is_type_tabbed())
+  if (browser()->is_type_normal())
     BuildSystemMenuForBrowserWindow(model);
   else
     BuildSystemMenuForAppOrPopupWindow(model);
@@ -87,6 +70,7 @@ void SystemMenuModelBuilder::BuildSystemMenuForBrowserWindow(
 #endif
   model->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   model->AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
+  model->AddItemWithStringId(IDC_BOOKMARK_ALL_TABS, IDS_BOOKMARK_ALL_TABS);
   if (chrome::CanOpenTaskManager()) {
     model->AddSeparator(ui::NORMAL_SEPARATOR);
     model->AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
@@ -108,22 +92,24 @@ void SystemMenuModelBuilder::BuildSystemMenuForAppOrPopupWindow(
   model->AddItemWithStringId(IDC_BACK, IDS_CONTENT_CONTEXT_BACK);
   model->AddItemWithStringId(IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD);
   model->AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
-  model->AddSeparator(ui::NORMAL_SEPARATOR);
-  if (browser()->is_app())
-    model->AddItemWithStringId(IDC_NEW_TAB, IDS_APP_MENU_NEW_WEB_PAGE);
-  else
-    model->AddItemWithStringId(IDC_SHOW_AS_TAB, IDS_SHOW_AS_TAB);
-  model->AddSeparator(ui::NORMAL_SEPARATOR);
-  model->AddItemWithStringId(IDC_CUT, IDS_CUT);
-  model->AddItemWithStringId(IDC_COPY, IDS_COPY);
-  model->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
-  model->AddSeparator(ui::NORMAL_SEPARATOR);
-  model->AddItemWithStringId(IDC_FIND, IDS_FIND);
-  model->AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-  zoom_menu_contents_.reset(new ZoomMenuModel(&menu_delegate_));
-  model->AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_ZOOM_MENU,
-                                zoom_menu_contents_.get());
-  if (browser()->is_app() && chrome::CanOpenTaskManager()) {
+  if (!web_app::AppBrowserController::IsForWebAppBrowser(browser())) {
+    model->AddSeparator(ui::NORMAL_SEPARATOR);
+    if (browser()->deprecated_is_app())
+      model->AddItemWithStringId(IDC_NEW_TAB, IDS_APP_MENU_NEW_WEB_PAGE);
+    else
+      model->AddItemWithStringId(IDC_SHOW_AS_TAB, IDS_SHOW_AS_TAB);
+    model->AddSeparator(ui::NORMAL_SEPARATOR);
+    model->AddItemWithStringId(IDC_CUT, IDS_CUT);
+    model->AddItemWithStringId(IDC_COPY, IDS_COPY);
+    model->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
+    model->AddSeparator(ui::NORMAL_SEPARATOR);
+    model->AddItemWithStringId(IDC_FIND, IDS_FIND);
+    model->AddItemWithStringId(IDC_PRINT, IDS_PRINT);
+    zoom_menu_contents_ = std::make_unique<ZoomMenuModel>(&menu_delegate_);
+    model->AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_ZOOM_MENU,
+                                  zoom_menu_contents_.get());
+  }
+  if (browser()->deprecated_is_app() && chrome::CanOpenTaskManager()) {
     model->AddSeparator(ui::NORMAL_SEPARATOR);
     model->AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
   }
@@ -131,14 +117,7 @@ void SystemMenuModelBuilder::BuildSystemMenuForAppOrPopupWindow(
   model->AddSeparator(ui::NORMAL_SEPARATOR);
   model->AddItemWithStringId(IDC_CLOSE_WINDOW, IDS_CLOSE);
 #endif
-
-  // Avoid appending the teleport menu for the settings window.  This window's
-  // presentation is unique: it's a normal browser window with an app-like
-  // frame, which doesn't have a user icon badge.  Thus if teleported it's not
-  // clear what user it applies to. Rather than bother to implement badging just
-  // for this rare case, simply prevent the user from teleporting the window.
-  if (!IsChromeSettingsAppOrPopupWindow(browser()))
-    AppendTeleportMenu(model);
+  AppendTeleportMenu(model);
 }
 
 void SystemMenuModelBuilder::AddFrameToggleItems(ui::SimpleMenuModel* model) {
@@ -153,6 +132,16 @@ void SystemMenuModelBuilder::AddFrameToggleItems(ui::SimpleMenuModel* model) {
 void SystemMenuModelBuilder::AppendTeleportMenu(ui::SimpleMenuModel* model) {
 #if defined(OS_CHROMEOS)
   DCHECK(browser()->window());
+
+  // Avoid appending the teleport menu for the settings window.  This window's
+  // presentation is unique: it's a normal browser window with an app-like
+  // frame, which doesn't have a user icon badge.  Thus if teleported it's not
+  // clear what user it applies to. Rather than bother to implement badging just
+  // for this rare case, simply prevent the user from teleporting the window.
+  if (chrome::SettingsWindowManager::GetInstance()->IsSettingsBrowser(
+          browser())) {
+    return;
+  }
 
   // Don't show the menu for incognito windows.
   if (browser()->profile()->IsOffTheRecord())
@@ -176,16 +165,19 @@ void SystemMenuModelBuilder::AppendTeleportMenu(ui::SimpleMenuModel* model) {
     return;
 
   model->AddSeparator(ui::NORMAL_SEPARATOR);
-  DCHECK_LE(logged_in_users.size(), 3u);
+  int command_id = IDC_VISIT_DESKTOP_OF_LRU_USER_NEXT;
   for (size_t user_index = 1; user_index < logged_in_users.size();
        ++user_index) {
+    if (command_id > IDC_VISIT_DESKTOP_OF_LRU_USER_LAST) {
+      break;
+    }
     const user_manager::UserInfo* user_info = logged_in_users[user_index];
     model->AddItem(
-        user_index == 1 ? IDC_VISIT_DESKTOP_OF_LRU_USER_2
-                        : IDC_VISIT_DESKTOP_OF_LRU_USER_3,
+        command_id,
         l10n_util::GetStringFUTF16(
             IDS_VISIT_DESKTOP_OF_LRU_USER, user_info->GetDisplayName(),
             base::ASCIIToUTF16(user_info->GetDisplayEmail())));
+    ++command_id;
   }
 #endif
 }

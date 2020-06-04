@@ -10,9 +10,9 @@
 
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "ios/web/public/referrer.h"
-#include "ios/web/public/user_agent.h"
-#import "ios/web/public/web_state/page_display_state.h"
+#include "ios/web/common/user_agent.h"
+#include "ios/web/public/navigation/referrer.h"
+#import "ios/web/public/ui/page_display_state.h"
 #include "url/gurl.h"
 
 namespace web {
@@ -21,6 +21,8 @@ namespace web {
 
 // Current URL (std::string).
 extern NSString* const kNavigationItemStorageURLKey;
+// Current URL (std::string).
+extern NSString* const kNavigationItemStorageVirtualURLKey;
 // Page referrer URL (std::string).
 extern NSString* const kNavigationItemStorageReferrerURLKey;
 // Page referrer URL (NSURL). Deprecated, used for backward compatibility.
@@ -50,6 +52,7 @@ extern NSString* const kNavigationItemStorageUserAgentTypeKey;
 // properties.
 @interface CRWNavigationItemStorage : NSObject <NSCoding>
 
+@property(nonatomic, assign) GURL URL;
 @property(nonatomic, assign) GURL virtualURL;
 @property(nonatomic, assign) web::Referrer referrer;
 @property(nonatomic, assign) base::Time timestamp;

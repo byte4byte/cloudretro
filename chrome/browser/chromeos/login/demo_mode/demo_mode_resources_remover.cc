@@ -8,13 +8,14 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -33,7 +34,6 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_type.h"
 #include "third_party/re2/src/re2/re2.h"
-#include "ui/base/user_activity/user_activity_detector.h"
 
 namespace chromeos {
 
@@ -64,7 +64,7 @@ DemoModeResourcesRemover::RemovalResult RemoveDirectory(
   if (!base::DirectoryExists(path) || base::IsDirectoryEmpty(path))
     return DemoModeResourcesRemover::RemovalResult::kNotFound;
 
-  if (!base::DeleteFile(path, true /*recursive*/))
+  if (!base::DeleteFileRecursively(path))
     return DemoModeResourcesRemover::RemovalResult::kFailed;
 
   return DemoModeResourcesRemover::RemovalResult::kSuccess;
@@ -145,8 +145,7 @@ void DemoModeResourcesRemover::LowDiskSpace(uint64_t free_disk_space) {
   AttemptRemoval(RemovalReason::kLowDiskSpace, RemovalCallback());
 }
 
-void DemoModeResourcesRemover::ActiveUserChanged(
-    const user_manager::User* user) {
+void DemoModeResourcesRemover::ActiveUserChanged(user_manager::User* user) {
   // Ignore user activity in guest sessions.
   if (user->GetType() == user_manager::USER_TYPE_GUEST)
     return;
@@ -229,7 +228,7 @@ void DemoModeResourcesRemover::AttemptRemoval(RemovalReason reason,
     return;
   removal_in_progress_ = true;
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&RemoveDirectory, DemoResources::GetPreInstalledPath()),
@@ -250,10 +249,7 @@ void DemoModeResourcesRemover::OverrideTimeForTesting(
 
 DemoModeResourcesRemover::DemoModeResourcesRemover(PrefService* local_state)
     : local_state_(local_state),
-      tick_clock_(base::DefaultTickClock::GetInstance()),
-      cryptohome_observer_(this),
-      user_activity_observer_(this),
-      weak_ptr_factory_(this) {
+      tick_clock_(base::DefaultTickClock::GetInstance()) {
   CHECK(!g_instance);
   g_instance = this;
 

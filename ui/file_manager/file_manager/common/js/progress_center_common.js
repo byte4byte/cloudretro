@@ -48,7 +48,9 @@ const ProgressItemType = {
   SYNC: 'sync',
   // The item is general file transfer operation.
   // This is used for the mixed operation of summarized item.
-  TRANSFER: 'transfer'
+  TRANSFER: 'transfer',
+  // The item is external drive format operation.
+  FORMAT: 'format'
 };
 Object.freeze(ProgressItemType);
 
@@ -86,13 +88,6 @@ class ProgressCenterItem {
      * @type {string}
      */
     this.destinationMessage = '';
-
-    /**
-     * Optional sub message for the progress item.
-     * TODO(crbug.com/947388) get rid of the subMessage field.
-     * @type {string}
-     */
-    this.subMessage = '';
 
     /**
      * Number of items being processed.
@@ -189,19 +184,12 @@ class ProgressCenterItem {
 
   /**
    * Clones the item.
-   * @return {ProgressCenterItem} New item having the same properties with this.
+   * TODO(adanilo) This is used by ProgressCenterItemGroup only, remove when
+   * VS feedback panels are turned on permanently.
+   * @return {!ProgressCenterItem} New item having the same properties as this.
    */
   clone() {
-    const newItem = new ProgressCenterItem();
-    newItem.id = this.id;
-    newItem.state = this.state;
-    newItem.message = this.message;
-    newItem.progressMax = this.progressMax;
-    newItem.progressValue = this.progressValue;
-    newItem.type = this.type;
-    newItem.single = this.single;
-    newItem.quiet = this.quiet;
-    newItem.cancelCallback = this.cancelCallback;
-    return newItem;
+    const clonedItem = Object.assign(new ProgressCenterItem(), this);
+    return /** @type {!ProgressCenterItem} */ (clonedItem);
   }
 }

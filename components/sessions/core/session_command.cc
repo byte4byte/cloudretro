@@ -21,6 +21,14 @@ SessionCommand::SessionCommand(id_type id, const base::Pickle& pickle)
   memcpy(contents(), pickle.data(), pickle.size());
 }
 
+SessionCommand::size_type SessionCommand::GetSerializedSize() const {
+  const size_type additional_overhead = sizeof(id_type);
+  return std::min(size(),
+                  static_cast<size_type>(std::numeric_limits<size_type>::max() -
+                                         additional_overhead)) +
+         additional_overhead;
+}
+
 bool SessionCommand::GetPayload(void* dest, size_t count) const {
   if (size() != count)
     return false;
@@ -28,8 +36,8 @@ bool SessionCommand::GetPayload(void* dest, size_t count) const {
   return true;
 }
 
-base::Pickle* SessionCommand::PayloadAsPickle() const {
-  return new base::Pickle(contents(), static_cast<int>(size()));
+std::unique_ptr<base::Pickle> SessionCommand::PayloadAsPickle() const {
+  return std::make_unique<base::Pickle>(contents(), static_cast<int>(size()));
 }
 
 }  // namespace sessions

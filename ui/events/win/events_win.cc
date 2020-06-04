@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/logging.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/win/events_win_utils.h"
 
@@ -56,15 +57,6 @@ MSG CopyNativeEvent(const MSG& event) {
 }
 
 void ReleaseCopiedNativeEvent(const MSG& event) {}
-
-void ClearTouchIdIfReleased(const MSG& xev) {
-  NOTIMPLEMENTED();
-}
-
-int GetTouchId(const MSG& xev) {
-  NOTIMPLEMENTED();
-  return 0;
-}
 
 PointerDetails GetTouchPointerDetailsFromNative(const MSG& native_event) {
   NOTIMPLEMENTED();

@@ -17,8 +17,15 @@ def StateItem(revision, **kwargs):
   item = {'revision': revision,
           'timestamp': kwargs.pop('timestamp', '2019-03-15'),
           'jobs': []}
+  with_bots = False
+  if kwargs.get('with_bots'):
+    with_bots = kwargs.pop('with_bots')
   for job_id, status in sorted(kwargs.items()):
-    item['jobs'].append({'id': job_id, 'status': status})
+    job = {'id': job_id, 'status': status}
+    if with_bots:
+      job['bot'] = job_id
+    item['jobs'].append(job)
+
   return item
 
 
@@ -34,6 +41,9 @@ class PinboardToolTests(unittest.TestCase):
         'cli_tools.pinboard.pinboard.subprocess').start()
     self.upload_to_cloud = mock.patch(
         'cli_tools.pinboard.pinboard.UploadToCloudStorage').start()
+    self.download_from_cloud = mock.patch(
+        'cli_tools.pinboard.pinboard.DownloadFromCloudStorage').start()
+    self.download_from_cloud.return_value = False
 
   def tearDown(self):
     mock.patch.stopall()
@@ -42,7 +52,13 @@ class PinboardToolTests(unittest.TestCase):
   @mock.patch('cli_tools.pinboard.pinboard.GetLastCommitOfDate')
   @mock.patch('cli_tools.pinboard.pinboard.LoadJsonFile')
   def testStartPinpointJobs(self, load_configs, get_last_commit):
-    load_configs.return_value = [{'name': 'config1'}, {'name': 'config2'}]
+    load_configs.return_value = [{
+        'name': 'config1',
+        'configuration': 'AndroidGo'
+    }, {
+        'name': 'config2',
+        'configuration': 'Pixel2'
+    }]
     get_last_commit.return_value = ('2a66bac4', '2019-03-17T23:50:16-07:00')
     self.subprocess.check_output.side_effect = [
         'Started: https://pinpoint.example.com/job/14b4c451f40000\n',
@@ -52,10 +68,20 @@ class PinboardToolTests(unittest.TestCase):
     pinboard.StartPinpointJobs(state, '2019-03-17')
 
     self.assertEqual(state, [{
-        'revision': '2a66bac4',
-        'timestamp': '2019-03-17T23:50:16-07:00',
-        'jobs': [{'id': '14b4c451f40000', 'status': 'queued'},
-                 {'id': '11fae481f40000', 'status': 'queued'}]}])
+        'revision':
+        '2a66bac4',
+        'timestamp':
+        '2019-03-17T23:50:16-07:00',
+        'jobs': [{
+            'id': '14b4c451f40000',
+            'status': 'queued',
+            'bot': 'AndroidGo'
+        }, {
+            'id': '11fae481f40000',
+            'status': 'queued',
+            'bot': 'Pixel2'
+        }]
+    }])
 
   def testCollectPinpointResults(self):
     state = [
@@ -109,7 +135,8 @@ class PinboardToolTests(unittest.TestCase):
     self.assertEqual(self.upload_to_cloud.call_count, 2)
 
   @mock.patch('cli_tools.pinboard.pinboard.GetRevisionResults')
-  def testAggregateAndUploadResults(self, get_revision_results):
+  @mock.patch('cli_tools.pinboard.pinboard.TimeAgo')
+  def testAggregateAndUploadResults(self, time_ago, get_revision_results):
     state = [
         StateItem('a100', timestamp='2019-03-15', job1='completed'),
         StateItem('a200', timestamp='2019-03-16', job2='completed'),
@@ -129,36 +156,86 @@ class PinboardToolTests(unittest.TestCase):
       return df
 
     get_revision_results.side_effect = GetFakeResults
+    time_ago.return_value = pd.Timestamp('2018-10-20')
 
     # Only process first few revisions.
-    pinboard.AggregateAndUploadResults(state[:3])
+    new_items, cached_df = pinboard.GetItemsToUpdate(state[:3])
+    pinboard.AggregateAndUploadResults(new_items, cached_df)
     dataset_file = pinboard.CachedFilePath(pinboard.DATASET_CSV_FILE)
     df = pd.read_csv(dataset_file)
     self.assertEqual(set(df['revision']), set(['a100', 'a200']))
     self.assertTrue((df[df['reference']]['revision'] == 'a200').all())
 
     # Incrementally process the rest.
-    pinboard.AggregateAndUploadResults(state)
+    new_items, cached_df = pinboard.GetItemsToUpdate(state)
+    pinboard.AggregateAndUploadResults(new_items, cached_df)
     dataset_file = pinboard.CachedFilePath(pinboard.DATASET_CSV_FILE)
     df = pd.read_csv(dataset_file)
     self.assertEqual(set(df['revision']), set(['a100', 'a200', 'a500']))
     self.assertTrue((df[df['reference']]['revision'] == 'a500').all())
 
     # No new revisions. This should be a no-op.
-    pinboard.AggregateAndUploadResults(state)
+    new_items, cached_df = pinboard.GetItemsToUpdate(state)
+    pinboard.AggregateAndUploadResults(new_items, cached_df)
 
     self.assertEqual(get_revision_results.call_count, 4)
-    self.assertEqual(self.upload_to_cloud.call_count, 2)
+    # Uploads twice (the pkl and csv) on each call to aggregate results.
+    self.assertEqual(self.upload_to_cloud.call_count, 2 * 2)
+
+  def testGetRevisionResults_different_bots(self):
+    item = StateItem(
+        '2a66ba',
+        timestamp='2019-03-17T23:50:16-07:00',
+        with_bots=True,
+        job1='completed',
+        job2='completed')
+    csv = [
+        'change,benchmark,story,name,unit,mean,job_id\n',
+        '2a66ba,loading,story1,Total:duration,ms_smallerIsBetter,300.0,job1\n',
+        '2a66ba,loading,story2,Total:duration,ms_smallerIsBetter,400.0,job2\n',
+        '2a66ba+patch,loading,story1,Total:duration,ms_smallerIsBetter,100.0,' +
+        'job1\n',
+        '2a66ba+patch,loading,story2,Total:duration,ms_smallerIsBetter,200.0,' +
+        'job2\n',
+        '2a66ba,loading,story1,Other:metric,count_smallerIsBetter,1.0,job1\n'
+    ]
+    expected_results = [
+        ('without_patch', 'job1', 0.3, '2018-03-17T12:00:00'),
+        ('with_patch', 'job1', 0.1, '2019-03-17T12:00:00'),
+        ('without_patch', 'job2', 0.4, '2018-03-17T12:00:00'),
+        ('with_patch', 'job2', 0.2, '2019-03-17T12:00:00'),
+    ]
+
+    filename = pinboard.RevisionResultsFile(item)
+    with open(filename, 'w') as f:
+      f.writelines(csv)
+
+    with mock.patch(
+        'cli_tools.pinboard.pinboard.ACTIVE_STORIES', new=['story1', 'story2']):
+      df = pinboard.GetRevisionResults(item)
+
+    self.assertEqual(len(df.index), 4)  # Only two rows of output.
+    self.assertTrue((df['revision'] == '2a66ba').all())
+    self.assertTrue((df['benchmark'] == 'loading').all())
+    self.assertTrue((df['name'] == 'Total:duration').all())
+    self.assertTrue((df['count'] == 1).all())
+    df = df.set_index(['label', 'bot'], verify_integrity=True)
+    for label, bot, value, timestamp in expected_results:
+      self.assertEqual(df.loc[label, bot]['mean'], value)
+      self.assertEqual(df.loc[label, bot]['timestamp'], pd.Timestamp(timestamp))
 
   def testGetRevisionResults_simple(self):
     item = StateItem('2a66ba', timestamp='2019-03-17T23:50:16-07:00')
     csv = [
-        'change,benchmark,story,name,unit,mean\n',
-        '2a66ba,loading,story1,Total:duration,ms_smallerIsBetter,300.0\n',
-        '2a66ba,loading,story2,Total:duration,ms_smallerIsBetter,400.0\n',
-        '2a66ba+patch,loading,story1,Total:duration,ms_smallerIsBetter,100.0\n',
-        '2a66ba+patch,loading,story2,Total:duration,ms_smallerIsBetter,200.0\n',
-        '2a66ba,loading,story1,Other:metric,count_smallerIsBetter,1.0\n']
+        'change,benchmark,story,name,unit,mean,job_id\n',
+        '2a66ba,loading,story1,Total:duration,ms_smallerIsBetter,300.0,job1\n',
+        '2a66ba,loading,story2,Total:duration,ms_smallerIsBetter,400.0,job1\n',
+        '2a66ba+patch,loading,story1,Total:duration,ms_smallerIsBetter,100.0,' +
+        'job1\n',
+        '2a66ba+patch,loading,story2,Total:duration,ms_smallerIsBetter,200.0,' +
+        'job1\n',
+        '2a66ba,loading,story1,Other:metric,count_smallerIsBetter,1.0,job1\n'
+    ]
     expected_results = [
         ('without_patch', 0.35, '2018-03-17T12:00:00'),
         ('with_patch', 0.15, '2019-03-17T12:00:00'),
@@ -185,8 +262,9 @@ class PinboardToolTests(unittest.TestCase):
   def testGetRevisionResults_empty(self):
     item = StateItem('2a66ba', timestamp='2019-03-17T23:50:16-07:00')
     csv = [
-        'change,benchmark,story,name,unit,mean\n',
-        '2a66ba,loading,story1,Other:metric,count_smallerIsBetter,1.0\n']
+        'change,benchmark,story,name,unit,mean,job_id\n',
+        '2a66ba,loading,story1,Other:metric,count_smallerIsBetter,1.0,job1\n'
+    ]
 
     filename = pinboard.RevisionResultsFile(item)
     with open(filename, 'w') as f:

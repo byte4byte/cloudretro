@@ -80,6 +80,10 @@ class CompositorView : public content::CompositorClient,
   void SetOverlayVideoMode(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& object,
                            bool enabled);
+  void SetOverlayImmersiveArMode(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& object,
+      bool enabled);
   void SetSceneLayer(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& object,
                      const base::android::JavaParamRef<jobject>& jscene_layer);
@@ -93,6 +97,8 @@ class CompositorView : public content::CompositorClient,
   void EvictCachedBackBuffer(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& object);
+  void OnTabChanged(JNIEnv* env,
+                    const base::android::JavaParamRef<jobject>& object);
 
   // CompositorClient implementation:
   void RecreateSurface() override;
@@ -124,8 +130,9 @@ class CompositorView : public content::CompositorClient,
   int content_width_;
   int content_height_;
   bool overlay_video_mode_;
+  bool overlay_immersive_ar_mode_;
 
-  base::WeakPtrFactory<CompositorView> weak_factory_;
+  base::WeakPtrFactory<CompositorView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CompositorView);
 };

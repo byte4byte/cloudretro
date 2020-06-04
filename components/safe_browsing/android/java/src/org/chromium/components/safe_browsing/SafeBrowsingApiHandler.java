@@ -4,7 +4,7 @@
 
 package org.chromium.components.safe_browsing;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -47,28 +47,32 @@ public interface SafeBrowsingApiHandler {
     public boolean init(Observer result);
 
     /**
-     * Verifies that SafeBrowsingApiHandler can operate and initializes if feasible.
-     * Should be called on the same sequence as |startUriLookup|.
-     *
-     * @param observer The object on which to call the callback functions when URL checking
-     * is complete.
-     * @param enableLocalBlacklists specifies if the feature to use local blacklists is enabled.
-     *
-     * @return whether Safe Browsing is supported for this installation.
-     */
-    public boolean init(Observer result, boolean enableLocalBlacklists);
-
-    /**
      * Returns the Safety Net ID of the device. Checks to make sure that the feature to report
      * telemetry for APK downloads is enabled. This should not be called for AW.
      *
      * @return the Safety Net ID of the device.
      */
-    public String getSafetyNetId();
+    // TODO(crbug.com/1070836): Remove this interface once internal repository implementation is
+    // removed.
+    public default String getSafetyNetId() {
+        return "";
+    }
 
     /**
      * Start a URI-lookup to determine if it matches one of the specified threats.
      * This is called on every URL resource Chrome loads, on the same sequence as |init|.
      */
     public void startUriLookup(long callbackId, String uri, int[] threatsOfInterest);
+
+    /**
+     * Start a check to determine if a uri is in an allowlist. If true, password protection
+     * service will consider the uri to be safe.
+     *
+     * @param uri The uri from a password protection event(user focuses on password form
+     *      * or user reuses their password)
+     * @param threatType determines the type of the allowlist that the uri will be matched to.
+     *
+     * @return true if the uri is found in the corresponding allowlist. Otherwise, false.
+     */
+    public boolean startAllowlistLookup(String uri, int threatType);
 }

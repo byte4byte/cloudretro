@@ -7,13 +7,13 @@
 #include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/chrome/browser/favicon/favicon_loader.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/credential.h"
 #import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_cell_utils.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_content_delegate.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/uicolor_manualfill.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_content_injector.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_credential.h"
 #import "ios/chrome/browser/ui/list_model/list_model.h"
-#import "ios/chrome/common/favicon/favicon_view.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/favicon/favicon_view.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/favicon_size.h"
@@ -22,6 +22,8 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+NSString* const kMaskedPasswordTitle = @"••••••••";
 
 @interface ManualFillCredentialItem ()
 
@@ -36,7 +38,8 @@
 @property(nonatomic, assign) BOOL isConnectedToNextItem;
 
 // The delegate for this item.
-@property(nonatomic, weak, readonly) id<ManualFillContentDelegate> delegate;
+@property(nonatomic, weak, readonly) id<ManualFillContentInjector>
+    contentInjector;
 
 @end
 
@@ -45,13 +48,14 @@
 - (instancetype)initWithCredential:(ManualFillCredential*)credential
          isConnectedToPreviousItem:(BOOL)isConnectedToPreviousItem
              isConnectedToNextItem:(BOOL)isConnectedToNextItem
-                          delegate:(id<ManualFillContentDelegate>)delegate {
+                   contentInjector:
+                       (id<ManualFillContentInjector>)contentInjector {
   self = [super initWithType:kItemTypeEnumZero];
   if (self) {
     _credential = credential;
     _isConnectedToPreviousItem = isConnectedToPreviousItem;
     _isConnectedToNextItem = isConnectedToNextItem;
-    _delegate = delegate;
+    _contentInjector = contentInjector;
     self.cellClass = [ManualFillPasswordCell class];
   }
   return self;
@@ -63,7 +67,7 @@
   [cell setUpWithCredential:self.credential
       isConnectedToPreviousCell:self.isConnectedToPreviousItem
           isConnectedToNextCell:self.isConnectedToNextItem
-                       delegate:self.delegate];
+                contentInjector:self.contentInjector];
 }
 
 - (const GURL&)faviconURL {
@@ -115,7 +119,7 @@ static const CGFloat NoMultiplier = 1.0;
 @property(nonatomic, strong) UIView* grayLine;
 
 // The delegate in charge of processing the user actions in this cell.
-@property(nonatomic, weak) id<ManualFillContentDelegate> delegate;
+@property(nonatomic, weak) id<ManualFillContentInjector> contentInjector;
 
 @end
 
@@ -136,7 +140,7 @@ static const CGFloat NoMultiplier = 1.0;
 
   [self.usernameButton setTitle:@"" forState:UIControlStateNormal];
   self.usernameButton.enabled = YES;
-  [self.usernameButton setTitleColor:UIColor.cr_manualFillChipDarkTextColor
+  [self.usernameButton setTitleColor:[UIColor colorNamed:kTextPrimaryColor]
                             forState:UIControlStateNormal];
 
   [self.passwordButton setTitle:@"" forState:UIControlStateNormal];
@@ -151,11 +155,11 @@ static const CGFloat NoMultiplier = 1.0;
 - (void)setUpWithCredential:(ManualFillCredential*)credential
     isConnectedToPreviousCell:(BOOL)isConnectedToPreviousCell
         isConnectedToNextCell:(BOOL)isConnectedToNextCell
-                     delegate:(id<ManualFillContentDelegate>)delegate {
+              contentInjector:(id<ManualFillContentInjector>)contentInjector {
   if (self.contentView.subviews.count == 0) {
     [self createViewHierarchy];
   }
-  self.delegate = delegate;
+  self.contentInjector = contentInjector;
   self.credential = credential;
 
   NSMutableArray<UIView*>* verticalLeadViews = [[NSMutableArray alloc] init];
@@ -168,7 +172,8 @@ static const CGFloat NoMultiplier = 1.0;
         [[NSMutableAttributedString alloc]
             initWithString:credential.siteName ? credential.siteName : @""
                 attributes:@{
-                  NSForegroundColorAttributeName : UIColor.blackColor,
+                  NSForegroundColorAttributeName :
+                      [UIColor colorNamed:kTextPrimaryColor],
                   NSFontAttributeName :
                       [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline]
                 }];
@@ -177,7 +182,8 @@ static const CGFloat NoMultiplier = 1.0;
       NSString* hostString =
           [NSString stringWithFormat:@" –– %@", credential.host];
       NSDictionary* attributes = @{
-        NSForegroundColorAttributeName : UIColor.lightGrayColor,
+        NSForegroundColorAttributeName :
+            [UIColor colorNamed:kTextSecondaryColor],
         NSFontAttributeName :
             [UIFont preferredFontForTextStyle:UIFontTextStyleBody]
       };
@@ -199,14 +205,15 @@ static const CGFloat NoMultiplier = 1.0;
     NSString* titleString =
         l10n_util::GetNSString(IDS_IOS_MANUAL_FALLBACK_NO_USERNAME);
     [self.usernameButton setTitle:titleString forState:UIControlStateNormal];
-    [self.usernameButton setTitleColor:UIColor.lightGrayColor
+    [self.usernameButton setTitleColor:[UIColor colorNamed:kTextSecondaryColor]
                               forState:UIControlStateNormal];
     self.usernameButton.enabled = NO;
   }
   [verticalLeadViews addObject:self.usernameButton];
 
   if (credential.password.length) {
-    [self.passwordButton setTitle:@"••••••••" forState:UIControlStateNormal];
+    [self.passwordButton setTitle:kMaskedPasswordTitle
+                         forState:UIControlStateNormal];
     self.passwordButton.accessibilityLabel =
         l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORD_HIDDEN_LABEL);
     [verticalLeadViews addObject:self.passwordButton];
@@ -307,20 +314,21 @@ static const CGFloat NoMultiplier = 1.0;
 - (void)userDidTapUsernameButton:(UIButton*)button {
   base::RecordAction(
       base::UserMetricsAction("ManualFallback_Password_SelectUsername"));
-  [self.delegate userDidPickContent:self.credential.username
-                      passwordField:NO
-                      requiresHTTPS:NO];
+  [self.contentInjector userDidPickContent:self.credential.username
+                             passwordField:NO
+                             requiresHTTPS:NO];
 }
 
 - (void)userDidTapPasswordButton:(UIButton*)button {
-  if (![self.delegate canUserInjectInPasswordField:YES requiresHTTPS:YES]) {
+  if (![self.contentInjector canUserInjectInPasswordField:YES
+                                            requiresHTTPS:YES]) {
     return;
   }
   base::RecordAction(
       base::UserMetricsAction("ManualFallback_Password_SelectPassword"));
-  [self.delegate userDidPickContent:self.credential.password
-                      passwordField:YES
-                      requiresHTTPS:YES];
+  [self.contentInjector userDidPickContent:self.credential.password
+                             passwordField:YES
+                             requiresHTTPS:YES];
 }
 
 @end

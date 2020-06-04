@@ -5,7 +5,9 @@
 #include "third_party/blink/renderer/core/timing/performance_element_timing.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/performance_entry_names.h"
+#include "third_party/blink/renderer/core/timing/performance.h"
 
 namespace blink {
 
@@ -15,7 +17,7 @@ PerformanceElementTiming* PerformanceElementTiming::Create(
     const String& url,
     const FloatRect& intersection_rect,
     DOMHighResTimeStamp render_time,
-    DOMHighResTimeStamp response_end,
+    DOMHighResTimeStamp load_time,
     const AtomicString& identifier,
     int naturalWidth,
     int naturalHeight,
@@ -26,27 +28,29 @@ PerformanceElementTiming* PerformanceElementTiming::Create(
   DCHECK_GE(naturalWidth, 0);
   DCHECK_GE(naturalHeight, 0);
   DCHECK(element);
+  double start_time = render_time != 0.0 ? render_time : load_time;
   return MakeGarbageCollected<PerformanceElementTiming>(
-      name, url, intersection_rect, render_time, response_end, identifier,
-      naturalWidth, naturalHeight, id, element);
+      name, start_time, url, intersection_rect, render_time, load_time,
+      identifier, naturalWidth, naturalHeight, id, element);
 }
 
 PerformanceElementTiming::PerformanceElementTiming(
     const AtomicString& name,
+    DOMHighResTimeStamp start_time,
     const String& url,
     const FloatRect& intersection_rect,
     DOMHighResTimeStamp render_time,
-    DOMHighResTimeStamp response_end,
+    DOMHighResTimeStamp load_time,
     const AtomicString& identifier,
     int naturalWidth,
     int naturalHeight,
     const AtomicString& id,
     Element* element)
-    : PerformanceEntry(name, 0, 0),
+    : PerformanceEntry(name, start_time, start_time),
       element_(element),
       intersection_rect_(DOMRectReadOnly::FromFloatRect(intersection_rect)),
       render_time_(render_time),
-      response_end_(response_end),
+      load_time_(load_time),
       identifier_(identifier),
       naturalWidth_(naturalWidth),
       naturalHeight_(naturalHeight),
@@ -64,18 +68,23 @@ PerformanceEntryType PerformanceElementTiming::EntryTypeEnum() const {
 }
 
 Element* PerformanceElementTiming::element() const {
-  if (!element_ || !element_->isConnected() || element_->IsInShadowTree())
-    return nullptr;
-
-  return element_;
+  return Performance::CanExposeNode(element_) ? element_ : nullptr;
 }
 
 void PerformanceElementTiming::BuildJSONValue(V8ObjectBuilder& builder) const {
   PerformanceEntry::BuildJSONValue(builder);
+  builder.Add("renderTime", render_time_);
+  builder.Add("loadTime", load_time_);
   builder.Add("intersectionRect", intersection_rect_);
+  builder.Add("identifier", identifier_);
+  builder.Add("naturalWidth", naturalWidth_);
+  builder.Add("naturalHeight", naturalHeight_);
+  builder.Add("id", id_);
+  builder.Add("element", element());
+  builder.Add("url", url_);
 }
 
-void PerformanceElementTiming::Trace(blink::Visitor* visitor) {
+void PerformanceElementTiming::Trace(Visitor* visitor) {
   visitor->Trace(element_);
   visitor->Trace(intersection_rect_);
   PerformanceEntry::Trace(visitor);

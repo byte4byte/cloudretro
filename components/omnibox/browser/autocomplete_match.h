@@ -101,6 +101,7 @@ struct AutocompleteMatch {
     // Offset within the string that this classification starts
     size_t offset;
 
+    // Contains a bitmask of flags defined in enum Style.
     int style;
   };
 
@@ -117,6 +118,15 @@ struct AutocompleteMatch {
   // and |description| strings.
   static const base::char16 kInvalidChars[];
 
+  // All IDs should be less than the family size, and family size must be
+  // a power of 2 so that the counter wraps.
+  enum {
+    PEDAL_FAMILY_ID = 1,
+    TAB_SWITCH_FAMILY_ID = 2,
+    FAMILY_SIZE = 1 << 2,
+  };
+  static constexpr size_t FAMILY_SIZE_MASK = ~(FAMILY_SIZE - 1);
+
   // Document subtype, for AutocompleteMatchType::DOCUMENT.
   // Update kDocumentTypeStrings when updating DocumentType.
   enum class DocumentType {
@@ -128,6 +138,7 @@ struct AutocompleteMatch {
     DRIVE_IMAGE,
     DRIVE_PDF,
     DRIVE_VIDEO,
+    DRIVE_FOLDER,
     DRIVE_OTHER,
     DOCUMENT_TYPE_SIZE
   };
@@ -162,8 +173,16 @@ struct AutocompleteMatch {
 
   // Comparison function for determining whether the first match is better than
   // the second.
-  static bool MoreRelevant(const AutocompleteMatch& elem1,
-                           const AutocompleteMatch& elem2);
+  static bool MoreRelevant(const AutocompleteMatch& match1,
+                           const AutocompleteMatch& match2);
+
+  // Comparison functions for determining whether the first match is preferred
+  // over the second when choosing between candidate duplicates.
+  static bool BetterDuplicate(const AutocompleteMatch& match1,
+                              const AutocompleteMatch& match2);
+  static bool BetterDuplicateByIterator(
+      const std::vector<AutocompleteMatch>::const_iterator it1,
+      const std::vector<AutocompleteMatch>::const_iterator it2);
 
   // Helper functions for classes creating matches:
   // Fills in the classifications for |text|, using |style| as the base style
@@ -221,6 +240,14 @@ struct AutocompleteMatch {
   // like entity, personalized, profile or postfix.
   static bool IsSpecializedSearchType(Type type);
 
+  // Convenience function to check if |type| is a search history type -
+  // usually this surfaces a clock icon to the user.
+  static bool IsSearchHistoryType(Type type);
+
+  // If this match is a submatch, returns the parent's type, otherwise this
+  // match's type.
+  Type GetDemotionType() const;
+
   // A static version GetTemplateURL() that takes the match's keyword and
   // match's hostname as parameters.  In short, returns the TemplateURL
   // associated with |keyword| if it exists; otherwise returns the TemplateURL
@@ -277,11 +304,21 @@ struct AutocompleteMatch {
   // components are important (part of the match), and should not be trimmed.
   static url_formatter::FormatUrlTypes GetFormatTypes(bool preserve_scheme,
                                                       bool preserve_subdomain);
-
   // Logs the search engine used to navigate to a search page or auto complete
   // suggestion. For direct URL navigations, nothing is logged.
   static void LogSearchEngineUsed(const AutocompleteMatch& match,
                                   TemplateURLService* template_url_service);
+
+  // There are some suggestions that we would like to follow each other
+  // e.g. pedals, tab switches, possibly keyword provider suggestions.
+  // These functions provide and compare integer groups so that when we
+  // generate these suggestions, they can be given integers in the same
+  // family, which will cause them to be sorted together.
+  static size_t GetNextFamilyID();
+  static bool IsSameFamily(size_t lhs, size_t rhs);
+  // Preferred method to set both fields simultaneously.
+  void SetSubMatch(size_t subrelevance, AutocompleteMatch::Type parent_type);
+  bool IsSubMatch() const;
 
   // Computes the stripped destination URL (via GURLToStrippedGURL()) and
   // stores the result in |stripped_destination_url|.  |input| is used for the
@@ -330,7 +367,7 @@ struct AutocompleteMatch {
   // Returns a new Pedal match suggestion instance derived from this match,
   // which is considered to be the triggering suggestion.  The new match
   // will be set to use the given |pedal|.
-  AutocompleteMatch DerivePedalSuggestion(OmniboxPedal* pedal) const;
+  AutocompleteMatch DerivePedalSuggestion(OmniboxPedal* pedal);
 
   // Adds optional information to the |additional_info| dictionary.
   void RecordAdditionalInfo(const std::string& property,
@@ -342,6 +379,10 @@ struct AutocompleteMatch {
   // dictionary.  Returns the empty string if no such value exists.
   std::string GetAdditionalInfo(const std::string& property) const;
 
+  // Returns the enum equivalent to the type of this autocomplete match.
+  metrics::OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType()
+      const;
+
   // Returns whether this match is a "verbatim" match: a URL navigation directly
   // to the user's input, a search for the user's input with the default search
   // engine, or a "keyword mode" search for the query portion of the user's
@@ -351,6 +392,19 @@ struct AutocompleteMatch {
   // what will happen when they press enter in those cases if the match is not
   // shown.
   bool IsVerbatimType() const;
+
+  // Returns whether this match is a search suggestion provided by search
+  // provider.
+  bool IsSearchProviderSearchSuggestion() const;
+
+  // Returns whether this match is a search suggestion provided by on device
+  // providers.
+  bool IsOnDeviceSearchSuggestion() const;
+
+  // Returns whether the autocompletion is trivial enough that we consider it
+  // an autocompletion for which the omnibox autocompletion code did not add
+  // any value.
+  bool IsTrivialAutocompletion() const;
 
   // Returns whether this match or any duplicate of this match can be deleted.
   // This is used to decide whether we should call DeleteMatch().
@@ -367,6 +421,19 @@ struct AutocompleteMatch {
   // |swap_contents_and_description| for conditions they are swapped.
   AutocompleteMatch GetMatchWithContentsAndDescriptionPossiblySwapped() const;
 
+  // Determines whether this match is allowed to be the default match by
+  // comparing |input.text| and |inline_autocompletion|. Therefore,
+  // |inline_autocompletion| should be set prior to invoking this method. Also
+  // Also considers trailing whitespace in the input, so the input should not be
+  // fixed up. May trim trailing whitespaces from |inline_autocompletion|.
+  //
+  // Input "x" will allow default matches "x", "xy", and "x y".
+  // Input "x " will allow default matches "x" and "x y".
+  // Input "x  " will allow default match "x".
+  // Input "x y" will allow default match "x y".
+  // Input "x" with prevent_inline_autocomplete will allow default match "x".
+  void SetAllowedToBeDefault(const AutocompleteInput& input);
+
   // If this match is a tail suggestion, prepends the passed |common_prefix|.
   // If not, but the prefix matches the beginning of the suggestion, dims that
   // portion in the classification.
@@ -380,10 +447,21 @@ struct AutocompleteMatch {
   // has a matching tab and will use a switch-to-tab button. It returns false,
   // for example, when the switch button is not shown because a keyword match
   // is taking precedence.
-  bool ShouldShowTabMatch() const;
+  bool ShouldShowTabMatchButton() const;
 
-  // Returns true if the suggestion should show a tab match button or pedal.
-  bool ShouldShowButton() const;
+  // Returns whether the suggestion is by itself a tab switch suggestion.
+  bool IsTabSwitchSuggestion() const;
+
+  // Upgrades this match by absorbing the best properties from
+  // |duplicate_match|. For instance: if |duplicate_match| has a higher
+  // relevance score, this match's own relevance score will be upgraded.
+  void UpgradeMatchWithPropertiesFrom(const AutocompleteMatch& duplicate_match);
+
+  // Called for navigation suggestions whose URLs cannot be inline autocompleted
+  // (e.g. because the input is not a prefix of the URL), to check if |title|
+  // can be inline autocompleted instead.
+  void TryAutocompleteWithTitle(const base::string16& title,
+                                const AutocompleteInput& input);
 
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is
@@ -398,6 +476,11 @@ struct AutocompleteMatch {
   // TODO(pkasting): http://b/1111299 This should be calculated algorithmically,
   // rather than being a fairly fixed value defined by the table above.
   int relevance = 0;
+
+  // This represents the numeric family that the match is part of. It is only
+  // set for certain paired suggestions. Suggestions within the same group will
+  // have similar subrelevances, and they will sort together.
+  size_t subrelevance = 0;
 
   // How many times this result was typed in / selected from the omnibox.
   // Only set for some providers and result_types.  If it is not set,
@@ -428,6 +511,15 @@ struct AutocompleteMatch {
   // should set this flag.
   bool allowed_to_be_default_match = false;
 
+  // Set by |TryAutocompleteWithTitle|. If |type| is navigational, then this
+  // field indicates |fill_into_edit| is not the URL but instead looks like
+  // search terms (e.g. `title - URL`). If |type| is non-navigational, then this
+  // is true regardless; i.e., |fill_into_edit| is not a URL. This allows
+  // callees of AutocompleteClassifier::Classify, such as
+  // OmniboxEditModel::AdjustTextForCopy, to treat such navigational matches
+  // differently than typical navigational matches with URL text.
+  bool is_navigational_title_match = false;
+
   // The URL to actually load when the autocomplete item is selected. This URL
   // should be canonical so we can compare URLs with strcmp to avoid dupes.
   // It may be empty if there is no possible navigation.
@@ -441,7 +533,7 @@ struct AutocompleteMatch {
   // Optional image information. Used for entity suggestions. The dominant color
   // can be used to paint the image placeholder while fetching the image.
   std::string image_dominant_color;
-  std::string image_url;
+  GURL image_url;
 
   // Optional override to use for types that specify an icon sub-type.
   DocumentType document_type = DocumentType::NONE;
@@ -456,9 +548,22 @@ struct AutocompleteMatch {
   // Additional helper text for each entry, such as a title or description.
   base::string16 description;
   ACMatchClassifications description_class;
+  // In the case of the document provider, the description includes a last
+  // updated date that may become stale. To avoid showing stale descriptions,
+  // when |description_for_shortcut| is not empty, it will be stored instead of
+  // |description| in the shortcuts provider.
+  base::string16 description_for_shortcuts;
+  ACMatchClassifications description_class_for_shortcuts;
+
+  // The optional suggestion group Id based on the SuggestionGroupIds enum in
+  // suggestion_config.proto. Used to look up the header text this match must
+  // appear under from ACResult.
+  base::Optional<int> suggestion_group_id;
 
   // If true, UI-level code should swap the contents and description fields
   // before displaying.
+  // This field is set when matches are appended to autocomplete results via
+  // |AutocompleteResult::AppendMatches| rather than when matches are created.
   bool swap_contents_and_description = false;
 
   // A rich-format version of the display for the dropdown.
@@ -471,6 +576,9 @@ struct AutocompleteMatch {
 
   // Type of this match.
   Type type = AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED;
+
+  // If a submatch, the type of the parent.
+  Type parent_type;
 
   // True if we saw a tab that matched this suggestion.
   bool has_tab_match = false;
@@ -531,22 +639,31 @@ struct AutocompleteMatch {
   // property and associated value and which is presented in chrome://omnibox.
   AdditionalInfo additional_info;
 
-  // A list of matches culled during de-duplication process, retained to
-  // ensure if a match is deleted, the duplicates are deleted as well.
+  // A vector of matches culled during de-duplication process, sorted from
+  // second-best to worst according to the de-duplication preference criteria.
+  // This vector is retained so that if the user deletes a match, all the
+  // duplicates are deleted as well. This is also used for re-duping Search
+  // Entity vs. plain Search suggestions.
   std::vector<AutocompleteMatch> duplicate_matches;
 
   // So users of AutocompleteMatch can use the same ellipsis that it uses.
   static const char kEllipsis[];
 
+  // A numeric quantity that only increases by the amount FAMILY_SIZE.
+  // It helps guarantee that a match family will have similar, but unique,
+  // numeric values.
+  static size_t next_family_id_;
+
 #if DCHECK_IS_ON()
   // Does a data integrity check on this match.
   void Validate() const;
+#endif  // DCHECK_IS_ON()
 
   // Checks one text/classifications pair for valid values.
-  void ValidateClassifications(
+  static void ValidateClassifications(
       const base::string16& text,
-      const ACMatchClassifications& classifications) const;
-#endif  // DCHECK_IS_ON()
+      const ACMatchClassifications& classifications,
+      const std::string& provider_name = "");
 };
 
 typedef AutocompleteMatch::ACMatchClassification ACMatchClassification;

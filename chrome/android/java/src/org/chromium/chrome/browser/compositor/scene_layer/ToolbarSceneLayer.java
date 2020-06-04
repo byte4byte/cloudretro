@@ -8,6 +8,7 @@ import android.content.Context;
 import android.graphics.RectF;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.layouts.Layout.ViewportMode;
@@ -18,11 +19,9 @@ import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
-import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
-import org.chromium.chrome.browser.widget.ControlContainer;
+import org.chromium.chrome.browser.toolbar.ControlContainer;
+import org.chromium.chrome.browser.toolbar.ToolbarColors;
+import org.chromium.components.browser_ui.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.resources.ResourceManager;
 
@@ -93,30 +92,24 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
         boolean showShadow = fullscreenManager.drawControlsAsTexture()
                 || forceHideAndroidBrowserControls;
 
-        boolean isLocationBarShownInNtp = false;
-        boolean isIncognito = false;
-        Tab currentTab = fullscreenManager.getTab();
-        if (currentTab != null) {
-            boolean isNtp =
-                    currentTab != null ? currentTab.getNativePage() instanceof NewTabPage : false;
-            if (isNtp) {
-                isLocationBarShownInNtp =
-                        ((NewTabPage) currentTab.getNativePage()).isLocationBarShownInNTP();
-            }
-            isIncognito = currentTab.isIncognito();
-        }
+        int textBoxColor =
+                ToolbarColors.getTextBoxColorForToolbarBackground(mContext.getResources(),
+                        fullscreenManager.getTab(), browserControlsBackgroundColor);
 
-        int textBoxColor = ColorUtils.getTextBoxColorForToolbarBackground(mContext.getResources(),
-                isLocationBarShownInNtp, browserControlsBackgroundColor, isIncognito);
         int textBoxResourceId = R.drawable.modern_location_bar;
-
-        nativeUpdateToolbarLayer(mNativePtr, resourceManager, R.id.control_container,
-                browserControlsBackgroundColor, textBoxResourceId, browserControlsUrlBarAlpha,
-                textBoxColor, fullscreenManager.getTopControlOffset(), windowHeight, useTexture,
-                showShadow);
+        // The content offset is passed to the toolbar layer so that it can position itself at the
+        // bottom of the space available for top controls. The main reason for using content offset
+        // instead of top controls offset is that top controls can have a greater height than that
+        // of the toolbar, e.g. when status indicator is visible, and the toolbar needs to be
+        // positioned at the bottom of the top controls regardless of the total height.
+        ToolbarSceneLayerJni.get().updateToolbarLayer(mNativePtr, ToolbarSceneLayer.this,
+                resourceManager, R.id.control_container, browserControlsBackgroundColor,
+                textBoxResourceId, browserControlsUrlBarAlpha, textBoxColor,
+                fullscreenManager.getContentOffset(), windowHeight, useTexture, showShadow);
 
         if (mProgressBarDrawingInfo == null) return;
-        nativeUpdateProgressBar(mNativePtr, mProgressBarDrawingInfo.progressBarRect.left,
+        ToolbarSceneLayerJni.get().updateProgressBar(mNativePtr, ToolbarSceneLayer.this,
+                mProgressBarDrawingInfo.progressBarRect.left,
                 mProgressBarDrawingInfo.progressBarRect.top,
                 mProgressBarDrawingInfo.progressBarRect.width(),
                 mProgressBarDrawingInfo.progressBarRect.height(),
@@ -130,13 +123,13 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
 
     @Override
     public void setContentTree(SceneLayer contentTree) {
-        nativeSetContentTree(mNativePtr, contentTree);
+        ToolbarSceneLayerJni.get().setContentTree(mNativePtr, ToolbarSceneLayer.this, contentTree);
     }
 
     @Override
     protected void initializeNative() {
         if (mNativePtr == 0) {
-            mNativePtr = nativeInit();
+            mNativePtr = ToolbarSceneLayerJni.get().init(ToolbarSceneLayer.this);
         }
         assert mNativePtr != 0;
     }
@@ -164,7 +157,7 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
         // compositor.
         float alpha = 1;
 
-        update(mRenderHost.getBrowserControlsBackgroundColor(), alpha,
+        update(mRenderHost.getBrowserControlsBackgroundColor(mContext.getResources()), alpha,
                 mLayoutProvider.getFullscreenManager(), resourceManager,
                 forceHideBrowserControlsAndroidView, viewportMode,
                 DeviceFormFactor.isNonMultiDisplayContextOnTablet(mContext), viewport.height());
@@ -224,24 +217,19 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
     @Override
     public void tabCreated(long time, boolean incognito, int id, int prevId, boolean selected) {}
 
-    private native long nativeInit();
-    private native void nativeSetContentTree(
-            long nativeToolbarSceneLayer,
-            SceneLayer contentTree);
-    private native void nativeUpdateToolbarLayer(long nativeToolbarSceneLayer,
-            ResourceManager resourceManager, int resourceId, int toolbarBackgroundColor,
-            int urlBarResourceId, float urlBarAlpha, int urlBarColor, float topOffset,
-            float viewHeight, boolean visible, boolean showShadow);
-    private native void nativeUpdateProgressBar(
-            long nativeToolbarSceneLayer,
-            int progressBarX,
-            int progressBarY,
-            int progressBarWidth,
-            int progressBarHeight,
-            int progressBarColor,
-            int progressBarBackgroundX,
-            int progressBarBackgroundY,
-            int progressBarBackgroundWidth,
-            int progressBarBackgroundHeight,
-            int progressBarBackgroundColor);
+    @NativeMethods
+    interface Natives {
+        long init(ToolbarSceneLayer caller);
+        void setContentTree(
+                long nativeToolbarSceneLayer, ToolbarSceneLayer caller, SceneLayer contentTree);
+        void updateToolbarLayer(long nativeToolbarSceneLayer, ToolbarSceneLayer caller,
+                ResourceManager resourceManager, int resourceId, int toolbarBackgroundColor,
+                int urlBarResourceId, float urlBarAlpha, int urlBarColor, float contentOffset,
+                float viewHeight, boolean visible, boolean showShadow);
+        void updateProgressBar(long nativeToolbarSceneLayer, ToolbarSceneLayer caller,
+                int progressBarX, int progressBarY, int progressBarWidth, int progressBarHeight,
+                int progressBarColor, int progressBarBackgroundX, int progressBarBackgroundY,
+                int progressBarBackgroundWidth, int progressBarBackgroundHeight,
+                int progressBarBackgroundColor);
+    }
 }

@@ -15,8 +15,8 @@
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
-#include "storage/browser/fileapi/file_stream_reader.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_stream_reader.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 namespace chromeos {
 namespace file_system_provider {
@@ -112,7 +112,7 @@ class FileStreamReader : public storage::FileStreamReader {
   scoped_refptr<OperationRunner> runner_;
   State state_;
 
-  base::WeakPtrFactory<FileStreamReader> weak_ptr_factory_;
+  base::WeakPtrFactory<FileStreamReader> weak_ptr_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(FileStreamReader);
 };
 

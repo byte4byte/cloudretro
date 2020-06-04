@@ -33,7 +33,7 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
   // and IO tasks on separate threads.
   BookmarkBubbleViewTest()
       : BrowserWithTestWindowTest(
-            content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
+            content::BrowserTaskEnvironment::REAL_IO_THREAD) {}
 
   // testing::Test:
   void SetUp() override {
@@ -58,36 +58,36 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
  protected:
   // Creates a bookmark bubble view.
   void CreateBubbleView() {
-    std::unique_ptr<BubbleSyncPromoDelegate> delegate;
-    bubble_.reset(new BookmarkBubbleView(NULL, NULL, std::move(delegate),
+    // Create a fake anchor view for the bubble.
+    anchor_ = std::make_unique<views::View>();
+
+    bubble_.reset(new BookmarkBubbleView(anchor_.get(), nullptr, nullptr,
                                          profile(), GURL(kTestBookmarkURL),
                                          true));
     bubble_->Init();
   }
 
-  std::unique_ptr<views::View> CreateFootnoteView() {
-    return bubble_->CreateFootnoteView();
-  }
-
   std::unique_ptr<BookmarkBubbleView> bubble_;
 
  private:
+  std::unique_ptr<views::View> anchor_;
+
   DISALLOW_COPY_AND_ASSIGN(BookmarkBubbleViewTest);
 };
 
 // Verifies that the sync promo is not displayed for a signed in user.
 TEST_F(BookmarkBubbleViewTest, SyncPromoSignedIn) {
-  identity::MakePrimaryAccountAvailable(
-      IdentityManagerFactory::GetForProfile(profile()), "fake_username");
+  signin::MakePrimaryAccountAvailable(
+      IdentityManagerFactory::GetForProfile(profile()),
+      "fake_username@gmail.com");
   CreateBubbleView();
-  std::unique_ptr<views::View> footnote = CreateFootnoteView();
-  EXPECT_FALSE(footnote);
+  EXPECT_FALSE(bubble_->GetFootnoteViewForTesting());
 }
 
 // Verifies that the sync promo is displayed for a user that is not signed in.
 TEST_F(BookmarkBubbleViewTest, SyncPromoNotSignedIn) {
   CreateBubbleView();
-  std::unique_ptr<views::View> footnote = CreateFootnoteView();
+  views::View* footnote = bubble_->GetFootnoteViewForTesting();
 #if defined(OS_CHROMEOS)
   EXPECT_FALSE(footnote);
 #else  // !defined(OS_CHROMEOS)

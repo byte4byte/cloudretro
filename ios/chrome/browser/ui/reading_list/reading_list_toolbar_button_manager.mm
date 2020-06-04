@@ -5,12 +5,13 @@
 #import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_manager.h"
 
 #include "base/logging.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
+#import "ios/chrome/browser/ui/reading_list/reading_list_constants.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_commands.h"
-#import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button_identifiers.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
@@ -80,7 +81,7 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
                target:nil
                action:@selector(deleteSelectedReadingListItems)];
     _deleteButton.accessibilityIdentifier = kReadingListToolbarDeleteButtonID;
-    _deleteButton.tintColor = [UIColor redColor];
+    _deleteButton.tintColor = [UIColor colorNamed:kRedColor];
 
     _deleteAllReadButton = [[UIBarButtonItem alloc]
         initWithTitle:l10n_util::GetNSString(
@@ -90,7 +91,7 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
                action:@selector(deleteAllReadReadingListItems)];
     _deleteAllReadButton.accessibilityIdentifier =
         kReadingListToolbarDeleteAllReadButtonID;
-    _deleteAllReadButton.tintColor = [UIColor redColor];
+    _deleteAllReadButton.tintColor = [UIColor colorNamed:kRedColor];
 
     _cancelButton = [[UIBarButtonItem alloc]
         initWithTitle:l10n_util::GetNSString(IDS_IOS_READING_LIST_CANCEL_BUTTON)
@@ -116,7 +117,6 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
     return;
   BOOL hadSelectedItems = _selectionState != ReadingListSelectionState::NONE;
   _selectionState = selectionState;
-  _markButton.title = GetMarkButtonTitleForSelectionState(_selectionState);
   // Check whether selection status has changed to or from NONE.
   if ((_selectionState != ReadingListSelectionState::NONE) != hadSelectedItems)
     _buttonItems = nil;
@@ -142,6 +142,12 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   // Selected cells are unselected when exiting edit mode.
   if (!_editing)
     self.selectionState = ReadingListSelectionState::NONE;
+}
+
+- (void)updateMarkButtonTitle {
+  if (!_editing)
+    return;
+  _markButton.title = GetMarkButtonTitleForSelectionState(_selectionState);
 }
 
 - (BOOL)buttonItemsUpdated {
@@ -210,10 +216,13 @@ NSString* GetMarkButtonTitleForSelectionState(ReadingListSelectionState state) {
   return _buttonItems;
 }
 
-- (ActionSheetCoordinator*)markButtonConfirmationWithBaseViewController:
-    (UIViewController*)viewController {
+- (ActionSheetCoordinator*)
+    markButtonConfirmationWithBaseViewController:
+        (UIViewController*)viewController
+                                         browser:(Browser*)browser {
   return [[ActionSheetCoordinator alloc]
       initWithBaseViewController:viewController
+                         browser:browser
                            title:nil
                          message:nil
                    barButtonItem:self.markButton];

@@ -9,7 +9,6 @@
 #include <string>
 
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
-#include "components/data_reduction_proxy/proto/pageload_metrics.pb.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/proxy_server.h"
 #include "net/nqe/effective_connection_type.h"
@@ -20,11 +19,6 @@ namespace base {
 class Time;
 class TimeDelta;
 }  // namespace base
-
-namespace net {
-class ProxyConfig;
-class ProxyInfo;
-}  // namespace net
 
 namespace data_reduction_proxy {
 
@@ -68,24 +62,6 @@ const char* GetStringForClient(Client client);
 
 GURL AddApiKeyToUrl(const GURL& url);
 
-// Returns whether this is valid for data reduction proxy use. |proxy_info|
-// should contain a single DIRECT ProxyServer, |url| should not be WS or WSO,
-// and the |method| should be idempotent for this to be eligible.
-bool EligibleForDataReductionProxy(const net::ProxyInfo& proxy_info,
-                                   const GURL& url,
-                                   const std::string& method);
-
-// Determines if |proxy_config| would override a direct. |proxy_config| should
-// be a data reduction proxy config with proxy servers mapped in the
-// rules, or DIRECT to indicate DRP is not to be used. |proxy_retry_info|
-// contains the list of bad proxies. |url| is used to determine whether it is
-// HTTP or HTTPS. |data_reduction_proxy_info| is an out param that will contain
-// the proxies that should be used.
-bool ApplyProxyConfigToProxyInfo(const net::ProxyConfig& proxy_config,
-                                 const net::ProxyRetryInfoMap& proxy_retry_info,
-                                 const GURL& url,
-                                 net::ProxyInfo* data_reduction_proxy_info);
-
 // Returns the hostname used for the other bucket to record datause not scoped
 // to a page load such as chrome-services traffic, service worker, Downloads.
 const char* GetSiteBreakdownOtherHostName();
@@ -98,23 +74,9 @@ static_assert(net::EFFECTIVE_CONNECTION_TYPE_LAST == 6,
               "If net::EFFECTIVE_CONNECTION_TYPE changes, "
               "PageloadMetrics_EffectiveConnectionType needs to be updated.");
 
-// Returns the PageloadMetrics_EffectiveConnectionType equivalent of
-// |effective_connection_type|.
-PageloadMetrics_EffectiveConnectionType
-ProtoEffectiveConnectionTypeFromEffectiveConnectionType(
-    net::EffectiveConnectionType effective_connection_type);
-
-// Returns the PageloadMetrics_ConnectionType equivalent of
-// |connection_type|.
-PageloadMetrics_ConnectionType ProtoConnectionTypeFromConnectionType(
-    net::NetworkChangeNotifier::ConnectionType connection_type);
-
-// Returns the |net::ProxyServer::Scheme| for a ProxyServer_ProxyScheme.
-net::ProxyServer::Scheme SchemeFromProxyScheme(
-    ProxyServer_ProxyScheme proxy_scheme);
-
-// Returns the ProxyServer_ProxyScheme for a |net::ProxyServer::Scheme|.
-ProxyServer_ProxyScheme ProxySchemeFromScheme(net::ProxyServer::Scheme scheme);
+// Returns the corresponding scheme string for the prefetch proto scheme.
+std::string SchemeFromPrefetchScheme(
+    PrefetchProxyConfig_Proxy_Scheme proxy_scheme);
 
 // Returns the |Duration| representation of |time_delta|.
 void TimeDeltaToDuration(const base::TimeDelta& time_delta, Duration* duration);

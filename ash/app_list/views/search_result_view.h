@@ -29,7 +29,7 @@ namespace views {
 class ImageView;
 }  // namespace views
 
-namespace app_list {
+namespace ash {
 namespace test {
 class SearchResultListViewTest;
 }  // namespace test
@@ -37,7 +37,6 @@ class SearchResultListViewTest;
 class AppListViewDelegate;
 class SearchResult;
 class SearchResultListView;
-class SearchResultActionsView;
 
 // SearchResultView displays a SearchResult.
 class APP_LIST_EXPORT SearchResultView
@@ -55,12 +54,10 @@ class APP_LIST_EXPORT SearchResultView
   // Sets/gets SearchResult displayed by this view.
   void OnResultChanged() override;
 
-  bool selected() const { return selected_; }
-
   void SetDisplayIcon(const gfx::ImageSkia& source);
 
  private:
-  friend class app_list::test::SearchResultListViewTest;
+  friend class test::SearchResultListViewTest;
 
   void UpdateTitleText();
   void UpdateDetailsText();
@@ -127,20 +124,17 @@ class APP_LIST_EXPORT SearchResultView
   views::ImageView* badge_icon_;    // Owned by views hierarchy.
   std::unique_ptr<gfx::RenderText> title_text_;
   std::unique_ptr<gfx::RenderText> details_text_;
-  SearchResultActionsView* actions_view_;  // Owned by the views hierarchy.
 
   std::unique_ptr<AppListMenuModelAdapter> context_menu_;
 
-  // Whether this view is selected.
-  bool selected_ = false;
   // Whether the removal confirmation dialog is invoked by long press touch.
   bool confirm_remove_by_long_press_ = false;
 
-  base::WeakPtrFactory<SearchResultView> weak_ptr_factory_;
+  base::WeakPtrFactory<SearchResultView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_SEARCH_RESULT_VIEW_H_

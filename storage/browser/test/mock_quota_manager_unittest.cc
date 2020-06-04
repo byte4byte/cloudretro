@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "storage/browser/test/mock_special_storage_policy.h"
 #include "storage/browser/test/mock_storage_client.h"
@@ -20,16 +20,7 @@
 
 using blink::mojom::StorageType;
 
-namespace content {
-
-const char kTestOrigin1[] = "http://host1:1/";
-const char kTestOrigin2[] = "http://host2:1/";
-const char kTestOrigin3[] = "http://host3:1/";
-
-// TODO(crbug.com/889590): Use helper for url::Origin creation from string.
-const url::Origin kOrigin1 = url::Origin::Create(GURL(kTestOrigin1));
-const url::Origin kOrigin2 = url::Origin::Create(GURL(kTestOrigin2));
-const url::Origin kOrigin3 = url::Origin::Create(GURL(kTestOrigin3));
+namespace storage {
 
 const StorageType kTemporary = StorageType::kTemporary;
 const StorageType kPersistent = StorageType::kPersistent;
@@ -39,10 +30,7 @@ const QuotaClient::ID kClientDB = QuotaClient::kIndexedDatabase;
 
 class MockQuotaManagerTest : public testing::Test {
  public:
-  MockQuotaManagerTest()
-    : deletion_callback_count_(0),
-      weak_factory_(this) {
-  }
+  MockQuotaManagerTest() : deletion_callback_count_(0) {}
 
   void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
@@ -100,7 +88,7 @@ class MockQuotaManagerTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::ScopedTempDir data_dir_;
   scoped_refptr<MockQuotaManager> manager_;
   scoped_refptr<MockSpecialStoragePolicy> policy_;
@@ -110,12 +98,15 @@ class MockQuotaManagerTest : public testing::Test {
   std::set<url::Origin> origins_;
   StorageType type_;
 
-  base::WeakPtrFactory<MockQuotaManagerTest> weak_factory_;
+  base::WeakPtrFactory<MockQuotaManagerTest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MockQuotaManagerTest);
 };
 
 TEST_F(MockQuotaManagerTest, BasicOriginManipulation) {
+  const url::Origin kOrigin1 = url::Origin::Create(GURL("http://host1:1/"));
+  const url::Origin kOrigin2 = url::Origin::Create(GURL("http://host2:1/"));
+
   EXPECT_FALSE(manager()->OriginHasData(kOrigin1, kTemporary, kClientFile));
   EXPECT_FALSE(manager()->OriginHasData(kOrigin1, kTemporary, kClientDB));
   EXPECT_FALSE(manager()->OriginHasData(kOrigin1, kPersistent, kClientFile));
@@ -158,6 +149,10 @@ TEST_F(MockQuotaManagerTest, BasicOriginManipulation) {
 }
 
 TEST_F(MockQuotaManagerTest, OriginDeletion) {
+  const url::Origin kOrigin1 = url::Origin::Create(GURL("http://host1:1/"));
+  const url::Origin kOrigin2 = url::Origin::Create(GURL("http://host2:1/"));
+  const url::Origin kOrigin3 = url::Origin::Create(GURL("http://host3:1/"));
+
   manager()->AddOrigin(kOrigin1, kTemporary, kClientFile, base::Time::Now());
   manager()->AddOrigin(kOrigin2, kTemporary, kClientFile | kClientDB,
       base::Time::Now());
@@ -186,6 +181,9 @@ TEST_F(MockQuotaManagerTest, OriginDeletion) {
 }
 
 TEST_F(MockQuotaManagerTest, ModifiedOrigins) {
+  const url::Origin kOrigin1 = url::Origin::Create(GURL("http://host1:1/"));
+  const url::Origin kOrigin2 = url::Origin::Create(GURL("http://host2:1/"));
+
   base::Time now = base::Time::Now();
   base::Time then = base::Time();
   base::TimeDelta an_hour = base::TimeDelta::FromMilliseconds(3600000);
@@ -223,4 +221,4 @@ TEST_F(MockQuotaManagerTest, ModifiedOrigins) {
   EXPECT_EQ(0UL, origins().count(kOrigin1));
   EXPECT_EQ(1UL, origins().count(kOrigin2));
 }
-}  // namespace content
+}  // namespace storage

@@ -13,17 +13,19 @@
 #include "base/files/file_path.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
+#include "chrome/browser/download/simple_download_manager_coordinator_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/safe_browsing/safe_browsing_navigation_observer_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/db/database_manager.h"
-#include "components/safe_browsing/features.h"
-#include "components/safe_browsing/ping_manager.h"
-#include "components/safe_browsing/web_ui/safe_browsing_ui.h"
+#include "components/safe_browsing/content/web_ui/safe_browsing_ui.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/db/database_manager.h"
+#include "components/safe_browsing/core/features.h"
+#include "components/safe_browsing/core/ping_manager.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
@@ -40,10 +42,6 @@ const char kApkMimeType[] = "application/vnd.android.package-archive";
 
 // The number of user gestures to trace back for the referrer chain.
 const int kAndroidTelemetryUserGestureLimit = 2;
-
-bool CanCaptureSafetyNetId() {
-  return base::FeatureList::IsEnabled(safe_browsing::kCaptureSafetyNetId);
-}
 
 void RecordApkDownloadTelemetryOutcome(ApkDownloadTelemetryOutcome outcome) {
   UMA_HISTOGRAM_ENUMERATION("SafeBrowsing.AndroidTelemetry.ApkDownload.Outcome",
@@ -73,47 +71,38 @@ void RecordApkDownloadTelemetryIncompleteReason(
 AndroidTelemetryService::AndroidTelemetryService(
     SafeBrowsingService* sb_service,
     Profile* profile)
-    : TelemetryService(),
-      profile_(profile),
-      sb_service_(sb_service),
-      weak_ptr_factory_(this) {
+    : TelemetryService(), profile_(profile), sb_service_(sb_service) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(profile_);
   DCHECK(sb_service_);
 
-  content::DownloadManager* download_manager =
-      BrowserContext::GetDownloadManager(profile_);
-  if (download_manager) {
-    // Look for new downloads being created.
-    download_manager->AddObserver(this);
-  }
+  download::SimpleDownloadManagerCoordinator* coordinator =
+      SimpleDownloadManagerCoordinatorFactory::GetForKey(
+          profile_->GetProfileKey());
+  coordinator->AddObserver(this);
 }
 
 AndroidTelemetryService::~AndroidTelemetryService() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  content::DownloadManager* download_manager =
-      BrowserContext::GetDownloadManager(profile_);
-  if (download_manager) {
-    download_manager->RemoveObserver(this);
-  }
+  download::SimpleDownloadManagerCoordinator* coordinator =
+      SimpleDownloadManagerCoordinatorFactory::GetForKey(
+          profile_->GetProfileKey());
+  coordinator->RemoveObserver(this);
 }
 
 void AndroidTelemetryService::OnDownloadCreated(
-    content::DownloadManager* manager,
     download::DownloadItem* item) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (!BrowserContext::GetDownloadManager(profile_)->IsManagerInitialized()) {
+  download::SimpleDownloadManagerCoordinator* coordinator =
+      SimpleDownloadManagerCoordinatorFactory::GetForKey(
+          profile_->GetProfileKey());
+  if (!coordinator->has_all_history_downloads())
     return;
-  }
 
   if (!CanSendPing(item)) {
     return;
   }
-
-  // The report can be sent. Try capturing the safety net ID. This should
-  // complete before the download completes, but is not guaranteed, That's OK.
-  MaybeCaptureSafetyNetId();
 
   item->AddObserver(this);
 }
@@ -145,7 +134,7 @@ bool AndroidTelemetryService::CanSendPing(download::DownloadItem* item) {
     return false;
   }
 
-  if (!IsSafeBrowsingEnabled()) {
+  if (!IsSafeBrowsingEnabled(*GetPrefs())) {
     RecordApkDownloadTelemetryOutcome(
         ApkDownloadTelemetryOutcome::NOT_SENT_SAFE_BROWSING_NOT_ENABLED);
     return false;
@@ -157,9 +146,11 @@ bool AndroidTelemetryService::CanSendPing(download::DownloadItem* item) {
     return false;
   }
 
-  if (!IsExtendedReportingEnabled(*GetPrefs())) {
+  bool no_ping_allowed = !IsExtendedReportingEnabled(*GetPrefs());
+
+  if (no_ping_allowed) {
     RecordApkDownloadTelemetryOutcome(
-        ApkDownloadTelemetryOutcome::NOT_SENT_EXTENDED_REPORTING_DISABLED);
+        ApkDownloadTelemetryOutcome::NOT_SENT_UNCONSENTED);
     return false;
   }
 
@@ -168,10 +159,6 @@ bool AndroidTelemetryService::CanSendPing(download::DownloadItem* item) {
 
 const PrefService* AndroidTelemetryService::GetPrefs() {
   return profile_->GetPrefs();
-}
-
-bool AndroidTelemetryService::IsSafeBrowsingEnabled() {
-  return GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled);
 }
 
 void AndroidTelemetryService::FillReferrerChain(
@@ -234,25 +221,8 @@ AndroidTelemetryService::GetReport(download::DownloadItem* item) {
   mutable_download_item_info->set_length(item->GetReceivedBytes());
   mutable_download_item_info->set_file_basename(
       item->GetTargetFilePath().BaseName().value());
-  report->set_safety_net_id(safety_net_id_on_ui_thread_);
 
   return report;
-}
-
-void AndroidTelemetryService::MaybeCaptureSafetyNetId() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(sb_service_->database_manager());
-  if (!CanCaptureSafetyNetId() || !safety_net_id_on_ui_thread_.empty() ||
-      !sb_service_->database_manager()->IsSupported()) {
-    return;
-  }
-
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(&SafeBrowsingDatabaseManager::GetSafetyNetId,
-                     sb_service_->database_manager()),
-      base::BindOnce(&AndroidTelemetryService::SetSafetyNetIdOnUIThread,
-                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void AndroidTelemetryService::MaybeSendApkDownloadReport(
@@ -266,18 +236,13 @@ void AndroidTelemetryService::MaybeSendApkDownloadReport(
   }
   sb_service_->ping_manager()->ReportThreatDetails(serialized);
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&WebUIInfoSingleton::AddToCSBRRsSent,
                      base::Unretained(WebUIInfoSingleton::GetInstance()),
                      std::move(report)));
 
   RecordApkDownloadTelemetryOutcome(ApkDownloadTelemetryOutcome::SENT);
-}
-
-void AndroidTelemetryService::SetSafetyNetIdOnUIThread(const std::string& sid) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  safety_net_id_on_ui_thread_ = sid;
 }
 
 }  // namespace safe_browsing

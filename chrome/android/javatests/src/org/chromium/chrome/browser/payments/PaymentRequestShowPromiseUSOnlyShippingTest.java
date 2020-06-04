@@ -15,12 +15,15 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppSpeed;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -39,27 +42,26 @@ public class PaymentRequestShowPromiseUSOnlyShippingTest implements MainActivity
             new PaymentRequestTestRule("show_promise/us_only_shipping.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCannotShipWithFastApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.IMMEDIATE_RESPONSE);
+    public void testCannotShipWithFastApp() throws TimeoutException {
+        mRule.addPaymentAppFactory("basic-card", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
         runCannotShipTest();
     }
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCannotShipWithSlowApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.DELAYED_RESPONSE, PaymentRequestTestRule.DELAYED_CREATION);
+    public void testCannotShipWithSlowApp() throws TimeoutException {
+        mRule.addPaymentAppFactory(
+                "basic-card", AppPresence.HAVE_APPS, FactorySpeed.SLOW_FACTORY, AppSpeed.SLOW_APP);
         runCannotShipTest();
     }
 
-    private void runCannotShipTest() throws InterruptedException, TimeoutException {
+    private void runCannotShipTest() throws TimeoutException {
         AutofillTestHelper autofillTestHelper = new AutofillTestHelper();
         autofillTestHelper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Jon Doe", "Google", "51 Breithaupt St", "ON", "Kitchener", "", "N2H 5G5", "", "CA",
@@ -79,22 +81,21 @@ public class PaymentRequestShowPromiseUSOnlyShippingTest implements MainActivity
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCanShipWithFastApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.IMMEDIATE_RESPONSE);
+    public void testCanShipWithFastApp() throws TimeoutException {
+        mRule.addPaymentAppFactory("basic-card", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
         runCanShipTest();
     }
 
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testCanShipWithSlowApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.DELAYED_RESPONSE, PaymentRequestTestRule.DELAYED_CREATION);
+    public void testCanShipWithSlowApp() throws TimeoutException {
+        mRule.addPaymentAppFactory(
+                "basic-card", AppPresence.HAVE_APPS, FactorySpeed.SLOW_FACTORY, AppSpeed.SLOW_APP);
         runCanShipTest();
     }
 
-    private void runCanShipTest() throws InterruptedException, TimeoutException {
+    private void runCanShipTest() throws TimeoutException {
         AutofillTestHelper autofillTestHelper = new AutofillTestHelper();
         autofillTestHelper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Jane Smith", "Google", "340 Main St", "California", "Los Angeles", "", "90291", "",

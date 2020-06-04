@@ -36,7 +36,7 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
       PrefService* local_state,
       DeviceManagementService* device_management_service,
       UserCloudPolicyManager* policy_manager,
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory);
   ~UserPolicySigninService() override;
 
@@ -46,10 +46,10 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
   // Virtual for testing.
   virtual void RegisterForPolicyWithAccountId(
       const std::string& username,
-      const std::string& account_id,
-      const PolicyRegistrationCallback& callback);
+      const CoreAccountId& account_id,
+      PolicyRegistrationCallback callback);
 
-  // identity::IdentityManager::Observer implementation:
+  // signin::IdentityManager::Observer implementation:
   // UserPolicySigninServiceBase is already an observer of IdentityManager.
   void OnPrimaryAccountSet(const CoreAccountInfo& account_info) override;
   void OnRefreshTokenUpdatedForAccount(
@@ -58,6 +58,11 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
   // CloudPolicyService::Observer implementation:
   void OnCloudPolicyServiceInitializationCompleted() override;
 
+  // The signin flow may be interrupted after the policy manager was
+  // initialized, but before the account is set as primary account. In this case
+  // the manager must be shutdown manually.
+  void ShutdownUserCloudPolicyManager() override;
+
  protected:
   // UserPolicySigninServiceBase implementation:
   void InitializeUserCloudPolicyManager(
@@ -65,7 +70,6 @@ class UserPolicySigninService : public UserPolicySigninServiceBase {
       std::unique_ptr<CloudPolicyClient> client) override;
 
   void PrepareForUserCloudPolicyManagerShutdown() override;
-  void ShutdownUserCloudPolicyManager() override;
 
  private:
   // Fetches an OAuth token to allow the cloud policy service to register with

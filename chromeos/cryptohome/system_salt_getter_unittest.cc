@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,8 +24,8 @@ void CopySystemSalt(std::string* out_system_salt,
 class SystemSaltGetterTest : public testing::Test {
  protected:
   SystemSaltGetterTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
     CryptohomeClient::InitializeFake();
@@ -41,7 +41,7 @@ class SystemSaltGetterTest : public testing::Test {
     CryptohomeClient::Shutdown();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(SystemSaltGetterTest, GetSystemSalt) {
@@ -49,7 +49,7 @@ TEST_F(SystemSaltGetterTest, GetSystemSalt) {
   FakeCryptohomeClient::Get()->SetServiceIsAvailable(false);
   std::string system_salt;
   SystemSaltGetter::Get()->GetSystemSalt(
-      base::Bind(&CopySystemSalt, &system_salt));
+      base::BindOnce(&CopySystemSalt, &system_salt));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(system_salt.empty());  // System salt is not returned yet.
 

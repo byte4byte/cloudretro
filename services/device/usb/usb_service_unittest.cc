@@ -8,7 +8,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_io_thread.h"
 #include "build/build_config.h"
 #include "device/base/features.h"
@@ -25,23 +25,22 @@ namespace {
 class UsbServiceTest : public ::testing::Test {
  public:
   UsbServiceTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI),
         usb_service_(UsbService::Create()),
         io_thread_(base::TestIOThread::kAutoStart) {}
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<UsbService> usb_service_;
   base::TestIOThread io_thread_;
 };
 
-void OnGetDevices(const base::Closure& quit_closure,
+void OnGetDevices(base::OnceClosure quit_closure,
                   const std::vector<scoped_refptr<UsbDevice>>& devices) {
   // Since there's no guarantee that any devices are connected at the moment
   // this test doesn't assume anything about the result but it at least verifies
   // that devices can be enumerated without the application crashing.
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 }  // namespace
@@ -50,8 +49,7 @@ TEST_F(UsbServiceTest, GetDevices) {
   // The USB service is not available on all platforms.
   if (usb_service_) {
     base::RunLoop loop;
-    usb_service_->GetDevices(
-        base::BindRepeating(&OnGetDevices, loop.QuitClosure()));
+    usb_service_->GetDevices(base::BindOnce(&OnGetDevices, loop.QuitClosure()));
     loop.Run();
   }
 }
@@ -64,8 +62,7 @@ TEST_F(UsbServiceTest, GetDevicesNewBackend) {
   // The USB service is not available on all platforms.
   if (usb_service_) {
     base::RunLoop loop;
-    usb_service_->GetDevices(
-        base::BindRepeating(&OnGetDevices, loop.QuitClosure()));
+    usb_service_->GetDevices(base::BindOnce(&OnGetDevices, loop.QuitClosure()));
     loop.Run();
   }
 }

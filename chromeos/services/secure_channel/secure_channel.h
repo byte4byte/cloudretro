@@ -67,14 +67,14 @@ class SecureChannel : public ConnectionObserver {
 
   class Factory {
    public:
-    static std::unique_ptr<SecureChannel> NewInstance(
+    static std::unique_ptr<SecureChannel> Create(
         std::unique_ptr<Connection> connection);
 
-    static void SetInstanceForTesting(Factory* factory);
+    static void SetFactoryForTesting(Factory* factory);
 
    protected:
-    virtual std::unique_ptr<SecureChannel> BuildInstance(
-        std::unique_ptr<Connection> connection);
+    virtual std::unique_ptr<SecureChannel> CreateInstance(
+        std::unique_ptr<Connection> connection) = 0;
 
    private:
     static Factory* factory_instance_;
@@ -156,7 +156,7 @@ class SecureChannel : public ConnectionObserver {
   std::unique_ptr<PendingMessage> pending_message_;
   int next_sequence_number_ = 0;
   base::ObserverList<Observer>::Unchecked observer_list_;
-  base::WeakPtrFactory<SecureChannel> weak_ptr_factory_;
+  base::WeakPtrFactory<SecureChannel> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SecureChannel);
 };

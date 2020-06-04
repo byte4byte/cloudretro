@@ -32,6 +32,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLL_ANIMATOR_H_
 
 #include <memory>
+#include "base/time/default_tick_clock.h"
+
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_client.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_delegate.h"
@@ -99,8 +101,9 @@ class CompositorAnimationTimeline;
 
 class CORE_EXPORT ScrollAnimator : public ScrollAnimatorBase {
  public:
-  using TimeFunction = double (*)();
-  ScrollAnimator(ScrollableArea*, TimeFunction);
+  explicit ScrollAnimator(ScrollableArea*,
+                          const base::TickClock* tick_clock =
+                              base::DefaultTickClock::GetInstance());
   ~ScrollAnimator() override;
 
   bool HasRunningAnimation() const override;
@@ -119,7 +122,7 @@ class CORE_EXPORT ScrollAnimator : public ScrollAnimatorBase {
   void TickAnimation(double monotonic_time) override;
   void CancelAnimation() override;
   void AdjustAnimationAndSetScrollOffset(const ScrollOffset&,
-                                         ScrollType) override;
+                                         mojom::blink::ScrollType) override;
   void TakeOverCompositorAnimation() override;
   void ResetAnimationState() override;
   void UpdateCompositorAnimations() override;
@@ -128,19 +131,11 @@ class CORE_EXPORT ScrollAnimator : public ScrollAnimatorBase {
   void LayerForCompositedScrollingDidChange(
       CompositorAnimationTimeline*) override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  protected:
   // Returns whether or not the animation was sent to the compositor.
   virtual bool SendAnimationToCompositor();
-
-  void NotifyAnimationTakeover(double monotonic_time,
-                               double animation_start_time,
-                               std::unique_ptr<cc::AnimationCurve>) override;
-
-  std::unique_ptr<CompositorScrollOffsetAnimationCurve> animation_curve_;
-  double start_time_;
-  TimeFunction time_function_;
 
  private:
   // Returns true if the animation was scheduled successfully. If animation
@@ -149,15 +144,15 @@ class CORE_EXPORT ScrollAnimator : public ScrollAnimatorBase {
   bool RegisterAndScheduleAnimation();
 
   void CreateAnimationCurve();
-  void PostAnimationCleanupAndReset();
-
-  void AddMainThreadScrollingReason();
-  void RemoveMainThreadScrollingReason();
 
   // Returns true if will animate to the given target offset. Returns false
   // only when there is no animation running and we are not starting one
   // because we are already at targetPos.
   bool WillAnimateToOffset(const ScrollOffset& target_pos);
+
+  std::unique_ptr<CompositorScrollOffsetAnimationCurve> animation_curve_;
+  const base::TickClock* const tick_clock_;
+  base::TimeTicks start_time_;
 
   ScrollOffset target_offset_;
   ScrollGranularity last_granularity_;

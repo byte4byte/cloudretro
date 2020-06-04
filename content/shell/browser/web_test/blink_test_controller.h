@@ -15,6 +15,7 @@
 
 #include "base/cancelable_callback.h"
 #include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
@@ -27,11 +28,15 @@
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/web_preferences.h"
 #include "content/shell/browser/web_test/leak_detector.h"
-#include "content/shell/common/web_test.mojom.h"
+#include "content/shell/common/web_test/blink_test.mojom.h"
+#include "content/shell/common/web_test/web_test.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "ui/gfx/geometry/size.h"
 
 class SkBitmap;
@@ -40,7 +45,6 @@ namespace content {
 
 class DevToolsProtocolTestBindings;
 class RenderFrameHost;
-class RenderProcessHost;
 class Shell;
 class WebTestBluetoothChooserFactory;
 class WebTestDevToolsBindings;
@@ -107,7 +111,8 @@ class BlinkTestResultPrinter {
 class BlinkTestController : public WebContentsObserver,
                             public RenderProcessHostObserver,
                             public NotificationObserver,
-                            public GpuDataManagerObserver {
+                            public GpuDataManagerObserver,
+                            public mojom::BlinkTestClient {
  public:
   static BlinkTestController* Get();
 
@@ -117,16 +122,12 @@ class BlinkTestController : public WebContentsObserver,
   // True if the controller is ready for testing.
   bool PrepareForWebTest(const TestInfo& test_info);
   // True if the controller was reset successfully.
-  bool ResetAfterWebTest();
+  bool ResetBrowserAfterWebTest();
 
   // IPC messages forwarded from elsewhere.
   void OnWebTestRuntimeFlagsChanged(
       int sender_process_host_id,
       const base::DictionaryValue& changed_web_test_runtime_flags);
-  void OnTestFinishedInSecondaryRenderer();
-  void OnInitiateCaptureDump(bool capture_navigation_history,
-                             bool capture_pixels);
-  void OnInspectSecondaryWindow();
 
   // Makes sure that the potentially new renderer associated with |frame| is 1)
   // initialized for the test, 2) kept up to date wrt test flags and 3)
@@ -147,12 +148,20 @@ class BlinkTestController : public WebContentsObserver,
 
   void DevToolsProcessCrashed();
 
+  void AddBlinkTestClientReceiver(
+      mojo::PendingAssociatedReceiver<mojom::BlinkTestClient> receiver);
+
   // WebContentsObserver implementation.
-  bool OnMessageReceived(const IPC::Message& message) override;
   void PluginCrashed(const base::FilePath& plugin_path,
                      base::ProcessId plugin_pid) override;
   void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
+  void TitleWasSet(NavigationEntry* entry) override;
+  void DidFailLoad(RenderFrameHost* render_frame_host,
+                   const GURL& validated_url,
+                   int error_code) override;
   void WebContentsDestroyed() override;
+  void DidUpdateFaviconURL(
+      const std::vector<blink::mojom::FaviconURLPtr>& candidates) override;
 
   // RenderProcessHostObserver implementation.
   void RenderProcessHostDestroyed(
@@ -173,6 +182,30 @@ class BlinkTestController : public WebContentsObserver,
     return accumulated_web_test_runtime_flags_changes_;
   }
 
+  // BlinkTestClient implementation.
+  void InitiateLayoutDump() override;
+  void InitiateCaptureDump(bool capture_navigation_history,
+                           bool capture_pixels) override;
+  void TestFinishedInSecondaryRenderer() override;
+  void ResetRendererAfterWebTestDone() override;
+  void PrintMessageToStderr(const std::string& message) override;
+  void PrintMessage(const std::string& message) override;
+  void Reload() override;
+  void OverridePreferences(
+      const content::WebPreferences& web_preferences) override;
+  void CloseRemainingWindows() override;
+  void GoToOffset(int offset) override;
+  void SendBluetoothManualChooserEvent(const std::string& event,
+                                       const std::string& argument) override;
+  void SetBluetoothManualChooser(bool enable) override;
+  void GetBluetoothManualChooserEvents() override;
+  void SetPopupBlockingEnabled(bool block_popups) override;
+  void LoadURLForFrame(const GURL& url, const std::string& frame_name) override;
+  void SetScreenOrientationChanged() override;
+  void BlockThirdPartyCookies(bool block) override;
+  void GetWritableDirectory(GetWritableDirectoryCallback callback) override;
+  void SetFilePathForMockFileDialog(const base::FilePath& path) override;
+
  private:
   enum TestPhase { BETWEEN_TESTS, DURING_TEST, CLEAN_UP };
 
@@ -192,44 +225,30 @@ class BlinkTestController : public WebContentsObserver,
 
   static BlinkTestController* instance_;
 
-  Shell* SecondaryWindow();
-  void LoadDevToolsJSTest();
   void DiscardMainWindow();
 
   // Message handlers.
   void OnAudioDump(const std::vector<unsigned char>& audio_dump);
   void OnImageDump(const std::string& actual_pixel_hash, const SkBitmap& image);
   void OnTextDump(const std::string& dump);
-  void OnInitiateLayoutDump();
   void OnDumpFrameLayoutResponse(int frame_tree_node_id,
                                  const std::string& dump);
-  void OnPrintMessageToStderr(const std::string& message);
-  void OnPrintMessage(const std::string& message);
-  void OnOverridePreferences(const WebPreferences& prefs);
-  void OnSetPopupBlockingEnabled(bool block_popups);
   void OnTestFinished();
-  void OnNavigateSecondaryWindow(const GURL& url);
-  void OnGoToOffset(int offset);
-  void OnReload();
-  void OnLoadURLForFrame(const GURL& url, const std::string& frame_name);
   void OnCaptureSessionHistory();
-  void OnCloseRemainingWindows();
-  void OnResetDone();
   void OnLeakDetectionDone(const LeakDetector::LeakDetectionReport& report);
-  void OnSetBluetoothManualChooser(bool enable);
-  void OnGetBluetoothManualChooserEvents();
-  void OnSendBluetoothManualChooserEvent(const std::string& event,
-                                         const std::string& argument);
-  void OnBlockThirdPartyCookies(bool block);
-  mojom::WebTestControlAssociatedPtr& GetWebTestControlPtr(
-      RenderFrameHost* frame);
-  void HandleWebTestControlError(const GlobalFrameRoutingId& key);
 
   void OnCleanupFinished();
-  void OnCaptureDumpCompleted(mojom::WebTestDumpPtr dump);
+  void OnCaptureDumpCompleted(mojom::BlinkTestDumpPtr dump);
   void OnPixelDumpCaptured(const SkBitmap& snapshot);
   void ReportResults();
   void EnqueueSurfaceCopyRequest();
+
+  mojo::AssociatedRemote<mojom::BlinkTestControl>& GetBlinkTestControlRemote(
+      RenderFrameHost* frame);
+  mojo::AssociatedRemote<mojom::WebTestControl>& GetWebTestControlRemote(
+      RenderProcessHost* process);
+  void HandleBlinkTestControlError(const GlobalFrameRoutingId& key);
+  void HandleWebTestControlError(RenderProcessHost* key);
 
   // CompositeAllFramesThen() first builds a frame tree based on
   // frame->GetParent(). Then, it builds a queue of frames in depth-first order,
@@ -254,7 +273,6 @@ class BlinkTestController : public WebContentsObserver,
 
   Shell* main_window_;
   Shell* secondary_window_;
-  Shell* devtools_window_;
 
   std::unique_ptr<WebTestDevToolsBindings> devtools_bindings_;
   std::unique_ptr<DevToolsProtocolTestBindings>
@@ -271,9 +289,6 @@ class BlinkTestController : public WebContentsObserver,
 
   // What phase of running an individual test we are currently in.
   TestPhase test_phase_;
-
-  // True if the currently running test is a compositing test.
-  bool is_compositing_test_;
 
   // Per test config.
   std::string expected_pixel_hash_;
@@ -299,14 +314,15 @@ class BlinkTestController : public WebContentsObserver,
 
   // Map from frame_tree_node_id into frame-specific dumps.
   std::map<int, std::string> frame_to_layout_dump_map_;
-  // Number of WebTestControl.DumpFrameLayout responses we are waiting for.
+  // Number of BlinkTestControl.DumpFrameLayout responses we are waiting for.
   int pending_layout_dumps_;
 
   // Renderer processes are observed to detect crashes.
   ScopedObserver<RenderProcessHost, RenderProcessHostObserver>
-      render_process_host_observer_;
+      render_process_host_observer_{this};
   std::set<RenderProcessHost*> all_observed_render_process_hosts_;
   std::set<RenderProcessHost*> main_window_render_process_hosts_;
+  std::set<RenderViewHost*> main_window_render_view_hosts_;
 
   // Changes reported by OnWebTestRuntimeFlagsChanged that have accumulated
   // since PrepareForWebTest (i.e. changes that need to be send to a fresh
@@ -316,16 +332,26 @@ class BlinkTestController : public WebContentsObserver,
   std::string navigation_history_dump_;
   base::Optional<SkBitmap> pixel_dump_;
   std::string actual_pixel_hash_;
-  mojom::WebTestDumpPtr main_frame_dump_;
+  mojom::BlinkTestDumpPtr main_frame_dump_;
   bool waiting_for_pixel_results_ = false;
   bool waiting_for_main_frame_dump_ = false;
+  int waiting_for_reset_done_ = 0;
 
   std::vector<std::unique_ptr<Node>> composite_all_frames_node_storage_;
   std::queue<Node*> composite_all_frames_node_queue_;
 
   // Map from one frame to one mojo pipe.
-  std::map<GlobalFrameRoutingId, mojom::WebTestControlAssociatedPtr>
+  std::map<GlobalFrameRoutingId,
+           mojo::AssociatedRemote<mojom::BlinkTestControl>>
+      blink_test_control_map_;
+
+  std::map<RenderProcessHost*, mojo::AssociatedRemote<mojom::WebTestControl>>
       web_test_control_map_;
+
+  mojo::AssociatedReceiverSet<mojom::BlinkTestClient>
+      blink_test_client_receivers_;
+
+  base::ScopedTempDir writable_directory_for_tests_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

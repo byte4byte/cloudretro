@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/component_export.h"
 #include "base/macros.h"
+#include "chromeos/dbus/shill/fake_shill_simulated_result.h"
 #include "chromeos/dbus/shill/shill_client_helper.h"
 
 namespace base {
@@ -31,7 +32,6 @@ class ShillPropertyChangedObserver;
 // initializes the DBusThreadManager instance.
 class COMPONENT_EXPORT(SHILL_CLIENT) ShillProfileClient {
  public:
-  typedef ShillClientHelper::PropertyChangedHandler PropertyChangedHandler;
   typedef ShillClientHelper::DictionaryValueCallbackWithoutStatus
       DictionaryValueCallbackWithoutStatus;
   typedef ShillClientHelper::ErrorCallback ErrorCallback;
@@ -89,6 +89,10 @@ class COMPONENT_EXPORT(SHILL_CLIENT) ShillProfileClient {
     // Remove all profile entries.
     virtual void ClearProfiles() = 0;
 
+    // Makes DeleteEntry succeed, fail, or timeout.
+    virtual void SetSimulateDeleteResult(
+        FakeShillSimulatedResult delete_result) = 0;
+
    protected:
     virtual ~TestInterface() {}
   };
@@ -120,24 +124,23 @@ class COMPONENT_EXPORT(SHILL_CLIENT) ShillProfileClient {
 
   // Calls GetProperties method.
   // |callback| is called after the method call succeeds.
-  virtual void GetProperties(
-      const dbus::ObjectPath& profile_path,
-      const DictionaryValueCallbackWithoutStatus& callback,
-      const ErrorCallback& error_callback) = 0;
+  virtual void GetProperties(const dbus::ObjectPath& profile_path,
+                             DictionaryValueCallbackWithoutStatus callback,
+                             ErrorCallback error_callback) = 0;
 
   // Calls GetEntry method.
   // |callback| is called after the method call succeeds.
   virtual void GetEntry(const dbus::ObjectPath& profile_path,
                         const std::string& entry_path,
-                        const DictionaryValueCallbackWithoutStatus& callback,
-                        const ErrorCallback& error_callback) = 0;
+                        DictionaryValueCallbackWithoutStatus callback,
+                        ErrorCallback error_callback) = 0;
 
   // Calls DeleteEntry method.
   // |callback| is called after the method call succeeds.
   virtual void DeleteEntry(const dbus::ObjectPath& profile_path,
                            const std::string& entry_path,
-                           const base::Closure& callback,
-                           const ErrorCallback& error_callback) = 0;
+                           base::OnceClosure callback,
+                           ErrorCallback error_callback) = 0;
 
   // Returns an interface for testing (stub only), or returns null.
   virtual TestInterface* GetTestInterface() = 0;

@@ -4,20 +4,21 @@
 
 #include "chrome/browser/page_load_metrics/observers/previews_page_load_metrics_observer.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/browser/previews/previews_content_util.h"
 #include "chrome/browser/previews/previews_ui_tab_helper.h"
-#include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
+#include "components/page_load_metrics/common/page_load_timing.h"
 #include "components/previews/content/previews_user_data.h"
 #include "components/previews/core/previews_experiments.h"
 #include "content/public/browser/navigation_handle.h"
@@ -135,22 +136,20 @@ PreviewsPageLoadMetricsObserver::OnCommit(
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 PreviewsPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   // FlushMetricsOnAppEnterBackground is invoked on Android in cases where the
   // app is about to be backgrounded, as part of the Activity.onPause()
   // flow. After this method is invoked, Chrome may be killed without further
   // notification.
-  if (info.did_commit) {
+  if (GetDelegate().DidCommit()) {
     RecordPageSizeUMA();
-    RecordTimingMetrics(timing, info);
+    RecordTimingMetrics(timing);
   }
   return STOP_OBSERVING;
 }
 
 void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   // TODO(dougarnett): Determine if a different event makes more sense.
   // https://crbug.com/864720
   int64_t inflation_bytes = 0;
@@ -164,16 +163,15 @@ void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
       (total_network_bytes_ * data_savings_inflation_percent_) / 100 +
       inflation_bytes;
 
-  DCHECK(info.url.SchemeIsHTTPOrHTTPS());
+  DCHECK(GetDelegate().GetUrl().SchemeIsHTTPOrHTTPS());
 
-  WriteToSavings(info.url, total_saved_bytes);
+  WriteToSavings(GetDelegate().GetUrl(), total_saved_bytes);
 }
 
 void PreviewsPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   RecordPageSizeUMA();
-  RecordTimingMetrics(timing, info);
+  RecordTimingMetrics(timing);
 }
 
 void PreviewsPageLoadMetricsObserver::RecordPageSizeUMA() const {
@@ -182,29 +180,28 @@ void PreviewsPageLoadMetricsObserver::RecordPageSizeUMA() const {
 }
 
 void PreviewsPageLoadMetricsObserver::RecordTimingMetrics(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->load_event_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->load_event_start, GetDelegate())) {
     RecordPageLoadHistogram(previews_type_,
                             "DocumentTiming.NavigationToLoadEventFired",
                             timing.document_timing->load_event_start.value());
   }
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_contentful_paint, GetDelegate())) {
     RecordPageLoadHistogram(
         previews_type_, "PaintTiming.NavigationToFirstContentfulPaint",
         timing.paint_timing->first_contentful_paint.value());
   }
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint, info)) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     RecordPageLoadHistogram(
         previews_type_,
         "Experimental.PaintTiming.NavigationToFirstMeaningfulPaint",
         timing.paint_timing->first_meaningful_paint.value());
   }
-  if (WasStartedInForegroundOptionalEventInForeground(
-          timing.parse_timing->parse_stop, info)) {
+  if (page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.parse_timing->parse_stop, GetDelegate())) {
     RecordPageLoadHistogram(
         previews_type_, "ParseTiming.ParseBlockedOnScriptLoad",
         timing.parse_timing->parse_blocked_on_script_load_duration.value());

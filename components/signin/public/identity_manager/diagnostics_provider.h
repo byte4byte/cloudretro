@@ -6,9 +6,10 @@
 #define COMPONENTS_SIGNIN_PUBLIC_IDENTITY_MANAGER_DIAGNOSTICS_PROVIDER_H_
 
 #include "base/macros.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "base/time/time.h"
+#include "components/signin/public/identity_manager/load_credentials_state.h"
 
-namespace identity {
+namespace signin {
 
 // DiagnosticsProvider is the interface to obtain diagnostics about
 // IdentityManager internals.
@@ -18,7 +19,7 @@ class DiagnosticsProvider {
   virtual ~DiagnosticsProvider() = default;
 
   // Returns the state of the load credentials operation.
-  virtual OAuth2TokenServiceDelegate::LoadCredentialsState
+  virtual signin::LoadCredentialsState
   GetDetailedStateOfLoadingOfRefreshTokens() const = 0;
 
   // Returns the time until a access token request can be sent (will be zero if
@@ -33,6 +34,6 @@ class DiagnosticsProvider {
   DISALLOW_COPY_AND_ASSIGN(DiagnosticsProvider);
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_PUBLIC_IDENTITY_MANAGER_DIAGNOSTICS_PROVIDER_H_

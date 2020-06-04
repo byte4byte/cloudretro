@@ -19,7 +19,7 @@
 void DownloadInProgressDialogView::Show(
     gfx::NativeWindow parent,
     int download_count,
-    Browser::DownloadClosePreventionType dialog_type,
+    Browser::DownloadCloseType dialog_type,
     bool app_modal,
     const base::Callback<void(bool)>& callback) {
   DownloadInProgressDialogView* window = new DownloadInProgressDialogView(
@@ -29,25 +29,55 @@ void DownloadInProgressDialogView::Show(
 
 DownloadInProgressDialogView::DownloadInProgressDialogView(
     int download_count,
-    Browser::DownloadClosePreventionType dialog_type,
+    Browser::DownloadCloseType dialog_type,
     bool app_modal,
     const base::Callback<void(bool)>& callback)
     : download_count_(download_count),
       app_modal_(app_modal),
       callback_(callback) {
+  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_EXIT_BUTTON));
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_CANCEL,
+      l10n_util::GetStringUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_CONTINUE_BUTTON));
   SetLayoutManager(std::make_unique<views::FillLayout>());
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
 
-  // This dialog should have been created within the same thread invocation
-  // as the original test, so it's never ok to close.
-  DCHECK_NE(Browser::DOWNLOAD_CLOSE_OK, dialog_type);
-  base::string16 message_text = l10n_util::GetStringUTF16(
-      dialog_type == Browser::DOWNLOAD_CLOSE_BROWSER_SHUTDOWN
-          ? IDS_ABANDON_DOWNLOAD_DIALOG_BROWSER_MESSAGE
-          : IDS_ABANDON_DOWNLOAD_DIALOG_INCOGNITO_MESSAGE);
+  auto run_callback = [](DownloadInProgressDialogView* dialog, bool accept) {
+    // Note that accepting this dialog means "cancel the download", while cancel
+    // means "continue the download".
+    dialog->callback_.Run(accept);
+  };
+  DialogDelegate::SetAcceptCallback(
+      base::BindOnce(run_callback, base::Unretained(this), true));
+  DialogDelegate::SetCancelCallback(
+      base::BindOnce(run_callback, base::Unretained(this), false));
+  DialogDelegate::SetCloseCallback(
+      base::BindOnce(run_callback, base::Unretained(this), false));
+
+  int message_id = 0;
+  switch (dialog_type) {
+    case Browser::DownloadCloseType::kLastWindowInIncognitoProfile:
+      message_id = IDS_ABANDON_DOWNLOAD_DIALOG_INCOGNITO_MESSAGE;
+      break;
+    case Browser::DownloadCloseType::kLastWindowInGuestSession:
+      message_id = IDS_ABANDON_DOWNLOAD_DIALOG_GUEST_MESSAGE;
+      break;
+    case Browser::DownloadCloseType::kBrowserShutdown:
+      message_id = IDS_ABANDON_DOWNLOAD_DIALOG_BROWSER_MESSAGE;
+      break;
+    case Browser::DownloadCloseType::kOk:
+      // This dialog should have been created within the same thread invocation
+      // as the original test, so it's never ok to close.
+      NOTREACHED();
+      break;
+  }
   auto message_label = std::make_unique<views::Label>(
-      message_text, CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY);
+      l10n_util::GetStringUTF16(message_id), CONTEXT_BODY_TEXT_LARGE,
+      views::style::STYLE_SECONDARY);
   message_label->SetMultiLine(true);
   message_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   AddChildView(message_label.release());
@@ -55,35 +85,13 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(
   chrome::RecordDialogCreation(chrome::DialogIdentifier::DOWNLOAD_IN_PROGRESS);
 }
 
-DownloadInProgressDialogView::~DownloadInProgressDialogView() {}
+DownloadInProgressDialogView::~DownloadInProgressDialogView() = default;
 
 gfx::Size DownloadInProgressDialogView::CalculatePreferredSize() const {
   const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
                         DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
                     margins().width();
   return gfx::Size(width, GetHeightForWidth(width));
-}
-
-int DownloadInProgressDialogView::GetDefaultDialogButton() const {
-  return ui::DIALOG_BUTTON_CANCEL;
-}
-
-base::string16 DownloadInProgressDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(
-      button == ui::DIALOG_BUTTON_OK
-          ? IDS_ABANDON_DOWNLOAD_DIALOG_EXIT_BUTTON
-          : IDS_ABANDON_DOWNLOAD_DIALOG_CONTINUE_BUTTON);
-}
-
-bool DownloadInProgressDialogView::Cancel() {
-  callback_.Run(false /* cancel_downloads */);
-  return true;
-}
-
-bool DownloadInProgressDialogView::Accept() {
-  callback_.Run(true /* cancel_downloads */);
-  return true;
 }
 
 ui::ModalType DownloadInProgressDialogView::GetModalType() const {
@@ -98,3 +106,7 @@ base::string16 DownloadInProgressDialogView::GetWindowTitle() const {
   return l10n_util::GetPluralStringFUTF16(IDS_ABANDON_DOWNLOAD_DIALOG_TITLE,
                                           download_count_);
 }
+
+BEGIN_METADATA(DownloadInProgressDialogView)
+METADATA_PARENT_CLASS(views::DialogDelegateView);
+END_METADATA()

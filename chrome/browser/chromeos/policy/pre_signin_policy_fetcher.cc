@@ -13,8 +13,8 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
@@ -35,8 +35,8 @@ namespace {
 // We will abort fresh policy fetch after this time and use cached policy.
 const int kPolicyFetchTimeoutSecs = 10;
 
-// Traits for the tasks posted in pre-signin policy fetch. As this blocks
-// signin, the tasks have user-visible priority.
+// Traits for the tasks posted on base::ThreadPool in pre-signin policy fetch.
+// As this blocks signin, the tasks have user-visible priority.
 constexpr base::TaskTraits kTaskTraits = {base::MayBlock(),
                                           base::TaskPriority::USER_VISIBLE};
 }  // namespace
@@ -54,8 +54,7 @@ PreSigninPolicyFetcher::PreSigninPolicyFetcher(
       is_active_directory_managed_(is_active_directory_managed),
       account_id_(account_id),
       auth_key_(auth_key),
-      task_runner_(base::CreateSequencedTaskRunnerWithTraits(kTaskTraits)),
-      weak_ptr_factory_(this) {
+      task_runner_(base::ThreadPool::CreateSequencedTaskRunner(kTaskTraits)) {
   DCHECK(account_id_.GetAccountType() != AccountType::ACTIVE_DIRECTORY ||
          is_active_directory_managed_);
 }
@@ -76,8 +75,8 @@ void PreSigninPolicyFetcher::FetchPolicy(PolicyFetchResultCallback callback) {
   chromeos::CryptohomeClient::Get()->MountEx(
       cryptohome::CreateAccountIdentifierFromAccountId(account_id_), auth,
       mount,
-      base::Bind(&PreSigninPolicyFetcher::OnMountTemporaryUserHome,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&PreSigninPolicyFetcher::OnMountTemporaryUserHome,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 bool PreSigninPolicyFetcher::ForceTimeoutForTesting() {
@@ -100,8 +99,8 @@ void PreSigninPolicyFetcher::OnMountTemporaryUserHome(
 
   session_manager_client_->RetrievePolicyForUserWithoutSession(
       cryptohome::CreateAccountIdentifierFromAccountId(account_id_),
-      base::Bind(&PreSigninPolicyFetcher::OnCachedPolicyRetrieved,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&PreSigninPolicyFetcher::OnCachedPolicyRetrieved,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PreSigninPolicyFetcher::OnCachedPolicyRetrieved(
@@ -116,7 +115,7 @@ void PreSigninPolicyFetcher::OnCachedPolicyRetrieved(
                                  &policy_key_dir));
     cached_policy_key_loader_ = std::make_unique<CachedPolicyKeyLoaderChromeOS>(
         cryptohome_client_, task_runner_, account_id_, policy_key_dir);
-    cached_policy_key_loader_->EnsurePolicyKeyLoaded(base::Bind(
+    cached_policy_key_loader_->EnsurePolicyKeyLoaded(base::BindOnce(
         &PreSigninPolicyFetcher::OnPolicyKeyLoaded,
         weak_ptr_factory_.GetWeakPtr(), retrieve_policy_response, policy_blob));
   } else {
@@ -179,8 +178,8 @@ void PreSigninPolicyFetcher::OnUnmountTemporaryUserHome(
   // Validate policy from session_manager.
   UserCloudPolicyValidator::StartValidation(
       CreateValidatorForCachedPolicy(std::move(policy)),
-      base::Bind(&PreSigninPolicyFetcher::OnCachedPolicyValidated,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&PreSigninPolicyFetcher::OnCachedPolicyValidated,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PreSigninPolicyFetcher::OnCachedPolicyValidated(
@@ -219,8 +218,8 @@ void PreSigninPolicyFetcher::OnCachedPolicyValidated(
   // Start a timer that will limit how long we wait for fresh policy.
   policy_fetch_timeout_.Start(
       FROM_HERE, base::TimeDelta::FromSeconds(kPolicyFetchTimeoutSecs),
-      base::Bind(&PreSigninPolicyFetcher::OnPolicyFetchTimeout,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&PreSigninPolicyFetcher::OnPolicyFetchTimeout,
+                     weak_ptr_factory_.GetWeakPtr()));
 
   cloud_policy_client_->FetchPolicy();
 }
@@ -246,8 +245,8 @@ void PreSigninPolicyFetcher::OnPolicyFetched(CloudPolicyClient* client) {
   // Validate fresh policy.
   UserCloudPolicyValidator::StartValidation(
       CreateValidatorForFetchedPolicy(std::move(fetched_policy_copy)),
-      base::Bind(&PreSigninPolicyFetcher::OnFetchedPolicyValidated,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&PreSigninPolicyFetcher::OnFetchedPolicyValidated,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PreSigninPolicyFetcher::OnRegistrationStateChanged(

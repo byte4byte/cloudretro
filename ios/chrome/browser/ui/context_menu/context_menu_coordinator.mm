@@ -24,24 +24,21 @@
 @implementation ContextMenuCoordinator
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
                                      title:(NSString*)title
                                     inView:(UIView*)view
                                 atLocation:(CGPoint)location {
-  self = [super initWithBaseViewController:viewController browserState:nullptr];
+  self = [super initWithBaseViewController:viewController browser:browser];
   if (self) {
     _alertCoordinator = [[ActionSheetCoordinator alloc]
         initWithBaseViewController:viewController
+                           browser:browser
                              title:title
                            message:nil
                               rect:CGRectMake(location.x, location.y, 1.0, 1.0)
                               view:view];
   }
   return self;
-}
-
-- (instancetype)initWithBaseViewController:(UIViewController*)viewController {
-  NOTREACHED();
-  return nil;
 }
 
 #pragma mark - Public Methods

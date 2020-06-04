@@ -10,15 +10,11 @@
 #include "content/browser/renderer_host/input/mock_input_router.h"
 #include "content/common/input/event_with_latency_info.h"
 #include "content/common/input/input_handler.mojom.h"
-#include "content/public/common/input_event_ack_source.h"
-#include "content/public/common/input_event_ack_state.h"
 #include "content/test/mock_widget_impl.h"
 #include "content/test/mock_widget_input_handler.h"
-#include "third_party/blink/public/platform/web_input_event.h"
-
-namespace viz {
-class MockCompositorFrameSinkClient;
-}  // namespace viz
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 
 namespace content {
 
@@ -26,19 +22,19 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
  public:
   // Allow poking at a few private members.
   using RenderWidgetHostImpl::frame_token_message_queue_;
+  using RenderWidgetHostImpl::GetInitialVisualProperties;
   using RenderWidgetHostImpl::GetVisualProperties;
   using RenderWidgetHostImpl::input_router_;
   using RenderWidgetHostImpl::is_hidden_;
   using RenderWidgetHostImpl::old_visual_properties_;
   using RenderWidgetHostImpl::RendererExited;
-  using RenderWidgetHostImpl::SetInitialVisualProperties;
   using RenderWidgetHostImpl::visual_properties_ack_pending_;
 
   ~MockRenderWidgetHost() override;
 
   void OnTouchEventAck(const TouchEventWithLatencyInfo& event,
-                       InputEventAckSource ack_source,
-                       InputEventAckState ack_result) override;
+                       blink::mojom::InputEventResultSource ack_source,
+                       blink::mojom::InputEventResultState ack_result) override;
 
   void reset_new_content_rendering_timeout_fired() {
     new_content_rendering_timeout_fired_ = false;
@@ -54,12 +50,6 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
   blink::WebInputEvent::Type acked_touch_event_type() const {
     return acked_touch_event_type_;
   }
-
-  // Mocks out |renderer_compositor_frame_sink_| with a
-  // CompositorFrameSinkClientPtr bound to
-  // |mock_renderer_compositor_frame_sink|.
-  void SetMockRendererCompositorFrameSink(
-      viz::MockCompositorFrameSinkClient* mock_renderer_compositor_frame_sink);
 
   void SetupForInputRouterTest();
 
@@ -90,7 +80,7 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
                        RenderProcessHost* process,
                        int routing_id,
                        std::unique_ptr<MockWidgetImpl> widget_impl,
-                       mojom::WidgetPtr widget);
+                       mojo::PendingRemote<mojom::Widget> widget);
 
   std::unique_ptr<MockWidgetImpl> widget_impl_;
 

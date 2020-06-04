@@ -8,16 +8,16 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/vr/base_graphics_delegate.h"
 #include "chrome/browser/vr/testapp/gl_renderer.h"
 #include "chrome/browser/vr/testapp/vr_test_context.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/types/native_display_delegate.h"
 #include "ui/display/types/native_display_observer.h"
@@ -147,6 +147,7 @@ class AppWindow : public ui::PlatformWindowDelegate {
   }
   void OnAcceleratedWidgetDestroyed() override { NOTREACHED(); }
   void OnActivationChanged(bool active) override {}
+  void OnMouseEnter() override {}
 
  private:
   // Since we pretend to have a GPU process, we should also pretend to
@@ -231,8 +232,8 @@ void WindowManager::OnConfigurationChanged() {
   }
 
   is_configuring_ = true;
-  delegate_->GetDisplays(base::BindRepeating(&WindowManager::OnDisplaysAquired,
-                                             base::Unretained(this)));
+  delegate_->GetDisplays(base::BindOnce(&WindowManager::OnDisplaysAquired,
+                                        base::Unretained(this)));
 }
 
 void WindowManager::OnDisplaySnapshotsInvalidated() {}
@@ -286,8 +287,7 @@ int main(int argc, char** argv) {
 
   // Build UI thread task executor. This is used by platform
   // implementations for event polling & running background tasks.
-  base::SingleThreadTaskExecutor main_task_executor(
-      base::MessagePump::Type::UI);
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("VrUiViewer");
 
   ui::OzonePlatform::InitParams params;
@@ -295,7 +295,6 @@ int main(int argc, char** argv) {
   ui::OzonePlatform::InitializeForUI(params);
   ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()
       ->SetCurrentLayoutByName("us");
-  ui::MaterialDesignController::Initialize();
 
   base::RunLoop run_loop;
 

@@ -10,6 +10,8 @@
 #include "base/debug/debugger.h"
 #include "base/debug/leak_annotations.h"
 #include "base/i18n/rtl.h"
+#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
@@ -22,7 +24,6 @@
 #include "build/build_config.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
-#include "content/common/service_manager/service_manager_connection_impl.h"
 #include "content/common/skia_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -35,7 +36,8 @@
 #include "mojo/public/cpp/bindings/mojo_buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/service_manager/sandbox/switches.h"
-#include "services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.h"
+#include "services/tracing/public/cpp/trace_startup.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/webrtc_overrides/init_webrtc.h"  // nogncheck
 #include "ui/base/ui_base_switches.h"
@@ -53,6 +55,10 @@
 #include "base/message_loop/message_pump_mac.h"
 #include "third_party/blink/public/web/web_view.h"
 #endif  // OS_MACOSX
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/system/core_scheduling.h"
+#endif  // OS_CHROMEOS
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/renderer/pepper/pepper_plugin_registry.h"
@@ -81,12 +87,12 @@ std::unique_ptr<base::MessagePump> CreateMainThreadMessagePump() {
   // As long as scrollbars on Mac are painted with Cocoa, the message pump
   // needs to be backed by a Foundation-level loop to process NSTimers. See
   // http://crbug.com/306348#c24 for details.
-  return base::MessagePump::Create(base::MessagePump::Type::NS_RUNLOOP);
+  return base::MessagePump::Create(base::MessagePumpType::NS_RUNLOOP);
 #elif defined(OS_FUCHSIA)
   // Allow FIDL APIs on renderer main thread.
-  return base::MessagePump::Create(base::MessagePump::Type::IO);
+  return base::MessagePump::Create(base::MessagePumpType::IO);
 #else
-  return base::MessagePump::Create(base::MessagePump::Type::DEFAULT);
+  return base::MessagePump::Create(base::MessagePumpType::DEFAULT);
 #endif
 }
 
@@ -96,7 +102,7 @@ std::unique_ptr<base::MessagePump> CreateMainThreadMessagePump() {
 int RendererMain(const MainFunctionParams& parameters) {
   // Don't use the TRACE_EVENT0 macro because the tracing infrastructure doesn't
   // expect synchronous events around the main loop of a thread.
-  TRACE_EVENT_ASYNC_BEGIN0("startup", "RendererMain", 0);
+  TRACE_EVENT_ASYNC_BEGIN1("startup", "RendererMain", 0, "zygote_child", false);
 
   base::trace_event::TraceLog::GetInstance()->set_process_name("Renderer");
   base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
@@ -118,6 +124,10 @@ int RendererMain(const MainFunctionParams& parameters) {
         command_line.GetSwitchValueASCII(switches::kLang);
     base::i18n::SetICUDefaultLocale(locale);
   }
+
+  // When we start the renderer on ChromeOS if the system has core scheduling
+  // available we want to turn it on.
+  chromeos::system::EnableCoreSchedulingIfAvailable();
 #endif
 
   InitializeSkia();
@@ -151,6 +161,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     }
   }
 
+  blink::Platform::InitializeBlink();
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler(
           CreateMainThreadMessagePump(), initial_virtual_time);
@@ -189,8 +200,17 @@ int RendererMain(const MainFunctionParams& parameters) {
     new RenderThreadImpl(run_loop.QuitClosure(),
                          std::move(main_thread_scheduler));
 
-    // Setup tracing sampler profiler as early as possible.
-    tracing::TracingSamplerProfiler::CreateForCurrentThread();
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+    // Startup tracing is usually enabled earlier, but if we forked from a
+    // zygote, we can only enable it after mojo IPC support is brought up
+    // initialized by RenderThreadImpl, because the mojo broker has to create
+    // the tracing SMB on our behalf due to the zygote sandbox.
+    if (parameters.zygote_child) {
+      tracing::EnableStartupTracingIfNeeded();
+      TRACE_EVENT_ASYNC_BEGIN1("startup", "RendererMain", 0, "zygote_child",
+                               true);
+    }
+#endif  // OS_POSIX && !OS_ANDROID && !!OS_MACOSX
 
     if (need_sandbox)
       should_run_loop = platform.EnableSandbox();

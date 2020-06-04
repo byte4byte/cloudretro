@@ -63,7 +63,7 @@ void ContentCaptureReceiverManager::BindContentCaptureReceiver(
 
 ContentCaptureReceiver*
 ContentCaptureReceiverManager::ContentCaptureReceiverForFrame(
-    content::RenderFrameHost* render_frame_host) {
+    content::RenderFrameHost* render_frame_host) const {
   auto mapping = frame_map_.find(render_frame_host);
   return mapping == frame_map_.end() ? nullptr : mapping->second.get();
 }
@@ -87,14 +87,15 @@ void ContentCaptureReceiverManager::RenderFrameDeleted(
 
 void ContentCaptureReceiverManager::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
-  auto* receiver =
-      ContentCaptureReceiverForFrame(navigation_handle->GetRenderFrameHost());
-  if (web_contents()->GetBrowserContext()->IsOffTheRecord() ||
-      !ShouldCapture(navigation_handle->GetURL())) {
-    receiver->StopCapture();
-    return;
+  if (auto* receiver = ContentCaptureReceiverForFrame(
+          navigation_handle->GetRenderFrameHost())) {
+    if (web_contents()->GetBrowserContext()->IsOffTheRecord() ||
+        !ShouldCapture(navigation_handle->GetURL())) {
+      receiver->StopCapture();
+      return;
+    }
+    receiver->StartCapture();
   }
-  receiver->StartCapture();
 }
 
 void ContentCaptureReceiverManager::DidCaptureContent(
@@ -159,6 +160,7 @@ void ContentCaptureReceiverManager::BuildContentCaptureSession(
     if (!receiver) {
       RenderFrameCreated(rfh);
       receiver = ContentCaptureReceiverForFrame(rfh);
+      DCHECK(receiver);
     }
     session->push_back(receiver->GetFrameContentCaptureData());
     rfh = receiver->rfh()->GetParent();

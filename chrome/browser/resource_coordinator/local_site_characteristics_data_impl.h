@@ -12,12 +12,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
-#include "chrome/browser/performance_manager/persistence/site_data/exponential_moving_average.h"
-#include "chrome/browser/performance_manager/persistence/site_data/feature_usage.h"
-#include "chrome/browser/performance_manager/persistence/site_data/site_data.pb.h"
-#include "chrome/browser/performance_manager/persistence/site_data/tab_visibility.h"
 #include "chrome/browser/resource_coordinator/local_site_characteristics_database.h"
 #include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "components/performance_manager/persistence/site_data/exponential_moving_average.h"
+#include "components/performance_manager/persistence/site_data/feature_usage.h"
+#include "components/performance_manager/persistence/site_data/site_data.pb.h"
+#include "components/performance_manager/persistence/site_data/tab_visibility.h"
 #include "url/origin.h"
 
 namespace resource_coordinator {
@@ -70,8 +70,7 @@ class LocalSiteCharacteristicsDataImpl
     kFaviconUpdate,
     kTitleUpdate,
     kAudioUsage,
-    kNotificationUsageUsage,
-    kMaxValue = kNotificationUsageUsage,
+    kMaxValue = kAudioUsage,
   };
 
   // Must be called when a load event is received for this site, this can be
@@ -94,7 +93,6 @@ class LocalSiteCharacteristicsDataImpl
   performance_manager::SiteFeatureUsage UpdatesFaviconInBackground() const;
   performance_manager::SiteFeatureUsage UpdatesTitleInBackground() const;
   performance_manager::SiteFeatureUsage UsesAudioInBackground() const;
-  performance_manager::SiteFeatureUsage UsesNotificationsInBackground() const;
 
   // Returns true if the most authoritative data has been loaded from the
   // backing store.
@@ -123,7 +121,6 @@ class LocalSiteCharacteristicsDataImpl
   void NotifyUpdatesFaviconInBackground();
   void NotifyUpdatesTitleInBackground();
   void NotifyUsesAudioInBackground();
-  void NotifyUsesNotificationsInBackground();
 
   // Call when a load-time performance measurement becomes available.
   void NotifyLoadTimePerformanceMeasurement(
@@ -225,8 +222,7 @@ class LocalSiteCharacteristicsDataImpl
 
   // Returns the usage of |site_feature| for this site.
   performance_manager::SiteFeatureUsage GetFeatureUsage(
-      const SiteDataFeatureProto& feature_proto,
-      const base::TimeDelta min_obs_time) const;
+      const SiteDataFeatureProto& feature_proto) const;
 
   // Helper function to update a given |SiteDataFeatureProto| when a
   // feature gets used.

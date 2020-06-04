@@ -27,6 +27,7 @@
 #include "components/sync/protocol/proto_memory_estimations.h"
 #include "components/sync/syncable/in_memory_directory_backing_store.h"
 #include "components/sync/syncable/model_neutral_mutable_entry.h"
+#include "components/sync/syncable/nigori_handler.h"
 #include "components/sync/syncable/on_disk_directory_backing_store.h"
 #include "components/sync/syncable/scoped_kernel_lock.h"
 #include "components/sync/syncable/scoped_parent_child_index_updater.h"
@@ -86,8 +87,7 @@ Directory::SaveChangesSnapshot::SaveChangesSnapshot()
 Directory::SaveChangesSnapshot::~SaveChangesSnapshot() {}
 
 bool Directory::SaveChangesSnapshot::HasUnsavedMetahandleChanges() const {
-  return !dirty_metas.empty() || !metahandles_to_purge.empty() ||
-         !delete_journals.empty() || !delete_journals_to_purge.empty();
+  return !dirty_metas.empty() || !metahandles_to_purge.empty();
 }
 
 Directory::Kernel::Kernel(
@@ -112,15 +112,13 @@ Directory::Kernel::~Kernel() {}
 Directory::Directory(
     std::unique_ptr<DirectoryBackingStore> store,
     const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
-    const base::Closure& report_unrecoverable_error_function,
-    NigoriHandler* nigori_handler,
-    Cryptographer* cryptographer)
+    const base::RepeatingClosure& report_unrecoverable_error_function,
+    NigoriHandler* nigori_handler)
     : store_(std::move(store)),
       unrecoverable_error_handler_(unrecoverable_error_handler),
       report_unrecoverable_error_function_(report_unrecoverable_error_function),
       unrecoverable_error_set_(false),
       nigori_handler_(nigori_handler),
-      cryptographer_(cryptographer),
       invariant_check_level_(VERIFY_CHANGES) {}
 
 Directory::~Directory() {
@@ -184,12 +182,10 @@ DirOpenResult Directory::OpenImpl(
   // swap these later.
   Directory::MetahandlesMap tmp_handles_map;
 
-  std::unique_ptr<JournalIndex> delete_journals =
-      std::make_unique<JournalIndex>();
   MetahandleSet metahandles_to_purge;
 
-  DirOpenResult result = store_->Load(&tmp_handles_map, delete_journals.get(),
-                                      &metahandles_to_purge, &info);
+  DirOpenResult result =
+      store_->Load(&tmp_handles_map, &metahandles_to_purge, &info);
   if (OPENED_NEW != result && OPENED_EXISTING != result)
     return result;
 
@@ -197,7 +193,6 @@ DirOpenResult Directory::OpenImpl(
   kernel_ =
       std::make_unique<Kernel>(name, info, delegate, transaction_observer);
   kernel_->metahandles_to_purge.swap(metahandles_to_purge);
-  delete_journal_ = std::make_unique<DeleteJournal>(std::move(delete_journals));
   InitializeIndices(&tmp_handles_map);
 
   // Save changes back in case there are any metahandles to purge.
@@ -207,15 +202,10 @@ DirOpenResult Directory::OpenImpl(
   // Now that we've successfully opened the store, install an error handler to
   // deal with catastrophic errors that may occur later on. Use a weak pointer
   // because we cannot guarantee that this Directory will outlive the Closure.
-  store_->SetCatastrophicErrorHandler(base::Bind(
+  store_->SetCatastrophicErrorHandler(base::BindRepeating(
       &Directory::OnCatastrophicError, weak_ptr_factory_.GetWeakPtr()));
 
   return result;
-}
-
-DeleteJournal* Directory::delete_journal() {
-  DCHECK(delete_journal_);
-  return delete_journal_.get();
 }
 
 void Directory::Close() {
@@ -518,9 +508,6 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
   snapshot->kernel_info_status = kernel_->info_status;
   // This one we reset on failure.
   kernel_->info_status = KERNEL_SHARE_INFO_VALID;
-
-  delete_journal_->TakeSnapshotAndClear(&trans, &snapshot->delete_journals,
-                                        &snapshot->delete_journals_to_purge);
 }
 
 bool Directory::SaveChanges() {
@@ -639,9 +626,7 @@ void Directory::UnapplyEntry(EntryKernel* entry) {
 }
 
 void Directory::DeleteEntry(const ScopedKernelLock& lock,
-                            bool save_to_journal,
-                            EntryKernel* entry_ptr,
-                            OwnedEntryKernelSet* entries_to_journal) {
+                            EntryKernel* entry_ptr) {
   int64_t handle = entry_ptr->ref(META_HANDLE);
 
   kernel_->metahandles_to_purge.insert(handle);
@@ -672,10 +657,6 @@ void Directory::DeleteEntry(const ScopedKernelLock& lock,
     num_erased = kernel_->server_tags_map.erase(entry->ref(UNIQUE_SERVER_TAG));
     DCHECK_EQ(1u, num_erased);
   }
-
-  if (save_to_journal) {
-    entries_to_journal->insert(std::move(entry));
-  }
 }
 
 void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
@@ -686,8 +667,6 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
     return;
 
   WriteTransaction trans(FROM_HERE, PURGE_ENTRIES, this);
-
-  OwnedEntryKernelSet entries_to_journal;
 
   {
     ScopedKernelLock lock(this);
@@ -722,17 +701,10 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
             types_to_unapply.Has(server_type)) {
           UnapplyEntry(entry);
         } else {
-          bool save_to_journal =
-              (types_to_journal.Has(local_type) ||
-               types_to_journal.Has(server_type)) &&
-              (delete_journal_->IsDeleteJournalEnabled(local_type) ||
-               delete_journal_->IsDeleteJournalEnabled(server_type));
-          DeleteEntry(lock, save_to_journal, entry, &entries_to_journal);
+          DeleteEntry(lock, entry);
         }
       }
     }
-
-    delete_journal_->AddJournalBatch(&trans, entries_to_journal);
 
     // Ensure meta tracking for these data types reflects the purged state.
     for (ModelType type : disabled_types) {
@@ -802,11 +774,6 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
 
   kernel_->metahandles_to_purge.insert(snapshot.metahandles_to_purge.begin(),
                                        snapshot.metahandles_to_purge.end());
-
-  // Restore delete journals.
-  delete_journal_->AddJournalBatch(&trans, snapshot.delete_journals);
-  delete_journal_->PurgeDeleteJournals(&trans,
-                                       snapshot.delete_journals_to_purge);
 }
 
 void Directory::GetDownloadProgress(
@@ -1034,7 +1001,7 @@ void Directory::MarkInitialSyncEndedForType(BaseWriteTransaction* trans,
   }
 }
 
-std::string Directory::legacy_store_birthday() const {
+std::string Directory::legacy_store_birthday_for_uma() const {
   ScopedKernelLock lock(this);
   return kernel_->persisted_info.legacy_store_birthday;
 }
@@ -1056,16 +1023,10 @@ void Directory::set_legacy_bag_of_chips(const string& bag_of_chips) {
 }
 
 const string& Directory::cache_guid() const {
-  DCHECK(!cache_guid_.empty()) << this;
-  return cache_guid_;
+  return store_->cache_guid();
 }
 
-void Directory::set_cache_guid(const std::string& cache_guid) {
-  DCHECK(!cache_guid.empty());
-  cache_guid_ = cache_guid;
-}
-
-string Directory::legacy_cache_guid() const {
+string Directory::legacy_cache_guid_for_uma() const {
   // No need to lock since nothing ever writes to it after load.
   return kernel_->legacy_cache_guid;
 }
@@ -1075,9 +1036,12 @@ NigoriHandler* Directory::GetNigoriHandler() {
   return nigori_handler_;
 }
 
-Cryptographer* Directory::GetCryptographer(const BaseTransaction* trans) {
-  DCHECK_EQ(this, trans->directory());
-  return cryptographer_;
+const Cryptographer* Directory::GetCryptographer(const BaseTransaction* trans) {
+  if (!nigori_handler_) {
+    // It's possible in some tests, that we have no |nigori_handler_|.
+    return nullptr;
+  }
+  return nigori_handler_->GetCryptographer(trans);
 }
 
 void Directory::ReportUnrecoverableError() {

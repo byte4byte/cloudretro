@@ -5,7 +5,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/objc-class.h>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #import "chrome/browser/mac/keystone_registration.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,12 +23,16 @@ namespace ksr = keystone_registration;
 // KSRegistration class on which to base FakeKeystoneRegistration.
 @implementation KSRegistration
 
-+ (id)registrationWithProductID:(NSString*)productID {
++ (instancetype)registrationWithProductID:(NSString*)productID {
   return nil;
 }
 
 - (BOOL)registerWithParameters:(NSDictionary*)args {
-  return NO;
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+  [center postNotificationName:ksr::KSRegistrationDidCompleteNotification
+                        object:nil
+                      userInfo:@{ksr::KSRegistrationStatusKey : @1}];
+  return YES;
 }
 
 - (BOOL)promoteWithParameters:(NSDictionary*)args
@@ -58,10 +62,8 @@ namespace ksr = keystone_registration;
 // Send the notifications that a real KeystoneGlue object would send.
 
 - (void)checkForUpdateWasUserInitiated:(BOOL)userInitiated {
-  NSNumber* yesNumber = [NSNumber numberWithBool:YES];
   NSString* statusKey = @"Status";
-  NSDictionary* dictionary = [NSDictionary dictionaryWithObject:yesNumber
-                                                         forKey:statusKey];
+  NSDictionary* dictionary = @{statusKey : @YES};
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
   [center postNotificationName:ksr::KSRegistrationCheckForUpdateNotification
                         object:nil
@@ -70,8 +72,10 @@ namespace ksr = keystone_registration;
 
 - (void)startUpdate {
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-  [center postNotificationName:ksr::KSRegistrationStartUpdateNotification
-                        object:nil];
+  [center
+      postNotificationName:ksr::KSRegistrationStartUpdateNotification
+                    object:nil
+                  userInfo:@{ksr::KSUpdateCheckSuccessfullyInstalledKey : @1}];
 }
 
 @end
@@ -79,10 +83,10 @@ namespace ksr = keystone_registration;
 
 @interface FakeKeystoneGlue : KeystoneGlue {
  @public
-  BOOL upToDate_;
-  base::scoped_nsobject<NSString> latestVersion_;
-  BOOL successful_;
-  int installs_;
+  BOOL _upToDate;
+  base::scoped_nsobject<NSString> _latestVersion;
+  BOOL _successful;
+  int _installs;
 }
 
 - (void)fakeAboutWindowCallback:(NSNotification*)notification;
@@ -91,13 +95,13 @@ namespace ksr = keystone_registration;
 
 @implementation FakeKeystoneGlue
 
-- (id)init {
+- (instancetype)init {
   if ((self = [super init])) {
     // some lies
-    upToDate_ = YES;
-    latestVersion_.reset([@"foo bar" copy]);
-    successful_ = YES;
-    installs_ = 1010101010;
+    _upToDate = YES;
+    _latestVersion.reset([@"foo bar" copy]);
+    _successful = YES;
+    _installs = 1010101010;
 
     // Set up an observer that takes the notification that the About window
     // listens for.
@@ -117,56 +121,48 @@ namespace ksr = keystone_registration;
 
 // For mocking
 - (NSDictionary*)infoDictionary {
-  NSDictionary* dict = [NSDictionary dictionaryWithObjectsAndKeys:
-                                     @"http://foo.bar", @"KSUpdateURL",
-                                     @"com.google.whatever", @"KSProductID",
-                                     @"0.0.0.1", @"KSVersion",
-                                     nil];
+  NSDictionary* dict = @{
+    @"KSUpdateURL" : @"http://foo.bar",
+    @"KSProductID" : @"com.google.whatever",
+    @"KSVersion" : @"0.0.0.1"
+  };
   return dict;
 }
 
-// For mocking
 - (BOOL)loadKeystoneRegistration {
+  // The real loadKeystoneRegistration adds a real registration.
+  [self addFakeRegistration];
   return YES;
 }
 
 // Confirms certain things are happy
 - (BOOL)dictReadCorrectly {
-  return ([url_ isEqual:@"http://foo.bar"] &&
-          [productID_ isEqual:@"com.google.whatever"] &&
-          [version_ isEqual:@"0.0.0.1"]);
+  return ([_url isEqual:@"http://foo.bar"] &&
+          [_productID isEqual:@"com.google.whatever"] &&
+          [_version isEqual:@"0.0.0.1"]);
 }
 
 // Confirms certain things are happy
 - (BOOL)hasATimer {
-  return timer_ ? YES : NO;
+  return _timer ? YES : NO;
 }
 
 - (void)addFakeRegistration {
-  registration_.reset([[FakeKeystoneRegistration alloc] init]);
+  _registration.reset([[FakeKeystoneRegistration alloc] init]);
 }
 
 - (void)fakeAboutWindowCallback:(NSNotification*)notification {
   NSDictionary* dictionary = [notification userInfo];
   AutoupdateStatus status = static_cast<AutoupdateStatus>(
-      [[dictionary objectForKey:kAutoupdateStatusStatus] intValue]);
+      [dictionary[kAutoupdateStatusStatus] intValue]);
 
   if (status == kAutoupdateAvailable) {
-    upToDate_ = NO;
-    latestVersion_.reset(
-        [[dictionary objectForKey:kAutoupdateStatusVersion] copy]);
+    _upToDate = NO;
+    _latestVersion.reset([dictionary[kAutoupdateStatusVersion] copy]);
   } else if (status == kAutoupdateInstallFailed) {
-    successful_ = NO;
-    installs_ = 0;
+    _successful = NO;
+    _installs = 0;
   }
-}
-
-// Confirm we look like callbacks with nil NSNotifications
-- (BOOL)confirmCallbacks {
-  return (!upToDate_ &&
-          (latestVersion_ == nil) &&
-          !successful_ &&
-          (installs_ == 0));
 }
 
 @end
@@ -182,10 +178,10 @@ namespace {
 
 class KeystoneGlueTest : public PlatformTest {
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
-// DISABLED because the mocking isn't currently working.
+// The test is flaky: crbug.com/1041813.
 TEST_F(KeystoneGlueTest, DISABLED_BasicGlobalCreate) {
   // Allow creation of a KeystoneGlue by mocking out a few calls
   SEL ids = @selector(infoDictionary);
@@ -200,16 +196,22 @@ TEST_F(KeystoneGlueTest, DISABLED_BasicGlobalCreate) {
   Method loadMethod_ = class_getInstanceMethod([KeystoneGlue class], lks);
   method_setImplementation(loadMethod_, newLoadImp_);
 
+  SEL afr = @selector(addFakeRegistration);
+  IMP oldAddFake_ = [[KeystoneGlue class] instanceMethodForSelector:afr];
+  IMP newAddFake_ = [[FakeKeystoneGlue class] instanceMethodForSelector:afr];
+  Method addMethod_ = class_getInstanceMethod([KeystoneGlue class], afr);
+  method_setImplementation(loadMethod_, newAddFake_);
+
   KeystoneGlue *glue = [KeystoneGlue defaultKeystoneGlue];
   ASSERT_TRUE(glue);
 
   // Fix back up the class to the way we found it.
   method_setImplementation(infoMethod_, oldInfoImp_);
   method_setImplementation(loadMethod_, oldLoadImp_);
+  method_setImplementation(addMethod_, oldAddFake_);
 }
 
-// DISABLED because the mocking isn't currently working.
-TEST_F(KeystoneGlueTest, DISABLED_BasicUse) {
+TEST_F(KeystoneGlueTest, BasicUse) {
   FakeKeystoneGlue* glue = [[[FakeKeystoneGlue alloc] init] autorelease];
   [glue loadParameters];
   ASSERT_TRUE([glue dictReadCorrectly]);
@@ -223,11 +225,15 @@ TEST_F(KeystoneGlueTest, DISABLED_BasicUse) {
   ASSERT_TRUE([glue hasATimer]);
   [glue stopTimer];
 
-  // Brief exercise of callbacks
-  [glue addFakeRegistration];
+  // Checking for an update should succeed, yielding kAutoupdateAvailable:
   [glue checkForUpdate];
+  ASSERT_EQ([glue recentStatus], kAutoupdateAvailable);
+
+  // And applying the update should also succeed:
   [glue installUpdate];
-  ASSERT_TRUE([glue confirmCallbacks]);
+  ASSERT_EQ([glue recentStatus], kAutoupdateInstalling);
+  // The rest of the update install is asynchronous & happens on a worker
+  // thread, so don't check it here.
 }
 
 TEST_F(KeystoneGlueTest, isValidSystemKeystone_Nils) {

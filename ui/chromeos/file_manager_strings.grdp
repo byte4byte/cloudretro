@@ -5,12 +5,6 @@
   <message name="IDS_FILE_BROWSER_ANDROID_FILES_ROOT_LABEL" desc="A label for the 'Play files' root which shows Android files. 'Play' in this label is an abbreviation of 'Google Play', so it should not be translated. Use sentence case.">
     Play files
   </message>
-  <message name="IDS_FILE_BROWSER_PLAY_STORE_ACCESS_LABEL" desc="A label for the toast which shows when Play Store apps don't have access to external storage devices.">
-    Play Store applications can't access this device
-  </message>
-  <message name="IDS_FILE_BROWSER_OPEN_PLAY_STORE_SETTINGS_LABEL" desc="A button for the toast which shows when Play Store apps don't have access to external storage devices.">
-    Open settings
-  </message>
   <message name="IDS_FILE_BROWSER_SHOW_ALL_ANDROID_FOLDERS_OPTION" desc="A label for an option menu item to show all Android folders. By default, only several folders are visible to users, and users will click this option menu item to show all folders. 'Play' in this label is an abbreviation of 'Google Play', so it should not be translated.">
     Show all Play folders
   </message>
@@ -92,8 +86,12 @@
   <message name="IDS_FILE_BROWSER_DOCPROVIDER_ROOT_LABEL_WITH_SUMMARY" desc="A label for a documents provider root, which has both title and summary.">
     <ph name="ROOT_TITLE">$1<ex>MyCloudProvider</ex></ph> (<ph name="ROOT_SUMMARY">$2<ex>me@example.com</ex></ph>)
   </message>
+  <!-- TODO (oto@): remove this msg as part of files-ng clean up process. -->
   <message name="IDS_FILE_BROWSER_DOWNLOADS_DIRECTORY_WARNING" desc="Warning displayed to user when viewing downloads folder.">
     <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Caution:<ph name="END_BOLD">&lt;/strong&gt;</ph>  These files are temporary and may be automatically deleted to free up disk space.  <ph name="BEGIN_LINK">&lt;a href="javascript://"&gt;</ph>Learn More<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_DOWNLOADS_DIRECTORY_WARNING_FILESNG" desc="Warning displayed to user when viewing downloads folder.">
+    Caution: These files are temporary and may be automatically deleted to free up disk space.  <ph name="BEGIN_LINK">&lt;a href="javascript://"&gt;</ph>Learn More<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
   </message>
   <message name="IDS_FILE_BROWSER_NAME_COLUMN_LABEL" desc="Name column label.">
     Name
@@ -112,6 +110,9 @@
   </message>
   <message name="IDS_FILE_BROWSER_COLUMN_SORTED_DESC_MESSAGE" desc="Message read by Chromevox/screenreader after sorting a column in the File list in descending order.">
     File list sorted by <ph name="COLUMN_NAME">$1<ex>date modified</ex></ph> in descending order.
+  </message>
+  <message name="IDS_FILE_BROWSER_EXTERNAL_LINK_MESSAGE" desc="Message read by Chromevox/screenreader when focusing a link that launches an external application.">
+    External link
   </message>
 
   <!-- File selection a11y -->
@@ -251,6 +252,9 @@
   </message>
   <message name="IDS_FILE_BROWSER_QUICK_VIEW_OPEN_IN_NEW_BUTTON_LABEL" desc="Label for button to open a file with external app.">
     Open
+  </message>
+  <message name="IDS_FILE_BROWSER_QUICK_VIEW_DELETE_BUTTON_LABEL" desc="Label for button to delete a file in QuickView.">
+    Delete
   </message>
   <message name="IDS_FILE_BROWSER_QUICK_VIEW_TOGGLE_METADATA_BOX_BUTTON_LABEL" desc="Label for button to toggle show/hide status of metadata box.">
     File info
@@ -823,15 +827,18 @@
   <message name="IDS_FILE_BROWSER_ERROR_PROGRESS_SUMMARY_PLURAL" desc="Summary message for multiple errors above the progress bar. This message may be placed at the next to ohter *_PROGERSS_SUMMARY messages.">
     <ph name="COUNT">$1<ex>10</ex></ph> errors.
   </message>
+  <message name="IDS_FILE_BROWSER_PERCENT_COMPLETE" desc="Percentage of file operation that is complete in a progress message.">
+    <ph name="PERCENT">$1<ex>10</ex></ph>% complete.
+  </message>
 
+  <message name="IDS_FILE_BROWSER_CANCEL_ACTIVITY_LABEL" desc="Text spoken by ChromeVox/screen reader describing what will be cancelled.">
+    Cancel <ph name="ACTIVITY_DESCRIPTION">$1<ex>Copying file.txt</ex></ph>.
+  </message>
   <message name="IDS_FILE_BROWSER_CANCEL_LABEL" desc="Cancel label.">
     Cancel
   </message>
   <message name="IDS_FILE_BROWSER_CLOSE_LABEL" desc="Close label.">
     Close
-  </message>
-  <message name="IDS_FILE_BROWSER_EXPAND_LABEL" desc="Expand label.">
-    Expand
   </message>
   <message name="IDS_FILE_BROWSER_OPEN_LABEL" desc="Open label.">
     Open
@@ -853,6 +860,15 @@
   </message>
   <message name="IDS_FILE_BROWSER_SEARCH_CLEAR_LABEL" desc="Label to clear search text field">
     Clear
+  </message>
+  <message name="IDS_FILE_BROWSER_FEEDBACK_COLLAPSE_LABEL" desc="Text spoken by Chromevox when collapsing displayed feedback panels.">
+    Collapse files feedback panels
+  </message>
+  <message name="IDS_FILE_BROWSER_FEEDBACK_EXPAND_LABEL" desc="Text spoken by Chromevox when expanding multiple feedback panels.">
+    Expand files feedback panels
+  </message>
+  <message name="IDS_FILE_BROWSER_FILES_FEEDBACK_WINDOW" desc="text spoken by Chromevox when tabbing to the feedback panel window.">
+    Files feedback window
   </message>
   <message name="IDS_FILE_BROWSER_SEARCH_A11Y_NO_RESULT" desc="Text spoken by ChromeVox/screen reader when a search has no result">
     There are no results for <ph name="SEARCH_TERM">$1<ex>ABC</ex></ph>.
@@ -902,6 +918,16 @@
   </message>
   <message name="IDS_FILE_BROWSER_FORMAT_DIALOG_CONFIRM_LABEL" desc="Label for the confirm button">
     Erase and Format
+  </message>
+
+  <message name="IDS_FILE_BROWSER_FORMAT_PROGRESS_MESSAGE" desc="Notification message displayed while formatting an external drive">
+    Formatting <ph name="DRIVE_NAME">$1<ex>My USB</ex></ph>...
+  </message>
+  <message name="IDS_FILE_BROWSER_FORMAT_SUCCESS_MESSAGE" desc="Notification message displayed when formatting of an external drive has succeeded">
+    Formatted <ph name="DRIVE_NAME">$1<ex>My USB</ex></ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_FORMAT_FAILURE_MESSAGE" desc="Notification message displayed if formatting of an external drive has failed">
+    Could not format <ph name="DRIVE_NAME">$1<ex>My USB</ex></ph>
   </message>
 
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_TITLE" desc="Title of the suggest app dialog, which shows the list of the apps which supports the selected file.">
@@ -1018,7 +1044,7 @@
     Title
   </message>
   <message name="IDS_FILE_BROWSER_METADATA_BOX_MODIFICATION_TIME" desc="Label for file modification time.">
-    Modified time
+    Date modified
   </message>
   <message name="IDS_FILE_BROWSER_METADATA_BOX_MODIFIED_BY" desc="Label for who modified the file.">
     Modified by
@@ -1080,27 +1106,6 @@
   <message name="IDS_FILE_BROWSER_OPEN_IN_OTHER_DESKTOP_MESSAGE_PLURAL" desc="Prural verson of the message of an alert dialog that is shown when a user opens a file in a desktop of another profile but the file is opened in the original desktop.">
     These files opened on a different desktop. Move to <ph name="USER_NAME">$1<ex>John Doe</ex></ph> (<ph name="MAIL_ADDRESS">$2<ex>xxxxxx@gmail.com</ex></ph>) to view it.
   </message>
-  <message name="IDS_FILE_BROWSER_MULTI_PROFILE_SHARE_DIALOG_TITLE" desc="Title of a dialog to request drive share for files that come from other profiles during file transfering.">
-    This Drive file isn't shared yet
-  </message>
-  <message name="IDS_FILE_BROWSER_MULTI_PROFILE_SHARE_DIALOG_TITLE_PLURAL" desc="Title of a dialog to request drive share for files that come from other profiles during file transfering.">
-    These Drive files aren't shared yet
-  </message>
-  <message name="IDS_FILE_BROWSER_MULTI_PROFILE_SHARE_DIALOG_MESSAGE" desc="Message of a dialog to request drive share for files that come from other profiles during file transfering. Below the message, there are the e-mail address of the account to be shared with the file, and a drop down list to select a share type.">
-    Change how this file is shared
-  </message>
-  <message name="IDS_FILE_BROWSER_MULTI_PROFILE_SHARE_DIALOG_MESSAGE_PLURAL" desc="Message of a dialog to request drive share for files that come from other profiles during file transfering. Below the message, there are the e-mail address of the account to be shared with the file, and a drop down list to select a share type.">
-    Change how these files are shared
-  </message>
-  <message name="IDS_FILE_BROWSER_DRIVE_SHARE_TYPE_CAN_EDIT" desc="Label text of 'Can edit' share type. Please use the same string with Google Drive.">
-    Can edit
-  </message>
-  <message name="IDS_FILE_BROWSER_DRIVE_SHARE_TYPE_CAN_COMMENT" desc="Label text of 'Can comment' share type. Please use the same string with Google Drive.">
-    Can comment
-  </message>
-  <message name="IDS_FILE_BROWSER_DRIVE_SHARE_TYPE_CAN_VIEW" desc="Label text of 'Can view' share type. Please use the same string with Google Drive.">
-    Can view
-  </message>
   <message name="IDS_FILE_BROWSER_DRIVE_MOBILE_CONNECTION_OPTION" desc="Option that determines if we will allow Google Drive content sync over mobile connections.">
     Do not use mobile data for sync
   </message>
@@ -1136,8 +1141,12 @@
   <message name="IDS_FILE_BROWSER_DRIVE_WELCOME_TITLE" desc="In the Welcome to Google Drive banner, title of banner.">
     Welcome to Google Drive!
   </message>
+  <!-- TODO (oto@): remove this msg as part of files-ng clean up process. -->
   <message name="IDS_FILE_BROWSER_DRIVE_WELCOME_TEXT_SHORT" desc="In the Welcome to Google Drive banner, text of the welcome message, short version.">
     All files saved in this folder are backed up online automatically
+  </message>
+  <message name="IDS_FILE_BROWSER_DRIVE_WELCOME_TEXT_SHORT_FILESNG" desc="In the Welcome to Google Drive banner, text of the welcome message, short version.">
+    All files saved in this folder are backed up online automatically.
   </message>
   <message name="IDS_FILE_BROWSER_DRIVE_WELCOME_TEXT_LONG" desc="In the Welcome to Google Drive banner, text of the welcome message, long version.">
     <ph name="MARKUP_1">&lt;p&gt;&lt;strong&gt;<ex>&lt;strong&gt;</ex></ph>Access files from everywhere, even offline.<ph name="MARKUP_2">&lt;/strong&gt;<ex>&lt;/strong&gt;</ex></ph>
@@ -1165,12 +1174,6 @@
   </message>
   <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX" desc="Message shown when a user tries to open a *.crx file, which we don't handle in the Files app.">
     We're constantly looking for ways to make your browsing safer. Previously, any website could prompt you to add an extension into your browser. In the latest versions of Google Chrome, you must explicitly tell Chrome that you want to install these extensions by adding them through the Extensions page. <ph name="BEGIN_LINK">&lt;a target='_blank' href='https://support.google.com/chrome_webstore/answer/2664769?p=crx_warning&amp;rd=1'&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
-  </message>
-  <message name="IDS_FILE_BROWSER_UNABLE_TO_OPEN_CROSTINI_TITLE" desc="Message title shown when a user tries to use a crostini app to open a file which cannot be shared with the crostini container (e.g. in Play or USB).  This message will be removed once we support this action.">
-    Unable to open with <ph name="APP_NAME">$1<ex>Visual Studio Code</ex></ph>
-  </message>
-  <message name="IDS_FILE_BROWSER_UNABLE_TO_OPEN_CROSTINI" desc="Message shown when a user tries to use a crostini app to open a file which cannot be shared with the crostini container (e.g. in Play or USB).  This message will be removed once we support this action.">
-    To open files with <ph name="APP_NAME">$1<ex>Visual Studio Code</ex></ph>, first copy to Linux files folder.
   </message>
   <message name="IDS_FILE_BROWSER_SHARE_ROOT_FOLDER_WITH_CROSTINI_TITLE" desc="Message title shown when a user shares the root of a volume such as 'My files' with the crostini container.">
     Share folder with Linux
@@ -1253,6 +1256,9 @@
   </message>
   <message name="IDS_FILE_BROWSER_EXCEL_FILE_TYPE" desc="Excel spreadsheet file type">
     Excel spreadsheet
+  </message>
+  <message name="IDS_FILE_BROWSER_TINI_FILE_TYPE" desc="Crostini Image File file type">
+    Crostini image file
   </message>
 
   <message name="IDS_FILE_BROWSER_GDOC_DOCUMENT_FILE_TYPE" desc="Google document file type">
@@ -1400,6 +1406,15 @@
   </message>
   <message name="IDS_FILE_BROWSER_A11Y_VOLUME_EJECT" desc="Text to be used by screen reader to indicate users that the eject volume action has finished.">
     <ph name="VOLUME_NAME">$1<ex>file_name.rar</ex></ph> has been ejected.
+  </message>
+  <message name="IDS_FILE_BROWSER_GRID_VIEW_FOLDERS_TITLE" desc="Title displayed in Grid View above the folders.">
+    Folders
+  </message>
+  <message name="IDS_FILE_BROWSER_GRID_VIEW_FILES_TITLE" desc="Title dislayed in Grid View above the files.">
+    Files
+  </message>
+  <message name="IDS_FILE_BROWSER_LOCATION_BREADCRUMB_ELIDER_BUTTON_LABEL" desc="Label for the breadcrumb sub-folder elider button in the Files app folder location line.">
+    More sub-folders...
   </message>
 
 <!-- Common for Audio player and Media player -->

@@ -8,7 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/test/views_test_base.h"
 
-namespace app_list {
+namespace ash {
 
 class AppListMenuModelAdapterTest : public views::ViewsTestBase {
  public:
@@ -33,8 +33,8 @@ class AppListMenuModelAdapterTest : public views::ViewsTestBase {
 // Tests that NOTIFICATION_CONTAINER is enabled. This ensures that the
 // container is able to handle gesture events.
 TEST_F(AppListMenuModelAdapterTest, NotificationContainerEnabled) {
-  EXPECT_TRUE(app_list_menu_model_adapter_->IsCommandEnabled(
-      ash::NOTIFICATION_CONTAINER));
+  EXPECT_TRUE(
+      app_list_menu_model_adapter_->IsCommandEnabled(NOTIFICATION_CONTAINER));
 }
 
-}  // namespace app_list
+}  // namespace ash

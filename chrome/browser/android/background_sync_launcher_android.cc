@@ -12,9 +12,9 @@
 #include "base/feature_list.h"
 #include "chrome/android/chrome_jni_headers/BackgroundSyncBackgroundTaskScheduler_jni.h"
 #include "chrome/android/chrome_jni_headers/BackgroundSyncBackgroundTask_jni.h"
-#include "chrome/android/chrome_jni_headers/BackgroundSyncLauncher_jni.h"
+#include "chrome/android/chrome_jni_headers/GooglePlayServicesChecker_jni.h"
 #include "chrome/android/chrome_jni_headers/PeriodicBackgroundSyncChromeWakeUpTask_jni.h"
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/background_sync_context.h"
 #include "content/public/browser/background_sync_parameters.h"
@@ -45,10 +45,6 @@ int GetBackgroundTaskType(blink::mojom::BackgroundSyncType sync_type) {
 void JNI_BackgroundSyncBackgroundTask_FireOneShotBackgroundSyncEvents(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& j_runnable) {
-  if (!base::FeatureList::IsEnabled(
-          chrome::android::kBackgroundTaskSchedulerForBackgroundSync)) {
-    return;
-  }
 
   BackgroundSyncLauncherAndroid::Get()->FireBackgroundSyncEvents(
       blink::mojom::BackgroundSyncType::ONE_SHOT, j_runnable);
@@ -61,6 +57,13 @@ void JNI_PeriodicBackgroundSyncChromeWakeUpTask_FirePeriodicBackgroundSyncEvents
       blink::mojom::BackgroundSyncType::PERIODIC, j_runnable);
 }
 
+void JNI_BackgroundSyncBackgroundTaskScheduler_SetPlayServicesVersionCheckDisabledForTests(
+    JNIEnv* env,
+    jboolean disabled) {
+  BackgroundSyncLauncherAndroid::SetPlayServicesVersionCheckDisabledForTests(
+      disabled);
+}
+
 // static
 BackgroundSyncLauncherAndroid* BackgroundSyncLauncherAndroid::Get() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -69,28 +72,25 @@ BackgroundSyncLauncherAndroid* BackgroundSyncLauncherAndroid::Get() {
 }
 
 // static
-void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUp(
-    blink::mojom::BackgroundSyncType sync_type) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  Get()->ScheduleBrowserWakeUpImpl(sync_type);
-}
-
-// static
-void BackgroundSyncLauncherAndroid::LaunchBrowserWithWakeUpDelta(
-    blink::mojom::BackgroundSyncType sync_type,
-    base::TimeDelta soonest_wakeup_delta) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  Get()->ScheduleBrowserWakeUpWithWakeUpDeltaImpl(sync_type,
-                                                  soonest_wakeup_delta);
-}
-
-// static
 void BackgroundSyncLauncherAndroid::SetPlayServicesVersionCheckDisabledForTests(
     bool disabled) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   disable_play_services_version_check_for_tests = disabled;
+}
+
+// static
+void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUpWithDelay(
+    blink::mojom::BackgroundSyncType sync_type,
+    base::TimeDelta delay) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  Get()->ScheduleBrowserWakeUpWithDelayImpl(sync_type, delay);
+}
+
+// static
+void BackgroundSyncLauncherAndroid::CancelBrowserWakeup(
+    blink::mojom::BackgroundSyncType sync_type) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  Get()->CancelBrowserWakeupImpl(sync_type);
 }
 
 // static
@@ -98,25 +98,11 @@ bool BackgroundSyncLauncherAndroid::ShouldDisableBackgroundSync() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (disable_play_services_version_check_for_tests)
     return false;
-  return Java_BackgroundSyncLauncher_shouldDisableBackgroundSync(
+  return Java_GooglePlayServicesChecker_shouldDisableBackgroundSync(
       base::android::AttachCurrentThread());
 }
 
-void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUpImpl(
-    blink::mojom::BackgroundSyncType sync_type) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  auto* profile = ProfileManager::GetLastUsedProfile();
-  DCHECK(profile);
-
-  content::BackgroundSyncContext::GetSoonestWakeupDeltaAcrossPartitions(
-      sync_type, profile,
-      base::BindOnce(&BackgroundSyncLauncherAndroid::
-                         ScheduleBrowserWakeUpWithWakeUpDeltaImpl,
-                     base::Unretained(this), sync_type));
-}
-
-void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUpWithWakeUpDeltaImpl(
+void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUpWithDelayImpl(
     blink::mojom::BackgroundSyncType sync_type,
     base::TimeDelta soonest_wakeup_delta) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -124,18 +110,20 @@ void BackgroundSyncLauncherAndroid::ScheduleBrowserWakeUpWithWakeUpDeltaImpl(
   JNIEnv* env = base::android::AttachCurrentThread();
   int64_t min_delay_ms = soonest_wakeup_delta.InMilliseconds();
 
-  if (!base::FeatureList::IsEnabled(
-          chrome::android::kBackgroundTaskSchedulerForBackgroundSync)) {
-    Java_BackgroundSyncLauncher_launchBrowserIfStopped(
-        env, java_gcm_network_manager_launcher_,
-        /* shouldLaunch= */ !soonest_wakeup_delta.is_max(), min_delay_ms);
-    return;
-  }
-
-  Java_BackgroundSyncBackgroundTaskScheduler_launchBrowserIfStopped(
+  Java_BackgroundSyncBackgroundTaskScheduler_scheduleOneOffTask(
       env, java_background_sync_background_task_scheduler_launcher_,
-      GetBackgroundTaskType(sync_type), !soonest_wakeup_delta.is_max(),
-      min_delay_ms);
+      GetBackgroundTaskType(sync_type), min_delay_ms);
+}
+
+void BackgroundSyncLauncherAndroid::CancelBrowserWakeupImpl(
+    blink::mojom::BackgroundSyncType sync_type) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  JNIEnv* env = base::android::AttachCurrentThread();
+
+  Java_BackgroundSyncBackgroundTaskScheduler_cancelOneOffTask(
+      env, java_background_sync_background_task_scheduler_launcher_,
+      GetBackgroundTaskType(sync_type));
 }
 
 void BackgroundSyncLauncherAndroid::FireBackgroundSyncEvents(
@@ -155,25 +143,10 @@ BackgroundSyncLauncherAndroid::BackgroundSyncLauncherAndroid() {
 
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  if (!base::FeatureList::IsEnabled(
-          chrome::android::kBackgroundTaskSchedulerForBackgroundSync)) {
-    java_gcm_network_manager_launcher_.Reset(
-        Java_BackgroundSyncLauncher_create(env));
-    return;
-  }
-
   java_background_sync_background_task_scheduler_launcher_.Reset(
       Java_BackgroundSyncBackgroundTaskScheduler_getInstance(env));
 }
 
 BackgroundSyncLauncherAndroid::~BackgroundSyncLauncherAndroid() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (base::FeatureList::IsEnabled(
-          chrome::android::kBackgroundTaskSchedulerForBackgroundSync)) {
-    return;
-  }
-
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_BackgroundSyncLauncher_destroy(env, java_gcm_network_manager_launcher_);
 }

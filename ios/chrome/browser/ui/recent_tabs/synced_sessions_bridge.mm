@@ -21,7 +21,7 @@ namespace synced_sessions {
 
 SyncedSessionsObserverBridge::SyncedSessionsObserverBridge(
     id<SyncedSessionsObserver> owner,
-    ios::ChromeBrowserState* browserState)
+    ChromeBrowserState* browserState)
     : owner_(owner),
       identity_manager_(
           IdentityManagerFactory::GetForBrowserState(browserState)),
@@ -39,7 +39,7 @@ SyncedSessionsObserverBridge::SyncedSessionsObserverBridge(
 
 SyncedSessionsObserverBridge::~SyncedSessionsObserverBridge() {}
 
-#pragma mark - identity::IdentityManager::Observer
+#pragma mark - signin::IdentityManager::Observer
 
 void SyncedSessionsObserverBridge::OnPrimaryAccountCleared(
     const CoreAccountInfo& previous_primary_account_info) {

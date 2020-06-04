@@ -11,11 +11,14 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "chrome/common/search/omnibox.mojom.h"
+#include "chrome/common/search/search.mojom.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "components/favicon_base/favicon_types.h"
@@ -23,6 +26,7 @@
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/web/web_frame.h"
@@ -195,7 +199,6 @@ SearchBox::IconURLHelper::~IconURLHelper() = default;
 SearchBox::SearchBox(content::RenderFrame* render_frame)
     : content::RenderFrameObserver(render_frame),
       content::RenderFrameObserverTracker<SearchBox>(render_frame),
-      binding_(this),
       can_run_js_in_renderframe_(false),
       page_seq_no_(0),
       is_focused_(false),
@@ -204,11 +207,16 @@ SearchBox::SearchBox(content::RenderFrame* render_frame)
       most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize),
       has_received_most_visited_(false) {
   // Connect to the embedded search interface in the browser.
-  chrome::mojom::EmbeddedSearchConnectorAssociatedPtr connector;
+  mojo::AssociatedRemote<chrome::mojom::EmbeddedSearchConnector> connector;
   render_frame->GetRemoteAssociatedInterfaces()->GetInterface(&connector);
-  chrome::mojom::EmbeddedSearchClientAssociatedPtrInfo embedded_search_client;
-  binding_.Bind(mojo::MakeRequest(&embedded_search_client));
-  connector->Connect(mojo::MakeRequest(&embedded_search_service_),
+  mojo::PendingAssociatedRemote<chrome::mojom::EmbeddedSearchClient>
+      embedded_search_client;
+  receiver_.Bind(embedded_search_client.InitWithNewEndpointAndPassReceiver(),
+                 render_frame->GetTaskRunner(
+                     blink::TaskType::kInternalNavigationAssociated));
+  connector->Connect(embedded_search_service_.BindNewEndpointAndPassReceiver(
+                         render_frame->GetTaskRunner(
+                             blink::TaskType::kInternalNavigationAssociated)),
                      std::move(embedded_search_client));
 }
 
@@ -273,8 +281,8 @@ bool SearchBox::GetMostVisitedItemWithID(
                                                            item);
 }
 
-const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() const {
-  return theme_info_;
+const NtpTheme* SearchBox::GetNtpTheme() const {
+  return base::OptionalOrNullptr(theme_);
 }
 
 void SearchBox::Paste(const base::string16& text) {
@@ -377,13 +385,14 @@ std::string SearchBox::FixupAndValidateUrl(const std::string& url) const {
   return internal::FixupAndValidateUrl(url);
 }
 
-void SearchBox::SetCustomBackgroundURLWithAttributions(
-    const GURL& background_url,
-    const std::string& attribution_line_1,
-    const std::string& attribution_line_2,
-    const GURL& action_url) {
-  embedded_search_service_->SetCustomBackgroundURLWithAttributions(
-      background_url, attribution_line_1, attribution_line_2, action_url);
+void SearchBox::SetCustomBackgroundInfo(const GURL& background_url,
+                                        const std::string& attribution_line_1,
+                                        const std::string& attribution_line_2,
+                                        const GURL& action_url,
+                                        const std::string& collection_id) {
+  embedded_search_service_->SetCustomBackgroundInfo(
+      background_url, attribution_line_1, attribution_line_2, action_url,
+      collection_id);
 }
 
 void SearchBox::SelectLocalBackgroundImage() {
@@ -427,6 +436,56 @@ void SearchBox::RevertThemeChanges() {
 
 void SearchBox::ConfirmThemeChanges() {
   embedded_search_service_->ConfirmThemeChanges();
+}
+
+void SearchBox::QueryAutocomplete(const base::string16& input,
+                                  bool prevent_inline_autocomplete) {
+  embedded_search_service_->QueryAutocomplete(input,
+                                              prevent_inline_autocomplete);
+}
+
+void SearchBox::DeleteAutocompleteMatch(uint8_t line) {
+  embedded_search_service_->DeleteAutocompleteMatch(line);
+}
+
+void SearchBox::StopAutocomplete(bool clear_result) {
+  embedded_search_service_->StopAutocomplete(clear_result);
+}
+
+void SearchBox::LogCharTypedToRepaintLatency(uint32_t latency_ms) {
+  embedded_search_service_->LogCharTypedToRepaintLatency(latency_ms);
+}
+
+void SearchBox::BlocklistPromo(const std::string& promo_id) {
+  embedded_search_service_->BlocklistPromo(promo_id);
+}
+
+void SearchBox::OpenExtensionsPage(double button,
+                                   bool alt_key,
+                                   bool ctrl_key,
+                                   bool meta_key,
+                                   bool shift_key) {
+  embedded_search_service_->OpenExtensionsPage(button, alt_key, ctrl_key,
+                                               meta_key, shift_key);
+}
+
+void SearchBox::OpenAutocompleteMatch(uint8_t line,
+                                      const GURL& url,
+                                      bool are_matches_showing,
+                                      double time_elapsed_since_last_focus,
+                                      double button,
+                                      bool alt_key,
+                                      bool ctrl_key,
+                                      bool meta_key,
+                                      bool shift_key) {
+  embedded_search_service_->OpenAutocompleteMatch(
+      line, url, are_matches_showing, time_elapsed_since_last_focus, button,
+      alt_key, ctrl_key, meta_key, shift_key);
+}
+
+void SearchBox::ToggleSuggestionGroupIdVisibility(int32_t suggestion_group_id) {
+  embedded_search_service_->ToggleSuggestionGroupIdVisibility(
+      suggestion_group_id);
 }
 
 void SearchBox::SetPageSequenceNumber(int page_seq_no) {
@@ -484,6 +543,23 @@ void SearchBox::DeleteCustomLinkResult(bool success) {
   }
 }
 
+void SearchBox::AutocompleteResultChanged(
+    chrome::mojom::AutocompleteResultPtr result) {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchAutocompleteResultChanged(
+        render_frame()->GetWebFrame(), std::move(result));
+  }
+}
+
+void SearchBox::AutocompleteMatchImageAvailable(uint32_t match_index,
+                                                const std::string& image_url,
+                                                const std::string& data_url) {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchAutocompleteMatchImageAvailable(
+        render_frame()->GetWebFrame(), match_index, image_url, data_url);
+  }
+}
+
 void SearchBox::MostVisitedInfoChanged(
     const InstantMostVisitedInfo& most_visited_info) {
   has_received_most_visited_ = true;
@@ -524,12 +600,12 @@ void SearchBox::SetInputInProgress(bool is_input_in_progress) {
   }
 }
 
-void SearchBox::ThemeChanged(const ThemeBackgroundInfo& theme_info) {
+void SearchBox::ThemeChanged(const NtpTheme& theme) {
   // Do not send duplicate notifications.
-  if (theme_info_ == theme_info)
+  if (theme_ == theme)
     return;
 
-  theme_info_ = theme_info;
+  theme_ = theme;
   if (can_run_js_in_renderframe_)
     SearchBoxExtension::DispatchThemeChange(render_frame()->GetWebFrame());
 }

@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "components/sync/driver/sync_merge_result.h"
 #include "components/sync/model/data_type_error_handler_impl.h"
-#include "components/sync/model/sync_merge_result.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,12 +18,12 @@ namespace syncer {
 
 FakeDataTypeController::FakeDataTypeController(ModelType type)
     : DirectoryDataTypeController(type,
-                                  base::Closure(),
+                                  base::NullCallback(),
                                   nullptr,
                                   GROUP_PASSIVE),
       state_(NOT_RUNNING),
       model_load_delayed_(false),
-      ready_for_start_(true),
+      precondition_state_(PreconditionState::kPreconditionsMet),
       should_load_model_before_configure_(false),
       register_with_backend_call_count_(0),
       clear_metadata_call_count_(0) {}
@@ -55,10 +56,10 @@ void FakeDataTypeController::LoadModels(
   }
 }
 
-void FakeDataTypeController::RegisterWithBackend(
-    base::OnceCallback<void(bool)> set_downloaded,
-    ModelTypeConfigurer* configurer) {
+DataTypeController::RegisterWithBackendResult
+FakeDataTypeController::RegisterWithBackend(ModelTypeConfigurer* configurer) {
   ++register_with_backend_call_count_;
+  return REGISTRATION_IGNORED;
 }
 
 // MODEL_LOADED -> MODEL_STARTING.
@@ -127,8 +128,9 @@ DataTypeController::State FakeDataTypeController::state() const {
   return state_;
 }
 
-bool FakeDataTypeController::ReadyForStart() const {
-  return ready_for_start_;
+DataTypeController::PreconditionState
+FakeDataTypeController::GetPreconditionState() const {
+  return precondition_state_;
 }
 
 void FakeDataTypeController::SetDelayModelLoad() {
@@ -147,8 +149,8 @@ void FakeDataTypeController::SimulateModelLoadFinishing() {
   model_load_callback_.Run(type(), load_error_);
 }
 
-void FakeDataTypeController::SetReadyForStart(bool ready) {
-  ready_for_start_ = ready;
+void FakeDataTypeController::SetPreconditionState(PreconditionState state) {
+  precondition_state_ = state;
 }
 
 void FakeDataTypeController::SetShouldLoadModelBeforeConfigure(bool value) {
@@ -159,7 +161,7 @@ std::unique_ptr<DataTypeErrorHandler>
 FakeDataTypeController::CreateErrorHandler() {
   DCHECK(CalledOnValidThread());
   return std::make_unique<DataTypeErrorHandlerImpl>(
-      base::SequencedTaskRunnerHandle::Get(), base::Closure(),
+      base::SequencedTaskRunnerHandle::Get(), base::NullCallback(),
       base::BindRepeating(model_load_callback_, type()));
 }
 

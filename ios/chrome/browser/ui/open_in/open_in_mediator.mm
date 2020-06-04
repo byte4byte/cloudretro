@@ -6,12 +6,13 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/open_in/open_in_tab_helper.h"
 #import "ios/chrome/browser/ui/open_in/open_in_controller.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/web/public/browser_state.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
@@ -24,6 +25,8 @@
   // A map associating webStates with their OpenInControllers.
   std::map<web::WebState*, OpenInController*> _openInControllersForWebStates;
 }
+// The Browser that accesses the WebStateList.
+@property(nonatomic, assign) Browser* browser;
 // The WebStateList that this mediator listens for newly added Webstates.
 @property(nonatomic, assign) WebStateList* webStateList;
 
@@ -31,12 +34,19 @@
 
 @implementation OpenInMediator
 
+@synthesize browser = _browser;
 @synthesize webStateList = _webStateList;
 
-- (instancetype)initWithWebStateList:(WebStateList*)webStateList {
+- (instancetype)initWithBrowser:(Browser*)browser {
   self = [super init];
   if (self) {
-    _webStateList = webStateList;
+    _browser = browser;
+    _webStateList = browser->GetWebStateList();
+    // Set the delegates for all existing webstates in the |_webStateList|.
+    for (int i = 0; i < _webStateList->count(); i++) {
+      web::WebState* webState = _webStateList->GetWebStateAt(i);
+      OpenInTabHelper::FromWebState(webState)->SetDelegate(self);
+    }
     _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
     _webStateList->AddObserver(_webStateListObserver.get());
   }
@@ -69,7 +79,6 @@
               atIndex:(int)index
            activating:(BOOL)activating {
   DCHECK_EQ(_webStateList, webStateList);
-
   OpenInTabHelper::FromWebState(webState)->SetDelegate(self);
 }
 
@@ -81,10 +90,12 @@
                 withDocumentURL:(const GURL&)documentURL
               suggestedFileName:(NSString*)suggestedFileName {
   if (!_openInControllersForWebStates[webState]) {
-    _openInControllersForWebStates[webState] = [[OpenInController alloc]
+    OpenInController* openInController = [[OpenInController alloc]
         initWithURLLoaderFactory:webState->GetBrowserState()
                                      ->GetSharedURLLoaderFactory()
                         webState:webState];
+    openInController.browser = _browser;
+    _openInControllersForWebStates[webState] = openInController;
   }
   OpenInController* controller = _openInControllersForWebStates[webState];
   controller.baseView = webState->GetView();

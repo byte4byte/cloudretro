@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/engagement/site_engagement_observer.h"
-#include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_id.h"
 #include "components/keyed_service/core/keyed_service.h"
 
 class Profile;
@@ -45,7 +45,7 @@ class WebAppMetrics : public KeyedService, public SiteEngagementObserver {
   static constexpr int kNumUserInstalledAppsNotCounted = -1;
   int num_user_installed_apps_ = kNumUserInstalledAppsNotCounted;
 
-  Profile* profile_;
+  Profile* const profile_;
 
   base::WeakPtrFactory<WebAppMetrics> weak_ptr_factory_{this};
 

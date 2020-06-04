@@ -70,18 +70,23 @@ class ASH_EXPORT KeyboardControllerImpl
   void ShowKeyboard() override;
   void HideKeyboard(HideReason reason) override;
   void SetContainerType(keyboard::ContainerType container_type,
-                        const base::Optional<gfx::Rect>& target_bounds,
+                        const gfx::Rect& target_bounds,
                         SetContainerTypeCallback callback) override;
   void SetKeyboardLocked(bool locked) override;
   void SetOccludedBounds(const std::vector<gfx::Rect>& bounds) override;
   void SetHitTestBounds(const std::vector<gfx::Rect>& bounds) override;
+  bool SetAreaToRemainOnScreen(const gfx::Rect& bounds) override;
   void SetDraggableArea(const gfx::Rect& bounds) override;
+  bool SetWindowBoundsInScreen(const gfx::Rect& bounds_in_screen) override;
+  bool ShouldOverscroll() override;
   void AddObserver(KeyboardControllerObserver* observer) override;
+  void RemoveObserver(KeyboardControllerObserver* observer) override;
 
   // keyboard::KeyboardLayoutDelegate:
   aura::Window* GetContainerForDefaultDisplay() override;
   aura::Window* GetContainerForDisplay(
       const display::Display& display) override;
+  void TransferGestureEventToShelf(const ui::GestureEvent& e) override;
 
   // SessionObserver:
   void OnSessionStateChanged(session_manager::SessionState state) override;

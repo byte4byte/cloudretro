@@ -5,21 +5,22 @@
 #import "ios/chrome/browser/prerender/prerender_service.h"
 
 #include "base/metrics/histogram_macros.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/prerender/preload_controller.h"
-#import "ios/chrome/browser/sessions/session_window_restoring.h"
+#import "ios/chrome/browser/sessions/session_restoration_browser_agent.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/web/load_timing_tab_helper.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/page_transition_types.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-PrerenderService::PrerenderService(ios::ChromeBrowserState* browser_state)
+PrerenderService::PrerenderService(ChromeBrowserState* browser_state)
     : controller_(
           [[PreloadController alloc] initWithBrowserState:browser_state]),
       loading_prerender_(false) {}
@@ -39,24 +40,15 @@ void PrerenderService::StartPrerender(const GURL& url,
                                       const web::Referrer& referrer,
                                       ui::PageTransition transition,
                                       bool immediately) {
-  // PrerenderService is not compatible with WKBasedNavigationManager because it
-  // loads the URL in a new WKWebView, which doesn't have the current session
-  // history. TODO(crbug.com/814789): decide whether PrerenderService needs to
-  // be supported after evaluating the performance impact in Finch experiment.
-  if (web::GetWebClient()->IsSlimNavigationManagerEnabled())
-    return;
-
   [controller_ prerenderURL:url
                    referrer:referrer
                  transition:transition
                 immediately:immediately];
 }
 
-bool PrerenderService::MaybeLoadPrerenderedURL(
-    const GURL& url,
-    ui::PageTransition transition,
-    WebStateList* web_state_list,
-    id<SessionWindowRestoring> restorer) {
+bool PrerenderService::MaybeLoadPrerenderedURL(const GURL& url,
+                                               ui::PageTransition transition,
+                                               Browser* browser) {
   if (!HasPrerenderForUrl(url)) {
     CancelPrerender();
     return false;
@@ -64,6 +56,26 @@ bool PrerenderService::MaybeLoadPrerenderedURL(
 
   std::unique_ptr<web::WebState> new_web_state =
       [controller_ releasePrerenderContents];
+  if (!new_web_state) {
+    CancelPrerender();
+    return false;
+  }
+
+  WebStateList* web_state_list = browser->GetWebStateList();
+
+  // Due to some security workarounds inside ios/web, sometimes a restored
+  // webState may mark new navigations as renderer initiated instead of browser
+  // initiated. As a result 'visible url' of preloaded web state will be
+  // 'last committed  url', and not 'url typed by the user'. As these
+  // navigations are uncommitted, and make the omnibox (or NTP) look strange,
+  // simply drop them.  See crbug.com/1020497 for the strange UI, and
+  // crbug.com/1010765 for the triggering security fixes.
+  if (web_state_list->GetActiveWebState()->GetVisibleURL() ==
+      new_web_state->GetVisibleURL()) {
+    CancelPrerender();
+    return false;
+  }
+
   DCHECK_NE(WebStateList::kInvalidIndex, web_state_list->active_index());
 
   web::NavigationManager* active_navigation_manager =
@@ -76,33 +88,24 @@ bool PrerenderService::MaybeLoadPrerenderedURL(
       lastIndex == 0;
   UMA_HISTOGRAM_BOOLEAN("Prerender.PrerenderLoadedOnFirstNTP", onFirstNTP);
 
-  web::NavigationManager* new_navigation_manager =
-      new_web_state->GetNavigationManager();
+  loading_prerender_ = true;
+  web_state_list->ReplaceWebStateAt(web_state_list->active_index(),
+                                    std::move(new_web_state));
+  loading_prerender_ = false;
+  // new_web_state is now null after the std::move, so grab a new pointer to
+  // it for further updates.
+  web::WebState* active_web_state = web_state_list->GetActiveWebState();
 
-  if (new_navigation_manager->CanPruneAllButLastCommittedItem()) {
-    new_navigation_manager->CopyStateFromAndPrune(active_navigation_manager);
-    loading_prerender_ = true;
-    web_state_list->ReplaceWebStateAt(web_state_list->active_index(),
-                                      std::move(new_web_state));
-    loading_prerender_ = false;
-    // new_web_state is now null after the std::move, so grab a new pointer to
-    // it for further updates.
-    web::WebState* active_web_state = web_state_list->GetActiveWebState();
-
-    bool typed_or_generated_transition =
-        PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) ||
-        PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_GENERATED);
-    if (typed_or_generated_transition) {
-      LoadTimingTabHelper::FromWebState(active_web_state)
-          ->DidPromotePrerenderTab();
-    }
-
-    [restorer saveSessionImmediately:NO];
-    return true;
+  bool typed_or_generated_transition =
+      PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) ||
+      PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_GENERATED);
+  if (typed_or_generated_transition) {
+    LoadTimingTabHelper::FromWebState(active_web_state)
+        ->DidPromotePrerenderTab();
   }
-
-  CancelPrerender();
-  return false;
+  SessionRestorationBrowserAgent::FromBrowser(browser)->SaveSession(
+      /*immediately=*/false);
+  return true;
 }
 
 void PrerenderService::CancelPrerender() {

@@ -1,0 +1,7 @@
+rootWebArea
+++genericContainer ignored
+++++genericContainer ignored
+++++++genericContainer ignored
+++++++++genericContainer
+++++++++++genericContainer ignored invisible name='nested locked element!'
+++++++++++genericContainer ignored invisible name='activatable locked element'

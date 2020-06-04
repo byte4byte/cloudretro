@@ -23,9 +23,9 @@ import org.junit.runner.RunWith;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity0;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.MultiActivityTestRule;
@@ -89,7 +89,7 @@ public class MediaLauncherActivityTest {
 
     @Test
     @SmallTest
-    public void testFilterURI() throws Exception {
+    public void testFilterURI() {
         List<Pair<String, String>> testCases = CollectionUtil.newArrayList(
                 new Pair<>("file:///test.jpg", "file:///test.jpg"),
                 new Pair<>("file:///test.jp!g", "file:///test.jp!g"),
@@ -133,11 +133,11 @@ public class MediaLauncherActivityTest {
 
         CriteriaHelper.pollUiThread(Criteria.equals(expectedUrl, new Callable<String>() {
             @Override
-            public String call() throws Exception {
+            public String call() {
                 Tab tab = cta.getActivityTab();
                 if (tab == null) return null;
 
-                return tab.getUrl();
+                return tab.getUrlString();
             }
         }));
     }

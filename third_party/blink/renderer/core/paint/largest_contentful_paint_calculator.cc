@@ -3,10 +3,36 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/largest_contentful_paint_calculator.h"
-
+#include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/paint/image_element_timing.h"
 
 namespace blink {
+
+namespace {
+bool HasLargestTextChanged(const std::unique_ptr<TextRecord>& a,
+                           const base::WeakPtr<TextRecord> b) {
+  if (!a && !b)
+    return false;
+  if (!a && b)
+    return true;
+  if (a && !b)
+    return true;
+  return a->node_id != b->node_id || a->first_size != b->first_size ||
+         a->paint_time != b->paint_time;
+}
+
+bool HasLargestImageChanged(const std::unique_ptr<ImageRecord>& a,
+                            const ImageRecord* b) {
+  if (!a && !b)
+    return false;
+  if (!a && b)
+    return true;
+  if (a && !b)
+    return true;
+  return a->node_id != b->node_id || a->first_size != b->first_size ||
+         a->paint_time != b->paint_time || a->load_time != b->load_time;
+}
+}  // namespace
 
 LargestContentfulPaintCalculator::LargestContentfulPaintCalculator(
     WindowPerformance* window_performance)
@@ -21,16 +47,7 @@ void LargestContentfulPaintCalculator::OnLargestImageUpdated(
     largest_image_->first_size = largest_image->first_size;
     largest_image_->paint_time = largest_image->paint_time;
     largest_image_->cached_image = largest_image->cached_image;
-  }
-
-  if (LargestImageSize() > LargestTextSize()) {
-    // The new largest image is the largest content, so report it as the LCP.
-    OnLargestContentfulPaintUpdated(LargestContentType::kImage);
-  } else if (largest_text_ && last_type_ == LargestContentType::kImage) {
-    // The text is at least as large as the new image. Because the last reported
-    // content type was image, this means that the largest image is now smaller
-    // and the largest text now needs to be reported as the LCP.
-    OnLargestContentfulPaintUpdated(LargestContentType::kText);
+    largest_image_->load_time = largest_image->load_time;
   }
 }
 
@@ -42,24 +59,55 @@ void LargestContentfulPaintCalculator::OnLargestTextUpdated(
         largest_text->node_id, largest_text->first_size, FloatRect());
     largest_text_->paint_time = largest_text->paint_time;
   }
+}
 
+void LargestContentfulPaintCalculator::UpdateLargestContentPaintIfNeeded(
+    base::Optional<base::WeakPtr<TextRecord>> largest_text,
+    base::Optional<const ImageRecord*> largest_image) {
+  bool image_has_changed = false;
+  bool text_has_changed = false;
+  if (largest_image.has_value()) {
+    image_has_changed = HasLargestImageChanged(largest_image_, *largest_image);
+    if (image_has_changed)
+      OnLargestImageUpdated(*largest_image);
+  }
+  if (largest_text.has_value()) {
+    text_has_changed = HasLargestTextChanged(largest_text_, *largest_text);
+    if (text_has_changed)
+      OnLargestTextUpdated(*largest_text);
+  }
+  // If |largest_image| does not have value, the detector may have been
+  // destroyed. In this case, keep using its last candidate for comparison with
+  // the text candidate. The same for |largest_text|.
+  if ((!largest_image.has_value() || !image_has_changed) &&
+      (!largest_text.has_value() || !text_has_changed))
+    return;
+
+  if (!largest_text_ && !largest_image_) {
+    if (LocalFrame* frame = window_performance_->GetFrame()) {
+      TRACE_EVENT_INSTANT2(
+          "loading,rail,devtools.timeline",
+          "largestContentfulPaint::Invalidate", TRACE_EVENT_SCOPE_THREAD,
+          "data", InvalidationTraceData(), "frame", ToTraceValue(frame));
+    }
+    return;
+  }
   if (LargestTextSize() > LargestImageSize()) {
-    // The new largest text is the largest content, so report it as the LCP.
-    OnLargestContentfulPaintUpdated(LargestContentType::kText);
-  } else if (largest_image_ && last_type_ == LargestContentType::kText) {
-    // The image is at least as large as the new text. Because the last reported
-    // content type was text, this means that the largest text is now smaller
-    // and the largest image now needs to be reported as the LCP.
-    OnLargestContentfulPaintUpdated(LargestContentType::kImage);
+    if (largest_text_->paint_time > base::TimeTicks())
+      UpdateLargestContentfulPaint(LargestContentType::kText);
+  } else {
+    if (largest_image_->paint_time > base::TimeTicks())
+      UpdateLargestContentfulPaint(LargestContentType::kImage);
   }
 }
 
-void LargestContentfulPaintCalculator::OnLargestContentfulPaintUpdated(
+void LargestContentfulPaintCalculator::UpdateLargestContentfulPaint(
     LargestContentType type) {
   DCHECK(window_performance_);
   DCHECK(type != LargestContentType::kUnknown);
   last_type_ = type;
   if (type == LargestContentType::kImage) {
+    DCHECK(largest_image_);
     const ImageResourceContent* cached_image = largest_image_->cached_image;
     Node* image_node = DOMNodeIds::NodeForId(largest_image_->node_id);
 
@@ -75,14 +123,23 @@ void LargestContentfulPaintCalculator::OnLargestContentfulPaintUpdated(
       return;
 
     const KURL& url = cached_image->Url();
-    auto* document = window_performance_->GetExecutionContext();
-    if (!url.ProtocolIsData() &&
-        (!document || !Performance::PassesTimingAllowCheck(
-                          cached_image->GetResponse(),
-                          *document->GetSecurityOrigin(), document))) {
-      // Reset the paint time of this image. It cannot be exposed to the
-      // webexposed API.
-      largest_image_->paint_time = base::TimeTicks();
+    bool expose_paint_time_to_api = url.ProtocolIsData();
+    // Use TimingAllowPassed() if possible, see comment in ImageElementTiming.
+    if (!expose_paint_time_to_api) {
+      if (RuntimeEnabledFeatures::OutOfBlinkCorsEnabled()) {
+        expose_paint_time_to_api =
+            cached_image->GetResponse().TimingAllowPassed();
+      } else {
+        auto* document = window_performance_->GetExecutionContext();
+        bool response_tainting_not_basic = false;
+        bool tainted_origin_flag = false;
+        expose_paint_time_to_api =
+            document &&
+            Performance::PassesTimingAllowCheck(
+                cached_image->GetResponse(), cached_image->GetResponse(),
+                *document->GetSecurityOrigin(), document,
+                &response_tainting_not_basic, &tainted_origin_flag);
+      }
     }
     const String& image_url =
         url.ProtocolIsData()
@@ -94,9 +151,19 @@ void LargestContentfulPaintCalculator::OnLargestContentfulPaintUpdated(
     const AtomicString& image_id =
         image_element ? image_element->GetIdAttribute() : AtomicString();
     window_performance_->OnLargestContentfulPaintUpdated(
-        largest_image_->paint_time, largest_image_->first_size,
-        cached_image->LoadResponseEnd(), image_id, image_url, image_element);
+        expose_paint_time_to_api ? largest_image_->paint_time
+                                 : base::TimeTicks(),
+        largest_image_->first_size, largest_image_->load_time, image_id,
+        image_url, image_element);
+
+    if (LocalFrame* frame = window_performance_->GetFrame()) {
+      TRACE_EVENT_MARK_WITH_TIMESTAMP2(
+          "loading,rail,devtools.timeline", "largestContentfulPaint::Candidate",
+          largest_image_->paint_time, "data", ImageCandidateTraceData(),
+          "frame", ToTraceValue(frame));
+    }
   } else {
+    DCHECK(largest_text_);
     Node* text_node = DOMNodeIds::NodeForId(largest_text_->node_id);
     // |text_node| could be null and |largest_text_| should be ignored in this
     // case.
@@ -111,11 +178,62 @@ void LargestContentfulPaintCalculator::OnLargestContentfulPaintUpdated(
     window_performance_->OnLargestContentfulPaintUpdated(
         largest_text_->paint_time, largest_text_->first_size, base::TimeTicks(),
         text_id, g_empty_string, text_element);
+
+    if (LocalFrame* frame = window_performance_->GetFrame()) {
+      TRACE_EVENT_MARK_WITH_TIMESTAMP2(
+          "loading,rail,devtools.timeline", "largestContentfulPaint::Candidate",
+          largest_text_->paint_time, "data", TextCandidateTraceData(), "frame",
+          ToTraceValue(frame));
+    }
   }
 }
 
 void LargestContentfulPaintCalculator::Trace(Visitor* visitor) {
   visitor->Trace(window_performance_);
+}
+
+std::unique_ptr<TracedValue>
+LargestContentfulPaintCalculator::TextCandidateTraceData() {
+  auto value = std::make_unique<TracedValue>();
+  value->SetString("type", "text");
+  value->SetInteger("nodeId", static_cast<int>(largest_text_->node_id));
+  value->SetInteger("size", static_cast<int>(largest_text_->first_size));
+  value->SetInteger("candidateIndex", ++count_candidates_);
+  value->SetBoolean("isMainFrame",
+                    window_performance_->GetFrame()->IsMainFrame());
+  auto* document = window_performance_->DomWindow()->document();
+  value->SetString("navigationId",
+                   IdentifiersFactory::LoaderId(document->Loader()));
+  return value;
+}
+
+std::unique_ptr<TracedValue>
+LargestContentfulPaintCalculator::ImageCandidateTraceData() {
+  auto value = std::make_unique<TracedValue>();
+  value->SetString("type", "image");
+  value->SetInteger("nodeId", static_cast<int>(largest_image_->node_id));
+  value->SetInteger("size", static_cast<int>(largest_image_->first_size));
+  value->SetInteger("candidateIndex", ++count_candidates_);
+  value->SetBoolean("isMainFrame",
+                    window_performance_->GetFrame()->IsMainFrame());
+  auto* document = window_performance_->DomWindow()->document();
+  value->SetString("navigationId",
+                   IdentifiersFactory::LoaderId(document->Loader()));
+
+  return value;
+}
+
+std::unique_ptr<TracedValue>
+LargestContentfulPaintCalculator::InvalidationTraceData() {
+  auto value = std::make_unique<TracedValue>();
+  value->SetInteger("candidateIndex", ++count_candidates_);
+  value->SetBoolean("isMainFrame",
+                    window_performance_->GetFrame()->IsMainFrame());
+  auto* document = window_performance_->DomWindow()->document();
+  value->SetString("navigationId",
+                   IdentifiersFactory::LoaderId(document->Loader()));
+
+  return value;
 }
 
 }  // namespace blink

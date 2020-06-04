@@ -25,9 +25,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "base/test/task_environment.h"
 #include "base/time/tick_clock.h"
+#include "build/build_config.h"
 #include "media/base/audio_bus.h"
 #include "media/base/fake_single_thread_task_runner.h"
 #include "media/base/video_frame.h"
@@ -89,11 +90,9 @@ std::string ConvertFromBase16String(const std::string& base_16) {
   DCHECK_EQ(base_16.size() % 2, 0u) << "Must be a multiple of 2";
   compressed.reserve(base_16.size() / 2);
 
-  std::vector<uint8_t> v;
-  if (!base::HexStringToBytes(base_16, &v)) {
+  if (!base::HexStringToString(base_16, &compressed)) {
     NOTREACHED();
   }
-  compressed.assign(reinterpret_cast<const char*>(&v[0]), v.size());
   return compressed;
 }
 
@@ -210,8 +209,7 @@ class LoopBackTransport : public PacketTransport {
 
   int64_t GetBytesSent() final { return bytes_sent_; }
 
-  void StartReceiving(
-      const PacketReceiverCallbackWithStatus& packet_receiver) final {}
+  void StartReceiving(PacketReceiverCallbackWithStatus packet_receiver) final {}
 
   void StopReceiving() final {}
 
@@ -879,7 +877,7 @@ class End2EndTest : public ::testing::Test {
   std::vector<std::pair<base::TimeTicks, base::TimeTicks> > video_ticks_;
 
   // |transport_sender_| has a RepeatingTimer which needs a MessageLoop.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 namespace {
@@ -934,8 +932,8 @@ void End2EndTest::Create() {
       CastSender::Create(cast_environment_sender_, transport_sender_.get());
 
   // Initializing audio and video senders.
-  cast_sender_->InitializeAudio(audio_sender_config_,
-                                base::Bind(&ExpectSuccessOperationalStatus));
+  cast_sender_->InitializeAudio(
+      audio_sender_config_, base::BindOnce(&ExpectSuccessOperationalStatus));
   cast_sender_->InitializeVideo(video_sender_config_,
                                 base::Bind(&ExpectSuccessOperationalStatus),
                                 CreateDefaultVideoEncodeAcceleratorCallback(),
@@ -1218,7 +1216,9 @@ TEST_F(End2EndTest, MAYBE_EvilNetwork) {
 // Tests that a system configured for 30 FPS drops frames when input is provided
 // at a much higher frame rate.
 // Fails consistently on official builds: crbug.com/612496
-#ifdef OFFICIAL_BUILD
+// crbug.com/997944. Flaky on multiple platforms.
+#if defined(OFFICIAL_BUILD) || defined(OS_LINUX) || defined(OS_MACOSX) || \
+    defined(OS_WIN)
 #define MAYBE_ShoveHighFrameRateDownYerThroat \
   DISABLED_ShoveHighFrameRateDownYerThroat
 #else

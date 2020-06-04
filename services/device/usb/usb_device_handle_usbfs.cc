@@ -183,7 +183,7 @@ struct UsbDeviceHandleUsbfs::Transfer {
 
   scoped_refptr<base::RefCountedBytes> control_transfer_buffer;
   scoped_refptr<base::RefCountedBytes> buffer;
-  base::CancelableClosure timeout_closure;
+  base::CancelableOnceClosure timeout_closure;
   bool cancelled = false;
 
   // When the URB is |cancelled| these two flags track whether the URB has both
@@ -872,7 +872,7 @@ void UsbDeviceHandleUsbfs::RefreshEndpointInfo() {
   DCHECK(device_);
   endpoints_.clear();
 
-  const mojom::UsbConfigurationInfo* config = device_->active_configuration();
+  const mojom::UsbConfigurationInfo* config = device_->GetActiveConfiguration();
   if (!config)
     return;
 
@@ -914,7 +914,7 @@ void UsbDeviceHandleUsbfs::SetUpTimeoutCallback(Transfer* transfer,
     return;
 
   transfer->timeout_closure.Reset(
-      base::Bind(&UsbDeviceHandleUsbfs::OnTimeout, this, transfer));
+      base::BindOnce(&UsbDeviceHandleUsbfs::OnTimeout, this, transfer));
   task_runner_->PostDelayedTask(FROM_HERE, transfer->timeout_closure.callback(),
                                 base::TimeDelta::FromMilliseconds(timeout));
 }

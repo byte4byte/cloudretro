@@ -15,6 +15,7 @@
 #include "components/account_id/account_id.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "components/user_manager/known_user.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/common/url_constants.h"
@@ -52,15 +53,14 @@ const char kAuthTokenExchangeEndPoint[] =
 ArcBackgroundAuthCodeFetcher::ArcBackgroundAuthCodeFetcher(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     Profile* profile,
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     bool initial_signin,
     bool is_primary_account)
     : url_loader_factory_(std::move(url_loader_factory)),
       profile_(profile),
       context_(profile_, account_id),
       initial_signin_(initial_signin),
-      is_primary_account_(is_primary_account),
-      weak_ptr_factory_(this) {}
+      is_primary_account_(is_primary_account) {}
 
 ArcBackgroundAuthCodeFetcher::~ArcBackgroundAuthCodeFetcher() = default;
 
@@ -77,7 +77,7 @@ void ArcBackgroundAuthCodeFetcher::OnPrepared(bool success) {
     return;
   }
 
-  identity::ScopeSet scopes;
+  signin::ScopeSet scopes;
   scopes.insert(GaiaConstants::kOAuth1LoginScope);
   access_token_fetcher_ = context_.CreateAccessTokenFetcher(
       kConsumerName, scopes,
@@ -87,7 +87,7 @@ void ArcBackgroundAuthCodeFetcher::OnPrepared(bool success) {
 
 void ArcBackgroundAuthCodeFetcher::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   ResetFetchers();
 
   if (error.state() != GoogleServiceAuthError::NONE) {
@@ -132,8 +132,8 @@ void ArcBackgroundAuthCodeFetcher::OnAccessTokenFetchComplete(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(kAuthTokenExchangeEndPoint);
   resource_request->load_flags =
-      net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_CACHE |
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+      net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_CACHE;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader(kGetAuthCodeKey, kGetAuthCodeValue);
   simple_url_loader_ = network::SimpleURLLoader::Create(
@@ -184,7 +184,7 @@ void ArcBackgroundAuthCodeFetcher::OnSimpleLoaderComplete(
     OptInSilentAuthCode uma_status;
     if (response_code >= 400 && response_code < 500)
       uma_status = OptInSilentAuthCode::HTTP_CLIENT_FAILURE;
-    if (response_code >= 500 && response_code < 600)
+    else if (response_code >= 500 && response_code < 600)
       uma_status = OptInSilentAuthCode::HTTP_SERVER_FAILURE;
     else
       uma_status = OptInSilentAuthCode::HTTP_UNKNOWN_FAILURE;
@@ -236,10 +236,6 @@ void ArcBackgroundAuthCodeFetcher::ReportResult(
       UpdateSecondaryAccountSilentAuthCodeUMA(uma_status);
   }
   std::move(callback_).Run(!auth_code.empty(), auth_code);
-}
-
-void ArcBackgroundAuthCodeFetcher::SkipMergeSessionForTesting() {
-  context_.SkipMergeSessionForTesting();
 }
 
 }  // namespace arc

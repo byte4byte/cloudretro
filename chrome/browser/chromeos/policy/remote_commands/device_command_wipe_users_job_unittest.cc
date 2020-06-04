@@ -24,11 +24,12 @@
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
+#include "components/policy/core/common/cloud/policy_invalidation_scope.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
 #include "components/policy/core/common/remote_commands/remote_commands_service.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
@@ -39,9 +40,11 @@ constexpr base::TimeDelta kVeryoldCommandAge = base::TimeDelta::FromDays(175);
 class TestingRemoteCommandsService : public RemoteCommandsService {
  public:
   explicit TestingRemoteCommandsService(MockCloudPolicyClient* client)
-      : RemoteCommandsService(
-            std::make_unique<DeviceCommandsFactoryChromeOS>(nullptr),
-            client) {}
+      : RemoteCommandsService(std::make_unique<DeviceCommandsFactoryChromeOS>(
+                                  /*policy_manager=*/nullptr),
+                              client,
+                              /*store=*/nullptr,
+                              PolicyInvalidationScope::kDevice) {}
   // RemoteCommandsService:
   void SetOnCommandAckedCallback(base::OnceClosure callback) override {
     on_command_acked_callback_ = std::move(callback);
@@ -72,7 +75,7 @@ std::unique_ptr<policy::RemoteCommandJob> CreateWipeUsersJob(
   // Create the job and validate.
   auto job = std::make_unique<policy::DeviceCommandWipeUsersJob>(service);
 
-  EXPECT_TRUE(job->Init(base::TimeTicks::Now(), command_proto));
+  EXPECT_TRUE(job->Init(base::TimeTicks::Now(), command_proto, nullptr));
   EXPECT_EQ(kUniqueID, job->unique_id());
   EXPECT_EQ(policy::RemoteCommandJob::NOT_STARTED, job->status());
 
@@ -84,7 +87,7 @@ class DeviceCommandWipeUsersJobTest : public testing::Test {
   DeviceCommandWipeUsersJobTest();
   ~DeviceCommandWipeUsersJobTest() override;
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
 
   ScopedTestingLocalState local_state_;
@@ -107,7 +110,8 @@ TEST_F(DeviceCommandWipeUsersJobTest, TestCommandLifetime) {
   std::unique_ptr<policy::RemoteCommandJob> job =
       CreateWipeUsersJob(kVeryoldCommandAge, service_.get());
 
-  EXPECT_TRUE(job->Run(base::TimeTicks::Now(), base::Closure()));
+  EXPECT_TRUE(
+      job->Run(base::Time::Now(), base::TimeTicks::Now(), base::Closure()));
 }
 
 // Make sure that the command's succeeded_callback is being invoked.
@@ -121,8 +125,8 @@ TEST_F(DeviceCommandWipeUsersJobTest, TestCommandSucceededCallback) {
         run_loop->Quit();
       },
       &run_loop_, job.get());
-  EXPECT_TRUE(
-      job->Run(base::TimeTicks::Now(), std::move(check_result_callback)));
+  EXPECT_TRUE(job->Run(base::Time::Now(), base::TimeTicks::Now(),
+                       std::move(check_result_callback)));
   // This call processes the CommitPendingWrite which persists the pref to disk,
   // and runs the passed callback which is the succeeded_callback.
   run_loop_.Run();
@@ -134,7 +138,8 @@ TEST_F(DeviceCommandWipeUsersJobTest, TestLogOutCalled) {
   std::unique_ptr<policy::RemoteCommandJob> job =
       CreateWipeUsersJob(kCommandAge, service_.get());
 
-  EXPECT_TRUE(job->Run(base::TimeTicks::Now(), run_loop_.QuitClosure()));
+  EXPECT_TRUE(job->Run(base::Time::Now(), base::TimeTicks::Now(),
+                       run_loop_.QuitClosure()));
   // At this point the job is run, and the succeeded_callback is waiting to be
   // invoked.
 

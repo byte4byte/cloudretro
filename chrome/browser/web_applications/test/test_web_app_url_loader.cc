@@ -41,6 +41,7 @@ void TestWebAppUrlLoader::SetNextLoadUrlResult(const GURL& url, Result result) {
 
 void TestWebAppUrlLoader::LoadUrl(const GURL& url,
                                   content::WebContents* web_contents,
+                                  UrlComparison url_comparison,
                                   ResultCallback callback) {
   if (should_save_requests_) {
     pending_requests_.emplace(url, std::move(callback));
@@ -53,6 +54,11 @@ void TestWebAppUrlLoader::LoadUrl(const GURL& url,
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), result));
+}
+
+void TestWebAppUrlLoader::SetAboutBlankResultLoaded() {
+  SetNextLoadUrlResult(GURL("about:blank"),
+                       WebAppUrlLoader::Result::kUrlLoaded);
 }
 
 }  // namespace web_app

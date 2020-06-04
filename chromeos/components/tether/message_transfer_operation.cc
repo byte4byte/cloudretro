@@ -93,8 +93,7 @@ MessageTransferOperation::MessageTransferOperation(
       device_sync_client_(device_sync_client),
       secure_channel_client_(secure_channel_client),
       connection_priority_(connection_priority),
-      timer_factory_(std::make_unique<TimerFactory>()),
-      weak_ptr_factory_(this) {}
+      timer_factory_(std::make_unique<TimerFactory>()) {}
 
 MessageTransferOperation::~MessageTransferOperation() {
   // If initialization never occurred, devices were never registered.
@@ -255,8 +254,8 @@ void MessageTransferOperation::StartTimerForDevice(
                                       timer_factory_->CreateOneShotTimer());
   remote_device_to_timer_map_[remote_device]->Start(
       FROM_HERE, base::TimeDelta::FromSeconds(timeout_seconds),
-      base::Bind(&MessageTransferOperation::OnTimeout,
-                 weak_ptr_factory_.GetWeakPtr(), remote_device));
+      base::BindOnce(&MessageTransferOperation::OnTimeout,
+                     weak_ptr_factory_.GetWeakPtr(), remote_device));
 }
 
 void MessageTransferOperation::StopTimerForDeviceIfRunning(

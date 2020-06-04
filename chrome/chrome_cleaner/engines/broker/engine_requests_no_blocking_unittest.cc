@@ -11,17 +11,19 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/win/win_util.h"
@@ -29,8 +31,8 @@
 #include "chrome/chrome_cleaner/engines/broker/interface_metadata_observer.h"
 #include "chrome/chrome_cleaner/engines/target/engine_file_requests_proxy.h"
 #include "chrome/chrome_cleaner/engines/target/sandboxed_test_helpers.h"
-#include "chrome/chrome_cleaner/mojom/engine_file_requests.mojom.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
+#include "chrome/chrome_cleaner/mojom/engine_file_requests.mojom.h"
 #include "chrome/chrome_cleaner/os/inheritable_event.h"
 #include "chrome/chrome_cleaner/strings/string16_embedded_nulls.h"
 #include "chrome/chrome_cleaner/test/test_executables.h"
@@ -95,8 +97,8 @@ scoped_refptr<SandboxChildProcess> SetupSandboxedChildProcess() {
 // Execute |closure| on a different sequence since it could block and we don't
 // want to block on the Mojo thread.
 void InvokeOnOtherSequence(base::OnceClosure closure) {
-  base::PostTaskWithTraits(FROM_HERE, {base::WithBaseSyncPrimitives()},
-                           std::move(closure));
+  base::ThreadPool::PostTask(FROM_HERE, {base::WithBaseSyncPrimitives()},
+                             std::move(closure));
 }
 
 }  // namespace
@@ -272,10 +274,12 @@ class TestEngineRequestInvoker {
                    BindOnce(&NtChangeRegistryValueCallback,
                             std::move(result_closure))));
     } else if (request_name == "DeleteService") {
+      // The broker should reject the empty string so we won't risk deleting a
+      // real service.
+      const base::string16 empty_service_name;
       cleaner_requests_proxy_->task_runner()->PostTask(
           FROM_HERE, BindOnce(IgnoreResult(&CleanerProxy::SandboxDeleteService),
-                              cleaner_requests_proxy_,
-                              RandomUnusedServiceNameForTesting().c_str(),
+                              cleaner_requests_proxy_, empty_service_name,
                               BindOnce(&DeleteServiceCallback,
                                        std::move(result_closure))));
     } else if (request_name == "DeleteTask") {
@@ -319,7 +323,7 @@ class TestEngineRequestInvoker {
   }
 
   static void OpenReadOnlyFileCallback(base::OnceClosure closure,
-                                       mojo::ScopedHandle /*handle*/) {
+                                       mojo::PlatformHandle /*handle*/) {
     InvokeOnOtherSequence(std::move(closure));
   }
 
@@ -434,7 +438,9 @@ class TestEngineRequestInvoker {
 };
 
 MULTIPROCESS_TEST_MAIN(EngineRequestsNoBlocking) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  // COM can't be initialized inside the sandbox.
+  base::test::TaskEnvironment task_environment(
+      base::test::TaskEnvironment::ThreadPoolCOMEnvironment::NONE);
 
   auto child_process = SetupSandboxedChildProcess();
   if (!child_process)
@@ -517,12 +523,7 @@ class EngineRequestsNoBlockingTest
     : public ::testing::TestWithParam<const char*> {};
 
 TEST_P(EngineRequestsNoBlockingTest, TestRequest) {
-  // All of these tests fail when run on win8 bots so return right away.
-  // TODO(crbug.com/947576): Find out why and re-enable them.
-  if (base::win::GetVersion() == base::win::Version::WIN8)
-    return;
-
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
   // This event will be shared between the parent and child processes. The
   // parent will wait on the event to simulate a long-running function call.
@@ -572,36 +573,33 @@ TEST_P(EngineRequestsNoBlockingTest, TestRequest) {
   test_process.Terminate(0, true);
 }
 
-INSTANTIATE_TEST_CASE_P(All,
-                        EngineRequestsNoBlockingTest,
-                        testing::Values("FindFirstFile",
-                                        "FindNextFile",
-                                        "FindClose",
-                                        "OpenReadOnlyFile",
-                                        "GetFileAttributes",
-                                        "GetKnownFolderPath",
-                                        "GetProcesses",
-                                        "GetTasks",
-                                        "GetProcessImagePath",
-                                        "GetLoadedModules",
-                                        "GetProcessCommandLine",
-                                        "GetUserInfoFromSID",
-                                        "OpenReadOnlyRegistry",
-                                        "NtOpenReadOnlyRegistry",
+INSTANTIATE_TEST_SUITE_P(All,
+                         EngineRequestsNoBlockingTest,
+                         testing::Values("FindFirstFile",
+                                         "FindNextFile",
+                                         "FindClose",
+                                         "OpenReadOnlyFile",
+                                         "GetFileAttributes",
+                                         "GetKnownFolderPath",
+                                         "GetProcesses",
+                                         "GetTasks",
+                                         "GetProcessImagePath",
+                                         "GetLoadedModules",
+                                         "GetProcessCommandLine",
+                                         "GetUserInfoFromSID",
+                                         "OpenReadOnlyRegistry",
+                                         "NtOpenReadOnlyRegistry",
 #if 0
                                         // Calls using FileRemover still block.
                                         "DeleteFile",
                                         "DeleteFilePostReboot",
 #endif
-                                        "NtDeleteRegistryKey",
-                                        "NtDeleteRegistryValue",
-                                        "NtChangeRegistryValue",
-#if 0
-                                        // TODO(https://crbug.com/945432): Disabled due to flake.
-                                        "DeleteService",
-#endif
-                                        "DeleteTask",
-                                        "TerminateProcess"),
-                        GetParamNameForTest());
+                                         "NtDeleteRegistryKey",
+                                         "NtDeleteRegistryValue",
+                                         "NtChangeRegistryValue",
+                                         "DeleteService",
+                                         "DeleteTask",
+                                         "TerminateProcess"),
+                         GetParamNameForTest());
 
 }  // namespace chrome_cleaner

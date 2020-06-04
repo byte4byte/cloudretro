@@ -11,13 +11,15 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/base/filename_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -160,23 +162,31 @@ class TestBrowserClientWithHeaderClient
       content::BrowserContext* browser_context,
       content::RenderFrameHost* frame,
       int render_process_id,
-      bool is_navigation,
-      bool is_download,
+      URLLoaderFactoryType type,
       const url::Origin& request_initiator,
+      base::Optional<int64_t> navigation_id,
       mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
-      network::mojom::TrustedURLLoaderHeaderClientPtrInfo* header_client,
-      bool* bypass_redirect_checks) override {
+      mojo::PendingRemote<network::mojom::TrustedURLLoaderHeaderClient>*
+          header_client,
+      bool* bypass_redirect_checks,
+      bool* disable_secure_dns,
+      network::mojom::URLLoaderFactoryOverridePtr* factory_override) override {
     if (header_client)
-      bindings_.AddBinding(this, mojo::MakeRequest(header_client));
+      receivers_.Add(this, header_client->InitWithNewPipeAndPassReceiver());
     return true;
   }
 
   // network::mojom::TrustedURLLoaderHeaderClient:
   void OnLoaderCreated(
       int32_t request_id,
-      network::mojom::TrustedHeaderClientRequest request) override {}
+      mojo::PendingReceiver<network::mojom::TrustedHeaderClient> receiver)
+      override {}
+  void OnLoaderForCorsPreflightCreated(
+      const network::ResourceRequest& request,
+      mojo::PendingReceiver<network::mojom::TrustedHeaderClient> receiver)
+      override {}
 
-  mojo::BindingSet<network::mojom::TrustedURLLoaderHeaderClient> bindings_;
+  mojo::ReceiverSet<network::mojom::TrustedURLLoaderHeaderClient> receivers_;
 };
 
 IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest,
@@ -242,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, InterceptSubresource) {
 IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, InterceptBrowser) {
   bool seen = false;
   GURL url = GetImageURL();
-  network::mojom::URLLoaderPtr loader;
+  mojo::PendingRemote<network::mojom::URLLoader> loader;
   network::TestURLLoaderClient client;
   network::ResourceRequest request;
   request.url = url;
@@ -261,7 +271,8 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, InterceptBrowser) {
                       ->GetURLLoaderFactoryForBrowserProcess()
                       .get();
   factory->CreateLoaderAndStart(
-      mojo::MakeRequest(&loader), 0, 0, 0, request, client.CreateInterfacePtr(),
+      loader.InitWithNewPipeAndPassReceiver(), 0, 0, 0, request,
+      client.CreateRemote(),
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
   client.RunUntilComplete();
   EXPECT_EQ(net::ERR_FAILED, client.completion_status().error_code);
@@ -275,8 +286,8 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponse) {
       "HTTP/1.1 200 OK\nContent-type: text/html\n\n", body, &client);
   client.RunUntilComplete();
 
-  EXPECT_EQ(client.response_head().headers->response_code(), 200);
-  EXPECT_EQ(client.response_head().mime_type, "text/html");
+  EXPECT_EQ(client.response_head()->headers->response_code(), 200);
+  EXPECT_EQ(client.response_head()->mime_type, "text/html");
 
   std::string response;
   EXPECT_TRUE(
@@ -294,7 +305,7 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile1) {
                                       &headers);
   client.RunUntilComplete();
 
-  EXPECT_EQ(client.response_head().headers->response_code(), 404);
+  EXPECT_EQ(client.response_head()->headers->response_code(), 404);
 
   std::string response;
   EXPECT_TRUE(
@@ -310,10 +321,10 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile2) {
   URLLoaderInterceptor::WriteResponse("content/test/data/hello.html", &client);
   client.RunUntilComplete();
 
-  EXPECT_EQ(client.response_head().headers->response_code(), 200);
+  EXPECT_EQ(client.response_head()->headers->response_code(), 200);
 
   std::string mime_type;
-  EXPECT_TRUE(client.response_head().headers->GetMimeType(&mime_type));
+  EXPECT_TRUE(client.response_head()->headers->GetMimeType(&mime_type));
   EXPECT_EQ(mime_type, "text/html");
 
   std::string response;
@@ -329,10 +340,10 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile3) {
   URLLoaderInterceptor::WriteResponse("content/test/data/empty.html", &client);
   client.RunUntilComplete();
 
-  EXPECT_EQ(client.response_head().headers->response_code(), 200);
+  EXPECT_EQ(client.response_head()->headers->response_code(), 200);
 
   std::string mime_type;
-  EXPECT_TRUE(client.response_head().headers->GetMimeType(&mime_type));
+  EXPECT_TRUE(client.response_head()->headers->GetMimeType(&mime_type));
   EXPECT_EQ(mime_type, "text/html");
 
   std::string response;

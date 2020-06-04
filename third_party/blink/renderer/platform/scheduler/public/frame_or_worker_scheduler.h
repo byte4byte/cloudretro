@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_PUBLIC_FRAME_OR_WORKER_SCHEDULER_H_
 
 #include "base/memory/weak_ptr.h"
+#include "base/util/type_safety/strong_alias.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/scheduling_lifecycle_state.h"
 #include "third_party/blink/renderer/platform/scheduler/public/scheduling_policy.h"
@@ -84,6 +85,10 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
 
   virtual ~FrameOrWorkerScheduler();
 
+  using Preempted = util::StrongAlias<class PreemptedTag, bool>;
+  // Stops any tasks from running while we yield and run a nested loop.
+  virtual void SetPreemptedForCooperativeScheduling(Preempted) = 0;
+
   // Notifies scheduler that this execution context has started using a feature
   // which impacts scheduling decisions.
   // When the feature stops being used, this handle should be destroyed.
@@ -113,6 +118,8 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
 
   virtual FrameScheduler* ToFrameScheduler() { return nullptr; }
 
+  base::WeakPtr<FrameOrWorkerScheduler> GetWeakPtr();
+
  protected:
   FrameOrWorkerScheduler();
 
@@ -129,8 +136,6 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
                                      const SchedulingPolicy& policy) = 0;
 
   virtual base::WeakPtr<FrameOrWorkerScheduler> GetDocumentBoundWeakPtr();
-
-  base::WeakPtr<FrameOrWorkerScheduler> GetWeakPtr();
 
  private:
   void RemoveLifecycleObserver(Observer* observer);

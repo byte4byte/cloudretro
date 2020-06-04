@@ -13,8 +13,9 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
-#include "chrome/browser/ui/tabs/tab_group_id.h"
-#include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/views/tabs/tab_slot_view.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/linear_animation.h"
@@ -24,12 +25,13 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/focus_ring.h"
 #include "ui/views/masked_targeter_delegate.h"
-#include "ui/views/view.h"
+#include "ui/views/view_observer.h"
 
 class AlertIndicator;
 class TabCloseButton;
 class TabController;
 class TabIcon;
+struct TabSizeInfo;
 class TabStyleViews;
 
 namespace gfx {
@@ -38,6 +40,7 @@ class LinearAnimation;
 }  // namespace gfx
 namespace views {
 class Label;
+class View;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,10 +50,9 @@ class Label;
 ///////////////////////////////////////////////////////////////////////////////
 class Tab : public gfx::AnimationDelegate,
             public views::ButtonListener,
-            public views::ContextMenuController,
             public views::MaskedTargeterDelegate,
-            public views::View,
-            public views::ViewObserver {
+            public views::ViewObserver,
+            public TabSlotView {
  public:
   // The Tab's class name.
   static const char kViewClassName[];
@@ -60,6 +62,10 @@ class Tab : public gfx::AnimationDelegate,
   // to hit on accident.
   static constexpr int kMinimumContentsWidthForCloseButtons = 68;
   static constexpr int kTouchMinimumContentsWidthForCloseButtons = 100;
+
+  // Sets whether hover cards should appear on mouse hover. Used in browser
+  // tests to prevent them from interfering with unrelated tests.
+  static void SetShowHoverCardOnMouseHoverForTesting(bool value);
 
   explicit Tab(TabController* controller);
   ~Tab() override;
@@ -71,19 +77,14 @@ class Tab : public gfx::AnimationDelegate,
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // views::ContextMenuController:
-  void ShowContextMenuForViewImpl(views::View* source,
-                                  const gfx::Point& point,
-                                  ui::MenuSourceType source_type) override;
-
   // views::MaskedTargeterDelegate:
   bool GetHitTestMask(SkPath* mask) const override;
 
-  // views::View:
+  // TabSlotView:
   void Layout() override;
   const char* GetClassName() const override;
-  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
+  bool OnKeyReleased(const ui::KeyEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -101,24 +102,14 @@ class Tab : public gfx::AnimationDelegate,
   void OnFocus() override;
   void OnBlur() override;
   void OnThemeChanged() override;
+  TabSlotView::ViewType GetTabSlotViewType() const override;
+  TabSizeInfo GetTabSizeInfo() const override;
 
   TabController* controller() const { return controller_; }
 
   // Used to set/check whether this Tab is being animated closed.
   void SetClosing(bool closing);
   bool closing() const { return closing_; }
-
-  // See description above field.
-  void set_dragging(bool dragging) { dragging_ = dragging; }
-  bool dragging() const { return dragging_; }
-
-  // Used to mark the tab as having been detached.  Once this has happened, the
-  // tab should be invisibly closed.  This is irreversible.
-  void set_detached() { detached_ = true; }
-  bool detached() const { return detached_; }
-
-  void SetGroup(base::Optional<TabGroupId> group);
-  base::Optional<TabGroupId> group() { return group_; }
 
   // Returns the color for the tab's group, if any.
   base::Optional<SkColor> GetGroupColor() const;
@@ -155,16 +146,9 @@ class Tab : public gfx::AnimationDelegate,
   // throbbers in sync.
   void StepLoadingAnimation(const base::TimeDelta& elapsed_time);
 
-  bool ShowingLoadingAnimation() const;
-
   // Sets the visibility of the indicator shown when the tab needs to indicate
   // to the user that it needs their attention.
   void SetTabNeedsAttention(bool attention);
-
-  // Gets/sets the background X offset used to match the image in the inactive
-  // tab to the frame image.
-  int background_offset() const { return background_offset_; }
-  void set_background_offset(int offset) { background_offset_ = offset; }
 
   // Returns true if this tab became the active tab selected in
   // response to the last ui::ET_TAP_DOWN gesture dispatched to
@@ -183,8 +167,13 @@ class Tab : public gfx::AnimationDelegate,
   // Returns the text to show in a tab's tooltip: The contents |title|, followed
   // by a break, followed by a localized string describing the |alert_state|.
   // Exposed publicly for tests.
-  static base::string16 GetTooltipText(const base::string16& title,
-                                       TabAlertState alert_state);
+  static base::string16 GetTooltipText(
+      const base::string16& title,
+      base::Optional<TabAlertState> alert_state);
+
+  // Returns an alert state to be shown among given alert states.
+  static base::Optional<TabAlertState> GetAlertStateToShow(
+      const std::vector<TabAlertState>& alert_states);
 
  private:
   class TabCloseButtonObserver;
@@ -221,7 +210,8 @@ class Tab : public gfx::AnimationDelegate,
   void UpdateForegroundColors();
 
   // Considers switching to hovered mode or [re-]showing the hover card based on
-  // the mouse moving over the tab.
+  // the mouse moving over the tab. If the tab is already hovered or mouse
+  // events are disabled because of touch input, this is a no-op.
   void MaybeUpdateHoverStatus(const ui::MouseEvent& event);
 
   // The controller, never nullptr.
@@ -233,15 +223,6 @@ class Tab : public gfx::AnimationDelegate,
 
   // True if the tab is being animated closed.
   bool closing_ = false;
-
-  // True if the tab is being dragged.
-  bool dragging_ = false;
-
-  // True if the tab has been detached.
-  bool detached_ = false;
-
-  // Defined when the tab is part of a group.
-  base::Optional<TabGroupId> group_;
 
   TabIcon* icon_ = nullptr;
   AlertIndicator* alert_indicator_ = nullptr;
@@ -255,9 +236,6 @@ class Tab : public gfx::AnimationDelegate,
   gfx::LinearAnimation title_animation_;
 
   bool tab_activated_with_last_tap_down_ = false;
-
-  // The offset used to paint the inactive background image.
-  int background_offset_;
 
   // For narrow tabs, we show the alert icon or, if there is no alert icon, the
   // favicon even if it won't completely fit. In this case, we need to center
@@ -287,8 +265,8 @@ class Tab : public gfx::AnimationDelegate,
   // padding between them to space them out visually.
   bool extra_alert_indicator_padding_ = false;
 
-  // The current color of the alert indicator and close button icons.
-  SkColor button_color_ = SK_ColorTRANSPARENT;
+  // The tab foreground color (title, buttons).
+  SkColor foreground_color_ = SK_ColorTRANSPARENT;
 
   // Indicates whether the mouse is currently hovered over the tab. This is
   // different from View::IsMouseHovered() which does a naive intersection with

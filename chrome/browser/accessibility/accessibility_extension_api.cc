@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/common/extensions/api/accessibility_private.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -34,7 +33,6 @@
 #include "extensions/common/error_utils.h"
 #include "extensions/common/image_util.h"
 #include "extensions/common/manifest_handlers/background_info.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -45,7 +43,6 @@
 #include "ash/public/cpp/accessibility_focus_ring_info.h"
 #include "ash/public/cpp/event_rewriter_controller.h"
 #include "ash/public/cpp/window_tree_host_lookup.h"
-#include "ash/public/interfaces/constants.mojom.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/arc/accessibility/arc_accessibility_helper_bridge.h"
 #include "ui/aura/window_tree_host.h"
@@ -92,8 +89,6 @@ AccessibilityPrivateOpenSettingsSubpageFunction::Run() {
   if (chrome::IsOSSettingsSubPage(params->subpage)) {
     chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
         profile, params->subpage);
-  } else {
-    chrome::ShowSettingsSubPageForProfile(profile, params->subpage);
   }
 #else
   // This function should only be available on ChromeOS.
@@ -239,18 +234,6 @@ AccessibilityPrivateDarkenScreenFunction::Run() {
 }
 
 #if defined(OS_CHROMEOS)
-ExtensionFunction::ResponseAction
-AccessibilityPrivateSetSwitchAccessKeysFunction::Run() {
-  std::unique_ptr<accessibility_private::SetSwitchAccessKeys::Params> params =
-      accessibility_private::SetSwitchAccessKeys::Params::Create(*args_);
-  EXTENSION_FUNCTION_VALIDATE(params);
-
-  ash::AccessibilityController::Get()->SetSwitchAccessKeysToCapture(
-      params->key_codes);
-
-  return RespondNow(NoArguments());
-}
-
 ExtensionFunction::ResponseAction
 AccessibilityPrivateSetNativeChromeVoxArcSupportForCurrentAppFunction::Run() {
   std::unique_ptr<

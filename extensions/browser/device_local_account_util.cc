@@ -14,6 +14,7 @@ namespace {
 const char* const kPublicSessionWhitelist[] = {
     // Public sessions in general:
     "cbkkbcmdlboombapidmoeolnmdacpkch",  // Chrome RDP
+    "inomeogfingihgjfjlpeplalcfajhgai",  // Chrome Remote Desktop
     "djflhoibgkdhkhhcedjiklpkjnoahfmg",  // User Agent Switcher
     "iabmpiboiopbgfabjmgeedhcmjenhbla",  // VNC Viewer
     "haiffjcadagjlijoggckpgfnoeiflnem",  // Citrix Receiver
@@ -26,6 +27,10 @@ const char* const kPublicSessionWhitelist[] = {
     "haeblkpifdemlfnkogkipmghfcbonief",  // Charismathics Smart Card Middleware
     "mpnkhdpphjiihmlmkcamhpogecnnfffa",  // Service NSW Kiosk Utility
     "npilppbicblkkgjfnbmibmhhgjhobpll",  // QwickACCESS
+    // TODO(isandrk): Only on the whitelist for the purpose of getting the soft
+    // MGS warning.  Remove
+    // once dynamic MGS warnings are implemented.
+    "ppkfnjlimknmjoaemnpidmdlfchhehel",  // VMware Horizon Client for Chrome
 
     // Libraries:
     "aclofikceldphonlfmghmimkodjdmhck",  // Ancoris login component
@@ -106,6 +111,7 @@ const char* const kPublicSessionWhitelist[] = {
     "mnoijifedipmbjaoekhadjcijipaijjc",  // Screensaver
     "gdobaoeekhiklaljmhladjfdfkigampc",  // Screensaver (eve)
     "lminefdanffajachfahfpmphfkhahcnj",  // Screensaver (nocturne)
+    "fafhbhdboeiciklpkminlncemohljlkj",  // Screensaver (kukui)
     "bnabjkecnachpogjlfilfcnlpcmacglh",  // Screensaver (other)
 
     // Testing extensions:

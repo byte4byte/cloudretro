@@ -118,6 +118,7 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
   void BlockSuspend(const base::UnguessableToken& token,
                     const std::string& debug_info) override;
   void UnblockSuspend(const base::UnguessableToken& token) override;
+  bool SupportsAmbientColor() override;
   void CreateArcTimers(
       const std::string& tag,
       std::vector<std::pair<clockid_t, base::ScopedFD>> arc_timer_requests,
@@ -127,6 +128,7 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
                      VoidDBusMethodCallback callback) override;
   void DeleteArcTimers(const std::string& tag,
                        VoidDBusMethodCallback callback) override;
+  base::TimeDelta GetDarkSuspendDelayTimeout() override;
 
   // Pops the first report from |video_activity_reports_|, returning whether the
   // activity was fullscreen or not. There must be at least one report.
@@ -187,6 +189,10 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
 
   void set_keyboard_brightness_percent(const base::Optional<double>& percent) {
     keyboard_brightness_percent_ = percent;
+  }
+
+  void set_supports_ambient_color(bool supports_ambient_color) {
+    supports_ambient_color_ = supports_ambient_color;
   }
 
   // Sets |tick_clock| to |tick_clock_|.
@@ -253,6 +259,10 @@ class COMPONENT_EXPORT(DBUS_POWER) FakePowerManagerClient
   // |pending_screen_brightness_changes_|, and will have to be applied
   // explicitly by calling ApplyPendingScreenBrightnessChange().
   bool enqueue_brightness_changes_on_backlights_forced_off_ = false;
+
+  // Whether the device has an ambient color sensor. Can be set via
+  // SetSupportsAmbientColor().
+  bool supports_ambient_color_ = false;
 
   // Pending screen brightness changes caused by SetBacklightsForcedOff().
   // ApplyPendingScreenBrightnessChange() applies the first pending change.

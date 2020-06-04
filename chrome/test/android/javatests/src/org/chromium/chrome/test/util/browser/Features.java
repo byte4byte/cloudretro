@@ -4,12 +4,14 @@
 
 package org.chromium.chrome.test.util.browser;
 
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.test.util.AnnotationRule;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.CachedFeatureFlags;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 
 import java.lang.annotation.Annotation;
 import java.lang.annotation.Retention;
@@ -87,11 +89,15 @@ public class Features {
 
     private void applyForJUnit() {
         ChromeFeatureList.setTestFeatures(mRegisteredState);
+        CachedFeatureFlags.setFeaturesForTesting(mRegisteredState);
     }
 
     private void applyForInstrumentation() {
+        ChromeFeatureList.setTestCanUseDefaultsForTesting();
         mergeFeatureLists("enable-features", true);
         mergeFeatureLists("disable-features", false);
+        CachedFeatureFlags.setFeaturesForTesting(mRegisteredState);
+        FieldTrials.getInstance().applyFieldTrials();
     }
 
     /**
@@ -120,6 +126,9 @@ public class Features {
     private static void reset() {
         sInstance = null;
         ChromeFeatureList.setTestFeatures(null);
+        ChromeFeatureList.resetTestCanUseDefaultsForTesting();
+        CachedFeatureFlags.resetFlagsForTesting();
+        FieldTrials.getInstance().reset();
     }
 
     /**
@@ -141,6 +150,12 @@ public class Features {
      */
     public static class InstrumentationProcessor extends Processor {
         @Override
+        protected void collectFeatures() {
+            super.collectFeatures();
+            FieldTrials.getInstance().collectFieldTrials();
+        }
+
+        @Override
         protected void applyFeatures() {
             getInstance().applyForInstrumentation();
         }
@@ -151,13 +166,13 @@ public class Features {
      * to enable, or get rid of exceptions when the production code tries to check for enabled
      * features.
      */
-    private static abstract class Processor extends AnnotationRule {
+    private abstract static class Processor extends AnnotationRule {
         public Processor() {
             super(EnableFeatures.class, DisableFeatures.class);
         }
 
         @Override
-        protected void before() throws Throwable {
+        protected void before() {
             collectFeatures();
             applyFeatures();
         }
@@ -167,9 +182,9 @@ public class Features {
             reset();
         }
 
-        abstract protected void applyFeatures();
+        protected abstract void applyFeatures();
 
-        private void collectFeatures() {
+        protected void collectFeatures() {
             for (Annotation annotation : getAnnotations()) {
                 if (annotation instanceof EnableFeatures) {
                     getInstance().enable(((EnableFeatures) annotation).value());

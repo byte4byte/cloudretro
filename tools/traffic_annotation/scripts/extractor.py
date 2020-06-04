@@ -7,13 +7,19 @@
 Extracts network traffic annotation definitions from C++ source code.
 """
 
+from __future__ import print_function
+
 import argparse
 import os
 import re
 import sys
+import traceback
 
 from annotation_tools import NetworkTrafficAnnotationTools
-from annotation_tokenizer import Tokenizer
+from annotation_tokenizer import Tokenizer, CppParsingError
+
+# Exit code for parsing errors. Other runtime errors return 1.
+EX_PARSE_ERROR = 2
 
 ANNOTATION_TYPES = {
     'DefineNetworkTrafficAnnotation': 'Definition',
@@ -76,8 +82,8 @@ class Annotation:
     self._parse_body(body)
 
 
-  def clang_tool_output_string(self):
-    """Returns a string formatted for clang-tool-style output."""
+  def extractor_output_string(self):
+    """Returns a string formatted for output."""
     return "\n".join(map(str, [
         "==== NEW ANNOTATION ====",
         self.file_path,
@@ -233,12 +239,21 @@ def main():
   for file_path in args.file_paths:
     if not args.no_filter and os.path.abspath(file_path) not in compdb_files:
       continue
-    annotation_definitions.extend(extract_annotations(file_path))
+    try:
+      annotation_definitions.extend(extract_annotations(file_path))
+    except CppParsingError:
+      traceback.print_exc()
+      return EX_PARSE_ERROR
 
   # Print output.
   for annotation in annotation_definitions:
-    print(annotation.clang_tool_output_string())
+    print(annotation.extractor_output_string())
 
+  # If all files were successfully checked for annotations but none of them had
+  # any, print something so that the traffic_annotation_auditor knows there was
+  # no error so that the files get checked for deleted annotations.
+  if not annotation_definitions:
+    print('No annotations in these files.')
   return 0
 
 

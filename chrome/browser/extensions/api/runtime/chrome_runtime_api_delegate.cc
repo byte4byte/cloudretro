@@ -28,7 +28,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/browser/notification_service.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/warning_service.h"
@@ -57,20 +56,13 @@ const char kUpdateThrottled[] = "throttled";
 const char kUpdateNotFound[] = "no_update";
 const char kUpdateFound[] = "update_available";
 
-// If an extension reloads itself within this many miliseconds of reloading
+// If an extension reloads itself within this many milliseconds of reloading
 // itself, the reload is considered suspiciously fast.
 const int kFastReloadTime = 10000;
 
 // Same as above, but we shorten the fast reload interval for unpacked
 // extensions for ease of testing.
 const int kUnpackedFastReloadTime = 1000;
-
-// After this many suspiciously fast consecutive reloads, an extension will get
-// disabled.
-const int kFastReloadCount = 5;
-
-// Same as above, but we increase the fast reload count for unpacked extensions.
-const int kUnpackedFastReloadCount = 30;
 
 // A holder class for the policy we use for exponential backoff of update check
 // requests.
@@ -145,9 +137,7 @@ struct ChromeRuntimeAPIDelegate::UpdateCheckInfo {
 
 ChromeRuntimeAPIDelegate::ChromeRuntimeAPIDelegate(
     content::BrowserContext* context)
-    : browser_context_(context),
-      registered_for_updates_(false),
-      extension_registry_observer_(this) {
+    : browser_context_(context), registered_for_updates_(false) {
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND,
                  content::NotificationService::AllSources());
@@ -187,14 +177,14 @@ void ChromeRuntimeAPIDelegate::ReloadExtension(
       extensions::ExtensionRegistry::Get(browser_context_)
           ->GetInstalledExtension(extension_id);
   int fast_reload_time = kFastReloadTime;
-  int fast_reload_count = kFastReloadCount;
+  int fast_reload_count = extensions::RuntimeAPI::kFastReloadCount;
 
   // If an extension is unpacked, we allow for a faster reload interval
   // and more fast reload attempts before terminating the extension.
   // This is intended to facilitate extension testing for developers.
   if (extensions::Manifest::IsUnpackedLocation(extension->location())) {
     fast_reload_time = kUnpackedFastReloadTime;
-    fast_reload_count = kUnpackedFastReloadCount;
+    fast_reload_count = extensions::RuntimeAPI::kUnpackedFastReloadCount;
   }
 
   std::pair<base::TimeTicks, int>& reload_info =
@@ -267,9 +257,12 @@ bool ChromeRuntimeAPIDelegate::CheckForUpdates(
                                                 true, kUpdateThrottled, "")));
   } else {
     info.callbacks.push_back(callback);
-    updater->CheckExtensionSoon(
-        extension_id, base::Bind(&ChromeRuntimeAPIDelegate::UpdateCheckComplete,
-                                 base::Unretained(this), extension_id));
+
+    extensions::ExtensionUpdater::CheckParams params;
+    params.ids = {extension_id};
+    params.callback = base::Bind(&ChromeRuntimeAPIDelegate::UpdateCheckComplete,
+                                 base::Unretained(this), extension_id);
+    updater->CheckNow(std::move(params));
   }
   return true;
 }
@@ -309,6 +302,8 @@ bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
   const char* arch = update_client::UpdateQueryParams::GetArch();
   if (strcmp(arch, "arm") == 0) {
     info->arch = extensions::api::runtime::PLATFORM_ARCH_ARM;
+  } else if (strcmp(arch, "arm64") == 0) {
+    info->arch = extensions::api::runtime::PLATFORM_ARCH_ARM64;
   } else if (strcmp(arch, "x86") == 0) {
     info->arch = extensions::api::runtime::PLATFORM_ARCH_X86_32;
   } else if (strcmp(arch, "x64") == 0) {
@@ -324,6 +319,9 @@ bool ChromeRuntimeAPIDelegate::GetPlatformInfo(PlatformInfo* info) {
 
   const char* nacl_arch = update_client::UpdateQueryParams::GetNaclArch();
   if (strcmp(nacl_arch, "arm") == 0) {
+    info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_ARM;
+  } else if (strcmp(nacl_arch, "arm64") == 0) {
+    // Use ARM for ARM64 NaCl, as ARM64 NaCl is not available.
     info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_ARM;
   } else if (strcmp(nacl_arch, "x86-32") == 0) {
     info->nacl_arch = extensions::api::runtime::PLATFORM_NACL_ARCH_X86_32;

@@ -21,6 +21,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/utility/chrome_content_utility_client.h"
 #include "components/component_updater/component_updater_paths.h"
+#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/common/content_paths.h"
 #include "extensions/buildflags/buildflags.h"
@@ -50,21 +51,6 @@ class ChromeContentBrowserClientWithoutNetworkServiceInitialization
   // Skip some production Network Service code that doesn't work in unit tests.
   void OnNetworkServiceCreated(
       network::mojom::NetworkService* network_service) override {}
-  // Overridden to skip a call to ProfileIOData::FromResourceContext downstream
-  // of ProxyingURLLoaderFactory, which assumes the ResourceContext is a
-  // ProfileIOData::ResourceContext, but in unit tests it's a mock.
-  bool WillCreateURLLoaderFactory(
-      content::BrowserContext* browser_context,
-      content::RenderFrameHost* frame,
-      int render_process_id,
-      bool is_navigation,
-      bool is_download,
-      const url::Origin& request_initiator,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory>* factory_receiver,
-      network::mojom::TrustedURLLoaderHeaderClientPtrInfo* header_client,
-      bool* bypass_redirect_checks) override {
-    return false;
-  }
 };
 
 // Creates a TestingBrowserProcess for each test.
@@ -123,6 +109,10 @@ void ChromeUnitTestSuite::Initialize() {
       testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new ChromeUnitTestSuiteInitializer);
 
+  {
+    ChromeContentClient content_client;
+    RegisterContentSchemes(&content_client);
+  }
   InitializeProviders();
   RegisterInProcessThreads();
 
@@ -134,6 +124,12 @@ void ChromeUnitTestSuite::Initialize() {
 
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
   ProfileShortcutManager::DisableForUnitTests();
+
+  // BrowserView assumes that application start time is set when it is painted.
+  // Since RecordApplicationStartTime() would DCHECK if it was invoked from
+  // multiple tests in the same process, invoke it once in test suite
+  // initialization.
+  startup_metric_utils::RecordApplicationStartTime(base::TimeTicks::Now());
 }
 
 void ChromeUnitTestSuite::Shutdown() {
@@ -142,11 +138,6 @@ void ChromeUnitTestSuite::Shutdown() {
 }
 
 void ChromeUnitTestSuite::InitializeProviders() {
-  {
-    ChromeContentClient content_client;
-    RegisterContentSchemes(&content_client);
-  }
-
   chrome::RegisterPathProvider();
   content::RegisterPathProvider();
   ui::RegisterPathProvider();

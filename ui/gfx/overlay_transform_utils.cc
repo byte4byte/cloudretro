@@ -4,13 +4,14 @@
 
 #include "ui/gfx/overlay_transform_utils.h"
 
+#include "base/logging.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace gfx {
 
 gfx::Transform OverlayTransformToTransform(
     gfx::OverlayTransform overlay_transform,
-    const gfx::Size& viewport_bounds) {
+    const gfx::SizeF& viewport_bounds) {
   switch (overlay_transform) {
     case gfx::OVERLAY_TRANSFORM_INVALID:
       NOTREACHED();

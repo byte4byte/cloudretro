@@ -18,7 +18,8 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
 import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
-import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
+import org.chromium.chrome.browser.notifications.channels.ChromeChannelDefinitions;
+import org.chromium.components.url_formatter.SchemeDisplay;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.webapk.lib.client.WebApkNavigationClient;
 
@@ -33,13 +34,17 @@ public class WebApkInstallService {
 
     /** Displays a notification when a WebAPK is successfully installed. */
     @CalledByNative
-    private static void showInstalledNotification(
-            String webApkPackage, String manifestUrl, String shortName, String url, Bitmap icon) {
+    private static void showInstalledNotification(String webApkPackage, String manifestUrl,
+            String shortName, String url, Bitmap icon, boolean isIconMaskable) {
         Context context = ContextUtils.getApplicationContext();
         Intent intent = WebApkNavigationClient.createLaunchWebApkIntent(webApkPackage, url, false
                 /* forceNavigation */);
         PendingIntent clickPendingIntent =
                 PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        if (isIconMaskable && ShortcutHelper.doesAndroidSupportMaskableIcons()) {
+            icon = ShortcutHelper.generateAdaptiveIconBitmap(icon);
+        }
 
         showNotification(manifestUrl, shortName, url, icon,
                 context.getResources().getString(R.string.notification_webapk_installed),
@@ -49,9 +54,12 @@ public class WebApkInstallService {
     /** Display a notification when an install starts. */
     @CalledByNative
     private static void showInstallInProgressNotification(
-            String manifestUrl, String shortName, String url, Bitmap icon) {
+            String manifestUrl, String shortName, String url, Bitmap icon, boolean isIconMaskable) {
         String message = ContextUtils.getApplicationContext().getResources().getString(
                 R.string.notification_webapk_install_in_progress, shortName);
+        if (isIconMaskable && ShortcutHelper.doesAndroidSupportMaskableIcons()) {
+            icon = ShortcutHelper.generateAdaptiveIconBitmap(icon);
+        }
         showNotification(manifestUrl, shortName, url, icon, message, null);
         ShortcutHelper.showToast(message);
     }
@@ -61,14 +69,15 @@ public class WebApkInstallService {
         Context context = ContextUtils.getApplicationContext();
         ChromeNotificationBuilder notificationBuilder =
                 NotificationBuilderFactory.createChromeNotificationBuilder(
-                        false /* preferCompat */, ChannelDefinitions.ChannelId.BROWSER);
+                        false /* preferCompat */, ChromeChannelDefinitions.ChannelId.BROWSER);
         notificationBuilder.setContentTitle(shortName)
                 .setContentText(message)
                 .setLargeIcon(icon)
                 .setSmallIcon(R.drawable.ic_chrome)
                 .setContentIntent(clickPendingIntent)
                 .setWhen(System.currentTimeMillis())
-                .setSubText(UrlFormatter.formatUrlForSecurityDisplayOmitScheme(url))
+                .setSubText(UrlFormatter.formatUrlForSecurityDisplay(
+                        url, SchemeDisplay.OMIT_HTTP_AND_HTTPS))
                 .setAutoCancel(true);
 
         NotificationManager notificationManager =

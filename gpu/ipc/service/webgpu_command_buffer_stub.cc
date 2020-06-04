@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -63,7 +63,12 @@ WebGPUCommandBufferStub::WebGPUCommandBufferStub(
                         stream_id,
                         route_id) {}
 
-WebGPUCommandBufferStub::~WebGPUCommandBufferStub() {}
+WebGPUCommandBufferStub::~WebGPUCommandBufferStub() {
+  // Must run before memory_tracker_ is destroyed.
+  decoder_context()->Destroy(false);
+
+  memory_tracker_ = nullptr;
+}
 
 gpu::ContextResult WebGPUCommandBufferStub::Initialize(
     CommandBufferStub* share_command_buffer_stub,

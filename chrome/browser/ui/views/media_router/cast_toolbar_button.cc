@@ -15,12 +15,13 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/controls/button/button_controller.h"
 
 namespace media_router {
 
@@ -54,7 +55,8 @@ CastToolbarButton::CastToolbarButton(
       browser_(browser),
       profile_(browser_->profile()),
       context_menu_(std::move(context_menu)) {
-  set_notify_action(Button::NOTIFY_ON_PRESS);
+  button_controller()->set_notify_action(
+      views::ButtonController::NotifyAction::kOnPress);
 
   EnableCanvasFlippingForRTLUI(false);
   SetTooltipText(l10n_util::GetStringUTF16(IDS_MEDIA_ROUTER_ICON_TOOLTIP_TEXT));
@@ -132,14 +134,29 @@ void CastToolbarButton::OnRoutesUpdated(
 
 bool CastToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
   if (event.IsRightMouseButton() && GetActionController())
-    GetActionController()->KeepIconOnRightMousePressed();
+    GetActionController()->KeepIconShownOnPressed();
   return ToolbarButton::OnMousePressed(event);
 }
 
 void CastToolbarButton::OnMouseReleased(const ui::MouseEvent& event) {
   ToolbarButton::OnMouseReleased(event);
   if (event.IsRightMouseButton() && GetActionController())
-    GetActionController()->MaybeHideIconOnRightMouseReleased();
+    GetActionController()->MaybeHideIconOnReleased();
+}
+
+void CastToolbarButton::OnGestureEvent(ui::GestureEvent* event) {
+  switch (event->type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+      GetActionController()->KeepIconShownOnPressed();
+      break;
+    case ui::ET_GESTURE_END:
+    case ui::ET_GESTURE_TAP_CANCEL:
+      GetActionController()->MaybeHideIconOnReleased();
+      break;
+    default:
+      break;
+  }
+  ToolbarButton::OnGestureEvent(event);
 }
 
 void CastToolbarButton::ButtonPressed(views::Button* sender,
@@ -150,7 +167,8 @@ void CastToolbarButton::ButtonPressed(views::Button* sender,
   if (dialog_controller->IsShowingMediaRouterDialog()) {
     dialog_controller->HideMediaRouterDialog();
   } else {
-    dialog_controller->ShowMediaRouterDialog();
+    dialog_controller->ShowMediaRouterDialog(
+        MediaRouterDialogOpenOrigin::TOOLBAR);
     MediaRouterMetrics::RecordMediaRouterDialogOrigin(
         MediaRouterDialogOpenOrigin::TOOLBAR);
   }
@@ -167,33 +185,33 @@ void CastToolbarButton::UpdateIcon() {
   if (!GetWidget())
     return;
   const gfx::VectorIcon& icon = GetCurrentIcon();
-  SetImage(views::Button::STATE_NORMAL,
-           gfx::CreateVectorIcon(icon, GetIconColor(&icon)));
+  UpdateIconsWithColors(icon, GetIconColor(views::Button::STATE_NORMAL, &icon),
+                        GetIconColor(views::Button::STATE_HOVERED, &icon),
+                        GetIconColor(views::Button::STATE_PRESSED, &icon),
+                        GetIconColor(views::Button::STATE_DISABLED, &icon));
   // This icon is smaller than the touchable-UI expected 24dp, so we need to pad
   // the insets to match.
   SetLayoutInsetDelta(
-      gfx::Insets(ui::MaterialDesignController::touch_ui() ? 4 : 0));
+      gfx::Insets(ui::TouchUiController::Get()->touch_ui() ? 4 : 0));
 }
 
 MediaRouterActionController* CastToolbarButton::GetActionController() const {
   return MediaRouterUIService::Get(profile_)->action_controller();
 }
 
-SkColor CastToolbarButton::GetIconColor(const gfx::VectorIcon* icon_id) const {
-  if (icon_id == &::vector_icons::kMediaRouterIdleIcon) {
-    return GetThemeProvider()->GetColor(
-        ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON);
-  } else if (icon_id == &::vector_icons::kMediaRouterActiveIcon) {
+SkColor CastToolbarButton::GetIconColor(ButtonState state,
+                                        const gfx::VectorIcon* icon_id) const {
+  if (icon_id == &::vector_icons::kMediaRouterIdleIcon)
+    return GetForegroundColor(state);
+  if (icon_id == &::vector_icons::kMediaRouterActiveIcon)
     return gfx::kGoogleBlue500;
-  } else if (icon_id == &::vector_icons::kMediaRouterWarningIcon) {
+  if (icon_id == &::vector_icons::kMediaRouterWarningIcon) {
     return GetNativeTheme()->GetSystemColor(
         ui::NativeTheme::kColorId_AlertSeverityMedium);
-  } else if (icon_id == &::vector_icons::kMediaRouterErrorIcon) {
-    return GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_AlertSeverityHigh);
   }
-  NOTREACHED();
-  return gfx::kPlaceholderColor;
+  DCHECK(icon_id == &::vector_icons::kMediaRouterErrorIcon);
+  return GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_AlertSeverityHigh);
 }
 
 }  // namespace media_router

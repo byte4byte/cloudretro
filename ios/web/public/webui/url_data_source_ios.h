@@ -50,7 +50,7 @@ class URLDataSourceIOS {
   // data is available or if the request could not be satisfied. This can be
   // called either in this callback or asynchronously with the response.
   virtual void StartDataRequest(const std::string& path,
-                                const GotDataCallback& callback) = 0;
+                                GotDataCallback callback) = 0;
 
   // Return the mimetype that should be sent with this response, or empty
   // string to specify no mime type.
@@ -76,9 +76,6 @@ class URLDataSourceIOS {
   // By default, the "X-Frame-Options: DENY" header is sent. To stop this from
   // happening, return false. It is OK to return false as needed.
   virtual bool ShouldDenyXFrameOptions() const;
-
-  // Whether |path| is gzipped (and should be transmitted gzipped).
-  virtual bool IsGzipped(const std::string& path) const;
 
   // By default, only chrome: requests are allowed.  Override in specific WebUI
   // data sources to enable for additional schemes or to implement fancier

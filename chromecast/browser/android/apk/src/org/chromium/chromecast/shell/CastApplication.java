@@ -10,6 +10,9 @@ import android.content.Context;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
+import org.chromium.ui.base.ResourceBundle;
 
 /**
  * Entry point for the Android cast shell application.  Handles initialization of information that
@@ -26,6 +29,13 @@ public class CastApplication extends Application {
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
         ContextUtils.initApplicationContext(this);
+        ResourceBundle.setAvailablePakLocales(
+                ProductConfig.COMPRESSED_LOCALES, ProductConfig.UNCOMPRESSED_LOCALES);
+        LibraryLoader.getInstance().setLinkerImplementation(
+                ProductConfig.USE_CHROMIUM_LINKER, ProductConfig.USE_MODERN_LINKER);
+        LibraryLoader.getInstance().setLibraryProcessType(isBrowserProcess()
+                        ? LibraryProcessType.PROCESS_BROWSER
+                        : LibraryProcessType.PROCESS_CHILD);
     }
 
     @Override
@@ -33,5 +43,9 @@ public class CastApplication extends Application {
         super.onCreate();
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         ApplicationStatus.initialize(this);
+    }
+
+    private static boolean isBrowserProcess() {
+        return !ContextUtils.getProcessName().contains(":");
     }
 }

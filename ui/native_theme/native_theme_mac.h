@@ -37,19 +37,20 @@ class NATIVE_THEME_EXPORT NativeThemeMac : public NativeThemeBase {
   static SkColor ApplySystemControlTint(SkColor color);
 
   // Overridden from NativeTheme:
-  SkColor GetSystemColor(ColorId color_id) const override;
+  SkColor GetSystemColor(ColorId color_id,
+                         ColorScheme color_scheme) const override;
 
   // Overridden from NativeThemeBase:
   void PaintMenuPopupBackground(
       cc::PaintCanvas* canvas,
       const gfx::Size& size,
-      const MenuBackgroundExtraParams& menu_background) const override;
-  void PaintMenuItemBackground(
-      cc::PaintCanvas* canvas,
-      State state,
-      const gfx::Rect& rect,
-      const MenuItemExtraParams& menu_item) const override;
-  bool SystemDarkModeSupported() const override;
+      const MenuBackgroundExtraParams& menu_background,
+      ColorScheme color_scheme) const override;
+  void PaintMenuItemBackground(cc::PaintCanvas* canvas,
+                               State state,
+                               const gfx::Rect& rect,
+                               const MenuItemExtraParams& menu_item,
+                               ColorScheme color_scheme) const override;
 
   // Paints the styled button shape used for default controls on Mac. The basic
   // style is used for dialog buttons, comboboxes, and tabbed pane tabs.
@@ -68,19 +69,35 @@ class NATIVE_THEME_EXPORT NativeThemeMac : public NativeThemeBase {
   static NativeThemeMac* instance();
 
  private:
-  NativeThemeMac();
+  NativeThemeMac(bool configure_web_instance, bool should_only_use_dark_colors);
   ~NativeThemeMac() override;
 
   // Paint the selected menu item background, and a border for emphasis when in
   // high contrast.
   void PaintSelectedMenuItem(cc::PaintCanvas* canvas,
-                             const gfx::Rect& rect) const;
+                             const gfx::Rect& rect,
+                             ColorScheme color_scheme) const;
 
   void InitializeDarkModeStateAndObserver();
+
+  void ConfigureWebInstance() override;
+
+  // Used by the GetSystem to run the switch for MacOS override colors that may
+  // use named NS system colors. This is a separate function from GetSystemColor
+  // to make sure the NSAppearance can be set in a scoped way.
+  base::Optional<SkColor> GetOSColor(ColorId color_id,
+                                     ColorScheme color_scheme) const;
 
   base::scoped_nsobject<NativeThemeEffectiveAppearanceObserver>
       appearance_observer_;
   id high_contrast_notification_token_;
+
+  // Used to notify the web native theme of changes to dark mode and high
+  // contrast.
+  std::unique_ptr<NativeTheme::ColorSchemeNativeThemeObserver>
+      color_scheme_observer_;
+
+  bool should_only_use_dark_colors_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeThemeMac);
 };

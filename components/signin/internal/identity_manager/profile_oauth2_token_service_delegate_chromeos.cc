@@ -93,7 +93,9 @@ ProfileOAuth2TokenServiceDelegateChromeOS::CreateAccessTokenFetcher(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     OAuth2AccessTokenConsumer* consumer) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS, load_credentials_state());
+  DCHECK_EQ(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS,
+      load_credentials_state());
 
   ValidateAccountId(account_id);
 
@@ -104,7 +106,7 @@ ProfileOAuth2TokenServiceDelegateChromeOS::CreateAccessTokenFetcher(
   if (it != errors_.end() && it->second.last_auth_error.IsPersistentError()) {
     VLOG(1) << "Request for token has been rejected due to persistent error #"
             << it->second.last_auth_error.state();
-    // |OAuth2TokenService| will manage the lifetime of this pointer.
+    // |ProfileOAuth2TokenService| will manage the lifetime of this pointer.
     return std::make_unique<OAuth2AccessTokenFetcherImmediateError>(
         consumer, it->second.last_auth_error);
   }
@@ -112,7 +114,7 @@ ProfileOAuth2TokenServiceDelegateChromeOS::CreateAccessTokenFetcher(
   if (backoff_entry_.ShouldRejectRequest()) {
     VLOG(1) << "Request for token has been rejected due to backoff rules from"
             << " previous error #" << backoff_error_.state();
-    // |OAuth2TokenService| will manage the lifetime of this pointer.
+    // |ProfileOAuth2TokenService| will manage the lifetime of this pointer.
     return std::make_unique<OAuth2AccessTokenFetcherImmediateError>(
         consumer, backoff_error_);
   }
@@ -131,7 +133,8 @@ ProfileOAuth2TokenServiceDelegateChromeOS::CreateAccessTokenFetcher(
 // |GetOAuthAccountIdsFromAccountKeys|.
 bool ProfileOAuth2TokenServiceDelegateChromeOS::RefreshTokenIsAvailable(
     const CoreAccountId& account_id) const {
-  if (load_credentials_state() != LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS) {
+  if (load_credentials_state() !=
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS) {
     return false;
   }
 
@@ -201,19 +204,23 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::LoadCredentials(
     const CoreAccountId& primary_account_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (load_credentials_state() != LOAD_CREDENTIALS_NOT_STARTED) {
+  if (load_credentials_state() !=
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED) {
     return;
   }
-  set_load_credentials_state(LOAD_CREDENTIALS_IN_PROGRESS);
+  set_load_credentials_state(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS);
 
   if (!is_regular_profile_) {
     // |LoadCredentials| needs to complete successfully for a successful Profile
     // initialization, but for Signin Profile and Lock Screen Profile this is a
     // no-op: they do not and must not have a working Account Manager available
     // to them. Note: They do have access to an Account Manager instance, but
-    // that instance is never set up (|AccountManager::Initialize|). Also, see
-    // http://crbug.com/891818
-    set_load_credentials_state(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+    // that instance is never set up (|AccountManager::Initialize|). Also, see:
+    // - http://crbug.com/891818
+    // - https://crbug.com/996615 and |GetURLLoaderFactory|.
+    set_load_credentials_state(
+        signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
     FireRefreshTokensLoaded();
     return;
   }
@@ -254,7 +261,9 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::UpdateCredentials(
   // Accounts) we can be sure that |account_id| is present in
   // |AccountTrackerService|.
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS, load_credentials_state());
+  DCHECK_EQ(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS,
+      load_credentials_state());
   DCHECK(!account_id.empty());
   DCHECK(!refresh_token.empty());
 
@@ -277,6 +286,22 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::UpdateCredentials(
 
 scoped_refptr<network::SharedURLLoaderFactory>
 ProfileOAuth2TokenServiceDelegateChromeOS::GetURLLoaderFactory() const {
+  if (!is_regular_profile_) {
+    // Signin and Lock Screen profiles (non-|is_regular_profile_|s) have weird
+    // expectations around token loading. They do not have an account associated
+    // with them but expect calls like |LoadCredentials| and
+    // |GetURLLoaderFactory| to successfully complete.
+    // We *can* return a |nullptr| here because the return value of
+    // |GetURLLoaderFactory| is never used by Signin and Lock Screen profiles.
+    // They get a hard-coded |GoogleServiceAuthError::USER_NOT_SIGNED_UP| error
+    // returned to them by access token fetchers.
+    // We *must* return a |nullptr| here because otherwise |AccountManager|
+    // DCHECKs as it has not been initialized for non-|is_regular_profile_| and
+    // crashes for this weird case (Non-regular profiles expecting to act on
+    // accounts).
+    // See https://crbug.com/996615 for details.
+    return nullptr;
+  }
   return account_manager_->GetUrlLoaderFactory();
 }
 
@@ -287,10 +312,12 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnGetAccounts(
   // This callback should only be triggered during |LoadCredentials|, which
   // implies that |load_credentials_state())| should in
   // |LOAD_CREDENTIALS_IN_PROGRESS| state.
-  DCHECK_EQ(LOAD_CREDENTIALS_IN_PROGRESS, load_credentials_state());
+  DCHECK_EQ(signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS,
+            load_credentials_state());
 
-  set_load_credentials_state(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
-  // The typical order of |OAuth2TokenServiceObserver| callbacks is:
+  set_load_credentials_state(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+  // The typical order of |ProfileOAuth2TokenServiceObserver| callbacks is:
   // 1. OnRefreshTokenAvailable
   // 2. OnEndBatchChanges
   // 3. OnRefreshTokensLoaded
@@ -316,7 +343,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnTokenUpserted(
   // All Gaia accounts in Chrome OS Account Manager must have an email
   // associated with them (https://crbug.com/933307).
   DCHECK(!account.raw_email.empty());
-  std::string account_id = account_tracker_service_->SeedAccountInfo(
+  CoreAccountId account_id = account_tracker_service_->SeedAccountInfo(
       account.key.id /* gaia_id */, account.raw_email);
   DCHECK(!account_id.empty());
 
@@ -341,7 +368,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnTokenUpserted(
 
   ScopedBatchChange batch(this);
   FireRefreshTokenAvailable(account_id);
-  // See |OAuth2TokenServiceObserver::OnAuthErrorChanged|.
+  // See |ProfileOAuth2TokenServiceObserver::OnAuthErrorChanged|.
   // |OnAuthErrorChanged| must be always called after
   // |OnRefreshTokenAvailable|, when refresh token is updated.
   FireAuthErrorChanged(account_id, error);
@@ -350,7 +377,9 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnTokenUpserted(
 void ProfileOAuth2TokenServiceDelegateChromeOS::OnAccountRemoved(
     const chromeos::AccountManager::Account& account) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS, load_credentials_state());
+  DCHECK_EQ(
+      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS,
+      load_credentials_state());
 
   auto it = account_keys_.find(account.key);
   if (it == account_keys_.end()) {
@@ -362,7 +391,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnAccountRemoved(
       chromeos::account_manager::AccountType::ACCOUNT_TYPE_GAIA) {
     return;
   }
-  std::string account_id =
+  CoreAccountId account_id =
       account_tracker_service_
           ->FindAccountInfoByGaiaId(account.key.id /* gaia_id */)
           .account_id;

@@ -4,7 +4,6 @@
 
 #include "chrome/test/chromedriver/chrome/download_directory_override_manager.h"
 #include "base/values.h"
-#include "build/build_config.h"
 #include "chrome/test/chromedriver/chrome/recorder_devtools_client.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -14,7 +13,7 @@ void AssertDownloadDirectoryCommand(const Command& command,
                                     const std::string& download_directory) {
   std::string behavior;
   std::string download_path;
-  ASSERT_EQ("Page.setDownloadBehavior", command.method);
+  ASSERT_EQ("Browser.setDownloadBehavior", command.method);
   ASSERT_TRUE(command.params.GetString("behavior", &behavior));
   ASSERT_TRUE(command.params.GetString("downloadPath", &download_path));
   ASSERT_EQ(download_directory, download_path);
@@ -39,16 +38,6 @@ TEST(DownloadDirectoryOverrideManager, OverrideSendsCommand) {
   ASSERT_EQ(kOk,
             manager.OverrideDownloadDirectoryWhenConnected(directory).code());
   ASSERT_EQ(0u, client.commands_.size());
-
-// Currently headless chrome download does not work
-// for MAC_OSX so it is designed to always return
-// true without sending a command. For more info:
-// https://bugs.chromium.org/p/chromium/issues/detail?id=979847
-#if defined(OS_MACOSX)
-  ASSERT_EQ(kOk, manager.OnConnected(&client).code());
-  ASSERT_EQ(0u, client.commands_.size());
-  return;
-#endif
 
   // On connected is called and the directory should now
   // be overridden to 'download/directory'

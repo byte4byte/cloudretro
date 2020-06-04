@@ -10,12 +10,12 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
@@ -23,6 +23,7 @@
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -48,7 +49,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/uninstall_reason.h"
@@ -59,6 +60,7 @@
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/verifier_formats.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -78,23 +80,24 @@ const char kTestExtensionName[] = "FooBar";
 void RequestProxyResolvingSocketFactoryOnUIThread(
     Profile* profile,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
   if (!service)
     return;
   network::mojom::NetworkContext* network_context =
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetNetworkContext();
-  network_context->CreateProxyResolvingSocketFactory(std::move(request));
+  network_context->CreateProxyResolvingSocketFactory(std::move(receiver));
 }
 
 void RequestProxyResolvingSocketFactory(
     Profile* profile,
     base::WeakPtr<gcm::GCMProfileService> service,
-    network::mojom::ProxyResolvingSocketFactoryRequest request) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread, profile,
-                     service, std::move(request)));
+    mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>
+        receiver) {
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&RequestProxyResolvingSocketFactoryOnUIThread,
+                                profile, service, std::move(receiver)));
 }
 
 }  // namespace
@@ -122,7 +125,7 @@ class Waiter {
 
   // Runs until IO loop becomes idle.
   void PumpIOLoop() {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&Waiter::OnIOLoopPump, base::Unretained(this)));
 
@@ -139,7 +142,7 @@ class Waiter {
   void OnIOLoopPump() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&Waiter::OnIOLoopPumpCompleted, base::Unretained(this)));
   }
@@ -147,7 +150,7 @@ class Waiter {
   void OnIOLoopPumpCompleted() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&Waiter::PumpIOLoopCompleted, base::Unretained(this)));
   }
@@ -222,13 +225,11 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
       content::BrowserContext* context) {
     Profile* profile = Profile::FromBrowserContext(context);
     scoped_refptr<base::SequencedTaskRunner> ui_thread =
-        base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::UI});
+        base::CreateSingleThreadTaskRunner({content::BrowserThread::UI});
     scoped_refptr<base::SequencedTaskRunner> io_thread =
-        base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO});
+        base::CreateSingleThreadTaskRunner({content::BrowserThread::IO});
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
-        base::CreateSequencedTaskRunnerWithTraits(
+        base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
     return std::make_unique<gcm::GCMProfileService>(
         profile->GetPrefs(), profile->GetPath(),
@@ -244,7 +245,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   }
 
   ExtensionGCMAppHandlerTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
+      : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD),
         extension_service_(NULL),
         registration_result_(gcm::GCMClient::UNKNOWN_ERROR),
         unregistration_result_(gcm::GCMClient::UNKNOWN_ERROR) {}
@@ -374,10 +375,9 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   void Register(const std::string& app_id,
                 const std::vector<std::string>& sender_ids) {
     GetGCMDriver()->Register(
-        app_id,
-        sender_ids,
-        base::Bind(&ExtensionGCMAppHandlerTest::RegisterCompleted,
-                   base::Unretained(this)));
+        app_id, sender_ids,
+        base::BindOnce(&ExtensionGCMAppHandlerTest::RegisterCompleted,
+                       base::Unretained(this)));
   }
 
   void RegisterCompleted(const std::string& registration_id,
@@ -407,7 +407,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<content::InProcessUtilityThreadHelper>
       in_process_utility_thread_helper_;
   std::unique_ptr<TestingProfile> profile_;

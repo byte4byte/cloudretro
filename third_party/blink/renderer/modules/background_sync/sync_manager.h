@@ -8,10 +8,13 @@
 #include "third_party/blink/public/mojom/background_sync/background_sync.mojom-blink.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
+class ExceptionState;
 class ScriptPromise;
 class ScriptPromiseResolver;
 class ScriptState;
@@ -21,30 +24,19 @@ class SyncManager final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SyncManager* Create(
-      ServiceWorkerRegistration* registration,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) {
-    return MakeGarbageCollected<SyncManager>(registration,
-                                             std::move(task_runner));
-  }
-
   SyncManager(ServiceWorkerRegistration*,
               scoped_refptr<base::SequencedTaskRunner>);
 
-  ScriptPromise registerFunction(ScriptState*, const String& tag);
+  ScriptPromise registerFunction(ScriptState*,
+                                 const String& tag,
+                                 ExceptionState& exception_state);
   ScriptPromise getTags(ScriptState*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   enum { kUnregisteredSyncID = -1 };
 
  private:
-  // Returns an initialized OneShotBackgroundSyncServicePtr. A connection with
-  // the browser's OneShotBackgroundSyncService is created the first time this
-  // method is called.
-  const mojom::blink::OneShotBackgroundSyncServicePtr&
-  GetBackgroundSyncServicePtr();
-
   // Callbacks
   void RegisterCallback(ScriptPromiseResolver*,
                         mojom::blink::BackgroundSyncError,
@@ -55,8 +47,9 @@ class SyncManager final : public ScriptWrappable {
       WTF::Vector<mojom::blink::SyncRegistrationOptionsPtr> registrations);
 
   Member<ServiceWorkerRegistration> registration_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  mojom::blink::OneShotBackgroundSyncServicePtr background_sync_service_;
+  HeapMojoRemote<mojom::blink::OneShotBackgroundSyncService,
+                 HeapMojoWrapperMode::kWithoutContextObserver>
+      background_sync_service_;
 };
 
 }  // namespace blink

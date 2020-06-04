@@ -29,6 +29,7 @@
 <translation id="1243314992276662751">Augšupielādēt</translation>
 <translation id="1249250836236328755">Žanrs</translation>
 <translation id="1278813325885878377">Ungāru valodas QWERTY tastatūra</translation>
+<translation id="1293556467332435079">Faili</translation>
 <translation id="1297922636971898492">Google disks pašlaik nav pieejams. Augšupielāde tiks automātiski atsākta, tiklīdz Google disks atkal būs pieejams.</translation>
 <translation id="1307931752636661898">Nevar skatīt Linux failus</translation>
 <translation id="1310751437842832374">Transliterācija (mausam → ନମସ୍ତେ)</translation>
@@ -75,20 +76,19 @@
 <translation id="1829129547161959350">Pingvīns</translation>
 <translation id="183183971458492120">Notiek informācijas ielāde...</translation>
 <translation id="1838709767668011582">Google vietne</translation>
-<translation id="1839704667838141620">Mainīt, kā tiek kopīgots šis fails</translation>
 <translation id="1844692022597038441">Šis fails nav pieejams bezsaistē.</translation>
 <translation id="184633654410729720">Taju valodas tastatūra (Kedmanee)</translation>
 <translation id="1847880352285315359">Saglabāts</translation>
-<translation id="1864676585353837027">Mainīt, kā tiek kopīgoti šie faili</translation>
 <translation id="1864756863218646478">Failu nevarēja atrast.</translation>
 <translation id="1921986354447415460">Turku-F tastatūra</translation>
+<translation id="1924372192547904021">Disks “<ph name="DRIVE_NAME" />” formatēts</translation>
 <translation id="1931134289871235022">Slovāku</translation>
 <translation id="1933345018156373194">Pārvietošana neizdevās; radās neparedzēta kļūda: <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">Somu valoda</translation>
 <translation id="1942765061641586207">Attēla izšķirtspēja</translation>
 <translation id="1943097386230153518">Jauna pakalpojuma instalēšana</translation>
 <translation id="1947424002851288782">Vācu valodas tastatūra</translation>
-<translation id="197560921582345123">Var rediģēt</translation>
+<translation id="1972984168337863910">Notiek failu atsauksmju paneļu izvēršana</translation>
 <translation id="1984603991036629094">Armēņu fonētiskā tastatūra</translation>
 <translation id="2001796770603320721">Pārvaldīt Diskā</translation>
 <translation id="2009067268969781306">Formatējot disku, tiks dzēsti visi tajā uzglabātie dati. Šo darbību nevar atsaukt.</translation>
@@ -165,6 +165,7 @@
 <translation id="2942290791863759244">Vācu NEO 2 tastatūra</translation>
 <translation id="2943400156390503548">Prezentācijas</translation>
 <translation id="2943503720238418293">Izmantojiet īsāku nosaukumu.</translation>
+<translation id="2949781154072577687">Notiek diska “<ph name="DRIVE_NAME" />” formatēšana...</translation>
 <translation id="2951236788251446349">Medūza</translation>
 <translation id="2963783323012015985">Turku valodas tastatūra</translation>
 <translation id="2966459079597787514">Zviedru valodas tastatūra</translation>
@@ -225,6 +226,7 @@
 <translation id="3645531960514756307">Atspraust mapi</translation>
 <translation id="3678559383040232393">Maltiešu tastatūra</translation>
 <translation id="3685122418104378273">Izmantojot mobilos datus, Google diska sinhronizācija pēc noklusējuma ir atspējota.</translation>
+<translation id="3689865792480713551">Atcelt: <ph name="ACTIVITY_DESCRIPTION" />.</translation>
 <translation id="3726463242007121105">Šo ierīci nevar atvērt, jo tās failu sistēma netiek atbalstīta.</translation>
 <translation id="3741243925913727067">Dublējiet savas multivides ierīces fotoattēlus un videoklipus Google diskā.</translation>
 <translation id="3749289110408117711">Faila nosaukums</translation>
@@ -266,11 +268,9 @@
 <translation id="421017592316736757">Lai piekļūtu šim failam, jums ir jābūt tiešsaistē.</translation>
 <translation id="4212740939091998969">Mape ar nosaukumu “<ph name="FOLDER_NAME" />” jau pastāv. Lūdzu, izvēlieties citu nosaukumu.</translation>
 <translation id="4215448920900139318">Dublēšana: <ph name="FILE_COUNT" /></translation>
-<translation id="4242533952199664413">Atvērt iestatījumus</translation>
 <translation id="426015154560005552">Arābu tastatūra</translation>
 <translation id="4261901459838235729">Google prezentācija</translation>
 <translation id="4290535918735525311">1 mape kopīgota ar Linux</translation>
-<translation id="42981349822642051">Izvērst</translation>
 <translation id="4298972503445160211">Dāņu valodas tastatūra</translation>
 <translation id="4299729908419173967">Brazīliešu</translation>
 <translation id="4309915981827077375">Vispārīga informācija</translation>
@@ -278,6 +278,7 @@
 <translation id="4336032328163998280">Kopēšana neizdevās. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">Melone</translation>
 <translation id="4372884569765913867">1 x 1</translation>
+<translation id="4394214039309501350">Ārējā saite</translation>
 <translation id="4425149324548788773">Mans disks</translation>
 <translation id="4465830120256509958">Brazīļu valodas tastatūra</translation>
 <translation id="4470564870223067757">Hangils (2 Set)</translation>
@@ -287,7 +288,6 @@
 <translation id="4522570452068850558">Informācija</translation>
 <translation id="4552678318981539154">Iegādāties papildu vietu krātuvē</translation>
 <translation id="4559767610552730302">Izplūduma efekts</translation>
-<translation id="4568854179928172494">Izmaiņu veikšanas laiks</translation>
 <translation id="4572815280350369984"><ph name="FILE_TYPE" /> fails</translation>
 <translation id="457386861538956877">Vēl...</translation>
 <translation id="4579744207439506346">Vienums “<ph name="ENTRY_NAME" />” ir pievienots atlasei.</translation>
@@ -326,7 +326,6 @@
 <translation id="4880520557730313061">Automātiski labot</translation>
 <translation id="4881695831933465202">Atvērt</translation>
 <translation id="4886021172213954916">Tamilu valodas tastatūra (rakstāmmašīna)</translation>
-<translation id="4892969127351273348">Nevar atvērt, izmantojot lietotni <ph name="APP_NAME" /></translation>
 <translation id="4905417359854579806">Gatavs dublēšanai: <ph name="FILE_COUNT" /></translation>
 <translation id="4924638091161556692">Fiksēts</translation>
 <translation id="4935975195727477204">Gazānijas zieds</translation>
@@ -366,7 +365,6 @@
 <translation id="5218183485292899140">Šveices franču</translation>
 <translation id="5234764350956374838">Noraidīt</translation>
 <translation id="5241298539944515331">Vjetnamiešu valodas tastatūra (VIQR)</translation>
-<translation id="52446585071384036">Lai atvērtu failus, izmantojot lietotni <ph name="APP_NAME" />, vispirms kopējiet tos uz Linux failu mapi.</translation>
 <translation id="5253070652067921974">Autors:</translation>
 <translation id="5257456363153333584">Spāre</translation>
 <translation id="5262311848634918433"><ph name="MARKUP_1" />Piekļūstiet saviem failiem, atrodoties jebkurā vietā, pat bezsaistē.<ph name="MARKUP_2" />
@@ -425,7 +423,6 @@
 <translation id="5818003990515275822">Korejiešu valoda</translation>
 <translation id="5819442873484330149">Hangils (3 Set, Final)</translation>
 <translation id="5833610766403489739">Šo failu nevar atrast. Lūdzu, pārbaudiet lejupielādes vietas iestatījumu un mēģiniet vēlreiz.</translation>
-<translation id="5838051104334203064">Play veikala lietojumprogrammas nevar piekļūt šai ierīcei</translation>
 <translation id="5838451609423551646">Visi vienumi noņemti no atlases.</translation>
 <translation id="5838825566232597749">Workman (ASV starptautiskā)</translation>
 <translation id="5850516540536751549">Šis faila tips netiek atbalstīts. Lūdzu, apmeklējiet <ph name="BEGIN_LINK" />Chrome interneta veikalu<ph name="END_LINK" />, lai atrastu lietotni, ar kuru var atvērt šo failu.
@@ -471,6 +468,7 @@
 <translation id="6339145975392024142">ASV starptautiskā (PC) tastatūra</translation>
 <translation id="6346310558342052870">Piekļuve ierobežota</translation>
 <translation id="6353618411602605519">Horvātu valodas tastatūra</translation>
+<translation id="6356685157277930264">Failu atsauksmju logs</translation>
 <translation id="6358884629796491903">Pūķis</translation>
 <translation id="637062427944097960">Šis fails tika atvērts citā darbvirsmā. Lai skatītu šo darbvirsmu, izmantojiet profilu <ph name="USER_NAME" /> (<ph name="MAIL_ADDRESS" />).</translation>
 <translation id="6395575651121294044"><ph name="NUMBER_OF_FILES" /> vienumi</translation>
@@ -511,6 +509,7 @@
 <translation id="6878261347041253038">Devanāgarī rakstības tastatūra (fonētiskā)</translation>
 <translation id="6885780034956018177">Gliemezis</translation>
 <translation id="6896758677409633944">Kopēt</translation>
+<translation id="6898028766943174120">Citas apakšmapes...</translation>
 <translation id="691516599546977041">Nevar veikt saglabāšanu mapē <ph name="FOLDER_NAME" />. Rediģētie attēli tiks saglabāti lejupielāžu mapē.</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Workman (ASV)</translation>
@@ -523,6 +522,7 @@
 <translation id="696203921837389374">Iespējot mobilo datu sinhronizāciju</translation>
 <translation id="6965382102122355670">Labi</translation>
 <translation id="6970230597523682626">Bulgāru valoda</translation>
+<translation id="6973630695168034713">Mapes</translation>
 <translation id="6978611942794658017">Šis fails ir paredzēts datoram, kurā tiek izmantota Windows programmatūra. Tas nav saderīgs ar jūsu ierīci, kurā darbojas operētājsistēma Chrome OS. Lūdzu, meklējiet Chrome interneta veikalā atbilstošu aizstājošo lietotni.</translation>
 <translation id="6979158407327259162">Google disks</translation>
 <translation id="6990081529015358884">Jums trūkst vietas</translation>
@@ -570,9 +570,11 @@
 <translation id="7589661784326793847">Mirkli uzgaidiet!</translation>
 <translation id="7603724359189955920">Režģi</translation>
 <translation id="7627790789328695202">Diemžēl fails <ph name="FILE_NAME" /> jau pastāv. Pārdēvējiet to un mēģiniet vēlreiz.</translation>
+<translation id="7628656427739290098">Pabeigts: <ph name="PERCENT" />%</translation>
 <translation id="7649070708921625228">Palīdzība</translation>
 <translation id="7654209398114106148">Notiek <ph name="NUMBER_OF_ITEMS" /> vienumu pārvietošana...</translation>
 <translation id="7658239707568436148">Atcelt</translation>
+<translation id="7695430100978772476">Nevarēja formatēt disku “<ph name="DRIVE_NAME" />”.</translation>
 <translation id="770015031906360009">Grieķu valoda</translation>
 <translation id="7706319470528945664">Portugāļu valodas tastatūra</translation>
 <translation id="7711920809702896782">Attēla informācija</translation>
@@ -596,7 +598,6 @@
 <translation id="7827012282502221009"><ph name="NUMBER_OF_TB" /> TB</translation>
 <translation id="7839804798877833423">Izgūstot šos failus, tiks izmantoti aptuveni <ph name="FILE_SIZE" /> mobilo datu.</translation>
 <translation id="7846076177841592234">Atcelt atlasi</translation>
-<translation id="7850851215703745691">Šie Diska faili vēl nav kopīgoti</translation>
 <translation id="7853966320808728790">Franču valodas BÉPO tastatūra</translation>
 <translation id="7864662577698025113">Pievienot jaunu pakalpojumu</translation>
 <translation id="7873831373602885875">Nevar veikt saglabāšanu mapē <ph name="FOLDER_NAME" />. Visi labojumi tiks saglabāti lejupielāžu mapē šeit: <ph name="DOWNLOADS_FOLDER" />.</translation>
@@ -612,7 +613,6 @@
 <translation id="7969525169268594403">Slovēņu valoda</translation>
 <translation id="7982283708762922719">Augstums</translation>
 <translation id="7987485481246785146">Uz arābu valodu balstīta kurdu (Sorani) tastatūra</translation>
-<translation id="799923393800005025">Var skatīt</translation>
 <translation id="8008366997883261463">Džeka Rasela terjers</translation>
 <translation id="8028993641010258682">Izmērs</translation>
 <translation id="8031722894461705849">Slovāku valodas tastatūra</translation>
@@ -641,6 +641,7 @@
 <translation id="8223479393428528563">Lai saglabātu šos failus izmantošanai bezsaistē, aktivizējiet tiešsaistes režīmu, ar peles labo pogu noklikšķiniet uz failiem un atlasiet opciju <ph name="OFFLINE_CHECKBOX_NAME" />.</translation>
 <translation id="8249296373107784235">Priekšlaikus pārtraukt</translation>
 <translation id="8261506727792406068">Dzēst</translation>
+<translation id="8269755669432358899">Notiek failu atsauksmju paneļu sakļaušana</translation>
 <translation id="8279388322240498158">Uz angļu valodu balstīta kurdu (Sorani) tastatūra</translation>
 <translation id="8280151743281770066">Armēņu fonētiskā</translation>
 <translation id="8294431847097064396">Avots</translation>
@@ -671,9 +672,8 @@
 <translation id="8569764466147087991">Atlasīt atveramo failu</translation>
 <translation id="8579285237314169903">Notiek <ph name="NUMBER_OF_FILES" /> vienumu sinhronizēšana...</translation>
 <translation id="8600173386174225982">Failu saraksts ir mainīts uz sīktēlu skatu.</translation>
+<translation id="8601932370724196034">Crostini attēla fails</translation>
 <translation id="8669949407341943408">Notiek pārvietošana...</translation>
-<translation id="8671210955687109937">Var komentēt</translation>
-<translation id="8686213429977032554">Šis Diska fails vēl nav kopīgots</translation>
 <translation id="8698464937041809063">Google zīmējums</translation>
 <translation id="8714406895390098252">Velosipēds</translation>
 <translation id="8719721339511222681">Atlasīts vienums “<ph name="ENTRY_NAME" />”.</translation>

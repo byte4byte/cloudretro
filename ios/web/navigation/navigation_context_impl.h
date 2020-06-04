@@ -11,7 +11,8 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#import "ios/web/public/web_state/navigation_context.h"
+#include "base/timer/elapsed_timer.h"
+#import "ios/web/public/navigation/navigation_context.h"
 #include "url/gurl.h"
 
 namespace web {
@@ -61,6 +62,9 @@ class NavigationContextImpl : public NavigationContext {
   void SetResponseHeaders(
       const scoped_refptr<net::HttpResponseHeaders>& response_headers);
 
+  // Get elapsed time since context was created.
+  base::TimeDelta GetElapsedTimeSinceCreation() const;
+
   // Optional unique id of the navigation item associated with this navigaiton.
   int GetNavigationItemUniqueID() const;
   void SetNavigationItemUniqueID(int unique_id);
@@ -80,11 +84,6 @@ class NavigationContextImpl : public NavigationContext {
   // exclusive.
   bool IsLoadingHtmlString() const;
   void SetLoadingHtmlString(bool is_loading_html);
-
-  // true if this navigation context is a placeholder navigation associated with
-  // a native view URL and the native content is already presented.
-  bool IsNativeContentPresented() const;
-  void SetIsNativeContentPresented(bool is_native_content_presented);
 
   // true if this navigation context is a placeholder navigation.
   bool IsPlaceholderNavigation() const;
@@ -130,9 +129,9 @@ class NavigationContextImpl : public NavigationContext {
   WKNavigationType wk_navigation_type_ = WKNavigationTypeOther;
   bool is_loading_error_page_ = false;
   bool is_loading_html_string_ = false;
-  bool is_native_content_presented_ = false;
   bool is_placeholder_navigation_ = false;
   NSString* mime_type_ = nil;
+  base::ElapsedTimer elapsed_timer_;
 
   // Holds pending navigation item in this object. Pending item is stored in
   // NavigationContext after context is created. The item is still stored in

@@ -19,7 +19,7 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image_skia_operations.h"
 
-namespace app_list {
+namespace ash {
 
 namespace {
 
@@ -71,9 +71,10 @@ void GhostImageView::Init(AppListItemView* drag_view,
     for (size_t i = 0; i < num_items_.value(); i++) {
       gfx::ImageSkia inner_icon_outline =
           gfx::ImageSkiaOperations::CreateResizedImage(
-              folder_item->item_list()->item_at(i)->icon(),
+              folder_item->item_list()->item_at(i)->GetIcon(
+                  drag_view->GetAppListConfig().type()),
               skia::ImageOperations::RESIZE_BEST,
-              AppListConfig::instance().item_icon_in_folder_icon_size());
+              drag_view->GetAppListConfig().item_icon_in_folder_icon_size());
       inner_folder_icon_outlines_.push_back(GetIconOutline(inner_icon_outline));
     }
   } else {
@@ -142,8 +143,8 @@ void GhostImageView::OnPaint(gfx::Canvas* canvas) {
     canvas->ClipPath(outer_circle_mask, true);
 
     // Returns the bounds for each inner icon in the folder icon.
-    std::vector<gfx::Rect> top_icon_bounds =
-        FolderImage::GetTopIconsBounds(icon_bounds_, num_items_.value());
+    std::vector<gfx::Rect> top_icon_bounds = FolderImage::GetTopIconsBounds(
+        AppListConfig::instance(), icon_bounds_, num_items_.value());
 
     // Draw ghost items within the ghost folder circle.
     for (size_t i = 0; i < num_items_.value(); i++) {
@@ -310,4 +311,4 @@ gfx::ImageSkia GhostImageView::GetIconOutline(
   return gfx::ImageSkiaOperations::CreateColorMask(icon_outline, outline_color);
 }
 
-}  // namespace app_list
+}  // namespace ash

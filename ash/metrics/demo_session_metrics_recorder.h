@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "ui/aura/window_observer.h"
+#include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 #include "ui/wm/public/activation_client.h"
@@ -22,10 +23,6 @@
 namespace base {
 class RepeatingTimer;
 }  // namespace base
-
-namespace ui {
-class UserActivityDetector;
-}  // namespace ui
 
 namespace ash {
 
@@ -105,6 +102,10 @@ class ASH_EXPORT DemoSessionMetricsRecorder
   // Emits various histograms for unique apps launched.
   void ReportUniqueAppsLaunched();
 
+  // Records the duration of time the user spent interacting with the current
+  // demo session, measured from first user activity to last user activity.
+  void ReportDwellTime();
+
   // Stores samples as they are collected. Report to UMA if we see user
   // activity soon after. Guaranteed not to grow too large.
   std::vector<DemoModeApp> unreported_samples_;
@@ -121,10 +122,14 @@ class ASH_EXPORT DemoSessionMetricsRecorder
   // How many periods have elapsed since the last user activity.
   int periods_since_activity_ = 0;
 
+  base::TimeTicks first_user_activity_;
+
+  base::TimeTicks last_user_activity_;
+
   std::unique_ptr<base::RepeatingTimer> timer_;
 
-  ScopedObserver<ui::UserActivityDetector, DemoSessionMetricsRecorder>
-      observer_;
+  ScopedObserver<ui::UserActivityDetector, ui::UserActivityObserver> observer_{
+      this};
 
   class ActiveAppArcPackageNameObserver;
   class UniqueAppsLaunchedArcPackageNameObserver;

@@ -12,10 +12,13 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/auto_enrollment_client_impl.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
@@ -24,6 +27,7 @@
 #include "chromeos/dbus/system_clock/system_clock_client.h"
 #include "chromeos/system/factory_ping_embargo_check.h"
 #include "chromeos/system/statistics_provider.h"
+#include "chromeos/tpm/install_attributes.h"
 #include "components/device_event_log/device_event_log.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -106,7 +110,7 @@ int GetSanitizedArg(const std::string& switch_name) {
   if (int_value > policy::AutoEnrollmentClient::kMaximumPower) {
     LOG(ERROR) << "Switch \"" << switch_name << "\" can't be greater than "
                << policy::AutoEnrollmentClient::kMaximumPower << ". Using "
-               << policy::AutoEnrollmentClient::kMaximumPower;
+               << policy::AutoEnrollmentClient::kMaximumPower << ".";
     return policy::AutoEnrollmentClient::kMaximumPower;
   }
   return int_value;
@@ -130,7 +134,7 @@ std::string FRERequirementToString(
   return std::string();
 }
 
-std::string AutoenrollmentStateToString(policy::AutoEnrollmentState state) {
+std::string AutoEnrollmentStateToString(policy::AutoEnrollmentState state) {
   switch (state) {
     case policy::AutoEnrollmentState::AUTO_ENROLLMENT_STATE_IDLE:
       return "Not started";
@@ -146,20 +150,22 @@ std::string AutoenrollmentStateToString(policy::AutoEnrollmentState state) {
       return "No enrollment";
     case policy::AutoEnrollmentState::AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH:
       return "Zero-touch enrollment";
+    case policy::AutoEnrollmentState::AUTO_ENROLLMENT_STATE_DISABLED:
+      return "Device disabled";
   }
 }
 
 // Returns true if this is an official build and the device has Chrome firmware.
-bool IsOfficialChrome() {
+bool IsGoogleBrandedChrome() {
   std::string firmware_type;
-  bool is_official =
+  bool is_chrome_branded =
       !system::StatisticsProvider::GetInstance()->GetMachineStatistic(
           system::kFirmwareTypeKey, &firmware_type) ||
       firmware_type != system::kFirmwareTypeValueNonchrome;
-#if !defined(OFFICIAL_BUILD)
-  is_official = false;
+#if !BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  is_chrome_branded = false;
 #endif
-  return is_official;
+  return is_chrome_branded;
 }
 
 // Schedules immediate initialization of the |DeviceManagementService| and
@@ -205,8 +211,8 @@ class AutoEnrollmentController::SystemClockSyncWaiter
     state_ = SystemClockSyncState::kWaitingForSync;
 
     timeout_timer_.Start(FROM_HERE, kSystemClockSyncWaitTimeout,
-                         base::BindRepeating(&SystemClockSyncWaiter::OnTimeout,
-                                             weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&SystemClockSyncWaiter::OnTimeout,
+                                        weak_ptr_factory_.GetWeakPtr()));
 
     chromeos::SystemClockClient::Get()->WaitForServiceToBeAvailable(
         base::BindOnce(&SystemClockSyncWaiter::OnGotSystemClockServiceAvailable,
@@ -328,13 +334,14 @@ bool AutoEnrollmentController::IsFREEnabled() {
 
   if (command_line_mode.empty() ||
       command_line_mode == kForcedReEnrollmentOfficialBuild) {
-    return IsOfficialChrome();
+    return IsGoogleBrandedChrome();
   }
 
   if (command_line_mode == kForcedReEnrollmentNever)
     return false;
 
-  LOG(FATAL) << "Unknown auto-enrollment mode for FRE " << command_line_mode;
+  LOG(FATAL) << "Unknown auto-enrollment mode for FRE: " << command_line_mode
+             << ".";
   return false;
 }
 
@@ -343,7 +350,7 @@ bool AutoEnrollmentController::IsInitialEnrollmentEnabled() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   if (!command_line->HasSwitch(switches::kEnterpriseEnableInitialEnrollment))
-    return IsOfficialChrome();
+    return IsGoogleBrandedChrome();
 
   std::string command_line_mode = command_line->GetSwitchValueASCII(
       switches::kEnterpriseEnableInitialEnrollment);
@@ -352,14 +359,14 @@ bool AutoEnrollmentController::IsInitialEnrollmentEnabled() {
 
   if (command_line_mode.empty() ||
       command_line_mode == kInitialEnrollmentOfficialBuild) {
-    return IsOfficialChrome();
+    return IsGoogleBrandedChrome();
   }
 
   if (command_line_mode == kInitialEnrollmentNever)
     return false;
 
-  LOG(FATAL) << "Unknown auto-enrollment mode for initial enrollment "
-             << command_line_mode;
+  LOG(FATAL) << "Unknown auto-enrollment mode for initial enrollment: "
+             << command_line_mode << ".";
   return false;
 }
 
@@ -409,6 +416,7 @@ void AutoEnrollmentController::Start() {
     case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH:
+    case policy::AUTO_ENROLLMENT_STATE_DISABLED:
       // Abort re-start when there's already a final decision.
       return;
 
@@ -427,8 +435,8 @@ void AutoEnrollmentController::Start() {
 
   // Arm the belts-and-suspenders timer to avoid hangs.
   safeguard_timer_.Start(FROM_HERE, kSafeguardTimeout,
-                         base::BindRepeating(&AutoEnrollmentController::Timeout,
-                                             weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&AutoEnrollmentController::Timeout,
+                                        weak_ptr_factory_.GetWeakPtr()));
   request_state_keys_tries_ = 0;
 
   // The system clock sync state is not known yet, and this
@@ -553,7 +561,7 @@ AutoEnrollmentController::GetInitialEnrollmentRequirement() {
 void AutoEnrollmentController::DetermineAutoEnrollmentCheckType() {
   // Skip everything if neither FRE nor Initial Enrollment are enabled.
   if (!IsEnabled()) {
-    LOGIN_LOG(EVENT) << "Auto-enrollment disabled";
+    LOGIN_LOG(EVENT) << "Auto-enrollment disabled.";
     auto_enrollment_check_type_ = AutoEnrollmentCheckType::kNone;
     return;
   }
@@ -568,22 +576,22 @@ void AutoEnrollmentController::DetermineAutoEnrollmentCheckType() {
 
   // Skip everything if the device was in consumer mode previously.
   fre_requirement_ = GetFRERequirement();
-  LOGIN_LOG(EVENT) << FRERequirementToString(fre_requirement_);
+  VLOG(1) << FRERequirementToString(fre_requirement_);
   if (fre_requirement_ == FRERequirement::kExplicitlyNotRequired) {
-    LOGIN_LOG(EVENT) << "Auto-enrollment disabled: VPD";
+    LOGIN_LOG(EVENT) << "Auto-enrollment disabled: VPD.";
     auto_enrollment_check_type_ = AutoEnrollmentCheckType::kNone;
     return;
   }
 
   if (ShouldDoFRECheck(command_line, fre_requirement_)) {
     // FRE has precedence over Initial Enrollment.
-    LOGIN_LOG(EVENT) << "Proceeding with FRE check";
+    LOGIN_LOG(EVENT) << "Proceeding with FRE check.";
     auto_enrollment_check_type_ = AutoEnrollmentCheckType::kFRE;
     return;
   }
 
   if (ShouldDoInitialEnrollmentCheck()) {
-    LOGIN_LOG(EVENT) << "Proceeding with Initial Enrollment check";
+    LOGIN_LOG(EVENT) << "Proceeding with Initial Enrollment check.";
     auto_enrollment_check_type_ = AutoEnrollmentCheckType::kInitialEnrollment;
     return;
   }
@@ -598,13 +606,13 @@ bool AutoEnrollmentController::ShouldDoFRECheck(
   // Skip FRE check if modulus configuration is not present.
   if (!command_line->HasSwitch(switches::kEnterpriseEnrollmentInitialModulus) &&
       !command_line->HasSwitch(switches::kEnterpriseEnrollmentModulusLimit)) {
-    LOGIN_LOG(EVENT) << "FRE disabled: command line (config)";
+    LOGIN_LOG(EVENT) << "FRE disabled through command line (config).";
     return false;
   }
 
   // Skip FRE check if it is not enabled by command-line switches.
   if (!IsFREEnabled()) {
-    LOGIN_LOG(EVENT) << "FRE disabled";
+    LOGIN_LOG(EVENT) << "FRE disabled.";
     return false;
   }
 
@@ -672,7 +680,7 @@ void AutoEnrollmentController::OnOwnershipStatusCheckDone(
 void AutoEnrollmentController::StartClientForFRE(
     const std::vector<std::string>& state_keys) {
   if (state_keys.empty()) {
-    LOG(ERROR) << "No state keys available";
+    LOG(ERROR) << "No state keys available.";
     if (fre_requirement_ == FRERequirement::kExplicitlyRequired) {
       if (request_state_keys_tries_ >= kMaxRequestStateKeysTries) {
         if (safeguard_timer_.IsRunning())
@@ -764,7 +772,7 @@ void AutoEnrollmentController::StartClientForInitialEnrollment() {
 void AutoEnrollmentController::UpdateState(
     policy::AutoEnrollmentState new_state) {
   LOGIN_LOG(EVENT) << "New auto-enrollment state: "
-                   << AutoenrollmentStateToString(new_state);
+                   << AutoEnrollmentStateToString(new_state);
   state_ = new_state;
 
   // Stop the safeguard timer once a result comes in.
@@ -777,8 +785,22 @@ void AutoEnrollmentController::UpdateState(
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ZERO_TOUCH:
     case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
+    case policy::AUTO_ENROLLMENT_STATE_DISABLED:
       safeguard_timer_.Stop();
       break;
+  }
+
+  // Device disabling mode is relying on device state stored in install
+  // attributes. In case that file is corrupted, this should prevent device
+  // re-enabling.
+  if (state_ == policy::AUTO_ENROLLMENT_STATE_DISABLED) {
+    policy::DeviceMode device_mode =
+        chromeos::InstallAttributes::Get()->GetMode();
+    if (device_mode == policy::DeviceMode::DEVICE_MODE_PENDING ||
+        device_mode == policy::DeviceMode::DEVICE_MODE_NOT_SET) {
+      DeviceSettingsService::Get()->SetDeviceMode(
+          policy::DeviceMode::DEVICE_MODE_ENTERPRISE);
+    }
   }
 
   if (state_ == policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT) {

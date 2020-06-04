@@ -4,12 +4,15 @@
 
 #include "chrome/browser/chromeos/logging.h"
 
+#include <cstdio>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/system/sys_info.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,7 +26,10 @@ namespace {
 
 // This should be true for exactly the period between the end of
 // InitChromeLogging() and the beginning of CleanupChromeLogging().
-bool chrome_logging_redirected_ = false;
+bool g_chrome_logging_redirected = false;
+
+// This should be set to true for tests that rely on log redirection.
+bool g_force_log_redirection = false;
 
 void SymlinkSetUp(const base::CommandLine& command_line,
                   const base::FilePath& log_path,
@@ -34,21 +40,27 @@ void SymlinkSetUp(const base::CommandLine& command_line,
   // deleted if it already exists.
   logging::LoggingSettings settings;
   settings.logging_dest = DetermineLoggingDestination(command_line);
-  settings.log_file = log_path.value().c_str();
+  settings.log_file_path = log_path.value().c_str();
   if (!logging::InitLogging(settings)) {
     DLOG(ERROR) << "Unable to initialize logging to " << log_path.value();
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock()},
         base::BindOnce(&RemoveSymlinkAndLog, log_path, target_path));
     return;
   }
-  chrome_logging_redirected_ = true;
+  g_chrome_logging_redirected = true;
 
   // Redirect the Network Service's logs as well if it's running out of process.
   if (content::IsOutOfProcessNetworkService()) {
     auto logging_settings = network::mojom::LoggingSettings::New();
     logging_settings->logging_dest = settings.logging_dest;
-    logging_settings->log_file = log_path;
+    base::ScopedFD log_file_descriptor(fileno(logging::DuplicateLogFILE()));
+    if (log_file_descriptor.get() < 0) {
+      DLOG(WARNING) << "Unable to duplicate log file handle";
+      return;
+    }
+    logging_settings->log_file_descriptor =
+        mojo::PlatformHandle(std::move(log_file_descriptor));
     content::GetNetworkService()->ReinitializeLogging(
         std::move(logging_settings));
   }
@@ -56,15 +68,19 @@ void SymlinkSetUp(const base::CommandLine& command_line,
 
 }  // namespace
 
+void ForceLogRedirectionForTesting() {
+  g_force_log_redirection = true;
+}
+
 void RedirectChromeLogging(const base::CommandLine& command_line) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // Only redirect when on an actual device. To do otherwise conflicts with
   // --vmodule that developers may want to use.
-  if (!base::SysInfo::IsRunningOnChromeOS())
+  if (!base::SysInfo::IsRunningOnChromeOS() && !g_force_log_redirection)
     return;
 
-  if (chrome_logging_redirected_) {
+  if (g_chrome_logging_redirected) {
     // TODO: Support multiple active users. http://crbug.com/230345
     LOG(WARNING) << "NOT redirecting logging for multi-profiles case.";
     return;
@@ -81,7 +97,7 @@ void RedirectChromeLogging(const base::CommandLine& command_line) {
   const base::FilePath log_path = GetSessionLogFile(command_line);
 
   // Always force a new symlink when redirecting.
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&SetUpSymlinkIfNeeded, log_path, true),
       base::BindOnce(&SymlinkSetUp, command_line, log_path));

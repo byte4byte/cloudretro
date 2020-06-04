@@ -20,21 +20,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.favicon.IconType;
-import org.chromium.chrome.browser.favicon.LargeIconBridge;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.suggestions.tile.Tile;
 import org.chromium.chrome.browser.suggestions.tile.TileVisualType;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.chrome.browser.ui.favicon.IconType;
+import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 import org.chromium.chrome.test.util.browser.suggestions.mostvisited.FakeMostVisitedSites;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
-
-import java.io.IOException;
 
 /**
  * Tests for events around the loading of a New Tab Page.
@@ -67,13 +65,13 @@ public class NewTabPageLoadTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
     @Test
     @SmallTest
-    public void testTilesTypeInitialisedWhenPageLoaded() throws IOException, InterruptedException {
+    public void testTilesTypeInitialisedWhenPageLoaded() {
         mActivityTestRule.loadUrl(UrlConstants.NTP_URL);
         NewTabPageTestUtils.waitForNtpLoaded(mTab);
         assertTrue(mMostVisitedSites.pageImpressionRecorded);
@@ -95,7 +93,7 @@ public class NewTabPageLoadTest {
 
     private static class AsyncMockLargeIconBridge extends LargeIconBridge {
         @Override
-        public boolean getLargeIconForUrl(String pageUrl, int desiredSizePx,
+        public boolean getLargeIconForStringUrl(String pageUrl, int desiredSizePx,
                 final LargeIconBridge.LargeIconCallback callback) {
             new Handler().postDelayed(new Runnable() {
                 @Override

@@ -17,7 +17,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/updater/updater_constants.h"
+#include "chrome/updater/constants.h"
 #include "chrome/updater/updater_version.h"
 #include "chrome/updater/util.h"
 #include "third_party/crashpad/crashpad/client/crashpad_client.h"
@@ -93,7 +93,7 @@ int CrashReporterMain() {
 
   // Disable rate-limiting until this is fixed:
   //   https://bugs.chromium.org/p/crashpad/issues/detail?id=23
-  command_line->AppendSwitch(kNoRateLimit);
+  command_line->AppendSwitch(kNoRateLimitSwitch);
 
   std::vector<base::CommandLine::StringType> argv = command_line->argv();
 

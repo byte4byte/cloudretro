@@ -12,6 +12,7 @@
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/test/base/chrome_unit_test_suite.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
+#include "components/autofill/content/renderer/autofill_assistant_agent.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
 #include "components/autofill/content/renderer/test_password_autofill_agent.h"
@@ -21,7 +22,7 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_frame.h"
@@ -38,6 +39,7 @@
 #endif
 
 using autofill::AutofillAgent;
+using autofill::AutofillAssistantAgent;
 using autofill::PasswordAutofillAgent;
 using autofill::PasswordGenerationAgent;
 using blink::WebFrame;
@@ -48,9 +50,9 @@ using blink::WebScriptSource;
 using blink::WebString;
 using blink::WebURLRequest;
 using content::RenderFrame;
+using testing::_;
 using testing::NiceMock;
 using testing::Return;
-using testing::_;
 
 namespace {
 
@@ -60,13 +62,13 @@ class MockAutofillAgent : public AutofillAgent {
   MockAutofillAgent(RenderFrame* render_frame,
                     PasswordAutofillAgent* password_autofill_agent,
                     PasswordGenerationAgent* password_generation_agent,
+                    AutofillAssistantAgent* autofill_assistant_agent,
                     blink::AssociatedInterfaceRegistry* registry)
       : AutofillAgent(render_frame,
                       password_autofill_agent,
                       password_generation_agent,
-                      registry) {
-    ON_CALL(*this, IsUserGesture()).WillByDefault(Return(true));
-  }
+                      autofill_assistant_agent,
+                      registry) {}
 
   ~MockAutofillAgent() override {}
 
@@ -76,8 +78,6 @@ class MockAutofillAgent : public AutofillAgent {
     run_loop_->Run();
     run_loop_.reset();
   }
-
-  MOCK_CONST_METHOD0(IsUserGesture, bool());
 
  private:
   void DidAssociateFormControlsDynamically() override {
@@ -93,15 +93,8 @@ class MockAutofillAgent : public AutofillAgent {
 
 }  // namespace
 
-ChromeRenderViewTest::ChromeRenderViewTest()
-    : password_autofill_agent_(NULL),
-      password_generation_(NULL),
-      autofill_agent_(NULL),
-      chrome_render_thread_(NULL) {
-}
-
-ChromeRenderViewTest::~ChromeRenderViewTest() {
-}
+ChromeRenderViewTest::ChromeRenderViewTest() = default;
+ChromeRenderViewTest::~ChromeRenderViewTest() = default;
 
 void ChromeRenderViewTest::SetUp() {
   ChromeUnitTestSuite::InitializeProviders();
@@ -127,9 +120,11 @@ void ChromeRenderViewTest::SetUp() {
   password_generation_ = new autofill::PasswordGenerationAgent(
       view_->GetMainRenderFrame(), password_autofill_agent_,
       &associated_interfaces_);
+  autofill_assistant_agent_ =
+      new autofill::AutofillAssistantAgent(view_->GetMainRenderFrame());
   autofill_agent_ = new NiceMock<MockAutofillAgent>(
       view_->GetMainRenderFrame(), password_autofill_agent_,
-      password_generation_, &associated_interfaces_);
+      password_generation_, autofill_assistant_agent_, &associated_interfaces_);
 }
 
 void ChromeRenderViewTest::TearDown() {
@@ -175,16 +170,6 @@ void ChromeRenderViewTest::InitChromeContentRendererClient(
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   client->InitSpellCheck();
 #endif
-}
-
-void ChromeRenderViewTest::EnableUserGestureSimulationForAutofill() {
-  EXPECT_CALL(*(static_cast<MockAutofillAgent*>(autofill_agent_)),
-              IsUserGesture()).WillRepeatedly(Return(true));
-}
-
-void ChromeRenderViewTest::DisableUserGestureSimulationForAutofill() {
-  EXPECT_CALL(*(static_cast<MockAutofillAgent*>(autofill_agent_)),
-              IsUserGesture()).WillRepeatedly(Return(false));
 }
 
 void ChromeRenderViewTest::WaitForAutofillDidAssociateFormControl() {

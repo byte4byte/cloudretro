@@ -20,6 +20,11 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/browser_app_launcher.h"
+#include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -30,7 +35,6 @@
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
@@ -44,6 +48,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/host_zoom_map.h"
+#include "content/public/browser/overlay_window.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -63,6 +68,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "printing/buildflags/buildflags.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/display/types/display_constants.h"
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
@@ -101,7 +107,7 @@ class TabsAddedNotificationObserver : public TabStripModelObserver {
  public:
   TabsAddedNotificationObserver(Browser* browser, size_t observations)
       : observations_(observations) {
-    tab_strip_observer_.Add(browser->tab_strip_model());
+    browser->tab_strip_model()->AddObserver(this);
   }
 
   ~TabsAddedNotificationObserver() override = default;
@@ -129,8 +135,6 @@ class TabsAddedNotificationObserver : public TabStripModelObserver {
   base::RunLoop run_loop_;
   size_t observations_;
   std::vector<content::WebContents*> observed_tabs_;
-  ScopedObserver<TabStripModel, TabStripModelObserver> tab_strip_observer_{
-      this};
 
   DISALLOW_COPY_AND_ASSIGN(TabsAddedNotificationObserver);
 };
@@ -231,19 +235,21 @@ class PlatformAppWithFileBrowserTest : public PlatformAppBrowserTest {
 
     base::FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
     const extensions::Extension* extension =
-        LoadExtensionWithFlags(extension_path, ExtensionBrowserTest::kFlagNone);
+        LoadExtensionWithFlags(extension_path, kFlagNone);
     if (!extension) {
       message_ = "Failed to load extension.";
       return false;
     }
 
-    AppLaunchParams params(browser()->profile(), extension->id(),
-                           extensions::LaunchContainer::kLaunchContainerNone,
-                           WindowOpenDisposition::NEW_WINDOW,
-                           extensions::AppLaunchSource::kSourceTest);
+    apps::AppLaunchParams params(
+        extension->id(), apps::mojom::LaunchContainer::kLaunchContainerNone,
+        WindowOpenDisposition::NEW_WINDOW,
+        apps::mojom::AppLaunchSource::kSourceTest);
     params.command_line = command_line;
     params.current_directory = test_data_dir_;
-    OpenApplication(params);
+    apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+        ->BrowserAppLauncher()
+        .LaunchAppWithParams(params);
 
     if (!catcher.GetNextResult()) {
       message_ = catcher.message();
@@ -455,10 +461,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
       << message_;
   observer.Wait();
   ASSERT_EQ(kExpectedNumberOfTabs, observer.tabs().size());
-  content::WaitForLoadStop(observer.tabs()[kExpectedNumberOfTabs - 1]);
+  EXPECT_FALSE(
+      content::WaitForLoadStop(observer.tabs()[kExpectedNumberOfTabs - 1]));
   EXPECT_EQ(GURL(kChromiumURL),
             observer.tabs()[kExpectedNumberOfTabs - 1]->GetURL());
-  content::WaitForLoadStop(observer.tabs()[kExpectedNumberOfTabs - 2]);
+  EXPECT_FALSE(
+      content::WaitForLoadStop(observer.tabs()[kExpectedNumberOfTabs - 2]));
   EXPECT_EQ(GURL(kChromiumURL),
             observer.tabs()[kExpectedNumberOfTabs - 2]->GetURL());
 }
@@ -762,7 +770,13 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, LaunchNewFile) {
 
 #endif  // !defined(OS_CHROMEOS)
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OpenLink) {
+#if defined(OS_CHROMEOS)
+// TODO(https://crbug.com/1000234): Re-enable this test.
+#define MAYBE_OpenLink DISABLED_OpenLink
+#else
+#define MAYBE_OpenLink OpenLink
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_OpenLink) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   LoadAndLaunchPlatformApp("open_link", "Launched");
   ui_test_utils::TabAddedWaiter(browser()).Wait();
@@ -874,10 +888,12 @@ void PlatformAppDevToolsBrowserTest::RunTestWithDevTools(const char* name,
     content::WindowedNotificationObserver app_loaded_observer(
         content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
         content::NotificationService::AllSources());
-    OpenApplication(AppLaunchParams(browser()->profile(), extension->id(),
-                                    LaunchContainer::kLaunchContainerNone,
-                                    WindowOpenDisposition::NEW_WINDOW,
-                                    extensions::AppLaunchSource::kSourceTest));
+    apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+        ->BrowserAppLauncher()
+        .LaunchAppWithParams(apps::AppLaunchParams(
+            extension->id(), LaunchContainer::kLaunchContainerNone,
+            WindowOpenDisposition::NEW_WINDOW,
+            apps::mojom::AppLaunchSource::kSourceTest));
     app_loaded_observer.Wait();
     window = GetFirstAppWindow();
     ASSERT_TRUE(window);
@@ -1021,10 +1037,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   ASSERT_TRUE(should_install.seen());
 
   ExtensionTestMessageListener launched_listener("Launched", false);
-  OpenApplication(AppLaunchParams(browser()->profile(), extension->id(),
-                                  LaunchContainer::kLaunchContainerNone,
-                                  WindowOpenDisposition::NEW_WINDOW,
-                                  extensions::AppLaunchSource::kSourceTest));
+  apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(apps::AppLaunchParams(
+          extension->id(), LaunchContainer::kLaunchContainerNone,
+          WindowOpenDisposition::NEW_WINDOW,
+          apps::mojom::AppLaunchSource::kSourceTest));
 
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 }
@@ -1044,10 +1062,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, PRE_ComponentAppBackgroundPage) {
   ASSERT_TRUE(extension);
 
   ExtensionTestMessageListener launched_listener("Launched", false);
-  OpenApplication(AppLaunchParams(browser()->profile(), extension->id(),
-                                  LaunchContainer::kLaunchContainerNone,
-                                  WindowOpenDisposition::NEW_WINDOW,
-                                  extensions::AppLaunchSource::kSourceTest));
+  apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(apps::AppLaunchParams(
+          extension->id(), LaunchContainer::kLaunchContainerNone,
+          WindowOpenDisposition::NEW_WINDOW,
+          apps::mojom::AppLaunchSource::kSourceTest));
 
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
   ASSERT_FALSE(should_not_install.seen());
@@ -1083,10 +1103,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ComponentAppBackgroundPage) {
   ASSERT_TRUE(should_install.seen());
 
   ExtensionTestMessageListener launched_listener("Launched", false);
-  OpenApplication(AppLaunchParams(browser()->profile(), extension->id(),
-                                  LaunchContainer::kLaunchContainerNone,
-                                  WindowOpenDisposition::NEW_WINDOW,
-                                  extensions::AppLaunchSource::kSourceTest));
+  apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(apps::AppLaunchParams(
+          extension->id(), LaunchContainer::kLaunchContainerNone,
+          WindowOpenDisposition::NEW_WINDOW,
+          apps::mojom::AppLaunchSource::kSourceTest));
 
   ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 }
@@ -1109,10 +1131,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
 
   {
     ExtensionTestMessageListener launched_listener("Launched", false);
-    OpenApplication(AppLaunchParams(browser()->profile(), extension->id(),
-                                    LaunchContainer::kLaunchContainerNone,
-                                    WindowOpenDisposition::NEW_WINDOW,
-                                    extensions::AppLaunchSource::kSourceTest));
+    apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
+        ->BrowserAppLauncher()
+        .LaunchAppWithParams(apps::AppLaunchParams(
+            extension->id(), LaunchContainer::kLaunchContainerNone,
+            WindowOpenDisposition::NEW_WINDOW,
+            apps::mojom::AppLaunchSource::kSourceTest));
     ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
   }
 
@@ -1211,10 +1235,10 @@ class PlatformAppIncognitoBrowserTest : public PlatformAppBrowserTest,
 IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest,
                        MAYBE_IncognitoComponentApp) {
   // Get the file manager app.
-  const Extension* file_manager = extension_service()->GetExtensionById(
-      "hhaomjibdihmijegdhdafkllkbggdgoj", false);
+  const Extension* file_manager = extension_registry()->GetExtensionById(
+      "hhaomjibdihmijegdhdafkllkbggdgoj", ExtensionRegistry::ENABLED);
   ASSERT_TRUE(file_manager != NULL);
-  Profile* incognito_profile = profile()->GetOffTheRecordProfile();
+  Profile* incognito_profile = profile()->GetPrimaryOTRProfile();
   ASSERT_TRUE(incognito_profile != NULL);
 
   // Wait until the file manager has had a chance to register its listener
@@ -1230,11 +1254,14 @@ IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest,
   AppWindowRegistry* registry = AppWindowRegistry::Get(incognito_profile);
   ASSERT_TRUE(registry != NULL);
   registry->AddObserver(this);
-
-  OpenApplication(CreateAppLaunchParamsUserContainer(
-      incognito_profile, file_manager,
-      WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      extensions::AppLaunchSource::kSourceTest));
+  apps::AppServiceProxyFactory::GetForProfile(incognito_profile)
+      ->Launch(file_manager->id(),
+               apps::GetEventFlags(
+                   apps::mojom::LaunchContainer::kLaunchContainerWindow,
+                   WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                   true /* prefer_container */),
+               apps::mojom::LaunchSource::kFromTest,
+               display::kInvalidDisplayId);
 
   while (!base::Contains(opener_app_ids_, file_manager->id())) {
     content::RunAllPendingInMessageLoop();

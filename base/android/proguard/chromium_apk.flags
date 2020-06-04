@@ -31,9 +31,7 @@
 # If we annotated all Parcelables that get put into Bundles other than
 # for saveInstanceState (e.g. PendingIntents), then we could actually keep the
 # names of just those ones. For now, we'll just keep them all.
--keepnames class * implements android.os.Parcelable {
-  <init>(...);
-}
+-keepnames class * implements android.os.Parcelable {}
 
 # Keep all enum values and valueOf methods. See
 # http://proguard.sourceforge.net/index.html#manual/examples.html
@@ -42,20 +40,11 @@
     public static **[] values();
 }
 
-# Allows Proguard freedom in removing these log related calls. We ask for debug
-# and verbose logs to be stripped out in base.Log, so we are just ensuring we
-# get rid of all other debug/verbose logs.
+# Allows Proguard freedom in removing these log related calls.
 -assumenosideeffects class android.util.Log {
   static *** d(...);
   static *** v(...);
-  static *** isLoggable(...);
-}
--checkdiscard class org.chromium.base.Log {
-  public static void d(...);
-  public static void v(...);
-  private static void debug(...);
-  private static void verbose(...);
-  private static String getCallOrigin(...);
+  static boolean isLoggable(...);
 }
 
 # The following chart was created on July 20, 2016, to decide on 3 optimization
@@ -76,7 +65,18 @@
 # ~1%, and reduces the method count by ~4%.
 -allowaccessmodification
 
-# The support library contains references to newer platform versions.
-# Don't warn about those in case this app is linking against an older
-# platform version.  We know about them, and they are safe.
--dontwarn android.support.**
+# Workaround for crbug/1002847. Methods of BaseGmsClient are incorrectly
+# removed even though they are required for the derived class GmsClient
+# to correctly implement Api$Client.
+# TODO: remove once crbug/1002847 resolved.
+-keep public class com.google.android.gms.common.internal.BaseGmsClient {
+  public void disconnect();
+  public void dump(java.lang.String,java.io.FileDescriptor,java.io.PrintWriter,java.lang.String[]);
+  public int getMinApkVersion();
+  public boolean requiresSignIn();
+}
+
+# Protobuf java lite runtime uses reflection
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
+  <fields>;
+}

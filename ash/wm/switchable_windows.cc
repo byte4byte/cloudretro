@@ -13,37 +13,17 @@
 #include "ui/aura/window.h"
 
 namespace ash {
-namespace wm {
 
 namespace {
 
-// TODO(afakhry): Consolidate the below lists when we launch Virtual Desks.
-// The list of switchable containers IDs when the Virtual Desks feature is
-// enabled.
-constexpr std::array<int, 5> kSwitchableContainersWithDesks = {
+constexpr std::array<int, 6> kSwitchableContainers = {
     kShellWindowId_DefaultContainerDeprecated,
     kShellWindowId_DeskContainerB,
     kShellWindowId_DeskContainerC,
     kShellWindowId_DeskContainerD,
     kShellWindowId_AlwaysOnTopContainer,
+    kShellWindowId_PipContainer,
 };
-
-// The list of switchable containers IDs when the Virtual Desks feature is
-// disabled.
-constexpr std::array<int, 2> kSwitchableContainersNoDesks = {
-    kShellWindowId_DefaultContainerDeprecated,
-    kShellWindowId_AlwaysOnTopContainer,
-};
-
-std::vector<int> GetSwitchableContainersIds() {
-  if (!features::IsVirtualDesksEnabled()) {
-    return std::vector<int>(kSwitchableContainersNoDesks.begin(),
-                            kSwitchableContainersNoDesks.end());
-  }
-
-  return std::vector<int>(kSwitchableContainersWithDesks.begin(),
-                          kSwitchableContainersWithDesks.end());
-}
 
 }  // namespace
 
@@ -61,10 +41,10 @@ std::vector<aura::Window*> GetSwitchableContainersForRoot(
     return containers;
   }
 
-  for (const auto& id : GetSwitchableContainersIds()) {
+  for (const auto& id : kSwitchableContainers) {
     auto* container = root->GetChildById(id);
     DCHECK(container);
-    containers.emplace_back(container);
+    containers.push_back(container);
   }
 
   return containers;
@@ -76,8 +56,7 @@ bool IsSwitchableContainer(const aura::Window* window) {
     return false;
   const int shell_window_id = window->id();
 
-  return base::Contains(GetSwitchableContainersIds(), shell_window_id);
+  return base::Contains(kSwitchableContainers, shell_window_id);
 }
 
-}  // namespace wm
 }  // namespace ash

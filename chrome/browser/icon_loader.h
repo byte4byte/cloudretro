@@ -73,9 +73,10 @@ class IconLoader {
   void ReadGroup();
   void ReadIcon();
 
-  // The traits of the tasks posted by this class. These operations may block,
-  // because they are fetching icons from the disk, yet the result will be seen
-  // by the user so they should be prioritized accordingly.
+  // The traits of the tasks posted to base::ThreadPool by this class. These
+  // operations may block, because they are fetching icons from the disk, yet
+  // the result will be seen by the user so they should be prioritized
+  // accordingly.
   static constexpr base::TaskTraits traits() {
     return {base::MayBlock(), base::TaskPriority::USER_VISIBLE};
   }

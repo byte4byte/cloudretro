@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop_current.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/task/thread_pool/initialization_util.h"
 #include "net/base/network_change_notifier.h"
@@ -45,7 +46,7 @@ void BuildSingleThreadTaskExecutor() {
     // current thread.
     if (!base::MessageLoopCurrent::Get()) {
       g_task_executor =
-          new base::SingleThreadTaskExecutor(base::MessagePump::Type::UI);
+          new base::SingleThreadTaskExecutor(base::MessagePumpType::UI);
     }
   });
 }
@@ -58,7 +59,8 @@ void DestroySingleThreadTaskExecutor() {
 void CreateNetworkChangeNotifier() {
   static dispatch_once_t once_token;
   dispatch_once(&once_token, ^{
-    g_network_change_notifer = net::NetworkChangeNotifier::Create().release();
+    g_network_change_notifer =
+        net::NetworkChangeNotifier::CreateIfNeeded().release();
   });
 }
 

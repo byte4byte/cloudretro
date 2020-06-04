@@ -23,6 +23,11 @@
         TestRunner.addResult('UISourceCodeRemoved: ' + uiSourceCode.displayName());
       }
 
+      async function printUiSourceCode(uiSourceCode) {
+        const { content } = await uiSourceCode.requestContent();
+        TestRunner.addResult(content);
+      }
+
       workspace.addEventListener(
           Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
       workspace.addEventListener(
@@ -30,11 +35,11 @@
 
       const uiSourceCode1 = await Snippets.project.createFile('', null, '');
       TestRunner.addResult('Snippet content:');
-      TestRunner.addResult(await uiSourceCode1.requestContent());
+      await printUiSourceCode(uiSourceCode1);
       TestRunner.addResult('Snippet1 created.');
       const uiSourceCode2 = await Snippets.project.createFile('', null, '');
       TestRunner.addResult('Snippet content:');
-      TestRunner.addResult(await uiSourceCode2.requestContent());
+      await printUiSourceCode(uiSourceCode2);
       TestRunner.addResult('Snippet2 created.');
 
       await rename(uiSourceCode1, 'foo');
@@ -45,9 +50,9 @@
       await rename(uiSourceCode2, 'foo');
 
       TestRunner.addResult('Content of first snippet:');
-      TestRunner.addResult(await uiSourceCode1.requestContent());
+      await printUiSourceCode(uiSourceCode1);
       TestRunner.addResult('Content of second snippet:');
-      TestRunner.addResult(await uiSourceCode2.requestContent());
+      await printUiSourceCode(uiSourceCode2);
 
       TestRunner.addResult('Delete snippets..');
       await uiSourceCode1.project().deleteFile(uiSourceCode1);
@@ -59,7 +64,7 @@
       TestRunner.addResult('Add third..');
       const uiSourceCode3 = await Snippets.project.createFile('', null, '');
       TestRunner.addResult('Content of third snippet:');
-      TestRunner.addResult(await uiSourceCode3.requestContent());
+      await printUiSourceCode(uiSourceCode3);
       TestRunner.addResult(
           'Number of uiSourceCodes in workspace: ' +
           workspace.uiSourceCodes().filter(uiSourceCode => uiSourceCode.url().startsWith('snippet://')).length);
@@ -107,7 +112,7 @@ doesNothing;
       TestRunner.addResult('Run Snippet1..');
       Snippets.evaluateScriptSnippet(uiSourceCode1);
       await ConsoleTestRunner.waitUntilMessageReceivedPromise();
-      ConsoleTestRunner.dumpConsoleMessages();
+      await ConsoleTestRunner.dumpConsoleMessages();
 
       const functionPromise = TestRunner.addSnifferPromise(
           Console.ConsoleViewMessage.prototype,
@@ -116,17 +121,17 @@ doesNothing;
       Snippets.evaluateScriptSnippet(uiSourceCode2);
       await ConsoleTestRunner.waitUntilMessageReceivedPromise();
       await functionPromise;
-      ConsoleTestRunner.dumpConsoleMessages();
+      await ConsoleTestRunner.dumpConsoleMessages();
 
       TestRunner.addResult('Run Snippet1..');
       Snippets.evaluateScriptSnippet(uiSourceCode1);
       await ConsoleTestRunner.waitUntilMessageReceivedPromise();
-      ConsoleTestRunner.dumpConsoleMessages();
+      await ConsoleTestRunner.dumpConsoleMessages();
 
       TestRunner.addResult('Run Snippet3..');
       Snippets.evaluateScriptSnippet(uiSourceCode3);
       await ConsoleTestRunner.waitUntilMessageReceivedPromise();
-      ConsoleTestRunner.dumpConsoleMessages();
+      await ConsoleTestRunner.dumpConsoleMessages();
 
       await uiSourceCode1.project().deleteFile(uiSourceCode1);
       await uiSourceCode2.project().deleteFile(uiSourceCode2);
@@ -145,7 +150,7 @@ doesNothing;
       TestRunner.addResult('Run Snippet1..');
       Snippets.evaluateScriptSnippet(uiSourceCode1);
       await ConsoleTestRunner.waitUntilMessageReceivedPromise();
-      ConsoleTestRunner.dumpConsoleMessages();
+      await ConsoleTestRunner.dumpConsoleMessages();
 
       await TestRunner.reloadPagePromise();
 
@@ -174,7 +179,7 @@ doesNothing;
         TestRunner.addResult('Run Snippet1..');
         Snippets.evaluateScriptSnippet(uiSourceCode1);
         await ConsoleTestRunner.waitUntilMessageReceivedPromise();
-        ConsoleTestRunner.dumpConsoleMessages();
+        await ConsoleTestRunner.dumpConsoleMessages();
 
         await uiSourceCode1.project().deleteFile(uiSourceCode1);
         next();

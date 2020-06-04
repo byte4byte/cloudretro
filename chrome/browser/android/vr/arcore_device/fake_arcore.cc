@@ -196,6 +196,14 @@ mojom::VRPosePtr FakeArCore::Update(bool* camera_updated) {
   return pose;
 }
 
+base::TimeDelta FakeArCore::GetFrameTimestamp() {
+  return base::TimeTicks::Now() - base::TimeTicks();
+}
+
+float FakeArCore::GetEstimatedFloorHeight() {
+  return 2.0;
+}
+
 bool FakeArCore::RequestHitTest(
     const mojom::XRRayPtr& ray,
     std::vector<mojom::XRHitResultPtr>* hit_results) {
@@ -207,11 +215,38 @@ bool FakeArCore::RequestHitTest(
   return true;
 }
 
+base::Optional<uint64_t> FakeArCore::SubscribeToHitTest(
+    mojom::XRNativeOriginInformationPtr nativeOriginInformation,
+    const std::vector<mojom::EntityTypeForHitTest>& entity_types,
+    mojom::XRRayPtr ray) {
+  NOTREACHED();
+  return base::nullopt;
+}
+
+base::Optional<uint64_t> FakeArCore::SubscribeToHitTestForTransientInput(
+    const std::string& profile_name,
+    const std::vector<mojom::EntityTypeForHitTest>& entity_types,
+    mojom::XRRayPtr ray) {
+  NOTREACHED();
+  return base::nullopt;
+}
+
+mojom::XRHitTestSubscriptionResultsDataPtr
+FakeArCore::GetHitTestSubscriptionResults(
+    const gfx::Transform& mojo_from_viewer,
+    const std::vector<mojom::XRInputSourceStatePtr>& input_state) {
+  return nullptr;
+}
+
+void FakeArCore::UnsubscribeFromHitTest(uint64_t subscription_id) {
+  NOTREACHED();
+}
+
 mojom::XRPlaneDetectionDataPtr FakeArCore::GetDetectedPlanesData() {
   std::vector<mojom::XRPlaneDataPtr> result;
 
   // 1m ahead of the origin, neutral orientation facing forward.
-  mojom::VRPosePtr pose = mojom::VRPose::New();
+  mojom::PosePtr pose = mojom::Pose::New();
   pose->position = gfx::Point3F(0.0, 0.0, -1.0);
   pose->orientation = gfx::Quaternion();
 
@@ -225,8 +260,76 @@ mojom::XRPlaneDetectionDataPtr FakeArCore::GetDetectedPlanesData() {
       mojom::XRPlaneData::New(1, device::mojom::XRPlaneOrientation::HORIZONTAL,
                               std::move(pose), std::move(vertices)));
 
-  return mojom::XRPlaneDetectionData::New(std::vector<int32_t>{1},
+  return mojom::XRPlaneDetectionData::New(std::vector<uint64_t>{1},
                                           std::move(result));
+}
+
+mojom::XRAnchorsDataPtr FakeArCore::GetAnchorsData() {
+  std::vector<mojom::XRAnchorDataPtr> result;
+  std::vector<uint64_t> result_ids;
+
+  for (auto& anchor_id_and_data : anchors_) {
+    mojom::PosePtr pose = mojom::Pose::New();
+    pose->position = anchor_id_and_data.second.position;
+    pose->orientation = anchor_id_and_data.second.orientation;
+
+    result.push_back(
+        mojom::XRAnchorData::New(anchor_id_and_data.first, std::move(pose)));
+    result_ids.push_back(anchor_id_and_data.first);
+  }
+
+  return mojom::XRAnchorsData::New(std::move(result_ids), std::move(result));
+}
+
+mojom::XRLightEstimationDataPtr FakeArCore::GetLightEstimationData() {
+  auto result = mojom::XRLightEstimationData::New();
+
+  // Initialize light probe with a top-down white light
+  result->light_probe = mojom::XRLightProbe::New();
+  result->light_probe->main_light_direction = gfx::Vector3dF(0, -1, 0);
+  result->light_probe->main_light_intensity = device::RgbTupleF32(1, 1, 1);
+
+  // Initialize spherical harmonics to zero-filled array
+  result->light_probe->spherical_harmonics = mojom::XRSphericalHarmonics::New();
+  result->light_probe->spherical_harmonics->coefficients.resize(9);
+
+  // Initialize reflection_probe to black
+  result->reflection_probe = mojom::XRReflectionProbe::New();
+  result->reflection_probe->cube_map = mojom::XRCubeMap::New();
+  result->reflection_probe->cube_map->width_and_height = 16;
+  result->reflection_probe->cube_map->positive_x.resize(16 * 16);
+  result->reflection_probe->cube_map->negative_x.resize(16 * 16);
+  result->reflection_probe->cube_map->positive_y.resize(16 * 16);
+  result->reflection_probe->cube_map->negative_y.resize(16 * 16);
+  result->reflection_probe->cube_map->positive_z.resize(16 * 16);
+  result->reflection_probe->cube_map->negative_z.resize(16 * 16);
+
+  return result;
+}
+
+void FakeArCore::CreatePlaneAttachedAnchor(const mojom::Pose& plane_from_anchor,
+                                           uint64_t plane_id,
+                                           CreateAnchorCallback callback) {
+  // TODO(992035): Fix this when implementing tests.
+  std::move(callback).Run(mojom::CreateAnchorResult::FAILURE, 0);
+}
+
+void FakeArCore::CreateAnchor(
+    const mojom::XRNativeOriginInformation& native_origin_information,
+    const mojom::Pose& native_origin_from_anchor,
+    CreateAnchorCallback callback) {
+  std::move(callback).Run(mojom::CreateAnchorResult::FAILURE, 0);
+}
+
+void FakeArCore::ProcessAnchorCreationRequests(
+    const gfx::Transform& mojo_from_viewer,
+    const std::vector<mojom::XRInputSourceStatePtr>& input_state) {
+  // No-op - nothing gets deferred so far.
+}
+
+void FakeArCore::DetachAnchor(uint64_t anchor_id) {
+  auto count = anchors_.erase(anchor_id);
+  DCHECK_EQ(1u, count);
 }
 
 void FakeArCore::Pause() {

@@ -11,7 +11,7 @@
 class GaiaCookieManagerService;
 class ProfileOAuth2TokenService;
 
-namespace identity {
+namespace signin {
 
 // Concrete implementation of the DiagnosticsProvider interface.
 class DiagnosticsProviderImpl final : public DiagnosticsProvider {
@@ -22,8 +22,8 @@ class DiagnosticsProviderImpl final : public DiagnosticsProvider {
   ~DiagnosticsProviderImpl() override;
 
   // Returns the state of the load credentials operation.
-  OAuth2TokenServiceDelegate::LoadCredentialsState
-  GetDetailedStateOfLoadingOfRefreshTokens() const override;
+  signin::LoadCredentialsState GetDetailedStateOfLoadingOfRefreshTokens()
+      const override;
 
   // Returns the time until a access token request can be sent (will be zero if
   // the release time is in the past).
@@ -40,6 +40,6 @@ class DiagnosticsProviderImpl final : public DiagnosticsProvider {
   DISALLOW_COPY_AND_ASSIGN(DiagnosticsProviderImpl);
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_DIAGNOSTICS_PROVIDER_IMPL_H_

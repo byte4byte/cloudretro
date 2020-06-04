@@ -6,30 +6,41 @@ package org.chromium.ui.widget;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.DrawableRes;
-import android.support.annotation.IdRes;
-import android.support.annotation.Px;
-import android.support.annotation.StyleRes;
-import android.support.v4.view.ViewCompat;
 import android.util.AttributeSet;
 import android.view.ContextThemeWrapper;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.annotation.DrawableRes;
+import androidx.annotation.IdRes;
+import androidx.annotation.Px;
+import androidx.annotation.StyleRes;
+import androidx.core.view.ViewCompat;
+
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.ui.R;
 
-/** The view responsible for displaying a material chip. */
+/**
+ * The view responsible for displaying a material chip. The chip has the following components :
+ * - A primary text to be shown.
+ * - An optional start icon that can be rounded as well.
+ * - An optional secondary text view that is shown to the right of the primary text view.
+ * - An optional remove icon at the end, intended for use with input chips.
+ */
 public class ChipView extends LinearLayout {
     /** An id to use for {@link #setIcon(int, boolean)} when there is no icon on the chip. */
     public static final int INVALID_ICON_ID = -1;
 
     private final RippleBackgroundHelper mRippleBackgroundHelper;
     private final TextView mPrimaryText;
-    private final ChromeImageView mIcon;
+    private final ChromeImageView mStartIcon;
+    private final boolean mUseRoundedStartIcon;
     private final @IdRes int mSecondaryTextAppearanceId;
+    private final int mEndIconWidth;
+    private final int mEndIconHeight;
 
+    private ChromeImageView mEndIcon;
     private TextView mSecondaryText;
 
     /**
@@ -49,9 +60,11 @@ public class ChipView extends LinearLayout {
     private ChipView(Context context, AttributeSet attrs, @StyleRes int themeOverlay) {
         super(new ContextThemeWrapper(context, themeOverlay), attrs, R.attr.chipStyle);
 
-        final @Px int leadingElementPadding =
+        @Px
+        int leadingElementPadding =
                 getResources().getDimensionPixelSize(R.dimen.chip_element_leading_padding);
-        final @Px int endPadding = getResources().getDimensionPixelSize(R.dimen.chip_end_padding);
+        @Px
+        int endPadding = getResources().getDimensionPixelSize(R.dimen.chip_end_padding);
 
         TypedArray a = getContext().obtainStyledAttributes(
                 attrs, R.styleable.ChipView, R.attr.chipStyle, 0);
@@ -65,17 +78,28 @@ public class ChipView extends LinearLayout {
                 getResources().getDimensionPixelSize(R.dimen.chip_icon_size));
         int iconHeight = a.getDimensionPixelSize(R.styleable.ChipView_iconHeight,
                 getResources().getDimensionPixelSize(R.dimen.chip_icon_size));
+        mUseRoundedStartIcon = a.getBoolean(R.styleable.ChipView_useRoundedIcon, false);
         int primaryTextAppearance = a.getResourceId(
                 R.styleable.ChipView_primaryTextAppearance, R.style.TextAppearance_ChipText);
+
+        mEndIconWidth = a.getDimensionPixelSize(R.styleable.ChipView_endIconWidth,
+                getResources().getDimensionPixelSize(R.dimen.chip_icon_size));
+        mEndIconHeight = a.getDimensionPixelSize(R.styleable.ChipView_endIconHeight,
+                getResources().getDimensionPixelSize(R.dimen.chip_icon_size));
         mSecondaryTextAppearanceId = a.getResourceId(
                 R.styleable.ChipView_secondaryTextAppearance, R.style.TextAppearance_ChipText);
         int verticalInset = a.getDimensionPixelSize(R.styleable.ChipView_verticalInset,
                 getResources().getDimensionPixelSize(R.dimen.chip_bg_vertical_inset));
         a.recycle();
 
-        mIcon = new ChromeImageView(getContext());
-        mIcon.setLayoutParams(new LayoutParams(iconWidth, iconHeight));
-        addView(mIcon);
+        mStartIcon = new ChromeImageView(getContext());
+        mStartIcon.setLayoutParams(new LayoutParams(iconWidth, iconHeight));
+        addView(mStartIcon);
+
+        if (mUseRoundedStartIcon) {
+            int chipHeight = getResources().getDimensionPixelOffset(R.dimen.chip_default_height);
+            leadingElementPadding = (chipHeight - iconHeight) / 2;
+        }
 
         // Setting this enforces 16dp padding at the end and 8dp at the start. For text, the start
         // padding needs to be 16dp which is why a ChipTextView contributes the remaining 8dp.
@@ -100,17 +124,29 @@ public class ChipView extends LinearLayout {
     }
 
     /**
+     * Unlike setSelected, setEnabled doesn't properly propagate the new state to its subcomponents.
+     * Enforce this so ColorStateLists used for the text appearance apply as intended.
+     * @param enabled The new enabled state for the chip view and the TextViews owned by it.
+     */
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        getPrimaryTextView().setEnabled(enabled);
+        if (mSecondaryText != null) mSecondaryText.setEnabled(enabled);
+    }
+
+    /**
      * Sets the icon at the start of the chip view.
      * @param icon The resource id pointing to the icon.
      */
     public void setIcon(@DrawableRes int icon, boolean tintWithTextColor) {
         if (icon == INVALID_ICON_ID) {
-            mIcon.setVisibility(ViewGroup.GONE);
+            mStartIcon.setVisibility(ViewGroup.GONE);
             return;
         }
 
-        mIcon.setVisibility(ViewGroup.VISIBLE);
-        mIcon.setImageResource(icon);
+        mStartIcon.setVisibility(ViewGroup.VISIBLE);
+        mStartIcon.setImageResource(icon);
         setTint(tintWithTextColor);
     }
 
@@ -119,9 +155,42 @@ public class ChipView extends LinearLayout {
      * @param drawable Drawable to display.
      */
     public void setIcon(Drawable drawable, boolean tintWithTextColor) {
-        mIcon.setVisibility(ViewGroup.VISIBLE);
-        mIcon.setImageDrawable(drawable);
+        mStartIcon.setVisibility(ViewGroup.VISIBLE);
+        mStartIcon.setImageDrawable(drawable);
         setTint(tintWithTextColor);
+    }
+
+    /**
+     * Adds a remove icon (X button) at the trailing end of the chip next to the primary text.
+     */
+    public void addRemoveIcon() {
+        if (mEndIcon != null) return;
+
+        mEndIcon = new ChromeImageView(getContext());
+        mEndIcon.setId(R.id.chip_cancel_btn);
+        mEndIcon.setImageResource(R.drawable.btn_close);
+        ApiCompatibilityUtils.setImageTintList(mEndIcon, mPrimaryText.getTextColors());
+        LinearLayout.LayoutParams layoutParams =
+                new LinearLayout.LayoutParams(mEndIconWidth, mEndIconHeight);
+        layoutParams.setMarginStart(
+                getResources().getDimensionPixelSize(R.dimen.chip_end_icon_margin_start));
+        mEndIcon.setLayoutParams(layoutParams);
+        addView(mEndIcon);
+
+        // Setting an end icon enforces 6dp padding at the end.
+        int chipPaddingEnd =
+                getResources().getDimensionPixelSize(R.dimen.chip_end_padding_with_end_icon);
+        ViewCompat.setPaddingRelative(
+                this, getPaddingStart(), getPaddingTop(), chipPaddingEnd, getPaddingBottom());
+    }
+
+    /**
+     * Sets a {@link android.view.View.OnClickListener} for the remove icon.
+     * {@link ChipView#addRemoveIcon()} must be called prior to this method.
+     * @param listener The listener to be invoked on click events.
+     */
+    public void setRemoveIconClickListener(OnClickListener listener) {
+        mEndIcon.setOnClickListener(listener);
     }
 
     /**
@@ -142,6 +211,10 @@ public class ChipView extends LinearLayout {
             mSecondaryText =
                     new TextView(new ContextThemeWrapper(getContext(), R.style.ChipTextView));
             ApiCompatibilityUtils.setTextAppearance(mSecondaryText, mSecondaryTextAppearanceId);
+            // Ensure that basic state changes are aligned with the ChipView. They update
+            // automatically once the view is part of the hierarchy.
+            mSecondaryText.setSelected(isSelected());
+            mSecondaryText.setEnabled(isEnabled());
             addView(mSecondaryText);
         }
         return mSecondaryText;
@@ -154,9 +227,9 @@ public class ChipView extends LinearLayout {
      */
     private void setTint(boolean tintWithTextColor) {
         if (mPrimaryText.getTextColors() != null && tintWithTextColor) {
-            ApiCompatibilityUtils.setImageTintList(mIcon, mPrimaryText.getTextColors());
+            ApiCompatibilityUtils.setImageTintList(mStartIcon, mPrimaryText.getTextColors());
         } else {
-            ApiCompatibilityUtils.setImageTintList(mIcon, null);
+            ApiCompatibilityUtils.setImageTintList(mStartIcon, null);
         }
     }
 }

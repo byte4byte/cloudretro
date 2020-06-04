@@ -7,59 +7,55 @@
 #include <memory>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
-#include "base/time/time.h"
 #include "chrome/test/views/chrome_test_views_delegate.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "chrome/test/views/chrome_views_test_base.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/views/test/views_test_base.h"
 
 namespace media_router {
 
-class CastDialogNoSinksViewTest : public views::ViewsTestBase {
+class CastDialogNoSinksViewTest : public ChromeViewsTestBase {
  public:
   CastDialogNoSinksViewTest() = default;
   ~CastDialogNoSinksViewTest() override = default;
 
   void SetUp() override {
-    auto thread_bundle = std::make_unique<content::TestBrowserThreadBundle>(
-        base::test::ScopedTaskEnvironment::MainThreadType::UI,
-        base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME);
-    thread_bundle_ = thread_bundle.get();
-    set_scoped_task_environment(std::move(thread_bundle));
-    set_views_delegate(std::make_unique<ChromeTestViewsDelegate>());
-    views::ViewsTestBase::SetUp();
+    ChromeViewsTestBase::SetUp();
     no_sinks_view_ = std::make_unique<CastDialogNoSinksView>(nullptr);
   }
 
  protected:
-  views::View* looking_for_sinks_view() {
-    return no_sinks_view_->looking_for_sinks_view_for_test();
+  bool running() const {
+    return no_sinks_view_->timer_for_testing().IsRunning();
   }
-  views::View* help_icon_view() {
-    return no_sinks_view_->help_icon_view_for_test();
+  const views::View* get_icon() const {
+    return no_sinks_view_->icon_for_testing();
   }
-
-  void AdvanceTime(base::TimeDelta delta) {
-    thread_bundle_->FastForwardBy(delta);
+  const base::string16& get_label_text() const {
+    return no_sinks_view_->label_text_for_testing();
   }
 
  private:
-  content::TestBrowserThreadBundle* thread_bundle_ = nullptr;
   std::unique_ptr<CastDialogNoSinksView> no_sinks_view_;
 
   DISALLOW_COPY_AND_ASSIGN(CastDialogNoSinksViewTest);
 };
 
 TEST_F(CastDialogNoSinksViewTest, SwitchViews) {
-  // Initially, only the throbber view should be shown.
-  EXPECT_TRUE(looking_for_sinks_view()->GetVisible());
-  EXPECT_FALSE(help_icon_view());
+  // Initially the search timer should be running and the icon and label should
+  // indicate we are searching for sinks. Icon should never be null.
+  EXPECT_TRUE(running());
+  const auto* initial_icon = get_icon();
+  auto initial_title = get_label_text();
+  EXPECT_NE(initial_icon, nullptr);
 
-  AdvanceTime(base::TimeDelta::FromSeconds(3));
-  // After three seconds, only the help icon view should be shown.
-  EXPECT_FALSE(looking_for_sinks_view());
-  EXPECT_TRUE(help_icon_view()->GetVisible());
+  // After |kSearchWaitTime| the search timer should have stopped and the icon
+  // and label should have changed to indicate no sinks were found.
+  task_environment()->FastForwardBy(
+      media_router::CastDialogNoSinksView::kSearchWaitTime);
+  EXPECT_FALSE(running());
+  EXPECT_NE(initial_icon, get_icon());
+  EXPECT_NE(initial_title, get_label_text());
 }
 
 }  // namespace media_router

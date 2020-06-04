@@ -12,8 +12,8 @@
 #include "chrome/browser/ui/sync/browser_synced_tab_delegate.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_navigation_handle.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,9 +27,6 @@ class FakeLocalSessionEventHandler : public LocalSessionEventHandler {
   void OnLocalTabModified(SyncedTabDelegate* modified_tab) override {
     was_notified_ = true;
   }
-
-  void OnFaviconsChanged(const std::set<GURL>& page_urls,
-                         const GURL& icon_url) override {}
 
   bool was_notified_since_last_call() {
     bool was_notified = was_notified_;

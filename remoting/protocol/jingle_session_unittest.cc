@@ -10,10 +10,10 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
 #include "net/socket/socket.h"
@@ -83,7 +83,8 @@ class FakeTransport : public Transport {
     return received_messages_;
   }
 
-  void set_on_message_callback(const base::Closure& on_message_callback) {
+  void set_on_message_callback(
+      const base::RepeatingClosure& on_message_callback) {
     on_message_callback_ = on_message_callback;
   }
 
@@ -96,7 +97,7 @@ class FakeTransport : public Transport {
   bool ProcessTransportInfo(jingle_xmpp::XmlElement* transport_info) override {
     received_messages_.push_back(
         std::make_unique<jingle_xmpp::XmlElement>(*transport_info));
-    if (!on_message_callback_.is_null())
+    if (on_message_callback_)
       on_message_callback_.Run();
     return true;
   }
@@ -104,7 +105,7 @@ class FakeTransport : public Transport {
  private:
   SendTransportInfoCallback send_transport_info_callback_;
   std::vector<std::unique_ptr<jingle_xmpp::XmlElement>> received_messages_;
-  base::Closure on_message_callback_;
+  base::RepeatingClosure on_message_callback_;
 };
 
 class FakePlugin : public SessionPlugin {
@@ -156,7 +157,6 @@ std::unique_ptr<jingle_xmpp::XmlElement> CreateTransportInfo(const std::string& 
 class JingleSessionTest : public testing::Test {
  public:
   JingleSessionTest() {
-    message_loop_.reset(new base::MessageLoopForIO());
     network_settings_ =
         NetworkSettings(NetworkSettings::NAT_TRAVERSAL_OUTGOING);
   }
@@ -322,7 +322,8 @@ class JingleSessionTest : public testing::Test {
     }
   }
 
-  std::unique_ptr<base::MessageLoopForIO> message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
 
   NetworkSettings network_settings_;
 

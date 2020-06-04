@@ -5,7 +5,8 @@
 #ifndef CHROME_BROWSER_LANGUAGE_TRANSLATE_FRAME_BINDER_H_
 #define CHROME_BROWSER_LANGUAGE_TRANSLATE_FRAME_BINDER_H_
 
-#include "components/translate/content/common/translate.mojom.h"
+#include "components/translate/content/common/translate.mojom-forward.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace content {
 class RenderFrameHost;
@@ -14,9 +15,8 @@ class RenderFrameHost;
 namespace language {
 
 void BindContentTranslateDriver(
-    translate::mojom::ContentTranslateDriverRequest request,
-    content::RenderFrameHost* render_frame_host);
-
+    content::RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<translate::mojom::ContentTranslateDriver> receiver);
 }
 
 #endif  // CHROME_BROWSER_LANGUAGE_TRANSLATE_FRAME_BINDER_H_

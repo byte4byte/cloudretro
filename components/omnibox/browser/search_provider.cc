@@ -35,7 +35,6 @@
 #include "components/omnibox/browser/url_prefix.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/search/search.h"
-#include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "components/variations/net/variations_http_headers.h"
@@ -71,9 +70,6 @@ enum SuggestRequestsHistogramValue {
   REPLY_RECEIVED,
   MAX_SUGGEST_REQUEST_HISTOGRAM_VALUE
 };
-
-// The verbatim score for an input which is not an URL.
-const int kNonURLVerbatimRelevance = 1300;
 
 // Increments the appropriate value in the histogram by one.
 void LogOmniboxSuggestRequest(
@@ -146,8 +142,7 @@ SearchProvider::SearchProvider(AutocompleteProviderClient* client,
     : BaseSearchProvider(AutocompleteProvider::TYPE_SEARCH, client),
       listener_(listener),
       providers_(client->GetTemplateURLService()),
-      answers_cache_(10),
-      observer_(this) {
+      answers_cache_(10) {
   TemplateURLService* template_url_service = client->GetTemplateURLService();
 
   // |template_url_service| can be null in tests.
@@ -473,10 +468,12 @@ void SearchProvider::ClearAllResults() {
 void SearchProvider::UpdateMatchContentsClass(
     const base::string16& input_text,
     SearchSuggestionParser::Results* results) {
+  const base::string16& trimmed_input =
+      base::CollapseWhitespace(input_text, false);
   for (auto& suggest_result : results->suggest_results)
-    suggest_result.ClassifyMatchContents(false, input_text);
+    suggest_result.ClassifyMatchContents(false, trimmed_input);
   for (auto& navigation_result : results->navigation_results)
-    navigation_result.CalculateAndClassifyMatchContents(false, input_text);
+    navigation_result.CalculateAndClassifyMatchContents(false, trimmed_input);
 }
 
 void SearchProvider::SortResults(bool is_keyword,
@@ -555,8 +552,8 @@ void SearchProvider::EnforceConstraints() {
         (keyword_url != nullptr) &&
         (keyword_url->type() == TemplateURL::OMNIBOX_API_EXTENSION);
     if ((keyword_url != nullptr) && !is_extension_keyword &&
-        (AutocompleteResult::FindTopMatch(input_.current_page_classification(),
-                                          matches_) == matches_.end())) {
+        (AutocompleteResult::FindTopMatch(input_, matches_) ==
+         matches_.end())) {
       // In non-extension keyword mode, disregard the keyword verbatim suggested
       // relevance if necessary, so at least one match is allowed to be default.
       // (In extension keyword mode this is not necessary because the extension
@@ -577,9 +574,8 @@ void SearchProvider::EnforceConstraints() {
       keyword_results_.verbatim_relevance = -1;
       ConvertResultsToAutocompleteMatches();
     }
-    if (!is_extension_keyword &&
-        (AutocompleteResult::FindTopMatch(input_.current_page_classification(),
-                                          matches_) == matches_.end())) {
+    if (!is_extension_keyword && (AutocompleteResult::FindTopMatch(
+                                      input_, matches_) == matches_.end())) {
       // Guarantee that SearchProvider returns a legal default match (except
       // when in extension-based keyword mode).  The omnibox always needs at
       // least one legal default match, and it relies on SearchProvider in
@@ -595,16 +591,14 @@ void SearchProvider::EnforceConstraints() {
     }
     DCHECK(!IsTopMatchSearchWithURLInput());
     DCHECK(is_extension_keyword || (AutocompleteResult::FindTopMatch(
-                                        input_.current_page_classification(),
-                                        matches_) != matches_.end()));
+                                        input_, matches_) != matches_.end()));
   }
 }
 
 void SearchProvider::RecordTopSuggestion() {
   top_query_suggestion_fill_into_edit_ = base::string16();
   top_navigation_suggestion_ = GURL();
-  auto first_match = AutocompleteResult::FindTopMatch(
-      input_.current_page_classification(), matches_);
+  auto first_match = AutocompleteResult::FindTopMatch(input_, matches_);
   if (first_match != matches_.end()) {
     // Identify if this match came from a query suggestion or a navsuggestion.
     // In either case, extracts the identifying feature of the suggestion
@@ -694,6 +688,8 @@ void SearchProvider::DoHistoryQuery(bool minimal_changes) {
 }
 
 base::TimeDelta SearchProvider::GetSuggestQueryDelay() const {
+  // TODO(manukh): Reuse AutocompleteProviderDebouncer which duplicates all
+  //  this logic and would avoid polling field trial params repeatedly.
   bool from_last_keystroke;
   int polling_delay_ms;
   OmniboxFieldTrial::GetSuggestPollingStrategy(&from_last_keystroke,
@@ -1105,8 +1101,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
   // Guarantee that if there's a legal default match anywhere in the result
   // set that it'll get returned.  The rotate() call does this by moving the
   // default match to the front of the list.
-  auto default_match = AutocompleteResult::FindTopMatch(
-      input_.current_page_classification(), &matches);
+  auto default_match = AutocompleteResult::FindTopMatch(input_, &matches);
   if (default_match != matches.end())
     std::rotate(matches.begin(), default_match, default_match + 1);
 
@@ -1166,8 +1161,7 @@ void SearchProvider::RemoveExtraAnswers(ACMatches* matches) {
 }
 
 bool SearchProvider::IsTopMatchSearchWithURLInput() const {
-  auto first_match = AutocompleteResult::FindTopMatch(
-      input_.current_page_classification(), matches_);
+  auto first_match = AutocompleteResult::FindTopMatch(input_, matches_);
   return (input_.type() == metrics::OmniboxInputType::URL) &&
          (first_match != matches_.end()) &&
          (first_match->relevance > CalculateRelevanceForVerbatim()) &&
@@ -1394,11 +1388,12 @@ int SearchProvider::GetVerbatimRelevance(bool* relevance_from_server) const {
 bool SearchProvider::ShouldCurbDefaultSuggestions() const {
   // Only curb if the global experimental keyword feature is enabled, we're
   // in keyword mode and we believe the user selected the mode explicitly.
-  if (providers_.has_keyword_provider())
+  if (providers_.has_keyword_provider()) {
     return InExplicitExperimentalKeywordMode(input_,
                                              providers_.keyword_provider());
-  else
+  } else {
     return false;
+  }
 }
 
 int SearchProvider::CalculateRelevanceForVerbatim() const {
@@ -1623,8 +1618,8 @@ void SearchProvider::PrefetchImages(SearchSuggestionParser::Results* results) {
     prefetch_limit--;
 
     const auto& image_url = suggestion.image_url();
-    if (!image_url.empty())
-      prefetch_image_urls.push_back(GURL(image_url));
+    if (!image_url.is_empty())
+      prefetch_image_urls.push_back(image_url);
 
     if (suggestion.answer())
       suggestion.answer()->AddImageURLsTo(&prefetch_image_urls);

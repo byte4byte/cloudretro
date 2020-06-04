@@ -8,7 +8,6 @@
 
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -49,9 +48,7 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
  public:
   ViewFocusChangeWaiter(views::FocusManager* focus_manager,
                         int previous_view_id)
-      : focus_manager_(focus_manager),
-        previous_view_id_(previous_view_id),
-        weak_factory_(this) {
+      : focus_manager_(focus_manager), previous_view_id_(previous_view_id) {
     focus_manager_->AddFocusChangeListener(this);
     // Call the focus change notification once in case the focus has
     // already changed.
@@ -81,7 +78,7 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
 
   views::FocusManager* focus_manager_;
   int previous_view_id_;
-  base::WeakPtrFactory<ViewFocusChangeWaiter> weak_factory_;
+  base::WeakPtrFactory<ViewFocusChangeWaiter> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ViewFocusChangeWaiter);
 };
@@ -325,7 +322,7 @@ void KeyboardAccessTest::TestSystemMenuReopenClosedTabWithKeyboard() {
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GURL("about:"), WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
   content::WebContents* tab_to_close =
@@ -449,18 +446,12 @@ IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, TestMenuKeyboardOpenDismiss) {
 }
 #endif
 
-#if defined(OS_MACOSX)
-// Focusing or input is not completely working on Mac: http://crbug.com/824418
-#define MAYBE_ReserveKeyboardAccelerators DISABLED_ReserveKeyboardAccelerators
-#else
-#define MAYBE_ReserveKeyboardAccelerators ReserveKeyboardAccelerators
-#endif
 // Test that JavaScript cannot intercept reserved keyboard accelerators like
 // ctrl-t to open a new tab or ctrl-f4 to close a tab.
 // TODO(isherman): This test times out on ChromeOS.  We should merge it with
 // BrowserKeyEventsTest.ReservedAccelerators, but just disable for now.
 // If this flakes, use http://crbug.com/62311.
-IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, MAYBE_ReserveKeyboardAccelerators) {
+IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, ReserveKeyboardAccelerators) {
   const std::string kBadPage =
       "<html><script>"
       "document.onkeydown = function() {"
@@ -471,7 +462,7 @@ IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, MAYBE_ReserveKeyboardAccelerators) {
   GURL url("data:text/html," + kBadPage);
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_TAB, true, false, false, false));
@@ -479,22 +470,21 @@ IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, MAYBE_ReserveKeyboardAccelerators) {
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   ASSERT_EQ(2, browser()->tab_strip_model()->active_index());
 
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+#if defined(OS_MACOSX)
+      browser(), ui::VKEY_W, false, false, false, true));
+#else
       browser(), ui::VKEY_W, true, false, false, false));
+#endif
   ASSERT_EQ(0, browser()->tab_strip_model()->active_index());
 }
 
 #if defined(OS_WIN)  // These keys are Windows-only.
-// Disabled on debug due to high flake rate; see https://crbug.com/846623.
-#if !defined(NDEBUG)
-#define MAYBE_BackForwardKeys DISABLED_BackForwardKeys
-#else
-#define MAYBE_BackForwardKeys BackForwardKeys
-#endif
-IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, MAYBE_BackForwardKeys) {
+// Disabled due to high flake rate; see https://crbug.com/846623.
+IN_PROC_BROWSER_TEST_F(KeyboardAccessTest, DISABLED_BackForwardKeys) {
   // Navigate to create some history.
   ui_test_utils::NavigateToURL(browser(), GURL("chrome://version/"));
   ui_test_utils::NavigateToURL(browser(), GURL("chrome://about/"));

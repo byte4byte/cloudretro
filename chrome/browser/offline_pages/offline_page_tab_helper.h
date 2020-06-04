@@ -15,11 +15,11 @@
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "chrome/common/mhtml_page_notifier.mojom.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
-#include "content/public/browser/web_contents_binding_set.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_receiver_set.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
-#include "third_party/blink/public/mojom/loader/mhtml_load_result.mojom.h"
+#include "third_party/blink/public/mojom/loader/mhtml_load_result.mojom-forward.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -57,10 +57,6 @@ class OfflinePageTabHelper
       public offline_pages::mojom::MhtmlPageNotifier {
  public:
   ~OfflinePageTabHelper() override;
-
-  // Creates the Mojo service that can listen to the renderer's archive events.
-  void CreateMhtmlPageNotifier(
-      offline_pages::mojom::MhtmlPageNotifierRequest request);
 
   // MhtmlPageNotifier overrides.
   void NotifyMhtmlPageLoadAttempted(blink::mojom::MHTMLLoadResult result,
@@ -211,17 +207,12 @@ class OfflinePageTabHelper
   // Service, outlives this object.
   PrefetchService* prefetch_service_ = nullptr;
 
-  // Table of OfflinePages policies.
-  // TODO(dimich): When we only have one shared version of PolicyController,
-  // replace this instance with access to a shared one.
-  ClientPolicyController policy_controller_;
-
   // TODO(crbug.com/827215): We only really want interface messages for the main
   // frame but this is not easily done with the current helper classes.
-  content::WebContentsFrameBindingSet<mojom::MhtmlPageNotifier>
-      mhtml_page_notifier_bindings_;
+  content::WebContentsFrameReceiverSet<mojom::MhtmlPageNotifier>
+      mhtml_page_notifier_receivers_;
 
-  base::WeakPtrFactory<OfflinePageTabHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<OfflinePageTabHelper> weak_ptr_factory_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

@@ -7,7 +7,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_client.h"
@@ -63,7 +63,7 @@ class PingPongTest {
   void OnPingDone() {
     current_iterations_++;
     if (current_iterations_ >= iterations_to_run_) {
-      quit_closure_.Run();
+      std::move(quit_closure_).Run();
       return;
     }
 
@@ -75,7 +75,7 @@ class PingPongTest {
   unsigned int iterations_to_run_;
   unsigned int current_iterations_;
 
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(PingPongTest);
 };
@@ -93,7 +93,7 @@ class MojoBindingsPerftest : public testing::Test {
   MojoBindingsPerftest() = default;
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(MojoBindingsPerftest, InProcessPingPong) {
@@ -183,7 +183,7 @@ class PingPongPaddle : public MessageReceiverWithResponderStatus {
   base::TimeTicks end_time_;
   uint32_t expected_count_ = 0;
   MessageReceiver* sender_;
-  base::Closure quit_closure_;
+  base::RepeatingClosure quit_closure_;
 };
 
 TEST_F(MojoBindingsPerftest, MultiplexRouterPingPong) {

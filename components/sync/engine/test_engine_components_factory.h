@@ -16,8 +16,7 @@ namespace syncer {
 
 class TestEngineComponentsFactory : public EngineComponentsFactory {
  public:
-  explicit TestEngineComponentsFactory(const Switches& switches,
-                                       StorageOption option,
+  explicit TestEngineComponentsFactory(StorageOption option,
                                        StorageOption* storage_used);
   ~TestEngineComponentsFactory() override;
 
@@ -42,13 +41,10 @@ class TestEngineComponentsFactory : public EngineComponentsFactory {
   std::unique_ptr<syncable::DirectoryBackingStore> BuildDirectoryBackingStore(
       StorageOption storage,
       const std::string& dir_name,
-      const base::RepeatingCallback<std::string()>& cache_guid_generator,
+      const std::string& cache_guid,
       const base::FilePath& backing_filepath) override;
 
-  Switches GetSwitches() const override;
-
  private:
-  const Switches switches_;
   const StorageOption storage_override_;
   StorageOption* storage_used_;
 

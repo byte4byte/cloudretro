@@ -3,203 +3,218 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview 'password-edit-dialog' is the dialog that allows showing a
- * saved password.
+ * @fileoverview 'address-edit-dialog' is the dialog that allows editing a saved
+ * address.
  */
-(function() {
-'use strict';
+import {html, flush, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-Polymer({
-  is: 'settings-address-edit-dialog',
+import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
+import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
+import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import {assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {addSingletonGetter} from 'chrome://resources/js/cr.m.js';
+import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
+import 'chrome://resources/cr_elements/md_select_css.m.js';
+import '../settings_shared_css.m.js';
+import '../settings_vars_css.m.js';
+import '../controls/settings_textarea.m.js';
 
-  behaviors: [
-    I18nBehavior,
-  ],
+  Polymer({
+    is: 'settings-address-edit-dialog',
 
-  properties: {
-    /** @type {chrome.autofillPrivate.AddressEntry} */
-    address: Object,
+    _template: html`{__html_template__}`,
 
-    /** @private */
-    title_: String,
+    behaviors: [
+      I18nBehavior,
+    ],
 
-    /** @private {!Array<!chrome.autofillPrivate.CountryEntry>} */
-    countries_: Array,
+    properties: {
+      /** @type {chrome.autofillPrivate.AddressEntry} */
+      address: Object,
 
-    /**
-     * Updates the address wrapper.
-     * @private {string|undefined}
-     */
-    countryCode_: {
-      type: String,
-      observer: 'onUpdateCountryCode_',
+      /** @private */
+      title_: String,
+
+      /** @private {!Array<!chrome.autofillPrivate.CountryEntry>} */
+      countries_: Array,
+
+      /**
+       * Updates the address wrapper.
+       * @private {string|undefined}
+       */
+      countryCode_: {
+        type: String,
+        observer: 'onUpdateCountryCode_',
+      },
+
+      /** @private {!Array<!Array<!AddressComponentUI>>} */
+      addressWrapper_: Object,
+
+      /** @private */
+      phoneNumber_: String,
+
+      /** @private */
+      email_: String,
+
+      /** @private */
+      canSave_: Boolean,
     },
 
-    /** @private {!Array<!Array<!settings.address.AddressComponentUI>>} */
-    addressWrapper_: Object,
+    /** @override */
+    attached() {
+      this.countryInfo =
+          CountryDetailManagerImpl.getInstance();
+      this.countryInfo.getCountryList().then(countryList => {
+        this.countries_ = countryList;
 
-    /** @private */
-    phoneNumber_: String,
+        this.title_ = this.i18n(
+            this.address.guid ? 'editAddressTitle' : 'addAddressTitle');
 
-    /** @private */
-    email_: String,
+        // |phoneNumbers| and |emailAddresses| are a single item array.
+        // See crbug.com/497934 for details.
+        this.phoneNumber_ =
+            this.address.phoneNumbers ? this.address.phoneNumbers[0] : '';
+        this.email_ =
+            this.address.emailAddresses ? this.address.emailAddresses[0] : '';
 
-    /** @private */
-    canSave_: Boolean,
-  },
+        this.async(() => {
+          if (this.countryCode_ == this.address.countryCode) {
+            this.updateAddressWrapper_();
+          } else {
+            this.countryCode_ = this.address.countryCode;
+          }
+        });
+      });
 
-  /** @override */
-  attached: function() {
-    this.countryInfo = settings.address.CountryDetailManagerImpl.getInstance();
-    this.countryInfo.getCountryList().then(countryList => {
-      this.countries_ = countryList;
+      // Open is called on the dialog after the address wrapper has been
+      // updated.
+    },
 
-      this.title_ =
-          this.i18n(this.address.guid ? 'editAddressTitle' : 'addAddressTitle');
+    /**
+     * Returns a class to denote how long this entry is.
+     * @param {AddressComponentUI} setting
+     * @return {string}
+     */
+    long_(setting) {
+      return setting.component.isLongField ? 'long' : '';
+    },
 
-      // |phoneNumbers| and |emailAddresses| are a single item array.
-      // See crbug.com/497934 for details.
-      this.phoneNumber_ =
-          this.address.phoneNumbers ? this.address.phoneNumbers[0] : '';
-      this.email_ =
-          this.address.emailAddresses ? this.address.emailAddresses[0] : '';
+    /**
+     * Updates the wrapper that represents this address in the country's format.
+     * @private
+     */
+    updateAddressWrapper_() {
+      // Default to the last country used if no country code is provided.
+      const countryCode = this.countryCode_ || this.countries_[0].countryCode;
+      this.countryInfo.getAddressFormat(countryCode).then(format => {
+        this.addressWrapper_ = format.components.map(
+            component => component.row.map(
+                c => new AddressComponentUI(this.address, c)));
 
-      this.async(() => {
-        if (this.countryCode_ == this.address.countryCode) {
-          this.updateAddressWrapper_();
-        } else {
-          this.countryCode_ = this.address.countryCode;
+        // Flush dom before resize and savability updates.
+        flush();
+
+        this.updateCanSave_();
+
+        this.fire('on-update-address-wrapper');  // For easier testing.
+
+        const dialog = /** @type {HTMLDialogElement} */ (this.$.dialog);
+        if (!dialog.open) {
+          dialog.showModal();
         }
       });
-    });
+    },
 
-    // Open is called on the dialog after the address wrapper has been updated.
-  },
+    updateCanSave_() {
+      const inputs = this.$.dialog.querySelectorAll('.address-column, select');
 
-  /**
-   * Returns a class to denote how long this entry is.
-   * @param {settings.address.AddressComponentUI} setting
-   * @return {string}
-   */
-  long_: function(setting) {
-    return setting.component.isLongField ? 'long' : '';
-  },
-
-  /**
-   * Updates the wrapper that represents this address in the country's format.
-   * @private
-   */
-  updateAddressWrapper_: function() {
-    // Default to the last country used if no country code is provided.
-    const countryCode = this.countryCode_ || this.countries_[0].countryCode;
-    this.countryInfo.getAddressFormat(countryCode).then(format => {
-      this.addressWrapper_ = format.components.map(
-          component => component.row.map(
-              c => new settings.address.AddressComponentUI(this.address, c)));
-
-      // Flush dom before resize and savability updates.
-      Polymer.dom.flush();
-
-      this.updateCanSave_();
-
-      this.fire('on-update-address-wrapper');  // For easier testing.
-
-      const dialog = /** @type {HTMLDialogElement} */ (this.$.dialog);
-      if (!dialog.open) {
-        dialog.showModal();
+      for (let i = 0; i < inputs.length; ++i) {
+        if (inputs[i].value) {
+          this.canSave_ = true;
+          this.fire('on-update-can-save');  // For easier testing.
+          return;
+        }
       }
-    });
-  },
 
-  updateCanSave_: function() {
-    const inputs = this.$.dialog.querySelectorAll('.address-column, select');
+      this.canSave_ = false;
+      this.fire('on-update-can-save');  // For easier testing.
+    },
 
-    for (let i = 0; i < inputs.length; ++i) {
-      if (inputs[i].value) {
-        this.canSave_ = true;
-        this.fire('on-update-can-save');  // For easier testing.
+    /**
+     * @param {!chrome.autofillPrivate.CountryEntry} country
+     * @return {string}
+     * @private
+     */
+    getCode_(country) {
+      return country.countryCode || 'SPACER';
+    },
+
+    /**
+     * @param {!chrome.autofillPrivate.CountryEntry} country
+     * @return {string}
+     * @private
+     */
+    getName_(country) {
+      return country.name || '------';
+    },
+
+    /**
+     * @param {!chrome.autofillPrivate.CountryEntry} country
+     * @return {boolean}
+     * @private
+     */
+    isDivision_(country) {
+      return !country.countryCode;
+    },
+
+    /** @private */
+    onCancelTap_() {
+      this.$.dialog.cancel();
+    },
+
+    /**
+     * Handler for tapping the save button.
+     * @private
+     */
+    onSaveButtonTap_() {
+      // The Enter key can call this function even if the button is disabled.
+      if (!this.canSave_) {
         return;
       }
-    }
 
-    this.canSave_ = false;
-    this.fire('on-update-can-save');  // For easier testing.
-  },
+      // Set a default country if none is set.
+      if (!this.address.countryCode) {
+        this.address.countryCode = this.countries_[0].countryCode;
+      }
 
-  /**
-   * @param {!chrome.autofillPrivate.CountryEntry} country
-   * @return {string}
-   * @private
-   */
-  getCode_: function(country) {
-    return country.countryCode || 'SPACER';
-  },
+      this.address.phoneNumbers = this.phoneNumber_ ? [this.phoneNumber_] : [];
+      this.address.emailAddresses = this.email_ ? [this.email_] : [];
 
-  /**
-   * @param {!chrome.autofillPrivate.CountryEntry} country
-   * @return {string}
-   * @private
-   */
-  getName_: function(country) {
-    return country.name || '------';
-  },
+      this.fire('save-address', this.address);
+      this.$.dialog.close();
+    },
 
-  /**
-   * @param {!chrome.autofillPrivate.CountryEntry} country
-   * @return {boolean}
-   * @private
-   */
-  isDivision_: function(country) {
-    return !country.countryCode;
-  },
+    /**
+     * Syncs the country code back to the address and rebuilds the address
+     * wrapper for the new location.
+     * @param {string|undefined} countryCode
+     * @private
+     */
+    onUpdateCountryCode_(countryCode) {
+      this.address.countryCode = countryCode;
+      this.updateAddressWrapper_();
+    },
 
-  /** @private */
-  onCancelTap_: function() {
-    this.$.dialog.cancel();
-  },
+    /** @private */
+    onCountryChange_() {
+      const countrySelect =
+          /** @type {!HTMLSelectElement} */ (this.$$('select'));
+      this.countryCode_ = countrySelect.value;
+    },
+  });
 
-  /**
-   * Handler for tapping the save button.
-   * @private
-   */
-  onSaveButtonTap_: function() {
-    // The Enter key can call this function even if the button is disabled.
-    if (!this.canSave_) {
-      return;
-    }
-
-    // Set a default country if none is set.
-    if (!this.address.countryCode) {
-      this.address.countryCode = this.countries_[0].countryCode;
-    }
-
-    this.address.phoneNumbers = this.phoneNumber_ ? [this.phoneNumber_] : [];
-    this.address.emailAddresses = this.email_ ? [this.email_] : [];
-
-    this.fire('save-address', this.address);
-    this.$.dialog.close();
-  },
-
-  /**
-   * Syncs the country code back to the address and rebuilds the address wrapper
-   * for the new location.
-   * @param {string|undefined} countryCode
-   * @private
-   */
-  onUpdateCountryCode_: function(countryCode) {
-    this.address.countryCode = countryCode;
-    this.updateAddressWrapper_();
-  },
-
-  /** @private */
-  onCountryChange_: function() {
-    const countrySelect = /** @type {!HTMLSelectElement} */ (this.$$('select'));
-    this.countryCode_ = countrySelect.value;
-  },
-});
-})();
-
-cr.define('settings.address', function() {
   /**
    * Creates a wrapper against a single data member for an address.
    */
@@ -210,10 +225,10 @@ cr.define('settings.address', function() {
      */
     constructor(address, component) {
       Object.defineProperty(this, 'value', {
-        get: function() {
+        get() {
           return this.getValue_();
         },
-        set: function(newValue) {
+        set(newValue) {
           this.setValue_(newValue);
         },
       });
@@ -317,9 +332,9 @@ cr.define('settings.address', function() {
 
   /**
    * Default implementation. Override for testing.
-   * @implements {settings.address.CountryDetailManager}
+   * @implements {CountryDetailManager}
    */
-  class CountryDetailManagerImpl {
+  export class CountryDetailManagerImpl {
     /** @override */
     getCountryList() {
       return new Promise(function(callback) {
@@ -335,11 +350,5 @@ cr.define('settings.address', function() {
     }
   }
 
-  cr.addSingletonGetter(CountryDetailManagerImpl);
+  addSingletonGetter(CountryDetailManagerImpl);
 
-  return {
-    AddressComponentUI: AddressComponentUI,
-    CountryDetailManager: CountryDetailManager,
-    CountryDetailManagerImpl: CountryDetailManagerImpl,
-  };
-});

@@ -175,7 +175,7 @@ class SerialIoHandlerWin::UiThreadHelper final
  private:
   // DeviceMonitorWin::Observer
   void OnDeviceRemoved(const GUID& class_guid,
-                       const std::string& device_path) override {
+                       const base::string16& device_path) override {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     io_thread_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&SerialIoHandlerWin::OnDeviceRemoved,
@@ -192,7 +192,7 @@ class SerialIoHandlerWin::UiThreadHelper final
   DISALLOW_COPY_AND_ASSIGN(UiThreadHelper);
 };
 
-void SerialIoHandlerWin::OnDeviceRemoved(const std::string& device_path) {
+void SerialIoHandlerWin::OnDeviceRemoved(const base::string16& device_path) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   DeviceInfoQueryWin device_info_query;
@@ -358,10 +358,7 @@ SerialIoHandlerWin::SerialIoHandlerWin(
     const base::FilePath& port,
     scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner)
     : SerialIoHandler(port, std::move(ui_thread_task_runner)),
-      event_mask_(0),
-      is_comm_pending_(false),
-      helper_(nullptr),
-      weak_factory_(this) {}
+      base::MessagePumpForIO::IOHandler(FROM_HERE) {}
 
 SerialIoHandlerWin::~SerialIoHandlerWin() {
   ui_thread_task_runner()->DeleteSoon(FROM_HERE, helper_);
@@ -472,20 +469,23 @@ mojom::SerialPortControlSignalsPtr SerialIoHandlerWin::GetControlSignals()
 
 bool SerialIoHandlerWin::SetControlSignals(
     const mojom::SerialHostControlSignals& signals) {
-  if (signals.has_dtr) {
-    if (!EscapeCommFunction(file().GetPlatformFile(),
-                            signals.dtr ? SETDTR : CLRDTR)) {
-      VPLOG(1) << "Failed to configure DTR signal";
-      return false;
-    }
+  if (signals.has_dtr && !EscapeCommFunction(file().GetPlatformFile(),
+                                             signals.dtr ? SETDTR : CLRDTR)) {
+    VPLOG(1) << "Failed to configure DTR signal";
+    return false;
   }
-  if (signals.has_rts) {
-    if (!EscapeCommFunction(file().GetPlatformFile(),
-                            signals.rts ? SETRTS : CLRRTS)) {
-      VPLOG(1) << "Failed to configure RTS signal";
-      return false;
-    }
+  if (signals.has_rts && !EscapeCommFunction(file().GetPlatformFile(),
+                                             signals.rts ? SETRTS : CLRRTS)) {
+    VPLOG(1) << "Failed to configure RTS signal";
+    return false;
   }
+  if (signals.has_brk &&
+      !EscapeCommFunction(file().GetPlatformFile(),
+                          signals.brk ? SETBREAK : CLRBREAK)) {
+    VPLOG(1) << "Failed to configure break signal";
+    return false;
+  }
+
   return true;
 }
 
@@ -503,22 +503,6 @@ mojom::SerialConnectionInfoPtr SerialIoHandlerWin::GetPortInfo() const {
   info->stop_bits = StopBitsConstantToEnum(config.StopBits);
   info->cts_flow_control = config.fOutxCtsFlow != 0;
   return info;
-}
-
-bool SerialIoHandlerWin::SetBreak() {
-  if (!SetCommBreak(file().GetPlatformFile())) {
-    VPLOG(1) << "Failed to set break";
-    return false;
-  }
-  return true;
-}
-
-bool SerialIoHandlerWin::ClearBreak() {
-  if (!ClearCommBreak(file().GetPlatformFile())) {
-    VPLOG(1) << "Failed to clear break";
-    return false;
-  }
-  return true;
 }
 
 }  // namespace device

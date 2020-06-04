@@ -18,7 +18,7 @@
 #include "chrome/browser/task_manager/sampling/shared_sampler.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "gpu/ipc/common/memory_stats.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +30,6 @@ class FakeTask : public Task {
  public:
   FakeTask(base::ProcessId process_id, Type type, bool is_running_in_vm)
       : Task(base::string16(),
-             "FakeTask",
              nullptr,
              base::kNullProcessHandle,
              process_id),
@@ -59,8 +58,8 @@ class FakeTask : public Task {
 class TaskGroupTest : public testing::Test {
  public:
   TaskGroupTest()
-      : io_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
-            {content::BrowserThread::IO})),
+      : io_task_runner_(
+            base::CreateSingleThreadTaskRunner({content::BrowserThread::IO})),
         run_loop_(std::make_unique<base::RunLoop>()) {}
 
  protected:
@@ -83,7 +82,7 @@ class TaskGroupTest : public testing::Test {
     task_group_->AddTask(fake_task_.get());
   }
 
-  content::TestBrowserThreadBundle browser_threads_;
+  content::BrowserTaskEnvironment task_environment_;
   scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
   std::unique_ptr<base::RunLoop> run_loop_;
   std::unique_ptr<TaskGroup> task_group_;

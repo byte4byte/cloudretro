@@ -4,7 +4,7 @@
 
 package org.chromium.content.browser.remoteobjects;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.chromium.blink.mojom.RemoteInvocationArgument;
 import org.chromium.blink.mojom.RemoteInvocationError;
@@ -400,6 +400,8 @@ class RemoteObjectImpl implements RemoteObject {
             } else {
                 resultValue.setStringValue(javaStringToMojoString((String) result));
             }
+        } else if (result == null) {
+            resultValue.setSingletonValue(SingletonJavaScriptValue.NULL);
         } else {
             int objectId = objectIdAllocator.getObjectId(result);
             resultValue.setObjectId(objectId);

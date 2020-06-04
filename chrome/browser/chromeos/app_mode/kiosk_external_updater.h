@@ -61,12 +61,6 @@ class KioskExternalUpdater : public disks::DiskMountManager::Observer,
       disks::DiskMountManager::MountEvent event,
       MountError error_code,
       const disks::DiskMountManager::MountPointInfo& mount_info) override;
-  void OnFormatEvent(disks::DiskMountManager::FormatEvent event,
-                     FormatError error_code,
-                     const std::string& device_path) override;
-  void OnRenameEvent(disks::DiskMountManager::RenameEvent event,
-                     RenameError error_code,
-                     const std::string& device_path) override;
 
   // KioskExternalUpdateValidatorDelegate overrides:
   void OnExternalUpdateUnpackSuccess(const std::string& app_id,
@@ -147,7 +141,7 @@ class KioskExternalUpdater : public disks::DiskMountManager::Observer,
 
   std::unique_ptr<KioskExternalUpdateNotification> notification_;
 
-  base::WeakPtrFactory<KioskExternalUpdater> weak_factory_;
+  base::WeakPtrFactory<KioskExternalUpdater> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(KioskExternalUpdater);
 };

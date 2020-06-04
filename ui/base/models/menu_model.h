@@ -5,26 +5,25 @@
 #ifndef UI_BASE_MODELS_MENU_MODEL_H_
 #define UI_BASE_MODELS_MENU_MODEL_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "ui/base/models/menu_model_delegate.h"
 #include "ui/base/models/menu_separator_types.h"
 #include "ui/base/ui_base_export.h"
-#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
 class FontList;
-class Image;
-struct VectorIcon;
 }
 
 namespace ui {
 
 class Accelerator;
 class ButtonMenuItemModel;
+class ImageModel;
 
 // An interface implemented by an object that provides the content of a menu.
-class UI_BASE_EXPORT MenuModel {
+class UI_BASE_EXPORT MenuModel : public base::SupportsWeakPtr<MenuModel> {
  public:
   // The type of item.
   enum ItemType {
@@ -38,6 +37,8 @@ class UI_BASE_EXPORT MenuModel {
     TYPE_HIGHLIGHTED,  // Performs an action when selected, and has a different
                        // colored background. When placed at the bottom, the
                        // background matches the menu's rounded corners.
+    TYPE_TITLE,        // Plain text that does not perform any action when
+                       // selected.
   };
 
   MenuModel();
@@ -64,17 +65,13 @@ class UI_BASE_EXPORT MenuModel {
   // Returns the label of the item at the specified index.
   virtual base::string16 GetLabelAt(int index) const = 0;
 
-  // Returns the sublabel of the item at the specified index. The sublabel
-  // is rendered beneath the label and using the font GetLabelFontAt().
-  virtual base::string16 GetSublabelAt(int index) const;
-
   // Returns the minor text of the item at the specified index. The minor text
   // is rendered to the right of the label and using the font GetLabelFontAt().
   virtual base::string16 GetMinorTextAt(int index) const;
 
   // Returns the minor icon of the item at the specified index. The minor icon
   // is rendered to the left of the minor text.
-  virtual const gfx::VectorIcon* GetMinorIconAt(int index) const;
+  virtual ImageModel GetMinorIconAt(int index) const;
 
   // Returns true if the menu item (label/sublabel/icon) at the specified
   // index can change over the course of the menu's lifetime. If this function
@@ -98,9 +95,9 @@ class UI_BASE_EXPORT MenuModel {
   // index belongs to.
   virtual int GetGroupIdAt(int index) const = 0;
 
-  // Gets the icon for the item at the specified index, returning true if there
-  // is an icon, false otherwise.
-  virtual bool GetIconAt(int index, gfx::Image* icon) = 0;
+  // Gets the icon for the item at the specified index. ImageModel is empty if
+  // there is no icon.
+  virtual ImageModel GetIconAt(int index) const = 0;
 
   // Returns the model for a menu item with a line of buttons at |index|.
   virtual ButtonMenuItemModel* GetButtonMenuItemAt(int index) const = 0;
@@ -135,6 +132,9 @@ class UI_BASE_EXPORT MenuModel {
 
   // Gets the MenuModelDelegate.
   MenuModelDelegate* menu_model_delegate() { return menu_model_delegate_; }
+  const MenuModelDelegate* menu_model_delegate() const {
+    return menu_model_delegate_;
+  }
 
   // Retrieves the model and index that contains a specific command id. Returns
   // true if an item with the specified command id is found. |model| is inout,

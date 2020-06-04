@@ -7,9 +7,10 @@
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_path_override.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_resources.h"

@@ -25,6 +25,8 @@
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "ui/aura/window_occlusion_tracker.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/compositor/layer_observer.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/events/devices/input_device_event_observer.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 
@@ -70,7 +72,8 @@ class ASH_EXPORT TabletModeController
       public WindowTreeHostManager::Observer,
       public SessionObserver,
       public ui::InputDeviceEventObserver,
-      public ui::LayerAnimationObserver {
+      public ui::LayerAnimationObserver,
+      public ui::LayerObserver {
  public:
   // Enable or disable using a screenshot for testing as it makes the
   // initialization flow async, which makes most tests harder to write.
@@ -119,7 +122,11 @@ class ASH_EXPORT TabletModeController
   // TabletMode:
   void AddObserver(TabletModeObserver* observer) override;
   void RemoveObserver(TabletModeObserver* observer) override;
+  // We are considered in tablet mode when |tablet_mode_window_manager_| is
+  // about to be initialized. When it is about to be shutdown, we are considered
+  // out of tablet mode.
   bool InTabletMode() const override;
+  void ForceUiTabletModeState(base::Optional<bool> enabled) override;
   void SetEnabledForTest(bool enabled) override;
 
   // ShellObserver:
@@ -153,6 +160,9 @@ class ASH_EXPORT TabletModeController
   void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override;
   void OnLayerAnimationScheduled(ui::LayerAnimationSequence* sequence) override;
 
+  // ui::LayerObserver:
+  void LayerDestroyed(ui::Layer* layer) override;
+
   void increment_app_window_drag_count() { ++app_window_drag_count_; }
   void increment_app_window_drag_in_splitview_count() {
     ++app_window_drag_in_splitview_count_;
@@ -160,6 +170,10 @@ class ASH_EXPORT TabletModeController
   void increment_tab_drag_count() { ++tab_drag_count_; }
   void increment_tab_drag_in_splitview_count() {
     ++tab_drag_in_splitview_count_;
+  }
+
+  bool is_in_tablet_physical_state() const {
+    return is_in_tablet_physical_state_;
   }
 
   // Enable/disable the tablet mode for development. Please see cc file
@@ -175,9 +189,10 @@ class ASH_EXPORT TabletModeController
   struct TabletModeBehavior {
     bool use_sensor = true;
     bool observe_display_events = true;
-    bool observe_external_pointer_device_events = true;
+    bool observe_pointer_device_events = true;
     bool block_internal_input_device = false;
     bool always_show_overview_button = false;
+    bool force_physical_tablet_state = false;
   };
 
  private:
@@ -201,10 +216,6 @@ class ASH_EXPORT TabletModeController
     kExitingTabletMode,
   };
 
-  // TODO(jonross): Merge this with AttemptEnterTabletMode. Currently these are
-  // separate for several reasons: there is no internal display when running
-  // unittests; the event blocker prevents keyboard input when running ChromeOS
-  // on linux. http://crbug.com/362881
   // Turn the always tablet mode window manager on or off.
   void SetTabletModeEnabledInternal(bool should_enable);
 
@@ -226,14 +237,6 @@ class ASH_EXPORT TabletModeController
   // configuration. If this returns false, it should never be the case that
   // tablet mode becomes enabled.
   bool CanEnterTabletMode();
-
-  // Attempts to enter tablet mode and updates the internal keyboard and
-  // touchpad.
-  void AttemptEnterTabletMode();
-
-  // Attempts to exit tablet mode and updates the internal keyboard and
-  // touchpad.
-  void AttemptLeaveTabletMode();
 
   // Record UMA stats tracking TabletMode usage. If |type| is
   // TABLET_MODE_INTERVAL_INACTIVE, then record that TabletMode has been
@@ -266,11 +269,6 @@ class ASH_EXPORT TabletModeController
   // because of an external attached mouse).
   void UpdateInternalInputDevicesEventBlocker();
 
-  // Returns true if the current lid angle can be detected and is in tablet mode
-  // angle range. If EC can handle lid angle calc, lid angle is unavailable to
-  // browser.
-  bool LidAngleInTabletModeRange();
-
   // Suspends |occlusion_tracker_pauser_| for the duration of
   // kOcclusionTrackTimeout.
   void SuspendOcclusionTracker();
@@ -292,11 +290,35 @@ class ASH_EXPORT TabletModeController
   void TakeScreenshot(aura::Window* top_window);
 
   // Called when a screenshot is taken. Creates |screenshot_widget_| which holds
-  // the screenshot results and stacks it under top window.
+  // the screenshot results and stacks it under top window. |root_window|
+  // specifies on which root window the screen shot is taken.
   void OnScreenshotTaken(base::OnceClosure on_screenshot_taken,
+                         aura::Window* root_window,
                          std::unique_ptr<viz::CopyOutputResult> copy_result);
 
-  // The maximized window manager (if enabled).
+  // Calculates whether the device is currently in a physical tablet state,
+  // using the most recent seen device events such as lid angle changes.
+  bool CalculateIsInTabletPhysicalState() const;
+
+  // Returns whether the UI should be in tablet mode based on the current
+  // physical tablet state, the availability of external input devices, and
+  // whether the UI is forced in a particular mode via command-line flags.
+  bool ShouldUiBeInTabletMode() const;
+
+  // Sets |is_in_tablet_physical_state_| to |new_state| and potentially updating
+  // the UI tablet mode state if needed. Returns true if the
+  // |is_in_tablet_physical_state_| has been changed.
+  bool SetIsInTabletPhysicalState(bool new_state);
+
+  // Updates the UI by either entering or exiting UI tablet mode if necessary
+  // based on the current state. Returns true if there's a change in the UI
+  // tablet mode state, false otherwise.
+  bool UpdateUiTabletState();
+
+  // Update the shelf's visibility before/after taking screenshot.
+  void UpdateShelfVisibilityForScreenshot(aura::Window* window, bool visible);
+
+  // The tablet window manager (if enabled).
   std::unique_ptr<TabletModeWindowManager> tablet_mode_window_manager_;
 
   // A helper class which when instantiated will block native events from the
@@ -306,6 +328,11 @@ class ASH_EXPORT TabletModeController
   // Whether we have ever seen accelerometer data. When ChromeOS EC lid angle is
   // present, convertible device cannot see accelerometer data.
   bool have_seen_accelerometer_data_ = false;
+
+  // True if ChromeOS EC lid angle driver is present. In this case Chrome does
+  // not calculate lid angle itself, but will reply on the tablet-mode flag that
+  // EC sends to decide if the device should in tablet mode.
+  bool ec_lid_angle_driver_present_ = false;
 
   // Whether the lid angle can be detected by browser. If it's true, the device
   // is a convertible device (both screen acclerometer and keyboard acclerometer
@@ -332,11 +359,24 @@ class ASH_EXPORT TabletModeController
   // Source for the current time in base::TimeTicks.
   const base::TickClock* tick_clock_;
 
+  // The state in which the UI mode is forced in via command-line flags, such as
+  // `--force-tablet-mode=touch_view` or `--force-tablet-mode=clamshell`.
+  UiMode forced_ui_mode_ = UiMode::kNone;
+
+  // True if the device is physically in a tablet state regardless of the UI
+  // tablet mode state. The physical tablet state only changes based on device
+  // events such as lid angle changes, or device getting detached from its base.
+  bool is_in_tablet_physical_state_ = false;
+
   // Set when tablet mode switch is on. This is used to force tablet mode.
   bool tablet_mode_switch_is_on_ = false;
 
   // Tracks when the lid is closed. Used to prevent entering tablet mode.
   bool lid_is_closed_ = false;
+
+  // True if |lid_angle_| is in the stable range of angle values.
+  // (See kMinStableAngle and kMaxStableAngle).
+  bool lid_angle_is_stable_ = false;
 
   // Last computed lid angle.
   double lid_angle_ = 0.0f;
@@ -344,6 +384,16 @@ class ASH_EXPORT TabletModeController
   // Tracks if the device has an external pointing device. The device will
   // not enter tablet mode if this is true.
   bool has_external_pointing_device_ = false;
+
+  // Tracks if the device has an internal pointing device. The device will not
+  // enter clamshell mode if both |has_internal_pointing_device_| and
+  // |has_external_pointing_device_| are false only for tablet-capable devices.
+  bool has_internal_pointing_device_ = true;
+
+  // Set to true temporarily when the tablet mode is enabled/disabled via the
+  // developer's keyboard shortcut in order to update the visibility of the
+  // overview tray button, even though internal events are not blocked.
+  bool force_notify_events_blocking_changed_ = false;
 
   // Counts the app window drag from top in tablet mode.
   int app_window_drag_count_ = 0;
@@ -388,6 +438,9 @@ class ASH_EXPORT TabletModeController
   // transition. It's observed to take an action after its animation ends.
   ui::Layer* animating_layer_ = nullptr;
 
+  // The layer that holds the clone of shelf layer while taking a screenshot.
+  std::unique_ptr<ui::LayerTreeOwner> phantom_shelf_layer_;
+
   std::unique_ptr<TabletModeTransitionFpsCounter> fps_counter_;
 
   base::CancelableOnceCallback<void(std::unique_ptr<viz::CopyOutputResult>)>
@@ -399,6 +452,8 @@ class ASH_EXPORT TabletModeController
   // everything in the screen rotation container except the top window. It helps
   // with animation performance because it fully occludes all windows except the
   // animating window for the duration of the animation.
+  // TODO(sammiequon): See if we can move screenshot and tablet mode transition
+  // animation related code into a separate class/file.
   std::unique_ptr<ui::Layer> screenshot_layer_;
 
   base::ObserverList<TabletModeObserver>::Unchecked tablet_mode_observers_;

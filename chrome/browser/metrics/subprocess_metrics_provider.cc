@@ -18,9 +18,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_process_host.h"
 
 namespace {
 
@@ -30,13 +27,10 @@ SubprocessMetricsProvider* g_subprocess_metrics_provider_for_testing;
 
 }  // namespace
 
-SubprocessMetricsProvider::SubprocessMetricsProvider()
-    : scoped_observer_(this) {
+SubprocessMetricsProvider::SubprocessMetricsProvider() {
   base::StatisticsRecorder::RegisterHistogramProvider(
       weak_ptr_factory_.GetWeakPtr());
   content::BrowserChildProcessObserver::Add(this);
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-                 content::NotificationService::AllBrowserContextsAndSources());
   g_subprocess_metrics_provider_for_testing = this;
 }
 
@@ -112,10 +106,6 @@ void SubprocessMetricsProvider::MergeHistogramDeltas() {
     MergeHistogramDeltasFromAllocator(iter.GetCurrentKey(),
                                       iter.GetCurrentValue());
   }
-
-  UMA_HISTOGRAM_COUNTS_100(
-      "UMA.SubprocessMetricsProvider.SubprocessCount",
-      allocators_by_id_.size());
 }
 
 void SubprocessMetricsProvider::BrowserChildProcessHostConnected(
@@ -126,13 +116,13 @@ void SubprocessMetricsProvider::BrowserChildProcessHostConnected(
   // managing the child in order to extract the metrics memory from it.
   // Unfortunately, the required lookup can only be performed on the IO
   // thread so do the necessary dance.
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE, {content::BrowserThread::IO},
-      base::Bind(
+      base::BindOnce(
           &SubprocessMetricsProvider::GetSubprocessHistogramAllocatorOnIOThread,
           data.id),
-      base::Bind(&SubprocessMetricsProvider::RegisterSubprocessAllocator,
-                 weak_ptr_factory_.GetWeakPtr(), data.id));
+      base::BindOnce(&SubprocessMetricsProvider::RegisterSubprocessAllocator,
+                     weak_ptr_factory_.GetWeakPtr(), data.id));
 }
 
 void SubprocessMetricsProvider::BrowserChildProcessHostDisconnected(
@@ -155,16 +145,8 @@ void SubprocessMetricsProvider::BrowserChildProcessKilled(
   DeregisterSubprocessAllocator(data.id);
 }
 
-void SubprocessMetricsProvider::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK_EQ(content::NOTIFICATION_RENDERER_PROCESS_CREATED, type);
-
-  content::RenderProcessHost* host =
-      content::Source<content::RenderProcessHost>(source).ptr();
-
+void SubprocessMetricsProvider::OnRenderProcessHostCreated(
+    content::RenderProcessHost* host) {
   // Sometimes, the same host will cause multiple notifications in tests so
   // could possibly do the same in a release build.
   if (!scoped_observer_.IsObserving(host))

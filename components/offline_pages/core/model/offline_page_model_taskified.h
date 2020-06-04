@@ -39,7 +39,7 @@ struct ClientId;
 struct OfflinePageItem;
 
 class ArchiveManager;
-class ClientPolicyController;
+class OfflinePageArchivePublisher;
 class OfflinePageArchiver;
 class OfflinePageMetadataStore;
 
@@ -102,10 +102,9 @@ class OfflinePageModelTaskified : public OfflinePageModel,
   void GetVisualsAvailability(
       int64_t offline_id,
       base::OnceCallback<void(VisualsAvailability)> callback) override;
-  const base::FilePath& GetInternalArchiveDirectory(
+  const base::FilePath& GetArchiveDirectory(
       const std::string& name_space) const override;
   bool IsArchiveInInternalDir(const base::FilePath& file_path) const override;
-  ClientPolicyController* GetPolicyController() override;
   OfflineEventLogger* GetLogger() override;
   void PublishInternalArchive(
       const OfflinePageItem& offline_page,
@@ -199,9 +198,6 @@ class OfflinePageModelTaskified : public OfflinePageModel,
 
   // Used for moving archives into public storage.
   std::unique_ptr<OfflinePageArchivePublisher> archive_publisher_;
-
-  // Controller of the client policies.
-  std::unique_ptr<ClientPolicyController> policy_controller_;
 
   // The observers.
   base::ObserverList<Observer>::Unchecked observers_;

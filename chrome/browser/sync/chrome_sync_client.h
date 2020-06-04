@@ -13,6 +13,7 @@
 #include "chrome/browser/sync/glue/extensions_activity_monitor.h"
 #include "components/browser_sync/browser_sync_client.h"
 #include "components/sync/model/model_type_store_service.h"
+#include "extensions/buildflags/buildflags.h"
 
 class Profile;
 
@@ -25,6 +26,7 @@ class PasswordStore;
 }
 
 namespace syncer {
+class ModelTypeController;
 class SyncService;
 }
 
@@ -39,6 +41,7 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
 
   // BrowserSyncClient implementation.
   PrefService* GetPrefService() override;
+  signin::IdentityManager* GetIdentityManager() override;
   base::FilePath GetLocalSyncBackendFolder() override;
   syncer::ModelTypeStoreService* GetModelTypeStoreService() override;
   syncer::DeviceInfoSyncService* GetDeviceInfoSyncService() override;
@@ -51,7 +54,7 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
   base::Closure GetPasswordStateChangedCallback() override;
   syncer::DataTypeController::TypeVector CreateDataTypeControllers(
       syncer::SyncService* sync_service) override;
-  autofill::PersonalDataManager* GetPersonalDataManager() override;
+  syncer::TrustedVaultClient* GetTrustedVaultClient() override;
   invalidation::InvalidationService* GetInvalidationService() override;
   BookmarkUndoService* GetBookmarkUndoService() override;
   scoped_refptr<syncer::ExtensionsActivity> GetExtensionsActivity() override;
@@ -65,6 +68,20 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
   syncer::SyncTypePreferenceProvider* GetPreferenceProvider() override;
 
  private:
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  // Creates the ModelTypeController for syncer::APPS.
+  std::unique_ptr<syncer::ModelTypeController> CreateAppsModelTypeController(
+      syncer::SyncService* sync_service);
+
+  // Creates the ModelTypeController for syncer::APP_SETTINGS.
+  std::unique_ptr<syncer::ModelTypeController>
+  CreateAppSettingsModelTypeController(syncer::SyncService* sync_service);
+
+  // Creates the ModelTypeController for syncer::WEB_APPS.
+  std::unique_ptr<syncer::ModelTypeController> CreateWebAppsModelTypeController(
+      syncer::SyncService* sync_service);
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
   Profile* const profile_;
 
   // The sync api component factory in use by this client.
@@ -73,11 +90,14 @@ class ChromeSyncClient : public browser_sync::BrowserSyncClient {
   std::unique_ptr<browser_sync::ProfileSyncComponentsFactoryImpl>
       component_factory_;
 
+  std::unique_ptr<syncer::TrustedVaultClient> trusted_vault_client_;
+
   // Members that must be fetched on the UI thread but accessed on their
   // respective backend threads.
   scoped_refptr<autofill::AutofillWebDataService> profile_web_data_service_;
   scoped_refptr<autofill::AutofillWebDataService> account_web_data_service_;
-  scoped_refptr<password_manager::PasswordStore> password_store_;
+  scoped_refptr<password_manager::PasswordStore> profile_password_store_;
+  scoped_refptr<password_manager::PasswordStore> account_password_store_;
 
   // The task runner for the |web_data_service_|, if any.
   scoped_refptr<base::SequencedTaskRunner> web_data_service_thread_;

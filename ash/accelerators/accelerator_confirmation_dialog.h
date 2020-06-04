@@ -5,7 +5,7 @@
 #ifndef ASH_ACCELERATORS_ACCELERATOR_CONFIRMATION_DIALOG_H_
 #define ASH_ACCELERATORS_ACCELERATOR_CONFIRMATION_DIALOG_H_
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
@@ -19,22 +19,20 @@ class AcceleratorConfirmationDialog : public views::DialogDelegateView {
  public:
   AcceleratorConfirmationDialog(int window_title_text_id,
                                 int dialog_text_id,
-                                base::OnceClosure on_accept_callback);
+                                base::OnceClosure on_accept_callback,
+                                base::OnceClosure on_cancel_callback);
   ~AcceleratorConfirmationDialog() override;
 
   // views::DialogDelegateView:
-  bool Accept() override;
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
 
   base::WeakPtr<AcceleratorConfirmationDialog> GetWeakPtr();
 
  private:
   const base::string16 window_title_;
-  base::OnceClosure on_accept_callback_;
 
-  base::WeakPtrFactory<AcceleratorConfirmationDialog> weak_ptr_factory_;
+  base::WeakPtrFactory<AcceleratorConfirmationDialog> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratorConfirmationDialog);
 };

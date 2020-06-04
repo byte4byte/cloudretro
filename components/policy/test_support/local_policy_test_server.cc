@@ -15,9 +15,11 @@
 #include "base/base_paths.h"
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
@@ -131,7 +133,7 @@ bool LocalPolicyTestServer::RegisterClient(
   client_dict.SetKey(kClientStateKeyDeviceToken, base::Value(dm_token));
   base::Value state_keys_value(base::Value::Type::LIST);
   for (const auto& key : state_keys) {
-    state_keys_value.GetList().push_back(base::Value(
+    state_keys_value.Append(base::Value(
         base::ToLowerASCII(base::HexEncode(key.data(), key.size()))));
   }
   client_dict.SetKey(kClientStateKeyStateKeys, std::move(state_keys_value));
@@ -142,15 +144,13 @@ bool LocalPolicyTestServer::RegisterClient(
 
   // Allow all policy types for now.
   base::Value types(base::Value::Type::LIST);
-  types.GetList().emplace_back(dm_protocol::kChromeDevicePolicyType);
-  types.GetList().emplace_back(dm_protocol::kChromeUserPolicyType);
-  types.GetList().emplace_back(dm_protocol::kChromePublicAccountPolicyType);
-  types.GetList().emplace_back(dm_protocol::kChromeExtensionPolicyType);
-  types.GetList().emplace_back(dm_protocol::kChromeSigninExtensionPolicyType);
-  types.GetList().emplace_back(
-      dm_protocol::kChromeMachineLevelUserCloudPolicyType);
-  types.GetList().emplace_back(
-      dm_protocol::kChromeMachineLevelExtensionCloudPolicyType);
+  types.Append(dm_protocol::kChromeDevicePolicyType);
+  types.Append(dm_protocol::kChromeUserPolicyType);
+  types.Append(dm_protocol::kChromePublicAccountPolicyType);
+  types.Append(dm_protocol::kChromeExtensionPolicyType);
+  types.Append(dm_protocol::kChromeSigninExtensionPolicyType);
+  types.Append(dm_protocol::kChromeMachineLevelUserCloudPolicyType);
+  types.Append(dm_protocol::kChromeMachineLevelExtensionCloudPolicyType);
 
   client_dict.SetKey(kClientStateKeyAllowedPolicyTypes, std::move(types));
   clients_.SetKey(dm_token, std::move(client_dict));

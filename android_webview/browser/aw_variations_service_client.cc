@@ -29,9 +29,9 @@ AwVariationsServiceClient::AwVariationsServiceClient() {}
 
 AwVariationsServiceClient::~AwVariationsServiceClient() {}
 
-base::Callback<base::Version(void)>
+AwVariationsServiceClient::VersionCallback
 AwVariationsServiceClient::GetVersionForSimulationCallback() {
-  return base::BindRepeating(&GetVersionForSimulation);
+  return base::BindOnce(&GetVersionForSimulation);
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
@@ -50,6 +50,10 @@ Channel AwVariationsServiceClient::GetChannel() {
 
 bool AwVariationsServiceClient::OverridesRestrictParameter(
     std::string* parameter) {
+  return false;
+}
+
+bool AwVariationsServiceClient::IsEnterprise() {
   return false;
 }
 

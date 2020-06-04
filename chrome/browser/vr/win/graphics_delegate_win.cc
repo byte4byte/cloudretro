@@ -7,9 +7,9 @@
 #include "base/numerics/math_constants.h"
 #include "content/public/browser/gpu_utils.h"
 #include "content/public/common/gpu_stream_constants.h"
+#include "device/vr/public/mojom/vr_service.mojom.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
-#include "mojo/public/cpp/system/platform_handle.h"
 
 namespace vr {
 
@@ -118,15 +118,12 @@ void GraphicsDelegateWin::PostRender() {
   ClearContext();
 }
 
-mojo::ScopedHandle GraphicsDelegateWin::GetTexture() {
-  // Hand out the gpu memory buffer.
-  mojo::ScopedHandle handle;
-  if (!gpu_memory_buffer_) {
-    return handle;
-  }
+mojo::PlatformHandle GraphicsDelegateWin::GetTexture() {
+  if (!gpu_memory_buffer_)
+    return {};
 
   gfx::GpuMemoryBufferHandle gpu_handle = gpu_memory_buffer_->CloneHandle();
-  return mojo::WrapPlatformFile(gpu_handle.dxgi_handle.GetHandle());
+  return mojo::PlatformHandle(std::move(gpu_handle.dxgi_handle));
 }
 
 gfx::RectF GraphicsDelegateWin::GetLeft() {
@@ -216,13 +213,12 @@ CameraModel CameraModelViewProjFromVREyeParameters(
     const device::mojom::VREyeParametersPtr& eye_params,
     gfx::Transform head_from_world) {
   CameraModel model = {};
+
+  DCHECK(eye_params->head_from_eye.IsInvertible());
   gfx::Transform eye_from_head;
-  // We have offsets of the eyes in head space, so invert the translation to
-  // calculate the transform from head space to eye space.  For example,
-  // (0, 0, 0) in head space is (-offset.x, -offset.y, -offset.z) in eye space,
-  // and (offset.x, offset.y, offset.z) in head space is (0, 0, 0) in eye space.
-  eye_from_head.Translate3d(-eye_params->offset);
-  model.view_matrix = eye_from_head * head_from_world;
+  if (eye_params->head_from_eye.GetInverse(&eye_from_head)) {
+    model.view_matrix = eye_from_head * head_from_world;
+  }
 
   float up_tan =
       tanf(eye_params->field_of_view->up_degrees * base::kPiFloat / 180.0);

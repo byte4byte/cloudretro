@@ -13,9 +13,8 @@
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/unguessable_token.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote_set.h"
 #include "services/media_session/public/cpp/media_metadata.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
@@ -46,9 +45,12 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
   void MediaSessionImagesChanged(
       const base::flat_map<mojom::MediaSessionImageType,
                            std::vector<MediaImage>>& images) override;
+  void MediaSessionPositionChanged(
+      const base::Optional<media_session::MediaPosition>& position) override;
 
   void WaitForState(mojom::MediaSessionInfo::SessionState wanted_state);
   void WaitForPlaybackState(mojom::MediaPlaybackState wanted_state);
+  void WaitForAudioVideoState(mojom::MediaAudioVideoState wanted_state);
   void WaitForControllable(bool is_controllable);
 
   void WaitForEmptyMetadata();
@@ -60,6 +62,9 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
 
   void WaitForExpectedImagesOfType(mojom::MediaSessionImageType type,
                                    const std::vector<MediaImage>& images);
+
+  void WaitForEmptyPosition();
+  void WaitForExpectedPosition(const MediaPosition& position);
 
   const mojom::MediaSessionInfoPtr& session_info() const {
     return session_info_;
@@ -74,6 +79,10 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
     return *session_actions_;
   }
 
+  const base::Optional<base::Optional<MediaPosition>>& session_position() {
+    return session_position_;
+  }
+
  private:
   void StartWaiting();
 
@@ -83,6 +92,8 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
   base::Optional<
       base::flat_map<mojom::MediaSessionImageType, std::vector<MediaImage>>>
       session_images_;
+  base::Optional<base::Optional<MediaPosition>> session_position_;
+  bool waiting_for_empty_position_ = false;
 
   base::Optional<MediaMetadata> expected_metadata_;
   base::Optional<std::set<mojom::MediaSessionAction>> expected_actions_;
@@ -90,10 +101,12 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP)
   base::Optional<
       std::pair<mojom::MediaSessionImageType, std::vector<MediaImage>>>
       expected_images_of_type_;
+  base::Optional<MediaPosition> expected_position_;
   bool waiting_for_empty_metadata_ = false;
 
   base::Optional<mojom::MediaSessionInfo::SessionState> wanted_state_;
   base::Optional<mojom::MediaPlaybackState> wanted_playback_state_;
+  base::Optional<mojom::MediaAudioVideoState> wanted_audio_video_state_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
   mojo::Receiver<mojom::MediaSessionObserver> receiver_{this};
@@ -129,6 +142,8 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
                            GetMediaImageBitmapCallback callback) override;
   void SeekTo(base::TimeDelta seek_time) override;
   void ScrubTo(base::TimeDelta scrub_to) override;
+  void EnterPictureInPicture() override;
+  void ExitPictureInPicture() override;
 
   void SetIsControllable(bool value);
   void SetPreferStop(bool value) { prefer_stop_ = value; }
@@ -136,11 +151,12 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   void AbandonAudioFocusFromClient();
 
   base::UnguessableToken RequestAudioFocusFromService(
-      mojom::AudioFocusManagerPtr& service,
+      mojo::Remote<mojom::AudioFocusManager>& service,
       mojom::AudioFocusType audio_foucs_type);
 
-  base::UnguessableToken RequestGroupedAudioFocusFromService(
-      mojom::AudioFocusManagerPtr& service,
+  bool RequestGroupedAudioFocusFromService(
+      const base::UnguessableToken& request_id,
+      mojo::Remote<mojom::AudioFocusManager>& service,
       mojom::AudioFocusType audio_focus_type,
       const base::UnguessableToken& group_id);
 
@@ -152,6 +168,7 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   void FlushForTesting();
 
   void SimulateMetadataChanged(const base::Optional<MediaMetadata>& metadata);
+  void SimulatePositionChanged(const base::Optional<MediaPosition>& position);
 
   void ClearAllImages();
   void SetImagesOfType(mojom::MediaSessionImageType type,
@@ -179,7 +196,7 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
 
   void RequestAudioFocusFromClient(mojom::AudioFocusType audio_focus_type);
 
-  mojom::AudioFocusRequestClientPtr afr_client_;
+  mojo::Remote<mojom::AudioFocusRequestClient> afr_client_;
 
   base::UnguessableToken request_id_;
 
@@ -203,7 +220,7 @@ class COMPONENT_EXPORT(MEDIA_SESSION_TEST_SUPPORT_CPP) MockMediaSession
   base::flat_map<mojom::MediaSessionImageType, std::vector<MediaImage>> images_;
   GURL last_image_src_;
 
-  mojo::BindingSet<mojom::MediaSession> bindings_;
+  mojo::ReceiverSet<mojom::MediaSession> receivers_;
 
   mojo::RemoteSet<mojom::MediaSessionObserver> observers_;
 

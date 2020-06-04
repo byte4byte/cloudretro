@@ -18,7 +18,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content_public.browser.WebContents;
@@ -56,7 +56,7 @@ public class PageLoadMetricsTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -79,10 +79,13 @@ public class PageLoadMetricsTest {
         private final CountDownLatch mFirstContentfulPaintLatch = new CountDownLatch(1);
         private final CountDownLatch mLoadEventStartLatch = new CountDownLatch(1);
         private long mNavigationId = NO_NAVIGATION_ID;
+        private Boolean mIsFirstNavigationInWebContents;
 
         @Override
-        public void onNewNavigation(WebContents webContents, long navigationId) {
+        public void onNewNavigation(WebContents webContents, long navigationId,
+                boolean isFirstNavigationInWebContents) {
             if (mNavigationId == NO_NAVIGATION_ID) mNavigationId = navigationId;
+            mIsFirstNavigationInWebContents = isFirstNavigationInWebContents;
         }
 
         @Override
@@ -123,6 +126,10 @@ public class PageLoadMetricsTest {
         public long getNavigationId() {
             return mNavigationId;
         }
+
+        public Boolean getIsFirstNavigationInWebContents() {
+            return mIsFirstNavigationInWebContents;
+        }
     }
 
     @Test
@@ -135,8 +142,14 @@ public class PageLoadMetricsTest {
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.addObserver(metricsObserver));
 
+        Assert.assertNull(metricsObserver.getIsFirstNavigationInWebContents());
+
         mActivityTestRule.loadUrl(mTestPage);
+        Assert.assertTrue(metricsObserver.getIsFirstNavigationInWebContents().booleanValue());
         assertMetricsEmitted(metricsObserver);
+
+        mActivityTestRule.loadUrl(mTestPage);
+        Assert.assertFalse(metricsObserver.getIsFirstNavigationInWebContents().booleanValue());
 
         TestThreadUtils.runOnUiThreadBlockingNoException(
                 () -> PageLoadMetrics.removeObserver(metricsObserver));
@@ -144,6 +157,7 @@ public class PageLoadMetricsTest {
 
     @Test
     @SmallTest
+    @FlakyTest(message = "crbug.com/986025")
     public void testPageLoadMetricNavigationIdSetCorrectly() throws InterruptedException {
         PageLoadMetricsTestObserver metricsObserver = new PageLoadMetricsTestObserver();
         TestThreadUtils.runOnUiThreadBlockingNoException(

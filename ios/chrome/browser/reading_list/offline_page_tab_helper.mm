@@ -12,6 +12,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/timer/timer.h"
 #include "components/reading_list/core/offline_url_utils.h"
 #include "components/reading_list/core/reading_list_entry.h"
@@ -21,10 +22,10 @@
 #include "ios/chrome/browser/reading_list/offline_url_utils.h"
 #include "ios/chrome/browser/reading_list/reading_list_download_service.h"
 #include "ios/chrome/browser/reading_list/reading_list_download_service_factory.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/navigation_context.h"
 #include "ui/base/page_transition_types.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -275,15 +276,15 @@ void OfflinePageTabHelper::PresentOfflinePageForOnlineUrl(const GURL& url) {
     web_state_->GetNavigationManager()->LoadURLWithParams(params);
     return;
   }
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
+  ChromeBrowserState* browser_state =
+      ChromeBrowserState::FromBrowserState(web_state_->GetBrowserState());
   base::FilePath offline_root =
       ReadingListDownloadServiceFactory::GetForBrowserState(browser_state)
           ->OfflineRoot()
           .DirName();
 
   base::FilePath offline_path = entry->DistilledPath();
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},

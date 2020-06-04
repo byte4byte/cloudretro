@@ -7,9 +7,10 @@
 #include <memory>
 #include <string>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
+#include "components/signin/internal/identity_manager/fake_profile_oauth2_token_service_delegate.h"
 #include "components/signin/internal/identity_manager/primary_account_manager.h"
 #include "components/signin/internal/identity_manager/primary_account_policy_manager_impl.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
@@ -17,15 +18,15 @@
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/base/test_signin_client.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "google_apis/gaia/fake_oauth2_token_service_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class PrimaryAccountPolicyManagerImplTest : public testing::Test {
  public:
   PrimaryAccountPolicyManagerImplTest()
       : test_signin_client_(&user_prefs_),
-        token_service_(&user_prefs_,
-                       std::make_unique<FakeOAuth2TokenServiceDelegate>()),
+        token_service_(
+            &user_prefs_,
+            std::make_unique<FakeProfileOAuth2TokenServiceDelegate>()),
         primary_account_manager_(&test_signin_client_,
                                  &token_service_,
                                  &account_tracker_,
@@ -42,7 +43,7 @@ class PrimaryAccountPolicyManagerImplTest : public testing::Test {
     test_signin_client_.Shutdown();
   }
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   sync_preferences::TestingPrefServiceSyncable user_prefs_;
   TestingPrefServiceSimple local_state_;
   TestSigninClient test_signin_client_;

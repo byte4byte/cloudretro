@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "chrome/browser/ui/views/frame/app_menu_button.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/app_menu.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
@@ -29,6 +30,7 @@ ExtensionToolbarMenuView::ExtensionToolbarMenuView(
     Browser* browser,
     views::MenuItemView* menu_item)
     : browser_(browser), menu_item_(menu_item) {
+  CHECK(!base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu));
   auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
   auto* toolbar_button_provider = browser_view->toolbar_button_provider();
   auto* app_menu_button = toolbar_button_provider->GetAppMenuButton();
@@ -36,7 +38,7 @@ ExtensionToolbarMenuView::ExtensionToolbarMenuView(
 
   // Use a transparent background so that the menu's background shows through.
   // None of the children use layers, so this should be ok.
-  SetBackgroundColor(SK_ColorTRANSPARENT);
+  SetBackgroundColor(base::nullopt);
   BrowserActionsContainer* main =
       toolbar_button_provider->GetBrowserActionsContainer();
   auto container = std::make_unique<BrowserActionsContainer>(browser_, main,

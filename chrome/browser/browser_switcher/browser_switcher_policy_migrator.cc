@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
@@ -17,8 +18,6 @@
 namespace browser_switcher {
 
 namespace {
-
-const char kLBSExtensionId[] = "heildphpnddilhkemkielfhnkaagiabh";
 
 void SecondsToMilliseconds(base::Value* val) {
   const int ms_per_second = 1000;
@@ -38,25 +37,29 @@ void SecondsToMilliseconds(base::Value* val) {
 void StringToList(base::Value* val) {
   std::string str = val->GetString();
   *val = base::Value(base::Value::Type::LIST);
-  val->GetList().push_back(base::Value(std::move(str)));
+  val->Append(base::Value(std::move(str)));
 }
 
 }  // namespace
+
+const char kLBSExtensionId[] = "heildphpnddilhkemkielfhnkaagiabh";
 
 BrowserSwitcherPolicyMigrator::BrowserSwitcherPolicyMigrator() = default;
 BrowserSwitcherPolicyMigrator::~BrowserSwitcherPolicyMigrator() = default;
 
 void BrowserSwitcherPolicyMigrator::Migrate(policy::PolicyBundle* bundle) {
+  VLOG(3) << "Migrating Legacy Browser Support extension policies...";
+
   policy::PolicyMap& extension_map = bundle->Get(policy::PolicyNamespace(
       policy::POLICY_DOMAIN_EXTENSIONS, kLBSExtensionId));
   policy::PolicyMap& chrome_map =
       bundle->Get(policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, ""));
-  if (extension_map.empty())
-    return;
 
   const auto* entry = chrome_map.Get("BrowserSwitcherEnabled");
-  if (!entry || !entry->value || !entry->value->GetBool())
+  if (!entry || !entry->value || !entry->value->GetBool()) {
+    VLOG(3) << "BrowserSwitcherEnabled is false, aborting policy migration.";
     return;
+  }
   extension_map.Set("browser_switcher_enabled", entry->DeepCopy());
 
   using Migration = policy::ExtensionPolicyMigrator::Migration;

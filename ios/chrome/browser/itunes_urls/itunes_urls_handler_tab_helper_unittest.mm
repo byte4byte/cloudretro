@@ -10,9 +10,9 @@
 #import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/store_kit/store_kit_tab_helper.h"
 #import "ios/chrome/test/fakes/fake_store_kit_launcher.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
-#import "ios/web/public/web_state/web_state_policy_decider.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 
@@ -45,14 +45,16 @@ class ITunesUrlsHandlerTabHelperTest : public PlatformTest {
     web::WebStatePolicyDecider::RequestInfo request_info(
         ui::PageTransition::PAGE_TRANSITION_LINK, main_frame,
         /*has_user_gesture=*/false);
-    bool request_allowed = web_state_.ShouldAllowRequest(
-        [NSURLRequest requestWithURL:[NSURL URLWithString:url_string]],
-        request_info);
-    return !request_allowed && (fake_launcher_.launchedProductID != nil ||
-                                fake_launcher_.launchedProductParams != nil);
+    web::WebStatePolicyDecider::PolicyDecision request_policy =
+        web_state_.ShouldAllowRequest(
+            [NSURLRequest requestWithURL:[NSURL URLWithString:url_string]],
+            request_info);
+    return request_policy.ShouldCancelNavigation() &&
+           (fake_launcher_.launchedProductID != nil ||
+            fake_launcher_.launchedProductParams != nil);
   }
 
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   FakeStoreKitLauncher* fake_launcher_;
   web::TestWebState web_state_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
@@ -78,6 +80,10 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, NoHandlingInIframes) {
       @"http://itunes.apple.com/app/bar/id243?at=12312", /*main_frame=*/true));
   EXPECT_FALSE(VerifyStoreKitLaunched(
       @"http://itunes.apple.com/app/bar/id243?at=12312", /*main_frame=*/false));
+  EXPECT_TRUE(VerifyStoreKitLaunched(
+      @"http://apps.apple.com/app/bar/id243?at=12312", /*main_frame=*/true));
+  EXPECT_FALSE(VerifyStoreKitLaunched(
+      @"http://apps.apple.com/app/bar/id243?at=12312", /*main_frame=*/false));
 }
 
 // Verifies that navigating to non iTunes product URLs, or not supported iTunes
@@ -96,10 +102,16 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, NonMatchingUrlsDoesntLaunchStoreKit) {
   EXPECT_FALSE(VerifyStoreKitLaunched(
       @"https://itunes.apple.com/us/tv-show/theshow/id1232",
       /*main_frame=*/true));
-  EXPECT_FALSE(VerifyStoreKitLaunched(
-      @"http://itunes.apple.com/podcast/id12345", /*main_frame=*/true));
+  EXPECT_FALSE(VerifyStoreKitLaunched(@"http://apps.apple.com/podcast/id12345",
+                                      /*main_frame=*/true));
   EXPECT_FALSE(VerifyStoreKitLaunched(
       @"itms-apps://itunes.apple.com/us/app/appname/id123",
+      /*main_frame=*/true));
+  EXPECT_FALSE(VerifyStoreKitLaunched(
+      @"http://test.itunes.apple.com/app/bar/id243?at=12312",
+      /*main_frame=*/true));
+  EXPECT_FALSE(VerifyStoreKitLaunched(
+      @"http://geo.apps.apple.com/app/bar/id243?at=12312",
       /*main_frame=*/true));
   EXPECT_FALSE(VerifyStoreKitLaunched(
       @"http://itunes.apple.com/us/movie/testmovie/id12345",
@@ -113,7 +125,7 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, NonMatchingUrlsDoesntLaunchStoreKit) {
 // with supported media type launches storekit.
 TEST_F(ITunesUrlsHandlerTabHelperTest, MatchingUrlsLaunchesStoreKit) {
   EXPECT_TRUE(VerifyStoreKitLaunched(
-      @"http://itunes.apple.com/us/app/app_name/id123", /*main_frame=*/true));
+      @"http://apps.apple.com/us/app/app_name/id123", /*main_frame=*/true));
   NSString* product_id = @"id";
   NSString* af_tkn = @"at";
   NSDictionary* expected_params = @{product_id : @"123"};
@@ -124,13 +136,13 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, MatchingUrlsLaunchesStoreKit) {
   EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
 
   EXPECT_TRUE(VerifyStoreKitLaunched(
-      @"http://foo.itunes.apple.com/app/test/id123?qux&baz#foo",
+      @"http://itunes.apple.com/app/test/id123?qux&baz#foo",
       /*main_frame=*/true));
   expected_params = @{product_id : @"123", @"qux" : @"", @"baz" : @""};
   EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
 
   EXPECT_TRUE(VerifyStoreKitLaunched(
-      @"http://itunes.apple.com/app/bar/id243?at=12312", /*main_frame=*/true));
+      @"http://apps.apple.com/app/bar/id243?at=12312", /*main_frame=*/true));
   expected_params = @{product_id : @"243", af_tkn : @"12312"};
   EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
 
@@ -141,7 +153,13 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, MatchingUrlsLaunchesStoreKit) {
   EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
 
   EXPECT_TRUE(VerifyStoreKitLaunched(
-      @"http://itunes.apple.com/de/app/bar/id123?at=2&uo=4#foo",
+      @"http://geo.itunes.apple.com/app/bar/id243?at=12312",
+      /*main_frame=*/true));
+  expected_params = @{product_id : @"243", af_tkn : @"12312"};
+  EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
+
+  EXPECT_TRUE(VerifyStoreKitLaunched(
+      @"http://apps.apple.com/de/app/bar/id123?at=2&uo=4#foo",
       /*main_frame=*/true));
   expected_params = @{product_id : @"123", af_tkn : @"2", @"uo" : @"4"};
   EXPECT_NSEQ(expected_params, fake_launcher_.launchedProductParams);
@@ -150,6 +168,6 @@ TEST_F(ITunesUrlsHandlerTabHelperTest, MatchingUrlsLaunchesStoreKit) {
       kITunesURLsHandlingResultHistogram,
       static_cast<base::HistogramBase::Sample>(
           ITunesUrlsStoreKitHandlingResult::kSingleAppUrlHandled),
-      6);
-  histogram_tester_.ExpectTotalCount(kITunesURLsHandlingResultHistogram, 6);
+      7);
+  histogram_tester_.ExpectTotalCount(kITunesURLsHandlingResultHistogram, 7);
 }

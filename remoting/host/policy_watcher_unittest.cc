@@ -12,7 +12,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/mock_log.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/policy/core/common/fake_async_policy_loader.h"
@@ -61,8 +61,8 @@ class MockPolicyCallback {
 class PolicyWatcherTest : public testing::Test {
  public:
   PolicyWatcherTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::IO) {}
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::IO) {}
 
   void SetUp() override {
     // We expect no callbacks unless explicitly specified by individual tests.
@@ -155,7 +155,6 @@ class PolicyWatcherTest : public testing::Test {
     curtain_false_.SetBoolean(key::kRemoteAccessHostRequireCurtain, false);
     username_true_.SetBoolean(key::kRemoteAccessHostMatchUsername, true);
     username_false_.SetBoolean(key::kRemoteAccessHostMatchUsername, false);
-    talk_gadget_blah_.SetString(key::kRemoteAccessHostTalkGadgetPrefix, "blah");
     third_party_auth_partial_.SetString(key::kRemoteAccessHostTokenUrl,
                                         "https://token.com");
     third_party_auth_partial_.SetString(
@@ -250,7 +249,7 @@ class PolicyWatcherTest : public testing::Test {
   static const char* kHostDomain;
   static const char* kClientDomain;
   static const char* kPortRange;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   MockPolicyCallback mock_policy_callback_;
 
   // |policy_loader_| is owned by |policy_watcher_|. PolicyWatcherTest retains
@@ -290,7 +289,6 @@ class PolicyWatcherTest : public testing::Test {
   base::DictionaryValue curtain_false_;
   base::DictionaryValue username_true_;
   base::DictionaryValue username_false_;
-  base::DictionaryValue talk_gadget_blah_;
   base::DictionaryValue third_party_auth_full_;
   base::DictionaryValue third_party_auth_partial_;
   base::DictionaryValue third_party_auth_cert_empty_;
@@ -312,7 +310,6 @@ class PolicyWatcherTest : public testing::Test {
     dict.Set(key::kRemoteAccessHostDomainList,
              std::make_unique<base::ListValue>());
     dict.SetBoolean(key::kRemoteAccessHostMatchUsername, false);
-    dict.SetString(key::kRemoteAccessHostTalkGadgetPrefix, "");
     dict.SetBoolean(key::kRemoteAccessHostRequireCurtain, false);
     dict.SetString(key::kRemoteAccessHostTokenUrl, "");
     dict.SetString(key::kRemoteAccessHostTokenValidationUrl, "");
@@ -631,18 +628,6 @@ TEST_F(PolicyWatcherTest, MatchUsername) {
   StartWatching();
   SetPolicies(username_true_);
   SetPolicies(username_false_);
-}
-
-TEST_F(PolicyWatcherTest, TalkGadgetPrefix) {
-  testing::InSequence sequence;
-  EXPECT_CALL(mock_policy_callback_,
-              OnPolicyUpdatePtr(IsPolicies(&nat_true_others_default_)));
-  EXPECT_CALL(mock_policy_callback_,
-              OnPolicyUpdatePtr(IsPolicies(&talk_gadget_blah_)));
-
-  SetPolicies(empty_);
-  StartWatching();
-  SetPolicies(talk_gadget_blah_);
 }
 
 TEST_F(PolicyWatcherTest, ThirdPartyAuthFull) {

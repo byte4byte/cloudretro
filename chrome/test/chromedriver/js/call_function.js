@@ -82,7 +82,7 @@ function newError(message, code) {
  * @constructor
  */
 function CacheWithUUID() {
-  this.cache_ = {};
+  this.cache_ = Object.create(null);
 }
 
 CacheWithUUID.prototype = {
@@ -146,7 +146,7 @@ CacheWithUUID.prototype = {
  * @constructor
  */
 function Cache() {
-  this.cache_ = {};
+  this.cache_ = Object.create(null);
   this.nextId_ = 1;
   this.idPrefix_ = Math.random().toString();
 }
@@ -281,6 +281,7 @@ function isElement(value) {
  * @return {boolean} True if value is an iterable collection.
  */
 function isCollection(value) {
+  const Symbol = window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol || window.Symbol;
   return (typeof value[Symbol.iterator] === 'function');
 }
 
@@ -307,6 +308,7 @@ function cloneWithAlgorithm(item, seen, algo, opt_cache) {
   }
 
   if (isCollection(item)) {
+    const Array = window.cdc_adoQpoasnfa76pfcZLmcfl_Array || window.Array;
     tmp = new Array(item.length);
     for (let i = 0; i < item.length; ++i)
       tmp[i] = maybeCopyProperty(i);
@@ -318,6 +320,22 @@ function cloneWithAlgorithm(item, seen, algo, opt_cache) {
   return tmp;
 }
 
+/**
+ * Wrapper to cloneWithAlgorithm, with circular reference detection logic.
+ * @param {*} item Object or collection to deep clone.
+ * @param {!Array<*>} seen Object references that have already been seen.
+ * @param {function(*, Array<*>, ?Cache) : *} algo Cloning algorithm to use to
+ *     deep clone properties of item.
+ * @return {*} Clone of item with status of cloning.
+ */
+function cloneWithCircularCheck(item, seen, algo) {
+  if (seen.includes(item))
+    throw newError('circular reference', StatusCode.JAVA_SCRIPT_ERROR);
+  seen.push(item);
+  const result = cloneWithAlgorithm(item, seen, algo);
+  seen.pop();
+  return result;
+}
 
 /**
  * Returns deep clone of given value, replacing element references with a
@@ -343,6 +361,8 @@ function jsonSerialize(item, seen) {
     ret[ELEMENT_KEY] = cache.storeItem(item);
     return ret;
   }
+  if (isCollection(item))
+    return cloneWithCircularCheck(item, seen, jsonSerialize);
   // http://crbug.com/chromedriver/2995: Placed here because some element
   // (above) are type 'function', so this check must be performed after.
   if (typeof item === 'function')
@@ -353,13 +373,8 @@ function jsonSerialize(item, seen) {
        Object.getPrototypeOf(item).hasOwnProperty('toJSON')))
     return item.toJSON();
 
-  // Deep clone collections and Objects.
-  if (seen.includes(item))
-    throw newError('circular reference', StatusCode.JAVA_SCRIPT_ERROR);
-  seen.push(item);
-  const result = cloneWithAlgorithm(item, seen, jsonSerialize);
-  seen.pop();
-  return result;
+  // Deep clone Objects.
+  return cloneWithCircularCheck(item, seen, jsonSerialize);
 }
 
 /**
@@ -377,7 +392,8 @@ function jsonDeserialize(item, opt_seen, opt_cache) {
       item === null ||
       typeof item === 'boolean' ||
       typeof item === 'number' ||
-      typeof item === 'string')
+      typeof item === 'string' ||
+      typeof item === 'function')
     return item;
   if (item.hasOwnProperty(ELEMENT_KEY)) {
     if (opt_cache === undefined || opt_cache === null) {
@@ -428,6 +444,7 @@ function callFunction(func, args, w3c, opt_unwrappedReturn) {
 
   let status = 0;
   let returnValue;
+  const Promise = window.cdc_adoQpoasnfa76pfcZLmcfl_Promise || window.Promise;
   try {
     const unwrappedArgs = jsonDeserialize(args, [], cache);
     const tmp = func.apply(null, unwrappedArgs);
@@ -441,6 +458,6 @@ function callFunction(func, args, w3c, opt_unwrappedReturn) {
       };
     }).catch(buildError);
   } catch (error) {
-    return buildError(error);
+    return Promise.resolve(buildError(error));
   }
 }

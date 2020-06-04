@@ -2,53 +2,46 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
       "name": "Scrolling Contents Layer",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow (relative positioned) DIV class='main box'",
+      "name": "LayoutNGBlockFlow (relative positioned) DIV class='main box'",
+      "position": [-30, -30],
       "bounds": [340, 340],
       "backgroundColor": "#FF0000",
       "transform": 1
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='negative child'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='negative child'",
       "bounds": [50, 50],
       "drawsContent": false,
       "transform": 3
     },
     {
-      "name": "LayoutBlockFlow (relative positioned) DIV class='main box' (foreground) Layer",
+      "name": "LayoutNGBlockFlow (relative positioned) DIV class='main box' (foreground) Layer",
+      "position": [-30, -30],
       "bounds": [340, 340],
       "transform": 1
     },
     {
-      "name": "LayoutBlockFlow (relative positioned) DIV class='main box'",
+      "name": "LayoutNGBlockFlow (relative positioned) DIV class='main box'",
+      "position": [-30, -30],
       "bounds": [340, 340],
       "backgroundColor": "#FF0000",
       "transform": 4
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='negative child'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='negative child'",
       "bounds": [50, 50],
       "drawsContent": false,
       "transform": 6
     },
     {
-      "name": "LayoutBlockFlow (relative positioned) DIV class='main box' (foreground) Layer",
+      "name": "LayoutNGBlockFlow (relative positioned) DIV class='main box' (foreground) Layer",
+      "position": [-30, -30],
       "bounds": [340, 340],
       "transform": 4
     }
@@ -60,7 +53,7 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [8, 78, 0, 1]
+        [38, 108, 0, 1]
       ]
     },
     {
@@ -70,7 +63,7 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [70, 70, 0, 1]
+        [40, 40, 0, 1]
       ]
     },
     {
@@ -89,7 +82,7 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [352, 8, 0, 1]
+        [382, 38, 0, 1]
       ]
     },
     {
@@ -99,7 +92,7 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [70, 70, 0, 1]
+        [40, 40, 0, 1]
       ]
     },
     {

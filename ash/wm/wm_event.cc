@@ -5,7 +5,6 @@
 #include "ash/wm/wm_event.h"
 
 namespace ash {
-namespace wm {
 
 WMEvent::WMEvent(WMEventType type) : type_(type) {
   DCHECK(IsWorkspaceEvent() || IsCompoundEvent() || IsBoundsEvent() ||
@@ -84,22 +83,33 @@ bool WMEvent::IsTransitionEvent() const {
   return false;
 }
 
-SetBoundsEvent::SetBoundsEvent(const gfx::Rect& bounds,
-                               bool animate,
-                               base::TimeDelta duration)
+const DisplayMetricsChangedWMEvent* WMEvent::AsDisplayMetricsChangedWMEvent()
+    const {
+  DCHECK_EQ(type(), WM_EVENT_DISPLAY_BOUNDS_CHANGED);
+  return static_cast<const DisplayMetricsChangedWMEvent*>(this);
+}
+
+SetBoundsWMEvent::SetBoundsWMEvent(const gfx::Rect& bounds,
+                                   bool animate,
+                                   base::TimeDelta duration)
     : WMEvent(WM_EVENT_SET_BOUNDS),
       requested_bounds_(bounds),
       animate_(animate),
       duration_(duration) {}
 
-SetBoundsEvent::SetBoundsEvent(const gfx::Rect& requested_bounds,
-                               int64_t display_id)
+SetBoundsWMEvent::SetBoundsWMEvent(const gfx::Rect& requested_bounds,
+                                   int64_t display_id)
     : WMEvent(WM_EVENT_SET_BOUNDS),
       requested_bounds_(requested_bounds),
       display_id_(display_id),
       animate_(false) {}
 
-SetBoundsEvent::~SetBoundsEvent() = default;
+SetBoundsWMEvent::~SetBoundsWMEvent() = default;
 
-}  // namespace wm
+DisplayMetricsChangedWMEvent::DisplayMetricsChangedWMEvent(int changed_metrics)
+    : WMEvent(WM_EVENT_DISPLAY_BOUNDS_CHANGED),
+      changed_metrics_(changed_metrics) {}
+
+DisplayMetricsChangedWMEvent::~DisplayMetricsChangedWMEvent() = default;
+
 }  // namespace ash

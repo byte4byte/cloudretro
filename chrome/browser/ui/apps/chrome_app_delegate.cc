@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/ui/color_chooser.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
-#include "chrome/common/extensions/chrome_extension_messages.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/zoom/zoom_controller.h"
@@ -46,7 +46,8 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/mojo/app_window.mojom.h"
+#include "extensions/common/mojom/app_window.mojom.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
@@ -69,10 +70,12 @@ bool disable_external_open_for_testing_ = false;
 content::WebContents* OpenURLFromTabInternal(
     content::BrowserContext* context,
     const content::OpenURLParams& params) {
+  NavigateParams new_tab_params(static_cast<Browser*>(nullptr), params.url,
+                                params.transition);
+  new_tab_params.FillNavigateParamsFromOpenURLParams(params);
+
   // Force all links to open in a new tab, even if they were trying to open a
   // window.
-  NavigateParams new_tab_params(static_cast<Browser*>(NULL), params.url,
-                                params.transition);
   if (params.disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
     new_tab_params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
   } else {
@@ -143,6 +146,7 @@ class ChromeAppDelegate::NewWindowContentsDelegate
 
  private:
   std::vector<std::unique_ptr<content::WebContents>> owned_contents_;
+
   DISALLOW_COPY_AND_ASSIGN(NewWindowContentsDelegate);
 };
 
@@ -186,8 +190,8 @@ ChromeAppDelegate::ChromeAppDelegate(bool keep_alive)
       for_lock_screen_app_(false),
       new_window_contents_delegate_(new NewWindowContentsDelegate()) {
   if (keep_alive) {
-    keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::CHROME_APP_DELEGATE,
-                                          KeepAliveRestartOption::DISABLED));
+    keep_alive_ = std::make_unique<ScopedKeepAlive>(
+        KeepAliveOrigin::CHROME_APP_DELEGATE, KeepAliveRestartOption::DISABLED);
   }
   registrar_.Add(this,
                  chrome::NOTIFICATION_APP_TERMINATING,
@@ -324,8 +328,9 @@ void ChromeAppDelegate::SetWebContentsBlocked(
   // RenderViewHost may be NULL during shutdown.
   content::RenderFrameHost* host = web_contents->GetMainFrame();
   if (host) {
-    extensions::mojom::AppWindowPtr app_window;
-    host->GetRemoteInterfaces()->GetInterface(&app_window);
+    mojo::Remote<extensions::mojom::AppWindow> app_window;
+    host->GetRemoteInterfaces()->GetInterface(
+        app_window.BindNewPipeAndPassReceiver());
     app_window->SetVisuallyDeemphasized(blocked);
   }
 }
@@ -335,8 +340,8 @@ bool ChromeAppDelegate::IsWebContentsVisible(
   return platform_util::IsVisible(web_contents->GetNativeView());
 }
 
-void ChromeAppDelegate::SetTerminatingCallback(const base::Closure& callback) {
-  terminating_callback_ = callback;
+void ChromeAppDelegate::SetTerminatingCallback(base::OnceClosure callback) {
+  terminating_callback_ = std::move(callback);
 }
 
 void ChromeAppDelegate::OnHide() {
@@ -348,7 +353,7 @@ void ChromeAppDelegate::OnHide() {
 
   // Hold on to the keep alive for some time to give the app a chance to show
   // the window.
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&ChromeAppDelegate::RelinquishKeepAliveAfterTimeout,
                      weak_factory_.GetWeakPtr()),
@@ -358,8 +363,8 @@ void ChromeAppDelegate::OnHide() {
 void ChromeAppDelegate::OnShow() {
   has_been_shown_ = true;
   is_hidden_ = false;
-  keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::CHROME_APP_DELEGATE,
-                                        KeepAliveRestartOption::DISABLED));
+  keep_alive_ = std::make_unique<ScopedKeepAlive>(
+      KeepAliveOrigin::CHROME_APP_DELEGATE, KeepAliveRestartOption::DISABLED);
 }
 
 bool ChromeAppDelegate::TakeFocus(content::WebContents* web_contents,
@@ -391,5 +396,5 @@ void ChromeAppDelegate::Observe(int type,
                                 const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
   if (!terminating_callback_.is_null())
-    terminating_callback_.Run();
+    std::move(terminating_callback_).Run();
 }

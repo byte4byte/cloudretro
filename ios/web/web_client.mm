@@ -8,7 +8,6 @@
 
 #include "ios/web/common/features.h"
 #include "ios/web/public/init/web_main_parts.h"
-#include "services/service_manager/public/cpp/service.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -45,6 +44,15 @@ bool WebClient::IsAppSpecificURL(const GURL& url) const {
   return false;
 }
 
+bool WebClient::ShouldBlockUrlDuringRestore(const GURL& url,
+                                            WebState* web_state) const {
+  return false;
+}
+
+void WebClient::AddSerializableData(
+    web::SerializableUserDataManager* user_data_manager,
+    web::WebState* web_state) {}
+
 base::string16 WebClient::GetPluginNotSupportedText() const {
   return base::string16();
 }
@@ -67,10 +75,6 @@ base::RefCountedMemory* WebClient::GetDataResourceBytes(int resource_id) const {
   return nullptr;
 }
 
-bool WebClient::IsDataResourceGzipped(int resource_id) const {
-  return false;
-}
-
 NSString* WebClient::GetDocumentStartScriptForAllFrames(
     BrowserState* browser_state) const {
   return @"";
@@ -81,33 +85,15 @@ NSString* WebClient::GetDocumentStartScriptForMainFrame(
   return @"";
 }
 
-std::unique_ptr<service_manager::Service> WebClient::HandleServiceRequest(
-    const std::string& service_name,
-    service_manager::mojom::ServiceRequest request) {
-  return nullptr;
-}
-
-base::Optional<service_manager::Manifest> WebClient::GetServiceManifestOverlay(
-    base::StringPiece name) {
-  return base::nullopt;
-}
-
-std::vector<service_manager::Manifest> WebClient::GetExtraServiceManifests() {
-  return {};
-}
-
 void WebClient::AllowCertificateError(
     WebState* web_state,
     int cert_error,
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
     bool overridable,
+    int64_t navigation_id,
     const base::Callback<void(bool)>& callback) {
   callback.Run(false);
-}
-
-bool WebClient::IsSlimNavigationManagerEnabled() const {
-  return base::FeatureList::IsEnabled(web::features::kSlimNavigationManager);
 }
 
 void WebClient::PrepareErrorPage(WebState* web_state,
@@ -115,13 +101,28 @@ void WebClient::PrepareErrorPage(WebState* web_state,
                                  NSError* error,
                                  bool is_post,
                                  bool is_off_the_record,
-                                 NSString** error_html) {
+                                 const base::Optional<net::SSLInfo>& info,
+                                 int64_t navigation_id,
+                                 base::OnceCallback<void(NSString*)> callback) {
   DCHECK(error);
-  *error_html = error.localizedDescription;
+  std::move(callback).Run(error.localizedDescription);
 }
 
 UIView* WebClient::GetWindowedContainer() {
   return nullptr;
+}
+
+bool WebClient::EnableLongPressAndForceTouchHandling() const {
+  return true;
+}
+
+bool WebClient::ForceMobileVersionByDefault(const GURL&) {
+  return false;
+}
+
+UserAgentType WebClient::GetDefaultUserAgent(id<UITraitEnvironment> web_view,
+                                             const GURL& url) {
+  return UserAgentType::MOBILE;
 }
 
 }  // namespace web

@@ -19,14 +19,15 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.SearchGeolocationDisclosureTabHelper;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
-import org.chromium.chrome.browser.preferences.website.PermissionInfo;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.site_settings.PermissionInfo;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.InfoBarUtil;
+import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.net.test.EmbeddedTestServer;
 
@@ -52,18 +53,20 @@ public class SearchGeolocationDisclosureInfoBarTest {
         PermissionInfo locationSettings = new PermissionInfo(
                 PermissionInfo.Type.GEOLOCATION, mTestServer.getURL(SEARCH_PAGE), null, false);
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
-                () -> locationSettings.setContentSetting(ContentSettingValues.ALLOW));
+                ()
+                        -> locationSettings.setContentSetting(
+                                Profile.getLastUsedRegularProfile(), ContentSettingValues.ALLOW));
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mTestServer != null) mTestServer.stopAndDestroyServer();
     }
 
     @Test
     @SmallTest
     @Feature({"Browser", "Main"})
-    public void testInfoBarAppears() throws InterruptedException, TimeoutException {
+    public void testInfoBarAppears() throws TimeoutException {
         SearchGeolocationDisclosureTabHelper.setIgnoreUrlChecksForTesting();
         Assert.assertEquals(
                 "Wrong starting infobar count", 0, mActivityTestRule.getInfoBars().size());
@@ -139,7 +142,7 @@ public class SearchGeolocationDisclosureInfoBarTest {
     @Test
     @SmallTest
     @Feature({"Browser", "Main"})
-    public void testInfoBarDismiss() throws InterruptedException, TimeoutException {
+    public void testInfoBarDismiss() throws TimeoutException {
         SearchGeolocationDisclosureTabHelper.setIgnoreUrlChecksForTesting();
         Assert.assertEquals(
                 "Wrong starting infobar count", 0, mActivityTestRule.getInfoBars().size());
@@ -172,7 +175,7 @@ public class SearchGeolocationDisclosureInfoBarTest {
     @Test
     @SmallTest
     @Feature({"Browser", "Main"})
-    public void testNoInfoBarForRandomUrl() throws InterruptedException, TimeoutException {
+    public void testNoInfoBarForRandomUrl() {
         Assert.assertEquals(
                 "Wrong starting infobar count", 0, mActivityTestRule.getInfoBars().size());
 
@@ -184,7 +187,7 @@ public class SearchGeolocationDisclosureInfoBarTest {
     @Test
     @SmallTest
     @Feature({"Browser", "Main"})
-    public void testNoInfoBarInIncognito() throws InterruptedException, TimeoutException {
+    public void testNoInfoBarInIncognito() {
         SearchGeolocationDisclosureTabHelper.setIgnoreUrlChecksForTesting();
         mActivityTestRule.newIncognitoTabFromMenu();
         Assert.assertEquals(

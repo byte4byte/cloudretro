@@ -26,12 +26,11 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 namespace ash {
-namespace wm {
 class WindowState;
-}
 }  // namespace ash
 
 namespace base {
@@ -51,6 +50,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
                          public aura::WindowObserver,
                          public aura::client::CaptureClientObserver,
                          public views::WidgetDelegate,
+                         public views::WidgetObserver,
                          public views::View,
                          public wm::ActivationChangeObserver {
  public:
@@ -67,6 +67,13 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   // The receiver can chose to not close the window on this signal.
   void set_close_callback(const base::RepeatingClosure& close_callback) {
     close_callback_ = close_callback;
+  }
+
+  // Set the callback to run when the user has requested to close the surface.
+  // This runs before the normal |close_callback_| and should not be used to
+  // actually close the surface.
+  void set_pre_close_callback(const base::RepeatingClosure& close_callback) {
+    pre_close_callback_ = close_callback;
   }
 
   // Set the callback to run when the surface is destroyed.
@@ -95,10 +102,6 @@ class ShellSurfaceBase : public SurfaceTreeHost,
 
   // Set the child ax tree ID for the surface.
   void SetChildAxTreeId(ui::AXTreeID child_ax_tree_id);
-
-  // Signal a request to close the window. It is up to the implementation to
-  // actually decide to do so though.
-  void Close();
 
   // Set geometry for surface. The geometry represents the "visible bounds"
   // for the surface from the user's perspective.
@@ -134,22 +137,23 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   // Returns a trace value representing the state of the surface.
   std::unique_ptr<base::trace_event::TracedValue> AsTracedValue() const;
 
-  // Overridden from SurfaceDelegate:
+  // SurfaceDelegate:
   void OnSurfaceCommit() override;
   bool IsInputEnabled(Surface* surface) const override;
   void OnSetFrame(SurfaceFrameType type) override;
   void OnSetFrameColors(SkColor active_color, SkColor inactive_color) override;
   void OnSetStartupId(const char* startup_id) override;
   void OnSetApplicationId(const char* application_id) override;
+  void OnActivationRequested() override;
 
-  // Overridden from SurfaceObserver:
+  // SurfaceObserver:
   void OnSurfaceDestroying(Surface* surface) override;
 
-  // Overridden from CaptureClientObserver:
+  // CaptureClientObserver:
   void OnCaptureChanged(aura::Window* lost_capture,
                         aura::Window* gained_capture) override;
 
-  // Overridden from views::WidgetDelegate:
+  // views::WidgetDelegate:
   bool CanResize() const override;
   bool CanMaximize() const override;
   bool CanMinimize() const override;
@@ -166,21 +170,24 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   bool WidgetHasHitTestMask() const override;
   void GetWidgetHitTestMask(SkPath* mask) const override;
 
-  // Overridden from views::View:
+  // views::WidgetObserver:
+  void OnWidgetClosing(views::Widget* widget) override;
+
+  // views::View:
   gfx::Size CalculatePreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
   gfx::Size GetMaximumSize() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
-  // Overridden from aura::WindowObserver:
+  // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
 
-  // Overridden from wm::ActivationChangeObserver:
+  // wm::ActivationChangeObserver:
   void OnWindowActivated(ActivationReason reason,
                          aura::Window* gained_active,
                          aura::Window* lost_active) override;
 
-  // Overridden from ui::AcceleratorTarget:
+  // ui::AcceleratorTarget:
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
   bool frame_enabled() const {
@@ -260,7 +267,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
 
   // Called on widget creation to initialize its window state.
   // TODO(reveman): Remove virtual functions below to avoid FBC problem.
-  virtual void InitializeWindowState(ash::wm::WindowState* window_state) = 0;
+  virtual void InitializeWindowState(ash::WindowState* window_state) = 0;
 
   // Returns the scale of the surface tree relative to the shell surface.
   virtual float GetScale() const;
@@ -285,6 +292,7 @@ class ShellSurfaceBase : public SurfaceTreeHost,
   base::Optional<std::string> application_id_;
   base::Optional<std::string> startup_id_;
   base::RepeatingClosure close_callback_;
+  base::RepeatingClosure pre_close_callback_;
   base::OnceClosure surface_destroyed_callback_;
   bool system_modal_ = false;
   bool non_system_modal_window_was_active_ = false;

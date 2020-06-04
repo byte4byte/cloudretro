@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/guid.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/task/post_task.h"
 #include "components/keyed_service/core/simple_key_map.h"
@@ -54,8 +55,8 @@ HeadlessBrowserContextImpl::~HeadlessBrowserContextImpl() {
   web_contents_map_.clear();
 
   if (request_context_manager_) {
-    content::BrowserThread::DeleteSoon(content::BrowserThread::IO, FROM_HERE,
-                                       request_context_manager_.release());
+    base::DeleteSoon(FROM_HERE, {content::BrowserThread::IO},
+                     request_context_manager_.release());
   }
 
   ShutdownStoragePartitions();
@@ -155,7 +156,6 @@ void HeadlessBrowserContextImpl::InitWhileIOAllowed() {
   } else {
     base::PathService::Get(base::DIR_EXE, &path_);
   }
-  BrowserContext::Initialize(this, path_);
 }
 
 std::unique_ptr<content::ZoomLevelDelegate>
@@ -197,6 +197,10 @@ HeadlessBrowserContextImpl::GetPushMessagingService() {
   return nullptr;
 }
 
+content::StorageNotificationService*
+HeadlessBrowserContextImpl::GetStorageNotificationService() {
+  return nullptr;
+}
 content::SSLHostStateDelegate*
 HeadlessBrowserContextImpl::GetSSLHostStateDelegate() {
   return nullptr;
@@ -224,19 +228,6 @@ HeadlessBrowserContextImpl::GetBackgroundSyncController() {
 
 content::BrowsingDataRemoverDelegate*
 HeadlessBrowserContextImpl::GetBrowsingDataRemoverDelegate() {
-  return nullptr;
-}
-
-net::URLRequestContextGetter* HeadlessBrowserContextImpl::CreateRequestContext(
-    content::ProtocolHandlerMap* protocol_handlers,
-    content::URLRequestInterceptorScopedVector request_interceptors) {
-  NOTREACHED();
-  return nullptr;
-}
-
-net::URLRequestContextGetter*
-HeadlessBrowserContextImpl::CreateMediaRequestContext() {
-  NOTREACHED();
   return nullptr;
 }
 
@@ -294,7 +285,7 @@ const std::string& HeadlessBrowserContextImpl::Id() {
   return UniqueId();
 }
 
-::network::mojom::NetworkContextPtr
+mojo::Remote<::network::mojom::NetworkContext>
 HeadlessBrowserContextImpl::CreateNetworkContext(
     bool in_memory,
     const base::FilePath& relative_partition_path) {
@@ -309,13 +300,6 @@ HeadlessBrowserContext::Builder::Builder(HeadlessBrowserImpl* browser)
 HeadlessBrowserContext::Builder::~Builder() = default;
 
 HeadlessBrowserContext::Builder::Builder(Builder&&) = default;
-
-HeadlessBrowserContext::Builder&
-HeadlessBrowserContext::Builder::SetProtocolHandlers(
-    ProtocolHandlerMap protocol_handlers) {
-  options_->protocol_handlers_ = std::move(protocol_handlers);
-  return *this;
-}
 
 HeadlessBrowserContext::Builder&
 HeadlessBrowserContext::Builder::SetProductNameAndVersion(

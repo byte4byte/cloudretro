@@ -2,8 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings_startup_urls_page', function() {
-  /** @implements {settings.StartupUrlsPageBrowserProxy} */
+// clang-format off
+import {EDIT_STARTUP_URL_EVENT, StartupUrlsPageBrowserProxy, StartupUrlsPageBrowserProxyImpl} from 'chrome://settings/settings.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {keyEventOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
+import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+// clang-format on
+
+  /** @implements {StartupUrlsPageBrowserProxy} */
   class TestStartupUrlsPageBrowserProxy extends TestBrowserProxy {
     constructor() {
       super([
@@ -71,12 +78,12 @@ cr.define('settings_startup_urls_page', function() {
      */
     function pressSpace(element) {
       // The actual key code is irrelevant for these tests.
-      MockInteractions.keyEventOn(element, 'input', 32 /* space key code */);
+      keyEventOn(element, 'input', 32 /* space key code */);
     }
 
     setup(function() {
       browserProxy = new TestStartupUrlsPageBrowserProxy();
-      settings.StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
+      StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
       PolymerTest.clearBody();
       dialog = document.createElement('settings-startup-url-dialog');
     });
@@ -87,7 +94,7 @@ cr.define('settings_startup_urls_page', function() {
 
     test('Initialization_Add', function() {
       document.body.appendChild(dialog);
-      Polymer.dom.flush();
+      flush();
       assertTrue(dialog.$.dialog.open);
 
       // Assert that the "Add" button is disabled.
@@ -196,7 +203,7 @@ cr.define('settings_startup_urls_page', function() {
       pressSpace(inputElement);
 
       return browserProxy.whenCalled('validateStartupPage').then(function() {
-        MockInteractions.keyEventOn(
+        keyEventOn(
             inputElement, 'keypress', 13, undefined, 'Enter');
 
         return browserProxy.whenCalled('addStartupPage');
@@ -212,7 +219,7 @@ cr.define('settings_startup_urls_page', function() {
 
     setup(function() {
       browserProxy = new TestStartupUrlsPageBrowserProxy();
-      settings.StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
+      StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
       PolymerTest.clearBody();
       page = document.createElement('settings-startup-urls-page');
       page.prefs = {
@@ -224,7 +231,7 @@ cr.define('settings_startup_urls_page', function() {
         },
       };
       document.body.appendChild(page);
-      Polymer.dom.flush();
+      flush();
     });
 
     teardown(function() {
@@ -249,16 +256,16 @@ cr.define('settings_startup_urls_page', function() {
       assertFalse(!!page.$$('settings-startup-url-dialog'));
 
       addPageButton.click();
-      Polymer.dom.flush();
+      flush();
       assertTrue(!!page.$$('settings-startup-url-dialog'));
     });
 
     test('EditPage_OpensDialog', function() {
       assertFalse(!!page.$$('settings-startup-url-dialog'));
       page.fire(
-          settings.EDIT_STARTUP_URL_EVENT,
+          EDIT_STARTUP_URL_EVENT,
           {model: createSampleUrlEntry(), anchor: null});
-      Polymer.dom.flush();
+      flush();
       assertTrue(!!page.$$('settings-startup-url-dialog'));
     });
 
@@ -277,13 +284,13 @@ cr.define('settings_startup_urls_page', function() {
         url: 'chrome://foo',
       };
 
-      cr.webUIListenerCallback('update-startup-pages', [entry1, entry2]);
-      page.fire(settings.EDIT_STARTUP_URL_EVENT, {model: entry2, anchor: null});
-      Polymer.dom.flush();
+      webUIListenerCallback('update-startup-pages', [entry1, entry2]);
+      page.fire(EDIT_STARTUP_URL_EVENT, {model: entry2, anchor: null});
+      flush();
 
       assertTrue(!!page.$$('settings-startup-url-dialog'));
-      cr.webUIListenerCallback('update-startup-pages', [entry1]);
-      Polymer.dom.flush();
+      webUIListenerCallback('update-startup-pages', [entry1]);
+      flush();
 
       assertFalse(!!page.$$('settings-startup-url-dialog'));
     });
@@ -302,7 +309,7 @@ cr.define('settings_startup_urls_page', function() {
         type: chrome.settingsPrivate.PrefType.NUMBER,
         value: 5,
       });
-      Polymer.dom.flush();
+      flush();
 
       assertTrue(!!page.$$('extension-controlled-indicator'));
       assertFalse(!!page.$$('#addPage'));
@@ -328,12 +335,12 @@ cr.define('settings_startup_urls_page', function() {
 
     setup(function() {
       browserProxy = new TestStartupUrlsPageBrowserProxy();
-      settings.StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
+      StartupUrlsPageBrowserProxyImpl.instance_ = browserProxy;
       PolymerTest.clearBody();
       element = document.createElement('settings-startup-url-entry');
       element.model = createSampleUrlEntry();
       document.body.appendChild(element);
-      Polymer.dom.flush();
+      flush();
     });
 
     teardown(function() {
@@ -342,12 +349,12 @@ cr.define('settings_startup_urls_page', function() {
 
     test('MenuOptions_Remove', function() {
       element.editable = true;
-      Polymer.dom.flush();
+      flush();
 
       // Bring up the popup menu.
       assertFalse(!!element.$$('cr-action-menu'));
       element.$$('#dots').click();
-      Polymer.dom.flush();
+      flush();
       assertTrue(!!element.$$('cr-action-menu'));
 
       const removeButton = element.shadowRoot.querySelector('#remove');
@@ -363,8 +370,7 @@ cr.define('settings_startup_urls_page', function() {
       assertFalse(!!element.$$('#dots'));
 
       element.editable = true;
-      Polymer.dom.flush();
+      flush();
       assertTrue(!!element.$$('#dots'));
     });
   });
-});

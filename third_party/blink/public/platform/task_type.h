@@ -178,15 +178,14 @@ enum class TaskType : unsigned char {
   kInternalMedia = 29,
 
   // Tasks to execute things for real-time media processing like recording. If a
-  // task touches MediaStreamTracks, associated sources and sinks, this task
-  // type should be used.
+  // task touches MediaStreamTracks, associated sources/sinks, and Web Audio,
+  // this task type should be used.
   // Tasks with this type are mainly posted by:
   // * //content/renderer/media
   // * //media
+  // * blink/renderer/modules/webaudio
+  // * blink/public/platform/audio
   kInternalMediaRealTime = 30,
-
-  // Tasks to execute IPC (legacy IPC and mojo).
-  kInternalIPC = 31,
 
   // Tasks related to user interaction like clicking or inputting texts.
   kInternalUserInteraction = 32,
@@ -211,13 +210,32 @@ enum class TaskType : unsigned char {
   // Note that the ordering between tasks related to different frames is not
   // always guaranteed - tasks belonging to different frames can be reordered
   // when one of the frames is frozen.
+  // Note: all AssociatedRemotes/AssociatedReceivers should use this task type.
   kInternalNavigationAssociated = 63,
 
-  // Legacy IPCs that are freezable.
-  kInternalFreezableIPC = 64,
+  // Tasks which should run when the frame is frozen, but otherwise should run
+  // in order with other legacy IPC and channel-associated interfaces.
+  // Only tasks related to unfreezing itself should run here, the majority of
+  // the tasks
+  // should use kInternalNavigationAssociated instead.
+  kInternalNavigationAssociatedUnfreezable = 64,
 
   // Task used to split a script loading task for cooperative scheduling
   kInternalContinueScriptLoading = 65,
+
+  // Experimental tasks types used for main thread scheduling postTask API
+  // (https://github.com/WICG/main-thread-scheduling).
+  // These task types should not be passed directly to
+  // FrameScheduler::GetTaskRunner(); they are used indirectly by
+  // WebSchedulingTaskQueues.
+  kExperimentalWebScheduling = 67,
+
+  // Tasks used to control frame lifecycle - they should run even when the frame
+  // is frozen.
+  kInternalFrameLifecycleControl = 68,
+
+  // Tasks used for find-in-page.
+  kInternalFindInPage = 70,
 
   ///////////////////////////////////////
   // The following task types are only for thread-local queues.
@@ -236,15 +254,16 @@ enum class TaskType : unsigned char {
   kMainThreadTaskQueueControl = 43,
   kMainThreadTaskQueueCleanup = 52,
   kMainThreadTaskQueueMemoryPurge = 62,
+  kMainThreadTaskQueueNonWaking = 69,
   kCompositorThreadTaskQueueDefault = 45,
   kCompositorThreadTaskQueueInput = 49,
   kWorkerThreadTaskQueueDefault = 46,
   kWorkerThreadTaskQueueV8 = 47,
   kWorkerThreadTaskQueueCompositor = 48,
 
-  kCount = 67,
+  kCount = 71,
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_TASK_TYPE_H_

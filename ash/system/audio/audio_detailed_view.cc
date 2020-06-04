@@ -4,15 +4,17 @@
 
 #include "ash/system/audio/audio_detailed_view.h"
 
+#include "ash/public/cpp/ash_features.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/audio/mic_gain_slider_controller.h"
+#include "ash/system/audio/mic_gain_slider_view.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/color_palette.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/separator.h"
@@ -36,6 +38,8 @@ base::string16 GetAudioDeviceName(const chromeos::AudioDevice& device) {
       return l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_AUDIO_USB_DEVICE,
                                         base::UTF8ToUTF16(device.display_name));
     case chromeos::AUDIO_TYPE_BLUETOOTH:
+      FALLTHROUGH;
+    case chromeos::AUDIO_TYPE_BLUETOOTH_NB_MIC:
       return l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_AUDIO_BLUETOOTH_DEVICE,
           base::UTF8ToUTF16(device.display_name));
@@ -83,6 +87,7 @@ void AudioDetailedView::AddAudioSubHeader(const gfx::VectorIcon& icon,
 void AudioDetailedView::CreateItems() {
   CreateScrollableList();
   CreateTitleRow(IDS_ASH_STATUS_TRAY_AUDIO);
+  mic_gain_controller_ = std::make_unique<MicGainSliderController>();
 }
 
 void AudioDetailedView::UpdateAudioDevices() {
@@ -157,6 +162,9 @@ void AudioDetailedView::UpdateScrollableList() {
     HoverHighlightView* container =
         AddScrollListCheckableItem(GetAudioDeviceName(device), device.active);
     device_map_[container] = device;
+
+    if (features::IsSystemTrayMicGainSettingEnabled())
+      AddScrollListChild(mic_gain_controller_->CreateMicGainSlider(device.id));
   }
 
   scroll_content()->SizeToPreferredSize();

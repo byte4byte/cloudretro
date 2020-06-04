@@ -9,14 +9,14 @@
 #include "base/command_line.h"
 #include "base/optional.h"
 #include "base/test/scoped_mock_time_message_loop_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_helper.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_helper_mock.h"
 #include "chrome/browser/chromeos/login/enrollment/mock_enrollment_screen.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
-#include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
+#include "chrome/browser/policy/enrollment_status.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -75,7 +75,7 @@ class EnrollmentScreenUnitTest : public testing::Test {
     last_screen_result_ = screen_result;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   // Replace main thread's task runner with a mock for duration of test.
   base::ScopedMockTimeMessageLoopTaskRunner runner_;
 
@@ -310,56 +310,6 @@ TEST_P(AutomaticEnrollmentScreenUnitTest, FinishEnrollmentFlow) {
 
 TEST_P(AutomaticEnrollmentScreenUnitTest, Fallback) {
   TestFallback();
-}
-
-class MultiLicenseEnrollmentScreenUnitTest : public EnrollmentScreenUnitTest {
- public:
-  MultiLicenseEnrollmentScreenUnitTest() = default;
-
-  void SetUpEnrollmentScreen() override {
-    enrollment_config_.mode = policy::EnrollmentConfig::MODE_MANUAL;
-    enrollment_config_.auth_mechanism =
-        policy::EnrollmentConfig::AUTH_MECHANISM_INTERACTIVE;
-    EnrollmentScreenUnitTest::SetUpEnrollmentScreen();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MultiLicenseEnrollmentScreenUnitTest);
-};
-
-// Sign in and check that selected license type is propagated correctly.
-TEST_F(MultiLicenseEnrollmentScreenUnitTest, TestLicenseSelection) {
-  std::unique_ptr<EnterpriseEnrollmentHelperMock> mock =
-      std::make_unique<EnterpriseEnrollmentHelperMock>();
-  auto* mock_ref = mock.get();
-  EXPECT_CALL(*mock, EnrollUsingAuthCode(_))
-      .Times(AnyNumber())
-      .WillRepeatedly(Invoke([mock_ref](const std::string&) {
-        EnrollmentLicenseMap licenses;
-        static_cast<EnrollmentScreen*>(mock_ref->status_consumer())
-            ->OnMultipleLicensesAvailable(licenses);
-      }));
-  EXPECT_CALL(*mock, UseLicenseType(::policy::LicenseType::ANNUAL)).Times(1);
-
-  EnterpriseEnrollmentHelper::SetEnrollmentHelperMock(std::move(mock));
-
-  EXPECT_CALL(*GetMockScreenView(), SetEnrollmentConfig(_, _)).Times(1);
-
-  SetUpEnrollmentScreen();
-
-  EXPECT_CALL(*GetMockScreenView(), Show()).Times(1);
-  EXPECT_CALL(*GetMockScreenView(), ShowSigninScreen()).Times(1);
-
-  // Start enrollment.
-  enrollment_screen_->Show();
-
-  // Once at login, once after picking license type.
-
-  EXPECT_CALL(*GetMockScreenView(), ShowEnrollmentSpinnerScreen()).Times(2);
-  EXPECT_CALL(*GetMockScreenView(), ShowLicenseTypeSelectionScreen(_)).Times(1);
-
-  enrollment_screen_->OnLoginDone("user@domain.com", "oauth");
-  enrollment_screen_->OnLicenseTypeSelected("annual");
 }
 
 INSTANTIATE_TEST_SUITE_P(

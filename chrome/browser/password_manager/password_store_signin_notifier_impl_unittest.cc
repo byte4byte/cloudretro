@@ -5,7 +5,7 @@
 #include "chrome/browser/password_manager/password_store_signin_notifier_impl.h"
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/signin/public/identity_manager/accounts_mutator.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -19,25 +19,23 @@ namespace {
 
 class PasswordStoreSigninNotifierImplTest : public testing::Test {
  public:
-  PasswordStoreSigninNotifierImplTest() {
-    store_ = new MockPasswordStore();
-  }
+  PasswordStoreSigninNotifierImplTest() { store_ = new MockPasswordStore(); }
 
   ~PasswordStoreSigninNotifierImplTest() override {
     store_->ShutdownOnUIThread();
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return &identity_test_env_;
   }
 
-  identity::IdentityManager* identity_manager() {
+  signin::IdentityManager* identity_manager() {
     return identity_test_env()->identity_manager();
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  base::test::TaskEnvironment task_environment_;
+  signin::IdentityTestEnvironment identity_test_env_;
   scoped_refptr<MockPasswordStore> store_;
 };
 
@@ -84,7 +82,7 @@ TEST_F(PasswordStoreSigninNotifierImplTest, SignOutContentArea) {
   // processed in this testing context.
   identity_test_env()->EnableRemovalOfExtendedAccountInfo();
   identity_manager->GetAccountsMutator()->RemoveAccount(
-      "secondary_account_id",
+      CoreAccountId("secondary_account_id"),
       signin_metrics::SourceForRefreshTokenOperation::kUserMenu_RemoveAccount);
   testing::Mock::VerifyAndClearExpectations(store_.get());
 

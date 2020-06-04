@@ -10,19 +10,10 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/accessibility/ax_export.h"
-#include "ui/accessibility/ax_text_boundary.h"
 
 namespace ui {
-
-// A direction when searching for the next boundary.
-enum TextBoundaryDirection {
-  // Search forwards for the next boundary past the starting position.
-  FORWARDS_DIRECTION,
-  // Search backwards for the previous boundary before the starting position.
-  BACKWARDS_DIRECTION
-};
 
 // Convenience method needed to implement platform-specific text
 // accessibility APIs like IAccessible2. Search forwards or backwards
@@ -31,9 +22,9 @@ enum TextBoundaryDirection {
 // using the vector of line break character offsets in |line_breaks|.
 AX_EXPORT size_t FindAccessibleTextBoundary(const base::string16& text,
                                             const std::vector<int>& line_breaks,
-                                            AXTextBoundary boundary,
+                                            ax::mojom::TextBoundary boundary,
                                             size_t start_offset,
-                                            TextBoundaryDirection direction,
+                                            ax::mojom::MoveDirection direction,
                                             ax::mojom::TextAffinity affinity);
 
 // Returns a string ID that corresponds to the name of the given action.

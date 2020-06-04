@@ -25,6 +25,7 @@
 #include "remoting/host/file_transfer/file_transfer_message_handler.h"
 #include "remoting/host/host_extension_session.h"
 #include "remoting/host/input_injector.h"
+#include "remoting/host/keyboard_layout_monitor.h"
 #include "remoting/host/mouse_shape_pump.h"
 #include "remoting/host/screen_controls.h"
 #include "remoting/host/screen_resolution.h"
@@ -44,13 +45,6 @@ namespace remoting {
 
 using protocol::ActionRequest;
 
-namespace {
-
-// Name of command-line flag to disable use of I444 by default.
-const char kDisableI444SwitchName[] = "disable-i444";
-
-}  // namespace
-
 ClientSession::ClientSession(
     EventHandler* event_handler,
     std::unique_ptr<protocol::ConnectionToClient> connection,
@@ -60,23 +54,19 @@ ClientSession::ClientSession(
     scoped_refptr<protocol::PairingRegistry> pairing_registry,
     const std::vector<HostExtension*>& extensions)
     : event_handler_(event_handler),
-      connection_(std::move(connection)),
-      client_jid_(connection_->session()->jid()),
       desktop_environment_factory_(desktop_environment_factory),
       desktop_environment_options_(desktop_environment_options),
       input_tracker_(&host_input_filter_),
       remote_input_filter_(&input_tracker_),
       mouse_clamping_filter_(&remote_input_filter_),
-      disable_input_filter_(&mouse_clamping_filter_),
+      pointer_lock_detector_(&mouse_clamping_filter_, this),
+      disable_input_filter_(&pointer_lock_detector_),
       disable_clipboard_filter_(clipboard_echo_filter_.host_filter()),
       client_clipboard_factory_(clipboard_echo_filter_.client_filter()),
       max_duration_(max_duration),
       pairing_registry_(pairing_registry),
-      // Note that |lossless_video_color_| defaults to true, but actually only
-      // controls VP9 video stream color quality.
-      lossless_video_color_(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          kDisableI444SwitchName)),
-      weak_factory_(this) {
+      connection_(std::move(connection)),
+      client_jid_(connection_->session()->jid()) {
   connection_->session()->AddPlugin(&host_experiment_session_plugin_);
   connection_->SetEventHandler(this);
 
@@ -97,8 +87,6 @@ ClientSession::~ClientSession() {
   DCHECK(!input_injector_);
   DCHECK(!screen_controls_);
   DCHECK(!video_stream_);
-
-  connection_.reset();
 }
 
 void ClientSession::NotifyClientResolution(
@@ -241,20 +229,42 @@ void ClientSession::DeliverClientMessage(
 
 void ClientSession::SelectDesktopDisplay(
     const protocol::SelectDesktopDisplayRequest& select_display) {
-  int id = webrtc::kFullDesktopScreenId;
-  if (select_display.id() != "all") {
+  LOG(INFO) << "SelectDesktopDisplay "
+            << "'" << select_display.id() << "'";
+
+  // Parse the string with the selected display.
+  int id = webrtc::kInvalidScreenId;
+  if (select_display.id() == "all") {
+    id = webrtc::kFullDesktopScreenId;
+  } else {
     if (!base::StringToInt(select_display.id().c_str(), &id)) {
-      // Default to fullscreen if unable to parse id.
-      id = webrtc::kFullDesktopScreenId;
+      LOG(ERROR) << "  Unable to parse display id "
+                 << "'" << select_display.id() << "'";
+      id = webrtc::kInvalidScreenId;
     }
-    // Invalid display index defaults to showing all displays.
     if (!desktop_display_info_.GetDisplayInfo(id)) {
-      id = webrtc::kFullDesktopScreenId;
+      LOG(ERROR) << "  Invalid display id "
+                 << "'" << select_display.id() << "'";
+      id = webrtc::kInvalidScreenId;
     }
   }
+  // Don't allow requests for fullscreen if not supported by the current
+  // display configuration.
+  if (!can_capture_full_desktop_ && id == webrtc::kFullDesktopScreenId) {
+    LOG(ERROR) << "  Full desktop not supported";
+    id = webrtc::kInvalidScreenId;
+  }
+  // Fall back to default capture config if invalid request.
+  if (id == webrtc::kInvalidScreenId) {
+    LOG(ERROR) << "  Invalid display specification, falling back to default";
+    id = can_capture_full_desktop_ ? webrtc::kFullDesktopScreenId : 0;
+  }
 
-  LOG(INFO) << "SelectDesktopDisplay " << id << " = '" << select_display.id()
-            << "'";
+  if (show_display_id_ == id) {
+    LOG(INFO) << "  Display " << id << " is already selected. Ignoring";
+    return;
+  }
+
   video_stream_->SelectSource(id);
   show_display_id_ = id;
 
@@ -294,8 +304,8 @@ void ClientSession::OnConnectionAuthenticated() {
   if (max_duration_ > base::TimeDelta()) {
     max_duration_timer_.Start(
         FROM_HERE, max_duration_,
-        base::Bind(&ClientSession::DisconnectSession, base::Unretained(this),
-                   protocol::MAX_SESSION_LENGTH));
+        base::BindOnce(&ClientSession::DisconnectSession,
+                       base::Unretained(this), protocol::MAX_SESSION_LENGTH));
   }
 
   // Notify EventHandler.
@@ -346,8 +356,14 @@ void ClientSession::CreateMediaStreams() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Create a VideoStream to pump frames from the capturer to the client.
-  video_stream_ = connection_->StartVideoStream(
-      desktop_environment_->CreateVideoCapturer());
+  auto composer = desktop_environment_->CreateComposingVideoCapturer();
+  if (composer) {
+    desktop_and_cursor_composer_ = composer->GetWeakPtr();
+    video_stream_ = connection_->StartVideoStream(std::move(composer));
+  } else {
+    video_stream_ = connection_->StartVideoStream(
+        desktop_environment_->CreateVideoCapturer());
+  }
 
   // Create a AudioStream to pump audio from the capturer to the client.
   std::unique_ptr<protocol::AudioSource> audio_capturer =
@@ -389,6 +405,16 @@ void ClientSession::OnConnectionChannelsConnected() {
   mouse_shape_pump_.reset(
       new MouseShapePump(desktop_environment_->CreateMouseCursorMonitor(),
                          connection_->client_stub()));
+  mouse_shape_pump_->SetMouseCursorMonitorCallback(this);
+
+  // Create KeyboardLayoutMonitor to send keyboard layout.
+  // Unretained is sound because callback will never be called after
+  // |keyboard_layout_monitor_| has been destroyed, and |connection_| (which
+  // owns the client stub) is guaranteed to outlive |keyboard_layout_monitor_|.
+  keyboard_layout_monitor_ = desktop_environment_->CreateKeyboardLayoutMonitor(
+      base::BindRepeating(&protocol::KeyboardLayoutStub::SetKeyboardLayout,
+                          base::Unretained(connection_->client_stub())));
+  keyboard_layout_monitor_->Start();
 
   if (pending_video_layout_message_) {
     connection_->client_stub()->SetVideoLayout(*pending_video_layout_message_);
@@ -416,9 +442,11 @@ void ClientSession::OnConnectionClosed(protocol::ErrorCode error) {
 
   // Stop components access the client, audio or video stubs, which are no
   // longer valid once ConnectionToClient calls OnConnectionClosed().
+  desktop_and_cursor_composer_.reset();
   audio_stream_.reset();
-  video_stream_.reset();
   mouse_shape_pump_.reset();
+  video_stream_.reset();
+  keyboard_layout_monitor_.reset();
   client_clipboard_factory_.InvalidateWeakPtrs();
   input_injector_.reset();
   screen_controls_.reset();
@@ -455,6 +483,13 @@ void ClientSession::DisconnectSession(protocol::ErrorCode error) {
   connection_->Disconnect(error);
 }
 
+void ClientSession::OnLocalKeyPressed(uint32_t usb_keycode) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  bool is_local = remote_input_filter_.LocalKeyPressed(usb_keycode);
+  if (is_local && desktop_environment_options_.terminate_upon_input())
+    DisconnectSession(protocol::OK);
+}
+
 void ClientSession::OnLocalPointerMoved(const webrtc::DesktopVector& position,
                                         ui::EventType type) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -484,6 +519,25 @@ ClientSessionControl* ClientSession::session_control() {
   return this;
 }
 
+void ClientSession::OnPointerLockChanged(bool active) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (desktop_and_cursor_composer_)
+    desktop_and_cursor_composer_->SetComposeEnabled(active);
+}
+
+void ClientSession::OnMouseCursor(webrtc::MouseCursor* mouse_cursor) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (desktop_and_cursor_composer_)
+    desktop_and_cursor_composer_->SetMouseCursor(mouse_cursor);
+}
+
+void ClientSession::OnMouseCursorPosition(
+    const webrtc::DesktopVector& position) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (desktop_and_cursor_composer_)
+    desktop_and_cursor_composer_->SetMouseCursorPosition(position);
+}
+
 void ClientSession::RegisterCreateHandlerCallbackForTesting(
     const std::string& prefix,
     protocol::DataChannelManager::CreateHandlerCallback constructor) {
@@ -507,71 +561,86 @@ std::unique_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
       base::ThreadTaskRunnerHandle::Get());
 }
 
-void ClientSession::SetMouseClampingFilter(const webrtc::DesktopSize& size,
-                                           const webrtc::DesktopVector& dpi) {
+void ClientSession::SetMouseClampingFilter(const DisplaySize& size) {
   UpdateMouseClampingFilterOffset();
-  mouse_clamping_filter_.set_output_size(size);
+
+  mouse_clamping_filter_.set_output_size(size.WidthAsPixels(),
+                                         size.HeightAsPixels());
 
   switch (connection_->session()->config().protocol()) {
     case protocol::SessionConfig::Protocol::ICE:
-      mouse_clamping_filter_.set_input_size(webrtc::DesktopSize(size));
+      mouse_clamping_filter_.set_input_size(size.WidthAsPixels(),
+                                            size.HeightAsPixels());
       break;
 
     case protocol::SessionConfig::Protocol::WEBRTC: {
-      // When using WebRTC protocol the client sends mouse coordinates in DIPs,
-      // while InputInjector expects them in physical pixels.
+#if defined(OS_MACOSX)
+      mouse_clamping_filter_.set_input_size(size.WidthAsPixels(),
+                                            size.HeightAsPixels());
+#else
+      // When using the WebRTC protocol the client sends mouse coordinates in
+      // DIPs, while InputInjector expects them in physical pixels.
       // TODO(sergeyu): Fix InputInjector implementations to use DIPs as well.
-      webrtc::DesktopSize size_dips =
-          DesktopDisplayInfo::CalcSizeDips(size, dpi.x(), dpi.y());
-      mouse_clamping_filter_.set_input_size(webrtc::DesktopSize(size_dips));
+      mouse_clamping_filter_.set_input_size(size.WidthAsDips(),
+                                            size.HeightAsDips());
+#endif  // defined(OS_MACOSX)
     }
   }
 }
 
 void ClientSession::UpdateMouseClampingFilterOffset() {
+  if (show_display_id_ == webrtc::kInvalidScreenId)
+    return;
+
   webrtc::DesktopVector origin;
-  if (show_display_id_ != webrtc::kFullDesktopScreenId) {
-    origin = desktop_display_info_.CalcDisplayOffset(show_display_id_);
-  }
+  origin = desktop_display_info_.CalcDisplayOffset(show_display_id_);
   mouse_clamping_filter_.set_output_offset(origin);
 }
 
 void ClientSession::OnVideoSizeChanged(protocol::VideoStream* video_stream,
-                                       const webrtc::DesktopSize& size,
+                                       const webrtc::DesktopSize& size_px,
                                        const webrtc::DesktopVector& dpi) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   LOG(INFO) << "ClientSession::OnVideoSizeChanged";
-  SetMouseClampingFilter(size, dpi);
+  DisplaySize size =
+      DisplaySize::FromPixels(size_px.width(), size_px.height(), dpi.x());
+  LOG(INFO) << "  DisplaySize: " << size;
+
+  // The first video size message that we receive from WebRtc is the full
+  // desktop size (if supported). If full desktop capture is not supported,
+  // then this will be the size of the default display.
+  if (default_webrtc_desktop_size_.IsEmpty()) {
+    default_webrtc_desktop_size_ = size;
+    LOG(INFO) << "  display id " << show_display_id_;
+    DCHECK(show_display_id_ == webrtc::kInvalidScreenId);
+    LOG(INFO) << "  Recording default webrtc capture size "
+              << default_webrtc_desktop_size_;
+  }
+  webrtc_capture_size_ = size;
+
+  SetMouseClampingFilter(size);
 
   // Record default DPI in case a display reports 0 for DPI.
   default_x_dpi_ = dpi.x();
   default_y_dpi_ = dpi.y();
+  if (dpi.x() != dpi.y()) {
+    LOG(WARNING) << "Mismatch x,y dpi. x=" << dpi.x() << " y=" << dpi.y();
+  }
 
   if (connection_->session()->config().protocol() !=
       protocol::SessionConfig::Protocol::WEBRTC) {
     return;
   }
 
-  LOG(INFO) << "   WebRTC input size (pixels): " << size.width() << "x"
-            << size.height() << " @ " << dpi.x() << "," << dpi.y();
-  webrtc::DesktopSize size_dips =
-      DesktopDisplayInfo::CalcSizeDips(size, dpi.x(), dpi.y());
-  LOG(INFO) << "   DPI: " << dpi.x() << "," << dpi.y();
-  LOG(INFO) << "   WebRTC input size (DIPS): " << size_dips.width() << "x"
-            << size_dips.height();
-
   // Generate and send VideoLayout message.
   protocol::VideoLayout layout;
   protocol::VideoTrackLayout* video_track = layout.add_video_track();
   video_track->set_position_x(0);
   video_track->set_position_y(0);
-  video_track->set_width(size_dips.width());
-  video_track->set_height(size_dips.height());
+  video_track->set_width(size.WidthAsDips());
+  video_track->set_height(size.HeightAsDips());
   video_track->set_x_dpi(dpi.x());
   video_track->set_y_dpi(dpi.y());
-
-  LOG(INFO) << "  VideoLayout Desktop (DIPS) = 0,0 " << size_dips.width() << "x"
-            << size_dips.height() << " [" << dpi.x() << "," << dpi.y() << "]";
 
   // VideoLayout can be sent only after the control channel is connected.
   // TODO(sergeyu): Change client_stub() implementation to allow queuing
@@ -593,7 +662,7 @@ void ClientSession::OnDesktopDisplayChanged(
   int max_y = 0;
   int dpi_x = 0;
   int dpi_y = 0;
-  LOG(INFO) << "  Scanning display info...";
+  LOG(INFO) << "  Scanning display info... (dips)";
   for (int display_id = 0; display_id < displays->video_track_size();
        display_id++) {
     protocol::VideoTrackLayout track = displays->video_track(display_id);
@@ -606,17 +675,12 @@ void ClientSession::OnDesktopDisplayChanged(
     if (dpi_y == 0)
       dpi_y = track.y_dpi();
 
-    // The WebRTC desktop only includes displays that match the main display's
-    // DPI. Here, we filter out non-matching displays so that our desktop
-    // geometry matches what WebRTC can handle.
-    if (dpi_x == track.x_dpi() && dpi_y == track.y_dpi()) {
-      int x = track.position_x();
-      int y = track.position_y();
-      min_x = std::min(x, min_x);
-      min_y = std::min(y, min_y);
-      max_x = std::max(x + track.width(), max_x);
-      max_y = std::max(y + track.height(), max_y);
-    }
+    int x = track.position_x();
+    int y = track.position_y();
+    min_x = std::min(x, min_x);
+    min_y = std::min(y, min_y);
+    max_x = std::max(x + track.width(), max_x);
+    max_y = std::max(y + track.height(), max_y);
   }
 
   // TODO(garykac): Investigate why these DPI values are 0 for some users.
@@ -628,28 +692,52 @@ void ClientSession::OnDesktopDisplayChanged(
   // Calc desktop scaled geometry (in DIPs)
   // See comment in OnVideoSizeChanged() for details.
   const webrtc::DesktopSize size(max_x - min_x, max_y - min_y);
-  webrtc::DesktopSize size_dips =
-      DesktopDisplayInfo::CalcSizeDips(size, dpi_x, dpi_y);
+
+  // If this is our first message, then we need to determine if the current
+  // display configuration supports capturing the entire desktop.
+  LOG(INFO) << "    Webrtc desktop size " << default_webrtc_desktop_size_;
+  if (show_display_id_ == webrtc::kInvalidScreenId) {
+#if defined(OS_MACOSX)
+    // On MacOS, there are situations where webrtc cannot capture the entire
+    // desktop (e.g, when there are displays with different DPIs). We detect
+    // this situation by comparing the full desktop size (calculated above
+    // from the displays) and the size of the initial webrtc capture (which
+    // defaults to the full desktop if supported).
+    if (size.width() == default_webrtc_desktop_size_.WidthAsDips() &&
+        size.height() == default_webrtc_desktop_size_.HeightAsDips()) {
+      LOG(INFO) << "    Full desktop capture supported.";
+      can_capture_full_desktop_ = true;
+    } else {
+      LOG(INFO)
+          << "    This configuration does not support full desktop capture.";
+      can_capture_full_desktop_ = false;
+    }
+#else
+    // Windows/Linux can capture full desktop if multiple displays.
+    can_capture_full_desktop_ = true;
+#endif  // defined(OS_MACOSX)
+  }
 
   // Generate and send VideoLayout message.
   protocol::VideoLayout layout;
+  layout.set_supports_full_desktop_capture(can_capture_full_desktop_);
   protocol::VideoTrackLayout* video_track;
 
-  // Add scaled geometry for entire desktop (in DIPs).
-  // The first layout must be the scaled geometry for backwards compatibility
-  // with the VideoLayout message. The scaled geometry is used for mouse
-  // coordinates sent from the client.
+  // The first layout must be the current webrtc capture size.
+  // This is required because we reuse the same message for both
+  // VideoSizeChanged (which is used to scale mouse coordinates)
+  // and DisplayDesktopChanged.
   video_track = layout.add_video_track();
   video_track->set_position_x(0);
   video_track->set_position_y(0);
-  video_track->set_width(size_dips.width());
-  video_track->set_height(size_dips.height());
+  video_track->set_width(webrtc_capture_size_.WidthAsDips());
+  video_track->set_height(webrtc_capture_size_.HeightAsDips());
   video_track->set_x_dpi(dpi_x);
   video_track->set_y_dpi(dpi_y);
-  LOG(INFO) << "  Desktop (DIPS) = 0,0 " << size_dips.width() << "x"
-            << size_dips.height() << " [" << dpi_x << "," << dpi_y << "]";
+  LOG(INFO) << "  Webrtc capture size (DIPS) = 0,0 "
+            << default_webrtc_desktop_size_;
 
-  // Add raw geometry for entire desktop (in pixels).
+  // Add raw geometry for entire desktop (in DIPs).
   video_track = layout.add_video_track();
   video_track->set_position_x(0);
   video_track->set_position_y(0);
@@ -657,7 +745,7 @@ void ClientSession::OnDesktopDisplayChanged(
   video_track->set_height(size.height());
   video_track->set_x_dpi(dpi_x);
   video_track->set_y_dpi(dpi_y);
-  LOG(INFO) << "  Desktop (pixels) = 0,0 " << size.width() << "x"
+  LOG(INFO) << "  Full Desktop (DIPS) = 0,0 " << size.width() << "x"
             << size.height() << " [" << dpi_x << "," << dpi_y << "]";
 
   // Add a VideoTrackLayout entry for each separate display.
@@ -674,6 +762,23 @@ void ClientSession::OnDesktopDisplayChanged(
               << display.height() << " [" << display.x_dpi() << ","
               << display.y_dpi() << "]";
   }
+
+  // Set the display id, if this is the first message being processed.
+  if (show_display_id_ == webrtc::kInvalidScreenId) {
+    if (can_capture_full_desktop_) {
+      show_display_id_ = webrtc::kFullDesktopScreenId;
+    } else {
+      // Select the default display.
+      protocol::SelectDesktopDisplayRequest req;
+      req.set_id("0");
+      SelectDesktopDisplay(req);
+    }
+  }
+
+  // We need to update the input filters whenever the displays change.
+  DisplaySize display_size =
+      DisplaySize::FromPixels(size.width(), size.height(), default_x_dpi_);
+  SetMouseClampingFilter(display_size);
 
   connection_->client_stub()->SetVideoLayout(layout);
 }

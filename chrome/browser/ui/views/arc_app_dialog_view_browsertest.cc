@@ -10,9 +10,12 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/arc/arc_usb_host_permission_manager.h"
@@ -20,7 +23,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/arc/arc_util.h"
-#include "components/arc/common/app.mojom.h"
+#include "components/arc/mojom/app.mojom.h"
 #include "components/arc/test/connection_holder_util.h"
 #include "components/arc/test/fake_app_instance.h"
 #include "content/public/test/test_utils.h"
@@ -53,7 +56,7 @@ class ArcAppUninstallDialogViewBrowserTest : public InProcessBrowserTest {
     arc_app_list_pref_->SetDefaultAppsReadyCallback(run_loop.QuitClosure());
     run_loop.Run();
 
-    app_instance_.reset(new arc::FakeAppInstance(arc_app_list_pref_));
+    app_instance_ = std::make_unique<arc::FakeAppInstance>(arc_app_list_pref_);
     arc_app_list_pref_->app_connection_holder()->SetInstance(
         app_instance_.get());
     WaitForInstanceReady(arc_app_list_pref_->app_connection_holder());
@@ -109,7 +112,7 @@ class ArcAppUninstallDialogViewBrowserTest : public InProcessBrowserTest {
 class ArcAppPermissionDialogViewBrowserTest
     : public ArcAppUninstallDialogViewBrowserTest {
  public:
-  ArcAppPermissionDialogViewBrowserTest() : weak_ptr_factory_(this) {}
+  ArcAppPermissionDialogViewBrowserTest() {}
   // InProcessBrowserTest:
   ~ArcAppPermissionDialogViewBrowserTest() override = default;
 
@@ -125,6 +128,12 @@ class ArcAppPermissionDialogViewBrowserTest
         base::StringPrintf("fake.package.%d", id) /* package_name */,
         id /* package_version */, id /* last_backup_android_id */,
         0 /* last_backup_time */, false /* sync */));
+
+    // AppService uses mojom, so flush mojom calls to add the app to AppService.
+    auto* app_service_proxy =
+        apps::AppServiceProxyFactory::GetForProfile(profile());
+    ASSERT_TRUE(app_service_proxy);
+    app_service_proxy->FlushMojoCallsForTesting();
   }
 
   void set_accepted(bool accepted) { accepted_ = accepted; }
@@ -172,7 +181,8 @@ class ArcAppPermissionDialogViewBrowserTest
   uint16_t vendor_id_ = 123;
   uint16_t product_id_ = 456;
 
-  base::WeakPtrFactory<ArcAppPermissionDialogViewBrowserTest> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcAppPermissionDialogViewBrowserTest> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcAppPermissionDialogViewBrowserTest);
 };
@@ -392,62 +402,6 @@ IN_PROC_BROWSER_TEST_F(ArcAppPermissionDialogViewBrowserTest,
       package0, guid(), serial_number(), vendor_id(), product_id()));
   EXPECT_FALSE(arc_usb_permission_manager->HasUsbAccessPermission(
       package1, guid(), serial_number(), vendor_id(), product_id()));
-}
-
-// User confirms/cancels ARC app uninstall. Note that the shortcut is removed
-// when the app and the package are uninstalled since the shortcut and the app
-// share same package.
-IN_PROC_BROWSER_TEST_F(ArcAppUninstallDialogViewBrowserTest,
-                       UserConfirmsUninstall) {
-  EXPECT_EQ(2u, arc_app_list_pref()->GetAppIds().size());
-  std::string package_name = "fake.package.0";
-  std::string app_activity = "fake.app.0.activity";
-  std::string app_id =
-      arc_app_list_pref()->GetAppId(package_name, app_activity);
-
-  ShowArcAppUninstallDialog(browser()->profile(), app_id);
-  content::RunAllPendingInMessageLoop();
-
-  // Cancelling the dialog won't uninstall any app.
-  EXPECT_TRUE(CloseAppDialogViewAndConfirmForTest(false));
-  content::RunAllPendingInMessageLoop();
-  EXPECT_EQ(2u, arc_app_list_pref()->GetAppIds().size());
-
-  ShowArcAppUninstallDialog(browser()->profile(), app_id);
-  content::RunAllPendingInMessageLoop();
-  EXPECT_TRUE(IsArcAppDialogViewAliveForTest());
-
-  // Accepting the dialog should work now.
-  EXPECT_TRUE(CloseAppDialogViewAndConfirmForTest(true));
-  content::RunAllPendingInMessageLoop();
-  EXPECT_EQ(0u, arc_app_list_pref()->GetAppIds().size());
-}
-
-// User confirms/cancels ARC app shortcut removal. Note that the app is not
-// uninstalled when the shortcut is removed.
-IN_PROC_BROWSER_TEST_F(ArcAppUninstallDialogViewBrowserTest,
-                       UserConfirmsUninstallShortcut) {
-  EXPECT_EQ(2u, arc_app_list_pref()->GetAppIds().size());
-  std::string package_name = "fake.package.0";
-  std::string intent_uri = "Fake Shortcut uri 0";
-  std::string app_id = arc_app_list_pref()->GetAppId(package_name, intent_uri);
-
-  ShowArcAppUninstallDialog(browser()->profile(), app_id);
-  content::RunAllPendingInMessageLoop();
-
-  // Cancelling the dialog won't uninstall any app.
-  EXPECT_TRUE(CloseAppDialogViewAndConfirmForTest(false));
-  content::RunAllPendingInMessageLoop();
-  EXPECT_EQ(2u, arc_app_list_pref()->GetAppIds().size());
-
-  ShowArcAppUninstallDialog(browser()->profile(), app_id);
-  content::RunAllPendingInMessageLoop();
-  EXPECT_TRUE(IsArcAppDialogViewAliveForTest());
-
-  // Accepting the dialog should uninstall the shortcut only.
-  EXPECT_TRUE(CloseAppDialogViewAndConfirmForTest(true));
-  content::RunAllPendingInMessageLoop();
-  EXPECT_EQ(1u, arc_app_list_pref()->GetAppIds().size());
 }
 
 }  // namespace arc

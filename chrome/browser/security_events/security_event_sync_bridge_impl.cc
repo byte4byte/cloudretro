@@ -11,8 +11,8 @@
 #include "base/big_endian.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "components/sync/model/entity_change.h"
@@ -36,7 +36,7 @@ std::unique_ptr<syncer::EntityData> ToEntityData(
     sync_pb::SecurityEventSpecifics specifics) {
   auto entity_data = std::make_unique<syncer::EntityData>();
   entity_data->name = base::NumberToString(specifics.event_time_usec());
-  entity_data->specifics.set_allocated_security_event(&specifics);
+  entity_data->specifics.mutable_security_event()->Swap(&specifics);
   return entity_data;
 }
 

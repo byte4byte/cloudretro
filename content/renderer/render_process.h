@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "content/child/child_process.h"
 
 namespace content {
@@ -29,13 +29,6 @@ class RenderProcess : public ChildProcess {
                 std::unique_ptr<base::ThreadPoolInstance::InitParams>
                     thread_pool_init_params);
   ~RenderProcess() override {}
-
-  // Keep track of the cumulative set of enabled bindings for this process,
-  // across any view.
-  virtual void AddBindings(int bindings) = 0;
-
-  // The cumulative set of enabled bindings for this process.
-  virtual int GetEnabledBindings() const = 0;
 
   // Returns a pointer to the RenderProcess singleton instance. Assuming that
   // we're actually a renderer or a renderer test, this static cast will

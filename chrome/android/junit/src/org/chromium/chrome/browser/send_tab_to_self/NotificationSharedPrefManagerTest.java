@@ -4,36 +4,24 @@
 
 package org.chromium.chrome.browser.send_tab_to_self;
 
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.support.annotation.Nullable;
 import android.support.test.filters.SmallTest;
 
+import androidx.annotation.Nullable;
+
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Spy;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.send_tab_to_self.NotificationSharedPrefManager.ActiveNotification;
 
 /** Tests for NotificationSharedPrefManagerTest */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class NotificationSharedPrefManagerTest {
-    @Spy
-    private Context mContext = RuntimeEnvironment.application.getApplicationContext();
-
-    @Before
-    public void setUp() {
-        ContextUtils.initApplicationContext(mContext);
-        ContextUtils.getAppSharedPreferences().edit().clear().apply();
-    }
-
     private @Nullable ActiveNotification deserialize(String serialized) {
         return NotificationSharedPrefManager.deserializeNotification(serialized);
     }
@@ -115,11 +103,9 @@ public class NotificationSharedPrefManagerTest {
     @Test
     @SmallTest
     public void testMaxNotificationId() {
-        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
-        prefs.edit()
-                .putInt(NotificationSharedPrefManager.PREF_NEXT_NOTIFICATION_ID,
-                        Integer.MAX_VALUE - 1)
-                .apply();
+        SharedPreferencesManager prefs = SharedPreferencesManager.getInstance();
+        prefs.writeInt(
+                ChromePreferenceKeys.SEND_TAB_TO_SELF_NEXT_NOTIFICATION_ID, Integer.MAX_VALUE - 1);
 
         // Check that the notificationId is reset.
         int id = NotificationSharedPrefManager.getNextNotificationId();
@@ -128,9 +114,8 @@ public class NotificationSharedPrefManagerTest {
         Assert.assertEquals(1, id);
 
         // Check that the notificationId is reset.
-        prefs.edit()
-                .putInt(NotificationSharedPrefManager.PREF_NEXT_NOTIFICATION_ID, Integer.MAX_VALUE)
-                .apply();
+        prefs.writeInt(
+                ChromePreferenceKeys.SEND_TAB_TO_SELF_NEXT_NOTIFICATION_ID, Integer.MAX_VALUE);
         id = NotificationSharedPrefManager.getNextNotificationId();
         Assert.assertEquals(0, id);
     }

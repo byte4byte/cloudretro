@@ -352,7 +352,7 @@ HRESULT DoDelete(const base::FilePath& install_path) {
   if (!base::DirectoryExists(install_path))
     return S_FALSE;
   Sleep(5000);  // Give parent some time to exit.
-  return base::DeleteFile(install_path, true) ? S_OK : E_FAIL;
+  return base::DeleteFileRecursively(install_path) ? S_OK : E_FAIL;
 }
 
 HRESULT DoInstall(const base::FilePath& install_path) {
@@ -364,7 +364,7 @@ HRESULT DoInstall(const base::FilePath& install_path) {
   base::FilePath old_install_path = GetInstallLocation(kUninstallId);
   if (!old_install_path.value().empty() && install_path != old_install_path) {
     if (base::DirectoryExists(old_install_path))
-      base::DeleteFile(old_install_path, true);
+      base::DeleteFileRecursively(old_install_path);
   }
   CreateUninstallKey(kUninstallId, LoadLocalString(IDS_DRIVER_NAME),
                      kUninstallSwitch);
@@ -408,26 +408,27 @@ int WINAPI WinMain(__in HINSTANCE hInstance,
                    __in HINSTANCE hPrevInstance,
                    __in LPSTR lpCmdLine,
                    __in int nCmdShow) {
-  using namespace cloud_print;
-
   base::AtExitManager at_exit_manager;
-  base::CommandLine::Init(0, NULL);
+  base::CommandLine::Init(0, nullptr);
 
-  HRESULT retval = ExecuteCommands();
+  HRESULT retval = cloud_print::ExecuteCommands();
 
   if (retval == HRESULT_FROM_WIN32(ERROR_BAD_DRIVER)) {
-    SetGoogleUpdateError(kGoogleUpdateProductId,
-                         LoadLocalString(IDS_ERROR_NO_XPS));
+    cloud_print::SetGoogleUpdateError(
+        cloud_print::kGoogleUpdateProductId,
+        cloud_print::LoadLocalString(IDS_ERROR_NO_XPS));
   } else if (FAILED(retval)) {
-    SetGoogleUpdateError(kGoogleUpdateProductId, retval);
+    cloud_print::SetGoogleUpdateError(cloud_print::kGoogleUpdateProductId,
+                                      retval);
   }
 
-  VLOG(0) << GetErrorMessage(retval) << " HRESULT=0x" << std::setbase(16)
-          << retval;
+  VLOG(0) << cloud_print::GetErrorMessage(retval) << " HRESULT=0x"
+          << std::setbase(16) << retval;
 
   // Installer is silent by default as required by Google Update.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
-    DisplayWindowsMessage(NULL, retval, LoadLocalString(IDS_DRIVER_NAME));
+    cloud_print::DisplayWindowsMessage(
+        nullptr, retval, cloud_print::LoadLocalString(IDS_DRIVER_NAME));
   }
   return retval;
 }

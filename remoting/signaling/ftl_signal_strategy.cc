@@ -106,15 +106,14 @@ class FtlSignalStrategy::Core {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<Core> weak_factory_;
+  base::WeakPtrFactory<Core> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 FtlSignalStrategy::Core::Core(
     std::unique_ptr<OAuthTokenGetter> oauth_token_getter,
     std::unique_ptr<RegistrationManager> registration_manager,
-    std::unique_ptr<MessagingClient> messaging_client)
-    : weak_factory_(this) {
+    std::unique_ptr<MessagingClient> messaging_client) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(oauth_token_getter);
   DCHECK(registration_manager);
@@ -152,6 +151,10 @@ void FtlSignalStrategy::Core::Connect() {
 
 void FtlSignalStrategy::Core::Disconnect() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (registration_manager_->IsSignedIn()) {
+    registration_manager_->SignOut();
+  }
 
   if (receive_message_subscription_) {
     local_address_ = SignalingAddress();
@@ -211,7 +214,7 @@ bool FtlSignalStrategy::Core::SendStanza(
   DCHECK(to_error.empty());
 
   // Synthesizing the from attribute in the message.
-  stanza->SetAttr(jingle_xmpp::QN_FROM, local_address_.jid());
+  stanza->SetAttr(jingle_xmpp::QN_FROM, local_address_.id());
 
   std::string stanza_id = stanza->Attr(jingle_xmpp::QN_ID);
   SendMessage(to, stanza_id, stanza->Str());
@@ -298,13 +301,10 @@ void FtlSignalStrategy::Core::OnReceiveMessagesStreamClosed(
     const grpc::Status& status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (status.error_code() == grpc::StatusCode::CANCELLED) {
-    // Stream is canceled by calling Disconnect().
-    return;
+    LOG(WARNING) << "ReceiveMessages stream closed with CANCELLED code.";
   }
-  if (!status.ok()) {
-    HandleGrpcStatusError(FROM_HERE, status);
-    return;
-  }
+  DCHECK(!status.ok());
+  HandleGrpcStatusError(FROM_HERE, status);
 }
 
 void FtlSignalStrategy::Core::OnMessageReceived(
@@ -328,6 +328,10 @@ void FtlSignalStrategy::Core::OnMessageReceived(
   DCHECK(message.xmpp().has_stanza());
   auto stanza = base::WrapUnique<jingle_xmpp::XmlElement>(
       jingle_xmpp::XmlElement::ForStr(message.xmpp().stanza()));
+  if (!stanza) {
+    LOG(WARNING) << "Failed to parse XMPP: " << message.xmpp().stanza();
+    return;
+  }
   OnStanza(sender_address, std::move(stanza));
 }
 
@@ -341,7 +345,7 @@ void FtlSignalStrategy::Core::SendMessage(const SignalingAddress& receiver,
   bool get_info_result =
       receiver.GetFtlInfo(&receiver_username, &receiver_registration_id);
   if (!get_info_result) {
-    LOG(DFATAL) << "Receiver is not in FTL address: " << receiver.jid();
+    LOG(DFATAL) << "Receiver is not in FTL address: " << receiver.id();
     return;
   }
 
@@ -379,8 +383,8 @@ void FtlSignalStrategy::Core::OnSendMessageResponse(
   auto error_iq = std::make_unique<jingle_xmpp::XmlElement>(jingle_xmpp::QN_IQ);
   error_iq->SetAttr(jingle_xmpp::QN_TYPE, jingle_xmpp::STR_ERROR);
   error_iq->SetAttr(jingle_xmpp::QN_ID, stanza_id);
-  error_iq->SetAttr(jingle_xmpp::QN_FROM, receiver.jid());
-  error_iq->SetAttr(jingle_xmpp::QN_TO, local_address_.jid());
+  error_iq->SetAttr(jingle_xmpp::QN_FROM, receiver.id());
+  error_iq->SetAttr(jingle_xmpp::QN_TO, local_address_.id());
   OnStanza(receiver, std::move(error_iq));
 }
 
@@ -394,7 +398,6 @@ void FtlSignalStrategy::Core::HandleGrpcStatusError(
              << ", message: " << status.error_message()
              << ", location: " << location.ToString();
   if (status.error_code() == grpc::StatusCode::UNAUTHENTICATED) {
-    registration_manager_->SignOut();
     oauth_token_getter_->InvalidateCache();
   }
   Disconnect();
@@ -411,12 +414,12 @@ void FtlSignalStrategy::Core::OnStanza(
     return;
   }
   if (SignalingAddress(stanza->Attr(jingle_xmpp::QN_FROM)) != sender_address) {
-    LOG(DFATAL) << "Expected sender: " << sender_address.jid()
+    LOG(DFATAL) << "Expected sender: " << sender_address.id()
                 << ", but received: " << stanza->Attr(jingle_xmpp::QN_FROM);
     return;
   }
   if (SignalingAddress(stanza->Attr(jingle_xmpp::QN_TO)) != local_address_) {
-    LOG(DFATAL) << "Expected receiver: " << local_address_.jid()
+    LOG(DFATAL) << "Expected receiver: " << local_address_.id()
                 << ", but received: " << stanza->Attr(jingle_xmpp::QN_TO);
     return;
   }
@@ -439,7 +442,8 @@ FtlSignalStrategy::FtlSignalStrategy(
   auto registration_manager = std::make_unique<FtlRegistrationManager>(
       oauth_token_getter.get(), std::move(device_id_provider));
   auto messaging_client = std::make_unique<FtlMessagingClient>(
-      oauth_token_getter.get(), registration_manager.get());
+      oauth_token_getter.get(), registration_manager.get(),
+      &signaling_tracker_);
   CreateCore(std::move(oauth_token_getter), std::move(registration_manager),
              std::move(messaging_client));
 }

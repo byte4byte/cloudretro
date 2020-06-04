@@ -5,10 +5,14 @@
 #ifndef BASE_TEST_TEST_SWITCHES_H_
 #define BASE_TEST_TEST_SWITCHES_H_
 
+#include "build/build_config.h"
+
 namespace switches {
 
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
+extern const char kHelpFlag[];
+extern const char kSingleProcessTests[];
 extern const char kTestLauncherBatchLimit[];
 extern const char kTestLauncherBotMode[];
 extern const char kTestLauncherDebugLauncher[];
@@ -21,6 +25,7 @@ extern const char kTestLauncherOutput[];
 extern const char kTestLauncherRetryLimit[];
 extern const char kIsolatedScriptTestLauncherRetryLimit[];
 extern const char kTestLauncherSummaryOutput[];
+extern const char kTestLauncherPrintTempLeaks[];
 extern const char kTestLauncherPrintTestStdio[];
 extern const char kTestLauncherPrintWritablePath[];
 extern const char kTestLauncherShardIndex[];
@@ -31,6 +36,10 @@ extern const char kTestLauncherTrace[];
 extern const char kTestTinyTimeout[];
 extern const char kUiTestActionTimeout[];
 extern const char kUiTestActionMaxTimeout[];
+
+#if defined(OS_IOS)
+extern const char kEnableRunIOSUnittestsWithXCTest[];
+#endif
 
 }  // namespace switches
 

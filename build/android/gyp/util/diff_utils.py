@@ -10,11 +10,24 @@ import difflib
 from util import build_utils
 
 
-def DiffFileContents(expected_path, actual_path):
+def _SkipOmitted(line):
+  """
+  Skip lines that are to be intentionally omitted from the expectations file.
+
+  This is required when the file to be compared against expectations contains
+  a line that changes from build to build because - for instance - it contains
+  version information.
+  """
+  if line.endswith('# OMIT FROM EXPECTATIONS\n'):
+    return '# THIS LINE WAS OMITTED\n'
+  return line
+
+
+def DiffFileContents(expected_path, actual_path, show_files_compared=True):
   """Check file contents for equality and return the diff or None."""
   with open(expected_path) as f_expected, open(actual_path) as f_actual:
     expected_lines = f_expected.readlines()
-    actual_lines = f_actual.readlines()
+    actual_lines = [_SkipOmitted(line) for line in f_actual]
 
   if expected_lines == actual_lines:
     return None
@@ -29,11 +42,15 @@ def DiffFileContents(expected_path, actual_path):
       tofile=os.path.join('after', expected_path),
       n=0)
 
-  # Space added before "patch" so that giant command is not put in bash history.
-  return """\
+  files_compared_msg = """\
 Files Compared:
   * {}
   * {}
+  """.format(expected_path, actual_path)
+
+  patch_msg = """\
+If you are looking at this through LogDog, click "Raw log" before copying.
+See https://bugs.chromium.org/p/chromium/issues/detail?id=984616.
 
 To update the file, run:
 ########### START ###########
@@ -41,4 +58,6 @@ To update the file, run:
 {}
 END_DIFF
 ############ END ############
-""".format(expected_path, actual_path, ''.join(diff).rstrip())
+""".format(''.join(diff).rstrip())
+
+  return files_compared_msg + patch_msg if show_files_compared else patch_msg

@@ -23,10 +23,11 @@ class ArCoreJavaUtils : public ArCoreSessionUtils {
   // ArCoreSessionUtils:
   void RequestArSession(int render_process_id,
                         int render_frame_id,
+                        bool use_overlay,
                         SurfaceReadyCallback ready_callback,
                         SurfaceTouchCallback touch_callback,
                         SurfaceDestroyedCallback destroyed_callback) override;
-  void DestroyDrawingSurface() override;
+  void EndSession() override;
   bool EnsureLoaded() override;
   base::android::ScopedJavaLocalRef<jobject> GetApplicationContext() override;
 
@@ -40,7 +41,9 @@ class ArCoreJavaUtils : public ArCoreSessionUtils {
       int height);
   void OnDrawingSurfaceTouch(JNIEnv* env,
                              const base::android::JavaParamRef<jobject>& obj,
+                             bool primary,
                              bool touching,
+                             int32_t pointer_id,
                              float x,
                              float y);
   void OnDrawingSurfaceDestroyed(
@@ -48,10 +51,6 @@ class ArCoreJavaUtils : public ArCoreSessionUtils {
       const base::android::JavaParamRef<jobject>& obj);
 
  private:
-  base::android::ScopedJavaLocalRef<jobject> getTabFromRenderer(
-      int render_process_id,
-      int render_frame_id);
-
   base::android::ScopedJavaGlobalRef<jobject> j_arcore_java_utils_;
 
   SurfaceReadyCallback surface_ready_callback_;

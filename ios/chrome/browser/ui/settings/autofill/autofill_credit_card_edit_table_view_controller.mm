@@ -7,7 +7,6 @@
 #include "base/format_macros.h"
 #import "base/ios/block_types.h"
 #import "base/mac/foundation_util.h"
-#include "base/mac/scoped_block.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
@@ -68,8 +67,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:style];
   if (self) {
     DCHECK(dataManager);
 
@@ -159,6 +157,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       _creditCard, GetApplicationContext()->GetApplicationLocale());
   cardholderNameitem.textFieldEnabled = isEditing;
   cardholderNameitem.autofillUIType = AutofillUITypeCreditCardHolderFullName;
+  cardholderNameitem.hideIcon = !isEditing;
   [model addItem:cardholderNameitem
       toSectionWithIdentifier:SectionIdentifierFields];
 
@@ -171,13 +170,16 @@ typedef NS_ENUM(NSInteger, ItemType) {
   cardNumberItem.textFieldValue =
       autofill::IsCreditCardLocal(_creditCard)
           ? base::SysUTF16ToNSString(_creditCard.number())
-          : base::SysUTF16ToNSString(
-                _creditCard.NetworkOrBankNameAndLastFourDigits());
+          : base::SysUTF16ToNSString(_creditCard.NetworkAndLastFourDigits());
   cardNumberItem.textFieldEnabled = isEditing;
   cardNumberItem.autofillUIType = AutofillUITypeCreditCardNumber;
   cardNumberItem.keyboardType = UIKeyboardTypeNumberPad;
-  cardNumberItem.identifyingIcon =
-      [self cardTypeIconFromNetwork:_creditCard.network().c_str()];
+  cardNumberItem.hideIcon = !isEditing;
+  // Hide credit card icon when editing.
+  if (!isEditing) {
+    cardNumberItem.identifyingIcon =
+        [self cardTypeIconFromNetwork:_creditCard.network().c_str()];
+  }
   [model addItem:cardNumberItem
       toSectionWithIdentifier:SectionIdentifierFields];
 
@@ -191,6 +193,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   expirationMonthItem.textFieldEnabled = isEditing;
   expirationMonthItem.autofillUIType = AutofillUITypeCreditCardExpMonth;
   expirationMonthItem.keyboardType = UIKeyboardTypeNumberPad;
+  expirationMonthItem.hideIcon = !isEditing;
   [model addItem:expirationMonthItem
       toSectionWithIdentifier:SectionIdentifierFields];
 
@@ -205,6 +208,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   expirationYearItem.autofillUIType = AutofillUITypeCreditCardExpYear;
   expirationYearItem.keyboardType = UIKeyboardTypeNumberPad;
   expirationYearItem.returnKeyType = UIReturnKeyDone;
+  expirationYearItem.hideIcon = !isEditing;
   [model addItem:expirationYearItem
       toSectionWithIdentifier:SectionIdentifierFields];
 
@@ -301,6 +305,13 @@ typedef NS_ENUM(NSInteger, ItemType) {
         base::mac::ObjCCastStrict<TableViewTextEditCell>(cell);
     [textFieldCell.textField becomeFirstResponder];
   }
+}
+
+#pragma mark - UIAdaptivePresentationControllerDelegate
+
+- (BOOL)presentationControllerShouldDismiss:
+    (UIPresentationController*)presentationController {
+  return !self.tableView.editing;
 }
 
 #pragma mark - Actions

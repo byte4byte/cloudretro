@@ -8,22 +8,25 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/time.h"
+#include "components/feed/core/common/pref_names.h"
+#include "components/feed/core/common/user_classifier.h"
+#include "components/prefs/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/mojom/window_open_disposition.mojom.h"
 
 using testing::ElementsAre;
 using testing::IsEmpty;
+using testing::SizeIs;
 
 namespace feed {
 namespace {
 
-GURL kVisitedUrl("http://visited_url.com/");
-
 // Fixed "now" to make tests more deterministic.
 char kNowString[] = "2018-06-11 15:41";
 
-// This needs to keep in sync with ActionType in third_party/feed/src/src/main/
+// This needs to keep in sync with ActionType in
+// third_party/feed_library/src/src/main/
 // java/com/google/android/libraries/feed/host/logging/ActionType.java.
 enum FeedActionType {
   UNKNOWN = -1,
@@ -34,9 +37,15 @@ enum FeedActionType {
   DOWNLOAD = 5,
 };
 
+// TODO(https://crbug.com/1042727): Fix test GURL scoping and remove this getter
+// function.
+GURL VisitedUrl() {
+  return GURL("http://visited_url.com/");
+}
+
 void CheckURLVisit(const GURL& url,
                    FeedLoggingMetrics::CheckURLVisitCallback callback) {
-  if (url == kVisitedUrl) {
+  if (url == VisitedUrl()) {
     std::move(callback).Run(true);
   } else {
     std::move(callback).Run(false);
@@ -52,8 +61,13 @@ class FeedLoggingMetricsTest : public testing::Test {
     EXPECT_TRUE(base::Time::FromUTCString(kNowString, &now));
     test_clock_.SetNow(now);
 
+    feed::RegisterProfilePrefs(prefs_.registry());
+    scheduler_host_ =
+        std::make_unique<FeedSchedulerHost>(&prefs_, &prefs_, &test_clock_);
+
     feed_logging_metrics_ = std::make_unique<FeedLoggingMetrics>(
-        base::BindRepeating(&CheckURLVisit), &test_clock_);
+        base::BindRepeating(&CheckURLVisit), &test_clock_,
+        scheduler_host_.get());
   }
 
   FeedLoggingMetrics* feed_logging_metrics() {
@@ -63,6 +77,10 @@ class FeedLoggingMetricsTest : public testing::Test {
 
  private:
   base::SimpleTestClock test_clock_;
+
+  TestingPrefServiceSimple prefs_;
+
+  std::unique_ptr<FeedSchedulerHost> scheduler_host_;
 
   std::unique_ptr<FeedLoggingMetrics> feed_logging_metrics_;
 
@@ -164,7 +182,7 @@ TEST_F(FeedLoggingMetricsTest, ShouldLogOnSuggestionWindowOpened) {
 
 TEST_F(FeedLoggingMetricsTest, ShouldLogOnSuggestionDismissedCommitIfVisited) {
   base::HistogramTester histogram_tester;
-  feed_logging_metrics()->OnSuggestionDismissed(/*position=*/10, kVisitedUrl,
+  feed_logging_metrics()->OnSuggestionDismissed(/*position=*/10, VisitedUrl(),
                                                 true);
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.ContentSuggestions.DismissedVisited.Commit"),
@@ -184,7 +202,7 @@ TEST_F(FeedLoggingMetricsTest,
 TEST_F(FeedLoggingMetricsTest,
        ShouldLogOnSuggestionDismissedUndoIfUndoDismissAndVisited) {
   base::HistogramTester histogram_tester;
-  feed_logging_metrics()->OnSuggestionDismissed(/*position=*/10, kVisitedUrl,
+  feed_logging_metrics()->OnSuggestionDismissed(/*position=*/10, VisitedUrl(),
                                                 false);
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.ContentSuggestions.DismissedVisited.Undo"),
@@ -225,6 +243,20 @@ TEST_F(FeedLoggingMetricsTest, ShouldLogOnTaskFinished) {
       histogram_tester.GetAllSamples(
           "ContentSuggestions.Feed.Task.ExecuteUploadActionRequest.TaskTime"),
       ElementsAre(base::Bucket(/*min=*/8, /*count=*/1)));
+}
+
+TEST_F(FeedLoggingMetricsTest, ShouldLogOnMoreButtonClicked) {
+  base::HistogramTester histogram_tester;
+
+  feed_logging_metrics()->OnMoreButtonClicked(1);
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  "NewTabPage.ContentSuggestions.MoreButtonClicked.Articles"),
+              ElementsAre(base::Bucket(/*min=*/1, /*count=*/1)));
+
+  // User classifier should have been informed of a suggestion being consumed.
+  EXPECT_THAT(histogram_tester.GetAllSamples(
+                  "NewTabPage.UserClassifier.AverageHoursToUseSuggestions"),
+              SizeIs(1));
 }
 
 }  // namespace feed

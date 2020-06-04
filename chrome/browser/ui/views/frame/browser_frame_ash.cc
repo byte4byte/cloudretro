@@ -27,7 +27,7 @@ namespace {
 
 // BrowserWindowStateDelegate class handles a user's fullscreen
 // request (Shift+F4/F4).
-class BrowserWindowStateDelegate : public ash::wm::WindowStateDelegate {
+class BrowserWindowStateDelegate : public ash::WindowStateDelegate {
  public:
   explicit BrowserWindowStateDelegate(Browser* browser)
       : browser_(browser) {
@@ -35,8 +35,8 @@ class BrowserWindowStateDelegate : public ash::wm::WindowStateDelegate {
   }
   ~BrowserWindowStateDelegate() override {}
 
-  // Overridden from ash::wm::WindowStateDelegate.
-  bool ToggleFullscreen(ash::wm::WindowState* window_state) override {
+  // Overridden from ash::WindowStateDelegate.
+  bool ToggleFullscreen(ash::WindowState* window_state) override {
     DCHECK(window_state->IsFullscreen() || window_state->CanMaximize());
     // Windows which cannot be maximized should not be fullscreened.
     if (!window_state->IsFullscreen() && !window_state->CanMaximize())
@@ -44,6 +44,7 @@ class BrowserWindowStateDelegate : public ash::wm::WindowStateDelegate {
     chrome::ToggleFullscreenMode(browser_);
     return true;
   }
+
  private:
   Browser* browser_;  // not owned.
 
@@ -75,23 +76,13 @@ BrowserFrameAsh::~BrowserFrameAsh() {}
 
 void BrowserFrameAsh::OnWidgetInitDone() {
   Browser* browser = browser_view_->browser();
-  ash::wm::WindowState* window_state =
-      ash::wm::GetWindowState(GetNativeWindow());
+  ash::WindowState* window_state = ash::WindowState::Get(GetNativeWindow());
   window_state->SetDelegate(
       std::make_unique<BrowserWindowStateDelegate>(browser));
   // For legacy reasons v1 apps (like Secure Shell) are allowed to consume keys
   // like brightness, volume, etc. Otherwise these keys are handled by the
   // Ash window manager.
-  window_state->SetCanConsumeSystemKeys(browser->is_app());
-}
-
-void BrowserFrameAsh::OnBoundsChanged(const gfx::Rect& old_bounds,
-                                      const gfx::Rect& new_bounds) {
-  NativeWidgetAura::OnBoundsChanged(old_bounds, new_bounds);
-  if (GetNativeWindow()->transparent()) {
-    GetNativeWindow()->SetOpaqueRegionsForOcclusion(
-        {gfx::Rect(new_bounds.size())});
-  }
+  window_state->SetCanConsumeSystemKeys(browser->deprecated_is_app());
 }
 
 void BrowserFrameAsh::OnWindowTargetVisibilityChanged(bool visible) {
@@ -170,6 +161,6 @@ int BrowserFrameAsh::GetMinimizeButtonOffset() const {
 void BrowserFrameAsh::SetWindowAutoManaged() {
   // For browser window in Chrome OS, we should only enable the auto window
   // management logic for tabbed browser.
-  if (!browser_view_->browser()->is_type_popup())
+  if (browser_view_->browser()->is_type_normal())
     GetNativeWindow()->SetProperty(ash::kWindowPositionManagedTypeKey, true);
 }

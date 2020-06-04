@@ -34,6 +34,10 @@ class IconizedLabel : public views::Label {
     custom_accessible_name_ = name;
   }
 
+  base::string16 GetAccessibleNameString() const {
+    return custom_accessible_name_;
+  }
+
   // views::Label:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
@@ -65,9 +69,6 @@ class ASH_EXPORT TrayItemView : public views::View,
   const char* GetClassName() const override;
 
  protected:
-  // The default animation duration is 200ms. But each view can customize this.
-  virtual int GetAnimationDurationMS();
-
   // Returns whether the shelf is horizontal.
   bool IsHorizontalAlignment() const;
 

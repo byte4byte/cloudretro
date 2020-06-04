@@ -14,8 +14,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "chrome/browser/android/contextualsearch/contextual_search_context.h"
 #include "chrome/browser/android/contextualsearch/resolved_search_term.h"
@@ -288,7 +288,8 @@ class ContextualSearchDelegateTest : public testing::Test {
   std::string search_url_preload_;
   int coca_card_tag_;
 
-  base::MessageLoopForIO io_message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   std::unique_ptr<TemplateURLService> template_url_service_;
   scoped_refptr<network::SharedURLLoaderFactory>
       test_shared_url_loader_factory_;
@@ -382,7 +383,7 @@ TEST_F(ContextualSearchDelegateTest, InvalidResponse) {
   auto* pending_request = test_url_loader_factory_.GetPendingRequest(0);
   test_url_loader_factory_.SimulateResponseForPendingRequest(
       pending_request->request.url, network::URLLoaderCompletionStatus(net::OK),
-      network::ResourceResponseHead(), std::string());
+      network::mojom::URLResponseHead::New(), std::string());
   base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(do_prevent_preload());

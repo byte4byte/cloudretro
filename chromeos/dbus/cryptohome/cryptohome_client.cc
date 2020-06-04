@@ -112,7 +112,7 @@ class DbusObjectProxyWithUma {
 // The CryptohomeClient implementation.
 class CryptohomeClientImpl : public CryptohomeClient {
  public:
-  CryptohomeClientImpl() : weak_ptr_factory_(this) {}
+  CryptohomeClientImpl() {}
 
   // CryptohomeClient override.
   void AddObserver(Observer* observer) override {
@@ -673,10 +673,11 @@ class CryptohomeClientImpl : public CryptohomeClient {
       const std::string& device_id,
       attestation::AttestationChallengeOptions options,
       const std::string& challenge,
+      const std::string& key_name_for_spkac,
       AsyncMethodCallback callback) override {
     dbus::MethodCall method_call(
         cryptohome::kCryptohomeInterface,
-        cryptohome::kCryptohomeTpmAttestationSignEnterpriseVaChallenge);
+        cryptohome::kCryptohomeTpmAttestationSignEnterpriseVaChallengeV2);
     dbus::MessageWriter writer(&method_call);
     writer.AppendInt32(GetVerifiedAccessType());
     bool is_user_specific = (key_type == attestation::KEY_USER);
@@ -691,6 +692,7 @@ class CryptohomeClientImpl : public CryptohomeClient {
     writer.AppendBool(include_signed_public_key);
     writer.AppendArrayOfBytes(
         reinterpret_cast<const uint8_t*>(challenge.data()), challenge.size());
+    writer.AppendString(key_name_for_spkac);
     proxy_->CallMethod(
         &method_call, kTpmDBusTimeoutMs,
         base::BindOnce(&CryptohomeClientImpl::OnAsyncMethodCall,
@@ -760,10 +762,11 @@ class CryptohomeClientImpl : public CryptohomeClient {
   }
 
   // CryptohomeClient override.
-  void TpmAttestationDeleteKeys(attestation::AttestationKeyType key_type,
-                                const cryptohome::AccountIdentifier& id,
-                                const std::string& key_prefix,
-                                DBusMethodCallback<bool> callback) override {
+  void TpmAttestationDeleteKeysByPrefix(
+      attestation::AttestationKeyType key_type,
+      const cryptohome::AccountIdentifier& id,
+      const std::string& key_prefix,
+      DBusMethodCallback<bool> callback) override {
     dbus::MethodCall method_call(
         cryptohome::kCryptohomeInterface,
         cryptohome::kCryptohomeTpmAttestationDeleteKeys);
@@ -772,6 +775,22 @@ class CryptohomeClientImpl : public CryptohomeClient {
     writer.AppendBool(is_user_specific);
     writer.AppendString(id.account_id());
     writer.AppendString(key_prefix);
+    CallBoolMethod(&method_call, std::move(callback));
+  }
+
+  // CryptohomeClient override.
+  void TpmAttestationDeleteKey(attestation::AttestationKeyType key_type,
+                               const cryptohome::AccountIdentifier& id,
+                               const std::string& key_name,
+                               DBusMethodCallback<bool> callback) override {
+    dbus::MethodCall method_call(
+        cryptohome::kCryptohomeInterface,
+        cryptohome::kCryptohomeTpmAttestationDeleteKey);
+    dbus::MessageWriter writer(&method_call);
+    bool is_user_specific = (key_type == attestation::KEY_USER);
+    writer.AppendBool(is_user_specific);
+    writer.AppendString(id.account_id());
+    writer.AppendString(key_name);
     CallBoolMethod(&method_call, std::move(callback));
   }
 
@@ -855,6 +874,22 @@ class CryptohomeClientImpl : public CryptohomeClient {
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
+  void AddDataRestoreKey(
+      const cryptohome::AccountIdentifier& id,
+      const cryptohome::AuthorizationRequest& auth,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override {
+    const char* method_name = cryptohome::kCryptohomeAddDataRestoreKey;
+    dbus::MethodCall method_call(cryptohome::kCryptohomeInterface, method_name);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendProtoAsArrayOfBytes(id);
+    writer.AppendProtoAsArrayOfBytes(auth);
+
+    proxy_->CallMethod(
+        &method_call, kTpmDBusTimeoutMs,
+        base::BindOnce(&CryptohomeClientImpl::OnBaseReplyMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
   void UpdateKeyEx(
       const cryptohome::AccountIdentifier& id,
       const cryptohome::AuthorizationRequest& auth,
@@ -879,6 +914,24 @@ class CryptohomeClientImpl : public CryptohomeClient {
       const cryptohome::RemoveKeyRequest& request,
       DBusMethodCallback<cryptohome::BaseReply> callback) override {
     const char* method_name = cryptohome::kCryptohomeRemoveKeyEx;
+    dbus::MethodCall method_call(cryptohome::kCryptohomeInterface, method_name);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendProtoAsArrayOfBytes(id);
+    writer.AppendProtoAsArrayOfBytes(auth);
+    writer.AppendProtoAsArrayOfBytes(request);
+
+    proxy_->CallMethod(
+        &method_call, kTpmDBusTimeoutMs,
+        base::BindOnce(&CryptohomeClientImpl::OnBaseReplyMethod,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void MassRemoveKeys(
+      const cryptohome::AccountIdentifier& id,
+      const cryptohome::AuthorizationRequest& auth,
+      const cryptohome::MassRemoveKeysRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override {
+    const char* method_name = cryptohome::kCryptohomeMassRemoveKeys;
     dbus::MethodCall method_call(cryptohome::kCryptohomeInterface, method_name);
     dbus::MessageWriter writer(&method_call);
     writer.AppendProtoAsArrayOfBytes(id);
@@ -1018,6 +1071,13 @@ class CryptohomeClientImpl : public CryptohomeClient {
                          std::move(callback));
   }
 
+  void CheckHealth(
+      const cryptohome::CheckHealthRequest& request,
+      DBusMethodCallback<cryptohome::BaseReply> callback) override {
+    CallCryptohomeMethod(cryptohome::kCryptohomeCheckHealth, request,
+                         std::move(callback));
+  }
+
   void LockToSingleUserMountUntilReboot(
       const cryptohome::LockToSingleUserMountUntilRebootRequest& request,
       DBusMethodCallback<cryptohome::BaseReply> callback) override {
@@ -1043,28 +1103,36 @@ class CryptohomeClientImpl : public CryptohomeClient {
 
     proxy_->ConnectToSignal(
         cryptohome::kCryptohomeInterface, cryptohome::kSignalAsyncCallStatus,
-        base::Bind(&CryptohomeClientImpl::AsyncCallStatusReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&CryptohomeClientImpl::AsyncCallStatusReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&CryptohomeClientImpl::OnSignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     proxy_->ConnectToSignal(
         cryptohome::kCryptohomeInterface,
         cryptohome::kSignalAsyncCallStatusWithData,
-        base::Bind(&CryptohomeClientImpl::AsyncCallStatusWithDataReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(
+            &CryptohomeClientImpl::AsyncCallStatusWithDataReceived,
+            weak_ptr_factory_.GetWeakPtr()),
+        base::BindOnce(&CryptohomeClientImpl::OnSignalConnected,
+                       weak_ptr_factory_.GetWeakPtr()));
+    proxy_->ConnectToSignal(
+        cryptohome::kCryptohomeInterface, cryptohome::kSignalTpmInitStatus,
+        base::BindRepeating(&CryptohomeClientImpl::TpmInitStatusReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&CryptohomeClientImpl::OnSignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     proxy_->ConnectToSignal(
         cryptohome::kCryptohomeInterface, cryptohome::kSignalLowDiskSpace,
-        base::Bind(&CryptohomeClientImpl::LowDiskSpaceReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&CryptohomeClientImpl::LowDiskSpaceReceived,
+                            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&CryptohomeClientImpl::OnSignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
     proxy_->ConnectToSignal(
         cryptohome::kCryptohomeInterface,
         cryptohome::kSignalDircryptoMigrationProgress,
-        base::Bind(&CryptohomeClientImpl::DircryptoMigrationProgressReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(
+            &CryptohomeClientImpl::DircryptoMigrationProgressReceived,
+            weak_ptr_factory_.GetWeakPtr()),
         base::BindOnce(&CryptohomeClientImpl::OnSignalConnected,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -1303,6 +1371,21 @@ class CryptohomeClientImpl : public CryptohomeClient {
       observer.AsyncCallStatusWithData(async_id, return_status, return_data);
   }
 
+  // Handles TpmInitStatus signal.
+  void TpmInitStatusReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    bool ready = false;
+    bool owned = false;
+    bool was_owned_this_boot = false;
+    if (!reader.PopBool(&ready) || !reader.PopBool(&owned) ||
+        !reader.PopBool(&was_owned_this_boot)) {
+      LOG(ERROR) << "Invalid signal: " << signal->ToString();
+      return;
+    }
+    for (auto& observer : observer_list_)
+      observer.TpmInitStatusUpdated(ready, owned, was_owned_this_boot);
+  }
+
   // Handles LowDiskSpace signal.
   void LowDiskSpaceReceived(dbus::Signal* signal) {
     dbus::MessageReader reader(signal);
@@ -1365,7 +1448,7 @@ class CryptohomeClientImpl : public CryptohomeClient {
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<CryptohomeClientImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<CryptohomeClientImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CryptohomeClientImpl);
 };

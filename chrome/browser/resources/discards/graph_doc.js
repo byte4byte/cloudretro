@@ -9,14 +9,100 @@ const kPageNodesTargetY = 20;
 const kPageNodesYRange = 100;
 
 // Range occupied by process nodes at the bottom of the graph view.
-const kProcessNodesYRange = 150;
+const kProcessNodesYRange = 100;
+
+// Range occupied by worker nodes at the bottom of the graph view, above
+// process nodes.
+const kWorkerNodesYRange = 200;
 
 // Target y position for frame nodes.
 const kFrameNodesTargetY = kPageNodesYRange + 50;
 
 // Range that frame nodes cannot enter at the top/bottom of the graph view.
 const kFrameNodesTopMargin = kPageNodesYRange;
-const kFrameNodesBottomMargin = kProcessNodesYRange + 50;
+const kFrameNodesBottomMargin = kWorkerNodesYRange + 50;
+
+class ToolTip {
+  /**
+   * @param {Element} div
+   * @param {GraphNode} node
+   */
+  constructor(div, node) {
+    /** @private {GraphNode} */
+    this.node_ = node;
+
+    /** @private {d3.selection} */
+    this.div_ = d3.select(div)
+                    .append('div')
+                    .attr('class', 'tooltip')
+                    .style('opacity', 0)
+                    .style('left', `${node.x}px`)
+                    .style('top', `${node.y - 28}px`);
+    this.div_.append('table').append('tbody');
+    this.div_.transition().duration(200).style('opacity', .9);
+
+    /** @private {string} */
+    this.description_json_ = '';
+    this.onDescription(JSON.stringify(null));
+  }
+
+  nodeMoved() {
+    const node = this.node_;
+    this.div_.style('left', `${node.x}px`).style('top', `${node.y - 28}px`);
+  }
+
+  goAway() {
+    this.div_.transition().duration(200).style('opacity', 0).remove();
+  }
+
+  /**
+   * Updates the description displayed.
+   * @param {string} description_json A JSON string.
+   */
+  onDescription(description_json) {
+    if (this.description_json_ === description_json) {
+      return;
+    }
+
+    // The JSON is either 'null', or it's a dictionary of data describer name
+    // to data. Assuming a convention that describers emit a dictionary from
+    // string->string, this is flattened to an array. Each top-level dictionary
+    // entry is flattened to a 'heading' with the describer's name, followed by
+    // some number of entries with a two-element list, each representing a
+    // key/value pair.
+    this.description_json_ = description_json;
+    const description = JSON.parse(description_json);
+    const flattenedDescription = [];
+    if (!description) {
+      flattenedDescription.push(['No Data']);
+    } else {
+      for (const [title, value] of Object.entries(
+               /** @type {!Object<?,?>} */ (description))) {
+        flattenedDescription.push([title]);
+        flattenedDescription.push(...Object.entries(value));
+      }
+    }
+
+    const selection =
+        this.div_.select('tbody').selectAll('tr').data(flattenedDescription);
+    selection.enter().append('tr').each(function(d) {
+      const tr = d3.select(this);
+      if (d.length > 1) {
+        tr.append('td').classed('key', true).text(d[0]);
+        tr.append('td').classed('value', true).text(d[1]);
+      } else {
+        tr.append('td').classed('heading', true).attr('colspan', 2).text(d[0]);
+      }
+    });
+
+    // Update the existing datums.
+    selection.each(function(d) {
+      d3.select(this).selectAll('td').data(d).text(i => i);
+    });
+
+    selection.exit().remove();
+  }
+}
 
 /** @implements {d3.ForceNode} */
 class GraphNode {
@@ -28,13 +114,23 @@ class GraphNode {
     /** @type {string} */
     this.iconUrl = '';
 
-    // Implementation of the d3.ForceNode interface.
-    // See https://github.com/d3/d3-force#simulation_nodes.
-    this.index = null;
-    this.x = null;
-    this.y = null;
-    this.vx = null;
-    this.vy = null;
+    /** @type {ToolTip} */
+    this.tooltip = null;
+
+    /**
+     * Implementation of the d3.ForceNode interface.
+     * See https://github.com/d3/d3-force#simulation_nodes.
+     * @type {number|undefined}
+     */
+    this.index;
+    /** @type {number|undefined} */
+    this.x;
+    /** @type {number|undefined} */
+    this.y;
+    /** @type {number|undefined} */
+    this.vx;
+    /** @type {number|undefined} */
+    this.vy;
     this.fx = null;
     this.fy = null;
   }
@@ -47,27 +143,27 @@ class GraphNode {
   /**
    * Sets the initial x and y position of this node, also resets
    * vx and vy.
-   * @param {number} graph_width: Width of the graph view (svg).
-   * @param {number} graph_height: Height of the graph view (svg).
+   * @param {number} graphWidth Width of the graph view (svg).
+   * @param {number} graphHeight Height of the graph view (svg).
    */
-  setInitialPosition(graph_width, graph_height) {
-    this.x = graph_width / 2;
-    this.y = this.targetYPosition(graph_height);
+  setInitialPosition(graphWidth, graphHeight) {
+    this.x = graphWidth / 2;
+    this.y = this.targetYPosition(graphHeight);
     this.vx = 0;
     this.vy = 0;
   }
 
   /**
-   * @param {number} graph_height: Height of the graph view (svg).
+   * @param {number} graphHeight Height of the graph view (svg).
    * @return {number}
    */
-  targetYPosition(graph_height) {
-    const bounds = this.allowedYRange(graph_height);
+  targetYPosition(graphHeight) {
+    const bounds = this.allowedYRange(graphHeight);
     return (bounds[0] + bounds[1]) / 2;
   }
 
   /**
-   * @return {number}: The strength of the force that pulls the node towards
+   * @return {number} The strength of the force that pulls the node towards
    *                    its target y position.
    */
   targetYPositionStrength() {
@@ -75,15 +171,15 @@ class GraphNode {
   }
 
   /**
-   * @param {number} graph_height: Height of the graph view.
+   * @param {number} graphHeight Height of the graph view.
    * @return {!Array<number>}
    */
-  allowedYRange(graph_height) {
+  allowedYRange(graphHeight) {
     // By default, nodes just need to be in bounds of the graph.
-    return [0, graph_height];
+    return [0, graphHeight];
   }
 
-  /** @return {number}: The strength of the repulsion force with other nodes. */
+  /** @return {number} The strength of the repulsion force with other nodes. */
   manyBodyStrength() {
     return -200;
   }
@@ -95,7 +191,7 @@ class GraphNode {
 
   /**
    * Selects a color string from an id.
-   * @param {number} id: The id the returned color is selected from.
+   * @param {number} id The id the returned color is selected from.
    * @return {string}
    */
   selectColor(id) {
@@ -104,10 +200,10 @@ class GraphNode {
 }
 
 class PageNode extends GraphNode {
-  /** @param {!performanceManager.mojom.WebUIPageInfo} page */
+  /** @param {!discards.mojom.PageInfo} page */
   constructor(page) {
     super(page.id);
-    /** @type {!performanceManager.mojom.WebUIPageInfo} */
+    /** @type {!discards.mojom.PageInfo} */
     this.page = page;
     this.y = kPageNodesTargetY;
   }
@@ -124,7 +220,7 @@ class PageNode extends GraphNode {
   }
 
   /** override */
-  allowedYRange(graph_height) {
+  allowedYRange(graphHeight) {
     return [0, kPageNodesYRange];
   }
 
@@ -135,10 +231,10 @@ class PageNode extends GraphNode {
 }
 
 class FrameNode extends GraphNode {
-  /** @param {!performanceManager.mojom.WebUIFrameInfo} frame */
+  /** @param {!discards.mojom.FrameInfo} frame */
   constructor(frame) {
     super(frame.id);
-    /** @type {!performanceManager.mojom.WebUIFrameInfo} frame */
+    /** @type {!discards.mojom.FrameInfo} frame */
     this.frame = frame;
     this.color = this.selectColor(frame.processId);
   }
@@ -149,13 +245,13 @@ class FrameNode extends GraphNode {
   }
 
   /** override */
-  targetYPosition(graph_height) {
+  targetYPosition(graphHeight) {
     return kFrameNodesTargetY;
   }
 
   /** override */
-  allowedYRange(graph_height) {
-    return [kFrameNodesTopMargin, graph_height - kFrameNodesBottomMargin];
+  allowedYRange(graphHeight) {
+    return [kFrameNodesTopMargin, graphHeight - kFrameNodesBottomMargin];
   }
 
   /** override */
@@ -168,10 +264,10 @@ class FrameNode extends GraphNode {
 }
 
 class ProcessNode extends GraphNode {
-  /** @param {!performanceManager.mojom.WebUIProcessInfo} process */
+  /** @param {!discards.mojom.ProcessInfo} process */
   constructor(process) {
     super(process.id);
-    /** @type {!performanceManager.mojom.WebUIProcessInfo} */
+    /** @type {!discards.mojom.ProcessInfo} */
     this.process = process;
 
     this.color = this.selectColor(process.id);
@@ -188,8 +284,8 @@ class ProcessNode extends GraphNode {
   }
 
   /** override */
-  allowedYRange(graph_height) {
-    return [graph_height - kProcessNodesYRange, graph_height];
+  allowedYRange(graphHeight) {
+    return [graphHeight - kProcessNodesYRange, graphHeight];
   }
 
   /** override */
@@ -198,11 +294,53 @@ class ProcessNode extends GraphNode {
   }
 }
 
+class WorkerNode extends GraphNode {
+  /** @param {!discards.mojom.WorkerInfo} worker */
+  constructor(worker) {
+    super(worker.id);
+    /** @type {!discards.mojom.WorkerInfo} */
+    this.worker = worker;
+
+    this.color = this.selectColor(worker.processId);
+  }
+
+  /** override */
+  get title() {
+    return this.worker.url.url.length > 0 ? this.worker.url.url : 'Worker';
+  }
+
+  /** @return {number} */
+  targetYPositionStrength() {
+    return 10;
+  }
+
+  /** override */
+  allowedYRange(graphHeight) {
+    return [
+      graphHeight - kWorkerNodesYRange, graphHeight - kProcessNodesYRange
+    ];
+  }
+
+  /** override */
+  manyBodyStrength() {
+    return -600;
+  }
+
+  /** override */
+  linkTargets() {
+    // Link the process, in addition to all the client and child workers.
+    return [
+      this.worker.processId, ...this.worker.clientFrameIds,
+      ...this.worker.clientWorkerIds, ...this.worker.childWorkerIds
+    ];
+  }
+}
+
 /**
  * A force that bounds GraphNodes |allowedYRange| in Y.
- * @param {number} graph_height
+ * @param {number} graphHeight
  */
-function bounding_force(graph_height) {
+function boundingForce(graphHeight) {
   /** @type {!Array<!GraphNode>} */
   let nodes = [];
   /** @type {!Array<!Array>} */
@@ -216,7 +354,7 @@ function bounding_force(graph_height) {
       const node = nodes[i];
       const yOld = node.y;
       const yNew = Math.max(bound[0], Math.min(yOld, bound[1]));
-      if (yOld != yNew) {
+      if (yOld !== yNew) {
         node.y = yNew;
         // Zero the velocity of clamped nodes.
         node.vy = 0;
@@ -227,27 +365,31 @@ function bounding_force(graph_height) {
   /** @param {!Array<!GraphNode>} n */
   force.initialize = function(n) {
     nodes = n;
-    bounds = nodes.map(node => node.allowedYRange(graph_height));
+    bounds = nodes.map(node => node.allowedYRange(graphHeight));
   };
 
   return force;
 }
 
 /**
- * @implements {performanceManager.mojom.WebUIGraphChangeStreamInterface}
+ * @implements {discards.mojom.GraphChangeStreamInterface}
  */
 class Graph {
   /**
    * TODO(siggi): This should be SVGElement, but closure doesn't have externs
    *    for this yet.
    * @param {Element} svg
+   * @param {Element} div
    */
-  constructor(svg) {
+  constructor(svg, div) {
     /**
      * TODO(siggi): SVGElement.
      * @private {Element}
      */
     this.svg_ = svg;
+
+    /** @private {Element} */
+    this.div_ = div;
 
     /** @private {boolean} */
     this.wasResized_ = false;
@@ -259,6 +401,12 @@ class Graph {
 
     /** @private {d3.ForceSimulation} */
     this.simulation_ = null;
+
+    /**
+     * A selection for the top-level <g> node that contains all separators.
+     * @private {d3.selection}
+     */
+    this.separatorGroup_ = null;
 
     /**
      * A selection for the top-level <g> node that contains all nodes.
@@ -280,6 +428,24 @@ class Graph {
      * @private {!Array<!d3.ForceLink>}
      */
     this.links_ = [];
+
+    /**
+     * The host window.
+     * @private {Window}
+     */
+    this.hostWindow_ = null;
+
+    /**
+     * The interval timer used to poll for node descriptions.
+     * @private {number}
+     */
+    this.pollDescriptionsInterval_ = 0;
+
+    /**
+     * The d3.drag instance applied to nodes.
+     * @private {?d3.Drag}
+     */
+    this.drag_ = null;
   }
 
   initialize() {
@@ -288,7 +454,7 @@ class Graph {
     // so these event handlers are never removed.
     window.addEventListener('message', this.onMessage_.bind(this));
 
-    // Set up a window resize listener to track the graph on resize.
+    // Set up a resize listener to track the graph on resize.
     window.addEventListener('resize', this.onResize_.bind(this));
 
     // Create the simulation and set up the permanent forces.
@@ -311,6 +477,14 @@ class Graph {
     const svg = d3.select(this.svg_);
     this.linkGroup_ = svg.append('g').attr('class', 'links');
     this.nodeGroup_ = svg.append('g').attr('class', 'nodes');
+    this.separatorGroup_ = svg.append('g').attr('class', 'separators');
+
+    const drag = d3.drag();
+    drag.clickDistance(4);
+    drag.on('start', this.onDragStart_.bind(this));
+    drag.on('drag', this.onDrag_.bind(this));
+    drag.on('end', this.onDragEnd_.bind(this));
+    this.drag_ = drag;
   }
 
   /** @override */
@@ -326,6 +500,11 @@ class Graph {
   /** @override */
   processCreated(process) {
     this.addNode_(new ProcessNode(process));
+  }
+
+  /** @override */
+  workerCreated(worker) {
+    this.addNode_(new WorkerNode(worker));
   }
 
   /** @override */
@@ -348,6 +527,17 @@ class Graph {
   }
 
   /** @override */
+  workerChanged(worker) {
+    const workerNode =
+        /** @type {!WorkerNode} */ (this.nodes_.get(worker.id));
+
+    // Worker node links may change dynamically, so account for that here.
+    this.removeNodeLinks_(workerNode);
+    workerNode.worker = worker;
+    this.addNodeLinks_(workerNode);
+  }
+
+  /** @override */
   favIconDataAvailable(iconInfo) {
     const graphNode = this.nodes_.get(iconInfo.nodeId);
     if (graphNode) {
@@ -359,12 +549,58 @@ class Graph {
   nodeDeleted(nodeId) {
     const node = this.nodes_.get(nodeId);
 
-    // Filter away any links to or from the deleted node.
-    this.links_ =
-        this.links_.filter(link => link.source != node && link.target != node);
-
-    // And remove the node.
+    // Remove any links, and then the node itself.
+    this.removeNodeLinks_(node);
     this.nodes_.delete(nodeId);
+  }
+
+  /**
+   * @param {!GraphNode} node
+   * @private
+   */
+  removeNodeLinks_(node) {
+    // Filter away any links to or from the deleted node.
+    this.links_ = this.links_.filter(
+        link => link.source !== node && link.target !== node);
+  }
+
+  /**
+   * @param {!Object<string>} nodeDescriptions
+   * @private
+   */
+  nodeDescriptions_(nodeDescriptions) {
+    for (const nodeId in nodeDescriptions) {
+      const node = this.nodes_.get(Number.parseInt(nodeId, 10));
+      if (node && node.tooltip) {
+        node.tooltip.onDescription(nodeDescriptions[nodeId]);
+      }
+    }
+  }
+
+  /**
+   * @private
+   */
+  pollForNodeDescriptions_() {
+    const nodeIds = [];
+    for (const node of this.nodes_.values()) {
+      if (node.tooltip) {
+        nodeIds.push(node.id);
+      }
+    }
+
+    if (nodeIds.length) {
+      this.hostWindow_.postMessage(['requestNodeDescriptions', nodeIds], '*');
+
+      if (this.pollDescriptionsInterval_ === 0) {
+        // Start polling if not already in progress.
+        this.pollDescriptionsInterval_ =
+            setInterval(this.pollForNodeDescriptions_.bind(this), 1000);
+      }
+    } else {
+      // No tooltips, stop polling.
+      clearInterval(this.pollDescriptionsInterval_);
+      this.pollDescriptionsInterval_ = 0;
+    }
   }
 
   /**
@@ -372,43 +608,74 @@ class Graph {
    * @private
    */
   onMessage_(event) {
+    if (!this.hostWindow_) {
+      this.hostWindow_ = event.source;
+    }
+
     const type = /** @type {string} */ (event.data[0]);
     const data = /** @type {Object|number} */ (event.data[1]);
     switch (type) {
       case 'frameCreated':
         this.frameCreated(
-            /** @type {!performanceManager.mojom.WebUIFrameInfo} */ (data));
+            /** @type {!discards.mojom.FrameInfo} */ (data));
         break;
       case 'pageCreated':
         this.pageCreated(
-            /** @type {!performanceManager.mojom.WebUIPageInfo} */ (data));
+            /** @type {!discards.mojom.PageInfo} */ (data));
         break;
       case 'processCreated':
         this.processCreated(
-            /** @type {!performanceManager.mojom.WebUIProcessInfo} */ (data));
+            /** @type {!discards.mojom.ProcessInfo} */ (data));
+        break;
+      case 'workerCreated':
+        this.workerCreated(
+            /** @type {!discards.mojom.WorkerInfo} */ (data));
         break;
       case 'frameChanged':
         this.frameChanged(
-            /** @type {!performanceManager.mojom.WebUIFrameInfo} */ (data));
+            /** @type {!discards.mojom.FrameInfo} */ (data));
         break;
       case 'pageChanged':
         this.pageChanged(
-            /** @type {!performanceManager.mojom.WebUIPageInfo} */ (data));
+            /** @type {!discards.mojom.PageInfo} */ (data));
         break;
       case 'processChanged':
         this.processChanged(
-            /** @type {!performanceManager.mojom.WebUIProcessInfo} */ (data));
+            /** @type {!discards.mojom.ProcessInfo} */ (data));
         break;
       case 'favIconDataAvailable':
         this.favIconDataAvailable(
-            /** @type {!performanceManager.mojom.WebUIFavIconInfo} */ (data));
+            /** @type {!discards.mojom.FavIconInfo} */ (data));
+        break;
+      case 'workerChanged':
+        this.workerChanged(
+            /** @type {!discards.mojom.WorkerInfo} */ (data));
         break;
       case 'nodeDeleted':
         this.nodeDeleted(/** @type {number} */ (data));
         break;
+      case 'nodeDescriptions':
+        this.nodeDescriptions_(/** @type {!Object<string>} */ (data));
+        break;
     }
 
     this.render_();
+  }
+
+  /**
+   * @param {GraphNode} node
+   * @private
+   */
+  onGraphNodeClick_(node) {
+    if (node.tooltip) {
+      node.tooltip.goAway();
+      node.tooltip = null;
+    } else {
+      node.tooltip = new ToolTip(this.div_, node);
+
+      // Poll for all tooltip node descriptions immediately.
+      this.pollForNodeDescriptions_();
+    }
   }
 
   /**
@@ -442,14 +709,13 @@ class Graph {
 
     // Add new nodes, if any.
     if (!node.enter().empty()) {
-      const drag = d3.drag();
-      drag.on('start', this.onDragStart_.bind(this));
-      drag.on('drag', this.onDrag_.bind(this));
-      drag.on('end', this.onDragEnd_.bind(this));
-
-      const newNodes = node.enter().append('g').call(drag);
+      const newNodes = node.enter()
+                           .append('g')
+                           .call(this.drag_)
+                           .on('click', this.onGraphNodeClick_.bind(this));
       const circles = newNodes.append('circle').attr('r', 9).attr(
           'fill', 'green');  // New nodes appear green.
+
       newNodes.append('image')
           .attr('x', -8)
           .attr('y', -8)
@@ -464,17 +730,31 @@ class Graph {
           .attr('r', 6);
     }
 
-    // Give dead nodes a distinguishing class to exclude them from the selection
-    // above. Interrupt any ongoing transitions, then transition them out.
-    const deletedNodes = node.exit().classed('dead', true).interrupt();
+    if (!node.exit().empty()) {
+      // Give dead nodes a distinguishing class to exclude them from the
+      // selection above.
+      const deletedNodes = node.exit().classed('dead', true);
 
-    deletedNodes.select('circle')
-        .attr('r', 9)
-        .attr('fill', 'red')
-        .transition()
-        .duration(2000)
-        .attr('r', 0)
-        .remove();
+      // Interrupt any ongoing transitions.
+      deletedNodes.interrupt();
+
+      // Turn down the node associated tooltips.
+      deletedNodes.each(d => {
+        if (d.tooltip) {
+          d.tooltip.goAway();
+        }
+      });
+
+      // Transition the nodes out and remove them at the end of transition.
+      deletedNodes.transition()
+          .remove()
+          .select('circle')
+          .attr('r', 9)
+          .attr('fill', 'red')
+          .transition()
+          .duration(2000)
+          .attr('r', 0);
+    }
 
     // Update the title for all nodes.
     node.selectAll('title').text(d => d.title);
@@ -496,23 +776,17 @@ class Graph {
     const nodes = this.nodeGroup_.selectAll('g');
     nodes.attr('transform', d => `translate(${d.x},${d.y})`);
 
+    for (const node of this.nodes_.values()) {
+      if (node.tooltip) {
+        node.tooltip.nodeMoved();
+      }
+    }
+
     const lines = this.linkGroup_.selectAll('line');
     lines.attr('x1', d => d.source.x)
         .attr('y1', d => d.source.y)
         .attr('x2', d => d.target.x)
         .attr('y2', d => d.target.y);
-  }
-
-  /**
-   * @param {!GraphNode} source
-   * @param {number} dst_id
-   * @private
-   */
-  maybeAddLink_(source, dst_id) {
-    const target = this.nodes_.get(dst_id);
-    if (target) {
-      this.links_.push({source: source, target: target});
-    }
   }
 
   /**
@@ -524,13 +798,24 @@ class Graph {
    */
   addNode_(node) {
     this.nodes_.set(node.id, node);
+    this.addNodeLinks_(node);
+    node.setInitialPosition(this.width_, this.height_);
+  }
 
+  /**
+   * Adds all the links for a node to the graph.
+   *
+   * @param {!GraphNode} node
+   * @private
+   */
+  addNodeLinks_(node) {
     const linkTargets = node.linkTargets();
     for (const linkTarget of linkTargets) {
-      this.maybeAddLink_(node, linkTarget);
+      const target = this.nodes_.get(linkTarget);
+      if (target) {
+        this.links_.push({source: node, target: target});
+      }
     }
-
-    node.setInitialPosition(this.width_, this.height_);
   }
 
   /**
@@ -590,6 +875,55 @@ class Graph {
     return d.manyBodyStrength();
   }
 
+  /**
+   * @param {number} graphWidth Width of the graph view (svg).
+   * @param {number} graphHeight Height of the graph view (svg).
+   * @private
+   */
+  updateSeparators_(graphWidth, graphHeight) {
+    const separators = [
+      ['Pages', 'Frame Tree', kPageNodesYRange],
+      ['', 'Workers', graphHeight - kWorkerNodesYRange],
+      ['', 'Processes', graphHeight - kProcessNodesYRange],
+    ];
+    const kAboveLabelOffset = -6;
+    const kBelowLabelOffset = 14;
+
+    const groups = this.separatorGroup_.selectAll('g').data(separators);
+    if (groups.enter()) {
+      const group = groups.enter().append('g').attr(
+          'transform', d => `translate(0,${d[2]})`);
+      group.append('line')
+          .attr('x1', 10)
+          .attr('y1', 0)
+          .attr('x2', graphWidth - 10)
+          .attr('y2', 0)
+          .attr('stroke', 'black')
+          .attr('stroke-dasharray', '4');
+
+      group.each(function(d) {
+        const parentGroup = d3.select(this);
+        if (d[0]) {
+          parentGroup.append('text')
+              .attr('x', 20)
+              .attr('y', kAboveLabelOffset)
+              .attr('class', 'separator')
+              .text(d => d[0]);
+        }
+        if (d[1]) {
+          parentGroup.append('text')
+              .attr('x', 20)
+              .attr('y', kBelowLabelOffset)
+              .attr('class', 'separator')
+              .text(d => d[1]);
+        }
+      });
+    }
+
+    groups.attr('transform', d => `translate(0,${d[2]})`);
+    groups.selectAll('line').attr('x2', graphWidth - 10);
+  }
+
   /** @private */
   restartSimulation_() {
     // Restart the simulation.
@@ -604,6 +938,8 @@ class Graph {
     this.width_ = this.svg_.clientWidth;
     this.height_ = this.svg_.clientHeight;
 
+    this.updateSeparators_(this.width_, this.height_);
+
     // Reset both X and Y attractive forces, as they're cached.
     const xForce = d3.forceX().x(this.width_ / 2).strength(0.1);
     const yForce = d3.forceY()
@@ -611,7 +947,7 @@ class Graph {
                        .strength(this.getTargetYPositionStrength_.bind(this));
     this.simulation_.force('x_pos', xForce);
     this.simulation_.force('y_pos', yForce);
-    this.simulation_.force('y_bound', bounding_force(this.height_));
+    this.simulation_.force('y_bound', boundingForce(this.height_));
 
     if (!this.wasResized_) {
       this.wasResized_ = true;
@@ -632,7 +968,8 @@ class Graph {
 
 let graph = null;
 function onLoad() {
-  graph = new Graph(document.querySelector('svg'));
+  graph =
+      new Graph(document.querySelector('svg'), document.querySelector('div'));
 
   graph.initialize();
 }

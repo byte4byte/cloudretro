@@ -5,12 +5,11 @@
 #include "ash/app_list/model/app_list_item.h"
 
 #include "ash/app_list/model/app_list_item_observer.h"
-#include "base/logging.h"
 
-namespace app_list {
+namespace ash {
 
 AppListItem::AppListItem(const std::string& id)
-    : metadata_(std::make_unique<ash::AppListItemMetadata>()),
+    : metadata_(std::make_unique<AppListItemMetadata>()),
       is_installing_(false),
       percent_downloaded_(-1) {
   metadata_->id = id;
@@ -21,11 +20,29 @@ AppListItem::~AppListItem() {
     observer.ItemBeingDestroyed();
 }
 
-void AppListItem::SetIcon(const gfx::ImageSkia& icon) {
-  metadata_->icon = icon;
-  metadata_->icon.EnsureRepsForSupportedScales();
+void AppListItem::SetIcon(AppListConfigType config_type,
+                          const gfx::ImageSkia& icon) {
+  if (config_type == AppListConfigType::kShared) {
+    metadata_->icon = icon;
+  } else {
+    per_config_icons_[config_type] = icon;
+  }
+  icon.EnsureRepsForSupportedScales();
+
   for (auto& observer : observers_)
-    observer.ItemIconChanged();
+    observer.ItemIconChanged(config_type);
+}
+
+const gfx::ImageSkia& AppListItem::GetIcon(
+    AppListConfigType config_type) const {
+  if (config_type != AppListConfigType::kShared) {
+    const auto& it = per_config_icons_.find(config_type);
+    if (it != per_config_icons_.end())
+      return it->second;
+    // If icon for requested config cannt be found, default to the shared config
+    // icon.
+  }
+  return metadata_->icon;
 }
 
 void AppListItem::SetIsInstalling(bool is_installing) {
@@ -60,7 +77,7 @@ const char* AppListItem::GetItemType() const {
 }
 
 AppListItem* AppListItem::FindChildItem(const std::string& id) {
-  return NULL;
+  return nullptr;
 }
 
 size_t AppListItem::ChildItemCount() const {
@@ -93,4 +110,4 @@ void AppListItem::SetNameAndShortName(const std::string& name,
     observer.ItemNameChanged();
 }
 
-}  // namespace app_list
+}  // namespace ash

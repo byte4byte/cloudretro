@@ -5,15 +5,22 @@
 #include "ash/app_list/views/search_result_base_view.h"
 
 #include "ash/app_list/model/search/search_result.h"
+#include "ash/app_list/views/search_result_actions_view.h"
+#include "ash/public/cpp/app_list/app_list_features.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
-namespace app_list {
+namespace ash {
 
 SearchResultBaseView::SearchResultBaseView() : Button(this) {
   SetInstallFocusRingOnFocus(false);
 }
 
-SearchResultBaseView::~SearchResultBaseView() = default;
+SearchResultBaseView::~SearchResultBaseView() {
+  if (result_)
+    result_->RemoveObserver(this);
+  result_ = nullptr;
+}
 
 bool SearchResultBaseView::SkipDefaultKeyEventProcessing(
     const ui::KeyEvent& event) {
@@ -26,9 +33,43 @@ const char* SearchResultBaseView::GetClassName() const {
   return "SearchResultBaseView";
 }
 
-void SearchResultBaseView::SetBackgroundHighlighted(bool enabled) {
-  background_highlighted_ = enabled;
+void SearchResultBaseView::SetSelected(bool selected,
+                                       base::Optional<bool> reverse_tab_order) {
+  if (selected_ == selected)
+    return;
+
+  selected_ = selected;
+
+  if (app_list_features::IsSearchBoxSelectionEnabled()) {
+    if (selected) {
+      SelectInitialResultAction(reverse_tab_order.value_or(false));
+    } else {
+      ClearSelectedResultAction();
+    }
+  }
+
   SchedulePaint();
+}
+
+bool SearchResultBaseView::SelectNextResultAction(bool reverse_tab_order) {
+  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
+
+  if (!selected() || !actions_view_)
+    return false;
+
+  if (!actions_view_->SelectNextAction(reverse_tab_order))
+    return false;
+
+  SchedulePaint();
+  return true;
+}
+
+void SearchResultBaseView::NotifyA11yResultSelected() {
+  if (actions_view_ && actions_view_->HasSelectedAction()) {
+    actions_view_->NotifyA11yResultSelected();
+    return;
+  }
+  NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
 }
 
 void SearchResultBaseView::SetResult(SearchResult* result) {
@@ -50,6 +91,9 @@ base::string16 SearchResultBaseView::ComputeAccessibleName() const {
   if (!result())
     return base::string16();
 
+  if (!result()->accessible_name().empty())
+    return result()->accessible_name();
+
   base::string16 accessible_name = result()->title();
   if (!result()->title().empty() && !result()->details().empty())
     accessible_name += base::ASCIIToUTF16(", ");
@@ -65,7 +109,24 @@ void SearchResultBaseView::UpdateAccessibleName() {
 void SearchResultBaseView::ClearResult() {
   if (result_)
     result_->RemoveObserver(this);
+  SetSelected(false, base::nullopt);
   result_ = nullptr;
 }
 
-}  // namespace app_list
+void SearchResultBaseView::SelectInitialResultAction(bool reverse_tab_order) {
+  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
+
+  if (actions_view_ && actions_view_->SelectInitialAction(reverse_tab_order))
+    return;
+
+  NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+}
+
+void SearchResultBaseView::ClearSelectedResultAction() {
+  DCHECK(app_list_features::IsSearchBoxSelectionEnabled());
+
+  if (actions_view_)
+    actions_view_->ClearSelectedAction();
+}
+
+}  // namespace ash

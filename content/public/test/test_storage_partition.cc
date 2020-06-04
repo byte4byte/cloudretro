@@ -4,6 +4,7 @@
 
 #include "content/public/test/test_storage_partition.h"
 
+#include "components/leveldb_proto/public/proto_database_provider.h"
 #include "content/public/browser/native_file_system_entry_factory.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 
@@ -14,15 +15,6 @@ TestStoragePartition::~TestStoragePartition() {}
 
 base::FilePath TestStoragePartition::GetPath() {
   return file_path_;
-}
-
-net::URLRequestContextGetter* TestStoragePartition::GetURLRequestContext() {
-  return url_request_context_getter_;
-}
-
-net::URLRequestContextGetter*
-TestStoragePartition::GetMediaURLRequestContext() {
-  return media_url_request_context_getter_;
 }
 
 network::mojom::NetworkContext* TestStoragePartition::GetNetworkContext() {
@@ -39,7 +31,7 @@ TestStoragePartition::GetURLLoaderFactoryForBrowserProcessWithCORBEnabled() {
   return nullptr;
 }
 
-std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+std::unique_ptr<network::PendingSharedURLLoaderFactory>
 TestStoragePartition::GetURLLoaderFactoryForBrowserProcessIOThread() {
   return nullptr;
 }
@@ -47,6 +39,24 @@ TestStoragePartition::GetURLLoaderFactoryForBrowserProcessIOThread() {
 network::mojom::CookieManager*
 TestStoragePartition::GetCookieManagerForBrowserProcess() {
   return cookie_manager_for_browser_process_;
+}
+
+void TestStoragePartition::CreateRestrictedCookieManager(
+    network::mojom::RestrictedCookieManagerRole role,
+    const url::Origin& origin,
+    const net::SiteForCookies& site_for_cookies,
+    const url::Origin& top_frame_origin,
+    bool is_service_worker,
+    int process_id,
+    int routing_id,
+    mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver) {
+  NOTREACHED();
+}
+
+void TestStoragePartition::CreateHasTrustTokensAnswerer(
+    mojo::PendingReceiver<network::mojom::HasTrustTokensAnswerer> receiver,
+    const url::Origin& top_frame_origin) {
+  NOTREACHED() << "Not implemented.";
 }
 
 storage::QuotaManager* TestStoragePartition::GetQuotaManager() {
@@ -73,8 +83,12 @@ DOMStorageContext* TestStoragePartition::GetDOMStorageContext() {
   return dom_storage_context_;
 }
 
-IndexedDBContext* TestStoragePartition::GetIndexedDBContext() {
-  return indexed_db_context_;
+storage::mojom::IndexedDBControl& TestStoragePartition::GetIndexedDBControl() {
+  // Bind and throw away the receiver. If testing is required, then add a method
+  // to set the remote.
+  if (!indexed_db_control_.is_bound())
+    ignore_result(indexed_db_control_.BindNewPipeAndPassReceiver());
+  return *indexed_db_control_;
 }
 
 NativeFileSystemEntryFactory*
@@ -84,6 +98,10 @@ TestStoragePartition::GetNativeFileSystemEntryFactory() {
 
 ServiceWorkerContext* TestStoragePartition::GetServiceWorkerContext() {
   return service_worker_context_;
+}
+
+DedicatedWorkerService* TestStoragePartition::GetDedicatedWorkerService() {
+  return dedicated_worker_service_;
 }
 
 SharedWorkerService* TestStoragePartition::GetSharedWorkerService() {
@@ -112,6 +130,14 @@ TestStoragePartition::GetDevToolsBackgroundServicesContext() {
 ContentIndexContext* TestStoragePartition::GetContentIndexContext() {
   return content_index_context_;
 }
+
+leveldb_proto::ProtoDatabaseProvider*
+TestStoragePartition::GetProtoDatabaseProvider() {
+  return nullptr;
+}
+
+void TestStoragePartition::SetProtoDatabaseProvider(
+    std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider) {}
 
 #if !defined(OS_ANDROID)
 HostZoomMap* TestStoragePartition::GetHostZoomMap() {
@@ -143,17 +169,11 @@ void TestStoragePartition::ClearData(
 void TestStoragePartition::ClearData(
     uint32_t remove_mask,
     uint32_t quota_storage_remove_mask,
-    const OriginMatcherFunction& origin_matcher,
+    OriginMatcherFunction origin_matcher,
     network::mojom::CookieDeletionFilterPtr cookie_deletion_filter,
     bool perform_storage_cleanup,
     const base::Time begin,
     const base::Time end,
-    base::OnceClosure callback) {}
-
-void TestStoragePartition::ClearHttpAndMediaCaches(
-    const base::Time begin,
-    const base::Time end,
-    const base::Callback<bool(const GURL&)>& url_matcher,
     base::OnceClosure callback) {}
 
 void TestStoragePartition::ClearCodeCaches(
@@ -171,5 +191,7 @@ void TestStoragePartition::ClearBluetoothAllowedDevicesMapForTesting() {}
 void TestStoragePartition::FlushNetworkInterfaceForTesting() {}
 
 void TestStoragePartition::WaitForDeletionTasksForTesting() {}
+
+void TestStoragePartition::WaitForCodeCacheShutdownForTesting() {}
 
 }  // namespace content

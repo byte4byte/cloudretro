@@ -11,7 +11,7 @@
   Polymer({
     is: 'offline-gaia',
 
-    behaviors: [I18nBehavior, OobeDialogHostBehavior],
+    behaviors: [OobeI18nBehavior, OobeDialogHostBehavior],
 
     properties: {
       disabled: {
@@ -21,6 +21,7 @@
 
       domain: {
         type: String,
+        value: null,
       },
 
       emailDomain: String,
@@ -33,43 +34,46 @@
       animationInProgress: Boolean,
     },
 
-    attached: function() {
+    attached() {
       if (this.isRTL_())
         this.setAttribute('rtl', '');
     },
 
-    focus: function() {
+    focus() {
       if (this.isEmailSectionActive_())
         this.$$('#emailInput').focus();
       else
         this.$$('#passwordInput').focus();
     },
 
-    back: function() {
+    back() {
       this.switchToEmailCard(true /* animated */);
     },
 
-    onAnimationFinish_: function() {
-      this.fire('backButton', !this.isEmailSectionActive_());
-      this.focus();
+    onBeforeShow() {
+      this.behaviors.forEach((behavior) => {
+        if (behavior.onBeforeShow)
+          behavior.onBeforeShow.call(this);
+      });
+      this.$$('#dialog').onBeforeShow();
     },
 
-    onForgotPasswordClicked_: function() {
+    onForgotPasswordClicked_() {
       this.disabled = true;
       this.fire('dialogShown');
       this.$$('#forgotPasswordDlg').showModal();
     },
 
-    onForgotPasswordCloseTap_: function() {
+    onForgotPasswordCloseTap_() {
       this.$$('#forgotPasswordDlg').close();
     },
 
-    onDialogOverlayClosed_: function() {
+    onDialogOverlayClosed_() {
       this.fire('dialogHidden');
       this.disabled = false;
     },
 
-    setEmail: function(email) {
+    setEmail(email) {
       if (email) {
         if (this.emailDomain)
           email = email.replace(this.emailDomain, '');
@@ -83,11 +87,11 @@
       }
     },
 
-    isRTL_: function() {
+    isRTL_() {
       return !!document.querySelector('html[dir=rtl]');
     },
 
-    isEmailSectionActive_: function() {
+    isEmailSectionActive_() {
       return this.activeSection == 'emailSection';
     },
 
@@ -118,12 +122,12 @@
       this.activeSection = 'passwordSection';
     },
 
-    onSlideAnimationEnd_: function() {
+    onSlideAnimationEnd_() {
       this.animationInProgress = false;
       this.focus();
     },
 
-    onEmailSubmitted_: function() {
+    onEmailSubmitted_() {
       if (this.$$('#emailInput').checkValidity()) {
         this.switchToPasswordCard(
             this.$$('#emailInput').value, true /* animated */);
@@ -132,7 +136,7 @@
       }
     },
 
-    onPasswordSubmitted_: function() {
+    onPasswordSubmitted_() {
       if (!this.$$('#passwordInput').checkValidity())
         return;
       var msg = {
@@ -144,12 +148,20 @@
       this.fire('authCompleted', msg);
     },
 
-    onBackButtonClicked_: function() {
+    onBackButtonClicked_() {
       if (!this.isEmailSectionActive_()) {
         this.switchToEmailCard(true);
       } else {
         this.fire('offline-gaia-cancel');
       }
+    },
+
+    onNextButtonClicked_() {
+      if (this.isEmailSectionActive_()) {
+        this.onEmailSubmitted_();
+        return;
+      }
+      this.onPasswordSubmitted_();
     },
   });
 }

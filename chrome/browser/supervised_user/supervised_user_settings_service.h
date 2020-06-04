@@ -114,12 +114,6 @@ class SupervisedUserSettingsService : public KeyedService,
   // An example of an uploaded item is an access request to a blocked URL.
   void UploadItem(const std::string& key, std::unique_ptr<base::Value> value);
 
-  // Updates supervised user setting and uploads it to the Sync server.
-  // An example is when an extension updates without permission
-  // increase, the approved version information should be updated accordingly.
-  void UpdateSetting(const std::string& key,
-                     std::unique_ptr<base::Value> value);
-
   // Sets the setting with the given |key| to a copy of the given |value|.
   void SetLocalSetting(const std::string& key,
                        std::unique_ptr<base::Value> value);
@@ -133,14 +127,14 @@ class SupervisedUserSettingsService : public KeyedService,
 
   // SyncableService implementation:
   void WaitUntilReadyToSync(base::OnceClosure done) override;
-  syncer::SyncMergeResult MergeDataAndStartSyncing(
+  base::Optional<syncer::ModelError> MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
       std::unique_ptr<syncer::SyncErrorFactory> error_handler) override;
   void StopSyncing(syncer::ModelType type) override;
-  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
-  syncer::SyncError ProcessSyncChanges(
+  syncer::SyncDataList GetAllSyncDataForTesting(syncer::ModelType type) const;
+  base::Optional<syncer::ModelError> ProcessSyncChanges(
       const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
@@ -148,17 +142,19 @@ class SupervisedUserSettingsService : public KeyedService,
   void OnPrefValueChanged(const std::string& key) override;
   void OnInitializationCompleted(bool success) override;
 
- private:
-  base::DictionaryValue* GetOrCreateDictionary(const std::string& key) const;
-  base::DictionaryValue* GetAtomicSettings() const;
-  base::DictionaryValue* GetSplitSettings() const;
-  base::DictionaryValue* GetQueuedItems() const;
+  const base::DictionaryValue* LocalSettingsForTest() const;
 
   // Returns the dictionary where a given Sync item should be stored, depending
   // on whether the supervised user setting is atomic or split. In case of a
   // split setting, the split setting prefix of |key| is removed, so that |key|
   // can be used to update the returned dictionary.
   base::DictionaryValue* GetDictionaryAndSplitKey(std::string* key) const;
+
+ private:
+  base::DictionaryValue* GetOrCreateDictionary(const std::string& key) const;
+  base::DictionaryValue* GetAtomicSettings() const;
+  base::DictionaryValue* GetSplitSettings() const;
+  base::DictionaryValue* GetQueuedItems() const;
 
   // Returns a dictionary with all supervised user settings if the service is
   // active, or NULL otherwise.

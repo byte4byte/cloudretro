@@ -39,13 +39,13 @@ namespace {
 
 constexpr const char kLoginExpandedPublicAccountViewClassName[] =
     "LoginExpandedPublicAccountView";
-constexpr int kExpandedViewWidthDp = 600;
+constexpr int kExpandedViewWidthDp = 628;
 constexpr int kExpandedViewHeightDp = 324;
 
 constexpr int kTextLineHeightDp = 16;
 constexpr int kRoundRectCornerRadiusDp = 2;
 constexpr int kBorderThicknessDp = 1;
-constexpr int kRightPaneMarginDp = 28;
+constexpr int kHorizontalMarginPaneDp = 28;
 constexpr int kLabelMarginDp = 20;
 constexpr int kLeftMarginForSelectionButton = 8;
 constexpr int kRightMarginForSelectionButton = 3;
@@ -60,17 +60,17 @@ constexpr SkColor kSelectionMenuTitleColor =
 constexpr SkColor kArrowButtonColor = SkColorSetARGB(0xFF, 0x42, 0x85, 0xF4);
 
 constexpr int kDropDownIconSizeDp = 16;
-constexpr int kArrowButtonSizeDp = 40;
+constexpr int kArrowButtonSizeDp = 48;
 constexpr int kAdvancedViewButtonWidthDp = 190;
 constexpr int kAdvancedViewButtonHeightDp = 16;
-constexpr int kSelectionBoxWidthDp = 178;
+constexpr int kSelectionBoxWidthDp = 192;
 constexpr int kSelectionBoxHeightDp = 28;
 constexpr int kTopSpacingForLabelInAdvancedViewDp = 7;
 constexpr int kTopSpacingForLabelInRegularViewDp = 65;
 constexpr int kSpacingBetweenLabelsDp = 17;
 constexpr int kSpacingBetweenSelectionMenusDp = 15;
 constexpr int kSpacingBetweenSelectionTitleAndButtonDp = 3;
-constexpr int kSpacingBetweenLanguageMenuAndAdvancedViewButtonDp = 34;
+constexpr int kSpacingBetweenLanguageMenuAndAdvancedViewButtonDp = 4;
 constexpr int kSpacingBetweenAdvancedViewButtonAndLabelDp = 32;
 constexpr int kTopSpacingForUserViewDp = 62;
 
@@ -220,7 +220,9 @@ class SelectionButtonView : public LoginButton {
 // Container for the device monitoring warning.
 class MonitoringWarningView : public NonAccessibleView {
  public:
-  MonitoringWarningView() : NonAccessibleView(kMonitoringWarningClassName) {
+  MonitoringWarningView()
+      : NonAccessibleView(kMonitoringWarningClassName),
+        warning_type_(WarningType::kNone) {
     SetLayoutManager(std::make_unique<views::BoxLayout>(
         views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
         kSpacingBetweenMonitoringWarningIconAndLabelDp));
@@ -241,27 +243,46 @@ class MonitoringWarningView : public NonAccessibleView {
     AddChildView(label_);
   }
 
-  enum class WarningType { kSoftWarning, kFullWarning };
+  enum class WarningType { kNone, kSoftWarning, kFullWarning };
+
+  void UpdateForUser(const LoginUserInfo& user) {
+    enterprise_domain_ = user.public_account_info->enterprise_domain;
+    UpdateLabel();
+  }
 
   void SetWarningType(WarningType warning_type) {
-    base::string16 label_text;
-    if (warning_type == WarningType::kFullWarning) {
-      label_text = l10n_util::GetStringUTF16(
-          IDS_ASH_LOGIN_MANAGED_SESSION_MONITORING_FULL_WARNING);
-      image_->SetVisible(true);
-    } else if (warning_type == WarningType::kSoftWarning) {
-      label_text = l10n_util::GetStringUTF16(
-          IDS_ASH_LOGIN_MANAGED_SESSION_MONITORING_SOFT_WARNING);
-      image_->SetVisible(false);
-    }
-    label_->SetText(label_text);
+    warning_type_ = warning_type;
+    UpdateLabel();
   }
 
   ~MonitoringWarningView() override = default;
 
  private:
+  void UpdateLabel() {
+    // Call sequence of UpdateForUser() and SetWarningType() is not clear.
+    // In case SetWarningType is called first there is a need to wait for
+    // enterprise_domain_ is set.
+    if (warning_type_ == WarningType::kNone || !enterprise_domain_.has_value())
+      return;
+    base::string16 label_text;
+    if (warning_type_ == WarningType::kFullWarning) {
+      label_text = l10n_util::GetStringFUTF16(
+          IDS_ASH_LOGIN_MANAGED_SESSION_MONITORING_FULL_WARNING,
+          base::UTF8ToUTF16(enterprise_domain_.value()));
+      image_->SetVisible(true);
+    } else {
+      label_text = l10n_util::GetStringFUTF16(
+          IDS_ASH_LOGIN_MANAGED_SESSION_MONITORING_SOFT_WARNING,
+          base::UTF8ToUTF16(enterprise_domain_.value()));
+      image_->SetVisible(false);
+    }
+    label_->SetText(label_text);
+  }
+
   friend class LoginExpandedPublicAccountView::TestApi;
 
+  WarningType warning_type_;
+  base::Optional<std::string> enterprise_domain_;
   views::ImageView* image_;
   views::Label* label_;
 
@@ -277,7 +298,7 @@ class RightPaneView : public NonAccessibleView,
       : on_learn_more_tapped_(on_learn_more_tapped) {
     SetPreferredSize(
         gfx::Size(kExpandedViewWidthDp / 2, kExpandedViewHeightDp));
-    SetBorder(views::CreateEmptyBorder(gfx::Insets(kRightPaneMarginDp)));
+    SetBorder(views::CreateEmptyBorder(gfx::Insets(kHorizontalMarginPaneDp)));
 
     // Create labels view.
     labels_view_ = new NonAccessibleView();
@@ -417,9 +438,16 @@ class RightPaneView : public NonAccessibleView,
       show_advanced_changed_by_user_ = true;
       Layout();
     } else if (sender == submit_button_) {
-      Shell::Get()->login_screen_controller()->LaunchPublicSession(
-          current_user_.basic_user_info.account_id,
-          selected_language_item_.value, selected_keyboard_item_.value);
+      // TODO(crbug.com/984021) change to LaunchSamlPublicSession which would
+      // take selected_language_item_.value, selected_keyboard_item_.value too.
+      if (current_user_.public_account_info->using_saml) {
+        Shell::Get()->login_screen_controller()->ShowGaiaSignin(
+            current_user_.basic_user_info.account_id);
+      } else {
+        Shell::Get()->login_screen_controller()->LaunchPublicSession(
+            current_user_.basic_user_info.account_id,
+            selected_language_item_.value, selected_keyboard_item_.value);
+      }
     } else if (sender == language_selection_) {
       DCHECK(language_menu_view_);
       if (language_menu_view_->GetVisible()) {
@@ -458,12 +486,18 @@ class RightPaneView : public NonAccessibleView,
   void UpdateForUser(const LoginUserInfo& user) {
     DCHECK_EQ(user.basic_user_info.type,
               user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+    monitoring_warning_view_->UpdateForUser(user);
     current_user_ = user;
     if (!language_changed_by_user_)
       selected_language_item_.value = user.public_account_info->default_locale;
 
     PopulateLanguageItems(user.public_account_info->available_locales);
-    PopulateKeyboardItems(user.public_account_info->keyboard_layouts);
+
+    if (user.public_account_info->default_locale ==
+        selected_language_item_.value) {
+      PopulateKeyboardItems(user.public_account_info->keyboard_layouts);
+    }
+
     language_selection_->SetText(
         base::UTF8ToUTF16(selected_language_item_.title));
     keyboard_selection_->SetText(
@@ -520,13 +554,18 @@ class RightPaneView : public NonAccessibleView,
         selected_language_item_ = item;
     }
 
+    LoginMenuView* old_language_menu_view = language_menu_view_;
+
     language_menu_view_ = new LoginMenuView(
         language_items_, language_selection_ /*anchor_view*/,
         language_selection_ /*bubble_opener*/,
         base::BindRepeating(&RightPaneView::OnLanguageSelected,
                             weak_factory_.GetWeakPtr()));
-    login_views_utils::GetTopLevelParentView(this)->AddChildView(
+    login_views_utils::GetBubbleContainer(this)->AddChildView(
         language_menu_view_);
+
+    if (old_language_menu_view)
+      delete old_language_menu_view;
   }
 
   void PopulateKeyboardItems(
@@ -544,13 +583,18 @@ class RightPaneView : public NonAccessibleView,
         selected_keyboard_item_ = item;
     }
 
+    LoginMenuView* old_keyboard_menu_view = keyboard_menu_view_;
+
     keyboard_menu_view_ = new LoginMenuView(
         keyboard_items_, keyboard_selection_ /*anchor_view*/,
         keyboard_selection_ /*bubble_opener*/,
         base::BindRepeating(&RightPaneView::OnKeyboardSelected,
                             weak_factory_.GetWeakPtr()));
-    login_views_utils::GetTopLevelParentView(this)->AddChildView(
+    login_views_utils::GetBubbleContainer(this)->AddChildView(
         keyboard_menu_view_);
+
+    if (old_keyboard_menu_view)
+      delete old_keyboard_menu_view;
   }
 
   LoginBaseBubbleView* GetLanguageMenuView() { return language_menu_view_; }
@@ -561,6 +605,10 @@ class RightPaneView : public NonAccessibleView,
   void Reset() {
     show_advanced_changed_by_user_ = false;
     language_changed_by_user_ = false;
+    if (language_menu_view_ && language_menu_view_->GetVisible())
+      language_menu_view_->Hide();
+    if (keyboard_menu_view_ && keyboard_menu_view_->GetVisible())
+      keyboard_menu_view_->Hide();
   }
 
  private:
@@ -610,6 +658,10 @@ LoginExpandedPublicAccountView::TestApi::TestApi(
     : view_(view) {}
 
 LoginExpandedPublicAccountView::TestApi::~TestApi() = default;
+
+LoginUserView* LoginExpandedPublicAccountView::TestApi::user_view() {
+  return view_->user_view_;
+}
 
 views::View* LoginExpandedPublicAccountView::TestApi::advanced_view_button() {
   return view_->right_pane_->advanced_view_button_;
@@ -664,6 +716,62 @@ LoginExpandedPublicAccountView::TestApi::selected_keyboard_item() {
 views::ImageView*
 LoginExpandedPublicAccountView::TestApi::monitoring_warning_icon() {
   return view_->right_pane_->monitoring_warning_view_->image_;
+}
+
+views::Label*
+LoginExpandedPublicAccountView::TestApi::monitoring_warning_label() {
+  return view_->right_pane_->monitoring_warning_view_->label_;
+}
+
+void LoginExpandedPublicAccountView::TestApi::ResetUserForTest() {
+  view_->right_pane_->monitoring_warning_view_->enterprise_domain_.reset();
+}
+
+bool LoginExpandedPublicAccountView::TestApi::SelectLanguage(
+    const std::string& language_code) {
+  for (LoginMenuView::Item item : view_->right_pane_->language_items_) {
+    if (item.value == language_code) {
+      view_->right_pane_->OnLanguageSelected(item);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool LoginExpandedPublicAccountView::TestApi::SelectKeyboard(
+    const std::string& ime_id) {
+  for (LoginMenuView::Item item : view_->right_pane_->keyboard_items_) {
+    if (item.value == ime_id) {
+      view_->right_pane_->OnKeyboardSelected(item);
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<LocaleItem> LoginExpandedPublicAccountView::TestApi::GetLocales() {
+  std::vector<LocaleItem> locales;
+  for (LoginMenuView::Item item : view_->right_pane_->language_items_) {
+    LocaleItem locale;
+    locale.title = item.title;
+    locale.language_code = item.value;
+    locales.push_back(locale);
+  }
+  return locales;
+}
+
+void LoginExpandedPublicAccountView::TestApi::OnAdvancedButtonTap() {
+  view_->right_pane_->ButtonPressed(
+      views::Button::AsButton(advanced_view_button()),
+      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::PointF(), gfx::PointF(),
+                     base::TimeTicks(), 0, 0));
+}
+
+void LoginExpandedPublicAccountView::TestApi::OnSubmitButtonTap() {
+  view_->right_pane_->ButtonPressed(
+      views::Button::AsButton(submit_button()),
+      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::PointF(), gfx::PointF(),
+                     base::TimeTicks(), 0, 0));
 }
 
 LoginExpandedPublicAccountView::LoginExpandedPublicAccountView(

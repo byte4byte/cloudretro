@@ -4,35 +4,45 @@
 
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
 
+#include <sys/sysctl.h>
+
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "build/branding_buildflags.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/ukm/ios/features.h"
+#import "ios/chrome/app/application_delegate/ios_enable_metrickit_buildflags.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
+#include "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/metrics/first_user_action_recorder.h"
 #import "ios/chrome/browser/metrics/previous_session_info.h"
 #import "ios/chrome/browser/net/connection_type_observer_bridge.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/system_flags.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/main/browser_interface_provider.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/chrome/common/app_group/app_group_metrics_mainapp.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/distribution/app_distribution_provider.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IOS_ENABLE_METRICKIT)
+#import "ios/chrome/app/application_delegate/metric_kit_subscribing_util.h"  // nogncheck
+#endif  // BUILDFLAG(IOS_ENABLE_METRICKIT)
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -41,6 +51,22 @@
 namespace {
 // The amount of time (in seconds) to wait for the user to start a new task.
 const NSTimeInterval kFirstUserActionTimeout = 30.0;
+
+// Returns time delta since app launch as retrieved from kernel info about
+// the current process.
+base::TimeDelta TimeDeltaSinceAppLaunchFromProcess() {
+  struct kinfo_proc info;
+  size_t length = sizeof(struct kinfo_proc);
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)getpid()};
+  const int kr = sysctl(mib, base::size(mib), &info, &length, nullptr, 0);
+  DCHECK_EQ(KERN_SUCCESS, kr);
+
+  const struct timeval time = info.kp_proc.p_starttime;
+  const NSTimeInterval time_since_1970 =
+      time.tv_sec + (time.tv_usec / (double)USEC_PER_SEC);
+  NSDate* date = [NSDate dateWithTimeIntervalSince1970:time_since_1970];
+  return base::TimeDelta::FromSecondsD(-date.timeIntervalSinceNow);
+}
 }  // namespace
 
 namespace metrics_mediator {
@@ -56,7 +82,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 
   // Observer for the connection type.  Contains a valid object only if the
   // metrics setting is set to wifi-only.
-  std::unique_ptr<ConnectionTypeObserverBridge> connectionTypeObserverBridge_;
+  std::unique_ptr<ConnectionTypeObserverBridge> _connectionTypeObserverBridge;
 }
 
 // Starts or stops metrics recording and/or uploading.
@@ -98,8 +124,15 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
   if (![startupInformation isColdStart])
     return;
 
-  base::TimeDelta startDuration =
+  const base::TimeDelta startDuration =
       base::TimeTicks::Now() - [startupInformation appLaunchTime];
+
+  const base::TimeDelta startDurationFromProcess =
+      TimeDeltaSinceAppLaunchFromProcess();
+
+  UMA_HISTOGRAM_TIMES("Startup.ColdStartFromProcessCreationTime",
+                      startDurationFromProcess);
+
   if ([startupInformation startupParameters]) {
     UMA_HISTOGRAM_TIMES("Startup.ColdStartWithExternalURLTime", startDuration);
   } else {
@@ -116,10 +149,19 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 
 + (void)logLaunchMetricsWithStartupInformation:
             (id<StartupInformation>)startupInformation
-                             interfaceProvider:(id<BrowserInterfaceProvider>)
-                                                   interfaceProvider {
-  int numTabs =
-      static_cast<int>(interfaceProvider.mainInterface.tabModel.count);
+                               connectedScenes:(NSArray<SceneState*>*)scenes {
+  int numTabs = 0;
+  for (SceneState* scene in scenes) {
+    if (!scene.interfaceProvider) {
+      // The scene might not yet be initiated.
+      // TODO(crbug.com/1064611): This will not be an issue when the tabs are
+      // counted in sessions instead of scenes.
+      continue;
+    }
+    numTabs += scene.interfaceProvider.mainInterface.browser->GetWebStateList()
+                   ->count();
+  }
+
   if (startupInformation.isColdStart) {
     [self recordNumTabAtStartup:numTabs];
   } else {
@@ -142,15 +184,27 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
     [startupInformation
         activateFirstUserActionRecorderWithBackgroundTime:interval];
 
-    web::WebState* currentWebState = interfaceProvider.currentInterface.tabModel
-                                         .webStateList->GetActiveWebState();
-    if (currentWebState &&
-        currentWebState->GetLastCommittedURL() == kChromeUINewTabURL) {
-      startupInformation.firstUserActionRecorder->RecordStartOnNTP();
-      [startupInformation resetFirstUserActionRecorder];
-    } else {
-      [startupInformation
-          expireFirstUserActionRecorderAfterDelay:kFirstUserActionTimeout];
+    SceneState* activeScene = nil;
+    for (SceneState* scene in scenes) {
+      if (scene.activationLevel == SceneActivationLevelForegroundActive) {
+        activeScene = scene;
+        break;
+      }
+    }
+
+    if (activeScene) {
+      web::WebState* currentWebState =
+          activeScene.interfaceProvider.currentInterface.browser
+              ->GetWebStateList()
+              ->GetActiveWebState();
+      if (currentWebState &&
+          currentWebState->GetLastCommittedURL() == kChromeUINewTabURL) {
+        startupInformation.firstUserActionRecorder->RecordStartOnNTP();
+        [startupInformation resetFirstUserActionRecorder];
+      } else {
+        [startupInformation
+            expireFirstUserActionRecorderAfterDelay:kFirstUserActionTimeout];
+      }
     }
     // Remove the value so it's not reused if the app crashes.
     [[NSUserDefaults standardUserDefaults]
@@ -173,12 +227,15 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
   [self setBreakpadEnabled:optIn withUploading:allowUploading];
   [self setWatchWWANEnabled:optIn];
   [self setAppGroupMetricsEnabled:optIn];
+#if BUILDFLAG(IOS_ENABLE_METRICKIT)
+  EnableMetricKitReportCollection();
+#endif
 }
 
 - (BOOL)areMetricsEnabled {
 // If this if-def changes, it needs to be changed in
 // IOSChromeMainParts::IsMetricsReportingEnabled and settings_egtest.mm.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   BOOL optIn = GetApplicationContext()->GetLocalState()->GetBoolean(
       metrics::prefs::kMetricsReportingEnabled);
 #else
@@ -246,7 +303,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
     callback = ^(NSData* log_content) {
       std::string log(static_cast<const char*>([log_content bytes]),
                       static_cast<size_t>([log_content length]));
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {web::WebThread::UI}, base::BindOnce(^{
             GetApplicationContext()->GetMetricsService()->PushExternalLog(log);
           }));
@@ -256,7 +313,7 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
   }
 
   app_group::main_app::RecordWidgetUsage();
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&app_group::main_app::ProcessPendingLogs, callback));
 }
@@ -289,12 +346,12 @@ using metrics_mediator::kAppEnteredBackgroundDateKey;
 
 - (void)setWatchWWANEnabled:(BOOL)enabled {
   if (!enabled) {
-    connectionTypeObserverBridge_.reset();
+    _connectionTypeObserverBridge.reset();
     return;
   }
 
-  if (!connectionTypeObserverBridge_) {
-    connectionTypeObserverBridge_.reset(new ConnectionTypeObserverBridge(self));
+  if (!_connectionTypeObserverBridge) {
+    _connectionTypeObserverBridge.reset(new ConnectionTypeObserverBridge(self));
   }
 }
 

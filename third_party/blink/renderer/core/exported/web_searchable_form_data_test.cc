@@ -34,7 +34,6 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_frame.h"
@@ -50,6 +49,8 @@ namespace {
 
 void RegisterMockedURLLoadFromBaseURL(const std::string& base_url,
                                       const std::string& file_name) {
+  // TODO(crbug.com/751425): We should use the mock functionality
+  // via |WebSearchableFormDataTest::web_view_helper_|.
   url_test_helpers::RegisterMockedURLLoadFromBase(
       WebString::FromUTF8(base_url), test::CoreTestDataPath(),
       WebString::FromUTF8(file_name));
@@ -60,9 +61,7 @@ class WebSearchableFormDataTest : public testing::Test {
   WebSearchableFormDataTest() = default;
 
   ~WebSearchableFormDataTest() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
   frame_test_helpers::WebViewHelper web_view_helper_;
@@ -75,8 +74,8 @@ TEST_F(WebSearchableFormDataTest, HttpSearchString) {
   WebViewImpl* web_view =
       web_view_helper_.InitializeAndLoad(base_url + "search_form_http.html");
 
-  WebVector<WebFormElement> forms;
-  web_view->MainFrameImpl()->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms =
+      web_view->MainFrameImpl()->GetDocument().Forms();
 
   EXPECT_EQ(forms.size(), 1U);
 
@@ -91,8 +90,8 @@ TEST_F(WebSearchableFormDataTest, HttpsSearchString) {
   WebViewImpl* web_view =
       web_view_helper_.InitializeAndLoad(base_url + "search_form_https.html");
 
-  WebVector<WebFormElement> forms;
-  web_view->MainFrameImpl()->GetDocument().Forms(forms);
+  WebVector<WebFormElement> forms =
+      web_view->MainFrameImpl()->GetDocument().Forms();
 
   EXPECT_EQ(forms.size(), 1U);
 

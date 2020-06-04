@@ -61,9 +61,7 @@ class CompositorWatcher : public ui::CompositorObserver {
   //     CompositorWatcher instance is deleted, nor from the CompositorWatcher
   //     destructor.
   explicit CompositorWatcher(base::OnceClosure callback)
-      : callback_(std::move(callback)),
-        compositor_observer_(this),
-        weak_ptr_factory_(this) {
+      : callback_(std::move(callback)), compositor_observer_(this) {
     Start();
   }
   ~CompositorWatcher() override = default;
@@ -204,7 +202,7 @@ class CompositorWatcher : public ui::CompositorObserver {
   std::map<ui::Compositor*, CompositorInfo> pending_compositing_;
   ScopedObserver<ui::Compositor, ui::CompositorObserver> compositor_observer_;
 
-  base::WeakPtrFactory<CompositorWatcher> weak_ptr_factory_;
+  base::WeakPtrFactory<CompositorWatcher> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CompositorWatcher);
 };
@@ -338,7 +336,7 @@ void PowerEventObserver::StopCompositingAndSuspendDisplays() {
   ui::UserActivityDetector::Get()->OnDisplayPowerChanging();
 
   Shell::Get()->display_configurator()->SuspendDisplays(
-      base::Bind(&OnSuspendDisplaysCompleted, block_suspend_token_));
+      base::BindOnce(&OnSuspendDisplaysCompleted, block_suspend_token_));
   block_suspend_token_ = {};
 }
 
@@ -347,7 +345,7 @@ void PowerEventObserver::EndPendingWallpaperAnimations() {
     WallpaperWidgetController* wallpaper_widget_controller =
         RootWindowController::ForWindow(window)->wallpaper_widget_controller();
     if (wallpaper_widget_controller->IsAnimating())
-      wallpaper_widget_controller->EndPendingAnimation();
+      wallpaper_widget_controller->StopAnimating();
   }
 }
 

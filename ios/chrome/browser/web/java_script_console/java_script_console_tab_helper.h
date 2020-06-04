@@ -7,8 +7,8 @@
 
 #include "base/values.h"
 #include "ios/chrome/browser/web/java_script_console/java_script_console_tab_helper_delegate.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
 namespace web {
 class WebFrame;
@@ -41,6 +41,9 @@ class JavaScriptConsoleTabHelper
 
   // The delegate associated with the receiver.
   JavaScriptConsoleTabHelperDelegate* delegate_ = nullptr;
+
+  // Subscription for JS message.
+  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
 
   // The WebState this instance is observing. Will be null after
   // WebStateDestroyed has been called.

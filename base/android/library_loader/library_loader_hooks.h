@@ -29,6 +29,10 @@ enum LibraryProcessType {
   PROCESS_WEBVIEW = 3,
   // Shared library is running in child process as part of webview.
   PROCESS_WEBVIEW_CHILD = 4,
+  // Shared library is running in the app that uses weblayer.
+  PROCESS_WEBLAYER = 5,
+  // Shared library is running in child process as part of weblayer.
+  PROCESS_WEBLAYER_CHILD = 6,
 };
 
 // Whether fewer code should be prefetched, and no-readahead should be set.
@@ -41,6 +45,11 @@ typedef bool NativeInitializationHook(LibraryProcessType library_process_type);
 
 BASE_EXPORT void SetNativeInitializationHook(
     NativeInitializationHook native_initialization_hook);
+
+typedef void NonMainDexJniRegistrationHook();
+
+BASE_EXPORT void SetNonMainDexJniRegistrationHook(
+    NonMainDexJniRegistrationHook jni_registration_hook);
 
 // Record any pending renderer histogram value as histograms.  Pending values
 // are set by

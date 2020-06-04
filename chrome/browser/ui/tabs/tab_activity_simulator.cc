@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/tabs/tab_activity_simulator.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
@@ -45,6 +45,7 @@ void TabActivitySimulator::Navigate(content::WebContents* web_contents,
   std::unique_ptr<content::NavigationSimulator> navigation =
       content::NavigationSimulator::CreateBrowserInitiated(url, web_contents);
   navigation->SetTransition(page_transition);
+  navigation->SetKeepLoading(true);
   navigation->Commit();
 }
 

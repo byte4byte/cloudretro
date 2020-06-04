@@ -41,6 +41,10 @@ BookmarkEntityBuilder::BookmarkEntityBuilder(
 
 BookmarkEntityBuilder::~BookmarkEntityBuilder() {}
 
+void BookmarkEntityBuilder::SetId(const std::string& id) {
+  id_ = id;
+}
+
 void BookmarkEntityBuilder::SetParentId(const std::string& parent_id) {
   parent_id_ = parent_id;
 }
@@ -74,8 +78,10 @@ sync_pb::EntitySpecifics BookmarkEntityBuilder::CreateBaseEntitySpecifics(
   sync_pb::EntitySpecifics entity_specifics;
   sync_pb::BookmarkSpecifics* bookmark_specifics =
       entity_specifics.mutable_bookmark();
+
   if (!is_legacy) {
-    bookmark_specifics->set_title(title_);
+    bookmark_specifics->set_legacy_canonicalized_title(title_);
+    bookmark_specifics->set_guid(originator_client_item_id_);
   }
 
   return entity_specifics;
@@ -94,12 +100,14 @@ std::unique_ptr<LoopbackServerEntity> BookmarkEntityBuilder::Build(
         LoopbackServerEntity::CreateId(syncer::BOOKMARKS, "bookmark_bar");
   }
 
-  const string id =
-      LoopbackServerEntity::CreateId(syncer::BOOKMARKS, base::GenerateGUID());
+  if (id_.empty()) {
+    id_ =
+        LoopbackServerEntity::CreateId(syncer::BOOKMARKS, base::GenerateGUID());
+  }
 
   return base::WrapUnique<LoopbackServerEntity>(
       new syncer::PersistentBookmarkEntity(
-          id, kUnusedVersion, title_, originator_cache_guid_,
+          id_, kUnusedVersion, title_, originator_cache_guid_,
           originator_client_item_id_, unique_position, entity_specifics,
           is_folder, parent_id_, kDefaultTime, kDefaultTime));
 }

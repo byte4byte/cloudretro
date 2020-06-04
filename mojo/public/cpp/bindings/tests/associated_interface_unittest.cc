@@ -14,8 +14,9 @@
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -137,7 +138,7 @@ class AssociatedInterfaceTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment;
   scoped_refptr<base::SequencedTaskRunner> main_runner_;
 };
 
@@ -210,7 +211,7 @@ TEST_F(AssociatedInterfaceTest, InterfacesAtBothEnds) {
 class TestSender {
  public:
   TestSender()
-      : task_runner_(base::CreateSequencedTaskRunnerWithTraits({})),
+      : task_runner_(base::ThreadPool::CreateSequencedTaskRunner({})),
         next_sender_(nullptr),
         max_value_to_send_(-1) {}
 
@@ -257,7 +258,7 @@ class TestSender {
 class TestReceiver {
  public:
   TestReceiver()
-      : task_runner_(base::CreateSequencedTaskRunnerWithTraits({})),
+      : task_runner_(base::ThreadPool::CreateSequencedTaskRunner({})),
         expected_calls_(0) {}
 
   void SetUp(PendingAssociatedReceiver<IntegerSender> receiver0,
@@ -267,11 +268,11 @@ class TestReceiver {
     CHECK(task_runner()->RunsTasksInCurrentSequence());
 
     impl0_.reset(new IntegerSenderImpl(std::move(receiver0)));
-    impl0_->set_notify_send_method_called(
-        base::Bind(&TestReceiver::SendMethodCalled, base::Unretained(this)));
+    impl0_->set_notify_send_method_called(base::BindRepeating(
+        &TestReceiver::SendMethodCalled, base::Unretained(this)));
     impl1_.reset(new IntegerSenderImpl(std::move(receiver1)));
-    impl1_->set_notify_send_method_called(
-        base::Bind(&TestReceiver::SendMethodCalled, base::Unretained(this)));
+    impl1_->set_notify_send_method_called(base::BindRepeating(
+        &TestReceiver::SendMethodCalled, base::Unretained(this)));
 
     expected_calls_ = expected_calls;
     notify_finish_ = std::move(notify_finish);
@@ -616,7 +617,7 @@ class PingProviderImpl : public AssociatedPingProvider {
   base::OnceClosure quit_waiting_;
 };
 
-class CallbackFilter : public MessageReceiver {
+class CallbackFilter : public MessageFilter {
  public:
   explicit CallbackFilter(base::RepeatingClosure callback)
       : callback_(std::move(callback)) {}
@@ -626,11 +627,13 @@ class CallbackFilter : public MessageReceiver {
     return std::make_unique<CallbackFilter>(std::move(callback));
   }
 
-  // MessageReceiver:
-  bool Accept(Message* message) override {
+  // MessageFilter:
+  bool WillDispatch(Message* message) override {
     callback_.Run();
     return true;
   }
+
+  void DidDispatchOrReject(Message* message, bool accepted) override {}
 
  private:
   base::RepeatingClosure callback_;
@@ -655,45 +658,19 @@ TEST_F(AssociatedInterfaceTest, ReceiverWithFilters) {
   int a_status = 0;
   int b_status = 0;
 
-  ping_a_impl.receiver().AddFilter(
+  ping_a_impl.receiver().SetFilter(
       CallbackFilter::Wrap(base::BindLambdaForTesting([&] {
         EXPECT_EQ(0, a_status);
         EXPECT_EQ(0, b_status);
         a_status = 1;
       })));
 
-  ping_a_impl.receiver().AddFilter(
+  ping_b_impl.receiver().SetFilter(
       CallbackFilter::Wrap(base::BindLambdaForTesting([&] {
         EXPECT_EQ(1, a_status);
         EXPECT_EQ(0, b_status);
-        a_status = 2;
-      })));
-
-  ping_a_impl.set_ping_handler(base::BindLambdaForTesting([&] {
-    EXPECT_EQ(2, a_status);
-    EXPECT_EQ(0, b_status);
-    a_status = 3;
-  }));
-
-  ping_b_impl.receiver().AddFilter(
-      CallbackFilter::Wrap(base::BindLambdaForTesting([&] {
-        EXPECT_EQ(3, a_status);
-        EXPECT_EQ(0, b_status);
         b_status = 1;
       })));
-
-  ping_b_impl.receiver().AddFilter(
-      CallbackFilter::Wrap(base::BindLambdaForTesting([&] {
-        EXPECT_EQ(3, a_status);
-        EXPECT_EQ(1, b_status);
-        b_status = 2;
-      })));
-
-  ping_b_impl.set_ping_handler(base::BindLambdaForTesting([&] {
-    EXPECT_EQ(3, a_status);
-    EXPECT_EQ(2, b_status);
-    b_status = 3;
-  }));
 
   for (int i = 0; i < 10; ++i) {
     a_status = 0;
@@ -705,7 +682,7 @@ TEST_F(AssociatedInterfaceTest, ReceiverWithFilters) {
       loop.Run();
     }
 
-    EXPECT_EQ(3, a_status);
+    EXPECT_EQ(1, a_status);
     EXPECT_EQ(0, b_status);
 
     {
@@ -714,8 +691,8 @@ TEST_F(AssociatedInterfaceTest, ReceiverWithFilters) {
       loop.Run();
     }
 
-    EXPECT_EQ(3, a_status);
-    EXPECT_EQ(3, b_status);
+    EXPECT_EQ(1, a_status);
+    EXPECT_EQ(1, b_status);
   }
 }
 
@@ -981,7 +958,7 @@ TEST_F(AssociatedInterfaceTest, SharedAssociatedRemote) {
   // Test the thread safe pointer can be used from another thread.
   base::RunLoop run_loop;
 
-  auto sender_task_runner = base::CreateSequencedTaskRunnerWithTraits({});
+  auto sender_task_runner = base::ThreadPool::CreateSequencedTaskRunner({});
   auto quit_closure = run_loop.QuitClosure();
   sender_task_runner->PostTask(
       FROM_HERE, base::BindLambdaForTesting([&] {
@@ -1005,7 +982,7 @@ struct ForwarderTestContext {
 
 TEST_F(AssociatedInterfaceTest, SharedAssociatedRemoteWithTaskRunner) {
   const scoped_refptr<base::SequencedTaskRunner> other_thread_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits({});
+      base::ThreadPool::CreateSequencedTaskRunner({});
 
   ForwarderTestContext* context = new ForwarderTestContext();
   PendingAssociatedRemote<IntegerSender> pending_remote;

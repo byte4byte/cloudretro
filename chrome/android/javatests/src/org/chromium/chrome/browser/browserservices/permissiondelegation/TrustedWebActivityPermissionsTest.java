@@ -19,16 +19,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.background_sync.BackgroundSyncPwaDetector;
-import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.webapps.WebappRegistry;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.Origin;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.ServerCertificate;
@@ -46,6 +46,9 @@ public class TrustedWebActivityPermissionsTest {
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
 
     private static final String TEST_PAGE = "/chrome/test/data/android/google.html";
+    private static final int NOTIFICATIONS = ContentSettingsType.NOTIFICATIONS;
+    private static final int GEOLOCATION = ContentSettingsType.GEOLOCATION;
+
     private EmbeddedTestServer mTestServer;
     private String mTestPage;
     private Origin mOrigin;
@@ -53,16 +56,16 @@ public class TrustedWebActivityPermissionsTest {
     private TrustedWebActivityPermissionManager mPermissionManager;
 
     @Before
-    public void setUp() throws InterruptedException, ProcessInitException, TimeoutException {
+    public void setUp() throws TimeoutException {
         // Native needs to be initialized to start the test server.
-        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        LibraryLoader.getInstance().ensureInitialized();
 
         // TWAs only work with HTTPS.
         mTestServer = EmbeddedTestServer.createAndStartHTTPSServer(
                 InstrumentationRegistry.getInstrumentation().getContext(),
                 ServerCertificate.CERT_OK);
         mTestPage = mTestServer.getURL(TEST_PAGE);
-        mOrigin = new Origin(mTestPage);
+        mOrigin = Origin.create(mTestPage);
         mPackage = InstrumentationRegistry.getTargetContext().getPackageName();
 
         mCustomTabActivityTestRule.startCustomTabActivityWithIntent(
@@ -75,32 +78,32 @@ public class TrustedWebActivityPermissionsTest {
     }
 
     @After
-    public void tearDown() throws TimeoutException {
+    public void tearDown() {
         mPermissionManager.clearForTesting();
         mTestServer.stopAndDestroyServer();
     }
 
     @Test
     @MediumTest
-    public void allowNotifications() throws TimeoutException, InterruptedException {
-        TestThreadUtils.runOnUiThreadBlocking(() ->
-                mPermissionManager.register(mOrigin, mPackage, true));
+    public void allowNotifications() throws TimeoutException {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, NOTIFICATIONS, true));
         assertEquals("\"granted\"", getNotificationPermission());
     }
 
     @Test
     @MediumTest
-    public void blockNotifications() throws TimeoutException, InterruptedException {
-        TestThreadUtils.runOnUiThreadBlocking(() ->
-                mPermissionManager.register(mOrigin, mPackage, false));
+    public void blockNotifications() throws TimeoutException {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, NOTIFICATIONS, false));
         assertEquals("\"denied\"", getNotificationPermission());
     }
 
     @Test
     @MediumTest
-    public void unregisterTwa() throws TimeoutException, InterruptedException {
-        TestThreadUtils.runOnUiThreadBlocking(() ->
-                mPermissionManager.register(mOrigin, mPackage, true));
+    public void unregisterTwa() throws TimeoutException {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, NOTIFICATIONS, true));
         assertEquals("\"granted\"", getNotificationPermission());
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -111,16 +114,36 @@ public class TrustedWebActivityPermissionsTest {
 
     @Test
     @SmallTest
-    public void detectTwa() throws TimeoutException, InterruptedException {
+    public void detectTwa() {
         TestThreadUtils.runOnUiThreadBlocking(
-                () -> mPermissionManager.register(mOrigin, mPackage, true));
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, NOTIFICATIONS, true));
         assertTrue(BackgroundSyncPwaDetector.isTwaInstalled(mOrigin.toString()));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> { mPermissionManager.unregister(mOrigin); });
         assertFalse(BackgroundSyncPwaDetector.isTwaInstalled(mOrigin.toString()));
     }
 
-    private String getNotificationPermission() throws TimeoutException, InterruptedException {
+    @Test
+    @SmallTest
+    public void allowGeolocation() {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, GEOLOCATION, true));
+        assertTrue(WebappRegistry.getInstance()
+                           .getTrustedWebActivityPermissionStore()
+                           .arePermissionEnabled(GEOLOCATION, mOrigin));
+    }
+
+    @Test
+    @SmallTest
+    public void blockGeolocation() {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> mPermissionManager.updatePermission(mOrigin, mPackage, GEOLOCATION, false));
+        assertFalse(WebappRegistry.getInstance()
+                            .getTrustedWebActivityPermissionStore()
+                            .arePermissionEnabled(GEOLOCATION, mOrigin));
+    }
+
+    private String getNotificationPermission() throws TimeoutException {
         return mCustomTabActivityTestRule.runJavaScriptCodeInCurrentTab("Notification.permission");
     }
 }

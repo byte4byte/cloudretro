@@ -10,9 +10,9 @@
 
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "content/shell/test_runner/test_common.h"
+#include "base/strings/string_util.h"
 
-namespace test_runner {
+namespace content {
 
 namespace {
 
@@ -25,11 +25,18 @@ void Append(blink::WebVector<blink::WebString>* data,
   data->Swap(result);
 }
 
+bool IsASCIIAlpha(char ch) {
+  return base::IsAsciiLower(ch | 0x20);
+}
+
+bool IsNotASCIIAlpha(char ch) {
+  return !IsASCIIAlpha(ch);
+}
+
 }  // namespace
 
-MockSpellCheck::MockSpellCheck() : initialized_(false) {}
-
-MockSpellCheck::~MockSpellCheck() {}
+MockSpellCheck::MockSpellCheck() = default;
+MockSpellCheck::~MockSpellCheck() = default;
 
 bool MockSpellCheck::SpellCheckWord(const blink::WebString& text,
                                     size_t* misspelled_offset,
@@ -172,4 +179,4 @@ bool MockSpellCheck::InitializeIfNeeded() {
   return false;
 }
 
-}  // namespace test_runner
+}  // namespace content

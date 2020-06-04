@@ -19,7 +19,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.Arrays;
@@ -40,13 +40,13 @@ public class ProviderBookmarksUriTest {
     private Uri mBookmarksUri;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mBookmarksUri = ChromeBrowserProvider.getBookmarksApiUri(mProviderTestRule.getActivity());
         mProviderTestRule.getContentResolver().delete(mBookmarksUri, null, null);
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mProviderTestRule.getContentResolver().delete(mBookmarksUri, null, null);
     }
 

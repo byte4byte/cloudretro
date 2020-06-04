@@ -24,6 +24,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/find_bar/find_bar_state.h"
+#include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -102,7 +104,8 @@ base::FilePath CreateTestingProfile(const std::string& name,
   base::FilePath profile_path =
       manager->user_data_dir().AppendASCII(relative_path);
   storage.AddProfile(profile_path, base::ASCIIToUTF16(name), std::string(),
-                     base::string16(), 0u, std::string(), EmptyAccountId());
+                     base::string16(), false, 0u, std::string(),
+                     EmptyAccountId());
 
   EXPECT_EQ(starting_number_of_profiles + 1u, storage.GetNumberOfProfiles());
   return profile_path;
@@ -199,10 +202,43 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsCookies) {
   ASSERT_EQ("", cookie);
 }
 
+IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsFindInPageCache) {
+  Browser* guest_browser = OpenGuestBrowser();
+  Profile* guest_profile = guest_browser->profile();
+
+  base::string16 fip_text =
+      base::ASCIIToUTF16("first guest session search text");
+  FindBarStateFactory::GetForBrowserContext(guest_profile)
+      ->SetLastSearchText(fip_text);
+
+  // Open a second guest window and close one. This should not affect the find
+  // in page cache as the guest session hasn't been ended.
+  profiles::FindOrCreateNewWindowForProfile(
+      guest_profile, chrome::startup::IS_NOT_PROCESS_STARTUP,
+      chrome::startup::IS_NOT_FIRST_RUN, true /*always_create*/);
+  CloseBrowserSynchronously(guest_browser);
+  EXPECT_EQ(fip_text, FindBarStateFactory::GetForBrowserContext(guest_profile)
+                          ->GetSearchPrepopulateText());
+
+  // Close the remaining guest browser window.
+  guest_browser = chrome::FindAnyBrowser(guest_profile, true);
+  EXPECT_TRUE(guest_browser);
+  CloseBrowserSynchronously(guest_browser);
+
+  // Open a new guest browser window. Since this is a separate session, the find
+  // in page text should have been cleared (along with all other browsing data).
+  profiles::FindOrCreateNewWindowForProfile(
+      guest_profile, chrome::startup::IS_NOT_PROCESS_STARTUP,
+      chrome::startup::IS_NOT_FIRST_RUN, true /*always_create*/);
+  EXPECT_EQ(base::string16(),
+            FindBarStateFactory::GetForBrowserContext(guest_profile)
+                ->GetSearchPrepopulateText());
+}
+
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestCannotSignin) {
   Browser* guest_browser = OpenGuestBrowser();
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(guest_browser->profile());
 
   // Guest profiles can't sign in without a IdentityManager.

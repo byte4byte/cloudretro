@@ -111,26 +111,26 @@ void LogMaxConsecutiveVideoFrameDropCountExceeded(
 
 void CallOnError(media::VideoCaptureError error,
                  VideoCaptureControllerEventHandler* client,
-                 VideoCaptureControllerID id) {
+                 const VideoCaptureControllerID& id) {
   client->OnError(id, error);
 }
 
 void CallOnStarted(VideoCaptureControllerEventHandler* client,
-                   VideoCaptureControllerID id) {
+                   const VideoCaptureControllerID& id) {
   client->OnStarted(id);
 }
 
 void CallOnStartedUsingGpuDecode(VideoCaptureControllerEventHandler* client,
-                                 VideoCaptureControllerID id) {
+                                 const VideoCaptureControllerID& id) {
   client->OnStartedUsingGpuDecode(id);
 }
 
 }  // anonymous namespace
 
 struct VideoCaptureController::ControllerClient {
-  ControllerClient(VideoCaptureControllerID id,
+  ControllerClient(const VideoCaptureControllerID& id,
                    VideoCaptureControllerEventHandler* handler,
-                   media::VideoCaptureSessionId session_id,
+                   const media::VideoCaptureSessionId& session_id,
                    const media::VideoCaptureParams& params)
       : controller_id(id),
         event_handler(handler),
@@ -226,21 +226,26 @@ VideoCaptureController::BufferContext::CloneBufferHandle() {
   media::mojom::VideoBufferHandlePtr result =
       media::mojom::VideoBufferHandle::New();
   if (buffer_handle_->is_shared_buffer_handle()) {
-    // Special behavior here: If the handle was already read-only, the Clone()
-    // call here will maintain that read-only permission. If it was read-write,
-    // the cloned handle will have read-write permission.
+    // Buffer handles are always writable as they come from
+    // VideoCaptureBufferPool which, among other use cases, provides decoder
+    // output buffers.
     //
-    // TODO(crbug.com/797470): We should be able to demote read-write to
-    // read-only permissions when Clone()'ing handles. Currently, this causes a
-    // crash.
+    // TODO(crbug.com/793446): BroadcastingReceiver::BufferContext also defines
+    // CloneBufferHandle and independently decides on handle permissions. The
+    // permissions should be coordinated between these two classes.
     result->set_shared_buffer_handle(
         buffer_handle_->get_shared_buffer_handle()->Clone(
             mojo::SharedBufferHandle::AccessMode::READ_WRITE));
+    DCHECK(result->get_shared_buffer_handle()->is_valid());
   } else if (buffer_handle_->is_read_only_shmem_region()) {
     result->set_read_only_shmem_region(
         buffer_handle_->get_read_only_shmem_region().Duplicate());
+    DCHECK(result->get_read_only_shmem_region().IsValid());
   } else if (buffer_handle_->is_mailbox_handles()) {
     result->set_mailbox_handles(buffer_handle_->get_mailbox_handles()->Clone());
+  } else if (buffer_handle_->is_gpu_memory_buffer_handle()) {
+    result->set_gpu_memory_buffer_handle(
+        buffer_handle_->get_gpu_memory_buffer_handle().Clone());
   } else {
     NOTREACHED() << "Unexpected video buffer handle type";
   }
@@ -279,14 +284,14 @@ VideoCaptureController::GetWeakPtrForIOThread() {
 }
 
 void VideoCaptureController::AddClient(
-    VideoCaptureControllerID id,
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* event_handler,
-    media::VideoCaptureSessionId session_id,
+    const media::VideoCaptureSessionId& session_id,
     const media::VideoCaptureParams& params) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   std::ostringstream string_stream;
   string_stream << "VideoCaptureController::AddClient(): id = " << id
-                << ", session_id = " << session_id
+                << ", session_id = " << session_id.ToString()
                 << ", params.requested_format = "
                 << media::VideoCaptureFormat::ToString(params.requested_format);
   EmitLogMessage(string_stream.str(), 1);
@@ -337,8 +342,8 @@ void VideoCaptureController::AddClient(
   }
 }
 
-int VideoCaptureController::RemoveClient(
-    VideoCaptureControllerID id,
+base::UnguessableToken VideoCaptureController::RemoveClient(
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* event_handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   std::ostringstream string_stream;
@@ -347,7 +352,7 @@ int VideoCaptureController::RemoveClient(
 
   ControllerClient* client = FindClient(id, event_handler, controller_clients_);
   if (!client)
-    return kInvalidMediaCaptureSessionId;
+    return base::UnguessableToken();
 
   for (const auto& buffer_id : client->buffers_in_use) {
     OnClientFinishedConsumingBuffer(
@@ -356,7 +361,7 @@ int VideoCaptureController::RemoveClient(
   }
   client->buffers_in_use.clear();
 
-  int session_id = client->session_id;
+  base::UnguessableToken session_id = client->session_id;
   controller_clients_.remove_if(
       [client](const std::unique_ptr<ControllerClient>& ptr) {
         return ptr.get() == client;
@@ -366,7 +371,7 @@ int VideoCaptureController::RemoveClient(
 }
 
 void VideoCaptureController::PauseClient(
-    VideoCaptureControllerID id,
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* event_handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DVLOG(1) << "VideoCaptureController::PauseClient: id = " << id;
@@ -381,7 +386,7 @@ void VideoCaptureController::PauseClient(
 }
 
 bool VideoCaptureController::ResumeClient(
-    VideoCaptureControllerID id,
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* event_handler) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DVLOG(1) << "VideoCaptureController::ResumeClient: id = " << id;
@@ -422,7 +427,8 @@ bool VideoCaptureController::HasPausedClient() const {
   return false;
 }
 
-void VideoCaptureController::StopSession(int session_id) {
+void VideoCaptureController::StopSession(
+    const base::UnguessableToken& session_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   std::ostringstream string_stream;
   string_stream << "VideoCaptureController::StopSession: session_id = "
@@ -438,7 +444,7 @@ void VideoCaptureController::StopSession(int session_id) {
 }
 
 void VideoCaptureController::ReturnBuffer(
-    VideoCaptureControllerID id,
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* event_handler,
     int buffer_id,
     double consumer_resource_utilization) {
@@ -581,6 +587,9 @@ void VideoCaptureController::OnFrameDropped(
     media::VideoCaptureFrameDropReason reason) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("video_and_image_capture"),
                "VideoCaptureController::OnFrameDropped");
+
+  MaybeEmitFrameDropLogMessage(reason);
+
   if (reason == frame_drop_log_state_.drop_reason) {
     if (frame_drop_log_state_.max_log_count_exceeded)
       return;
@@ -589,12 +598,6 @@ void VideoCaptureController::OnFrameDropped(
         kMaxConsecutiveFrameDropForSameReasonCount) {
       frame_drop_log_state_.max_log_count_exceeded = true;
       LogMaxConsecutiveVideoFrameDropCountExceeded(reason, stream_type_);
-      std::ostringstream string_stream;
-      string_stream << "Too many consecutive frames dropped with reason code "
-                    << static_cast<int>(reason)
-                    << ". Stopping to log dropped frames for this reason in "
-                       "order to avoid log spam.";
-      EmitLogMessage(string_stream.str(), 1);
       return;
     }
   } else {
@@ -602,10 +605,6 @@ void VideoCaptureController::OnFrameDropped(
   }
 
   LogVideoFrameDrop(reason, stream_type_);
-  std::ostringstream string_stream;
-  string_stream << "Frame dropped with reason code "
-                << static_cast<int>(reason);
-  EmitLogMessage(string_stream.str(), 1);
 }
 
 void VideoCaptureController::OnLog(const std::string& message) {
@@ -773,7 +772,7 @@ void VideoCaptureController::SetDesktopCaptureWindowIdAsync(
 }
 
 VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
-    VideoCaptureControllerID id,
+    const VideoCaptureControllerID& id,
     VideoCaptureControllerEventHandler* handler,
     const ControllerClients& clients) {
   for (const auto& client : clients) {
@@ -784,7 +783,7 @@ VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
 }
 
 VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
-    int session_id,
+    const base::UnguessableToken& session_id,
     const ControllerClients& clients) {
   for (const auto& client : clients) {
     if (client->session_id == session_id)
@@ -858,6 +857,36 @@ void VideoCaptureController::EmitLogMessage(const std::string& message,
                                             int verbose_log_level) {
   DVLOG(verbose_log_level) << message;
   emit_log_message_cb_.Run(message);
+}
+
+void VideoCaptureController::MaybeEmitFrameDropLogMessage(
+    media::VideoCaptureFrameDropReason reason) {
+  using Type = std::underlying_type<media::VideoCaptureFrameDropReason>::type;
+  static_assert(
+      static_cast<Type>(media::VideoCaptureFrameDropReason::kMaxValue) <= 100,
+      "Risk of memory overuse.");
+
+  static_assert(kMaxEmittedLogsForDroppedFramesBeforeSuppressing <
+                    kFrequencyForSuppressedLogs,
+                "");
+
+  DCHECK_GE(static_cast<Type>(reason), 0);
+  DCHECK_LE(reason, media::VideoCaptureFrameDropReason::kMaxValue);
+
+  int& occurrences = frame_drop_log_counters_[reason];
+  if (++occurrences > kMaxEmittedLogsForDroppedFramesBeforeSuppressing &&
+      occurrences % kFrequencyForSuppressedLogs != 0) {
+    return;
+  }
+
+  std::ostringstream string_stream;
+  string_stream << "Frame dropped with reason code "
+                << static_cast<Type>(reason) << ".";
+  if (occurrences == kMaxEmittedLogsForDroppedFramesBeforeSuppressing) {
+    string_stream << " Additional logs will be partially suppressed.";
+  }
+
+  EmitLogMessage(string_stream.str(), 1);
 }
 
 }  // namespace content

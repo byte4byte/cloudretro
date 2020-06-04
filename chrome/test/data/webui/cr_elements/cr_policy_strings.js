@@ -14,4 +14,8 @@ var CrPolicyStrings = CrPolicyStrings || {
   controlledSettingExtension: 'extension: $1',
   controlledSettingExtensionWithoutName: 'extension',
   controlledSettingParent: 'parent',
+  controlledSettingChildRestriction: 'Restricted for child',
 };
+
+// Necessary for tests residing within a JS module.
+window.CrPolicyStrings = CrPolicyStrings;

@@ -25,13 +25,14 @@ namespace android {
 class OverlayPanelLayer : public Layer {
  public:
   // Default width for any icon displayed on an OverlayPanel.
-  static const float kDefaultIconWidthDp;
+  static constexpr float kDefaultIconWidthDp = 36.0f;
 
   // ID for Invalid resource.
-  static const int kInvalidResourceID;
+  static constexpr int kInvalidResourceID = -1;
 
   void SetResourceIds(int bar_text_resource_id,
                       int panel_shadow_resource_id,
+                      int rounded_bar_top_resource_id,
                       int bar_shadow_resource_id,
                       int panel_icon_resource_id,
                       int drag_handlebar_resource_id,
@@ -53,11 +54,10 @@ class OverlayPanelLayer : public Layer {
                      float bar_text_opacity,
                      bool bar_border_visible,
                      float bar_border_height,
-                     bool bar_shadow_visible,
-                     float bar_shadow_opacity,
                      int icon_tint,
                      int drag_handlebar_tint,
-                     float icon_opacity);
+                     float icon_opacity,
+                     int separator_line_color);
 
   void SetProgressBar(int progress_bar_background_resource_id,
                       int progress_bar_resource_id,
@@ -65,7 +65,7 @@ class OverlayPanelLayer : public Layer {
                       float progress_bar_position_y,
                       float progress_bar_height,
                       float progress_bar_opacity,
-                      int progress_bar_completion,
+                      float progress_bar_completion,
                       float panel_width);
 
   scoped_refptr<cc::Layer> layer() override;
@@ -81,6 +81,8 @@ class OverlayPanelLayer : public Layer {
   scoped_refptr<cc::Layer> layer_;
 
   scoped_refptr<cc::NinePatchLayer> panel_shadow_;
+  scoped_refptr<cc::NinePatchLayer> panel_shadow_right_;
+  scoped_refptr<cc::NinePatchLayer> rounded_bar_top_;
   scoped_refptr<cc::SolidColorLayer> bar_background_;
   scoped_refptr<cc::UIResourceLayer> bar_text_;
   scoped_refptr<cc::UIResourceLayer> bar_shadow_;
@@ -97,6 +99,7 @@ class OverlayPanelLayer : public Layer {
   int panel_icon_resource_id_;
   int bar_text_resource_id_;
   int panel_shadow_resource_id_;
+  int rounded_bar_top_resource_id_;
   int bar_shadow_resource_id_;
   int drag_handlebar_resource_id_;
   int open_tab_icon_resource_id_;

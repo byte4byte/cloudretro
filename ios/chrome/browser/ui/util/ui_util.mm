@@ -30,10 +30,6 @@ const CGFloat kPortraitWidth[INTERFACE_IDIOM_COUNT] = {
     768   // IPAD_IDIOM
 };
 
-bool IsHighResScreen() {
-  return [[UIScreen mainScreen] scale] > 1.0;
-}
-
 bool IsPortrait() {
   UIInterfaceOrientation orient = GetInterfaceOrientation();
   return UIInterfaceOrientationIsPortrait(orient) ||
@@ -57,11 +53,6 @@ bool IsIPhoneX() {
   CGFloat height = CGRectGetHeight([[UIScreen mainScreen] nativeBounds]);
   return (idiom == UIUserInterfaceIdiomPhone &&
           (height == 2436 || height == 2688 || height == 1792));
-}
-
-// TODO(crbug.com/893314) : Remove this flag.
-bool IsClosingLastIncognitoTabEnabled() {
-  return base::FeatureList::IsEnabled(kClosingLastIncognitoTab);
 }
 
 CGFloat DeviceCornerRadius() {
@@ -95,6 +86,12 @@ CGRect CGRectCopyWithOrigin(CGRect rect, CGFloat x, CGFloat y) {
 CGRect CGRectMakeAlignedAndCenteredAt(CGFloat x, CGFloat y, CGFloat width) {
   return AlignRectOriginAndSizeToPixels(
       CGRectMake(x - width / 2.0, y - width / 2.0, width, width));
+}
+
+CGRect CGRectMakeCenteredRectInFrame(CGSize frameSize, CGSize rectSize) {
+  CGFloat rectX = AlignValueToPixel((frameSize.width - rectSize.width) / 2);
+  CGFloat rectY = AlignValueToPixel((frameSize.height - rectSize.height) / 2);
+  return CGRectMake(rectX, rectY, rectSize.width, rectSize.height);
 }
 
 bool AreCGFloatsEqual(CGFloat a, CGFloat b) {

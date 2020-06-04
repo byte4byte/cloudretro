@@ -8,14 +8,18 @@
 #include <set>
 
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
+#include "chrome/browser/profiles/profile_manager_observer.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 // Internal free-standing functions that are exported here for testing.
 namespace profiles {
+
+// Name of the badged icon file generated for a given profile.
+extern const base::FilePath::StringPieceType kProfileIconFileName;
+
 namespace internal {
 
 // Returns the full path to the profile icon file.
@@ -58,7 +62,7 @@ base::string16 CreateProfileShortcutFlags(const base::FilePath& profile_path);
 
 class ProfileShortcutManagerWin : public ProfileShortcutManager,
                                   public ProfileAttributesStorage::Observer,
-                                  public content::NotificationObserver {
+                                  public ProfileManagerObserver {
  public:
   // Specifies whether only the existing shortcut should be updated, a new
   // shortcut should be created if none exist, or only the icon for this profile
@@ -68,7 +72,9 @@ class ProfileShortcutManagerWin : public ProfileShortcutManager,
     CREATE_WHEN_NONE_FOUND,
     CREATE_OR_UPDATE_ICON_ONLY,
   };
-  // Specifies whether non-profile shortcuts should be updated.
+  // Specifies whether non-profile shortcuts should be updated. This also
+  // includes default profile shortcuts, which point at the default
+  // profile, but don't have a profile name in their filename.
   enum NonProfileShortcutAction {
     IGNORE_NON_PROFILE_SHORTCUTS,
     UPDATE_NON_PROFILE_SHORTCUTS,
@@ -96,10 +102,8 @@ class ProfileShortcutManagerWin : public ProfileShortcutManager,
                             const base::string16& old_profile_name) override;
   void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
-  // content::NotificationObserver implementation:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ProfileManagerObserver:
+  void OnProfileAdded(Profile* profile) override;
 
  private:
   // Gives the profile path of an alternate profile than |profile_path|.
@@ -115,8 +119,6 @@ class ProfileShortcutManagerWin : public ProfileShortcutManager,
       NonProfileShortcutAction action);
 
   ProfileManager* profile_manager_;
-
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileShortcutManagerWin);
 };

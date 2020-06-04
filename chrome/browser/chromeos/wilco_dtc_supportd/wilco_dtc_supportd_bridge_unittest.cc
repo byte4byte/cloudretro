@@ -7,22 +7,22 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/memory/scoped_refptr.h"
+#include "base/check.h"
 #include "base/optional.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/fake_wilco_dtc_supportd_client.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/testing_wilco_dtc_supportd_network_context.h"
 #include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_bridge.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_network_context.h"
 #include "chrome/services/wilco_dtc_supportd/public/mojom/wilco_dtc_supportd.mojom.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/fake_wilco_dtc_supportd_client.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/handle.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
-#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -48,32 +48,35 @@ class FakeMojoWilcoDtcSupportdServiceFactory final
   // WilcoDtcSupportdServiceFactory overrides:
 
   void GetService(
-      wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceRequest service,
-      wilco_dtc_supportd::mojom::WilcoDtcSupportdClientPtr client,
+      mojo::PendingReceiver<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>
+          service,
+      mojo::PendingRemote<wilco_dtc_supportd::mojom::WilcoDtcSupportdClient>
+          client,
       GetServiceCallback callback) override {
     EXPECT_FALSE(pending_get_service_call_);
     pending_get_service_call_ = PendingGetServiceCall{
         std::move(service), std::move(client), std::move(callback)};
   }
 
-  // Completes the Mojo binding of this instance to the given Mojo interface
-  // request.
-  void Bind(wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactoryRequest
-                request) {
-    // Close the Mojo binding in case it was previously completed, to allow
+  // Completes the Mojo receiver of this instance to the given Mojo pending
+  // receiver.
+  void Bind(
+      mojo::PendingReceiver<
+          wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactory> receiver) {
+    // Close the Mojo receiver in case it was previously completed, to allow
     // calling this method multiple times.
-    self_binding_.Close();
+    self_receiver_.reset();
 
-    self_binding_.Bind(std::move(request));
+    self_receiver_.Bind(std::move(receiver));
 
-    self_binding_.set_connection_error_handler(
+    self_receiver_.set_disconnect_handler(
         base::BindOnce(&FakeMojoWilcoDtcSupportdServiceFactory::OnBindingError,
                        base::Unretained(this)));
   }
 
-  // Closes the Mojo binding of this instance.
-  void CloseBinding() {
-    self_binding_.Close();
+  // Closes the Mojo receiver of this instance.
+  void CloseReceiver() {
+    self_receiver_.reset();
 
     // Drop the current pending GetService call, if there was any, to allow our
     // instance to be used for new GetService calls after this instance gets
@@ -87,13 +90,14 @@ class FakeMojoWilcoDtcSupportdServiceFactory final
   }
 
   // Respond to the current pending GetService call.
-  wilco_dtc_supportd::mojom::WilcoDtcSupportdClientPtr RespondToGetServiceCall(
-      mojo::Binding<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>*
-          mojo_wilco_dtc_supportd_service_binding) {
+  mojo::PendingRemote<wilco_dtc_supportd::mojom::WilcoDtcSupportdClient>
+  RespondToGetServiceCall(
+      mojo::Receiver<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>*
+          mojo_wilco_dtc_supportd_service_receiver) {
     DCHECK(pending_get_service_call_);
     PendingGetServiceCall pending_call = std::move(*pending_get_service_call_);
     pending_get_service_call_.reset();
-    mojo_wilco_dtc_supportd_service_binding->Bind(
+    mojo_wilco_dtc_supportd_service_receiver->Bind(
         std::move(pending_call.service));
     std::move(pending_call.callback).Run();
     return std::move(pending_call.client);
@@ -101,8 +105,10 @@ class FakeMojoWilcoDtcSupportdServiceFactory final
 
  private:
   struct PendingGetServiceCall {
-    wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceRequest service;
-    wilco_dtc_supportd::mojom::WilcoDtcSupportdClientPtr client;
+    mojo::PendingReceiver<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>
+        service;
+    mojo::PendingRemote<wilco_dtc_supportd::mojom::WilcoDtcSupportdClient>
+        client;
     GetServiceCallback callback;
   };
 
@@ -113,8 +119,8 @@ class FakeMojoWilcoDtcSupportdServiceFactory final
     pending_get_service_call_.reset();
   }
 
-  mojo::Binding<wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactory>
-      self_binding_{this};
+  mojo::Receiver<wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactory>
+      self_receiver_{this};
 
   base::Optional<PendingGetServiceCall> pending_get_service_call_;
 };
@@ -131,13 +137,14 @@ class FakeWilcoDtcSupportdBridgeDelegate final
             mojo_wilco_dtc_supportd_service_factory) {}
 
   void CreateWilcoDtcSupportdServiceFactoryMojoInvitation(
-      wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactoryPtr*
-          wilco_dtc_supportd_service_factory_mojo_ptr,
+      mojo::Remote<wilco_dtc_supportd::mojom::WilcoDtcSupportdServiceFactory>*
+          wilco_dtc_supportd_service_factory_mojo_remote,
       base::ScopedFD* remote_endpoint_fd) override {
     // Bind the Mojo pointer passed to the bridge with the
     // FakeMojoWilcoDtcSupportdServiceFactory implementation.
     mojo_wilco_dtc_supportd_service_factory_->Bind(
-        mojo::MakeRequest(wilco_dtc_supportd_service_factory_mojo_ptr));
+        wilco_dtc_supportd_service_factory_mojo_remote
+            ->BindNewPipeAndPassReceiver());
 
     // Return a fake file descriptor - its value is not used in the unit test
     // environment for anything except comparing with zero.
@@ -166,8 +173,7 @@ class MockWilcoDtcSupportdNotificationController
 class WilcoDtcSupportdBridgeTest : public testing::Test {
  protected:
   WilcoDtcSupportdBridgeTest() {
-    DBusThreadManager::Initialize();
-    CHECK(DBusThreadManager::Get()->IsUsingFakes());
+    WilcoDtcSupportdClient::InitializeFake();
 
     auto profile_manager = std::make_unique<TestingProfileManager>(
         TestingBrowserProcess::GetGlobal());
@@ -184,14 +190,13 @@ class WilcoDtcSupportdBridgeTest : public testing::Test {
     wilco_dtc_supportd_bridge_ = std::make_unique<WilcoDtcSupportdBridge>(
         std::make_unique<FakeWilcoDtcSupportdBridgeDelegate>(
             &mojo_wilco_dtc_supportd_service_factory_),
-        base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-            &test_url_loader_factory_),
+        std::make_unique<TestingWilcoDtcSupportdNetworkContext>(),
         std::move(notification_controller));
   }
 
   ~WilcoDtcSupportdBridgeTest() override {
     wilco_dtc_supportd_bridge_.reset();
-    DBusThreadManager::Shutdown();
+    WilcoDtcSupportdClient::Shutdown();
   }
 
   StrictMock<MockWilcoDtcSupportdNotificationController>*
@@ -203,9 +208,14 @@ class WilcoDtcSupportdBridgeTest : public testing::Test {
     return wilco_dtc_supportd_bridge_.get();
   }
 
+  wilco_dtc_supportd::mojom::WilcoDtcSupportdClient*
+  wilco_dtc_supportd_client() {
+    return wilco_dtc_supportd_bridge_.get();
+  }
+
   FakeWilcoDtcSupportdClient* wilco_dtc_supportd_dbus_client() {
     WilcoDtcSupportdClient* const wilco_dtc_supportd_client =
-        DBusThreadManager::Get()->GetWilcoDtcSupportdClient();
+        WilcoDtcSupportdClient::Get();
     DCHECK(wilco_dtc_supportd_client);
     return static_cast<FakeWilcoDtcSupportdClient*>(wilco_dtc_supportd_client);
   }
@@ -218,30 +228,31 @@ class WilcoDtcSupportdBridgeTest : public testing::Test {
 
   // Reply to the pending GetService Mojo call held up by the fake.
   void RespondToMojoFactoryGetServiceCall() {
-    // Close the binding, if it was completed, to allow calling this method
+    // Close the receiver, if it was completed, to allow calling this method
     // multiple times.
-    mojo_wilco_dtc_supportd_service_binding_.Close();
+    mojo_wilco_dtc_supportd_service_receiver_.reset();
+    mojo_wilco_dtc_supportd_client_.reset();
 
-    mojo_wilco_dtc_supportd_client_ =
+    mojo_wilco_dtc_supportd_client_.Bind(
         mojo_wilco_dtc_supportd_service_factory_.RespondToGetServiceCall(
-            &mojo_wilco_dtc_supportd_service_binding_);
+            &mojo_wilco_dtc_supportd_service_receiver_));
   }
 
   // Simulates Mojo connection error.
   void AbortMojoConnection() {
-    mojo_wilco_dtc_supportd_service_factory_.CloseBinding();
+    mojo_wilco_dtc_supportd_service_factory_.CloseReceiver();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
 
  private:
   FakeMojoWilcoDtcSupportdServiceFactory
       mojo_wilco_dtc_supportd_service_factory_;
 
   MockMojoWilcoDtcSupportdService mojo_wilco_dtc_supportd_service_;
-  mojo::Binding<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>
-      mojo_wilco_dtc_supportd_service_binding_{
+  mojo::Receiver<wilco_dtc_supportd::mojom::WilcoDtcSupportdService>
+      mojo_wilco_dtc_supportd_service_receiver_{
           &mojo_wilco_dtc_supportd_service_};
 
   StrictMock<MockWilcoDtcSupportdNotificationController>*
@@ -249,9 +260,8 @@ class WilcoDtcSupportdBridgeTest : public testing::Test {
 
   std::unique_ptr<WilcoDtcSupportdBridge> wilco_dtc_supportd_bridge_;
 
-  wilco_dtc_supportd::mojom::WilcoDtcSupportdClientPtr
+  mojo::Remote<wilco_dtc_supportd::mojom::WilcoDtcSupportdClient>
       mojo_wilco_dtc_supportd_client_;
-  network::TestURLLoaderFactory test_url_loader_factory_;
 };
 
 }  // namespace
@@ -276,13 +286,13 @@ TEST_F(WilcoDtcSupportdBridgeTest, SuccessfulBootstrap) {
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(true);
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(
       base::nullopt);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(is_mojo_factory_get_service_call_in_flight());
 
   // Resolve the pending GetService Mojo call. Verify the bridge exposes the
   // obtained WilcoDtcSupportdService Mojo interface pointer.
   RespondToMojoFactoryGetServiceCall();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 
@@ -299,7 +309,7 @@ TEST_F(WilcoDtcSupportdBridgeTest, DBusServiceNotBringingUpError) {
                    ->wait_for_service_to_be_available_in_flight_call_count());
 
   // Verify that no extra WaitForServiceToBeAvailable calls are made.
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
   EXPECT_EQ(1, wilco_dtc_supportd_dbus_client()
                    ->wait_for_service_to_be_available_in_flight_call_count());
@@ -321,7 +331,7 @@ TEST_F(WilcoDtcSupportdBridgeTest, DBusBootstrapMojoConnectionError) {
     wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(false);
     wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(
         base::nullopt);
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     // Verify that no new BootstrapMojoConnection call is made immediately after
     // the previous one failed.
@@ -329,7 +339,7 @@ TEST_F(WilcoDtcSupportdBridgeTest, DBusBootstrapMojoConnectionError) {
                      ->bootstrap_mojo_connection_in_flight_call_count());
 
     // Fast forward the clock till the next attempt should occur.
-    scoped_task_environment_.FastForwardBy(
+    task_environment_.FastForwardBy(
         WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
   }
 
@@ -345,22 +355,23 @@ TEST_F(WilcoDtcSupportdBridgeTest, DBusBootstrapMojoConnectionError) {
 TEST_F(WilcoDtcSupportdBridgeTest, ImmediateMojoDisconnectionError) {
   wilco_dtc_supportd_dbus_client()->SetWaitForServiceToBeAvailableResult(true);
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(true);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   for (int attempt_number = 0;
        attempt_number <
        WilcoDtcSupportdBridge::max_connection_attempt_count_for_testing();
        ++attempt_number) {
     // Verify that the bridge made the GetService Mojo call (on the
-    // WilcoDtcSupportdServiceFactory interface). Abort the Mojo binding without
-    // responding to the call. Verify that no new call happens immediately.
+    // WilcoDtcSupportdServiceFactory interface). Abort the Mojo receiver
+    // without responding to the call. Verify that no new call happens
+    // immediately.
     EXPECT_TRUE(is_mojo_factory_get_service_call_in_flight());
     AbortMojoConnection();
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     EXPECT_FALSE(is_mojo_factory_get_service_call_in_flight());
 
     // Fast forward the clock till the next attempt should occur.
-    scoped_task_environment_.FastForwardBy(
+    task_environment_.FastForwardBy(
         WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
   }
 
@@ -374,29 +385,29 @@ TEST_F(WilcoDtcSupportdBridgeTest, Reestablishing) {
   // Let the bootstrapping succeed on the first attempt.
   wilco_dtc_supportd_dbus_client()->SetWaitForServiceToBeAvailableResult(true);
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(true);
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(is_mojo_factory_get_service_call_in_flight());
   RespondToMojoFactoryGetServiceCall();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 
-  // Abort the Mojo binding. Verify that no new connection attempt happens
+  // Abort the Mojo receiver. Verify that no new connection attempt happens
   // immediately.
   AbortMojoConnection();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_FALSE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
   EXPECT_FALSE(is_mojo_factory_get_service_call_in_flight());
 
   // Fast forward the clock till the next connection attempt.
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
 
   // Let the bootstrapping succeed again.
   ASSERT_TRUE(is_mojo_factory_get_service_call_in_flight());
   RespondToMojoFactoryGetServiceCall();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 }
@@ -408,30 +419,30 @@ TEST_F(WilcoDtcSupportdBridgeTest, RetryCounterReset) {
 
   // Fail the first few connection attempts, leaving only one attempt left.
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(false);
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing() *
       (WilcoDtcSupportdBridge::max_connection_attempt_count_for_testing() - 2));
 
   // Let the bootstrapping succeed on the new attempt (the last allowed one in
   // this serie).
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(true);
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
   ASSERT_TRUE(is_mojo_factory_get_service_call_in_flight());
   RespondToMojoFactoryGetServiceCall();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 
-  // Abort the Mojo binding.
+  // Abort the Mojo receiver.
   AbortMojoConnection();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_FALSE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 
   // Fail again a few attempts as before.
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(false);
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing() *
       (WilcoDtcSupportdBridge::max_connection_attempt_count_for_testing() - 1));
 
@@ -439,11 +450,11 @@ TEST_F(WilcoDtcSupportdBridgeTest, RetryCounterReset) {
   // the retry attempts made before the previous successful bootstrap were
   // ignored.
   wilco_dtc_supportd_dbus_client()->SetBootstrapMojoConnectionResult(true);
-  scoped_task_environment_.FastForwardBy(
+  task_environment_.FastForwardBy(
       WilcoDtcSupportdBridge::connection_attempt_interval_for_testing());
   ASSERT_TRUE(is_mojo_factory_get_service_call_in_flight());
   RespondToMojoFactoryGetServiceCall();
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   EXPECT_TRUE(
       wilco_dtc_supportd_bridge()->wilco_dtc_supportd_service_mojo_proxy());
 }
@@ -451,19 +462,19 @@ TEST_F(WilcoDtcSupportdBridgeTest, RetryCounterReset) {
 // Test that the bridge calls the right method on the notification controller.
 TEST_F(WilcoDtcSupportdBridgeTest, HandleEvent) {
   EXPECT_CALL(*notification_controller(), ShowBatteryAuthNotification());
-  wilco_dtc_supportd_bridge()->HandleEvent(
+  wilco_dtc_supportd_client()->HandleEvent(
       wilco_dtc_supportd::mojom::WilcoDtcSupportdEvent::kBatteryAuth);
 
   EXPECT_CALL(*notification_controller(), ShowIncompatibleDockNotification());
-  wilco_dtc_supportd_bridge()->HandleEvent(
+  wilco_dtc_supportd_client()->HandleEvent(
       wilco_dtc_supportd::mojom::WilcoDtcSupportdEvent::kIncompatibleDock);
 
   EXPECT_CALL(*notification_controller(), ShowNonWilcoChargerNotification());
-  wilco_dtc_supportd_bridge()->HandleEvent(
+  wilco_dtc_supportd_client()->HandleEvent(
       wilco_dtc_supportd::mojom::WilcoDtcSupportdEvent::kNonWilcoCharger);
 
   EXPECT_CALL(*notification_controller(), ShowDockErrorNotification());
-  wilco_dtc_supportd_bridge()->HandleEvent(
+  wilco_dtc_supportd_client()->HandleEvent(
       wilco_dtc_supportd::mojom::WilcoDtcSupportdEvent::kDockError);
 }
 

@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "remoting/base/constants.h"
 #include "remoting/codec/webrtc_video_encoder_proxy.h"
@@ -82,19 +81,23 @@ struct WebrtcVideoStream::FrameStats {
 };
 
 WebrtcVideoStream::WebrtcVideoStream(const SessionOptions& session_options)
-    : video_stats_dispatcher_(kStreamLabel),
-      session_options_(session_options),
-      weak_factory_(this) {
+    : video_stats_dispatcher_(kStreamLabel), session_options_(session_options) {
+  // WeakPtr can't be used here, as the Create...() methods return a value
+  // which would be undefined if the pointer were invalidated. But
+  // Unretained(this) is safe because |encoder_selector_| is owned by this
+  // object.
   encoder_selector_.RegisterEncoder(
-      base::Bind(&WebrtcVideoEncoderVpx::IsSupportedByVP8),
-      base::Bind(&WebrtcVideoEncoderVpx::CreateForVP8));
+      base::BindRepeating(&WebrtcVideoEncoderVpx::IsSupportedByVP8),
+      base::BindRepeating(&WebrtcVideoStream::CreateVP8Encoder,
+                          base::Unretained(this)));
   encoder_selector_.RegisterEncoder(
-      base::Bind(&WebrtcVideoEncoderVpx::IsSupportedByVP9),
-      base::Bind(&WebrtcVideoEncoderVpx::CreateForVP9));
+      base::BindRepeating(&WebrtcVideoEncoderVpx::IsSupportedByVP9),
+      base::BindRepeating(&WebrtcVideoStream::CreateVP9Encoder,
+                          base::Unretained(this)));
 #if defined(USE_H264_ENCODER)
   encoder_selector_.RegisterEncoder(
-      base::Bind(&WebrtcVideoEncoderGpu::IsSupportedByH264),
-      base::Bind(&WebrtcVideoEncoderGpu::CreateForH264));
+      base::BindRepeating(&WebrtcVideoEncoderGpu::IsSupportedByH264),
+      base::BindRepeating(&WebrtcVideoEncoderGpu::CreateForH264));
 #endif
 }
 
@@ -167,11 +170,17 @@ void WebrtcVideoStream::Pause(bool pause) {
 }
 
 void WebrtcVideoStream::SetLosslessEncode(bool want_lossless) {
-  NOTIMPLEMENTED();
+  lossless_encode_ = want_lossless;
+  if (encoder_) {
+    encoder_->SetLosslessEncode(want_lossless);
+  }
 }
 
 void WebrtcVideoStream::SetLosslessColor(bool want_lossless) {
-  NOTIMPLEMENTED();
+  lossless_color_ = want_lossless;
+  if (encoder_) {
+    encoder_->SetLosslessColor(want_lossless);
+  }
 }
 
 void WebrtcVideoStream::SetObserver(Observer* observer) {
@@ -188,40 +197,45 @@ void WebrtcVideoStream::OnCaptureResult(
   current_frame_stats_->capture_delay =
       base::TimeDelta::FromMilliseconds(frame ? frame->capture_time_ms() : 0);
 
+  if (!frame) {
+    scheduler_->OnFrameCaptured(nullptr, nullptr);
+    return;
+  }
+
+  // TODO(sergeyu): Handle ERROR_PERMANENT result here.
+  webrtc::DesktopVector dpi =
+      frame->dpi().is_zero() ? webrtc::DesktopVector(kDefaultDpi, kDefaultDpi)
+                             : frame->dpi();
+
+  if (!frame_size_.equals(frame->size()) || !frame_dpi_.equals(dpi)) {
+    frame_size_ = frame->size();
+    frame_dpi_ = dpi;
+    if (observer_)
+      observer_->OnVideoSizeChanged(this, frame_size_, frame_dpi_);
+  }
+
+  current_frame_stats_->capturer_id = frame->capturer_id();
+
+  if (!encoder_) {
+    encoder_selector_.SetDesktopFrame(*frame);
+    encoder_ = encoder_selector_.CreateEncoder();
+    encoder_->SetLosslessEncode(lossless_encode_);
+    encoder_->SetLosslessColor(lossless_color_);
+
+    // TODO(zijiehe): Permanently stop the video stream if we cannot create an
+    // encoder for the |frame|.
+  }
+
   WebrtcVideoEncoder::FrameParams frame_params;
   if (!scheduler_->OnFrameCaptured(frame.get(), &frame_params)) {
     return;
   }
 
-  // TODO(sergeyu): Handle ERROR_PERMANENT result here.
-  if (frame) {
-    webrtc::DesktopVector dpi =
-        frame->dpi().is_zero() ? webrtc::DesktopVector(kDefaultDpi, kDefaultDpi)
-                               : frame->dpi();
-
-    if (!frame_size_.equals(frame->size()) || !frame_dpi_.equals(dpi)) {
-      frame_size_ = frame->size();
-      frame_dpi_ = dpi;
-      if (observer_)
-        observer_->OnVideoSizeChanged(this, frame_size_, frame_dpi_);
-    }
-
-    current_frame_stats_->capturer_id = frame->capturer_id();
-
-    if (!encoder_) {
-      encoder_selector_.SetDesktopFrame(*frame);
-      encoder_ = encoder_selector_.CreateEncoder();
-
-      // TODO(zijiehe): Permanently stop the video stream if we cannot create an
-      // encoder for the |frame|.
-    }
-  }
-
   if (encoder_) {
     current_frame_stats_->encode_started_time = base::TimeTicks::Now();
-    encoder_->Encode(
-        std::move(frame), frame_params,
-        base::Bind(&WebrtcVideoStream::OnFrameEncoded, base::Unretained(this)));
+    encoder_->Encode(std::move(frame), frame_params,
+                     base::BindOnce(&WebrtcVideoStream::OnFrameEncoded,
+                                    base::Unretained(this)));
   }
 }
 
@@ -259,7 +273,9 @@ void WebrtcVideoStream::OnFrameEncoded(
   // frame.
   // TODO(crbug.com/891571): Remove |quantizer| from the WebrtcVideoEncoder
   // interface, and move this logic to the encoders.
-  current_frame_stats_->frame_quality = (63 - frame->quantizer) * 100 / 63;
+  if (frame) {
+    current_frame_stats_->frame_quality = (63 - frame->quantizer) * 100 / 63;
+  }
 
   HostFrameStats stats;
   scheduler_->OnFrameEncoded(frame.get(), &stats);
@@ -341,6 +357,16 @@ void WebrtcVideoStream::OnEncoderCreated(webrtc::VideoCodecType codec_type) {
   } else {
     LOG(FATAL) << "Unknown codec type: " << codec_type;
   }
+}
+
+std::unique_ptr<WebrtcVideoEncoder> WebrtcVideoStream::CreateVP8Encoder() {
+  return std::make_unique<WebrtcVideoEncoderProxy>(
+      WebrtcVideoEncoderVpx::CreateForVP8(), encode_task_runner_);
+}
+
+std::unique_ptr<WebrtcVideoEncoder> WebrtcVideoStream::CreateVP9Encoder() {
+  return std::make_unique<WebrtcVideoEncoderProxy>(
+      WebrtcVideoEncoderVpx::CreateForVP9(), encode_task_runner_);
 }
 
 }  // namespace protocol

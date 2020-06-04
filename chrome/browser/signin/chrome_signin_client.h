@@ -18,7 +18,7 @@
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "services/network/public/mojom/network_change_manager.mojom.h"
+#include "services/network/public/mojom/network_change_manager.mojom-forward.h"
 
 #if !defined(OS_CHROMEOS)
 #include "services/network/public/cpp/network_connection_tracker.h"
@@ -61,11 +61,7 @@ class ChromeSigninClient
   std::unique_ptr<GaiaAuthFetcher> CreateGaiaAuthFetcher(
       GaiaAuthConsumer* consumer,
       gaia::GaiaSource source) override;
-
-  // Returns a string describing the chrome version environment. Version format:
-  // <Build Info> <OS> <Version number> (<Last change>)<channel or "-devel">
-  // If version information is unavailable, returns "invalid."
-  std::string GetProductVersion() override;
+  bool IsNonEnterpriseUser(const std::string& username) override;
 
   // gaia::GaiaOAuthClient::Delegate implementation.
   void OnGetTokenInfoResponse(
@@ -79,7 +75,7 @@ class ChromeSigninClient
   void OnConnectionChanged(network::mojom::ConnectionType type) override;
 #endif
 
-  void SetReadyForDiceMigration(bool is_ready) override;
+  void SetDiceMigrationCompleted() override;
 
   // Used in tests to override the URLLoaderFactory returned by
   // GetURLLoaderFactory().
@@ -98,9 +94,9 @@ class ChromeSigninClient
       const base::FilePath& profile_path);
   void OnCloseBrowsersAborted(const base::FilePath& profile_path);
 
-  // identity::PrimaryAccountAccessTokenFetcher callback
+  // signin::PrimaryAccountAccessTokenFetcher callback
   void OnAccessTokenAvailable(GoogleServiceAuthError error,
-                              identity::AccessTokenInfo access_token_info);
+                              signin::AccessTokenInfo access_token_info);
 
   Profile* profile_;
 
@@ -117,7 +113,7 @@ class ChromeSigninClient
 #endif
 
   std::unique_ptr<gaia::GaiaOAuthClient> oauth_client_;
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher_;
 
   scoped_refptr<network::SharedURLLoaderFactory>

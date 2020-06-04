@@ -8,9 +8,11 @@
 #include <string>
 
 #include "base/bind.h"
-#include "content/browser/appcache/appcache_response.h"
+#include "base/memory/ptr_util.h"
+#include "content/browser/appcache/appcache_response_info.h"
 #include "content/browser/service_worker/service_worker_disk_cache.h"
-#include "content/browser/service_worker/service_worker_storage.h"
+#include "content/common/service_worker/service_worker_utils.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace {
 
@@ -579,15 +581,16 @@ int ServiceWorkerCacheWriter::ReadDataHelper(
   return adaptor->result();
 }
 
-int ServiceWorkerCacheWriter::WriteInfoToResponseWriter(
-    scoped_refptr<HttpResponseInfoIOBuffer> response_info) {
+int ServiceWorkerCacheWriter::WriteResponseHeadToResponseWriter(
+    const network::mojom::URLResponseHead& response_head,
+    int response_data_size) {
   did_replace_ = true;
   net::CompletionOnceCallback run_callback = base::BindOnce(
       &ServiceWorkerCacheWriter::AsyncDoLoop, weak_factory_.GetWeakPtr());
   scoped_refptr<AsyncOnlyCompletionCallbackAdaptor> adaptor(
       new AsyncOnlyCompletionCallbackAdaptor(std::move(run_callback)));
-  writer_->WriteInfo(
-      response_info.get(),
+  writer_->WriteResponseHead(
+      response_head, response_data_size,
       base::BindOnce(&AsyncOnlyCompletionCallbackAdaptor::WrappedCallback,
                      adaptor));
   adaptor->set_async(true);
@@ -596,17 +599,27 @@ int ServiceWorkerCacheWriter::WriteInfoToResponseWriter(
 
 int ServiceWorkerCacheWriter::WriteInfo(
     scoped_refptr<HttpResponseInfoIOBuffer> response_info) {
-  if (!write_observer_)
-    return WriteInfoToResponseWriter(std::move(response_info));
+  DCHECK(response_info);
+  // Always set SSLInfo. An observer will drop it if the SSLInfo isn't needed.
+  auto response = ServiceWorkerUtils::CreateResourceResponseHeadAndMetadata(
+      response_info->http_info.get(),
+      /*options=*/network::mojom::kURLLoadOptionSendSSLInfoWithResponse,
+      /*request_start_time=*/base::TimeTicks(),
+      /*response_start_time=*/base::TimeTicks::Now(),
+      response_info->response_data_size);
+  // There should be no metadata when writing response headers.
+  DCHECK(response.metadata.empty());
 
-  int result = write_observer_->WillWriteInfo(response_info);
-  if (result != net::OK) {
-    DCHECK_NE(result, net::ERR_IO_PENDING);
-    state_ = STATE_DONE;
-    return result;
+  if (write_observer_) {
+    int result = write_observer_->WillWriteResponseHead(*response.head);
+    if (result != net::OK) {
+      DCHECK_NE(result, net::ERR_IO_PENDING);
+      state_ = STATE_DONE;
+      return result;
+    }
   }
-
-  return WriteInfoToResponseWriter(std::move(response_info));
+  return WriteResponseHeadToResponseWriter(*response.head,
+                                           response_info->response_data_size);
 }
 
 int ServiceWorkerCacheWriter::WriteDataToResponseWriter(

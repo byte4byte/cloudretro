@@ -14,8 +14,8 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/arc/common/file_system.mojom.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/arc/mojom/file_system.mojom.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -38,6 +38,7 @@ constexpr char kTestingProfileName[] = "test-user";
 
 MATCHER_P(FileTypeInfoMatcher, expected, "") {
   EXPECT_EQ(expected.extensions, arg.extensions);
+  EXPECT_EQ(expected.include_all_files, arg.include_all_files);
   return true;
 }
 
@@ -160,7 +161,7 @@ class ArcSelectFilesHandlerTest : public testing::Test {
                                                    callback.Get());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   std::unique_ptr<ArcSelectFilesHandler> arc_select_files_handler_;
   MockSelectFileDialogHolder* mock_dialog_holder_;
@@ -197,6 +198,33 @@ TEST_F(ArcSelectFilesHandlerTest, SelectFiles_FileTypeInfo) {
   std::vector<base::FilePath::StringType> extensions;
   extensions.push_back("text");
   extensions.push_back("txt");
+  expected_file_type_info.extensions.push_back(extensions);
+
+  EXPECT_CALL(
+      *mock_dialog_holder_,
+      SelectFile(_, _,
+                 testing::Pointee(FileTypeInfoMatcher(expected_file_type_info)),
+                 1234, _))
+      .Times(1);
+
+  base::MockCallback<SelectFilesCallback> callback;
+  arc_select_files_handler_->SelectFiles(request, callback.Get());
+}
+
+TEST_F(ArcSelectFilesHandlerTest, SelectFiles_FileTypeInfo_Asterisk) {
+  SelectFilesRequestPtr request = SelectFilesRequest::New();
+  request->action_type = SelectFilesActionType::OPEN_DOCUMENT;
+  request->mime_types.push_back("multipart/*");
+  request->task_id = 1234;
+
+  SelectFileDialog::FileTypeInfo expected_file_type_info;
+  expected_file_type_info.allowed_paths =
+      SelectFileDialog::FileTypeInfo::ANY_PATH;
+  std::vector<base::FilePath::StringType> extensions;
+  extensions.push_back("mhtml");
+  extensions.push_back("mht");
+  // include_all_files should be enabled when MIME type contains an asterisk.
+  expected_file_type_info.include_all_files = true;
   expected_file_type_info.extensions.push_back(extensions);
 
   EXPECT_CALL(

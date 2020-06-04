@@ -7,6 +7,7 @@
 #include "base/mac/foundation_util.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
+#import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_constants.h"
 #import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_service_delegate.h"
 #import "ios/chrome/browser/ui/settings/google_services/manage_sync_settings_view_controller_model_delegate.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -23,13 +24,21 @@
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.tableView.accessibilityIdentifier =
-      @"manage_sync_settings_view_controller";
+      kManageSyncTableViewAccessibilityIdentifier;
   self.title = l10n_util::GetNSString(IDS_IOS_MANAGE_SYNC_SETTINGS_TITLE);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
   [self reloadData];
+}
+
+- (void)didMoveToParentViewController:(UIViewController*)parent {
+  [super didMoveToParentViewController:parent];
+  if (!parent) {
+    [self.presentationDelegate
+        manageSyncSettingsTableViewControllerWasRemoved:self];
+  }
 }
 
 #pragma mark - Private
@@ -60,13 +69,6 @@
     switchCell.switchView.tag = item.type;
   }
   return cell;
-}
-
-#pragma mark - SettingsControllerProtocol
-
-- (void)viewControllerWasPopped {
-  [self.presentationDelegate
-      manageSyncSettingsTableViewControllerWasPopped:self];
 }
 
 #pragma mark - ChromeTableViewController

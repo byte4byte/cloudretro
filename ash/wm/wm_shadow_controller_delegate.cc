@@ -4,9 +4,11 @@
 
 #include "ash/wm/wm_shadow_controller_delegate.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/overview/overview_item.h"
 #include "ash/wm/overview/overview_session.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/window_state.h"
@@ -23,11 +25,13 @@ WmShadowControllerDelegate::~WmShadowControllerDelegate() = default;
 bool WmShadowControllerDelegate::ShouldShowShadowForWindow(
     const aura::Window* window) {
   // Hide the shadow if it is one of the splitscreen snapped windows.
-  SplitViewController* split_view_controller =
-      Shell::Get()->split_view_controller();
-  if (split_view_controller &&
-      split_view_controller->IsWindowInSplitView(window)) {
-    return false;
+  if (window->GetRootWindow() && RootWindowController::ForWindow(window)) {
+    SplitViewController* split_view_controller =
+        SplitViewController::Get(window);
+    if (split_view_controller &&
+        split_view_controller->IsWindowInSplitView(window)) {
+      return false;
+    }
   }
 
   // Hide the shadow while we are in overview mode.
@@ -36,12 +40,11 @@ bool WmShadowControllerDelegate::ShouldShowShadowForWindow(
     OverviewSession* overview_session = overview_controller->overview_session();
     // InOverviewSession() being true implies |overview_session| exists.
     DCHECK(overview_session);
-    // The window may be still in overview mode, but it belongs to a non-active
-    // desk, as it has just been dragged and dropped onto a non-active desk's
-    // mini_view. In this case, we shouldn't disable its shadow, so that it may
-    // restored properly.
+    // Windows in overview that are not moving out of the active desk should not
+    // have shadows.
+    auto* overview_item = overview_session->GetOverviewItemForWindow(window);
     if (desks_util::BelongsToActiveDesk(const_cast<aura::Window*>(window)) &&
-        overview_session->IsWindowInOverview(window)) {
+        overview_item && !overview_item->is_moving_to_another_desk()) {
       return false;
     }
   }
@@ -52,7 +55,7 @@ bool WmShadowControllerDelegate::ShouldShowShadowForWindow(
 
   // Show the shadow if it's currently being dragged no matter of the window's
   // show state.
-  auto* window_state = wm::GetWindowState(window);
+  auto* window_state = WindowState::Get(window);
   if (window_state && window_state->is_dragged())
     return ::wm::GetShadowElevationConvertDefault(window) > 0;
 

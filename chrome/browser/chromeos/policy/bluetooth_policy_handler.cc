@@ -14,7 +14,7 @@ namespace policy {
 
 BluetoothPolicyHandler::BluetoothPolicyHandler(
     chromeos::CrosSettings* cros_settings)
-    : cros_settings_(cros_settings), weak_factory_(this) {
+    : cros_settings_(cros_settings) {
   bluetooth_policy_subscription_ = cros_settings_->AddSettingsObserver(
       chromeos::kAllowBluetooth,
       base::Bind(&BluetoothPolicyHandler::OnBluetoothPolicyChanged,
@@ -29,12 +29,12 @@ BluetoothPolicyHandler::~BluetoothPolicyHandler() {}
 void BluetoothPolicyHandler::OnBluetoothPolicyChanged() {
   chromeos::CrosSettingsProvider::TrustedStatus status =
       cros_settings_->PrepareTrustedValues(
-          base::Bind(&BluetoothPolicyHandler::OnBluetoothPolicyChanged,
-                     weak_factory_.GetWeakPtr()));
+          base::BindOnce(&BluetoothPolicyHandler::OnBluetoothPolicyChanged,
+                         weak_factory_.GetWeakPtr()));
   if (status != chromeos::CrosSettingsProvider::TRUSTED)
     return;
 
-  device::BluetoothAdapterFactory::GetAdapter(base::BindOnce(
+  device::BluetoothAdapterFactory::Get()->GetAdapter(base::BindOnce(
       &BluetoothPolicyHandler::SetBluetoothPolicy, weak_factory_.GetWeakPtr()));
 }
 

@@ -49,7 +49,7 @@ std::string SharedResourcesDataSourceIOS::GetSource() const {
 
 void SharedResourcesDataSourceIOS::StartDataRequest(
     const std::string& path,
-    const URLDataSourceIOS::GotDataCallback& callback) {
+    URLDataSourceIOS::GotDataCallback callback) {
   const GritResourceMap* resource = PathToResource(path);
   DCHECK(resource) << " path: " << path;
   scoped_refptr<base::RefCountedMemory> bytes;
@@ -64,7 +64,7 @@ void SharedResourcesDataSourceIOS::StartDataRequest(
     bytes = web_client->GetDataResourceBytes(idr);
   }
 
-  callback.Run(bytes.get());
+  std::move(callback).Run(bytes.get());
 }
 
 std::string SharedResourcesDataSourceIOS::GetMimeType(
@@ -72,12 +72,6 @@ std::string SharedResourcesDataSourceIOS::GetMimeType(
   std::string mime_type;
   net::GetMimeTypeFromFile(base::FilePath().AppendASCII(path), &mime_type);
   return mime_type;
-}
-
-bool SharedResourcesDataSourceIOS::IsGzipped(const std::string& path) const {
-  const GritResourceMap* resource = PathToResource(path);
-  int idr = resource ? resource->value : -1;
-  return idr == -1 ? false : GetWebClient()->IsDataResourceGzipped(idr);
 }
 
 }  // namespace web

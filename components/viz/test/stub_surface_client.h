@@ -18,7 +18,7 @@ class StubSurfaceClient : public SurfaceClient {
 
   void OnSurfaceActivated(Surface* surface) override {}
   void OnSurfaceDestroyed(Surface* surface) override {}
-  void OnSurfaceDrawn(Surface* surface) override {}
+  void OnSurfaceWillDraw(Surface* surface) override {}
   void RefResources(
       const std::vector<TransferableResource>& resources) override {}
   void UnrefResources(const std::vector<ReturnedResource>& resources) override {
@@ -38,8 +38,9 @@ class StubSurfaceClient : public SurfaceClient {
       const gfx::Rect& damage_rect,
       base::TimeTicks expected_display_time) override {}
   void OnSurfacePresented(uint32_t frame_token,
+                          base::TimeTicks draw_start_timestamp,
+                          const gfx::SwapTimings& swap_timings,
                           const gfx::PresentationFeedback& feedback) override {}
-  bool NeedsSyncTokens() const override;
 
   base::WeakPtrFactory<StubSurfaceClient> weak_factory{this};
 };

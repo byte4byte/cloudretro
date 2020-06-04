@@ -16,13 +16,14 @@
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/task_manager/providers/browser_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/child_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/fallback_task_provider.h"
 #include "chrome/browser/task_manager/providers/render_process_host_task_provider.h"
-#include "chrome/browser/task_manager/providers/service_worker_task_provider.h"
 #include "chrome/browser/task_manager/providers/web_contents/web_contents_task_provider.h"
+#include "chrome/browser/task_manager/providers/worker_task_provider.h"
 #include "chrome/browser/task_manager/sampling/shared_sampler.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/nacl/common/buildflags.h"
@@ -40,7 +41,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 #include "chrome/browser/task_manager/providers/arc/arc_process_task_provider.h"
-#include "chrome/browser/task_manager/providers/crostini/crostini_process_task_provider.h"
+#include "chrome/browser/task_manager/providers/vm/vm_process_task_provider.h"
 #include "components/arc/arc_util.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -76,7 +77,7 @@ TaskManagerImpl::TaskManagerImpl()
     : on_background_data_ready_callback_(
           base::Bind(&TaskManagerImpl::OnTaskGroupBackgroundCalculationsDone,
                      base::Unretained(this))),
-      blocking_pool_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      blocking_pool_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
       shared_sampler_(new SharedSampler(blocking_pool_runner_)),
@@ -86,7 +87,7 @@ TaskManagerImpl::TaskManagerImpl()
 
   task_providers_.emplace_back(new BrowserProcessTaskProvider());
   task_providers_.emplace_back(new ChildProcessTaskProvider());
-  task_providers_.emplace_back(new ServiceWorkerTaskProvider());
+  task_providers_.emplace_back(new WorkerTaskProvider());
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kTaskManagerShowExtraRenderers)) {
     task_providers_.emplace_back(new WebContentsTaskProvider());
@@ -102,7 +103,7 @@ TaskManagerImpl::TaskManagerImpl()
 #if defined(OS_CHROMEOS)
   if (arc::IsArcAvailable())
     task_providers_.emplace_back(new ArcProcessTaskProvider());
-  task_providers_.emplace_back(new CrostiniProcessTaskProvider());
+  task_providers_.emplace_back(new VmProcessTaskProvider());
   arc_shared_sampler_ = std::make_unique<ArcSharedSampler>();
 #endif  // defined(OS_CHROMEOS)
 }
@@ -233,10 +234,6 @@ const base::string16& TaskManagerImpl::GetTitle(TaskId task_id) const {
   return GetTaskByTaskId(task_id)->title();
 }
 
-const std::string& TaskManagerImpl::GetTaskNameForRappor(TaskId task_id) const {
-  return GetTaskByTaskId(task_id)->rappor_sample_name();
-}
-
 base::string16 TaskManagerImpl::GetProfileName(TaskId task_id) const {
   return GetTaskByTaskId(task_id)->GetProfileName();
 }
@@ -308,7 +305,7 @@ bool TaskManagerImpl::GetV8Memory(TaskId task_id,
 
 bool TaskManagerImpl::GetWebCacheStats(
     TaskId task_id,
-    blink::WebCache::ResourceTypeStats* stats) const {
+    blink::WebCacheResourceTypeStats* stats) const {
   const Task* task = GetTaskByTaskId(task_id);
   if (!task->ReportsWebCacheStats())
     return false;
@@ -594,8 +591,8 @@ void TaskManagerImpl::OnReceivedMemoryDump(
 void TaskManagerImpl::Refresh() {
   if (IsResourceRefreshEnabled(REFRESH_TYPE_GPU_MEMORY)) {
     content::GpuDataManager::GetInstance()->RequestVideoMemoryUsageStatsUpdate(
-        base::Bind(&TaskManagerImpl::OnVideoMemoryUsageStatsUpdate,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&TaskManagerImpl::OnVideoMemoryUsageStatsUpdate,
+                       weak_ptr_factory_.GetWeakPtr()));
   }
 
   if (IsResourceRefreshEnabled(REFRESH_TYPE_MEMORY_FOOTPRINT) &&

@@ -6,11 +6,14 @@
 
 #include "base/android/jni_android.h"
 #include "base/memory/ptr_util.h"
-#include "chrome/android/public/profiles/jni_headers/Profile_jni.h"
+#include "chrome/browser/profiles/android/jni_headers/Profile_jni.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_key_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/web_contents.h"
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
@@ -48,7 +51,8 @@ Profile* ProfileAndroid::FromProfileAndroid(const JavaRef<jobject>& obj) {
 }
 
 // static
-ScopedJavaLocalRef<jobject> ProfileAndroid::GetLastUsedProfile(JNIEnv* env) {
+ScopedJavaLocalRef<jobject> ProfileAndroid::GetLastUsedRegularProfile(
+    JNIEnv* env) {
   Profile* profile = ProfileManager::GetLastUsedProfile();
   if (profile == NULL) {
     NOTREACHED() << "Profile not found.";
@@ -119,9 +123,31 @@ void ProfileAndroid::Wipe(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   profile_->Wipe();
 }
 
+jlong ProfileAndroid::GetBrowserContextPointer(JNIEnv* env) {
+  return reinterpret_cast<jlong>(
+      static_cast<content::BrowserContext*>(profile_));
+}
+
 // static
-ScopedJavaLocalRef<jobject> JNI_Profile_GetLastUsedProfile(JNIEnv* env) {
-  return ProfileAndroid::GetLastUsedProfile(env);
+ScopedJavaLocalRef<jobject> JNI_Profile_GetLastUsedRegularProfile(JNIEnv* env) {
+  return ProfileAndroid::GetLastUsedRegularProfile(env);
+}
+
+// static
+ScopedJavaLocalRef<jobject> JNI_Profile_FromWebContents(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& jweb_contents) {
+  auto* web_contents = content::WebContents::FromJavaWebContents(jweb_contents);
+  if (!web_contents)
+    return ScopedJavaLocalRef<jobject>();
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  if (!profile)
+    return ScopedJavaLocalRef<jobject>();
+  ProfileAndroid* profile_android = ProfileAndroid::FromProfile(profile);
+  if (!profile_android)
+    return ScopedJavaLocalRef<jobject>();
+  return profile_android->GetJavaObject();
 }
 
 ProfileAndroid::ProfileAndroid(Profile* profile)

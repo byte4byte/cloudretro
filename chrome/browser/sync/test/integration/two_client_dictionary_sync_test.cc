@@ -30,6 +30,7 @@ class TwoClientDictionarySyncTest : public SyncTest {
 };
 
 IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest, E2E_ENABLED(Sanity)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   dictionary_helper::LoadDictionaries();
   ASSERT_TRUE(DictionaryMatchChecker().Wait());
@@ -60,6 +61,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest, E2E_ENABLED(Sanity)) {
 
 IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
                        E2E_ENABLED(SimultaneousAdd)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   dictionary_helper::LoadDictionaries();
   ASSERT_TRUE(DictionaryMatchChecker().Wait());
@@ -72,6 +74,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
 
 IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
                        E2E_ENABLED(SimultaneousRemove)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   dictionary_helper::LoadDictionaries();
   ASSERT_TRUE(DictionaryMatchChecker().Wait());
@@ -89,6 +92,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
 
 IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
                        E2E_ENABLED(AddDifferentToEach)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   dictionary_helper::LoadDictionaries();
   ASSERT_TRUE(DictionaryMatchChecker().Wait());
@@ -103,6 +107,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
 
 IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest,
                        E2E_ENABLED(RemoveOnAAddOnB)) {
+  ResetSyncForPrimaryAccount();
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   dictionary_helper::LoadDictionaries();
   ASSERT_TRUE(DictionaryMatchChecker().Wait());
@@ -158,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientDictionarySyncTest, Limit) {
   // any sort of limit. This will cause client #1 to have 3 * chunk_size. When
   // client #1 then tries to commit changes, that is when it obeys the limit
   // and will cause client #0 to only see the limit worth of words.
-  ASSERT_TRUE(GetClient(1)->EnableSyncForAllDatatypes());
+  ASSERT_TRUE(GetClient(1)->EnableSyncForRegisteredDatatypes());
   ASSERT_TRUE(NumDictionaryEntriesChecker(1, 3 * chunk_size).Wait());
   ASSERT_TRUE(ServerCountMatchStatusChecker(syncer::DICTIONARY,
                                             kMaxSyncableDictionaryWords)

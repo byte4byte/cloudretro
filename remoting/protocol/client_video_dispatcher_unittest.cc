@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/base/buffered_socket_writer.h"
 #include "remoting/base/constants.h"
@@ -46,7 +46,7 @@ class ClientVideoDispatcherTest : public testing::Test,
   void OnMessageReceived(std::unique_ptr<CompoundBuffer> buffer);
   void OnReadError(int error);
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   // Set to true in OnChannelInitialized().
   bool initialized_ = false;
@@ -130,7 +130,7 @@ TEST_F(ClientVideoDispatcherTest, WithoutAcks) {
   packet.set_data(std::string());
 
   // Send a VideoPacket and verify that the client receives it.
-  writer_.Write(SerializeAndFrameMessage(packet), base::Closure(),
+  writer_.Write(SerializeAndFrameMessage(packet), {},
                 TRAFFIC_ANNOTATION_FOR_TESTS);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, video_packets_.size());
@@ -151,7 +151,7 @@ TEST_F(ClientVideoDispatcherTest, WithAcks) {
   packet.set_frame_id(kTestFrameId);
 
   // Send a VideoPacket and verify that the client receives it.
-  writer_.Write(SerializeAndFrameMessage(packet), base::Closure(),
+  writer_.Write(SerializeAndFrameMessage(packet), {},
                 TRAFFIC_ANNOTATION_FOR_TESTS);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, video_packets_.size());
@@ -188,7 +188,7 @@ TEST_F(ClientVideoDispatcherTest, VideoLayout) {
       .WillOnce(testing::SaveArg<0>(&layout));
 
   // Send a VideoPacket and verify that the client receives it.
-  writer_.Write(SerializeAndFrameMessage(packet), base::Closure(),
+  writer_.Write(SerializeAndFrameMessage(packet), {},
                 TRAFFIC_ANNOTATION_FOR_TESTS);
   base::RunLoop().RunUntilIdle();
 
@@ -210,12 +210,12 @@ TEST_F(ClientVideoDispatcherTest, AcksOrder) {
   packet.set_frame_id(kTestFrameId);
 
   // Send two VideoPackets.
-  writer_.Write(SerializeAndFrameMessage(packet), base::Closure(),
+  writer_.Write(SerializeAndFrameMessage(packet), {},
                 TRAFFIC_ANNOTATION_FOR_TESTS);
   base::RunLoop().RunUntilIdle();
 
   packet.set_frame_id(kTestFrameId + 1);
-  writer_.Write(SerializeAndFrameMessage(packet), base::Closure(),
+  writer_.Write(SerializeAndFrameMessage(packet), {},
                 TRAFFIC_ANNOTATION_FOR_TESTS);
   base::RunLoop().RunUntilIdle();
 

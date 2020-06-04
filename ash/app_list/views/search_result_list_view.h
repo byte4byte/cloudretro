@@ -12,9 +12,10 @@
 #include "ash/app_list/views/search_result_view.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "ui/views/view.h"
 
-namespace app_list {
+namespace ash {
 namespace test {
 class SearchResultListViewTest;
 }
@@ -30,7 +31,9 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
                        AppListViewDelegate* view_delegate);
   ~SearchResultListView() override;
 
-  void SearchResultActivated(SearchResultView* view, int event_flags);
+  void SearchResultActivated(SearchResultView* view,
+                             int event_flags,
+                             bool by_button_press);
 
   void SearchResultActionActivated(SearchResultView* view,
                                    size_t action_index,
@@ -56,6 +59,10 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
 
   AppListMainView* app_list_main_view() const { return main_view_; }
 
+ protected:
+  // Overridden from views::View:
+  void VisibilityChanged(View* starting_from, bool is_visible) override;
+
  private:
   friend class test::SearchResultListViewTest;
 
@@ -66,6 +73,10 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
   void Layout() override;
   int GetHeightForWidth(int w) const override;
 
+  // Logs the set of recommendations (impressions) that were shown to the user
+  // after a period of time.
+  void LogImpressions();
+
   AppListMainView* main_view_;          // Owned by views hierarchy.
   AppListViewDelegate* view_delegate_;  // Not owned.
 
@@ -73,9 +84,16 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
 
   std::vector<SearchResultView*> search_result_views_;  // Not owned.
 
+  // Used for logging impressions shown to users.
+  base::OneShotTimer impression_timer_;
+  base::OneShotTimer zero_state_file_impression_timer_;
+  base::OneShotTimer drive_quick_access_impression_timer_;
+  bool previous_found_zero_state_file_ = false;
+  bool previous_found_drive_quick_access_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(SearchResultListView);
 };
 
-}  // namespace app_list
+}  // namespace ash
 
 #endif  // ASH_APP_LIST_VIEWS_SEARCH_RESULT_LIST_VIEW_H_

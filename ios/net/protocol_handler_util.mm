@@ -73,25 +73,6 @@ NSURLResponse* GetNSURLResponseForRequest(URLRequest* request) {
   NSURL* url = NSURLWithGURL(request->url());
   DCHECK(url);
 
-  // The default iOS stack returns a NSURLResponse when the request has a data
-  // scheme, and a NSHTTPURLResponse otherwise.
-  if (request->url().SchemeIs("data")) {
-    std::string mt;
-    request->GetMimeType(&mt);
-    NSString* mime_type = base::SysUTF8ToNSString(mt);
-    DCHECK(mime_type);
-    std::string cs;
-    request->GetCharset(&cs);
-    NSString* charset = base::SysUTF8ToNSString(cs);
-    DCHECK(charset);
-    // The default iOS stack computes the length of the decoded string. If we
-    // wanted to do that we would have to decode the string now. However, using
-    // the unknown length (-1) seems to be working.
-    return [[NSURLResponse alloc] initWithURL:url
-                                     MIMEType:mime_type
-                        expectedContentLength:-1
-                             textEncodingName:charset];
-  } else {
     // Iterate over all the headers and copy them.
     bool has_content_type_header = false;
     NSMutableDictionary* header_fields = [NSMutableDictionary dictionary];
@@ -180,7 +161,6 @@ NSURLResponse* GetNSURLResponseForRequest(URLRequest* request) {
                                         statusCode:request->GetResponseCode()
                                        HTTPVersion:version_string
                                       headerFields:header_fields];
-  }
 }
 
 void CopyHttpHeaders(NSURLRequest* in_request, URLRequest* out_request) {
@@ -199,13 +179,10 @@ void CopyHttpHeaders(NSURLRequest* in_request, URLRequest* out_request) {
       out_request->set_referrer_policy(URLRequest::NEVER_CLEAR_REFERRER);
       continue;
     }
-    if (![key isEqualToString:@"User-Agent"]) {
-      // The user agent string is added by the network stack, and might be
-      // different from the one provided by UIWebView. Do not copy it.
-      NSString* value = [headers objectForKey:key];
-      net_headers.SetHeader(base::SysNSStringToUTF8(key),
-                            base::SysNSStringToUTF8(value));
-    }
+    // Copy over all headers that were set on NSURLRequest
+    NSString* value = [headers objectForKey:key];
+    net_headers.SetHeader(base::SysNSStringToUTF8(key),
+                          base::SysNSStringToUTF8(value));
   }
   // Set default values for some missing headers.
   // The "Accept" header is defined by Webkit on the desktop version.

@@ -35,7 +35,7 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_type_pattern.h"
-#include "components/captive_portal/captive_portal_detector.h"
+#include "components/captive_portal/core/captive_portal_detector.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user_manager.h"
@@ -210,7 +210,7 @@ const char NetworkPortalNotificationController::kUserActionMetric[] =
 
 NetworkPortalNotificationController::NetworkPortalNotificationController(
     NetworkPortalDetector* network_portal_detector)
-    : network_portal_detector_(network_portal_detector), weak_factory_(this) {
+    : network_portal_detector_(network_portal_detector) {
   if (NetworkHandler::IsInitialized()) {  // May be false in tests.
     NetworkHandler::Get()->network_state_handler()->AddObserver(this,
                                                                 FROM_HERE);

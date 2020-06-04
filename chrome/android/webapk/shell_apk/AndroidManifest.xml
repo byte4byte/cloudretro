@@ -20,13 +20,11 @@
     package="{{{manifest_package}}}"
     android:versionCode="{{{version_code}}}"
     android:versionName="{{{version_name}}}" >
-
-    <uses-permission android:name="android.permission.VIBRATE"></uses-permission>
     {{{raw_manifest_tags}}}
 
     <uses-sdk
-        android:minSdkVersion="16"
-        android:targetSdkVersion="28" />
+        android:minSdkVersion="19"
+        android:targetSdkVersion="29" />
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -44,6 +42,11 @@
                 <category android:name="android.intent.category.BROWSABLE"></category>
                 <data android:scheme="{{{scope_url_scheme}}}" android:host="{{{scope_url_host}}}" {{{scope_url_path_type}}}="{{{scope_url_path}}}"></data>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED"></action>
+                <category android:name="android.intent.category.DEFAULT"></category>
+                <data android:scheme="{{{scope_url_scheme}}}" android:host="{{{scope_url_host}}}" {{{scope_url_path_type}}}="{{{scope_url_path}}}"></data>
+            </intent-filter>
             {{/intent_filters}}
             {{{raw_intent_filters}}}
          </activity>
@@ -51,13 +54,12 @@
         [[#use_new_splash]]
         <activity android:name="org.chromium.webapk.shell_apk.h2o.H2OOpaqueMainActivity"
                   android:theme="@style/SplashTheme"
-                  android:relinquishTaskIdentity="true"
-                  android:excludeFromRecents="true"
-                  android:noHistory="true">
+                  android:relinquishTaskIdentity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
         <activity android:name="org.chromium.webapk.shell_apk.h2o.SplashActivity"
                   android:theme="@style/SplashTheme"
@@ -75,6 +77,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
 
         {{#share_template}}
@@ -133,7 +136,11 @@
 
         <meta-data android:name="org.chromium.webapk.shell_apk.defaultBackgroundColorId" android:resource="@color/webapp_default_bg" />
         <meta-data android:name="org.chromium.webapk.shell_apk.iconId" android:resource="@mipmap/app_icon" />
+        {{#has_maskable_icon}}
+        <meta-data android:name="org.chromium.webapk.shell_apk.maskableIconId" android:resource="@mipmap/maskable_app_icon"/>
+        {{/has_maskable_icon}}
         <meta-data android:name="org.chromium.webapk.shell_apk.splashId" android:resource="@drawable/splash_icon" />
+        <meta-data android:name="org.chromium.webapk.shell_apk.isSplashIconMaskableBooleanId" android:resource="@bool/is_splash_icon_maskable"/>
         <meta-data android:name="org.chromium.webapk.shell_apk.distributor" android:value="{{{distributor}}}" />
 
         {{!  Hashes of icons should be taken of the icons as they are available on the web. The icon
@@ -142,7 +149,6 @@
         <meta-data android:name="org.chromium.webapk.shell_apk.iconUrlsAndIconMurmur2Hashes" android:value="{{{icon_urls_and_icon_murmur2_hashes}}}" />
 
         <meta-data android:name="org.chromium.webapk.shell_apk.webManifestUrl" android:value="{{{web_manifest_url}}}" />
-        {{#badge_icon_id}}<meta-data android:name="org.chromium.webapk.shell_apk.badgeIconId" android:resource="{{{badge_icon_id}}}" />{{/badge_icon_id}}
         <service
             android:name="org.chromium.webapk.shell_apk.WebApkServiceFactory"
             android:exported="true"

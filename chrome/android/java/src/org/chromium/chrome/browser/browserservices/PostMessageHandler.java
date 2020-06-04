@@ -5,15 +5,17 @@
 package org.chromium.chrome.browser.browserservices;
 
 import android.net.Uri;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsSessionToken;
-import android.support.customtabs.PostMessageBackend;
+
+import androidx.annotation.VisibleForTesting;
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.PostMessageBackend;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.browserservices.OriginVerifier.OriginVerificationListener;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.embedder_support.util.Origin;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.MessagePort.MessageCallback;
 import org.chromium.content_public.browser.NavigationHandle;
@@ -96,8 +98,8 @@ public class PostMessageHandler implements OriginVerificationListener {
         mChannel = webContents.createMessageChannel();
         mChannel[0].setMessageCallback(mMessageCallback, null);
 
-        webContents.postMessageToFrame(
-                null, "", mPostMessageUri.toString(), "", new MessagePort[] {mChannel[1]});
+        webContents.postMessageToMainFrame(
+                "", mPostMessageUri.toString(), "", new MessagePort[] {mChannel[1]});
 
         mPostMessageBackend.onNotifyMessageChannelReady(null);
     }

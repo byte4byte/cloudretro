@@ -285,11 +285,11 @@ void TaskGroup::RefreshWindowsHandles() {
 
 #if BUILDFLAG(ENABLE_NACL)
 void TaskGroup::RefreshNaClDebugStubPort(int child_process_unique_id) {
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::PostTaskAndReplyWithResult(
       FROM_HERE, {content::BrowserThread::IO},
-      base::Bind(&GetNaClDebugStubPortOnIoThread, child_process_unique_id),
-      base::Bind(&TaskGroup::OnRefreshNaClDebugStubPortDone,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&GetNaClDebugStubPortOnIoThread, child_process_unique_id),
+      base::BindOnce(&TaskGroup::OnRefreshNaClDebugStubPortDone,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void TaskGroup::OnRefreshNaClDebugStubPortDone(int nacl_debug_stub_port) {

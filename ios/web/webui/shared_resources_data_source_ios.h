@@ -18,11 +18,9 @@ class SharedResourcesDataSourceIOS : public URLDataSourceIOS {
 
   // web::URLDataSourceIOS implementation.
   std::string GetSource() const override;
-  void StartDataRequest(
-      const std::string& path,
-      const URLDataSourceIOS::GotDataCallback& callback) override;
+  void StartDataRequest(const std::string& path,
+                        URLDataSourceIOS::GotDataCallback callback) override;
   std::string GetMimeType(const std::string& path) const override;
-  bool IsGzipped(const std::string& path) const override;
 
  private:
   ~SharedResourcesDataSourceIOS() override;

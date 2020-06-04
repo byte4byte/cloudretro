@@ -4,9 +4,10 @@
 
 package org.chromium.chrome.browser.keyboard_accessory.sheet_tabs;
 
-import android.support.v7.widget.RecyclerView;
 import android.view.View;
 import android.view.ViewGroup;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
@@ -74,6 +75,6 @@ class AddressAccessorySheetViewBinder {
 
     static void initializeView(RecyclerView view, AccessorySheetTabModel model) {
         view.setAdapter(AddressAccessorySheetCoordinator.createAdapter(model));
-        view.addItemDecoration(new AddressAccessoryInfoView.DynamicBottomSpacer());
+        view.addItemDecoration(new DynamicInfoViewBottomSpacer(AddressAccessoryInfoView.class));
     }
 }

@@ -4,14 +4,14 @@
 
 #include "chrome/browser/page_load_metrics/observers/resource_metrics_observer.h"
 
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
-#include "chrome/browser/page_load_metrics/resource_tracker.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
+#include "components/page_load_metrics/browser/resource_tracker.h"
 
 namespace {
 
 #define RESOURCE_BYTES_HISTOGRAM(suffix, was_cached, value)                \
   if (was_cached) {                                                        \
-    PAGE_BYTES_HISTOGRAM("Ads.ResourceUsage.Size.Cache." suffix, value);   \
+    PAGE_BYTES_HISTOGRAM("Ads.ResourceUsage.Size.Cache2." suffix, value);  \
   } else {                                                                 \
     PAGE_BYTES_HISTOGRAM("Ads.ResourceUsage.Size.Network." suffix, value); \
   }
@@ -34,23 +34,21 @@ void ResourceMetricsObserver::OnResourceDataUseObserved(
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 ResourceMetricsObserver::FlushMetricsOnAppEnterBackground(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   // TODO(johnidel): This logic was maintained when resource metrics were moved
   // out of the AdsPageLoadMetricsObserver. These metrics don't need to stop
   // being reported when backgrounded.
-  if (extra_info.did_commit) {
-    OnComplete(timing, extra_info);
+  if (GetDelegate().DidCommit()) {
+    OnComplete(timing);
   }
 
   return STOP_OBSERVING;
 }
 
 void ResourceMetricsObserver::OnComplete(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
   for (auto const& kv :
-       GetDelegate()->GetResourceTracker().unfinished_resources())
+       GetDelegate().GetResourceTracker().unfinished_resources())
     RecordResourceHistograms(kv.second);
 }
 
@@ -78,10 +76,6 @@ void ResourceMetricsObserver::RecordResourceMimeHistograms(
 
 void ResourceMetricsObserver::RecordResourceHistograms(
     const page_load_metrics::mojom::ResourceDataUpdatePtr& resource) {
-  // TODO(968141): Update these metrics to include resources loaded by the
-  // memory cache.
-  if (resource->cache_type == page_load_metrics::mojom::CacheType::kMemory)
-    return;
   bool was_cached =
       resource->cache_type != page_load_metrics::mojom::CacheType::kNotCached;
   int64_t data_length = was_cached ? resource->encoded_body_length

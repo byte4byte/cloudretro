@@ -15,19 +15,17 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_extensions_external_loader.h"
+#include "components/session_manager/core/session_manager.h"
 #include "components/session_manager/core/session_manager_observer.h"
 #include "components/user_manager/user_manager.h"
 #include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 
 class PrefRegistrySimple;
 
 namespace base {
 class OneShotTimer;
-}
-
-namespace session_manager {
-class SessionManager;
 }
 
 namespace chromeos {
@@ -80,13 +78,18 @@ class DemoSession : public session_manager::SessionManagerObserver,
   // TODO(crbug.com/983359): Sort these by country name in the current locale
   // instead of using this hard-coded US-centric order.
   static constexpr char kSupportedCountries[][3] = {
-      "us", "be", "ca", "dk", "fi", "fr", "de",
-      "ie", "jp", "lu", "nl", "no", "se", "gb"};
+      "us", "be", "ca", "dk", "fi", "fr", "de", "ie",
+      "it", "jp", "lu", "nl", "no", "es", "se", "gb"};
 
   static std::string DemoConfigToString(DemoModeConfig config);
 
   // Whether the device is set up to run demo sessions.
   static bool IsDeviceInDemoMode();
+
+  // Whether the device is set up to enroll Demo Mode offline.
+  // The device needs to be set up for Demo Mode in order to return true.
+  // TODO(b/154290639): Move into anonymous namespace when fixed.
+  static bool IsDemoModeOfflineEnrolled();
 
   // Returns current demo mode configuration.
   static DemoModeConfig GetDemoConfig();
@@ -155,7 +158,7 @@ class DemoSession : public session_manager::SessionManagerObserver,
   base::OneShotTimer* GetTimerForTesting();
 
   // user_manager::UserManager::UserSessionStateObserver:
-  void ActiveUserChanged(const user_manager::User* user) override;
+  void ActiveUserChanged(user_manager::User* active_user) override;
 
   // extensions::AppWindowRegistry::Observer:
   void OnAppWindowActivated(extensions::AppWindow* app_window) override;

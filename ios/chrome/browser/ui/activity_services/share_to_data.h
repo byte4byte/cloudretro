@@ -8,7 +8,7 @@
 #import <UIKit/UIKit.h>
 
 #include "ios/chrome/browser/ui/activity_services/chrome_activity_item_thumbnail_generator.h"
-#include "ios/web/public/user_agent.h"
+#include "ios/web/common/user_agent.h"
 #include "url/gurl.h"
 
 @interface ShareToData : NSObject
@@ -30,10 +30,9 @@
 // The visible URL of the page.
 @property(nonatomic, readonly) const GURL& visibleURL;
 
-// NSURL versions of 'shareURL' and 'passwordManagerURL'. Use only for passing
+// NSURL version of 'shareURL'. Use only for passing
 // to libraries that take NSURL.
 @property(nonatomic, readonly) NSURL* shareNSURL;
-@property(nonatomic, readonly) NSURL* passwordManagerNSURL;
 
 // Title to be shared (not nil).
 @property(nonatomic, readonly, copy) NSString* title;

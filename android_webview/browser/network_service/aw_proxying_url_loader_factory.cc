@@ -4,33 +4,41 @@
 
 #include "android_webview/browser/network_service/aw_proxying_url_loader_factory.h"
 
+#include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "android_webview/browser/android_protocol_handler.h"
 #include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/input_stream.h"
-#include "android_webview/browser/net/aw_web_resource_response.h"
 #include "android_webview/browser/network_service/android_stream_reader_url_loader.h"
+#include "android_webview/browser/network_service/aw_web_resource_intercept_response.h"
+#include "android_webview/browser/network_service/aw_web_resource_response.h"
 #include "android_webview/browser/network_service/net_helpers.h"
 #include "android_webview/browser/renderer_host/auto_login_parser.h"
 #include "android_webview/common/url_constants.h"
 #include "base/android/build_info.h"
 #include "base/bind.h"
+#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
-#include "components/safe_browsing/common/safebrowsing_constants.h"
+#include "components/safe_browsing/core/common/safebrowsing_constants.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_utils.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
+#include "url/gurl.h"
 
 namespace android_webview {
 
@@ -50,18 +58,18 @@ class InterceptedRequest : public network::mojom::URLLoader,
       uint32_t options,
       const network::ResourceRequest& request,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
-      network::mojom::URLLoaderRequest loader_request,
-      network::mojom::URLLoaderClientPtr client,
-      network::mojom::URLLoaderFactoryPtr target_factory,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
       bool intercept_only);
   ~InterceptedRequest() override;
 
   void Restart();
 
   // network::mojom::URLLoaderClient
-  void OnReceiveResponse(const network::ResourceResponseHead& head) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
-                         const network::ResourceResponseHead& head) override;
+                         network::mojom::URLResponseHeadPtr head) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback callback) override;
@@ -75,7 +83,6 @@ class InterceptedRequest : public network::mojom::URLLoader,
   void FollowRedirect(const std::vector<std::string>& removed_headers,
                       const net::HttpRequestHeaders& modified_headers,
                       const base::Optional<GURL>& new_url) override;
-  void ProceedWithResponse() override;
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override;
   void PauseReadingBodyFromNet() override;
@@ -86,7 +93,7 @@ class InterceptedRequest : public network::mojom::URLLoader,
       std::unique_ptr<AwWebResourceResponse> response);
 
   void InterceptResponseReceived(
-      std::unique_ptr<AwWebResourceResponse> response);
+      std::unique_ptr<AwWebResourceInterceptResponse> intercept_response);
 
   // Returns true if the request was restarted or completed.
   bool InputStreamFailed(bool restart_needed);
@@ -101,7 +108,7 @@ class InterceptedRequest : public network::mojom::URLLoader,
   void OnURLLoaderError(uint32_t custom_reason, const std::string& description);
 
   // Call OnComplete on |target_client_|. If |wait_for_loader_error| is true
-  // then this object will wait for |proxied_loader_binding_| to have a
+  // then this object will wait for |proxied_loader_receiver_| to have a
   // connection error before destructing.
   void CallOnComplete(const network::URLLoaderCompletionStatus& status,
                       bool wait_for_loader_error);
@@ -138,18 +145,20 @@ class InterceptedRequest : public network::mojom::URLLoader,
 
   const net::MutableNetworkTrafficAnnotationTag traffic_annotation_;
 
-  mojo::Binding<network::mojom::URLLoader> proxied_loader_binding_;
-  network::mojom::URLLoaderClientPtr target_client_;
+  mojo::Receiver<network::mojom::URLLoader> proxied_loader_receiver_;
+  mojo::Remote<network::mojom::URLLoaderClient> target_client_;
 
-  mojo::Binding<network::mojom::URLLoaderClient> proxied_client_binding_;
-  network::mojom::URLLoaderPtr target_loader_;
-  network::mojom::URLLoaderFactoryPtr target_factory_;
+  mojo::Receiver<network::mojom::URLLoaderClient> proxied_client_receiver_{
+      this};
+  mojo::Remote<network::mojom::URLLoader> target_loader_;
+  mojo::Remote<network::mojom::URLLoaderFactory> target_factory_;
 
-  base::WeakPtrFactory<InterceptedRequest> weak_factory_;
+  base::WeakPtrFactory<InterceptedRequest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(InterceptedRequest);
 };
 
+// A ResponseDelegate for responses returned by shouldInterceptRequest.
 class InterceptResponseDelegate
     : public AndroidStreamReaderURLLoader::ResponseDelegate {
  public:
@@ -203,6 +212,9 @@ class InterceptResponseDelegate
   base::WeakPtr<InterceptedRequest> request_;
 };
 
+// A ResponseDelegate based on top of AndroidProtocolHandler for special
+// protocols, such as content://, file:///android_asset, and file:///android_res
+// URLs.
 class ProtocolResponseDelegate
     : public AndroidStreamReaderURLLoader::ResponseDelegate {
  public:
@@ -254,9 +266,9 @@ InterceptedRequest::InterceptedRequest(
     uint32_t options,
     const network::ResourceRequest& request,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
-    network::mojom::URLLoaderRequest loader_request,
-    network::mojom::URLLoaderClientPtr client,
-    network::mojom::URLLoaderFactoryPtr target_factory,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
+    mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
     bool intercept_only)
     : process_id_(process_id),
       request_id_(request_id),
@@ -265,17 +277,14 @@ InterceptedRequest::InterceptedRequest(
       intercept_only_(intercept_only),
       request_(request),
       traffic_annotation_(traffic_annotation),
-      proxied_loader_binding_(this, std::move(loader_request)),
+      proxied_loader_receiver_(this, std::move(loader_receiver)),
       target_client_(std::move(client)),
-      proxied_client_binding_(this),
-      target_factory_(std::move(target_factory)),
-      weak_factory_(this) {
+      target_factory_(std::move(target_factory)) {
   // If there is a client error, clean up the request.
-  target_client_.set_connection_error_handler(base::BindOnce(
+  target_client_.set_disconnect_handler(base::BindOnce(
       &InterceptedRequest::OnURLLoaderClientError, base::Unretained(this)));
-  proxied_loader_binding_.set_connection_error_with_reason_handler(
-      base::BindOnce(&InterceptedRequest::OnURLLoaderError,
-                     base::Unretained(this)));
+  proxied_loader_receiver_.set_disconnect_with_reason_handler(base::BindOnce(
+      &InterceptedRequest::OnURLLoaderError, base::Unretained(this)));
 }
 
 InterceptedRequest::~InterceptedRequest() {
@@ -329,7 +338,7 @@ bool InterceptedRequest::ShouldNotInterceptRequest() {
 }
 
 void InterceptedRequest::InterceptResponseReceived(
-    std::unique_ptr<AwWebResourceResponse> response) {
+    std::unique_ptr<AwWebResourceInterceptResponse> intercept_response) {
   // We send the application's package name in the X-Requested-With header for
   // compatibility with previous WebView versions. This should not be visible to
   // shouldInterceptRequest. It should also not trigger CORS prefetch if
@@ -341,21 +350,30 @@ void InterceptedRequest::InterceptResponseReceived(
         base::android::BuildInfo::GetInstance()->host_package_name());
   }
 
-  if (response) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  if (intercept_response && intercept_response->RaisedException(env)) {
+    // The JNI handler has already raised an exception. Fail the resource load
+    // as it may be insecure to load on error.
+    SendErrorAndCompleteImmediately(net::ERR_UNEXPECTED);
+    return;
+  }
+
+  if (intercept_response && intercept_response->HasResponse(env)) {
     // non-null response: make sure to use it as an override for the
     // normal network data.
-    ContinueAfterInterceptWithOverride(std::move(response));
-  } else {
-    // Request was not intercepted/overridden. Proceed with loading
-    // from network, unless this is a special |intercept_only_| loader,
-    // which happens for external schemes: e.g. unsupported schemes and
-    // cid: schemes.
-    if (intercept_only_) {
-      SendErrorAndCompleteImmediately(net::ERR_UNKNOWN_URL_SCHEME);
-      return;
-    }
-    ContinueAfterIntercept();
+    ContinueAfterInterceptWithOverride(intercept_response->GetResponse(env));
+    return;
   }
+
+  // Request was not intercepted/overridden. Proceed with loading from network,
+  // unless this is a special |intercept_only_| loader, which happens for
+  // external schemes: e.g. unsupported schemes and cid: schemes.
+  if (intercept_only_) {
+    SendErrorAndCompleteImmediately(net::ERR_UNKNOWN_URL_SCHEME);
+    return;
+  }
+
+  ContinueAfterIntercept();
 }
 
 // returns true if the request has been restarted or was completed.
@@ -378,7 +396,7 @@ bool InterceptedRequest::InputStreamFailed(bool restart_needed) {
   }
 
   input_stream_previously_failed_ = true;
-  proxied_client_binding_.Unbind();
+  proxied_client_receiver_.reset();
   Restart();
   return true;  // request restarted
 }
@@ -397,10 +415,9 @@ void InterceptedRequest::ContinueAfterIntercept() {
   if (!input_stream_previously_failed_ &&
       (request_.url.SchemeIs(url::kContentScheme) ||
        android_webview::IsAndroidSpecialFileUrl(request_.url))) {
-    network::mojom::URLLoaderClientPtr proxied_client;
-    proxied_client_binding_.Bind(mojo::MakeRequest(&proxied_client));
     AndroidStreamReaderURLLoader* loader = new AndroidStreamReaderURLLoader(
-        request_, std::move(proxied_client), traffic_annotation_,
+        request_, proxied_client_receiver_.BindNewPipeAndPassRemote(),
+        traffic_annotation_,
         std::make_unique<ProtocolResponseDelegate>(request_.url,
                                                    weak_factory_.GetWeakPtr()));
     loader->Start();
@@ -408,20 +425,18 @@ void InterceptedRequest::ContinueAfterIntercept() {
   }
 
   if (!target_loader_ && target_factory_) {
-    network::mojom::URLLoaderClientPtr proxied_client;
-    proxied_client_binding_.Bind(mojo::MakeRequest(&proxied_client));
     target_factory_->CreateLoaderAndStart(
-        mojo::MakeRequest(&target_loader_), routing_id_, request_id_, options_,
-        request_, std::move(proxied_client), traffic_annotation_);
+        target_loader_.BindNewPipeAndPassReceiver(), routing_id_, request_id_,
+        options_, request_, proxied_client_receiver_.BindNewPipeAndPassRemote(),
+        traffic_annotation_);
   }
 }
 
 void InterceptedRequest::ContinueAfterInterceptWithOverride(
     std::unique_ptr<AwWebResourceResponse> response) {
-  network::mojom::URLLoaderClientPtr proxied_client;
-  proxied_client_binding_.Bind(mojo::MakeRequest(&proxied_client));
   AndroidStreamReaderURLLoader* loader = new AndroidStreamReaderURLLoader(
-      request_, std::move(proxied_client), traffic_annotation_,
+      request_, proxied_client_receiver_.BindNewPipeAndPassRemote(),
+      traffic_annotation_,
       std::make_unique<InterceptResponseDelegate>(std::move(response),
                                                   weak_factory_.GetWeakPtr()));
   loader->Start();
@@ -465,7 +480,7 @@ void OnReceivedErrorOnUiThread(int process_id,
                   << request.url;
     return;
   }
-  client->OnReceivedError(request, error_code, safebrowsing_hit);
+  client->OnReceivedError(request, error_code, safebrowsing_hit, true);
 }
 
 void OnNewLoginRequestOnUiThread(int process_id,
@@ -485,18 +500,18 @@ void OnNewLoginRequestOnUiThread(int process_id,
 // URLLoaderClient methods.
 
 void InterceptedRequest::OnReceiveResponse(
-    const network::ResourceResponseHead& head) {
+    network::mojom::URLResponseHeadPtr head) {
   // intercept response headers here
-  // pause/resume proxied_client_binding_ if necessary
+  // pause/resume |proxied_client_receiver_| if necessary
 
-  if (head.headers && head.headers->response_code() >= 400) {
+  if (head->headers && head->headers->response_code() >= 400) {
     // In Android WebView the WebViewClient.onReceivedHttpError callback
     // is invoked for any resource (main page, iframe, image, etc.) with
     // status code >= 400.
     std::unique_ptr<AwContentsClientBridge::HttpErrorInfo> error_info =
-        AwContentsClientBridge::ExtractHttpErrorInfo(head.headers.get());
+        AwContentsClientBridge::ExtractHttpErrorInfo(head->headers.get());
 
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&OnReceivedHttpErrorOnUiThread, process_id_,
                        request_.render_frame_id, AwWebResourceRequest(request_),
@@ -504,16 +519,16 @@ void InterceptedRequest::OnReceiveResponse(
   }
 
   if (request_.resource_type ==
-      static_cast<int>(content::ResourceType::kMainFrame)) {
+      static_cast<int>(blink::mojom::ResourceType::kMainFrame)) {
     // Check for x-auto-login-header
     HeaderData header_data;
     std::string header_string;
-    if (head.headers && head.headers->GetNormalizedHeader(kAutoLoginHeaderName,
-                                                          &header_string)) {
+    if (head->headers && head->headers->GetNormalizedHeader(
+                             kAutoLoginHeaderName, &header_string)) {
       if (ParseHeader(header_string, ALLOW_ANY_REALM, &header_data)) {
         // TODO(timvolodine): consider simplifying this and above callback
         // code, crbug.com/897149.
-        base::PostTaskWithTraits(
+        base::PostTask(
             FROM_HERE, {content::BrowserThread::UI},
             base::BindOnce(&OnNewLoginRequestOnUiThread, process_id_,
                            request_.render_frame_id, header_data.realm,
@@ -522,15 +537,15 @@ void InterceptedRequest::OnReceiveResponse(
     }
   }
 
-  target_client_->OnReceiveResponse(head);
+  target_client_->OnReceiveResponse(std::move(head));
 }
 
 void InterceptedRequest::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& head) {
+    network::mojom::URLResponseHeadPtr head) {
   // TODO(timvolodine): handle redirect override.
   request_was_redirected_ = true;
-  target_client_->OnReceiveRedirect(redirect_info, head);
+  target_client_->OnReceiveRedirect(redirect_info, std::move(head));
   request_.url = redirect_info.new_url;
   request_.method = redirect_info.new_method;
   request_.site_for_cookies = redirect_info.new_site_for_cookies;
@@ -576,17 +591,12 @@ void InterceptedRequest::FollowRedirect(
     target_loader_->FollowRedirect(removed_headers, modified_headers, new_url);
 
   // If |OnURLLoaderClientError| was called then we're just waiting for the
-  // connection error handler of |proxied_loader_binding_|. Don't restart the
+  // connection error handler of |proxied_loader_receiver_|. Don't restart the
   // job since that'll create another URLLoader
   if (!target_client_)
     return;
 
   Restart();
-}
-
-void InterceptedRequest::ProceedWithResponse() {
-  if (target_loader_)
-    target_loader_->ProceedWithResponse();
 }
 
 void InterceptedRequest::SetPriority(net::RequestPriority priority,
@@ -658,17 +668,17 @@ void InterceptedRequest::CallOnComplete(
   if (target_client_)
     target_client_->OnComplete(status);
 
-  if (proxied_loader_binding_ && wait_for_loader_error) {
-    // Don't delete |this| yet, in case the |proxied_loader_binding_|'s
+  if (proxied_loader_receiver_.is_bound() && wait_for_loader_error) {
+    // Since the original client is gone no need to continue loading the
+    // request.
+    proxied_client_receiver_.reset();
+    target_loader_.reset();
+
+    // Don't delete |this| yet, in case the |proxied_loader_receiver_|'s
     // error_handler is called with a reason to indicate an error which we want
     // to send to the client bridge. Also reset |target_client_| so we don't
     // get its error_handler called and then delete |this|.
     target_client_.reset();
-
-    // Since the original client is gone no need to continue loading the
-    // request.
-    proxied_client_binding_.Close();
-    target_loader_.reset();
 
     // In case there are pending checks as to whether this request should be
     // intercepted, we don't want that causing |target_client_| to be used
@@ -694,7 +704,7 @@ void InterceptedRequest::SendErrorCallback(int error_code,
     return;
 
   sent_error_callback_ = true;
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&OnReceivedErrorOnUiThread, process_id_,
                      request_.render_frame_id, AwWebResourceRequest(request_),
@@ -709,25 +719,20 @@ void InterceptedRequest::SendErrorCallback(int error_code,
 
 AwProxyingURLLoaderFactory::AwProxyingURLLoaderFactory(
     int process_id,
-    network::mojom::URLLoaderFactoryRequest loader_request,
-    network::mojom::URLLoaderFactoryPtrInfo target_factory_info,
-    std::unique_ptr<AwInterceptedRequestHandler> request_handler,
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
+    mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory_remote,
     bool intercept_only)
-    : process_id_(process_id),
-      request_handler_(std::move(request_handler)),
-      intercept_only_(intercept_only),
-      weak_factory_(this) {
-  // actual creation of the factory
+    : process_id_(process_id), intercept_only_(intercept_only) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  DCHECK(!(intercept_only_ && target_factory_info));
-  if (target_factory_info) {
-    target_factory_.Bind(std::move(target_factory_info));
-    target_factory_.set_connection_error_handler(
+  DCHECK(!(intercept_only_ && target_factory_remote));
+  if (target_factory_remote) {
+    target_factory_.Bind(std::move(target_factory_remote));
+    target_factory_.set_disconnect_handler(
         base::BindOnce(&AwProxyingURLLoaderFactory::OnTargetFactoryError,
                        base::Unretained(this)));
   }
-  proxy_bindings_.AddBinding(this, std::move(loader_request));
-  proxy_bindings_.set_connection_error_handler(
+  proxy_receivers_.Add(this, std::move(loader_receiver));
+  proxy_receivers_.set_disconnect_handler(
       base::BindRepeating(&AwProxyingURLLoaderFactory::OnProxyBindingError,
                           base::Unretained(this)));
 }
@@ -737,31 +742,31 @@ AwProxyingURLLoaderFactory::~AwProxyingURLLoaderFactory() {}
 // static
 void AwProxyingURLLoaderFactory::CreateProxy(
     int process_id,
-    network::mojom::URLLoaderFactoryRequest loader_request,
-    network::mojom::URLLoaderFactoryPtrInfo target_factory_info,
-    std::unique_ptr<AwInterceptedRequestHandler> request_handler) {
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver,
+    mojo::PendingRemote<network::mojom::URLLoaderFactory>
+        target_factory_remote) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   // will manage its own lifetime
-  new AwProxyingURLLoaderFactory(process_id, std::move(loader_request),
-                                 std::move(target_factory_info),
-                                 std::move(request_handler), false);
+  new AwProxyingURLLoaderFactory(process_id, std::move(loader_receiver),
+                                 std::move(target_factory_remote), false);
 }
 
 void AwProxyingURLLoaderFactory::CreateLoaderAndStart(
-    network::mojom::URLLoaderRequest loader,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   // TODO(timvolodine): handle interception, modification (headers for
   // webview), blocking, callbacks etc..
 
-  network::mojom::URLLoaderFactoryPtr target_factory_clone;
+  mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory_clone;
   if (target_factory_)
-    target_factory_->Clone(MakeRequest(&target_factory_clone));
+    target_factory_->Clone(
+        target_factory_clone.InitWithNewPipeAndPassReceiver());
 
   bool global_cookie_policy =
       AwCookieAccessPolicy::GetInstance()->GetShouldAcceptCookies();
@@ -796,14 +801,14 @@ void AwProxyingURLLoaderFactory::OnTargetFactoryError() {
 }
 
 void AwProxyingURLLoaderFactory::OnProxyBindingError() {
-  if (proxy_bindings_.empty())
+  if (proxy_receivers_.empty())
     delete this;
 }
 
 void AwProxyingURLLoaderFactory::Clone(
-    network::mojom::URLLoaderFactoryRequest loader_request) {
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> loader_receiver) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  proxy_bindings_.AddBinding(this, std::move(loader_request));
+  proxy_receivers_.Add(this, std::move(loader_receiver));
 }
 
 }  // namespace android_webview

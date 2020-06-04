@@ -18,29 +18,22 @@ TetherHostFetcherImpl::Factory*
     TetherHostFetcherImpl::Factory::factory_instance_ = nullptr;
 
 // static
-std::unique_ptr<TetherHostFetcher> TetherHostFetcherImpl::Factory::NewInstance(
+std::unique_ptr<TetherHostFetcher> TetherHostFetcherImpl::Factory::Create(
     device_sync::DeviceSyncClient* device_sync_client,
     chromeos::multidevice_setup::MultiDeviceSetupClient*
         multidevice_setup_client) {
-  if (!factory_instance_) {
-    factory_instance_ = new Factory();
+  if (factory_instance_) {
+    return factory_instance_->CreateInstance(device_sync_client,
+                                             multidevice_setup_client);
   }
-  return factory_instance_->BuildInstance(device_sync_client,
-                                          multidevice_setup_client);
+
+  return base::WrapUnique(
+      new TetherHostFetcherImpl(device_sync_client, multidevice_setup_client));
 }
 
 // static
-void TetherHostFetcherImpl::Factory::SetInstanceForTesting(Factory* factory) {
+void TetherHostFetcherImpl::Factory::SetFactoryForTesting(Factory* factory) {
   factory_instance_ = factory;
-}
-
-std::unique_ptr<TetherHostFetcher>
-TetherHostFetcherImpl::Factory::BuildInstance(
-    device_sync::DeviceSyncClient* device_sync_client,
-    chromeos::multidevice_setup::MultiDeviceSetupClient*
-        multidevice_setup_client) {
-  return base::WrapUnique(
-      new TetherHostFetcherImpl(device_sync_client, multidevice_setup_client));
 }
 
 TetherHostFetcherImpl::TetherHostFetcherImpl(
@@ -48,8 +41,7 @@ TetherHostFetcherImpl::TetherHostFetcherImpl(
     chromeos::multidevice_setup::MultiDeviceSetupClient*
         multidevice_setup_client)
     : device_sync_client_(device_sync_client),
-      multidevice_setup_client_(multidevice_setup_client),
-      weak_ptr_factory_(this) {
+      multidevice_setup_client_(multidevice_setup_client) {
   device_sync_client_->AddObserver(this);
   multidevice_setup_client_->AddObserver(this);
 

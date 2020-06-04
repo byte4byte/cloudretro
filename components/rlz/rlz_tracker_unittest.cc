@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -49,19 +49,13 @@ class TestRLZTrackerDelegate : public RLZTrackerDelegate {
   }
 
   void SimulateOmniboxUsage() {
-    using std::swap;
-    base::Closure callback;
-    swap(callback, on_omnibox_search_callback_);
-    if (!callback.is_null())
-      callback.Run();
+    if (!on_omnibox_search_callback_.is_null())
+      std::move(on_omnibox_search_callback_).Run();
   }
 
   void SimulateHomepageUsage() {
-    using std::swap;
-    base::Closure callback;
-    swap(callback, on_homepage_search_callback_);
-    if (!callback.is_null())
-      callback.Run();
+    if (!on_homepage_search_callback_.is_null())
+      std::move(on_homepage_search_callback_).Run();
   }
 
   // RLZTrackerDelegate implementation.
@@ -100,14 +94,14 @@ class TestRLZTrackerDelegate : public RLZTrackerDelegate {
 
   bool ClearReferral() override { return true; }
 
-  void SetOmniboxSearchCallback(const base::Closure& callback) override {
+  void SetOmniboxSearchCallback(base::OnceClosure callback) override {
     DCHECK(!callback.is_null());
-    on_omnibox_search_callback_ = callback;
+    on_omnibox_search_callback_ = std::move(callback);
   }
 
-  void SetHomepageSearchCallback(const base::Closure& callback) override {
+  void SetHomepageSearchCallback(base::OnceClosure callback) override {
     DCHECK(!callback.is_null());
-    on_homepage_search_callback_ = callback;
+    on_homepage_search_callback_ = std::move(callback);
   }
 
   // A speculative fix for https://crbug.com/907379.
@@ -118,8 +112,8 @@ class TestRLZTrackerDelegate : public RLZTrackerDelegate {
 
   std::string brand_override_;
   std::string reactivation_brand_override_;
-  base::Closure on_omnibox_search_callback_;
-  base::Closure on_homepage_search_callback_;
+  base::OnceClosure on_omnibox_search_callback_;
+  base::OnceClosure on_homepage_search_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRLZTrackerDelegate);
 };
@@ -260,7 +254,7 @@ class RlzLibTest : public testing::Test {
   void ExpectRlzPingSent(bool expected);
   void ExpectReactivationRlzPingSent(bool expected);
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   TestRLZTrackerDelegate* delegate_;
   std::unique_ptr<TestRLZTracker> tracker_;
   RlzLibTestNoMachineStateHelper m_rlz_test_helper_;

@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "base/logging.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_samples.h"
@@ -383,6 +384,40 @@ TEST_P(SparseHistogramTest, HistogramNameHash) {
   HistogramBase* histogram = SparseHistogram::FactoryGet(
       kName, HistogramBase::kUmaTargetedHistogramFlag);
   EXPECT_EQ(histogram->name_hash(), HashMetricName(kName));
+}
+
+TEST_P(SparseHistogramTest, WriteAscii) {
+  HistogramBase* histogram =
+      SparseHistogram::FactoryGet("AsciiOut", HistogramBase::kNoFlags);
+  histogram->AddCount(/*sample=*/4, /*value=*/5);
+  histogram->AddCount(/*sample=*/10, /*value=*/15);
+
+  std::string output;
+  histogram->WriteAscii(&output);
+
+  const char kOutputFormatRe[] =
+      R"(Histogram: AsciiOut recorded 20 samples.*\n)"
+      R"(4   -+O +\(5 = 25.0%\)\n)"
+      R"(10  -+O +\(15 = 75.0%\)\n)";
+
+  EXPECT_THAT(output, testing::MatchesRegex(kOutputFormatRe));
+}
+
+TEST_P(SparseHistogramTest, WriteHTMLGraph) {
+  HistogramBase* histogram =
+      SparseHistogram::FactoryGet("HTMLOut", HistogramBase::kNoFlags);
+  histogram->AddCount(/*sample=*/4, /*value=*/5);
+  histogram->AddCount(/*sample=*/10, /*value=*/15);
+
+  std::string output;
+  histogram->WriteHTMLGraph(&output);
+
+  const char kOutputFormatRe[] =
+      R"(<PRE><h4>Histogram: HTMLOut recorded 20 samples.*<\/h4>)"
+      R"(4   -+O +\(5 = 25.0%\)<br>)"
+      R"(10  -+O +\(15 = 75.0%\)<br><\/PRE>)";
+
+  EXPECT_THAT(output, testing::MatchesRegex(kOutputFormatRe));
 }
 
 }  // namespace base

@@ -11,7 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #import "ios/web/js_messaging/crw_js_injector.h"
-#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/ui/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_view_proxy_impl.h"
 #import "ios/web/web_state/web_state_impl.h"
@@ -71,6 +71,14 @@ std::unique_ptr<base::Value> ExecuteJavaScript(web::WebState* web_state,
 
 CGRect GetBoundingRectOfElement(web::WebState* web_state,
                                 ElementSelector* selector) {
+#if !TARGET_IPHONE_SIMULATOR
+  // TODO(crbug.com/1013714): Replace delay with improved JavaScript.
+  // As of iOS 13.1, devices need additional time to stabalize the page before
+  // getting the element location. Without this wait, the element's bounding
+  // rect will be incorrect.
+  base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(0.5));
+#endif
+
   std::string selector_script =
       base::SysNSStringToUTF8(selector.selectorScript);
   std::string selector_description =

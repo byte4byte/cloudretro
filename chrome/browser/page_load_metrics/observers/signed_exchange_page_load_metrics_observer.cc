@@ -4,19 +4,23 @@
 
 #include "chrome/browser/page_load_metrics/observers/signed_exchange_page_load_metrics_observer.h"
 
-#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
-#include "third_party/blink/public/platform/web_loading_behavior_flag.h"
+#include "components/page_load_metrics/browser/page_load_metrics_util.h"
+#include "third_party/blink/public/common/loader/loading_behavior_flag.h"
 
 namespace internal {
 
 #define HISTOGRAM_SXG_PREFIX "PageLoad.Clients.SignedExchange."
 #define HISTOGRAM_CACHED_SXG_PREFIX "PageLoad.Clients.SignedExchange.Cached."
+#define HISTOGRAM_NOTCACHED_SXG_PREFIX \
+  "PageLoad.Clients.SignedExchange.NotCached."
 #define HISTOGRAM_ALT_SUB_SXG_PREFIX \
   "PageLoad.Clients.SignedExchange.AltSubSXG."
 
 constexpr char kHistogramSignedExchangePrefix[] = HISTOGRAM_SXG_PREFIX;
 constexpr char kHistogramCachedSignedExchangePrefix[] =
     HISTOGRAM_CACHED_SXG_PREFIX;
+constexpr char kHistogramNotCachedSignedExchangePrefix[] =
+    HISTOGRAM_NOTCACHED_SXG_PREFIX;
 constexpr char kHistogramAltSubSxgSignedExchangePrefix[] =
     HISTOGRAM_ALT_SUB_SXG_PREFIX;
 
@@ -25,6 +29,8 @@ constexpr char kHistogramAltSubSxgSignedExchangePrefix[] =
       HISTOGRAM_SXG_PREFIX suffix;                           \
   constexpr char kHistogramCachedSignedExchange##name[] =    \
       HISTOGRAM_CACHED_SXG_PREFIX suffix;                    \
+  constexpr char kHistogramNotCachedSignedExchange##name[] = \
+      HISTOGRAM_NOTCACHED_SXG_PREFIX suffix;                 \
   constexpr char kHistogramAltSubSxgSignedExchange##name[] = \
       HISTOGRAM_ALT_SUB_SXG_PREFIX suffix;
 
@@ -53,6 +59,9 @@ SXG_LOAD_METRIC_VARIABLE(Load, "DocumentTiming.NavigationToLoadEventFired")
     if (was_cached_) {                                                       \
       PAGE_LOAD_HISTOGRAM(internal::kHistogramCachedSignedExchange##name,    \
                           value);                                            \
+    } else {                                                                 \
+      PAGE_LOAD_HISTOGRAM(internal::kHistogramNotCachedSignedExchange##name, \
+                          value);                                            \
     }                                                                        \
     if (had_prefetched_alt_sxg_) {                                           \
       PAGE_LOAD_HISTOGRAM(internal::kHistogramAltSubSxgSignedExchange##name, \
@@ -63,6 +72,7 @@ SXG_LOAD_METRIC_VARIABLE(Load, "DocumentTiming.NavigationToLoadEventFired")
 #undef SXG_LOAD_METRIC_VARIABLE
 #undef HISTOGRAM_ALT_SUB_SXG_PREFIX
 #undef HISTOGRAM_CACHED_SXG_PREFIX
+#undef HISTOGRAM_NOTCACHED_SXG_PREFIX
 #undef HISTOGRAM_SXG_PREFIX
 
 }  // namespace internal
@@ -85,10 +95,9 @@ SignedExchangePageLoadMetricsObserver::OnCommit(
 }
 
 void SignedExchangePageLoadMetricsObserver::OnFirstPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_paint, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_paint, GetDelegate())) {
     return;
   }
 
@@ -96,10 +105,9 @@ void SignedExchangePageLoadMetricsObserver::OnFirstPaintInPage(
 }
 
 void SignedExchangePageLoadMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_contentful_paint, GetDelegate())) {
     return;
   }
 
@@ -112,10 +120,9 @@ void SignedExchangePageLoadMetricsObserver::OnFirstContentfulPaintInPage(
 
 void SignedExchangePageLoadMetricsObserver::
     OnFirstMeaningfulPaintInMainFrameDocument(
-        const page_load_metrics::mojom::PageLoadTiming& timing,
-        const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_meaningful_paint, info)) {
+        const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.paint_timing->first_meaningful_paint, GetDelegate())) {
     return;
   }
 
@@ -127,10 +134,10 @@ void SignedExchangePageLoadMetricsObserver::
 }
 
 void SignedExchangePageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->dom_content_loaded_event_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->dom_content_loaded_event_start,
+          GetDelegate())) {
     return;
   }
 
@@ -140,10 +147,9 @@ void SignedExchangePageLoadMetricsObserver::OnDomContentLoadedEventStart(
 }
 
 void SignedExchangePageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->load_event_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->load_event_start, GetDelegate())) {
     return;
   }
 
@@ -152,10 +158,9 @@ void SignedExchangePageLoadMetricsObserver::OnLoadEventStart(
 }
 
 void SignedExchangePageLoadMetricsObserver::OnFirstInputInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.interactive_timing->first_input_timestamp, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.interactive_timing->first_input_timestamp, GetDelegate())) {
     return;
   }
 
@@ -171,6 +176,12 @@ void SignedExchangePageLoadMetricsObserver::OnFirstInputInPage(
         timing.interactive_timing->first_input_delay.value(),
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
         50);
+  } else {
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        internal::kHistogramNotCachedSignedExchangeFirstInputDelay,
+        timing.interactive_timing->first_input_delay.value(),
+        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(60),
+        50);
   }
   if (had_prefetched_alt_sxg_) {
     UMA_HISTOGRAM_CUSTOM_TIMES(
@@ -182,10 +193,9 @@ void SignedExchangePageLoadMetricsObserver::OnFirstInputInPage(
 }
 
 void SignedExchangePageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.parse_timing->parse_start, info)) {
+    const page_load_metrics::mojom::PageLoadTiming& timing) {
+  if (!page_load_metrics::WasStartedInForegroundOptionalEventInForeground(
+          timing.parse_timing->parse_start, GetDelegate())) {
     return;
   }
 

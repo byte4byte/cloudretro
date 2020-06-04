@@ -18,7 +18,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
-#include "components/favicon/core/favicon_server_fetcher_params.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon_base/fallback_icon_style.h"
 #include "components/favicon_base/favicon_types.h"
@@ -45,17 +44,11 @@ enum class FaviconFetchResult {
   COUNT = 3
 };
 
-void RecordFaviconFetchResult(FaviconFetchResult result) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "NewTabPage.ContentSuggestions.ArticleFaviconFetchResult", result,
-      FaviconFetchResult::COUNT);
-}
-
 }  // namespace
 
 ContentSuggestionsService::ContentSuggestionsService(
     State state,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     history::HistoryService* history_service,
     favicon::LargeIconService* large_icon_service,
     PrefService* pref_service,
@@ -183,7 +176,6 @@ void ContentSuggestionsService::FetchSuggestionFavicon(
   if (!domain_with_favicon.is_valid() || !large_icon_service_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), gfx::Image()));
-    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
     return;
   }
 
@@ -229,10 +221,10 @@ void ContentSuggestionsService::GetFaviconFromCache(
   // is not poorly rescaled by LargeIconService).
   large_icon_service_->GetLargeIconImageOrFallbackStyleForPageUrl(
       publisher_url, minimum_size_in_pixel, /*desired_size_in_pixel=*/0,
-      base::Bind(&ContentSuggestionsService::OnGetFaviconFromCacheFinished,
-                 base::Unretained(this), publisher_url, minimum_size_in_pixel,
-                 desired_size_in_pixel, base::Passed(std::move(callback)),
-                 continue_to_google_server),
+      base::BindOnce(&ContentSuggestionsService::OnGetFaviconFromCacheFinished,
+                     base::Unretained(this), publisher_url,
+                     minimum_size_in_pixel, desired_size_in_pixel,
+                     std::move(callback), continue_to_google_server),
       &favicons_task_tracker_);
 }
 
@@ -245,11 +237,6 @@ void ContentSuggestionsService::OnGetFaviconFromCacheFinished(
     const favicon_base::LargeIconImageResult& result) {
   if (!result.image.IsEmpty()) {
     std::move(callback).Run(result.image);
-    // The icon is from cache if we haven't gone to Google server yet. The icon
-    // is freshly fetched, otherwise.
-    RecordFaviconFetchResult(continue_to_google_server
-                                 ? FaviconFetchResult::SUCCESS_CACHED
-                                 : FaviconFetchResult::SUCCESS_FETCHED);
     // Update the time when the icon was last requested - postpone thus the
     // automatic eviction of the favicon from the favicon database.
     large_icon_service_->TouchIconFromGoogleServer(result.icon_url);
@@ -263,7 +250,6 @@ void ContentSuggestionsService::OnGetFaviconFromCacheFinished(
     // cache (resulting in non-default background color) or if we already did
     // so.
     std::move(callback).Run(gfx::Image());
-    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
     return;
   }
 
@@ -292,14 +278,13 @@ void ContentSuggestionsService::OnGetFaviconFromCacheFinished(
         })");
   large_icon_service_
       ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-          favicon::FaviconServerFetcherParams::CreateForMobile(
-              publisher_url, desired_size_in_pixel),
+          publisher_url,
           /*may_page_url_be_private=*/false,
           /*should_trim_page_url_path=*/false, traffic_annotation,
-          base::Bind(
+          base::BindOnce(
               &ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished,
               base::Unretained(this), publisher_url, minimum_size_in_pixel,
-              desired_size_in_pixel, base::Passed(std::move(callback))));
+              desired_size_in_pixel, std::move(callback)));
 }
 
 void ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished(
@@ -310,7 +295,6 @@ void ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished(
     favicon_base::GoogleFaviconServerRequestStatus status) {
   if (status != favicon_base::GoogleFaviconServerRequestStatus::SUCCESS) {
     std::move(callback).Run(gfx::Image());
-    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
     return;
   }
 
@@ -322,7 +306,7 @@ void ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished(
 void ContentSuggestionsService::ClearHistory(
     base::Time begin,
     base::Time end,
-    const base::Callback<bool(const GURL& url)>& filter) {
+    const base::RepeatingCallback<bool(const GURL& url)>& filter) {
   for (const auto& provider : providers_) {
     provider->ClearHistory(begin, end, filter);
   }
@@ -517,7 +501,7 @@ void ContentSuggestionsService::OnSuggestionInvalidated(
     observer.OnSuggestionInvalidated(suggestion_id);
   }
 }
-// identity::IdentityManager::Observer implementation
+// signin::IdentityManager::Observer implementation
 void ContentSuggestionsService::OnPrimaryAccountSet(
     const CoreAccountInfo& account_info) {
   OnSignInStateChanged(/*has_signed_in=*/true);
@@ -538,8 +522,8 @@ void ContentSuggestionsService::OnURLsDeleted(
   }
 
   if (deletion_info.IsAllHistory()) {
-    base::Callback<bool(const GURL& url)> filter =
-        base::Bind([](const GURL& url) { return true; });
+    base::RepeatingCallback<bool(const GURL& url)> filter =
+        base::BindRepeating([](const GURL& url) { return true; });
     ClearHistory(base::Time(), base::Time::Max(), filter);
   } else {
     // If a user deletes a single URL, we don't consider this a clear user
@@ -555,10 +539,10 @@ void ContentSuggestionsService::OnURLsDeleted(
     for (const history::URLRow& row : deletion_info.deleted_rows()) {
       deleted_urls.insert(row.url());
     }
-    base::Callback<bool(const GURL& url)> filter =
-        base::Bind([](const std::set<GURL>& set,
-                      const GURL& url) { return set.count(url) != 0; },
-                   deleted_urls);
+    base::RepeatingCallback<bool(const GURL& url)> filter =
+        base::BindRepeating([](const std::set<GURL>& set,
+                               const GURL& url) { return set.count(url) != 0; },
+                            deleted_urls);
     // We usually don't have any time-related information (the URLRow objects
     // usually don't provide a |last_visit()| timestamp. Hence we simply clear
     // the whole history for the selected URLs.

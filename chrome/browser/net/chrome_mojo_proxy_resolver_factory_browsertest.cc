@@ -8,7 +8,6 @@
 
 #include <vector>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/process/process.h"
@@ -71,6 +70,7 @@ class DumbProxyResolverFactoryRequestClient
   void ResolveDns(
       const std::string& hostname,
       net::ProxyResolveDnsOperation operation,
+      const net::NetworkIsolationKey& network_isolation_key,
       mojo::PendingRemote<proxy_resolver::mojom::HostResolverRequestClient>
           client) override {}
 
@@ -157,9 +157,8 @@ IN_PROC_BROWSER_TEST_F(ChromeMojoProxyResolverFactoryBrowserTest,
   // Wait a little bit and check it's still running.
   {
     base::RunLoop run_loop;
-    base::PostDelayedTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                                    run_loop.QuitClosure(),
-                                    kServiceShutdownTimeout);
+    base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                          run_loop.QuitClosure(), kServiceShutdownTimeout);
     run_loop.Run();
   }
 
@@ -202,9 +201,8 @@ IN_PROC_BROWSER_TEST_F(ChromeMojoProxyResolverFactoryBrowserTest,
   // Wait a little bit and check it's still running.
   {
     base::RunLoop run_loop;
-    base::PostDelayedTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                                    run_loop.QuitClosure(),
-                                    kServiceShutdownTimeout);
+    base::PostDelayedTask(FROM_HERE, {content::BrowserThread::UI},
+                          run_loop.QuitClosure(), kServiceShutdownTimeout);
     run_loop.Run();
   }
 

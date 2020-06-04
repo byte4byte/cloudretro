@@ -12,8 +12,6 @@
 
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
-#include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/search/search_ipc_router.h"
 #include "chrome/common/search/mock_embedded_search_client.h"
@@ -28,6 +26,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/vector_icon_types.h"
 #include "url/gurl.h"
 
 using testing::_;
@@ -51,8 +50,6 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-    identity_test_env_adaptor_ =
-        std::make_unique<IdentityTestEnvironmentProfileAdaptor>(profile());
     SearchTabHelper::CreateForWebContents(web_contents());
     auto* search_tab = SearchTabHelper::FromWebContents(web_contents());
     auto factory =
@@ -63,32 +60,12 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
         .set_embedded_search_client_factory_for_testing(std::move(factory));
   }
 
-  void TearDown() override {
-    // |identity_test_env_adaptor_| must be destroyed before profile().
-    identity_test_env_adaptor_.reset();
-    ChromeRenderViewHostTestHarness::TearDown();
-  }
-
-  content::BrowserContext* CreateBrowserContext() override {
-    TestingProfile::TestingFactories factories = {
-        {ProfileSyncServiceFactory::GetInstance(),
-         base::BindLambdaForTesting(
-             [](content::BrowserContext*) -> std::unique_ptr<KeyedService> {
-               return std::make_unique<syncer::TestSyncService>();
-             })}};
-
-    // Per comments on content::RenderViewHostTestHarness, it takes ownership of
-    // the returned object.
-    return IdentityTestEnvironmentProfileAdaptor::
-        CreateProfileForIdentityTestEnvironment(factories)
-            .release();
-  }
-
-  // Associates |email| with profile as the primary account. |email|
-  // should not be empty.
-  void SetUpAccount(const std::string& email) {
-    ASSERT_FALSE(email.empty());
-    identity_test_env()->SetPrimaryAccount(email);
+  TestingProfile::TestingFactories GetTestingFactories() const override {
+    return {{ProfileSyncServiceFactory::GetInstance(),
+             base::BindRepeating(
+                 [](content::BrowserContext*) -> std::unique_ptr<KeyedService> {
+                   return std::make_unique<syncer::TestSyncService>();
+                 })}};
   }
 
   // Configure the account to |sync_history| or not.
@@ -105,15 +82,8 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
     sync_service->SetPreferredDataTypes(types);
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
-    DCHECK(identity_test_env_adaptor_);
-    return identity_test_env_adaptor_->identity_test_env();
-  }
-
  private:
   NiceMock<MockEmbeddedSearchClient> mock_embedded_search_client_;
-  std::unique_ptr<IdentityTestEnvironmentProfileAdaptor>
-      identity_test_env_adaptor_;
 };
 
 TEST_F(SearchTabHelperTest, FileSelectedUpdatesLastSelectedDirectory) {

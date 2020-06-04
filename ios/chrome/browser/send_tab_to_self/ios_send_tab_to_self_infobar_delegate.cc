@@ -11,10 +11,10 @@
 #include "components/send_tab_to_self/send_tab_to_self_entry.h"
 #include "components/send_tab_to_self/send_tab_to_self_metrics.h"
 #include "components/send_tab_to_self/send_tab_to_self_model.h"
+#include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/strings/grit/ui_strings.h"
 
 namespace send_tab_to_self {
 
@@ -66,7 +66,7 @@ bool IOSSendTabToSelfInfoBarDelegate::Accept() {
   model_->MarkEntryOpened(entry_->GetGUID());
   RecordNotificationHistogram(SendTabToSelfNotification::kOpened);
   infobar()->owner()->OpenURL(entry_->GetURL(),
-                              WindowOpenDisposition::CURRENT_TAB);
+                              WindowOpenDisposition::NEW_FOREGROUND_TAB);
   return true;
 }
 

@@ -13,7 +13,7 @@
 #include "components/arc/test/fake_arc_session.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "content/public/browser/tts_controller.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace arc {
@@ -39,7 +39,8 @@ class TestableTtsController : public content::TtsController {
 
   // Unimplemented.
   bool IsSpeaking() override { return false; }
-  void SpeakOrEnqueue(content::TtsUtterance* utterance) override {}
+  void SpeakOrEnqueue(
+      std::unique_ptr<content::TtsUtterance> utterance) override {}
   void Stop() override {}
   void Stop(const GURL& source_url) override {}
   void Pause() override {}
@@ -94,7 +95,7 @@ class ArcTtsServiceTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<ArcServiceManager> arc_service_manager_;
   std::unique_ptr<TestingProfile> testing_profile_;
   std::unique_ptr<TestableTtsController> tts_controller_;

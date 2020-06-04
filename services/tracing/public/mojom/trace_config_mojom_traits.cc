@@ -16,6 +16,10 @@ bool StructTraits<tracing::mojom::BufferConfigDataView,
     Read(tracing::mojom::BufferConfigDataView data,
          perfetto::TraceConfig::BufferConfig* out) {
   out->set_size_kb(data.size_kb());
+  perfetto::TraceConfig::BufferConfig::FillPolicy policy;
+  if (data.ReadFillPolicy(&policy)) {
+    out->set_fill_policy(policy);
+  }
 
   return true;
 }
@@ -52,6 +56,7 @@ bool StructTraits<tracing::mojom::PerfettoBuiltinDataSourceDataView,
   out->set_disable_clock_snapshotting(data.disable_clock_snapshotting());
   out->set_disable_trace_config(data.disable_trace_config());
   out->set_disable_system_info(data.disable_system_info());
+  out->set_disable_service_events(data.disable_service_events());
   return true;
 }
 

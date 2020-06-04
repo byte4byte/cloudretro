@@ -6,14 +6,15 @@
 #define CHROMEOS_SERVICES_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_IMPL_H_
 
 #include <memory>
+#include <string>
 
 #include "base/containers/flat_map.h"
 #include "chromeos/services/multidevice_setup/feature_state_manager.h"
 #include "chromeos/services/multidevice_setup/host_status_provider.h"
 #include "chromeos/services/multidevice_setup/multidevice_setup_base.h"
 #include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "url/gurl.h"
 
 class PrefService;
@@ -48,10 +49,7 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
  public:
   class Factory {
    public:
-    static Factory* Get();
-    static void SetFactoryForTesting(Factory* test_factory);
-    virtual ~Factory();
-    virtual std::unique_ptr<MultiDeviceSetupBase> BuildInstance(
+    static std::unique_ptr<MultiDeviceSetupBase> Create(
         PrefService* pref_service,
         device_sync::DeviceSyncClient* device_sync_client,
         AuthTokenValidator* auth_token_validator,
@@ -59,6 +57,18 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
         AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate,
         AndroidSmsPairingStateTracker* android_sms_pairing_state_tracker,
         const device_sync::GcmDeviceInfoProvider* gcm_device_info_provider);
+    static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
+    virtual ~Factory();
+    virtual std::unique_ptr<MultiDeviceSetupBase> CreateInstance(
+        PrefService* pref_service,
+        device_sync::DeviceSyncClient* device_sync_client,
+        AuthTokenValidator* auth_token_validator,
+        OobeCompletionTracker* oobe_completion_tracker,
+        AndroidSmsAppHelperDelegate* android_sms_app_helper_delegate,
+        AndroidSmsPairingStateTracker* android_sms_pairing_state_tracker,
+        const device_sync::GcmDeviceInfoProvider* gcm_device_info_provider) = 0;
 
    private:
     static Factory* test_factory_;
@@ -80,12 +90,16 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
 
   // mojom::MultiDeviceSetup:
   void SetAccountStatusChangeDelegate(
-      mojom::AccountStatusChangeDelegatePtr delegate) override;
-  void AddHostStatusObserver(mojom::HostStatusObserverPtr observer) override;
+      mojo::PendingRemote<mojom::AccountStatusChangeDelegate> delegate)
+      override;
+  void AddHostStatusObserver(
+      mojo::PendingRemote<mojom::HostStatusObserver> observer) override;
   void AddFeatureStateObserver(
-      mojom::FeatureStateObserverPtr observer) override;
+      mojo::PendingRemote<mojom::FeatureStateObserver> observer) override;
   void GetEligibleHostDevices(GetEligibleHostDevicesCallback callback) override;
-  void SetHostDevice(const std::string& host_device_id,
+  void GetEligibleActiveHostDevices(
+      GetEligibleActiveHostDevicesCallback callback) override;
+  void SetHostDevice(const std::string& host_instance_id_or_legacy_device_id,
                      const std::string& auth_token,
                      SetHostDeviceCallback callback) override;
   void RemoveHostDevice() override;
@@ -102,7 +116,7 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
 
   // MultiDeviceSetupBase:
   void SetHostDeviceWithoutAuthToken(
-      const std::string& host_device_id,
+      const std::string& host_instance_id_or_legacy_device_id,
       mojom::PrivilegedHostDeviceSetter::SetHostDeviceCallback callback)
       override;
 
@@ -116,7 +130,7 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
 
   // Attempts to set the host device, returning a boolean of whether the attempt
   // was successful.
-  bool AttemptSetHost(const std::string& host_device_id);
+  bool AttemptSetHost(const std::string& host_instance_id_or_legacy_device_id);
   bool IsAuthTokenRequiredForFeatureStateChange(mojom::Feature feature,
                                                 bool enabled);
 
@@ -136,8 +150,8 @@ class MultiDeviceSetupImpl : public MultiDeviceSetupBase,
       android_sms_app_installing_host_observer_;
   AuthTokenValidator* auth_token_validator_;
 
-  mojo::InterfacePtrSet<mojom::HostStatusObserver> host_status_observers_;
-  mojo::InterfacePtrSet<mojom::FeatureStateObserver> feature_state_observers_;
+  mojo::RemoteSet<mojom::HostStatusObserver> host_status_observers_;
+  mojo::RemoteSet<mojom::FeatureStateObserver> feature_state_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(MultiDeviceSetupImpl);
 };

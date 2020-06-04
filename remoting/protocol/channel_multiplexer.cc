@@ -131,7 +131,7 @@ class ChannelMultiplexer::MuxSocket : public P2PStreamSocket {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<MuxSocket> weak_factory_;
+  base::WeakPtrFactory<MuxSocket> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MuxSocket);
 };
@@ -216,8 +216,7 @@ ChannelMultiplexer::MuxSocket::MuxSocket(MuxChannel* channel)
     : channel_(channel),
       read_buffer_size_(0),
       write_pending_(false),
-      write_result_(0),
-      weak_factory_(this) {}
+      write_result_(0) {}
 
 ChannelMultiplexer::MuxSocket::~MuxSocket() {
   channel_->OnSocketDestroyed();
@@ -314,8 +313,7 @@ ChannelMultiplexer::ChannelMultiplexer(StreamChannelFactory* factory,
                                        const std::string& base_channel_name)
     : base_channel_factory_(factory),
       base_channel_name_(base_channel_name),
-      next_channel_id_(0),
-      weak_factory_(this) {}
+      next_channel_id_(0) {}
 
 ChannelMultiplexer::~ChannelMultiplexer() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -373,8 +371,8 @@ void ChannelMultiplexer::OnBaseChannelReady(
                                     base::Unretained(this)));
     writer_.Start(base::Bind(&P2PStreamSocket::Write,
                              base::Unretained(base_channel_.get())),
-                  base::Bind(&ChannelMultiplexer::OnBaseChannelError,
-                             base::Unretained(this)));
+                  base::BindOnce(&ChannelMultiplexer::OnBaseChannelError,
+                                 base::Unretained(this)));
   }
 
   DoCreatePendingChannels();

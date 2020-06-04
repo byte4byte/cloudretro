@@ -23,14 +23,13 @@ ThirdPartyClientAuthenticator::ThirdPartyClientAuthenticator(
     const FetchThirdPartyTokenCallback& fetch_token_callback)
     : ThirdPartyAuthenticatorBase(WAITING_MESSAGE),
       create_base_authenticator_callback_(create_base_authenticator_callback),
-      fetch_token_callback_(std::move(fetch_token_callback)),
-      weak_factory_(this) {}
+      fetch_token_callback_(std::move(fetch_token_callback)) {}
 
 ThirdPartyClientAuthenticator::~ThirdPartyClientAuthenticator() = default;
 
 void ThirdPartyClientAuthenticator::ProcessTokenMessage(
     const jingle_xmpp::XmlElement* message,
-    const base::Closure& resume_callback) {
+    base::OnceClosure resume_callback) {
   std::string token_url = message->TextNamed(kTokenUrlTag);
   std::string token_scope = message->TextNamed(kTokenScopeTag);
 
@@ -39,7 +38,7 @@ void ThirdPartyClientAuthenticator::ProcessTokenMessage(
         "missing token verification URL or scope.";
     token_state_ = REJECTED;
     rejection_reason_ = PROTOCOL_ERROR;
-    resume_callback.Run();
+    std::move(resume_callback).Run();
     return;
   }
 
@@ -48,7 +47,8 @@ void ThirdPartyClientAuthenticator::ProcessTokenMessage(
   fetch_token_callback_.Run(
       token_url, token_scope,
       base::Bind(&ThirdPartyClientAuthenticator::OnThirdPartyTokenFetched,
-                 weak_factory_.GetWeakPtr(), resume_callback));
+                 weak_factory_.GetWeakPtr(),
+                 base::Passed(std::move(resume_callback))));
 }
 
 void ThirdPartyClientAuthenticator::AddTokenElements(
@@ -63,7 +63,7 @@ void ThirdPartyClientAuthenticator::AddTokenElements(
 }
 
 void ThirdPartyClientAuthenticator::OnThirdPartyTokenFetched(
-    const base::Closure& resume_callback,
+    base::OnceClosure resume_callback,
     const std::string& third_party_token,
     const std::string& shared_secret) {
   token_ = third_party_token;
@@ -75,7 +75,7 @@ void ThirdPartyClientAuthenticator::OnThirdPartyTokenFetched(
     underlying_ =
         create_base_authenticator_callback_.Run(shared_secret, MESSAGE_READY);
   }
-  resume_callback.Run();
+  std::move(resume_callback).Run();
 }
 
 }  // namespace protocol

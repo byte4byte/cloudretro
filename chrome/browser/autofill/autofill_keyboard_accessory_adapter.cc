@@ -12,7 +12,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
-#include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #include "components/autofill/core/browser/ui/popup_item_ids.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
 
@@ -35,13 +34,8 @@ base::string16 CreateLabel(const Suggestion& suggestion) {
 }  // namespace
 
 AutofillKeyboardAccessoryAdapter::AutofillKeyboardAccessoryAdapter(
-    AutofillPopupController* controller,
-    unsigned int animation_duration_millis,
-    bool should_limit_label_width)
-    : controller_(controller),
-      animation_duration_millis_(animation_duration_millis),
-      should_limit_label_width_(should_limit_label_width),
-      weak_ptr_factory_(this) {}
+    base::WeakPtr<AutofillPopupController> controller)
+    : controller_(controller) {}
 
 AutofillKeyboardAccessoryAdapter::~AutofillKeyboardAccessoryAdapter() = default;
 
@@ -49,7 +43,6 @@ AutofillKeyboardAccessoryAdapter::~AutofillKeyboardAccessoryAdapter() = default;
 
 void AutofillKeyboardAccessoryAdapter::Show() {
   DCHECK(view_) << "Show called before a View was set!";
-  view_->Initialize(animation_duration_millis_, should_limit_label_width_);
   OnSuggestionsChanged();
 }
 
@@ -78,7 +71,7 @@ void AutofillKeyboardAccessoryAdapter::OnSuggestionsChanged() {
     DCHECK(!front_element_.has_value()) << "Additional front item at: " << i;
     front_element_ = base::Optional<int>(i);
     // If there is a special popup item, just reuse the previously used label.
-    labels_.push_back(controller_->GetElidedLabelAt(i));
+    labels_.push_back(controller_->GetSuggestionLabelAt(i));
   }
 
   view_->Show();
@@ -106,17 +99,22 @@ const autofill::Suggestion& AutofillKeyboardAccessoryAdapter::GetSuggestionAt(
   return controller_->GetSuggestionAt(OffsetIndexFor(row));
 }
 
-const base::string16& AutofillKeyboardAccessoryAdapter::GetElidedValueAt(
+const base::string16& AutofillKeyboardAccessoryAdapter::GetSuggestionValueAt(
     int row) const {
-  DCHECK(controller_) << "Call GetElidedValueAt only from its owner!";
-  return controller_->GetElidedValueAt(OffsetIndexFor(row));
+  DCHECK(controller_) << "Call GetSuggestionValueAt only from its owner!";
+  return controller_->GetSuggestionValueAt(OffsetIndexFor(row));
 }
 
-const base::string16& AutofillKeyboardAccessoryAdapter::GetElidedLabelAt(
+const base::string16& AutofillKeyboardAccessoryAdapter::GetSuggestionLabelAt(
     int row) const {
-  DCHECK(controller_) << "Call GetElidedLabelAt only from its owner!";
+  DCHECK(controller_) << "Call GetSuggestionLabelAt only from its owner!";
   DCHECK(static_cast<size_t>(row) < labels_.size());
   return labels_[OffsetIndexFor(row)];
+}
+
+PopupType AutofillKeyboardAccessoryAdapter::GetPopupType() const {
+  DCHECK(controller_) << "Call GetPopupType only from its owner!";
+  return controller_->GetPopupType();
 }
 
 bool AutofillKeyboardAccessoryAdapter::GetRemovalConfirmationText(
@@ -162,43 +160,27 @@ base::Optional<int> AutofillKeyboardAccessoryAdapter::selected_line() const {
   return base::nullopt;
 }
 
-const AutofillPopupLayoutModel& AutofillKeyboardAccessoryAdapter::layout_model()
-    const {
-  DCHECK(controller_) << "Call OnSuggestionsChanged only from its owner!";
-  return controller_->layout_model();
-}
-
 // AutofillPopupViewDelegate implementation
+
+void AutofillKeyboardAccessoryAdapter::Hide(PopupHidingReason reason) {
+  if (controller_)
+    controller_->Hide(reason);
+}
 
 void AutofillKeyboardAccessoryAdapter::ViewDestroyed() {
   if (controller_)
     controller_->ViewDestroyed();
 
   view_.reset();
-}
 
-void AutofillKeyboardAccessoryAdapter::SetSelectionAtPoint(
-    const gfx::Point& point) {
-  if (controller_)
-    controller_->SetSelectionAtPoint(point);
-}
-
-bool AutofillKeyboardAccessoryAdapter::AcceptSelectedLine() {
-  return controller_ && controller_->AcceptSelectedLine();
+  // The controller has now deleted itself.
+  controller_ = nullptr;
+  delete this;  // Remove dangling weak reference.
 }
 
 void AutofillKeyboardAccessoryAdapter::SelectionCleared() {
   if (controller_)
     controller_->SelectionCleared();
-}
-
-bool AutofillKeyboardAccessoryAdapter::HasSelection() const {
-  return controller_ && controller_->HasSelection();
-}
-
-gfx::Rect AutofillKeyboardAccessoryAdapter::popup_bounds() const {
-  DCHECK(controller_) << "Call OnSuggestionsChanged only from its owner!";
-  return controller_->popup_bounds();
 }
 
 gfx::NativeView AutofillKeyboardAccessoryAdapter::container_view() const {
@@ -215,11 +197,11 @@ bool AutofillKeyboardAccessoryAdapter::IsRTL() const {
   return controller_ && controller_->IsRTL();
 }
 
-const std::vector<autofill::Suggestion>
-AutofillKeyboardAccessoryAdapter::GetSuggestions() {
+std::vector<Suggestion> AutofillKeyboardAccessoryAdapter::GetSuggestions()
+    const {
   if (!controller_)
-    return std::vector<autofill::Suggestion>();
-  std::vector<autofill::Suggestion> suggestions = controller_->GetSuggestions();
+    return std::vector<Suggestion>();
+  std::vector<Suggestion> suggestions = controller_->GetSuggestions();
   if (front_element_.has_value()) {
     std::rotate(suggestions.begin(),
                 suggestions.begin() + front_element_.value(),

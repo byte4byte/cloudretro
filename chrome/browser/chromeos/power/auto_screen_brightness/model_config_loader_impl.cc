@@ -8,14 +8,16 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_value_converter.h"
-#include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -27,14 +29,15 @@ namespace auto_screen_brightness {
 
 namespace {
 
-// Reads string content from |model_params_path|, which should exist.
+// Reads string content from |model_params_path| if it exists.
 // This should run in another thread to be non-blocking to the main thread (if
 // |is_testing| is false).
 std::string LoadModelParamsFromDisk(const base::FilePath& model_params_path,
                                     bool is_testing) {
   DCHECK(is_testing ||
          !content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK(base::PathExists(model_params_path));
+  if (!base::PathExists(model_params_path))
+    return std::string();
 
   std::string content;
   if (!base::ReadFileToString(model_params_path, &content)) {
@@ -90,7 +93,7 @@ ModelConfigLoaderImpl::ModelConfigLoaderImpl()
     : ModelConfigLoaderImpl(
           base::FilePath(
               "/usr/share/chromeos-assets/autobrightness/model_params.json"),
-          base::CreateSequencedTaskRunnerWithTraits(
+          base::ThreadPool::CreateSequencedTaskRunner(
               {base::TaskPriority::USER_VISIBLE, base::MayBlock(),
                base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
           false /* is_testing */) {}
@@ -130,20 +133,12 @@ ModelConfigLoaderImpl::ModelConfigLoaderImpl(
     bool is_testing)
     : model_params_path_(model_params_path),
       blocking_task_runner_(blocking_task_runner),
-      is_testing_(is_testing),
-      weak_ptr_factory_(this) {
+      is_testing_(is_testing) {
   Init();
 }
 
 void ModelConfigLoaderImpl::Init() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  if (!base::PathExists(model_params_path_)) {
-    // Allow experiment flags to provide configs if there isn't any config from
-    // the disk.
-    InitFromParams();
-    return;
-  }
 
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(), FROM_HERE,

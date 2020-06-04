@@ -9,12 +9,14 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.view.ViewGroup;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.compositor.animation.CompositorAnimator;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelAnimation;
+import org.chromium.chrome.browser.contextualsearch.QuickActionCategory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
@@ -27,9 +29,6 @@ public class ContextualSearchBarControl {
 
     /** Transparent opacity -- completely transparent (not visible). */
     private static final float TRANSPARENT_OPACITY = 0.0f;
-
-    /** The opacity of the divider line when using the generic UX. */
-    private static final float DIVIDER_LINE_OPACITY_GENERIC = FULL_OPACITY;
 
     /**
      * The panel used to get information about the panel layout.
@@ -61,6 +60,9 @@ public class ContextualSearchBarControl {
      * returned by the server.
      */
     private final ContextualSearchCardIconControl mCardIconControl;
+
+    /** The width of our icon, including padding, in pixels. */
+    private final float mPaddedIconWidthPx;
 
     /**
      * The {@link ContextualSearchImageControl} for the panel.
@@ -165,11 +167,12 @@ public class ContextualSearchBarControl {
                 R.dimen.contextual_search_divider_line_height);
         mDividerLineColor = ApiCompatibilityUtils.getColor(
                 context.getResources(), R.color.contextual_search_divider_line_color);
-        int endButtonsWidthDimension =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)
-                ? R.dimen.contextual_search_end_buttons_width
-                : R.dimen.contextual_search_end_button_width;
-        mEndButtonWidth = context.getResources().getDimension(endButtonsWidthDimension);
+
+        // Icon attributes.
+        mPaddedIconWidthPx =
+                context.getResources().getDimension(R.dimen.contextual_search_padded_button_width);
+        mEndButtonWidth = mPaddedIconWidthPx
+                + context.getResources().getDimension(R.dimen.overlay_panel_button_padding);
         mDpToPx = context.getResources().getDisplayMetrics().density;
     }
 
@@ -232,11 +235,14 @@ public class ContextualSearchBarControl {
 
         // If there is a quick action, the divider line's appearance was animated when the quick
         // action was set.
-        if (!getQuickActionControl().hasQuickAction()) {
+        if (!getQuickActionControl().hasQuickAction()
+                && !ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
             mDividerLineVisibilityPercentage = percentage;
         }
         getImageControl().onUpdateFromPeekToExpand(percentage);
         mCaptionControl.onUpdateFromPeekToExpand(percentage);
+        mSearchTermControl.onUpdateFromPeekToExpand(percentage);
+        mContextControl.onUpdateFromPeekToExpand(percentage);
     }
 
     /**
@@ -357,8 +363,8 @@ public class ContextualSearchBarControl {
      * @param toolbarBackgroundColor The current toolbar background color. This may be used for
      *                               icon tinting.
      */
-    public void setQuickAction(
-            String quickActionUri, int quickActionCategory, int toolbarBackgroundColor) {
+    public void setQuickAction(String quickActionUri, @QuickActionCategory int quickActionCategory,
+            int toolbarBackgroundColor) {
         mQuickActionControl.setQuickAction(
                 quickActionUri, quickActionCategory, toolbarBackgroundColor);
         if (mQuickActionControl.hasQuickAction()) {
@@ -450,6 +456,8 @@ public class ContextualSearchBarControl {
      * @param visible Whether the divider line should be made visible.
      */
     private void animateDividerLine(boolean visible) {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) return;
+
         float endValue = visible ? FULL_OPACITY : TRANSPARENT_OPACITY;
         if (mDividerLineVisibilityPercentage == endValue) return;
         if (mDividerLineVisibilityAnimation != null) mDividerLineVisibilityAnimation.cancel();
@@ -480,6 +488,12 @@ public class ContextualSearchBarControl {
      */
     private boolean mWasDividerVisibleOnTouch;
 
+    /** Where the touch highlight should start, in pixels. */
+    private float mTouchHighlightXOffsetPx;
+
+    /** The width of the touch highlight, in pixels. */
+    private float mTouchHighlightWidthPx;
+
     /**
      * @return Whether the touch highlight is visible.
      */
@@ -491,6 +505,10 @@ public class ContextualSearchBarControl {
      * @return The x-offset of the touch highlight in pixels.
      */
     public float getTouchHighlightXOffsetPx() {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
+            return mTouchHighlightXOffsetPx;
+        }
+
         if (mWasDividerVisibleOnTouch
                 && ((mWasTouchOnEndButton && !LocalizationUtils.isLayoutRtl())
                 || (!mWasTouchOnEndButton && LocalizationUtils.isLayoutRtl()))) {
@@ -508,6 +526,10 @@ public class ContextualSearchBarControl {
      * @return The width of the touch highlight in pixels.
      */
     public float getTouchHighlightWidthPx() {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
+            return mTouchHighlightWidthPx;
+        }
+
         if (mWasDividerVisibleOnTouch) {
             // The touch was on the end button so the touch highlight should cover the end button.
             if (mWasTouchOnEndButton) return mEndButtonWidth;
@@ -525,19 +547,58 @@ public class ContextualSearchBarControl {
 
     /**
      * Should be called when the Bar is clicked.
-     * @param x The x-position of the click in px.
+     * @param xDps The x-position of the click in DPs.
      */
-    public void onSearchBarClick(float x) {
-        showTouchHighlight(x);
+    public void onSearchBarClick(float xDps) {
+        showTouchHighlight(xDps * mDpToPx);
     }
 
     /**
      * Should be called when an onShowPress() event occurs on the Bar.
-     * See {@link GestureDetector.SimpleOnGestureListener#onShowPress()}.
-     * @param x The x-position of the touch in px.
+     * See {@code GestureDetector.SimpleOnGestureListener#onShowPress()}.
+     * @param xDps The x-position of the touch in DPs.
      */
-    public void onShowPress(float x) {
-        showTouchHighlight(x);
+    public void onShowPress(float xDps) {
+        showTouchHighlight(xDps * mDpToPx);
+    }
+
+    /**
+     * Classifies the give x position in pixels and computes the highlight offset and width.
+     * @param xPx The x-coordinate of a touch location, in pixels.
+     */
+    private void classifyTouchLocation(float xPx) {
+        assert ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT);
+
+        // There are 3 cases:
+        // 1) The whole Bar (without any icons)
+        // 2) The Bar minus icon (when the icon is present)
+        // 3) The icon
+        int panelWidth = mContextualSearchPanel.getContentViewWidthPx();
+        if (mContextualSearchPanel.isPeeking()) {
+            // Case 1 - whole Bar.
+            mTouchHighlightXOffsetPx = 0;
+            mTouchHighlightWidthPx = panelWidth;
+        } else {
+            // The open-tab-icon is on the right (on the left in RTL).
+            boolean isRtl = LocalizationUtils.isLayoutRtl();
+            float paddedIconWithMarginWidth =
+                    (mContextualSearchPanel.getBarMarginSide()
+                            + mContextualSearchPanel.getOpenTabIconDimension()
+                            + mContextualSearchPanel.getButtonPaddingDps())
+                    * mDpToPx;
+            float contentWidth = panelWidth - paddedIconWithMarginWidth;
+            // Adjust the touch point to panel coordinates.
+            xPx -= mContextualSearchPanel.getOffsetX() * mDpToPx;
+            if (isRtl && xPx > paddedIconWithMarginWidth || !isRtl && xPx < contentWidth) {
+                // Case 2 - Bar minus icon.
+                mTouchHighlightXOffsetPx = isRtl ? paddedIconWithMarginWidth : 0;
+                mTouchHighlightWidthPx = contentWidth;
+            } else {
+                // Case 3 - the icon.
+                mTouchHighlightXOffsetPx = isRtl ? 0 : contentWidth;
+                mTouchHighlightWidthPx = paddedIconWithMarginWidth;
+            }
+        }
     }
 
     /**
@@ -550,17 +611,20 @@ public class ContextualSearchBarControl {
         mWasTouchOnEndButton = isTouchOnEndButton(x);
 
         // If the panel is expanded or maximized and the panel content cannot be promoted to a new
-        // tab, then tapping anywhere besides the end button does nothing. In this case, the touch
+        // tab, then tapping anywhere besides the end buttons does nothing. In this case, the touch
         // highlight should not be shown.
-        if (!mWasTouchOnEndButton && !mContextualSearchPanel.isPeeking() && !mCanPromoteToNewTab)
-            return;
+        if (!mContextualSearchPanel.isPeeking() && !mCanPromoteToNewTab) return;
 
-        mWasDividerVisibleOnTouch = getDividerLineVisibilityPercentage() > TRANSPARENT_OPACITY;
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.OVERLAY_NEW_LAYOUT)) {
+            classifyTouchLocation(x);
+        } else {
+            mWasDividerVisibleOnTouch = getDividerLineVisibilityPercentage() > TRANSPARENT_OPACITY;
+        }
         mTouchHighlightVisible = true;
 
         // The touch highlight animation is used to ensure the touch highlight is visible for at
         // least OverlayPanelAnimation.BASE_ANIMATION_DURATION_MS.
-        // TODO(twellington): Add a material ripple to this animation.
+        // TODO(donnd): Add a material ripple to this animation.
         if (mTouchHighlightAnimation == null) {
             mTouchHighlightAnimation =
                     new CompositorAnimator(mContextualSearchPanel.getAnimationHandler());
@@ -577,13 +641,15 @@ public class ContextualSearchBarControl {
     }
 
     /**
-     * @param x The x-position of the touch in px.
+     * @param xPx The x-position of the touch in px.
      * @return Whether the touch occurred on the search Bar's end button.
      */
-    private boolean isTouchOnEndButton(float x) {
+    private boolean isTouchOnEndButton(float xPx) {
         if (getDividerLineVisibilityPercentage() == TRANSPARENT_OPACITY) return false;
 
-        float xPx = x * mDpToPx;
+        // Adjust the touch position to compensate for the narrow panel.
+        xPx -= mContextualSearchPanel.getOffsetX() * mDpToPx;
+
         if (LocalizationUtils.isLayoutRtl()) return xPx <= getDividerLineXOffset();
         return xPx > getDividerLineXOffset();
     }

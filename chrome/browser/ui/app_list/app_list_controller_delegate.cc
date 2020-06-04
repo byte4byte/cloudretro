@@ -7,21 +7,21 @@
 #include <utility>
 
 #include "ash/public/cpp/app_list/app_list_switches.h"
-#include "base/bind.h"
-#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_list/extension_uninstaller.h"
-#include "chrome/browser/ui/apps/app_info_dialog.h"
-#include "chrome/browser/ui/ash/tablet_mode_client.h"
+#include "chrome/browser/ui/ash/tablet_mode_page_behavior.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/common/chrome_features.h"
+#include "chrome/browser/ui/webui/settings/chromeos/app_management/app_management_uma.h"
+#include "chrome/browser/web_applications/components/app_registrar.h"
+#include "chrome/browser/web_applications/components/web_app_utils.h"
+#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -52,8 +52,7 @@ const extensions::Extension* GetExtension(Profile* profile,
 
 }  // namespace
 
-AppListControllerDelegate::AppListControllerDelegate()
-    : weak_ptr_factory_(this) {}
+AppListControllerDelegate::AppListControllerDelegate() {}
 
 AppListControllerDelegate::~AppListControllerDelegate() {}
 
@@ -74,60 +73,42 @@ std::string AppListControllerDelegate::AppListSourceToString(
   }
 }
 
-bool AppListControllerDelegate::UserMayModifySettings(
-    Profile* profile,
-    const std::string& app_id) {
+bool AppListControllerDelegate::UninstallAllowed(Profile* profile,
+                                                 const std::string& app_id) {
   const extensions::Extension* extension = GetExtension(profile, app_id);
   const extensions::ManagementPolicy* policy =
       extensions::ExtensionSystem::Get(profile)->management_policy();
-  return extension && policy->UserMayModifySettings(extension, NULL);
+  return extension && policy->UserMayModifySettings(extension, nullptr) &&
+         !policy->MustRemainInstalled(extension, nullptr);
 }
 
-bool AppListControllerDelegate::CanDoShowAppInfoFlow() {
-  return CanShowAppInfoDialog();
-}
+void AppListControllerDelegate::DoShowAppInfoFlow(Profile* profile,
+                                                  const std::string& app_id) {
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfile(profile);
+  DCHECK(proxy);
+  DCHECK_NE(proxy->AppRegistryCache().GetAppType(app_id),
+            apps::mojom::AppType::kUnknown);
 
-void AppListControllerDelegate::DoShowAppInfoFlow(
-    Profile* profile,
-    const std::string& extension_id) {
-  DCHECK(CanDoShowAppInfoFlow());
-
-  const extensions::Extension* extension = GetExtension(profile, extension_id);
-  DCHECK(extension);
-
-  if (base::FeatureList::IsEnabled(features::kAppManagement)) {
-    chrome::ShowAppManagementPage(profile, extension_id);
-    return;
+  web_app::AppRegistrar& registrar =
+      web_app::WebAppProvider::Get(profile)->registrar();
+  if (registrar.IsInstalled(app_id)) {
+    chrome::ShowAppManagementPage(
+        profile, app_id,
+        AppManagementEntryPoint::kAppListContextMenuAppInfoWebApp);
+  } else {
+    chrome::ShowAppManagementPage(
+        profile, app_id,
+        AppManagementEntryPoint::kAppListContextMenuAppInfoChromeApp);
   }
-
-  if (extension->is_hosted_app() && extension->from_bookmark()) {
-    chrome::ShowSiteSettings(
-        profile, extensions::AppLaunchInfo::GetFullLaunchURL(extension));
-    return;
-  }
-
-  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialog.Launches",
-                            AppInfoLaunchSource::FROM_APP_LIST,
-                            AppInfoLaunchSource::NUM_LAUNCH_SOURCES);
-
-  // Since the AppListControllerDelegate is a leaky singleton, passing its raw
-  // pointer around is OK.
-  GetAppInfoDialogBounds(base::BindOnce(
-      [](base::WeakPtr<AppListControllerDelegate> self, Profile* profile,
-         const std::string& extension_id, const gfx::Rect& bounds) {
-        const extensions::Extension* extension =
-            GetExtension(profile, extension_id);
-        DCHECK(extension);
-        ShowAppInfoInAppList(bounds, profile, extension);
-      },
-      weak_ptr_factory_.GetWeakPtr(), profile, extension_id));
 }
 
 void AppListControllerDelegate::UninstallApp(Profile* profile,
                                              const std::string& app_id) {
-  // ExtensionUninstall deletes itself when done or aborted.
-  ExtensionUninstaller* uninstaller = new ExtensionUninstaller(profile, app_id);
-  uninstaller->Run();
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfile(profile);
+  DCHECK(proxy);
+  proxy->Uninstall(app_id, GetAppListWindow());
 }
 
 bool AppListControllerDelegate::IsAppFromWebStore(Profile* profile,

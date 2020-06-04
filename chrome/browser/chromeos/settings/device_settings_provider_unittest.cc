@@ -9,11 +9,13 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/path_service.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_path_override.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -44,14 +46,6 @@ using ::testing::Mock;
 namespace {
 
 const char kDisabledMessage[] = "This device has been disabled.";
-
-constexpr em::AutoUpdateSettingsProto_ConnectionType kConnectionTypes[] = {
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_ETHERNET,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIFI,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_WIMAX,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_BLUETOOTH,
-    em::AutoUpdateSettingsProto::CONNECTION_TYPE_CELLULAR,
-};
 
 }  // namespace
 
@@ -101,6 +95,8 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     proto->set_report_users(enable_reporting);
     proto->set_report_hardware_status(enable_reporting);
     proto->set_report_session_status(enable_reporting);
+    proto->set_report_graphics_status(enable_reporting);
+    proto->set_report_crash_report_info(enable_reporting);
     proto->set_report_os_update_status(enable_reporting);
     proto->set_report_running_kiosk_app(enable_reporting);
     proto->set_report_power_status(enable_reporting);
@@ -167,14 +163,23 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   void VerifyReportingSettings(bool expected_enable_state,
                                int expected_frequency) {
     const char* reporting_settings[] = {
-        kReportDeviceVersionInfo, kReportDeviceActivityTimes,
-        kReportDeviceBoardStatus, kReportDeviceBootMode,
+        kReportDeviceVersionInfo,
+        kReportDeviceActivityTimes,
+        kReportDeviceBoardStatus,
+        kReportDeviceBootMode,
         // Device location reporting is not currently supported.
         // kReportDeviceLocation,
-        kReportDeviceNetworkInterfaces, kReportDeviceUsers,
-        kReportDeviceHardwareStatus, kReportDevicePowerStatus,
-        kReportDeviceStorageStatus, kReportDeviceSessionStatus,
-        kReportOsUpdateStatus, kReportRunningKioskApp};
+        kReportDeviceNetworkInterfaces,
+        kReportDeviceUsers,
+        kReportDeviceHardwareStatus,
+        kReportDevicePowerStatus,
+        kReportDeviceStorageStatus,
+        kReportDeviceSessionStatus,
+        kReportDeviceGraphicsStatus,
+        kReportDeviceCrashReportInfo,
+        kReportOsUpdateStatus,
+        kReportRunningKioskApp,
+    };
 
     const base::Value expected_enable_value(expected_enable_state);
     for (auto* setting : reporting_settings) {
@@ -217,12 +222,13 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   }
 
   // Helper routine to set AutoUpdates connection types policy.
-  void SetAutoUpdateConnectionTypes(const std::vector<int>& values) {
+  void SetAutoUpdateConnectionTypes(
+      const std::vector<em::AutoUpdateSettingsProto::ConnectionType>& values) {
     em::AutoUpdateSettingsProto* proto =
         device_policy_->payload().mutable_auto_update_settings();
     proto->set_update_disabled(false);
     for (auto const& value : values) {
-      proto->add_allowed_connection_types(kConnectionTypes[value]);
+      proto->add_allowed_connection_types(value);
     }
     BuildAndInstallDevicePolicy();
   }
@@ -318,6 +324,23 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     BuildAndInstallDevicePolicy();
   }
 
+  // Helper routine to set DeviceLoginScreenSystemInfoEnforced policy.
+  void SetSystemInfoEnforced(bool enabled) {
+    em::BooleanPolicyProto* proto =
+        device_policy_->payload()
+            .mutable_device_login_screen_system_info_enforced();
+    proto->set_value(enabled);
+    BuildAndInstallDevicePolicy();
+  }
+
+  void SetShowNumericKeyboardForPassword(bool show_numeric_keyboard) {
+    em::BooleanPolicyProto* proto =
+        device_policy_->payload()
+            .mutable_device_show_numeric_keyboard_for_password();
+    proto->set_value(show_numeric_keyboard);
+    BuildAndInstallDevicePolicy();
+  }
+
   ScopedTestingLocalState local_state_;
 
   std::unique_ptr<DeviceSettingsProvider> provider_;
@@ -348,8 +371,10 @@ TEST_F(DeviceSettingsProviderTest, InitializationTest) {
 
   // Verify that the policy blob has been correctly parsed and trusted.
   // The trusted flag should be set before the call to PrepareTrustedValues.
+  base::OnceClosure closure = base::DoNothing();
   EXPECT_EQ(CrosSettingsProvider::TRUSTED,
-            provider_->PrepareTrustedValues(base::Closure()));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
   const base::Value* value = provider_->Get(kStatsReportingPref);
   ASSERT_TRUE(value);
   bool bool_value;
@@ -363,8 +388,10 @@ TEST_F(DeviceSettingsProviderTest, InitializationTestUnowned) {
   ReloadDeviceSettings();
 
   // The trusted flag should be set before the call to PrepareTrustedValues.
+  base::OnceClosure closure = base::DoNothing();
   EXPECT_EQ(CrosSettingsProvider::TRUSTED,
-            provider_->PrepareTrustedValues(base::Closure()));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
   const base::Value* value = provider_->Get(kReleaseChannel);
   ASSERT_TRUE(value);
   std::string string_value;
@@ -489,6 +516,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
+  base::HistogramTester histogram_tester;
   owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_->GetSigningKey());
   device_policy_->policy().set_policy_data_signature("bad signature");
   session_manager_client_.set_device_policy(device_policy_->GetBlob());
@@ -497,11 +525,19 @@ TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
   // Verify that the cached settings blob is not "trusted".
   EXPECT_EQ(DeviceSettingsService::STORE_VALIDATION_ERROR,
             device_settings_service_->status());
+  base::OnceClosure closure = base::DoNothing();
   EXPECT_EQ(CrosSettingsProvider::PERMANENTLY_UNTRUSTED,
-            provider_->PrepareTrustedValues(base::Closure()));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
+  histogram_tester.ExpectUniqueSample(
+      "Enterprise.DeviceSettings.UpdatedStatus",
+      DeviceSettingsService::STORE_VALIDATION_ERROR, /*amount=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DeviceSettings.MissingPolicyMitigated", 0);
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicy) {
+  base::HistogramTester histogram_tester;
   owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_->GetSigningKey());
   session_manager_client_.set_device_policy(std::string());
   ReloadDeviceSettings();
@@ -509,36 +545,83 @@ TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicy) {
   // Verify that the cached settings blob is not "trusted".
   EXPECT_EQ(DeviceSettingsService::STORE_NO_POLICY,
             device_settings_service_->status());
+  base::OnceClosure closure = base::DoNothing();
   EXPECT_EQ(CrosSettingsProvider::PERMANENTLY_UNTRUSTED,
-            provider_->PrepareTrustedValues(base::Closure()));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
+  histogram_tester.ExpectUniqueSample("Enterprise.DeviceSettings.UpdatedStatus",
+                                      DeviceSettingsService::STORE_NO_POLICY,
+                                      /*amount=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DeviceSettings.MissingPolicyMitigated", 0);
+}
+
+TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicyMitigated) {
+  base::HistogramTester histogram_tester;
+  profile_->ScopedCrosSettingsTestHelper()
+      ->InstallAttributes()
+      ->SetConsumerOwned();
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_->GetSigningKey());
+  session_manager_client_.set_device_policy(std::string());
+  ReloadDeviceSettings();
+
+  // Verify that the cached settings blob is not "trusted".
+  EXPECT_EQ(DeviceSettingsService::STORE_NO_POLICY,
+            device_settings_service_->status());
+  base::OnceClosure closure = base::DoNothing();
+  EXPECT_EQ(CrosSettingsProvider::TRUSTED,
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
+  histogram_tester.ExpectUniqueSample("Enterprise.DeviceSettings.UpdatedStatus",
+                                      DeviceSettingsService::STORE_NO_POLICY,
+                                      /*amount=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DeviceSettings.MissingPolicyMitigated", 1);
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyFailedPermanentlyNotification) {
+  base::HistogramTester histogram_tester;
   session_manager_client_.set_device_policy(std::string());
+
+  base::OnceClosure closure = base::BindOnce(
+      &DeviceSettingsProviderTest::GetTrustedCallback, base::Unretained(this));
 
   EXPECT_CALL(*this, GetTrustedCallback());
   EXPECT_EQ(CrosSettingsProvider::TEMPORARILY_UNTRUSTED,
-            provider_->PrepareTrustedValues(
-                base::Bind(&DeviceSettingsProviderTest::GetTrustedCallback,
-                           base::Unretained(this))));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_FALSE(closure);  // Ownership of |closure| was taken.
 
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(this);
 
+  closure = base::DoNothing::Once();
   EXPECT_EQ(CrosSettingsProvider::PERMANENTLY_UNTRUSTED,
-            provider_->PrepareTrustedValues(base::Closure()));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_TRUE(closure);  // Ownership of |closure| was not taken.
+  histogram_tester.ExpectUniqueSample("Enterprise.DeviceSettings.UpdatedStatus",
+                                      DeviceSettingsService::STORE_NO_POLICY,
+                                      /*amount=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DeviceSettings.MissingPolicyMitigated", 0);
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyLoadNotification) {
+  base::HistogramTester histogram_tester;
   EXPECT_CALL(*this, GetTrustedCallback());
 
+  base::OnceClosure closure = base::BindOnce(
+      &DeviceSettingsProviderTest::GetTrustedCallback, base::Unretained(this));
   EXPECT_EQ(CrosSettingsProvider::TEMPORARILY_UNTRUSTED,
-            provider_->PrepareTrustedValues(
-                base::Bind(&DeviceSettingsProviderTest::GetTrustedCallback,
-                           base::Unretained(this))));
+            provider_->PrepareTrustedValues(&closure));
+  EXPECT_FALSE(closure);  // Ownership of |closure| was taken.
 
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(this);
+  histogram_tester.ExpectUniqueSample("Enterprise.DeviceSettings.UpdatedStatus",
+                                      DeviceSettingsService::STORE_SUCCESS,
+                                      /*amount=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DeviceSettings.MissingPolicyMitigated", 0);
 }
 
 TEST_F(DeviceSettingsProviderTest, LegacyDeviceLocalAccounts) {
@@ -631,11 +714,12 @@ TEST_F(DeviceSettingsProviderTest, EmptyAllowedConnectionTypesForUpdate) {
   VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
 
   // In case of empty list policy should not be set.
-  const std::vector<int> no_values = {};
+  const std::vector<em::AutoUpdateSettingsProto::ConnectionType> no_values = {};
   SetAutoUpdateConnectionTypes(no_values);
   VerifyPolicyValue(kAllowedConnectionTypesForUpdate, nullptr);
 
-  const std::vector<int> single_value = {0};
+  const std::vector<em::AutoUpdateSettingsProto::ConnectionType> single_value =
+      {em::AutoUpdateSettingsProto::CONNECTION_TYPE_ETHERNET};
   // Check some meaningful value. Policy should be set.
   SetAutoUpdateConnectionTypes(single_value);
   base::ListValue allowed_connections;
@@ -721,7 +805,7 @@ TEST_F(DeviceSettingsProviderTest, DeviceAutoUpdateTimeRestrictionsExtra) {
   interval.SetPath({"end", "day_of_week"}, base::Value("Wednesday"));
   interval.SetPath({"end", "hours"}, base::Value(1));
   interval.SetPath({"end", "minutes"}, base::Value(20));
-  test_list.GetList().push_back(std::move(interval));
+  test_list.Append(std::move(interval));
   SetDeviceAutoUpdateTimeRestrictions(extra_field);
   VerifyPolicyValue(kDeviceAutoUpdateTimeRestrictions, &test_list);
 }
@@ -775,6 +859,12 @@ TEST_F(DeviceSettingsProviderTest, DeviceRebootAfterUserSignout) {
   {
     SetDeviceRebootOnUserSignout(PolicyProto::ALWAYS);
     base::Value expected_value(PolicyProto::ALWAYS);
+    VerifyPolicyValue(kDeviceRebootOnUserSignout, &expected_value);
+  }
+
+  {
+    SetDeviceRebootOnUserSignout(PolicyProto::VM_STARTED_OR_ARC_SESSION);
+    base::Value expected_value(PolicyProto::VM_STARTED_OR_ARC_SESSION);
     VerifyPolicyValue(kDeviceRebootOnUserSignout, &expected_value);
   }
 }
@@ -833,14 +923,41 @@ TEST_F(DeviceSettingsProviderTest,
 }
 
 TEST_F(DeviceSettingsProviderTest, DevicePowerwashAllowed) {
-  // Policy should not be set by default
-  VerifyPolicyValue(kDevicePowerwashAllowed, nullptr);
+  // Policy should be set to true by default
+  base::Value default_value(true);
+  VerifyPolicyValue(kDevicePowerwashAllowed, &default_value);
 
   SetDevicePowerwashAllowed(true);
   EXPECT_EQ(base::Value(true), *provider_->Get(kDevicePowerwashAllowed));
 
   SetDevicePowerwashAllowed(false);
   EXPECT_EQ(base::Value(false), *provider_->Get(kDevicePowerwashAllowed));
+}
+
+TEST_F(DeviceSettingsProviderTest, DeviceLoginScreenSystemInfoEnforced) {
+  // Policy should not be set by default
+  VerifyPolicyValue(kDeviceLoginScreenSystemInfoEnforced, nullptr);
+
+  SetSystemInfoEnforced(true);
+  EXPECT_EQ(base::Value(true),
+            *provider_->Get(kDeviceLoginScreenSystemInfoEnforced));
+
+  SetSystemInfoEnforced(false);
+  EXPECT_EQ(base::Value(false),
+            *provider_->Get(kDeviceLoginScreenSystemInfoEnforced));
+}
+
+TEST_F(DeviceSettingsProviderTest, DeviceShowNumericKeyboardForPassword) {
+  // Policy should not be set by default
+  VerifyPolicyValue(kDeviceShowNumericKeyboardForPassword, nullptr);
+
+  SetShowNumericKeyboardForPassword(true);
+  EXPECT_EQ(base::Value(true),
+            *provider_->Get(kDeviceShowNumericKeyboardForPassword));
+
+  SetShowNumericKeyboardForPassword(false);
+  EXPECT_EQ(base::Value(false),
+            *provider_->Get(kDeviceShowNumericKeyboardForPassword));
 }
 
 }  // namespace chromeos

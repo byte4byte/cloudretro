@@ -17,15 +17,20 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
+#include "chrome/browser/web_applications/components/app_shortcut_manager.h"
+#include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/browser/web_applications/components/web_app_provider_base.h"
+#include "chrome/browser/web_applications/test/test_web_app_ui_manager.h"
+#include "chrome/browser/web_applications/test/web_app_test.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/api/management/management_api.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/test_management_policy.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
@@ -33,6 +38,7 @@
 
 using extensions::Extension;
 using extensions::Manifest;
+using web_app::ProviderType;
 
 namespace {
 
@@ -146,10 +152,37 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, CreateAppShortcut) {
                                   "createAppShortcut.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, GenerateAppForLink) {
+class GenerateAppManagementApiTest
+    : public ExtensionManagementApiTest,
+      public ::testing::WithParamInterface<ProviderType> {
+ public:
+  void SetUp() override {
+    if (GetParam() == ProviderType::kWebApps) {
+      scoped_feature_list_.InitWithFeatures(
+          {features::kDesktopPWAsWithoutExtensions}, {});
+    } else {
+      DCHECK_EQ(GetParam(), ProviderType::kBookmarkApps);
+      scoped_feature_list_.InitWithFeatures(
+          {}, {features::kDesktopPWAsWithoutExtensions});
+    }
+
+    ExtensionManagementApiTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(GenerateAppManagementApiTest, GenerateAppForLink) {
   ASSERT_TRUE(RunExtensionSubtest("management/test",
                                   "generateAppForLink.html"));
 }
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         GenerateAppManagementApiTest,
+                         ::testing::Values(ProviderType::kBookmarkApps,
+                                           ProviderType::kWebApps),
+                         web_app::ProviderTypeParamToString);
 
 class InstallReplacementWebAppApiTest : public ExtensionManagementApiTest {
  public:
@@ -158,98 +191,100 @@ class InstallReplacementWebAppApiTest : public ExtensionManagementApiTest {
   ~InstallReplacementWebAppApiTest() override = default;
 
  protected:
+  static const char kManifest[];
+  static const char kAppManifest[];
+
   void SetUpOnMainThread() override {
     ExtensionManagementApiTest::SetUpOnMainThread();
     https_test_server_.ServeFilesFromDirectory(test_data_dir_);
     ASSERT_TRUE(https_test_server_.Start());
+
+    web_app::WebAppProviderBase::GetProviderBase(profile())
+        ->shortcut_manager()
+        .SuppressShortcutsForTesting();
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    ExtensionManagementApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(
-        extensions::switches::kWhitelistedExtensionID,
-        "odfeghegfpmohakomgihhcnoboeecemb");
-  }
-
-  void RunTest(const char* web_app_path,
+  void RunTest(const char* manifest,
+               const char* web_app_path,
                const char* background_script,
-               bool from_webstore,
-               bool whitelisted) {
-    static constexpr char kManifest[] =
-        R"({
-            "name": "Management API Test",
-            "version": "0.1",
-            "manifest_version": 2,
-            "background": { "scripts": ["background.js"] },
-            "replacement_web_app": "%s"
-          })";
-
-    static constexpr char kPem[] =
-        "-----BEGIN PRIVATE KEY-----"
-        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCs5ycnzJEUSwlN"
-        "U7yAuywl8vro4dXew7Eijdd+gYwHAtaQyKxpeJHy09eusWKTfHEaOdqfqssqPMnl"
-        "XqoC+Tyt/24xM6rw6uSyAV78DRSAl7AxiyemxTh5P2rzaN4ytJayLpZDzwi38zeZ"
-        "QJC4TcSk04bclB2zfLFmMe8W53oxdE8vV6Xa2TPFigR6PV0FcRE40cCPHFhRTDwz"
-        "C04b/qW30Ceix2AeLPT4+qsGroq5kLt7zTgvaA+QToKeZNX41snk1w2u/IhOXG+J"
-        "0jyZnFU1lgnA9ScMW0laA+Ba2WXB5tLPgyRyyABRRaT5oiJCxRLQc+HFnMdUftGK"
-        "D4MKnf+/AgMBAAECggEADJ+/8x7zhMjJwBSaEcgYvBiWi0RZ6i7dkwlKL5lj0Os7"
-        "IU0VkYnVFiaze7TF3sDaPTD2Lmw48zeHAjE8NoVeEdIxiHQeSgLMedaxybNmyNDK"
-        "c4OWfI2vxuKDe4wvlQIscowGOqM2HsAqUg0tw9chwWsUUKyb0owLI8wHieOSv2OA"
-        "w8UlhflqkXLBUc4Mx3iqkIwAyrxQXT/vlA0M8/QvikK/zfeZYZ4f8tg23m3T0fV3"
-        "HC4k/Q09MFyUvURVYNpbPHrL83/ZbaHBniEjy+qBX4POO4xrKhow77tr/znB8bsA"
-        "T3mRwrEnYoIZmkwxlAdOMNxSYcAKZh4jPWOut0VQ0QKBgQDk341ysCaNzRq7nscR"
-        "RzDtpAA+UPcS2vcssXKDRjhsTp31qsUsVsYjTX+O/sv2uyb4HikYiFZOe3iPIfOl"
-        "ni7ZfhYFMMIZFjjP0cjQ7C/+ArxGb96DcTbRf7SNTDOLTtZy1jZSgIRek+2vvcr1"
-        "a/xPUMCxLEZdUPu+AVhKYHKHOQKBgQDBZVr04r4s5/BygRR3NhFgquI8ffdPHZzC"
-        "riEO1X/YOucTs+F+qwTvr25kRozpEjFsZJUibJTDngX9OziatAQdnjt5CtabOXd/"
-        "1rSgUadWEvRrcy/aaouCE1J+1unX6Kk5RHmIsK1YP3wC6JrHmqfnEVq9kaoUubTC"
-        "WHZfgjQGtwKBgF3B0nD8Bh8quVvIlGXYkwuWll7wzfYUaxMM8gsi1fRQVFcSCMm8"
-        "FljZ43pRmH5PdoxH1q/tEeX+oImJ8ASVgz2ncB/aNHkQaF+B4dDsIFDfD/+Ozkls"
-        "NHen5+/GGotj1WefpwsvCIqx8LmAd0cIYIihXP53U6/gf+/7Hw8A6YnJAoGAEbhs"
-        "xiWEkW7LLGLBck7k9ruRsUNFht1KwNfdtZNAfJqhE8AWuFmJQUEM12lTfgOpvanV"
-        "tGrIksgG+nYTsLEv81rNTkD8+wof9fnBYTM6Jvvjo3jReKzsjYWhuHeOw7bQ0quA"
-        "i1LM/1oJzeZsUD/OhLClZNtU/0Mo2enrJsMyay8CgYEApCQ8BDMYewQj2MCM92Vw"
-        "DWDzqQpfaGIG/eDAeEtdicbfdih3zUWfhEVOpnvf7s7nS8bMVpAo9pGW6sT/s8eX"
-        "POGiP9efxb2uHsX06pkAYZm9nddIliWnm0/eDBmSSXPymAZaNYFrex4wxMII20K/"
-        "ZX1nuseC+Lx0yzxa/c+iCWg="
-        "-----END PRIVATE KEY-----";
-
+               bool from_webstore) {
     extensions::TestExtensionDir extension_dir;
     extension_dir.WriteManifest(base::StringPrintf(
-        kManifest, https_test_server_.GetURL(web_app_path).spec().c_str()));
+        manifest, https_test_server_.GetURL(web_app_path).spec().c_str()));
     extension_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
                             background_script);
-
-    base::FilePath crx;
-    if (whitelisted)
-      crx = extension_dir.PackWithPem(kPem);
-    else
-      crx = extension_dir.Pack();
-
     extensions::ResultCatcher catcher;
     if (from_webstore) {
       // |expected_change| is the expected change in the number of installed
       // extensions.
-      ASSERT_TRUE(InstallExtensionFromWebstore(crx, 1 /* expected_change */));
+      ASSERT_TRUE(InstallExtensionFromWebstore(extension_dir.UnpackedPath(),
+                                               1 /* expected_change */));
     } else {
-      ASSERT_TRUE(LoadExtension(crx));
+      ASSERT_TRUE(LoadExtension(extension_dir.UnpackedPath()));
     }
 
     ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
   }
 
+  void RunInstallableWebAppTest(const char* manifest,
+                                const char* web_app_url,
+                                const char* web_app_start_url) {
+    static constexpr char kInstallReplacementWebApp[] =
+        R"(chrome.test.runWithUserGesture(function() {
+             chrome.management.installReplacementWebApp(function() {
+               chrome.test.assertNoLastError();
+               chrome.test.notifyPass();
+             });
+           });)";
+
+    chrome::SetAutoAcceptPWAInstallConfirmationForTesting(true);
+    const GURL start_url = https_test_server_.GetURL(web_app_start_url);
+    web_app::AppId web_app_id = web_app::GenerateAppIdFromURL(start_url);
+
+    auto* provider =
+        web_app::WebAppProviderBase::GetProviderBase(browser()->profile());
+    EXPECT_FALSE(provider->registrar().IsLocallyInstalled(start_url));
+    EXPECT_EQ(0, static_cast<int>(
+                     provider->ui_manager().GetNumWindowsForApp(web_app_id)));
+
+    RunTest(manifest, web_app_url, kInstallReplacementWebApp,
+            true /* from_webstore */);
+    EXPECT_TRUE(provider->registrar().IsLocallyInstalled(start_url));
+    EXPECT_EQ(1, static_cast<int>(
+                     provider->ui_manager().GetNumWindowsForApp(web_app_id)));
+
+    // Call API again. It should launch the app.
+    RunTest(manifest, web_app_url, kInstallReplacementWebApp,
+            true /* from_webstore */);
+    EXPECT_TRUE(provider->registrar().IsLocallyInstalled(start_url));
+    EXPECT_EQ(2, static_cast<int>(
+                     provider->ui_manager().GetNumWindowsForApp(web_app_id)));
+
+    chrome::SetAutoAcceptPWAInstallConfirmationForTesting(false);
+  }
+
   net::EmbeddedTestServer https_test_server_;
 };
 
-IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NotWhitelisted) {
-  static constexpr char kBackground[] = R"(
-    chrome.test.assertEq(undefined, chrome.management.installReplacementWebApp);
-    chrome.test.notifyPass();
-  )";
+const char InstallReplacementWebAppApiTest::kManifest[] =
+    R"({
+          "name": "Management API Test",
+          "version": "0.1",
+          "manifest_version": 2,
+          "background": { "scripts": ["background.js"] },
+          "replacement_web_app": "%s"
+        })";
 
-  RunTest("/management/install_replacement_web_app/good_web_app/index.html",
-          kBackground, true /* from_webstore */, false /* whitelisted */);
-}
+const char InstallReplacementWebAppApiTest::kAppManifest[] =
+    R"({
+          "name": "Management API Test",
+          "version": "0.1",
+          "manifest_version": 2,
+          "app": {
+            "background": { "scripts": ["background.js"] }
+          },
+          "replacement_web_app": "%s"
+        })";
 
 IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NotWebstore) {
   static constexpr char kBackground[] = R"(
@@ -259,8 +294,9 @@ IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NotWebstore) {
     chrome.test.notifyPass();
   });)";
 
-  RunTest("/management/install_replacement_web_app/good_web_app/index.html",
-          kBackground, false /* from_webstore */, true /* whitelisted */);
+  RunTest(kManifest,
+          "/management/install_replacement_web_app/good_web_app/index.html",
+          kBackground, false /* from_webstore */);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NoGesture) {
@@ -271,8 +307,9 @@ IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NoGesture) {
     chrome.test.notifyPass();
   });)";
 
-  RunTest("/management/install_replacement_web_app/good_web_app/index.html",
-          kBackground, true /* from_webstore */, true /* whitelisted */);
+  RunTest(kManifest,
+          "/management/install_replacement_web_app/good_web_app/index.html",
+          kBackground, true /* from_webstore */);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NotInstallableWebApp) {
@@ -285,64 +322,49 @@ IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, NotInstallableWebApp) {
            });
          });)";
 
-  RunTest("/management/install_replacement_web_app/bad_web_app/index.html",
-          kBackground, true /* from_webstore */, true /* whitelisted */);
+  RunTest(kManifest,
+          "/management/install_replacement_web_app/bad_web_app/index.html",
+          kBackground, true /* from_webstore */);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest, InstallableWebApp) {
-  static constexpr char kBackground[] =
-      R"(chrome.test.runTests([
-           function runInstall() {
-             chrome.test.runWithUserGesture(function() {
-               chrome.management.installReplacementWebApp(function() {
-                 chrome.test.assertNoLastError();
-                 chrome.test.succeed();
-               });
-             });
-           },
-           function runInstallWhenAlreadyInstalled() {
-             chrome.test.runWithUserGesture(function() {
-               chrome.management.installReplacementWebApp(function() {
-                 chrome.test.assertLastError(
-                     'Web app is already installed.');
-                 chrome.test.succeed();
-               });
-             });
-           }
-         ]);)";
   static constexpr char kGoodWebAppURL[] =
       "/management/install_replacement_web_app/good_web_app/index.html";
 
-  chrome::SetAutoAcceptPWAInstallConfirmationForTesting(true);
-  const GURL good_web_app_url = https_test_server_.GetURL(kGoodWebAppURL);
-
-  auto* provider =
-      web_app::WebAppProviderBase::GetProviderBase(browser()->profile());
-  EXPECT_FALSE(provider->registrar().IsInstalled(good_web_app_url));
-
-  RunTest(kGoodWebAppURL, kBackground, true /* from_webstore */,
-          true /* whitelisted */);
-  EXPECT_TRUE(provider->registrar().IsInstalled(good_web_app_url));
-  chrome::SetAutoAcceptPWAInstallConfirmationForTesting(false);
+  RunInstallableWebAppTest(kManifest, kGoodWebAppURL, kGoodWebAppURL);
 }
 
-// Fails often on Windows dbg bots. http://crbug.com/177163
-#if defined(OS_WIN)
-#define MAYBE_ManagementPolicyAllowed DISABLED_ManagementPolicyAllowed
-#else
-#define MAYBE_ManagementPolicyAllowed ManagementPolicyAllowed
-#endif  // defined(OS_WIN)
+// Check that web app still installs and launches correctly when start_url does
+// not match replacement_web_app_url.
+IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest,
+                       InstallableWebAppWithStartUrl) {
+  static constexpr char kGoodWebAppUrl[] =
+      "/management/install_replacement_web_app/good_web_app_with_start_url/"
+      "index.html";
+  static constexpr char kGoodWebAppStartUrl[] =
+      "/management/install_replacement_web_app/good_web_app_with_start_url/"
+      "pwa_start_url.html";
+
+  RunInstallableWebAppTest(kManifest, kGoodWebAppUrl, kGoodWebAppStartUrl);
+}
+
+IN_PROC_BROWSER_TEST_F(InstallReplacementWebAppApiTest,
+                       InstallableWebAppInPlatformApp) {
+  static constexpr char kGoodWebAppURL[] =
+      "/management/install_replacement_web_app/good_web_app/index.html";
+
+  RunInstallableWebAppTest(kAppManifest, kGoodWebAppURL, kGoodWebAppURL);
+}
+
 // Tests actions on extensions when no management policy is in place.
-IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest,
-                       MAYBE_ManagementPolicyAllowed) {
+IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, ManagementPolicyAllowed) {
   LoadExtensions();
   extensions::ScopedTestDialogAutoConfirm auto_confirm(
       extensions::ScopedTestDialogAutoConfirm::ACCEPT);
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(browser()->profile())
-          ->extension_service();
-  EXPECT_TRUE(service->GetExtensionById(extension_ids_["enabled_extension"],
-                                        false));
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
+  EXPECT_TRUE(registry->enabled_extensions().GetByID(
+      extension_ids_["enabled_extension"]));
 
   // Ensure that all actions are allowed.
   extensions::ExtensionSystem::Get(
@@ -351,42 +373,33 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest,
   ASSERT_TRUE(RunExtensionSubtest("management/management_policy",
                                   "allowed.html"));
   // The last thing the test does is uninstall the "enabled_extension".
-  EXPECT_FALSE(service->GetExtensionById(extension_ids_["enabled_extension"],
-                                         true));
+  EXPECT_FALSE(
+      registry->GetExtensionById(extension_ids_["enabled_extension"],
+                                 extensions::ExtensionRegistry::EVERYTHING));
 }
 
-// Fails often on Windows dbg bots. http://crbug.com/177163
-#if defined(OS_WIN)
-#define MAYBE_ManagementPolicyProhibited DISABLED_ManagementPolicyProhibited
-#else
-#define MAYBE_ManagementPolicyProhibited ManagementPolicyProhibited
-#endif  // defined(OS_WIN)
 // Tests actions on extensions when management policy prohibits those actions.
-IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest,
-                       MAYBE_ManagementPolicyProhibited) {
+IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, ManagementPolicyProhibited) {
   LoadExtensions();
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(browser()->profile())
-          ->extension_service();
-  EXPECT_TRUE(service->GetExtensionById(extension_ids_["enabled_extension"],
-                                        false));
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
+  EXPECT_TRUE(registry->enabled_extensions().GetByID(
+      extension_ids_["enabled_extension"]));
 
   // Prohibit status changes.
   extensions::ManagementPolicy* policy = extensions::ExtensionSystem::Get(
       browser()->profile())->management_policy();
   policy->UnregisterAllProviders();
   extensions::TestManagementPolicyProvider provider(
-    extensions::TestManagementPolicyProvider::PROHIBIT_MODIFY_STATUS);
+      extensions::TestManagementPolicyProvider::PROHIBIT_MODIFY_STATUS |
+      extensions::TestManagementPolicyProvider::MUST_REMAIN_ENABLED |
+      extensions::TestManagementPolicyProvider::MUST_REMAIN_INSTALLED);
   policy->RegisterProvider(&provider);
   ASSERT_TRUE(RunExtensionSubtest("management/management_policy",
                                   "prohibited.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchPanelApp) {
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(browser()->profile())
-          ->extension_service();
-
   // Load an extension that calls launchApp() on any app that gets
   // installed.
   ExtensionTestMessageListener launcher_loaded("launcher loaded", false);
@@ -402,16 +415,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchPanelApp) {
   // Find the app's browser.  Check that it is a popup.
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
   Browser* app_browser = FindOtherBrowser(browser());
-  ASSERT_TRUE(app_browser->is_type_popup());
-  ASSERT_TRUE(app_browser->is_app());
+  ASSERT_TRUE(app_browser->is_type_app());
 
   // Close the app panel.
   CloseBrowserSynchronously(app_browser);
 
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
   // Unload the extension.
   UninstallExtension(app_id);
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
-  ASSERT_FALSE(service->GetExtensionById(app_id, true));
+  ASSERT_FALSE(registry->GetExtensionById(
+      app_id, extensions::ExtensionRegistry::EVERYTHING));
 
   // Set a pref indicating that the user wants to launch in a regular tab.
   // This should be ignored, because panel apps always load in a popup.
@@ -430,8 +445,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchPanelApp) {
   // prefs, so we should still see the launch in a popup.
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
   app_browser = FindOtherBrowser(browser());
-  ASSERT_TRUE(app_browser->is_type_popup());
-  ASSERT_TRUE(app_browser->is_app());
+  ASSERT_TRUE(app_browser->is_type_app());
 }
 
 // Disabled: crbug.com/230165, crbug.com/915339, crbug.com/979399
@@ -443,10 +457,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchPanelApp) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, MAYBE_LaunchTabApp) {
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(browser()->profile())
-          ->extension_service();
-
   // Load an extension that calls launchApp() on any app that gets
   // installed.
   ExtensionTestMessageListener launcher_loaded("launcher loaded", false);
@@ -468,10 +478,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, MAYBE_LaunchTabApp) {
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
 
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
   // Unload the extension.
   UninstallExtension(app_id);
   ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
-  ASSERT_FALSE(service->GetExtensionById(app_id, true));
+  ASSERT_FALSE(registry->GetExtensionById(
+      app_id, extensions::ExtensionRegistry::EVERYTHING));
 
   // Set a pref indicating that the user wants to launch in a window.
   extensions::SetLaunchType(browser()->profile(), app_id,
@@ -488,7 +501,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, MAYBE_LaunchTabApp) {
   // a new browser.
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
   Browser* app_browser = FindOtherBrowser(browser());
-  ASSERT_TRUE(app_browser->is_app());
+  ASSERT_TRUE(app_browser->is_type_app());
 }
 
 // Flaky on MacOS: crbug.com/915339

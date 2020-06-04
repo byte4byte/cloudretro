@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/app_list/internal_app/internal_app_context_menu.h"
 
 #include "ash/public/cpp/app_menu_constants.h"
+#include "chrome/browser/apps/app_service/app_service_metrics.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_manager.h"
 #include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/ui/app_list/internal_app/internal_app_metadata.h"
@@ -19,9 +20,9 @@ InternalAppContextMenu::InternalAppContextMenu(
 InternalAppContextMenu::~InternalAppContextMenu() = default;
 
 bool InternalAppContextMenu::IsCommandIdEnabled(int command_id) const {
-  if (command_id == ash::STOP_APP) {
+  if (command_id == ash::SHUTDOWN_GUEST_OS) {
     DCHECK_EQ(app_list::FindInternalApp(app_id())->internal_app_name,
-              app_list::InternalAppName::kPluginVm);
+              apps::BuiltInAppName::kPluginVm);
     return plugin_vm::IsPluginVmRunning(profile());
   }
   return app_list::AppContextMenu::IsCommandIdEnabled(command_id);
@@ -29,10 +30,11 @@ bool InternalAppContextMenu::IsCommandIdEnabled(int command_id) const {
 
 void InternalAppContextMenu::ExecuteCommand(int command_id, int event_flags) {
   switch (command_id) {
-    case ash::STOP_APP:
+    case ash::SHUTDOWN_GUEST_OS:
       DCHECK_EQ(app_list::FindInternalApp(app_id())->internal_app_name,
-                app_list::InternalAppName::kPluginVm);
-      plugin_vm::PluginVmManager::GetForProfile(profile())->StopPluginVm();
+                apps::BuiltInAppName::kPluginVm);
+      plugin_vm::PluginVmManager::GetForProfile(profile())->StopPluginVm(
+          plugin_vm::kPluginVmName, /*force=*/false);
       return;
   }
   app_list::AppContextMenu::ExecuteCommand(command_id, event_flags);
@@ -43,8 +45,8 @@ void InternalAppContextMenu::BuildMenu(ui::SimpleMenuModel* menu_model) {
 
   const auto* internal_app = app_list::FindInternalApp(app_id());
   DCHECK(internal_app);
-  if (internal_app->internal_app_name == app_list::InternalAppName::kPluginVm) {
-    AddContextMenuOption(menu_model, ash::STOP_APP,
+  if (internal_app->internal_app_name == apps::BuiltInAppName::kPluginVm) {
+    AddContextMenuOption(menu_model, ash::SHUTDOWN_GUEST_OS,
                          IDS_PLUGIN_VM_SHUT_DOWN_MENU_ITEM);
   }
 }

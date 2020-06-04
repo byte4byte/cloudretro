@@ -9,18 +9,21 @@
 #include "base/bind.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/password_manager/core/browser/leak_detection/leak_detection_check.h"
+#include "components/password_manager/core/browser/leak_detection/leak_detection_check_factory.h"
+#include "components/password_manager/core/browser/leak_detection/mock_leak_detection_check_factory.h"
 #include "components/password_manager/core/browser/test_password_store.h"
-#include "ios/chrome/browser/passwords/credential_manager_util.h"
+#include "components/password_manager/ios/credential_manager_util.h"
 #import "ios/chrome/browser/passwords/test/test_password_manager_client.h"
-#include "ios/chrome/browser/ssl/ios_security_state_tab_helper.h"
-#include "ios/web/public/navigation_item.h"
-#include "ios/web/public/navigation_manager.h"
+#include "ios/web/public/navigation/navigation_item.h"
+#include "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/test/web_js_test.h"
 #include "ios/web/public/test/web_test_with_web_state.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/origin.h"
 
@@ -49,6 +52,11 @@ constexpr char kFileOrigin[] = "file://example_file";
 // SSL certificate to load for testing.
 constexpr char kCertFileName[] = "ok_cert.pem";
 
+class MockLeakDetectionCheck : public password_manager::LeakDetectionCheck {
+ public:
+  MOCK_METHOD3(Start, void(const GURL&, base::string16, base::string16));
+};
+
 }  // namespace
 
 class CredentialManagerBaseTest
@@ -59,9 +67,6 @@ class CredentialManagerBaseTest
 
   void SetUp() override {
     WebTestWithWebState::SetUp();
-
-    // Used indirectly by WebStateContentIsSecureHtml function.
-    IOSSecurityStateTabHelper::CreateForWebState(web_state());
   }
 
   // Updates SSLStatus on web_state()->GetNavigationManager()->GetVisibleItem()
@@ -107,9 +112,6 @@ class CredentialManagerTest : public CredentialManagerBaseTest {
     LoadHtmlAndInject(@"<html></html>");
     UpdateSslStatus(net::CERT_STATUS_IS_EV, web::SECURITY_STYLE_AUTHENTICATED,
                     web::SSLStatus::NORMAL_CONTENT);
-
-    ON_CALL(*client_, OnCredentialManagerUsed())
-        .WillByDefault(testing::Return(true));
 
     password_credential_form_1_.username_value = base::ASCIIToUTF16("id1");
     password_credential_form_1_.display_name = base::ASCIIToUTF16("Name One");
@@ -161,6 +163,18 @@ class CredentialManagerTest : public CredentialManagerBaseTest {
 
 // Tests storing a PasswordCredential.
 TEST_F(CredentialManagerTest, StorePasswordCredential) {
+  auto mock_factory = std::make_unique<
+      testing::StrictMock<password_manager::MockLeakDetectionCheckFactory>>();
+  auto* weak_factory = mock_factory.get();
+  manager_->set_leak_factory(std::move(mock_factory));
+
+  auto check_instance = std::make_unique<MockLeakDetectionCheck>();
+  EXPECT_CALL(*check_instance,
+              Start(GURL(kHttpsWebOrigin), base::ASCIIToUTF16("id"),
+                    base::ASCIIToUTF16("pencil")));
+  EXPECT_CALL(*weak_factory, TryCreateLeakCheck)
+      .WillOnce(testing::Return(testing::ByMove(std::move(check_instance))));
+
   // Call API method |store|.
   ExecuteJavaScript(
       @"var credential = new PasswordCredential({"
@@ -260,10 +274,6 @@ TEST_F(CredentialManagerTest, TryToStoreCredentialFromInsecureContext) {
 
   // Expect that user will NOT be prompted to save or update password.
   EXPECT_CALL(*client_, PromptUserToSavePasswordPtr(_)).Times(0);
-
-  // Expect that PasswordManagerClient method used by
-  // CredentialManagerImpl::Store will not be called.
-  EXPECT_CALL(*client_, OnCredentialManagerUsed()).Times(0);
 
   // Call API method |store|.
   ExecuteJavaScript(
@@ -381,10 +391,6 @@ TEST_F(CredentialManagerTest, TryToGetCredentialFromInsecureContext) {
   LoadHtml(@"<html></html>", GURL(kHttpWebOrigin));
   LoadHtmlAndInject(@"<html></html>");
   client_->set_current_url(GURL(kHttpWebOrigin));
-
-  // Expect that PasswordManagerClient method used by
-  // CredentialManagerImpl::Get will not be called.
-  EXPECT_CALL(*client_, OnCredentialManagerUsed()).Times(0);
 
   // Call API method |get|.
   ExecuteJavaScript(
@@ -644,13 +650,13 @@ TEST_F(WebStateContentIsSecureHtmlTest, AcceptHttpsUrls) {
   LoadHtml(@"<html></html>", GURL(kHttpsWebOrigin));
   UpdateSslStatus(net::CERT_STATUS_IS_EV, web::SECURITY_STYLE_AUTHENTICATED,
                   web::SSLStatus::NORMAL_CONTENT);
-  EXPECT_TRUE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_TRUE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that WebStateContentIsSecureHtml returns false for HTTP origin.
 TEST_F(WebStateContentIsSecureHtmlTest, HttpIsNotSecureContext) {
   LoadHtml(@"<html></html>", GURL(kHttpWebOrigin));
-  EXPECT_FALSE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_FALSE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that WebStateContentIsSecureHtml returns false for HTTPS origin with
@@ -659,7 +665,7 @@ TEST_F(WebStateContentIsSecureHtmlTest, InsecureContent) {
   LoadHtml(@"<html></html>", GURL(kHttpsWebOrigin));
   UpdateSslStatus(net::CERT_STATUS_IS_EV, web::SECURITY_STYLE_AUTHENTICATED,
                   web::SSLStatus::DISPLAYED_INSECURE_CONTENT);
-  EXPECT_FALSE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_FALSE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that WebStateContentIsSecureHtml returns false for HTTPS origin with
@@ -668,30 +674,30 @@ TEST_F(WebStateContentIsSecureHtmlTest, InvalidSslCertificate) {
   LoadHtml(@"<html></html>", GURL(kHttpsWebOrigin));
   UpdateSslStatus(net::CERT_STATUS_INVALID, web::SECURITY_STYLE_UNAUTHENTICATED,
                   web::SSLStatus::NORMAL_CONTENT);
-  EXPECT_FALSE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_FALSE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that data:// URI scheme is not accepted as secure context.
 TEST_F(WebStateContentIsSecureHtmlTest, DataUriSchemeIsNotSecureContext) {
   LoadHtml(@"<html></html>", GURL(kDataUriSchemeOrigin));
-  EXPECT_FALSE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_FALSE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that localhost is accepted as secure context.
 TEST_F(WebStateContentIsSecureHtmlTest, LocalhostIsSecureContext) {
   LoadHtml(@"<html></html>", GURL(kLocalhostOrigin));
-  EXPECT_TRUE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_TRUE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that file origin is accepted as secure context.
 TEST_F(WebStateContentIsSecureHtmlTest, FileIsSecureContext) {
   LoadHtml(@"<html></html>", GURL(kFileOrigin));
-  EXPECT_TRUE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_TRUE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }
 
 // Tests that content must be HTML.
 TEST_F(WebStateContentIsSecureHtmlTest, ContentMustBeHtml) {
   // No HTML is loaded on purpose, so that web_state()->ContentIsHTML() will
   // return false.
-  EXPECT_FALSE(WebStateContentIsSecureHtml(web_state()));
+  EXPECT_FALSE(password_manager::WebStateContentIsSecureHtml(web_state()));
 }

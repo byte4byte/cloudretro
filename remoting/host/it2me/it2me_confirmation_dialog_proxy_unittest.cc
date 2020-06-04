@@ -10,14 +10,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::InvokeWithoutArgs;
-using ::testing::CreateFunctor;
 
 namespace remoting {
 
@@ -87,7 +85,7 @@ class It2MeConfirmationDialogProxyTest : public testing::Test {
   ~It2MeConfirmationDialogProxyTest() override;
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner() {
-    return scoped_task_environment_.GetMainThreadTaskRunner();
+    return task_environment_.GetMainThreadTaskRunner();
   }
 
   scoped_refptr<base::SingleThreadTaskRunner> dialog_task_runner() {
@@ -111,7 +109,7 @@ class It2MeConfirmationDialogProxyTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::RunLoop run_loop_;
   base::Thread dialog_thread_;
 
@@ -136,13 +134,11 @@ It2MeConfirmationDialogProxyTest::~It2MeConfirmationDialogProxyTest() = default;
 TEST_F(It2MeConfirmationDialogProxyTest, Show) {
   ResultCallbackTarget callback_target(main_task_runner());
 
+  StubIt2MeConfirmationDialog* confirm_dialog = dialog();
   EXPECT_CALL(*dialog(), OnShow())
-      .WillOnce(
-          InvokeWithoutArgs(
-              CreateFunctor(
-                  &StubIt2MeConfirmationDialog::ReportResult,
-                  base::Unretained(dialog()),
-                  It2MeConfirmationDialog::Result::CANCEL)));
+      .WillOnce(InvokeWithoutArgs([confirm_dialog]() {
+        confirm_dialog->ReportResult(It2MeConfirmationDialog::Result::CANCEL);
+      }));
 
   EXPECT_CALL(callback_target,
               OnDialogResult(It2MeConfirmationDialog::Result::CANCEL))

@@ -37,11 +37,12 @@ constexpr base::TimeDelta kInboxMessageTtl = base::TimeDelta::FromMinutes(1);
 
 FtlMessagingClient::FtlMessagingClient(
     OAuthTokenGetter* token_getter,
-    RegistrationManager* registration_manager)
+    RegistrationManager* registration_manager,
+    SignalingTracker* signaling_tracker)
     : FtlMessagingClient(
           std::make_unique<GrpcAuthenticatedExecutor>(token_getter),
           registration_manager,
-          std::make_unique<FtlMessageReceptionChannel>()) {}
+          std::make_unique<FtlMessageReceptionChannel>(signaling_tracker)) {}
 
 FtlMessagingClient::FtlMessagingClient(
     std::unique_ptr<GrpcExecutor> executor,
@@ -103,7 +104,7 @@ void FtlMessagingClient::SendMessage(
   request.mutable_message()->set_message_type(
       ftl::InboxMessage_MessageType_CHROMOTING_MESSAGE);
   request.mutable_message()->set_message_class(
-      ftl::InboxMessage_MessageClass_USER);
+      ftl::InboxMessage_MessageClass_STATUS);
   if (!destination_registration_id.empty()) {
     request.add_dest_registration_ids(destination_registration_id);
   }

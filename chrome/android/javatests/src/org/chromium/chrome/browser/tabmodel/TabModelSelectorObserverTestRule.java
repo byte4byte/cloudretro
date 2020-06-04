@@ -12,6 +12,8 @@ import org.junit.runners.model.Statement;
 import org.chromium.base.CommandLine;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -58,7 +60,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
         }, description);
     }
 
-    private void setUp() throws Exception {
+    private void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> { initialize(); });
     }
 
@@ -67,7 +69,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
                                                    .getTargetContext()
                                                    .getApplicationContext());
 
-        mSelector = new TabModelSelectorBase() {
+        mSelector = new TabModelSelectorBase(null, false) {
             @Override
             public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
@@ -75,9 +77,10 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
             }
         };
 
-        TabModelOrderController orderController = new TabModelOrderController(mSelector);
-        TabContentManager tabContentManager =
-                new TabContentManager(InstrumentationRegistry.getTargetContext(), null, false);
+        TabModelOrderController orderController = new TabModelOrderControllerImpl(mSelector);
+        TabContentManager tabContentManager = new TabContentManager(
+                InstrumentationRegistry.getTargetContext(), null, false, mSelector::getTabById);
+        tabContentManager.initWithNative();
         TabPersistencePolicy persistencePolicy = new TabbedModeTabPersistencePolicy(0, false);
         TabPersistentStore tabPersistentStore =
                 new TabPersistentStore(persistencePolicy, mSelector, null, null);
@@ -120,6 +123,12 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
             public boolean closeAllTabsRequest(boolean incognito) {
                 return false;
             }
+
+            @Override
+            public boolean isReparentingInProgress() {
+                return false;
+            }
+
         };
         mNormalTabModel = new TabModelSelectorTestTabModel(
                 false, orderController, tabContentManager, tabPersistentStore, delegate);
@@ -127,7 +136,7 @@ public class TabModelSelectorObserverTestRule extends ChromeBrowserTestRule {
         mIncognitoTabModel = new TabModelSelectorTestTabModel(
                 true, orderController, tabContentManager, tabPersistentStore, delegate);
 
-        mSelector.initialize(false, mNormalTabModel, mIncognitoTabModel);
+        mSelector.initialize(mNormalTabModel, mIncognitoTabModel);
     }
 
     /**

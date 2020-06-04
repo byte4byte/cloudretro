@@ -51,6 +51,18 @@ void DeleteQueriesEXTImmediate(GLsizei n, const GLuint* queries) {
   }
 }
 
+void QueryCounterEXT(GLuint id,
+                     GLenum target,
+                     uint32_t sync_data_shm_id,
+                     uint32_t sync_data_shm_offset,
+                     GLuint submit_count) {
+  raster::cmds::QueryCounterEXT* c =
+      GetCmdSpace<raster::cmds::QueryCounterEXT>();
+  if (c) {
+    c->Init(id, target, sync_data_shm_id, sync_data_shm_offset, submit_count);
+  }
+}
+
 void BeginQueryEXT(GLenum target,
                    GLuint id,
                    uint32_t sync_data_shm_id,
@@ -178,6 +190,8 @@ void CopySubTextureINTERNALImmediate(GLint xoffset,
                                      GLint y,
                                      GLsizei width,
                                      GLsizei height,
+                                     GLboolean unpack_flip_y,
+                                     GLboolean unpack_premultiply_alpha,
                                      const GLbyte* mailboxes) {
   const uint32_t size =
       raster::cmds::CopySubTextureINTERNALImmediate::ComputeSize();
@@ -185,7 +199,31 @@ void CopySubTextureINTERNALImmediate(GLint xoffset,
       GetImmediateCmdSpaceTotalSize<
           raster::cmds::CopySubTextureINTERNALImmediate>(size);
   if (c) {
-    c->Init(xoffset, yoffset, x, y, width, height, mailboxes);
+    c->Init(xoffset, yoffset, x, y, width, height, unpack_flip_y,
+            unpack_premultiply_alpha, mailboxes);
+  }
+}
+
+void WritePixelsINTERNALImmediate(GLint x_offset,
+                                  GLint y_offset,
+                                  GLuint src_width,
+                                  GLuint src_height,
+                                  GLuint row_bytes,
+                                  GLuint src_sk_color_type,
+                                  GLuint src_sk_alpha_type,
+                                  GLint shm_id,
+                                  GLuint shm_offset,
+                                  GLuint pixels_offset,
+                                  const GLbyte* mailbox) {
+  const uint32_t size =
+      raster::cmds::WritePixelsINTERNALImmediate::ComputeSize();
+  raster::cmds::WritePixelsINTERNALImmediate* c =
+      GetImmediateCmdSpaceTotalSize<raster::cmds::WritePixelsINTERNALImmediate>(
+          size);
+  if (c) {
+    c->Init(x_offset, y_offset, src_width, src_height, row_bytes,
+            src_sk_color_type, src_sk_alpha_type, shm_id, shm_offset,
+            pixels_offset, mailbox);
   }
 }
 

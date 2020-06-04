@@ -7,12 +7,12 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/performance_manager/public/graph/graph_operations.h"
 #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
 #include "chrome/browser/resource_coordinator/tab_load_tracker.h"
 #include "chrome/browser/resource_coordinator/tab_manager_stats_collector.h"
 #include "chrome/browser/resource_coordinator/tab_manager_web_contents_data.h"
 #include "chrome/browser/resource_coordinator/utils.h"
+#include "components/performance_manager/public/graph/graph_operations.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -23,9 +23,8 @@ namespace resource_coordinator {
 // and can't be forward declared.
 class TabManagerResourceCoordinatorSignalObserverHelper {
  public:
-  static void OnPageAlmostIdle(content::WebContents* web_contents) {
-    // This object is create on demand, so always exists.
-    TabLoadTracker::Get()->OnPageAlmostIdle(web_contents);
+  static void OnPageStoppedLoading(content::WebContents* web_contents) {
+    TabLoadTracker::Get()->OnPageStoppedLoading(web_contents);
   }
 };
 
@@ -37,16 +36,14 @@ TabManager::ResourceCoordinatorSignalObserver::
 TabManager::ResourceCoordinatorSignalObserver::
     ~ResourceCoordinatorSignalObserver() = default;
 
-void TabManager::ResourceCoordinatorSignalObserver::OnPageAlmostIdleChanged(
+void TabManager::ResourceCoordinatorSignalObserver::OnIsLoadingChanged(
     const PageNode* page_node) {
-  // Only notify of changes to almost idle.
-  if (!page_node->IsPageAlmostIdle())
-    return;
-  // Forward the notification over to the UI thread.
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(&OnPageAlmostIdleOnUi, tab_manager_,
-                                          page_node->GetContentProxy(),
-                                          page_node->GetNavigationID()));
+  // Forward the notification over to the UI thread when the page stops loading.
+  if (!page_node->IsLoading()) {
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&OnPageStoppedLoadingOnUi,
+                                  page_node->GetContentsProxy()));
+  }
 }
 
 void TabManager::ResourceCoordinatorSignalObserver::
@@ -60,11 +57,10 @@ void TabManager::ResourceCoordinatorSignalObserver::
           process_node);
   for (auto* page_node : associated_page_nodes) {
     // Forward the notification over to the UI thread.
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::UI},
-        base::BindOnce(&OnExpectedTaskQueueingDurationSampleOnUi, tab_manager_,
-                       page_node->GetContentProxy(),
-                       page_node->GetNavigationID(), duration));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&OnExpectedTaskQueueingDurationSampleOnUi,
+                                  tab_manager_, page_node->GetContentsProxy(),
+                                  page_node->GetNavigationID(), duration));
   }
 }
 
@@ -95,14 +91,11 @@ TabManager::ResourceCoordinatorSignalObserver::GetContentsForDispatch(
 }
 
 // static
-void TabManager::ResourceCoordinatorSignalObserver::OnPageAlmostIdleOnUi(
-    const base::WeakPtr<TabManager>& tab_manager,
-    const WebContentsProxy& contents_proxy,
-    int64_t navigation_id) {
+void TabManager::ResourceCoordinatorSignalObserver::OnPageStoppedLoadingOnUi(
+    const WebContentsProxy& contents_proxy) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (auto* contents =
-          GetContentsForDispatch(tab_manager, contents_proxy, navigation_id)) {
-    TabManagerResourceCoordinatorSignalObserverHelper::OnPageAlmostIdle(
+  if (auto* contents = contents_proxy.Get()) {
+    TabManagerResourceCoordinatorSignalObserverHelper::OnPageStoppedLoading(
         contents);
   }
 }

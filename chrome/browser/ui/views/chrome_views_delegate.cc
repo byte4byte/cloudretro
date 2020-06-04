@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,14 +15,16 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/version_info/version_info.h"
-#include "content/public/browser/context_factory.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/frame_utils.h"
 #include "chrome/browser/ui/views/touch_selection_menu_runner_chromeos.h"
+#include "ui/aura/client/aura_constants.h"
 #endif
 
 // Helpers --------------------------------------------------------------------
@@ -157,9 +159,24 @@ void ChromeViewsDelegate::ReleaseRef() {
 void ChromeViewsDelegate::OnBeforeWidgetInit(
     views::Widget::InitParams* params,
     views::internal::NativeWidgetDelegate* delegate) {
+#if defined(OS_CHROMEOS)
+  // Only for dialog widgets, if this is not going to be a transient child,
+  // then we mark it as an OS system app, otherwise its transient root's app
+  // type should be used.
+  if (delegate->IsDialogBox() && !params->parent) {
+    params->init_properties_container.SetProperty(
+        aura::client::kAppType, static_cast<int>(ash::AppType::SYSTEM_APP));
+  }
+#endif  // defined(OS_CHROMEOS)
+
   // We need to determine opacity if it's not already specified.
-  if (params->opacity == views::Widget::InitParams::INFER_OPACITY)
-    params->opacity = GetOpacityForInitParams(*params);
+  if (params->opacity == views::Widget::InitParams::WindowOpacity::kInferred) {
+#if defined(OS_CHROMEOS)
+    ash::ResolveInferredOpacity(params);
+#else
+    params->opacity = views::Widget::InitParams::WindowOpacity::kOpaque;
+#endif
+  }
 
   // If we already have a native_widget, we don't have to try to come
   // up with one.
@@ -175,22 +192,6 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
   params->native_widget = CreateNativeWidget(params, delegate);
 }
 
-ui::ContextFactory* ChromeViewsDelegate::GetContextFactory() {
-  return content::GetContextFactory();
-}
-
-ui::ContextFactoryPrivate* ChromeViewsDelegate::GetContextFactoryPrivate() {
-  return content::GetContextFactoryPrivate();
-}
-
 std::string ChromeViewsDelegate::GetApplicationName() {
   return version_info::GetProductName();
 }
-
-#if !defined(OS_CHROMEOS)
-views::Widget::InitParams::WindowOpacity
-ChromeViewsDelegate::GetOpacityForInitParams(
-    const views::Widget::InitParams& params) {
-  return views::Widget::InitParams::OPAQUE_WINDOW;
-}
-#endif

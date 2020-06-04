@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/close_bubble_on_tab_activation_helper.h"
@@ -19,7 +20,6 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/style/typography.h"
@@ -31,9 +31,6 @@ class Button;
 class Label;
 }  // namespace views
 
-struct AccountInfo;
-class DiceSigninButtonView;
-
 // This class provides the UI for different menus that are created by user
 // clicking the avatar button.
 class ProfileMenuViewBase : public content::WebContentsDelegate,
@@ -41,33 +38,37 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
                             public views::ButtonListener,
                             public views::StyledLabelListener {
  public:
-  // MenuItems struct keeps the menu items and meta data for a group of items in
-  // a menu. It takes the ownership of views and passes it to the menu when menu
-  // is constructed.
-  struct MenuItems {
-    MenuItems();
-    MenuItems(MenuItems&&);
-    ~MenuItems();
-
-    enum ItemType {
-      kNone,
-      kTitleCard,
-      kLabel,
-      kButton,
-      kStyledButton,
-      kGeneral
-    };
-
-    std::vector<std::unique_ptr<views::View>> items;
-
-    ItemType first_item_type;
-    ItemType last_item_type;
-    bool different_item_types;
-
-    DISALLOW_COPY_AND_ASSIGN(MenuItems);
+  // Enumeration of all actionable items in the profile menu.
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class ActionableItem {
+    kManageGoogleAccountButton = 0,
+    kPasswordsButton = 1,
+    kCreditCardsButton = 2,
+    kAddressesButton = 3,
+    kGuestProfileButton = 4,
+    kManageProfilesButton = 5,
+    // DEPRECATED: kLockButton = 6,
+    kExitProfileButton = 7,
+    kSyncErrorButton = 8,
+    // DEPRECATED: kCurrentProfileCard = 9,
+    kSigninButton = 10,
+    kSigninAccountButton = 11,
+    kSignoutButton = 12,
+    kOtherProfileButton = 13,
+    kCookiesClearedOnExitLink = 14,
+    kAddNewProfileButton = 15,
+    kSyncSettingsButton = 16,
+    kEditProfileButton = 17,
+    kMaxValue = kEditProfileButton,
   };
 
-  enum GroupMarginSize { kNone, kTiny, kSmall, kLarge };
+  enum class SyncInfoContainerBackgroundState {
+    kNoError,
+    kPaused,
+    kError,
+    kNoPrimaryAccount,
+  };
 
   // Shows the bubble if one is not already showing.  This allows us to easily
   // make a button toggle the bubble on and off when clicked: we unconditionally
@@ -76,8 +77,6 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
   // the existing bubble will auto-close due to focus loss.
   static void ShowBubble(
       profiles::BubbleViewMode view_mode,
-      const signin::ManageAccountsParams& manage_accounts_params,
-      signin_metrics::AccessPoint access_point,
       views::Button* anchor_button,
       Browser* browser,
       bool is_source_keyboard);
@@ -87,41 +86,63 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
 
   static ProfileMenuViewBase* GetBubbleForTesting();
 
- protected:
   ProfileMenuViewBase(views::Button* anchor_button,
                       Browser* browser);
   ~ProfileMenuViewBase() override;
 
-  void Reset();
+  // This method is called once to add all menu items.
+  virtual void BuildMenu() = 0;
 
-  // Initializes a new group of menu items. A separator is added before them if
-  // |add_separator| is true.
-  void AddMenuGroup(bool add_separator = true);
+  // Override to supply a sync icon for the profile menu.
+  virtual gfx::ImageSkia GetSyncIcon() const;
 
-  // The following functions add different menu items to the latest menu group.
-  // They pass the ownership of the generated item to |menu_item_groups_| and
-  // return a raw pointer to the object. The ownership is transferred to the
-  // menu when view is repopulated from menu items.
-  // Please use |AddViewItem| only if none of the previous ones match.
-  views::Button* CreateAndAddTitleCard(std::unique_ptr<views::View> icon_view,
-                                       const base::string16& title,
-                                       const base::string16& subtitle,
-                                       bool enabled = true);
-  views::Button* CreateAndAddButton(const gfx::ImageSkia& icon,
-                                    const base::string16& title);
-  views::Button* CreateAndAddBlueButton(const base::string16& text,
-                                        bool md_style);
-#if !defined(OS_CHROMEOS)
-  DiceSigninButtonView* CreateAndAddDiceSigninButton(
-      AccountInfo* account_info = nullptr,
-      gfx::Image* account_icon = nullptr);
-#endif
+  // API to build the profile menu.
+  void SetHeading(const base::string16& heading,
+                  const base::string16& tooltip_text,
+                  base::RepeatingClosure action);
+  // If |image| is empty |icon| will be used instead.
+  void SetIdentityInfo(const gfx::ImageSkia& image,
+                       const base::string16& title,
+                       const base::string16& subtitle = base::string16(),
+                       const gfx::VectorIcon& icon = kUserAccountAvatarIcon,
+                       ui::NativeTheme::ColorId color_id =
+                           ui::NativeTheme::kColorId_MenuIconColor);
+  void SetSyncInfo(const base::string16& description,
+                   const base::string16& clickable_text,
+                   SyncInfoContainerBackgroundState background_state,
+                   base::RepeatingClosure action,
+                   bool show_badge = true);
+  void AddShortcutFeatureButton(const gfx::VectorIcon& icon,
+                                const base::string16& text,
+                                base::RepeatingClosure action);
+  void AddFeatureButton(const base::string16& text,
+                        base::RepeatingClosure action,
+                        const gfx::VectorIcon& icon = gfx::kNoneIcon,
+                        float icon_to_image_ratio = 1.0f);
+  void SetProfileManagementHeading(const base::string16& heading);
+  void AddSelectableProfile(const gfx::ImageSkia& image,
+                            const base::string16& name,
+                            bool is_guest,
+                            base::RepeatingClosure action);
+  void AddProfileManagementShortcutFeatureButton(const gfx::VectorIcon& icon,
+                                                 const base::string16& text,
+                                                 base::RepeatingClosure action);
+  void AddProfileManagementFeatureButton(const gfx::VectorIcon& icon,
+                                         const base::string16& text,
+                                         base::RepeatingClosure action);
+
+  gfx::ImageSkia ColoredImageForMenu(const gfx::VectorIcon& icon,
+                                     SkColor color) const;
+  // Should be called inside each button/link action.
+  void RecordClick(ActionableItem item);
+
   views::Label* CreateAndAddLabel(
       const base::string16& text,
       int text_context = views::style::CONTEXT_LABEL);
+  views::StyledLabel* CreateAndAddLabelWithLink(const base::string16& text,
+                                                gfx::Range link_range,
+                                                base::RepeatingClosure action);
   void AddViewItem(std::unique_ptr<views::View> view);
-
-  void RepopulateViewFromMenuItems();
 
   Browser* browser() const { return browser_; }
 
@@ -131,50 +152,66 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
 
   views::Button* anchor_button() const { return anchor_button_; }
 
-  bool ShouldProvideInitiallyFocusedView() const;
-
-  gfx::ImageSkia CreateVectorIcon(const gfx::VectorIcon& icon);
-
-  int GetDefaultIconSize();
-
  private:
-  friend class ProfileChooserViewExtensionsTest;
+  friend class ProfileMenuViewExtensionsTest;
+
+  void Reset();
 
   // Requests focus for a button when opened by keyboard.
-  virtual void FocusButtonOnKeyboardOpen() {}
+  void FocusButtonOnKeyboardOpen();
 
   // views::BubbleDialogDelegateView:
+  void Init() final;
   void WindowClosing() override;
   void OnThemeChanged() override;
-  int GetDialogButtons() const override;
   ax::mojom::Role GetAccessibleWindowRole() override;
 
   // content::WebContentsDelegate:
   bool HandleContextMenu(content::RenderFrameHost* render_frame_host,
                          const content::ContextMenuParams& params) override;
 
+  // views::ButtonListener:
+  void ButtonPressed(views::Button* button, const ui::Event& event) final;
+
   // views::StyledLabelListener:
-  void StyledLabelLinkClicked(views::StyledLabel* label,
+  void StyledLabelLinkClicked(views::StyledLabel* link,
                               const gfx::Range& range,
-                              int event_flags) override;
+                              int event_flags) final;
 
-  // Returns the size of different margin types.
-  int GetMarginSize(GroupMarginSize margin_size) const;
+  // Handles all click events.
+  void OnClick(views::View* clickable_view);
 
-  void AddMenuItemInternal(std::unique_ptr<views::View> view,
-                           MenuItems::ItemType item_type);
+  void RegisterClickAction(views::View* clickable_view,
+                           base::RepeatingClosure action);
+
+  void UpdateSyncInfoContainerBackground();
 
   Browser* const browser_;
 
-  int menu_width_;
-
-  // ProfileMenuViewBase takes ownership of all menu_items and passes it to the
-  // underlying view when it is created.
-  std::vector<MenuItems> menu_item_groups_;
-
   views::Button* const anchor_button_;
 
+  std::map<views::View*, base::RepeatingClosure> click_actions_;
+
+  // Component containers.
+  views::View* heading_container_ = nullptr;
+  views::View* identity_info_container_ = nullptr;
+  views::View* sync_info_container_ = nullptr;
+  views::View* shortcut_features_container_ = nullptr;
+  views::View* features_container_ = nullptr;
+  views::View* profile_mgmt_separator_container_ = nullptr;
+  views::View* profile_mgmt_heading_container_ = nullptr;
+  views::View* selectable_profiles_container_ = nullptr;
+  views::View* profile_mgmt_shortcut_features_container_ = nullptr;
+  views::View* profile_mgmt_features_container_ = nullptr;
+
+  // The first profile button that should be focused when the menu is opened
+  // using a key accelerator.
+  views::Button* first_profile_button_ = nullptr;
+
   CloseBubbleOnTabActivationHelper close_bubble_helper_;
+
+  SyncInfoContainerBackgroundState sync_background_state_ =
+      SyncInfoContainerBackgroundState::kNoError;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileMenuViewBase);
 };

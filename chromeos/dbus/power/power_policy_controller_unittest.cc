@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -38,7 +38,7 @@ class PowerPolicyControllerTest : public testing::Test {
   }
 
   PowerPolicyController* policy_controller_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PowerPolicyControllerTest);
@@ -96,7 +96,7 @@ TEST_F(PowerPolicyControllerTest, Prefs) {
   expected_policy.set_boot_on_ac(true);
   expected_policy.set_usb_power_share(false);
   expected_policy.mutable_battery_charge_mode()->set_mode(
-      power_manager::PowerManagementPolicy::BatteryChargeMode::STANDARD);
+      power_manager::PowerManagementPolicy::BatteryChargeMode::ADAPTIVE);
 
   expected_policy.set_reason(PowerPolicyController::kPrefsReason);
   EXPECT_EQ(

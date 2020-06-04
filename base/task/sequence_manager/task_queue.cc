@@ -12,6 +12,7 @@
 #include "base/task/sequence_manager/sequence_manager_impl.h"
 #include "base/task/sequence_manager/task_queue_impl.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_checker_impl.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -35,11 +36,15 @@ class NullTaskRunner final : public SingleThreadTaskRunner {
     return false;
   }
 
-  bool RunsTasksInCurrentSequence() const override { return false; }
+  bool RunsTasksInCurrentSequence() const override {
+    return thread_checker_.CalledOnValidThread();
+  }
 
  private:
   // Ref-counted
   ~NullTaskRunner() override = default;
+
+  ThreadCheckerImpl thread_checker_;
 };
 
 // TODO(kraynov): Move NullTaskRunner from //base/test to //base.
@@ -248,14 +253,14 @@ TaskQueue::QueuePriority TaskQueue::GetQueuePriority() const {
   return impl_->GetQueuePriority();
 }
 
-void TaskQueue::AddTaskObserver(MessageLoop::TaskObserver* task_observer) {
+void TaskQueue::AddTaskObserver(TaskObserver* task_observer) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   if (!impl_)
     return;
   impl_->AddTaskObserver(task_observer);
 }
 
-void TaskQueue::RemoveTaskObserver(MessageLoop::TaskObserver* task_observer) {
+void TaskQueue::RemoveTaskObserver(TaskObserver* task_observer) {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   if (!impl_)
     return;
@@ -315,11 +320,11 @@ bool TaskQueue::BlockedByFence() const {
   return impl_->BlockedByFence();
 }
 
-EnqueueOrder TaskQueue::GetLastUnblockEnqueueOrder() const {
+EnqueueOrder TaskQueue::GetEnqueueOrderAtWhichWeBecameUnblocked() const {
   DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
   if (!impl_)
     return EnqueueOrder();
-  return impl_->GetLastUnblockEnqueueOrder();
+  return impl_->GetEnqueueOrderAtWhichWeBecameUnblocked();
 }
 
 const char* TaskQueue::GetName() const {

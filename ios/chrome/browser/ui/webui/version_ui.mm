@@ -102,7 +102,7 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
   html_source->AddString(version_ui::kCompiler, "LLVM clang");
 #endif
 
-  html_source->SetJsonPath("strings.js");
+  html_source->UseStringsJs();
   html_source->AddResourcePath(version_ui::kVersionJS, IDR_VERSION_UI_JS);
   html_source->AddResourcePath(version_ui::kAboutVersionCSS,
                                IDR_VERSION_UI_CSS);
@@ -114,7 +114,7 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
 
 VersionUI::VersionUI(web::WebUIIOS* web_ui) : web::WebUIIOSController(web_ui) {
   web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
-  web::WebUIIOSDataSource::Add(ios::ChromeBrowserState::FromWebUIIOS(web_ui),
+  web::WebUIIOSDataSource::Add(ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateVersionUIDataSource());
 }
 

@@ -19,8 +19,10 @@
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -32,6 +34,8 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
+
+namespace {
 
 const char kPermissionRequestApiPath[] = "people/me/permissionRequests";
 const char kPermissionRequestApiScope[] =
@@ -46,13 +50,13 @@ const char kStateKey[] = "state";
 
 // Request values.
 const char kEventTypeURLRequest[] = "PERMISSION_CHROME_URL";
-const char kEventTypeInstallRequest[] = "PERMISSION_CHROME_CWS_ITEM_INSTALL";
-const char kEventTypeUpdateRequest[] = "PERMISSION_CHROME_CWS_ITEM_UPDATE";
 const char kState[] = "PENDING";
 
 // Response keys.
 const char kPermissionRequestKey[] = "permissionRequest";
 const char kIdKey[] = "id";
+
+}  // namespace
 
 struct PermissionRequestCreatorApiary::Request {
   Request(const std::string& request_type,
@@ -63,7 +67,7 @@ struct PermissionRequestCreatorApiary::Request {
   std::string request_type;
   std::string object_ref;
   SuccessCallback callback;
-  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+  std::unique_ptr<signin::PrimaryAccountAccessTokenFetcher>
       access_token_fetcher;
   std::string access_token;
   bool access_token_expired;
@@ -82,7 +86,7 @@ PermissionRequestCreatorApiary::Request::Request(
 PermissionRequestCreatorApiary::Request::~Request() {}
 
 PermissionRequestCreatorApiary::PermissionRequestCreatorApiary(
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : identity_manager_(identity_manager),
       url_loader_factory_(std::move(url_loader_factory)),
@@ -109,18 +113,6 @@ void PermissionRequestCreatorApiary::CreateURLAccessRequest(
     SuccessCallback callback) {
   CreateRequest(kEventTypeURLRequest, url_requested.spec(),
                 std::move(callback));
-}
-
-void PermissionRequestCreatorApiary::CreateExtensionInstallRequest(
-    const std::string& id,
-    SuccessCallback callback) {
-  CreateRequest(kEventTypeInstallRequest, id, std::move(callback));
-}
-
-void PermissionRequestCreatorApiary::CreateExtensionUpdateRequest(
-    const std::string& id,
-    SuccessCallback callback) {
-  CreateRequest(kEventTypeUpdateRequest, id, std::move(callback));
 }
 
 GURL PermissionRequestCreatorApiary::GetApiUrl() const {
@@ -156,24 +148,26 @@ void PermissionRequestCreatorApiary::CreateRequest(
 }
 
 void PermissionRequestCreatorApiary::StartFetching(Request* request) {
-  identity::ScopeSet scopes;
+  signin::ScopeSet scopes;
   scopes.insert(GetApiScope());
   // It is safe to use Unretained(this) here given that the callback
   // will not be invoked if this object is deleted. Likewise, |request|
   // only comes from |requests_|, which are owned by this object too.
   request->access_token_fetcher =
-      std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
           "permissions_creator", identity_manager_, scopes,
           base::BindOnce(
               &PermissionRequestCreatorApiary::OnAccessTokenFetchComplete,
               base::Unretained(this), request),
-          identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate,
+          // This class doesn't care about browser sync consent.
+          signin::ConsentLevel::kNotRequired);
 }
 
 void PermissionRequestCreatorApiary::OnAccessTokenFetchComplete(
     Request* request,
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   auto it = requests_.begin();
   while (it != requests_.end()) {
     if (request->access_token_fetcher.get() ==
@@ -228,8 +222,7 @@ void PermissionRequestCreatorApiary::OnAccessTokenFetchComplete(
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GetApiUrl();
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader(
       net::HttpRequestHeaders::kAuthorization,
@@ -265,11 +258,13 @@ void PermissionRequestCreatorApiary::OnSimpleLoaderComplete(
   if (response_code == net::HTTP_UNAUTHORIZED &&
       !request->access_token_expired) {
     request->access_token_expired = true;
-    identity::ScopeSet scopes;
+    signin::ScopeSet scopes;
     scopes.insert(GetApiScope());
+    // "Unconsented" because this class doesn't care about browser sync consent.
     identity_manager_->RemoveAccessTokenFromCache(
-        identity_manager_->GetPrimaryAccountId(), scopes,
-        request->access_token);
+        identity_manager_->GetPrimaryAccountId(
+            signin::ConsentLevel::kNotRequired),
+        scopes, request->access_token);
     StartFetching(request);
     return;
   }

@@ -9,9 +9,7 @@
 
 namespace ash {
 enum class AppListLaunchedFrom;
-}
 
-namespace app_list {
 // The type of the ChromeSearchResult. This is used for logging so do not
 // change the order of this enum. If you add to this enum update
 // AppListSearchResult in enums.xml.
@@ -78,20 +76,37 @@ enum SearchResultType {
   // A result from omnibox for the personalized suggestion.
   // Currently, it is used for the user's recent query.
   OMNIBOX_SUGGEST_PERSONALIZED,
+  // A zero-state result representing a local file.
+  ZERO_STATE_FILE,
+  // A result from the Drive QuickAccess provider.
+  DRIVE_QUICK_ACCESS,
+  // A result from the Assistant provider.
+  ASSISTANT,
+  // An OsSettingsResult.
+  OS_SETTINGS,
+  // A Plugin VM App Result.
+  PLUGIN_VM_APP,
   // Boundary is always last.
   SEARCH_RESULT_TYPE_BOUNDARY
 };
 
 ASH_PUBLIC_EXPORT void RecordSearchResultOpenTypeHistogram(
-    ash::AppListLaunchedFrom launch_location,
+    AppListLaunchedFrom launch_location,
     SearchResultType type,
     bool is_tablet_mode);
+
+ASH_PUBLIC_EXPORT void RecordDefaultSearchResultOpenTypeHistogram(
+    SearchResultType type);
 
 ASH_PUBLIC_EXPORT void RecordZeroStateSuggestionOpenTypeHistogram(
     SearchResultType type);
 
 ASH_PUBLIC_EXPORT void RecordLauncherIssuedSearchQueryLength(int query_length);
 
-}  // namespace app_list
+ASH_PUBLIC_EXPORT void RecordSuccessfulAppLaunchUsingSearch(
+    AppListLaunchedFrom launched_from,
+    int query_length);
+
+}  // namespace ash
 
 #endif  // ASH_PUBLIC_CPP_APP_LIST_APP_LIST_METRICS_H_

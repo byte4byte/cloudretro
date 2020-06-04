@@ -13,7 +13,7 @@
 #include "content/browser/frame_host/cross_process_frame_connector.h"
 #include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
-#include "content/browser/frame_host/navigation_handle_impl.h"
+#include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/navigator_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -27,10 +27,10 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/url_utils.h"
-#include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/test/test_render_view_host.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom.h"
 #include "ui/base/page_transition_types.h"
 
 namespace content {
@@ -102,6 +102,7 @@ TestRenderFrameHost* TestWebContents::GetPendingMainFrame() {
 
 int TestWebContents::DownloadImage(const GURL& url,
                                    bool is_favicon,
+                                   uint32_t preferred_size,
                                    uint32_t max_bitmap_size,
                                    bool bypass_cache,
                                    ImageDownloadCallback callback) {
@@ -184,7 +185,8 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
   params.is_overriding_user_agent = false;
   params.history_list_was_cleared = false;
   params.origin = url::Origin::Create(url);
-  params.insecure_request_policy = blink::kLeaveInsecureRequestsAlone;
+  params.insecure_request_policy =
+      blink::mojom::InsecureRequestPolicy::kLeaveInsecureRequestsAlone;
   params.has_potentially_trustworthy_unique_origin = false;
 
   rfh->SendNavigateWithParams(&params, was_within_same_document);
@@ -247,15 +249,12 @@ void TestWebContents::TestDidReceiveInputEvent(
 }
 
 void TestWebContents::TestDidFinishLoad(const GURL& url) {
-  FrameHostMsg_DidFinishLoad msg(0, url);
-  frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
+  OnDidFinishLoad(frame_tree_.root()->current_frame_host(), url);
 }
 
-void TestWebContents::TestDidFailLoadWithError(
-    const GURL& url,
-    int error_code,
-    const base::string16& error_description) {
-  GetMainFrame()->DidFailLoadWithError(url, error_code, error_description);
+void TestWebContents::TestDidFailLoadWithError(const GURL& url,
+                                               int error_code) {
+  GetMainFrame()->DidFailLoadWithError(url, error_code);
 }
 
 bool TestWebContents::CrossProcessNavigationPending() {
@@ -319,7 +318,7 @@ void TestWebContents::TestSetIsLoading(bool value) {
           node->render_manager()->speculative_frame_host();
       if (speculative_frame_host)
         speculative_frame_host->ResetLoadingState();
-      node->ResetNavigationRequest(false, true);
+      node->ResetNavigationRequest(false);
     }
   }
 }
@@ -373,26 +372,32 @@ void TestWebContents::SetHistoryOffsetAndLength(int history_offset,
 void TestWebContents::SetHttpResponseHeaders(
     NavigationHandle* navigation_handle,
     scoped_refptr<net::HttpResponseHeaders> response_headers) {
-  static_cast<NavigationHandleImpl*>(navigation_handle)
+  NavigationRequest::From(navigation_handle)
       ->set_response_headers_for_testing(response_headers);
 }
 
-void TestWebContents::CreateNewWindow(
+RenderFrameHostDelegate* TestWebContents::CreateNewWindow(
     RenderFrameHost* opener,
-    int32_t route_id,
-    int32_t main_frame_route_id,
-    int32_t main_frame_widget_route_id,
     const mojom::CreateNewWindowParams& params,
+    bool is_new_browsing_instance,
     bool has_user_gesture,
-    SessionStorageNamespace* session_storage_namespace) {}
+    SessionStorageNamespace* session_storage_namespace) {
+  return nullptr;
+}
 
-void TestWebContents::CreateNewWidget(int32_t render_process_id,
-                                      int32_t route_id,
-                                      mojom::WidgetPtr widget) {}
+void TestWebContents::CreateNewWidget(
+    int32_t render_process_id,
+    int32_t route_id,
+    mojo::PendingRemote<mojom::Widget> widget,
+    mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost> blink_widget_host,
+    mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget) {}
 
-void TestWebContents::CreateNewFullscreenWidget(int32_t render_process_id,
-                                                int32_t route_id,
-                                                mojom::WidgetPtr widget) {}
+void TestWebContents::CreateNewFullscreenWidget(
+    int32_t render_process_id,
+    int32_t route_id,
+    mojo::PendingRemote<mojom::Widget> widget,
+    mojo::PendingAssociatedReceiver<blink::mojom::WidgetHost> blink_widget_host,
+    mojo::PendingAssociatedRemote<blink::mojom::Widget> blink_widget) {}
 
 void TestWebContents::ShowCreatedWindow(int process_id,
                                         int route_id,
@@ -419,10 +424,11 @@ void TestWebContents::SaveFrameWithHeaders(
   suggested_filename_ = suggested_filename;
 }
 
-std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>
+std::vector<mojo::Remote<blink::mojom::PauseSubresourceLoadingHandle>>
 TestWebContents::PauseSubresourceLoading() {
   pause_subresource_loading_called_ = true;
-  return std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>();
+  return std::vector<
+      mojo::Remote<blink::mojom::PauseSubresourceLoadingHandle>>();
 }
 
 bool TestWebContents::GetPauseSubresourceLoadingCalled() {
@@ -433,12 +439,16 @@ void TestWebContents::ResetPauseSubresourceLoadingCalled() {
   pause_subresource_loading_called_ = false;
 }
 
-void TestWebContents::SetPageImportanceSignals(PageImportanceSignals signals) {
-  page_importance_signals_ = signals;
-}
-
 void TestWebContents::SetLastActiveTime(base::TimeTicks last_active_time) {
   last_active_time_ = last_active_time;
+}
+
+void TestWebContents::TestIncrementBluetoothConnectedDeviceCount() {
+  IncrementBluetoothConnectedDeviceCount();
+}
+
+void TestWebContents::TestDecrementBluetoothConnectedDeviceCount() {
+  DecrementBluetoothConnectedDeviceCount();
 }
 
 base::UnguessableToken TestWebContents::GetAudioGroupId() {

@@ -17,31 +17,36 @@ import sys
 import tempfile
 import time
 import urllib
+import logging
 
 from core import results_dashboard
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='(%(levelname)s) %(asctime)s pid=%(process)d'
+    '  %(module)s.%(funcName)s:%(lineno)d  %(message)s')
 
 RESULTS_LINK_PATH = '/report?masters=%s&bots=%s&tests=%s&rev=%s'
 
 
-def _GetMainRevision(commit_pos):
-  """Return revision to use as the numerical x-value in the perf dashboard.
-  This will be used as the value of "rev" in the data passed to
-  results_dashboard.SendResults.
-  This function returns the value of "got_revision_cp" in build properties.
+def _CommitPositionNumber(commit_pos):
+  """Extracts the number part of a commit position.
+
+  This is used to extract the number from got_revision_cp; This will be used
+  as the value of "rev" in the data passed to results_dashboard.SendResults.
   """
   return int(re.search(r'{#(\d+)}', commit_pos).group(1))
 
 
 def _GetDashboardJson(options):
-  main_revision = _GetMainRevision(options.got_revision_cp)
+  main_revision = _CommitPositionNumber(options.got_revision_cp)
   revisions = _GetPerfDashboardRevisionsWithProperties(
     options.got_webrtc_revision, options.got_v8_revision,
     options.git_revision, main_revision)
   reference_build = 'reference' in options.name
   stripped_test_name = options.name.replace('.reference', '')
   results = {}
-  print 'Opening results file %s' % options.results_file
+  logging.info('Opening results file %s' % options.results_file)
   with open(options.results_file) as f:
     results = json.load(f)
   dashboard_json = {}
@@ -65,7 +70,8 @@ def _GetDashboardJson(options):
 
 def _GetDashboardHistogramData(options):
   revisions = {
-      '--chromium_commit_positions': _GetMainRevision(options.got_revision_cp),
+      '--chromium_commit_positions': _CommitPositionNumber(
+          options.got_revision_cp),
       '--chromium_revisions': options.git_revision
   }
 
@@ -92,8 +98,8 @@ def _GetDashboardHistogramData(options):
         output_dir=output_dir,
         max_bytes=max_bytes)
     end_time = time.time()
-    print 'Duration of adding diagnostics for %s: %d seconds' % (
-        stripped_test_name, end_time - begin_time)
+    logging.info('Duration of adding diagnostics for %s: %d seconds' %
+                 (stripped_test_name, end_time - begin_time))
 
     # Read all batch files from output_dir.
     dashboard_jsons = []
@@ -125,7 +131,6 @@ def _CreateParser():
   parser.add_option('--git-revision')
   parser.add_option('--output-json-dashboard-url')
   parser.add_option('--send-as-histograms', action='store_true')
-  parser.add_option('--service-account-file', default=None)
   return parser
 
 
@@ -139,10 +144,8 @@ def main(args):
   if not options.configuration_name or not options.results_url:
     parser.error('configuration_name and results_url are required.')
 
-  service_account_file = options.service_account_file
-
   if not options.perf_dashboard_machine_group:
-    print 'Error: Invalid perf dashboard machine group'
+    logging.error('Invalid perf dashboard machine group')
     return 1
 
   if not options.send_as_histograms:
@@ -178,12 +181,11 @@ def main(args):
           batch,
           options.name,
           options.results_url,
-          send_as_histograms=options.send_as_histograms,
-          service_account_file=service_account_file):
+          send_as_histograms=options.send_as_histograms):
         return 1
   else:
     # The upload didn't fail since there was no data to upload.
-    print 'Warning: No perf dashboard JSON was produced.'
+    logging.warning('No perf dashboard JSON was produced.')
   return 0
 
 if __name__ == '__main__':
@@ -192,15 +194,15 @@ if __name__ == '__main__':
 
 def GetDashboardUrl(name, configuration_name, results_url,
     got_revision_cp, perf_dashboard_machine_group):
-  """Optionally writes the dashboard url to a file
-    and returns a link to the dashboard.
+  """Optionally writes the dashboard URL to a file and returns a link to the
+  dashboard.
   """
   name = name.replace('.reference', '')
   dashboard_url = results_url + RESULTS_LINK_PATH % (
       urllib.quote(perf_dashboard_machine_group),
       urllib.quote(configuration_name),
       urllib.quote(name),
-      _GetMainRevision(got_revision_cp))
+      _CommitPositionNumber(got_revision_cp))
 
   return dashboard_url
 
@@ -209,7 +211,6 @@ def _GetPerfDashboardRevisionsWithProperties(
     got_webrtc_revision, got_v8_revision, git_revision, main_revision,
     point_id=None):
   """Fills in the same revisions fields that process_log_utils does."""
-
   versions = {}
   versions['rev'] = main_revision
   versions['webrtc_git'] = got_webrtc_revision

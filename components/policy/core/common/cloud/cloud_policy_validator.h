@@ -15,7 +15,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
@@ -123,6 +122,8 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
     TIMESTAMP_NOT_VALIDATED,
   };
 
+  enum SignatureType { SHA1, SHA256 };
+
   struct POLICY_EXPORT ValidationResult {
     // Validation status.
     Status status = VALIDATION_OK;
@@ -156,7 +157,7 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
     return policy_data_;
   }
 
-  // ToDo
+  // Retrieve the policy value validation result.
   std::unique_ptr<ValidationResult> GetValidationResult() const;
 
   // Instruct the validator to check that the policy timestamp is present and is
@@ -256,6 +257,13 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
   // Immediately performs validation on the current thread.
   void RunValidation();
 
+  // Verifies the SHA1/ or SHA256/RSA |signature| on |data| against |key|.
+  // |signature_type| specifies the type of signature (SHA1 or SHA256 ).
+  static bool VerifySignature(const std::string& data,
+                              const std::string& key,
+                              const std::string& signature,
+                              SignatureType signature_type);
+
  protected:
   // Internal flags indicating what to check.
   enum ValidationFlags {
@@ -284,7 +292,7 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
   // which will eventually report its result via |completion_callback|.
   static void PostValidationTask(
       std::unique_ptr<CloudPolicyValidatorBase> validator,
-      const base::Closure& completion_callback);
+      base::OnceClosure completion_callback);
 
   // Helper to check MessageLite-type payloads. It exists so the implementation
   // can be moved to the .cc (PolicyValidators with protobuf payloads are
@@ -296,17 +304,15 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
   int validation_flags_;
 
  private:
-  enum SignatureType { SHA1, SHA256 };
-
   // Performs validation, called on a background thread.
   static void PerformValidation(
       std::unique_ptr<CloudPolicyValidatorBase> self,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      const base::Closure& completion_callback);
+      base::OnceClosure completion_callback);
 
   // Reports completion to the |completion_callback_|.
   static void ReportCompletion(std::unique_ptr<CloudPolicyValidatorBase> self,
-                               const base::Closure& completion_callback);
+                               base::OnceClosure completion_callback);
 
   // Invokes all the checks and reports the result.
   void RunChecks();
@@ -347,13 +353,6 @@ class POLICY_EXPORT CloudPolicyValidatorBase {
   virtual Status CheckPayload() = 0;
   virtual Status CheckValues() = 0;
 
-  // Verifies the SHA1/ or SHA256/RSA |signature| on |data| against |key|.
-  // |signature_type| specifies the type of signature (SHA1 or SHA256).
-  static bool VerifySignature(const std::string& data,
-                              const std::string& key,
-                              const std::string& signature,
-                              SignatureType signature_type);
-
   Status status_;
   std::unique_ptr<enterprise_management::PolicyFetchResponse> policy_;
   std::unique_ptr<enterprise_management::PolicyData> policy_data_;
@@ -387,7 +386,7 @@ template <typename PayloadProto>
 class POLICY_EXPORT CloudPolicyValidator final
     : public CloudPolicyValidatorBase {
  public:
-  using CompletionCallback = base::Callback<void(CloudPolicyValidator*)>;
+  using CompletionCallback = base::OnceCallback<void(CloudPolicyValidator*)>;
 
   // Creates a new validator.
   // |background_task_runner| is optional; if RunValidation() is used directly
@@ -410,11 +409,11 @@ class POLICY_EXPORT CloudPolicyValidator final
   // Kicks off asynchronous validation through |validator|.
   // |completion_callback| is invoked when done.
   static void StartValidation(std::unique_ptr<CloudPolicyValidator> validator,
-                              const CompletionCallback& completion_callback) {
-    CloudPolicyValidator* const validator_ptr = validator.release();
+                              CompletionCallback completion_callback) {
+    CloudPolicyValidator* const validator_ptr = validator.get();
     PostValidationTask(
-        base::WrapUnique<CloudPolicyValidatorBase>(validator_ptr),
-        base::Bind(completion_callback, validator_ptr));
+        std::move(validator),
+        base::BindOnce(std::move(completion_callback), validator_ptr));
   }
 
  private:

@@ -26,7 +26,7 @@ anything.
 
 To use this script, you need to
 1. Build 32-bit APK as usual.
-2. Build 64-bit APK with GN variable build_apk_secondary_abi=false OR true.
+2. Build 64-bit APK.
 3. Use this script to merge the 2 APKs.
 
 """
@@ -48,12 +48,12 @@ BUILD_ANDROID_DIR = os.path.join(SRC_DIR, 'build', 'android')
 BUILD_ANDROID_GYP_DIR = os.path.join(BUILD_ANDROID_DIR, 'gyp')
 sys.path.append(BUILD_ANDROID_GYP_DIR)
 
-import finalize_apk # pylint: disable=import-error,wrong-import-position
-from util import build_utils # pylint: disable=import-error,wrong-import-position
+import finalize_apk  # pylint: disable=wrong-import-position
+from util import build_utils  # pylint: disable=wrong-import-position
 
 sys.path.append(BUILD_ANDROID_DIR)
 
-from pylib import constants  # pylint: disable=import-error,wrong-import-position
+from pylib import constants  # pylint: disable=wrong-import-position
 
 DEFAULT_ZIPALIGN_PATH = os.path.join(
     SRC_DIR, 'third_party', 'android_sdk', 'public', 'build-tools',
@@ -105,8 +105,8 @@ def GetDiffFiles(dcmp, base_dir):
                           (dcmp.diff_files, dcmp.left, dcmp.right))
 
   if len(dcmp.funny_files) > 0:
-    ApkMergeFailure('found uncomparable files: %s in %s and %s' %
-                    (dcmp.funny_files, dcmp.left, dcmp.right))
+    raise ApkMergeFailure('found uncomparable files: %s in %s and %s' %
+                          (dcmp.funny_files, dcmp.left, dcmp.right))
 
   for sub_dcmp in dcmp.subdirs.itervalues():
     copy_files.extend(GetDiffFiles(sub_dcmp, base_dir))
@@ -181,7 +181,7 @@ def MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64):
   if args.bundle:
     # if merging a bundle we must ignore the bundle specific
     # proto files as they will always be different.
-    ignores += ['BundleConfig.pb', 'native.pb', 'resources.pb']
+    ignores += ['BundleConfig.pb', 'native.pb']
 
   dcmp = filecmp.dircmp(
       tmp_dir_64,
@@ -210,8 +210,6 @@ def MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64):
 
 
 def main():
-  # TODO(cjgrant): Remove obsolete arguments once the build scripts stop
-  # specifying them.
   parser = argparse.ArgumentParser(
       description='Merge a 32-bit APK into a 64-bit APK')
   # Using type=os.path.abspath converts file paths to absolute paths so that
@@ -223,22 +221,13 @@ def main():
   parser.add_argument('--keystore_path', required=True, type=os.path.abspath)
   parser.add_argument('--key_name', required=True)
   parser.add_argument('--key_password', required=True)
-  parser.add_argument('--component-build', action='store_true')
-  parser.add_argument('--shared_library')
-  parser.add_argument('--page-align-shared-libraries', action='store_true',
-                      help='Obsolete, but remains for backwards compatibility')
   parser.add_argument('--uncompress-shared-libraries', action='store_true')
   parser.add_argument('--bundle', action='store_true')
   parser.add_argument('--debug', action='store_true')
+  # This option shall only used in debug build, see http://crbug.com/631494.
   parser.add_argument('--ignore-classes-dex', action='store_true')
   parser.add_argument('--has-unwind-cfi', action='store_true',
                       help='Specifies if the 32-bit apk has unwind_cfi file')
-  parser.add_argument('--loadable_module_32', action='append', default=[],
-                      help='Use for each 32-bit library added via '
-                      'loadable_modules')
-  parser.add_argument('--loadable_module_64', action='append', default=[],
-                      help='Use for each 64-bit library added via '
-                      'loadable_modules')
   args = parser.parse_args()
 
   if (args.zipalign_path is not None and
@@ -263,11 +252,15 @@ def main():
   try:
     MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64)
 
-    apksigner_path = os.path.join(
-        os.path.dirname(args.zipalign_path), 'apksigner')
-    finalize_apk.FinalizeApk(apksigner_path, args.zipalign_path,
-                             tmp_apk, new_apk, args.keystore_path,
-                             args.key_password, args.key_name)
+    apksigner_jar = os.path.join(
+        os.path.dirname(args.zipalign_path), 'lib', 'apksigner.jar')
+    # Official APKs are re-signed anyways, so it is not important to figure out
+    # the correct min_sdk_version. Use 21 since that's the lowest supported
+    # webview version.
+    min_sdk_version = 21
+    finalize_apk.FinalizeApk(apksigner_jar, args.zipalign_path, tmp_apk,
+                             new_apk, args.keystore_path, args.key_password,
+                             args.key_name, min_sdk_version)
   finally:
     shutil.rmtree(tmp_dir)
   return 0

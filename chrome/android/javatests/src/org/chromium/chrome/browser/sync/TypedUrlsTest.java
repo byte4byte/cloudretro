@@ -17,7 +17,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.sync.ModelType;
@@ -124,7 +124,7 @@ public class TypedUrlsTest {
         });
     }
 
-    private void addServerTypedUrl(String url) throws InterruptedException {
+    private void addServerTypedUrl(String url) {
         EntitySpecifics specifics =
                 EntitySpecifics.newBuilder()
                         .setTypedUrl(TypedUrlSpecifics.newBuilder()
@@ -181,18 +181,12 @@ public class TypedUrlsTest {
 
     private void waitForServerTypedUrlCountWithName(final int count, final String name) {
         CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Expected " + count + " server typed URLs with name " + name + ".") {
-                    @Override
-                    public boolean isSatisfied() {
-                        try {
-                            return mSyncTestRule.getFakeServerHelper()
-                                    .verifyEntityCountByTypeAndName(
-                                            count, ModelType.TYPED_URLS, name);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
+                ()
+                        -> {
+                    return mSyncTestRule.getFakeServerHelper().verifyEntityCountByTypeAndName(
+                            count, ModelType.TYPED_URLS, name);
                 },
+                "Expected " + count + " server typed URLs with name " + name + ".",
                 SyncTestUtil.TIMEOUT_MS, SyncTestUtil.INTERVAL_MS);
     }
 

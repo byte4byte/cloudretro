@@ -14,7 +14,7 @@
 #include "base/optional.h"
 #include "chromeos/services/device_sync/network_request_error.h"
 #include "google_apis/gaia/oauth2_api_call_flow.h"
-#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace chromeos {
 
@@ -88,10 +88,10 @@ class CryptAuthApiCallFlow : public OAuth2ApiCallFlow {
   std::string CreateApiCallBody() override;
   std::string CreateApiCallBodyContentType() override;
   std::string GetRequestTypeForBody(const std::string& body) override;
-  void ProcessApiCallSuccess(const network::ResourceResponseHead* head,
+  void ProcessApiCallSuccess(const network::mojom::URLResponseHead* head,
                              std::unique_ptr<std::string> body) override;
   void ProcessApiCallFailure(int net_error,
-                             const network::ResourceResponseHead* head,
+                             const network::mojom::URLResponseHead* head,
                              std::unique_ptr<std::string> body) override;
   net::PartialNetworkTrafficAnnotationTag GetNetworkTrafficAnnotationTag()
       override;

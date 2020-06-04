@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_SSL_SSL_CONFIG_SERVICE_MANAGER_H_
 
 #include "services/network/public/mojom/network_service.mojom.h"
-#include "services/network/public/mojom/ssl_config.mojom.h"
 
 class PrefService;
 class PrefRegistrySimple;
@@ -26,7 +25,7 @@ class SSLConfigServiceManager {
   virtual ~SSLConfigServiceManager() {}
 
   // Populates the SSLConfig-related members of |network_context_params|
-  // (|initial_ssl_config| and |ssl_config_client_request|). Updated SSLConfigs
+  // (|initial_ssl_config| and |ssl_config_client_receiver|). Updated SSLConfigs
   // will be send to the NetworkContext created with those params whenever the
   // configuration changes. Can be called more than once to inform multiple
   // NetworkContexts of changes.

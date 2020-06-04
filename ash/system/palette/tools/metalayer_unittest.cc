@@ -6,8 +6,8 @@
 
 #include "ash/highlighter/highlighter_controller.h"
 #include "ash/highlighter/highlighter_controller_test_api.h"
-#include "ash/public/cpp/voice_interaction_controller.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
+#include "ash/public/cpp/assistant/assistant_state.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/system/palette/mock_palette_tool_delegate.h"
 #include "ash/system/palette/palette_ids.h"
@@ -18,6 +18,8 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
+#include "components/prefs/pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/view.h"
@@ -49,6 +51,11 @@ class MetalayerToolTest : public AshTestBase {
     AshTestBase::TearDown();
   }
 
+  AssistantState* assistant_state() { return AssistantState::Get(); }
+  PrefService* prefs() {
+    return Shell::Get()->session_controller()->GetPrimaryUserPrefService();
+  }
+
  protected:
   std::unique_ptr<HighlighterControllerTestApi> highlighter_test_api_;
   std::unique_ptr<MockPaletteToolDelegate> palette_tool_delegate_;
@@ -61,17 +68,14 @@ class MetalayerToolTest : public AshTestBase {
 }  // namespace
 
 // The metalayer tool is always visible, but only enabled when the user
-// has enabled the metalayer AND the voice interaction framework is ready.
+// has enabled the metalayer AND the Assistant framework is ready.
 TEST_F(MetalayerToolTest, PaletteMenuState) {
-  const mojom::VoiceInteractionState kStates[] = {
-      mojom::VoiceInteractionState::NOT_READY,
-      mojom::VoiceInteractionState::STOPPED,
-      mojom::VoiceInteractionState::RUNNING};
+  const mojom::AssistantState kStates[] = {mojom::AssistantState::NOT_READY,
+                                           mojom::AssistantState::READY};
   const mojom::AssistantAllowedState kAllowedStates[] = {
       mojom::AssistantAllowedState::ALLOWED,
       mojom::AssistantAllowedState::DISALLOWED_BY_POLICY,
       mojom::AssistantAllowedState::DISALLOWED_BY_LOCALE,
-      mojom::AssistantAllowedState::DISALLOWED_BY_FLAG,
       mojom::AssistantAllowedState::DISALLOWED_BY_NONPRIMARY_USER,
       mojom::AssistantAllowedState::DISALLOWED_BY_SUPERVISED_USER,
       mojom::AssistantAllowedState::DISALLOWED_BY_INCOGNITO,
@@ -79,21 +83,21 @@ TEST_F(MetalayerToolTest, PaletteMenuState) {
   const base::string16 kLoading(base::ASCIIToUTF16("loading"));
 
   // Iterate over every possible combination of states.
-  for (mojom::VoiceInteractionState state : kStates) {
+  for (mojom::AssistantState state : kStates) {
     for (mojom::AssistantAllowedState allowed_state : kAllowedStates) {
       for (int enabled = 0; enabled <= 1; enabled++) {
         for (int context = 0; context <= 1; context++) {
           const bool allowed =
               allowed_state == mojom::AssistantAllowedState::ALLOWED;
-          const bool ready = state != mojom::VoiceInteractionState::NOT_READY;
+          const bool ready = state != mojom::AssistantState::NOT_READY;
           const bool selectable = allowed && enabled && context && ready;
 
-          VoiceInteractionController::Get()->NotifyStatusChanged(state);
-          VoiceInteractionController::Get()->NotifySettingsEnabled(enabled);
-          VoiceInteractionController::Get()->NotifyContextEnabled(context);
-          VoiceInteractionController::Get()->NotifyFeatureAllowed(
-              allowed_state);
-          VoiceInteractionController::Get()->FlushForTesting();
+          assistant_state()->NotifyStatusChanged(state);
+          prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled,
+                              enabled);
+          assistant_state()->NotifyFeatureAllowed(allowed_state);
+          prefs()->SetBoolean(
+              chromeos::assistant::prefs::kAssistantContextEnabled, context);
 
           std::unique_ptr<views::View> view =
               base::WrapUnique(tool_->CreateView());
@@ -139,32 +143,28 @@ TEST_F(MetalayerToolTest, EnablingDisablingMetalayerEnablesDisablesController) {
 
 // Verifies that disabling the metalayer support disables the tool.
 TEST_F(MetalayerToolTest, MetalayerUnsupportedDisablesPaletteTool) {
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      mojom::VoiceInteractionState::RUNNING);
-  VoiceInteractionController::Get()->NotifySettingsEnabled(true);
-  VoiceInteractionController::Get()->NotifyContextEnabled(true);
-  VoiceInteractionController::Get()->FlushForTesting();
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, true);
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantContextEnabled,
+                      true);
 
   // Disabling the user prefs individually should disable the tool.
   tool_->OnEnable();
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER));
-  VoiceInteractionController::Get()->NotifySettingsEnabled(false);
-  VoiceInteractionController::Get()->FlushForTesting();
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, false);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
-  VoiceInteractionController::Get()->NotifySettingsEnabled(true);
-  VoiceInteractionController::Get()->FlushForTesting();
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantEnabled, true);
 
   tool_->OnEnable();
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER));
-  VoiceInteractionController::Get()->NotifyContextEnabled(false);
-  VoiceInteractionController::Get()->FlushForTesting();
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantContextEnabled,
+                      false);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
-  VoiceInteractionController::Get()->NotifyContextEnabled(true);
-  VoiceInteractionController::Get()->FlushForTesting();
+  prefs()->SetBoolean(chromeos::assistant::prefs::kAssistantContextEnabled,
+                      true);
 
-  // Test VoiceInteractionState changes.
+  // Test AssistantState changes.
   tool_->OnEnable();
 
   // Changing the state from RUNNING to STOPPED and back should not disable the
@@ -172,20 +172,14 @@ TEST_F(MetalayerToolTest, MetalayerUnsupportedDisablesPaletteTool) {
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER))
       .Times(0);
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      mojom::VoiceInteractionState::STOPPED);
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      mojom::VoiceInteractionState::RUNNING);
-  VoiceInteractionController::Get()->FlushForTesting();
+  assistant_state()->NotifyStatusChanged(mojom::AssistantState::READY);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
 
   // Changing the state to NOT_READY should disable the tool.
   EXPECT_CALL(*palette_tool_delegate_.get(),
               DisableTool(PaletteToolId::METALAYER))
       .Times(testing::AtLeast(1));
-  VoiceInteractionController::Get()->NotifyStatusChanged(
-      mojom::VoiceInteractionState::NOT_READY);
-  VoiceInteractionController::Get()->FlushForTesting();
+  assistant_state()->NotifyStatusChanged(mojom::AssistantState::NOT_READY);
   testing::Mock::VerifyAndClearExpectations(palette_tool_delegate_.get());
 }
 

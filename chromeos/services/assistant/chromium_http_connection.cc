@@ -12,17 +12,20 @@
 
 #include "base/logging.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/load_flags.h"
 #include "services/network/public/cpp/header_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 using assistant_client::HttpConnection;
+using network::PendingSharedURLLoaderFactory;
 using network::SharedURLLoaderFactory;
-using network::SharedURLLoaderFactoryInfo;
 
-// A macro which ensures we are running on the main thread.
-#define ENSURE_MAIN_THREAD(method, ...)                                  \
+// A macro which ensures we are running in |task_runner_|'s sequence.
+#define ENSURE_IN_SEQUENCE(method, ...)                                  \
   if (!task_runner_->RunsTasksInCurrentSequence()) {                     \
     task_runner_->PostTask(FROM_HERE,                                    \
                            base::BindOnce(method, this, ##__VA_ARGS__)); \
@@ -39,26 +42,14 @@ constexpr int kResponseCodeInvalid = -1;
 
 }  // namespace
 
-ChromiumHttpConnectionFactory::ChromiumHttpConnectionFactory(
-    std::unique_ptr<SharedURLLoaderFactoryInfo> url_loader_factory_info)
-    : url_loader_factory_(
-          SharedURLLoaderFactory::Create(std::move(url_loader_factory_info))) {}
-
-ChromiumHttpConnectionFactory::~ChromiumHttpConnectionFactory() = default;
-
-HttpConnection* ChromiumHttpConnectionFactory::Create(
-    HttpConnection::Delegate* delegate) {
-  return new ChromiumHttpConnection(url_loader_factory_->Clone(), delegate);
-}
-
 ChromiumHttpConnection::ChromiumHttpConnection(
-    std::unique_ptr<SharedURLLoaderFactoryInfo> url_loader_factory_info,
+    std::unique_ptr<PendingSharedURLLoaderFactory> pending_url_loader_factory,
     Delegate* delegate)
     : delegate_(delegate),
-      task_runner_(base::CreateSequencedTaskRunnerWithTraits({})),
-      url_loader_factory_info_(std::move(url_loader_factory_info)) {
+      task_runner_(base::ThreadPool::CreateSequencedTaskRunner({})),
+      pending_url_loader_factory_(std::move(pending_url_loader_factory)) {
   DCHECK(delegate_);
-  DCHECK(url_loader_factory_info_);
+  DCHECK(pending_url_loader_factory_);
 
   // Add a reference, so |this| cannot go away until Close() is called.
   AddRef();
@@ -71,7 +62,7 @@ ChromiumHttpConnection::~ChromiumHttpConnection() {
 }
 
 void ChromiumHttpConnection::SetRequest(const std::string& url, Method method) {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::SetRequest, url, method);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::SetRequest, url, method);
   DCHECK_EQ(state_, State::NEW);
   url_ = GURL(url);
   method_ = method;
@@ -79,7 +70,7 @@ void ChromiumHttpConnection::SetRequest(const std::string& url, Method method) {
 
 void ChromiumHttpConnection::AddHeader(const std::string& name,
                                        const std::string& value) {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::AddHeader, name, value);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::AddHeader, name, value);
   DCHECK_EQ(state_, State::NEW);
 
   if (!network::IsRequestHeaderSafe(name, value)) {
@@ -104,7 +95,7 @@ void ChromiumHttpConnection::AddHeader(const std::string& name,
 
 void ChromiumHttpConnection::SetUploadContent(const std::string& content,
                                               const std::string& content_type) {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::SetUploadContent, content,
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::SetUploadContent, content,
                      content_type);
   DCHECK_EQ(state_, State::NEW);
   upload_content_ = content;
@@ -114,21 +105,22 @@ void ChromiumHttpConnection::SetUploadContent(const std::string& content,
 
 void ChromiumHttpConnection::SetChunkedUploadContentType(
     const std::string& content_type) {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::SetChunkedUploadContentType,
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::SetChunkedUploadContentType,
                      content_type);
   DCHECK_EQ(state_, State::NEW);
   upload_content_ = "";
   upload_content_type_ = "";
   chunked_upload_content_type_ = content_type;
+  AddHeader(::net::HttpRequestHeaders::kContentType, content_type);
 }
 
 void ChromiumHttpConnection::EnableHeaderResponse() {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::EnableHeaderResponse)
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::EnableHeaderResponse)
   enable_header_response_ = true;
 }
 
 void ChromiumHttpConnection::EnablePartialResults() {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::EnablePartialResults);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::EnablePartialResults);
   DCHECK_EQ(state_, State::NEW);
   handle_partial_response_ = true;
 }
@@ -136,7 +128,7 @@ void ChromiumHttpConnection::EnablePartialResults() {
 void ChromiumHttpConnection::Start() {
   VLOG(2) << "Requested to start connection";
 
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::Start);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::Start);
   DCHECK_EQ(state_, State::NEW);
   state_ = State::STARTED;
 
@@ -161,16 +153,17 @@ void ChromiumHttpConnection::Start() {
       resource_request->method = "HEAD";
       break;
   }
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   const bool chunked_upload =
       !chunked_upload_content_type_.empty() && method_ == Method::POST;
   if (chunked_upload) {
     // Attach a chunked upload body.
-    network::mojom::ChunkedDataPipeGetterPtr data_pipe;
-    binding_set_.AddBinding(this, mojo::MakeRequest(&data_pipe));
+    mojo::PendingRemote<network::mojom::ChunkedDataPipeGetter> data_remote;
+    receiver_set_.Add(this, data_remote.InitWithNewPipeAndPassReceiver());
     resource_request->request_body = new network::ResourceRequestBody();
-    resource_request->request_body->SetToChunkedDataPipe(std::move(data_pipe));
+    resource_request->request_body->SetToChunkedDataPipe(
+        std::move(data_remote));
   }
 
   url_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),
@@ -181,7 +174,7 @@ void ChromiumHttpConnection::Start() {
     url_loader_->AttachStringForUpload(upload_content_, upload_content_type_);
 
   auto factory =
-      SharedURLLoaderFactory::Create(std::move(url_loader_factory_info_));
+      SharedURLLoaderFactory::Create(std::move(pending_url_loader_factory_));
   if (handle_partial_response_) {
     url_loader_->SetOnResponseStartedCallback(
         base::BindOnce(&ChromiumHttpConnection::OnResponseStarted, this));
@@ -194,12 +187,12 @@ void ChromiumHttpConnection::Start() {
 }
 
 void ChromiumHttpConnection::Pause() {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::Pause);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::Pause);
   is_paused_ = true;
 }
 
 void ChromiumHttpConnection::Resume() {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::Resume);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::Resume);
   is_paused_ = false;
 
   if (!partial_response_cache_.empty()) {
@@ -214,7 +207,7 @@ void ChromiumHttpConnection::Resume() {
 void ChromiumHttpConnection::Close() {
   VLOG(2) << "Requesting to close connection object";
 
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::Close);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::Close);
   if (state_ == State::DESTROYED)
     return;
 
@@ -229,7 +222,7 @@ void ChromiumHttpConnection::Close() {
 
 void ChromiumHttpConnection::UploadData(const std::string& data,
                                         bool is_last_chunk) {
-  ENSURE_MAIN_THREAD(&ChromiumHttpConnection::UploadData, data, is_last_chunk);
+  ENSURE_IN_SEQUENCE(&ChromiumHttpConnection::UploadData, data, is_last_chunk);
   if (state_ != State::STARTED)
     return;
 
@@ -393,12 +386,24 @@ void ChromiumHttpConnection::OnURLLoadComplete(
 
 void ChromiumHttpConnection::OnResponseStarted(
     const GURL& final_url,
-    const network::ResourceResponseHead& response_header) {
+    const network::mojom::URLResponseHead& response_header) {
   if (enable_header_response_ && response_header.headers) {
     // Only propagate |OnHeaderResponse()| once before any |OnPartialResponse()|
     // invoked to honor the API contract.
     delegate_->OnHeaderResponse(response_header.headers->raw_headers());
   }
+}
+
+ChromiumHttpConnectionFactory::ChromiumHttpConnectionFactory(
+    std::unique_ptr<PendingSharedURLLoaderFactory> pending_url_loader_factory)
+    : url_loader_factory_(SharedURLLoaderFactory::Create(
+          std::move(pending_url_loader_factory))) {}
+
+ChromiumHttpConnectionFactory::~ChromiumHttpConnectionFactory() = default;
+
+HttpConnection* ChromiumHttpConnectionFactory::Create(
+    HttpConnection::Delegate* delegate) {
+  return new ChromiumHttpConnection(url_loader_factory_->Clone(), delegate);
 }
 
 }  // namespace assistant

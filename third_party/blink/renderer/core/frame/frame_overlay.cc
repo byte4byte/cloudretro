@@ -72,20 +72,12 @@ void FrameOverlay::UpdatePrePaint() {
     layer_ = std::make_unique<GraphicsLayer>(*this);
     layer_->SetDrawsContent(true);
     layer_->SetHitTestable(false);
-
-    if (!RuntimeEnabledFeatures::BlinkGenPropertyTreesEnabled()) {
-      // This is required for contents of overlay to stay in sync with the page
-      // while scrolling. When BlinkGenPropertyTrees is enabled, scrolling is
-      // prevented by using the root scroll node in the root property tree
-      // state.
-      cc::Layer* cc_layer = layer_->CcLayer();
-      cc_layer->AddMainThreadScrollingReasons(
-          cc::MainThreadScrollingReason::kFrameOverlay);
-    }
   }
 
   DCHECK(parent_layer);
-  if (layer_->Parent() != parent_layer)
+  if (layer_->Parent() != parent_layer ||
+      // Keep the layer the last child of parent to make it topmost.
+      parent_layer->Children().back() != layer_.get())
     parent_layer->AddChild(layer_.get());
   layer_->SetLayerState(DefaultPropertyTreeState(), IntPoint());
   layer_->SetSize(gfx::Size(Size()));
@@ -117,6 +109,15 @@ void FrameOverlay::PaintContents(const GraphicsLayer* graphics_layer,
   DCHECK_EQ(graphics_layer, layer_.get());
   DCHECK_EQ(DefaultPropertyTreeState(), layer_->GetPropertyTreeState());
   Paint(context);
+}
+
+void FrameOverlay::GraphicsLayersDidChange() {
+  frame_->View()->SetForeignLayerListNeedsUpdate();
+}
+
+void FrameOverlay::ServiceScriptedAnimations(
+    base::TimeTicks monotonic_frame_begin_time) {
+  delegate_->ServiceScriptedAnimations(monotonic_frame_begin_time);
 }
 
 String FrameOverlay::DebugName(const GraphicsLayer*) const {

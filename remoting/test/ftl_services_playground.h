@@ -15,6 +15,7 @@
 #include "remoting/base/oauth_token_getter.h"
 #include "remoting/signaling/ftl_messaging_client.h"
 #include "remoting/signaling/ftl_registration_manager.h"
+#include "remoting/signaling/signaling_tracker_impl.h"
 
 namespace remoting {
 
@@ -88,7 +89,9 @@ class FtlServicesPlayground {
 
   base::OnceClosure receive_messages_done_callback_;
 
-  base::WeakPtrFactory<FtlServicesPlayground> weak_factory_;
+  SignalingTrackerImpl signaling_tracker_;
+
+  base::WeakPtrFactory<FtlServicesPlayground> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(FtlServicesPlayground);
 };
 

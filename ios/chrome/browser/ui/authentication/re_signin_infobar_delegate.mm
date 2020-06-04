@@ -14,14 +14,13 @@
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/infobars/infobar.h"
+#include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/signin_interaction/public/signin_presenter.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -29,7 +28,7 @@
 #endif
 
 // static
-bool ReSignInInfoBarDelegate::Create(ios::ChromeBrowserState* browser_state,
+bool ReSignInInfoBarDelegate::Create(ChromeBrowserState* browser_state,
                                      web::WebState* web_state,
                                      id<SigninPresenter> presenter) {
   DCHECK(web_state);
@@ -48,7 +47,7 @@ bool ReSignInInfoBarDelegate::Create(ios::ChromeBrowserState* browser_state,
 // static
 std::unique_ptr<infobars::InfoBar> ReSignInInfoBarDelegate::CreateInfoBar(
     infobars::InfoBarManager* infobar_manager,
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     id<SigninPresenter> presenter) {
   DCHECK(infobar_manager);
   std::unique_ptr<ReSignInInfoBarDelegate> delegate =
@@ -61,7 +60,7 @@ std::unique_ptr<infobars::InfoBar> ReSignInInfoBarDelegate::CreateInfoBar(
 // static
 std::unique_ptr<ReSignInInfoBarDelegate>
 ReSignInInfoBarDelegate::CreateInfoBarDelegate(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     id<SigninPresenter> presenter) {
   DCHECK(browser_state);
   // Do not ask user to sign in if current profile is incognito.
@@ -85,7 +84,7 @@ ReSignInInfoBarDelegate::CreateInfoBarDelegate(
 }
 
 ReSignInInfoBarDelegate::ReSignInInfoBarDelegate(
-    ios::ChromeBrowserState* browser_state,
+    ChromeBrowserState* browser_state,
     id<SigninPresenter> presenter)
     : browser_state_(browser_state),
       icon_([UIImage imageNamed:@"infobar_warning"]),
@@ -123,7 +122,6 @@ bool ReSignInInfoBarDelegate::Accept() {
   signin_metrics::RecordSigninUserActionForAccessPoint(
       signin_metrics::AccessPoint::ACCESS_POINT_RESIGNIN_INFOBAR,
       signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
-  DCHECK(static_cast<InfoBarIOS*>(infobar())->View());
   ShowSigninCommand* command = [[ShowSigninCommand alloc]
       initWithOperation:AUTHENTICATION_OPERATION_REAUTHENTICATE
             accessPoint:signin_metrics::AccessPoint::

@@ -7,10 +7,12 @@ package org.chromium.chrome.browser.vr;
 import org.chromium.base.BundleUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.modules.ModuleInstallUi;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.components.module_installer.OnModuleInstallFinishedListener;
+import org.chromium.components.module_installer.engine.InstallListener;
+import org.chromium.ui.vr.VrModeObserver;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +36,6 @@ public class VrModuleProvider implements ModuleInstallUi.FailureUiListener {
      */
     public static void maybeInit() {
         if (!VrBuildConfig.IS_VR_ENABLED) return;
-        nativeInit();
         // Always install the VR module on Daydream-ready devices.
         maybeRequestModuleIfDaydreamReady();
     }
@@ -87,7 +88,7 @@ public class VrModuleProvider implements ModuleInstallUi.FailureUiListener {
         for (VrModeObserver observer : sVrModeObservers) observer.onExitVr();
     }
 
-    /* package */ static void installModule(OnModuleInstallFinishedListener onFinishedListener) {
+    /* package */ static void installModule(InstallListener listener) {
         VrModule.install((success) -> {
             if (success) {
                 // Re-create delegate provider.
@@ -96,14 +97,14 @@ public class VrModuleProvider implements ModuleInstallUi.FailureUiListener {
                 assert !(delegate instanceof VrDelegateFallback);
                 delegate.initAfterModuleInstall();
             }
-            onFinishedListener.onFinished(success);
+            listener.onComplete(success);
         });
     }
 
     // TODO(crbug.com/870055): JNI should be registered in the shared VR library's JNI_OnLoad
     // function. Do this once we have a shared VR library.
     /* package */ static void registerJni() {
-        nativeRegisterJni();
+        VrModuleProviderJni.get().registerJni();
     }
 
     private static VrDelegateProvider getDelegateProvider() {
@@ -128,16 +129,13 @@ public class VrModuleProvider implements ModuleInstallUi.FailureUiListener {
     }
 
     @Override
-    public void onRetry() {
-        if (mNativeVrModuleProvider != 0) {
+    public void onFailureUiResponse(boolean retry) {
+        if (mNativeVrModuleProvider == 0) return;
+        if (retry) {
             installModule(mTab);
-        }
-    }
-
-    @Override
-    public void onCancel() {
-        if (mNativeVrModuleProvider != 0) {
-            nativeOnInstalledModule(mNativeVrModuleProvider, false);
+        } else {
+            VrModuleProviderJni.get().onInstalledModule(
+                    mNativeVrModuleProvider, VrModuleProvider.this, false);
         }
     }
 
@@ -162,12 +160,16 @@ public class VrModuleProvider implements ModuleInstallUi.FailureUiListener {
                     return;
                 }
                 ui.showInstallSuccessUi();
-                nativeOnInstalledModule(mNativeVrModuleProvider, success);
+                VrModuleProviderJni.get().onInstalledModule(
+                        mNativeVrModuleProvider, VrModuleProvider.this, success);
             }
         });
     }
 
-    private static native void nativeInit();
-    private static native void nativeRegisterJni();
-    private native void nativeOnInstalledModule(long nativeVrModuleProvider, boolean success);
+    @NativeMethods
+    interface Natives {
+        void registerJni();
+        void onInstalledModule(
+                long nativeVrModuleProvider, VrModuleProvider caller, boolean success);
+    }
 }

@@ -26,8 +26,7 @@ MasterHostScanCache::MasterHostScanCache(
       active_host_(active_host),
       network_host_scan_cache_(network_host_scan_cache),
       persistent_host_scan_cache_(persistent_host_scan_cache),
-      is_initializing_(false),
-      weak_ptr_factory_(this) {
+      is_initializing_(false) {
   InitializeFromPersistentCache();
 }
 
@@ -173,8 +172,8 @@ void MasterHostScanCache::StartTimer(const std::string& tether_network_guid) {
   found_iter->second->Start(
       FROM_HERE,
       base::TimeDelta::FromMinutes(kNumMinutesBeforeCacheEntryExpires),
-      base::Bind(&MasterHostScanCache::OnTimerFired,
-                 weak_ptr_factory_.GetWeakPtr(), tether_network_guid));
+      base::BindOnce(&MasterHostScanCache::OnTimerFired,
+                     weak_ptr_factory_.GetWeakPtr(), tether_network_guid));
 }
 
 void MasterHostScanCache::OnTimerFired(const std::string& tether_network_guid) {

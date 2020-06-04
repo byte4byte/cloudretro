@@ -76,7 +76,7 @@ void RespondWithBadResponse(const network::ResourceRequest& request,
                             network::TestURLLoaderFactory* factory) {
   network::URLLoaderCompletionStatus status;
   factory->AddResponse(
-      request.url, network::ResourceResponseHead(), std::string(),
+      request.url, network::mojom::URLResponseHead::New(), std::string(),
       network::URLLoaderCompletionStatus(net::ERR_NETWORK_CHANGED));
 }
 
@@ -131,11 +131,10 @@ void RespondToRegisterWithSuccess(em::DeviceRegisterRequest::Type expected_type,
 
   status.decoded_body_length = content.size();
 
-  network::ResourceResponseHead head =
-      network::CreateResourceResponseHead(net::HTTP_OK);
-  head.mime_type = "application/protobuf";
+  auto head = network::CreateURLResponseHead(net::HTTP_OK);
+  head->mime_type = "application/protobuf";
 
-  factory->AddResponse(request.url, head, content, status);
+  factory->AddResponse(request.url, std::move(head), content, status);
 }
 
 }  // namespace
@@ -175,7 +174,7 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
     // the username to the UserCloudPolicyValidator.
     auto* identity_manager =
         IdentityManagerFactory::GetForProfile(browser()->profile());
-    identity::SetPrimaryAccount(identity_manager, "user@example.com");
+    signin::SetPrimaryAccount(identity_manager, "user@example.com");
 
     ASSERT_TRUE(policy_manager());
     policy_manager()->Connect(
@@ -277,9 +276,9 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyManagerTest, RegisterFailsWithRetries) {
   test_url_loader_factory_->SetInterceptor(
       base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
         network::URLLoaderCompletionStatus status(net::ERR_NETWORK_CHANGED);
-        test_url_loader_factory_->AddResponse(request.url,
-                                              network::ResourceResponseHead(),
-                                              std::string(), status);
+        test_url_loader_factory_->AddResponse(
+            request.url, network::mojom::URLResponseHead::New(), std::string(),
+            status);
         ++count;
       }));
 
@@ -305,9 +304,9 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyManagerTest, RegisterWithRetry) {
         if (!gave_error) {
           gave_error = true;
           network::URLLoaderCompletionStatus status(net::ERR_NETWORK_CHANGED);
-          test_url_loader_factory_->AddResponse(request.url,
-                                                network::ResourceResponseHead(),
-                                                std::string(), status);
+          test_url_loader_factory_->AddResponse(
+              request.url, network::mojom::URLResponseHead::New(),
+              std::string(), status);
           return;
         }
 

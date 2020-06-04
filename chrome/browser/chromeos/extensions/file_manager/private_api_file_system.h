@@ -22,8 +22,8 @@
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "components/drive/file_errors.h"
 #include "extensions/browser/extension_function.h"
-#include "services/device/public/mojom/mtp_storage_info.mojom.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "services/device/public/mojom/mtp_storage_info.mojom-forward.h"
+#include "storage/browser/file_system/file_system_url.h"
 
 namespace storage {
 class FileSystemContext;
@@ -43,7 +43,13 @@ namespace drive {
 namespace util {
 class FileStreamMd5Digester;
 }  // namespace util
-struct HashAndFilePath;
+
+// File path and its MD5 hash obtained from drive.
+struct HashAndFilePath {
+  std::string hash;
+  base::FilePath path;
+};
+
 }  // namespace drive
 
 namespace extensions {
@@ -51,7 +57,7 @@ namespace extensions {
 // Grant permission to request externalfile scheme. The permission is needed to
 // start drag for external file URL.
 class FileManagerPrivateEnableExternalFileSchemeFunction
-    : public UIThreadExtensionFunction {
+    : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.enableExternalFileScheme",
                              FILEMANAGERPRIVATE_ENABLEEXTERNALFILESCHEME)
@@ -65,7 +71,7 @@ class FileManagerPrivateEnableExternalFileSchemeFunction
 
 // Grants R/W permissions to profile-specific directories (Drive, Downloads)
 // from other profiles.
-class FileManagerPrivateGrantAccessFunction : public UIThreadExtensionFunction {
+class FileManagerPrivateGrantAccessFunction : public ExtensionFunction {
  public:
   FileManagerPrivateGrantAccessFunction();
 
@@ -86,7 +92,7 @@ class FileManagerPrivateGrantAccessFunction : public UIThreadExtensionFunction {
 // "FileWatch",
 // the class and its sub classes are used only for watching changes in
 // directories.
-class FileWatchFunctionBase : public LoggedUIThreadExtensionFunction {
+class FileWatchFunctionBase : public LoggedExtensionFunction {
  public:
   using ResponseCallback = base::Callback<void(bool success)>;
 
@@ -167,8 +173,7 @@ class FileManagerPrivateInternalRemoveFileWatchFunction
 };
 
 // Implements the chrome.fileManagerPrivate.getSizeStats method.
-class FileManagerPrivateGetSizeStatsFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateGetSizeStatsFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.getSizeStats",
                              FILEMANAGERPRIVATE_GETSIZESTATS)
@@ -193,7 +198,7 @@ class FileManagerPrivateGetSizeStatsFunction
 
 // Implements the chrome.fileManagerPrivate.validatePathNameLength method.
 class FileManagerPrivateInternalValidatePathNameLengthFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION(
       "fileManagerPrivateInternal.validatePathNameLength",
@@ -211,8 +216,7 @@ class FileManagerPrivateInternalValidatePathNameLengthFunction
 
 // Implements the chrome.fileManagerPrivate.formatVolume method.
 // Formats Volume given its mount path.
-class FileManagerPrivateFormatVolumeFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateFormatVolumeFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.formatVolume",
                              FILEMANAGERPRIVATE_FORMATVOLUME)
@@ -226,8 +230,7 @@ class FileManagerPrivateFormatVolumeFunction
 
 // Implements the chrome.fileManagerPrivate.renameVolume method.
 // Renames Volume given its mount path and new Volume name.
-class FileManagerPrivateRenameVolumeFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateRenameVolumeFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.renameVolume",
                              FILEMANAGERPRIVATE_RENAMEVOLUME)
@@ -241,7 +244,7 @@ class FileManagerPrivateRenameVolumeFunction
 
 // Implements the chrome.fileManagerPrivate.startCopy method.
 class FileManagerPrivateInternalStartCopyFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   FileManagerPrivateInternalStartCopyFunction();
 
@@ -276,8 +279,7 @@ class FileManagerPrivateInternalStartCopyFunction
 };
 
 // Implements the chrome.fileManagerPrivate.cancelCopy method.
-class FileManagerPrivateCancelCopyFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateCancelCopyFunction : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.cancelCopy",
                              FILEMANAGERPRIVATE_CANCELCOPY)
@@ -292,7 +294,7 @@ class FileManagerPrivateCancelCopyFunction
 // Implements the chrome.fileManagerPrivateInternal.resolveIsolatedEntries
 // method.
 class FileManagerPrivateInternalResolveIsolatedEntriesFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION(
       "fileManagerPrivateInternal.resolveIsolatedEntries",
@@ -302,7 +304,7 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
   ~FileManagerPrivateInternalResolveIsolatedEntriesFunction() override =
       default;
 
-  // UIThreadExtensionFunction overrides.
+  // ExtensionFunction overrides.
   ResponseAction Run() override;
 
  private:
@@ -312,7 +314,7 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
 };
 
 class FileManagerPrivateInternalComputeChecksumFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   FileManagerPrivateInternalComputeChecksumFunction();
 
@@ -332,9 +334,8 @@ class FileManagerPrivateInternalComputeChecksumFunction
 };
 
 // Implements the chrome.fileManagerPrivate.searchFilesByHashes method.
-// TODO(b/883628): Write some tests maybe?
 class FileManagerPrivateSearchFilesByHashesFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   FileManagerPrivateSearchFilesByHashesFunction();
 
@@ -364,8 +365,7 @@ class FileManagerPrivateSearchFilesByHashesFunction
   const ChromeExtensionFunctionDetails chrome_details_;
 };
 
-class FileManagerPrivateSearchFilesFunction
-    : public LoggedUIThreadExtensionFunction {
+class FileManagerPrivateSearchFilesFunction : public LoggedExtensionFunction {
  public:
   FileManagerPrivateSearchFilesFunction();
 
@@ -385,29 +385,9 @@ class FileManagerPrivateSearchFilesFunction
   const ChromeExtensionFunctionDetails chrome_details_;
 };
 
-// Implements the chrome.fileManagerPrivate.setEntryTag method.
-class FileManagerPrivateInternalSetEntryTagFunction
-    : public LoggedUIThreadExtensionFunction {
- public:
-  FileManagerPrivateInternalSetEntryTagFunction();
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.setEntryTag",
-                             FILEMANAGERPRIVATEINTERNAL_SETENTRYTAG)
- protected:
-  ~FileManagerPrivateInternalSetEntryTagFunction() override = default;
-
- private:
-  const ChromeExtensionFunctionDetails chrome_details_;
-
-  // Called when setting a tag is completed with either a success or an error.
-  void OnSetEntryPropertyCompleted(drive::FileError result);
-
-  ExtensionFunction::ResponseAction Run() override;
-  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateInternalSetEntryTagFunction);
-};
-
 // Implements the chrome.fileManagerPrivate.getDirectorySize method.
 class FileManagerPrivateInternalGetDirectorySizeFunction
-    : public LoggedUIThreadExtensionFunction {
+    : public LoggedExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.getDirectorySize",
                              FILEMANAGERPRIVATEINTERNAL_GETDIRECTORYSIZE)

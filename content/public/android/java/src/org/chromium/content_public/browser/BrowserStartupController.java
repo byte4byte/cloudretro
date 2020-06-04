@@ -4,7 +4,7 @@
 
 package org.chromium.content_public.browser;
 
-import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.content.browser.BrowserStartupControllerImpl;
 
 /**
@@ -22,7 +22,7 @@ public interface BrowserStartupController {
     /**
      * This provides the interface to the callbacks for successful or failed startup
      */
-    public interface StartupCallback {
+    interface StartupCallback {
         void onSuccess();
         void onFailure();
     }
@@ -30,13 +30,10 @@ public interface BrowserStartupController {
     /**
      * Get BrowserStartupController instance, create a new one if no existing.
      *
-     * @param libraryProcessType the type of process the shared library is loaded. it must be
-     *                           LibraryProcessType.PROCESS_BROWSER or
-     *                           LibraryProcessType.PROCESS_WEBVIEW.
      * @return BrowserStartupController instance.
      */
-    public static BrowserStartupController get(int libraryProcessType) {
-        return BrowserStartupControllerImpl.get(libraryProcessType);
+    static BrowserStartupController getInstance() {
+        return BrowserStartupControllerImpl.getInstance();
     }
 
     /**
@@ -45,13 +42,18 @@ public interface BrowserStartupController {
      * <p/>
      * Note that this can only be called on the UI thread.
      *
+     * @param libraryProcessType the type of process the shared library is loaded. It must be
+     *                           LibraryProcessType.PROCESS_BROWSER,
+     *                           LibraryProcessType.PROCESS_WEBVIEW or
+     *                           LibraryProcessType.PROCESS_WEBLAYER.
      * @param startGpuProcess Whether to start the GPU process if it is not started.
      * @param startServiceManagerOnly Whether browser startup will be paused after ServiceManager
      *                                is started.
      * @param callback the callback to be called when browser startup is complete.
      */
-    void startBrowserProcessesAsync(boolean startGpuProcess, boolean startServiceManagerOnly,
-            final StartupCallback callback) throws ProcessInitException;
+    void startBrowserProcessesAsync(@LibraryProcessType int libraryProcessType,
+            boolean startGpuProcess, boolean startServiceManagerOnly,
+            final StartupCallback callback);
 
     /**
      * Start the browser process synchronously. If the browser is already being started
@@ -60,11 +62,15 @@ public interface BrowserStartupController {
      * <p/>
      * Note that this can only be called on the UI thread.
      *
+     * @param libraryProcessType the type of process the shared library is loaded. It must be
+     *                           LibraryProcessType.PROCESS_BROWSER,
+     *                           LibraryProcessType.PROCESS_WEBVIEW or
+     *                           LibraryProcessType.PROCESS_WEBLAYER.
      * @param singleProcess true iff the browser should run single-process, ie. keep renderers in
      *                      the browser process
-     * @throws ProcessInitException
      */
-    void startBrowserProcessesSync(boolean singleProcess) throws ProcessInitException;
+    void startBrowserProcessesSync(
+            @LibraryProcessType int libraryProcessType, boolean singleProcess);
 
     /**
      * @return Whether the browser process has been started in "Full Browser" mode successfully. See

@@ -7,6 +7,7 @@
 
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 
 class Browser;
@@ -28,15 +29,14 @@ class ExtensionBrowserWindowHelper : public ExtensionRegistryObserver {
                            const Extension* extension,
                            UnloadedExtensionReason reason) override;
 
-  // Closes any tabs owned by the extension with the given |extension_id| and
-  // unmutes others if necessary.
-  void CleanUpTabsOnUnload(const ExtensionId& extension_id);
+  // Closes any tabs owned by the extension and unmutes others if necessary.
+  void CleanUpTabsOnUnload(const Extension* extension);
 
   // The associated browser. Must outlive this object.
   Browser* const browser_ = nullptr;
 
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      registry_observer_;
+      registry_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionBrowserWindowHelper);
 };

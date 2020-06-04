@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.autofill;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.support.test.filters.SmallTest;
 import android.view.View;
 
@@ -19,7 +17,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.autofill.AutofillDelegate;
@@ -72,7 +70,7 @@ public class AutofillTest {
         });
     }
 
-    private static final long CALLBACK_TIMEOUT_MS = scaleTimeout(4000);
+    private static final long CALLBACK_TIMEOUT_MS = 4000L;
     private static final int CHECK_INTERVAL_MS = 100;
 
     private class MockAutofillCallback implements AutofillDelegate {
@@ -148,7 +146,7 @@ public class AutofillTest {
     @Test
     @SmallTest
     @Feature({"autofill"})
-    public void testAutofillWithDifferentNumberSuggestions() throws Exception {
+    public void testAutofillWithDifferentNumberSuggestions() {
         openAutofillPopupAndWaitUntilReady(createTwoAutofillSuggestionArray());
         Assert.assertEquals(2, mAutofillPopup.getListView().getCount());
 
@@ -159,7 +157,7 @@ public class AutofillTest {
     @Test
     @SmallTest
     @Feature({"autofill"})
-    public void testAutofillClickFirstSuggestion() throws Exception {
+    public void testAutofillClickFirstSuggestion() {
         AutofillSuggestion[] suggestions = createTwoAutofillSuggestionArray();
         openAutofillPopupAndWaitUntilReady(suggestions);
         Assert.assertEquals(2, mAutofillPopup.getListView().getCount());

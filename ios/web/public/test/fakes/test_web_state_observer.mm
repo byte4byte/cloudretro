@@ -7,11 +7,11 @@
 #include <memory>
 
 #include "ios/web/navigation/navigation_context_impl.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/ssl_status.h"
-#import "ios/web/public/web_state/navigation_context.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -62,15 +62,6 @@ void TestWebStateObserver::LoadProgressChanged(WebState* web_state,
       std::make_unique<web::TestChangeLoadingProgressInfo>();
   change_loading_progress_info_->web_state = web_state;
   change_loading_progress_info_->progress = progress;
-}
-
-void TestWebStateObserver::NavigationItemsPruned(WebState* web_state,
-                                                 size_t pruned_item_count) {
-  ASSERT_EQ(web_state_, web_state);
-  navigation_items_pruned_info_ =
-      std::make_unique<web::TestNavigationItemsPrunedInfo>();
-  navigation_items_pruned_info_->web_state = web_state;
-  navigation_items_pruned_info_->count = pruned_item_count;
 }
 
 void TestWebStateObserver::DidStartNavigation(WebState* web_state,

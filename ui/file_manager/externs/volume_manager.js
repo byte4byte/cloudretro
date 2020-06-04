@@ -25,32 +25,30 @@ class VolumeManager {
    * Obtains a volume info containing the passed entry.
    * @param {!Entry|!FilesAppEntry} entry Entry on the volume to be
    *     returned. Can be fake.
-   * @return {VolumeInfo} The VolumeInfo instance or null if not found.
+   * @return {?VolumeInfo} The VolumeInfo instance or null if not found.
    */
   getVolumeInfo(entry) {}
 
   /**
    * Returns the drive connection state.
-   * @return {VolumeManagerCommon.DriveConnectionState} Connection state.
+   * @return {chrome.fileManagerPrivate.DriveConnectionState} Connection state.
    */
   getDriveConnectionState() {}
 
   /**
    * @param {string} fileUrl File url to the archive file.
-   * @param {function(VolumeInfo)} successCallback Success callback.
-   * @param {function(VolumeManagerCommon.VolumeError)} errorCallback Error
-   *     callback.
+   * @return {!Promise<!VolumeInfo>} Fulfilled on success, otherwise rejected
+   *     with a VolumeManagerCommon.VolumeError.
    */
-  mountArchive(fileUrl, successCallback, errorCallback) {}
+  mountArchive(fileUrl) {}
 
   /**
    * Unmounts a volume.
    * @param {!VolumeInfo} volumeInfo Volume to be unmounted.
-   * @param {function()} successCallback Success callback.
-   * @param {function(VolumeManagerCommon.VolumeError)} errorCallback Error
-   *     callback.
+   * @return {!Promise<void>} Fulfilled on success, otherwise rejected with a
+   *     VolumeManagerCommon.VolumeError.
    */
-  unmount(volumeInfo, successCallback, errorCallback) {}
+  unmount(volumeInfo) {}
 
   /**
    * Configures a volume.
@@ -132,4 +130,3 @@ class VolumeManager {
  * @typedef {!CustomEvent<!VolumeInfo>}
  */
 let ExternallyUnmountedEvent;
-

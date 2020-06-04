@@ -5,8 +5,10 @@
 #import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_presentation_controller.h"
 
 #include "base/logging.h"
+#import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/infobars/presentation/infobar_modal_positioner.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -19,18 +21,45 @@ const CGFloat kPresentedViewMargin = 10.0;
 const CGFloat kPresentedViewMaxWidth = 394.0;
 // The rounded corner radius for the container view.
 const CGFloat kContainerCornerRadius = 13.0;
-// The background color for the container view.
-const int kContainerBackgroundColor = 0x2F2F2F;
-// The alpha component for the container view background color.
-const CGFloat kContainerBackgroundColorAlpha = 0.5;
 }  // namespace
+
+@interface InfobarModalPresentationController ()
+// Delegate used to position the ModalInfobar.
+@property(nonatomic, weak) id<InfobarModalPositioner> modalPositioner;
+@end
 
 @implementation InfobarModalPresentationController
 
+- (instancetype)
+    initWithPresentedViewController:(UIViewController*)presentedViewController
+           presentingViewController:(UIViewController*)presentingViewController
+                    modalPositioner:
+                        (id<InfobarModalPositioner>)modalPositioner {
+  self = [super initWithPresentedViewController:presentedViewController
+                       presentingViewController:presentingViewController];
+  if (self) {
+    _modalPositioner = modalPositioner;
+  }
+  return self;
+}
+
+- (BOOL)shouldPresentInFullscreen {
+  // Don't present in fullscreen when modals are shown using OverlayPresenter
+  // so that banners presented are inserted into the correct place in the view
+  // hierarchy.  Returning NO adds the container view as a sibling view in front
+  // of the presenting view controller's view.
+  return !base::FeatureList::IsEnabled(kInfobarOverlayUI);
+}
+
 - (void)presentationTransitionWillBegin {
+  // Add a gesture recognizer to endEditing (thus hiding the keyboard) if a user
+  // taps outside the keyboard while one its being presented. Set
+  // cancelsTouchesInView to NO so the presented Modal can handle the gesture as
+  // well. (e.g. Selecting a row in a TableViewController.)
   UITapGestureRecognizer* tap =
       [[UITapGestureRecognizer alloc] initWithTarget:self.presentedView
                                               action:@selector(endEditing:)];
+  tap.cancelsTouchesInView = NO;
   [self.containerView addGestureRecognizer:tap];
 }
 
@@ -42,12 +71,12 @@ const CGFloat kContainerBackgroundColorAlpha = 0.5;
   self.presentedView.layer.masksToBounds = YES;
   self.presentedView.clipsToBounds = YES;
   self.containerView.backgroundColor =
-      [UIColorFromRGB(kContainerBackgroundColor)
-          colorWithAlphaComponent:kContainerBackgroundColorAlpha];
+      [UIColor colorNamed:kScrimBackgroundColor];
+
+  [super containerViewWillLayoutSubviews];
 }
 
 - (CGRect)frameForPresentedView {
-  DCHECK(self.modalPositioner);
   CGRect safeAreaBounds = self.containerView.safeAreaLayoutGuide.layoutFrame;
   CGFloat safeAreaWidth = CGRectGetWidth(safeAreaBounds);
   CGFloat safeAreaHeight = CGRectGetHeight(safeAreaBounds);

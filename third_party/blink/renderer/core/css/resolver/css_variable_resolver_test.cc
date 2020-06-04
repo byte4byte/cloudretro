@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -43,8 +44,11 @@ static const Color kTestColor = Color(255, 0, 0);
 
 }  // namespace
 
-class CSSVariableResolverTest : public PageTestBase {
+class CSSVariableResolverTest : public PageTestBase,
+                                private ScopedCSSCascadeForTest {
  public:
+  CSSVariableResolverTest() : ScopedCSSCascadeForTest(false) {}
+
   void SetUp() override {
     PageTestBase::SetUp();
 
@@ -52,7 +56,7 @@ class CSSVariableResolverTest : public PageTestBase {
   }
 
   void SetTestHTML(const String& value) {
-    GetDocument().body()->SetInnerHTMLFromString(
+    GetDocument().body()->setInnerHTML(
         "<style>"
         "  #target {"
         "    --main-bg-color: black;"
@@ -129,7 +133,7 @@ class CSSVariableResolverTest : public PageTestBase {
     builder.Append("</style>\n");
     builder.Append("<div id=target></div>\n");
 
-    GetDocument().body()->SetInnerHTMLFromString(builder.ToString());
+    GetDocument().body()->setInnerHTML(builder.ToString());
     UpdateAllLifecyclePhasesForTest();
   }
 };
@@ -276,9 +280,14 @@ TEST_F(CSSVariableResolverTest, CopiedVariablesRetainNeedsResolution) {
 }
 
 TEST_F(CSSVariableResolverTest, NeedsResolutionClearedByResolver) {
+  // This test is not relevant when CSSCascade is enabled, as we won't store
+  // unresolved CSSVariableData on the ComputedStyle in that case.
+  if (RuntimeEnabledFeatures::CSSCascadeEnabled())
+    return;
+
   const ComputedStyle* initial = &ComputedStyle::InitialStyle();
   StyleResolverState state(GetDocument(), *GetDocument().documentElement(),
-                           nullptr /* pseudo_element */, initial, initial);
+                           initial, initial);
 
   scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->InheritFrom(*initial);
@@ -289,14 +298,14 @@ TEST_F(CSSVariableResolverTest, NeedsResolutionClearedByResolver) {
   const auto* prop3 = CreateCustomProperty("--prop3", "var(--prop2)");
 
   // Register prop3 to make it non-inherited.
-  base::Optional<CSSSyntaxDescriptor> token_syntax =
+  base::Optional<CSSSyntaxDefinition> token_syntax =
       CSSSyntaxStringParser("*").Parse();
   ASSERT_TRUE(token_syntax);
   String initial_value_str("foo");
   const auto tokens = CSSTokenizer(initial_value_str).TokenizeToEOF();
   const auto* context = MakeGarbageCollected<CSSParserContext>(GetDocument());
   const CSSValue* initial_value =
-      token_syntax->Parse(CSSParserTokenRange(tokens), context, false);
+      token_syntax->Parse(CSSParserTokenRange(tokens), *context, false);
   ASSERT_TRUE(initial_value);
   ASSERT_TRUE(initial_value->IsVariableReferenceValue());
   PropertyRegistration* registration =
@@ -421,7 +430,7 @@ TEST_F(CSSVariableResolverTest, BillionLaughs) {
   builder.Append("</style>\n");
   builder.Append("<div id=target></div>\n");
 
-  GetDocument().body()->SetInnerHTMLFromString(builder.ToString());
+  GetDocument().body()->setInnerHTML(builder.ToString());
   UpdateAllLifecyclePhasesForTest();
 
   Element* target = GetDocument().getElementById("target");
@@ -466,7 +475,7 @@ TEST_F(CSSVariableResolverTest, CSSWideKeywords) {
 
   const ComputedStyle* initial = &ComputedStyle::InitialStyle();
   StyleResolverState state(GetDocument(), *GetDocument().documentElement(),
-                           nullptr /* pseudo_element */, initial, initial);
+                           initial, initial);
 
   scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
   style->InheritFrom(*initial);

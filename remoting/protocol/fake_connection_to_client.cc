@@ -16,7 +16,7 @@
 namespace remoting {
 namespace protocol {
 
-FakeVideoStream::FakeVideoStream() : weak_factory_(this) {}
+FakeVideoStream::FakeVideoStream() {}
 FakeVideoStream::~FakeVideoStream() = default;
 
 void FakeVideoStream::SetEventTimestampsSource(
@@ -49,15 +49,14 @@ void FakeConnectionToClient::SetEventHandler(EventHandler* event_handler) {
 
 std::unique_ptr<VideoStream> FakeConnectionToClient::StartVideoStream(
     std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) {
+  desktop_capturer_ = std::move(desktop_capturer);
   if (video_stub_ && video_encode_task_runner_) {
     std::unique_ptr<VideoEncoder> video_encoder =
         VideoEncoder::Create(session_->config());
 
-    std::unique_ptr<protocol::VideoFramePump> pump(
-        new protocol::VideoFramePump(video_encode_task_runner_,
-                                     std::move(desktop_capturer),
-                                     std::move(video_encoder),
-                                     video_stub_));
+    std::unique_ptr<protocol::VideoFramePump> pump(new protocol::VideoFramePump(
+        video_encode_task_runner_, std::move(desktop_capturer_),
+        std::move(video_encoder), video_stub_));
     video_feedback_stub_ = pump->video_feedback_stub();
     return std::move(pump);
   }

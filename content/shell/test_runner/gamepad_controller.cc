@@ -4,20 +4,19 @@
 
 #include "content/shell/test_runner/gamepad_controller.h"
 
-#include <string.h>
+#include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/macros.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/shell/test_runner/web_test_delegate.h"
 #include "gin/arguments.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
 #include "mojo/public/cpp/system/platform_handle.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/platform/web_gamepad_listener.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "v8/include/v8.h"
@@ -25,7 +24,7 @@
 using device::Gamepad;
 using device::Gamepads;
 
-namespace test_runner {
+namespace content {
 
 namespace {
 
@@ -170,9 +169,9 @@ void GamepadControllerBindings::SetDualRumbleVibrationActuator(int index,
 
 GamepadController::MonitorImpl::MonitorImpl(
     GamepadController* controller,
-    device::mojom::GamepadMonitorRequest request)
-    : controller_(controller), binding_(this), observer_(nullptr) {
-  binding_.Bind(std::move(request));
+    mojo::PendingReceiver<device::mojom::GamepadMonitor> receiver)
+    : controller_(controller) {
+  receiver_.Bind(std::move(receiver));
 }
 
 GamepadController::MonitorImpl::~MonitorImpl() = default;
@@ -192,9 +191,9 @@ void GamepadController::MonitorImpl::GamepadStopPolling(
 }
 
 void GamepadController::MonitorImpl::SetObserver(
-    device::mojom::GamepadObserverPtr observer) {
-  observer_ = std::move(observer);
-  observer_.set_connection_error_handler(
+    mojo::PendingRemote<device::mojom::GamepadObserver> observer) {
+  observer_remote_.Bind(std::move(observer));
+  observer_remote_.set_disconnect_handler(
       base::BindOnce(&GamepadController::OnConnectionError,
                      base::Unretained(controller_), base::Unretained(this)));
 
@@ -212,8 +211,8 @@ void GamepadController::MonitorImpl::SetObserver(
 void GamepadController::MonitorImpl::DispatchConnected(
     int index,
     const device::Gamepad& pad) {
-  if (observer_) {
-    observer_->GamepadConnected(index, pad);
+  if (observer_remote_) {
+    observer_remote_->GamepadConnected(index, pad);
   } else {
     // Record that there wasn't an observer to get the GamepadConnected RPC so
     // we can send it when SetObserver gets called.
@@ -224,8 +223,8 @@ void GamepadController::MonitorImpl::DispatchConnected(
 void GamepadController::MonitorImpl::DispatchDisconnected(
     int index,
     const device::Gamepad& pad) {
-  if (observer_)
-    observer_->GamepadDisconnected(index, pad);
+  if (observer_remote_)
+    observer_remote_->GamepadDisconnected(index, pad);
 }
 
 void GamepadController::MonitorImpl::Reset() {
@@ -250,7 +249,7 @@ GamepadController::GamepadController() {
   Reset();
 }
 
-GamepadController::~GamepadController() {}
+GamepadController::~GamepadController() = default;
 
 void GamepadController::Reset() {
   memset(gamepads_, 0, sizeof(*gamepads_));
@@ -264,9 +263,7 @@ void GamepadController::Install(blink::WebLocalFrame* frame) {
   if (!render_frame)
     return;
 
-  service_manager::InterfaceProvider::TestApi connector_test_api(
-      render_frame->GetRemoteInterfaces());
-  connector_test_api.SetBinderForName(
+  render_frame->GetBrowserInterfaceBroker()->SetBinderForTesting(
       device::mojom::GamepadMonitor::Name_,
       base::BindRepeating(&GamepadController::OnInterfaceRequest,
                           base::Unretained(this)));
@@ -276,7 +273,8 @@ void GamepadController::Install(blink::WebLocalFrame* frame) {
 void GamepadController::OnInterfaceRequest(
     mojo::ScopedMessagePipeHandle handle) {
   monitors_.insert(std::make_unique<MonitorImpl>(
-      this, device::mojom::GamepadMonitorRequest(std::move(handle))));
+      this,
+      mojo::PendingReceiver<device::mojom::GamepadMonitor>(std::move(handle))));
 }
 
 base::ReadOnlySharedMemoryRegion GamepadController::GetSharedMemoryRegion()
@@ -415,4 +413,4 @@ void GamepadController::SetDualRumbleVibrationActuator(int index,
   gamepads_->seqlock.WriteEnd();
 }
 
-}  // namespace test_runner
+}  // namespace content

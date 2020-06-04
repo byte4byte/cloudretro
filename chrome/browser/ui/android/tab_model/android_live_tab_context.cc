@@ -4,13 +4,16 @@
 
 #include "chrome/browser/ui/android/tab_model/android_live_tab_context.h"
 
-#include "base/token.h"
+#include <memory>
+
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "components/sessions/content/content_live_tab.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
+#include "components/tab_groups/tab_group_id.h"
+#include "components/tab_groups/tab_group_visual_data.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/restore_type.h"
@@ -61,10 +64,30 @@ bool AndroidLiveTabContext::IsTabPinned(int index) const {
   return false;
 }
 
-base::Optional<base::Token> AndroidLiveTabContext::GetTabGroupForTab(
+base::Optional<tab_groups::TabGroupId> AndroidLiveTabContext::GetTabGroupForTab(
     int index) const {
   // Not applicable to android.
-  return base::Optional<base::Token>();
+  return base::Optional<tab_groups::TabGroupId>();
+}
+
+const tab_groups::TabGroupVisualData*
+AndroidLiveTabContext::GetVisualDataForGroup(
+    const tab_groups::TabGroupId& group) const {
+  // Since we never return a group from GetTabGroupForTab(), this should never
+  // be called.
+  NOTREACHED();
+  return nullptr;
+}
+
+void AndroidLiveTabContext::SetVisualDataForGroup(
+    const tab_groups::TabGroupId& group,
+    const tab_groups::TabGroupVisualData& group_visual_data) {
+  // Not supported on Android.
+
+  // TODO(crbug.com/1003128): ensure this never gets called (or remove
+  // NOTREACHED) if we implement restoring groups for foreign session
+  // windows.
+  NOTREACHED();
 }
 
 const gfx::Rect AndroidLiveTabContext::GetRestoredBounds() const {
@@ -87,12 +110,13 @@ sessions::LiveTab* AndroidLiveTabContext::AddRestoredTab(
     int tab_index,
     int selected_navigation,
     const std::string& extension_app_id,
-    base::Optional<base::Token> group,
+    base::Optional<tab_groups::TabGroupId> group,
+    const tab_groups::TabGroupVisualData& group_visual_data,
     bool select,
     bool pin,
     bool from_last_session,
     const sessions::PlatformSpecificTabData* tab_platform_data,
-    const std::string& user_agent_override) {
+    const sessions::SerializedUserAgentOverride& user_agent_override) {
   Profile* profile = tab_model_->GetProfile();
 
   // Prepare navigation history.
@@ -117,12 +141,12 @@ sessions::LiveTab* AndroidLiveTabContext::AddRestoredTab(
 // Currently does nothing.
 sessions::LiveTab* AndroidLiveTabContext::ReplaceRestoredTab(
     const std::vector<sessions::SerializedNavigationEntry>& navigations,
-    base::Optional<base::Token> group,
+    base::Optional<tab_groups::TabGroupId> group,
     int selected_navigation,
     bool from_last_session,
     const std::string& extension_app_id,
     const sessions::PlatformSpecificTabData* tab_platform_data,
-    const std::string& user_agent_override) {
+    const sessions::SerializedUserAgentOverride& user_agent_override) {
   NOTIMPLEMENTED();
   return nullptr;
 }

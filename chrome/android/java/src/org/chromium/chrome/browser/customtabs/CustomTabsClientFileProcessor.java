@@ -10,9 +10,10 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
-import android.support.annotation.WorkerThread;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsSessionToken;
+
+import androidx.annotation.WorkerThread;
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsSessionToken;
 
 import org.chromium.base.FileUtils;
 import org.chromium.base.Log;
@@ -55,7 +56,7 @@ public class CustomTabsClientFileProcessor {
             return false;
         }
         switch (purpose) {
-            case CustomTabsService.FILE_PURPOSE_TWA_SPLASH_IMAGE:
+            case CustomTabsService.FILE_PURPOSE_TRUSTED_WEB_ACTIVITY_SPLASH_IMAGE:
                 return receiveTwaSplashImage(session, uri);
         }
         Log.w(TAG, "Unknown FilePurpose " + purpose);

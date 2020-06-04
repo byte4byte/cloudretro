@@ -28,15 +28,21 @@ def _ExtractImportantEnvironment(output_of_set):
   """Extracts environment variables required for the toolchain to run from
   a textual dump output by the cmd.exe 'set' command."""
   envvars_to_save = (
+      'cipd_cache_dir', # needed by vpython
+      'homedrive', # needed by vpython
+      'homepath', # needed by vpython
       'goma_.*', # TODO(scottmg): This is ugly, but needed for goma.
       'include',
       'lib',
       'libpath',
+      'luci_context', # needed by vpython
       'path',
       'pathext',
       'systemroot',
       'temp',
       'tmp',
+      'userprofile', # needed by vpython
+      'vpython_virtualenv_root' # needed by vpython
       )
   env = {}
   # This occasionally happens and leads to misleading SYSTEMROOT error messages
@@ -63,7 +69,7 @@ def _ExtractImportantEnvironment(output_of_set):
 
 
 def _DetectVisualStudioPath():
-  """Return path to the GYP_MSVS_VERSION of Visual Studio.
+  """Return path to the installed Visual Studio.
   """
 
   # Use the code in build/vs_toolchain.py to avoid duplicating code.
@@ -179,6 +185,16 @@ def _LowercaseDict(d):
   return {k.lower(): d[k].lower() for k in d}
 
 
+def FindFileInEnvList(env, env_name, separator, file_name, optional=False):
+  parts = env[env_name].split(separator)
+  for path in parts:
+    if os.path.exists(os.path.join(path, file_name)):
+      return os.path.realpath(path)
+  assert optional, "%s is not found in %s:\n%s\nCheck if it is installed." % (
+      file_name, env_name, '\n'.join(parts))
+  return ''
+
+
 def main():
   if len(sys.argv) != 7:
     print('Usage setup_toolchain.py '
@@ -217,25 +233,11 @@ def main():
       env = _LoadToolchainEnv(cpu, win_sdk_path, target_store)
       env['PATH'] = runtime_dirs + os.pathsep + env['PATH']
 
-      for path in env['PATH'].split(os.pathsep):
-        if os.path.exists(os.path.join(path, 'cl.exe')):
-          vc_bin_dir = os.path.realpath(path)
-          break
-
-      for path in env['LIB'].split(';'):
-        if os.path.exists(os.path.join(path, 'msvcrt.lib')):
-          vc_lib_path = os.path.realpath(path)
-          break
-
-      for path in env['LIB'].split(';'):
-        if os.path.exists(os.path.join(path, 'atls.lib')):
-          vc_lib_atlmfc_path = os.path.realpath(path)
-          break
-
-      for path in env['LIB'].split(';'):
-        if os.path.exists(os.path.join(path, 'User32.Lib')):
-          vc_lib_um_path = os.path.realpath(path)
-          break
+      vc_bin_dir = FindFileInEnvList(env, 'PATH', os.pathsep, 'cl.exe')
+      vc_lib_path = FindFileInEnvList(env, 'LIB', ';', 'msvcrt.lib')
+      vc_lib_atlmfc_path = FindFileInEnvList(
+          env, 'LIB', ';', 'atls.lib', optional=True)
+      vc_lib_um_path = FindFileInEnvList(env, 'LIB', ';', 'user32.lib')
 
       # The separator for INCLUDE here must match the one used in
       # _LoadToolchainEnv() above.
@@ -265,22 +267,16 @@ def main():
         with open(environment_block_name, 'w') as f:
           f.write(env_block)
 
-  assert vc_bin_dir
   print('vc_bin_dir = ' + gn_helpers.ToGNString(vc_bin_dir))
   assert include_I
   print('include_flags_I = ' + gn_helpers.ToGNString(include_I))
   assert include_imsvc
   print('include_flags_imsvc = ' + gn_helpers.ToGNString(include_imsvc))
-  assert vc_lib_path
   print('vc_lib_path = ' + gn_helpers.ToGNString(vc_lib_path))
-  if (target_store != True):
-    # Path is assumed not to exist for desktop applications
-    assert vc_lib_atlmfc_path
   # Possible atlmfc library path gets introduced in the future for store thus
   # output result if a result exists.
   if (vc_lib_atlmfc_path != ''):
     print('vc_lib_atlmfc_path = ' + gn_helpers.ToGNString(vc_lib_atlmfc_path))
-  assert vc_lib_um_path
   print('vc_lib_um_path = ' + gn_helpers.ToGNString(vc_lib_um_path))
   print('paths = ' + gn_helpers.ToGNString(env['PATH']))
   assert libpath_flags

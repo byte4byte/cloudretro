@@ -35,7 +35,7 @@ UserPolicySigninService::UserPolicySigninService(
     PrefService* local_state,
     DeviceManagementService* device_management_service,
     UserCloudPolicyManager* policy_manager,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory)
     : UserPolicySigninServiceBase(profile,
                                   local_state,
@@ -64,15 +64,15 @@ void UserPolicySigninService::PrepareForUserCloudPolicyManagerShutdown() {
 
 void UserPolicySigninService::RegisterForPolicyWithAccountId(
     const std::string& username,
-    const std::string& account_id,
-    const PolicyRegistrationCallback& callback) {
+    const CoreAccountId& account_id,
+    PolicyRegistrationCallback callback) {
   DCHECK(!account_id.empty());
 
   // Create a new CloudPolicyClient for fetching the DMToken.
   std::unique_ptr<CloudPolicyClient> policy_client =
       CreateClientForRegistrationOnly(username);
   if (!policy_client) {
-    callback.Run(std::string(), std::string());
+    std::move(callback).Run(std::string(), std::string());
     return;
   }
 
@@ -86,16 +86,16 @@ void UserPolicySigninService::RegisterForPolicyWithAccountId(
       enterprise_management::DeviceRegisterRequest::BROWSER);
   registration_helper_->StartRegistration(
       identity_manager(), account_id,
-      base::Bind(&UserPolicySigninService::CallPolicyRegistrationCallback,
-                 base::Unretained(this), base::Passed(&policy_client),
-                 callback));
+      base::BindOnce(&UserPolicySigninService::CallPolicyRegistrationCallback,
+                     base::Unretained(this), std::move(policy_client),
+                     std::move(callback)));
 }
 
 void UserPolicySigninService::CallPolicyRegistrationCallback(
     std::unique_ptr<CloudPolicyClient> client,
     PolicyRegistrationCallback callback) {
   registration_helper_.reset();
-  callback.Run(client->dm_token(), client->client_id());
+  std::move(callback).Run(client->dm_token(), client->client_id());
 }
 
 void UserPolicySigninService::OnPrimaryAccountSet(
@@ -187,8 +187,8 @@ void UserPolicySigninService::RegisterCloudPolicyService() {
       enterprise_management::DeviceRegisterRequest::BROWSER));
   registration_helper_->StartRegistration(
       identity_manager(), identity_manager()->GetPrimaryAccountId(),
-      base::Bind(&UserPolicySigninService::OnRegistrationComplete,
-                 base::Unretained(this)));
+      base::BindOnce(&UserPolicySigninService::OnRegistrationComplete,
+                     base::Unretained(this)));
 }
 
 void UserPolicySigninService::OnRegistrationComplete() {

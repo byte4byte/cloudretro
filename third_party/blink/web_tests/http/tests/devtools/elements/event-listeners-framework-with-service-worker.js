@@ -29,21 +29,21 @@
 
   var objectEventListenersPane = self.runtime.sharedInstance(BrowserDebugger.ObjectEventListenersSidebarPane);
 
-  function isDedicatedWorker() {
+  function isServiceWorker() {
     var target = UI.context.flavor(SDK.ExecutionContext).target();
-    return target.type() === SDK.Target.Type.Worker;
+    return target.type() === SDK.Target.Type.ServiceWorker;
   }
 
   function step1(target) {
     SourcesTestRunner.waitForExecutionContextInTarget(target, step2);
   }
 
-  function step2(executionContext) {
+  async function step2(executionContext) {
     TestRunner.addResult('Selecting service worker thread');
     SourcesTestRunner.selectThread(executionContext.target());
-    TestRunner.addResult('Context is dedicated worker: ' + isDedicatedWorker());
+    TestRunner.addResult('Context is service worker: ' + isServiceWorker());
     TestRunner.addResult('Dumping listeners');
-    UI.viewManager.showView('sources.globalListeners').then(() => {
+    await UI.viewManager.showView('sources.globalListeners').then(() => {
       objectEventListenersPane.update();
       ElementsTestRunner.expandAndDumpEventListeners(objectEventListenersPane._eventListenersView, step3);
     });
@@ -52,13 +52,13 @@
   function step3() {
     TestRunner.addResult('Selecting main thread');
     SourcesTestRunner.selectThread(SDK.targetManager.mainTarget());
-    TestRunner.addResult('Context is dedicated worker: ' + isDedicatedWorker());
+    TestRunner.addResult('Context is service worker: ' + isServiceWorker());
     TestRunner.addResult('Dumping listeners');
     ElementsTestRunner.expandAndDumpEventListeners(objectEventListenersPane._eventListenersView, step4);
   }
 
-  function step4() {
-    ConsoleTestRunner.dumpConsoleMessages(false, false, TestRunner.textContentWithLineBreaks);
+  async function step4() {
+    await ConsoleTestRunner.dumpConsoleMessages(false, false, TestRunner.textContentWithLineBreaks);
     TestRunner.completeTest();
   }
 })();

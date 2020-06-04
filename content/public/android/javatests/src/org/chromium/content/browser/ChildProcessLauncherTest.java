@@ -6,11 +6,11 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 import android.os.Bundle;
-import android.os.RemoteException;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -39,7 +39,7 @@ import java.util.concurrent.TimeoutException;
 public class ChildProcessLauncherTest {
     private static final long CONDITION_WAIT_TIMEOUT_MS = 5000;
 
-    private static final String SERVICE_PACKAGE_NAME = "org.chromium.content_shell_apk";
+    private static final String SERVICE_PACKAGE_NAME = "org.chromium.content_shell_apk.tests";
     private static final String SERVICE_NAME =
             "org.chromium.content_shell_apk.TestChildProcessService";
     private static final String SERVICE_COUNT_META_DATA_KEY =
@@ -100,7 +100,7 @@ public class ChildProcessLauncherTest {
     private ChildConnectionAllocator mConnectionAllocator;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mConnectionAllocator = ChildProcessLauncherTestUtils.runOnLauncherAndGetResult(
                 new Callable<ChildConnectionAllocator>() {
                     @Override
@@ -162,19 +162,19 @@ public class ChildProcessLauncherTest {
             mOnRunMainHelper.notifyCalled();
         }
 
-        public void waitForOnConnectionSetupCalled() throws InterruptedException, TimeoutException {
+        public void waitForOnConnectionSetupCalled() throws TimeoutException {
             mOnConnectionSetupHelper.waitForCallback(0 /* currentCallCount */);
         }
 
-        public void waitForOnNativeLibraryCalled() throws InterruptedException, TimeoutException {
+        public void waitForOnNativeLibraryCalled() throws TimeoutException {
             mOnLoadNativeHelper.waitForCallback(0 /* currentCallCount */);
         }
 
-        public void waitOnBeforeMainCalled() throws InterruptedException, TimeoutException {
+        public void waitOnBeforeMainCalled() throws TimeoutException {
             mOnBeforeMainHelper.waitForCallback(0 /* currentCallCount */);
         }
 
-        public void waitOnRunMainCalled() throws InterruptedException, TimeoutException {
+        public void waitOnRunMainCalled() throws TimeoutException {
             mOnRunMainHelper.waitForCallback(0 /* currentCallCount */);
         }
     };
@@ -186,7 +186,7 @@ public class ChildProcessLauncherTest {
      * validate them.
      */
     private void testProcessLauncher(final AlreadyBoundConnection boundConnectionToUse)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         // ConditionVariables used to check the ChildProcessLauncher.Delegate methods get called.
         final CallbackHelper onBeforeConnectionAllocatedHelper = new CallbackHelper();
         final CallbackHelper onBeforeConnectionSetupHelper = new CallbackHelper();
@@ -330,12 +330,8 @@ public class ChildProcessLauncherTest {
                 });
         Assert.assertNotNull(boundConnection);
 
-        CriteriaHelper.pollInstrumentationThread(new Criteria("Connection failed to connect") {
-            @Override
-            public boolean isSatisfied() {
-                return boundConnection.isConnected();
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(
+                boundConnection::isConnected, "Connection failed to connect");
         testProcessLauncher(new AlreadyBoundConnection(boundConnection, serviceCallbackForwarder));
     }
 
@@ -379,7 +375,7 @@ public class ChildProcessLauncherTest {
     @Test
     @MediumTest
     @Feature({"ProcessManagement"})
-    public void testServiceCrashedBeforeSetup() throws RemoteException {
+    public void testServiceCrashedBeforeSetup() {
         Assert.assertFalse(mConnectionAllocator.anyConnectionAllocated());
 
         // Start and connect to a new service.
@@ -403,7 +399,7 @@ public class ChildProcessLauncherTest {
     @Test
     @MediumTest
     @Feature({"ProcessManagement"})
-    public void testServiceCrashedAfterSetup() throws RemoteException {
+    public void testServiceCrashedAfterSetup() {
         Assert.assertFalse(mConnectionAllocator.anyConnectionAllocated());
 
         // Start and connect to a new service.
@@ -430,7 +426,7 @@ public class ChildProcessLauncherTest {
     @Test
     @MediumTest
     @Feature({"ProcessManagement"})
-    public void testPendingSpawnQueue() throws RemoteException {
+    public void testPendingSpawnQueue() {
         Assert.assertFalse(mConnectionAllocator.anyConnectionAllocated());
 
         // Launch 4 processes. Since we have only 2 services, the 3rd and 4th should get queued.
@@ -490,40 +486,29 @@ public class ChildProcessLauncherTest {
     private static void waitForConnectionAllocatorState(
             final ChildConnectionAllocator connectionAllocator, final boolean emptyState) {
         CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Failed to wait for connection allocator.") {
-                    @Override
-                    public boolean isSatisfied() {
-                        return emptyState ? !connectionAllocator.anyConnectionAllocated()
-                                          : connectionAllocator.anyConnectionAllocated();
-                    }
-                });
+                Criteria.equals(!emptyState, connectionAllocator::anyConnectionAllocated));
     }
 
     private static void waitForConnectionState(
             final ChildProcessConnection connection, final int connectionState) {
-        assert connectionState == CONNECTION_BLOCK_UNTIL_CONNECTED
-                || connectionState == CONNECTION_BLOCK_UNTIL_SETUP;
-        CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Failed wait for connection to connect.") {
-                    @Override
-                    public boolean isSatisfied() {
-                        if (connectionState == CONNECTION_BLOCK_UNTIL_CONNECTED) {
-                            return connection.isConnected();
-                        }
-                        assert connectionState == CONNECTION_BLOCK_UNTIL_SETUP;
-                        return getConnectionPid(connection) != 0;
-                    }
-                });
+        Assert.assertThat(connectionState,
+                Matchers.anyOf(Matchers.equalTo(CONNECTION_BLOCK_UNTIL_CONNECTED),
+                        Matchers.equalTo(CONNECTION_BLOCK_UNTIL_SETUP)));
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            if (connectionState == CONNECTION_BLOCK_UNTIL_CONNECTED) {
+                Assert.assertTrue(connection.isConnected());
+            } else {
+                Assert.assertEquals(CONNECTION_BLOCK_UNTIL_SETUP, connectionState);
+                Assert.assertNotEquals(0, getConnectionPid(connection));
+            }
+        });
     }
 
     private static void waitUntilLauncherSetup(final ChildProcessLauncher launcher) {
         CriteriaHelper.pollInstrumentationThread(
-                new Criteria("Failed wait for launcher to connect.") {
-                    @Override
-                    public boolean isSatisfied() {
-                        return launcher.getConnection() != null;
-                    }
-                });
+                ()
+                        -> Assert.assertNotNull(
+                                "Failed wait for launcher to connect.", launcher.getConnection()));
         waitForConnectionState(launcher.getConnection(), CONNECTION_BLOCK_UNTIL_SETUP);
     }
 

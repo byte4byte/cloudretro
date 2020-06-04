@@ -7,14 +7,12 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind_test_util.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
-#include "components/viz/service/surfaces/surface_manager.h"
-#include "components/viz/test/begin_frame_args_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor.h"
@@ -31,16 +29,15 @@ namespace {
 
 class CompositorTest : public testing::Test {
  public:
-  CompositorTest() {}
-  ~CompositorTest() override {}
+  CompositorTest() = default;
+  ~CompositorTest() override = default;
 
   void SetUp() override {
     context_factories_ = std::make_unique<TestContextFactories>(false);
 
     compositor_ = std::make_unique<Compositor>(
-        context_factories_->GetContextFactoryPrivate()->AllocateFrameSinkId(),
-        context_factories_->GetContextFactory(),
-        context_factories_->GetContextFactoryPrivate(), CreateTaskRunner(),
+        context_factories_->GetContextFactory()->AllocateFrameSinkId(),
+        context_factories_->GetContextFactory(), CreateTaskRunner(),
         false /* enable_pixel_canvas */);
     compositor_->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
   }
@@ -82,8 +79,7 @@ class CompositorTestWithMockedTime : public CompositorTest {
 class CompositorTestWithMessageLoop : public CompositorTest {
  public:
   CompositorTestWithMessageLoop()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {}
   ~CompositorTestWithMessageLoop() override = default;
 
  protected:
@@ -95,13 +91,13 @@ class CompositorTestWithMessageLoop : public CompositorTest {
   base::SequencedTaskRunner* task_runner() { return task_runner_.get(); }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
 }  // namespace
 
-TEST_F(CompositorTestWithMessageLoop, OutputColorMatrix) {
+TEST_F(CompositorTestWithMessageLoop, ShouldUpdateDisplayProperties) {
   auto root_layer = std::make_unique<Layer>(ui::LAYER_SOLID_COLOR);
   viz::ParentLocalSurfaceIdAllocator allocator;
   allocator.GenerateId();
@@ -111,24 +107,38 @@ TEST_F(CompositorTestWithMessageLoop, OutputColorMatrix) {
                                 allocator.GetCurrentLocalSurfaceIdAllocation());
   DCHECK(compositor()->IsVisible());
 
-  // Set a non-identity color matrix on the compistor display, and expect it to
-  // be set on the context factory.
+  // Set a non-identity color matrix, color space, sdr white level, vsync
+  // timebase and vsync interval, and expect it to be set on the context
+  // factory.
   SkMatrix44 color_matrix(SkMatrix44::kIdentity_Constructor);
   color_matrix.set(1, 1, 0.7f);
   color_matrix.set(2, 2, 0.4f);
+  gfx::DisplayColorSpaces display_color_spaces(
+      gfx::ColorSpace::CreateDisplayP3D65());
+  display_color_spaces.SetSDRWhiteLevel(1.f);
+  base::TimeTicks vsync_timebase(base::TimeTicks::Now());
+  base::TimeDelta vsync_interval(base::TimeDelta::FromMilliseconds(250));
   compositor()->SetDisplayColorMatrix(color_matrix);
-  InProcessContextFactory* context_factory_private =
-      static_cast<InProcessContextFactory*>(
-          compositor()->context_factory_private());
+  compositor()->SetDisplayColorSpaces(display_color_spaces);
+  compositor()->SetDisplayVSyncParameters(vsync_timebase, vsync_interval);
+
+  InProcessContextFactory* context_factory =
+      static_cast<InProcessContextFactory*>(compositor()->context_factory());
   compositor()->ScheduleDraw();
   DrawWaiterForTest::WaitForCompositingEnded(compositor());
-  EXPECT_EQ(color_matrix,
-            context_factory_private->GetOutputColorMatrix(compositor()));
+  EXPECT_EQ(color_matrix, context_factory->GetOutputColorMatrix(compositor()));
+  EXPECT_EQ(display_color_spaces,
+            context_factory->GetDisplayColorSpaces(compositor()));
+  EXPECT_EQ(vsync_timebase,
+            context_factory->GetDisplayVSyncTimeBase(compositor()));
+  EXPECT_EQ(vsync_interval,
+            context_factory->GetDisplayVSyncTimeInterval(compositor()));
 
   // Simulate a lost context by releasing the output surface and setting it on
-  // the compositor again. Expect that the same color matrix will be set again
-  // on the context factory.
-  context_factory_private->ResetOutputColorMatrixToIdentity(compositor());
+  // the compositor again. Expect that the same color matrix, color space, sdr
+  // white level, vsync timebase and vsync interval will be set again on the
+  // context factory.
+  context_factory->ResetDisplayOutputParameters(compositor());
   compositor()->SetVisible(false);
   EXPECT_EQ(gfx::kNullAcceleratedWidget,
             compositor()->ReleaseAcceleratedWidget());
@@ -136,8 +146,13 @@ TEST_F(CompositorTestWithMessageLoop, OutputColorMatrix) {
   compositor()->SetVisible(true);
   compositor()->ScheduleDraw();
   DrawWaiterForTest::WaitForCompositingEnded(compositor());
-  EXPECT_EQ(color_matrix,
-            context_factory_private->GetOutputColorMatrix(compositor()));
+  EXPECT_EQ(color_matrix, context_factory->GetOutputColorMatrix(compositor()));
+  EXPECT_EQ(display_color_spaces,
+            context_factory->GetDisplayColorSpaces(compositor()));
+  EXPECT_EQ(vsync_timebase,
+            context_factory->GetDisplayVSyncTimeBase(compositor()));
+  EXPECT_EQ(vsync_interval,
+            context_factory->GetDisplayVSyncTimeInterval(compositor()));
   compositor()->SetRootLayer(nullptr);
 }
 
@@ -148,6 +163,71 @@ TEST_F(CompositorTestWithMockedTime,
             compositor()->ReleaseAcceleratedWidget());
   compositor()->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
   compositor()->SetVisible(true);
+}
+
+TEST_F(CompositorTestWithMessageLoop, MoveThroughputTracker) {
+  // Move a not started instance.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    auto moved_tracker = std::move(tracker);
+  }
+
+  // Move a started instance.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    tracker.Start(base::BindLambdaForTesting(
+        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+          // This should not be called since the tracking is auto canceled.
+          ADD_FAILURE();
+        }));
+    auto moved_tracker = std::move(tracker);
+  }
+
+  // Move a started instance and stop.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    tracker.Start(base::BindLambdaForTesting(
+        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+          // May be called since Stop() is called.
+        }));
+    auto moved_tracker = std::move(tracker);
+    moved_tracker.Stop();
+  }
+
+  // Move a started instance and cancel.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    tracker.Start(base::BindLambdaForTesting(
+        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+          // This should not be called since Cancel() is called.
+          ADD_FAILURE();
+        }));
+    auto moved_tracker = std::move(tracker);
+    moved_tracker.Cancel();
+  }
+
+  // Move a stopped instance.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    tracker.Start(base::BindLambdaForTesting(
+        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+          // May be called since Stop() is called.
+        }));
+    tracker.Stop();
+    auto moved_tracker = std::move(tracker);
+  }
+
+  // Move a canceled instance.
+  {
+    auto tracker = compositor()->RequestNewThroughputTracker();
+    tracker.Start(base::BindLambdaForTesting(
+        [&](cc::FrameSequenceMetrics::ThroughputData throughput) {
+          // This should not be called since Cancel() is called.
+          ADD_FAILURE();
+        }));
+    tracker.Cancel();
+    auto moved_tracker = std::move(tracker);
+  }
 }
 
 #if defined(OS_WIN)

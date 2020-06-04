@@ -34,22 +34,37 @@ const blink::WebVector<blink::WebString> convert_to_web_vector(
 ResourceLoadingHintsAgent::ResourceLoadingHintsAgent(
     blink::AssociatedInterfaceRegistry* associated_interfaces,
     content::RenderFrame* render_frame)
-    : content::RenderFrameObserver(render_frame), binding_(this) {
+    : content::RenderFrameObserver(render_frame),
+      content::RenderFrameObserverTracker<ResourceLoadingHintsAgent>(
+          render_frame) {
   DCHECK(render_frame);
   DCHECK(IsMainFrame());
 
   associated_interfaces->AddInterface(base::BindRepeating(
-      &ResourceLoadingHintsAgent::SetBinding, base::Unretained(this)));
+      &ResourceLoadingHintsAgent::SetReceiver, base::Unretained(this)));
 }
 
 GURL ResourceLoadingHintsAgent::GetDocumentURL() const {
   return render_frame()->GetWebFrame()->GetDocument().Url();
 }
 
+void ResourceLoadingHintsAgent::DidStartNavigation(
+    const GURL& url,
+    base::Optional<blink::WebNavigationType> navigation_type) {
+  subresource_redirect_hints_agent_.DidStartNavigation();
+}
+
+void ResourceLoadingHintsAgent::ReadyToCommitNavigation(
+    blink::WebDocumentLoader* document_loader) {
+  subresource_redirect_hints_agent_.ReadyToCommitNavigation(
+      render_frame()->GetRoutingID());
+}
+
 void ResourceLoadingHintsAgent::DidCreateNewDocument() {
   DCHECK(IsMainFrame());
   if (!GetDocumentURL().SchemeIsHTTPOrHTTPS())
     return;
+
   if (subresource_patterns_to_block_.empty())
     return;
 
@@ -74,10 +89,10 @@ void ResourceLoadingHintsAgent::OnDestruct() {
 
 ResourceLoadingHintsAgent::~ResourceLoadingHintsAgent() = default;
 
-void ResourceLoadingHintsAgent::SetBinding(
-    blink::mojom::PreviewsResourceLoadingHintsReceiverAssociatedRequest
-        request) {
-  binding_.Bind(std::move(request));
+void ResourceLoadingHintsAgent::SetReceiver(
+    mojo::PendingAssociatedReceiver<
+        blink::mojom::PreviewsResourceLoadingHintsReceiver> receiver) {
+  receiver_.Bind(std::move(receiver));
 }
 
 bool ResourceLoadingHintsAgent::IsMainFrame() const {
@@ -98,6 +113,12 @@ void ResourceLoadingHintsAgent::SetResourceLoadingHints(
        resource_loading_hints->subresources_to_block) {
     subresource_patterns_to_block_.push_back(subresource);
   }
+}
+
+void ResourceLoadingHintsAgent::SetCompressPublicImagesHints(
+    blink::mojom::CompressPublicImagesHintsPtr images_hints) {
+  subresource_redirect_hints_agent_.SetCompressPublicImagesHints(
+      std::move(images_hints));
 }
 
 }  // namespace previews

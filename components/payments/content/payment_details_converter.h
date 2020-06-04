@@ -16,17 +16,20 @@ namespace payments {
 
 class PaymentDetailsConverter {
  public:
-  using MethodChecker = base::RepeatingCallback<bool(const std::string&)>;
+  using MethodChecker =
+      base::RepeatingCallback<void(const std::string& payment_method_identifier,
+                                   bool* is_valid)>;
 
   // Converts and redacts the |details| from the merchant's updateWith(details)
   // call into a data structure that can be sent to the payment handler.
   //
   // The |details| should not be null.
-  //
+  // Shipping related information is redacted when |handles_shipping| is false.
   // The |method_checker| is not saved. It is used only for the duration of this
   // call.
-  static mojom::PaymentMethodChangeResponsePtr
-  ConvertToPaymentMethodChangeResponse(const mojom::PaymentDetailsPtr& details,
+  static mojom::PaymentRequestDetailsUpdatePtr
+  ConvertToPaymentRequestDetailsUpdate(const mojom::PaymentDetailsPtr& details,
+                                       bool handles_shipping,
                                        const MethodChecker& method_checker);
 
  private:

@@ -154,17 +154,7 @@ to send commands to Chromium.
 
 ### Mobile provisioning profiles for tests
 
-In addition to that, you need provisioning profiles for the individual test
-suites that you want to run. Their bundle identifier depends on whether the
-gn variable `ios_automatically_manage_certs` is set to true (the default)
-or false.
-
-If set to true, then you just need a provisioning profile for the bundle
-identifier `${prefix}.gtest.generic-unit-test` but you can only have a
-single test application installed on the device (all the test application
-will share the same bundle identifier).
-
-If set to false, then you need a different provisioning profile for each
+In addition to that, you need a different provisioning profile for each
 test application. Those provisioning profile will have a bundle identifier
 matching the following pattern `${prefix}.gtest.${test-suite-name}` where
 `${test-suite-name}` is the name of the test suite with underscores changed
@@ -178,10 +168,8 @@ profiles for EarlGrey and OCHamcrest frameworks:
 -   `${prefix}.test.EarlGrey`
 
 In addition to that, then you'll need one additional provisioning profile for
-the XCTest module too. This module bundle identifier depends on whether the
-gn variable `ios_automatically_manage_certs` is set to true or false. If set
-to true, then `${prefix}.gtest.generic-unit-test-module` will be used, otherwise
-it will match the pattern: `${prefix}.gtest.${test-suite-name}-module`.
+the XCTest module too. It must match the pattern:
+`${prefix}.gtest.${test-suite-name}-module`.
 
 ### Other applications
 
@@ -218,7 +206,7 @@ then it will be impossible to install the application on a device (Xcode will
 display an error stating that "The application was signed with invalid
 entitlements").
 
-## Running apps from the commandline
+## Running apps from the command line
 
 Any target that is built and runs on the bots (see [below](#Troubleshooting))
 should run successfully in a local build. To run in the simulator from the
@@ -296,6 +284,11 @@ The second command syncs dependencies to the appropriate versions and re-runs
 hooks as needed.
 
 ## Tips, tricks, and troubleshooting
+
+Remember that the XCode project you interact with while working on Chromium is a
+build artifact, generated from the `BUILD.gn` files. Do not use it to add new
+files; instead see the procedures for [working with
+files](working_with_files.md).
 
 If you have problems building, join us in `#chromium` on `irc.freenode.net` and
 ask there. As mentioned above, be sure that the

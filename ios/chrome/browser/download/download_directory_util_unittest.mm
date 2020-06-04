@@ -7,7 +7,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #import "base/test/ios/wait_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "testing/platform_test.h"
 
@@ -20,20 +20,20 @@ using base::test::ios::kWaitForFileOperationTimeout;
 
 using DownloadDirectoryTest = PlatformTest;
 
-// Tests that DeleteDownloadsDirectory() actually deletes the directory.
+// Tests that DeleteTempDownloadsDirectory() actually deletes the directory.
 TEST_F(DownloadDirectoryTest, Deletion) {
-  base::test::ScopedTaskEnvironment envoronment;
+  base::test::TaskEnvironment envoronment;
 
   // Create a new file in downloads directory.
   base::FilePath dir;
-  EXPECT_TRUE(GetDownloadsDirectory(&dir));
+  EXPECT_TRUE(GetTempDownloadsDirectory(&dir));
   EXPECT_TRUE(CreateDirectory(dir));
   base::FilePath file = dir.Append("file.txt");
   EXPECT_EQ(0, WriteFile(file, "", 0));
   ASSERT_TRUE(base::PathExists(file));
 
   // Delete download directory.
-  DeleteDownloadsDirectory();
+  DeleteTempDownloadsDirectory();
 
   // Verify download directory deletion.
   EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForFileOperationTimeout, ^{

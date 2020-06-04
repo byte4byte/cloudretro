@@ -41,7 +41,10 @@ constexpr int kDialogTitleMarginEndDp = 0;
 
 ToastDialogView::ToastDialogView(const base::string16& app_name,
                                  base::OnceClosure dismissed_callback)
-    : app_name_(app_name), dismissed_callback_(std::move(dismissed_callback)) {
+    : app_name_(app_name) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  DialogDelegate::SetCloseCallback(std::move(dismissed_callback));
+
   chrome::RecordDialogCreation(
       chrome::DialogIdentifier::LOCK_SCREEN_NOTE_APP_TOAST);
 
@@ -80,7 +83,7 @@ void ToastDialogView::Show() {
       &params, ash::kShellWindowId_SettingBubbleContainer);
 
   views::Widget* widget = new views::Widget;  // owned by native widget
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->AddObserver(this);
   widget->Show();
 }
@@ -94,22 +97,12 @@ base::string16 ToastDialogView::GetWindowTitle() const {
                                     app_name_);
 }
 
-bool ToastDialogView::Close() {
-  if (!dismissed_callback_.is_null())
-    std::move(dismissed_callback_).Run();
-  return true;
-}
-
 void ToastDialogView::AddedToWidget() {
   std::unique_ptr<views::Label> title =
       views::BubbleFrameView::CreateDefaultTitleLabel(GetWindowTitle());
   title->SetFontList(views::Label::GetDefaultFontList().Derive(
       3, gfx::Font::NORMAL, gfx::Font::Weight::MEDIUM));
   GetBubbleFrameView()->SetTitleView(std::move(title));
-}
-
-int ToastDialogView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_NONE;
 }
 
 bool ToastDialogView::ShouldShowCloseButton() const {

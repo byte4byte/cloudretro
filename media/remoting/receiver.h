@@ -34,12 +34,14 @@ class Receiver final : public RendererClient {
   void OnError(PipelineStatus status) override;
   void OnEnded() override;
   void OnStatisticsUpdate(const PipelineStatistics& stats) override;
-  void OnBufferingStateChange(BufferingState state) override;
+  void OnBufferingStateChange(BufferingState state,
+                              BufferingStateChangeReason reason) override;
   void OnWaiting(WaitingReason reason) override;
   void OnAudioConfigChange(const AudioDecoderConfig& config) override;
   void OnVideoConfigChange(const VideoDecoderConfig& config) override;
   void OnVideoNaturalSizeChange(const gfx::Size& size) override;
   void OnVideoOpacityChange(bool opaque) override;
+  void OnVideoFrameRateChange(base::Optional<int>) override;
 
   void OnReceivedRpc(std::unique_ptr<pb::RpcMessage> message);
   void OnReceivedBuffer(DemuxerStream::Type type,

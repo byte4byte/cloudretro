@@ -13,29 +13,42 @@ namespace spellcheck {
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
 
-const base::Feature kSpellingServiceRestApi{"SpellingServiceRestApi",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
-#if defined(OS_WIN)
-const base::Feature kWinUseBrowserSpellChecker{
-    "WinUseBrowserSpellChecker", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif
+#if BUILDFLAG(USE_WIN_HYBRID_SPELLCHECKER)
+const base::Feature kWinUseHybridSpellChecker{
+    "WinUseHybridSpellChecker", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // BUILDFLAG(USE_WIN_HYBRID_SPELLCHECKER)
 
 bool UseBrowserSpellChecker() {
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   return false;
 #elif defined(OS_WIN)
   return base::FeatureList::IsEnabled(spellcheck::kWinUseBrowserSpellChecker) &&
-         base::win::GetVersion() > base::win::Version::WIN7 &&
-         base::win::GetVersion() < base::win::Version::WIN_LAST;
+         WindowsVersionSupportsSpellchecker();
 #else
   return true;
 #endif
 }
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK)
 
-#if BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
+#if defined(OS_WIN)
+const base::Feature kWinUseBrowserSpellChecker{
+    "WinUseBrowserSpellChecker", base::FEATURE_DISABLED_BY_DEFAULT};
 
+bool WindowsVersionSupportsSpellchecker() {
+  return base::win::GetVersion() > base::win::Version::WIN7 &&
+         base::win::GetVersion() < base::win::Version::WIN_LAST;
+}
+
+bool UseWinHybridSpellChecker() {
+#if BUILDFLAG(USE_WIN_HYBRID_SPELLCHECKER)
+  return base::FeatureList::IsEnabled(spellcheck::kWinUseHybridSpellChecker) &&
+         UseBrowserSpellChecker();
+#else
+  return false;
+#endif
+}
+#endif  // defined(OS_WIN)
+
+#if defined(OS_ANDROID)
 // Enables/disables Android spellchecker.
 const base::Feature kAndroidSpellChecker{
     "AndroidSpellChecker", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -55,7 +68,8 @@ bool IsAndroidSpellCheckFeatureEnabled() {
 
   return false;
 }
+#endif  // defined(OS_ANDROID)
 
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_SPELLCHECK)
 
 }  // namespace spellcheck

@@ -7,15 +7,29 @@
  * interact with the content settings prefs.
  */
 
+// clang-format off
+import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+import {ChooserType,ContentSetting,ContentSettingsTypes,SiteSettingSource} from './constants.js';
+import {CrPolicyIndicatorType} from 'chrome://resources/cr_elements/policy/cr_policy_indicator_behavior.m.js';
+// clang-format on
+
 /**
  * The handler will send a policy source that is similar, but not exactly the
  * same as a ControlledBy value. If the ContentSettingProvider is omitted it
  * should be treated as 'default'.
  * @enum {string}
  */
-const ContentSettingProvider = {
+export const ContentSettingProvider = {
+  POLICY: 'policy',
+  SUPERVISED_USER: 'supervised_user',
   EXTENSION: 'extension',
+  INSTALLED_WEBAPP_PROVIDER: 'installed_webapp_provider',
+  NOTIFICATION_ANDROID: 'notification_android',
+  EPHEMERAL: 'ephemeral',
   PREFERENCE: 'preference',
+  DEFAULT: 'default',
+  TESTS: 'tests',
+  TESTS_OTHER: 'tests_other'
 };
 
 /**
@@ -26,6 +40,26 @@ const ContentSettingProvider = {
 let IsValid;
 
 /**
+ * Stores information about the management state of a control, i.e. whether
+ * it is disabled and what indicator should be shown (including
+ * CrPolicyIndicatorType::NONE)
+ * @typedef {{disabled: boolean,
+ *            indicator: !CrPolicyIndicatorType}}
+ */
+export let ManagedState;
+
+/**
+ * Stores information about whether individual cookies controls are managed,
+ * and if so what the source of that management is.
+ * @typedef {{allowAll: !ManagedState,
+ *            blockThirdPartyIncognito: !ManagedState,
+ *            blockThirdParty: !ManagedState,
+ *            blockAll: !ManagedState,
+              sessionOnly: !ManagedState}}
+ */
+export let CookieControlsManagedState;
+
+/**
  * Stores origin information. The |hasPermissionSettings| will be set to true
  * when this origin has permissions or when there is a pattern permission
  * affecting this origin.
@@ -33,9 +67,10 @@ let IsValid;
  *            engagement: number,
  *            usage: number,
               numCookies: number,
-              hasPermissionSettings: boolean}}
+              hasPermissionSettings: boolean,
+              isInstalled: boolean}}
  */
-let OriginInfo;
+export let OriginInfo;
 
 /**
  * Represents a list of sites, grouped under the same eTLD+1. For example, an
@@ -44,9 +79,10 @@ let OriginInfo;
  * "example.com".
  * @typedef {{etldPlus1: string,
  *            numCookies: number,
- *            origins: Array<OriginInfo>}}
+ *            origins: Array<OriginInfo>,
+ *            hasInstalledPWA: boolean}}
  */
-let SiteGroup;
+export let SiteGroup;
 
 /**
  * The site exception information passed from the C++ handler.
@@ -55,57 +91,68 @@ let SiteGroup;
  *            incognito: boolean,
  *            origin: string,
  *            displayName: string,
- *            setting: !settings.ContentSetting,
- *            source: !settings.SiteSettingSource}}
+ *            type: string,
+ *            setting: !ContentSetting,
+ *            source: !SiteSettingSource}}
  */
-let RawSiteException;
+export let RawSiteException;
 
 /**
  * The site exception after it has been converted/filtered for UI use.
  * See also: RawSiteException.
- * @typedef {{category: !settings.ContentSettingsTypes,
+ * @typedef {{category: !ContentSettingsTypes,
  *            embeddingOrigin: string,
  *            incognito: boolean,
  *            origin: string,
  *            displayName: string,
- *            setting: !settings.ContentSetting,
+ *            setting: !ContentSetting,
  *            enforcement: ?chrome.settingsPrivate.Enforcement,
  *            controlledBy: !chrome.settingsPrivate.ControlledBy,
  *            showAndroidSmsNote: (boolean|undefined)}}
  */
-let SiteException;
+export let SiteException;
+
+/**
+ * Represents a list of exceptions recently configured for a site, where recent
+ * is defined by the maximum number of sources parameter passed to
+ * GetRecentSitePermissions.
+ * @typedef {{origin: !string,
+ *            incognito: boolean,
+ *            recentPermissions: !Array<!RawSiteException>}}
+ */
+export let RecentSitePermissions;
 
 /**
  * The chooser exception information passed from the C++ handler.
  * See also: ChooserException.
- * @typedef {{chooserType: !settings.ChooserType,
+ * @typedef {{chooserType: !ChooserType,
  *            displayName: string,
  *            object: Object,
  *            sites: Array<!RawSiteException>}}
  */
-let RawChooserException;
+export let RawChooserException;
 
 /**
  * The chooser exception after it has been converted/filtered for UI use.
  * See also: RawChooserException.
- * @typedef {{chooserType: !settings.ChooserType,
+ * @typedef {{chooserType: !ChooserType,
  *            displayName: string,
  *            object: Object,
  *            sites: Array<!SiteException>}}
  */
-let ChooserException;
+export let ChooserException;
 
 /**
- * @typedef {{setting: !settings.ContentSetting,
+ * @typedef {{setting: !ContentSetting,
  *            source: !ContentSettingProvider}}
  */
-let DefaultContentSetting;
+export let DefaultContentSetting;
 
 /**
  * @typedef {{name: string,
  *            id: string}}
  */
-let MediaPickerEntry;
+export let MediaPickerEntry;
 
 /**
  * @typedef {{protocol: string,
@@ -119,11 +166,10 @@ let ProtocolHandlerEntry;
  *            source: string,
  *            zoom: string}}
  */
-let ZoomLevelEntry;
+export let ZoomLevelEntry;
 
-cr.define('settings', function() {
   /** @interface */
-  class SiteSettingsPrefsBrowserProxy {
+  export class SiteSettingsPrefsBrowserProxy {
     /**
      * Sets the default value for a site settings category.
      * @param {string} contentType The name of the category to change.
@@ -133,7 +179,8 @@ cr.define('settings', function() {
 
     /**
      * Gets the default value for a site settings category.
-     * @param {string} contentType The name of the category to query.
+     * @param {!ContentSettingsTypes} contentType The name of the
+     *   category to query.
      * @return {!Promise<!DefaultContentSetting>}
      */
     getDefaultValueForContentType(contentType) {}
@@ -141,15 +188,40 @@ cr.define('settings', function() {
     /**
      * Gets a list of sites, grouped by eTLD+1, affected by any of the content
      * settings specified by |contentTypes|.
-     * @param {!Array<!settings.ContentSettingsTypes>} contentTypes A list of
+     * @param {!Array<!ContentSettingsTypes>} contentTypes A list of
      *     the content types to retrieve sites for.
      * @return {!Promise<!Array<!SiteGroup>>}
      */
     getAllSites(contentTypes) {}
 
     /**
+     * Get whether each of the cookie controls are managed or not, and what
+     * the source of that management is.
+     * @return {!Promise<!CookieControlsManagedState>}
+     */
+    getCookieControlsManagedState() {}
+
+    /**
+     * Get the string which describes the current effective cookie setting.
+     * @return {!Promise<string>}
+     */
+    getCookieSettingDescription() {}
+
+    /**
+     * Gets most recently changed permissions grouped by host and limited to
+     * numSources different origin/profile (inconigto/regular) pairings.
+     * This includes permissions adjusted by embargo, but excludes any set
+     * via policy.
+     * @param {!Array<!ContentSettingsTypes>} contentTypes A list of
+     *     the content types to retrieve sites with recently changed settings.
+     * @param {!number} numSources Maximum number of different sources to return
+     * @return {!Promise<!Array<!RecentSitePermissions>>}
+     */
+    getRecentSitePermissions(contentTypes, numSources) {}
+
+    /**
      * Gets the chooser exceptions for a particular chooser type.
-     * @param {settings.ChooserType} chooserType The chooser type to grab
+     * @param {ChooserType} chooserType The chooser type to grab
      *     exceptions from.
      * @return {!Promise<!Array<!RawChooserException>>}
      */
@@ -175,7 +247,7 @@ cr.define('settings', function() {
      * may be different to the results retrieved by getExceptionList(), since it
      * combines different sources of data to get a permission's value.
      * @param {string} origin The origin to look up permissions for.
-     * @param {!Array<!settings.ContentSettingsTypes>} contentTypes A list of
+     * @param {!Array<!ContentSettingsTypes>} contentTypes A list of
      *     categories to retrieve the ContentSetting for.
      * @return {!Promise<!NodeList<!RawSiteException>>}
      */
@@ -185,11 +257,11 @@ cr.define('settings', function() {
      * Resets the permissions for a list of categories for a given origin. This
      * does not support incognito settings or patterns.
      * @param {string} origin The origin to reset permissions for.
-     * @param {!Array<!settings.ContentSettingsTypes>} contentTypes A list of
+     * @param {!Array<!ContentSettingsTypes>} contentTypes A list of
      *     categories to set the permission for. Typically this would be a
      *     single category, but sometimes it is useful to clear any permissions
      *     set for all categories.
-     * @param {!settings.ContentSetting} blanketSetting The setting to set all
+     * @param {!ContentSetting} blanketSetting The setting to set all
      *     permissions listed in |contentTypes| to.
      */
     setOriginPermissions(origin, contentTypes, blanketSetting) {}
@@ -218,7 +290,7 @@ cr.define('settings', function() {
     /**
      * Removes a particular chooser object permission by origin and embedding
      * origin.
-     * @param {settings.ChooserType} chooserType The chooser exception type
+     * @param {ChooserType} chooserType The chooser exception type
      * @param {string} origin The origin to look up the permission for.
      * @param {string} embeddingOrigin the embedding origin to look up.
      * @param {!Object} exception The exception to revoke permission for.
@@ -251,7 +323,7 @@ cr.define('settings', function() {
     /**
      * Checks whether a setting is valid.
      * @param {string} pattern The pattern to check.
-     * @param {settings.ContentSettingsTypes} category What kind of setting,
+     * @param {ContentSettingsTypes} category What kind of setting,
      *     e.g. Location, Camera, Cookies, etc.
      * @return {!Promise<IsValid>} Contains whether or not the pattern is
      *     valid for the type, and if it is invalid, the reason why.
@@ -351,6 +423,12 @@ cr.define('settings', function() {
     clearEtldPlus1DataAndCookies(etldPlus1) {}
 
     /**
+     * Clears all the web storage data and cookies for a given origin.
+     * @param {string} origin The origin to clear data from.
+     */
+    clearOriginDataAndCookies(origin) {}
+
+    /**
      * Record All Sites Page action for metrics.
      *  @param {number} action number.
      */
@@ -358,9 +436,9 @@ cr.define('settings', function() {
   }
 
   /**
-   * @implements {settings.SiteSettingsPrefsBrowserProxy}
+   * @implements {SiteSettingsPrefsBrowserProxy}
    */
-  class SiteSettingsPrefsBrowserProxyImpl {
+  export class SiteSettingsPrefsBrowserProxyImpl {
     /** @override */
     setDefaultValueForContentType(contentType, defaultValue) {
       chrome.send('setDefaultValueForContentType', [contentType, defaultValue]);
@@ -368,32 +446,48 @@ cr.define('settings', function() {
 
     /** @override */
     getDefaultValueForContentType(contentType) {
-      return cr.sendWithPromise('getDefaultValueForContentType', contentType);
+      return sendWithPromise('getDefaultValueForContentType', contentType);
     }
 
     /** @override */
     getAllSites(contentTypes) {
-      return cr.sendWithPromise('getAllSites', contentTypes);
+      return sendWithPromise('getAllSites', contentTypes);
+    }
+
+    /** @override */
+    getCookieControlsManagedState() {
+      return sendWithPromise('getCookieControlsManagedState');
+    }
+
+    /** @override */
+    getCookieSettingDescription() {
+      return sendWithPromise('getCookieSettingDescription');
+    }
+
+    /** @override */
+    getRecentSitePermissions(contentTypes, numSources) {
+      return sendWithPromise(
+          'getRecentSitePermissions', contentTypes, numSources);
     }
 
     /** @override */
     getChooserExceptionList(chooserType) {
-      return cr.sendWithPromise('getChooserExceptionList', chooserType);
+      return sendWithPromise('getChooserExceptionList', chooserType);
     }
 
     /** @override */
     getFormattedBytes(numBytes) {
-      return cr.sendWithPromise('getFormattedBytes', numBytes);
+      return sendWithPromise('getFormattedBytes', numBytes);
     }
 
     /** @override */
     getExceptionList(contentType) {
-      return cr.sendWithPromise('getExceptionList', contentType);
+      return sendWithPromise('getExceptionList', contentType);
     }
 
     /** @override */
     getOriginPermissions(origin, contentTypes) {
-      return cr.sendWithPromise('getOriginPermissions', origin, contentTypes);
+      return sendWithPromise('getOriginPermissions', origin, contentTypes);
     }
 
     /** @override */
@@ -426,22 +520,19 @@ cr.define('settings', function() {
     /** @override */
     setCategoryPermissionForPattern(
         primaryPattern, secondaryPattern, contentType, value, incognito) {
-      // TODO(dschuyler): It may be incorrect for JS to send the embeddingOrigin
-      // pattern. Look into removing this parameter from site_settings_handler.
-      // Ignoring the |secondaryPattern| and using '' instead is a quick-fix.
       chrome.send(
           'setCategoryPermissionForPattern',
-          [primaryPattern, '', contentType, value, incognito]);
+          [primaryPattern, secondaryPattern, contentType, value, incognito]);
     }
 
     /** @override */
     isOriginValid(origin) {
-      return cr.sendWithPromise('isOriginValid', origin);
+      return sendWithPromise('isOriginValid', origin);
     }
 
     /** @override */
     isPatternValidForType(pattern, category) {
-      return cr.sendWithPromise('isPatternValidForType', pattern, category);
+      return sendWithPromise('isPatternValidForType', pattern, category);
     }
 
     /** @override */
@@ -512,6 +603,11 @@ cr.define('settings', function() {
     }
 
     /** @override */
+    clearOriginDataAndCookies(origin) {
+      chrome.send('clearUsage', [origin]);
+    }
+
+    /** @override */
     recordAction(action) {
       chrome.send('recordAction', [action]);
     }
@@ -519,10 +615,5 @@ cr.define('settings', function() {
 
   // The singleton instance_ is replaced with a test version of this wrapper
   // during testing.
-  cr.addSingletonGetter(SiteSettingsPrefsBrowserProxyImpl);
+  addSingletonGetter(SiteSettingsPrefsBrowserProxyImpl);
 
-  return {
-    SiteSettingsPrefsBrowserProxy: SiteSettingsPrefsBrowserProxy,
-    SiteSettingsPrefsBrowserProxyImpl: SiteSettingsPrefsBrowserProxyImpl,
-  };
-});

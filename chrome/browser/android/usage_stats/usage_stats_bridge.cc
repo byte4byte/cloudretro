@@ -57,8 +57,7 @@ UsageStatsBridge::UsageStatsBridge(
     const JavaRef<jobject>& j_this)
     : usage_stats_database_(std::move(usage_stats_database)),
       profile_(profile),
-      j_this_(ScopedJavaGlobalRef<jobject>(j_this)),
-      weak_ptr_factory_(this) {
+      j_this_(ScopedJavaGlobalRef<jobject>(j_this)) {
   history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfile(profile_,
                                            ServiceAccessType::IMPLICIT_ACCESS);
@@ -326,11 +325,23 @@ void UsageStatsBridge::OnURLsDeleted(
 
   history::DeletionTimeRange time_range = deletion_info.time_range();
   if (time_range.IsValid()) {
-    int64_t startTimeMs = time_range.begin().ToJavaTime();
-    int64_t endTimeMs = time_range.end().ToJavaTime();
+    const base::Optional<std::set<GURL>>& urls = deletion_info.restrict_urls();
+    if (urls.has_value() && urls.value().size() > 0) {
+      std::vector<std::string> domains;
+      domains.reserve(urls.value().size());
+      for (const auto& gurl : urls.value()) {
+        domains.push_back(gurl.host());
+      }
+      Java_UsageStatsBridge_onHistoryDeletedForDomains(
+          env, j_this_, ToJavaArrayOfStrings(env, domains));
+    } else {
+      int64_t startTimeMs = time_range.begin().ToJavaTime();
+      int64_t endTimeMs = time_range.end().ToJavaTime();
 
-    Java_UsageStatsBridge_onHistoryDeletedInRange(env, j_this_, startTimeMs,
-                                                  endTimeMs);
+      Java_UsageStatsBridge_onHistoryDeletedInRange(env, j_this_, startTimeMs,
+                                                    endTimeMs);
+    }
+
     return;
   }
 }

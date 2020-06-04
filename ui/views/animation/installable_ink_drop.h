@@ -14,11 +14,10 @@
 #include "ui/views/animation/ink_drop_event_handler.h"
 #include "ui/views/animation/ink_drop_state.h"
 #include "ui/views/animation/installable_ink_drop_animator.h"
+#include "ui/views/animation/installable_ink_drop_config.h"
 #include "ui/views/animation/installable_ink_drop_painter.h"
 #include "ui/views/view_observer.h"
 #include "ui/views/views_export.h"
-
-class SkPath;
 
 namespace gfx {
 class AnimationContainer;
@@ -60,6 +59,9 @@ class VIEWS_EXPORT InstallableInkDrop : public InkDrop,
 
   ~InstallableInkDrop() override;
 
+  void SetConfig(InstallableInkDropConfig config);
+  InstallableInkDropConfig config() const { return config_; }
+
   // Should only be used for inspecting properties of the layer in tests.
   const ui::Layer* layer_for_testing() const { return layer_.get(); }
 
@@ -67,7 +69,7 @@ class VIEWS_EXPORT InstallableInkDrop : public InkDrop,
   void HostSizeChanged(const gfx::Size& new_size) override;
   InkDropState GetTargetInkDropState() const override;
   void AnimateToState(InkDropState ink_drop_state) override;
-  void SetHoverHighlightFadeDurationMs(int duration_ms) override;
+  void SetHoverHighlightFadeDuration(base::TimeDelta duration) override;
   void UseDefaultHoverHighlightFadeDuration() override;
   void SnapToActivated() override;
   void SnapToHidden() override;
@@ -90,10 +92,6 @@ class VIEWS_EXPORT InstallableInkDrop : public InkDrop,
   void OnDeviceScaleFactorChanged(float old_device_scale_factor,
                                   float new_device_scale_factor) override;
 
-  // Gets the path that the ink drop fills in for the highlight. This uses
-  // |kHighlightPathKey| if provided but falls back to a pill-shaped path.
-  static SkPath GetHighlightPathForView(const View* view);
-
  private:
   void SchedulePaint();
   void UpdateAnimatorHighlight();
@@ -106,6 +104,9 @@ class VIEWS_EXPORT InstallableInkDrop : public InkDrop,
   // If we were installed on an InkDropHostView, this will be non-null. We store
   // this to to remove our InkDropEventHandler override.
   InkDropHostView* ink_drop_host_view_ = nullptr;
+
+  // Contains the colors and opacities used to paint.
+  InstallableInkDropConfig config_;
 
   // The layer we paint to.
   std::unique_ptr<ui::Layer> layer_;

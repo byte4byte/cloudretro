@@ -9,7 +9,6 @@
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "base/logging.h"
 #include "ui/display/screen.h"
 #include "ui/views/widget/widget.h"
 
@@ -23,7 +22,7 @@ void ImmersiveContextAsh::OnEnteringOrExitingImmersive(
     ImmersiveFullscreenController* controller,
     bool entering) {
   aura::Window* window = controller->widget()->GetNativeWindow();
-  wm::WindowState* window_state = wm::GetWindowState(window);
+  WindowState* window_state = WindowState::Get(window);
   // Auto hide the shelf in immersive fullscreen instead of hiding it.
   window_state->SetHideShelfWhenFullscreen(!entering);
 
@@ -39,7 +38,7 @@ gfx::Rect ImmersiveContextAsh::GetDisplayBoundsInScreen(views::Widget* widget) {
 }
 
 bool ImmersiveContextAsh::DoesAnyWindowHaveCapture() {
-  return wm::GetCaptureWindow() != nullptr;
+  return window_util::GetCaptureWindow() != nullptr;
 }
 
 }  // namespace ash

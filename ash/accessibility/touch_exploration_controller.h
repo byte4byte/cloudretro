@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/events/event.h"
 #include "ui/events/event_rewriter.h"
 #include "ui/events/gesture_detection/gesture_detector.h"
@@ -281,11 +281,6 @@ class ASH_EXPORT TouchExplorationController
   void DispatchKeyWithFlags(const ui::KeyboardCode key,
                             int flags,
                             const Continuation continuation);
-
-  // Binds DispatchKeyWithFlags to a specific key and flags.
-  base::Closure BindKeyEventWithFlags(const ui::KeyboardCode key,
-                                      int flags,
-                                      const Continuation continuation);
 
   std::unique_ptr<ui::MouseEvent> CreateMouseMoveEvent(
       const gfx::PointF& location,

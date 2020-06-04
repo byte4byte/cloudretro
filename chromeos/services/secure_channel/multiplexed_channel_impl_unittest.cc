@@ -12,7 +12,7 @@
 
 #include "base/bind.h"
 #include "base/stl_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/services/secure_channel/connection_details.h"
 #include "chromeos/services/secure_channel/connection_medium.h"
 #include "chromeos/services/secure_channel/fake_authenticated_channel.h"
@@ -52,7 +52,7 @@ class FakeSingleClientMessageProxyImplFactory
   }
 
  private:
-  std::unique_ptr<SingleClientMessageProxy> BuildInstance(
+  std::unique_ptr<SingleClientMessageProxy> CreateInstance(
       SingleClientMessageProxy::Delegate* delegate,
       std::unique_ptr<ClientConnectionParameters> client_connection_parameters)
       override {
@@ -102,7 +102,7 @@ class SecureChannelMultiplexedChannelImplTest : public testing::Test {
   void SetUp() override {
     fake_proxy_factory_ =
         std::make_unique<FakeSingleClientMessageProxyImplFactory>();
-    SingleClientMessageProxyImpl::Factory::SetInstanceForTesting(
+    SingleClientMessageProxyImpl::Factory::SetFactoryForTesting(
         fake_proxy_factory_.get());
 
     fake_delegate_ = std::make_unique<FakeMultiplexedChannelDelegate>();
@@ -113,7 +113,7 @@ class SecureChannelMultiplexedChannelImplTest : public testing::Test {
   }
 
   void TearDown() override {
-    SingleClientMessageProxyImpl::Factory::SetInstanceForTesting(nullptr);
+    SingleClientMessageProxyImpl::Factory::SetFactoryForTesting(nullptr);
   }
 
   void CreateChannel() {
@@ -121,16 +121,14 @@ class SecureChannelMultiplexedChannelImplTest : public testing::Test {
         std::make_unique<FakeAuthenticatedChannel>();
     fake_authenticated_channel_ = fake_authenticated_channel.get();
 
-    multiplexed_channel_ =
-        MultiplexedChannelImpl::Factory::Get()->BuildInstance(
-            std::move(fake_authenticated_channel), fake_delegate_.get(),
-            ConnectionDetails(kTestDeviceId,
-                              ConnectionMedium::kBluetoothLowEnergy),
-            &initial_client_list_);
+    multiplexed_channel_ = MultiplexedChannelImpl::Factory::Create(
+        std::move(fake_authenticated_channel), fake_delegate_.get(),
+        ConnectionDetails(kTestDeviceId, ConnectionMedium::kBluetoothLowEnergy),
+        &initial_client_list_);
 
-    // Once BuildInstance() has finished, |fake_proxy_factory_| is expected to
-    // have already created one or more instances. Verify that the delegate
-    // passed to the factory is actually |multiplexed_channel_|.
+    // Once Create() has finished, |fake_proxy_factory_| is expected to have
+    // already created one or more instances. Verify that the delegate passed to
+    // the factory is actually |multiplexed_channel_|.
     EXPECT_EQ(static_cast<MultiplexedChannelImpl*>(multiplexed_channel_.get()),
               fake_proxy_factory_->expected_delegate());
   }
@@ -297,7 +295,7 @@ class SecureChannelMultiplexedChannelImplTest : public testing::Test {
     sent_message_counters_.insert(message_counter);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   int next_send_message_counter_ = 0;
   std::unordered_set<int> sent_message_counters_;

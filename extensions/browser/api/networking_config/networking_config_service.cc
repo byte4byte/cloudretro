@@ -67,14 +67,11 @@ NetworkingConfigService::NetworkingConfigService(
     std::unique_ptr<EventDelegate> event_delegate,
     ExtensionRegistry* extension_registry)
     : browser_context_(browser_context),
-      registry_observer_(this),
-      event_delegate_(std::move(event_delegate)),
-      weak_factory_(this) {
+      event_delegate_(std::move(event_delegate)) {
   registry_observer_.Add(extension_registry);
 }
 
-NetworkingConfigService::~NetworkingConfigService() {
-}
+NetworkingConfigService::~NetworkingConfigService() = default;
 
 void NetworkingConfigService::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
@@ -255,9 +252,9 @@ void NetworkingConfigService::DispatchPortalDetectedEvent(
   // that are not affected by policy, i.e BSSID.
   network_handler->managed_network_configuration_handler()->GetProperties(
       "" /* empty userhash */, service_path,
-      base::Bind(&NetworkingConfigService::OnGotProperties,
-                 weak_factory_.GetWeakPtr(), extension_id, guid,
-                 authentication_callback),
+      base::BindOnce(&NetworkingConfigService::OnGotProperties,
+                     weak_factory_.GetWeakPtr(), extension_id, guid,
+                     authentication_callback),
       base::Bind(&NetworkingConfigService::OnGetPropertiesFailed,
                  weak_factory_.GetWeakPtr(), extension_id, guid));
 }

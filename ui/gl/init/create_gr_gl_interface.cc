@@ -3,13 +3,100 @@
 // found in the LICENSE file.
 
 #include "ui/gl/init/create_gr_gl_interface.h"
+
+#include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/progress_reporter.h"
 
 namespace gl {
 namespace init {
+
+// This code emulates GL fences (GL_APPLE_sync or GL_ARB_sync) via
+// EGL_KHR_fence_sync extension. It's used to provide Skia ways of
+// synchronization on platforms that does not have GL fences but support EGL
+namespace {
+struct EGLFenceData {
+  EGLSync sync;
+  EGLDisplay display;
+};
+
+GLsync glFenceSyncEmulateEGL(GLenum condition, GLbitfield flags) {
+  DCHECK(condition == GL_SYNC_GPU_COMMANDS_COMPLETE);
+  DCHECK(flags == 0);
+
+  init::EGLFenceData* data = new EGLFenceData;
+
+  data->display = eglGetCurrentDisplay();
+  data->sync = eglCreateSyncKHR(data->display, EGL_SYNC_FENCE_KHR, nullptr);
+
+  return reinterpret_cast<GLsync>(data);
+}
+
+void glDeleteSyncEmulateEGL(GLsync sync) {
+  EGLFenceData* data = reinterpret_cast<EGLFenceData*>(sync);
+  eglDestroySyncKHR(data->display, data->sync);
+  delete data;
+}
+
+GLenum glClientWaitSyncEmulateEGL(GLsync sync,
+                                  GLbitfield flags,
+                                  GLuint64 timeout) {
+  init::EGLFenceData* data = reinterpret_cast<init::EGLFenceData*>(sync);
+
+  EGLint egl_flags = 0;
+
+  if (flags & GL_SYNC_FLUSH_COMMANDS_BIT) {
+    egl_flags |= EGL_SYNC_FLUSH_COMMANDS_BIT;
+  }
+  EGLint result =
+      eglClientWaitSyncKHR(data->display, data->sync, egl_flags, timeout);
+
+  switch (result) {
+    case EGL_CONDITION_SATISFIED:
+      return GL_CONDITION_SATISFIED;
+    case EGL_TIMEOUT_EXPIRED:
+      return GL_TIMEOUT_EXPIRED;
+    case EGL_FALSE:
+      return GL_WAIT_FAILED;
+  }
+
+  NOTREACHED();
+  return 0;
+}
+
+void glWaitSyncEmulateEGL(GLsync sync, GLbitfield flags, GLuint64 timeout) {
+  init::EGLFenceData* data = reinterpret_cast<init::EGLFenceData*>(sync);
+
+  DCHECK(timeout == GL_TIMEOUT_IGNORED);
+  DCHECK(flags == 0);
+
+  if (!g_driver_egl.ext.b_EGL_KHR_wait_sync) {
+    eglClientWaitSyncKHR(data->display, data->sync, 0, EGL_FOREVER_KHR);
+    return;
+  }
+
+  EGLint result = eglWaitSyncKHR(data->display, data->sync, 0);
+  DCHECK(result);
+}
+
+GLboolean glIsSyncEmulateEGL(GLsync sync) {
+  NOTREACHED();
+  return true;
+}
+
+#if defined(OS_MACOSX)
+std::map<GLuint, base::TimeTicks>& GetProgramCreateTimesMap() {
+  static base::NoDestructor<std::map<GLuint, base::TimeTicks>> instance;
+  return *instance.get();
+}
+#endif
+
+}  // namespace
 
 namespace {
 
@@ -31,45 +118,75 @@ GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> bind_slow(
   };
 }
 
-template <typename R, typename... Args>
+template <bool droppable_call, typename R, typename... Args>
+GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> maybe_drop_call(
+    R(GL_BINDING_CALL* func)(Args...)) {
+  // One branch is optimized away because droppable_call is set at compile time.
+  if (droppable_call) {
+    return [func](Args... args) {
+      if (!HasInitializedNullDrawGLBindings())
+        func(args...);
+    };
+  } else {
+    return func;
+  }
+}
+
+template <bool droppable_call = false, typename R, typename... Args>
 GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> bind_slow_on_mac(
     R(GL_BINDING_CALL* func)(Args...),
     gl::ProgressReporter* progress_reporter) {
 #if defined(OS_MACOSX)
-  if (!progress_reporter)
-    return func;
+  if (!progress_reporter) {
+    return maybe_drop_call<droppable_call>(func);
+  }
   return [func, progress_reporter](Args... args) {
     gl::ScopedProgressReporter scoped_reporter(progress_reporter);
-    return func(args...);
+    // Conditional may be optimized out because droppable_call is set at compile
+    // time.
+    if (!droppable_call || !HasInitializedNullDrawGLBindings())
+      return func(args...);
   };
 #endif
-  return func;
+  return maybe_drop_call<droppable_call>(func);
 }
 
-template <typename R, typename... Args>
+template <bool droppable_call = false, typename R, typename... Args>
 GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> bind_with_flush_on_mac(
     R(GL_BINDING_CALL* func)(Args...)) {
 #if defined(OS_MACOSX)
   return [func](Args... args) {
-    glFlush();
-    func(args...);
-    glFlush();
+    // Conditional may be optimized out because droppable_call is set at compile
+    // time.
+    if (!droppable_call || !HasInitializedNullDrawGLBindings()) {
+      {
+        TRACE_EVENT0(
+            "gpu", "CreateGrGLInterface - bind_with_flush_on_mac - beforefunc")
+        glFlush();
+      }
+      func(args...);
+      {
+        TRACE_EVENT0("gpu",
+                     "CreateGrGLInterface - bind_with_flush_on_mac - afterfunc")
+        glFlush();
+      }
+    }
   };
 #else
-  return func;
+  return maybe_drop_call<droppable_call>(func);
 #endif
 }
 
-template <typename R, typename... Args>
+template <bool droppable_call = false, typename R, typename... Args>
 GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> bind_slow_with_flush_on_mac(
     R(GL_BINDING_CALL* func)(Args...),
     gl::ProgressReporter* progress_reporter) {
   if (!progress_reporter) {
-    return bind_with_flush_on_mac(func);
+    return bind_with_flush_on_mac<droppable_call>(func);
   }
   return [func, progress_reporter](Args... args) {
     gl::ScopedProgressReporter scoped_reporter(progress_reporter);
-    return bind_with_flush_on_mac(func)(args...);
+    return bind_with_flush_on_mac<droppable_call>(func)(args...);
   };
 }
 
@@ -88,7 +205,6 @@ const GLubyte* GetStringHook(const char* gl_version_string,
 
 const char* kBlacklistExtensions[] = {
     "GL_APPLE_framebuffer_multisample",
-    "GL_APPLE_sync",
     "GL_ARB_ES3_1_compatibility",
     "GL_ARB_draw_indirect",
     "GL_ARB_invalidate_subdata",
@@ -128,18 +244,23 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   const bool apply_version_override = use_version_es2 ||
                                       version_info.IsAtLeastGL(4, 2) ||
                                       version_info.IsAtLeastGLES(3, 1);
-  if (apply_version_override) {
-    const char* fake_gl_version = nullptr;
-    const char* fake_glsl_version = nullptr;
-    if (use_version_es2) {
-      fake_gl_version = "OpenGL ES 2.0";
-      fake_glsl_version = "OpenGL ES GLSL ES 1.00";
+
+  if (apply_version_override || version_info.IsVersionSubstituted()) {
+    GLVersionInfo::VersionStrings version;
+    if (version_info.IsVersionSubstituted()) {
+      version = version_info.GetFakeVersionStrings(version_info.major_version,
+                                                   version_info.minor_version);
+    } else if (version_info.is_es) {
+      if (use_version_es2)
+        version = version_info.GetFakeVersionStrings(2, 0);
+      else
+        version = version_info.GetFakeVersionStrings(3, 0);
     } else {
-      fake_gl_version = version_info.is_es ? "OpenGL ES 3.0" : "4.1";
-      fake_glsl_version = version_info.is_es ? "OpenGL ES GLSL ES 3.00" : "4.10";
+      version = version_info.GetFakeVersionStrings(4, 1);
     }
-    get_string = [fake_gl_version, fake_glsl_version](GLenum name) {
-      return GetStringHook(fake_gl_version, fake_glsl_version, name);
+
+    get_string = [version](GLenum name) {
+      return GetStringHook(version.gl_version, version.glsl_version, name);
     };
   } else {
     get_string = bind(&gl::GLApi::glGetStringFn, api);
@@ -177,7 +298,7 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fBufferData = gl->glBufferDataFn;
   functions->fBufferSubData = gl->glBufferSubDataFn;
   functions->fClear =
-      bind_slow_with_flush_on_mac(gl->glClearFn, progress_reporter);
+      bind_slow_with_flush_on_mac<true>(gl->glClearFn, progress_reporter);
   functions->fClearColor = gl->glClearColorFn;
   functions->fClearStencil = gl->glClearStencilFn;
   functions->fClearTexImage = gl->glClearTexImageFn;
@@ -191,13 +312,30 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
       bind_slow(gl->glCompressedTexSubImage2DFn, progress_reporter);
   functions->fCopyTexSubImage2D =
       bind_slow(gl->glCopyTexSubImage2DFn, progress_reporter);
+#if defined(OS_MACOSX)
+  functions->fCreateProgram = [func = gl->glCreateProgramFn]() {
+    auto& program_create_times = GetProgramCreateTimesMap();
+    GLuint program = func();
+    program_create_times[program] = base::TimeTicks::Now();
+    return program;
+  };
+#else
   functions->fCreateProgram = gl->glCreateProgramFn;
+#endif
   functions->fCreateShader = gl->glCreateShaderFn;
   functions->fCullFace = gl->glCullFaceFn;
   functions->fDeleteBuffers =
       bind_slow(gl->glDeleteBuffersARBFn, progress_reporter);
+#if defined(OS_MACOSX)
+  functions->fDeleteProgram = [func = gl->glDeleteProgramFn](GLuint program) {
+    auto& program_create_times = GetProgramCreateTimesMap();
+    program_create_times.erase(program);
+    func(program);
+  };
+#else
   functions->fDeleteProgram =
       bind_slow(gl->glDeleteProgramFn, progress_reporter);
+#endif
   functions->fDeleteQueries = gl->glDeleteQueriesFn;
   functions->fDeleteSamplers = gl->glDeleteSamplersFn;
   functions->fDeleteShader = bind_slow(gl->glDeleteShaderFn, progress_reporter);
@@ -208,23 +346,31 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fDisableVertexAttribArray = gl->glDisableVertexAttribArrayFn;
   functions->fDiscardFramebuffer = gl->glDiscardFramebufferEXTFn;
   functions->fDrawArrays =
-      bind_slow_on_mac(gl->glDrawArraysFn, progress_reporter);
+      bind_slow_on_mac<true>(gl->glDrawArraysFn, progress_reporter);
   functions->fDrawBuffer = gl->glDrawBufferFn;
   functions->fDrawBuffers = gl->glDrawBuffersARBFn;
   functions->fDrawElements =
-      bind_slow_on_mac(gl->glDrawElementsFn, progress_reporter);
+      bind_slow_on_mac<true>(gl->glDrawElementsFn, progress_reporter);
 
-  functions->fDrawArraysInstanced =
-      bind_slow_on_mac(gl->glDrawArraysInstancedANGLEFn, progress_reporter);
-  functions->fDrawElementsInstanced =
-      bind_slow_on_mac(gl->glDrawElementsInstancedANGLEFn, progress_reporter);
+  functions->fDrawArraysInstanced = bind_slow_on_mac<true>(
+      gl->glDrawArraysInstancedANGLEFn, progress_reporter);
+  functions->fDrawArraysInstancedBaseInstance = bind_slow_on_mac<true>(
+      gl->glDrawArraysInstancedBaseInstanceANGLEFn, progress_reporter);
+  functions->fDrawElementsInstanced = bind_slow_on_mac<true>(
+      gl->glDrawElementsInstancedANGLEFn, progress_reporter);
+  functions->fDrawElementsInstancedBaseVertexBaseInstance =
+      bind_slow_on_mac<true>(
+          gl->glDrawElementsInstancedBaseVertexBaseInstanceANGLEFn,
+          progress_reporter);
 
   // GL 4.0 or GL_ARB_draw_indirect or ES 3.1
-  functions->fDrawArraysIndirect = gl->glDrawArraysIndirectFn;
-  functions->fDrawElementsIndirect = gl->glDrawElementsIndirectFn;
+  functions->fDrawArraysIndirect =
+      bind_slow_on_mac<true>(gl->glDrawArraysIndirectFn, progress_reporter);
+  functions->fDrawElementsIndirect =
+      bind_slow_on_mac<true>(gl->glDrawElementsIndirectFn, progress_reporter);
 
   functions->fDrawRangeElements =
-      bind_slow_on_mac(gl->glDrawRangeElementsFn, progress_reporter);
+      bind_slow_on_mac<true>(gl->glDrawRangeElementsFn, progress_reporter);
   functions->fEnable = gl->glEnableFn;
   functions->fEnableVertexAttribArray = gl->glEnableVertexAttribArrayFn;
   functions->fEndQuery = gl->glEndQueryFn;
@@ -244,7 +390,23 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fGetQueryiv = gl->glGetQueryivFn;
   functions->fGetProgramBinary = gl->glGetProgramBinaryFn;
   functions->fGetProgramInfoLog = gl->glGetProgramInfoLogFn;
+#if defined(OS_MACOSX)
+  functions->fGetProgramiv = [func = gl->glGetProgramivFn](
+                                 GLuint program, GLenum pname, GLint* params) {
+    func(program, pname, params);
+    if (pname == 0x8B82 /* GR_GL_LINK_STATUS */) {
+      auto& program_create_times = GetProgramCreateTimesMap();
+      auto found = program_create_times.find(program);
+      if (found != program_create_times.end()) {
+        base::TimeDelta elapsed = base::TimeTicks::Now() - found->second;
+        UMA_HISTOGRAM_TIMES("Gpu.GL.ProgramBuildTime", elapsed);
+        program_create_times.erase(found);
+      }
+    }
+  };
+#else
   functions->fGetProgramiv = gl->glGetProgramivFn;
+#endif
   functions->fGetShaderInfoLog = gl->glGetShaderInfoLogFn;
   functions->fGetShaderiv = gl->glGetShaderivFn;
   functions->fGetString = get_string;
@@ -348,8 +510,8 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
       gl->glGetFramebufferAttachmentParameterivEXTFn;
   functions->fGetRenderbufferParameteriv =
       gl->glGetRenderbufferParameterivEXTFn;
-  functions->fBindFramebuffer =
-      bind_with_flush_on_mac(gl->glBindFramebufferEXTFn);
+  functions->fBindFramebuffer = bind_slow_with_flush_on_mac(
+      gl->glBindFramebufferEXTFn, progress_reporter);
   functions->fFramebufferTexture2D = gl->glFramebufferTexture2DEXTFn;
   functions->fCheckFramebufferStatus = gl->glCheckFramebufferStatusEXTFn;
   functions->fDeleteFramebuffers = bind_slow_with_flush_on_mac(
@@ -561,16 +723,29 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   //     gl->glFlushMappedNamedBufferRangeEXTFn;
   // functions->fTextureBuffer = gl->glTextureBufferEXTFn;
 
-  functions->fDebugMessageControl = gl->glDebugMessageControlFn;
-  functions->fDebugMessageInsert = gl->glDebugMessageInsertFn;
-  functions->fDebugMessageCallback = gl->glDebugMessageCallbackFn;
-  functions->fGetDebugMessageLog = gl->glGetDebugMessageLogFn;
-  functions->fPushDebugGroup = gl->glPushDebugGroupFn;
-  functions->fPopDebugGroup = gl->glPopDebugGroupFn;
-  functions->fObjectLabel = gl->glObjectLabelFn;
+  // Some drivers report GL_KHR_debug but do not provide functions. Validate and
+  // remove reported extension from the list if necessary
+  // See https://crbug.com/1008125
+  if (gl->glDebugMessageControlFn && gl->glDebugMessageInsertFn &&
+      gl->glDebugMessageCallbackFn && gl->glGetDebugMessageLogFn &&
+      gl->glPushDebugGroupFn && gl->glPopDebugGroupFn && gl->glObjectLabelFn) {
+    functions->fDebugMessageControl = gl->glDebugMessageControlFn;
+    functions->fDebugMessageInsert = gl->glDebugMessageInsertFn;
+    functions->fDebugMessageCallback = gl->glDebugMessageCallbackFn;
+    functions->fGetDebugMessageLog = gl->glGetDebugMessageLogFn;
+    functions->fPushDebugGroup = gl->glPushDebugGroupFn;
+    functions->fPopDebugGroup = gl->glPopDebugGroupFn;
+    functions->fObjectLabel = gl->glObjectLabelFn;
+  } else {
+    extensions.remove("GL_KHR_debug");
+  }
 
   // GL_EXT_window_rectangles
   functions->fWindowRectangles = gl->glWindowRectanglesEXTFn;
+
+  // GL_QCOM_tiled_rendering
+  functions->fStartTiling = gl->glStartTilingQCOMFn;
+  functions->fEndTiling = gl->glEndTilingQCOMFn;
 
   // EGL_KHR_image / EGL_KHR_image_base
   // functions->fCreateImage = nullptr;
@@ -581,6 +756,38 @@ sk_sp<GrGLInterface> CreateGrGLInterface(
   functions->fClientWaitSync = gl->glClientWaitSyncFn;
   functions->fWaitSync = gl->glWaitSyncFn;
   functions->fDeleteSync = gl->glDeleteSyncFn;
+
+  if (!gl->glFenceSyncFn) {
+    // NOTE: Skia uses the same function pointers without APPLE suffix
+    if (extensions.has("GL_APPLE_sync")) {
+      functions->fFenceSync = gl->glFenceSyncAPPLEFn;
+      functions->fIsSync = gl->glIsSyncAPPLEFn;
+      functions->fClientWaitSync = gl->glClientWaitSyncAPPLEFn;
+      functions->fWaitSync = gl->glWaitSyncAPPLEFn;
+      functions->fDeleteSync = gl->glDeleteSyncAPPLEFn;
+    } else if (g_driver_egl.ext.b_EGL_KHR_fence_sync) {
+      // Emulate APPLE_sync via egl
+      extensions.add("GL_APPLE_sync");
+
+      functions->fFenceSync = glFenceSyncEmulateEGL;
+      functions->fIsSync = glIsSyncEmulateEGL;
+      functions->fClientWaitSync = glClientWaitSyncEmulateEGL;
+      functions->fWaitSync = glWaitSyncEmulateEGL;
+      functions->fDeleteSync = glDeleteSyncEmulateEGL;
+    }
+  } else if (use_version_es2) {
+    // We have gl sync, but want to Skia use ES2 that doesn't have fences.
+    // To provide Skia with ways of sync to prevent it calling glFinish we set
+    // GL_APPLE_sync support.
+    extensions.add("GL_APPLE_sync");
+  }
+
+  // Skia can fall back to GL_NV_fence if GLsync objects are not available.
+  functions->fDeleteFences = gl->glDeleteFencesNVFn;
+  functions->fFinishFence = gl->glFinishFenceNVFn;
+  functions->fGenFences = gl->glGenFencesNVFn;
+  functions->fSetFence = gl->glSetFenceNVFn;
+  functions->fTestFence = gl->glTestFenceNVFn;
 
   functions->fGetInternalformativ = gl->glGetInternalformativFn;
 

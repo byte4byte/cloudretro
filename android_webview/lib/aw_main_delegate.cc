@@ -9,10 +9,12 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_media_url_interceptor.h"
 #include "android_webview/browser/gfx/browser_view_renderer.h"
-#include "android_webview/browser/gfx/deferred_gpu_command_service.h"
+#include "android_webview/browser/gfx/gpu_service_web_view.h"
+#include "android_webview/browser/gfx/viz_compositor_thread_runner_webview.h"
 #include "android_webview/browser/scoped_add_feature_flags.h"
 #include "android_webview/browser/tracing/aw_trace_event_args_whitelist.h"
 #include "android_webview/common/aw_descriptors.h"
+#include "android_webview/common/aw_features.h"
 #include "android_webview/common/aw_paths.h"
 #include "android_webview/common/aw_resource_bundle.h"
 #include "android_webview/common/aw_switches.h"
@@ -23,21 +25,22 @@
 #include "base/android/apk_assets.h"
 #include "base/android/build_info.h"
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
 #include "base/i18n/icu_util.h"
 #include "base/i18n/rtl.h"
-#include "base/lazy_instance.h"
-#include "base/logging.h"
 #include "base/posix/global_descriptors.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/crash/core/common/crash_key.h"
+#include "components/gwp_asan/buildflags/buildflags.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
 #include "components/services/heap_profiling/public/cpp/profiling_client.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
+#include "components/version_info/android/channel_getter.h"
 #include "components/viz/common/features.h"
 #include "content/public/browser/android/media_url_interceptor_register.h"
 #include "content/public/browser/browser_main_runner.h"
@@ -62,15 +65,18 @@
 #include "components/spellcheck/common/spellcheck_features.h"
 #endif  // ENABLE_SPELLCHECK
 
+#if BUILDFLAG(ENABLE_GWP_ASAN)
+#include "components/gwp_asan/client/gwp_asan.h"  // nogncheck
+#endif
+
 namespace android_webview {
 
-AwMainDelegate::AwMainDelegate() {}
+AwMainDelegate::AwMainDelegate() = default;
 
-AwMainDelegate::~AwMainDelegate() {}
+AwMainDelegate::~AwMainDelegate() = default;
 
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
-  content::SetContentClient(&content_client_);
-
+  TRACE_EVENT0("startup", "AwMainDelegate::BasicStartupComplete");
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
 
   // WebView uses the Android system's scrollbars and overscroll glow.
@@ -87,9 +93,6 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 
   // Web Notification API and the Push API are not supported (crbug.com/434712)
   cl->AppendSwitch(switches::kDisableNotifications);
-
-  // WebRTC hardware decoding is not supported, internal bug 15075307
-  cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
 
   // Check damage in OnBeginFrame to prevent unnecessary draws.
   cl->AppendSwitch(cc::switches::kCheckDamageEarly);
@@ -137,9 +140,6 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     ui::GestureConfiguration::GetInstance()
         ->set_fling_touchscreen_tap_suppression_enabled(false);
 
-    base::android::RegisterApkAssetWithFileDescriptorStore(
-        content::kV8NativesDataDescriptor,
-        gin::V8Initializer::GetNativesFilePath());
 #if defined(USE_V8_CONTEXT_SNAPSHOT)
     gin::V8Initializer::V8SnapshotFileType file_type =
         gin::V8Initializer::V8SnapshotFileType::kWithAdditionalContext;
@@ -172,42 +172,64 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
         autofill::features::kAutofillSkipComparingInferredLabels);
 
     if (cl->HasSwitch(switches::kWebViewLogJsConsoleMessages)) {
-      features.EnableIfNotSet(features::kLogJsConsoleMessages);
+      features.EnableIfNotSet(::features::kLogJsConsoleMessages);
     }
 
-    features.DisableIfNotSet(features::kWebPayments);
+    features.DisableIfNotSet(::features::kWebPayments);
 
     // WebView does not and should not support WebAuthN.
-    features.DisableIfNotSet(features::kWebAuth);
+    features.DisableIfNotSet(::features::kWebAuth);
 
-    // WebView isn't compatible with OOP-D.
-    features.DisableIfNotSet(features::kVizDisplayCompositor);
+    // Checking for command line here as FeatureList isn't initialized here yet,
+    // so we can't use FeatureList::IsEnabled. This is necessary if someone
+    // enabled feature through command line. Finch experiments will need to set
+    // all flags in trial config.
+    if (!features.IsEnabled(::features::kVizForWebView)) {
+      // Viz for WebView is required to support embedding CompositorFrameSinks
+      // which is needed for UseSurfaceLayerForVideo feature.
+      // https://crbug.com/853832
+      features.EnableIfNotSet(media::kDisableSurfaceLayerForVideo);
+    }
 
-    // WebView does not support AndroidOverlay yet for video overlays.
-    features.DisableIfNotSet(media::kUseAndroidOverlay);
-
-    // WebView doesn't support embedding CompositorFrameSinks which is needed
-    // for UseSurfaceLayerForVideo feature. https://crbug.com/853832
-    features.EnableIfNotSet(media::kDisableSurfaceLayerForVideo);
+    // WebView does not support overlay fullscreen yet for video overlays.
+    features.DisableIfNotSet(media::kOverlayFullscreenVideo);
 
     // WebView does not support EME persistent license yet, because it's not
     // clear on how user can remove persistent media licenses from UI.
     features.DisableIfNotSet(media::kMediaDrmPersistentLicense);
 
+    // WebView does not support Picture-in-Picture yet.
+    features.DisableIfNotSet(media::kPictureInPictureAPI);
+
     features.DisableIfNotSet(
         autofill::features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
 
-    features.DisableIfNotSet(features::kBackgroundFetch);
+    features.DisableIfNotSet(::features::kBackgroundFetch);
 
-    features.DisableIfNotSet(features::kAndroidSurfaceControl);
-
-    // Network service for WebView is still being evaluated. Once enabled
-    // by default the following line can be deleted.
-    features.DisableIfNotSet(network::features::kNetworkService);
+    features.EnableIfNotSet(::features::kDisableSurfaceControlForWebview);
 
     // TODO(https://crbug.com/963653): SmsReceiver is not yet supported on
     // WebView.
-    features.DisableIfNotSet(features::kSmsReceiver);
+    features.DisableIfNotSet(::features::kSmsReceiver);
+
+    // TODO(https://crbug.com/1012899): WebXR is not yet supported on WebView.
+    features.DisableIfNotSet(::features::kWebXr);
+
+    features.DisableIfNotSet(::features::kWebXrArModule);
+
+    features.DisableIfNotSet(::features::kWebXrHitTest);
+
+    features.DisableIfNotSet(::features::kDynamicColorGamut);
+
+    // De-jelly is never supported on WebView.
+    features.EnableIfNotSet(::features::kDisableDeJelly);
+
+    // COEP is not supported on WebView.
+    // See
+    // https://groups.google.com/a/chromium.org/forum/#!topic/blink-dev/XBKAGb2_7uAi.
+    features.DisableIfNotSet(network::features::kCrossOriginEmbedderPolicy);
+
+    features.DisableIfNotSet(::features::kInstalledApp);
   }
 
   android_webview::RegisterPathProvider();
@@ -236,6 +258,7 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 }
 
 void AwMainDelegate::PreSandboxStartup() {
+  TRACE_EVENT0("startup", "AwMainDelegate::PreSandboxStartup");
 #if defined(ARCH_CPU_ARM_FAMILY)
   // Create an instance of the CPU class to parse /proc/cpuinfo and cache
   // cpu_brand info.
@@ -309,6 +332,34 @@ bool AwMainDelegate::ShouldCreateFeatureList() {
 void AwMainDelegate::PostEarlyInitialization(bool is_running_tests) {
   InitIcuAndResourceBundleBrowserSide();
   aw_feature_list_creator_->CreateFeatureListAndFieldTrials();
+  PostFieldTrialInitialization();
+}
+
+void AwMainDelegate::PostFieldTrialInitialization() {
+  version_info::Channel channel = version_info::android::GetChannel();
+  bool is_canary_dev = (channel == version_info::Channel::CANARY ||
+                        channel == version_info::Channel::DEV);
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+  bool is_browser_process = process_type.empty();
+
+  ALLOW_UNUSED_LOCAL(is_canary_dev);
+  ALLOW_UNUSED_LOCAL(is_browser_process);
+
+#if BUILDFLAG(ENABLE_GWP_ASAN_MALLOC)
+  gwp_asan::EnableForMalloc(is_canary_dev || is_browser_process,
+                            process_type.c_str());
+#endif
+
+#if BUILDFLAG(ENABLE_GWP_ASAN_PARTITIONALLOC)
+  gwp_asan::EnableForPartitionAlloc(is_canary_dev, process_type.c_str());
+#endif
+}
+
+content::ContentClient* AwMainDelegate::CreateContentClient() {
+  return &content_client_;
 }
 
 content::ContentBrowserClient* AwMainDelegate::CreateContentBrowserClient() {
@@ -321,24 +372,32 @@ content::ContentBrowserClient* AwMainDelegate::CreateContentBrowserClient() {
 
 namespace {
 gpu::SyncPointManager* GetSyncPointManager() {
-  DCHECK(DeferredGpuCommandService::GetInstance());
-  return DeferredGpuCommandService::GetInstance()->sync_point_manager();
+  DCHECK(GpuServiceWebView::GetInstance());
+  return GpuServiceWebView::GetInstance()->sync_point_manager();
 }
+
 gpu::SharedImageManager* GetSharedImageManager() {
-  DCHECK(DeferredGpuCommandService::GetInstance());
+  DCHECK(GpuServiceWebView::GetInstance());
   const bool enable_shared_image =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWebViewEnableSharedImage);
+      base::FeatureList::IsEnabled(::features::kEnableSharedImageForWebview);
   return enable_shared_image
-             ? DeferredGpuCommandService::GetInstance()->shared_image_manager()
+             ? GpuServiceWebView::GetInstance()->shared_image_manager()
              : nullptr;
 }
+
+viz::VizCompositorThreadRunner* GetVizCompositorThreadRunner() {
+  return ::features::IsUsingVizForWebView()
+             ? VizCompositorThreadRunnerWebView::GetInstance()
+             : nullptr;
+}
+
 }  // namespace
 
 content::ContentGpuClient* AwMainDelegate::CreateContentGpuClient() {
   content_gpu_client_ = std::make_unique<AwContentGpuClient>(
       base::BindRepeating(&GetSyncPointManager),
-      base::BindRepeating(&GetSharedImageManager));
+      base::BindRepeating(&GetSharedImageManager),
+      base::BindRepeating(&GetVizCompositorThreadRunner));
   return content_gpu_client_.get();
 }
 

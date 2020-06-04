@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'chrome://resources/mojo/mojo/public/js/mojo_bindings_lite.js';
+import './chrome/browser/ui/webui/omnibox/omnibox.mojom-lite.js';
+import './strings.m.js';
+
+import {sendWithPromise} from 'chrome://resources/js/cr.m.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {$} from 'chrome://resources/js/util.m.js';
+
+import {DisplayInputs, OmniboxInput, QueryInputs} from './omnibox_input.js';
+import {OmniboxOutput} from './omnibox_output.js';
+
 /**
  * Javascript for omnibox.html, served from chrome://omnibox/
  * This is used to debug omnibox ranking.  The user enters some text
@@ -17,7 +28,6 @@
  * are available, the Javascript formats them and displays them.
  */
 
-(function() {
 /**
  * @typedef {{
  *   inputText: string,
@@ -25,7 +35,7 @@
  *   display: boolean,
  * }}
  */
-let Request;
+let OmniboxRequest;
 
 /**
   * @typedef {{
@@ -48,13 +58,13 @@ let OmniboxExport;
 let browserProxy;
 /** @type {!OmniboxInput} */
 let omniboxInput;
-/** @type {!omnibox_output.OmniboxOutput} */
+/** @type {!OmniboxOutput} */
 let omniboxOutput;
 /** @type {!ExportDelegate} */
 let exportDelegate;
 
 class BrowserProxy {
-  /** @param {!omnibox_output.OmniboxOutput} omniboxOutput */
+  /** @param {!OmniboxOutput} omniboxOutput */
   constructor(omniboxOutput) {
     /** @private {!mojom.OmniboxPageCallbackRouter} */
     this.callbackRouter_ = new mojom.OmniboxPageCallbackRouter;
@@ -66,22 +76,22 @@ class BrowserProxy {
     this.callbackRouter_.handleAnswerImageData.addListener(
         omniboxOutput.updateAnswerImage.bind(omniboxOutput));
 
-    /** @private {!mojom.OmniboxPageHandlerProxy} */
-    this.handler_ = mojom.OmniboxPageHandler.getProxy();
-    this.handler_.setClientPage(this.callbackRouter_.$.createProxy());
+    /** @private {!mojom.OmniboxPageHandlerRemote} */
+    this.handler_ = mojom.OmniboxPageHandler.getRemote();
+    this.handler_.setClientPage(
+        this.callbackRouter_.$.bindNewPipeAndPassRemote());
 
-    /** @private {Request} */
+    /** @private {?OmniboxRequest} */
     this.lastRequest;
   }
-
 
   /**
    * @param {!mojom.OmniboxResponse} response
    * @param {boolean} isPageController
    */
   handleNewAutocompleteResponse(response, isPageController) {
-    const isForLastPageRequest = isPageController && this.lastRequest &&
-        this.lastRequest.inputText === response.host;
+    const isForLastPageRequest =
+        this.isForLastPageRequest(response.inputText, isPageController);
 
     // When unfocusing the browser omnibox, the autocomplete controller
     // sends a response with no combined results. This response is ignored
@@ -94,6 +104,9 @@ class BrowserProxy {
       omniboxOutput.addAutocompleteResponse(response);
     }
 
+    // TODO(orinj|manukh): If |response.done| but not |isForLastPageRequest|
+    // then callback is being dropped. We should guarantee that callback is
+    // always called because some callers await promises.
     if (isForLastPageRequest && response.done) {
       this.lastRequest.callback(response);
       this.lastRequest = null;
@@ -107,8 +120,7 @@ class BrowserProxy {
   handleNewAutocompleteQuery(isPageController, inputText) {
     // If the request originated from the debug page and is not for display,
     // then we don't want to clear the omniboxOutput.
-    if (isPageController && this.lastRequest &&
-            this.lastRequest.inputText === inputText &&
+    if (this.isForLastPageRequest(inputText, isPageController) &&
             this.lastRequest.display ||
         omniboxInput.connectWindowOmnibox && !isPageController) {
       omniboxOutput.prepareNewQuery();
@@ -139,17 +151,31 @@ class BrowserProxy {
           pageClassification);
     });
   }
+
+  /**
+   * @param {string} inputText
+   * @param {boolean} isPageController
+   * @return {boolean}
+   */
+  isForLastPageRequest(inputText, isPageController) {
+    // Note: Using inputText is a sufficient fix for the way this is used today,
+    // but in principle it would be better to associate requests with responses
+    // using a unique session identifier, for example by rolling an integer each
+    // time a request is made. Doing so would require extra bookkeeping on the
+    // host side, so for now we keep it simple.
+    return isPageController && this.lastRequest !== null &&
+        this.lastRequest.inputText.trimStart() === inputText;
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   omniboxInput = /** @type {!OmniboxInput} */ ($('omnibox-input'));
   omniboxOutput =
-      /** @type {!omnibox_output.OmniboxOutput} */ ($('omnibox-output'));
+      /** @type {!OmniboxOutput} */ ($('omnibox-output'));
   browserProxy = new BrowserProxy(omniboxOutput);
   exportDelegate = new ExportDelegate(omniboxOutput, omniboxInput);
 
   omniboxInput.addEventListener('query-inputs-changed', e => {
-    omniboxOutput.updateQueryInputs(e.detail);
     browserProxy.makeRequest(
         e.detail.inputText, e.detail.resetAutocompleteController,
         e.detail.cursorPosition, e.detail.zeroSuggest,
@@ -174,17 +200,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   omniboxOutput.addEventListener(
       'responses-count-changed', e => omniboxInput.responsesCount = e.detail);
+
+  omniboxOutput.updateDisplayInputs(omniboxInput.displayInputs);
 });
 
 class ExportDelegate {
   /**
-   * @param {!omnibox_output.OmniboxOutput} omniboxOutput
+   * @param {!OmniboxOutput} omniboxOutput
    * @param {!OmniboxInput} omniboxInput
    */
   constructor(omniboxOutput, omniboxInput) {
     /** @private {!OmniboxInput} */
     this.omniboxInput_ = omniboxInput;
-    /** @private {!omnibox_output.OmniboxOutput} */
+    /** @private {!OmniboxOutput} */
     this.omniboxOutput_ = omniboxOutput;
   }
 
@@ -202,7 +230,6 @@ class ExportDelegate {
     }
     this.omniboxInput_.queryInputs = importData.queryInputs;
     this.omniboxInput_.displayInputs = importData.displayInputs;
-    this.omniboxOutput_.updateQueryInputs(importData.queryInputs);
     this.omniboxOutput_.updateDisplayInputs(importData.displayInputs);
     this.omniboxOutput_.setResponsesHistory(importData.responsesHistory);
     return true;
@@ -212,8 +239,9 @@ class ExportDelegate {
    * This is the worker function that transforms query inputs to accumulate
    * batch exports, then finally initiates a download for the complete set.
    * @param {!Array<!QueryInputs>} batchQueryInputs
+   * @param {string} batchName
    */
-  async processBatch(batchQueryInputs) {
+  async processBatch(batchQueryInputs, batchName) {
     const batchExports = [];
     for (const queryInputs of batchQueryInputs) {
       const omniboxResponse = await browserProxy
@@ -232,8 +260,32 @@ class ExportDelegate {
       };
       batchExports.push(exportData);
     }
-    const fileName = `omnibox_batch_${ExportDelegate.getTimeStamp()}.json`;
-    const batchData = { appVersion: navigator.appVersion, batchExports };
+    const variationInfo =
+        await sendWithPromise('requestVariationInfo', true);
+    const pathInfo = await sendWithPromise('requestPathInfo');
+    const loadTimeDataKeys = ['cl', 'command_line', 'executable_path',
+        'language', 'official', 'os_type', 'profile_path', 'useragent',
+        'version', 'version_bitsize', 'version_modifier'];
+    const versionDetails = Object.fromEntries(
+        loadTimeDataKeys.map(key => [key, loadTimeData.getValue(key)]));
+
+    const now = new Date();
+    const fileName = `omnibox_batch_${ExportDelegate.getTimeStamp(now)}.json`;
+    // If this data format changes, please roll schemaVersion.
+    const batchData = {
+      schemaKind: 'Omnibox Batch Export',
+      schemaVersion: 3,
+      dateCreated: now.toISOString(),
+      author: '',
+      description: '',
+      authorTool: 'chrome://omnibox',
+      batchName,
+      versionDetails,
+      variationInfo,
+      pathInfo,
+      appVersion: navigator.appVersion,
+      batchExports
+    };
     ExportDelegate.download_(batchData, fileName);
   }
 
@@ -243,11 +295,14 @@ class ExportDelegate {
    * @param {!BatchSpecifier} processBatchData
    */
   processBatchData(processBatchData) {
-    if (processBatchData.batchMode && processBatchData.batchQueryInputs) {
-      this.processBatch(processBatchData.batchQueryInputs);
+    if (processBatchData.batchMode && processBatchData.batchQueryInputs &&
+        processBatchData.batchName) {
+      this.processBatch(
+          processBatchData.batchQueryInputs, processBatchData.batchName);
     } else {
       const expected = {
         batchMode: "combined",
+        batchName: "name for this batch of queries",
         batchQueryInputs: [
           {
             inputText: "example input text",
@@ -268,8 +323,8 @@ class ExportDelegate {
   }
 
   exportClipboard() {
-    navigator.clipboard.writeText(JSON.stringify(this.exportData_)).catch(
-        error => console.error('unable to export to clipboard:', error));
+    navigator.clipboard.writeText(JSON.stringify(this.exportData_, null, 2))
+        .catch(error => console.error('unable to export to clipboard:', error));
   }
 
   exportFile() {
@@ -304,9 +359,15 @@ class ExportDelegate {
     a.click();
   }
 
-  /** @return {string} A sortable timestamp string for use in filenames. */
-  static getTimeStamp() {
-    const iso = new Date().toISOString();
+  /**
+    * @param {Date=} date
+    * @return {string} A sortable timestamp string for use in filenames.
+    */
+  static getTimeStamp(date) {
+    if (!date) {
+      date = new Date();
+    }
+    const iso = date.toISOString();
     return iso.replace(/:/g, '').split('.')[0];
   }
 }
@@ -365,4 +426,3 @@ function validateImportData_(importData) {
 
   return true;
 }
-})();

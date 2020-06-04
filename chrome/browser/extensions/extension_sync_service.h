@@ -16,8 +16,11 @@
 #include "base/version.h"
 #include "chrome/browser/extensions/sync_bundle.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/sync/model/model_error.h"
 #include "components/sync/model/syncable_service.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_observer.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 
 class Profile;
@@ -51,19 +54,25 @@ class ExtensionSyncService : public syncer::SyncableService,
   // it is updated to the given |version|. This happens when we get a Sync
   // update telling us to re-enable a newer version than what is currently
   // installed.
+  // TODO(crbug/1019813): The logic for this function was broken after forced
+  // custodian installations were removed. See
+  // ExtensionServiceTestSupervised.
+  // UpdateWithPermissionIncreaseApprovalNewVersion
+  // for an example of when this function should return true but returns false
+  // instead in the test code.
   bool HasPendingReenable(const std::string& id,
                           const base::Version& version) const;
 
   // syncer::SyncableService implementation.
   void WaitUntilReadyToSync(base::OnceClosure done) override;
-  syncer::SyncMergeResult MergeDataAndStartSyncing(
+  base::Optional<syncer::ModelError> MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
       std::unique_ptr<syncer::SyncErrorFactory> sync_error_factory) override;
   void StopSyncing(syncer::ModelType type) override;
-  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
-  syncer::SyncError ProcessSyncChanges(
+  syncer::SyncDataList GetAllSyncDataForTesting(syncer::ModelType type) const;
+  base::Optional<syncer::ModelError> ProcessSyncChanges(
       const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
@@ -77,7 +86,8 @@ class ExtensionSyncService : public syncer::SyncableService,
   void DeleteThemeDoNotUse(const extensions::Extension& theme);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(TwoClientAppsSyncTest, UnexpectedLaunchType);
+  FRIEND_TEST_ALL_PREFIXES(TwoClientExtensionAppsSyncTest,
+                           UnexpectedLaunchType);
   FRIEND_TEST_ALL_PREFIXES(ExtensionDisabledGlobalErrorTest,
                            HigherPermissionsFromSync);
 
@@ -131,9 +141,10 @@ class ExtensionSyncService : public syncer::SyncableService,
   Profile* profile_;
 
   ScopedObserver<extensions::ExtensionRegistry,
-                 extensions::ExtensionRegistryObserver> registry_observer_;
-  ScopedObserver<extensions::ExtensionPrefs,
-                 extensions::ExtensionPrefsObserver> prefs_observer_;
+                 extensions::ExtensionRegistryObserver>
+      registry_observer_{this};
+  ScopedObserver<extensions::ExtensionPrefs, extensions::ExtensionPrefsObserver>
+      prefs_observer_{this};
 
   // When this is set to true, any incoming updates (from the observers as well
   // as from explicit SyncExtensionChangeIfNeeded calls) are ignored. This is

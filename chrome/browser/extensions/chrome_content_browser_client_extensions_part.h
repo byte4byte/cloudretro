@@ -12,13 +12,12 @@
 #include "base/optional.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
 #include "content/public/browser/browser_or_resource_context.h"
-#include "content/public/common/resource_type.h"
-#include "services/network/public/mojom/network_context.mojom.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/network/public/mojom/network_context.mojom-forward.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "ui/base/page_transition_types.h"
 
 namespace content {
-struct Referrer;
 class RenderFrameHost;
 class RenderProcessHost;
 class ResourceContext;
@@ -51,7 +50,7 @@ class ChromeContentBrowserClientExtensionsPart
   static bool ShouldUseSpareRenderProcessHost(Profile* profile,
                                               const GURL& site_url);
   static bool DoesSiteRequireDedicatedProcess(
-      content::BrowserOrResourceContext browser_or_resource_context,
+      content::BrowserContext* browser_context,
       const GURL& effective_site_url);
   static bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                                  const GURL& effective_site_url);
@@ -66,25 +65,18 @@ class ChromeContentBrowserClientExtensionsPart
       content::RenderFrameHost* main_frame);
   static bool ShouldSwapBrowsingInstancesForNavigation(
       content::SiteInstance* site_instance,
-      const GURL& current_url,
-      const GURL& new_url);
-  static bool AllowServiceWorker(const GURL& scope,
-                                 const GURL& first_party_url,
-                                 const GURL& script_url,
-                                 content::ResourceContext* context);
-  static void OverrideNavigationParams(
-      content::SiteInstance* site_instance,
-      ui::PageTransition* transition,
-      bool* is_renderer_initiated,
-      content::Referrer* referrer,
-      base::Optional<url::Origin>* initiator_origin);
+      const GURL& current_effective_url,
+      const GURL& destination_effective_url);
+  // TODO(crbug.com/824858): Remove the OnIO method.
+  static bool AllowServiceWorkerOnIO(const GURL& scope,
+                                     const GURL& first_party_url,
+                                     const GURL& script_url,
+                                     content::ResourceContext* context);
+  static bool AllowServiceWorkerOnUI(const GURL& scope,
+                                     const GURL& first_party_url,
+                                     const GURL& script_url,
+                                     content::BrowserContext* context);
   static std::vector<url::Origin> GetOriginsRequiringDedicatedProcess();
-
-  // Similiar to ChromeContentBrowserClient::ShouldAllowOpenURL(), but the
-  // return value indicates whether to use |result| or not.
-  static bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
-                                 const GURL& to_url,
-                                 bool* result);
 
   // Helper function to call InfoMap::SetSigninProcess().
   static void SetSigninProcess(content::SiteInstance* site_instance);
@@ -94,12 +86,11 @@ class ChromeContentBrowserClientExtensionsPart
   static std::unique_ptr<content::VpnServiceProxy> GetVpnServiceProxy(
       content::BrowserContext* browser_context);
 
-  static network::mojom::URLLoaderFactoryPtrInfo
-  CreateURLLoaderFactoryForNetworkRequests(
-      content::RenderProcessHost* process,
-      network::mojom::NetworkContext* network_context,
-      network::mojom::TrustedURLLoaderHeaderClientPtrInfo* header_client,
-      const url::Origin& request_initiator);
+  static void OverrideURLLoaderFactoryParams(
+      content::BrowserContext* browser_context,
+      const url::Origin& origin,
+      bool is_for_isolated_world,
+      network::mojom::URLLoaderFactoryParams* factory_params);
 
   static bool IsBuiltinComponent(content::BrowserContext* browser_context,
                                  const url::Origin& origin);

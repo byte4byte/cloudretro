@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "chrome/browser/offline_pages/offline_page_url_loader.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/resource_type.h"
 
 namespace offline_pages {
 
@@ -23,7 +22,6 @@ OfflinePageURLLoaderRequestInterceptor::
 void OfflinePageURLLoaderRequestInterceptor::MaybeCreateLoader(
     const network::ResourceRequest& tentative_resource_request,
     content::BrowserContext* browser_context,
-    content::ResourceContext* resource_context,
     content::URLLoaderRequestInterceptor::LoaderCallback callback) {
   url_loader_ = OfflinePageURLLoader::Create(
       navigation_ui_data_, frame_tree_node_id_, tentative_resource_request,
@@ -36,7 +34,7 @@ void OfflinePageURLLoaderRequestInterceptor::OnRequestHandled(
     content::URLLoaderRequestInterceptor::RequestHandler handler) {
   // OfflinePageURLLoader decides to handle the request as offline page. Since
   // now, OfflinePageURLLoader will own itself and live as long as its URLLoader
-  // and URLLoaderClientPtr are alive.
+  // and URLLoaderClient are alive.
   url_loader_.release();
 
   std::move(callback).Run(std::move(handler));

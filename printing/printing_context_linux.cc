@@ -7,8 +7,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/values.h"
 #include "printing/metafile.h"
 #include "printing/print_dialog_gtk_interface.h"
@@ -122,14 +123,19 @@ PrintingContext::Result PrintingContextLinux::UpdatePrinterSettings(
     print_dialog_->AddRefToDialog();
   }
 
-  print_dialog_->UpdateSettings(&settings_);
+  // PrintDialogGtk::UpdateSettings() calls InitWithSettings() so settings_ will
+  // remain non-null after this line.
+  print_dialog_->UpdateSettings(std::move(settings_));
+  DCHECK(settings_);
+
   return OK;
 }
 
-void PrintingContextLinux::InitWithSettings(const PrintSettings& settings) {
+void PrintingContextLinux::InitWithSettings(
+    std::unique_ptr<PrintSettings> settings) {
   DCHECK(!in_print_job_);
 
-  settings_ = settings;
+  settings_ = std::move(settings);
 }
 
 PrintingContext::Result PrintingContextLinux::NewDocument(

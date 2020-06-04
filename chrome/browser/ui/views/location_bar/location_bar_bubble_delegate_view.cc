@@ -8,11 +8,19 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_account_icon_container_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
+#include "ui/accessibility/ax_role_properties.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/bubble/bubble_frame_view.h"
+#include "url/origin.h"
 
 LocationBarBubbleDelegateView::WebContentMouseHandler::WebContentMouseHandler(
     LocationBarBubbleDelegateView* bubble,
@@ -40,26 +48,38 @@ void LocationBarBubbleDelegateView::WebContentMouseHandler::OnEvent(
 
 LocationBarBubbleDelegateView::LocationBarBubbleDelegateView(
     views::View* anchor_view,
-    const gfx::Point& anchor_point,
     content::WebContents* web_contents)
-    : BubbleDialogDelegateView(anchor_view,
-                               anchor_view ? views::BubbleBorder::TOP_RIGHT
-                                           : views::BubbleBorder::NONE),
+    : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT),
       WebContentsObserver(web_contents) {
   // Add observer to close the bubble if the fullscreen state changes.
   if (web_contents) {
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-    fullscreen_observer_.Add(
-        browser->exclusive_access_manager()->fullscreen_controller());
+    // |browser| can be null in tests.
+    if (browser)
+      fullscreen_observer_.Add(
+          browser->exclusive_access_manager()->fullscreen_controller());
   }
-  if (!anchor_view)
-    SetAnchorRect(gfx::Rect(anchor_point, gfx::Size()));
 }
 
 LocationBarBubbleDelegateView::~LocationBarBubbleDelegateView() = default;
 
 void LocationBarBubbleDelegateView::ShowForReason(DisplayReason reason,
                                                   bool allow_refocus_alert) {
+  // These bubbles all anchor to the location bar or toolbar. We selectively
+  // anchor location bar bubbles to one end or the other of the toolbar based on
+  // whether their normal anchor point is visible. However, if part or all of
+  // the toolbar is off-screen, we should ajust the bubbles so that they are
+  // visible on the screen and not cut off.
+  //
+  // Note: These must be set after the bubble is created.
+  // Note also: |set_adjust_if_offscreen| is disabled by default on some
+  // platforms for arbitrary dialog bubbles to be consistent with platform
+  // standards, however in this case there is no good reason not to ensure the
+  // bubbles are displayed on-screen.
+  set_adjust_if_offscreen(true);
+  GetBubbleFrameView()->set_preferred_arrow_adjustment(
+      views::BubbleFrameView::PreferredArrowAdjustment::kOffset);
+
   if (reason == USER_GESTURE) {
     GetWidget()->Show();
   } else {
@@ -74,8 +94,7 @@ void LocationBarBubbleDelegateView::ShowForReason(DisplayReason reason,
           l10n_util::GetStringUTF8(IDS_SHOW_BUBBLE_INACTIVE_DESCRIPTION));
     }
   }
-  if (GetAccessibleWindowRole() == ax::mojom::Role::kAlert ||
-      GetAccessibleWindowRole() == ax::mojom::Role::kAlertDialog) {
+  if (ui::IsAlert(GetAccessibleWindowRole())) {
     GetWidget()->GetRootView()->NotifyAccessibilityEvent(
         ax::mojom::Event::kAlert, true);
   }
@@ -94,6 +113,21 @@ void LocationBarBubbleDelegateView::OnVisibilityChanged(
 
 void LocationBarBubbleDelegateView::WebContentsDestroyed() {
   CloseBubble();
+}
+
+void LocationBarBubbleDelegateView::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!close_on_main_frame_origin_navigation_ ||
+      !navigation_handle->IsInMainFrame() ||
+      !navigation_handle->HasCommitted()) {
+    return;
+  }
+
+  // Close dialog when navigating to a different domain.
+  if (!url::IsSameOriginWith(navigation_handle->GetPreviousURL(),
+                             navigation_handle->GetURL())) {
+    CloseBubble();
+  }
 }
 
 gfx::Rect LocationBarBubbleDelegateView::GetAnchorBoundsInScreen() const {

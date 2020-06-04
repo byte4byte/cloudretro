@@ -13,15 +13,15 @@
 #include "chrome/browser/local_discovery/service_discovery_client.h"
 #include "chrome/browser/local_discovery/service_discovery_client_mac.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/sockaddr_storage.h"
 #include "testing/gtest_mac.h"
 
 @interface TestNSNetService : NSNetService {
  @private
-  base::scoped_nsobject<NSData> data_;
-  base::scoped_nsobject<NSArray> addresses_;
+  base::scoped_nsobject<NSData> _data;
+  base::scoped_nsobject<NSArray> _addresses;
 }
 - (id)initWithData:(NSData*)data;
 - (void)setAddresses:(NSArray*)addresses;
@@ -30,22 +30,22 @@
 @implementation TestNSNetService
 
 - (id)initWithData:(NSData*)data {
-  if ((self = [super init])) {
-    data_.reset([data retain]);
+  if ((self = [super initWithDomain:@"" type:@"_tcp." name:@"Test.123"])) {
+    _data.reset([data retain]);
   }
   return self;
 }
 
 - (void)setAddresses:(NSArray*)addresses {
-  addresses_.reset([addresses copy]);
+  _addresses.reset([addresses copy]);
 }
 
 - (NSArray*)addresses {
-  return addresses_;
+  return _addresses;
 }
 
 - (NSData*)TXTRecordData {
-  return data_;
+  return _data;
 }
 
 @end
@@ -79,7 +79,7 @@ class ServiceDiscoveryClientMacTest : public CocoaTest {
   ServiceDiscoveryClient* client() { return client_.get(); }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   scoped_refptr<ServiceDiscoveryClientMac> client_;
 

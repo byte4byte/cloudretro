@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
-#include "components/google/core/browser/google_pref_names.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/rappor/rappor_pref_names.h"
 #include "components/reading_list/core/reading_list_pref_names.h"
@@ -61,6 +61,7 @@ const char* const kPersistentPrefNames[] = {
     ash::prefs::kAccessibilitySwitchAccessPreviousSetting,
     ash::prefs::kAccessibilitySwitchAccessAutoScanEnabled,
     ash::prefs::kAccessibilitySwitchAccessAutoScanSpeedMs,
+    ash::prefs::kAccessibilitySwitchAccessAutoScanKeyboardSpeedMs,
     ash::prefs::kAccessibilityDictationEnabled,
     ash::prefs::kDockedMagnifierEnabled,
     ash::prefs::kDockedMagnifierScale,
@@ -90,60 +91,6 @@ const char* const kPersistentPrefNames[] = {
     prefs::kPartnerBookmarkMappings,
 #endif  // defined(OS_ANDROID)
 
-    // Metrics preferences are out of profile scope and are merged between
-    // incognito and regular modes.
-    metrics::prefs::kInstallDate,
-    metrics::prefs::kMetricsClientID,
-    metrics::prefs::kMetricsDefaultOptIn,
-    metrics::prefs::kMetricsInitialLogs,
-    metrics::prefs::kMetricsLowEntropySource,
-    metrics::prefs::kMetricsMachineId,
-    metrics::prefs::kMetricsOngoingLogs,
-    metrics::prefs::kMetricsResetIds,
-
-    metrics::prefs::kMetricsReportingEnabled,
-    metrics::prefs::kMetricsReportingEnabledTimestamp,
-    metrics::prefs::kMetricsSessionID,
-    metrics::prefs::kMetricsLastSeenPrefix,
-    metrics::prefs::kStabilityBreakpadRegistrationFail,
-    metrics::prefs::kStabilityBreakpadRegistrationSuccess,
-    metrics::prefs::kStabilityBrowserLastLiveTimeStamp,
-    metrics::prefs::kStabilityChildProcessCrashCount,
-    metrics::prefs::kStabilityCrashCount,
-    metrics::prefs::kStabilityCrashCountDueToGmsCoreUpdate,
-    metrics::prefs::kStabilityCrashCountWithoutGmsCoreUpdateObsolete,
-    metrics::prefs::kStabilityDebuggerNotPresent,
-    metrics::prefs::kStabilityDebuggerPresent,
-    metrics::prefs::kStabilityDeferredCount,
-    metrics::prefs::kStabilityDiscardCount,
-    metrics::prefs::kStabilityExecutionPhase,
-    metrics::prefs::kStabilityExitedCleanly,
-    metrics::prefs::kStabilityExtensionRendererCrashCount,
-    metrics::prefs::kStabilityExtensionRendererFailedLaunchCount,
-    metrics::prefs::kStabilityExtensionRendererLaunchCount,
-    metrics::prefs::kStabilityGmsCoreVersion,
-    metrics::prefs::kStabilityGpuCrashCount,
-    metrics::prefs::kStabilityIncompleteSessionEndCount,
-    metrics::prefs::kStabilityLaunchCount,
-    metrics::prefs::kStabilityPageLoadCount,
-    metrics::prefs::kStabilityRendererCrashCount,
-    metrics::prefs::kStabilityRendererFailedLaunchCount,
-    metrics::prefs::kStabilityRendererHangCount,
-    metrics::prefs::kStabilityRendererLaunchCount,
-    metrics::prefs::kStabilitySavedSystemProfile,
-    metrics::prefs::kStabilitySavedSystemProfileHash,
-    metrics::prefs::kStabilitySessionEndCompleted,
-    metrics::prefs::kStabilityStatsBuildTime,
-    metrics::prefs::kStabilityStatsVersion,
-    metrics::prefs::kStabilitySystemCrashCount,
-    metrics::prefs::kStabilityVersionMismatchCount,
-    metrics::prefs::kUninstallLaunchCount,
-    metrics::prefs::kUninstallMetricsPageLoadCount,
-    metrics::prefs::kUninstallMetricsUptimeSec,
-    metrics::prefs::kUkmCellDataUse,
-    metrics::prefs::kUmaCellDataUse,
-    metrics::prefs::kUserCellDataUse,
-
 #if defined(OS_ANDROID)
     // Clipboard modification state is updated over all profiles.
     prefs::kClipboardLastModifiedTime,
@@ -169,10 +116,6 @@ const char* const kPersistentPrefNames[] = {
     prefs::kDevToolsPreferences,
     prefs::kDevToolsDiscoverTCPTargetsEnabled,
     prefs::kDevToolsTCPDiscoveryConfig,
-
-    // Google URL prefs don't store user data and just keep track of the URL.
-    prefs::kLastKnownGoogleURL,
-    prefs::kLastPromptedGoogleURL,
 
 #if defined(OS_WIN)
     // The total number of times that network profile warning is shown is
@@ -211,6 +154,11 @@ const char* const kPersistentPrefNames[] = {
     ukm::prefs::kUkmClientId,
     ukm::prefs::kUkmUnsentLogStore,
     ukm::prefs::kUkmSessionId,
+
+    // Cookie controls preference is, as in an initial release, surfaced only in
+    // the incognito mode and therefore should be persisted between incognito
+    // sessions.
+    prefs::kCookieControlsMode,
 };
 
 }  // namespace

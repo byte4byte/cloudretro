@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/stl_util.h"
-#include "content/shell/test_runner/web_test_delegate.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/web_view_test_proxy.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
@@ -21,7 +21,7 @@
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
 
-namespace test_runner {
+namespace content {
 
 class AccessibilityControllerBindings
     : public gin::Wrappable<AccessibilityControllerBindings> {
@@ -149,7 +149,11 @@ AccessibilityController::AccessibilityController(
     : log_accessibility_events_(false),
       web_view_test_proxy_(web_view_test_proxy) {}
 
-AccessibilityController::~AccessibilityController() {}
+AccessibilityController::~AccessibilityController() {
+  // v8::Persistent will leak on destroy, due to the default
+  // NonCopyablePersistentTraits (it claims this may change in the future).
+  notification_callback_.Reset();
+}
 
 void AccessibilityController::Reset() {
   elements_.Clear();
@@ -159,7 +163,7 @@ void AccessibilityController::Reset() {
 }
 
 void AccessibilityController::Install(blink::WebLocalFrame* frame) {
-  ax_context_.reset(new blink::WebAXContext(frame->GetDocument()));
+  ax_context_ = std::make_unique<blink::WebAXContext>(frame->GetDocument());
   frame->View()->GetSettings()->SetInlineTextBoxAccessibilityEnabled(true);
 
   AccessibilityControllerBindings::Install(weak_factory_.GetWeakPtr(), frame);
@@ -170,11 +174,14 @@ bool AccessibilityController::ShouldLogAccessibilityEvents() {
 }
 
 void AccessibilityController::NotificationReceived(
+    blink::WebLocalFrame* frame,
     const blink::WebAXObject& target,
     const std::string& notification_name) {
-  web_view_test_proxy_->delegate()->PostTask(
-      base::BindOnce(&AccessibilityController::PostNotification,
-                     weak_factory_.GetWeakPtr(), target, notification_name));
+  frame->GetTaskRunner(blink::TaskType::kInternalTest)
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(&AccessibilityController::PostNotification,
+                                weak_factory_.GetWeakPtr(), target,
+                                notification_name));
 }
 
 void AccessibilityController::PostNotification(
@@ -292,7 +299,7 @@ AccessibilityController::FindAccessibleElementByIdRecursive(
 }
 
 blink::WebView* AccessibilityController::web_view() {
-  return web_view_test_proxy_->webview();
+  return web_view_test_proxy_->GetWebView();
 }
 
 blink::WebAXObject
@@ -307,4 +314,4 @@ AccessibilityController::GetAccessibilityObjectForMainFrame() {
       web_view()->MainFrame()->ToWebLocalFrame()->GetDocument());
 }
 
-}  // namespace test_runner
+}  // namespace content

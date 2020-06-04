@@ -18,7 +18,7 @@ namespace syncer {
 
 DirectoryDataTypeController::DirectoryDataTypeController(
     ModelType type,
-    const base::Closure& dump_stack,
+    const base::RepeatingClosure& dump_stack,
     SyncService* sync_service,
     ModelSafeGroup model_safe_group)
     : DataTypeController(type),
@@ -40,9 +40,11 @@ void DirectoryDataTypeController::BeforeLoadModels(
   configurer->RegisterDirectoryDataType(type(), model_safe_group_);
 }
 
-void DirectoryDataTypeController::RegisterWithBackend(
-    base::OnceCallback<void(bool)> set_downloaded,
-    ModelTypeConfigurer* configurer) {}
+DataTypeController::RegisterWithBackendResult
+DirectoryDataTypeController::RegisterWithBackend(
+    ModelTypeConfigurer* configurer) {
+  return REGISTRATION_IGNORED;
+}
 
 void DirectoryDataTypeController::ActivateDataType(
     ModelTypeConfigurer* configurer) {

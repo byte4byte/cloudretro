@@ -102,7 +102,7 @@ function registerPeriodicSync(tag, minInterval) {
     .catch(sendErrorToTest);
 }
 
-function registerPeriodicSyncFromLocalFrame(frame_url, minInterval) {
+function registerPeriodicSyncFromLocalFrame(frame_url) {
   let frameWindow;
   return createFrame(frame_url)
     .then((frame) => {
@@ -114,12 +114,24 @@ function registerPeriodicSyncFromLocalFrame(frame_url, minInterval) {
     })
     .then((frame_registration) => {
       return frame_registration.periodicSync.register(
-          'foo', {minInterval: minInterval});
+          'foo', {});
     })
     .then(() => {
-      sendResultToTest('ok - iframe registered periodic sync');
+      sendResultToTest('ok - iframe registered periodicSync');
     })
     .catch(sendErrorToTest);
+}
+
+function registerPeriodicSyncFromCrossOriginFrame(cross_frame_url) {
+  return createFrame(cross_frame_url)
+    .then((frame) => receiveMessage())
+    .then((message) => {
+      if (message !== 'registration failed') {
+        sendResultToTest('failed - ' + message);
+        return;
+      }
+      sendResultToTest('ok - frame failed to register periodicSync');
+    });
 }
 
 function registerPeriodicSyncFromServiceWorker(tag, minInterval) {
@@ -267,9 +279,24 @@ function receiveMessage() {
   });
 }
 
+function getNumPeriodicSyncEvents() {
+  navigator.serviceWorker.ready
+    .then(swRegistration => {
+      swRegistration.active.postMessage({action: 'getPeriodicSyncEventCount'});
+      sendResultToTest('ok - getting count of periodicsync events');
+    })
+    .catch(sendErrorToTest);
+}
+
 navigator.serviceWorker.addEventListener('message', (event) => {
   const message = event.data;
-  if (message.type == 'sync' || message.type === 'register' ||
-        message.type === 'unregister')
+  const expected_messages = [
+    'sync',
+    'register',
+    'unregister',
+    'gotEventCount',
+  ];
+
+  if (expected_messages.includes(message.type))
     resultQueue.push(message.data);
 }, false);

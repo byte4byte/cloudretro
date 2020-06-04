@@ -6,15 +6,14 @@
 #define CHROME_BROWSER_AUTOFILL_MANUAL_FILLING_CONTROLLER_H_
 
 #include <memory>
+#include <string>
 
-#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/ui/accessory_sheet_data.h"
-#include "components/autofill/core/common/mojom/autofill_types.mojom.h"
+#include "components/autofill/core/common/mojom/autofill_types.mojom-forward.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "ui/gfx/image/image.h"
 
 // Controller interface for the view that includes the keyboard accessory and
 // the accessory sheet below it. Implementations of this interface create and
@@ -58,6 +57,11 @@ class ManualFillingController {
   // and attaches it to the WebContents; the same instance is returned by all
   // future invocations for the same WebContents.
   static base::WeakPtr<ManualFillingController> GetOrCreate(
+      content::WebContents* contents);
+
+  // Returns a weak pointer to the unique ManualFillingController instance
+  // associated with a WebContents.
+  static base::WeakPtr<ManualFillingController> Get(
       content::WebContents* contents);
 
   // --------------------------------------------
@@ -107,17 +111,10 @@ class ManualFillingController {
   virtual void OnOptionSelected(
       autofill::AccessoryAction selected_action) const = 0;
 
-  // Gets an icon for the currently focused frame and passes it to
-  // |icon_callback|. The callback is invoked with an image unless an icon for
-  // a new origin was called. In the latter case, the callback is dropped.
-  // The callback is called with an |IsEmpty()| image if there is no favicon.
-  //
-  // TODO(crbug.com/905669): This controller doesn't need to know about
-  // favicons. Generalize this to forward an icon requests from the UI to a
-  // type-specific accessory controller.
-  virtual void GetFavicon(
-      int desired_size_in_pixel,
-      base::OnceCallback<void(const gfx::Image&)> icon_callback) = 0;
+  // Called by the UI code because a user toggled the |toggled_action|,
+  // such as "Save passwords for this site".
+  virtual void OnToggleChanged(autofill::AccessoryAction toggled_action,
+                               bool enabled) const = 0;
 
   // -----------------
   // Member accessors:

@@ -25,6 +25,7 @@ class DeskSwitchAnimationWaiter : public DesksController::Observer {
   void OnDeskRemoved(const Desk* desk) override;
   void OnDeskActivationChanged(const Desk* activated,
                                const Desk* deactivated) override;
+  void OnDeskSwitchAnimationLaunching() override;
   void OnDeskSwitchAnimationFinished() override;
 
  private:
@@ -36,6 +37,10 @@ class DeskSwitchAnimationWaiter : public DesksController::Observer {
 // Activates the given |desk| and waits for the desk switch animation to
 // complete before returning.
 void ActivateDesk(const Desk* desk);
+
+// Removes the given |desk| and waits for the desk-removal animation to finish
+// if one would launch.
+void RemoveDesk(const Desk* desk);
 
 }  // namespace ash
 

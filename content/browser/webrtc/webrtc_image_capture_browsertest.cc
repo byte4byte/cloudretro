@@ -32,11 +32,28 @@ namespace content {
 #if defined(OS_ANDROID)
 // TODO(crbug.com/793859): Re-enable test on Android as soon as the cause for
 // the bug is understood and fixed.
+#define MAYBE_ManipulatePan DISABLED_ManipulatePan
 #define MAYBE_ManipulateZoom DISABLED_ManipulateZoom
+#else
+#define MAYBE_ManipulatePan ManipulatePan
+#define MAYBE_ManipulateZoom ManipulateZoom
+#endif
+
+// TODO(crbug.com/793859, crbug.com/986602): This test is broken on Android
+// (see above) and flaky on Linux.
+#if defined(OS_ANDROID) || defined(OS_LINUX)
 #define MAYBE_ManipulateExposureTime DISABLED_ManipulateExposureTime
 #else
-#define MAYBE_ManipulateZoom ManipulateZoom
 #define MAYBE_ManipulateExposureTime ManipulateExposureTime
+#endif
+
+#if defined(OS_LINUX)
+// See crbug/986470
+#define MAYBE_GetPhotoSettings DISABLED_GetPhotoSettings
+#define MAYBE_GetTrackSettings DISABLED_GetTrackSettings
+#else
+#define MAYBE_GetPhotoSettings GetPhotoSettings
+#define MAYBE_GetTrackSettings GetTrackSettings
 #endif
 
 namespace {
@@ -83,6 +100,9 @@ class WebRtcImageCaptureBrowserTestBase
     ASSERT_FALSE(base::CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kUseFakeDeviceForMediaStream));
 
+    // Enable Pan/Tilt for testing.
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "MediaCapturePanTilt");
   }
 
   void SetUp() override {
@@ -102,7 +122,7 @@ class WebRtcImageCaptureBrowserTestBase
 #endif
 
     GURL url(embedded_test_server()->GetURL(kImageCaptureHtmlFile));
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
 
     if (!IsWebcamAvailableOnSystem(shell()->web_contents())) {
       DVLOG(1) << "No video device; skipping test...";
@@ -169,15 +189,21 @@ class WebRtcImageCaptureSucceedsBrowserTest
   DISALLOW_COPY_AND_ASSIGN(WebRtcImageCaptureSucceedsBrowserTest);
 };
 
+// TODO(crbug.com/998305): Flaky on Linux.
+#if defined(OS_LINUX)
+#define MAYBE_GetPhotoCapabilities DISABLED_GetPhotoCapabilities
+#else
+#define MAYBE_GetPhotoCapabilities GetPhotoCapabilities
+#endif
 IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
-                       GetPhotoCapabilities) {
+                       MAYBE_GetPhotoCapabilities) {
   embedded_test_server()->StartAcceptingConnections();
   ASSERT_TRUE(
       RunImageCaptureTestCase("testCreateAndGetPhotoCapabilitiesSucceeds()"));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
-                       GetPhotoSettings) {
+                       MAYBE_GetPhotoSettings) {
   embedded_test_server()->StartAcceptingConnections();
   ASSERT_TRUE(
       RunImageCaptureTestCase("testCreateAndGetPhotoSettingsSucceeds()"));
@@ -193,16 +219,42 @@ IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest, GrabFrame) {
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGrabFrameSucceeds()"));
 }
 
+// Flaky. crbug.com/998116
+#if defined(OS_LINUX)
+#define MAYBE_GetTrackCapabilities DISABLED_GetTrackCapabilities
+#else
+#define MAYBE_GetTrackCapabilities GetTrackCapabilities
+#endif
 IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
-                       GetTrackCapabilities) {
+                       MAYBE_GetTrackCapabilities) {
   embedded_test_server()->StartAcceptingConnections();
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGetTrackCapabilities()"));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
-                       GetTrackSettings) {
+                       MAYBE_GetTrackSettings) {
   embedded_test_server()->StartAcceptingConnections();
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGetTrackSettings()"));
+}
+
+IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
+                       MAYBE_ManipulatePan) {
+  embedded_test_server()->StartAcceptingConnections();
+  ASSERT_TRUE(RunImageCaptureTestCase("testManipulatePan()"));
+}
+
+// TODO(crbug.com/998304): Flaky on Linux.
+// TODO(crbug.com/793859): Re-enable test on Android as soon as the cause for
+// the bug is understood and fixed.
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+#define MAYBE_ManipulateTilt DISABLED_ManipulateTilt
+#else
+#define MAYBE_ManipulateTilt ManipulateTilt
+#endif
+IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
+                       MAYBE_ManipulateTilt) {
+  embedded_test_server()->StartAcceptingConnections();
+  ASSERT_TRUE(RunImageCaptureTestCase("testManipulateTilt()"));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
@@ -224,8 +276,8 @@ IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSucceedsBrowserTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ,  // Use no prefix, so that these get picked up when using
-       // --gtest_filter=WebRtc*
+    All,  // Use no prefix, so that these get picked up when using
+          // --gtest_filter=WebRtc*
     WebRtcImageCaptureSucceedsBrowserTest,
     testing::Combine(
         testing::Values(TargetCamera::FAKE_DEVICE),
@@ -320,7 +372,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureGetPhotoStateFailsBrowserTest,
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGrabFrameSucceeds()"));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebRtcImageCaptureGetPhotoStateFailsBrowserTest,
                          testing::ValuesIn(kTargetVideoCaptureStacks));
 
@@ -347,7 +399,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureSetPhotoOptionsFailsBrowserTest,
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGrabFrameSucceeds()"));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebRtcImageCaptureSetPhotoOptionsFailsBrowserTest,
                          testing::ValuesIn(kTargetVideoCaptureStacks));
 
@@ -371,7 +423,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcImageCaptureTakePhotoFailsBrowserTest, GrabFrame) {
   ASSERT_TRUE(RunImageCaptureTestCase("testCreateAndGrabFrameSucceeds()"));
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebRtcImageCaptureTakePhotoFailsBrowserTest,
                          testing::ValuesIn(kTargetVideoCaptureStacks));
 

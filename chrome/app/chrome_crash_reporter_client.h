@@ -13,11 +13,18 @@
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "build/build_config.h"
-#include "components/crash/content/app/crash_reporter_client.h"
+#include "components/crash/core/app/crash_reporter_client.h"
 
 class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
  public:
   static void Create();
+
+#if defined(OS_CHROMEOS)
+  // If true, processes of this type should pass crash-loop-before down to the
+  // crash reporter and to their children (if the children's type is a process
+  // type that wants crash-loop-before).
+  static bool ShouldPassCrashLoopBefore(const std::string& process_type);
+#endif
 
   // crash_reporter::CrashReporterClient implementation.
 #if !defined(OS_MACOSX) && !defined(OS_ANDROID)
@@ -36,7 +43,7 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
 
   bool GetCrashDumpLocation(base::FilePath* crash_dir) override;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
   bool GetCrashMetricsLocation(base::FilePath* metrics_dir) override;
 #endif
 
@@ -52,7 +59,7 @@ class ChromeCrashReporterClient : public crash_reporter::CrashReporterClient {
   int GetAndroidMinidumpDescriptor() override;
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
   bool ShouldMonitorCrashHandlerExpensively() override;
 #endif
 

@@ -13,29 +13,30 @@
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/android/chrome_startup_flags.h"
 #include "chrome/browser/android/metrics/uma_utils.h"
+#include "chrome/common/profiler/main_thread_stack_sampling_profiler.h"
 #include "components/policy/core/browser/android/android_combined_policy_provider.h"
+#include "components/safe_browsing/buildflags.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "content/public/browser/browser_main_runner.h"
 
-#if defined(SAFE_BROWSING_DB_REMOTE)
+#if BUILDFLAG(SAFE_BROWSING_DB_REMOTE)
 #include "components/safe_browsing/android/safe_browsing_api_handler.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
 #endif
 
 using safe_browsing::SafeBrowsingApiHandler;
 
-
 // ChromeMainDelegateAndroid is created when the library is loaded. It is always
-// done in the process's main Java thread. But for non browser process, e.g.
+// done in the process' main Java thread. But for a non-browser process, e.g.
 // renderer process, it is not the native Chrome's main thread.
-ChromeMainDelegateAndroid::ChromeMainDelegateAndroid() {
-}
-
-ChromeMainDelegateAndroid::~ChromeMainDelegateAndroid() {
-}
+ChromeMainDelegateAndroid::ChromeMainDelegateAndroid() = default;
+ChromeMainDelegateAndroid::~ChromeMainDelegateAndroid() = default;
 
 bool ChromeMainDelegateAndroid::BasicStartupComplete(int* exit_code) {
-#if defined(SAFE_BROWSING_DB_REMOTE)
+  // Start the sampling profiler as early as possible.
+  sampling_profiler_ = std::make_unique<MainThreadStackSamplingProfiler>();
+
+#if BUILDFLAG(SAFE_BROWSING_DB_REMOTE)
   safe_browsing_api_handler_.reset(
       new safe_browsing::SafeBrowsingApiHandlerBridge());
   SafeBrowsingApiHandler::SetInstance(safe_browsing_api_handler_.get());
@@ -86,8 +87,8 @@ int ChromeMainDelegateAndroid::RunProcess(
   // Also only record the start time the first time round, since this is the
   // start time of the application, and will be same for all requests.
   if (!browser_runner_) {
-    startup_metric_utils::RecordMainEntryPointTime(
-        chrome::android::GetMainEntryPointTimeTicks());
+    startup_metric_utils::RecordApplicationStartTime(
+        chrome::android::GetApplicationStartTime());
     browser_runner_ = content::BrowserMainRunner::Create();
   }
 
@@ -102,7 +103,7 @@ int ChromeMainDelegateAndroid::RunProcess(
 
 void ChromeMainDelegateAndroid::ProcessExiting(
     const std::string& process_type) {
-#if defined(SAFE_BROWSING_DB_REMOTE)
+#if BUILDFLAG(SAFE_BROWSING_DB_REMOTE)
   SafeBrowsingApiHandler::SetInstance(nullptr);
 #endif
 }

@@ -11,9 +11,9 @@
 #include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/mock_timer.h"
 #include "base/values.h"
@@ -70,6 +70,9 @@ class TestClientStub : public protocol::ClientStub {
   // protocol::CursorShapeStub implementation.
   void SetCursorShape(const protocol::CursorShapeInfo& cursor_shape) override;
 
+  // protocol::KeyboardLayoutStub implementation.
+  void SetKeyboardLayout(const protocol::KeyboardLayout& layout) override;
+
   void WaitForDeliverHostMessage(base::TimeDelta max_timeout);
 
   void CheckHostDataMessage(int id, const std::string& data);
@@ -104,6 +107,9 @@ void TestClientStub::InjectClipboardEvent(
 
 void TestClientStub::SetCursorShape(
     const protocol::CursorShapeInfo& cursor_shape) {}
+
+void TestClientStub::SetKeyboardLayout(const protocol::KeyboardLayout& layout) {
+}
 
 void TestClientStub::WaitForDeliverHostMessage(base::TimeDelta max_timeout) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -153,7 +159,8 @@ class SecurityKeyExtensionSessionTest : public testing::Test {
   void CreateSecurityKeyConnection();
 
  protected:
-  base::MessageLoopForIO message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
 
   // Object under test.
   std::unique_ptr<SecurityKeyExtensionSession> security_key_extension_session_;

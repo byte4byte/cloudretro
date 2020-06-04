@@ -9,12 +9,13 @@ import android.content.ContentResolver;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.support.annotation.IntDef;
 import android.webkit.MimeTypeMap;
 
-import org.chromium.base.metrics.CachedMetrics;
+import androidx.annotation.IntDef;
+
+import org.chromium.base.IntentUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
-import org.chromium.chrome.browser.util.IntentUtils;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -37,10 +38,6 @@ public class MediaLauncherActivity extends Activity {
         int NUM_ENTRIES = 4;
     }
 
-    private static CachedMetrics.EnumeratedHistogramSample sMediaTypeHistogram =
-            new CachedMetrics.EnumeratedHistogramSample(
-                    "MediaLauncherActivity.MediaType", MediaType.NUM_ENTRIES);
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -50,7 +47,8 @@ public class MediaLauncherActivity extends Activity {
         String mimeType = getMIMEType(contentUri);
         int mediaType = MediaViewerUtils.getMediaTypeFromMIMEType(mimeType);
 
-        sMediaTypeHistogram.record(mediaType);
+        RecordHistogram.recordEnumeratedHistogram(
+                "MediaLauncherActivity.MediaType", mediaType, MediaType.NUM_ENTRIES);
 
         if (mediaType == MediaType.UNKNOWN) {
             // With our intent-filter, we should only receive implicit intents with media MIME

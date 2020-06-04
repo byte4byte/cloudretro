@@ -62,8 +62,8 @@ class LocalHotkeyInputMonitorMac : public LocalHotkeyInputMonitor {
 
 @interface LocalHotkeyInputMonitorManager : NSObject {
  @private
-  GTMCarbonHotKey* hotKey_;
-  remoting::LocalHotkeyInputMonitorMac::EventHandler* monitor_;
+  GTMCarbonHotKey* _hotKey;
+  remoting::LocalHotkeyInputMonitorMac::EventHandler* _monitor;
 }
 
 - (id)initWithMonitor:
@@ -83,17 +83,17 @@ class LocalHotkeyInputMonitorMac : public LocalHotkeyInputMonitor {
 - (id)initWithMonitor:
     (remoting::LocalHotkeyInputMonitorMac::EventHandler*)monitor {
   if ((self = [super init])) {
-    monitor_ = monitor;
+    _monitor = monitor;
 
     GTMCarbonEventDispatcherHandler* handler =
         [GTMCarbonEventDispatcherHandler sharedEventDispatcherHandler];
-    hotKey_ = [handler registerHotKey:kEscKeyCode
+    _hotKey = [handler registerHotKey:kEscKeyCode
                             modifiers:(NSAlternateKeyMask | NSControlKeyMask)
                                target:self
                                action:@selector(hotKeyHit:)
                              userInfo:nil
                           whenPressed:YES];
-    if (!hotKey_) {
+    if (!_hotKey) {
       LOG(ERROR) << "registerHotKey failed.";
       [self release];
       return nil;
@@ -103,15 +103,15 @@ class LocalHotkeyInputMonitorMac : public LocalHotkeyInputMonitor {
 }
 
 - (void)hotKeyHit:(GTMCarbonHotKey*)hotKey {
-  monitor_->OnDisconnectShortcut();
+  _monitor->OnDisconnectShortcut();
 }
 
 - (void)invalidate {
-  if (hotKey_) {
+  if (_hotKey) {
     GTMCarbonEventDispatcherHandler* handler =
         [GTMCarbonEventDispatcherHandler sharedEventDispatcherHandler];
-    [handler unregisterHotKey:hotKey_];
-    hotKey_ = nullptr;
+    [handler unregisterHotKey:_hotKey];
+    _hotKey = nullptr;
   }
 }
 

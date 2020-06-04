@@ -48,6 +48,9 @@ class SystemLogUploader : public UploadJob::Delegate {
   static const int64_t kDefaultUploadDelayMs;
   static const int64_t kErrorUploadDelayMs;
 
+  static const int64_t kLogThrottleCount;
+  static const base::TimeDelta kLogThrottleWindowDuration;
+
   // Http header constants to upload non-zipped logs.
   static const char* const kNameFieldTemplate;
   static const char* const kFileTypeHeaderName;
@@ -57,7 +60,11 @@ class SystemLogUploader : public UploadJob::Delegate {
   // Http header constants to upload zipped logs.
   static const char* const kFileTypeZippedLogFile;
   static const char* const kZippedLogsName;
+  static const char* const kZippedLogsFileName;
   static const char* const kContentTypeOctetStream;
+
+  // UMA histogram name.
+  static const char* const kSystemLogUploadResultHistogram;
 
   // A delegate interface used by SystemLogUploader to read the system logs
   // from the disk and create an upload job.
@@ -88,6 +95,19 @@ class SystemLogUploader : public UploadJob::Delegate {
                                ZippedLogUploadCallback upload_callback) = 0;
   };
 
+  // Enum used for UMA. Do NOT reorder or remove entry.
+  // Don't forget to update enums.xml when adding new entries.
+  enum SystemLogUploadResult {
+    NON_ZIPPED_LOGS_UPLOAD_SUCCESS = 0,
+    ZIPPED_LOGS_UPLOAD_SUCCESS = 1,
+    NON_ZIPPED_LOGS_UPLOAD_FAILURE = 2,
+    ZIPPED_LOGS_UPLOAD_FAILURE = 3,
+
+    // Magic constant used by the histogram macros.
+    // Always update it to the max value.
+    kMaxValue = ZIPPED_LOGS_UPLOAD_FAILURE
+  };
+
   // Constructor. Callers can inject their own Delegate. A nullptr can be passed
   // for |syslog_delegate| to use the default implementation.
   SystemLogUploader(
@@ -101,6 +121,12 @@ class SystemLogUploader : public UploadJob::Delegate {
   base::Time last_upload_attempt() const { return last_upload_attempt_; }
 
   void ScheduleNextSystemLogUploadImmediately();
+
+  // Removes the log upload times before the particular time window ( which were
+  // uploaded before kLogThrottleWindowDuration time from now), add the latest
+  // log upload time if any and return the oldest log upload time in the
+  // particular time window.
+  base::Time UpdateLocalStateForLogs();
 
   // UploadJob::Delegate:
   // Callbacks handle success and failure results of upload, destroy the
@@ -166,7 +192,7 @@ class SystemLogUploader : public UploadJob::Delegate {
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<SystemLogUploader> weak_factory_;
+  base::WeakPtrFactory<SystemLogUploader> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SystemLogUploader);
 };

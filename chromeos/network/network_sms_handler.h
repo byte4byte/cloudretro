@@ -18,7 +18,6 @@
 
 namespace base {
 class DictionaryValue;
-class ListValue;
 class Value;
 }
 
@@ -84,7 +83,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkSmsHandler
                                  const base::DictionaryValue& properties);
 
   // Requests properties for each entry in |devices|.
-  void UpdateDevices(const base::ListValue* devices);
+  void UpdateDevices(const base::Value& devices);
 
   // Callback to handle the device properties for |device_path|.
   // A NetworkSmsDeviceHandler will be instantiated for each cellular device.
@@ -95,7 +94,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkSmsHandler
   base::ObserverList<Observer, true>::Unchecked observers_;
   std::vector<std::unique_ptr<NetworkSmsDeviceHandler>> device_handlers_;
   std::vector<std::unique_ptr<base::DictionaryValue>> received_messages_;
-  base::WeakPtrFactory<NetworkSmsHandler> weak_ptr_factory_;
+  base::WeakPtrFactory<NetworkSmsHandler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NetworkSmsHandler);
 };

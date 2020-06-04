@@ -11,8 +11,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "chromeos/components/multidevice/remote_device_test_util.h"
 #include "chromeos/components/tether/device_id_tether_network_guid_map.h"
@@ -91,7 +91,7 @@ class FakeHostScannerOperationFactory : public HostScannerOperation::Factory {
   FakeHostScannerOperationFactory(
       const multidevice::RemoteDeviceRefList& test_devices)
       : expected_devices_(test_devices) {}
-  virtual ~FakeHostScannerOperationFactory() = default;
+  ~FakeHostScannerOperationFactory() override = default;
 
   std::vector<FakeHostScannerOperation*>& created_operations() {
     return created_operations_;
@@ -99,7 +99,7 @@ class FakeHostScannerOperationFactory : public HostScannerOperation::Factory {
 
  protected:
   // HostScannerOperation::Factory:
-  std::unique_ptr<HostScannerOperation> BuildInstance(
+  std::unique_ptr<HostScannerOperation> CreateInstance(
       const multidevice::RemoteDeviceRefList& devices_to_connect,
       device_sync::DeviceSyncClient* device_sync_client,
       secure_channel::SecureChannelClient* secure_channel_client,
@@ -221,7 +221,7 @@ class HostScannerImplTest : public testing::Test {
 
     fake_host_scanner_operation_factory_ =
         base::WrapUnique(new FakeHostScannerOperationFactory(test_devices_));
-    HostScannerOperation::Factory::SetInstanceForTesting(
+    HostScannerOperation::Factory::SetFactoryForTesting(
         fake_host_scanner_operation_factory_.get());
 
     fake_connection_preserver_ = std::make_unique<FakeConnectionPreserver>();
@@ -245,7 +245,7 @@ class HostScannerImplTest : public testing::Test {
 
   void TearDown() override {
     host_scanner_->RemoveObserver(test_observer_.get());
-    HostScannerOperation::Factory::SetInstanceForTesting(nullptr);
+    HostScannerOperation::Factory::SetFactoryForTesting(nullptr);
   }
 
   // Causes |fake_operation| to receive the scan result in
@@ -392,7 +392,7 @@ class HostScannerImplTest : public testing::Test {
     return helper_.network_state_handler();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   NetworkStateTestHelper helper_{true /* use_default_devices_and_services */};
   const multidevice::RemoteDeviceRefList test_devices_;

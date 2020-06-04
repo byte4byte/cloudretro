@@ -10,9 +10,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "components/arc/common/enterprise_reporting.mojom.h"
+#include "components/arc/mojom/enterprise_reporting.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "mojo/public/cpp/bindings/binding.h"
 
 namespace content {
 class BrowserContext;
@@ -44,7 +43,7 @@ class ArcEnterpriseReportingService
 
   ArcBridgeService* const arc_bridge_service_;  // Owned by ArcServiceManager.
 
-  base::WeakPtrFactory<ArcEnterpriseReportingService> weak_ptr_factory_;
+  base::WeakPtrFactory<ArcEnterpriseReportingService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ArcEnterpriseReportingService);
 };

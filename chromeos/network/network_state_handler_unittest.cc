@@ -18,7 +18,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/shill/shill_clients.h"
@@ -251,8 +251,8 @@ class TestTetherSortDelegate : public NetworkStateHandler::TetherSortDelegate {
 class NetworkStateHandlerTest : public testing::Test {
  public:
   NetworkStateHandlerTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI),
         device_test_(nullptr),
         manager_test_(nullptr),
         profile_test_(nullptr),
@@ -323,9 +323,9 @@ class NetworkStateHandlerTest : public testing::Test {
   void SetServiceProperty(const std::string& service_path,
                           const std::string& key,
                           const base::Value& value) {
-    ShillServiceClient::Get()->SetProperty(dbus::ObjectPath(service_path), key,
-                                           value, base::DoNothing(),
-                                           base::Bind(&ErrorCallbackFunction));
+    ShillServiceClient::Get()->SetProperty(
+        dbus::ObjectPath(service_path), key, value, base::DoNothing(),
+        base::BindOnce(&ErrorCallbackFunction));
   }
 
   void SetProperties(NetworkState* network, const base::Value& properties) {
@@ -347,7 +347,7 @@ class NetworkStateHandlerTest : public testing::Test {
         false /* visible_only */, limit, list);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<NetworkStateHandler> network_state_handler_;
   std::unique_ptr<TestObserver> test_observer_;
   ShillDeviceClient::TestInterface* device_test_;
@@ -728,20 +728,20 @@ TEST_F(NetworkStateHandlerTest, GetVisibleNetworks) {
 }
 
 TEST_F(NetworkStateHandlerTest, TechnologyChanged) {
-  // Disable a technology. Will immediately set the state to AVAILABLE and
+  // Disable a technology. Will immediately set the state to DISABLING and
   // notify observers.
   network_state_handler_->SetTechnologyEnabled(
       NetworkTypePattern::WiFi(), false, network_handler::ErrorCallback());
   EXPECT_EQ(1u, test_observer_->device_list_changed_count());
   EXPECT_EQ(
-      NetworkStateHandler::TECHNOLOGY_AVAILABLE,
+      NetworkStateHandler::TECHNOLOGY_DISABLING,
       network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
 
-  // Run the message loop. No additional notification should be received when
-  // Shill updates the enabled technologies since the state remains AVAILABLE.
+  // Run the message loop. When Shill updates the enabled technologies since
+  // the state should transition to AVAILABLE and observers should be notified.
   test_observer_->reset_change_counts();
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(0u, test_observer_->device_list_changed_count());
+  EXPECT_EQ(1u, test_observer_->device_list_changed_count());
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_AVAILABLE,
       network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
@@ -766,37 +766,40 @@ TEST_F(NetworkStateHandlerTest, TechnologyChanged) {
 }
 
 TEST_F(NetworkStateHandlerTest, TechnologyState) {
-  manager_test_->RemoveTechnology(shill::kTypeWimax);
+  manager_test_->RemoveTechnology(shill::kTypeWifi);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_UNAVAILABLE,
-      network_state_handler_->GetTechnologyState(NetworkTypePattern::Wimax()));
+      network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
 
-  manager_test_->AddTechnology(shill::kTypeWimax, false);
+  manager_test_->AddTechnology(shill::kTypeWifi, false);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_AVAILABLE,
-      network_state_handler_->GetTechnologyState(NetworkTypePattern::Wimax()));
+      network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
 
-  manager_test_->SetTechnologyInitializing(shill::kTypeWimax, true);
+  manager_test_->SetTechnologyInitializing(shill::kTypeWifi, true);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_UNINITIALIZED,
-      network_state_handler_->GetTechnologyState(NetworkTypePattern::Wimax()));
+      network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
 
-  manager_test_->SetTechnologyInitializing(shill::kTypeWimax, false);
+  manager_test_->SetTechnologyInitializing(shill::kTypeWifi, false);
   network_state_handler_->SetTechnologyEnabled(
-      NetworkTypePattern::Wimax(), true, network_handler::ErrorCallback());
+      NetworkTypePattern::WiFi(), true, network_handler::ErrorCallback());
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_ENABLED,
-      network_state_handler_->GetTechnologyState(NetworkTypePattern::Wimax()));
+      network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
 
-  manager_test_->RemoveTechnology(shill::kTypeWimax);
+  manager_test_->RemoveTechnology(shill::kTypeWifi);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(
       NetworkStateHandler::TECHNOLOGY_UNAVAILABLE,
-      network_state_handler_->GetTechnologyState(NetworkTypePattern::Wimax()));
+      network_state_handler_->GetTechnologyState(NetworkTypePattern::WiFi()));
+
+  // Restore wifi technology
+  manager_test_->AddTechnology(shill::kTypeWifi, true);
 }
 
 TEST_F(NetworkStateHandlerTest, TetherTechnologyState) {
@@ -1633,6 +1636,25 @@ TEST_F(NetworkStateHandlerTest, NetworkActiveNetworksStateChanged) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1u, test_observer_->active_network_change_count());
 
+  // Activate cellular network so that it's part of active network list.
+  service_test_->SetServiceProperty(
+      kShillManagerClientStubCellular, shill::kActivationStateProperty,
+      base::Value(shill::kActivationStateActivating));
+  base::RunLoop().RunUntilIdle();
+  expected_active_network_paths = {kShillManagerClientStubCellular};
+  EXPECT_EQ(expected_active_network_paths,
+            test_observer_->active_network_paths());
+  // Test that network technology change signals the observer.
+  test_observer_->reset_change_counts();
+  service_test_->SetServiceProperty(kShillManagerClientStubCellular,
+                                    shill::kNetworkTechnologyProperty,
+                                    base::Value(shill::kNetworkTechnologyUmts));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1u, test_observer_->active_network_change_count());
+  // Remove cellular service.
+  service_test_->RemoveService(kShillManagerClientStubCellular);
+  base::RunLoop().RunUntilIdle();
+
   // Add two Tether networks.
   test_observer_->reset_change_counts();
   network_state_handler_->SetTetherTechnologyState(
@@ -1801,11 +1823,24 @@ TEST_F(NetworkStateHandlerTest, RequestScan) {
   EXPECT_EQ(0u, test_observer_->scan_requested_count());
   network_state_handler_->RequestScan(NetworkTypePattern::WiFi());
   network_state_handler_->RequestScan(NetworkTypePattern::Tether());
-  EXPECT_EQ(2u, test_observer_->scan_requested_count());
+  network_state_handler_->RequestScan(NetworkTypePattern::Mobile());
+  EXPECT_EQ(3u, test_observer_->scan_requested_count());
   EXPECT_TRUE(
       NetworkTypePattern::WiFi().Equals(test_observer_->scan_requests()[0]));
   EXPECT_TRUE(
       NetworkTypePattern::Tether().Equals(test_observer_->scan_requests()[1]));
+  EXPECT_TRUE(
+      NetworkTypePattern::Mobile().Equals(test_observer_->scan_requests()[2]));
+
+  // Disable cellular, scan request for cellular only should not send a
+  // notification
+  test_observer_->reset_change_counts();
+  network_state_handler_->SetTechnologyEnabled(
+      NetworkTypePattern::Cellular(), false, network_handler::ErrorCallback());
+  network_state_handler_->RequestScan(NetworkTypePattern::Cellular());
+  EXPECT_EQ(0u, test_observer_->scan_requested_count());
+  network_state_handler_->RequestScan(NetworkTypePattern::Mobile());
+  EXPECT_EQ(1u, test_observer_->scan_requested_count());
 
   // Disable wifi, scan request for wifi only should not send a notification.
   test_observer_->reset_change_counts();

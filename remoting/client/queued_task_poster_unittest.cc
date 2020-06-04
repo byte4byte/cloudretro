@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,9 +25,9 @@ class QueuedTaskPosterTest : public testing::Test {
   void TearDown() override;
 
  protected:
-  base::Closure SetSequenceStartedClosure(bool started);
-  base::Closure AssertExecutionOrderClosure(int order);
-  base::Closure AssertSequenceNotStartedClosure();
+  base::OnceClosure SetSequenceStartedClosure(bool started);
+  base::OnceClosure AssertExecutionOrderClosure(int order);
+  base::OnceClosure AssertSequenceNotStartedClosure();
 
   void RunUntilPosterDone();
 
@@ -42,7 +42,7 @@ class QueuedTaskPosterTest : public testing::Test {
   void AssertSequenceNotStarted();
 
   base::Thread target_thread_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   bool sequence_started_ = false;
 };
 
@@ -60,26 +60,27 @@ void QueuedTaskPosterTest::TearDown() {
   target_thread_.Stop();
 }
 
-base::Closure QueuedTaskPosterTest::SetSequenceStartedClosure(bool started) {
-  return base::Bind(&QueuedTaskPosterTest::SetSequenceStarted,
-                    base::Unretained(this), started);
+base::OnceClosure QueuedTaskPosterTest::SetSequenceStartedClosure(
+    bool started) {
+  return base::BindOnce(&QueuedTaskPosterTest::SetSequenceStarted,
+                        base::Unretained(this), started);
 }
 
-base::Closure QueuedTaskPosterTest::AssertExecutionOrderClosure(int order) {
-  return base::Bind(&QueuedTaskPosterTest::AssertExecutionOrder,
-                    base::Unretained(this), order);
+base::OnceClosure QueuedTaskPosterTest::AssertExecutionOrderClosure(int order) {
+  return base::BindOnce(&QueuedTaskPosterTest::AssertExecutionOrder,
+                        base::Unretained(this), order);
 }
 
-base::Closure QueuedTaskPosterTest::AssertSequenceNotStartedClosure() {
-  return base::Bind(&QueuedTaskPosterTest::AssertSequenceNotStarted,
-                    base::Unretained(this));
+base::OnceClosure QueuedTaskPosterTest::AssertSequenceNotStartedClosure() {
+  return base::BindOnce(&QueuedTaskPosterTest::AssertSequenceNotStarted,
+                        base::Unretained(this));
 }
 
 void QueuedTaskPosterTest::RunUntilPosterDone() {
   base::RunLoop run_loop;
-  poster_->AddTask(
-      base::Bind(base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
-                 main_task_runner_, FROM_HERE, run_loop.QuitClosure()));
+  poster_->AddTask(base::BindOnce(
+      base::IgnoreResult(&base::SingleThreadTaskRunner::PostTask),
+      main_task_runner_, FROM_HERE, run_loop.QuitClosure()));
   run_loop.Run();
 }
 

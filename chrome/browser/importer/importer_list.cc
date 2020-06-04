@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 #include "chrome/browser/shell_integration.h"
@@ -47,6 +48,8 @@ void DetectIEProfiles(std::vector<importer::SourceProfile>* profiles) {
 }
 
 void DetectEdgeProfiles(std::vector<importer::SourceProfile>* profiles) {
+  if (!importer::EdgeImporterCanImport())
+    return;
   importer::SourceProfile edge;
   edge.importer_name = l10n_util::GetStringUTF16(IDS_IMPORT_FROM_EDGE);
   edge.importer_type = importer::TYPE_EDGE;
@@ -57,10 +60,13 @@ void DetectEdgeProfiles(std::vector<importer::SourceProfile>* profiles) {
 
 void DetectBuiltinWindowsProfiles(
     std::vector<importer::SourceProfile>* profiles) {
-  // Make the assumption on Windows 10 that Edge exists and is probably default.
-  if (importer::EdgeImporterCanImport())
+  if (shell_integration::IsIEDefaultBrowser()) {
+    DetectIEProfiles(profiles);
     DetectEdgeProfiles(profiles);
-  DetectIEProfiles(profiles);
+  } else {
+    DetectEdgeProfiles(profiles);
+    DetectIEProfiles(profiles);
+  }
 }
 
 #endif  // defined(OS_WIN)
@@ -89,42 +95,51 @@ void DetectFirefoxProfiles(const std::string locale,
                            std::vector<importer::SourceProfile>* profiles) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
-
-  base::FilePath profile_path = GetFirefoxProfilePath();
-  if (profile_path.empty())
-    return;
-
-  // Detects which version of Firefox is installed.
-  importer::ImporterType firefox_type;
-  base::FilePath app_path;
-  int version = 0;
 #if defined(OS_WIN)
-  version = GetCurrentFirefoxMajorVersionFromRegistry();
-#endif
-  if (version < 2)
-    GetFirefoxVersionAndPathFromProfile(profile_path, &version, &app_path);
-
-  if (version >= 3) {
-    firefox_type = importer::TYPE_FIREFOX;
-  } else {
-    // Ignores old versions of firefox.
+  const std::string firefox_install_id =
+      shell_integration::GetFirefoxProgIdSuffix();
+#else
+  const std::string firefox_install_id;
+#endif  // defined(OS_WIN)
+  std::vector<FirefoxDetail> details = GetFirefoxDetails(firefox_install_id);
+  if (details.empty())
     return;
+
+  for (auto detail = details.begin(); detail != details.end(); ++detail) {
+    base::FilePath app_path;
+    if (detail->path.empty())
+      continue;
+
+    int version = 0;
+#if defined(OS_WIN)
+    version = GetCurrentFirefoxMajorVersionFromRegistry();
+#endif
+
+    if (version < 2) {
+      GetFirefoxVersionAndPathFromProfile(detail->path, &version, &app_path);
+      // Note that |version| is re-assigned above.
+      if (version < 2) {
+        // Ignores old versions of firefox.
+        continue;
+      }
+    }
+
+    importer::SourceProfile firefox;
+    firefox.importer_name = GetFirefoxImporterName(app_path);
+    firefox.profile = detail->name;
+    firefox.importer_type = importer::TYPE_FIREFOX;
+    firefox.source_path = detail->path;
+#if defined(OS_WIN)
+    firefox.app_path = GetFirefoxInstallPathFromRegistry();
+#endif
+    if (firefox.app_path.empty())
+      firefox.app_path = app_path;
+    firefox.services_supported =
+        importer::HISTORY | importer::FAVORITES | importer::PASSWORDS |
+        importer::SEARCH_ENGINES | importer::AUTOFILL_FORM_DATA;
+    firefox.locale = locale;
+    profiles->push_back(firefox);
   }
-
-  importer::SourceProfile firefox;
-  firefox.importer_name = GetFirefoxImporterName(app_path);
-  firefox.importer_type = firefox_type;
-  firefox.source_path = profile_path;
-#if defined(OS_WIN)
-  firefox.app_path = GetFirefoxInstallPathFromRegistry();
-#endif
-  if (firefox.app_path.empty())
-    firefox.app_path = app_path;
-  firefox.services_supported = importer::HISTORY | importer::FAVORITES |
-                               importer::PASSWORDS | importer::SEARCH_ENGINES |
-                               importer::AUTOFILL_FORM_DATA;
-  firefox.locale = locale;
-  profiles->push_back(firefox);
 }
 
 std::vector<importer::SourceProfile> DetectSourceProfilesWorker(
@@ -181,14 +196,14 @@ void ImporterList::DetectSourceProfiles(
     bool include_interactive_profiles,
     const base::Closure& profiles_loaded_callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::Bind(&DetectSourceProfilesWorker, locale,
-                 include_interactive_profiles),
-      base::Bind(&ImporterList::SourceProfilesLoaded,
-                 weak_ptr_factory_.GetWeakPtr(), profiles_loaded_callback));
+      base::BindOnce(&DetectSourceProfilesWorker, locale,
+                     include_interactive_profiles),
+      base::BindOnce(&ImporterList::SourceProfilesLoaded,
+                     weak_ptr_factory_.GetWeakPtr(), profiles_loaded_callback));
 }
 
 const importer::SourceProfile& ImporterList::GetSourceProfileAt(

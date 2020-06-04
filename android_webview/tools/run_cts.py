@@ -7,6 +7,7 @@
 """Runs the CTS test APKs stored in CIPD."""
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -18,13 +19,15 @@ import zipfile
 
 sys.path.append(os.path.join(
     os.path.dirname(__file__), os.pardir, os.pardir, 'build', 'android'))
-import devil_chromium  # pylint: disable=import-error, unused-import
-from devil.android.ndk import abis  # pylint: disable=import-error
-from devil.android.sdk import version_codes  # pylint: disable=import-error
-from devil.android.tools import script_common  # pylint: disable=import-error
-from devil.utils import cmd_helper  # pylint: disable=import-error
-from devil.utils import logging_common  # pylint: disable=import-error
-from pylib.utils import test_filter # pylint: disable=import-error
+import devil_chromium  # pylint: disable=unused-import
+from devil.android import device_utils
+from devil.android.ndk import abis
+from devil.android.sdk import version_codes
+from devil.android.tools import script_common
+from devil.utils import cmd_helper
+from devil.utils import logging_common
+from pylib.local.emulator import avd
+from pylib.utils import test_filter
 
 # cts test archives for all platforms are stored in this bucket
 # contents need to be updated if there is an important fix to any of
@@ -33,9 +36,6 @@ from pylib.utils import test_filter # pylint: disable=import-error
 _TEST_RUNNER_PATH = os.path.join(
     os.path.dirname(__file__), os.pardir, os.pardir,
     'build', 'android', 'test_runner.py')
-
-_EXPECTED_FAILURES_FILE = os.path.join(
-    os.path.dirname(__file__), 'cts_config', 'expected_failure_on_bot.json')
 
 _WEBVIEW_CTS_GCS_PATH_FILE = os.path.join(
     os.path.dirname(__file__), 'cts_config', 'webview_cts_gcs_path.json')
@@ -52,7 +52,9 @@ SDK_PLATFORM_DICT = {
     version_codes.NOUGAT: 'N',
     version_codes.NOUGAT_MR1: 'N',
     version_codes.OREO: 'O',
-    version_codes.OREO_MR1: 'O'
+    version_codes.OREO_MR1: 'O',
+    version_codes.PIE: 'P',
+    version_codes.Q: 'Q',
 }
 
 # The test apks are apparently compatible across all architectures, the
@@ -96,20 +98,6 @@ def GetCTSModuleNames(arch, cts_release):
   return [os.path.basename(r['apk']) for r in test_runs]
 
 
-def GetExpectedFailures():
-  """Gets list of tests expected to fail in <class>#<method> format.
-
-  See _EXPECTED_FAILURES_FILE
-  """
-  with open(_EXPECTED_FAILURES_FILE) as f:
-    expected_failures_info = json.load(f)
-  expected_failures = []
-  for class_name, methods in expected_failures_info.iteritems():
-    expected_failures.extend(['%s#%s' % (class_name, m['name'])
-                              for m in methods])
-  return expected_failures
-
-
 def GetTestRunFilterArg(args, test_run):
   """ Merges json file filters with cmdline filters using
       test_filter.InitializeFilterFromArgs
@@ -126,15 +114,11 @@ def GetTestRunFilterArg(args, test_run):
         filter_string,
         positive_patterns=[i["match"] for i in includes])
 
-  excludes = test_run.get("excludes", [])
-  filter_string = test_filter.AppendPatternsToFilter(
-      filter_string,
-      negative_patterns=[e["match"] for e in excludes])
-
   if args.skip_expected_failures:
+    excludes = test_run.get("excludes", [])
     filter_string = test_filter.AppendPatternsToFilter(
         filter_string,
-        negative_patterns=GetExpectedFailures())
+        negative_patterns=[e["match"] for e in excludes])
 
   if filter_string:
     return [TEST_FILTER_OPT + '=' + filter_string]
@@ -335,6 +319,30 @@ def ForwardArgsToTestRunner(known_args):
   return forwarded_args
 
 
+@contextlib.contextmanager
+def GetDevice(args):
+  try:
+    emulator_instance = None
+    if args.avd_config:
+      avd_config = avd.AvdConfig(args.avd_config)
+      avd_config.Install()
+      emulator_instance = avd_config.CreateInstance()
+      # Start the emulator w/ -writable-system s.t. we can remount the system
+      # partition r/w and install our own webview provider.
+      emulator_instance.Start(writable_system=True)
+      device_utils.DeviceUtils(emulator_instance.serial).WaitUntilFullyBooted()
+
+    devices = script_common.GetDevices(args.devices, args.blacklist_file)
+    device = devices[0]
+    if len(devices) > 1:
+      logging.warning('Detection of arch and cts-release will use 1st of %d '
+                      'devices: %s', len(devices), device.serial)
+    yield device
+  finally:
+    if emulator_instance:
+      emulator_instance.Stop()
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument(
@@ -379,6 +387,13 @@ def main():
       dest='module_apk',
       help='CTS module apk name in ' + _WEBVIEW_CTS_GCS_PATH_FILE +
       ' file, without the path prefix.')
+  parser.add_argument(
+      '--avd-config',
+      type=os.path.realpath,
+      help='Path to the avd config textpb. '
+           '(See //tools/android/avd/proto for message definition'
+           ' and existing textpb files.)')
+
 
   test_filter.AddFilterOptions(parser)
   script_common.AddDeviceArguments(parser)
@@ -390,35 +405,31 @@ def main():
 
   test_runner_args.extend(ForwardArgsToTestRunner(args))
 
-  devices = script_common.GetDevices(args.devices, args.blacklist_file)
-  device = devices[0]
-  if len(devices) > 1:
-    logging.warning('Detection of arch and cts-release will use 1st of %d '
-                    'devices: %s', len(devices), device.serial)
-  arch = args.arch or DetermineArch(device)
-  cts_release = args.cts_release or DetermineCtsRelease(device)
+  with GetDevice(args) as device:
+    arch = args.arch or DetermineArch(device)
+    cts_release = args.cts_release or DetermineCtsRelease(device)
 
-  if (args.test_filter_file or args.test_filter
-      or args.isolated_script_test_filter):
-    # TODO(aluo): auto-determine the module based on the test filter and the
-    # available tests in each module
-    if not args.module_apk:
-      args.module_apk = 'CtsWebkitTestCases.apk'
+    if (args.test_filter_file or args.test_filter
+        or args.isolated_script_test_filter):
+      # TODO(aluo): auto-determine the module based on the test filter and the
+      # available tests in each module
+      if not args.module_apk:
+        args.module_apk = 'CtsWebkitTestCases.apk'
 
-  platform_modules = GetCTSModuleNames(arch, cts_release)
-  if args.module_apk and args.module_apk not in platform_modules:
-    raise Exception('--module-apk for arch==' + arch + 'and cts_release=='
-                    + cts_release + ' must be one of: '
-                    + ', '.join(platform_modules))
+    platform_modules = GetCTSModuleNames(arch, cts_release)
+    if args.module_apk and args.module_apk not in platform_modules:
+      raise Exception('--module-apk for arch==' + arch + 'and cts_release=='
+                      + cts_release + ' must be one of: '
+                      + ', '.join(platform_modules))
 
-  # Need to uninstall all previous cts webkit packages so that the
-  # MockContentProvider names won't conflict with a previously installed
-  # one under a different package name.  This is due to CtsWebkitTestCases's
-  # package name change from M to N versions of the tests while keeping the
-  # MockContentProvider's authority string the same.
-  UninstallAnyCtsWebkitPackages(device)
+    # Need to uninstall all previous cts webkit packages so that the
+    # MockContentProvider names won't conflict with a previously installed
+    # one under a different package name.  This is due to CtsWebkitTestCases's
+    # package name change from M to N versions of the tests while keeping the
+    # MockContentProvider's authority string the same.
+    UninstallAnyCtsWebkitPackages(device)
 
-  return RunAllCTSTests(args, arch, cts_release, test_runner_args)
+    return RunAllCTSTests(args, arch, cts_release, test_runner_args)
 
 
 if __name__ == '__main__':

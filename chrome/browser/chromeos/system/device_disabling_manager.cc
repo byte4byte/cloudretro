@@ -37,12 +37,11 @@ DeviceDisablingManager::DeviceDisablingManager(
     CrosSettings* cros_settings,
     user_manager::UserManager* user_manager)
     : delegate_(delegate),
-      browser_policy_connector_(g_browser_process->platform_part()->
-          browser_policy_connector_chromeos()),
+      browser_policy_connector_(g_browser_process->platform_part()
+                                    ->browser_policy_connector_chromeos()),
       cros_settings_(cros_settings),
       user_manager_(user_manager),
-      device_disabled_(false),
-      weak_factory_(this) {
+      device_disabled_(false) {
   CHECK(delegate_);
 }
 
@@ -103,10 +102,9 @@ void DeviceDisablingManager::CheckWhetherDeviceDisabledDuringOOBE(
     // If the device mode is not known yet, request to be called back once it
     // becomes known.
     browser_policy_connector_->GetInstallAttributes()->ReadImmutableAttributes(
-        base::Bind(
+        base::BindOnce(
             &DeviceDisablingManager::CheckWhetherDeviceDisabledDuringOOBE,
-            weak_factory_.GetWeakPtr(),
-            callback));
+            weak_factory_.GetWeakPtr(), callback));
     return;
   }
 
@@ -172,7 +170,7 @@ bool DeviceDisablingManager::HonorDeviceDisablingDuringNormalOperation() {
 }
 
 void DeviceDisablingManager::UpdateFromCrosSettings() {
-  if (cros_settings_->PrepareTrustedValues(base::Bind(
+  if (cros_settings_->PrepareTrustedValues(base::BindOnce(
           &DeviceDisablingManager::UpdateFromCrosSettings,
           weak_factory_.GetWeakPtr())) != CrosSettingsProvider::TRUSTED) {
     // If the cros settings are not trusted yet, request to be called back

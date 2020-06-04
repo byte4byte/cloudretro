@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/logging.h"
 #include "components/ui_devtools/Protocol.h"
 #include "components/ui_devtools/ui_element_delegate.h"
 
@@ -25,6 +26,9 @@ UIElement::ClassProperties::ClassProperties(
     const UIElement::ClassProperties& other) = default;
 
 UIElement::ClassProperties::~ClassProperties() = default;
+
+UIElement::Source::Source(std::string path, int line)
+    : path_(path), line_(line) {}
 
 // static
 void UIElement::ResetNodeId() {
@@ -132,6 +136,17 @@ UIElement::UIElement(const UIElementType type,
 bool UIElement::SetPropertiesFromString(const std::string& text) {
   NOTREACHED();
   return false;
+}
+
+void UIElement::AddSource(std::string path, int line) {
+  sources_.emplace_back(path, line);
+}
+
+std::vector<UIElement::Source> UIElement::GetSources() {
+  if (sources_.empty())
+    InitSources();
+
+  return sources_;
 }
 
 }  // namespace ui_devtools

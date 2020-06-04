@@ -65,11 +65,16 @@
     function consoleMessageAdded() {
       SDK.consoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, wrappedConsoleMessageAdded);
       Console.ConsoleView.instance()._invalidateViewport();
-      var xpathResult = document.evaluate("//span[@class='devtools-link' and starts-with(., 'extensions-panel.html')]", Console.ConsoleView.instance()._viewport.element, null, XPathResult.ANY_UNORDERED_NODE_TYPE, null);
 
-      var click = document.createEvent("MouseEvent");
-      click.initMouseEvent("click", true, true);
-      xpathResult.singleNodeValue.dispatchEvent(click);
+      // Trigger link creation so we can properly await pending live location updates. Needed so we can
+      // click the link in the first place.
+      for (const messageView of Console.ConsoleView.instance()._visibleViewMessages) messageView.element();
+      TestRunner.waitForPendingLiveLocationUpdates().then(() => {
+        var xpathResult = document.evaluate("//span[@class='devtools-link' and starts-with(., 'extensions-panel.html')]", Console.ConsoleView.instance()._viewport.element, null, XPathResult.ANY_UNORDERED_NODE_TYPE, null);
+        var click = document.createEvent("MouseEvent");
+        click.initMouseEvent("click", true, true);
+        xpathResult.singleNodeValue.dispatchEvent(click);
+      });
     }
   }
 
@@ -198,7 +203,7 @@
         extension_showPanel("extension");
 
         function performSearch(query) {
-          UI.inspectorView.panel(extensionsOrigin + "TestPanelforsearch").then(panel => {
+          UI.inspectorView.panel(Extensions.extensionsOrigin + "TestPanelforsearch").then(panel => {
             panel.searchableView().showSearchField();
             panel.searchableView()._searchInputElement.value = query;
             panel.searchableView()._performSearch(true, true);

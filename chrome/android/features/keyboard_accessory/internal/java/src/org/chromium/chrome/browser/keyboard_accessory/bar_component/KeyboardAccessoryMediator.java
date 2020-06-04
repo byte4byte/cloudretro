@@ -6,17 +6,19 @@ package org.chromium.chrome.browser.keyboard_accessory.bar_component;
 
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BAR_ITEMS;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BOTTOM_OFFSET_PX;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.DISABLE_ANIMATIONS_FOR_TESTING;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.KEYBOARD_TOGGLE_VISIBLE;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHEET_TITLE;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SHOW_KEYBOARD_CALLBACK;
+import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.SKIP_CLOSING_ANIMATION;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.TAB_LAYOUT_ITEM;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.VISIBLE;
 
-import android.support.annotation.Nullable;
-import android.support.annotation.Px;
+import androidx.annotation.Nullable;
+import androidx.annotation.Px;
+import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryAction;
 import org.chromium.chrome.browser.keyboard_accessory.AccessorySheetTrigger;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingMetricsRecorder;
@@ -117,18 +119,44 @@ class KeyboardAccessoryMediator
         return retainedItems;
     }
 
+    /**
+     * Next to the regular suggestion that we always want to show, there is a number of special
+     * suggestions which we want to suppress (e.g. replaced entry points, old warnings, separators).
+     * @param suggestion This {@link AutofillSuggestion} will be checked for usefulness.
+     * @return True iff the suggestion should be displayed.
+     */
+    private boolean shouldShowSuggestion(AutofillSuggestion suggestion) {
+        switch (suggestion.getSuggestionId()) {
+            case PopupItemId.ITEM_ID_INSECURE_CONTEXT_PAYMENT_DISABLED_MESSAGE:
+                // The insecure context warning has a replacement in the fallback sheet.
+            case PopupItemId.ITEM_ID_SEPARATOR:
+            case PopupItemId.ITEM_ID_CLEAR_FORM:
+            case PopupItemId.ITEM_ID_CREDIT_CARD_SIGNIN_PROMO:
+            case PopupItemId.ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY:
+            case PopupItemId.ITEM_ID_GENERATE_PASSWORD_ENTRY:
+            case PopupItemId.ITEM_ID_SHOW_ACCOUNT_CARDS:
+            case PopupItemId.ITEM_ID_AUTOFILL_OPTIONS:
+                return false;
+            case PopupItemId.ITEM_ID_AUTOCOMPLETE_ENTRY:
+            case PopupItemId.ITEM_ID_PASSWORD_ENTRY:
+            case PopupItemId.ITEM_ID_DATALIST_ENTRY:
+            case PopupItemId.ITEM_ID_SCAN_CREDIT_CARD:
+            case PopupItemId.ITEM_ID_TITLE:
+            case PopupItemId.ITEM_ID_USERNAME_ENTRY:
+            case PopupItemId.ITEM_ID_CREATE_HINT:
+            case PopupItemId.ITEM_ID_ACCOUNT_STORAGE_PASSWORD_ENTRY:
+            case PopupItemId.ITEM_ID_ACCOUNT_STORAGE_USERNAME_ENTRY:
+                return true;
+        }
+        return true; // If it's not a special id, show the regular suggestion!
+    }
+
     private List<AutofillBarItem> toBarItems(
             AutofillSuggestion[] suggestions, AutofillDelegate delegate) {
         List<AutofillBarItem> barItems = new ArrayList<>(suggestions.length);
         for (int position = 0; position < suggestions.length; ++position) {
             AutofillSuggestion suggestion = suggestions[position];
-            // The accessory doesn't need any special options like clearing or managing for now.
-            if (suggestion.getSuggestionId() == PopupItemId.ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY
-                    || suggestion.getSuggestionId() == PopupItemId.ITEM_ID_CLEAR_FORM
-                    || suggestion.getSuggestionId() == PopupItemId.ITEM_ID_SEPARATOR
-                    || suggestion.getSuggestionId() == PopupItemId.ITEM_ID_AUTOFILL_OPTIONS) {
-                continue;
-            }
+            if (!shouldShowSuggestion(suggestion)) continue;
             barItems.add(new AutofillBarItem(suggestion, createAutofillAction(delegate, position)));
         }
         return barItems;
@@ -190,7 +218,12 @@ class KeyboardAccessoryMediator
     }
 
     void show() {
+        mModel.set(SKIP_CLOSING_ANIMATION, false);
         mModel.set(VISIBLE, true);
+    }
+
+    void skipClosingAnimationOnce() {
+        mModel.set(SKIP_CLOSING_ANIMATION, true);
     }
 
     void dismiss() {
@@ -217,7 +250,9 @@ class KeyboardAccessoryMediator
             return;
         }
         if (propertyKey == BOTTOM_OFFSET_PX || propertyKey == SHOW_KEYBOARD_CALLBACK
-                || propertyKey == TAB_LAYOUT_ITEM || propertyKey == SHEET_TITLE) {
+                || propertyKey == TAB_LAYOUT_ITEM || propertyKey == SHEET_TITLE
+                || propertyKey == SKIP_CLOSING_ANIMATION
+                || propertyKey == DISABLE_ANIMATIONS_FOR_TESTING) {
             return;
         }
         assert false : "Every property update needs to be handled explicitly!";

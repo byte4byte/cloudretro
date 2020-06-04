@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 #include <memory>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -22,16 +24,17 @@
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/public/browser/permission_type.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_permission_manager.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/mock_platform_notification_service.h"
 #include "content/test/test_content_browser_client.h"
 #include "mojo/core/embedder/embedder.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/notifications/notification_constants.h"
@@ -65,13 +68,14 @@ SkBitmap CreateBitmap(int width, int height, SkColor color) {
 class MockNonPersistentNotificationListener
     : public blink::mojom::NonPersistentNotificationListener {
  public:
-  MockNonPersistentNotificationListener() : binding_(this) {}
+  MockNonPersistentNotificationListener() = default;
   ~MockNonPersistentNotificationListener() override = default;
 
-  blink::mojom::NonPersistentNotificationListenerPtr GetPtr() {
-    blink::mojom::NonPersistentNotificationListenerPtr ptr;
-    binding_.Bind(mojo::MakeRequest(&ptr));
-    return ptr;
+  mojo::PendingRemote<blink::mojom::NonPersistentNotificationListener>
+  GetRemote() {
+    mojo::PendingRemote<blink::mojom::NonPersistentNotificationListener> remote;
+    receiver_.Bind(remote.InitWithNewPipeAndPassReceiver());
+    return remote;
   }
 
   // NonPersistentNotificationListener interface.
@@ -84,7 +88,8 @@ class MockNonPersistentNotificationListener
   }
 
  private:
-  mojo::Binding<blink::mojom::NonPersistentNotificationListener> binding_;
+  mojo::Receiver<blink::mojom::NonPersistentNotificationListener> receiver_{
+      this};
 };
 
 // This is for overriding the Platform Notification Service with a mock one.
@@ -110,7 +115,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
   // Using REAL_IO_THREAD would give better coverage for thread safety, but
   // at time of writing EmbeddedWorkerTestHelper didn't seem to support that.
   BlinkNotificationServiceImplTest()
-      : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(BrowserTaskEnvironment::IO_MAINLOOP),
         embedded_worker_helper_(
             std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath())),
         mock_platform_service_(&browser_context_),
@@ -136,7 +141,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
         notification_context_.get(), &browser_context_,
         embedded_worker_helper_->context_wrapper(),
         url::Origin::Create(GURL(kTestOrigin)),
-        mojo::MakeRequest(&notification_service_ptr_));
+        notification_service_remote_.BindNewPipeAndPassReceiver());
 
     // Provide a mock permission manager to the |browser_context_|.
     browser_context_.SetPermissionControllerDelegate(
@@ -169,6 +174,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
       base::RunLoop run_loop;
       embedded_worker_helper_->context()->RegisterServiceWorker(
           GURL(kTestServiceWorkerUrl), options,
+          blink::mojom::FetchClientSettingsObject::New(),
           base::BindOnce(
               &BlinkNotificationServiceImplTest::DidRegisterServiceWorker,
               base::Unretained(this), &service_worker_registration_id,
@@ -183,7 +189,7 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
 
     {
       base::RunLoop run_loop;
-      embedded_worker_helper_->context()->storage()->FindRegistrationForId(
+      embedded_worker_helper_->context()->registry()->FindRegistrationForId(
           service_worker_registration_id, GURL(kTestOrigin),
           base::BindOnce(&BlinkNotificationServiceImplTest::
                              DidFindServiceWorkerRegistration,
@@ -293,10 +299,11 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
       const std::string& token,
       const blink::PlatformNotificationData& platform_notification_data,
       const blink::NotificationResources& notification_resources,
-      blink::mojom::NonPersistentNotificationListenerPtr event_listener_ptr) {
-    notification_service_ptr_->DisplayNonPersistentNotification(
+      mojo::PendingRemote<blink::mojom::NonPersistentNotificationListener>
+          event_listener_remote) {
+    notification_service_remote_->DisplayNonPersistentNotification(
         token, platform_notification_data, notification_resources,
-        std::move(event_listener_ptr));
+        std::move(event_listener_remote));
     // TODO(https://crbug.com/787459): Pass a callback to
     // DisplayNonPersistentNotification instead of waiting for all tasks to run
     // here; a callback parameter will be needed anyway to enable
@@ -309,9 +316,8 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
       const blink::PlatformNotificationData& platform_notification_data,
       const blink::NotificationResources& notification_resources) {
     base::RunLoop run_loop;
-    notification_service_ptr_.set_connection_error_handler(
-        run_loop.QuitClosure());
-    notification_service_ptr_->DisplayPersistentNotification(
+    notification_service_remote_.set_disconnect_handler(run_loop.QuitClosure());
+    notification_service_remote_->DisplayPersistentNotification(
         service_worker_registration_id, platform_notification_data,
         notification_resources,
         base::BindOnce(
@@ -416,13 +422,13 @@ class BlinkNotificationServiceImplTest : public ::testing::Test {
  protected:
   void OnMojoError(const std::string& error) { bad_messages_.push_back(error); }
 
-  TestBrowserThreadBundle thread_bundle_;  // Must be first member.
+  BrowserTaskEnvironment task_environment_;  // Must be first member.
 
   std::unique_ptr<EmbeddedWorkerTestHelper> embedded_worker_helper_;
 
   std::unique_ptr<BlinkNotificationServiceImpl> notification_service_;
 
-  blink::mojom::NotificationServicePtr notification_service_ptr_;
+  mojo::Remote<blink::mojom::NotificationService> notification_service_remote_;
 
   TestBrowserContext browser_context_;
 
@@ -502,7 +508,7 @@ TEST_F(BlinkNotificationServiceImplTest,
   DisplayNonPersistentNotification(
       "token", blink::PlatformNotificationData(),
       blink::NotificationResources(),
-      non_persistent_notification_listener_.GetPtr());
+      non_persistent_notification_listener_.GetRemote());
 
   EXPECT_EQ(1u, GetDisplayedNotifications().size());
 }
@@ -514,7 +520,7 @@ TEST_F(BlinkNotificationServiceImplTest,
   DisplayNonPersistentNotification(
       "token", blink::PlatformNotificationData(),
       blink::NotificationResources(),
-      non_persistent_notification_listener_.GetPtr());
+      non_persistent_notification_listener_.GetRemote());
 
   EXPECT_EQ(0u, GetDisplayedNotifications().size());
 }
@@ -527,7 +533,7 @@ TEST_F(BlinkNotificationServiceImplTest,
   resources.image = CreateBitmap(200, 100, SK_ColorMAGENTA);
   DisplayNonPersistentNotification(
       "token", blink::PlatformNotificationData(), resources,
-      non_persistent_notification_listener_.GetPtr());
+      non_persistent_notification_listener_.GetRemote());
 
   EXPECT_EQ(1u, GetDisplayedNotifications().size());
 }
@@ -544,7 +550,7 @@ TEST_F(BlinkNotificationServiceImplTest,
   resources.image = CreateBitmap(200, 100, SK_ColorMAGENTA);
   DisplayNonPersistentNotification(
       "token", blink::PlatformNotificationData(), resources,
-      non_persistent_notification_listener_.GetPtr());
+      non_persistent_notification_listener_.GetRemote());
   EXPECT_EQ(1u, bad_messages_.size());
   EXPECT_EQ(kBadMessageImproperNotificationImage, bad_messages_[0]);
 }

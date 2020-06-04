@@ -7,8 +7,10 @@
 #include <string>
 
 #include "base/logging.h"
+#include "services/network/public/mojom/parsed_headers.mojom-blink.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/testing/blink_fuzzer_test_support.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -19,13 +21,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   static blink::BlinkFuzzerTestSupport test_support;
 
   blink::CommaDelimitedHeaderSet set;
-  double delay;
+  base::TimeDelta delay;
   String url;
   blink::ResourceResponse response;
   wtf_size_t end;
-  String report_url;
-  String failure_reason;
-  unsigned failure_position = 0;
 
   std::string terminated(reinterpret_cast<const char*>(data), size);
 
@@ -43,7 +42,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                        size, &response, &end);
   blink::ParseServerTimingHeader(terminated.c_str());
   blink::ParseContentTypeOptionsHeader(terminated.c_str());
-  blink::ParseXSSProtectionHeader(terminated.c_str(), failure_reason,
-                                  failure_position, report_url);
+  blink::ParseHeaders(terminated.c_str(), blink::KURL("http://example.com"));
   return 0;
 }

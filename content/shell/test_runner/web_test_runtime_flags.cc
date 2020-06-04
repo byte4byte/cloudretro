@@ -4,7 +4,7 @@
 
 #include "content/shell/test_runner/web_test_runtime_flags.h"
 
-namespace test_runner {
+namespace content {
 
 WebTestRuntimeFlags::WebTestRuntimeFlags() {
   Reset();
@@ -38,7 +38,6 @@ void WebTestRuntimeFlags::Reset() {
   set_storage_allowed(true);
   set_plugins_allowed(true);
   set_running_insecure_content_allowed(false);
-  set_autoplay_allowed(true);
 
   set_dump_editting_callbacks(false);
   set_dump_frame_load_callbacks(false);
@@ -58,14 +57,15 @@ void WebTestRuntimeFlags::Reset() {
   set_can_open_windows(false);
 
   set_dump_create_view(false);
-  set_dump_spell_check_callbacks(false);
   set_dump_javascript_dialogs(true);
 
   set_has_custom_text_output(false);
   set_custom_text_output("");
 
+  set_is_web_platform_tests_mode(false);
+
   // No need to report the initial state - only the future delta is important.
   tracked_dictionary().ResetChangeTracking();
 }
 
-}  // namespace test_runner
+}  // namespace content

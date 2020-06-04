@@ -33,14 +33,13 @@ TetherDisconnectorImpl::TetherDisconnectorImpl(
       disconnect_tethering_request_sender_(disconnect_tethering_request_sender),
       tether_connector_(tether_connector),
       device_id_tether_network_guid_map_(device_id_tether_network_guid_map),
-      tether_session_completion_logger_(tether_session_completion_logger),
-      weak_ptr_factory_(this) {}
+      tether_session_completion_logger_(tether_session_completion_logger) {}
 
 TetherDisconnectorImpl::~TetherDisconnectorImpl() = default;
 
 void TetherDisconnectorImpl::DisconnectFromNetwork(
     const std::string& tether_network_guid,
-    const base::Closure& success_callback,
+    base::OnceClosure success_callback,
     const network_handler::StringResultCallback& error_callback,
     const TetherSessionCompletionLogger::SessionCompletionReason&
         session_completion_reason) {
@@ -72,7 +71,7 @@ void TetherDisconnectorImpl::DisconnectFromNetwork(
                       << tether_network_guid
                       << ", which had not yet connected. "
                       << "Canceled in-progress connection attempt.";
-      success_callback.Run();
+      std::move(success_callback).Run();
       return;
     }
 
@@ -85,7 +84,7 @@ void TetherDisconnectorImpl::DisconnectFromNetwork(
 
   DCHECK(!active_wifi_network_guid.empty());
   DisconnectActiveWifiConnection(tether_network_guid, active_wifi_network_guid,
-                                 success_callback, error_callback);
+                                 std::move(success_callback), error_callback);
 
   tether_session_completion_logger_->RecordTetherSessionCompletion(
       session_completion_reason);
@@ -94,7 +93,7 @@ void TetherDisconnectorImpl::DisconnectFromNetwork(
 void TetherDisconnectorImpl::DisconnectActiveWifiConnection(
     const std::string& tether_network_guid,
     const std::string& wifi_network_guid,
-    const base::Closure& success_callback,
+    base::OnceClosure success_callback,
     const network_handler::StringResultCallback& error_callback) {
   // First, disconnect the active host so that the user gets visual indication
   // that the disconnection is in progress as quickly as possible.
@@ -103,7 +102,7 @@ void TetherDisconnectorImpl::DisconnectActiveWifiConnection(
   // Disconnect from the Wi-Fi hotspot. This transfers responsibility for
   // invoking the success or error callbacks to |wifi_hotspot_disconnector_|.
   wifi_hotspot_disconnector_->DisconnectFromWifiHotspot(
-      wifi_network_guid, success_callback, error_callback);
+      wifi_network_guid, std::move(success_callback), error_callback);
 
   // In addition to disconnecting from the Wi-Fi network, this device must also
   // send a DisconnectTetheringRequest to the tether host so that it can shut

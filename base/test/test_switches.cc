@@ -4,6 +4,13 @@
 
 #include "base/test/test_switches.h"
 
+// Flag to show the help message.
+const char switches::kHelpFlag[] = "help";
+
+// Flag to run all tests and the launcher in a single process. Useful for
+// debugging a specific test in a debugger.
+const char switches::kSingleProcessTests[] = "single-process-tests";
+
 // Maximum number of tests to run in a single batch.
 const char switches::kTestLauncherBatchLimit[] = "test-launcher-batch-limit";
 
@@ -51,6 +58,11 @@ const char switches::kIsolatedScriptTestLauncherRetryLimit[] =
 const char switches::kTestLauncherSummaryOutput[] =
     "test-launcher-summary-output";
 
+// Causes the test launcher to print information about leaked files and/or
+// directories in child process's temporary directories.
+const char switches::kTestLauncherPrintTempLeaks[] =
+    "test-launcher-print-temp-leaks";
+
 // Flag controlling when test stdio is displayed as part of the launcher's
 // standard output.
 const char switches::kTestLauncherPrintTestStdio[] =
@@ -84,3 +96,9 @@ const char switches::kTestLauncherTrace[] = "test-launcher-trace";
 const char switches::kTestTinyTimeout[] = "test-tiny-timeout";
 const char switches::kUiTestActionTimeout[] = "ui-test-action-timeout";
 const char switches::kUiTestActionMaxTimeout[] = "ui-test-action-max-timeout";
+
+#if defined(OS_IOS)
+// If enabled, runs unittests using the XCTest test runner.
+const char switches::kEnableRunIOSUnittestsWithXCTest[] =
+    "enable-run-ios-unittests-with-xctest";
+#endif

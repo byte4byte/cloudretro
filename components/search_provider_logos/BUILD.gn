@@ -32,7 +32,6 @@ static_library("search_provider_logos") {
     "//components/image_fetcher/core",
     "//components/keyed_service/core",
     "//components/search_engines",
-    "//components/signin/core/browser",
     "//components/signin/public/identity_manager",
     "//net",
     "//services/network/public/cpp",
@@ -77,10 +76,8 @@ bundle_data("unit_tests_bundle_data") {
     "//components/test/data/search_provider_logos/ddljson_ios4.json",
     "//components/test/data/search_provider_logos/ddljson_ios4_fp.json",
   ]
-  outputs = [
-    "{{bundle_resources_dir}}/" +
-        "{{source_root_relative_dir}}/{{source_file_part}}",
-  ]
+  outputs = [ "{{bundle_resources_dir}}/" +
+              "{{source_root_relative_dir}}/{{source_file_part}}" ]
 }
 
 source_set("unit_tests") {
@@ -96,7 +93,6 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/image_fetcher/core",
     "//components/search_engines",
-    "//components/signin/core/browser",
     "//components/signin/public/base:test_support",
     "//components/signin/public/identity_manager:test_support",
     "//components/sync_preferences:test_support",

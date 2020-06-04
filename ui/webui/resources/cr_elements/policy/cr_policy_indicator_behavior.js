@@ -8,6 +8,8 @@
  * rework the "policy" naming scheme throughout this directory.
  */
 
+// #import {assertNotReached} from 'chrome://resources/js/assert.m.js';
+
 /**
  * Strings required for policy indicators. These must be set at runtime.
  * Chrome OS only strings may be undefined.
@@ -21,13 +23,19 @@
  *   controlledSettingWithOwner: string,
  *   controlledSettingNoOwner: string,
  *   controlledSettingParent: string,
+ *   controlledSettingChildRestriction: string,
  * }}
  */
 // eslint-disable-next-line no-var
 var CrPolicyStrings;
 
-/** @enum {string} */
-const CrPolicyIndicatorType = {
+/**
+ * Possible policy indicators that can be shown in settings.
+ * Must be kept in sync with the PolicyIndicatorType enum located in
+ * chrome/browser/ui/webui/site_settings_helper.h
+ * @enum {string}
+ */
+/* #export */ const CrPolicyIndicatorType = {
   DEVICE_POLICY: 'devicePolicy',
   EXTENSION: 'extension',
   NONE: 'none',
@@ -36,10 +44,11 @@ const CrPolicyIndicatorType = {
   RECOMMENDED: 'recommended',
   USER_POLICY: 'userPolicy',
   PARENT: 'parent',
+  CHILD_RESTRICTION: 'childRestriction',
 };
 
 /** @polymerBehavior */
-const CrPolicyIndicatorBehavior = {
+/* #export */ const CrPolicyIndicatorBehavior = {
   // Properties exposed to all policy indicators.
   properties: {
     /**
@@ -79,8 +88,8 @@ const CrPolicyIndicatorBehavior = {
    * @return {boolean} True if the indicator should be shown.
    * @private
    */
-  getIndicatorVisible_: function(type) {
-    return type != CrPolicyIndicatorType.NONE;
+  getIndicatorVisible_(type) {
+    return type !== CrPolicyIndicatorType.NONE;
   },
 
   /**
@@ -88,7 +97,7 @@ const CrPolicyIndicatorBehavior = {
    * @return {string} The iron-icon icon name.
    * @private
    */
-  getIndicatorIcon_: function(type) {
+  getIndicatorIcon_(type) {
     switch (type) {
       case CrPolicyIndicatorType.EXTENSION:
         return 'cr:extension';
@@ -103,6 +112,7 @@ const CrPolicyIndicatorBehavior = {
       case CrPolicyIndicatorType.RECOMMENDED:
         return 'cr20:domain';
       case CrPolicyIndicatorType.PARENT:
+      case CrPolicyIndicatorType.CHILD_RESTRICTION:
         return 'cr20:kite';
       default:
         assertNotReached();
@@ -117,10 +127,12 @@ const CrPolicyIndicatorBehavior = {
    *     value matches the recommended value.
    * @return {string} The tooltip text for |type|.
    */
-  getIndicatorTooltip: function(type, name, opt_matches) {
-    if (!CrPolicyStrings) {
+  getIndicatorTooltip(type, name, opt_matches) {
+    if (!window['CrPolicyStrings']) {
       return '';
     }  // Tooltips may not be defined, e.g. in OOBE.
+
+    CrPolicyStrings = window['CrPolicyStrings'];
     switch (type) {
       case CrPolicyIndicatorType.EXTENSION:
         return name.length > 0 ?
@@ -141,6 +153,8 @@ const CrPolicyIndicatorBehavior = {
             CrPolicyStrings.controlledSettingRecommendedDiffers;
       case CrPolicyIndicatorType.PARENT:
         return CrPolicyStrings.controlledSettingParent;
+      case CrPolicyIndicatorType.CHILD_RESTRICTION:
+        return CrPolicyStrings.controlledSettingChildRestriction;
     }
     return '';
   },

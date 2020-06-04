@@ -13,6 +13,7 @@
 #include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/files/file_path.h"
+#include "base/observer_list_types.h"
 #include "chromeos/dbus/cros_disks_client.h"
 
 namespace chromeos {
@@ -28,11 +29,14 @@ enum MountCondition {
 };
 
 // Possible filesystem types that can be passed to FormatMountedDevice.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum class FormatFileSystemType {
   kUnknown = 0,
   kVfat = 1,
   kExfat = 2,
   kNtfs = 3,
+  kMaxValue = kNtfs,
 };
 
 // This class handles the interaction with cros-disks.
@@ -104,10 +108,8 @@ class COMPONENT_EXPORT(CHROMEOS_DISKS) DiskMountManager {
       EnsureMountInfoRefreshedCallback;
 
   // Implement this interface to be notified about disk/mount related events.
-  class Observer {
+  class Observer : public base::CheckedObserver {
    public:
-    virtual ~Observer() {}
-
     // Called when auto-mountable disk mount status is changed.
     virtual void OnAutoMountableDiskEvent(DiskEvent event, const Disk& disk) {}
     // Called when fixed storage disk status is changed.
@@ -122,11 +124,16 @@ class COMPONENT_EXPORT(CHROMEOS_DISKS) DiskMountManager {
     // Called on format process events.
     virtual void OnFormatEvent(FormatEvent event,
                                FormatError error_code,
-                               const std::string& device_path) {}
+                               const std::string& device_path,
+                               const std::string& device_label) {}
     // Called on rename process events.
     virtual void OnRenameEvent(RenameEvent event,
                                RenameError error_code,
-                               const std::string& device_path) {}
+                               const std::string& device_path,
+                               const std::string& device_label) {}
+
+   protected:
+    ~Observer() override;
   };
 
   virtual ~DiskMountManager() {}
@@ -170,13 +177,11 @@ class COMPONENT_EXPORT(CHROMEOS_DISKS) DiskMountManager {
                          MountAccessMode access_mode) = 0;
 
   // Unmounts a mounted disk.
-  // |UnmountOptions| enum defined in chromeos/dbus/cros_disks_client.h.
   // When the method is complete, |callback| will be called and observers'
   // |OnMountEvent| will be raised.
   //
   // |callback| may be empty, in which case it gets ignored.
   virtual void UnmountPath(const std::string& mount_path,
-                           UnmountOptions options,
                            UnmountPathCallback callback) = 0;
 
   // Remounts mounted removable devices to change the read-only mount option.

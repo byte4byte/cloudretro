@@ -14,16 +14,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/task_runner.h"
 #include "base/time/time.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
-
-namespace base {
-class TaskRunner;
-}
 
 namespace ash {
 
@@ -81,7 +78,7 @@ class ASH_EXPORT WallpaperResizer {
 
   scoped_refptr<base::TaskRunner> task_runner_;
 
-  base::WeakPtrFactory<WallpaperResizer> weak_ptr_factory_;
+  base::WeakPtrFactory<WallpaperResizer> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperResizer);
 };

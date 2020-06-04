@@ -15,7 +15,7 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/sessions/core/session_id.h"
-#include "third_party/blink/public/platform/web_cache.h"
+#include "third_party/blink/public/common/web_cache/web_cache_resource_type_stats.h"
 #include "ui/gfx/image/image_skia.h"
 
 class Profile;
@@ -37,32 +37,32 @@ class Task {
     UNKNOWN = 0,
 
     /* Singleton processes first that don't belong to a particular tab. */
-    BROWSER,  /* The main browser process. */
-    GPU,      /* A graphics process. */
-    ARC,      /* An ARC process. */
-    CROSTINI, /* A Crostini VM process. */
-    ZYGOTE,   /* A Linux zygote process. */
-    UTILITY,  /* A browser utility process. */
+    BROWSER,   /* The main browser process. */
+    GPU,       /* A graphics process. */
+    ARC,       /* An ARC process. */
+    CROSTINI,  /* A Crostini VM process. */
+    PLUGIN_VM, /* A Plugin VM process. */
+    ZYGOTE,    /* A Linux zygote process. */
+    UTILITY,   /* A browser utility process. */
 
     /* Per-Tab processes next. */
     RENDERER,  /* A normal WebContents renderer process. */
     EXTENSION, /* An extension or app process. */
 
     /* Plugin processes last.*/
-    GUEST,          /* A browser plugin guest process. */
-    PLUGIN,         /* A plugin process. */
-    WORKER,         /* A web worker process. */
-    NACL,           /* A NativeClient loader or broker process. */
-    SANDBOX_HELPER, /* A sandbox helper process. */
-    SERVICE_WORKER, /* A service worker running on the renderer process. */
+    GUEST,            /* A browser plugin guest process. */
+    PLUGIN,           /* A plugin process. */
+    NACL,             /* A NativeClient loader or broker process. */
+    SANDBOX_HELPER,   /* A sandbox helper process. */
+    DEDICATED_WORKER, /* A dedicated worker running on the renderer process. */
+    SHARED_WORKER,    /* A shared worker running on the renderer process. */
+    SERVICE_WORKER,   /* A service worker running on the renderer process. */
   };
 
   // Create a task with the given |title| and the given favicon |icon|. This
-  // task runs on a process whose handle is |handle|. |rappor_sample| is the
-  // name of the sample to be recorded if this task needs to be reported by
-  // Rappor. If |process_id| is not supplied, it will be determined by |handle|.
+  // task runs on a process whose handle is |handle|.
+  // If |process_id| is not supplied, it will be determined by |handle|.
   Task(const base::string16& title,
-       const std::string& rappor_sample,
        const gfx::ImageSkia* icon,
        base::ProcessHandle handle,
        base::ProcessId process_id = base::kNullProcessId);
@@ -150,7 +150,7 @@ class Task {
   // Checking if the task reports Webkit resource cache statistics and getting
   // them if it does.
   virtual bool ReportsWebCacheStats() const;
-  virtual blink::WebCache::ResourceTypeStats GetWebCacheStats() const;
+  virtual blink::WebCacheResourceTypeStats GetWebCacheStats() const;
 
   // Returns the keep-alive counter if the Task is an event page, -1 otherwise.
   virtual int GetKeepaliveCount() const;
@@ -175,7 +175,6 @@ class Task {
   }
 
   const base::string16& title() const { return title_; }
-  const std::string& rappor_sample_name() const { return rappor_sample_name_; }
   const gfx::ImageSkia& icon() const { return icon_; }
   const base::ProcessHandle& process_handle() const { return process_handle_; }
   const base::ProcessId& process_id() const { return process_id_; }
@@ -186,9 +185,6 @@ class Task {
   // Returns |*result_image|.
   static gfx::ImageSkia* FetchIcon(int id, gfx::ImageSkia** result_image);
   void set_title(const base::string16& new_title) { title_ = new_title; }
-  void set_rappor_sample_name(const std::string& sample) {
-    rappor_sample_name_ = sample;
-  }
   void set_icon(const gfx::ImageSkia& new_icon) { icon_ = new_icon; }
 
  private:
@@ -223,10 +219,6 @@ class Task {
 
   // The title of the task.
   base::string16 title_;
-
-  // The name of the sample representing this task when a Rappor sample needs to
-  // be recorded for it.
-  std::string rappor_sample_name_;
 
   // The favicon.
   gfx::ImageSkia icon_;

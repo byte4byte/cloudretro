@@ -9,12 +9,15 @@
 #include "components/omnibox/common/omnibox_features.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/elements/extended_touch_target_button.h"
+#import "ios/chrome/browser/ui/elements/fade_truncating_label.h"
 #import "ios/chrome/browser/ui/omnibox/popup/autocomplete_suggestion.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_icon_view.h"
-#import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_truncating_label.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/colors/dynamic_color_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -33,6 +36,12 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
     @"OmniboxPopupRowSwitchTabAccessibilityIdentifier";
 }  // namespace
 
+#if defined(__IPHONE_13_4)
+@interface OmniboxPopupRowCell (PointerInteraction) <
+    UIPointerInteractionDelegate>
+@end
+#endif  // defined(__IPHONE_13_4)
+
 @interface OmniboxPopupRowCell ()
 
 // The suggestion that this cell is currently displaying.
@@ -43,9 +52,9 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 // Stack view containing all text labels.
 @property(nonatomic, strong) UIStackView* textStackView;
 // Truncating label for the main text.
-@property(nonatomic, strong) OmniboxPopupTruncatingLabel* textTruncatingLabel;
+@property(nonatomic, strong) FadeTruncatingLabel* textTruncatingLabel;
 // Truncating label for the detail text.
-@property(nonatomic, strong) OmniboxPopupTruncatingLabel* detailTruncatingLabel;
+@property(nonatomic, strong) FadeTruncatingLabel* detailTruncatingLabel;
 // Regular UILabel for the detail text when the suggestion is an answer.
 // Answers have slightly different display requirements, like possibility of
 // multiple lines and truncating with ellipses instead of a fade gradient.
@@ -56,6 +65,13 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 // Separator line for adjacent cells.
 @property(nonatomic, strong) UIView* separator;
 
+// Stores the extra constraints activated when the cell enters deletion mode.
+@property(nonatomic, strong)
+    NSArray<NSLayoutConstraint*>* deletingLayoutGuideConstraints;
+// Stores the extra constrants activated when the cell is not in deletion mode.
+@property(nonatomic, strong)
+    NSArray<NSLayoutConstraint*>* nonDeletingLayoutGuideConstraints;
+
 @end
 
 @implementation OmniboxPopupRowCell
@@ -64,8 +80,15 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
               reuseIdentifier:(NSString*)reuseIdentifier {
   self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
   if (self) {
+    _incognito = NO;
+
+    self.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.selectedBackgroundView.backgroundColor = color::DarkModeDynamicColor(
+        [UIColor colorNamed:kTableViewRowHighlightColor], _incognito,
+        [UIColor colorNamed:kTableViewRowHighlightDarkColor]);
+
     _textTruncatingLabel =
-        [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
+        [[FadeTruncatingLabel alloc] initWithFrame:CGRectZero];
     _textTruncatingLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_textTruncatingLabel
         setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh + 1
@@ -78,7 +101,7 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
     _textStackView.alignment = UIStackViewAlignmentLeading;
 
     _detailTruncatingLabel =
-        [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
+        [[FadeTruncatingLabel alloc] initWithFrame:CGRectZero];
     _detailTruncatingLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
     // Answers use a UILabel with NSLineBreakByTruncatingTail to produce a
@@ -102,9 +125,15 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
     _separator.translatesAutoresizingMaskIntoConstraints = NO;
     _separator.hidden = YES;
 
-    _incognito = NO;
-
-    self.backgroundColor = [UIColor clearColor];
+    self.backgroundColor = UIColor.clearColor;
+#if defined(__IPHONE_13_4)
+    if (@available(iOS 13.4, *)) {
+      if (base::FeatureList::IsEnabled(kPointerSupport)) {
+        [self addInteraction:[[UIPointerInteraction alloc]
+                                 initWithDelegate:self]];
+      }
+    }
+#endif  // defined(__IPHONE_13_4)
   }
   return self;
 }
@@ -114,6 +143,24 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 
   if (self.window) {
     [self attachToLayoutGuides];
+  }
+}
+
+- (void)willTransitionToState:(UITableViewCellStateMask)state {
+  // |UITableViewCellStateDefaultMask| is actually 0, so it must be checked
+  // manually, and can't be checked with bitwise AND.
+  if (state == UITableViewCellStateDefaultMask) {
+    for (NSLayoutConstraint* constraint in self
+             .deletingLayoutGuideConstraints) {
+      DCHECK(constraint.active);
+    }
+    [self unfreezeLayoutGuidePositions];
+  } else if (state & UITableViewCellStateShowingDeleteConfirmationMask) {
+    for (NSLayoutConstraint* constraint in self
+             .nonDeletingLayoutGuideConstraints) {
+      DCHECK(constraint.active);
+    }
+    [self freezeLayoutGuidePositions];
   }
 }
 
@@ -134,6 +181,11 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
   _omniboxSemanticContentAttribute = omniboxSemanticContentAttribute;
   self.contentView.semanticContentAttribute = omniboxSemanticContentAttribute;
   self.textStackView.semanticContentAttribute = omniboxSemanticContentAttribute;
+  // The layout guides may have been repositioned before this, so re-freeze.
+  if (self.showingDeleteConfirmation) {
+    [self unfreezeLayoutGuidePositions];
+    [self freezeLayoutGuidePositions];
+  }
 }
 
 - (BOOL)showsSeparator {
@@ -249,17 +301,81 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
   stackViewToLayoutGuideTrailing.priority = higher;
   stackViewToCellTrailing.priority = highest;
 
-  [NSLayoutConstraint activateConstraints:@[
+  // These constraints need to be removed when freezing the position of these
+  // views. See -freezeLayoutGuidePositions for the reason why.
+  self.nonDeletingLayoutGuideConstraints = @[
     [self.leadingIconView.centerXAnchor
         constraintEqualToAnchor:imageLayoutGuide.centerXAnchor],
-    [self.leadingIconView.widthAnchor
-        constraintEqualToAnchor:imageLayoutGuide.widthAnchor],
-    [self.textStackView.leadingAnchor
-        constraintEqualToAnchor:textLayoutGuide.leadingAnchor],
     stackViewToLayoutGuideLeading,
     stackViewToLayoutGuideTrailing,
+  ];
+
+  [NSLayoutConstraint activateConstraints:@[
+    [self.leadingIconView.widthAnchor
+        constraintEqualToAnchor:imageLayoutGuide.widthAnchor],
     stackViewToCellTrailing,
   ]];
+
+  [NSLayoutConstraint
+      activateConstraints:self.nonDeletingLayoutGuideConstraints];
+}
+
+// Freezes the position of any view that is positioned relative to the layout
+// guides. When the view enters deletion mode (swipe-to-delete), the layout
+// guides do not move. This means that the views in this cell positioned
+// relative to the layout guide also do not move with the swipe. This method
+// freezes those views with constraints relative to the cell content view so
+// they do move with the swipe-to-delete.
+- (void)freezeLayoutGuidePositions {
+  [NSLayoutConstraint
+      deactivateConstraints:self.nonDeletingLayoutGuideConstraints];
+
+  NamedGuide* imageLayoutGuide =
+      [NamedGuide guideWithName:kOmniboxLeadingImageGuide view:self];
+  NamedGuide* textLayoutGuide = [NamedGuide guideWithName:kOmniboxTextFieldGuide
+                                                     view:self];
+
+  // Layout guides should both be setup
+  DCHECK(imageLayoutGuide.isConstrained);
+  DCHECK(textLayoutGuide.isConstrained);
+
+  self.deletingLayoutGuideConstraints = @[
+    [self.leadingIconView.leadingAnchor
+        constraintEqualToAnchor:self.contentView.leadingAnchor
+                       constant:
+                           [self leadingSpaceForLayoutGuide:imageLayoutGuide]],
+    [self.textStackView.leadingAnchor
+        constraintEqualToAnchor:self.contentView.leadingAnchor
+                       constant:
+                           [self leadingSpaceForLayoutGuide:textLayoutGuide]],
+  ];
+
+  [NSLayoutConstraint activateConstraints:self.deletingLayoutGuideConstraints];
+}
+
+// Helper method for -freezeLayoutGuidePositions to calculate the actual
+// distance between the leading edge of a layout guide and the leading edge
+// of the cell's content view.
+- (CGFloat)leadingSpaceForLayoutGuide:(UILayoutGuide*)layoutGuide {
+  CGRect layoutGuideFrame =
+      [layoutGuide.owningView convertRect:layoutGuide.layoutFrame
+                                   toView:self.contentView];
+  return self.omniboxSemanticContentAttribute ==
+                 UISemanticContentAttributeForceRightToLeft
+             ? self.contentView.bounds.size.width - layoutGuideFrame.origin.x -
+                   layoutGuideFrame.size.width
+             : layoutGuideFrame.origin.x;
+}
+
+// Unfreezes the position of any view that is positioned relative to a layout
+// guide. See the comment on -freezeLayoutGuidePositions for why that is
+// necessary.
+- (void)unfreezeLayoutGuidePositions {
+  [NSLayoutConstraint
+      deactivateConstraints:self.deletingLayoutGuideConstraints];
+  self.deletingLayoutGuideConstraints = @[];
+  [NSLayoutConstraint
+      activateConstraints:self.nonDeletingLayoutGuideConstraints];
 }
 
 - (void)prepareForReuse {
@@ -300,6 +416,17 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
   }
   self.suggestion = suggestion;
   self.incognito = incognito;
+
+  // While iOS 12 is still supported, the background color needs to be reset
+  // when the incognito mode changes. Once iOS 12 is no longer supported,
+  // the color should only have to be set once.
+  if (@available(iOS 13, *)) {
+    // Empty because condition should be if (!@available(iOS 13, *)).
+  } else {
+    self.selectedBackgroundView.backgroundColor = color::DarkModeDynamicColor(
+        [UIColor colorNamed:kTableViewRowHighlightColor], self.incognito,
+        [UIColor colorNamed:kTableViewRowHighlightDarkColor]);
+  }
 
   self.separator.backgroundColor =
       self.incognito ? [UIColor.whiteColor colorWithAlphaComponent:0.12]
@@ -363,9 +490,9 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 
   [self.trailingButton setImage:trailingButtonImage
                        forState:UIControlStateNormal];
-  self.trailingButton.tintColor = self.incognito
-                                      ? [UIColor whiteColor]
-                                      : UIColorFromRGB(kLocationBarTintBlue);
+  self.trailingButton.tintColor = color::DarkModeDynamicColor(
+      [UIColor colorNamed:kBlueColor], self.incognito,
+      [UIColor colorNamed:kBlueDarkColor]);
 }
 
 - (NSString*)accessibilityLabel {
@@ -373,17 +500,35 @@ NSString* const kOmniboxPopupRowSwitchTabAccessibilityIdentifier =
 }
 
 - (NSString*)accessibilityValue {
-  return self.detailTruncatingLabel.hidden
+  return self.suggestion.hasAnswer
              ? self.detailAnswerLabel.attributedText.string
              : self.detailTruncatingLabel.attributedText.string;
-}
-
-- (NSString*)accessibilityIdentifier {
-  return self.textTruncatingLabel.attributedText.string;
 }
 
 - (void)trailingButtonTapped {
   [self.delegate trailingButtonTappedForCell:self];
 }
+
+#if defined(__IPHONE_13_4)
+
+#pragma mark UIPointerInteractionDelegate
+
+- (UIPointerRegion*)pointerInteraction:(UIPointerInteraction*)interaction
+                      regionForRequest:(UIPointerRegionRequest*)request
+                         defaultRegion:(UIPointerRegion*)defaultRegion
+    API_AVAILABLE(ios(13.4)) {
+  return defaultRegion;
+}
+
+- (UIPointerStyle*)pointerInteraction:(UIPointerInteraction*)interaction
+                       styleForRegion:(UIPointerRegion*)region
+    API_AVAILABLE(ios(13.4)) {
+  UIPointerHoverEffect* effect = [UIPointerHoverEffect
+      effectWithPreview:[[UITargetedPreview alloc] initWithView:self]];
+  effect.prefersScaledContent = NO;
+  effect.prefersShadow = NO;
+  return [UIPointerStyle styleWithEffect:effect shape:nil];
+}
+#endif  // defined(__IPHONE_13_4)
 
 @end

@@ -6,10 +6,9 @@
 
 #include "chrome/installer/setup/setup_util.h"
 
-#include <windows.h>
-
 #include <objbase.h>
 #include <stddef.h>
+#include <windows.h>
 #include <wtsapi32.h>
 
 #include <algorithm>
@@ -40,6 +39,7 @@
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/install_modes.h"
@@ -139,7 +139,13 @@ void RemoveProfileStatistics(const InstallerState& installer_state) {
 // for this mode of install was dropped from ToT in December 2016. Remove any
 // stray bits in the registry leftover from such installs.
 void RemoveBinariesVersionKey(const InstallerState& installer_state) {
-  base::string16 path(install_static::GetBinariesClientsKeyPath());
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  base::string16 path(install_static::GetClientsKeyPath(
+      L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}"));
+#else
+  // Assume that non-Google is Chromium branding.
+  base::string16 path(L"Software\\Chromium Binaries");
+#endif
   if (base::win::RegKey(installer_state.root_key(), path.c_str(),
                         KEY_QUERY_VALUE | KEY_WOW64_32KEY)
           .Valid()) {
@@ -149,93 +155,9 @@ void RemoveBinariesVersionKey(const InstallerState& installer_state) {
   }
 }
 
-// Remove leftover traces of multi-install Chrome Frame, if present. Once upon a
-// time, Google Chrome Frame could be co-installed with Chrome such that they
-// shared the same binaries on disk. Support for new installs of GCF was dropped
-// from ToT in December 2013. Remove any stray bits in the registry leftover
-// from an old multi-install GCF.
-void RemoveMultiChromeFrame(const InstallerState& installer_state) {
-// There never was a "Chromium Frame".
-#if defined(GOOGLE_CHROME_BUILD)
-  // To maximize cleanup, unconditionally delete GCF's Clients and ClientState
-  // keys unless single-install GCF is present. This condition is satisfied if
-  // both keys exist, Clients\pv contains a value, and
-  // ClientState\UninstallString contains a path including "\Chrome Frame\".
-  // Multi-install GCF would have had "\Chrome\", and anything else is garbage.
-
-  static constexpr wchar_t kGcfGuid[] =
-      L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}";
-  base::string16 clients_key_path = install_static::GetClientsKeyPath(kGcfGuid);
-  base::win::RegKey clients_key;
-  base::string16 client_state_key_path =
-      install_static::GetClientStateKeyPath(kGcfGuid);
-  base::win::RegKey client_state_key;
-
-  const bool has_clients_key =
-      clients_key.Open(installer_state.root_key(), clients_key_path.c_str(),
-                       KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS;
-  const bool has_client_state_key =
-      client_state_key.Open(installer_state.root_key(),
-                            client_state_key_path.c_str(),
-                            KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS;
-  if (!has_clients_key && !has_client_state_key)
-    return;  // Nothing to check or to clean.
-
-  base::string16 value;
-  if (has_clients_key && has_client_state_key &&
-      clients_key.ReadValue(google_update::kRegVersionField, &value) ==
-          ERROR_SUCCESS &&
-      !value.empty() &&
-      client_state_key.ReadValue(kUninstallStringField, &value) ==
-          ERROR_SUCCESS &&
-      value.find(L"\\Chrome Frame\\") != base::string16::npos) {
-    return;  // Single-install Chrome Frame found.
-  }
-  client_state_key.Close();
-  clients_key.Close();
-
-  // Remnants of multi-install GCF or of a malformed GCF are present. Remove the
-  // Clients and ClientState keys so that Google Update ceases to check for
-  // updates, and the Programs and Features control panel entry to reduce user
-  // confusion.
-  constexpr int kOperations = 3;
-  int success_count = 0;
-
-  if (InstallUtil::DeleteRegistryKey(installer_state.root_key(),
-                                     clients_key_path, KEY_WOW64_32KEY)) {
-    ++success_count;
-  }
-  if (InstallUtil::DeleteRegistryKey(installer_state.root_key(),
-                                     client_state_key_path, KEY_WOW64_32KEY)) {
-    ++success_count;
-  }
-  if (InstallUtil::DeleteRegistryKey(
-          installer_state.root_key(),
-          L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
-          L"Google Chrome Frame",
-          KEY_WOW64_32KEY)) {
-    ++success_count;
-  }
-  DCHECK_LE(success_count, kOperations);
-
-  // Used for a histogram; do not reorder.
-  enum MultiChromeFrameRemovalResult {
-    ALL_FAILED = 0,
-    PARTIAL_SUCCESS = 1,
-    SUCCESS = 2,
-    NUM_RESULTS
-  };
-  MultiChromeFrameRemovalResult result =
-      (success_count == kOperations ? SUCCESS : (success_count ? PARTIAL_SUCCESS
-                                                               : ALL_FAILED));
-  UMA_HISTOGRAM_ENUMERATION("Setup.Install.MultiChromeFrameRemoved", result,
-                            NUM_RESULTS);
-#endif  // GOOGLE_CHROME_BUILD
-}
-
 void RemoveAppLauncherVersionKey(const InstallerState& installer_state) {
 // The app launcher was only registered for Google Chrome.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   static constexpr wchar_t kLauncherGuid[] =
       L"{FDA71E6F-AC4C-4a00-8B70-9958A68906BF}";
 
@@ -248,25 +170,12 @@ void RemoveAppLauncherVersionKey(const InstallerState& installer_state) {
     UMA_HISTOGRAM_BOOLEAN("Setup.Install.DeleteAppLauncherClientsKey",
                           succeeded);
   }
-#endif  // GOOGLE_CHROME_BUILD
-}
-
-void RemoveAppHostExe(const InstallerState& installer_state) {
-// The app host was only installed for Google Chrome.
-#if defined(GOOGLE_CHROME_BUILD)
-  base::FilePath app_host(
-      installer_state.target_path().Append(FILE_PATH_LITERAL("app_host.exe")));
-
-  if (base::PathExists(app_host)) {
-    const bool succeeded = base::DeleteFile(app_host, false);
-    UMA_HISTOGRAM_BOOLEAN("Setup.Install.DeleteAppHost", succeeded);
-  }
-#endif  // GOOGLE_CHROME_BUILD
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 void RemoveLegacyChromeAppCommands(const InstallerState& installer_state) {
 // These app commands were only registered for Google Chrome.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   base::string16 path(GetCommandKey(L"install-extension"));
 
   if (base::win::RegKey(installer_state.root_key(), path.c_str(),
@@ -277,13 +186,11 @@ void RemoveLegacyChromeAppCommands(const InstallerState& installer_state) {
     UMA_HISTOGRAM_BOOLEAN("Setup.Install.DeleteInstallExtensionCommand",
                           succeeded);
   }
-#endif  // GOOGLE_CHROME_BUILD
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
 }  // namespace
 
-const char kUnPackNTSTATUSMetricsName[] = "Setup.Install.LzmaUnPackNTSTATUS";
-const char kUnPackResultMetricsName[] = "Setup.Install.LzmaUnPackResult";
 const char kUnPackStatusMetricsName[] = "Setup.Install.LzmaUnPackStatus";
 
 int CourgettePatchFiles(const base::FilePath& src,
@@ -629,9 +536,11 @@ void DeleteRegistryKeyPartial(
 
   // Delete the key if it no longer has any subkeys.
   if (to_skip.empty()) {
-    result = key.DeleteEmptyKey(L"");
-    LOG_IF(ERROR, result != ERROR_SUCCESS) << "Failed to delete empty key "
-                                           << path << "; result: " << result;
+    result = key.DeleteKey(L"");
+    if (result != ERROR_SUCCESS) {
+      ::SetLastError(result);
+      PLOG(ERROR) << "Failed to delete key " << path;
+    }
     return;
   }
 
@@ -701,8 +610,6 @@ int GetInstallAge(const InstallerState& installer_state) {
 }
 
 void RecordUnPackMetrics(UnPackStatus unpack_status,
-                         int32_t status,
-                         DWORD lzma_result,
                          UnPackConsumer consumer) {
   std::string consumer_name = "";
 
@@ -724,12 +631,6 @@ void RecordUnPackMetrics(UnPackStatus unpack_status,
   base::UmaHistogramExactLinear(
       std::string(std::string(kUnPackStatusMetricsName) + "_" + consumer_name),
       unpack_status, UNPACK_STATUS_COUNT);
-
-  base::UmaHistogramSparse(
-      std::string(kUnPackResultMetricsName) + "_" + consumer_name, lzma_result);
-
-  base::UmaHistogramSparse(
-      std::string(kUnPackNTSTATUSMetricsName) + "_" + consumer_name, status);
 }
 
 void RegisterEventLogProvider(const base::FilePath& install_directory,
@@ -784,21 +685,6 @@ void DeRegisterEventLogProvider() {
                                  WorkItem::kWow64Default);
 }
 
-bool AreBinariesInstalled(const InstallerState& installer_state) {
-  if (!install_static::InstallDetails::Get().supported_multi_install())
-    return false;
-
-  base::win::RegKey key;
-  base::string16 pv;
-
-  // True if the "pv" value exists and isn't empty.
-  return key.Open(installer_state.root_key(),
-                  install_static::GetBinariesClientsKeyPath().c_str(),
-                  KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS &&
-         key.ReadValue(google_update::kRegVersionField, &pv) == ERROR_SUCCESS &&
-         !pv.empty();
-}
-
 void DoLegacyCleanups(const InstallerState& installer_state,
                       InstallStatus install_status) {
   // Do no harm if the install didn't succeed.
@@ -814,9 +700,7 @@ void DoLegacyCleanups(const InstallerState& installer_state,
     return;
 
   RemoveBinariesVersionKey(installer_state);
-  RemoveMultiChromeFrame(installer_state);
   RemoveAppLauncherVersionKey(installer_state);
-  RemoveAppHostExe(installer_state);
   RemoveLegacyChromeAppCommands(installer_state);
 }
 
@@ -833,7 +717,7 @@ base::Time GetConsoleSessionStartTime() {
     return base::Time();
   }
   base::ScopedClosureRunner wts_deleter(
-      base::Bind(&::WTSFreeMemory, base::Unretained(buffer)));
+      base::BindOnce(&::WTSFreeMemory, base::Unretained(buffer)));
 
   WTSINFO* wts_info = nullptr;
   if (buffer_size < sizeof(*wts_info))
@@ -872,31 +756,37 @@ bool StoreDMToken(const std::string& token) {
     return false;
   }
 
-  std::wstring path;
-  std::wstring name;
-  InstallUtil::GetMachineLevelUserCloudPolicyDMTokenRegistryPath(&path,
-                                                                 &name);
-
+  // Write the token both to the app-neutral and browser-specific locations.
+  // Only the former is mandatory -- the latter is best-effort.
   base::win::RegKey key;
-  LONG result = key.Create(HKEY_LOCAL_MACHINE, path.c_str(),
-                           KEY_WRITE | KEY_WOW64_64KEY);
-  if (result != ERROR_SUCCESS) {
-    LOG(ERROR) << "Unable to create/open registry key HKLM\\" << path
-               << " for writing result=" << result;
-    return false;
-  }
+  std::wstring value_name;
+  bool succeeded = false;
+  for (const auto& is_browser_location : {InstallUtil::BrowserLocation(false),
+                                          InstallUtil::BrowserLocation(true)}) {
+    std::tie(key, value_name) = InstallUtil::GetCloudManagementDmTokenLocation(
+        InstallUtil::ReadOnly(false), is_browser_location);
+    // If the key couldn't be opened on the first iteration (the mandatory
+    // location), return failure straight away. Otherwise, continue iterating.
+    if (!key.Valid()) {
+      if (succeeded)
+        continue;
+      // Logging already performed in GetCloudManagementDmTokenLocation.
+      return false;
+    }
 
-  result =
-      key.WriteValue(name.c_str(), token.data(),
-                     base::saturated_cast<DWORD>(token.size()), REG_BINARY);
-  if (result != ERROR_SUCCESS) {
-    LOG(ERROR) << "Unable to write specified DMToken to the registry at HKLM\\"
-               << path << "\\" << name << " result=" << result;
-    return false;
+    auto result =
+        key.WriteValue(value_name.c_str(), token.data(),
+                       base::saturated_cast<DWORD>(token.size()), REG_BINARY);
+    if (result == ERROR_SUCCESS) {
+      succeeded = true;
+    } else if (!succeeded) {
+      ::SetLastError(result);
+      PLOG(ERROR) << "Unable to write specified DMToken to the registry";
+      return false;
+    }  // Else ignore the failure to write to the best-effort location.
   }
 
   VLOG(1) << "Successfully stored specified DMToken in the registry.";
-
   return true;
 }
 

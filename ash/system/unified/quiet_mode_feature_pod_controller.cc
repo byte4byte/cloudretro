@@ -10,6 +10,7 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/machine_learning/user_settings_event_logger.h"
 #include "ash/system/unified/feature_pod_button.h"
 #include "ash/system/unified/unified_system_tray_controller.h"
 #include "base/metrics/histogram_macros.h"
@@ -20,6 +21,16 @@
 using message_center::MessageCenter;
 
 namespace ash {
+namespace {
+
+void LogUserQuietModeEvent(const bool enabled) {
+  auto* logger = ml::UserSettingsEventLogger::Get();
+  if (logger) {
+    logger->LogQuietModeUkmEvent(enabled);
+  }
+}
+
+}  // namespace
 
 QuietModeFeaturePodController::QuietModeFeaturePodController(
     UnifiedSystemTrayController* tray_controller)
@@ -41,8 +52,9 @@ FeaturePodButton* QuietModeFeaturePodController::CreateButton() {
       !Shell::Get()->session_controller()->IsScreenLocked());
   button_->SetLabel(
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_NOTIFICATIONS_LABEL));
-  button_->SetIconTooltip(l10n_util::GetStringUTF16(
-      IDS_ASH_STATUS_TRAY_NOTIFICATIONS_TOGGLE_TOOLTIP));
+  button_->SetIconTooltip(l10n_util::GetStringFUTF16(
+      IDS_ASH_STATUS_TRAY_NOTIFICATIONS_TOGGLE_TOOLTIP,
+      GetQuietModeStateTooltip()));
   button_->ShowDetailedViewArrow();
   NotifierSettingsController::Get()->AddNotifierSettingsObserver(this);
   OnQuietModeChanged(MessageCenter::Get()->IsQuietMode());
@@ -52,6 +64,7 @@ FeaturePodButton* QuietModeFeaturePodController::CreateButton() {
 void QuietModeFeaturePodController::OnIconPressed() {
   MessageCenter* message_center = MessageCenter::Get();
   bool is_quiet_mode = message_center->IsQuietMode();
+  LogUserQuietModeEvent(!is_quiet_mode);
   message_center->SetQuietMode(!is_quiet_mode);
 
   if (message_center->IsQuietMode()) {
@@ -72,6 +85,9 @@ SystemTrayItemUmaType QuietModeFeaturePodController::GetUmaType() const {
 
 void QuietModeFeaturePodController::OnQuietModeChanged(bool in_quiet_mode) {
   button_->SetToggled(in_quiet_mode);
+  button_->SetIconTooltip(l10n_util::GetStringFUTF16(
+      IDS_ASH_STATUS_TRAY_NOTIFICATIONS_TOGGLE_TOOLTIP,
+      GetQuietModeStateTooltip()));
 
   if (in_quiet_mode) {
     button_->SetSubLabel(l10n_util::GetStringUTF16(
@@ -107,6 +123,13 @@ void QuietModeFeaturePodController::OnNotifiersUpdated(
     button_->SetLabelTooltip(l10n_util::GetStringUTF16(
         IDS_ASH_STATUS_TRAY_NOTIFICATIONS_SETTINGS_ON_TOOLTIP));
   }
+}
+
+base::string16 QuietModeFeaturePodController::GetQuietModeStateTooltip() {
+  return l10n_util::GetStringUTF16(
+      MessageCenter::Get()->IsQuietMode()
+          ? IDS_ASH_STATUS_TRAY_NOTIFICATIONS_DO_NOT_DISTURB_ON_STATE
+          : IDS_ASH_STATUS_TRAY_NOTIFICATIONS_DO_NOT_DISTURB_OFF_STATE);
 }
 
 }  // namespace ash

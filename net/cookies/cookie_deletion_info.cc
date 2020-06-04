@@ -28,12 +28,8 @@ bool DomainMatchesDomains(const net::CanonicalCookie& cookie,
   // If the cookie's domain is is not parsed as belonging to a registry
   // (e.g. for IP addresses or internal hostnames) an empty string will be
   // returned.  In this case, use the domain in the cookie.
-  if (effective_domain.empty()) {
-    if (cookie.IsDomainCookie())
-      effective_domain = cookie.Domain().substr(1);
-    else
-      effective_domain = cookie.Domain();
-  }
+  if (effective_domain.empty())
+    effective_domain = cookie.DomainWithoutDot();
 
   return match_domains.count(effective_domain) != 0;
 }
@@ -75,14 +71,7 @@ CookieDeletionInfo::CookieDeletionInfo()
 
 CookieDeletionInfo::CookieDeletionInfo(base::Time start_time,
                                        base::Time end_time)
-    : creation_range(start_time, end_time) {
-  // Options to use for deletion of cookies associated with
-  // a particular URL.  These options will make sure that all
-  // cookies associated with the URL are deleted.
-  cookie_options.set_include_httponly();
-  cookie_options.set_same_site_cookie_context(
-      net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
-}
+    : creation_range(start_time, end_time) {}
 
 CookieDeletionInfo::CookieDeletionInfo(CookieDeletionInfo&& other) = default;
 
@@ -97,7 +86,8 @@ CookieDeletionInfo& CookieDeletionInfo::operator=(CookieDeletionInfo&& rhs) =
 CookieDeletionInfo& CookieDeletionInfo::operator=(
     const CookieDeletionInfo& rhs) = default;
 
-bool CookieDeletionInfo::Matches(const CanonicalCookie& cookie) const {
+bool CookieDeletionInfo::Matches(const CanonicalCookie& cookie,
+                                 CookieAccessSemantics access_semantics) const {
   if (session_control != SessionControl::IGNORE_CONTROL &&
       (cookie.IsPersistent() !=
        (session_control == SessionControl::PERSISTENT_COOKIES))) {
@@ -120,9 +110,13 @@ bool CookieDeletionInfo::Matches(const CanonicalCookie& cookie) const {
     return false;
   }
 
+  // |CookieOptions::MakeAllInclusive()| options will make sure that all
+  // cookies associated with the URL are deleted.
   if (url.has_value() &&
-      cookie.IncludeForRequestURL(url.value(), cookie_options) !=
-          CanonicalCookie::CookieInclusionStatus::INCLUDE) {
+      !cookie
+           .IncludeForRequestURL(url.value(), CookieOptions::MakeAllInclusive(),
+                                 access_semantics)
+           .IsInclude()) {
     return false;
   }
 

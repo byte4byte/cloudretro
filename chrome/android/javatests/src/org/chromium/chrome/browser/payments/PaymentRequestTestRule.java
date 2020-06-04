@@ -14,6 +14,8 @@ import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.annotation.IntDef;
+
 import org.junit.Assert;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
@@ -24,17 +26,18 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.autofill.CardUnmaskPrompt;
 import org.chromium.chrome.browser.autofill.CardUnmaskPrompt.CardUnmaskObserverForTest;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorObserverForTest;
+import org.chromium.chrome.browser.autofill.prefeditor.EditorTextField;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.payments.PaymentRequestImpl.PaymentRequestServiceObserverForTest;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestSection.OptionSection;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestSection.OptionSection.OptionRow;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestUI;
 import org.chromium.chrome.browser.payments.ui.PaymentRequestUI.PaymentRequestObserverForTest;
-import org.chromium.chrome.browser.widget.prefeditor.EditorObserverForTest;
-import org.chromium.chrome.browser.widget.prefeditor.EditorTextField;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.components.payments.PayerData;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -44,15 +47,19 @@ import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
 import org.chromium.payments.mojom.PaymentMethodData;
+import org.chromium.payments.mojom.PaymentOptions;
+import org.chromium.payments.mojom.PaymentShippingOption;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 import org.chromium.ui.modelutil.PropertyModel;
 
-import java.util.ArrayList;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -62,23 +69,35 @@ import java.util.concurrent.atomic.AtomicReference;
 public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
         implements PaymentRequestObserverForTest, PaymentRequestServiceObserverForTest,
                    CardUnmaskObserverForTest, EditorObserverForTest {
-    /** Flag for installing a payment app without instruments. */
-    public static final int NO_INSTRUMENTS = 0;
+    @IntDef({AppPresence.NO_APPS, AppPresence.HAVE_APPS})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface AppPresence {
+        /** Flag for a factory without payment apps. */
+        public static final int NO_APPS = 0;
 
-    /** Flag for installing a payment app with instruments. */
-    public static final int HAVE_INSTRUMENTS = 1;
+        /** Flag for a factory with payment apps. */
+        public static final int HAVE_APPS = 1;
+    }
 
-    /** Flag for installing a fast payment app. */
-    public static final int IMMEDIATE_RESPONSE = 0;
+    @IntDef({AppSpeed.FAST_APP, AppSpeed.SLOW_APP})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface AppSpeed {
+        /** Flag for installing a payment app that responds to its invocation fast. */
+        public static final int FAST_APP = 0;
 
-    /** Flag for installing a slow payment app. */
-    public static final int DELAYED_RESPONSE = 1;
+        /** Flag for installing a payment app that responds to its invocation slowly. */
+        public static final int SLOW_APP = 1;
+    }
 
-    /** Flag for immediately installing a payment app. */
-    public static final int IMMEDIATE_CREATION = 0;
+    @IntDef({FactorySpeed.FAST_FACTORY, FactorySpeed.SLOW_FACTORY})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface FactorySpeed {
+        /** Flag for a factory that immediately creates a payment app. */
+        public static final int FAST_FACTORY = 0;
 
-    /** Flag for installing a payment app with a delay. */
-    public static final int DELAYED_CREATION = 1;
+        /** Flag for a factory that creates a payment app with a delay. */
+        public static final int SLOW_FACTORY = 1;
+    }
 
     /** The expiration month dropdown index for December. */
     public static final int DECEMBER = 11;
@@ -86,8 +105,10 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     /** The expiration year dropdown index for the next year. */
     public static final int NEXT_YEAR = 1;
 
-    /** The billing address dropdown index for the first billing address. Index 0 is for the
-     * "Select" hint.*/
+    /**
+     * The billing address dropdown index for the first billing address. Index 0 is for the
+     * "Select" hint.
+     */
     public static final int FIRST_BILLING_ADDRESS = 1;
 
     /** Command line flag to enable payment details modifiers in tests. */
@@ -117,6 +138,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     final CallbackHelper mHasEnrolledInstrumentQueryResponded;
     final CallbackHelper mExpirationMonthChange;
     final CallbackHelper mPaymentResponseReady;
+    final CallbackHelper mCompleteReplied;
+    final CallbackHelper mRendererClosedMojoConnection;
     PaymentRequestImpl mPaymentRequest;
     PaymentRequestUI mUI;
 
@@ -156,6 +179,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
         mShowFailed = new CallbackHelper();
         mCanMakePaymentQueryResponded = new CallbackHelper();
         mHasEnrolledInstrumentQueryResponded = new CallbackHelper();
+        mCompleteReplied = new CallbackHelper();
+        mRendererClosedMojoConnection = new CallbackHelper();
         mWebContentsRef = new AtomicReference<>();
         mTestFilePath = testFileName.equals("about:blank") || testFileName.startsWith("data:")
                 ? testFileName
@@ -169,11 +194,11 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
         this(testFileName, null);
     }
 
-    public void startMainActivity() throws InterruptedException {
+    public void startMainActivity() {
         startMainActivityWithURL(mTestFilePath);
     }
 
-    protected void openPage() throws InterruptedException, TimeoutException {
+    protected void openPage() throws TimeoutException {
         onMainActivityStarted();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             mWebContentsRef.set(getActivity().getCurrentWebContents());
@@ -242,75 +267,75 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     public CallbackHelper getPaymentResponseReady() {
         return mPaymentResponseReady;
     }
+    public CallbackHelper getCompleteReplied() {
+        return mCompleteReplied;
+    }
+    public CallbackHelper getRendererClosedMojoConnection() {
+        return mRendererClosedMojoConnection;
+    }
     public PaymentRequestUI getPaymentRequestUI() {
         return mUI;
     }
 
     protected void triggerUIAndWait(PaymentsCallbackHelper<PaymentRequestUI> helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         openPageAndClickNodeAndWait("buy", helper);
         mUI = helper.getTarget();
     }
 
     protected void openPageAndClickNodeAndWait(String nodeId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         openPage();
         clickNodeAndWait(nodeId, helper);
     }
 
-    protected void openPageAndClickBuyAndWait(CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+    protected void openPageAndClickBuyAndWait(CallbackHelper helper) throws TimeoutException {
         openPageAndClickNodeAndWait("buy", helper);
     }
 
-    protected void openPageAndClickNode(String nodeId)
-            throws InterruptedException, TimeoutException {
+    protected void openPageAndClickNode(String nodeId) throws TimeoutException {
         openPage();
         clickNode(nodeId);
     }
 
     protected void triggerUIAndWait(String nodeId, PaymentsCallbackHelper<PaymentRequestUI> helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         openPageAndClickNodeAndWait(nodeId, helper);
         mUI = helper.getTarget();
     }
 
-    protected void reTriggerUIAndWait(
-            String nodeId, PaymentsCallbackHelper<PaymentRequestUI> helper)
-            throws InterruptedException, TimeoutException {
+    protected void reTriggerUIAndWait(String nodeId,
+            PaymentsCallbackHelper<PaymentRequestUI> helper) throws TimeoutException {
         clickNodeAndWait(nodeId, helper);
         mUI = helper.getTarget();
     }
 
     protected void retryPaymentRequest(String validationErrors, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         JavaScriptUtils.executeJavaScriptAndWaitForResult(
                 mWebContentsRef.get(), "retry(" + validationErrors + ");");
         helper.waitForCallback(callCount);
     }
 
-    protected String executeJavaScriptAndWaitForResult(String script)
-            throws InterruptedException, TimeoutException {
+    protected String executeJavaScriptAndWaitForResult(String script) throws TimeoutException {
         return JavaScriptUtils.executeJavaScriptAndWaitForResult(mWebContentsRef.get(), script);
     }
 
     /** Clicks on an HTML node. */
-    protected void clickNodeAndWait(String nodeId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+    protected void clickNodeAndWait(String nodeId, CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         clickNode(nodeId);
         helper.waitForCallback(callCount);
     }
 
     /** Clicks on an HTML node. */
-    protected void clickNode(String nodeId) throws InterruptedException, TimeoutException {
+    protected void clickNode(String nodeId) throws TimeoutException {
         DOMUtils.clickNode(mWebContentsRef.get(), nodeId);
     }
 
     /** Clicks on an element in the payments UI. */
-    protected void clickAndWait(int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+    protected void clickAndWait(int resourceId, CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
@@ -324,8 +349,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     /** Clicks on an element in the "Order summary" section of the payments UI. */
-    protected void clickInOrderSummaryAndWait(CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+    protected void clickInOrderSummaryAndWait(CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             mUI.getOrderSummarySectionForTest().findViewById(R.id.payments_section).performClick();
@@ -335,7 +359,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on an element in the "Shipping address" section of the payments UI. */
     protected void clickInShippingAddressAndWait(final int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             mUI.getShippingAddressSectionForTest().findViewById(resourceId).performClick();
@@ -345,7 +369,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on an element in the "Payment" section of the payments UI. */
     protected void clickInPaymentMethodAndWait(final int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             mUI.getPaymentMethodSectionForTest().findViewById(resourceId).performClick();
@@ -355,7 +379,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on an element in the "Contact Info" section of the payments UI. */
     protected void clickInContactInfoAndWait(final int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             mUI.getContactDetailsSectionForTest().findViewById(resourceId).performClick();
@@ -365,7 +389,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on an element in the editor UI for credit cards. */
     protected void clickInCardEditorAndWait(final int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(
                 () -> { mUI.getCardEditorDialog().findViewById(resourceId).performClick(); });
@@ -374,7 +398,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on an element in the editor UI. */
     protected void clickInEditorAndWait(final int resourceId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(
                 () -> { mUI.getEditorDialog().findViewById(resourceId).performClick(); });
@@ -382,7 +406,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     protected void clickAndroidBackButtonInEditorAndWait(CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
             mUI.getEditorDialog().dispatchKeyEvent(
@@ -395,7 +419,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Clicks on a button in the card unmask UI. */
     protected void clickCardUnmaskButtonAndWait(final int dialogButtonId, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             PropertyModel model = mCardUnmaskPrompt.getDialogForTest();
@@ -425,8 +449,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
                 () -> mUI.getContactDetailsSectionForTest().getEditButtonState());
     }
 
-    /** Returns the label corresponding to the payment instrument at the specified |index|. */
-    protected String getPaymentInstrumentLabel(final int index) {
+    /** Returns the label of the payment app at the specified |index|. */
+    protected String getPaymentAppLabel(final int index) {
         return ThreadUtils.runOnUiThreadBlockingNoException(
                 ()
                         -> ((OptionSection) mUI.getPaymentMethodSectionForTest())
@@ -435,8 +459,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
                                    .toString());
     }
 
-    /** Returns the label of the selected payment instrument. */
-    protected String getSelectedPaymentInstrumentLabel() {
+    /** Returns the label of the selected payment app. */
+    protected String getSelectedPaymentAppLabel() {
         return ThreadUtils.runOnUiThreadBlockingNoException(() -> {
             OptionSection section = ((OptionSection) mUI.getPaymentMethodSectionForTest());
             int size = section.getNumberOfOptionLabelsForTest();
@@ -485,8 +509,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
                                    .toString());
     }
 
-    /** Returns the number of payment instruments. */
-    protected int getNumberOfPaymentInstruments() {
+    /** Returns the number of payment apps. */
+    protected int getNumberOfPaymentApps() {
         return ThreadUtils.runOnUiThreadBlockingNoException(
                 ()
                         -> ((OptionSection) mUI.getPaymentMethodSectionForTest())
@@ -498,7 +522,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
      * |suggestionIndex|.
      */
     protected String getPaymentMethodSuggestionLabel(final int suggestionIndex) {
-        Assert.assertTrue(suggestionIndex < getNumberOfPaymentInstruments());
+        Assert.assertTrue(suggestionIndex < getNumberOfPaymentApps());
 
         return ThreadUtils.runOnUiThreadBlockingNoException(
                 ()
@@ -584,10 +608,9 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     /**
      * Clicks on the label corresponding to the shipping address suggestion at the specified
      * |suggestionIndex|.
-     * @throws InterruptedException
      */
-    protected void clickOnShippingAddressSuggestionOptionAndWait(final int suggestionIndex,
-            CallbackHelper helper) throws TimeoutException, InterruptedException {
+    protected void clickOnShippingAddressSuggestionOptionAndWait(
+            final int suggestionIndex, CallbackHelper helper) throws TimeoutException {
         Assert.assertTrue(suggestionIndex < getNumberOfShippingAddressSuggestions());
 
         int callCount = helper.getCallCount();
@@ -602,11 +625,10 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     /**
      * Clicks on the label corresponding to the payment method suggestion at the specified
      * |suggestionIndex|.
-     * @throws InterruptedException
      */
-    protected void clickOnPaymentMethodSuggestionOptionAndWait(final int suggestionIndex,
-            CallbackHelper helper) throws TimeoutException, InterruptedException {
-        Assert.assertTrue(suggestionIndex < getNumberOfPaymentInstruments());
+    protected void clickOnPaymentMethodSuggestionOptionAndWait(
+            final int suggestionIndex, CallbackHelper helper) throws TimeoutException {
+        Assert.assertTrue(suggestionIndex < getNumberOfPaymentApps());
 
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
@@ -620,10 +642,9 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     /**
      * Clicks on the label corresponding to the contact info suggestion at the specified
      * |suggestionIndex|.
-     * @throws InterruptedException
      */
-    protected void clickOnContactInfoSuggestionOptionAndWait(final int suggestionIndex,
-            CallbackHelper helper) throws TimeoutException, InterruptedException {
+    protected void clickOnContactInfoSuggestionOptionAndWait(
+            final int suggestionIndex, CallbackHelper helper) throws TimeoutException {
         Assert.assertTrue(suggestionIndex < getNumberOfContactDetailSuggestions());
 
         int callCount = helper.getCallCount();
@@ -639,9 +660,9 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
      * Clicks on the edit icon corresponding to the payment method suggestion at the specified
      * |suggestionIndex|.
      */
-    protected void clickOnPaymentMethodSuggestionEditIconAndWait(final int suggestionIndex,
-            CallbackHelper helper) throws TimeoutException, InterruptedException {
-        Assert.assertTrue(suggestionIndex < getNumberOfPaymentInstruments());
+    protected void clickOnPaymentMethodSuggestionEditIconAndWait(
+            final int suggestionIndex, CallbackHelper helper) throws TimeoutException {
+        Assert.assertTrue(suggestionIndex < getNumberOfPaymentApps());
 
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
@@ -731,8 +752,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     /** Selects the spinner value in the editor UI for credit cards. */
-    protected void setSpinnerSelectionsInCardEditorAndWait(final int[] selections,
-            CallbackHelper helper) throws InterruptedException, TimeoutException {
+    protected void setSpinnerSelectionsInCardEditorAndWait(
+            final int[] selections, CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             List<Spinner> fields = mUI.getCardEditorDialog().getDropdownFieldsForTest();
@@ -745,7 +766,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Selects the spinner value in the editor UI. */
     protected void setSpinnerSelectionInEditorAndWait(final int selection, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(
                 ()
@@ -756,11 +777,10 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Directly sets the text in the editor UI for credit cards. */
     protected void setTextInCardEditorAndWait(final String[] values, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
-            ViewGroup contents =
-                    (ViewGroup) mUI.getCardEditorDialog().findViewById(R.id.contents);
+            ViewGroup contents = (ViewGroup) mUI.getCardEditorDialog().findViewById(R.id.contents);
             Assert.assertNotNull(contents);
             for (int i = 0, j = 0; i < contents.getChildCount() && j < values.length; i++) {
                 View view = contents.getChildAt(i);
@@ -774,7 +794,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Directly sets the text in the editor UI. */
     protected void setTextInEditorAndWait(final String[] values, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+            throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             List<EditText> fields = mUI.getEditorDialog().getEditableTextFieldsForTest();
@@ -788,7 +808,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Directly sets the checkbox selection in the editor UI for credit cards. */
     protected void selectCheckboxAndWait(final int resourceId, final boolean isChecked,
-            CallbackHelper helper) throws InterruptedException, TimeoutException {
+            CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(
                 ()
@@ -799,7 +819,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
 
     /** Directly sets the text in the card unmask UI. */
     protected void setTextInCardUnmaskDialogAndWait(final int resourceId, final String input,
-            CallbackHelper helper) throws InterruptedException, TimeoutException {
+            CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             EditText editText = mCardUnmaskPrompt.getDialogForTest()
@@ -812,9 +832,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     /** Directly sets the text in the expired card unmask UI. */
-    protected void setTextInExpiredCardUnmaskDialogAndWait(
-            final int[] resourceIds, final String[] values, CallbackHelper helper)
-            throws InterruptedException, TimeoutException {
+    protected void setTextInExpiredCardUnmaskDialogAndWait(final int[] resourceIds,
+            final String[] values, CallbackHelper helper) throws TimeoutException {
         assert resourceIds.length == values.length;
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
@@ -830,8 +849,8 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     /** Focues a view and hits the "submit" button on the software keyboard. */
-    /* package */ void hitSoftwareKeyboardSubmitButtonAndWait(final int resourceId,
-            CallbackHelper helper) throws InterruptedException, TimeoutException {
+    /* package */ void hitSoftwareKeyboardSubmitButtonAndWait(
+            final int resourceId, CallbackHelper helper) throws TimeoutException {
         int callCount = helper.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(() -> {
             EditText editText = mCardUnmaskPrompt.getDialogForTest()
@@ -862,9 +881,6 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
                         }
                     }
                     return true;
-                } catch (InterruptedException e1) {
-                    updateFailureReason(e1.getMessage());
-                    return false;
                 } catch (TimeoutException e2) {
                     updateFailureReason(e2.getMessage());
                     return false;
@@ -936,7 +952,7 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
         }
     }
 
-    /* package */ View getPaymentRequestView() throws Throwable {
+    /* package */ View getPaymentRequestView() {
         return ThreadUtils.runOnUiThreadBlockingNoException(
                 () -> mUI.getDialogForTest().findViewById(R.id.payment_request));
     }
@@ -963,6 +979,9 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     @Override
     public void onPaymentRequestReadyForInput(PaymentRequestUI ui) {
         ThreadUtils.assertOnUiThread();
+        // This happens when the payment request is created by a direct js function call rather than
+        // calling the js function via triggerUIAndWait() which sets the mUI.
+        if (mUI == null) mUI = ui;
         mReadyForInput.notifyCalled(ui);
     }
 
@@ -987,6 +1006,9 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     @Override
     public void onPaymentRequestReadyToPay(PaymentRequestUI ui) {
         ThreadUtils.assertOnUiThread();
+        // This happens when the payment request is created by a direct js function call rather than
+        // calling the js function via triggerUIAndWait() which sets the mUI.
+        if (mUI == null) mUI = ui;
         mReadyToPay.notifyCalled(ui);
     }
 
@@ -1081,6 +1103,18 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
         mPaymentResponseReady.notifyCalled();
     }
 
+    @Override
+    public void onCompleteReplied() {
+        ThreadUtils.assertOnUiThread();
+        mCompleteReplied.notifyCalled();
+    }
+
+    @Override
+    public void onRendererClosedMojoConnection() {
+        ThreadUtils.assertOnUiThread();
+        mRendererClosedMojoConnection.notifyCalled();
+    }
+
     /**
      * Listens for UI notifications.
      */
@@ -1109,127 +1143,96 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     }
 
     /**
-     * Installs a payment app for testing.
+     * Adds a payment app factory for testing.
      *
-     * @param instrumentPresence Whether the app has any payment instruments. Either NO_INSTRUMENTS
-     *                           or HAVE_INSTRUMENTS.
-     * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
-     *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
+     * @param appPresence  Whether the factory has apps.
+     * @param factorySpeed How quick the factory creates apps.
+     * @return The test factory. Can be ignored.
      */
-    protected void installPaymentApp(int instrumentPresence, int responseSpeed) {
-        installPaymentApp("https://bobpay.com", instrumentPresence, responseSpeed);
+    /* package */ TestFactory addPaymentAppFactory(
+            @AppPresence int appPresence, @FactorySpeed int factorySpeed) {
+        return addPaymentAppFactory("https://bobpay.com", appPresence, factorySpeed);
     }
 
     /**
-     * Installs a payment app for testing.
+     * Adds a payment app factory for testing.
      *
-     * @param methodName         The name of the payment method used in the payment app.
-     * @param instrumentPresence Whether the app has any payment instruments. Either NO_INSTRUMENTS
-     *                           or HAVE_INSTRUMENTS.
-     * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
-     *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
+     * @param methodName   The name of the payment method used in the payment app.
+     * @param appPresence  Whether the factory has apps.
+     * @param factorySpeed How quick the factory creates apps.
+     * @return The test factory. Can be ignored.
      */
-    protected void installPaymentApp(String methodName, int instrumentPresence, int responseSpeed) {
-        installPaymentApp(methodName, instrumentPresence, responseSpeed, IMMEDIATE_CREATION);
+    /* package */ TestFactory addPaymentAppFactory(
+            String methodName, @AppPresence int appPresence, @FactorySpeed int factorySpeed) {
+        return addPaymentAppFactory(methodName, appPresence, factorySpeed, AppSpeed.FAST_APP);
     }
 
     /**
-     * Installs a payment app for testing.
+     * Adds a payment app factory for testing.
      *
-     * @param methodName         The name of the payment method used in the payment app.
-     * @param instrumentPresence Whether the app has any payment instruments. Either NO_INSTRUMENTS
-     *                           or HAVE_INSTRUMENTS.
-     * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
-     *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
-     * @param creationSpeed      How quickly the app factory will create this app. Either
-     *                           IMMEDIATE_CREATION or DELAYED_CREATION.
+     * @param methodName   The name of the payment method used in the payment app.
+     * @param appPresence  Whether the factory has apps.
+     * @param factorySpeed How quick the factory creates apps.
+     * @param appSpeed     How quick the app responds to "invoke".
+     * @return The test factory. Can be ignored.
      */
-    protected void installPaymentApp(
-            final String appMethodName, final int instrumentPresence,
-            final int responseSpeed, final int creationSpeed) {
-        PaymentAppFactory.getInstance().addAdditionalFactory(
-                (webContents, methodNames, mayCrawlUnusued, callback) -> {
-                    final TestPay app = new TestPay(appMethodName, instrumentPresence,
-                            responseSpeed);
-                    if (creationSpeed == IMMEDIATE_CREATION) {
-                        callback.onPaymentAppCreated(app);
-                        callback.onAllPaymentAppsCreated();
-                    } else {
-                        new Handler().postDelayed(() -> {
-                            callback.onPaymentAppCreated(app);
-                            callback.onAllPaymentAppsCreated();
-                        }, 100);
-                    }
-                });
+    /* package */ TestFactory addPaymentAppFactory(String appMethodName, int appPresence,
+            @FactorySpeed int factorySpeed, @AppSpeed int appSpeed) {
+        TestFactory factory = new TestFactory(appMethodName, appPresence, factorySpeed, appSpeed);
+        PaymentAppService.getInstance().addFactory(factory);
+        return factory;
+    }
+
+    /** A payment app factory implementation for test. */
+    /* package */ static final class TestFactory implements PaymentAppFactoryInterface {
+        private final String mAppMethodName;
+        private final @AppPresence int mAppPresence;
+        private final @FactorySpeed int mFactorySpeed;
+        private final @AppSpeed int mAppSpeed;
+        private PaymentAppFactoryDelegate mDelegate;
+
+        private TestFactory(String appMethodName, @AppPresence int appPresence,
+                @FactorySpeed int factorySpeed, @AppSpeed int appSpeed) {
+            mAppMethodName = appMethodName;
+            mAppPresence = appPresence;
+            mFactorySpeed = factorySpeed;
+            mAppSpeed = appSpeed;
+        }
+
+        @Override
+        public void create(PaymentAppFactoryDelegate delegate) {
+            Runnable createApp = () -> {
+                boolean canMakePayment =
+                        delegate.getParams().getMethodData().containsKey(mAppMethodName);
+                delegate.onCanMakePaymentCalculated(canMakePayment);
+                if (canMakePayment && mAppPresence == AppPresence.HAVE_APPS) {
+                    delegate.onPaymentAppCreated(new TestPay(mAppMethodName, mAppSpeed));
+                }
+                delegate.onDoneCreatingPaymentApps(this);
+            };
+            if (mFactorySpeed == FactorySpeed.FAST_FACTORY) {
+                createApp.run();
+            } else {
+                new Handler().postDelayed(createApp, 100);
+            }
+            mDelegate = delegate;
+        }
+
+        /* package */ PaymentAppFactoryDelegate getDelegateForTest() {
+            return mDelegate;
+        }
     }
 
     /** A payment app implementation for test. */
-    static class TestPay implements PaymentApp {
+    /* package */ static final class TestPay extends PaymentApp {
         private final String mDefaultMethodName;
-        private final int mInstrumentPresence;
-        private final int mResponseSpeed;
-        private InstrumentsCallback mCallback;
+        private final @AppSpeed int mAppSpeed;
 
-        TestPay(String defaultMethodName, int instrumentPresence, int responseSpeed) {
+        TestPay(String defaultMethodName, @AppSpeed int appSpeed) {
+            super(/*id=*/UUID.randomUUID().toString(), /*label=*/defaultMethodName,
+                    /*sublabel=*/null, /*icon=*/null);
             mDefaultMethodName = defaultMethodName;
-            mInstrumentPresence = instrumentPresence;
-            mResponseSpeed = responseSpeed;
-        }
-
-        @Override
-        public void getInstruments(String id, Map<String, PaymentMethodData> methodData,
-                String origin, String iframeOrigin, byte[][] certificateChain,
-                Map<String, PaymentDetailsModifier> modifiers,
-                InstrumentsCallback instrumentsCallback) {
-            mCallback = instrumentsCallback;
-            respond();
-        }
-
-        void respond() {
-            final List<PaymentInstrument> instruments = new ArrayList<>();
-            if (mInstrumentPresence == HAVE_INSTRUMENTS) {
-                instruments.add(new TestPayInstrument(
-                        getAppIdentifier(), mDefaultMethodName, mDefaultMethodName));
-            }
-            Runnable instrumentsReady = () -> {
-                ThreadUtils.assertOnUiThread();
-                mCallback.onInstrumentsReady(TestPay.this, instruments);
-            };
-            if (mResponseSpeed == IMMEDIATE_RESPONSE) {
-                instrumentsReady.run();
-            } else if (mResponseSpeed == DELAYED_RESPONSE) {
-                new Handler().postDelayed(instrumentsReady, 100);
-            }
-        }
-
-        @Override
-        public Set<String> getAppMethodNames() {
-            Set<String> result = new HashSet<>();
-            result.add(mDefaultMethodName);
-            return result;
-        }
-
-        @Override
-        public boolean supportsMethodsAndData(Map<String, PaymentMethodData> methodsAndData) {
-            assert methodsAndData != null;
-            Set<String> methodNames = new HashSet<>(methodsAndData.keySet());
-            methodNames.retainAll(getAppMethodNames());
-            return !methodNames.isEmpty();
-        }
-
-        @Override
-        public String getAppIdentifier() {
-            return TestPay.this.toString();
-        }
-    }
-
-    /** A payment instrument implementation for test. */
-    private static class TestPayInstrument extends PaymentInstrument {
-        private final String mDefaultMethodName;
-
-        TestPayInstrument(String appId, String defaultMethodName, String label) {
-            super(appId + defaultMethodName, label, null, null);
-            mDefaultMethodName = defaultMethodName;
+            mAppSpeed = appSpeed;
         }
 
         @Override
@@ -1244,16 +1247,25 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
                 String iframeOrigin, byte[][] certificateChain,
                 Map<String, PaymentMethodData> methodData, PaymentItem total,
                 List<PaymentItem> displayItems, Map<String, PaymentDetailsModifier> modifiers,
+                PaymentOptions paymentOptions, List<PaymentShippingOption> shippingOptions,
                 InstrumentDetailsCallback detailsCallback) {
-            detailsCallback.onInstrumentDetailsReady(mDefaultMethodName,
-                    "{\"transaction\": 1337, \"total\": \"" + total.amount.value + "\"}");
+            Runnable respond = () -> {
+                detailsCallback.onInstrumentDetailsReady(mDefaultMethodName,
+                        "{\"transaction\": 1337, \"total\": \"" + total.amount.value + "\"}",
+                        new PayerData());
+            };
+            if (mAppSpeed == AppSpeed.FAST_APP) {
+                respond.run();
+            } else {
+                new Handler().postDelayed(respond, 100);
+            }
         }
 
         @Override
         public void dismissInstrument() {}
     }
 
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         if (mCallback != null) {
             mCallback.onMainActivityStarted();
         }
@@ -1273,6 +1285,6 @@ public class PaymentRequestTestRule extends ChromeTabbedActivityTestRule
     /** The interface for being notified of the main activity startup. */
     public interface MainActivityStartCallback {
         /** Called when the main activity has started up. */
-        void onMainActivityStarted() throws InterruptedException, TimeoutException;
+        void onMainActivityStarted() throws TimeoutException;
     }
 }

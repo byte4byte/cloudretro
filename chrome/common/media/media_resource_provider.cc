@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
-#include "build/build_config.h"
 #include "chrome/common/media/media_resource_provider.h"
+#include "base/notreached.h"
+#include "build/build_config.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-namespace chrome_common_media {
+namespace {
 
 int MediaMessageIdToGrdId(media::MessageId message_id) {
   switch (message_id) {
@@ -24,8 +24,8 @@ int MediaMessageIdToGrdId(media::MessageId message_id) {
   }
 }
 
-base::string16 LocalizedStringProvider(media::MessageId message_id) {
+}  // namespace
+
+base::string16 ChromeMediaLocalizedStringProvider(media::MessageId message_id) {
   return l10n_util::GetStringUTF16(MediaMessageIdToGrdId(message_id));
 }
-
-}  // namespace chrome_common_media

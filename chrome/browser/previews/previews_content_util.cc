@@ -14,12 +14,12 @@
 #include "base/optional.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/default_clock.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "chrome/browser/previews/previews_lite_page_decider.h"
-#include "chrome/browser/previews/previews_lite_page_navigation_throttle.h"
-#include "chrome/browser/previews/previews_lite_page_navigation_throttle_manager.h"
+#include "chrome/browser/previews/previews_lite_page_redirect_decider.h"
+#include "chrome/browser/previews/previews_lite_page_redirect_url_loader_interceptor.h"
 #include "chrome/browser/previews/previews_offline_helper.h"
 #include "chrome/browser/previews/previews_service.h"
 #include "chrome/browser/previews/previews_service_factory.h"
@@ -29,16 +29,23 @@
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
+#include "components/previews/content/previews_ui_service.h"
 #include "components/previews/content/previews_user_data.h"
 #include "components/previews/core/previews_experiments.h"
 #include "components/previews/core/previews_features.h"
 #include "components/previews/core/previews_lite_page_redirect.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/ip_address.h"
 #include "net/base/url_util.h"
 #include "net/nqe/effective_connection_type.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_source.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 
 namespace previews {
 
@@ -73,20 +80,19 @@ bool ShouldAllowRedirectPreview(content::NavigationHandle* navigation_handle) {
   content::WebContents* web_contents = navigation_handle->GetWebContents();
   auto* previews_service = PreviewsServiceFactory::GetForProfile(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()));
-  PreviewsLitePageDecider* decider =
-      previews_service->previews_lite_page_decider();
+  PreviewsLitePageRedirectDecider* decider =
+      previews_service->previews_lite_page_redirect_decider();
 
-  std::vector<PreviewsLitePageNavigationThrottle::IneligibleReason>
-      ineligible_reasons;
+  std::vector<previews::LitePageRedirectIneligibleReason> ineligible_reasons;
 
   if (!url.SchemeIs(url::kHttpsScheme)) {
     ineligible_reasons.push_back(
-        PreviewsLitePageNavigationThrottle::IneligibleReason::kNonHttpsScheme);
+        previews::LitePageRedirectIneligibleReason::kNonHttpsScheme);
   }
 
   if (decider->IsServerUnavailable()) {
-    ineligible_reasons.push_back(PreviewsLitePageNavigationThrottle::
-                                     IneligibleReason::kServerUnavailable);
+    ineligible_reasons.push_back(
+        previews::LitePageRedirectIneligibleReason::kServerUnavailable);
   }
 
   content_settings::CookieSettings* cookie_settings =
@@ -94,46 +100,72 @@ bool ShouldAllowRedirectPreview(content::NavigationHandle* navigation_handle) {
           Profile::FromBrowserContext(web_contents->GetBrowserContext()))
           .get();
   ContentSetting setting;
-  GURL previews_url =
-      PreviewsLitePageNavigationThrottle::GetPreviewsURLForURL(url);
+  GURL previews_url = GetLitePageRedirectURLForURL(url);
   cookie_settings->GetCookieSetting(previews_url, previews_url, nullptr,
                                     &setting);
   if (!content_settings::CookieSettingsBase::IsAllowed(setting)) {
     ineligible_reasons.push_back(
-        PreviewsLitePageNavigationThrottle::IneligibleReason::kCookiesBlocked);
+        previews::LitePageRedirectIneligibleReason::kCookiesBlocked);
   }
 
   if (!decider->has_drp_headers()) {
-    ineligible_reasons.push_back(PreviewsLitePageNavigationThrottle::
-                                     IneligibleReason::kInvalidProxyHeaders);
+    ineligible_reasons.push_back(
+        previews::LitePageRedirectIneligibleReason::kInvalidProxyHeaders);
+  }
+
+  if (previews::params::LitePageRedirectOnlyTriggerOnSuccessfulProbe()) {
+    if (!decider->IsServerProbeResultAvailable()) {
+      ineligible_reasons.push_back(
+          previews::LitePageRedirectIneligibleReason::kServiceProbeIncomplete);
+    } else if (!decider->IsServerReachableByProbe()) {
+      ineligible_reasons.push_back(
+          previews::LitePageRedirectIneligibleReason::kServiceProbeFailed);
+    }
+  }
+
+  if (!previews::params::LitePageRedirectTriggerOnAPITransition() &&
+      navigation_handle->GetPageTransition() & ui::PAGE_TRANSITION_FROM_API) {
+    ineligible_reasons.push_back(
+        previews::LitePageRedirectIneligibleReason::kAPIPageTransition);
+  }
+
+  if (previews::params::LitePageRedirectValidateForwardBackTransition() &&
+      navigation_handle->GetPageTransition() &
+          ui::PAGE_TRANSITION_FORWARD_BACK) {
+    // On forward/back navigations, enable LPR iff we showed an LPR for the
+    // prior navigation that we are returning to. For example, suppose the user
+    // navigates to A then B, without getting a preview for either navigation.
+    // If the user navigates back to A, we should load the original page as that
+    // is likely cached; loading a preview would be much slower as that requires
+    // contacting the litepages server.
+    if (!previews::IsLitePageRedirectPreviewURL(navigation_handle->GetURL())) {
+      ineligible_reasons.push_back(previews::LitePageRedirectIneligibleReason::
+                                       kForwardBackPageTransition);
+    }
   }
 
   // Record UMA.
-  for (PreviewsLitePageNavigationThrottle::IneligibleReason reason :
-       ineligible_reasons) {
-    PreviewsLitePageNavigationThrottle::LogIneligibleReason(reason);
+  for (previews::LitePageRedirectIneligibleReason reason : ineligible_reasons) {
+    previews::LogLitePageRedirectIneligibleReason(reason);
   }
   if (!ineligible_reasons.empty())
     return false;
 
   // Check dynamic blacklists.
-  std::vector<PreviewsLitePageNavigationThrottle::BlacklistReason>
-      blacklist_reasons;
+  std::vector<previews::LitePageRedirectBlacklistReason> blacklist_reasons;
 
   if (IsPrivateDomain(url)) {
     blacklist_reasons.push_back(
-        PreviewsLitePageNavigationThrottle::BlacklistReason::
-            kNavigationToPrivateDomain);
+        previews::LitePageRedirectBlacklistReason::kNavigationToPrivateDomain);
   }
 
   if (decider->HostBlacklistedFromBypass(url.host())) {
-    blacklist_reasons.push_back(PreviewsLitePageNavigationThrottle::
-                                    BlacklistReason::kHostBypassBlacklisted);
+    blacklist_reasons.push_back(
+        previews::LitePageRedirectBlacklistReason::kHostBypassBlacklisted);
   }
 
   // Record UMA
-  for (PreviewsLitePageNavigationThrottle::BlacklistReason reason :
-       blacklist_reasons) {
+  for (previews::LitePageRedirectBlacklistReason reason : blacklist_reasons) {
     UMA_HISTOGRAM_ENUMERATION("Previews.ServerLitePage.BlacklistReasons",
                               reason);
   }
@@ -142,18 +174,18 @@ bool ShouldAllowRedirectPreview(content::NavigationHandle* navigation_handle) {
     return false;
 
   // This should always be at the end, but before the control group check.
-  if (decider->NeedsToNotifyUser()) {
-    decider->NotifyUser(web_contents);
-    PreviewsLitePageNavigationThrottle::LogIneligibleReason(
-        PreviewsLitePageNavigationThrottle::IneligibleReason::kInfoBarNotSeen);
+  if (previews_service->previews_https_notification_infobar_decider()
+          ->NeedsToNotifyUser()) {
+    previews::LogLitePageRedirectIneligibleReason(
+        previews::LitePageRedirectIneligibleReason::kInfoBarNotSeen);
     return false;
   }
 
   // This should always be last.
   if (previews::params::IsInLitePageRedirectControl()) {
     previews::PreviewsUserData::ServerLitePageInfo* info =
-        PreviewsLitePageNavigationThrottle::GetOrCreateServerLitePageInfo(
-            navigation_handle, decider);
+        PreviewsLitePageRedirectURLLoaderInterceptor::
+            GetOrCreateServerLitePageInfo(navigation_handle, decider);
     info->status = previews::ServerLitePageStatus::kControl;
     return false;
   }
@@ -169,9 +201,6 @@ CreateServerLitePageInfoFromNavigationHandle(
   // This is only for unit testing.
   if (!navigation_handle->GetWebContents())
     return nullptr;
-
-  server_lite_page_info->original_navigation_start =
-      navigation_handle->NavigationStart();
 
   const net::HttpRequestHeaders& headers =
       navigation_handle->GetRequestHeaders();
@@ -231,9 +260,6 @@ content::PreviewsState DetermineAllowedClientPreviewsState(
     return content::LITE_PAGE_REDIRECT_ON;
   }
 
-  // Record whether the hint cache has a matching entry for this pre-commit URL.
-  previews_decider->LogHintCacheMatch(url, false /* is_committed */);
-
   if (!previews::params::ArePreviewsAllowed()) {
     return previews_state;
   }
@@ -264,41 +290,43 @@ content::PreviewsState DetermineAllowedClientPreviewsState(
                         ->ShouldAttemptOfflinePreview(url);
   }
   allow_offline =
-      allow_offline &&
-      previews_decider->ShouldAllowPreviewAtNavigationStart(
-          previews_data, url, is_reload, previews::PreviewsType::OFFLINE);
+      allow_offline && previews_decider->ShouldAllowPreviewAtNavigationStart(
+                           previews_data, navigation_handle, is_reload,
+                           previews::PreviewsType::OFFLINE);
 
   if (allow_offline)
     previews_state |= content::OFFLINE_PAGE_ON;
 
-  // Check PageHint preview types first.
-  bool should_load_page_hints = false;
+  // Check commit-time preview types first.
+  bool allow_commit_time_previews = false;
   if (previews_decider->ShouldAllowPreviewAtNavigationStart(
-          previews_data, url, is_reload,
+          previews_data, navigation_handle, is_reload,
           previews::PreviewsType::DEFER_ALL_SCRIPT)) {
     previews_state |= content::DEFER_ALL_SCRIPT_ON;
-    should_load_page_hints = true;
+    allow_commit_time_previews = true;
   }
   if (previews_decider->ShouldAllowPreviewAtNavigationStart(
-          previews_data, url, is_reload,
+          previews_data, navigation_handle, is_reload,
           previews::PreviewsType::RESOURCE_LOADING_HINTS)) {
     previews_state |= content::RESOURCE_LOADING_HINTS_ON;
-    should_load_page_hints = true;
+    allow_commit_time_previews = true;
   }
   if (previews_decider->ShouldAllowPreviewAtNavigationStart(
-          previews_data, url, is_reload, previews::PreviewsType::NOSCRIPT)) {
+          previews_data, navigation_handle, is_reload,
+          previews::PreviewsType::NOSCRIPT)) {
     previews_state |= content::NOSCRIPT_ON;
-    should_load_page_hints = true;
+    allow_commit_time_previews = true;
   }
-  bool has_page_hints = false;
-  if (should_load_page_hints) {
-    // Initiate load of any applicable page hint details.
-    has_page_hints = previews_decider->LoadPageHints(url);
+  bool commit_time_previews_are_available = false;
+  if (allow_commit_time_previews) {
+    commit_time_previews_are_available =
+        previews_decider->AreCommitTimePreviewsAvailable(navigation_handle);
   }
 
-  if ((!has_page_hints || params::LitePagePreviewsOverridePageHints()) &&
+  if ((!commit_time_previews_are_available ||
+       params::LitePagePreviewsOverridePageHints()) &&
       previews_decider->ShouldAllowPreviewAtNavigationStart(
-          previews_data, url, is_reload,
+          previews_data, navigation_handle, is_reload,
           previews::PreviewsType::LITE_PAGE_REDIRECT) &&
       ShouldAllowRedirectPreview(navigation_handle)) {
     previews_state |= content::LITE_PAGE_REDIRECT_ON;
@@ -333,17 +361,59 @@ void LogCommittedPreview(previews::PreviewsUserData* previews_data,
       navigation_ect, net::EFFECTIVE_CONNECTION_TYPE_LAST);
 }
 
+// Records the result of the coin flip in PreviewsUserData and UKM. This may be
+// called multiple times during a navigation (like on redirects), but once
+// called with one |result|, that value is not expected to change.
+void UpdatePreviewsUserDataAndRecordCoinFlipResult(
+    content::NavigationHandle* navigation_handle,
+    previews::PreviewsUserData* previews_user_data,
+    previews::CoinFlipHoldbackResult result) {
+  DCHECK_NE(result, previews::CoinFlipHoldbackResult::kNotSet);
+
+  // Log a coin flip holdback to the interventions-internals page.
+  if (result == previews::CoinFlipHoldbackResult::kHoldback) {
+    auto* previews_service =
+        navigation_handle && navigation_handle->GetWebContents()
+            ? PreviewsServiceFactory::GetForProfile(Profile::FromBrowserContext(
+                  navigation_handle->GetWebContents()->GetBrowserContext()))
+            : nullptr;
+    if (previews_service && previews_service->previews_ui_service()) {
+      PreviewsEligibilityReason reason =
+          PreviewsEligibilityReason::COINFLIP_HOLDBACK;
+      PreviewsType type =
+          previews_user_data->PreHoldbackCommittedPreviewsType();
+      std::vector<PreviewsEligibilityReason> passed_reasons;
+      previews_service->previews_ui_service()->LogPreviewDecisionMade(
+          reason, navigation_handle->GetURL(),
+          base::DefaultClock::GetInstance()->Now(), type,
+          std::move(passed_reasons), previews_user_data->page_id());
+    }
+  }
+
+  // We only want to record the coin flip once per navigation when set, so if it
+  // is already set then we're done.
+  if (previews_user_data->coin_flip_holdback_result() !=
+      previews::CoinFlipHoldbackResult::kNotSet) {
+    // The coin flip result value should never change its set state during a
+    // navigation.
+    DCHECK_EQ(previews_user_data->coin_flip_holdback_result(), result);
+    return;
+  }
+
+  previews_user_data->set_coin_flip_holdback_result(result);
+
+  ukm::builders::PreviewsCoinFlip builder(ukm::ConvertToSourceId(
+      navigation_handle->GetNavigationId(), ukm::SourceIdType::NAVIGATION_ID));
+  builder.Setcoin_flip_result(static_cast<int>(result));
+  builder.Record(ukm::UkmRecorder::Get());
+}
+
 content::PreviewsState DetermineCommittedClientPreviewsState(
     previews::PreviewsUserData* previews_data,
     const GURL& url,
     content::PreviewsState previews_state,
     const previews::PreviewsDecider* previews_decider,
     content::NavigationHandle* navigation_handle) {
-  bool is_https = url.SchemeIs(url::kHttpsScheme);
-
-  // Record whether the hint cache has a matching entry for this committed URL.
-  previews_decider->LogHintCacheMatch(url, true /* is_committed */);
-
   // Check if an offline preview was actually served.
   if (previews_data && previews_data->offline_preview_used()) {
     DCHECK(previews_state & content::OFFLINE_PAGE_ON);
@@ -374,9 +444,7 @@ content::PreviewsState DetermineCommittedClientPreviewsState(
   // Check if a LITE_PAGE_REDIRECT preview was actually served.
   if (previews_state & content::LITE_PAGE_REDIRECT_ON) {
     if (IsLitePageRedirectPreviewURL(url)) {
-      if (navigation_handle &&
-          base::FeatureList::IsEnabled(
-              previews::features::kHTTPSServerPreviewsUsingURLLoader)) {
+      if (navigation_handle) {
         previews_data->set_server_lite_page_info(
             CreateServerLitePageInfoFromNavigationHandle(navigation_handle));
       }
@@ -387,15 +455,74 @@ content::PreviewsState DetermineCommittedClientPreviewsState(
   }
   DCHECK(!IsLitePageRedirectPreviewURL(url));
 
+  // Check if the URL is eligible for defer all script preview. A URL
+  // may not be eligible for the preview if it's likely to cause a
+  // client redirect loop.
+  if ((previews::params::DetectDeferRedirectLoopsUsingCache()) &&
+      (previews_state & content::DEFER_ALL_SCRIPT_ON)) {
+    content::WebContents* web_contents =
+        navigation_handle ? navigation_handle->GetWebContents() : nullptr;
+    if (web_contents) {
+      auto* previews_service = PreviewsServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+
+      if (previews_service &&
+          !previews_service->IsUrlEligibleForDeferAllScriptPreview(url)) {
+        previews_state &= ~content::DEFER_ALL_SCRIPT_ON;
+        UMA_HISTOGRAM_BOOLEAN(
+            "Previews.DeferAllScript.RedirectLoopDetectedUsingCache", true);
+        if (previews_service->previews_ui_service()) {
+          previews::PreviewsDeciderImpl* previews_decider_impl =
+              previews_service->previews_ui_service()->previews_decider_impl();
+          DCHECK(previews_decider_impl);
+          std::vector<PreviewsEligibilityReason> passed_reasons;
+          previews_decider_impl->LogPreviewDecisionMade(
+              PreviewsEligibilityReason::REDIRECT_LOOP_DETECTED,
+              navigation_handle->GetURL(),
+              base::DefaultClock::GetInstance()->Now(),
+              PreviewsType::DEFER_ALL_SCRIPT, std::move(passed_reasons),
+              previews_data);
+        }
+      }
+    }
+  }
+
+  if (previews_state & content::DEFER_ALL_SCRIPT_ON) {
+    content::WebContents* web_contents =
+        navigation_handle ? navigation_handle->GetWebContents() : nullptr;
+    if (web_contents) {
+      auto* previews_service = PreviewsServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+
+      if (previews_service &&
+          previews_service->MatchesDeferAllScriptDenyListRegexp(url)) {
+        previews_state &= ~content::DEFER_ALL_SCRIPT_ON;
+        UMA_HISTOGRAM_BOOLEAN("Previews.DeferAllScript.DenyListMatch", true);
+        if (previews_service->previews_ui_service()) {
+          previews::PreviewsDeciderImpl* previews_decider_impl =
+              previews_service->previews_ui_service()->previews_decider_impl();
+          DCHECK(previews_decider_impl);
+          std::vector<PreviewsEligibilityReason> passed_reasons;
+          previews_decider_impl->LogPreviewDecisionMade(
+              PreviewsEligibilityReason::DENY_LIST_MATCHED,
+              navigation_handle->GetURL(),
+              base::DefaultClock::GetInstance()->Now(),
+              PreviewsType::DEFER_ALL_SCRIPT, std::move(passed_reasons),
+              previews_data);
+        }
+      }
+    }
+  }
+
   // Make priority decision among allowed client preview types that can be
   // decided at Commit time.
 
   if (previews_state & content::DEFER_ALL_SCRIPT_ON) {
     // DeferAllScript was allowed for the original URL but only continue with it
     // if the committed URL has HTTPS scheme and is allowed by decider.
-    if (is_https && previews_decider &&
-        previews_decider->ShouldCommitPreview(
-            previews_data, url, previews::PreviewsType::DEFER_ALL_SCRIPT)) {
+    if (previews_decider && previews_decider->ShouldCommitPreview(
+                                previews_data, navigation_handle,
+                                previews::PreviewsType::DEFER_ALL_SCRIPT)) {
       LogCommittedPreview(previews_data, PreviewsType::DEFER_ALL_SCRIPT);
       return content::DEFER_ALL_SCRIPT_ON;
     }
@@ -407,9 +534,9 @@ content::PreviewsState DetermineCommittedClientPreviewsState(
   if (previews_state & content::RESOURCE_LOADING_HINTS_ON) {
     // Resource loading hints was chosen for the original URL but only continue
     // with it if the committed URL has HTTPS scheme and is allowed by decider.
-    if (is_https && previews_decider &&
+    if (previews_decider &&
         previews_decider->ShouldCommitPreview(
-            previews_data, url,
+            previews_data, navigation_handle,
             previews::PreviewsType::RESOURCE_LOADING_HINTS)) {
       LogCommittedPreview(previews_data, PreviewsType::RESOURCE_LOADING_HINTS);
       return content::RESOURCE_LOADING_HINTS_ON;
@@ -422,9 +549,9 @@ content::PreviewsState DetermineCommittedClientPreviewsState(
   if (previews_state & content::NOSCRIPT_ON) {
     // NoScript was chosen for the original URL but only continue with it
     // if the committed URL has HTTPS scheme and is allowed by decider.
-    if (is_https && previews_decider &&
-        previews_decider->ShouldCommitPreview(
-            previews_data, url, previews::PreviewsType::NOSCRIPT)) {
+    if (previews_decider && previews_decider->ShouldCommitPreview(
+                                previews_data, navigation_handle,
+                                previews::PreviewsType::NOSCRIPT)) {
       LogCommittedPreview(previews_data, PreviewsType::NOSCRIPT);
       return content::NOSCRIPT_ON;
     }
@@ -468,13 +595,13 @@ content::PreviewsState MaybeCoinFlipHoldbackBeforeCommit(
     // will also be held back here. However, since a before-commit preview was
     // likely, we turn off all of them to make analysis simpler and this code
     // more robust.
-    previews_data->set_coin_flip_holdback_result(
-        CoinFlipHoldbackResult::kHoldback);
+    UpdatePreviewsUserDataAndRecordCoinFlipResult(
+        navigation_handle, previews_data, CoinFlipHoldbackResult::kHoldback);
     return content::PREVIEWS_OFF;
   }
 
-  previews_data->set_coin_flip_holdback_result(
-      CoinFlipHoldbackResult::kAllowed);
+  UpdatePreviewsUserDataAndRecordCoinFlipResult(
+      navigation_handle, previews_data, CoinFlipHoldbackResult::kAllowed);
   return initial_state;
 }
 
@@ -507,13 +634,14 @@ content::PreviewsState MaybeCoinFlipHoldbackAfterCommit(
           CoinFlipHoldbackResult::kNotSet);
       return initial_state;
     }
-    previews_data->set_coin_flip_holdback_result(
-        CoinFlipHoldbackResult::kHoldback);
+
+    UpdatePreviewsUserDataAndRecordCoinFlipResult(
+        navigation_handle, previews_data, CoinFlipHoldbackResult::kHoldback);
     return content::PREVIEWS_OFF;
   }
 
-  previews_data->set_coin_flip_holdback_result(
-      CoinFlipHoldbackResult::kAllowed);
+  UpdatePreviewsUserDataAndRecordCoinFlipResult(
+      navigation_handle, previews_data, CoinFlipHoldbackResult::kAllowed);
   return initial_state;
 }
 

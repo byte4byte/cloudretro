@@ -20,9 +20,10 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.WarmupManager;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -53,7 +54,7 @@ public class ChromeTabCreatorTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTestServer.stopAndDestroyServer();
     }
 
@@ -64,8 +65,7 @@ public class ChromeTabCreatorTest {
     @Restriction(RESTRICTION_TYPE_LOW_END_DEVICE)
     @MediumTest
     @Feature({"Browser"})
-    public void testCreateNewTabInBackgroundLowEnd()
-            throws ExecutionException, InterruptedException {
+    public void testCreateNewTabInBackgroundLowEnd() throws ExecutionException {
         final Tab fgTab = mActivityTestRule.getActivity().getActivityTab();
         final Tab bgTab = TestThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override
@@ -99,7 +99,7 @@ public class ChromeTabCreatorTest {
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @MediumTest
     @Feature({"Browser"})
-    public void testCreateNewTabInBackground() throws ExecutionException, InterruptedException {
+    public void testCreateNewTabInBackground() throws ExecutionException {
         final Tab fgTab = mActivityTestRule.getActivity().getActivityTab();
         Tab bgTab = TestThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {
             @Override

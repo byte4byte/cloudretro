@@ -8,13 +8,11 @@
 #include <vector>
 
 #include "base/test/test_mock_time_task_runner.h"
-#include "base/time/clock.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger.h"
-#include "chrome/browser/chromeos/power/ml/fake_boot_clock.h"
 #include "chrome/browser/chromeos/power/ml/screen_brightness_event.pb.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -28,6 +26,7 @@
 #include "chromeos/dbus/power_manager/power_supply_properties.pb.h"
 #include "components/ukm/content/source_url_recorder.h"
 #include "content/public/test/web_contents_tester.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/user_activity/user_activity_detector.h"
@@ -83,10 +82,9 @@ class AdaptiveScreenBrightnessManagerTest
  public:
   AdaptiveScreenBrightnessManagerTest()
       : ChromeRenderViewHostTestHarness(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI,
-            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME,
-            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::
-                QUEUED) {}
+            base::test::TaskEnvironment::MainThreadType::UI,
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME,
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
 
   ~AdaptiveScreenBrightnessManagerTest() override = default;
 
@@ -96,17 +94,16 @@ class AdaptiveScreenBrightnessManagerTest
     auto logger = std::make_unique<TestingAdaptiveScreenBrightnessUkmLogger>();
     ukm_logger_ = logger.get();
 
-    viz::mojom::VideoDetectorObserverPtr observer;
+    mojo::PendingRemote<viz::mojom::VideoDetectorObserver> observer;
     auto periodic_timer = std::make_unique<base::RepeatingTimer>();
-    periodic_timer->SetTaskRunner(thread_bundle()->GetMainThreadTaskRunner());
+    periodic_timer->SetTaskRunner(
+        task_environment()->GetMainThreadTaskRunner());
     screen_brightness_manager_ =
         std::make_unique<AdaptiveScreenBrightnessManager>(
             std::move(logger), &user_activity_detector_,
             FakePowerManagerClient::Get(), nullptr, nullptr,
-            mojo::MakeRequest(&observer), std::move(periodic_timer),
-            const_cast<base::Clock*>(thread_bundle()->GetMockClock()),
-            std::make_unique<FakeBootClock>(thread_bundle(),
-                                            base::TimeDelta::FromSeconds(10)));
+            observer.InitWithNewPipeAndPassReceiver(),
+            std::move(periodic_timer));
   }
 
   void TearDown() override {
@@ -163,7 +160,7 @@ class AdaptiveScreenBrightnessManagerTest
   }
 
   void FastForwardTimeBySecs(const int seconds) {
-    thread_bundle()->FastForwardBy(base::TimeDelta::FromSeconds(seconds));
+    task_environment()->FastForwardBy(base::TimeDelta::FromSeconds(seconds));
   }
 
   // Creates a test browser window and sets its visibility, activity and

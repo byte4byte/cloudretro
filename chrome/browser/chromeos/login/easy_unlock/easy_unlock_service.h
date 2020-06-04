@@ -82,9 +82,6 @@ class EasyUnlockService : public KeyedService {
   // Returns the user currently associated with the service.
   virtual AccountId GetAccountId() const = 0;
 
-  // Gets/Sets/Clears the permit access for the local device.
-  virtual void ClearPermitAccess() = 0;
-
   // Retrieve the stored remote devices list:
   //   * If in regular context, device list is retrieved from prefs.
   //   * If in sign-in context, device list is retrieved from TPM.
@@ -299,7 +296,7 @@ class EasyUnlockService : public KeyedService {
 
   bool tpm_key_checked_;
 
-  base::WeakPtrFactory<EasyUnlockService> weak_ptr_factory_;
+  base::WeakPtrFactory<EasyUnlockService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockService);
 };

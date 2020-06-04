@@ -9,7 +9,7 @@
 
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
-#include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/assistant/ui/assistant_view_ids.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
@@ -89,12 +89,13 @@ class AssistantOptInContainer : public views::Button {
 
 AssistantOptInView::AssistantOptInView(AssistantViewDelegate* delegate)
     : delegate_(delegate) {
+  SetID(AssistantViewID::kOptInView);
   InitLayout();
-  delegate_->AddAssistantPrefsObserver(this);
+  AssistantState::Get()->AddObserver(this);
 }
 
 AssistantOptInView::~AssistantOptInView() {
-  delegate_->RemoveAssistantPrefsObserver(this);
+  AssistantState::Get()->RemoveObserver(this);
 }
 
 const char* AssistantOptInView::GetClassName() const {
@@ -114,7 +115,7 @@ void AssistantOptInView::ButtonPressed(views::Button* sender,
   delegate_->OnOptInButtonPressed();
 }
 
-void AssistantOptInView::OnAssistantConsentStatusUpdated(int consent_status) {
+void AssistantOptInView::OnAssistantConsentStatusChanged(int consent_status) {
   UpdateLabel(consent_status);
 }
 
@@ -124,15 +125,14 @@ void AssistantOptInView::InitLayout() {
           views::BoxLayout::Orientation::kHorizontal));
 
   layout_manager->set_cross_axis_alignment(
-      app_list_features::IsEmbeddedAssistantUIEnabled()
-          ? views::BoxLayout::CrossAxisAlignment::kCenter
-          : views::BoxLayout::CrossAxisAlignment::kEnd);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   layout_manager->set_main_axis_alignment(
       views::BoxLayout::MainAxisAlignment::kCenter);
 
   // Container.
-  container_ = new AssistantOptInContainer(/*listener=*/this);
+  container_ = AddChildView(
+      std::make_unique<AssistantOptInContainer>(/*listener=*/this));
 
   layout_manager =
       container_->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -142,17 +142,16 @@ void AssistantOptInView::InitLayout() {
   layout_manager->set_cross_axis_alignment(
       views::BoxLayout::CrossAxisAlignment::kCenter);
 
-  AddChildView(container_);
-
   // Label.
-  label_ = new views::StyledLabel(base::string16(), /*listener=*/nullptr);
+  label_ = container_->AddChildView(std::make_unique<views::StyledLabel>(
+      base::string16(), /*listener=*/nullptr));
   label_->SetAutoColorReadabilityEnabled(false);
   label_->SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_CENTER);
 
-  container_->AddChildView(label_);
   container_->SetFocusForPlatform();
 
-  UpdateLabel(delegate_->GetConsentStatus());
+  UpdateLabel(AssistantState::Get()->consent_status().value_or(
+      chromeos::assistant::prefs::ConsentStatus::kUnknown));
 }
 
 void AssistantOptInView::UpdateLabel(int consent_status) {

@@ -15,10 +15,10 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
-#include "chrome/browser/sessions/session_tab_helper.h"
-#include "chrome/common/safe_browsing/file_type_policies.h"
-#include "components/safe_browsing/common/utils.h"
-#include "components/safe_browsing/db/database_manager.h"
+#include "components/safe_browsing/core/common/utils.h"
+#include "components/safe_browsing/core/db/database_manager.h"
+#include "components/safe_browsing/core/file_type_policies.h"
+#include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -45,24 +45,26 @@ PPAPIDownloadRequest::PPAPIDownloadRequest(
     const base::FilePath& default_file_path,
     const std::vector<base::FilePath::StringType>& alternate_extensions,
     Profile* profile,
-    const CheckDownloadCallback& callback,
+    CheckDownloadCallback callback,
     DownloadProtectionService* service,
     scoped_refptr<SafeBrowsingDatabaseManager> database_manager)
     : requestor_url_(requestor_url),
       initiating_frame_url_(initiating_frame_url),
       initiating_main_frame_url_(
           web_contents ? web_contents->GetLastCommittedURL() : GURL()),
-      tab_id_(SessionTabHelper::IdForTab(web_contents)),
+      tab_id_(sessions::SessionTabHelper::IdForTab(web_contents)),
       default_file_path_(default_file_path),
       alternate_extensions_(alternate_extensions),
-      callback_(callback),
+      callback_(std::move(callback)),
       service_(service),
       database_manager_(database_manager),
       start_time_(base::TimeTicks::Now()),
       supported_path_(
-          GetSupportedFilePath(default_file_path, alternate_extensions)) {
+          GetSupportedFilePath(default_file_path, alternate_extensions)),
+      profile_(profile) {
   DCHECK(profile);
   is_extended_reporting_ = IsExtendedReportingEnabled(*profile->GetPrefs());
+  is_enhanced_protection_ = IsEnhancedProtectionEnabled(*profile->GetPrefs());
 
   if (service->navigation_observer_manager()) {
     has_user_gesture_ =
@@ -107,14 +109,13 @@ void PPAPIDownloadRequest::Start() {
   // verdict. The weak pointer used for the timeout will be invalidated (and
   // hence would prevent the timeout) if the check completes on time and
   // execution reaches Finish().
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&PPAPIDownloadRequest::OnRequestTimedOut,
-                     weakptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(
-          service_->download_request_timeout_ms()));
+  base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
+                        base::BindOnce(&PPAPIDownloadRequest::OnRequestTimedOut,
+                                       weakptr_factory_.GetWeakPtr()),
+                        base::TimeDelta::FromMilliseconds(
+                            service_->download_request_timeout_ms()));
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&PPAPIDownloadRequest::CheckWhitelistsOnIOThread,
                      requestor_url_, database_manager_,
@@ -142,10 +143,9 @@ void PPAPIDownloadRequest::CheckWhitelistsOnIOThread(
   bool url_was_whitelisted =
       requestor_url.is_valid() && database_manager &&
       database_manager->MatchDownloadWhitelistUrl(requestor_url);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&PPAPIDownloadRequest::WhitelistCheckComplete,
-                     download_request, url_was_whitelisted));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&PPAPIDownloadRequest::WhitelistCheckComplete,
+                                download_request, url_was_whitelisted));
 }
 
 void PPAPIDownloadRequest::WhitelistCheckComplete(bool was_on_whitelist) {
@@ -168,9 +168,11 @@ void PPAPIDownloadRequest::SendRequest() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   ClientDownloadRequest request;
-  auto population = is_extended_reporting_
-                        ? ChromeUserPopulation::EXTENDED_REPORTING
-                        : ChromeUserPopulation::SAFE_BROWSING;
+  auto population = is_enhanced_protection_
+                        ? ChromeUserPopulation::ENHANCED_PROTECTION
+                        : is_extended_reporting_
+                              ? ChromeUserPopulation::EXTENDED_REPORTING
+                              : ChromeUserPopulation::SAFE_BROWSING;
   request.mutable_population()->set_user_population(population);
   request.mutable_population()->set_profile_management_status(
       GetProfileManagementStatus(
@@ -257,7 +259,7 @@ void PPAPIDownloadRequest::SendRequest() {
   loader_->AttachStringForUpload(client_download_request_data_,
                                  "application/octet-stream");
   loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      service_->url_loader_factory_.get(),
+      service_->GetURLLoaderFactory(profile_).get(),
       base::BindOnce(&PPAPIDownloadRequest::OnURLLoaderComplete,
                      base::Unretained(this)));
 }

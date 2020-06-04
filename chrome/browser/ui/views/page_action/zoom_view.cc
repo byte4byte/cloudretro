@@ -16,17 +16,20 @@
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/size.h"
 
-ZoomView::ZoomView(PageActionIconView::Delegate* delegate)
-    : PageActionIconView(nullptr, 0, delegate), icon_(&kZoomMinusIcon) {
+ZoomView::ZoomView(IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
+                   PageActionIconView::Delegate* page_action_icon_delegate)
+    : PageActionIconView(nullptr,
+                         0,
+                         icon_label_bubble_delegate,
+                         page_action_icon_delegate),
+      icon_(&kZoomMinusIcon) {
   SetVisible(false);
 }
 
 ZoomView::~ZoomView() {}
 
-bool ZoomView::Update() {
-  bool was_visible = GetVisible();
+void ZoomView::UpdateImpl() {
   ZoomChangedForActiveTab(false);
-  return GetVisible() != was_visible;
 }
 
 bool ZoomView::ShouldBeVisible(bool can_show_bubble) const {
@@ -80,8 +83,7 @@ void ZoomView::ZoomChangedForActiveTab(bool can_show_bubble) {
     SetVisible(true);
 
     if (can_show_bubble) {
-      ZoomBubbleView::ShowBubble(web_contents, gfx::Point(),
-                                 ZoomBubbleView::AUTOMATIC);
+      ZoomBubbleView::ShowBubble(web_contents, ZoomBubbleView::AUTOMATIC);
     } else {
       ZoomBubbleView::RefreshBubbleIfShowing(web_contents);
     }
@@ -95,8 +97,7 @@ void ZoomView::ZoomChangedForActiveTab(bool can_show_bubble) {
 }
 
 void ZoomView::OnExecuting(PageActionIconView::ExecuteSource source) {
-  ZoomBubbleView::ShowBubble(GetWebContents(), gfx::Point(),
-                             ZoomBubbleView::USER_GESTURE);
+  ZoomBubbleView::ShowBubble(GetWebContents(), ZoomBubbleView::USER_GESTURE);
 }
 
 views::BubbleDialogDelegateView* ZoomView::GetBubble() const {
@@ -110,4 +111,8 @@ const gfx::VectorIcon& ZoomView::GetVectorIcon() const {
 base::string16 ZoomView::GetTextForTooltipAndAccessibleName() const {
   return l10n_util::GetStringFUTF16(IDS_TOOLTIP_ZOOM,
                                     base::FormatPercent(current_zoom_percent_));
+}
+
+const char* ZoomView::GetClassName() const {
+  return "ZoomView";
 }

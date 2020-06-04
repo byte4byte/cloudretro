@@ -9,11 +9,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "ui/base/platform_window_defaults.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/init/gl_factory.h"
+
+#if defined(OS_LINUX)
+#include "ui/platform_window/common/platform_window_defaults.h"  // nogncheck
+#endif
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
@@ -29,6 +32,9 @@ namespace {
 void InitializeOneOffHelper(bool init_extensions) {
   DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
 
+  // TODO(https://crbug.com/1036285): delete this once USE_X11 is removed. If
+  // Ozone/X11 is used, XThreads are initialized with the
+  // OzonePlatform::InitializeForGPU call.
 #if defined(USE_X11)
   XInitThreads();
 #endif
@@ -37,10 +43,11 @@ void InitializeOneOffHelper(bool init_extensions) {
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
+#if defined(OS_LINUX)
   ui::test::EnableTestConfigForPlatformWindows();
+#endif
 
   bool use_software_gl = true;
 
@@ -70,12 +77,12 @@ void InitializeOneOffHelper(bool init_extensions) {
       << "kUseGL has not effect in tests";
 
   bool fallback_to_software_gl = false;
-  bool gpu_service_logging = false;
   bool disable_gl_drawing = true;
 
-  CHECK(init::InitializeGLOneOffImplementation(
-      impl, fallback_to_software_gl, gpu_service_logging, disable_gl_drawing,
-      init_extensions));
+  CHECK(gl::init::InitializeStaticGLBindingsImplementation(
+      impl, fallback_to_software_gl));
+  CHECK(gl::init::InitializeGLOneOffPlatformImplementation(
+      fallback_to_software_gl, disable_gl_drawing, init_extensions));
 }
 }  // namespace
 
@@ -100,12 +107,12 @@ void GLSurfaceTestSupport::InitializeOneOffImplementation(
   // bindings in different ways.
   init::ShutdownGL(false);
 
-  bool gpu_service_logging = false;
   bool disable_gl_drawing = false;
 
-  CHECK(init::InitializeGLOneOffImplementation(impl, fallback_to_software_gl,
-                                               gpu_service_logging,
-                                               disable_gl_drawing, true));
+  CHECK(gl::init::InitializeStaticGLBindingsImplementation(
+      impl, fallback_to_software_gl));
+  CHECK(gl::init::InitializeGLOneOffPlatformImplementation(
+      fallback_to_software_gl, disable_gl_drawing, true));
 }
 
 // static
@@ -114,7 +121,6 @@ void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
   InitializeOneOffImplementation(kGLImplementationMockGL, false);
@@ -126,7 +132,6 @@ void GLSurfaceTestSupport::InitializeOneOffWithStubBindings() {
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
   ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
 #endif
 
   InitializeOneOffImplementation(kGLImplementationStubGL, false);

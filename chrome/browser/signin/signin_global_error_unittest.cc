@@ -31,7 +31,7 @@
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 static const char kTestEmail[] = "testuser@test.com";
@@ -64,7 +64,8 @@ class SigninGlobalErrorTest : public testing::Test {
     ASSERT_TRUE(profile_manager_.profile_attributes_storage()->
         GetProfileAttributesWithPath(profile()->GetPath(), &entry));
 
-    entry->SetAuthInfo(account_info.gaia, base::UTF8ToUTF16(kTestEmail));
+    entry->SetAuthInfo(account_info.gaia, base::UTF8ToUTF16(kTestEmail),
+                       /*is_consented_primary_account=*/true);
 
     global_error_ = SigninGlobalErrorFactory::GetForProfile(profile());
     error_controller_ = SigninErrorControllerFactory::GetForProfile(profile());
@@ -79,18 +80,18 @@ class SigninGlobalErrorTest : public testing::Test {
   SigninErrorController* error_controller() { return error_controller_; }
 
   void SetAuthError(GoogleServiceAuthError::State state) {
-    identity::IdentityTestEnvironment* identity_test_env =
+    signin::IdentityTestEnvironment* identity_test_env =
         identity_test_env_profile_adaptor_->identity_test_env();
-    std::string primary_account_id =
+    CoreAccountId primary_account_id =
         identity_test_env->identity_manager()->GetPrimaryAccountId();
 
-    identity::UpdatePersistentErrorOfRefreshTokenForAccount(
+    signin::UpdatePersistentErrorOfRefreshTokenForAccount(
         identity_test_env->identity_manager(), primary_account_id,
         GoogleServiceAuthError(state));
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;
 
@@ -149,8 +150,9 @@ TEST_F(SigninGlobalErrorTest, AuthStatusEnumerateAllErrors) {
     EXPECT_FALSE(global_error()->GetBubbleViewAcceptButtonLabel().empty());
     EXPECT_TRUE(global_error()->GetBubbleViewCancelButtonLabel().empty());
 
-    ProfileMetrics::LogNumberOfProfiles(
-        testing_profile_manager()->profile_manager());
+    ProfileMetrics::LogNumberOfProfiles(&testing_profile_manager()
+                                             ->profile_manager()
+                                             ->GetProfileAttributesStorage());
 
     if (entry.is_error) {
       histogram_tester.ExpectBucketCount("Signin.AuthError", entry.error_state,

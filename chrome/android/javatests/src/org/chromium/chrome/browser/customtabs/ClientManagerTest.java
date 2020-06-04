@@ -7,11 +7,12 @@ package org.chromium.chrome.browser.customtabs;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Process;
-import android.support.customtabs.CustomTabsService;
-import android.support.customtabs.CustomTabsSessionToken;
-import android.support.customtabs.PostMessageServiceConnection;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
+
+import androidx.browser.customtabs.CustomTabsService;
+import androidx.browser.customtabs.CustomTabsSessionToken;
+import androidx.browser.customtabs.PostMessageServiceConnection;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -24,9 +25,9 @@ import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.MetricsUtils;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.browserservices.Origin;
 import org.chromium.chrome.browser.browserservices.OriginVerifier;
 import org.chromium.chrome.browser.browserservices.PostMessageHandler;
+import org.chromium.components.embedder_support.util.Origin;
 import org.chromium.content_public.browser.test.NativeLibraryTestRule;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -47,7 +48,7 @@ public class ClientManagerTest {
     private int mUid = Process.myUid();
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         Context context = InstrumentationRegistry.getInstrumentation()
                                   .getTargetContext()
                                   .getApplicationContext();
@@ -173,7 +174,10 @@ public class ClientManagerTest {
     @SmallTest
     public void testPostMessageOriginVerification() {
         final ClientManager cm = mClientManager;
-        PostMessageServiceConnection serviceConnection = new PostMessageServiceConnection(mSession);
+        // TODO(peconn): Get rid of this anonymous class once PostMessageServiceConnection is made
+        // non-abstract. Same with the other occurrences below.
+        PostMessageServiceConnection serviceConnection =
+                new PostMessageServiceConnection(mSession) {};
         Assert.assertTrue(cm.newSession(mSession, mUid, null,
                 new PostMessageHandler(serviceConnection), serviceConnection));
         // Should always start with no origin.
@@ -182,15 +186,15 @@ public class ClientManagerTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             // With no prepopulated origins, this verification should fail.
             cm.verifyAndInitializeWithPostMessageOriginForSession(
-                    mSession, new Origin(URL), CustomTabsService.RELATION_USE_AS_ORIGIN);
+                    mSession, Origin.create(URL), CustomTabsService.RELATION_USE_AS_ORIGIN);
             Assert.assertNull(cm.getPostMessageOriginForSessionForTesting(mSession));
 
             // If there is a prepopulated origin, we should get a synchronous verification.
             OriginVerifier.addVerificationOverride(
-                    ContextUtils.getApplicationContext().getPackageName(), new Origin(URL),
+                    ContextUtils.getApplicationContext().getPackageName(), Origin.create(URL),
                     CustomTabsService.RELATION_USE_AS_ORIGIN);
             cm.verifyAndInitializeWithPostMessageOriginForSession(
-                    mSession, new Origin(URL), CustomTabsService.RELATION_USE_AS_ORIGIN);
+                    mSession, Origin.create(URL), CustomTabsService.RELATION_USE_AS_ORIGIN);
         });
 
         CriteriaHelper.pollUiThread(new Criteria() {
@@ -216,13 +220,14 @@ public class ClientManagerTest {
     @SmallTest
     public void testPostMessageOriginDifferentRelations() {
         final ClientManager cm = mClientManager;
-        PostMessageServiceConnection serviceConnection = new PostMessageServiceConnection(mSession);
+        PostMessageServiceConnection serviceConnection =
+                new PostMessageServiceConnection(mSession) {};
         Assert.assertTrue(cm.newSession(mSession, mUid, null,
                 new PostMessageHandler(serviceConnection), serviceConnection));
         // Should always start with no origin.
         Assert.assertNull(cm.getPostMessageOriginForSessionForTesting(mSession));
 
-        Origin origin = new Origin(URL);
+        Origin origin = Origin.create(URL);
 
         // With no prepopulated origins, this verification should fail.
         cm.verifyAndInitializeWithPostMessageOriginForSession(
@@ -255,14 +260,15 @@ public class ClientManagerTest {
     @SmallTest
     public void testPostMessageOriginHttpNotAllowed() {
         final ClientManager cm = mClientManager;
-        PostMessageServiceConnection serviceConnection = new PostMessageServiceConnection(mSession);
+        PostMessageServiceConnection serviceConnection =
+                new PostMessageServiceConnection(mSession) {};
         Assert.assertTrue(cm.newSession(mSession, mUid, null,
                 new PostMessageHandler(serviceConnection), serviceConnection));
         // Should always start with no origin.
         Assert.assertNull(cm.getPostMessageOriginForSessionForTesting(mSession));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Origin origin = new Origin(HTTP_URL);
+            Origin origin = Origin.create(HTTP_URL);
             // With no prepopulated origins, this verification should fail.
             cm.verifyAndInitializeWithPostMessageOriginForSession(
                     mSession, origin, CustomTabsService.RELATION_USE_AS_ORIGIN);

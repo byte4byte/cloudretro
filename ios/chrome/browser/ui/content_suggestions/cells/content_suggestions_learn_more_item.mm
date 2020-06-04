@@ -5,9 +5,11 @@
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_learn_more_item.h"
 
 #include "base/logging.h"
+#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_constants.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/common/string_util.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -21,7 +23,6 @@ namespace {
 const CGFloat kLabelLineSpacing = 4;
 const CGFloat kTopLabelMargin = 24;
 const CGFloat kBottomLabelMargin = 8;
-const int kLinkColorRGB = 0x5595FE;
 }
 
 #pragma mark - ContentSuggestionsLearnMoreItem
@@ -42,7 +43,7 @@ const int kLinkColorRGB = 0x5595FE;
 - (void)configureCell:(ContentSuggestionsLearnMoreCell*)cell {
   [super configureCell:cell];
   [cell setText:[self text]];
-  cell.accessibilityIdentifier = [[self class] accessibilityIdentifier];
+  cell.accessibilityIdentifier = kContentSuggestionsLearnMoreIdentifier;
 }
 
 - (NSString*)text {
@@ -53,10 +54,6 @@ const int kLinkColorRGB = 0x5595FE;
 - (CGFloat)cellHeightForWidth:(CGFloat)width {
   return [ContentSuggestionsLearnMoreCell heightForWidth:width
                                                 withText:[self text]];
-}
-
-+ (NSString*)accessibilityIdentifier {
-  return @"Learn more";
 }
 
 @end
@@ -122,7 +119,7 @@ const int kLinkColorRGB = 0x5595FE;
       [[NSMutableAttributedString alloc] initWithString:strippedText];
 
   // Sets the styling to mimic a link.
-  UIColor* linkColor = UIColorFromRGB(kLinkColorRGB, 1.0);
+  UIColor* linkColor = [UIColor colorNamed:kBlueColor];
   [attributedText addAttribute:NSForegroundColorAttributeName
                          value:linkColor
                          range:linkRange];

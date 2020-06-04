@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.vr;
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import org.junit.Assert;
 
@@ -29,9 +29,6 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
     public static final int CONSENT_DIALOG_ACTION_DO_NOTHING = 0;
     public static final int CONSENT_DIALOG_ACTION_ALLOW = 1;
     public static final int CONSENT_DIALOG_ACTION_DENY = 2;
-
-    // If set, a consent dialog is expected on all enterSessionWithUserGesture* methods.
-    protected boolean mShouldExpectConsentDialog = true;
 
     @ConsentDialogAction
     protected int mConsentDialogAction = CONSENT_DIALOG_ACTION_ALLOW;
@@ -69,12 +66,26 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
         }
         super.enterSessionWithUserGesture(webContents);
 
-        if (!mShouldExpectConsentDialog) return;
+        if (!shouldExpectConsentDialog()) return;
         PermissionUtils.waitForConsentPrompt(getRule().getActivity());
-        if (mConsentDialogAction == CONSENT_DIALOG_ACTION_ALLOW)
+        if (mConsentDialogAction == CONSENT_DIALOG_ACTION_ALLOW) {
             PermissionUtils.acceptConsentPrompt(getRule().getActivity());
-        else if (mConsentDialogAction == CONSENT_DIALOG_ACTION_DENY)
+        } else if (mConsentDialogAction == CONSENT_DIALOG_ACTION_DENY) {
             PermissionUtils.declineConsentPrompt(getRule().getActivity());
+        }
+    }
+
+    /**
+     * 'enterSessionWithUserGestureOrFail' is specific to immersive sessions. This method does the
+     * same, but for the magic window session.
+     */
+    public void enterMagicWindowSessionWithUserGestureOrFail() {
+        runJavaScriptOrFail(
+                "sessionTypeToRequest = sessionTypes.MAGIC_WINDOW", POLL_TIMEOUT_SHORT_MS);
+        enterSessionWithUserGesture();
+        pollJavaScriptBooleanOrFail(
+                "sessionInfos[sessionTypes.MAGIC_WINDOW].currentSession != null",
+                POLL_TIMEOUT_LONG_MS);
     }
 
     /**
@@ -95,13 +106,31 @@ public class WebXrVrTestFramework extends WebXrTestFramework {
     }
 
     /**
-     * Ends a WebXR immersive session.
+     * End an immersive session and wait until that session has actually ended.
      *
      * @param webContents The WebContents for the tab to end the session in.
      */
     @Override
     public void endSession(WebContents webContents) {
+        // Use a long timeout for session.end(), this can unexpectedly take more than
+        // a second. TODO(https://crbug.com/1014159): investigate why.
         runJavaScriptOrFail("sessionInfos[sessionTypes.IMMERSIVE].currentSession.end()",
-                POLL_TIMEOUT_SHORT_MS, webContents);
+                POLL_TIMEOUT_LONG_MS, webContents);
+
+        // Wait for the session to end before proceeding with followup tests.
+        pollJavaScriptBooleanOrFail("sessionInfos[sessionTypes.IMMERSIVE].currentSession == null",
+                POLL_TIMEOUT_LONG_MS, webContents);
+    }
+
+    /**
+     * Checks whether an immersive VR session would trigger the consent dialog.
+     *
+     * @param webContents The WebContents to check in.
+     * @return True if an immersive VR session request would trigger the consent dialog, otherwise
+     *     false.
+     */
+    @Override
+    public boolean shouldExpectConsentDialog(WebContents webContents) {
+        return shouldExpectConsentDialog("sessionTypeToRequest", webContents);
     }
 }

@@ -20,33 +20,24 @@ class PrintingHandler;
 class ChromeContentUtilityClient : public content::ContentUtilityClient {
  public:
   using NetworkBinderCreationCallback =
-      base::Callback<void(service_manager::BinderRegistry*)>;
+      base::OnceCallback<void(service_manager::BinderRegistry*)>;
 
   ChromeContentUtilityClient();
   ~ChromeContentUtilityClient() override;
 
   // content::ContentUtilityClient:
-  void UtilityThreadStarted() override;
+  void ExposeInterfacesToBrowser(mojo::BinderMap* binders) override;
   bool OnMessageReceived(const IPC::Message& message) override;
-  bool HandleServiceRequest(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request) override;
   void RegisterNetworkBinders(
       service_manager::BinderRegistry* registry) override;
-  void RunIOThreadService(mojo::GenericPendingReceiver* receiver) override;
+  mojo::ServiceFactory* GetMainThreadServiceFactory() override;
+  mojo::ServiceFactory* GetIOThreadServiceFactory() override;
 
   // See NetworkBinderProvider above.
   static void SetNetworkBinderCreationCallback(
-      const NetworkBinderCreationCallback& callback);
+      NetworkBinderCreationCallback callback);
 
  private:
-  std::unique_ptr<service_manager::Service> MaybeCreateMainThreadService(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request);
-  std::unique_ptr<service_manager::Service> MaybeCreateElevatedService(
-      const std::string& service_name,
-      service_manager::mojom::ServiceRequest request);
-
 #if defined(OS_WIN) && BUILDFLAG(ENABLE_PRINT_PREVIEW)
   // Last IPC message handler.
   std::unique_ptr<printing::PrintingHandler> printing_handler_;

@@ -42,6 +42,11 @@ class ASH_PUBLIC_EXPORT LoginScreenModel {
   virtual void ShowEasyUnlockIcon(const AccountId& account_id,
                                   const EasyUnlockIconOptions& icon) = 0;
 
+  // Update the status of the challenge-response authentication against a
+  // security token for the given user.
+  virtual void SetChallengeResponseAuthEnabledForUser(const AccountId& user,
+                                                      bool enabled) = 0;
+
   // Shows a warning banner message on the login screen. A warning banner is
   // used to notify users of important messages before they log in to their
   // session. (e.g. Tell the user that an update of the user data will start
@@ -72,8 +77,9 @@ class ASH_PUBLIC_EXPORT LoginScreenModel {
       const AccountId& account_id,
       const AuthDisabledData& auth_disabled_data) = 0;
 
-  // Sets the authentication type to tap-to-unlock for the user.
-  virtual void EnableTapToUnlockForUser(const AccountId& account_id) = 0;
+  // Enables or disables the authentication type to tap-to-unlock for the user.
+  virtual void SetTapToUnlockEnabledForUser(const AccountId& account_id,
+                                            bool enabled) = 0;
 
   // Forces online sign-in for the user.
   virtual void ForceOnlineSignInForUser(const AccountId& account_id) = 0;
@@ -83,17 +89,19 @@ class ASH_PUBLIC_EXPORT LoginScreenModel {
                                 const UserAvatar& avatar) = 0;
 
   // Called when new system information is available.
-  // |show_if_hidden|: If true, the system information should be displayed to
-  //                   the user if it is currently hidden. If false, the system
-  //                   information should remain hidden if not already shown.
-  //                   Hidden system information can be shown by pressing alt-v.
-  // |os_version_label_text|: The OS version.
-  // |enterprise_info_text|:  The enterprise info.
-  // |bluetooth_name|:        The name of the bluetooth adapter.
-  virtual void SetSystemInfo(bool show_if_hidden,
+  // |show|: Whether the system information should be displayed to user.
+  // |enforced|: Whether the display of system information is enforced and
+  // cannot be changed by some specific user operations (e.g., pressing alt-v).
+  // |os_version_label_text|:   The OS version.
+  // |enterprise_info_text|:    The enterprise info.
+  // |bluetooth_name|:          The name of the bluetooth adapter.
+  // |adb_sideloading_enabled|: The device status of adb sideoading.
+  virtual void SetSystemInfo(bool show,
+                             bool enforced,
                              const std::string& os_version_label_text,
                              const std::string& enterprise_info_text,
-                             const std::string& bluetooth_name) = 0;
+                             const std::string& bluetooth_name,
+                             bool adb_sideloading_enabled) = 0;
 
   // Set the public session display name for user with |account_id|.
   virtual void SetPublicSessionDisplayName(const AccountId& account_id,

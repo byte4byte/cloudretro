@@ -67,17 +67,9 @@ class ExtensionActionAPI : public BrowserContextKeyedAPI {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  bool GetBrowserActionVisibility(const std::string& extension_id);
-  void SetBrowserActionVisibility(const std::string& extension_id,
-                                  bool visible);
-
   // Opens the popup for the given |extension| in the given |browser|'s window.
-  // If |grant_active_tab_permissions| is true, this grants the extension
-  // activeTab (so this should only be done if this is through a direct user
-  // action).
-  bool ShowExtensionActionPopup(const Extension* extension,
-                                Browser* browser,
-                                bool grant_active_tab_permissions);
+  bool ShowExtensionActionPopupForAPICall(const Extension* extension,
+                                          Browser* browser);
 
   // Notifies that there has been a change in the given |extension_action|.
   void NotifyChange(ExtensionAction* extension_action,
@@ -130,7 +122,7 @@ class ExtensionActionAPI : public BrowserContextKeyedAPI {
 // tabIds while browserAction's are optional, they have different internal
 // browser notification requirements, and not all functions are defined for all
 // APIs).
-class ExtensionActionFunction : public UIThreadExtensionFunction {
+class ExtensionActionFunction : public ExtensionFunction {
  public:
   static bool ParseCSSColorString(const std::string& color_string,
                                   SkColor* result);
@@ -330,7 +322,21 @@ class ActionSetBadgeBackgroundColorFunction
   ~ActionSetBadgeBackgroundColorFunction() override {}
 };
 
-// TODO(devlin): Add the rest of the action APIs here.
+class ActionEnableFunction : public ExtensionActionShowFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("action.enable", ACTION_ENABLE)
+
+ protected:
+  ~ActionEnableFunction() override {}
+};
+
+class ActionDisableFunction : public ExtensionActionHideFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("action.disable", ACTION_DISABLE)
+
+ protected:
+  ~ActionDisableFunction() override {}
+};
 
 //
 // browserAction.* aliases for supported browserAction APIs.
@@ -432,7 +438,7 @@ class BrowserActionDisableFunction : public ExtensionActionHideFunction {
   ~BrowserActionDisableFunction() override {}
 };
 
-class BrowserActionOpenPopupFunction : public UIThreadExtensionFunction,
+class BrowserActionOpenPopupFunction : public ExtensionFunction,
                                        public content::NotificationObserver {
  public:
   DECLARE_EXTENSION_FUNCTION("browserAction.openPopup",

@@ -15,7 +15,8 @@
 #include "content/common/content_export.h"
 #include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "ui/events/types/scroll_types.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -38,8 +39,9 @@ class CONTENT_EXPORT SyntheticSmoothMoveGestureParams {
   int fling_velocity_y;
   bool prevent_fling;
   bool add_slop;
-  bool precise_scrolling_deltas;
-  bool scroll_by_page;
+  ui::ScrollGranularity granularity;
+  // A bitfield of values from blink::WebInputEvent::Modifiers.
+  int key_modifiers;
 };
 
 // This class is used as helper class for simulation of scroll and drag.
@@ -79,7 +81,8 @@ class CONTENT_EXPORT SyntheticSmoothMoveGesture : public SyntheticGesture {
   void ForwardMouseWheelEvent(SyntheticGestureTarget* target,
                               const gfx::Vector2dF& delta,
                               const blink::WebMouseWheelEvent::Phase phase,
-                              const base::TimeTicks& timestamp) const;
+                              const base::TimeTicks& timestamp,
+                              int key_modifiers) const;
 
   void ForwardFlingGestureEvent(SyntheticGestureTarget* target,
                                 const blink::WebInputEvent::Type type) const;

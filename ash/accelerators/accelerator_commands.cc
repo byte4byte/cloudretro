@@ -4,6 +4,7 @@
 
 #include "ash/accelerators/accelerator_commands.h"
 
+#include "ash/display/display_configuration_controller.h"
 #include "ash/shell.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/screen_pinning_controller.h"
@@ -46,7 +47,7 @@ void ResetDisplayZoom() {
 }
 
 bool ToggleMinimized() {
-  aura::Window* window = wm::GetActiveWindow();
+  aura::Window* window = window_util::GetActiveWindow();
   // Attempt to restore the window that would be cycled through next from
   // the launcher when there is no active window.
   if (!window) {
@@ -55,10 +56,10 @@ bool ToggleMinimized() {
     MruWindowTracker::WindowList mru_windows(
         Shell::Get()->mru_window_tracker()->BuildMruWindowList(kActiveDesk));
     if (!mru_windows.empty())
-      wm::GetWindowState(mru_windows.front())->Activate();
+      WindowState::Get(mru_windows.front())->Activate();
     return true;
   }
-  wm::WindowState* window_state = wm::GetWindowState(window);
+  WindowState* window_state = WindowState::Get(window);
   if (!window_state->CanMinimize())
     return false;
   window_state->Minimize();
@@ -66,26 +67,26 @@ bool ToggleMinimized() {
 }
 
 void ToggleMaximized() {
-  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* active_window = window_util::GetActiveWindow();
   if (!active_window)
     return;
   base::RecordAction(base::UserMetricsAction("Accel_Toggle_Maximized"));
-  wm::WMEvent event(wm::WM_EVENT_TOGGLE_MAXIMIZE);
-  wm::GetWindowState(active_window)->OnWMEvent(&event);
+  WMEvent event(WM_EVENT_TOGGLE_MAXIMIZE);
+  WindowState::Get(active_window)->OnWMEvent(&event);
 }
 
 void ToggleFullscreen() {
-  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* active_window = window_util::GetActiveWindow();
   if (!active_window)
     return;
-  const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-  wm::GetWindowState(active_window)->OnWMEvent(&event);
+  const WMEvent event(WM_EVENT_TOGGLE_FULLSCREEN);
+  WindowState::Get(active_window)->OnWMEvent(&event);
 }
 
 bool CanUnpinWindow() {
   // WindowStateType::kTrustedPinned does not allow the user to press a key to
   // exit pinned mode.
-  wm::WindowState* window_state = wm::GetActiveWindowState();
+  WindowState* window_state = WindowState::ForActiveWindow();
   return window_state &&
          window_state->GetStateType() == WindowStateType::kPinned;
 }
@@ -94,7 +95,37 @@ void UnpinWindow() {
   aura::Window* pinned_window =
       Shell::Get()->screen_pinning_controller()->pinned_window();
   if (pinned_window)
-    wm::GetWindowState(pinned_window)->Restore();
+    WindowState::Get(pinned_window)->Restore();
+}
+
+void ShiftPrimaryDisplay() {
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
+
+  CHECK_GE(display_manager->GetNumDisplays(), 2U);
+
+  const int64_t primary_display_id =
+      display::Screen::GetScreen()->GetPrimaryDisplay().id();
+
+  const display::Displays& active_display_list =
+      display_manager->active_display_list();
+
+  auto primary_display_iter =
+      std::find_if(active_display_list.begin(), active_display_list.end(),
+                   [id = primary_display_id](const display::Display& display) {
+                     return display.id() == id;
+                   });
+
+  DCHECK(primary_display_iter != active_display_list.end());
+
+  ++primary_display_iter;
+
+  // If we've reach the end of |active_display_list|, wrap back around to the
+  // front.
+  if (primary_display_iter == active_display_list.end())
+    primary_display_iter = active_display_list.begin();
+
+  Shell::Get()->display_configuration_controller()->SetPrimaryDisplayId(
+      primary_display_iter->id(), true /* throttle */);
 }
 
 }  // namespace accelerators

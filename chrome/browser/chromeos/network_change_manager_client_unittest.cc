@@ -15,7 +15,7 @@
 #include "chromeos/dbus/shill/shill_service_client.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_change_notifier_posix.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,7 +73,6 @@ TEST(NetworkChangeManagerClientTest, ConnectionTypeFromShill) {
   TypeMapping type_mappings[] = {
       {shill::kTypeEthernet, "", NetworkChangeNotifier::CONNECTION_ETHERNET},
       {shill::kTypeWifi, "", NetworkChangeNotifier::CONNECTION_WIFI},
-      {shill::kTypeWimax, "", NetworkChangeNotifier::CONNECTION_4G},
       {"unknown type", "unknown technology",
        NetworkChangeNotifier::CONNECTION_UNKNOWN},
       {shill::kTypeCellular, shill::kNetworkTechnology1Xrtt,
@@ -110,10 +109,10 @@ TEST(NetworkChangeManagerClientTest, ConnectionTypeFromShill) {
 TEST(NetworkChangeManagerClientTest,
      NetworkChangeNotifierConnectionTypeUpdated) {
   // Create a NetworkChangeNotifier with a non-NONE connection type.
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<net::NetworkChangeNotifierPosix> network_change_notifier(
       static_cast<net::NetworkChangeNotifierPosix*>(
-          net::NetworkChangeNotifier::Create().release()));
+          net::NetworkChangeNotifier::CreateIfNeeded().release()));
   network_change_notifier->OnConnectionChanged(
       net::NetworkChangeNotifier::CONNECTION_UNKNOWN);
   EXPECT_EQ(net::NetworkChangeNotifier::CONNECTION_UNKNOWN,
@@ -150,7 +149,7 @@ class NetworkChangeManagerClientUpdateTest : public testing::Test {
   ~NetworkChangeManagerClientUpdateTest() override = default;
 
   void SetUp() override {
-    network_change_notifier_ = net::NetworkChangeNotifier::Create();
+    network_change_notifier_ = net::NetworkChangeNotifier::CreateIfNeeded();
     DBusThreadManager::Initialize();
     PowerManagerClient::InitializeFake();
     NetworkHandler::Initialize();
@@ -217,7 +216,7 @@ class NetworkChangeManagerClientUpdateTest : public testing::Test {
   }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   NetworkState default_network_;
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   std::unique_ptr<NetworkChangeManagerClient> proxy_;

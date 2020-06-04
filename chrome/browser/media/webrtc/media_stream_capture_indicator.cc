@@ -10,8 +10,9 @@
 #include <string>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -76,6 +77,36 @@ base::string16 GetTitle(WebContents* web_contents) {
 #endif
 
   return url_formatter::FormatUrlForSecurityDisplay(web_contents->GetURL());
+}
+
+typedef void (MediaStreamCaptureIndicator::Observer::*ObserverMethod)(
+    content::WebContents* web_contents,
+    bool value);
+
+ObserverMethod GetObserverMethodToCall(blink::mojom::MediaStreamType type) {
+  switch (type) {
+    case blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE:
+      return &MediaStreamCaptureIndicator::Observer::OnIsCapturingAudioChanged;
+
+    case blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE:
+      return &MediaStreamCaptureIndicator::Observer::OnIsCapturingVideoChanged;
+
+    case blink::mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE:
+      return &MediaStreamCaptureIndicator::Observer::OnIsBeingMirroredChanged;
+
+    case blink::mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE:
+    case blink::mojom::MediaStreamType::GUM_DESKTOP_AUDIO_CAPTURE:
+    case blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE:
+    case blink::mojom::MediaStreamType::DISPLAY_AUDIO_CAPTURE:
+      return &MediaStreamCaptureIndicator::Observer::
+          OnIsCapturingDesktopChanged;
+
+    case blink::mojom::MediaStreamType::NO_SERVICE:
+    case blink::mojom::MediaStreamType::NUM_MEDIA_TYPES:
+      NOTREACHED();
+      return nullptr;
+  }
 }
 
 }  // namespace
@@ -192,8 +223,17 @@ MediaStreamCaptureIndicator::WebContentsDeviceUsage::RegisterMediaStream(
 void MediaStreamCaptureIndicator::WebContentsDeviceUsage::AddDevices(
     const blink::MediaStreamDevices& devices,
     base::OnceClosure stop_callback) {
-  for (const auto& device : devices)
-    ++GetStreamCount(device.type);
+  for (const auto& device : devices) {
+    int& stream_count = GetStreamCount(device.type);
+    ++stream_count;
+
+    if (web_contents() && stream_count == 1) {
+      ObserverMethod obs_func = GetObserverMethodToCall(device.type);
+      DCHECK(obs_func);
+      for (Observer& obs : indicator_->observers_)
+        (obs.*obs_func)(web_contents(), true);
+    }
+  }
 
   if (web_contents()) {
     stop_callback_ = std::move(stop_callback);
@@ -209,6 +249,13 @@ void MediaStreamCaptureIndicator::WebContentsDeviceUsage::RemoveDevices(
     int& stream_count = GetStreamCount(device.type);
     --stream_count;
     DCHECK_GE(stream_count, 0);
+
+    if (web_contents() && stream_count == 0) {
+      ObserverMethod obs_func = GetObserverMethodToCall(device.type);
+      DCHECK(obs_func);
+      for (Observer& obs : indicator_->observers_)
+        (obs.*obs_func)(web_contents(), false);
+    }
   }
 
   if (web_contents()) {
@@ -248,6 +295,10 @@ int& MediaStreamCaptureIndicator::WebContentsDeviceUsage::GetStreamCount(
       NOTREACHED();
       return video_stream_count_;
   }
+}
+
+MediaStreamCaptureIndicator::Observer::~Observer() {
+  DCHECK(!IsInObserverList());
 }
 
 MediaStreamCaptureIndicator::MediaStreamCaptureIndicator() {}

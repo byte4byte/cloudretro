@@ -5,18 +5,21 @@
 package org.chromium.chrome.browser.vr;
 
 import android.content.res.Resources;
-import android.support.annotation.NonNull;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.content_public.browser.NavigationHandle;
+import org.chromium.components.url_formatter.SchemeDisplay;
+import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.content_public.browser.XrConsentPromptLevel;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
@@ -29,8 +32,8 @@ import org.chromium.ui.modelutil.PropertyModel;
 public class VrConsentDialog
         extends WebContentsObserver implements ModalDialogProperties.Controller {
     @NativeMethods
-    /* package */ interface VrConsentUiHelperImpl {
-        void onUserConsentResult(long nativeGvrConsentHelperImpl, boolean allowed);
+    /* package */ interface VrConsentUiHelper {
+        void onUserConsentResult(long nativeGvrConsentHelper, boolean allowed);
     }
 
     private ModalDialogManager mModalDialogManager;
@@ -38,18 +41,22 @@ public class VrConsentDialog
     private long mNativeInstance;
     private ConsentFlowMetrics mMetrics;
     private String mUrl;
+    private @XrConsentPromptLevel int mConsentLevel;
 
-    private VrConsentDialog(long instance, WebContents webContents) {
+    private VrConsentDialog(
+            long instance, WebContents webContents, @XrConsentPromptLevel int consentLevel) {
         super(webContents);
         mNativeInstance = instance;
         mMetrics = new ConsentFlowMetrics(webContents);
         mUrl = webContents.getLastCommittedUrl();
+        mConsentLevel = consentLevel;
     }
 
     @CalledByNative
-    private static VrConsentDialog promptForUserConsent(long instance, final Tab tab) {
-        VrConsentDialog dialog = new VrConsentDialog(instance, tab.getWebContents());
-        dialog.show(tab.getActivity(), new VrConsentListener() {
+    private static VrConsentDialog promptForUserConsent(
+            long instance, final Tab tab, @XrConsentPromptLevel int consentLevel) {
+        VrConsentDialog dialog = new VrConsentDialog(instance, tab.getWebContents(), consentLevel);
+        dialog.show(tab.getWindowAndroid(), new VrConsentListener() {
             @Override
             public void onUserConsent(boolean allowed) {
                 dialog.onUserGesture(allowed);
@@ -58,34 +65,62 @@ public class VrConsentDialog
         return dialog;
     }
 
+    @CalledByNative
+    private void onNativeDestroy() {
+        mNativeInstance = 0;
+        mModalDialogManager.dismissAllDialogs(DialogDismissalCause.UNKNOWN);
+    }
+
     @VisibleForTesting
     protected void onUserGesture(boolean allowed) {
-        VrConsentDialogJni.get().onUserConsentResult(mNativeInstance, allowed);
+        if (mNativeInstance != 0) {
+            VrConsentDialogJni.get().onUserConsentResult(mNativeInstance, allowed);
+        }
     }
 
-    @Override
-    public void didStartNavigation(NavigationHandle navigationHandle) {
-        mModalDialogManager.dismissAllDialogs(DialogDismissalCause.UNKNOWN);
-        onUserGesture(false);
+    private static String bulletedString(Resources resources, int id) {
+        return resources.getString(R.string.xr_consent_bullet, resources.getString(id));
     }
 
-    public void show(@NonNull ChromeActivity activity, @NonNull VrConsentListener listener) {
+    public void show(@NonNull WindowAndroid window, @NonNull VrConsentListener listener) {
         mListener = listener;
 
-        Resources resources = activity.getResources();
+        Resources resources = window.getContext().get().getResources();
+
+        String dialogTitle = resources.getString(R.string.xr_consent_dialog_title,
+                UrlFormatter.formatUrlForSecurityDisplay(mUrl, SchemeDisplay.OMIT_HTTP_AND_HTTPS));
+
+        String dialogBody =
+                resources.getString(R.string.xr_consent_dialog_description_default) + "\n";
+        switch (mConsentLevel) {
+            case XrConsentPromptLevel.VR_FLOOR_PLAN:
+                dialogBody += bulletedString(resources,
+                                      R.string.xr_consent_dialog_description_physical_features)
+                        + "\n"
+                        + bulletedString(
+                                resources, R.string.xr_consent_dialog_description_floor_plan);
+                break;
+            case XrConsentPromptLevel.VR_FEATURES:
+                dialogBody += bulletedString(
+                        resources, R.string.xr_consent_dialog_description_physical_features);
+                break;
+            case XrConsentPromptLevel.DEFAULT:
+            default:
+                dialogBody = "";
+                break;
+        }
+
         PropertyModel model = new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
                                       .with(ModalDialogProperties.CONTROLLER, this)
-                                      .with(ModalDialogProperties.TITLE, resources,
-                                              R.string.xr_consent_dialog_title)
-                                      .with(ModalDialogProperties.MESSAGE, resources,
-                                              R.string.xr_consent_dialog_description)
+                                      .with(ModalDialogProperties.TITLE, dialogTitle)
+                                      .with(ModalDialogProperties.MESSAGE, dialogBody)
                                       .with(ModalDialogProperties.POSITIVE_BUTTON_TEXT, resources,
                                               R.string.xr_consent_dialog_button_allow_and_enter_vr)
                                       .with(ModalDialogProperties.NEGATIVE_BUTTON_TEXT, resources,
-                                              R.string.xr_consent_dialog_button_deny_vr)
+                                              R.string.cancel)
                                       .with(ModalDialogProperties.CANCEL_ON_TOUCH_OUTSIDE, true)
                                       .build();
-        mModalDialogManager = activity.getModalDialogManager();
+        mModalDialogManager = window.getModalDialogManager();
         mModalDialogManager.showDialog(model, ModalDialogManager.ModalDialogType.TAB);
     }
 
@@ -100,7 +135,10 @@ public class VrConsentDialog
 
     @Override
     public void onDismiss(PropertyModel model, int dismissalCause) {
-        if (dismissalCause == DialogDismissalCause.UNKNOWN) return;
+        if (dismissalCause == DialogDismissalCause.UNKNOWN) {
+            mListener.onUserConsent(false);
+            return;
+        }
 
         if (dismissalCause == DialogDismissalCause.POSITIVE_BUTTON_CLICKED) {
             mListener.onUserConsent(true);

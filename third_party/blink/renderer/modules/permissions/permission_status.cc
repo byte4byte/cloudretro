@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/permissions/permission_status.h"
 
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -36,10 +37,10 @@ PermissionStatus* PermissionStatus::CreateAndListen(
 PermissionStatus::PermissionStatus(ExecutionContext* execution_context,
                                    MojoPermissionStatus status,
                                    MojoPermissionDescriptor descriptor)
-    : ContextLifecycleStateObserver(execution_context),
+    : ExecutionContextLifecycleStateObserver(execution_context),
       status_(status),
       descriptor_(std::move(descriptor)),
-      binding_(this) {}
+      receiver_(this, execution_context) {}
 
 PermissionStatus::~PermissionStatus() = default;
 
@@ -52,11 +53,11 @@ const AtomicString& PermissionStatus::InterfaceName() const {
 }
 
 ExecutionContext* PermissionStatus::GetExecutionContext() const {
-  return ContextLifecycleStateObserver::GetExecutionContext();
+  return ExecutionContextLifecycleStateObserver::GetExecutionContext();
 }
 
 bool PermissionStatus::HasPendingActivity() const {
-  return binding_.is_bound();
+  return receiver_.is_bound();
 }
 
 void PermissionStatus::ContextLifecycleStateChanged(
@@ -67,30 +68,26 @@ void PermissionStatus::ContextLifecycleStateChanged(
     StopListening();
 }
 
-void PermissionStatus::ContextDestroyed(ExecutionContext*) {
-  StopListening();
-}
-
 String PermissionStatus::state() const {
   return PermissionStatusToString(status_);
 }
 
 void PermissionStatus::StartListening() {
-  DCHECK(!binding_.is_bound());
-  mojom::blink::PermissionObserverPtr observer;
+  DCHECK(!receiver_.is_bound());
+  mojo::PendingRemote<mojom::blink::PermissionObserver> observer;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       GetExecutionContext()->GetTaskRunner(TaskType::kPermission);
-  binding_.Bind(mojo::MakeRequest(&observer, task_runner), task_runner);
+  receiver_.Bind(observer.InitWithNewPipeAndPassReceiver(), task_runner);
 
-  mojom::blink::PermissionServicePtr service;
+  mojo::Remote<mojom::blink::PermissionService> service;
   ConnectToPermissionService(GetExecutionContext(),
-                             mojo::MakeRequest(&service, task_runner));
+                             service.BindNewPipeAndPassReceiver(task_runner));
   service->AddPermissionObserver(descriptor_->Clone(), status_,
                                  std::move(observer));
 }
 
 void PermissionStatus::StopListening() {
-  binding_.Close();
+  receiver_.reset();
 }
 
 void PermissionStatus::OnPermissionStatusChange(MojoPermissionStatus status) {
@@ -101,9 +98,10 @@ void PermissionStatus::OnPermissionStatusChange(MojoPermissionStatus status) {
   DispatchEvent(*Event::Create(event_type_names::kChange));
 }
 
-void PermissionStatus::Trace(blink::Visitor* visitor) {
+void PermissionStatus::Trace(Visitor* visitor) {
+  visitor->Trace(receiver_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleStateObserver::Trace(visitor);
+  ExecutionContextLifecycleStateObserver::Trace(visitor);
 }
 
 }  // namespace blink

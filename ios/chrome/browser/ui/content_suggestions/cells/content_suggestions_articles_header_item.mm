@@ -5,9 +5,9 @@
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_articles_header_item.h"
 
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
-#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
-#import "ios/chrome/common/colors/semantic_color_names.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -95,7 +95,6 @@ const CGFloat kTextMargin = 13;
     _label.adjustsFontSizeToFitWidth = YES;
 
     _button = [UIButton buttonWithType:UIButtonTypeSystem];
-    _button.tintColor = [UIColor colorNamed:kTintColor];
     _button.translatesAutoresizingMaskIntoConstraints = NO;
     _button.titleLabel.font =
         [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];

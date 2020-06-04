@@ -64,7 +64,7 @@ class UploadJobImpl : public UploadJob,
   // all the public methods are called.
   UploadJobImpl(
       const GURL& upload_url,
-      const std::string& account_id,
+      const CoreAccountId& account_id,
       OAuth2AccessTokenManager* access_token_manager,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       Delegate* delegate,
@@ -137,7 +137,7 @@ class UploadJobImpl : public UploadJob,
   const GURL upload_url_;
 
   // The account ID that will be used for the access token fetch.
-  const std::string account_id_;
+  const CoreAccountId account_id_;
 
   // The token manager used to retrieve the access token.
   OAuth2AccessTokenManager* const access_token_manager_;
@@ -188,7 +188,7 @@ class UploadJobImpl : public UploadJob,
 
   // Should remain the last member so it will be destroyed first and
   // invalidate all weak pointers.
-  base::WeakPtrFactory<UploadJobImpl> weak_factory_;
+  base::WeakPtrFactory<UploadJobImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UploadJobImpl);
 };

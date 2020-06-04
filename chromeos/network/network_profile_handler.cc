@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill/shill_manager_client.h"
@@ -76,8 +77,7 @@ void NetworkProfileHandler::GetManagerPropertiesCallback(
     return;
   }
 
-  const base::Value* profiles = NULL;
-  properties.GetWithoutPathExpansion(shill::kProfilesProperty, &profiles);
+  const base::Value* profiles = properties.FindKey(shill::kProfilesProperty);
   if (!profiles) {
     LOG(ERROR) << "Manager properties returned from Shill don't contain "
                << "the field " << shill::kProfilesProperty;
@@ -128,9 +128,9 @@ void NetworkProfileHandler::OnPropertyChanged(const std::string& name,
     VLOG(2) << "Requesting properties of profile path " << *it << ".";
     ShillProfileClient::Get()->GetProperties(
         dbus::ObjectPath(*it),
-        base::Bind(&NetworkProfileHandler::GetProfilePropertiesCallback,
-                   weak_ptr_factory_.GetWeakPtr(), *it),
-        base::Bind(&LogProfileRequestError, *it));
+        base::BindOnce(&NetworkProfileHandler::GetProfilePropertiesCallback,
+                       weak_ptr_factory_.GetWeakPtr(), *it),
+        base::BindOnce(&LogProfileRequestError, *it));
   }
 }
 
@@ -145,10 +145,10 @@ void NetworkProfileHandler::GetProfilePropertiesCallback(
     VLOG(1) << "Ignore received properties, profile is already created.";
     return;
   }
-  std::string userhash;
-  properties.GetStringWithoutPathExpansion(shill::kUserHashProperty, &userhash);
+  const std::string* userhash =
+      properties.FindStringKey(shill::kUserHashProperty);
 
-  AddProfile(NetworkProfile(profile_path, userhash));
+  AddProfile(NetworkProfile(profile_path, userhash ? *userhash : ""));
 }
 
 void NetworkProfileHandler::AddProfile(const NetworkProfile& profile) {
@@ -202,21 +202,27 @@ const NetworkProfile* NetworkProfileHandler::GetDefaultUserProfile() const {
   return NULL;
 }
 
-NetworkProfileHandler::NetworkProfileHandler()
-    : weak_ptr_factory_(this) {
-}
+NetworkProfileHandler::NetworkProfileHandler() {}
 
 void NetworkProfileHandler::Init() {
   ShillManagerClient::Get()->AddPropertyChangedObserver(this);
 
   // Request the initial profile list.
   ShillManagerClient::Get()->GetProperties(
-      base::Bind(&NetworkProfileHandler::GetManagerPropertiesCallback,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&NetworkProfileHandler::GetManagerPropertiesCallback,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 NetworkProfileHandler::~NetworkProfileHandler() {
   ShillManagerClient::Get()->RemovePropertyChangedObserver(this);
+}
+
+// static
+std::unique_ptr<NetworkProfileHandler>
+NetworkProfileHandler::InitializeForTesting() {
+  auto* handler = new NetworkProfileHandler();
+  handler->Init();
+  return base::WrapUnique(handler);
 }
 
 }  // namespace chromeos

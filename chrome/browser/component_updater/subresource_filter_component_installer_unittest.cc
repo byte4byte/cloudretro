@@ -27,7 +27,7 @@
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features_test_support.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -47,7 +47,7 @@ class TestRulesetService : public subresource_filter::RulesetService {
                                            base_dir,
                                            blocking_task_runner) {}
 
-  ~TestRulesetService() override {}
+  ~TestRulesetService() override = default;
 
   using UnindexedRulesetInfo = subresource_filter::UnindexedRulesetInfo;
   void IndexAndStoreAndPublishRulesetIfNeeded(
@@ -76,8 +76,8 @@ class TestRulesetService : public subresource_filter::RulesetService {
 class SubresourceFilterMockComponentUpdateService
     : public component_updater::MockComponentUpdateService {
  public:
-  SubresourceFilterMockComponentUpdateService() {}
-  ~SubresourceFilterMockComponentUpdateService() override {}
+  SubresourceFilterMockComponentUpdateService() = default;
+  ~SubresourceFilterMockComponentUpdateService() override = default;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SubresourceFilterMockComponentUpdateService);
@@ -96,7 +96,7 @@ namespace component_updater {
 
 class SubresourceFilterComponentInstallerTest : public PlatformTest {
  public:
-  SubresourceFilterComponentInstallerTest() {}
+  SubresourceFilterComponentInstallerTest() = default;
 
   void SetUp() override {
     PlatformTest::SetUp();
@@ -118,7 +118,7 @@ class SubresourceFilterComponentInstallerTest : public PlatformTest {
 
   void TearDown() override {
     TestingBrowserProcess::GetGlobal()->SetRulesetService(nullptr);
-    thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     PlatformTest::TearDown();
   }
 
@@ -167,10 +167,9 @@ class SubresourceFilterComponentInstallerTest : public PlatformTest {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
  private:
-
   base::ScopedTempDir component_install_dir_;
   base::ScopedTempDir ruleset_service_dir_;
 
@@ -191,7 +190,7 @@ TEST_F(SubresourceFilterComponentInstallerTest,
       component_updater(new SubresourceFilterMockComponentUpdateService());
   EXPECT_CALL(*component_updater, RegisterComponent(testing::_)).Times(0);
   RegisterSubresourceFilterComponent(component_updater.get());
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(SubresourceFilterComponentInstallerTest,
@@ -205,7 +204,7 @@ TEST_F(SubresourceFilterComponentInstallerTest,
       .Times(1)
       .WillOnce(testing::Return(true));
   RegisterSubresourceFilterComponent(component_updater.get());
-  thread_bundle_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(SubresourceFilterComponentInstallerTest, LoadEmptyRuleset) {

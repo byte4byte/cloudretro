@@ -7,12 +7,14 @@
 #include "ash/public/cpp/notification_utils.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/browser_thread.h"
@@ -20,6 +22,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/message_center/public/cpp/notification.h"
 
@@ -66,14 +69,19 @@ void ExtensionInstalledNotification::Click(
   if (!extensions::util::IsAppLaunchable(extension_id_, profile_))
     return;
 
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
-          extension_id_, extensions::ExtensionRegistry::EVERYTHING);
-  if (!extension)
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfile(profile_);
+  DCHECK(proxy);
+  if (proxy->AppRegistryCache().GetAppType(extension_id_) ==
+      apps::mojom::AppType::kUnknown) {
     return;
+  }
 
-  AppLaunchParams params = CreateAppLaunchParamsUserContainer(
-      profile_, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      extensions::AppLaunchSource::kSourceInstalledNotification);
-  OpenApplication(params);
+  proxy->Launch(
+      extension_id_,
+      apps::GetEventFlags(apps::mojom::LaunchContainer::kLaunchContainerNone,
+                          WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                          true /* preferred_containner */),
+      apps::mojom::LaunchSource::kFromInstalledNotification,
+      display::kInvalidDisplayId);
 }

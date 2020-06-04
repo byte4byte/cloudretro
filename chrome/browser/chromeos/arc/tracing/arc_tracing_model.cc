@@ -7,6 +7,7 @@
 #include "chrome/browser/chromeos/arc/tracing/arc_tracing_model.h"
 
 #include "base/json/json_reader.h"
+#include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/trace_event/common/trace_event_common.h"
 #include "chrome/browser/chromeos/arc/tracing/arc_tracing_event.h"
@@ -313,7 +314,7 @@ bool HandleGpuFreq(ValueEvents* value_events,
     return false;
   }
 
-  value_events->emplace_back(timestamp, ArcValueEvent::Type::kGpuFreq,
+  value_events->emplace_back(timestamp, ArcValueEvent::Type::kGpuFrequency,
                              new_freq);
   return true;
 }

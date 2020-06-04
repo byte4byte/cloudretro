@@ -17,6 +17,26 @@ gfx::Vector2dF ProjectScalarOntoVector(float scalar,
   return gfx::ScaleVector2d(vector, scalar / vector.Length());
 }
 
+// returns the animation progress along an arctan curve to provide simple
+// ease-in ease-out behavior.
+float GetCurvedRatio(const base::TimeTicks& current,
+                     const base::TimeTicks& start,
+                     const base::TimeTicks& end,
+                     int speed_in_pixels_s) {
+  // Increasing this would make the start and the end of the curv smoother.
+  // Hence the higher value for the higher speed.
+  const float kArctanRange = sqrt(static_cast<double>(speed_in_pixels_s)) / 100;
+
+  const float kMaxArctan = std::atan(kArctanRange / 2);
+  const float kMinArctan = std::atan(-kArctanRange / 2);
+
+  float linear_ratio =
+      (current - start).InSecondsF() / (end - start).InSecondsF();
+  return (std::atan(kArctanRange * linear_ratio - kArctanRange / 2) -
+          kMinArctan) /
+         (kMaxArctan - kMinArctan);
+}
+
 const int kDefaultSpeedInPixelsPerSec = 800;
 
 }  // namespace
@@ -27,8 +47,7 @@ SyntheticSmoothMoveGestureParams::SyntheticSmoothMoveGestureParams()
       fling_velocity_y(0),
       prevent_fling(true),
       add_slop(true),
-      precise_scrolling_deltas(false),
-      scroll_by_page(false) {}
+      granularity(ui::ScrollGranularity::kScrollByPixel) {}
 
 SyntheticSmoothMoveGestureParams::SyntheticSmoothMoveGestureParams(
     const SyntheticSmoothMoveGestureParams& other) = default;
@@ -172,7 +191,8 @@ void SyntheticSmoothMoveGesture::ForwardMouseWheelInputEvents(
         blink::WebMouseWheelEvent::Phase phase =
             needs_scroll_begin_ ? blink::WebMouseWheelEvent::kPhaseBegan
                                 : blink::WebMouseWheelEvent::kPhaseChanged;
-        ForwardMouseWheelEvent(target, delta, phase, event_timestamp);
+        ForwardMouseWheelEvent(target, delta, phase, event_timestamp,
+                               params_.key_modifiers);
         current_move_segment_total_delta_ += delta;
         needs_scroll_begin_ = false;
       }
@@ -188,12 +208,12 @@ void SyntheticSmoothMoveGesture::ForwardMouseWheelInputEvents(
           if (!params_.prevent_fling && (params_.fling_velocity_x != 0 ||
                                          params_.fling_velocity_y != 0)) {
             ForwardFlingGestureEvent(
-                target, blink::WebGestureEvent::kGestureFlingStart);
+                target, blink::WebGestureEvent::Type::kGestureFlingStart);
           } else {
             // Forward a wheel event with phase ended and zero deltas.
             ForwardMouseWheelEvent(target, gfx::Vector2d(),
                                    blink::WebMouseWheelEvent::kPhaseEnded,
-                                   event_timestamp);
+                                   event_timestamp, params_.key_modifiers);
           }
           needs_scroll_begin_ = true;
         }
@@ -262,11 +282,11 @@ void SyntheticSmoothMoveGesture::ForwardMouseWheelEvent(
     SyntheticGestureTarget* target,
     const gfx::Vector2dF& delta,
     const blink::WebMouseWheelEvent::Phase phase,
-    const base::TimeTicks& timestamp) const {
+    const base::TimeTicks& timestamp,
+    int key_modifiers) const {
   blink::WebMouseWheelEvent mouse_wheel_event =
       SyntheticWebMouseWheelEventBuilder::Build(
-          0, 0, delta.x(), delta.y(), 0, params_.precise_scrolling_deltas,
-          params_.scroll_by_page);
+          0, 0, delta.x(), delta.y(), key_modifiers, params_.granularity);
 
   mouse_wheel_event.SetPositionInWidget(
       current_move_segment_start_position_.x(),
@@ -342,11 +362,11 @@ gfx::Vector2dF SyntheticSmoothMoveGesture::GetPositionDeltaAtTime(
   if (FinishedCurrentMoveSegment(timestamp))
     return params_.distances[current_move_segment_];
 
-  float delta_length =
-      params_.speed_in_pixels_s *
-      (timestamp - current_move_segment_start_time_).InSecondsF();
-  return ProjectScalarOntoVector(delta_length,
-                                 params_.distances[current_move_segment_]);
+  return gfx::ScaleVector2d(
+      params_.distances[current_move_segment_],
+      GetCurvedRatio(timestamp, current_move_segment_start_time_,
+                     current_move_segment_stop_time_,
+                     params_.speed_in_pixels_s));
 }
 
 void SyntheticSmoothMoveGesture::ComputeNextMoveSegment() {

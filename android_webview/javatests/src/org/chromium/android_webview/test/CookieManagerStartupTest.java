@@ -28,6 +28,9 @@ import org.chromium.net.test.util.TestWebServer;
 
 /**
  * Tests for CookieManager/Chromium startup ordering weirdness.
+ *
+ * This tests various cases around ordering of calls to CookieManager at startup, and thus is
+ * separate from the normal CookieManager tests so it can control call ordering carefully.
  */
 @RunWith(AwJUnit4ClassRunner.class)
 public class CookieManagerStartupTest {
@@ -48,7 +51,7 @@ public class CookieManagerStartupTest {
     private AwContents mAwContents;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         ThreadUtils.setUiThread(null);
         ThreadUtils.setWillOverrideUiThread(true);
 
@@ -58,20 +61,28 @@ public class CookieManagerStartupTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         ThreadUtils.setWillOverrideUiThread(false);
     }
 
-    private void startChromium() throws Exception {
+    /**
+     * Called when a test wants to initiate normal Chromium process startup, after
+     * doing any CookieManager calls that are supposed to happen before the UI thread
+     * is committed.
+     */
+    private void startChromium() {
         ThreadUtils.setUiThread(Looper.getMainLooper());
         startChromiumWithClient(new TestAwContentsClient());
     }
 
-    private void startChromiumWithClient(TestAwContentsClient contentsClient) throws Exception {
-        // The activity must be launched in order for proper webview statics to be setup.
-        mActivityTestRule.launchActivity();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> AwBrowserProcess.start());
-
+    /**
+     * Called when a test wants to initiate normal Chromium process startup, after
+     * doing any CookieManager calls that are supposed to happen before the UI thread
+     * is committed.
+     */
+    private void startChromiumWithClient(TestAwContentsClient contentsClient) {
+        mActivityTestRule.createAwBrowserContext();
+        mActivityTestRule.startBrowserProcess();
         mContentsClient = contentsClient;
         final AwTestContainerView testContainerView =
                 mActivityTestRule.createAwTestContainerViewOnMainSync(mContentsClient);
@@ -88,6 +99,7 @@ public class CookieManagerStartupTest {
             String path = "/cookie_test.html";
             String url = webServer.setResponse(path, CommonResources.ABOUT_HTML, null);
 
+            // Verify that we can use AwCookieManager successfully before having started Chromium.
             AwCookieManager cookieManager = new AwCookieManager();
             Assert.assertNotNull(cookieManager);
 
@@ -99,12 +111,16 @@ public class CookieManagerStartupTest {
 
             cookieManager.setCookie(url, "count=41");
 
+            // Now start Chromium to cause the switch from the temporary cookie store to the real
+            // Mojo store.
             startChromium();
             mActivityTestRule.loadUrlSync(
                     mAwContents, mContentsClient.getOnPageFinishedHelper(), url);
             mActivityTestRule.executeJavaScriptAndWaitForResult(mAwContents, mContentsClient,
                     "var c=document.cookie.split('=');document.cookie=c[0]+'='+(1+(+c[1]));");
 
+            // Verify that the cookie value we set before was successfully passed through to the
+            // Mojo store.
             Assert.assertEquals("count=42", cookieManager.getCookie(url));
         } finally {
             webServer.shutdown();
@@ -114,7 +130,7 @@ public class CookieManagerStartupTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Privacy"})
-    public void testAllowFileSchemeCookies() throws Throwable {
+    public void testAllowFileSchemeCookies() {
         AwCookieManager cookieManager = new AwCookieManager();
         Assert.assertFalse(cookieManager.allowFileSchemeCookies());
         cookieManager.setAcceptFileSchemeCookies(true);
@@ -126,7 +142,7 @@ public class CookieManagerStartupTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Privacy"})
-    public void testAllowCookies() throws Throwable {
+    public void testAllowCookies() {
         AwCookieManager cookieManager = new AwCookieManager();
         Assert.assertTrue(cookieManager.acceptCookie());
         cookieManager.setAcceptCookie(false);

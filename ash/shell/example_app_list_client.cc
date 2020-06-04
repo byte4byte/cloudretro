@@ -10,7 +10,6 @@
 #include "ash/app_list/app_list_controller_impl.h"
 #include "ash/app_list/model/app_list_item.h"
 #include "ash/app_list/model/search/search_result.h"
-#include "ash/public/interfaces/constants.mojom.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
@@ -29,7 +28,7 @@ namespace shell {
 
 // WindowTypeShelfItem is an app item of app list. It carries a window
 // launch type and launches corresponding example window when activated.
-class WindowTypeShelfItem : public app_list::AppListItem {
+class WindowTypeShelfItem : public AppListItem {
  public:
   enum Type {
     TOPLEVEL_WINDOW = 0,
@@ -125,9 +124,9 @@ class WindowTypeShelfItem : public app_list::AppListItem {
 };
 
 WindowTypeShelfItem::WindowTypeShelfItem(const std::string& id, Type type)
-    : app_list::AppListItem(id), type_(type) {
+    : AppListItem(id), type_(type) {
   std::string title(GetTitle(type));
-  SetIcon(GetIcon(type));
+  SetIcon(ash::AppListConfigType::kShared, GetIcon(type));
   SetName(title);
 }
 
@@ -137,7 +136,7 @@ WindowTypeShelfItem::~WindowTypeShelfItem() = default;
 // show, what should title and details text look like. It also carries the
 // matching window launch type so that AppListViewDelegate knows how to open
 // it.
-class ExampleSearchResult : public app_list::SearchResult {
+class ExampleSearchResult : public SearchResult {
  public:
   ExampleSearchResult(WindowTypeShelfItem::Type type,
                       const base::string16& query)
@@ -149,7 +148,7 @@ class ExampleSearchResult : public app_list::SearchResult {
     set_title(title);
 
     if (query.empty()) {
-      set_display_type(ash::SearchResultDisplayType::kRecommendation);
+      set_is_recommendation(true);
       SetChipIcon(WindowTypeShelfItem::GetIcon(type_));
     } else {
       Tags title_tags;
@@ -235,7 +234,8 @@ void ExampleAppListClient::OpenSearchResult(
     int event_flags,
     ash::AppListLaunchedFrom launched_from,
     ash::AppListLaunchType launch_type,
-    int suggestion_index) {
+    int suggestion_index,
+    bool launch_as_default) {
   auto it = std::find_if(
       search_results_.begin(), search_results_.end(),
       [&result_id](const std::unique_ptr<ExampleSearchResult>& result) {

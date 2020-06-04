@@ -5,24 +5,24 @@
 #include "chrome/browser/chromeos/policy/display_settings_handler.h"
 
 #include <utility>
-#include "ash/public/interfaces/constants.mojom.h"
+
+#include "ash/public/ash_interfaces.h"
+#include "ash/public/mojom/cros_display_config.mojom.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/settings/cros_settings_names.h"
-#include "content/public/browser/system_connector.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 
 namespace policy {
 
 DisplaySettingsHandler::DisplaySettingsHandler() {
-  content::GetSystemConnector()->BindInterface(ash::mojom::kServiceName,
-                                               &cros_display_config_);
+  ash::BindCrosDisplayConfigController(
+      cros_display_config_.BindNewPipeAndPassReceiver());
 }
 
 DisplaySettingsHandler::~DisplaySettingsHandler() = default;
@@ -64,9 +64,10 @@ void DisplaySettingsHandler::OnGetInitialDisplayInfo(
     std::vector<ash::mojom::DisplayUnitInfoPtr> info_list) {
   // Add this as an observer to the mojo service now that it is ready.
   // (We only care about changes that occur after we apply any changes below).
-  ash::mojom::CrosDisplayConfigObserverAssociatedPtrInfo ptr_info;
-  cros_display_config_observer_binding_.Bind(mojo::MakeRequest(&ptr_info));
-  cros_display_config_->AddObserver(std::move(ptr_info));
+  mojo::PendingAssociatedRemote<ash::mojom::CrosDisplayConfigObserver> observer;
+  cros_display_config_observer_receiver_.Bind(
+      observer.InitWithNewEndpointAndPassReceiver());
+  cros_display_config_->AddObserver(std::move(observer));
 
   ApplyChanges(std::move(info_list));
 }

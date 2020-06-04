@@ -5,7 +5,9 @@
 #import "ios/chrome/browser/ui/dialogs/overlay_java_script_dialog_presenter.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #import "base/strings/sys_string_conversions.h"
+#include "ios/chrome/browser/overlays/public/overlay_callback_manager.h"
 #import "ios/chrome/browser/overlays/public/overlay_request.h"
 #import "ios/chrome/browser/overlays/public/overlay_request_queue.h"
 #import "ios/chrome/browser/overlays/public/overlay_response.h"
@@ -13,7 +15,8 @@
 #import "ios/chrome/browser/overlays/public/web_content_area/java_script_confirmation_overlay.h"
 #import "ios/chrome/browser/overlays/public/web_content_area/java_script_prompt_overlay.h"
 #import "ios/chrome/browser/ui/dialogs/java_script_dialog_blocking_state.h"
-#import "ios/web/public/web_state/web_state.h"
+#include "ios/chrome/browser/ui/dialogs/java_script_dialog_metrics.h"
+#import "ios/web/public/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -23,6 +26,10 @@ OverlayJavaScriptDialogPresenter::OverlayJavaScriptDialogPresenter()
     : weak_factory_(this) {}
 
 OverlayJavaScriptDialogPresenter::~OverlayJavaScriptDialogPresenter() = default;
+
+void OverlayJavaScriptDialogPresenter::Close() {
+  closing_ = true;
+}
 
 void OverlayJavaScriptDialogPresenter::RunJavaScriptDialog(
     web::WebState* web_state,
@@ -34,6 +41,7 @@ void OverlayJavaScriptDialogPresenter::RunJavaScriptDialog(
   JavaScriptDialogBlockingState::CreateForWebState(web_state);
   if (JavaScriptDialogBlockingState::FromWebState(web_state)->blocked()) {
     // Block the dialog if needed.
+    RecordDialogDismissalCause(IOSJavaScriptDialogDismissalCause::kBlocked);
     std::move(callback).Run(NO, nil);
     return;
   }
@@ -61,7 +69,7 @@ void OverlayJavaScriptDialogPresenter::RunJavaScriptDialog(
           base::SysNSStringToUTF8(default_prompt_text));
       break;
   }
-  request->set_callback(base::BindOnce(
+  request->GetCallbackManager()->AddCompletionCallback(base::BindOnce(
       &OverlayJavaScriptDialogPresenter::HandleJavaScriptDialogResponse,
       weak_factory_.GetWeakPtr(), std::move(callback), source, dialog_type));
   OverlayRequestQueue::FromWebState(web_state, OverlayModality::kWebContentArea)
@@ -86,10 +94,17 @@ void OverlayJavaScriptDialogPresenter::HandleJavaScriptDialogResponse(
   }
 
   if (!response) {
+    // Cancelled dialogs have no response.  Cancellations that don't occur
+    // during tab closures are due to navigation.
+    IOSJavaScriptDialogDismissalCause cause =
+        closing_ ? IOSJavaScriptDialogDismissalCause::kClosure
+                 : IOSJavaScriptDialogDismissalCause::kNavigation;
+    RecordDialogDismissalCause(cause);
     std::move(callback).Run(false, nil);
     return;
   }
 
+  RecordDialogDismissalCause(IOSJavaScriptDialogDismissalCause::kUser);
   bool success = false;
   NSString* user_input = nil;
   switch (dialog_type) {

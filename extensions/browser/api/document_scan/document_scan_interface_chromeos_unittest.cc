@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_lorgnette_manager_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -35,7 +35,7 @@ class DocumentScanInterfaceChromeosTest : public testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   DocumentScanInterfaceChromeos scan_interface_;
 };
 
@@ -53,7 +53,7 @@ TEST_F(DocumentScanInterfaceChromeosTest, ListScanners) {
        {lorgnette::kScannerPropertyType, kScannerType}});
 
   base::RunLoop run_loop;
-  scan_interface_.ListScanners(base::Bind(
+  scan_interface_.ListScanners(base::BindOnce(
       [](base::RunLoop* run_loop,
          const std::vector<DocumentScanInterface::ScannerDescription>&
              descriptions,
@@ -79,7 +79,7 @@ TEST_F(DocumentScanInterfaceChromeosTest, ScanFailure) {
   base::RunLoop run_loop;
   scan_interface_.Scan(
       "Monet", DocumentScanInterface::kScanModeColor, 4096,
-      base::Bind(
+      base::BindOnce(
           [](base::RunLoop* run_loop, const std::string& scanned_image,
              const std::string& mime_type, const std::string& error) {
             run_loop->Quit();
@@ -102,7 +102,7 @@ TEST_F(DocumentScanInterfaceChromeosTest, ScanSuccess) {
   base::RunLoop run_loop;
   scan_interface_.Scan(
       kScannerName, DocumentScanInterface::kScanModeColor, kResolution,
-      base::Bind(
+      base::BindOnce(
           [](base::RunLoop* run_loop, const std::string& scanned_image,
              const std::string& mime_type, const std::string& error) {
             run_loop->Quit();

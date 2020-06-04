@@ -49,10 +49,14 @@ gl::GLSurfaceFormat AwGLSurface::GetFormat() {
 
 bool AwGLSurface::Resize(const gfx::Size& size,
                          float scale_factor,
-                         ColorSpace color_space,
+                         const gfx::ColorSpace& color_space,
                          bool has_alpha) {
   size_ = size;
   return true;
+}
+
+void AwGLSurface::SetSize(const gfx::Size& size) {
+  size_ = size;
 }
 
 void AwGLSurface::MaybeDidPresent(gfx::PresentationFeedback feedback) {

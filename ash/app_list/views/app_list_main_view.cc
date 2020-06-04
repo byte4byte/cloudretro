@@ -29,7 +29,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
-#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "ui/aura/window.h"
 #include "ui/chromeos/search_box/search_box_view_base.h"
 #include "ui/gfx/geometry/insets.h"
@@ -40,7 +40,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/wm/public/activation_client.h"
 
-namespace app_list {
+namespace ash {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppListMainView:
@@ -50,8 +50,6 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
     : delegate_(delegate),
       model_(delegate->GetModel()),
       search_model_(delegate->GetSearchModel()),
-      search_box_view_(nullptr),
-      contents_view_(nullptr),
       app_list_view_(app_list_view) {
   // We need a layer to apply transform to in small display so that the apps
   // grid fits in the display.
@@ -71,18 +69,18 @@ void AppListMainView::Init(int initial_apps_page,
   AddContentsViews();
 
   // Switch the apps grid view to the specified page.
-  ash::PaginationModel* pagination_model = GetAppsPaginationModel();
+  PaginationModel* pagination_model = GetAppsPaginationModel();
   if (pagination_model->is_valid_page(initial_apps_page))
     pagination_model->SelectPage(initial_apps_page, false);
 }
 
 void AppListMainView::AddContentsViews() {
   DCHECK(search_box_view_);
-  contents_view_ = new ContentsView(app_list_view_);
-  contents_view_->Init(model_);
-  contents_view_->SetPaintToLayer(ui::LAYER_NOT_DRAWN);
-  contents_view_->layer()->SetMasksToBounds(true);
-  AddChildView(contents_view_);
+  auto contents_view = std::make_unique<ContentsView>(app_list_view_);
+  contents_view->Init(model_);
+  contents_view->SetPaintToLayer(ui::LAYER_NOT_DRAWN);
+  contents_view->layer()->SetMasksToBounds(true);
+  contents_view_ = AddChildView(std::move(contents_view));
 
   search_box_view_->set_contents_view(contents_view_);
 }
@@ -117,7 +115,7 @@ void AppListMainView::SetDragAndDropHostOfCurrentAppList(
   contents_view_->SetDragAndDropHostOfCurrentAppList(drag_and_drop_host);
 }
 
-ash::PaginationModel* AppListMainView::GetAppsPaginationModel() {
+PaginationModel* AppListMainView::GetAppsPaginationModel() {
   return contents_view_->GetAppsContainerView()
       ->apps_grid_view()
       ->pagination_model();
@@ -149,8 +147,14 @@ void AppListMainView::ActivateApp(AppListItem* item, int event_flags) {
                               kFullscreenAppListFolders, kMaxFolderOpened);
   } else {
     base::RecordAction(base::UserMetricsAction("AppList_ClickOnApp"));
-    delegate_->ActivateItem(item->id(), event_flags,
-                            ash::AppListLaunchedFrom::kLaunchedFromGrid);
+
+    // Avoid using |item->id()| as the parameter. In some rare situations,
+    // activating the item may destruct it. Using the reference to an object
+    // which may be destroyed during the procedure as the function parameter
+    // may bring the crash like https://crbug.com/990282.
+    const std::string id = item->id();
+    delegate_->ActivateItem(id, event_flags,
+                            AppListLaunchedFrom::kLaunchedFromGrid);
   }
 }
 
@@ -165,6 +169,16 @@ void AppListMainView::OnResultInstalled(SearchResult* result) {
   // Clears the search to show the apps grid. The last installed app
   // should be highlighted and made visible already.
   search_box_view_->ClearSearch();
+}
+
+// AppListModelObserver overrides:
+void AppListMainView::OnAppListStateChanged(AppListState new_state,
+                                            AppListState old_state) {
+  if (new_state == AppListState::kStateEmbeddedAssistant) {
+    search_box_view_->SetVisible(false);
+  } else {
+    search_box_view_->SetVisible(true);
+  }
 }
 
 void AppListMainView::QueryChanged(search_box::SearchBoxViewBase* sender) {
@@ -184,7 +198,7 @@ void AppListMainView::ActiveChanged(search_box::SearchBoxViewBase* sender) {
   if (!app_list_features::IsZeroStateSuggestionsEnabled())
     return;
   // Do not update views on closing.
-  if (app_list_view_->app_list_state() == ash::AppListViewState::kClosed)
+  if (app_list_view_->app_list_state() == AppListViewState::kClosed)
     return;
 
   if (search_box_view_->is_search_box_active()) {
@@ -211,14 +225,12 @@ void AppListMainView::SearchBoxFocusChanged(
 
   SearchResultBaseView* first_result_view =
       contents_view_->search_results_page_view()->first_result_view();
-  if (!first_result_view || !first_result_view->background_highlighted())
+  if (!first_result_view || !first_result_view->selected())
     return;
-
-  first_result_view->SetBackgroundHighlighted(false);
+  first_result_view->SetSelected(false, base::nullopt);
 }
 
 void AppListMainView::AssistantButtonPressed() {
-  DCHECK(chromeos::switches::IsAssistantEnabled());
   delegate_->StartAssistant();
 }
 
@@ -227,4 +239,4 @@ void AppListMainView::BackButtonPressed() {
     app_list_view_->Dismiss();
 }
 
-}  // namespace app_list
+}  // namespace ash

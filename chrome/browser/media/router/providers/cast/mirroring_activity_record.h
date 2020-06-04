@@ -9,15 +9,21 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
+#include "base/time/time.h"
 #include "chrome/browser/media/router/providers/cast/activity_record.h"
 #include "chrome/browser/media/router/providers/cast/cast_session_tracker.h"
 #include "chrome/common/media_router/media_route.h"
-#include "chrome/common/media_router/mojo/media_router.mojom-forward.h"
+#include "chrome/common/media_router/mojom/media_router.mojom-forward.h"
 #include "components/cast_channel/cast_message_handler.h"
 #include "components/mirroring/mojom/cast_message_channel.mojom.h"
 #include "components/mirroring/mojom/mirroring_service_host.mojom.h"
 #include "components/mirroring/mojom/session_observer.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 namespace media_router {
 
@@ -29,11 +35,18 @@ class MirroringActivityRecord : public ActivityRecord,
  public:
   using OnStopCallback = base::OnceClosure;
 
+  enum class MirroringType {
+    kTab,           // Mirror a single tab.
+    kDesktop,       // Mirror the whole desktop.
+    kOffscreenTab,  // Used for Presentation API 1UA mode.
+    kNonLocal,      // Activity started by other sender devices.
+    kMaxValue = kNonLocal,
+  };
+
   MirroringActivityRecord(const MediaRoute& route,
                           const std::string& app_id,
                           cast_channel::CastMessageHandler* message_handler,
                           CastSessionTracker* session_tracker,
-                          DataDecoder* data_decoder,
                           int target_tab_id,
                           const CastSinkExtraData& cast_data,
                           mojom::MediaRouter* media_router,
@@ -49,61 +62,41 @@ class MirroringActivityRecord : public ActivityRecord,
   void Send(mirroring::mojom::CastMessagePtr message) override;
 
   // ActivityRecord implementation
-  cast_channel::Result SendAppMessageToReceiver(
-      const CastInternalMessage& cast_message) override;
-  base::Optional<int> SendMediaRequestToReceiver(
-      const CastInternalMessage& cast_message) override;
-  void SendSetVolumeRequestToReceiver(
-      const CastInternalMessage& cast_message,
-      cast_channel::ResultCallback callback) override;
-  void SendStopSessionMessageToReceiver(
-      const base::Optional<std::string>& client_id,
-      const std::string& hash_token,
-      mojom::MediaRouteProvider::TerminateRouteCallback callback) override;
-  void HandleLeaveSession(const std::string& client_id) override;
-  mojom::RoutePresentationConnectionPtr AddClient(const CastMediaSource& source,
-                                                  const url::Origin& origin,
-                                                  int tab_id) override;
-  void RemoveClient(const std::string& client_id) override;
-  void SendMessageToClient(
-      const std::string& client_id,
-      blink::mojom::PresentationConnectionMessagePtr message) override;
-  void SendMediaStatusToClients(const base::Value& media_status,
-                                base::Optional<int> request_id) override;
-  void ClosePresentationConnections(
-      blink::mojom::PresentationConnectionCloseReason close_reason) override;
-  void TerminatePresentationConnections() override;
-  void OnAppMessage(const cast_channel::CastMessage& message) override;
+  void OnAppMessage(const cast::channel::CastMessage& message) override;
   void OnInternalMessage(const cast_channel::InternalMessage& message) override;
 
  protected:
-  void OnSessionSet() override;
+  void CreateMediaController(
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer) override;
 
  private:
-  enum class MirroringType {
-    kTab,           // Mirror a single tab.
-    kDesktop,       // Mirror the whole desktop.
-    kOffscreenTab,  // Used for Presentation API 1UA mode.
-    kMaxValue = kOffscreenTab,
-  };
+  void HandleParseJsonResult(const std::string& route_id,
+                             data_decoder::DataDecoder::ValueOrError result);
 
+  void StartMirroring(
+      mirroring::mojom::SessionParametersPtr session_params,
+      mojo::PendingReceiver<CastMessageChannel> channel_to_service);
   void StopMirroring();
 
-  mirroring::mojom::MirroringServiceHostPtr host_;
+  mojo::Remote<mirroring::mojom::MirroringServiceHost> host_;
 
   // Sends Cast messages from the mirroring receiver to the mirroring service.
-  mirroring::mojom::CastMessageChannelPtr channel_to_service_;
+  mojo::Remote<mirroring::mojom::CastMessageChannel> channel_to_service_;
 
-  mojo::Binding<mirroring::mojom::SessionObserver> observer_binding_{this};
+  mojo::Receiver<mirroring::mojom::SessionObserver> observer_receiver_{this};
 
   // To handle Cast messages from the mirroring service to the mirroring
   // receiver.
-  mojo::Binding<mirroring::mojom::CastMessageChannel> channel_binding_{this};
+  mojo::Receiver<mirroring::mojom::CastMessageChannel> channel_receiver_{this};
+
+  // Set before and after a mirroring session is established, for metrics.
+  base::Optional<base::Time> will_start_mirroring_timestamp_;
+  base::Optional<base::Time> did_start_mirroring_timestamp_;
 
   const int channel_id_;
   const MirroringType mirroring_type_;
   OnStopCallback on_stop_;
-  base::OnceCallback<void()> on_session_set_;
   base::WeakPtrFactory<MirroringActivityRecord> weak_ptr_factory_{this};
 };
 

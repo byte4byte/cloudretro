@@ -2,9 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
 import("//build/config/jumbo.gni")
+import("//tools/grit/grit_rule.gni")
 
 declare_args() {
   # Controls the product part of the user agent calculated in sync_util.cc.
@@ -15,8 +15,6 @@ jumbo_static_library("driver") {
   sources = [
     "about_sync_util.cc",
     "about_sync_util.h",
-    "async_directory_type_controller.cc",
-    "async_directory_type_controller.h",
     "backend_migrator.cc",
     "backend_migrator.h",
     "configure_context.h",
@@ -33,32 +31,24 @@ jumbo_static_library("driver") {
     "data_type_status_table.h",
     "directory_data_type_controller.cc",
     "directory_data_type_controller.h",
-    "frontend_data_type_controller.cc",
-    "frontend_data_type_controller.h",
-    "generic_change_processor.cc",
-    "generic_change_processor.h",
-    "generic_change_processor_factory.cc",
-    "generic_change_processor_factory.h",
+    "file_based_trusted_vault_client.cc",
+    "file_based_trusted_vault_client.h",
     "glue/sync_engine_backend.cc",
     "glue/sync_engine_backend.h",
     "glue/sync_engine_impl.cc",
     "glue/sync_engine_impl.h",
     "model_association_manager.cc",
     "model_association_manager.h",
-    "model_associator.h",
     "model_type_controller.cc",
     "model_type_controller.h",
     "non_ui_syncable_service_based_model_type_controller.cc",
     "non_ui_syncable_service_based_model_type_controller.h",
+    "passphrase_type_metrics_provider.cc",
+    "passphrase_type_metrics_provider.h",
     "profile_sync_service.cc",
     "profile_sync_service.h",
-    "shared_change_processor.cc",
-    "shared_change_processor.h",
-    "shared_change_processor_ref.cc",
-    "shared_change_processor_ref.h",
     "startup_controller.cc",
     "startup_controller.h",
-    "sync_api_component_factory.cc",
     "sync_api_component_factory.h",
     "sync_auth_manager.cc",
     "sync_auth_manager.h",
@@ -68,6 +58,8 @@ jumbo_static_library("driver") {
     "sync_client.h",
     "sync_driver_switches.cc",
     "sync_driver_switches.h",
+    "sync_merge_result.cc",
+    "sync_merge_result.h",
     "sync_service.cc",
     "sync_service.h",
     "sync_service_crypto.cc",
@@ -90,6 +82,7 @@ jumbo_static_library("driver") {
     "sync_util.h",
     "syncable_service_based_model_type_controller.cc",
     "syncable_service_based_model_type_controller.h",
+    "trusted_vault_client.h",
   ]
 
   configs += [ "//build/config:precompiled_headers" ]
@@ -111,8 +104,9 @@ jumbo_static_library("driver") {
     "//components/data_use_measurement/core",
     "//components/invalidation/impl:feature_list",
     "//components/keyed_service/core",
+    "//components/metrics",
+    "//components/os_crypt",
     "//components/prefs",
-    "//components/signin/core/browser",
     "//components/signin/public/identity_manager",
     "//components/version_info",
     "//components/version_info:generate_version_info",
@@ -131,32 +125,42 @@ jumbo_static_library("driver") {
     ]
   }
 
+  if (is_chromeos) {
+    deps += [ "//chromeos/constants" ]
+  }
+
   defines = [ "SYNC_USER_AGENT_PRODUCT=$sync_user_agent_product" ]
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
+grit("resources") {
+  source = "resources.grd"
+
+  outputs = [
+    "grit/sync_driver_resources.h",
+    "sync_driver_resources.pak",
+  ]
+  output_dir = "$root_gen_dir/components"
+  grit_flags = [
+    "-E",
+    "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
+  ]
+}
+
 static_library("test_support") {
   testonly = true
   sources = [
-    "async_directory_type_controller_mock.cc",
-    "async_directory_type_controller_mock.h",
     "data_type_controller_mock.cc",
     "data_type_controller_mock.h",
     "data_type_manager_mock.cc",
     "data_type_manager_mock.h",
     "fake_data_type_controller.cc",
     "fake_data_type_controller.h",
-    "fake_generic_change_processor.cc",
-    "fake_generic_change_processor.h",
     "fake_sync_service.cc",
     "fake_sync_service.h",
-    "frontend_data_type_controller_mock.cc",
-    "frontend_data_type_controller_mock.h",
     "mock_sync_service.cc",
     "mock_sync_service.h",
-    "model_associator_mock.cc",
-    "model_associator_mock.h",
     "profile_sync_service_bundle.cc",
     "profile_sync_service_bundle.h",
     "sync_api_component_factory_mock.cc",
@@ -171,9 +175,7 @@ static_library("test_support") {
     "test_sync_user_settings.h",
   ]
 
-  public_deps = [
-    "//components/sync/base:test_support",
-  ]
+  public_deps = [ "//components/sync/base:test_support" ]
 
   deps = [
     "//components/invalidation/impl:test_support",

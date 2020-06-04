@@ -5,9 +5,9 @@
 package org.chromium.chrome.browser.metrics;
 
 import android.os.SystemClock;
-import android.support.annotation.IntDef;
 
-import org.chromium.base.library_loader.LibraryProcessType;
+import androidx.annotation.IntDef;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
@@ -58,8 +58,8 @@ public class OmniboxStartupMetrics {
     public OmniboxStartupMetrics(ChromeActivity activity) {
         mActivity = activity;
         registerObservers();
-        BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                .addStartupCompletedObserver(new BrowserStartupController.StartupCallback() {
+        BrowserStartupController.getInstance().addStartupCompletedObserver(
+                new BrowserStartupController.StartupCallback() {
                     @Override
                     public void onSuccess() {
                         onNativeLibraryLoaded();

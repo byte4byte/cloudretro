@@ -16,9 +16,8 @@
 #include "components/strings/grit/components_strings.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
-#include "ui/events/event_constants.h"
-#include "ui/gfx/paint_vector_icon.h"
-#include "ui/views/controls/menu/menu_config.h"
+#include "ui/base/models/image_model.h"
+#include "ui/events/types/event_type.h"
 #include "ui/views/vector_icons.h"
 #include "ui/wm/core/window_animations.h"
 
@@ -65,11 +64,9 @@ void ShelfWindowWatcherItemDelegate::GetContextMenu(
     GetContextMenuCallback callback) {
   auto menu = std::make_unique<ShelfContextMenuModel>(this, display_id);
   // Show a default context menu with just an extra close item.
-  const views::MenuConfig& menu_config = views::MenuConfig::instance();
   menu->AddItemWithStringIdAndIcon(
       kCloseCommandId, IDS_CLOSE,
-      gfx::CreateVectorIcon(views::kCloseIcon, menu_config.touchable_icon_size,
-                            menu_config.touchable_icon_color));
+      ui::ImageModel::FromVectorIcon(views::kCloseIcon));
   std::move(callback).Run(std::move(menu));
 }
 
@@ -82,7 +79,7 @@ void ShelfWindowWatcherItemDelegate::ExecuteCommand(bool from_context_menu,
 }
 
 void ShelfWindowWatcherItemDelegate::Close() {
-  wm::CloseWidgetForWindow(window_);
+  window_util::CloseWidgetForWindow(window_);
 }
 
 }  // namespace ash

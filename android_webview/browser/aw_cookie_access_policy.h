@@ -5,13 +5,14 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_COOKIE_ACCESS_POLICY_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_COOKIE_ACCESS_POLICY_H_
 
-#include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
 
 class GURL;
 
 namespace net {
+class SiteForCookies;
 class URLRequest;
 }  // namespace net
 
@@ -38,25 +39,21 @@ class AwCookieAccessPolicy {
                                         int frame_tree_node_id);
   bool GetShouldAcceptThirdPartyCookies(const net::URLRequest& request);
 
-  // Whether or not to allow cookies to bet sent or set for |request|. Can only
-  // be called from the IO thread.
-  bool AllowCookies(const net::URLRequest& request);
-
   // Whether or not to allow cookies for requests with these parameters.
   bool AllowCookies(const GURL& url,
-                    const GURL& first_party,
+                    const net::SiteForCookies& site_for_cookies,
                     int render_process_id,
                     int render_frame_id);
 
  private:
-  friend struct base::LazyInstanceTraitsBase<AwCookieAccessPolicy>;
+  friend class base::NoDestructor<AwCookieAccessPolicy>;
   friend class AwCookieAccessPolicyTest;
 
   AwCookieAccessPolicy();
   ~AwCookieAccessPolicy();
 
   bool CanAccessCookies(const GURL& url,
-                        const GURL& site_for_cookies,
+                        const net::SiteForCookies& site_for_cookies,
                         bool accept_third_party_cookies);
   bool accept_cookies_;
   base::Lock lock_;

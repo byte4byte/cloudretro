@@ -229,14 +229,8 @@ static NSSize abs(NSSize size) {
     scrollbar = _scrollableArea->VerticalScrollbar();
 
   // It is possible to have a null scrollbar here since it is possible for this
-  // delegate
-  // method to be called between the moment when a scrollbar has been set to 0
-  // and the
-  // moment when its destructor has been called. We should probably de-couple
-  // some
-  // of the clean-up work in ScrollbarThemeMac::unregisterScrollbar() to avoid
-  // this
-  // issue.
+  // delegate method to be called between the moment when a scrollbar has been
+  // set to 0 and the moment when its destructor has been called.
   if (!scrollbar)
     return NSZeroPoint;
 
@@ -312,7 +306,7 @@ class BlinkScrollbarPartAnimationTimer {
   ~BlinkScrollbarPartAnimationTimer() {}
 
   void Start() {
-    start_time_ = WTF::CurrentTime();
+    start_time_ = base::Time::Now().ToDoubleT();
     // Set the framerate of the animation. NSAnimation uses a default
     // framerate of 60 Hz, so use that here.
     timer_.StartRepeating(base::TimeDelta::FromSecondsD(1.0 / 60.0), FROM_HERE);
@@ -324,7 +318,7 @@ class BlinkScrollbarPartAnimationTimer {
 
  private:
   void TimerFired(TimerBase*) {
-    double current_time = WTF::CurrentTime();
+    double current_time = base::Time::Now().ToDoubleT();
     double delta = current_time - start_time_;
 
     if (delta >= duration_)
@@ -813,7 +807,7 @@ void ScrollAnimatorMac::ImmediateScrollTo(const ScrollOffset& new_offset) {
   ScrollOffset delta = adjusted_offset - current_offset_;
 
   current_offset_ = adjusted_offset;
-  NotifyContentAreaScrolled(delta, kUserScroll);
+  NotifyContentAreaScrolled(delta, mojom::blink::ScrollType::kUser);
   NotifyOffsetChanged();
 }
 
@@ -941,8 +935,9 @@ void ScrollAnimatorMac::WillRemoveHorizontalScrollbar(Scrollbar& scrollbar) {
   [scrollbar_painter_controller_ setHorizontalScrollerImp:nil];
 }
 
-void ScrollAnimatorMac::NotifyContentAreaScrolled(const ScrollOffset& delta,
-                                                  ScrollType scrollType) {
+void ScrollAnimatorMac::NotifyContentAreaScrolled(
+    const ScrollOffset& delta,
+    mojom::blink::ScrollType scrollType) {
   // This function is called when a page is going into the page cache, but the
   // page
   // isn't really scrolling in that case. We should only pass the message on to

@@ -8,19 +8,20 @@
 #include <vector>
 
 #include "ash/ash_export.h"
+#include "ash/login/security_token_request_controller.h"
 #include "ash/login/ui/login_data_dispatcher.h"
 #include "ash/public/cpp/kiosk_app_menu.h"
 #include "ash/public/cpp/login_screen.h"
 #include "ash/public/cpp/system_tray_focus_observer.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/time/time.h"
+#include "ui/gfx/native_widget_types.h"
 
 class PrefRegistrySimple;
 
 namespace ash {
 
-class ParentAccessWidget;
 class SystemTrayNotifier;
 
 // LoginScreenController implements LoginScreen and wraps the LoginScreenClient
@@ -45,10 +46,6 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
   // succeeded/failed.
   using OnAuthenticateCallback =
       base::OnceCallback<void(base::Optional<bool> success)>;
-  // Callback for parent access code validation. |success| is nullopt if
-  // validation did not run, otherwise it contains validation result.
-  using OnParentAccessValidation =
-      base::OnceCallback<void(base::Optional<bool> success)>;
 
   explicit LoginScreenController(SystemTrayNotifier* system_tray_notifier);
   ~LoginScreenController() override;
@@ -70,8 +67,12 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
                                           OnAuthenticateCallback callback);
   void EnrollUserWithExternalBinary(OnAuthenticateCallback callback);
   void AuthenticateUserWithEasyUnlock(const AccountId& account_id);
+  void AuthenticateUserWithChallengeResponse(const AccountId& account_id,
+                                             OnAuthenticateCallback callback);
   bool ValidateParentAccessCode(const AccountId& account_id,
+                                base::Time validation_time,
                                 const std::string& code);
+  bool GetSecurityTokenPinRequestCanceled() const;
   void HardlockPod(const AccountId& account_id);
   void OnFocusPod(const AccountId& account_id);
   void OnNoPodFocused();
@@ -81,7 +82,8 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
   void LoginAsGuest();
   void OnMaxIncorrectPasswordAttempted(const AccountId& account_id);
   void FocusLockScreenApps(bool reverse);
-  void ShowGaiaSignin(bool can_close, const AccountId& prefilled_account);
+  void ShowGaiaSignin(const AccountId& prefilled_account);
+  void HideGaiaSignin();
   void OnRemoveUserWarningShown();
   void RemoveUser(const AccountId& account_id);
   void LaunchPublicSession(const AccountId& account_id,
@@ -91,7 +93,8 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
                                            const std::string& locale);
   void ShowFeedback();
   void ShowResetScreen();
-  void ShowAccountAccessHelpApp();
+  void ShowAccountAccessHelpApp(gfx::NativeWindow parent_window);
+  void ShowParentAccessHelpApp(gfx::NativeWindow parent_window);
   void ShowLockScreenNotificationSettings();
   void FocusOobeDialog();
   void NotifyUserActivity();
@@ -114,12 +117,24 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
   void EnableShutdownButton(bool enable) override;
   void ShowGuestButtonInOobe(bool show) override;
   void ShowParentAccessButton(bool show) override;
-  void ShowParentAccessWidget(
-      const AccountId& child_account_id,
-      base::RepeatingCallback<void(bool success)> callback,
-      ParentAccessRequestReason reason,
-      bool extra_dimmer) override;
   void SetAllowLoginAsGuest(bool allow_guest) override;
+  std::unique_ptr<ScopedGuestButtonBlocker> GetScopedGuestButtonBlocker()
+      override;
+
+  // TODO(agawronska): Change all callers of this to use
+  // Shell::Get()->parent_access_controller()->ShowWidget() directly and delete
+  // this method.
+  void ShowParentAccessWidget(const AccountId& child_account_id,
+                              base::OnceCallback<void(bool success)> callback,
+                              ParentAccessRequestReason reason,
+                              bool extra_dimmer,
+                              base::Time validation_time) override;
+  void RequestSecurityTokenPin(SecurityTokenPinRequest request) override;
+  void ClearSecurityTokenPinRequest() override;
+  bool SetLoginShelfGestureHandler(const base::string16& nudge_text,
+                                   const base::RepeatingClosure& fling_callback,
+                                   base::OnceClosure exit_callback) override;
+  void ClearLoginShelfGestureHandler() override;
 
   // KioskAppMenu:
   void SetKioskApps(
@@ -150,12 +165,12 @@ class ASH_EXPORT LoginScreenController : public LoginScreen,
 
   SystemTrayNotifier* system_tray_notifier_;
 
+  SecurityTokenRequestController security_token_request_controller_;
+
   // If set to false, all auth requests will forcibly fail.
   ForceFailAuth force_fail_auth_for_debug_overlay_ = ForceFailAuth::kOff;
 
-  std::unique_ptr<ParentAccessWidget> parent_access_widget_;
-
-  base::WeakPtrFactory<LoginScreenController> weak_factory_;
+  base::WeakPtrFactory<LoginScreenController> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LoginScreenController);
 };

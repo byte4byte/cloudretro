@@ -206,9 +206,7 @@ if (!is_win) {
         "breakpad/src/processor/microdump_stackwalk.cc",
       ]
 
-      deps = [
-        ":stackwalk_common",
-      ]
+      deps = [ ":stackwalk_common" ]
 
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
@@ -223,9 +221,7 @@ if (!is_win) {
         "breakpad/src/processor/minidump_stackwalk.cc",
       ]
 
-      deps = [
-        ":stackwalk_common",
-      ]
+      deps = [ ":stackwalk_common" ]
 
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
@@ -384,7 +380,7 @@ if (is_mac) {
       "breakpad/src/client/mac/handler/dynamic_images.cc",
       "breakpad/src/client/mac/handler/minidump_generator.cc",
       "breakpad/src/client/minidump_file_writer.cc",
-      "breakpad/src/common/convert_UTF.c",
+      "breakpad/src/common/convert_UTF.cc",
       "breakpad/src/common/mac/MachIPC.mm",
       "breakpad/src/common/mac/arch_utilities.cc",
       "breakpad/src/common/mac/bootstrap_compat.cc",
@@ -424,9 +420,7 @@ if (is_mac) {
       "Foundation.framework",
     ]
 
-    deps = [
-      ":utilities",
-    ]
+    deps = [ ":utilities" ]
   }
 
   # TODO(GYP) this target has some mac_bundle_resources stuff.
@@ -477,6 +471,10 @@ if (is_linux || is_android) {
       sources = [
         "breakpad/src/common/linux/http_upload.cc",
         "breakpad/src/common/linux/http_upload.h",
+        "breakpad/src/common/linux/libcurl_wrapper.cc",
+        "breakpad/src/common/linux/libcurl_wrapper.h",
+        "breakpad/src/common/linux/symbol_collector_client.cc",
+        "breakpad/src/common/linux/symbol_collector_client.h",
         "breakpad/src/common/linux/symbol_upload.cc",
         "breakpad/src/common/linux/symbol_upload.h",
         "breakpad/src/tools/linux/symupload/sym_upload.cc",
@@ -598,7 +596,7 @@ if (is_linux || is_android) {
       "breakpad/src/client/minidump_file_writer-inl.h",
       "breakpad/src/client/minidump_file_writer.cc",
       "breakpad/src/client/minidump_file_writer.h",
-      "breakpad/src/common/convert_UTF.c",
+      "breakpad/src/common/convert_UTF.cc",
       "breakpad/src/common/convert_UTF.h",
       "breakpad/src/common/linux/elf_core_dump.cc",
       "breakpad/src/common/linux/elf_core_dump.h",
@@ -606,6 +604,7 @@ if (is_linux || is_android) {
       "breakpad/src/common/linux/elfutils.h",
       "breakpad/src/common/linux/file_id.cc",
       "breakpad/src/common/linux/file_id.h",
+      "breakpad/src/common/linux/breakpad_getcontext.S",
       "breakpad/src/common/linux/google_crashdump_uploader.cc",
       "breakpad/src/common/linux/google_crashdump_uploader.h",
       "breakpad/src/common/linux/guid_creator.cc",
@@ -633,10 +632,6 @@ if (is_linux || is_android) {
       # Avoid running out of registers in
       # linux_syscall_support.h:sys_clone()'s inline assembly.
       cflags = [ "-marm" ]
-    }
-
-    if (is_android) {
-      sources += [ "breakpad/src/common/android/breakpad_getcontext.S" ]
     }
 
     libs = [ "dl" ]
@@ -691,6 +686,7 @@ if (is_linux || is_android) {
       "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc",
       "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc",
       "breakpad/src/client/linux/minidump_writer/proc_cpuinfo_reader_unittest.cc",
+      "breakpad/src/common/linux/breakpad_getcontext_unittest.cc",
       "breakpad/src/common/linux/elf_core_dump_unittest.cc",
       "breakpad/src/common/linux/file_id_unittest.cc",
       "breakpad/src/common/linux/linux_libc_support_unittest.cc",
@@ -741,8 +737,6 @@ if (is_linux || is_android) {
 
     if (is_android) {
       use_raw_android_executable = true
-      sources +=
-          [ "breakpad/src/common/android/breakpad_getcontext_unittest.cc" ]
       libs = [ "log" ]
       extra_dist_files = [ "$root_out_dir/linux_dumper_unittest_helper" ]
     }
@@ -754,12 +748,8 @@ if (is_linux || is_android) {
   executable("linux_dumper_unittest_helper") {
     set_sources_assignment_filter([])
     testonly = true
-    sources = [
-      "breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc",
-    ]
-    deps = [
-      ":processor_support",
-    ]
+    sources = [ "breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc" ]
+    deps = [ ":processor_support" ]
 
     configs += [ ":client_config" ]
 
@@ -771,9 +761,7 @@ if (is_linux || is_android) {
   executable("generate_test_dump") {
     set_sources_assignment_filter([])
     testonly = true
-    sources = [
-      "linux/generate-test-dump.cc",
-    ]
+    sources = [ "linux/generate-test-dump.cc" ]
 
     # This file has an unused variable warning.
     configs -= [ "//build/config/compiler:chromium_code" ]
@@ -782,9 +770,7 @@ if (is_linux || is_android) {
       "//build/config/compiler:no_chromium_code",
     ]
 
-    deps = [
-      ":client",
-    ]
+    deps = [ ":client" ]
 
     if (is_android) {
       libs = [ "log" ]
@@ -801,20 +787,14 @@ if (is_linux || is_android) {
 
     include_dirs = [ "breakpad/src" ]
 
-    deps = [
-      ":client",
-    ]
+    deps = [ ":client" ]
   }
 
   executable("core-2-minidump") {
     set_sources_assignment_filter([])
-    sources = [
-      "breakpad/src/tools/linux/core2md/core2md.cc",
-    ]
+    sources = [ "breakpad/src/tools/linux/core2md/core2md.cc" ]
 
-    deps = [
-      ":client",
-    ]
+    deps = [ ":client" ]
 
     include_dirs = [ "breakpad/src" ]
   }
@@ -862,9 +842,7 @@ if (is_win) {
         "breakpad/src/tools/windows/converter/ms_symbol_server_converter.cc",
       ]
 
-      deps = [
-        "//third_party/breakpad:common_windows",
-      ]
+      deps = [ "//third_party/breakpad:common_windows" ]
 
       libs = [ "Pathcch.lib" ]
     }
@@ -877,13 +855,9 @@ if (is_win) {
         "breakpad/src",
       ]
 
-      sources = [
-        "breakpad/src/tools/windows/dump_syms/dump_syms.cc",
-      ]
+      sources = [ "breakpad/src/tools/windows/dump_syms/dump_syms.cc" ]
 
-      deps = [
-        "//third_party/breakpad:common_windows",
-      ]
+      deps = [ "//third_party/breakpad:common_windows" ]
 
       lib_dirs = []
       if (current_cpu == "x64") {
@@ -910,13 +884,9 @@ if (is_win) {
         "breakpad/src",
       ]
 
-      sources = [
-        "breakpad/src/tools/windows/symupload/symupload.cc",
-      ]
+      sources = [ "breakpad/src/tools/windows/symupload/symupload.cc" ]
 
-      deps = [
-        "//third_party/breakpad:common_windows",
-      ]
+      deps = [ "//third_party/breakpad:common_windows" ]
 
       ldflags = [ "/LARGEADDRESSAWARE" ]
 
@@ -1017,7 +987,7 @@ if (is_ios) {
       "breakpad/src/client/minidump_file_writer-inl.h",
       "breakpad/src/client/minidump_file_writer.cc",
       "breakpad/src/client/minidump_file_writer.h",
-      "breakpad/src/common/convert_UTF.c",
+      "breakpad/src/common/convert_UTF.cc",
       "breakpad/src/common/convert_UTF.h",
       "breakpad/src/common/long_string_dictionary.cc",
       "breakpad/src/common/mac/HTTPMultipartUpload.m",
@@ -1045,10 +1015,6 @@ if (is_ios) {
       "breakpad/src",
       "breakpad/src/client/mac/Framework",
       "breakpad/src/common/mac",
-    ]
-
-    deps = [
-      "//third_party/google_toolbox_for_mac",
     ]
 
     public_configs = [ ":client_config" ]

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_RESOURCE_COORDINATOR_SITE_CHARACTERISTICS_DATA_READER_H_
 #define CHROME_BROWSER_RESOURCE_COORDINATOR_SITE_CHARACTERISTICS_DATA_READER_H_
 
-#include "chrome/browser/performance_manager/persistence/site_data/feature_usage.h"
+#include "components/performance_manager/persistence/site_data/feature_usage.h"
 
 #include "base/callback_forward.h"
 
@@ -24,8 +24,6 @@ class SiteCharacteristicsDataReader {
   virtual performance_manager::SiteFeatureUsage UpdatesTitleInBackground()
       const = 0;
   virtual performance_manager::SiteFeatureUsage UsesAudioInBackground()
-      const = 0;
-  virtual performance_manager::SiteFeatureUsage UsesNotificationsInBackground()
       const = 0;
 
   // Returns true if this reader is fully initialized and serving the most

@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/passwords/password_generation_popup_view_tester.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/autofill/core/common/renderer_id.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,12 +27,13 @@ class TestPasswordGenerationPopupController
       : PasswordGenerationPopupControllerImpl(
             gfx::RectF(0, 0, 10, 10),
             autofill::password_generation::PasswordGenerationUIData(
-                gfx::RectF(0, 0, 10, 10),
-                10,
-                base::string16(),
-                100,
-                base::i18n::TextDirection(),
-                PasswordForm()),
+                /*bounds=*/gfx::RectF(0, 0, 10, 10),
+                /*max_length=*/10,
+                /*generation_element=*/base::string16(),
+                autofill::FieldRendererId(100),
+                /*is_generation_element_password_type=*/true,
+                /*text_direction=*/base::i18n::TextDirection(),
+                FormData()),
             password_manager::ContentPasswordManagerDriverFactory::
                 FromWebContents(web_contents)
                     ->GetDriverForFrame(web_contents->GetMainFrame())

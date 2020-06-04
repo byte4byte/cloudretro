@@ -15,7 +15,7 @@ namespace blink {
 
 // http://fetch.spec.whatwg.org/#terminology-headers
 class CORE_EXPORT FetchHeaderList final
-    : public GarbageCollectedFinalized<FetchHeaderList> {
+    : public GarbageCollected<FetchHeaderList> {
  public:
   struct ByteCaseInsensitiveCompare {
     bool operator()(const String& lhs, const String& rhs) const {
@@ -37,6 +37,7 @@ class CORE_EXPORT FetchHeaderList final
   size_t size() const;
   void Remove(const String&);
   bool Get(const String&, String&) const;
+  String GetAsRawString(int status_code, String status_message) const;
   bool Has(const String&) const;
   void ClearList();
 
@@ -50,7 +51,7 @@ class CORE_EXPORT FetchHeaderList final
   static bool IsValidHeaderName(const String&);
   static bool IsValidHeaderValue(const String&);
 
-  void Trace(blink::Visitor* visitor) {}
+  void Trace(Visitor* visitor) {}
 
  private:
   // While using STL data structures in Blink is not very common or

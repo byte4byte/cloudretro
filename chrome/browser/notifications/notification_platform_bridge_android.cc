@@ -11,9 +11,10 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/nullable_string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -192,10 +193,10 @@ void NotificationPlatformBridgeAndroid::OnNotificationClicked(
 
   profile_manager->LoadProfile(
       profile_id, incognito,
-      base::Bind(&NotificationDisplayServiceImpl::ProfileLoadedCallback,
-                 NotificationCommon::OPERATION_CLICK, notification_type, origin,
-                 notification_id, std::move(action_index), std::move(reply),
-                 base::nullopt /* by_user */));
+      base::BindOnce(&NotificationDisplayServiceImpl::ProfileLoadedCallback,
+                     NotificationCommon::OPERATION_CLICK, notification_type,
+                     origin, notification_id, std::move(action_index),
+                     std::move(reply), base::nullopt /* by_user */));
 }
 
 void NotificationPlatformBridgeAndroid::
@@ -241,11 +242,11 @@ void NotificationPlatformBridgeAndroid::OnNotificationClosed(
 
   profile_manager->LoadProfile(
       profile_id, incognito,
-      base::Bind(&NotificationDisplayServiceImpl::ProfileLoadedCallback,
-                 NotificationCommon::OPERATION_CLOSE, notification_type,
-                 GURL(ConvertJavaStringToUTF8(env, java_origin)),
-                 notification_id, base::nullopt /* action index */,
-                 base::nullopt /* reply */, by_user));
+      base::BindOnce(&NotificationDisplayServiceImpl::ProfileLoadedCallback,
+                     NotificationCommon::OPERATION_CLOSE, notification_type,
+                     GURL(ConvertJavaStringToUTF8(env, java_origin)),
+                     notification_id, base::nullopt /* action index */,
+                     base::nullopt /* reply */, by_user));
 }
 
 void NotificationPlatformBridgeAndroid::Display(
@@ -258,8 +259,14 @@ void NotificationPlatformBridgeAndroid::Display(
   JNIEnv* env = AttachCurrentThread();
 
   GURL origin_url(notification.origin_url().GetOrigin());
-  GURL scope_url(PersistentNotificationMetadata::From(metadata.get())
-                     ->service_worker_scope);
+
+  // TODO(knollr): Reconsider the meta-data system to try to remove this branch.
+  const PersistentNotificationMetadata* persistent_notification_metadata =
+      PersistentNotificationMetadata::From(metadata.get());
+
+  GURL scope_url = persistent_notification_metadata
+                       ? persistent_notification_metadata->service_worker_scope
+                       : origin_url;
   if (!scope_url.is_valid())
     scope_url = origin_url;
 
@@ -352,7 +359,7 @@ void NotificationPlatformBridgeAndroid::GetDisplayed(
     Profile* profile,
     GetDisplayedNotificationsCallback callback) const {
   std::set<std::string> displayed_notifications;
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(std::move(callback), std::move(displayed_notifications),
                      false /* supports_synchronization */));

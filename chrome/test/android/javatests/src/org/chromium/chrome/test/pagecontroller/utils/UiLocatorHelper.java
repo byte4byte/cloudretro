@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.test.pagecontroller.utils;
 
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.uiautomator.StaleObjectException;
 import android.support.test.uiautomator.UiDevice;
 import android.support.test.uiautomator.UiObject2;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,16 +43,25 @@ public class UiLocatorHelper {
         if (object2.isCheckable()) {
             return object2.isChecked();
         } else {
-            throw UiLocationException.newInstance("Item is not checkable", null, object2);
+            throw new UiLocationException("Item in " + object2 + " is not checkable.");
         }
     };
 
     private final UiDevice mDevice;
     private long mTimeout;
 
+    /** Create a UiLocatorHelper with default timeout. */
     UiLocatorHelper() {
+        this(DEFAULT_TIMEOUT_MS);
+    }
+
+    /**
+     * Create a UiLocatorHelper with specified timeout.
+     * @param timeout Timeout in milliseconds.
+     */
+    UiLocatorHelper(long timeout) {
         mDevice = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-        mTimeout = DEFAULT_TIMEOUT_MS;
+        mTimeout = timeout;
     }
 
     /**
@@ -62,16 +72,7 @@ public class UiLocatorHelper {
     }
 
     /**
-     * Set the timeout used for location operations.
-     * This is immutable outside package to reduce errors.
-     * @param timeout Timeout in milliseconds.
-     */
-    void setTimeout(long timeout) {
-        mTimeout = timeout;
-    }
-
-    /**
-     * Checks and waits if a node is found on the screen.
+     * Determines if a node is found on the screen.
      * @param locator Locator used to find the node.
      * @return        true if node is found, false otherwise.
      */
@@ -85,7 +86,7 @@ public class UiLocatorHelper {
     }
 
     /**
-     * Checks if a node is found on the screen, does not retry.
+     * Determines if a node is found on the screen, does not retry.
      * @param locator Locator used to find the node.
      * @param root    Node to search under, or null if all the nodes should be searched.
      *                Possible root staleness will make retries ineffective, this means
@@ -97,10 +98,19 @@ public class UiLocatorHelper {
     }
 
     /**
+     * Checks that a node is found on the screen.
+     * @param locator Locator used to find the node.
+     * @throws        UiLocationException if locator is not found on screen.
+     */
+    public void verifyOnScreen(@NonNull IUi2Locator locator) {
+        getOne(locator);
+    }
+
+    /**
      * Get text from a single node using locator.
      * @param locator          Locator used to find the nodes.
      * @return                 Text field of the node.
-     * @throws UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public String getOneText(@NonNull IUi2Locator locator) {
         return getOneElement(locator, CONVERTER_TEXT);
@@ -110,7 +120,7 @@ public class UiLocatorHelper {
      * Get list of text using locator.
      * @param locator          Locator used to find the nodes.
      * @return                 List of text.
-     * @throws UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public List<String> getAllTexts(@NonNull IUi2Locator locator) {
         return getAllElements(locator, CONVERTER_TEXT);
@@ -145,7 +155,7 @@ public class UiLocatorHelper {
      * Get content description from a single node using locator.
      * @param locator          Locator used to find the nodes.
      * @return                 Content description field of the node.
-     * @throws UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public String getOneDescription(@NonNull IUi2Locator locator) {
         return getOneElement(locator, CONVERTER_DESC);
@@ -155,7 +165,7 @@ public class UiLocatorHelper {
      * Get list of content descriptions using locator.
      * @param locator          Locator used to find the nodes.
      * @return                 List of content descriptions.
-     * @throws UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public List<String> getAllDescriptions(@NonNull IUi2Locator locator) {
         return getAllElements(locator, CONVERTER_DESC);
@@ -191,7 +201,7 @@ public class UiLocatorHelper {
      * Get checked status from a single node using locator.
      * @param locator           Locator used to find the nodes.
      * @return                  checked status of the node.
-     * @throws  UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws  UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public Boolean getOneChecked(@NonNull IUi2Locator locator) {
         return getOneElement(locator, CONVERTER_CHECKED);
@@ -201,7 +211,7 @@ public class UiLocatorHelper {
      * Get list of checked statuses using locator.
      * @param locator          Locator used to find the nodes.
      * @return                 List of checked statuses.
-     * @throws UiLocationError if locator didn't find any nodes within timeout interval.
+     * @throws UiLocationException if locator didn't find any nodes within timeout interval.
      */
     public List<Boolean> getAllChecked(@NonNull IUi2Locator locator) {
         return getAllElements(locator, CONVERTER_CHECKED);
@@ -234,7 +244,7 @@ public class UiLocatorHelper {
 
     /**
      * Returns the first element found using locator.
-     * Throws UiLocationError if not found.
+     * Throws UiLocationException if not found.
      * @param locator Locator to use to find the element.
      * @return        UiObject2
      */
@@ -265,7 +275,7 @@ public class UiLocatorHelper {
      * Return a list of UiObject2 nodes matching locator, will retry up to timeout.
      * @param locator          Locator to use to find the element.
      * @return                 list of elements matching the locator
-     * @throws UiLocationError if locator didn't find any nodes.
+     * @throws UiLocationException if locator didn't find any nodes.
      */
     public List<UiObject2> getAll(IUi2Locator locator) {
         long startTime = Utils.currentTime();
@@ -288,9 +298,9 @@ public class UiLocatorHelper {
             }
             Utils.sleep(UI_CHECK_INTERVAL_MS);
         } while (true);
-        throw UiLocationException.newInstance("Could not find any objects after " + elapsedTime
-                        + " ms and " + attempts + " attempts",
-                locator, null);
+        throw new UiLocationException("Could not find any objects after " + elapsedTime + " ms and "
+                        + attempts + " attempts.",
+                locator);
     }
 
     /**
@@ -315,7 +325,7 @@ public class UiLocatorHelper {
      * Delegate to be used with getCustomElements.
      * @param <T> The type of the element.
      */
-    static public interface CustomElementMaker<T> {
+    public static interface CustomElementMaker<T> {
         /**
          * Should construct an element given a node.
          * @param root          The input node.
@@ -331,7 +341,7 @@ public class UiLocatorHelper {
          *                      an element gets cutoff at a scroll boundary.
          * @return              The element if construction is successful, null
          *                      otherwise.
-         * @throws              Should throw a UiLocationError or
+         * @throws UiLocationException Should throw a UiLocationException or
          *                      UiStaleObjectException if getCustomElements
          *                      should re-obtain a root using its provided
          *                      locator.
@@ -393,10 +403,11 @@ public class UiLocatorHelper {
 
     private <T> T getOneElement(IUi2Locator locator, ElementConverter<T> converter) {
         List<T> all = getAllElements(locator, converter);
-        if (all.size() > 0)
+        if (all.size() > 0) {
             return all.get(0);
-        else
+        } else {
             return null;
+        }
     }
 
     private <T> T getOneElementImmediate(

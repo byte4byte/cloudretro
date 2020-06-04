@@ -7,7 +7,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 
 namespace notifications {
@@ -52,6 +53,10 @@ proto::SchedulerClientType ToSchedulerClientType(SchedulerClientType type) {
       return proto::SchedulerClientType::UNKNOWN;
     case SchedulerClientType::kWebUI:
       return proto::SchedulerClientType::WEBUI;
+    case SchedulerClientType::kChromeUpdate:
+      return proto::SchedulerClientType::CHROME_UPDATE;
+    case SchedulerClientType::kPrefetch:
+      return proto::SchedulerClientType::PREFETCH;
   }
   NOTREACHED();
 }
@@ -70,6 +75,10 @@ SchedulerClientType FromSchedulerClientType(
       return SchedulerClientType::kUnknown;
     case proto::SchedulerClientType::WEBUI:
       return SchedulerClientType::kWebUI;
+    case proto::SchedulerClientType::CHROME_UPDATE:
+      return SchedulerClientType::kChromeUpdate;
+    case proto::SchedulerClientType::PREFETCH:
+      return SchedulerClientType::kPrefetch;
   }
   NOTREACHED();
 }
@@ -143,30 +152,26 @@ ImpressionResult FromImpressionResult(
   NOTREACHED();
 }
 
-// Converts ImpressionResult to its associated enum in proto buffer.
-proto::Impression_SchedulerTaskTime ToSchedulerTaskTime(
-    SchedulerTaskTime time) {
-  switch (time) {
-    case SchedulerTaskTime::kUnknown:
-      return proto::Impression_SchedulerTaskTime_UNKNOWN_TASK_TIME;
-    case SchedulerTaskTime::kMorning:
-      return proto::Impression_SchedulerTaskTime_MORNING;
-    case SchedulerTaskTime::kEvening:
-      return proto::Impression_SchedulerTaskTime_EVENING;
+proto::IconType ToIconType(IconType type) {
+  switch (type) {
+    case IconType::kUnknownType:
+      return proto::IconType::UNKNOWN_ICON_TYPE;
+    case IconType::kSmallIcon:
+      return proto::IconType::SMALL_ICON;
+    case IconType::kLargeIcon:
+      return proto::IconType::LARGE_ICON;
   }
   NOTREACHED();
 }
 
-// Converts ImpressionResult from its associated enum in proto buffer.
-SchedulerTaskTime FromSchedulerTaskTime(
-    proto::Impression_SchedulerTaskTime time) {
-  switch (time) {
-    case proto::Impression_SchedulerTaskTime_UNKNOWN_TASK_TIME:
-      return SchedulerTaskTime::kUnknown;
-    case proto::Impression_SchedulerTaskTime_MORNING:
-      return SchedulerTaskTime::kMorning;
-    case proto::Impression_SchedulerTaskTime_EVENING:
-      return SchedulerTaskTime::kEvening;
+IconType FromIconType(proto::IconType proto_type) {
+  switch (proto_type) {
+    case proto::IconType::UNKNOWN_ICON_TYPE:
+      return IconType::kUnknownType;
+    case proto::IconType::SMALL_ICON:
+      return IconType::kSmallIcon;
+    case proto::IconType::LARGE_ICON:
+      return IconType::kLargeIcon;
   }
   NOTREACHED();
 }
@@ -240,8 +245,6 @@ proto::ScheduleParams_Priority ScheduleParamsPriorityToProto(
   switch (priority) {
     case Priority::kLow:
       return proto::ScheduleParams_Priority_LOW;
-    case Priority::kHigh:
-      return proto::ScheduleParams_Priority_HIGH;
     case Priority::kNoThrottle:
       return proto::ScheduleParams_Priority_NO_THROTTLE;
   }
@@ -254,8 +257,6 @@ ScheduleParams::Priority ScheduleParamsPriorityFromProto(
   switch (priority) {
     case proto::ScheduleParams_Priority_LOW:
       return Priority::kLow;
-    case proto::ScheduleParams_Priority_HIGH:
-      return Priority::kHigh;
     case proto::ScheduleParams_Priority_NO_THROTTLE:
       return Priority::kNoThrottle;
   }
@@ -272,6 +273,16 @@ void ScheduleParamsToProto(ScheduleParams* params,
     proto_impression_mapping->set_impression_result(
         ToImpressionResult(mapping.second));
   }
+
+  if (params->deliver_time_start.has_value()) {
+    proto->set_deliver_time_start(
+        TimeToMilliseconds(params->deliver_time_start.value()));
+  }
+
+  if (params->deliver_time_end.has_value()) {
+    proto->set_deliver_time_end(
+        TimeToMilliseconds(params->deliver_time_end.value()));
+  }
 }
 
 // Converts ScheduleParams from proto buffer type.
@@ -287,20 +298,24 @@ void ScheduleParamsFromProto(proto::ScheduleParams* proto,
         FromImpressionResult(proto_impression_mapping.impression_result());
     params->impression_mapping[user_feedback] = impression_result;
   }
+  if (proto->has_deliver_time_start()) {
+    params->deliver_time_start =
+        MillisecondsToTime(proto->deliver_time_start());
+  }
+  if (proto->has_deliver_time_end()) {
+    params->deliver_time_end = MillisecondsToTime(proto->deliver_time_end());
+  }
 }
 
 }  // namespace
 
 void IconEntryToProto(IconEntry* entry, notifications::proto::Icon* proto) {
-  proto->mutable_uuid()->swap(entry->uuid);
   proto->mutable_icon()->swap(entry->data);
 }
 
 void IconEntryFromProto(proto::Icon* proto, notifications::IconEntry* entry) {
-  DCHECK(proto->has_uuid());
   DCHECK(proto->has_icon());
   entry->data.swap(*proto->mutable_icon());
-  entry->uuid.swap(*proto->mutable_uuid());
 }
 
 void ClientStateToProto(ClientState* client_state,
@@ -314,8 +329,6 @@ void ClientStateToProto(ClientState* client_state,
     impression_ptr->set_feedback(ToUserFeedback(impression.feedback));
     impression_ptr->set_impression(ToImpressionResult(impression.impression));
     impression_ptr->set_integrated(impression.integrated);
-    impression_ptr->set_task_start_time(
-        ToSchedulerTaskTime(impression.task_start_time));
     impression_ptr->set_guid(impression.guid);
 
     for (const auto& mapping : impression.impression_mapping) {
@@ -324,6 +337,12 @@ void ClientStateToProto(ClientState* client_state,
           ToUserFeedback(mapping.first));
       proto_impression_mapping->set_impression_result(
           ToImpressionResult(mapping.second));
+    }
+
+    for (const auto& pair : impression.custom_data) {
+      auto* data = impression_ptr->add_custom_data();
+      data->set_key(pair.first);
+      data->set_value(pair.second);
     }
   }
 
@@ -335,6 +354,18 @@ void ClientStateToProto(ClientState* client_state,
     suppression_proto->set_duration_ms(
         TimeDeltaToMilliseconds(suppression.duration));
     suppression_proto->set_recover_goal(suppression.recover_goal);
+  }
+
+  proto->set_negative_events_count(client_state->negative_events_count);
+
+  if (client_state->last_negative_event_ts.has_value()) {
+    proto->set_last_negative_event_ts(
+        TimeToMilliseconds(client_state->last_negative_event_ts.value()));
+  }
+
+  if (client_state->last_shown_ts.has_value()) {
+    proto->set_last_shown_ts(
+        TimeToMilliseconds(client_state->last_shown_ts.value()));
   }
 }
 
@@ -352,8 +383,6 @@ void ClientStateFromProto(proto::ClientState* proto,
     impression.feedback = FromUserFeedback(proto_impression.feedback());
     impression.impression = FromImpressionResult(proto_impression.impression());
     impression.integrated = proto_impression.integrated();
-    impression.task_start_time =
-        FromSchedulerTaskTime(proto_impression.task_start_time());
     impression.guid = proto_impression.guid();
     impression.type = client_state->type;
 
@@ -365,6 +394,11 @@ void ClientStateFromProto(proto::ClientState* proto,
       auto impression_result =
           FromImpressionResult(proto_impression_mapping.impression_result());
       impression.impression_mapping[user_feedback] = impression_result;
+    }
+
+    for (int i = 0; i < proto_impression.custom_data_size(); ++i) {
+      const auto& pair = proto_impression.custom_data(i);
+      impression.custom_data.emplace(pair.key(), pair.value());
     }
 
     client_state->impressions.emplace_back(std::move(impression));
@@ -382,6 +416,17 @@ void ClientStateFromProto(proto::ClientState* proto,
     suppression_info.recover_goal = proto_suppression.recover_goal();
     client_state->suppression_info = std::move(suppression_info);
   }
+
+  client_state->negative_events_count = proto->negative_events_count();
+
+  if (proto->has_last_shown_ts()) {
+    client_state->last_shown_ts = MillisecondsToTime(proto->last_shown_ts());
+  }
+
+  if (proto->has_last_negative_event_ts()) {
+    client_state->last_negative_event_ts =
+        MillisecondsToTime(proto->last_negative_event_ts());
+  }
 }
 
 void NotificationEntryToProto(NotificationEntry* entry,
@@ -390,11 +435,12 @@ void NotificationEntryToProto(NotificationEntry* entry,
   proto->set_guid(entry->guid);
   proto->set_create_time(TimeToMilliseconds(entry->create_time));
   auto* proto_notification_data = proto->mutable_notification_data();
-  NotificationDataToProto(&entry->notification_data, proto_notification_data);
-  for (const auto& icon_id : entry->icons_uuid) {
-    auto* proto_icon_id = proto_notification_data->add_icon_uuid();
-    *proto_icon_id = icon_id;
+  for (const auto& icon_type_uuid_pair : entry->icons_uuid) {
+    auto* proto_icons = proto_notification_data->add_icons_uuid();
+    proto_icons->set_type(ToIconType(icon_type_uuid_pair.first));
+    proto_icons->set_uuid(icon_type_uuid_pair.second);
   }
+  NotificationDataToProto(&entry->notification_data, proto_notification_data);
 
   auto* proto_schedule_params = proto->mutable_schedule_params();
   ScheduleParamsToProto(&entry->schedule_params, proto_schedule_params);
@@ -407,12 +453,14 @@ void NotificationEntryFromProto(proto::NotificationEntry* proto,
   entry->create_time = MillisecondsToTime(proto->create_time());
   NotificationDataFromProto(proto->mutable_notification_data(),
                             &entry->notification_data);
-  for (int i = 0; i < proto->notification_data().icon_uuid_size(); ++i) {
-    entry->icons_uuid.emplace_back(proto->notification_data().icon_uuid(i));
-  }
-
   ScheduleParamsFromProto(proto->mutable_schedule_params(),
                           &entry->schedule_params);
+
+  for (int i = 0; i < proto->notification_data().icons_uuid_size(); i++) {
+    const auto& icon_uuid_pair = proto->notification_data().icons_uuid(i);
+    entry->icons_uuid.emplace(FromIconType(icon_uuid_pair.type()),
+                              icon_uuid_pair.uuid());
+  }
 }
 
 }  // namespace notifications

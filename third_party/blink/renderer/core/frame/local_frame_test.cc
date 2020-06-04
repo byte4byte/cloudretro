@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
@@ -12,46 +14,69 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#if defined(OS_MACOSX)
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "third_party/blink/public/mojom/input/text_input_host.mojom-blink.h"
+#include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
+#endif
 
 namespace blink {
 
 namespace {
 
-void MaybeAllowImagePlaceholder(DummyPageHolder* page_holder,
-                                FetchParameters& params) {
-  if (page_holder->GetFrame().IsClientLoFiAllowed(params.GetResourceRequest()))
-    params.SetClientLoFiPlaceholder();
-}
-
-void DisableLazyLoadAndDisableDataSaverHoldbackInSettings(Settings& settings) {
+void DisableLazyLoadInSettings(Settings& settings) {
   settings.SetLazyLoadEnabled(false);
-  settings.SetDataSaverHoldbackWebApi(false);
 }
-void EnableLazyLoadAndDisableDataSaverHoldbackInSettings(Settings& settings) {
+void EnableLazyLoadInSettings(Settings& settings) {
   settings.SetLazyLoadEnabled(true);
-  settings.SetDataSaverHoldbackWebApi(false);
-}
-void EnableLazyLoadAndEnableDataSaverHoldbackInSettings(Settings& settings) {
-  settings.SetLazyLoadEnabled(true);
-  settings.SetDataSaverHoldbackWebApi(true);
 }
 
-}  // namespace
+#if defined(OS_MACOSX)
+void RegisterMockedHttpURLLoad(const std::string& base_url,
+                               const std::string& file_name) {
+  url_test_helpers::RegisterMockedURLLoadFromBase(
+      WebString::FromUTF8(base_url), test::CoreTestDataPath(),
+      WebString::FromUTF8(file_name));
+}
 
-class TestLocalFrameClient : public EmptyLocalFrameClient {
+class TestTextInputHostWaiter : public mojom::blink::TextInputHost {
  public:
-  explicit TestLocalFrameClient(
-      WebURLRequest::PreviewsState frame_previews_state)
-      : frame_previews_state_(frame_previews_state) {}
-  ~TestLocalFrameClient() override = default;
+  TestTextInputHostWaiter() = default;
+  ~TestTextInputHostWaiter() override = default;
 
-  WebURLRequest::PreviewsState GetPreviewsStateForFrame() const override {
-    return frame_previews_state_;
+  void Init(base::OnceClosure callback,
+            blink::BrowserInterfaceBrokerProxy& provider) {
+    callback_ = std::move(callback);
+    provider.SetBinderForTesting(
+        mojom::blink::TextInputHost::Name_,
+        base::BindRepeating(&TestTextInputHostWaiter::BindTextInputHostReceiver,
+                            base::Unretained(this)));
   }
 
+  void GotCharacterIndexAtPoint(uint32_t index) override {
+    index_ = index;
+    if (callback_)
+      std::move(callback_).Run();
+  }
+
+  void BindTextInputHostReceiver(
+      mojo::ScopedMessagePipeHandle message_pipe_handle) {
+    receiver_.Bind(mojo::PendingReceiver<mojom::blink::TextInputHost>(
+        std::move(message_pipe_handle)));
+  }
+
+  uint32_t index() { return index_; }
+
  private:
-  const WebURLRequest::PreviewsState frame_previews_state_;
+  mojo::Receiver<mojom::blink::TextInputHost> receiver_{this};
+  uint32_t index_;
+  base::OnceClosure callback_;
 };
+#endif
+
+}  // namespace
 
 class LocalFrameTest : public testing::Test {
  public:
@@ -61,100 +86,11 @@ class LocalFrameTest : public testing::Test {
   }
 };
 
-TEST_F(LocalFrameTest, MaybeAllowPlaceholderImageUsesSpecifiedRequestValue) {
-  ResourceRequest request1;
-  request1.SetUrl(KURL("http://insecure.com"));
-  request1.SetPreviewsState(WebURLRequest::kClientLoFiOn);
-  FetchParameters params1(request1);
-  auto page_holder = std::make_unique<DummyPageHolder>(
-      IntSize(800, 600), nullptr,
-      MakeGarbageCollected<TestLocalFrameClient>(WebURLRequest::kPreviewsOff));
-  MaybeAllowImagePlaceholder(page_holder.get(), params1);
-  EXPECT_EQ(FetchParameters::kAllowPlaceholder,
-            params1.GetImageRequestOptimization());
-
-  ResourceRequest request2;
-  request2.SetUrl(KURL("https://secure.com"));
-  request2.SetPreviewsState(WebURLRequest::kPreviewsOff);
-  FetchParameters params2(request2);
-  auto page_holder2 = std::make_unique<DummyPageHolder>(
-      IntSize(800, 600), nullptr,
-      MakeGarbageCollected<TestLocalFrameClient>(WebURLRequest::kClientLoFiOn));
-  MaybeAllowImagePlaceholder(page_holder2.get(), params2);
-  EXPECT_EQ(FetchParameters::kNone, params2.GetImageRequestOptimization());
-}
-
-TEST_F(LocalFrameTest, MaybeAllowPlaceholderImageUsesFramePreviewsState) {
-  ResourceRequest request1;
-  request1.SetUrl(KURL("http://insecure.com"));
-  request1.SetPreviewsState(WebURLRequest::kPreviewsUnspecified);
-  FetchParameters params1(request1);
-  auto page_holder = std::make_unique<DummyPageHolder>(
-      IntSize(800, 600), nullptr,
-      MakeGarbageCollected<TestLocalFrameClient>(WebURLRequest::kClientLoFiOn));
-  MaybeAllowImagePlaceholder(page_holder.get(), params1);
-  EXPECT_EQ(FetchParameters::kAllowPlaceholder,
-            params1.GetImageRequestOptimization());
-  EXPECT_TRUE(page_holder->GetFrame().IsUsingDataSavingPreview());
-
-  ResourceRequest request2;
-  request2.SetUrl(KURL("http://insecure.com"));
-  request2.SetPreviewsState(WebURLRequest::kPreviewsUnspecified);
-  FetchParameters params2(request2);
-  auto page_holder2 = std::make_unique<DummyPageHolder>(
-      IntSize(800, 600), nullptr,
-      MakeGarbageCollected<TestLocalFrameClient>(
-          WebURLRequest::kServerLitePageOn));
-  MaybeAllowImagePlaceholder(page_holder2.get(), params2);
-  EXPECT_EQ(FetchParameters::kNone, params2.GetImageRequestOptimization());
-  EXPECT_FALSE(page_holder2->GetFrame().IsUsingDataSavingPreview());
-}
-
-TEST_F(LocalFrameTest, IsUsingDataSavingPreview) {
-  EXPECT_TRUE(std::make_unique<DummyPageHolder>(
-                  IntSize(800, 600), nullptr,
-                  MakeGarbageCollected<TestLocalFrameClient>(
-                      WebURLRequest::kClientLoFiOn))
-                  ->GetFrame()
-                  .IsUsingDataSavingPreview());
-  EXPECT_TRUE(std::make_unique<DummyPageHolder>(
-                  IntSize(800, 600), nullptr,
-                  MakeGarbageCollected<TestLocalFrameClient>(
-                      WebURLRequest::kNoScriptOn))
-                  ->GetFrame()
-                  .IsUsingDataSavingPreview());
-
-  EXPECT_FALSE(std::make_unique<DummyPageHolder>(
-                   IntSize(800, 600), nullptr,
-                   MakeGarbageCollected<TestLocalFrameClient>(
-                       WebURLRequest::kPreviewsUnspecified))
-                   ->GetFrame()
-                   .IsUsingDataSavingPreview());
-  EXPECT_FALSE(std::make_unique<DummyPageHolder>(
-                   IntSize(800, 600), nullptr,
-                   MakeGarbageCollected<TestLocalFrameClient>(
-                       WebURLRequest::kPreviewsOff))
-                   ->GetFrame()
-                   .IsUsingDataSavingPreview());
-  EXPECT_FALSE(std::make_unique<DummyPageHolder>(
-                   IntSize(800, 600), nullptr,
-                   MakeGarbageCollected<TestLocalFrameClient>(
-                       WebURLRequest::kPreviewsNoTransform))
-                   ->GetFrame()
-                   .IsUsingDataSavingPreview());
-  EXPECT_FALSE(std::make_unique<DummyPageHolder>(
-                   IntSize(800, 600), nullptr,
-                   MakeGarbageCollected<TestLocalFrameClient>(
-                       WebURLRequest::kServerLitePageOn))
-                   ->GetFrame()
-                   .IsUsingDataSavingPreview());
-}
-
 TEST_F(LocalFrameTest, IsLazyLoadingImageAllowedWithFeatureDisabled) {
   ScopedLazyImageLoadingForTest scoped_lazy_image_loading_for_test(false);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndDisableDataSaverHoldbackInSettings));
+      base::BindOnce(&EnableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kDisabled,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
@@ -163,7 +99,7 @@ TEST_F(LocalFrameTest, IsLazyLoadingImageAllowedWithSettingDisabled) {
   ScopedLazyImageLoadingForTest scoped_lazy_image_loading_for_test(false);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&DisableLazyLoadAndDisableDataSaverHoldbackInSettings));
+      base::BindOnce(&DisableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kDisabled,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
@@ -174,7 +110,7 @@ TEST_F(LocalFrameTest, IsLazyLoadingImageAllowedWithAutomaticDisabled) {
       scoped_automatic_lazy_image_loading_for_test(false);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndDisableDataSaverHoldbackInSettings));
+      base::BindOnce(&EnableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kEnabledExplicit,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
@@ -188,7 +124,7 @@ TEST_F(LocalFrameTest, IsLazyLoadingImageAllowedWhenNotRestricted) {
           false);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndDisableDataSaverHoldbackInSettings));
+      base::BindOnce(&EnableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kEnabledAutomatic,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
@@ -203,22 +139,7 @@ TEST_F(LocalFrameTest,
   GetNetworkStateNotifier().SetSaveDataEnabled(false);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndDisableDataSaverHoldbackInSettings));
-  EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kEnabledExplicit,
-            page_holder->GetFrame().GetLazyLoadImageSetting());
-}
-
-TEST_F(LocalFrameTest,
-       IsLazyLoadingImageAllowedWhenRestrictedWithDataSaverEnabledHoldback) {
-  ScopedLazyImageLoadingForTest scoped_lazy_image_loading_for_test(true);
-  ScopedAutomaticLazyImageLoadingForTest
-      scoped_automatic_lazy_image_loading_for_test(true);
-  ScopedRestrictAutomaticLazyImageLoadingToDataSaverForTest
-      scoped_restrict_automatic_lazy_image_loading_to_data_saver_for_test(true);
-  GetNetworkStateNotifier().SetSaveDataEnabled(true);
-  auto page_holder = std::make_unique<DummyPageHolder>(
-      IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndEnableDataSaverHoldbackInSettings));
+      base::BindOnce(&EnableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kEnabledExplicit,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
@@ -233,9 +154,117 @@ TEST_F(LocalFrameTest,
   GetNetworkStateNotifier().SetSaveDataEnabled(true);
   auto page_holder = std::make_unique<DummyPageHolder>(
       IntSize(800, 600), nullptr, nullptr,
-      base::BindOnce(&EnableLazyLoadAndDisableDataSaverHoldbackInSettings));
+      base::BindOnce(&EnableLazyLoadInSettings));
   EXPECT_EQ(LocalFrame::LazyLoadImageSetting::kEnabledAutomatic,
             page_holder->GetFrame().GetLazyLoadImageSetting());
 }
+
+namespace {
+
+void TestGreenDiv(DummyPageHolder& page_holder) {
+  const Document& doc = page_holder.GetDocument();
+  Element* div = doc.getElementById("div");
+  ASSERT_TRUE(div);
+  ASSERT_TRUE(div->GetComputedStyle());
+  EXPECT_EQ(MakeRGB(0, 128, 0), div->GetComputedStyle()->VisitedDependentColor(
+                                    GetCSSPropertyColor()));
+}
+
+}  // namespace
+
+TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLStyleInBody) {
+  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  data->Append(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><style>div { color: "
+      "green }</style><div id='div'></div></body></html>",
+      static_cast<size_t>(118));
+  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  TestGreenDiv(*page_holder);
+}
+
+TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLLinkInBody) {
+  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  data->Append(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><body><link rel='stylesheet' "
+      "href='data:text/css,div{color:green}' /><div "
+      "id='div'></div></body></html>",
+      static_cast<size_t>(146));
+  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  TestGreenDiv(*page_holder);
+}
+
+TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLStyleInHead) {
+  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  data->Append(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>div { color: "
+      "green }</style></head><body><div id='div'></div></body></html>",
+      static_cast<size_t>(131));
+  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  TestGreenDiv(*page_holder);
+}
+
+TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XHTMLLinkInHead) {
+  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  data->Append(
+      "<html xmlns='http://www.w3.org/1999/xhtml'><head><link rel='stylesheet' "
+      "href='data:text/css,div{color:green}' /></head><body><div "
+      "id='div'></div></body></html>",
+      static_cast<size_t>(159));
+  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  TestGreenDiv(*page_holder);
+}
+
+TEST_F(LocalFrameTest, ForceSynchronousDocumentInstall_XMLStyleSheet) {
+  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+
+  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
+  data->Append(
+      "<?xml-stylesheet type='text/css' "
+      "href='data:text/css,div{color:green}'?><html "
+      "xmlns='http://www.w3.org/1999/xhtml'><body><div "
+      "id='div'></div></body></html>",
+      static_cast<size_t>(155));
+  page_holder->GetFrame().ForceSynchronousDocumentInstall("text/xml", data);
+  TestGreenDiv(*page_holder);
+}
+
+#if defined(OS_MACOSX)
+TEST_F(LocalFrameTest, CharacterIndexAtPointWithPinchZoom) {
+  RegisterMockedHttpURLLoad("http://internal.test/", "sometext.html");
+
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.InitializeAndLoad("http://internal.test/sometext.html");
+  web_view_helper.LoadAhem();
+  web_view_helper.Resize(WebSize(640, 480));
+
+  // Move the visual viewport to the start of the target div containing the
+  // text.
+  web_view_helper.GetWebView()->SetPageScaleFactor(2);
+  web_view_helper.GetWebView()->SetVisualViewportOffset(gfx::PointF(100, 50));
+
+  Page* page = web_view_helper.GetWebView()->GetPage();
+  LocalFrame* main_frame = DynamicTo<LocalFrame>(page->MainFrame());
+  main_frame->text_input_host_.reset();
+
+  base::RunLoop run_loop;
+  TestTextInputHostWaiter waiter;
+  waiter.Init(run_loop.QuitClosure(), main_frame->GetBrowserInterfaceBroker());
+  main_frame->GetBrowserInterfaceBroker().GetInterface(
+      main_frame->text_input_host_.BindNewPipeAndPassReceiver());
+  // Since we're zoomed in to 2X, each char of Ahem is 20px wide/tall in
+  // viewport space. We expect to hit the fifth char on the first line.
+  main_frame->GetCharacterIndexAtPoint(gfx::Point(100, 15));
+  run_loop.Run();
+  EXPECT_EQ(waiter.index(), 5ul);
+}
+#endif
 
 }  // namespace blink

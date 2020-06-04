@@ -36,6 +36,7 @@ template("ppapi_example") {
 
       cflags = invoker.cflags
       ldflags = invoker.ldflags
+      libs = invoker.libs
 
       ldflags += [
         # Not to strip important symbols by -Wl,-dead_strip.

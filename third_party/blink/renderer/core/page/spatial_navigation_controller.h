@@ -9,6 +9,8 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 
 namespace blink {
 
@@ -23,8 +25,8 @@ struct PhysicalRect;
 // Navigation is used to move and interact with a page in a purely directional
 // way, e.g. keyboard arrows. We use the term "interest" to specify which
 // element the user is currently on.
-class CORE_EXPORT SpatialNavigationController
-    : public GarbageCollectedFinalized<SpatialNavigationController> {
+class CORE_EXPORT SpatialNavigationController final
+    : public GarbageCollected<SpatialNavigationController> {
  public:
   explicit SpatialNavigationController(Page& page);
 
@@ -47,7 +49,7 @@ class CORE_EXPORT SpatialNavigationController
   void FocusedNodeChanged(Document*);
   void FullscreenStateChanged(Element* element);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   // Entry-point into SpatialNavigation advancement. Will return true if an
@@ -105,7 +107,9 @@ class CORE_EXPORT SpatialNavigationController
   bool UpdateIsFormFocused(Element* element);
   bool UpdateHasDefaultVideoControls(Element* element);
 
-  const mojom::blink::SpatialNavigationHostPtr& GetSpatialNavigationHost();
+  const HeapMojoRemote<mojom::blink::SpatialNavigationHost,
+                       HeapMojoWrapperMode::kWithoutContextObserver>&
+  GetSpatialNavigationHost();
   void ResetMojoBindings();
 
   // The currently indicated element or nullptr if no node is indicated by
@@ -119,7 +123,9 @@ class CORE_EXPORT SpatialNavigationController
   bool enter_key_press_seen_ = false;
 
   mojom::blink::SpatialNavigationStatePtr spatial_navigation_state_;
-  mojom::blink::SpatialNavigationHostPtr spatial_navigation_host_;
+  HeapMojoRemote<mojom::blink::SpatialNavigationHost,
+                 HeapMojoWrapperMode::kWithoutContextObserver>
+      spatial_navigation_host_;
 };
 
 }  // namespace blink

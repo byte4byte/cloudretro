@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -19,7 +20,6 @@
 #include "base/task/post_task.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/browser/compositor/surface_utils.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
@@ -45,13 +45,24 @@
 
 namespace content {
 
-void NavigateFrameToURL(FrameTreeNode* node, const GURL& url) {
+bool NavigateFrameToURL(FrameTreeNode* node, const GURL& url) {
   TestFrameNavigationObserver observer(node);
   NavigationController::LoadURLParams params(url);
   params.transition_type = ui::PAGE_TRANSITION_LINK;
   params.frame_tree_node_id = node->frame_tree_node_id();
   node->navigator()->GetController()->LoadURLWithParams(params);
   observer.Wait();
+
+  if (!observer.last_navigation_succeeded()) {
+    DLOG(WARNING) << "Navigation did not succeed: " << url;
+    return false;
+  }
+  if (url != node->current_url()) {
+    DLOG(WARNING) << "Expected URL " << url << " but observed "
+                  << node->current_url();
+    return false;
+  }
+  return true;
 }
 
 void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed, bool success) {
@@ -345,54 +356,34 @@ void UrlCommitObserver::DidFinishNavigation(
   }
 }
 
-RenderProcessHostKillWaiter::RenderProcessHostKillWaiter(
+RenderProcessHostBadIpcMessageWaiter::RenderProcessHostBadIpcMessageWaiter(
     RenderProcessHost* render_process_host)
-    : exit_watcher_(render_process_host,
-                    RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT) {}
+    : internal_waiter_(render_process_host,
+                       "Stability.BadMessageTerminated.Content") {}
 
 base::Optional<bad_message::BadMessageReason>
-RenderProcessHostKillWaiter::Wait() {
-  base::Optional<bad_message::BadMessageReason> result;
-
-  // Wait for the renderer kill.
-  exit_watcher_.Wait();
-  if (exit_watcher_.did_exit_normally())
-    return result;
-
-  // Find the logged Stability.BadMessageTerminated.Content data (if present).
-  std::vector<base::Bucket> uma_samples =
-      histogram_tester_.GetAllSamples("Stability.BadMessageTerminated.Content");
-  // No UMA will be present if the kill was not trigerred by the //content layer
-  // (e.g. if it was trigerred by bad_message::ReceivedBadMessage from //chrome
-  // layer or from somewhere in the //components layer).
-  if (uma_samples.empty())
-    return result;
-  const base::Bucket& bucket = uma_samples.back();
-  // Assumming that user of RenderProcessHostKillWatcher makes sure that only
-  // one kill can happen while using the class.
-  DCHECK_EQ(1u, uma_samples.size())
-      << "Multiple renderer kills are unsupported";
-
-  // Translate contents of the bucket into bad_message::BadMessageReason.
-  return static_cast<bad_message::BadMessageReason>(bucket.min);
+RenderProcessHostBadIpcMessageWaiter::Wait() {
+  base::Optional<int> internal_result = internal_waiter_.Wait();
+  if (!internal_result.has_value())
+    return base::nullopt;
+  return static_cast<bad_message::BadMessageReason>(internal_result.value());
 }
 
-ShowWidgetMessageFilter::ShowWidgetMessageFilter()
+ShowWidgetMessageFilter::ShowWidgetMessageFilter(WebContents* web_content)
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
-    : content::BrowserMessageFilter(FrameMsgStart),
+    : BrowserMessageFilter(FrameMsgStart),
 #else
-    : content::BrowserMessageFilter(ViewMsgStart),
+    : BrowserMessageFilter(ViewMsgStart),
 #endif
+      WebContentsObserver(web_content),
       message_loop_runner_(new content::MessageLoopRunner) {
 }
 
-ShowWidgetMessageFilter::~ShowWidgetMessageFilter() {}
+ShowWidgetMessageFilter::~ShowWidgetMessageFilter() = default;
 
 bool ShowWidgetMessageFilter::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(ShowWidgetMessageFilter, message)
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-    IPC_MESSAGE_HANDLER(FrameHostMsg_ShowPopup, OnShowPopup)
-#else
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowWidget, OnShowWidget)
 #endif
   IPC_END_MESSAGE_MAP()
@@ -411,19 +402,26 @@ void ShowWidgetMessageFilter::Reset() {
 
 void ShowWidgetMessageFilter::OnShowWidget(int route_id,
                                            const gfx::Rect& initial_rect) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&ShowWidgetMessageFilter::OnShowWidgetOnUI, this, route_id,
-                     initial_rect));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&ShowWidgetMessageFilter::OnShowWidgetOnUI,
+                                this, route_id, initial_rect));
 }
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
-void ShowWidgetMessageFilter::OnShowPopup(
-    const FrameHostMsg_ShowPopup_Params& params) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(&ShowWidgetMessageFilter::OnShowWidgetOnUI, this,
-                     MSG_ROUTING_NONE, params.bounds));
+bool ShowWidgetMessageFilter::ShowPopup(
+    RenderFrameHost* render_frame_host,
+    mojo::PendingRemote<blink::mojom::ExternalPopup>* popup,
+    const gfx::Rect& bounds,
+    int32_t item_height,
+    double font_size,
+    int32_t selected_item,
+    std::vector<blink::mojom::MenuItemPtr>* menu_items,
+    bool right_aligned,
+    bool allow_multiple_selection) {
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(&ShowWidgetMessageFilter::OnShowWidgetOnUI,
+                                this, MSG_ROUTING_NONE, bounds));
+  return true;
 }
 #endif
 

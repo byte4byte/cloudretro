@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "chrome/browser/page_load_metrics/observers/https_engagement_metrics/https_engagement_service.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -27,8 +27,7 @@ class HttpsEngagementPageLoadMetricsObserver
 
   // page_load_metrics::PageLoadMetricsObserver:
   void OnComplete(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
  private:
   HttpsEngagementService* engagement_service_;

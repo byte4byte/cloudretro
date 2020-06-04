@@ -25,12 +25,14 @@ class MockRemoteService : public RemoteService {
                scoped_refptr<RemoteCharacteristic>(
                    const bluetooth_v2_shlib::Uuid& uuid));
   const bluetooth_v2_shlib::Uuid& uuid() const override { return uuid_; }
-  MOCK_CONST_METHOD0(handle, uint16_t());
+  MOCK_CONST_METHOD0(handle, HandleId());
   MOCK_CONST_METHOD0(primary, bool());
 
   const bluetooth_v2_shlib::Uuid uuid_;
 
  private:
+  friend testing::StrictMock<MockRemoteService>;
+
   ~MockRemoteService();
 };
 

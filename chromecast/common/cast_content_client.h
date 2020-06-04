@@ -24,14 +24,14 @@ class CastContentClient : public content::ContentClient {
   base::string16 GetLocalizedString(int message_id) override;
   base::StringPiece GetDataResource(int resource_id,
                                     ui::ScaleFactor scale_factor) override;
-  bool IsDataResourceGzipped(int resource_id) override;
+  base::RefCountedMemory* GetDataResourceBytes(int resource_id) override;
   gfx::Image& GetNativeImageNamed(int resource_id) override;
 #if defined(OS_ANDROID)
   ::media::MediaDrmBridgeClient* GetMediaDrmBridgeClient() override;
 #endif  // OS_ANDROID
-  void BindChildProcessInterface(
-      const std::string& interface_name,
-      mojo::ScopedMessagePipeHandle* receiving_handle) override;
+  void ExposeInterfacesToBrowser(
+      scoped_refptr<base::SequencedTaskRunner> io_task_runner,
+      mojo::BinderMap* binders) override;
 
  private:
   GURL last_active_url_;

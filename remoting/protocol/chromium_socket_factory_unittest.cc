@@ -11,9 +11,10 @@
 #include <vector>
 
 #include "base/containers/flat_set.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
+#include "remoting/protocol/transport_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/rtc_base/async_packet_socket.h"
@@ -42,7 +43,8 @@ class ChromiumSocketFactoryTest : public testing::Test,
                                   public sigslot::has_slots<> {
  public:
   void SetUp() override {
-    socket_factory_.reset(new ChromiumPacketSocketFactory());
+    socket_factory_ = std::make_unique<ChromiumPacketSocketFactory>(
+        TransportContext::ForTests(TransportRole::SERVER));
 
     socket_.reset(socket_factory_->CreateUdpSocket(
         rtc::SocketAddress("127.0.0.1", 0), 0, 0));
@@ -82,7 +84,7 @@ class ChromiumSocketFactoryTest : public testing::Test,
     while (last_packet_.empty() && attempts++ < kMaxAttempts) {
       sender->SendTo(test_packet.data(), test_packet.size(),
                      socket_->GetLocalAddress(), options);
-      message_loop_.task_runner()->PostDelayedTask(
+      task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
           FROM_HERE, run_loop_.QuitClosure(), kAttemptPeriod);
       run_loop_.Run();
     }
@@ -91,7 +93,8 @@ class ChromiumSocketFactoryTest : public testing::Test,
   }
 
  protected:
-  base::MessageLoopForIO message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
   base::RunLoop run_loop_;
 
   std::unique_ptr<rtc::PacketSocketFactory> socket_factory_;

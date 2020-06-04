@@ -5,6 +5,7 @@
 #ifndef UI_LATENCY_LATENCY_TRACKER_H_
 #define UI_LATENCY_LATENCY_TRACKER_H_
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "ui/latency/average_lag_tracker.h"
 #include "ui/latency/latency_info.h"
@@ -21,8 +22,12 @@ class LatencyTracker {
   // Terminates latency tracking for events that triggered rendering, also
   // performing relevant UMA latency reporting.
   // Called when GPU buffers swap completes.
-  void OnGpuSwapBuffersCompleted(const std::vector<LatencyInfo>& latency_info);
-  void OnGpuSwapBuffersCompleted(const LatencyInfo& latency);
+  void OnGpuSwapBuffersCompleted(
+      const std::vector<LatencyInfo>& latency_info,
+      bool top_controls_visible_height_changed = false);
+  void OnGpuSwapBuffersCompleted(
+      const LatencyInfo& latency,
+      bool top_controls_visible_height_changed = false);
 
   using LatencyInfoProcessor =
       base::RepeatingCallback<void(const std::vector<ui::LatencyInfo>&)>;
@@ -50,7 +55,8 @@ class LatencyTracker {
   void ComputeEndToEndLatencyHistograms(
       base::TimeTicks gpu_swap_begin_timestamp,
       base::TimeTicks gpu_swap_end_timestamp,
-      const LatencyInfo& latency);
+      const LatencyInfo& latency,
+      bool top_controls_visible_height_changed);
 
   AverageLagTracker average_lag_tracker_;
 

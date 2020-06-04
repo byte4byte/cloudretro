@@ -6,10 +6,10 @@
 #define IOS_CHROME_BROWSER_PASSWORDS_PASSWORD_TAB_HELPER_H_
 
 #include "base/macros.h"
-#import "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_user_data.h"
+#include "ios/web/public/web_state_observer.h"
+#import "ios/web/public/web_state_user_data.h"
 
-@protocol ApplicationCommands;
+class Browser;
 @protocol FormSuggestionProvider;
 @class PasswordController;
 @protocol PasswordControllerDelegate;
@@ -34,11 +34,11 @@ class PasswordTabHelper : public web::WebStateObserver,
   // Sets the BaseViewController from which to present UI.
   void SetBaseViewController(UIViewController* baseViewController);
 
-  // Sets the PasswordController dispatcher.
-  void SetDispatcher(id<ApplicationCommands> dispatcher);
-
   // Sets the PasswordController delegate.
   void SetPasswordControllerDelegate(id<PasswordControllerDelegate> delegate);
+
+  // Sets the Browser.
+  void SetBrowser(Browser* browser);
 
   // Returns an object that can provide suggestions from the PasswordController.
   // May return nil.

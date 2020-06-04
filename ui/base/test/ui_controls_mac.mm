@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #import "base/mac/foundation_util.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
@@ -289,7 +289,7 @@ bool SendKeyPressNotifyWhenDone(gfx::NativeWindow window,
   return true;
 }
 
-bool SendMouseMove(long x, long y) {
+bool SendMouseMove(int x, int y) {
   CHECK(g_ui_controls_enabled);
   return SendMouseMoveNotifyWhenDone(x, y, base::OnceClosure());
 }
@@ -298,7 +298,7 @@ bool SendMouseMove(long x, long y) {
 // events require them window-relative, so we adjust.  We *DO* flip
 // the coordinate space, so input events can be the same for all
 // platforms.  E.g. (0,0) is upper-left.
-bool SendMouseMoveNotifyWhenDone(long x, long y, base::OnceClosure task) {
+bool SendMouseMoveNotifyWhenDone(int x, int y, base::OnceClosure task) {
   CHECK(g_ui_controls_enabled);
   g_mouse_location = gfx::ScreenPointToNSPoint(gfx::Point(x, y));  // flip!
 

@@ -7,9 +7,8 @@
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web/navigation/wk_navigation_action_util.h"
 #import "ios/web/navigation/wk_navigation_util.h"
-#import "ios/web/public/java_script_dialog_type.h"
+#import "ios/web/public/ui/java_script_dialog_type.h"
 #import "ios/web/public/web_client.h"
-#include "ios/web/public/web_state/web_state_interface_provider.h"
 #import "ios/web/web_state/ui/crw_context_menu_controller.h"
 #import "ios/web/web_state/ui/crw_wk_ui_handler_delegate.h"
 #import "ios/web/web_state/user_interaction_state.h"
@@ -37,25 +36,22 @@
 
 @implementation CRWWKUIHandler
 
-#pragma mark - Public
+#pragma mark - CRWWebViewHandler
 
 - (void)close {
+  [super close];
   _mojoFacade.reset();
 }
 
 #pragma mark - Property
 
 - (web::WebStateImpl*)webStateImpl {
-  return [self.delegate webStateImplForUIHandler:self];
+  return [self.delegate webStateImplForWebViewHandler:self];
 }
 
 - (web::MojoFacade*)mojoFacade {
-  if (!_mojoFacade) {
-    service_manager::mojom::InterfaceProvider* interfaceProvider =
-        self.webStateImpl->GetWebStateInterfaceProvider();
-    _mojoFacade =
-        std::make_unique<web::MojoFacade>(interfaceProvider, self.webStateImpl);
-  }
+  if (!_mojoFacade)
+    _mojoFacade = std::make_unique<web::MojoFacade>(self.webStateImpl);
   return _mojoFacade.get();
 }
 
@@ -77,7 +73,7 @@
       valueForHTTPHeaderField:web::wk_navigation_util::kReferrerHeaderName];
   GURL openerURL = referrer.length
                        ? GURL(base::SysNSStringToUTF8(referrer))
-                       : [self.delegate documentURLForUIHandler:self];
+                       : [self.delegate documentURLForWebViewHandler:self];
 
   // There is no reliable way to tell if there was a user gesture, so this code
   // checks if user has recently tapped on web view. TODO(crbug.com/809706):
@@ -193,6 +189,59 @@
     commitPreviewingViewController:(UIViewController*)previewingViewController {
   return self.webStateImpl->CommitPreviewingViewController(
       previewingViewController);
+}
+
+- (void)webView:(WKWebView*)webView
+    contextMenuConfigurationForElement:(WKContextMenuElementInfo*)elementInfo
+                     completionHandler:
+                         (void (^)(UIContextMenuConfiguration* _Nullable))
+                             completionHandler API_AVAILABLE(ios(13.0)) {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->ContextMenuConfiguration(self.webStateImpl,
+                                     net::GURLWithNSURL(elementInfo.linkURL),
+                                     completionHandler);
+}
+
+- (void)webView:(WKWebView*)webView
+    contextMenuDidEndForElement:(WKContextMenuElementInfo*)elementInfo
+    API_AVAILABLE(ios(13.0)) {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->ContextMenuDidEnd(self.webStateImpl,
+                              net::GURLWithNSURL(elementInfo.linkURL));
+}
+
+- (void)webView:(WKWebView*)webView
+     contextMenuForElement:(nonnull WKContextMenuElementInfo*)elementInfo
+    willCommitWithAnimator:
+        (nonnull id<UIContextMenuInteractionCommitAnimating>)animator
+    API_AVAILABLE(ios(13.0)) {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->ContextMenuWillCommitWithAnimator(
+      self.webStateImpl, net::GURLWithNSURL(elementInfo.linkURL), animator);
+}
+
+- (void)webView:(WKWebView*)webView
+    contextMenuWillPresentForElement:(WKContextMenuElementInfo*)elementInfo
+    API_AVAILABLE(ios(13.0)) {
+  web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->ContextMenuWillPresent(self.webStateImpl,
+                                   net::GURLWithNSURL(elementInfo.linkURL));
 }
 
 #pragma mark - Helper

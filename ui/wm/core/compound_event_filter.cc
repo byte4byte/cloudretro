@@ -5,6 +5,7 @@
 #include "ui/wm/core/compound_event_filter.h"
 
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/drag_drop_client.h"
@@ -13,6 +14,7 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/events/event.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -52,23 +54,23 @@ gfx::NativeCursor CompoundEventFilter::CursorForWindowComponent(
     int window_component) {
   switch (window_component) {
     case HTBOTTOM:
-      return ui::CursorType::kSouthResize;
+      return ui::mojom::CursorType::kSouthResize;
     case HTBOTTOMLEFT:
-      return ui::CursorType::kSouthWestResize;
+      return ui::mojom::CursorType::kSouthWestResize;
     case HTBOTTOMRIGHT:
-      return ui::CursorType::kSouthEastResize;
+      return ui::mojom::CursorType::kSouthEastResize;
     case HTLEFT:
-      return ui::CursorType::kWestResize;
+      return ui::mojom::CursorType::kWestResize;
     case HTRIGHT:
-      return ui::CursorType::kEastResize;
+      return ui::mojom::CursorType::kEastResize;
     case HTTOP:
-      return ui::CursorType::kNorthResize;
+      return ui::mojom::CursorType::kNorthResize;
     case HTTOPLEFT:
-      return ui::CursorType::kNorthWestResize;
+      return ui::mojom::CursorType::kNorthWestResize;
     case HTTOPRIGHT:
-      return ui::CursorType::kNorthEastResize;
+      return ui::mojom::CursorType::kNorthEastResize;
     default:
-      return ui::CursorType::kNull;
+      return ui::mojom::CursorType::kNull;
   }
 }
 
@@ -78,28 +80,6 @@ void CompoundEventFilter::AddHandler(ui::EventHandler* handler) {
 
 void CompoundEventFilter::RemoveHandler(ui::EventHandler* handler) {
   handlers_.RemoveObserver(handler);
-}
-
-void CompoundEventFilter::SetCursorForWindow(aura::Window* window,
-                                             const ui::Cursor& cursor) {
-  if (last_window_that_provided_cursor_.windows().empty())
-    return;
-
-  aura::Window* last_window = last_window_that_provided_cursor_.windows()[0];
-
-  // Determine if the window hierarchies match, i.e. if |window| is an ancestor
-  // or descendent of |last_window_that_provided_cursor_|.
-  if (!window->Contains(last_window) && !last_window->Contains(window))
-    return;
-
-  aura::Window* root_window = window->GetRootWindow();
-  if (!root_window)
-    return;
-
-  aura::client::CursorClient* cursor_client =
-      aura::client::GetCursorClient(root_window);
-  if (cursor_client)
-    cursor_client->SetCursor(cursor);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -114,9 +94,6 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
       aura::client::GetDragDropClient(root_window);
   if (drag_drop_client && drag_drop_client->IsDragDropInProgress())
     return;
-
-  last_window_that_provided_cursor_.RemoveAll();
-  last_window_that_provided_cursor_.Add(target);
 
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
@@ -181,12 +158,20 @@ void CompoundEventFilter::SetCursorVisibilityOnEvent(aura::Window* target,
 void CompoundEventFilter::SetMouseEventsEnableStateOnEvent(aura::Window* target,
                                                            ui::Event* event,
                                                            bool enable) {
+  TRACE_EVENT2("ui,input",
+               "CompoundEventFilter::SetMouseEventsEnableStateOnEvent",
+               "event_flags", event->flags(), "enable", enable);
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
   aura::client::CursorClient* client =
       aura::client::GetCursorClient(target->GetRootWindow());
-  if (!client)
+  if (!client) {
+    TRACE_EVENT_INSTANT0(
+        "ui,input",
+        "CompoundEventFilter::SetMouseEventsEnableStateOnEvent - No Client",
+        TRACE_EVENT_SCOPE_THREAD);
     return;
+  }
 
   if (enable)
     client->EnableMouseEvents();
@@ -208,6 +193,8 @@ void CompoundEventFilter::OnKeyEvent(ui::KeyEvent* event) {
 }
 
 void CompoundEventFilter::OnMouseEvent(ui::MouseEvent* event) {
+  TRACE_EVENT2("ui,input", "CompoundEventFilter::OnMouseEvent", "event_type",
+               event->type(), "event_flags", event->flags());
   aura::Window* window = static_cast<aura::Window*>(event->target());
 
   // We must always update the cursor, otherwise the cursor can get stuck if an
@@ -235,6 +222,8 @@ void CompoundEventFilter::OnScrollEvent(ui::ScrollEvent* event) {
 }
 
 void CompoundEventFilter::OnTouchEvent(ui::TouchEvent* event) {
+  TRACE_EVENT2("ui,input", "CompoundEventFilter::OnTouchEvent", "event_type",
+               event->type(), "event_handled", event->handled());
   FilterTouchEvent(event);
   if (!event->handled() && event->type() == ui::ET_TOUCH_PRESSED &&
       ShouldHideCursorOnTouch(*event)) {

@@ -9,23 +9,34 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/span.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
+#include "base/memory/unsafe_shared_memory_region.h"
+#include "base/memory/writable_shared_memory_region.h"
 #include "base/no_destructor.h"
 #include "base/process/process.h"
+#include "build/build_config.h"
+#include "components/services/storage/test_api/test_api.h"
 #include "content/public/child/child_thread.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_manager_connection.h"
-#include "content/public/common/simple_connection_filter.h"
 #include "content/public/test/test_service.h"
 #include "content/public/test/test_service.mojom.h"
 #include "content/public/utility/utility_thread.h"
 #include "content/shell/common/power_monitor_test_impl.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/service_factory.h"
 #include "mojo/public/cpp/system/buffer.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/sandbox/sandbox.h"
 #include "services/test/echo/echo_service.h"
+
+#if defined(OS_LINUX)
+#include "services/service_manager/tests/sandbox_status_service.h"
+#endif
 
 namespace content {
 
@@ -33,9 +44,9 @@ namespace {
 
 class TestUtilityServiceImpl : public mojom::TestService {
  public:
-  static void Create(mojom::TestServiceRequest request) {
-    mojo::MakeStrongBinding(base::WrapUnique(new TestUtilityServiceImpl),
-                            std::move(request));
+  static void Create(mojo::PendingReceiver<mojom::TestService> receiver) {
+    mojo::MakeSelfOwnedReceiver(base::WrapUnique(new TestUtilityServiceImpl),
+                                std::move(receiver));
   }
 
   // mojom::TestService implementation:
@@ -61,25 +72,54 @@ class TestUtilityServiceImpl : public mojom::TestService {
     NOTREACHED();
   }
 
-  void CreateSharedBuffer(const std::string& message,
-                          CreateSharedBufferCallback callback) override {
-    mojo::ScopedSharedBufferHandle buffer =
-        mojo::SharedBufferHandle::Create(message.size());
-    CHECK(buffer.is_valid());
-
-    mojo::ScopedSharedBufferMapping mapping = buffer->Map(message.size());
-    CHECK(mapping);
+  void CreateReadOnlySharedMemoryRegion(
+      const std::string& message,
+      CreateReadOnlySharedMemoryRegionCallback callback) override {
+    base::MappedReadOnlyRegion map_and_region =
+        base::ReadOnlySharedMemoryRegion::Create(message.size());
+    CHECK(map_and_region.IsValid());
     std::copy(message.begin(), message.end(),
-              reinterpret_cast<char*>(mapping.get()));
+              map_and_region.mapping.GetMemoryAsSpan<char>().begin());
+    std::move(callback).Run(std::move(map_and_region.region));
+  }
 
-    std::move(callback).Run(std::move(buffer));
+  void CreateWritableSharedMemoryRegion(
+      const std::string& message,
+      CreateWritableSharedMemoryRegionCallback callback) override {
+    auto region = base::WritableSharedMemoryRegion::Create(message.size());
+    CHECK(region.IsValid());
+    base::WritableSharedMemoryMapping mapping = region.Map();
+    CHECK(mapping.IsValid());
+    std::copy(message.begin(), message.end(),
+              mapping.GetMemoryAsSpan<char>().begin());
+    std::move(callback).Run(std::move(region));
+  }
+
+  void CreateUnsafeSharedMemoryRegion(
+      const std::string& message,
+      CreateUnsafeSharedMemoryRegionCallback callback) override {
+    auto region = base::UnsafeSharedMemoryRegion::Create(message.size());
+    CHECK(region.IsValid());
+    base::WritableSharedMemoryMapping mapping = region.Map();
+    CHECK(mapping.IsValid());
+    std::copy(message.begin(), message.end(),
+              mapping.GetMemoryAsSpan<char>().begin());
+    std::move(callback).Run(std::move(region));
+  }
+
+  void IsProcessSandboxed(IsProcessSandboxedCallback callback) override {
+    std::move(callback).Run(service_manager::Sandbox::IsProcessSandboxed());
   }
 
  private:
-  explicit TestUtilityServiceImpl() {}
+  TestUtilityServiceImpl() = default;
 
   DISALLOW_COPY_AND_ASSIGN(TestUtilityServiceImpl);
 };
+
+auto RunEchoService(mojo::PendingReceiver<echo::mojom::EchoService> receiver) {
+  return std::make_unique<echo::EchoService>(std::move(receiver));
+}
 
 }  // namespace
 
@@ -89,23 +129,28 @@ ShellContentUtilityClient::ShellContentUtilityClient(bool is_browsertest) {
           switches::kProcessType) == switches::kUtilityProcess) {
     network_service_test_helper_ = std::make_unique<NetworkServiceTestHelper>();
     audio_service_test_helper_ = std::make_unique<AudioServiceTestHelper>();
+    storage::InjectTestApiImplementation();
+    register_sandbox_status_helper_ = true;
   }
 }
 
-ShellContentUtilityClient::~ShellContentUtilityClient() {
-}
+ShellContentUtilityClient::~ShellContentUtilityClient() = default;
 
-void ShellContentUtilityClient::UtilityThreadStarted() {
-  auto registry = std::make_unique<service_manager::BinderRegistry>();
-  registry->AddInterface(base::BindRepeating(&TestUtilityServiceImpl::Create),
-                         base::ThreadTaskRunnerHandle::Get());
-  registry->AddInterface<mojom::PowerMonitorTest>(
-      base::BindRepeating(&PowerMonitorTestImpl::MakeStrongBinding),
+void ShellContentUtilityClient::ExposeInterfacesToBrowser(
+    mojo::BinderMap* binders) {
+  binders->Add(base::BindRepeating(&TestUtilityServiceImpl::Create),
+               base::ThreadTaskRunnerHandle::Get());
+  binders->Add<mojom::PowerMonitorTest>(
+      base::BindRepeating(&PowerMonitorTestImpl::MakeSelfOwnedReceiver),
       base::ThreadTaskRunnerHandle::Get());
-  content::ChildThread::Get()
-      ->GetServiceManagerConnection()
-      ->AddConnectionFilter(
-          std::make_unique<SimpleConnectionFilter>(std::move(registry)));
+#if defined(OS_LINUX)
+  if (register_sandbox_status_helper_) {
+    binders->Add<service_manager::mojom::SandboxStatusService>(
+        base::BindRepeating(
+            &service_manager::SandboxStatusService::MakeSelfOwnedReceiver),
+        base::ThreadTaskRunnerHandle::Get());
+  }
+#endif
 }
 
 bool ShellContentUtilityClient::HandleServiceRequest(
@@ -127,23 +172,17 @@ bool ShellContentUtilityClient::HandleServiceRequest(
   return false;
 }
 
-void ShellContentUtilityClient::RunIOThreadService(
-    mojo::GenericPendingReceiver* receiver) {
-  if (auto echo_receiver = receiver->As<echo::mojom::EchoService>()) {
-    static base::NoDestructor<echo::EchoService> service(
-        std::move(echo_receiver));
-    return;
-  }
+mojo::ServiceFactory* ShellContentUtilityClient::GetIOThreadServiceFactory() {
+  static base::NoDestructor<mojo::ServiceFactory> factory{
+      RunEchoService,
+  };
+  return factory.get();
 }
 
 void ShellContentUtilityClient::RegisterNetworkBinders(
     service_manager::BinderRegistry* registry) {
-  network_service_test_helper_->RegisterNetworkBinders(registry);
-}
-
-void ShellContentUtilityClient::RegisterAudioBinders(
-    service_manager::BinderMap* binders) {
-  audio_service_test_helper_->RegisterAudioBinders(binders);
+  if (network_service_test_helper_)
+    network_service_test_helper_->RegisterNetworkBinders(registry);
 }
 
 }  // namespace content

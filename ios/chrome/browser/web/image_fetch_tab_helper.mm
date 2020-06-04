@@ -14,9 +14,9 @@
 #include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #include "ios/web/common/referrer_util.h"
 #include "ios/web/public/browser_state.h"
+#import "ios/web/public/navigation/navigation_context.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/navigation_context.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -67,7 +67,7 @@ ImageFetchTabHelper::ImageFetchTabHelper(web::WebState* web_state)
   web_state->AddObserver(this);
   // BindRepeating cannot work on WeakPtr and function with return value, use
   // lambda as mediator.
-  web_state->AddScriptCommandCallback(
+  subscription_ = web_state->AddScriptCommandCallback(
       base::BindRepeating(&ImageFetchTabHelper::OnJsMessage,
                           weak_ptr_factory_.GetWeakPtr()),
       kCommandPrefix);
@@ -87,7 +87,6 @@ void ImageFetchTabHelper::DidStartNavigation(
 }
 
 void ImageFetchTabHelper::WebStateDestroyed(web::WebState* web_state) {
-  web_state->RemoveScriptCommandCallback(kCommandPrefix);
   for (auto&& pair : js_callbacks_)
     std::move(pair.second).Run(nullptr);
   web_state->RemoveObserver(this);
@@ -131,7 +130,7 @@ void ImageFetchTabHelper::GetImageDataByJs(const GURL& url,
   DCHECK_EQ(js_callbacks_.count(call_id_), 0UL);
   js_callbacks_.insert({call_id_, std::move(callback)});
 
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {web::WebThread::UI},
       base::BindRepeating(&ImageFetchTabHelper::OnJsTimeout,
                           weak_ptr_factory_.GetWeakPtr(), call_id_),

@@ -22,11 +22,13 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/crash/core/common/crash_keys.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "printing/backend/print_backend.h"
 #include "printing/print_job_constants.h"
 #include "printing/printed_document.h"
 #include "printing/printing_utils.h"
@@ -39,7 +41,9 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/threading/thread_restrictions.h"
 #include "printing/printed_page_win.h"
+#include "printing/printing_features.h"
 #endif
 
 using content::BrowserThread;
@@ -165,16 +169,15 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   // When we delegate to a destination, we don't ask the user for settings.
   // TODO(mad): Ask the destination for settings.
   if (ask_user_for_settings) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&PrintJobWorker::GetSettingsWithUI,
                        base::Unretained(this), document_page_count,
                        has_selection, is_scripted, std::move(callback)));
   } else {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&PrintJobWorker::UseDefaultSettings,
-                       base::Unretained(this), std::move(callback)));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(&PrintJobWorker::UseDefaultSettings,
+                                  base::Unretained(this), std::move(callback)));
   }
 }
 
@@ -182,11 +185,10 @@ void PrintJobWorker::SetSettings(base::Value new_settings,
                                  SettingsCallback callback) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&PrintJobWorker::UpdatePrintSettings,
-                     base::Unretained(this), std::move(new_settings),
-                     std::move(callback)));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&PrintJobWorker::UpdatePrintSettings,
+                                base::Unretained(this), std::move(new_settings),
+                                std::move(callback)));
 }
 
 #if defined(OS_CHROMEOS)
@@ -195,19 +197,42 @@ void PrintJobWorker::SetSettingsFromPOD(
     SettingsCallback callback) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&PrintJobWorker::UpdatePrintSettingsFromPOD,
-                     base::Unretained(this), std::move(new_settings),
-                     std::move(callback)));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(&PrintJobWorker::UpdatePrintSettingsFromPOD,
+                                base::Unretained(this), std::move(new_settings),
+                                std::move(callback)));
 }
 #endif
 
 void PrintJobWorker::UpdatePrintSettings(base::Value new_settings,
                                          SettingsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  PrintingContext::Result result =
-      printing_context_->UpdatePrintSettings(std::move(new_settings));
+
+  std::unique_ptr<crash_keys::ScopedPrinterInfo> crash_key;
+  PrinterType type = static_cast<PrinterType>(
+      new_settings.FindIntKey(kSettingPrinterType).value());
+  if (type == PrinterType::kLocal) {
+#if defined(OS_WIN)
+    // Blocking is needed here because Windows printer drivers are oftentimes
+    // not thread-safe and have to be accessed on the UI thread.
+    base::ScopedAllowBlocking allow_blocking;
+#endif
+    scoped_refptr<PrintBackend> print_backend = PrintBackend::CreateInstance(
+        nullptr, g_browser_process->GetApplicationLocale());
+    std::string printer_name = *new_settings.FindStringKey(kSettingDeviceName);
+    crash_key = std::make_unique<crash_keys::ScopedPrinterInfo>(
+        print_backend->GetPrinterDriverInfo(printer_name));
+  }
+
+  PrintingContext::Result result;
+  {
+#if defined(OS_WIN)
+    // Blocking is needed here because Windows printer drivers are oftentimes
+    // not thread-safe and have to be accessed on the UI thread.
+    base::ScopedAllowBlocking allow_blocking;
+#endif
+    result = printing_context_->UpdatePrintSettings(std::move(new_settings));
+  }
   GetSettingsDone(std::move(callback), result);
 }
 
@@ -224,7 +249,7 @@ void PrintJobWorker::UpdatePrintSettingsFromPOD(
 
 void PrintJobWorker::GetSettingsDone(SettingsCallback callback,
                                      PrintingContext::Result result) {
-  std::move(callback).Run(printing_context_->settings(), result);
+  std::move(callback).Run(printing_context_->TakeAndResetSettings(), result);
 }
 
 void PrintJobWorker::GetSettingsWithUI(int document_page_count,
@@ -335,13 +360,39 @@ void PrintJobWorker::OnNewPage() {
   if (!document_)
     return;
 
+  bool do_spool_job = true;
 #if defined(OS_WIN)
+  const bool source_is_pdf =
+      !print_job_->document()->settings().is_modifiable();
+  if (!printing::features::ShouldPrintUsingXps(source_is_pdf)) {
+    // Using the Windows GDI print API.
+    if (!OnNewPageHelperGdi())
+      return;
+
+    do_spool_job = false;
+  }
+#endif  // defined(OS_WIN)
+
+  if (do_spool_job) {
+    if (!document_->GetMetafile()) {
+      PostWaitForPage();
+      return;
+    }
+    SpoolJob();
+  }
+
+  OnDocumentDone();
+  // Don't touch |this| anymore since the instance could be destroyed.
+}
+
+#if defined(OS_WIN)
+bool PrintJobWorker::OnNewPageHelperGdi() {
   if (page_number_ == PageNumber::npos()) {
     // Find first page to print.
     int page_count = document_->page_count();
     if (!page_count) {
       // We still don't know how many pages the document contains.
-      return;
+      return false;
     }
     // We have enough information to initialize |page_number_|.
     page_number_.Init(document_->settings(), page_count);
@@ -351,7 +402,7 @@ void PrintJobWorker::OnNewPage() {
     scoped_refptr<PrintedPage> page = document_->GetPage(page_number_.ToInt());
     if (!page) {
       PostWaitForPage();
-      return;
+      return false;
     }
     // The page is there, print it.
     SpoolPage(page.get());
@@ -359,17 +410,9 @@ void PrintJobWorker::OnNewPage() {
     if (page_number_ == PageNumber::npos())
       break;
   }
-#else
-  if (!document_->GetMetafile()) {
-    PostWaitForPage();
-    return;
-  }
-  SpoolJob();
-#endif  // defined(OS_WIN)
-
-  OnDocumentDone();
-  // Don't touch |this| anymore since the instance could be destroyed.
+  return true;
 }
+#endif  // defined(OS_WIN)
 
 void PrintJobWorker::Cancel() {
   // This is the only function that can be called from any thread.
@@ -447,18 +490,18 @@ void PrintJobWorker::SpoolPage(PrintedPage* page) {
   // Signal everyone that the page is printed.
   DCHECK(print_job_);
   print_job_->PostTask(
-      FROM_HERE, base::BindRepeating(
-                     &PageNotificationCallback, base::RetainedRef(print_job_),
+      FROM_HERE,
+      base::BindOnce(&PageNotificationCallback, base::RetainedRef(print_job_),
                      JobEventDetails::PAGE_DONE, printing_context_->job_id(),
                      base::RetainedRef(document_), base::RetainedRef(page)));
 }
-#else
+#endif  // defined(OS_WIN)
+
 void PrintJobWorker::SpoolJob() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   if (!document_->RenderPrintedDocument(printing_context_.get()))
     OnFailure();
 }
-#endif
 
 void PrintJobWorker::OnFailure() {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());

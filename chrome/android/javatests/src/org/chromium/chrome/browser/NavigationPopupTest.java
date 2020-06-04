@@ -25,13 +25,14 @@ import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.content_public.browser.test.mock.MockNavigationController;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -56,16 +57,9 @@ public class NavigationPopupTest {
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
+        // TODO (https://crbug.com/1063807):  Add incognito mode tests.
         TestThreadUtils.runOnUiThreadBlocking(
-                (Runnable) () -> mProfile = Profile.getLastUsedProfile());
-    }
-
-    // Exists solely to expose protected methods to this test.
-    private static class TestNavigationHistory extends NavigationHistory {
-        @Override
-        public void addEntry(NavigationEntry entry) {
-            super.addEntry(entry);
-        }
+                (Runnable) () -> mProfile = Profile.getLastUsedRegularProfile());
     }
 
     // Exists solely to expose protected methods to this test.
@@ -77,117 +71,16 @@ public class NavigationPopupTest {
         }
     }
 
-    private static class TestNavigationController implements NavigationController {
-        private final TestNavigationHistory mHistory;
+    private static class TestNavigationController extends MockNavigationController {
+        private final NavigationHistory mHistory;
         private int mNavigatedIndex = INVALID_NAVIGATION_INDEX;
 
         public TestNavigationController() {
-            mHistory = new TestNavigationHistory();
+            mHistory = new NavigationHistory();
             mHistory.addEntry(new TestNavigationEntry(
                     1, "about:blank", null, null, "About Blank", null, 0, 0));
             mHistory.addEntry(new TestNavigationEntry(
                     5, UrlUtils.encodeHtmlDataUri("<html>1</html>"), null, null, null, null, 0, 0));
-        }
-
-        @Override
-        public boolean canGoBack() {
-            return false;
-        }
-
-        @Override
-        public boolean canGoForward() {
-            return false;
-        }
-
-        @Override
-        public boolean canGoToOffset(int offset) {
-            return false;
-        }
-
-        @Override
-        public void goToOffset(int offset) {
-        }
-
-        @Override
-        public void goBack() {
-        }
-
-        @Override
-        public void goForward() {
-        }
-
-        @Override
-        public boolean isInitialNavigation() {
-            return false;
-        }
-
-        @Override
-        public void loadIfNecessary() {
-        }
-
-        @Override
-        public boolean needsReload() {
-            return false;
-        }
-
-        @Override
-        public void setNeedsReload() {}
-
-        @Override
-        public void reload(boolean checkForRepost) {
-        }
-
-        @Override
-        public void reloadBypassingCache(boolean checkForRepost) {
-        }
-
-        @Override
-        public void cancelPendingReload() {
-        }
-
-        @Override
-        public void continuePendingReload() {
-        }
-
-        @Override
-        public void loadUrl(LoadUrlParams params) {
-        }
-
-        @Override
-        public void clearHistory() {
-        }
-
-        @Override
-        public NavigationHistory getNavigationHistory() {
-            return null;
-        }
-
-        @Override
-        public void clearSslPreferences() {
-        }
-
-        @Override
-        public boolean getUseDesktopUserAgent() {
-            return false;
-        }
-
-        @Override
-        public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange) {
-        }
-
-        @Override
-        public NavigationEntry getEntryAtIndex(int index) {
-            return null;
-        }
-
-        @Override
-        public NavigationEntry getVisibleEntry() {
-            return null;
-        }
-
-        @Override
-        public NavigationEntry getPendingEntry() {
-            return null;
         }
 
         @Override
@@ -198,29 +91,6 @@ public class NavigationPopupTest {
         @Override
         public void goToNavigationIndex(int index) {
             mNavigatedIndex = index;
-        }
-
-        @Override
-        public int getLastCommittedEntryIndex() {
-            return -1;
-        }
-
-        @Override
-        public boolean removeEntryAtIndex(int index) {
-            return false;
-        }
-
-        @Override
-        public String getEntryExtraData(int index, String key) {
-            return null;
-        }
-
-        @Override
-        public void setEntryExtraData(int index, String key, String value) {}
-
-        @Override
-        public boolean isEntryMarkedToBeSkipped(int index) {
-            return false;
         }
     }
 
@@ -282,12 +152,16 @@ public class NavigationPopupTest {
     @MediumTest
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     @Feature({"Navigation"})
-    public void testLongPressBackTriggering() throws ExecutionException {
+    @CommandLineFlags.Add({"force-fieldtrials=GestureNavigation/Disabled",
+            "force-fieldtrial-params=GestureNavigation.Disabled:"
+                    + "overscroll_history_navigation_bottom_sheet/false"})
+    public void
+    testLongPressBackTriggering() {
         KeyEvent event = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK);
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { mActivityTestRule.getActivity().onKeyDown(KeyEvent.KEYCODE_BACK, event); });
         CriteriaHelper.pollUiThread(
-                () -> mActivityTestRule.getActivity().hasPendingNavigationPopupForTesting());
+                () -> mActivityTestRule.getActivity().hasPendingNavigationRunnableForTesting());
 
         // Wait for the long press timeout to trigger and show the navigation popup.
         CriteriaHelper.pollUiThread(
@@ -298,19 +172,23 @@ public class NavigationPopupTest {
     @SmallTest
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     @Feature({"Navigation"})
-    public void testLongPressBackTriggering_Cancellation() throws ExecutionException {
+    @CommandLineFlags.Add({"force-fieldtrials=GestureNavigation/Disabled",
+            "force-fieldtrial-params=GestureNavigation.Disabled:"
+                    + "overscroll_history_navigation_bottom_sheet/false"})
+    public void
+    testLongPressBackTriggering_Cancellation() throws ExecutionException {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             KeyEvent event = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK);
             mActivityTestRule.getActivity().onKeyDown(KeyEvent.KEYCODE_BACK, event);
         });
         CriteriaHelper.pollUiThread(
-                () -> mActivityTestRule.getActivity().hasPendingNavigationPopupForTesting());
+                () -> mActivityTestRule.getActivity().hasPendingNavigationRunnableForTesting());
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             KeyEvent event = new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK);
             mActivityTestRule.getActivity().onKeyUp(KeyEvent.KEYCODE_BACK, event);
         });
         CriteriaHelper.pollUiThread(
-                () -> !mActivityTestRule.getActivity().hasPendingNavigationPopupForTesting());
+                () -> !mActivityTestRule.getActivity().hasPendingNavigationRunnableForTesting());
 
         // Ensure no navigation popup is showing.
         Assert.assertNull(TestThreadUtils.runOnUiThreadBlocking(

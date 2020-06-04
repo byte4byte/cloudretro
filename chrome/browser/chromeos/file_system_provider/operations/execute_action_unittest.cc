@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
-#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/file_system/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -64,7 +64,7 @@ TEST_F(FileSystemProviderOperationsExecuteActionTest, Execute) {
 
   ExecuteAction execute_action(
       NULL, file_system_info_, entry_paths_, kActionId,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   execute_action.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -99,7 +99,7 @@ TEST_F(FileSystemProviderOperationsExecuteActionTest, Execute_NoListener) {
 
   ExecuteAction execute_action(
       NULL, file_system_info_, entry_paths_, kActionId,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   execute_action.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -113,7 +113,7 @@ TEST_F(FileSystemProviderOperationsExecuteActionTest, OnSuccess) {
 
   ExecuteAction execute_action(
       NULL, file_system_info_, entry_paths_, kActionId,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   execute_action.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -133,7 +133,7 @@ TEST_F(FileSystemProviderOperationsExecuteActionTest, OnError) {
 
   ExecuteAction execute_action(
       NULL, file_system_info_, entry_paths_, kActionId,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   execute_action.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));

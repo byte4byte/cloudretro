@@ -23,6 +23,7 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_utils.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/sessions/tab_restore_service_load_waiter.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/chrome_render_view_test.h"
@@ -30,6 +31,7 @@
 #include "components/history/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/sessions/content/content_live_tab.h"
+#include "components/sessions/content/content_test_helper.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
 #include "components/sessions/core/session_types.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
@@ -43,6 +45,7 @@
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 typedef sessions::TabRestoreService::Entry Entry;
 typedef sessions::TabRestoreService::Tab Tab;
@@ -50,6 +53,7 @@ typedef sessions::TabRestoreService::Window Window;
 
 using content::NavigationEntry;
 using content::WebContentsTester;
+using sessions::ContentTestHelper;
 using sessions::SerializedNavigationEntry;
 using sessions::SerializedNavigationEntryTestHelper;
 
@@ -73,12 +77,19 @@ class TabRestoreServiceImplTest : public ChromeRenderViewHostTestHarness {
       : url1_("http://1"),
         url2_("http://2"),
         url3_("http://3"),
-        user_agent_override_(
+        user_agent_override_(blink::UserAgentOverride::UserAgentOnly(
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/535.19"
-            " (KHTML, like Gecko) Chrome/18.0.1025.45 Safari/535.19"),
+            " (KHTML, like Gecko) Chrome/18.0.1025.45 Safari/535.19")),
         time_factory_(NULL),
         window_id_(SessionID::FromSerializedValue(1)),
-        tab_id_(SessionID::FromSerializedValue(2)) {}
+        tab_id_(SessionID::FromSerializedValue(2)) {
+    user_agent_override_.ua_metadata_override.emplace();
+    user_agent_override_.ua_metadata_override->brand = "Chrome";
+    user_agent_override_.ua_metadata_override->full_version = "18.0.1025.45";
+    user_agent_override_.ua_metadata_override->major_version = "18";
+    user_agent_override_.ua_metadata_override->platform = "Linux";
+    user_agent_override_.ua_metadata_override->architecture = "x86_64";
+  }
 
   ~TabRestoreServiceImplTest() override {}
 
@@ -148,8 +159,7 @@ class TabRestoreServiceImplTest : public ChromeRenderViewHostTestHarness {
 
     SessionService* session_service =
         SessionServiceFactory::GetForProfile(profile());
-    session_service->SetWindowType(window_id(), Browser::TYPE_TABBED,
-                                   SessionService::TYPE_NORMAL);
+    session_service->SetWindowType(window_id(), Browser::TYPE_NORMAL);
     session_service->SetTabWindow(window_id(), tab_id());
     session_service->SetTabIndexInWindow(window_id(), tab_id(), 0);
     session_service->SetSelectedTabInWindow(window_id(), 0);
@@ -157,8 +167,7 @@ class TabRestoreServiceImplTest : public ChromeRenderViewHostTestHarness {
       session_service->SetPinnedState(window_id(), tab_id(), true);
     session_service->UpdateTabNavigation(
         window_id(), tab_id(),
-        SerializedNavigationEntryTestHelper::CreateNavigation(url1_.spec(),
-                                                              "title"));
+        ContentTestHelper::CreateNavigation(url1_.spec(), "title"));
   }
 
   // Creates a SessionService and assigns it to the Profile. The SessionService
@@ -179,8 +188,9 @@ class TabRestoreServiceImplTest : public ChromeRenderViewHostTestHarness {
 
   void SynchronousLoadTabsFromLastSession() {
     // Ensures that the load is complete before continuing.
+    TabRestoreServiceLoadWaiter waiter(service_.get());
     service_->LoadTabsFromLastSession();
-    content::RunAllTasksUntilIdle();
+    waiter.Wait();
   }
 
   sessions::LiveTab* live_tab() { return live_tab_.get(); }
@@ -188,39 +198,13 @@ class TabRestoreServiceImplTest : public ChromeRenderViewHostTestHarness {
   GURL url1_;
   GURL url2_;
   GURL url3_;
-  std::string user_agent_override_;
+  blink::UserAgentOverride user_agent_override_;
   std::unique_ptr<sessions::LiveTab> live_tab_;
   std::unique_ptr<sessions::TabRestoreServiceImpl> service_;
   TabRestoreTimeFactory* time_factory_;
   SessionID window_id_;
   SessionID tab_id_;
 };
-
-namespace {
-
-class TestTabRestoreServiceObserver
-    : public sessions::TabRestoreServiceObserver {
- public:
-  TestTabRestoreServiceObserver() : got_loaded_(false) {}
-
-  void clear_got_loaded() { got_loaded_ = false; }
-  bool got_loaded() const { return got_loaded_; }
-
-  // TabRestoreServiceObserver:
-  void TabRestoreServiceDestroyed(
-      sessions::TabRestoreService* service) override {}
-  void TabRestoreServiceLoaded(sessions::TabRestoreService* service) override {
-    got_loaded_ = true;
-  }
-
- private:
-  // Was TabRestoreServiceLoaded() invoked?
-  bool got_loaded_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTabRestoreServiceObserver);
-};
-
-}  // namespace
 
 TEST_F(TabRestoreServiceImplTest, Basic) {
   AddThreeNavigations();
@@ -241,7 +225,10 @@ TEST_F(TabRestoreServiceImplTest, Basic) {
   EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
   EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
   EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
-  EXPECT_EQ("", tab->user_agent_override);
+  EXPECT_EQ("", tab->user_agent_override.ua_string_override);
+  EXPECT_TRUE(!blink::UserAgentMetadata::Demarshal(
+                   tab->user_agent_override.opaque_ua_metadata_override)
+                   .has_value());
   EXPECT_EQ(2, tab->current_navigation_index);
   EXPECT_EQ(
       time_factory_->TimeNow().ToDeltaSinceWindowsEpoch().InMicroseconds(),
@@ -265,7 +252,12 @@ TEST_F(TabRestoreServiceImplTest, Basic) {
   EXPECT_EQ(url1_, tab->navigations[0].virtual_url());
   EXPECT_EQ(url2_, tab->navigations[1].virtual_url());
   EXPECT_EQ(url3_, tab->navigations[2].virtual_url());
-  EXPECT_EQ(user_agent_override_, tab->user_agent_override);
+  EXPECT_EQ(user_agent_override_.ua_string_override,
+            tab->user_agent_override.ua_string_override);
+  base::Optional<blink::UserAgentMetadata> client_hints_override =
+      blink::UserAgentMetadata::Demarshal(
+          tab->user_agent_override.opaque_ua_metadata_override);
+  EXPECT_EQ(user_agent_override_.ua_metadata_override, client_hints_override);
   EXPECT_EQ(1, tab->current_navigation_index);
   EXPECT_EQ(
       time_factory_->TimeNow().ToDeltaSinceWindowsEpoch().InMicroseconds(),
@@ -285,6 +277,7 @@ TEST_F(TabRestoreServiceImplTest, Restore) {
 
   // Have the service record the tab.
   service_->CreateHistoricalTab(live_tab(), -1);
+  EXPECT_EQ(1U, service_->entries().size());
 
   // Recreate the service and have it load the tabs.
   RecreateService();
@@ -513,11 +506,7 @@ TEST_F(TabRestoreServiceImplTest, LoadPreviousSession) {
 
   EXPECT_FALSE(service_->IsLoaded());
 
-  TestTabRestoreServiceObserver observer;
-  service_->AddObserver(&observer);
   SynchronousLoadTabsFromLastSession();
-  EXPECT_TRUE(observer.got_loaded());
-  service_->RemoveObserver(&observer);
 
   // Make sure we get back one entry with one tab whose url is url1.
   ASSERT_EQ(1U, service_->entries().size());
@@ -870,10 +859,9 @@ TEST_F(TabRestoreServiceImplTest, PruneEntries) {
 
   const size_t max_entries = kMaxEntries;
   for (size_t i = 0; i < max_entries + 5; i++) {
-    SerializedNavigationEntry navigation =
-        SerializedNavigationEntryTestHelper::CreateNavigation(
-            base::StringPrintf("http://%d", static_cast<int>(i)),
-            base::NumberToString(i));
+    SerializedNavigationEntry navigation = ContentTestHelper::CreateNavigation(
+        base::StringPrintf("http://%d", static_cast<int>(i)),
+        base::NumberToString(i));
 
     auto tab = std::make_unique<Tab>();
     tab->navigations.push_back(navigation);
@@ -893,8 +881,7 @@ TEST_F(TabRestoreServiceImplTest, PruneEntries) {
   // Prune older first.
   const char kRecentUrl[] = "http://recent";
   SerializedNavigationEntry navigation =
-      SerializedNavigationEntryTestHelper::CreateNavigation(kRecentUrl,
-                                                            "Most recent");
+      ContentTestHelper::CreateNavigation(kRecentUrl, "Most recent");
   auto tab = std::make_unique<Tab>();
   tab->navigations.push_back(navigation);
   tab->current_navigation_index = 0;
@@ -907,8 +894,8 @@ TEST_F(TabRestoreServiceImplTest, PruneEntries) {
                                   .virtual_url());
 
   // Ignore NTPs.
-  navigation = SerializedNavigationEntryTestHelper::CreateNavigation(
-      chrome::kChromeUINewTabURL, "New tab");
+  navigation = ContentTestHelper::CreateNavigation(chrome::kChromeUINewTabURL,
+                                                   "New tab");
 
   tab = std::make_unique<Tab>();
   tab->navigations.push_back(navigation);
@@ -986,11 +973,7 @@ TEST_F(TabRestoreServiceImplTest, GoToLoadedWhenHaveMaxEntries) {
   }
 
   EXPECT_FALSE(service_->IsLoaded());
-  TestTabRestoreServiceObserver observer;
-  service_->AddObserver(&observer);
   EXPECT_EQ(max_entries, service_->entries().size());
   SynchronousLoadTabsFromLastSession();
-  EXPECT_TRUE(observer.got_loaded());
   EXPECT_TRUE(service_->IsLoaded());
-  service_->RemoveObserver(&observer);
 }

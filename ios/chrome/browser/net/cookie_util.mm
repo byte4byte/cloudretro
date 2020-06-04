@@ -14,8 +14,9 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/net/cookies/cookie_store_ios_persistent.h"
+#import "ios/net/cookies/cookie_store_ios.h"
 #import "ios/net/cookies/system_cookie_store.h"
 #include "ios/web/common/features.h"
 #include "ios/web/public/thread/web_task_traits.h"
@@ -45,9 +46,8 @@ scoped_refptr<net::SQLitePersistentCookieStore> CreatePersistentCookieStore(
     net::CookieCryptoDelegate* crypto_delegate) {
   return scoped_refptr<net::SQLitePersistentCookieStore>(
       new net::SQLitePersistentCookieStore(
-          path,
-          base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}),
-          base::CreateSequencedTaskRunnerWithTraits(
+          path, base::CreateSingleThreadTaskRunner({web::WebThread::IO}),
+          base::ThreadPool::CreateSequencedTaskRunner(
               {base::MayBlock(), base::TaskPriority::BEST_EFFORT}),
           restore_old_session_cookies, crypto_delegate));
 }
@@ -95,25 +95,10 @@ std::unique_ptr<net::CookieStore> CreateCookieStore(
   if (config.cookie_store_type == CookieStoreConfig::COOKIE_MONSTER)
     return CreateCookieMonster(config, net_log);
 
-  // On iOS 11, there is no need to use PersistentCookieStore or CookieMonster
-  // because there is a way to access cookies in WKHTTPCookieStore. This will
-  // allow URLFetcher and any other users of net:CookieStore to in iOS to set
-  // and get cookies directly in WKHTTPCookieStore.
-  if (base::FeatureList::IsEnabled(web::features::kWKHTTPSystemCookieStore)) {
-    return std::make_unique<net::CookieStoreIOS>(std::move(system_cookie_store),
-                                                 net_log);
-  }
-
-  scoped_refptr<net::SQLitePersistentCookieStore> persistent_store = nullptr;
-  if (config.session_cookie_mode ==
-      CookieStoreConfig::RESTORED_SESSION_COOKIES) {
-    DCHECK(!config.path.empty());
-    persistent_store = CreatePersistentCookieStore(
-        config.path, true /* restore_old_session_cookies */,
-        config.crypto_delegate);
-  }
-  return std::make_unique<net::CookieStoreIOSPersistent>(
-      persistent_store.get(), std::move(system_cookie_store), net_log);
+  // Using the SystemCookieStore will allow URLFetcher and any other users of
+  // net:CookieStore to in iOS to use cookies directly from WKHTTPCookieStore.
+  return std::make_unique<net::CookieStoreIOS>(std::move(system_cookie_store),
+                                               net_log);
 }
 
 bool ShouldClearSessionCookies() {
@@ -136,14 +121,14 @@ bool ShouldClearSessionCookies() {
 }
 
 // Clears the session cookies for |profile|.
-void ClearSessionCookies(ios::ChromeBrowserState* browser_state) {
+void ClearSessionCookies(ChromeBrowserState* browser_state) {
   scoped_refptr<net::URLRequestContextGetter> getter =
       browser_state->GetRequestContext();
-  base::PostTaskWithTraits(FROM_HERE, {web::WebThread::IO}, base::BindOnce(^{
-                             getter->GetURLRequestContext()
-                                 ->cookie_store()
-                                 ->DeleteSessionCookiesAsync(base::DoNothing());
-                           }));
+  base::PostTask(FROM_HERE, {web::WebThread::IO}, base::BindOnce(^{
+                   getter->GetURLRequestContext()
+                       ->cookie_store()
+                       ->DeleteSessionCookiesAsync(base::DoNothing());
+                 }));
 }
 
 }  // namespace cookie_util

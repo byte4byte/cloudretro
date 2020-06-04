@@ -10,6 +10,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/macros.h"
 #include "components/sync/driver/sync_service_observer.h"
+#include "components/sync/engine/net/http_post_provider_factory.h"
 
 class Profile;
 
@@ -49,8 +50,14 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
                                 jboolean allowed);
   jboolean IsSyncActive(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsSyncDisabledByEnterprisePolicy(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   jboolean IsEngineInitialized(JNIEnv* env,
                                const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsTransportStateActive(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   void SetSetupInProgress(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jboolean in_progress);
@@ -58,7 +65,8 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
   void SetFirstSetupComplete(JNIEnv* env,
-                             const base::android::JavaParamRef<jobject>& obj);
+                             const base::android::JavaParamRef<jobject>& obj,
+                             jint source);
   base::android::ScopedJavaLocalRef<jintArray> GetActiveDataTypes(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
@@ -81,7 +89,13 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
       const base::android::JavaParamRef<jobject>& obj);
   void EnableEncryptEverything(JNIEnv* env,
                                const base::android::JavaParamRef<jobject>& obj);
-  jboolean IsPassphraseRequiredForDecryption(
+  jboolean IsPassphraseRequiredForPreferredDataTypes(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsTrustedVaultKeyRequired(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsTrustedVaultKeyRequiredForPreferredDataTypes(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
   jboolean IsUsingSecondaryPassphrase(
@@ -161,28 +175,23 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
 
   // Functionality only available for testing purposes.
 
+  jlong GetProfileSyncServiceForTest(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   // Returns a timestamp for when a sync was last executed. The return value is
   // the internal value of base::Time.
   jlong GetLastSyncedTimeForTest(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
-  // Overrides ProfileSyncService's NetworkResources object. This is used to
-  // set up the Sync FakeServer for testing.
-  void OverrideNetworkResourcesForTest(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      jlong network_resources);
-
-  static ProfileSyncServiceAndroid* GetProfileSyncServiceAndroid();
+  void OverrideNetworkForTest(const syncer::CreateHttpPostProviderFactory&
+                                  create_http_post_provider_factory_cb);
 
   void TriggerRefresh(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& obj);
 
  private:
-  // Returns whether sync is allowed by Android.
-  bool IsSyncAllowedByAndroid() const;
-
   // A reference to the Chrome profile object.
   Profile* profile_;
 

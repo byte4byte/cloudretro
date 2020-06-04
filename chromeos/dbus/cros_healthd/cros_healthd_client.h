@@ -12,6 +12,7 @@
 #include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "chromeos/services/cros_healthd/public/mojom/cros_healthd.mojom.h"
+#include "chromeos/services/cros_healthd/public/mojom/cros_healthd_probe.mojom.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 
@@ -31,10 +32,6 @@ class COMPONENT_EXPORT(CROS_HEALTHD) CrosHealthdClient {
   // Creates and initializes a fake global instance if not already created.
   static void InitializeFake();
 
-  static void InitializeFakeWithMockService(
-      mojo::PendingRemote<cros_healthd::mojom::CrosHealthdService>
-          mock_service);
-
   // Destroys the global instance.
   static void Shutdown();
 
@@ -43,7 +40,7 @@ class COMPONENT_EXPORT(CROS_HEALTHD) CrosHealthdClient {
 
   // Uses D-Bus to bootstrap the Mojo connection between the cros_healthd daemon
   // and the browser. Returns a bound remote
-  virtual mojo::Remote<cros_healthd::mojom::CrosHealthdService>
+  virtual mojo::Remote<cros_healthd::mojom::CrosHealthdServiceFactory>
   BootstrapMojoConnection(
       base::OnceCallback<void(bool success)> result_callback) = 0;
 

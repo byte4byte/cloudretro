@@ -3,28 +3,11 @@
 // found in the LICENSE file.
 
 (async function() {
+  'use strict';
   TestRunner.addResult(`This test checks Web Inspector utilities.\n`);
 
 
   TestRunner.runTestSuite([
-    function remove(next) {
-      var testArrays = [
-        [], [], [], [1], [1], [1], [1, 2, 3, 4, 5, 4, 3, 2, 1], [1, 3, 4, 5, 4, 3, 2, 1], [1, 3, 4, 5, 4, 3, 1],
-        [2, 2, 2, 2, 2], [2, 2, 2, 2], [], [2, 2, 2, 1, 2, 2, 3, 2], [2, 2, 1, 2, 2, 3, 2], [1, 3]
-      ];
-      for (var i = 0; i < testArrays.length; i += 3) {
-        var actual = testArrays[i].slice(0);
-        var expected = testArrays[i + 1];
-        actual.remove(2, true);
-        TestRunner.assertEquals(JSON.stringify(expected), JSON.stringify(actual), 'remove(2, true) passed');
-        actual = testArrays[i].slice(0);
-        expected = testArrays[i + 2];
-        actual.remove(2, false);
-        TestRunner.assertEquals(JSON.stringify(expected), JSON.stringify(actual), 'remove(2, false) passed');
-      }
-      next();
-    },
-
     function orderedMergeIntersect(next) {
       function comparator(a, b) {
         return a - b;
@@ -40,8 +23,9 @@
         var allValues = a.concat(b).concat(actual);
         for (var i = 0; i < allValues.length; ++i) {
           var value = allValues[i];
-          expectedCount = checkOperation(count(a, value), count(b, value));
-          actualCount = count(actual, value);
+          const expectedCount =
+              checkOperation(count(a, value), count(b, value));
+          const actualCount = count(actual, value);
           TestRunner.assertEquals(
               expectedCount, actualCount,
               'Incorrect result for value: ' + value + ' at [' + a + '] ' + opName + ' [' + b + '] -> [' + actual +
@@ -129,32 +113,6 @@
       next();
     },
 
-    function qselectTest(next) {
-      var testArrays =
-          [[], [0], [0, 0, 0, 0, 0, 0, 0, 0], [4, 3, 2, 1], [1, 2, 3, 4, 5], [-1, 3, 2, 7, 7, 7, 10, 12, 3, 4, -1, 2]];
-
-      function testArray(array) {
-        function compare(a, b) {
-          return a - b;
-        }
-        var sorted = array.slice(0).sort(compare);
-
-        var reference = {min: sorted[0], median: sorted[Math.floor(sorted.length / 2)], max: sorted[sorted.length - 1]};
-
-        var actual = {
-          min: array.slice(0).qselect(0),
-          median: array.slice(0).qselect(Math.floor(array.length / 2)),
-          max: array.slice(0).qselect(array.length - 1)
-        };
-        TestRunner.addResult('Array: ' + JSON.stringify(array));
-        TestRunner.addResult('Reference: ' + JSON.stringify(reference));
-        TestRunner.addResult('Actual:    ' + JSON.stringify(actual));
-      }
-      for (var i = 0, l = testArrays.length; i < l; ++i)
-        testArray(testArrays[i]);
-      next();
-    },
-
     function sortRangeTest(next) {
       var testArrays = [[], [1], [2, 1], [6, 4, 2, 7, 10, 15, 1], [10, 44, 3, 6, 56, 66, 10, 55, 32, 56, 2, 5]];
 
@@ -181,7 +139,7 @@
                 compareArrays(
                     middle.slice(first - left, first - left + count), actual.slice(first, first + count),
                     'sorted ' + left + ' ' + right + ' ' + first + ' ' + count);
-                actualRest = actual.slice(first + count, right + 1);
+                const actualRest = actual.slice(first + count, right + 1);
                 actualRest.sort(comparator);
                 compareArrays(
                     middle.slice(first - left + count), actualRest,
@@ -228,96 +186,6 @@
       next();
     },
 
-    function stableSortPrimitiveTest(next) {
-      TestRunner.assertEquals('', [].stableSort().join(','));
-      TestRunner.assertEquals('1', [1].stableSort().join(','));
-      TestRunner.assertEquals('1,2', [2, 1].stableSort().join(','));
-      TestRunner.assertEquals('1,1,1', [1, 1, 1].stableSort().join(','));
-      TestRunner.assertEquals('1,2,3,4', [1, 2, 3, 4].stableSort().join(','));
-
-      function defaultComparator(a, b) {
-        return a < b ? -1 : (a > b ? 1 : 0);
-      }
-
-      function strictNumberCmp(a, b) {
-        if (a !== b)
-          return false;
-        if (a)
-          return true;
-        return 1 / a === 1 / b;  // Neg zero comparison.
-      }
-
-      // The following fails with standard Array.sort()
-      var original = [0, -0, 0, -0, -0, -0, 0, 0, 0, -0, 0, -0, -0, -0, 0, 0];
-      var sorted = original.slice(0).stableSort(defaultComparator);
-      for (var i = 0; i < original.length; ++i)
-        TestRunner.assertTrue(strictNumberCmp(original[i], sorted[i]), 'Sorting negative zeros');
-
-      // Test sorted and backward-sorted arrays.
-      var identity = [];
-      var reverse = [];
-      for (var i = 0; i < 100; ++i) {
-        identity[i] = i;
-        reverse[i] = -i;
-      }
-      identity.stableSort(defaultComparator);
-      reverse.stableSort(defaultComparator);
-      for (var i = 1; i < identity.length; ++i) {
-        TestRunner.assertTrue(identity[i - 1] < identity[i], 'identity');
-        TestRunner.assertTrue(reverse[i - 1] < reverse[i], 'reverse');
-      }
-
-      next();
-    },
-
-    function stableSortTest(next) {
-      function Pair(key1, key2) {
-        this.key1 = key1;
-        this.key2 = key2;
-      }
-      Pair.prototype.toString = function() {
-        return 'Pair(' + this.key1 + ', ' + this.key2 + ')';
-      };
-
-      var testArray = [
-        new Pair(1, 1),  new Pair(3, 31),  new Pair(3, 30), new Pair(5, 55), new Pair(5, 54), new Pair(5, 57),
-        new Pair(4, 47), new Pair(4, 46),  new Pair(4, 45), new Pair(5, 52), new Pair(5, 59), new Pair(3, 37),
-        new Pair(3, 38), new Pair(5, -58), new Pair(5, 58), new Pair(4, 41), new Pair(4, 42), new Pair(4, 43),
-        new Pair(3, 33), new Pair(3, 32),  new Pair(9, 9),
-      ];
-
-      var testArrayKey2Values = [];
-      for (var i = 0, n = testArray.length; i < n; ++i) {
-        var value = testArray[i].key2;
-        TestRunner.assertTrue(testArrayKey2Values.indexOf(value) === -1, 'FAIL: key2 values should be unique');
-        testArrayKey2Values.push(value);
-      }
-
-      function comparator(a, b) {
-        return a.key1 - b.key1;
-      }
-      testArray.stableSort(comparator);
-      TestRunner.addResult('Stable sort result:\n' + testArray.join('\n'));
-
-      function assertHelper(condition, message, i, a, b) {
-        TestRunner.assertTrue(condition, 'FAIL: ' + message + ' at index ' + i + ': ' + a + ' < ' + b);
-      }
-
-      for (var i = 1, n = testArray.length; i < n; ++i) {
-        var a = testArray[i - 1];
-        var b = testArray[i];
-        assertHelper(a.key1 <= b.key1, 'primary key order', i, a, b);
-        if (a.key1 !== b.key1)
-          continue;
-        var key2IndexA = testArrayKey2Values.indexOf(a.key2);
-        TestRunner.assertTrue(key2IndexA !== -1);
-        var key2IndexB = testArrayKey2Values.indexOf(b.key2);
-        TestRunner.assertTrue(key2IndexB !== -1);
-        assertHelper(key2IndexA < key2IndexB, 'stable order', i, a, b);
-      }
-      next();
-    },
-
     function stringHashTest(next) {
       var stringA = ' '.repeat(10000);
       var stringB = stringA + ' ';
@@ -325,37 +193,6 @@
       TestRunner.assertTrue(hashA !== String.hashCode(stringB));
       TestRunner.assertTrue(isFinite(hashA));
       TestRunner.assertTrue(hashA + 1 !== hashA);
-      next();
-    },
-
-    function stringTrimURLTest(next) {
-      var baseURLDomain = 'www.chromium.org';
-      var testArray = [
-        'http://www.chromium.org/foo/bar',
-        '/foo/bar',
-        'https://www.CHromium.ORG/BAZ/zoo',
-        '/BAZ/zoo',
-        'https://example.com/foo[]',
-        'example.com/foo[]',
-      ];
-      for (var i = 0; i < testArray.length; i += 2) {
-        var url = testArray[i];
-        var expected = testArray[i + 1];
-        TestRunner.assertEquals(expected, url.trimURL(baseURLDomain), url);
-      }
-      next();
-    },
-
-    function stringToBase64Test(next) {
-      var testArray = [
-        '', '', 'a', 'YQ==', 'bc', 'YmM=', 'def', 'ZGVm', 'ghij', 'Z2hpag==', 'klmno', 'a2xtbm8=', 'pqrstu', 'cHFyc3R1',
-        String.fromCharCode(0x444, 0x5555, 0x66666, 0x777777), '0YTllZXmmabnnbc='
-      ];
-      for (var i = 0; i < testArray.length; i += 2) {
-        var string = testArray[i];
-        var encodedString = testArray[i + 1];
-        TestRunner.assertEquals(encodedString, string.toBase64());
-      }
       next();
     },
 

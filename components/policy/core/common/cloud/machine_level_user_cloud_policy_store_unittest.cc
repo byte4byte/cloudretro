@@ -8,7 +8,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
@@ -26,12 +26,11 @@ namespace policy {
 class MachineLevelUserCloudPolicyStoreTest : public ::testing::Test {
  public:
   MachineLevelUserCloudPolicyStoreTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI) {
+      : task_environment_(base::test::TaskEnvironment::MainThreadType::UI) {
     policy_.SetDefaultInitialSigningKey();
     policy_.policy_data().set_policy_type(
         dm_protocol::kChromeMachineLevelUserCloudPolicyType);
-    policy_.payload().mutable_incognitoenabled()->set_value(false);
+    policy_.payload().mutable_searchsuggestenabled()->set_value(false);
     policy_.Build();
   }
 
@@ -44,7 +43,7 @@ class MachineLevelUserCloudPolicyStoreTest : public ::testing::Test {
 
   void SetExpectedPolicyMap(PolicySource source) {
     expected_policy_map_.Clear();
-    expected_policy_map_.Set("IncognitoEnabled", POLICY_LEVEL_MANDATORY,
+    expected_policy_map_.Set("SearchSuggestEnabled", POLICY_LEVEL_MANDATORY,
                              POLICY_SCOPE_MACHINE, source,
                              std::make_unique<base::Value>(false), nullptr);
   }
@@ -53,9 +52,9 @@ class MachineLevelUserCloudPolicyStoreTest : public ::testing::Test {
       bool cloud_policy_overrides = false) {
     std::unique_ptr<MachineLevelUserCloudPolicyStore> store =
         MachineLevelUserCloudPolicyStore::Create(
-            PolicyBuilder::kFakeToken, PolicyBuilder::kFakeDeviceId,
-            tmp_policy_dir_.GetPath(), cloud_policy_overrides,
-            base::ThreadTaskRunnerHandle::Get());
+            DMToken::CreateValidTokenForTesting(PolicyBuilder::kFakeToken),
+            PolicyBuilder::kFakeDeviceId, tmp_policy_dir_.GetPath(),
+            cloud_policy_overrides, base::ThreadTaskRunnerHandle::Get());
     store->AddObserver(&observer_);
     return store;
   }
@@ -74,13 +73,14 @@ class MachineLevelUserCloudPolicyStoreTest : public ::testing::Test {
   PolicyMap expected_policy_map_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(MachineLevelUserCloudPolicyStoreTest);
 };
 
 TEST_F(MachineLevelUserCloudPolicyStoreTest, LoadWithoutDMToken) {
-  store_->SetupRegistration(std::string(), std::string());
+  store_->SetupRegistration(DMToken::CreateEmptyTokenForTesting(),
+                            std::string());
   EXPECT_FALSE(store_->policy());
   EXPECT_TRUE(store_->policy_map().empty());
 
@@ -97,7 +97,8 @@ TEST_F(MachineLevelUserCloudPolicyStoreTest, LoadWithoutDMToken) {
 }
 
 TEST_F(MachineLevelUserCloudPolicyStoreTest, LoadImmediatelyWithoutDMToken) {
-  store_->SetupRegistration(std::string(), std::string());
+  store_->SetupRegistration(DMToken::CreateEmptyTokenForTesting(),
+                            std::string());
   EXPECT_FALSE(store_->policy());
   EXPECT_TRUE(store_->policy_map().empty());
 
@@ -207,7 +208,8 @@ TEST_F(MachineLevelUserCloudPolicyStoreTest,
   ::testing::Mock::VerifyAndClearExpectations(&observer_);
 
   std::unique_ptr<MachineLevelUserCloudPolicyStore> loader = CreateStore();
-  loader->SetupRegistration("invalid_token", "invalid_client_id");
+  loader->SetupRegistration(DMToken(DMToken::Status::kValid, "bad_token"),
+                            "invalid_client_id");
   EXPECT_CALL(observer_, OnStoreError(loader.get()));
   loader->Load();
   base::RunLoop().RunUntilIdle();

@@ -16,11 +16,12 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/bind_test_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/authpolicy/auth_policy_credentials_manager.h"
+#include "chrome/browser/chromeos/authpolicy/authpolicy_credentials_manager.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -46,7 +47,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/dbus/auth_policy/fake_auth_policy_client.h"
+#include "chromeos/dbus/authpolicy/fake_authpolicy_client.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/session_manager/fake_session_manager_client.h"
@@ -91,12 +92,17 @@ namespace chromeos {
 
 namespace {
 
-const char kGaiaID[] = "12345";
-const char kUsername[] = "test_user@gmail.com";
-const char kUserWhitelist[] = "*@gmail.com";
+const char kObjectGuid[] = "12345";
+const char kAdUsername[] = "test_user@ad-domain.com";
+const char kNewUser[] = "new_test_user@gmail.com";
+const char kNewGaiaID[] = "11111";
+const char kExistingUser[] = "existing_test_user@gmail.com";
+const char kExistingGaiaID[] = "22222";
+const char kUserWhitelist[] = "*@ad-domain.com";
 const char kUserNotMatchingWhitelist[] = "user@another_mail.com";
 const char kSupervisedUserID[] = "supervised_user@locally-managed.localhost";
 const char kPassword[] = "test_password";
+const char kHash[] = "test_hash";
 
 const char kPublicSessionUserEmail[] = "public_session_user@localhost";
 const int kAutoLoginNoDelay = 0;
@@ -108,7 +114,7 @@ void WaitForPermanentlyUntrustedStatusAndRun(const base::Closure& callback) {
   while (true) {
     const CrosSettingsProvider::TrustedStatus status =
         CrosSettings::Get()->PrepareTrustedValues(
-            base::Bind(&WaitForPermanentlyUntrustedStatusAndRun, callback));
+            base::BindOnce(&WaitForPermanentlyUntrustedStatusAndRun, callback));
     switch (status) {
       case CrosSettingsProvider::PERMANENTLY_UNTRUSTED:
         callback.Run();
@@ -167,12 +173,6 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
     EXPECT_CALL(*mock_login_display_, Init(_, true, true, true)).Times(1);
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    policy::DevicePolicyCrosBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kLoginManager);
-    command_line->AppendSwitch(switches::kForceLoginManagerInTests);
-  }
-
   void SetUpOnMainThread() override {
     policy::DevicePolicyCrosBrowserTest::SetUpOnMainThread();
     existing_user_controller_ = std::make_unique<ExistingUserController>();
@@ -182,10 +182,6 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
     ASSERT_EQ(existing_user_controller(), existing_user_controller_.get());
 
     existing_user_controller_->Init(user_manager::UserList());
-
-    chromeos::test::UserSessionManagerTestApi session_manager_test_api(
-        chromeos::UserSessionManager::GetInstance());
-    session_manager_test_api.SetShouldObtainTokenHandleInTests(false);
   }
 
   void TearDownOnMainThread() override {
@@ -211,12 +207,6 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
                           HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT))
         .Times(1);
     EXPECT_CALL(*mock_login_display_, SetUIEnabled(true)).Times(1);
-  }
-
-  void RegisterUser(const std::string& user_id) {
-    ListPrefUpdate users_pref(g_browser_process->local_state(),
-                              "LoggedInUsers");
-    users_pref->AppendIfNotPresent(std::make_unique<base::Value>(user_id));
   }
 
   void MakeCrosSettingsPermanentlyUntrusted() {
@@ -251,29 +241,22 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
   std::unique_ptr<MockLoginDisplay> mock_login_display_;
   std::unique_ptr<MockLoginDisplayHost> mock_login_display_host_;
 
-  const AccountId gaia_account_id_ =
-      AccountId::FromUserEmailGaiaId(kUsername, kGaiaID);
   const AccountId ad_account_id_ =
-      AccountId::AdFromUserEmailObjGuid(kUsername, kGaiaID);
+      AccountId::AdFromUserEmailObjGuid(kAdUsername, kObjectGuid);
+
+  const LoginManagerMixin::TestUserInfo new_user_{
+      AccountId::FromUserEmailGaiaId(kNewUser, kNewGaiaID)};
+  const LoginManagerMixin::TestUserInfo existing_user_{
+      AccountId::FromUserEmailGaiaId(kExistingUser, kExistingGaiaID)};
+
+  LoginManagerMixin login_manager_{&mixin_host_, {existing_user_}};
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExistingUserControllerTest);
 };
 
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, PRE_ExistingUserLogin) {
-  RegisterUser(gaia_account_id_.GetUserEmail());
-}
-
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, DISABLED_ExistingUserLogin) {
+IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, ExistingUserLogin) {
   EXPECT_CALL(*mock_login_display_, SetUIEnabled(false)).Times(2);
-  const user_manager::User* user =
-      user_manager::UserManager::Get()->FindUser(gaia_account_id_);
-  UserContext user_context(*user);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
-  test::UserSessionManagerTestApi session_manager_test_api(
-      UserSessionManager::GetInstance());
-  session_manager_test_api.InjectStubUserContext(user_context);
   EXPECT_CALL(*mock_login_display_, SetUIEnabled(true)).Times(1);
   EXPECT_CALL(*mock_login_display_host_,
               StartWizard(TermsOfServiceScreenView::kScreenId.AsId()))
@@ -282,8 +265,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, DISABLED_ExistingUserLogin) {
   content::WindowedNotificationObserver profile_prepared_observer(
       chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
       content::NotificationService::AllSources());
-  existing_user_controller()->Login(user_context, SigninSpecifics());
-
+  login_manager_.LoginWithDefaultContext(existing_user_);
   profile_prepared_observer.Wait();
 }
 
@@ -305,25 +287,15 @@ class ExistingUserControllerUntrustedTest : public ExistingUserControllerTest {
 
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerUntrustedTest,
                        ExistingUserLoginForbidden) {
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(existing_user_));
   existing_user_controller()->Login(user_context, SigninSpecifics());
 }
 
-// Per http://crbug.com/603735, NewUserLoginForbidden fails.
-#if defined(LINUX)
-#define MAYBE_NewUserLoginForbidden DISABLED_NewUserLoginForbidden
-#else
-#define MAYBE_NewUserLoginForbidden NewUserLoginForbidden
-#endif
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerUntrustedTest,
-                       MAYBE_NewUserLoginForbidden) {
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+                       NewUserLoginForbidden) {
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   existing_user_controller()->CompleteLogin(user_context);
 }
 
@@ -339,7 +311,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerUntrustedTest,
   UserContext user_context(user_manager::UserType::USER_TYPE_SUPERVISED,
                            AccountId::FromUserEmail(kSupervisedUserID));
   user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+  user_context.SetUserIDHash(kHash);
   existing_user_controller()->Login(user_context, SigninSpecifics());
 }
 
@@ -348,7 +320,8 @@ MATCHER_P(HasDetails, expected, "") {
 }
 
 class ExistingUserControllerPublicSessionTest
-    : public ExistingUserControllerTest {
+    : public ExistingUserControllerTest,
+      public user_manager::UserManager::Observer {
  protected:
   ExistingUserControllerPublicSessionTest() {}
 
@@ -358,13 +331,13 @@ class ExistingUserControllerPublicSessionTest
     // Wait for the public session user to be created.
     if (!user_manager::UserManager::Get()->IsKnownUser(
             public_session_account_id_)) {
-      content::WindowedNotificationObserver(
-          chrome::NOTIFICATION_USER_LIST_CHANGED,
-          base::Bind(&user_manager::UserManager::IsKnownUser,
-                     base::Unretained(user_manager::UserManager::Get()),
-                     public_session_account_id_))
-          .Wait();
+      user_manager::UserManager::Get()->AddObserver(this);
+      local_state_changed_run_loop_ = std::make_unique<base::RunLoop>();
+      local_state_changed_run_loop_->Run();
+      user_manager::UserManager::Get()->RemoveObserver(this);
     }
+    EXPECT_TRUE(user_manager::UserManager::Get()->IsKnownUser(
+        public_session_account_id_));
 
     // Wait for the device local account policy to be installed.
     policy::CloudPolicyStore* store =
@@ -436,6 +409,11 @@ class ExistingUserControllerPublicSessionTest
       controller->current_screen()->Hide();
   }
 
+  // user_manager::UserManager::Observer:
+  void LocalStateChanged(user_manager::UserManager* user_manager) override {
+    local_state_changed_run_loop_->Quit();
+  }
+
   void ExpectSuccessfulLogin(const UserContext& user_context) {
     test::UserSessionManagerTestApi session_manager_test_api(
         UserSessionManager::GetInstance());
@@ -466,7 +444,7 @@ class ExistingUserControllerPublicSessionTest
       runner1 = new content::MessageLoopRunner;
       subscription1 = chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kAccountsPrefDeviceLocalAccountAutoLoginId,
-          runner1->QuitClosure());
+          base::BindLambdaForTesting([&]() { runner1->Quit(); }));
     }
     scoped_refptr<content::MessageLoopRunner> runner2;
     std::unique_ptr<CrosSettings::ObserverSubscription> subscription2;
@@ -476,7 +454,7 @@ class ExistingUserControllerPublicSessionTest
       runner2 = new content::MessageLoopRunner;
       subscription2 = chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kAccountsPrefDeviceLocalAccountAutoLoginDelay,
-          runner2->QuitClosure());
+          base::BindLambdaForTesting([&]() { runner2->Quit(); }));
     }
 
     // Update the policy.
@@ -505,6 +483,8 @@ class ExistingUserControllerPublicSessionTest
           policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION));
 
  private:
+  std::unique_ptr<base::RunLoop> local_state_changed_run_loop_;
+
   DISALLOW_COPY_AND_ASSIGN(ExistingUserControllerPublicSessionTest);
 };
 
@@ -530,11 +510,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
   EXPECT_FALSE(auto_login_timer()->IsRunning());
 }
 
-// Disable since the flake from this test makes it hard to track down other
-// problems on the bots.
-// See https://crbug.com/644205 or https://crbug.com/516015 .
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       DISABLED_AutoLoginNoDelay) {
+                       AutoLoginNoDelay) {
   // Set up mocks to check login success.
   UserContext user_context(user_manager::USER_TYPE_PUBLIC_ACCOUNT,
                            public_session_account_id_);
@@ -580,14 +557,11 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
   content::RunAllPendingInMessageLoop();
 }
 
-// See http://crbug.com/654719
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       DISABLED_LoginStopsAutoLogin) {
+                       LoginStopsAutoLogin) {
   // Set up mocks to check login success.
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(user_context.GetAccountId().GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   ExpectSuccessfulLogin(user_context);
 
   existing_user_controller()->OnSigninScreenReady();
@@ -617,9 +591,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
                        GuestModeLoginStopsAutoLogin) {
   EXPECT_CALL(*mock_login_display_, SetUIEnabled(false)).Times(2);
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   test::UserSessionManagerTestApi session_manager_test_api(
       UserSessionManager::GetInstance());
   session_manager_test_api.InjectStubUserContext(user_context);
@@ -647,10 +620,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
                        CompleteLoginStopsAutoLogin) {
   // Set up mocks to check login success.
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(user_context.GetAccountId().GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   ExpectSuccessfulLogin(user_context);
 
   existing_user_controller()->OnSigninScreenReady();
@@ -718,10 +689,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
 
   // Check that the attempt to start a public session fails with an error.
   ExpectLoginFailure();
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(user_context.GetAccountId().GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   existing_user_controller()->Login(user_context, SigninSpecifics());
 }
 
@@ -738,16 +707,6 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
   // Check that when the timer fires, auto-login fails with an error.
   ExpectLoginFailure();
   FireAutoLogin();
-}
-
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       PRE_TestLoadingPublicUsersFromLocalState) {
-  // First run propagates public accounts and stores them in Local State.
-}
-
-IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
-                       TestLoadingPublicUsersFromLocalState) {
-  // Second run loads list of public accounts from Local State.
 }
 
 class ExistingUserControllerActiveDirectoryTest
@@ -789,13 +748,13 @@ class ExistingUserControllerActiveDirectoryTest
   // Needs to be a member because this class is a friend of
   // AuthPolicyCredentialsManagerFactory to access GetServiceForBrowserContext.
   KerberosFilesHandler* GetKerberosFilesHandler() {
-    auto* auth_policy_credentials_manager =
+    auto* authpolicy_credentials_manager =
         static_cast<AuthPolicyCredentialsManager*>(
             AuthPolicyCredentialsManagerFactory::GetInstance()
                 ->GetServiceForBrowserContext(
                     ProfileManager::GetLastUsedProfile(), false /* create */));
-    EXPECT_TRUE(auth_policy_credentials_manager);
-    return auth_policy_credentials_manager->GetKerberosFilesHandlerForTesting();
+    EXPECT_TRUE(authpolicy_credentials_manager);
+    return authpolicy_credentials_manager->GetKerberosFilesHandlerForTesting();
   }
 
   void LoginAdOnline() {
@@ -980,10 +939,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryTest,
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryTest,
                        GAIAAccountLogin_Failure) {
   ExpectLoginFailure();
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   existing_user_controller()->CompleteLogin(user_context);
 }
 
@@ -1011,7 +968,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryUserWhitelistTest,
                        Fail) {
   ExpectLoginWhitelistFailure();
   AccountId account_id =
-      AccountId::AdFromUserEmailObjGuid(kUserNotMatchingWhitelist, kGaiaID);
+      AccountId::AdFromUserEmailObjGuid(kUserNotMatchingWhitelist, kObjectGuid);
   UserContext user_context(user_manager::UserType::USER_TYPE_ACTIVE_DIRECTORY,
                            account_id);
   user_context.SetKey(Key(kPassword));
@@ -1038,10 +995,8 @@ class ExistingUserControllerSavePasswordHashTest
 // profile prefs.
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerSavePasswordHashTest,
                        GaiaOnlineLoginSavesPasswordHashToPrefs) {
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(new_user_));
   content::WindowedNotificationObserver profile_prepared_observer(
       chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
       content::NotificationService::AllSources());
@@ -1060,10 +1015,8 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerSavePasswordHashTest,
 // prefs.
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerSavePasswordHashTest,
                        OfflineLoginSavesPasswordHashToPrefs) {
-  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
-                           gaia_account_id_);
-  user_context.SetKey(Key(kPassword));
-  user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());
+  UserContext user_context(
+      LoginManagerMixin::CreateDefaultUserContext(existing_user_));
   content::WindowedNotificationObserver profile_prepared_observer(
       chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
       content::NotificationService::AllSources());
@@ -1103,7 +1056,8 @@ class ExistingUserControllerAuthFailureTest
     // login, the login attempt cannot be shortcut by login manager mixin API -
     // it has to go through login UI.
     const std::string& password = user_context.GetKey()->GetSecret();
-    ash::LoginScreenTestApi::SubmitPassword(test_user_.account_id, password);
+    ash::LoginScreenTestApi::SubmitPassword(test_user_.account_id, password,
+                                            true /*check_if_submittable*/);
   }
 
   void SetUpStubAuthenticatorAndAttemptLoginWithWrongPassword() {
@@ -1114,8 +1068,8 @@ class ExistingUserControllerAuthFailureTest
     test::UserSessionManagerTestApi(UserSessionManager::GetInstance())
         .InjectAuthenticatorBuilder(std::move(authenticator_builder));
 
-    ash::LoginScreenTestApi::SubmitPassword(test_user_.account_id,
-                                            "wrong!!!!!");
+    ash::LoginScreenTestApi::SubmitPassword(test_user_.account_id, "wrong!!!!!",
+                                            true /*check_if_submittable*/);
   }
 
   // Waits for auth error message to be shown in login UI.
@@ -1149,8 +1103,9 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerAuthFailureTest, TpmError) {
   EXPECT_EQ(0, FakePowerManagerClient::Get()->num_request_restart_calls());
 
   test::OobeJS().ExpectVisiblePath({"tpm-error-message"});
-  test::OobeJS().ExpectVisiblePath({"reboot-button"});
-  test::OobeJS().Evaluate("document.getElementById('reboot-button').click()");
+  test::OobeJS().ExpectVisiblePath({"tpm-restart-button"});
+  test::OobeJS().Evaluate(
+      "document.getElementById('tpm-restart-button').click()");
 
   EXPECT_EQ(1, FakePowerManagerClient::Get()->num_request_restart_calls());
 }

@@ -7,8 +7,8 @@
 
 #include <vector>
 
-#include "ash/components/fast_ink/fast_ink_points.h"
-#include "ash/components/fast_ink/fast_ink_view.h"
+#include "ash/fast_ink/fast_ink_points.h"
+#include "ash/fast_ink/fast_ink_view.h"
 #include "base/time/time.h"
 
 namespace aura {
@@ -46,14 +46,14 @@ class HighlighterView : public fast_ink::FastInkView {
   void AddGap();
   void Animate(const gfx::PointF& pivot,
                HighlighterGestureType gesture_type,
-               const base::Closure& done);
+               base::OnceClosure done);
 
  private:
   friend class HighlighterControllerTestApi;
 
   void FadeOut(const gfx::PointF& pivot,
                HighlighterGestureType gesture_type,
-               const base::Closure& done);
+               base::OnceClosure done);
   void ScheduleUpdateBuffer();
   void UpdateBuffer();
   void Draw(gfx::Canvas& canvas);
@@ -64,7 +64,7 @@ class HighlighterView : public fast_ink::FastInkView {
   std::unique_ptr<base::OneShotTimer> animation_timer_;
   gfx::Rect highlighter_damage_rect_;
   bool pending_update_buffer_ = false;
-  base::WeakPtrFactory<HighlighterView> weak_ptr_factory_;
+  base::WeakPtrFactory<HighlighterView> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(HighlighterView);
 };

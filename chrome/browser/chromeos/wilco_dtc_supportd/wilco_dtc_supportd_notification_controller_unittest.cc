@@ -7,12 +7,16 @@
 #include <memory>
 #include <string>
 
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/wilco_dtc_supportd/wilco_dtc_supportd_client.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "components/user_manager/scoped_user_manager.h"
+#include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -49,7 +53,10 @@ struct WilcoDtcSupportdNotificationControllerTestParams {
     {&WilcoDtcSupportdNotificationController::ShowDockThunderboltNotification,
      IDS_WILCO_NOTIFICATION_DOCK_THUNDERBOLT_TITLE,
      IDS_WILCO_NOTIFICATION_DOCK_THUNDERBOLT_MESSAGE,
-     message_center::DEFAULT_PRIORITY}};
+     message_center::DEFAULT_PRIORITY},
+    {&WilcoDtcSupportdNotificationController::ShowLowPowerChargerNotification,
+     IDS_WILCO_LOW_POWER_CHARGER_TITLE, IDS_WILCO_LOW_POWER_CHARGER_MESSAGE,
+     message_center::SYSTEM_PRIORITY}};
 
 class WilcoDtcSupportdNotificationControllerTest
     : public testing::TestWithParam<
@@ -63,8 +70,15 @@ class WilcoDtcSupportdNotificationControllerTest
     // The created profile is owned by ProfileManager.
     Profile* profile = profile_manager_.CreateTestingProfile(kProfileName);
     profile_manager_.UpdateLastUser(profile);
-    profile_manager_.SetLoggedIn(true);
     ProfileHelper::Get()->SetActiveUserIdForTesting(kProfileName);
+
+    user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
+        std::make_unique<chromeos::FakeChromeUserManager>());
+
+    auto account = AccountId::FromUserEmail(kProfileName);
+    GetFakeUserManager()->AddUser(account);
+    GetFakeUserManager()->LoginUser(account);
+
     service_tester_ =
         std::make_unique<NotificationDisplayServiceTester>(profile);
 
@@ -95,12 +109,20 @@ class WilcoDtcSupportdNotificationControllerTest
   }
 
  private:
+  chromeos::FakeChromeUserManager* GetFakeUserManager() {
+    return static_cast<chromeos::FakeChromeUserManager*>(
+        user_manager::UserManager::Get());
+  }
+
   // CreateTestingProfile must be called on Chrome_UIThread
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
+  std::unique_ptr<user_manager::ScopedUserManager> user_manager_enabler_;
   std::unique_ptr<WilcoDtcSupportdNotificationController>
       notification_controller_ = nullptr;
   std::unique_ptr<NotificationDisplayServiceTester> service_tester_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(WilcoDtcSupportdNotificationControllerTest);
 };
 
 }  // namespace

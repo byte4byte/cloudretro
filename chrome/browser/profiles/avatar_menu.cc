@@ -15,7 +15,6 @@
 #include "chrome/browser/profiles/avatar_menu_observer.h"
 #include "chrome/browser/profiles/profile_list.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
@@ -42,10 +41,7 @@ AvatarMenu::AvatarMenu(ProfileAttributesStorage* profile_storage,
                        Browser* browser)
     : profile_list_(ProfileList::Create(profile_storage)),
       menu_actions_(AvatarMenuActions::Create()),
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-      supervised_user_observer_(this),
-#endif
-      profile_storage_(profile_storage),
+      profile_storage_(profile_storage->AsWeakPtr()),
       observer_(observer),
       browser_(browser) {
   DCHECK(profile_storage_);
@@ -67,7 +63,10 @@ AvatarMenu::AvatarMenu(ProfileAttributesStorage* profile_storage,
 }
 
 AvatarMenu::~AvatarMenu() {
-  profile_storage_->RemoveObserver(this);
+  // Note that |profile_storage_| may be destroyed before |this|.
+  // https://crbug.com/1008947
+  if (profile_storage_)
+    profile_storage_->RemoveObserver(this);
 }
 
 AvatarMenu::Item::Item(size_t menu_index, const base::FilePath& profile_path,
@@ -85,9 +84,7 @@ AvatarMenu::Item::Item(const Item& other) = default;
 AvatarMenu::Item::~Item() {
 }
 
-void AvatarMenu::SwitchToProfile(size_t index,
-                                 bool always_create,
-                                 ProfileMetrics::ProfileOpen metric) {
+void AvatarMenu::SwitchToProfile(size_t index, bool always_create) {
   DCHECK(profiles::IsMultipleProfilesEnabled() ||
          index == GetActiveProfileIndex());
   const Item& item = GetItemAt(index);
@@ -100,7 +97,7 @@ void AvatarMenu::SwitchToProfile(size_t index,
   }
 
   profiles::SwitchToProfile(item.profile_path, always_create,
-                            ProfileManager::CreateCallback(), metric);
+                            ProfileManager::CreateCallback());
 }
 
 void AvatarMenu::AddNewProfile(ProfileMetrics::ProfileAdd type) {

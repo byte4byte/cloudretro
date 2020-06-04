@@ -8,6 +8,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -82,9 +83,8 @@ int GetIndexOfExistingTab(Browser* browser, const NavigateParams& params) {
   // that we do not open another URL that will get redirected to the rewritten
   // URL.
   GURL rewritten_url(params.url);
-  bool reverse_on_redirect = false;
   content::BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-      &rewritten_url, browser->profile(), &reverse_on_redirect);
+      &rewritten_url, browser->profile());
 
   ChromeAutocompleteProviderClient client(browser->profile());
   // If there are several matches: prefer the active tab by starting there.
@@ -104,7 +104,7 @@ int GetIndexOfExistingTab(Browser* browser, const NavigateParams& params) {
 
     GURL rewritten_tab_url = tab_url;
     content::BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-        &rewritten_tab_url, browser->profile(), &reverse_on_redirect);
+        &rewritten_tab_url, browser->profile());
 
     url::Replacements<char> replacements;
     replacements.ClearRef();
@@ -122,4 +122,21 @@ int GetIndexOfExistingTab(Browser* browser, const NavigateParams& params) {
   }
 
   return -1;
+}
+
+std::pair<Browser*, int> GetIndexAndBrowserOfExistingTab(
+    Profile* profile,
+    const NavigateParams& params) {
+  for (auto browser_it = BrowserList::GetInstance()->begin_last_active();
+       browser_it != BrowserList::GetInstance()->end_last_active();
+       ++browser_it) {
+    Browser* browser = *browser_it;
+    // When tab switching, only look at same profile and anonymity level.
+    if (browser->profile()->IsSameProfileAndType(profile)) {
+      int index = GetIndexOfExistingTab(browser, params);
+      if (index >= 0)
+        return {browser, index};
+    }
+  }
+  return {nullptr, -1};
 }

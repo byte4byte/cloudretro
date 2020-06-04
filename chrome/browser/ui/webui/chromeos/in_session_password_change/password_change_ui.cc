@@ -10,12 +10,13 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chromeos/login/saml/password_expiry_notification.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/chromeos/in_session_password_change/confirm_password_change_handler.h"
+#include "chrome/browser/ui/webui/chromeos/in_session_password_change/password_change_dialogs.h"
 #include "chrome/browser/ui/webui/chromeos/in_session_password_change/password_change_handler.h"
 #include "chrome/browser/ui/webui/chromeos/in_session_password_change/urgent_password_expiry_notification_handler.h"
-#include "chrome/browser/ui/webui/localized_string.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -24,10 +25,12 @@
 #include "chromeos/login/auth/saml_password_attributes.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
 #include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -35,12 +38,6 @@
 namespace chromeos {
 
 namespace {
-
-PasswordChangeDialog* g_dialog = nullptr;
-
-ConfirmPasswordChangeDialog* g_confirm_dialog = nullptr;
-
-UrgentPasswordExpiryNotificationDialog* g_notification_dialog = nullptr;
 
 std::string GetPasswordChangeUrl(Profile* profile) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -63,77 +60,22 @@ std::string GetPasswordChangeUrl(Profile* profile) {
       .password_change_url();
 }
 
-base::string16 GetManagementNotice(Profile* profile) {
-  base::string16 host = base::UTF8ToUTF16(
-      net::GetHostAndOptionalPort(GURL(GetPasswordChangeUrl(profile))));
+base::string16 GetHostedHeaderText(const std::string& password_change_url) {
+  base::string16 host =
+      base::UTF8ToUTF16(net::GetHostAndOptionalPort(GURL(password_change_url)));
   DCHECK(!host.empty());
   return l10n_util::GetStringFUTF16(IDS_LOGIN_SAML_PASSWORD_CHANGE_NOTICE,
                                     host);
 }
 
-constexpr int kMaxPasswordChangeDialogWidth = 768;
-constexpr int kMaxPasswordChangeDialogHeight = 640;
-
-// TODO(https://crbug.com/930109): Change these numbers depending on what is
-// shown in the dialog.
-constexpr int kMaxConfirmPasswordChangeDialogWidth = 560;
-constexpr int kMaxConfirmPasswordChangeDialogHeight = 420;
-
-constexpr int kMaxNotificationDialogWidth = 560;
-constexpr int kMaxNotificationDialogHeight = 320;
-
-// Given a desired width and height, returns the same size if it fits on screen,
-// or the closest possible size that will fit on the screen.
-gfx::Size FitSizeToDisplay(int max_width, int max_height) {
-  const display::Display display =
-      display::Screen::GetScreen()->GetPrimaryDisplay();
-
-  gfx::Size display_size = display.size();
-
-  if (display.rotation() == display::Display::ROTATE_90 ||
-      display.rotation() == display::Display::ROTATE_270) {
-    display_size = gfx::Size(display_size.height(), display_size.width());
-  }
-
-  display_size = gfx::Size(std::min(display_size.width(), max_width),
-                           std::min(display_size.height(), max_height));
-
-  return display_size;
+void AddSize(content::WebUIDataSource* source,
+             const std::string& suffix,
+             const gfx::Size& size) {
+  source->AddInteger("width" + suffix, size.width());
+  source->AddInteger("height" + suffix, size.height());
 }
 
 }  // namespace
-
-PasswordChangeDialog::PasswordChangeDialog(const base::string16& title)
-    : SystemWebDialogDelegate(GURL(chrome::kChromeUIPasswordChangeUrl), title) {
-}
-
-PasswordChangeDialog::~PasswordChangeDialog() {
-  DCHECK_EQ(this, g_dialog);
-  g_dialog = nullptr;
-}
-
-void PasswordChangeDialog::GetDialogSize(gfx::Size* size) const {
-  *size = FitSizeToDisplay(kMaxPasswordChangeDialogWidth,
-                           kMaxPasswordChangeDialogHeight);
-}
-
-// static
-void PasswordChangeDialog::Show(Profile* profile) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_dialog) {
-    g_dialog->Focus();
-    return;
-  }
-  g_dialog = new PasswordChangeDialog(GetManagementNotice(profile));
-  g_dialog->ShowSystemDialog();
-}
-
-// static
-void PasswordChangeDialog::Dismiss() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_dialog)
-    g_dialog->Close();
-}
 
 PasswordChangeUI::PasswordChangeUI(content::WebUI* web_ui)
     : ui::WebDialogUI(web_ui) {
@@ -143,10 +85,12 @@ PasswordChangeUI::PasswordChangeUI(content::WebUI* web_ui)
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIPasswordChangeHost);
 
+  const std::string password_change_url = GetPasswordChangeUrl(profile);
   web_ui->AddMessageHandler(
-      std::make_unique<PasswordChangeHandler>(GetPasswordChangeUrl(profile)));
+      std::make_unique<PasswordChangeHandler>(password_change_url));
 
-  source->SetJsonPath("strings.js");
+  source->AddString("hostedHeader", GetHostedHeaderText(password_change_url));
+  source->UseStringsJs();
 
   source->SetDefaultResource(IDR_PASSWORD_CHANGE_HTML);
 
@@ -160,57 +104,6 @@ PasswordChangeUI::PasswordChangeUI(content::WebUI* web_ui)
 
 PasswordChangeUI::~PasswordChangeUI() = default;
 
-// static
-void ConfirmPasswordChangeDialog::Show(const std::string& scraped_old_password,
-                                       const std::string& scraped_new_password,
-                                       bool show_spinner_initially) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_confirm_dialog) {
-    g_confirm_dialog->Focus();
-    return;
-  }
-  g_confirm_dialog = new ConfirmPasswordChangeDialog(
-      scraped_old_password, scraped_new_password, show_spinner_initially);
-  g_confirm_dialog->ShowSystemDialog();
-}
-
-// static
-void ConfirmPasswordChangeDialog::Dismiss() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_confirm_dialog)
-    g_confirm_dialog->Close();
-}
-
-ConfirmPasswordChangeDialog::ConfirmPasswordChangeDialog(
-    const std::string& scraped_old_password,
-    const std::string& scraped_new_password,
-    bool show_spinner_initially)
-    : SystemWebDialogDelegate(GURL(chrome::kChromeUIConfirmPasswordChangeUrl),
-                              /*title=*/base::string16()),
-      scraped_old_password_(scraped_old_password),
-      scraped_new_password_(scraped_new_password),
-      show_spinner_initially_(show_spinner_initially) {}
-
-ConfirmPasswordChangeDialog::~ConfirmPasswordChangeDialog() {
-  DCHECK_EQ(this, g_confirm_dialog);
-  g_confirm_dialog = nullptr;
-}
-
-void ConfirmPasswordChangeDialog::GetDialogSize(gfx::Size* size) const {
-  *size = FitSizeToDisplay(kMaxConfirmPasswordChangeDialogWidth,
-                           kMaxConfirmPasswordChangeDialogHeight);
-}
-
-std::string ConfirmPasswordChangeDialog::GetDialogArgs() const {
-  // TODO(https://crbug.com/930109): Configure the embedded UI to only display
-  // prompts for the passwords that were not scraped.
-  std::string data;
-  base::DictionaryValue dialog_args;
-  dialog_args.SetBoolean("showSpinnerInitially", show_spinner_initially_);
-  base::JSONWriter::Write(dialog_args, &data);
-  return data;
-}
-
 ConfirmPasswordChangeUI::ConfirmPasswordChangeUI(content::WebUI* web_ui)
     : ui::WebDialogUI(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
@@ -219,7 +112,7 @@ ConfirmPasswordChangeUI::ConfirmPasswordChangeUI(content::WebUI* web_ui)
   content::WebUIDataSource* source = content::WebUIDataSource::Create(
       chrome::kChromeUIConfirmPasswordChangeHost);
 
-  static constexpr LocalizedString kLocalizedStrings[] = {
+  static constexpr webui::LocalizedString kLocalizedStrings[] = {
       {"title", IDS_PASSWORD_CHANGE_CONFIRM_DIALOG_TITLE},
       {"bothPasswordsPrompt",
        IDS_PASSWORD_CHANGE_CONFIRM_DIALOG_BOTH_PASSWORDS_PROMPT},
@@ -230,92 +123,55 @@ ConfirmPasswordChangeUI::ConfirmPasswordChangeUI(content::WebUI* web_ui)
       {"oldPassword", IDS_PASSWORD_CHANGE_OLD_PASSWORD_LABEL},
       {"newPassword", IDS_PASSWORD_CHANGE_NEW_PASSWORD_LABEL},
       {"confirmNewPassword", IDS_PASSWORD_CHANGE_CONFIRM_NEW_PASSWORD_LABEL},
+      {"incorrectPassword", IDS_LOGIN_CONFIRM_PASSWORD_INCORRECT_PASSWORD},
       {"matchError", IDS_PASSWORD_CHANGE_PASSWORDS_DONT_MATCH},
       {"save", IDS_PASSWORD_CHANGE_CONFIRM_SAVE_BUTTON}};
 
-  AddLocalizedStringsBulk(source, kLocalizedStrings,
-                          base::size(kLocalizedStrings));
+  AddLocalizedStringsBulk(source, kLocalizedStrings);
 
-  source->SetJsonPath("strings.js");
+  AddSize(source, "", ConfirmPasswordChangeDialog::GetSize(false, false));
+  AddSize(source, "Old", ConfirmPasswordChangeDialog::GetSize(true, false));
+  AddSize(source, "New", ConfirmPasswordChangeDialog::GetSize(false, true));
+  AddSize(source, "OldNew", ConfirmPasswordChangeDialog::GetSize(true, true));
+
+  source->UseStringsJs();
   source->SetDefaultResource(IDR_CONFIRM_PASSWORD_CHANGE_HTML);
   source->AddResourcePath("confirm_password_change.js",
                           IDR_CONFIRM_PASSWORD_CHANGE_JS);
 
-  web_ui->AddMessageHandler(std::make_unique<ConfirmPasswordChangeHandler>());
+  // The ConfirmPasswordChangeHandler is added by the dialog, so no need to add
+  // it here.
 
   content::WebUIDataSource::Add(profile, source);
 }
 
 ConfirmPasswordChangeUI::~ConfirmPasswordChangeUI() = default;
 
-UrgentPasswordExpiryNotificationDialog::UrgentPasswordExpiryNotificationDialog(
-    int less_than_n_days)
-    : SystemWebDialogDelegate(
-          GURL(std::string(
-                   chrome::kChromeUIUrgentPasswordExpiryNotificationUrl) +
-               base::NumberToString(less_than_n_days)),
-          /*title=*/base::string16()) {}
-
-UrgentPasswordExpiryNotificationDialog::
-    ~UrgentPasswordExpiryNotificationDialog() {
-  DCHECK_EQ(this, g_notification_dialog);
-  g_notification_dialog = nullptr;
-}
-
-void UrgentPasswordExpiryNotificationDialog::GetDialogSize(
-    gfx::Size* size) const {
-  *size = FitSizeToDisplay(kMaxNotificationDialogWidth,
-                           kMaxNotificationDialogHeight);
-}
-
-// static
-void UrgentPasswordExpiryNotificationDialog::Show(int less_than_n_days) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_notification_dialog) {
-    // TODO(https://crbug.com/930109): Update the existing dialog
-    // with less_than_n_days, or make the dialog update automatically.
-    g_notification_dialog->Focus();
-    return;
-  }
-  g_notification_dialog =
-      new UrgentPasswordExpiryNotificationDialog(less_than_n_days);
-  g_notification_dialog->ShowSystemDialog();
-}
-
-// static
-void UrgentPasswordExpiryNotificationDialog::Dismiss() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (g_notification_dialog)
-    g_notification_dialog->Close();
-}
-
 UrgentPasswordExpiryNotificationUI::UrgentPasswordExpiryNotificationUI(
     content::WebUI* web_ui)
     : ui::WebDialogUI(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
-  CHECK(profile->GetPrefs()->GetBoolean(
-      prefs::kSamlInSessionPasswordChangeEnabled));
+  PrefService* prefs = profile->GetPrefs();
+  CHECK(prefs->GetBoolean(prefs::kSamlInSessionPasswordChangeEnabled));
+
   content::WebUIDataSource* source = content::WebUIDataSource::Create(
       chrome::kChromeUIUrgentPasswordExpiryNotificationHost);
 
-  // chrome://urgent-password-expiry-notification/3 shows a title something like
-  // "Less than 3 days remaining" - so we extract the 3 here:
-  const std::string url_suffix =
-      web_ui->GetWebContents()->GetURL().ExtractFileName();
-  int less_than_n_days = 0;
-  base::StringToInt(url_suffix, &less_than_n_days);
-  less_than_n_days = std::max(less_than_n_days, 0);
-  const base::string16 title = l10n_util::GetPluralStringFUTF16(
-      IDS_PASSWORD_EXPIRY_DAYS_TITLE, less_than_n_days);
-  source->AddString("title", title);
+  SamlPasswordAttributes attrs = SamlPasswordAttributes::LoadFromPrefs(prefs);
+  if (attrs.has_expiration_time()) {
+    const base::Time expiration_time = attrs.expiration_time();
+    source->AddString("initialTitle", PasswordExpiryNotification::GetTitleText(
+                                          expiration_time - base::Time::Now()));
+    source->AddString("expirationTime",
+                      base::NumberToString(expiration_time.ToJsTime()));
+  }
 
-  static constexpr LocalizedString kLocalizedStrings[] = {
+  static constexpr webui::LocalizedString kLocalizedStrings[] = {
       {"body", IDS_PASSWORD_EXPIRY_CALL_TO_ACTION_CRITICAL},
-      {"button", IDS_PASSWORD_EXPIRY_CHANGE_PASSWORD_BUTTON}};
-  AddLocalizedStringsBulk(source, kLocalizedStrings,
-                          base::size(kLocalizedStrings));
+      {"button", IDS_OK}};
+  AddLocalizedStringsBulk(source, kLocalizedStrings);
 
-  source->SetJsonPath("strings.js");
+  source->UseStringsJs();
   source->SetDefaultResource(IDR_URGENT_PASSWORD_EXPIRY_NOTIFICATION_HTML);
   source->AddResourcePath("urgent_password_expiry_notification.js",
                           IDR_URGENT_PASSWORD_EXPIRY_NOTIFICATION_JS);

@@ -12,7 +12,9 @@
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "components/favicon/content/content_favicon_driver.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/models/table_model.h"
@@ -123,10 +125,10 @@ class HungPagesTableModel : public ui::TableModel,
   base::RepeatingClosure hang_monitor_restarter_;
 
   ScopedObserver<content::RenderProcessHost, content::RenderProcessHostObserver>
-      process_observer_;
+      process_observer_{this};
 
   ScopedObserver<content::RenderWidgetHost, content::RenderWidgetHostObserver>
-      widget_observer_;
+      widget_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(HungPagesTableModel);
 };
@@ -164,12 +166,6 @@ class HungRendererDialogView : public views::DialogDelegateView,
   base::string16 GetWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
   void WindowClosing() override;
-  int GetDialogButtons() const override;
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  bool Cancel() override;
-  bool Accept() override;
-  bool Close() override;
-  bool ShouldUseCustomFrame() const override;
 
   // HungPagesTableModel::Delegate overrides:
   void TabUpdated() override;
@@ -179,20 +175,14 @@ class HungRendererDialogView : public views::DialogDelegateView,
   HungRendererDialogView();
   ~HungRendererDialogView() override;
 
-  // views::View overrides:
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override;
-
   static HungRendererDialogView* g_instance_;
 
  private:
   friend class HungRendererDialogViewBrowserTest;
 
-  // Initialize the controls in this dialog.
-  void Init();
-
   // Restart the hang timer, giving the page more time.
   void RestartHangTimer();
+  void ForceCrashHungRenderer();
 
   void UpdateLabels();
 
@@ -207,9 +197,6 @@ class HungRendererDialogView : public views::DialogDelegateView,
   // The model that provides the contents of the table that shows a list of
   // pages affected by the hang.
   std::unique_ptr<HungPagesTableModel> hung_pages_table_model_;
-
-  // Whether or not we've created controls for ourself.
-  bool initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(HungRendererDialogView);
 };

@@ -25,7 +25,7 @@ class MockLibcurlWrapper : public google_breakpad::LibcurlWrapper {
   MOCK_METHOD5(SendRequest,
                bool(const std::string& url,
                     const std::map<std::string, std::string>& parameters,
-                    int* http_status_code,
+                    long* http_status_code,
                     std::string* http_header_data,
                     std::string* http_response_data));
 };
@@ -138,9 +138,6 @@ TEST(CastCrashdumpUploaderTest, UploadFailsWithInvalidAttachment) {
   // Create a temporary file.
   ScopedTempFile minidump;
 
-  EXPECT_CALL(*m, Init()).Times(1).WillOnce(Return(true));
-  EXPECT_CALL(*m, AddFile(minidump.path().value(), _)).WillOnce(Return(true));
-
   CastCrashdumpData data;
   data.product = "foobar";
   data.version = "1.0";
@@ -152,8 +149,7 @@ TEST(CastCrashdumpUploaderTest, UploadFailsWithInvalidAttachment) {
   CastCrashdumpUploader uploader(data, std::move(m));
 
   // Add a file that does not exist as an attachment.
-  uploader.AddAttachment("label", "/path/does/not/exist");
-  ASSERT_FALSE(uploader.Upload(nullptr));
+  ASSERT_FALSE(uploader.AddAttachment("label", "/path/does/not/exist"));
 }
 
 TEST(CastCrashdumpUploaderTest, UploadSucceedsWithValidAttachment) {

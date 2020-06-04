@@ -17,6 +17,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_sub_menu_model.h"
 #include "components/omnibox/browser/omnibox_view.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/compositor/compositor.h"
@@ -39,7 +41,7 @@ class WebContents;
 
 namespace gfx {
 class RenderText;
-}
+}  // namespace gfx
 
 namespace ui {
 class OSExchangeData;
@@ -126,7 +128,7 @@ class OmniboxViewViews : public OmniboxView,
                           base::string16::size_type* end) const override;
   void SelectAll(bool reversed) override;
   void RevertAll() override;
-  void SetFocus() override;
+  void SetFocus(bool is_user_initiated) override;
   bool IsImeComposing() const override;
   gfx::NativeView GetRelativeWindowForPopup() const override;
   bool IsImeShowingPopup() const override;
@@ -149,6 +151,7 @@ class OmniboxViewViews : public OmniboxView,
 
  protected:
   // views::Textfield:
+  void OnThemeChanged() override;
   bool IsDropCursorForInsertion() const override;
 
  private:
@@ -186,11 +189,7 @@ class OmniboxViewViews : public OmniboxView,
   void ClearAccessibilityLabel();
 
   void SetAccessibilityLabel(const base::string16& display_text,
-                             const AutocompleteMatch& match);
-
-  // Selects the whole omnibox contents as a result of the user gesture. This
-  // may also unapply steady state elisions depending on user preferences.
-  void SelectAllForUserGesture();
+                             const AutocompleteMatch& match) override;
 
   // Returns true if the user text was updated with the full URL (without
   // steady-state elisions).  |gesture| is the user gesture causing unelision.
@@ -200,17 +199,16 @@ class OmniboxViewViews : public OmniboxView,
   // flip.)
   bool TextAndUIDirectionMatch() const;
 
-  // Helper function for MaybeFocusTabButton() and MaybeUnfocusTabButton().
-  bool SelectedSuggestionHasTabMatch() const;
-
   // Like SelectionAtEnd(), but accounts for RTL.
   bool DirectionAwareSelectionAtEnd() const;
 
-  // Attempts to either focus or unfocus the tab switch button (tests if all
-  // conditions are met and makes necessary subroutine call) and returns
-  // whether it succeeded.
-  bool MaybeFocusTabButton();
-  bool MaybeUnfocusTabButton();
+  // If the Secondary button for the current suggestion is focused, clicks it
+  // and returns true.
+  bool MaybeTriggerSecondaryButton(const ui::KeyEvent& event);
+
+#if defined(OS_MACOSX)
+  void AnnounceFriendlySuggestionText();
+#endif
 
   // OmniboxView:
   void SetCaretPos(size_t caret_pos) override;
@@ -272,7 +270,7 @@ class OmniboxViewViews : public OmniboxView,
                       const ui::KeyEvent& key_event) override;
   void OnBeforeUserAction(views::Textfield* sender) override;
   void OnAfterUserAction(views::Textfield* sender) override;
-  void OnAfterCutOrCopy(ui::ClipboardType clipboard_type) override;
+  void OnAfterCutOrCopy(ui::ClipboardBuffer clipboard_buffer) override;
   void OnWriteDragData(ui::OSExchangeData* data) override;
   void OnGetDragOperationsForTextfield(int* drag_operations) override;
   void AppendDropFormats(
@@ -280,6 +278,9 @@ class OmniboxViewViews : public OmniboxView,
       std::set<ui::ClipboardFormatType>* format_types) override;
   int OnDrop(const ui::OSExchangeData& data) override;
   void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) override;
+
+  // ui::SimpleMenuModel::Delegate:
+  bool IsCommandIdChecked(int id) const override;
 
   // ui::CompositorObserver:
   void OnCompositingDidCommit(ui::Compositor* compositor) override;
@@ -366,13 +367,17 @@ class OmniboxViewViews : public OmniboxView,
   int friendly_suggestion_text_prefix_length_;
 
   ScopedObserver<ui::Compositor, ui::CompositorObserver>
-      scoped_compositor_observer_;
+      scoped_compositor_observer_{this};
   ScopedObserver<TemplateURLService, TemplateURLServiceObserver>
-      scoped_template_url_service_observer_;
+      scoped_template_url_service_observer_{this};
 
   // Send tab to self submenu.
   std::unique_ptr<send_tab_to_self::SendTabToSelfSubMenuModel>
       send_tab_to_self_sub_menu_model_;
+
+  PrefChangeRegistrar pref_change_registrar_;
+
+  base::WeakPtrFactory<OmniboxViewViews> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

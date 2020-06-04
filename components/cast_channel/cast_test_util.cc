@@ -8,7 +8,6 @@
 
 #include "base/token.h"
 #include "net/base/ip_address.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace cast_channel {
 
@@ -52,8 +51,7 @@ net::IPEndPoint CreateIPEndPointForTest() {
 MockCastMessageHandler::MockCastMessageHandler(
     MockCastSocketService* socket_service)
     : CastMessageHandler(socket_service,
-                         /* connector */ nullptr,
-                         base::Token{},
+                         /* parse_json */ base::DoNothing(),
                          "userAgent",
                          "1.2.3.4",
                          "en-US") {}

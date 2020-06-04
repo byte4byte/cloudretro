@@ -38,7 +38,7 @@ void SSLClientCertificateSelectorTestBase::SetUpInProcessBrowserTestFixture() {
 }
 
 void SSLClientCertificateSelectorTestBase::SetUpOnMainThread() {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&SSLClientCertificateSelectorTestBase::SetUpOnIOThread,
                      base::Unretained(this)));
@@ -52,14 +52,14 @@ void SSLClientCertificateSelectorTestBase::SetUpOnMainThread() {
 // Have to release our reference to the auth handler during the test to allow
 // it to be destroyed while the Browser and its IO thread still exist.
 void SSLClientCertificateSelectorTestBase::TearDownOnMainThread() {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&SSLClientCertificateSelectorTestBase::TearDownOnIOThread,
                      base::Unretained(this)));
 
   io_loop_finished_event_.Wait();
 
-  auth_requestor_ = NULL;
+  auth_requestor_.reset();
 }
 
 void SSLClientCertificateSelectorTestBase::SetUpOnIOThread() {

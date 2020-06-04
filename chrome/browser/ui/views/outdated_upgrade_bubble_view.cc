@@ -8,10 +8,12 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
@@ -21,6 +23,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
+#include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
@@ -90,8 +93,7 @@ bool OutdatedUpgradeBubbleView::ShouldShowCloseButton() const {
   return true;
 }
 
-bool OutdatedUpgradeBubbleView::Accept() {
-  uma_recorded_ = true;
+void OutdatedUpgradeBubbleView::OnDialogAccepted() {
   // Offset the +1 in the dtor.
   --g_num_ignored_bubbles;
   if (auto_update_enabled_) {
@@ -120,47 +122,28 @@ bool OutdatedUpgradeBubbleView::Accept() {
     }
 
     // Re-enable updates by shelling out to setup.exe asynchronously.
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE,
         {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
          base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
         base::BindOnce(&google_update::ElevateIfNeededToReenableUpdates));
 #endif  // defined(OS_WIN)
   }
-
-  return true;
-}
-
-bool OutdatedUpgradeBubbleView::Close() {
-  // DialogDelegate::Close() would call Accept(), as there is only one button.
-  // Prevent that and record UMA. Note in the past there was also a "Later"
-  // button, hence the name.
-  if (!uma_recorded_)
-    base::RecordAction(base::UserMetricsAction("OutdatedUpgradeBubble.Later"));
-  return true;
-}
-
-int OutdatedUpgradeBubbleView::GetDialogButtons() const {
-  return ui::DIALOG_BUTTON_OK;
-}
-
-base::string16 OutdatedUpgradeBubbleView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  return l10n_util::GetStringUTF16(auto_update_enabled_ ? IDS_REINSTALL_APP
-                                                        : IDS_REENABLE_UPDATES);
 }
 
 void OutdatedUpgradeBubbleView::Init() {
   SetLayoutManager(std::make_unique<views::FillLayout>());
-  views::Label* text_label =
-      new views::Label(l10n_util::GetStringUTF16(IDS_UPGRADE_BUBBLE_TEXT));
+  auto text_label = std::make_unique<views::Label>(
+      l10n_util::GetStringUTF16(IDS_UPGRADE_BUBBLE_TEXT),
+      views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   text_label->SetMultiLine(true);
   text_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   text_label->SizeToFit(
       ChromeLayoutProvider::Get()->GetDistanceMetric(
           ChromeDistanceMetric::DISTANCE_BUBBLE_PREFERRED_WIDTH) -
       margins().width());
-  AddChildView(text_label);
+  AddChildView(std::move(text_label));
 }
 
 OutdatedUpgradeBubbleView::OutdatedUpgradeBubbleView(
@@ -170,5 +153,15 @@ OutdatedUpgradeBubbleView::OutdatedUpgradeBubbleView(
     : BubbleDialogDelegateView(anchor_view, views::BubbleBorder::TOP_RIGHT),
       auto_update_enabled_(auto_update_enabled),
       navigator_(navigator) {
+  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
+  DialogDelegate::SetButtonLabel(
+      ui::DIALOG_BUTTON_OK,
+      l10n_util::GetStringUTF16(auto_update_enabled_ ? IDS_REINSTALL_APP
+                                                     : IDS_REENABLE_UPDATES));
+  DialogDelegate::SetAcceptCallback(base::BindOnce(
+      &OutdatedUpgradeBubbleView::OnDialogAccepted, base::Unretained(this)));
+  DialogDelegate::SetCloseCallback(
+      base::BindOnce(&base::RecordAction,
+                     base::UserMetricsAction("OutdatedUpgradeBubble.Later")));
   chrome::RecordDialogCreation(chrome::DialogIdentifier::OUTDATED_UPGRADE);
 }

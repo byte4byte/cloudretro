@@ -132,7 +132,7 @@ class ShapePathBuilder : public PathBuilder {
   }
 
  private:
-  Member<LocalFrameView> view_;
+  LocalFrameView* view_;
   LayoutObject& layout_object_;
   const ShapeOutsideInfo& shape_outside_info_;
 };
@@ -278,6 +278,8 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
       class_names.Append("::before");
     else if (pseudo_element->GetPseudoId() == kPseudoIdAfter)
       class_names.Append("::after");
+    else if (pseudo_element->GetPseudoId() == kPseudoIdMarker)
+      class_names.Append("::marker");
   }
   if (!class_names.IsEmpty())
     element_info->setString("className", class_names.ToString());
@@ -287,25 +289,30 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
   if (!layout_object || !containing_view)
     return element_info;
 
-  if (auto* context = element->GetDisplayLockContext()) {
-    if (context->IsLocked()) {
-      // If it's a locked element, use the values from the locked frame rect.
-      // TODO(vmpstr): Verify that these values are correct here.
-      element_info->setString(
-          "nodeWidth",
-          String::Number(context->GetLockedContentLogicalWidth().ToDouble()));
-      element_info->setString(
-          "nodeHeight",
-          String::Number(context->GetLockedContentLogicalHeight().ToDouble()));
-    }
-    return element_info;
-  }
+  // if (auto* context = element->GetDisplayLockContext()) {
+  //  if (context->IsLocked()) {
+  //    // If it's a locked element, use the values from the locked frame rect.
+  //    // TODO(vmpstr): Verify that these values are correct here.
+  //    element_info->setString(
+  //        "nodeWidth",
+  //        String::Number(context->GetLockedContentLogicalWidth().ToDouble()));
+  //    element_info->setString(
+  //        "nodeHeight",
+  //        String::Number(context->GetLockedContentLogicalHeight().ToDouble()));
+  //  }
+  //  return element_info;
+  //}
 
   // layoutObject the getBoundingClientRect() data in the tooltip
   // to be consistent with the rulers (see http://crbug.com/262338).
   DOMRect* bounding_box = element->getBoundingClientRect();
   element_info->setString("nodeWidth", String::Number(bounding_box->width()));
   element_info->setString("nodeHeight", String::Number(bounding_box->height()));
+
+  element_info->setBoolean("isKeyboardFocusable",
+                           element->IsKeyboardFocusable());
+  element_info->setString("accessibleName", element->computedName());
+  element_info->setString("accessibleRole", element->computedRole());
   return element_info;
 }
 
@@ -335,28 +342,41 @@ std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
   const auto& rows = layout_grid->RowPositions();
   const auto& columns = layout_grid->ColumnPositions();
 
-  PathBuilder cell_builder;
   auto row_gap =
       layout_grid->GridGap(kForRows) + layout_grid->GridItemOffset(kForRows);
   auto column_gap = layout_grid->GridGap(kForColumns) +
                     layout_grid->GridItemOffset(kForColumns);
 
+  PathBuilder row_builder;
+  LayoutUnit row_left = columns.front();
+  LayoutUnit row_width = columns.back() - columns.front();
   for (size_t i = 1; i < rows.size(); ++i) {
-    for (size_t j = 1; j < columns.size(); ++j) {
-      PhysicalOffset position(columns.at(j - 1), rows.at(i - 1));
-      PhysicalSize size(columns.at(j) - columns.at(j - 1),
-                        rows.at(i) - rows.at(i - 1));
-      if (i != rows.size() - 1)
-        size.height -= row_gap;
-      if (j != columns.size() - 1)
-        size.width -= column_gap;
-      PhysicalRect cell(position, size);
-      FloatQuad cell_quad = layout_grid->LocalRectToAbsoluteQuad(cell);
-      FrameQuadToViewport(containing_view, cell_quad);
-      cell_builder.AppendPath(QuadToPath(cell_quad), scale);
-    }
+    PhysicalOffset position(row_left, rows.at(i - 1));
+    PhysicalSize size(row_width, rows.at(i) - rows.at(i - 1));
+    if (i != rows.size() - 1)
+      size.height -= row_gap;
+    PhysicalRect row(position, size);
+    FloatQuad row_quad = layout_grid->LocalRectToAbsoluteQuad(row);
+    FrameQuadToViewport(containing_view, row_quad);
+    row_builder.AppendPath(QuadToPath(row_quad), scale);
   }
-  grid_info->setValue("cells", cell_builder.Release());
+  grid_info->setValue("rows", row_builder.Release());
+
+  PathBuilder column_builder;
+  LayoutUnit column_top = rows.front();
+  LayoutUnit column_height = rows.back() - rows.front();
+  for (size_t i = 1; i < columns.size(); ++i) {
+    PhysicalOffset position(columns.at(i - 1), column_top);
+    PhysicalSize size(columns.at(i) - columns.at(i - 1), column_height);
+    if (i != columns.size() - 1)
+      size.width -= column_gap;
+    PhysicalRect column(position, size);
+    FloatQuad column_quad = layout_grid->LocalRectToAbsoluteQuad(column);
+    FrameQuadToViewport(containing_view, column_quad);
+    column_builder.AppendPath(QuadToPath(column_quad), scale);
+  }
+  grid_info->setValue("columns", column_builder.Release());
+
   grid_info->setString("color", color.Serialized());
   grid_info->setBoolean("isPrimaryGrid", isPrimary);
   return grid_info;
@@ -448,8 +468,10 @@ InspectorHighlight::InspectorHighlight(
       scale_(1.f) {
   DCHECK(!DisplayLockUtilities::NearestLockedExclusiveAncestor(*node));
   LocalFrameView* frame_view = node->GetDocument().View();
-  if (frame_view)
-    scale_ = 1.f / frame_view->GetChromeClient()->WindowToViewportScalar(1.f);
+  if (frame_view) {
+    scale_ = 1.f / frame_view->GetChromeClient()->WindowToViewportScalar(
+                       &frame_view->GetFrame(), 1.f);
+  }
   AppendPathsForShapeOutside(node, highlight_config);
   AppendNodeHighlight(node, highlight_config);
   auto* text_node = DynamicTo<Text>(node);
@@ -475,7 +497,8 @@ void InspectorHighlight::AppendDistanceInfo(Node* node) {
   boxes_ = std::make_unique<protocol::Array<protocol::Array<double>>>();
   computed_style_ = protocol::DictionaryValue::create();
 
-  node->GetDocument().EnsurePaintLocationDataValidForNode(node);
+  node->GetDocument().EnsurePaintLocationDataValidForNode(
+      node, DocumentUpdateReason::kInspector);
   LayoutObject* layout_object = node->GetLayoutObject();
   if (!layout_object)
     return;
@@ -484,7 +507,8 @@ void InspectorHighlight::AppendDistanceInfo(Node* node) {
       MakeGarbageCollected<CSSComputedStyleDeclaration>(node, true);
   for (size_t i = 0; i < style->length(); ++i) {
     AtomicString name(style->item(i));
-    const CSSValue* value = style->GetPropertyCSSValue(cssPropertyID(name));
+    const CSSValue* value = style->GetPropertyCSSValue(
+        cssPropertyID(node->GetExecutionContext(), name));
     if (!value)
       continue;
     if (value->IsColorValue()) {
@@ -536,7 +560,7 @@ void InspectorHighlight::VisitAndCollectDistanceInfo(
     PseudoId pseudo_id,
     LayoutObject* layout_object) {
   protocol::DOM::PseudoType pseudo_type;
-  if (!InspectorDOMAgent::GetPseudoElementType(pseudo_id, &pseudo_type))
+  if (pseudo_id == kPseudoIdNone)
     return;
   for (LayoutObject* child = layout_object->SlowFirstChild(); child;
        child = child->NextSibling()) {
@@ -703,7 +727,8 @@ bool InspectorHighlight::GetBoxModel(
     Node* node,
     std::unique_ptr<protocol::DOM::BoxModel>* model,
     bool use_absolute_zoom) {
-  node->GetDocument().EnsurePaintLocationDataValidForNode(node);
+  node->GetDocument().EnsurePaintLocationDataValidForNode(
+      node, DocumentUpdateReason::kInspector);
   LayoutObject* layout_object = node->GetLayoutObject();
   LocalFrameView* view = node->GetDocument().View();
   if (!layout_object || !view)

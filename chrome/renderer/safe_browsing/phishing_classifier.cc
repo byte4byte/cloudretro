@@ -23,7 +23,7 @@
 #include "chrome/renderer/safe_browsing/phishing_term_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/phishing_url_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/scorer.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/proto/csd.pb.h"
 #include "content/public/renderer/render_frame.h"
 #include "crypto/sha2.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -38,25 +38,6 @@ namespace safe_browsing {
 
 const float PhishingClassifier::kInvalidScore = -1.0;
 const float PhishingClassifier::kPhishyThreshold = 0.5;
-
-namespace {
-// Used for UMA, do not reorder.
-enum SkipClassificationReason {
-  CLASSIFICATION_PROCEED = 0,
-  DEPRECATED_SKIP_HTTPS = 1,
-  SKIP_NONE_GET = 2,
-  SKIP_SCHEME_NOT_SUPPORTED = 3,
-  SKIP_REASON_MAX
-};
-
-void RecordReasonForSkippingClassificationToUMA(
-    SkipClassificationReason reason) {
-  UMA_HISTOGRAM_ENUMERATION("SBClientPhishing.SkipClassificationReason",
-                            reason,
-                            SKIP_REASON_MAX);
-}
-
-}  // namespace
 
 PhishingClassifier::PhishingClassifier(content::RenderFrame* render_frame,
                                        FeatureExtractorClock* clock)
@@ -127,20 +108,16 @@ void PhishingClassifier::BeginFeatureExtraction() {
   // Currently, we only classify http/https URLs that are GET requests.
   GURL url(frame->GetDocument().Url());
   if (!url.SchemeIsHTTPOrHTTPS()) {
-    RecordReasonForSkippingClassificationToUMA(SKIP_SCHEME_NOT_SUPPORTED);
     RunFailureCallback();
     return;
   }
 
   blink::WebDocumentLoader* document_loader = frame->GetDocumentLoader();
   if (!document_loader || document_loader->HttpMethod().Ascii() != "GET") {
-    if (document_loader)
-      RecordReasonForSkippingClassificationToUMA(SKIP_NONE_GET);
     RunFailureCallback();
     return;
   }
 
-  RecordReasonForSkippingClassificationToUMA(CLASSIFICATION_PROCEED);
   features_.reset(new FeatureMap);
   if (!url_extractor_->ExtractFeatures(url, features_.get())) {
     RunFailureCallback();
@@ -190,7 +167,6 @@ void PhishingClassifier::TermExtractionFinished(bool success) {
     verdict.set_model_version(scorer_->model_version());
     verdict.set_url(main_frame->GetDocument().Url().GetString().Utf8());
     for (const auto& it : features_->features()) {
-      DVLOG(2) << "Feature: " << it.first << " = " << it.second;
       bool result = hashed_features.AddRealFeature(
           crypto::SHA256HashString(it.first), it.second);
       DCHECK(result);
@@ -203,7 +179,7 @@ void PhishingClassifier::TermExtractionFinished(bool success) {
     }
     float score = static_cast<float>(scorer_->ComputeScore(hashed_features));
     verdict.set_client_score(score);
-    verdict.set_is_phishing(score >= kPhishyThreshold);
+    verdict.set_is_phishing(score >= scorer_->threshold_probability());
     RunCallback(verdict);
   } else {
     RunFailureCallback();

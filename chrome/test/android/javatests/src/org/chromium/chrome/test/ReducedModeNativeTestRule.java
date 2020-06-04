@@ -9,15 +9,10 @@ import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
-import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.EmptyBrowserParts;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -47,10 +42,6 @@ public class ReducedModeNativeTestRule implements TestRule {
         return new Statement() {
             @Override
             public void evaluate() throws Throwable {
-                Features.getInstance().enable(ChromeFeatureList.NETWORK_SERVICE);
-                // Unfortunately, Features has already formed the command line at this point. This
-                // forces another redo after we added new flags.
-                Features.ensureCommandLineIsUpToDate();
                 if (mAutoLoadNative) {
                     loadNative();
                 }
@@ -72,12 +63,8 @@ public class ReducedModeNativeTestRule implements TestRule {
             }
         };
         PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
-            try {
-                ChromeBrowserInitializer.getInstance().handlePreNativeStartup(parts);
-                ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
-            } catch (ProcessInitException e) {
-                ChromeApplication.reportStartupErrorAndExit(e);
-            }
+            ChromeBrowserInitializer.getInstance().handlePreNativeStartup(parts);
+            ChromeBrowserInitializer.getInstance().handlePostNativeStartup(true, parts);
         });
         waitForNativeLoaded();
     }
@@ -95,11 +82,9 @@ public class ReducedModeNativeTestRule implements TestRule {
     public void assertOnlyServiceManagerStarted() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             Assert.assertTrue("Native has not been started.",
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                            .isNativeStarted());
+                    BrowserStartupController.getInstance().isNativeStarted());
             Assert.assertFalse("The full browser is started instead of ServiceManager only.",
-                    BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                            .isFullBrowserStarted());
+                    BrowserStartupController.getInstance().isFullBrowserStarted());
         });
     }
 }

@@ -5,27 +5,34 @@
 #import "ios/chrome/browser/ui/qr_scanner/qr_scanner_legacy_coordinator.h"
 
 #include "base/logging.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
-#import "ios/chrome/browser/ui/qr_scanner/qr_scanner_presenting.h"
+#import "ios/chrome/browser/ui/commands/omnibox_commands.h"
 #import "ios/chrome/browser/ui/qr_scanner/qr_scanner_view_controller.h"
-#import "ios/chrome/browser/ui/toolbar/public/omnibox_focuser.h"
+#import "ios/chrome/browser/ui/scanner/scanner_presenting.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface QRScannerLegacyCoordinator ()<QRScannerPresenting>
+@interface QRScannerLegacyCoordinator () <ScannerPresenting>
 
 @property(nonatomic, readwrite, strong) QRScannerViewController* viewController;
 
 @end
 
 @implementation QRScannerLegacyCoordinator
-@synthesize dispatcher = _dispatcher;
 @synthesize viewController = _viewController;
 
 #pragma mark - ChromeCoordinator
+
+- (void)start {
+  DCHECK(self.browser);
+  [self.browser->GetCommandDispatcher()
+      startDispatchingToTarget:self
+                   forSelector:@selector(showQRScanner)];
+}
 
 - (void)stop {
   [super stop];
@@ -33,34 +40,20 @@
     [self.baseViewController dismissViewControllerAnimated:NO completion:nil];
   }
   self.viewController = nil;
-  self.dispatcher = nil;
-}
-
-#pragma mark - Public
-
-- (void)setDispatcher:(CommandDispatcher*)dispatcher {
-  if (dispatcher == self.dispatcher) {
-    return;
-  }
-
-  if (self.dispatcher) {
-    [self.dispatcher stopDispatchingToTarget:self];
-  }
-
-  [dispatcher startDispatchingToTarget:self
-                           forSelector:@selector(showQRScanner)];
-  _dispatcher = dispatcher;
+  [self.browser->GetCommandDispatcher() stopDispatchingToTarget:self];
 }
 
 #pragma mark - Commands
 
 - (void)showQRScanner {
-  DCHECK(self.dispatcher);
-  [static_cast<id<OmniboxFocuser>>(self.dispatcher) cancelOmniboxEdit];
+  DCHECK(self.browser);
+  CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
+  id<OmniboxCommands> handler = HandlerForProtocol(dispatcher, OmniboxCommands);
+  [handler cancelOmniboxEdit];
   self.viewController = [[QRScannerViewController alloc]
       initWithPresentationProvider:self
                        queryLoader:static_cast<id<LoadQueryCommands>>(
-                                       self.dispatcher)];
+                                       self.browser->GetCommandDispatcher())];
   self.viewController.modalPresentationStyle = UIModalPresentationFullScreen;
 
   [self.baseViewController
@@ -71,8 +64,8 @@
 
 #pragma mark - QRScannerPresenting
 
-- (void)dismissQRScannerViewController:(UIViewController*)controller
-                            completion:(void (^)(void))completion {
+- (void)dismissScannerViewController:(UIViewController*)controller
+                          completion:(void (^)(void))completion {
   DCHECK_EQ(self.viewController,
             self.baseViewController.presentedViewController);
   [self.baseViewController dismissViewControllerAnimated:YES

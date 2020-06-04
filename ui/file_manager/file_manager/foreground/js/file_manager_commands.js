@@ -61,6 +61,15 @@ CommandUtil.getCommandEntries = (fileManager, element) => {
     return [element.selectedItem.entry];
   }
 
+  // The event target could still be a descendant of a DirectoryItem element
+  // (e.g. the eject button).
+  if (fileManager.ui.directoryTree.contains(/** @type {Node} */ (element))) {
+    const treeItem = element.closest('.tree-item');
+    if (treeItem && treeItem.entry) {
+      return [treeItem.entry];
+    }
+  }
+
   // File list (cr.ui.List).
   if (element.selectedItems && element.selectedItems.length) {
     const entries = element.selectedItems;
@@ -155,7 +164,7 @@ CommandUtil.canExecuteVisibleOnDriveInNormalAppModeOnly =
 CommandUtil.forceDefaultHandler = (node, commandId) => {
   const doc = node.ownerDocument;
   const command = /** @type {!cr.ui.Command} */ (
-      doc.querySelector('command[id="' + commandId + '"]'));
+      doc.body.querySelector('command[id="' + commandId + '"]'));
   node.addEventListener('keydown', e => {
     if (command.matchesEvent(e)) {
       // Prevent cr.ui.CommandManager of handling it and leave it
@@ -171,7 +180,7 @@ CommandUtil.forceDefaultHandler = (node, commandId) => {
     event.cancelBubble = true;
   });
   node.addEventListener('canExecute', event => {
-    if (event.command.id !== commandId) {
+    if (event.command.id !== commandId || event.target !== node) {
       return;
     }
     event.canExecute = document.queryCommandEnabled(event.command.id);
@@ -442,6 +451,15 @@ class CommandHandler {
     handler.canExecute.call(
         /** @type {Command} */ (handler), event, this.fileManager_);
   }
+
+  /**
+   * Returns command handler by name.
+   * @param {string} name The command name.
+   * @public
+   */
+  static getCommand(name) {
+    return CommandHandler.COMMANDS_[name];
+  }
 }
 
 /**
@@ -544,7 +562,12 @@ CommandHandler.COMMANDS_ = {};
  * Unmounts external drive.
  */
 CommandHandler.COMMANDS_['unmount'] = new class extends Command {
-  execute(event, fileManager) {
+  /**
+   * @param {!Event} event Command event.
+   * @param {!CommandHandlerDeps} fileManager CommandHandlerDeps.
+   * @private
+   */
+  async executeImpl_(event, fileManager) {
     /** @param {VolumeManagerCommon.VolumeType=} opt_volumeType */
     const errorCallback = opt_volumeType => {
       if (opt_volumeType === VolumeManagerCommon.VolumeType.REMOVABLE) {
@@ -554,11 +577,6 @@ CommandHandler.COMMANDS_['unmount'] = new class extends Command {
         fileManager.ui.alertDialog.showHtml(
             '', str('UNMOUNT_PROVIDED_FAILED'), null, null, null);
       }
-    };
-
-    const successCallback = () => {
-      const msg = strf('A11Y_VOLUME_EJECT', label);
-      fileManager.ui.speakA11yMessage(msg);
     };
 
     // Find volumes to unmount.
@@ -587,11 +605,22 @@ CommandHandler.COMMANDS_['unmount'] = new class extends Command {
     }
 
     // Eject volumes of which there may be multiple.
-    for (let i = 0; i < volumes.length; i++) {
-      fileManager.volumeManager.unmount(
-          volumes[i], (i == volumes.length - 1) ? successCallback : () => {},
-          errorCallback.bind(null, volumes[i].volumeType));
-    }
+    const promises = volumes.map(async (volume) => {
+      try {
+        await fileManager.volumeManager.unmount(volume);
+      } catch (error) {
+        console.error(
+            `Cannot unmount '${volume.volumeId}': ${error.stack || error}`);
+        errorCallback(volume.volumeType);
+      }
+    });
+
+    await Promise.all(promises);
+    fileManager.ui.speakA11yMessage(strf('A11Y_VOLUME_EJECT', label));
+  }
+
+  execute(event, fileManager) {
+    this.executeImpl_(event, fileManager);
   }
 
   /** @override */
@@ -599,23 +628,29 @@ CommandHandler.COMMANDS_['unmount'] = new class extends Command {
     const volumeInfo =
         CommandUtil.getElementVolumeInfo(event.target, fileManager);
     const entry = CommandUtil.getCommandEntry(fileManager, event.target);
-    if (!volumeInfo && !entry) {
+
+    let volumeType;
+    if (entry && entry instanceof EntryList) {
+      volumeType = entry.rootType;
+    } else if (volumeInfo) {
+      volumeType = volumeInfo.volumeType;
+    } else {
       event.canExecute = false;
       event.command.setHidden(true);
       return;
     }
 
-    const volumeType =
-        (entry instanceof EntryList) ? entry.rootType : volumeInfo.volumeType;
     event.canExecute =
         (volumeType === VolumeManagerCommon.VolumeType.ARCHIVE ||
          volumeType === VolumeManagerCommon.VolumeType.REMOVABLE ||
-         volumeType === VolumeManagerCommon.VolumeType.PROVIDED);
+         volumeType === VolumeManagerCommon.VolumeType.PROVIDED ||
+         volumeType === VolumeManagerCommon.VolumeType.SMB);
     event.command.setHidden(!event.canExecute);
 
     switch (volumeType) {
       case VolumeManagerCommon.VolumeType.ARCHIVE:
       case VolumeManagerCommon.VolumeType.PROVIDED:
+      case VolumeManagerCommon.VolumeType.SMB:
         event.command.label = str('CLOSE_VOLUME_BUTTON_LABEL');
         break;
       case VolumeManagerCommon.VolumeType.REMOVABLE:
@@ -631,7 +666,15 @@ CommandHandler.COMMANDS_['unmount'] = new class extends Command {
 CommandHandler.COMMANDS_['format'] = new class extends Command {
   execute(event, fileManager) {
     const directoryModel = fileManager.directoryModel;
-    let root = CommandUtil.getCommandEntry(fileManager, event.target);
+    let root;
+    if (fileManager.ui.directoryTree.contains(
+            /** @type {Node} */ (event.target))) {
+      // The command is executed from the directory tree context menu.
+      root = CommandUtil.getCommandEntry(fileManager, event.target);
+    } else {
+      // The command is executed from the gear menu.
+      root = directoryModel.getCurrentDirEntry();
+    }
     // If an entry is not found from the event target, use the current
     // directory. This can happen for the format button for unsupported and
     // unrecognized volumes.
@@ -641,24 +684,23 @@ CommandHandler.COMMANDS_['format'] = new class extends Command {
 
     const volumeInfo = fileManager.volumeManager.getVolumeInfo(assert(root));
     if (volumeInfo) {
-      if (loadTimeData.getBoolean('FORMAT_DIALOG_ENABLED')) {
-        fileManager.ui.formatDialog.showModal(volumeInfo);
-      } else {
-        fileManager.ui.confirmDialog.show(
-            loadTimeData.getString('FORMATTING_WARNING'),
-            chrome.fileManagerPrivate.formatVolume.bind(
-                null, volumeInfo.volumeId,
-                chrome.fileManagerPrivate.FormatFileSystemType.VFAT,
-                'UNTITLED'),
-            null, null);
-      }
+      fileManager.ui.formatDialog.showModal(volumeInfo);
     }
   }
 
   /** @override */
   canExecute(event, fileManager) {
     const directoryModel = fileManager.directoryModel;
-    let root = CommandUtil.getCommandEntry(fileManager, event.target);
+    let root;
+    if (fileManager.ui.directoryTree.contains(
+            /** @type {Node} */ (event.target))) {
+      // The command is executed from the directory tree context menu.
+      root = CommandUtil.getCommandEntry(fileManager, event.target);
+    } else {
+      // The command is executed from the gear menu.
+      root = directoryModel.getCurrentDirEntry();
+    }
+
     // |root| is null for unrecognized volumes. Enable format command for such
     // volumes.
     const isUnrecognizedVolume = (root == null);
@@ -669,6 +711,8 @@ CommandHandler.COMMANDS_['format'] = new class extends Command {
     const location = root && fileManager.volumeManager.getLocationInfo(root);
     const writable = location && !location.isReadOnly;
     const isRoot = location && location.isRootEntry;
+
+    // Enable the command if this is a removable device (e.g. a USB drive).
     const removableRoot = location && isRoot &&
         location.rootType === VolumeManagerCommon.RootType.REMOVABLE;
     event.canExecute = removableRoot && (isUnrecognizedVolume || writable);
@@ -819,7 +863,7 @@ CommandHandler.COMMANDS_['new-folder'] = new class extends Command {
  */
 CommandHandler.COMMANDS_['new-window'] = new class extends Command {
   execute(event, fileManager) {
-    fileManager.backgroundPage.launcher.launchFileManager({
+    fileManager.launchFileManager({
       currentDirectoryURL: fileManager.getCurrentDirectoryEntry() &&
           fileManager.getCurrentDirectoryEntry().toURL()
     });
@@ -840,12 +884,15 @@ CommandHandler.COMMANDS_['select-all'] = new class extends Command {
 
   /** @override */
   canExecute(event, fileManager) {
+    // Check we can select multiple items.
+    const multipleSelect =
+        fileManager.directoryModel.getFileListSelection().multiple;
     // Check we are not inside an input element (e.g. the search box).
     const inputElementActive =
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement ||
         document.activeElement.tagName.toLowerCase() === 'cr-input';
-    event.canExecute = !inputElementActive &&
+    event.canExecute = multipleSelect && !inputElementActive &&
         fileManager.directoryModel.getFileList().length > 0;
   }
 };
@@ -926,29 +973,17 @@ CommandHandler.COMMANDS_['delete'] = new class extends Command {
   execute(event, fileManager) {
     const entries = CommandUtil.getCommandEntries(fileManager, event.target);
 
-    // Execute might be called without a call of canExecute method,
-    // e.g. called directly from code. Double check here not to delete
-    // undeletable entries.
-    if (!entries.every(CommandUtil.shouldShowMenuItemsForEntry.bind(
-            null, fileManager.volumeManager)) ||
-        this.containsReadOnlyEntry_(entries, fileManager)) {
-      return;
-    }
-
-    const message = entries.length === 1 ?
-        strf('GALLERY_CONFIRM_DELETE_ONE', entries[0].name) :
-        strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
-
-    fileManager.ui.deleteConfirmDialog.show(message, () => {
-      fileManager.fileOperationManager.deleteEntries(entries);
-    }, null, null);
+    // Execute might be called without a call of canExecute method, e.g.,
+    // called directly from code, crbug.com/509483. See toolbar controller
+    // delete button handling, for an example.
+    this.deleteEntries(entries, fileManager);
   }
 
   /** @override */
   canExecute(event, fileManager) {
     const entries = CommandUtil.getCommandEntries(fileManager, event.target);
 
-    // If entries contain fake or root entry, hide delete option.
+    // If entries contain fake or root entry, remove delete option.
     if (!entries.every(CommandUtil.shouldShowMenuItemsForEntry.bind(
             null, fileManager.volumeManager))) {
       event.canExecute = false;
@@ -956,23 +991,88 @@ CommandHandler.COMMANDS_['delete'] = new class extends Command {
       return;
     }
 
-    event.canExecute = entries.length > 0 &&
-        !this.containsReadOnlyEntry_(entries, fileManager) &&
-        !fileManager.directoryModel.isReadOnly() &&
-        CommandUtil.hasCapability(entries, 'canDelete');
+    event.canExecute = this.canDeleteEntries_(entries, fileManager);
 
-    // Hide if there isn't anything selected, meaning user clicked in an empty
+    // Remove if nothing is selected, e.g. user clicked in an empty
     // space in the file list.
     const noEntries = entries.length === 0;
     event.command.setHidden(noEntries);
   }
 
   /**
-   * Returns True if any entry belongs to a read-only volume or is
+   * Delete the entries (if the entries can be deleted).
+   * @param {!Array<!Entry>} entries
+   * @param {!CommandHandlerDeps} fileManager
+   * @param {?FilesConfirmDialog} dialog An optional delete confirm dialog.
+   *    The default delete confirm dialog will be used if |dialog| is null.
+   * @public
+   */
+  deleteEntries(entries, fileManager, dialog = null) {
+    // Verify that the entries are not fake or root entries, and that they
+    // can be deleted.
+    if (!entries.every(CommandUtil.shouldShowMenuItemsForEntry.bind(
+            null, fileManager.volumeManager)) ||
+        !this.canDeleteEntries_(entries, fileManager)) {
+      return;
+    }
+
+    const message = entries.length === 1 ?
+        strf('GALLERY_CONFIRM_DELETE_ONE', entries[0].name) :
+        strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
+
+    if (!dialog) {
+      dialog = fileManager.ui.deleteConfirmDialog;
+    } else if (dialog.showModalElement) {
+      dialog.showModalElement();
+    }
+
+    dialog.show(message, () => {
+      dialog.doneCallback && dialog.doneCallback();
+      fileManager.fileOperationManager.deleteEntries(entries);
+    }, dialog.doneCallback, null);
+  }
+
+  /**
+   * Returns true if all entries can be deleted. Note: This does not check for
+   * root or fake entries.
+   * @param {!Array<!Entry>} entries
+   * @param {!CommandHandlerDeps} fileManager
+   * @return {boolean}
+   * @private
+   */
+  canDeleteEntries_(entries, fileManager) {
+    return entries.length > 0 &&
+        !this.containsReadOnlyEntry_(entries, fileManager) &&
+        !fileManager.directoryModel.isReadOnly() &&
+        CommandUtil.hasCapability(entries, 'canDelete');
+  }
+
+  /**
+   * Returns True if entries can be deleted.
+   * @param {!Array<!Entry>} entries
+   * @param {!CommandHandlerDeps} fileManager
+   * @return {boolean}
+   * @public
+   */
+  canDeleteEntries(entries, fileManager) {
+    // Verify that the entries are not fake or root entries, and that they
+    // can be deleted.
+    if (!entries.every(CommandUtil.shouldShowMenuItemsForEntry.bind(
+            null, fileManager.volumeManager)) ||
+        !this.canDeleteEntries_(entries, fileManager)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Returns true if any entry belongs to a read-only volume or is
    * forced to be read-only like MyFiles>Downloads.
    * @param {!Array<!Entry>} entries
    * @param {!CommandHandlerDeps} fileManager
-   * @return {boolean} True if entries contain read only entry.
+   * @return {boolean}
+   * @private
    */
   containsReadOnlyEntry_(entries, fileManager) {
     return entries.some(entry => {
@@ -1305,7 +1405,7 @@ CommandHandler.COMMANDS_['volume-help'] = new class extends Command {
  */
 CommandHandler.COMMANDS_['send-feedback'] = new class extends Command {
   execute(event, fileManager) {
-    let message = {
+    const message = {
       categoryTag: 'chromeos-files-app',
       requestFeedback: true,
       feedbackInfo: {
@@ -1464,7 +1564,7 @@ CommandHandler.COMMANDS_['get-info'] = new class extends Command {
       return;
     }
 
-    event.canExecute = entries.length === 1;
+    event.canExecute = entries.length >= 1;
     event.command.setHidden(false);
   }
 };
@@ -1479,7 +1579,7 @@ CommandHandler.COMMANDS_['search'] = new class extends Command {
 
     // Focus and unhide the search box.
     const element = fileManager.document.querySelector('#search-box cr-input');
-    element.hidden = false;
+    element.disabled = false;
     (/** @type {!CrInputElement} */ (element)).select();
   }
 
@@ -2274,7 +2374,9 @@ CommandHandler.COMMANDS_['open-gear-menu'] = new class extends Command {
  */
 CommandHandler.COMMANDS_['focus-action-bar'] = new class extends Command {
   execute(event, fileManager) {
-    fileManager.ui.actionbar.querySelector('button:not([hidden])').focus();
+    fileManager.ui.actionbar
+        .querySelector('button:not([hidden]), cr-button:not([hidden])')
+        .focus();
   }
 };
 
@@ -2405,6 +2507,27 @@ CommandHandler.COMMANDS_['set-wallpaper'] = new class extends Command {
 CommandHandler.COMMANDS_['volume-storage'] = new class extends Command {
   execute(event, fileManager) {
     chrome.fileManagerPrivate.openSettingsSubpage('storage');
+  }
+
+  /** @override */
+  canExecute(event, fileManager) {
+    event.canExecute = false;
+    const currentVolumeInfo = fileManager.directoryModel.getCurrentVolumeInfo();
+    if (!currentVolumeInfo) {
+      return;
+    }
+
+    // Can execute only for local file systems.
+    if (currentVolumeInfo.volumeType ==
+            VolumeManagerCommon.VolumeType.MY_FILES ||
+        currentVolumeInfo.volumeType ==
+            VolumeManagerCommon.VolumeType.DOWNLOADS ||
+        currentVolumeInfo.volumeType ==
+            VolumeManagerCommon.VolumeType.CROSTINI ||
+        currentVolumeInfo.volumeType ==
+            VolumeManagerCommon.VolumeType.ANDROID_FILES) {
+      event.canExecute = true;
+    }
   }
 };
 

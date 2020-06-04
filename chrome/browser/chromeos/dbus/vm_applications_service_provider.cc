@@ -8,12 +8,13 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "chrome/browser/chromeos/crostini/crostini_features.h"
 #include "chrome/browser/chromeos/crostini/crostini_mime_types_service.h"
 #include "chrome/browser/chromeos/crostini/crostini_mime_types_service_factory.h"
-#include "chrome/browser/chromeos/crostini/crostini_registry_service.h"
-#include "chrome/browser/chromeos/crostini/crostini_registry_service_factory.h"
 #include "chrome/browser/chromeos/crostini/crostini_terminal.h"
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
+#include "chrome/browser/chromeos/guest_os/guest_os_registry_service.h"
+#include "chrome/browser/chromeos/guest_os/guest_os_registry_service_factory.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chromeos/dbus/vm_applications/apps.pb.h"
@@ -23,8 +24,7 @@
 
 namespace chromeos {
 
-VmApplicationsServiceProvider::VmApplicationsServiceProvider()
-    : weak_ptr_factory_(this) {}
+VmApplicationsServiceProvider::VmApplicationsServiceProvider() {}
 
 VmApplicationsServiceProvider::~VmApplicationsServiceProvider() = default;
 
@@ -35,22 +35,22 @@ void VmApplicationsServiceProvider::Start(
       vm_tools::apps::kVmApplicationsServiceUpdateApplicationListMethod,
       base::BindRepeating(&VmApplicationsServiceProvider::UpdateApplicationList,
                           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&VmApplicationsServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&VmApplicationsServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
   exported_object->ExportMethod(
       vm_tools::apps::kVmApplicationsServiceInterface,
       vm_tools::apps::kVmApplicationsServiceLaunchTerminalMethod,
       base::BindRepeating(&VmApplicationsServiceProvider::LaunchTerminal,
                           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&VmApplicationsServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&VmApplicationsServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
   exported_object->ExportMethod(
       vm_tools::apps::kVmApplicationsServiceInterface,
       vm_tools::apps::kVmApplicationsServiceUpdateMimeTypesMethod,
       base::BindRepeating(&VmApplicationsServiceProvider::UpdateMimeTypes,
                           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&VmApplicationsServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&VmApplicationsServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void VmApplicationsServiceProvider::OnExported(
@@ -72,19 +72,20 @@ void VmApplicationsServiceProvider::UpdateApplicationList(
     constexpr char error_message[] =
         "Unable to parse ApplicationList from message";
     LOG(ERROR) << error_message;
-    response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-        method_call, DBUS_ERROR_INVALID_ARGS, error_message));
+    std::move(response_sender)
+        .Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, DBUS_ERROR_INVALID_ARGS, error_message));
     return;
   }
 
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
-  if (crostini::IsCrostiniEnabled(profile)) {
-    crostini::CrostiniRegistryService* registry_service =
-        crostini::CrostiniRegistryServiceFactory::GetForProfile(profile);
+  if (crostini::CrostiniFeatures::Get()->IsEnabled(profile)) {
+    auto* registry_service =
+        guest_os::GuestOsRegistryServiceFactory::GetForProfile(profile);
     registry_service->UpdateApplicationList(request);
   }
 
-  response_sender.Run(dbus::Response::FromMethodCall(method_call));
+  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
 }
 
 void VmApplicationsServiceProvider::LaunchTerminal(
@@ -98,13 +99,14 @@ void VmApplicationsServiceProvider::LaunchTerminal(
     constexpr char error_message[] =
         "Unable to parse TerminalParams from message";
     LOG(ERROR) << error_message;
-    response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-        method_call, DBUS_ERROR_INVALID_ARGS, error_message));
+    std::move(response_sender)
+        .Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, DBUS_ERROR_INVALID_ARGS, error_message));
     return;
   }
 
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
-  if (crostini::IsCrostiniEnabled(profile) &&
+  if (crostini::CrostiniFeatures::Get()->IsEnabled(profile) &&
       request.owner_id() == crostini::CryptohomeIdForProfile(profile)) {
     crostini::LaunchContainerTerminal(
         profile, request.vm_name(), request.container_name(),
@@ -112,7 +114,7 @@ void VmApplicationsServiceProvider::LaunchTerminal(
                                  request.params().end()));
   }
 
-  response_sender.Run(dbus::Response::FromMethodCall(method_call));
+  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
 }
 
 void VmApplicationsServiceProvider::UpdateMimeTypes(
@@ -125,19 +127,20 @@ void VmApplicationsServiceProvider::UpdateMimeTypes(
   if (!reader.PopArrayOfBytesAsProto(&request)) {
     constexpr char error_message[] = "Unable to parse MimeTypes from message";
     LOG(ERROR) << error_message;
-    response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-        method_call, DBUS_ERROR_INVALID_ARGS, error_message));
+    std::move(response_sender)
+        .Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, DBUS_ERROR_INVALID_ARGS, error_message));
     return;
   }
 
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
-  if (crostini::IsCrostiniEnabled(profile)) {
+  if (crostini::CrostiniFeatures::Get()->IsEnabled(profile)) {
     crostini::CrostiniMimeTypesService* mime_types_service =
         crostini::CrostiniMimeTypesServiceFactory::GetForProfile(profile);
     mime_types_service->UpdateMimeTypes(request);
   }
 
-  response_sender.Run(dbus::Response::FromMethodCall(method_call));
+  std::move(response_sender).Run(dbus::Response::FromMethodCall(method_call));
 }
 
 }  // namespace chromeos

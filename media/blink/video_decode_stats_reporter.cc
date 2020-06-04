@@ -11,12 +11,12 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "media/capabilities/bucket_utility.h"
-#include "media/mojo/interfaces/media_types.mojom.h"
+#include "media/mojo/mojom/media_types.mojom.h"
 
 namespace media {
 
 VideoDecodeStatsReporter::VideoDecodeStatsReporter(
-    mojom::VideoDecodeStatsRecorderPtr recorder_ptr,
+    mojo::PendingRemote<mojom::VideoDecodeStatsRecorder> recorder_remote,
     GetPipelineStatsCB get_pipeline_stats_cb,
     VideoCodecProfile codec_profile,
     const gfx::Size& natural_size,
@@ -28,7 +28,7 @@ VideoDecodeStatsReporter::VideoDecodeStatsReporter(
           base::TimeDelta::FromMilliseconds(kRecordingIntervalMs)),
       kTinyFpsWindowDuration(
           base::TimeDelta::FromMilliseconds(kTinyFpsWindowMs)),
-      recorder_ptr_(std::move(recorder_ptr)),
+      recorder_remote_(std::move(recorder_remote)),
       get_pipeline_stats_cb_(std::move(get_pipeline_stats_cb)),
       codec_profile_(codec_profile),
       natural_size_(GetSizeBucket(natural_size)),
@@ -37,12 +37,12 @@ VideoDecodeStatsReporter::VideoDecodeStatsReporter(
                                        : false),
       tick_clock_(tick_clock),
       stats_cb_timer_(tick_clock_) {
-  DCHECK(recorder_ptr_.is_bound());
+  DCHECK(recorder_remote_.is_bound());
   DCHECK(get_pipeline_stats_cb_);
   DCHECK_NE(VIDEO_CODEC_PROFILE_UNKNOWN, codec_profile_);
   DCHECK(!cdm_config || !key_system_.empty());
 
-  recorder_ptr_.set_connection_error_handler(base::BindRepeating(
+  recorder_remote_.set_disconnect_handler(base::BindOnce(
       &VideoDecodeStatsReporter::OnIpcConnectionError, base::Unretained(this)));
   stats_cb_timer_.SetTaskRunner(task_runner);
 }
@@ -157,7 +157,7 @@ void VideoDecodeStatsReporter::StartNewRecord(
       codec_profile_, natural_size_, last_observed_fps_, key_system_,
       use_hw_secure_codecs);
 
-  recorder_ptr_->StartNewRecord(std::move(features));
+  recorder_remote_->StartNewRecord(std::move(features));
 }
 
 void VideoDecodeStatsReporter::ResetFrameRateState() {
@@ -188,7 +188,6 @@ bool VideoDecodeStatsReporter::UpdateDecodeProgress(
     const PipelineStatistics& stats) {
   DCHECK_GE(stats.video_frames_decoded, last_frames_decoded_);
   DCHECK_GE(stats.video_frames_dropped, last_frames_dropped_);
-  DCHECK_GE(stats.video_frames_decoded, stats.video_frames_dropped);
 
   // Check if additional frames decoded since last stats update.
   if (stats.video_frames_decoded == last_frames_decoded_) {
@@ -309,17 +308,26 @@ void VideoDecodeStatsReporter::UpdateStats() {
   if (stats.video_frames_decoded == frames_decoded_offset_)
     return;
 
+  // Cap all counts to |frames_decoded|. We should never exceed this cap, but
+  // we have some hard to track bug where we accumulate 1 extra dropped frame
+  // in a tiny minority of cases. Dropping all frames is a strong signal we
+  // don't want to discard, so just sanitize the data and carry on.
+  uint32_t frames_decoded = stats.video_frames_decoded - frames_decoded_offset_;
+  uint32_t frames_dropped = std::min(
+      stats.video_frames_dropped - frames_dropped_offset_, frames_decoded);
+  uint32_t frames_power_efficient =
+      std::min(stats.video_frames_decoded_power_efficient -
+                   frames_decoded_power_efficient_offset_,
+               frames_decoded);
+
   mojom::PredictionTargetsPtr targets = mojom::PredictionTargets::New(
-      stats.video_frames_decoded - frames_decoded_offset_,
-      stats.video_frames_dropped - frames_dropped_offset_,
-      stats.video_frames_decoded_power_efficient -
-          frames_decoded_power_efficient_offset_);
+      frames_decoded, frames_dropped, frames_power_efficient);
 
   DVLOG(2) << __func__ << " Recording -- dropped:" << targets->frames_dropped
            << "/" << targets->frames_decoded
            << " power efficient:" << targets->frames_power_efficient << "/"
            << targets->frames_decoded;
-  recorder_ptr_->UpdateRecord(std::move(targets));
+  recorder_remote_->UpdateRecord(std::move(targets));
 }
 
 }  // namespace media

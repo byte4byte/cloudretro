@@ -323,11 +323,11 @@ bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
                                             SyncCycle* cycle,
                                             const ClientToServerMessage& msg,
                                             ClientToServerResponse* response) {
-  ServerConnectionManager::PostBufferParams params;
   DCHECK(msg.has_protocol_version());
   DCHECK_EQ(msg.protocol_version(),
             ClientToServerMessage::default_instance().protocol_version());
-  msg.SerializeToString(&params.buffer_in);
+  std::string buffer_in;
+  msg.SerializeToString(&buffer_in);
 
   UMA_HISTOGRAM_ENUMERATION("Sync.PostedClientToServerMessage",
                             msg.message_contents(),
@@ -346,21 +346,23 @@ bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
           progress_marker.token();
       UMA_HISTOGRAM_ENUMERATION(
           "Sync.PostedDataTypeGetUpdatesRequest",
-          ModelTypeToHistogramInt(GetModelTypeFromSpecificsFieldNumber(
-              progress_marker.data_type_id())),
-          static_cast<int>(ModelType::NUM_ENTRIES));
+          ModelTypeHistogramValue(GetModelTypeFromSpecificsFieldNumber(
+              progress_marker.data_type_id())));
     }
   }
 
   const base::Time start_time = base::Time::Now();
 
-  // Fills in params.buffer_out and params.response.
-  if (!scm->PostBufferWithCachedAuth(&params)) {
-    LOG(WARNING) << "Error posting from syncer:" << params.response;
+  std::string buffer_out;
+  HttpResponse http_response = HttpResponse::Uninitialized();
+
+  // Fills in buffer_out and http_response.
+  if (!scm->PostBufferWithCachedAuth(buffer_in, &buffer_out, &http_response)) {
+    LOG(WARNING) << "Error posting from syncer:" << http_response;
     return false;
   }
 
-  if (!response->ParseFromString(params.buffer_out)) {
+  if (!response->ParseFromString(buffer_out)) {
     DLOG(WARNING) << "Error parsing response from sync server";
     return false;
   }
@@ -420,7 +422,6 @@ SyncerError SyncerProtoUtil::PostClientToServerMessage(
   DCHECK(msg.has_api_key());
   DCHECK(msg.has_client_status());
   DCHECK(msg.has_invalidator_client_id());
-  DCHECK(!msg.get_updates().has_from_timestamp());  // Deprecated.
 
   LogClientToServerMessage(msg);
   if (!PostAndProcessHeaders(cycle->context()->connection_manager(), cycle, msg,
@@ -613,12 +614,12 @@ std::string SyncerProtoUtil::SyncEntityDebugString(
       "d (%s), "
       "ctime: %" PRId64
       "d (%s), "
-      "name: %s, sync_timestamp: %" PRId64
+      "name: %s, "
       "d, "
       "%s ",
       entry.id_string().c_str(), entry.parent_id_string().c_str(),
       entry.version(), entry.mtime(), mtime_str.c_str(), entry.ctime(),
-      ctime_str.c_str(), entry.name().c_str(), entry.sync_timestamp(),
+      ctime_str.c_str(), entry.name().c_str(),
       entry.deleted() ? "deleted, " : "");
 }
 

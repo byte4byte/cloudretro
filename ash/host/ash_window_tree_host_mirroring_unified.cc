@@ -37,8 +37,8 @@ AshWindowTreeHostMirroringUnified::GetRootTransformForLocalEventCoordinates()
     DCHECK(display);
     // Undo the translation in the root window transform, since this transform
     // should be applied on local points to this host.
-    trans.Translate(SkIntToMScalar(display->bounds().x()),
-                    SkIntToMScalar(display->bounds().y()));
+    trans.Translate(SkIntToScalar(display->bounds().x()),
+                    SkIntToScalar(display->bounds().y()));
   }
 
   return trans;
@@ -70,6 +70,10 @@ void AshWindowTreeHostMirroringUnified::PrepareForShutdown() {
   is_shutting_down_ = true;
 
   AshWindowTreeHostPlatform::PrepareForShutdown();
+}
+
+void AshWindowTreeHostMirroringUnified::OnMouseEnter() {
+  // No logical display change in unified desktop mode,so do nothing.
 }
 
 }  // namespace ash

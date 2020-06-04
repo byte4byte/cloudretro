@@ -15,6 +15,8 @@ animationIterationCount
 animationName
 animationPlayState
 animationTimingFunction
+appearance
+aspectRatio
 backdropFilter
 backfaceVisibility
 background
@@ -107,6 +109,7 @@ color
 colorInterpolation
 colorInterpolationFilters
 colorRendering
+colorScheme
 columnCount
 columnFill
 columnGap
@@ -118,6 +121,7 @@ columnSpan
 columnWidth
 columns
 contain
+containIntrinsicSize
 content
 counterIncrement
 counterReset
@@ -150,6 +154,7 @@ fontDisplay
 fontFamily
 fontFeatureSettings
 fontKerning
+fontOpticalSizing
 fontSize
 fontSizeAdjust
 fontStretch
@@ -186,6 +191,8 @@ height
 hyphens
 imageOrientation
 imageRendering
+inherits
+initialValue
 inlineSize
 inset
 insetBlock
@@ -228,6 +235,8 @@ markerStart
 mask
 maskSourceType
 maskType
+mathStyle
+mathSuperscriptShiftStyle
 maxBlockSize
 maxHeight
 maxInlineSize
@@ -299,6 +308,7 @@ resize
 right
 rotate
 rowGap
+rubyPosition
 rx
 ry
 scale
@@ -346,6 +356,8 @@ strokeLinejoin
 strokeMiterlimit
 strokeOpacity
 strokeWidth
+subtreeVisibility
+syntax
 tabSize
 tableLayout
 textAlign
@@ -470,14 +482,9 @@ webkitLocale
 webkitLogicalHeight
 webkitLogicalWidth
 webkitMarginAfter
-webkitMarginAfterCollapse
 webkitMarginBefore
-webkitMarginBeforeCollapse
-webkitMarginBottomCollapse
-webkitMarginCollapse
 webkitMarginEnd
 webkitMarginStart
-webkitMarginTopCollapse
 webkitMask
 webkitMaskBoxImage
 webkitMaskBoxImageOutset

@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/arc/input_method_manager/input_connection_impl.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/chromeos/arc/input_method_manager/test_input_method_manager_bridge.h"
 #include "chrome/browser/ui/ash/keyboard/chrome_keyboard_controller_client_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -38,9 +38,8 @@ class DummyInputMethodEngineObserver
   void OnDeactivated(const std::string& engine_id) override {}
   void OnCompositionBoundsChanged(
       const std::vector<gfx::Rect>& bounds) override {}
-  bool IsInterestedInKeyEvent() const override { return true; }
   void OnSurroundingTextChanged(const std::string& engine_id,
-                                const std::string& text,
+                                const base::string16& text,
                                 int cursor_pos,
                                 int anchor_pos,
                                 int offset_pos) override {}
@@ -209,7 +208,7 @@ class InputConnectionImplTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<TestInputMethodManagerBridge> bridge_;
   std::unique_ptr<chromeos::InputMethodEngine> engine_;
   MockTextInputClient text_input_client_;

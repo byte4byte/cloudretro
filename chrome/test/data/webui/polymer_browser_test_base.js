@@ -24,26 +24,11 @@ PolymerTest.prototype = {
   browsePreload: 'chrome://chrome-urls/',
 
   /**
-   * The name of the custom element under test. Should be overridden by
-   * subclasses that are using the HTML imports polyfill and need to wait for
-   * a custom element to be defined before starting the test.
-   * @type {?string}
-   */
-  customElementName: null,
-
-  /**
    * The mocha adapter assumes all tests are async.
    * @override
    * @final
    */
   isAsync: true,
-
-  /**
-   * Old style a11y checks are obsolete. See ../a11y/accessibility_test.js for
-   * the new suggested way.
-   * @override
-   */
-  runAccessibilityChecks: false,
 
   /**
    * Files that need not be compiled.
@@ -93,59 +78,7 @@ PolymerTest.prototype = {
         throw e;
       }
     };
-
-    if (typeof HTMLImports !== 'undefined') {
-      suiteSetup(() => {
-        return new Promise(resolve => {
-                 HTMLImports.whenReady(resolve);
-               })
-            .then(() => {
-              const customElementName = this.customElementName;
-              if (customElementName) {
-                return customElements.whenDefined(customElementName);
-              }
-            });
-      });
-    }
   },
-
-  /** @override */
-  tearDown: function() {
-    // Note: We do this in tearDown() so that we have a chance to stamp all the
-    // dom-if templates, add elements through interaction, etc.
-    PolymerTest.testIronIcons(document.body);
-
-    testing.Test.prototype.tearDown.call(this);
-  }
-};
-
-/**
- * Tests that any iron-icon child of an HTML element has a corresponding
- * non-empty svg element.
- * @param {!HTMLElement} e The element to check the iron icons in.
- */
-PolymerTest.testIronIcons = function(e) {
-  e.querySelectorAll('* /deep/ iron-icon').forEach(function(icon) {
-    // Early return if the src is set instead of the icon, since the tests
-    // below will not work correctly in this case.
-    if (icon.src && !icon.icon) {
-      return;
-    }
-
-    // If the icon isn't set (or is set to ''), then don't test this. Having no
-    // set icon is valid for cases when we don't want to display anything.
-    if (!icon.icon) {
-      var rect = icon.getBoundingClientRect();
-      expectFalse(
-          rect.width * rect.height > 0,
-          'iron-icon with undefined "icon" is visible in the DOM.');
-      return;
-    }
-    var svg = icon.$$('svg');
-    expectTrue(
-        !!svg && svg.innerHTML != '',
-        'icon "' + icon.icon + '" is not present');
-  });
 };
 
 /**
@@ -195,28 +128,4 @@ PolymerTest.clearBody = function() {
   if (vulcanizeDiv) {
     document.body.appendChild(vulcanizeDiv);
   }
-};
-
-/*
- * Waits for queued up tasks to finish before proceeding. Inspired by:
- * https://github.com/Polymer/web-component-tester/blob/master/browser/environment/helpers.js#L97
- */
-PolymerTest.flushTasks = function() {
-  Polymer.dom.flush();
-  // Promises have microtask timing, so we use setTimeout to explicity force a
-  // new task.
-  return new Promise(function(resolve, reject) {
-    window.setTimeout(resolve, 0);
-  });
-};
-
-/**
- * @param {!HTMLElement} element
- * @return {!Promise} Promise that resolves when an afterNextRender()
- *     callback on |element| is run.
- */
-PolymerTest.afterNextRender = function(element) {
-  return new Promise(resolve => {
-    Polymer.RenderStatus.afterNextRender(element, resolve);
-  });
 };

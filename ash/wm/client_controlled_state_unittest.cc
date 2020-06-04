@@ -4,11 +4,12 @@
 
 #include "ash/wm/client_controlled_state.h"
 
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/desks/desks_util.h"
+#include "ash/wm/pip/pip_positioner.h"
 #include "ash/wm/screen_pinning_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -20,7 +21,6 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
 namespace {
 
 constexpr gfx::Rect kInitialBounds(0, 0, 100, 100);
@@ -119,8 +119,8 @@ class ClientControlledStateTest : public AshTestBase {
     params.delegate = widget_delegate_;
 
     widget_ = std::make_unique<views::Widget>();
-    widget_->Init(params);
-    wm::WindowState* window_state = wm::GetWindowState(window());
+    widget_->Init(std::move(params));
+    WindowState* window_state = WindowState::Get(window());
     window_state->set_allow_set_bounds_direct(true);
     auto delegate = std::make_unique<TestClientControlledStateDelegate>();
     state_delegate_ = delegate.get();
@@ -139,7 +139,7 @@ class ClientControlledStateTest : public AshTestBase {
 
  protected:
   aura::Window* window() { return widget_->GetNativeWindow(); }
-  WindowState* window_state() { return GetWindowState(window()); }
+  WindowState* window_state() { return WindowState::Get(window()); }
   ClientControlledState* state() { return state_; }
   TestClientControlledStateDelegate* delegate() { return state_delegate_; }
   views::Widget* widget() { return widget_.get(); }
@@ -385,7 +385,7 @@ TEST_F(ClientControlledStateTest, SnapInSecondaryDisplay) {
   window_state()->OnWMEvent(&snap_left_event);
 
   EXPECT_EQ(second_display_id, delegate()->display_id());
-  EXPECT_EQ(gfx::Rect(0, 0, 300, 500 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(0, 0, 300, 500 - ShelfConfig::Get()->shelf_size()),
             delegate()->requested_bounds());
 
   state()->EnterNextState(window_state(), delegate()->new_state());
@@ -396,7 +396,7 @@ TEST_F(ClientControlledStateTest, SnapInSecondaryDisplay) {
   window()->SetBoundsInScreen(delegate()->requested_bounds(), first_display);
   state()->set_bounds_locally(false);
   EXPECT_EQ(first_display.id(), delegate()->display_id());
-  EXPECT_EQ(gfx::Rect(0, 0, 400, 600 - ShelfConstants::shelf_size()),
+  EXPECT_EQ(gfx::Rect(0, 0, 400, 600 - ShelfConfig::Get()->shelf_size()),
             delegate()->requested_bounds());
 }
 
@@ -444,8 +444,7 @@ TEST_F(ClientControlledStateTest, Pinned) {
 
   // Two windows cannot be pinned simultaneously.
   auto widget2 = CreateTestWidget();
-  WindowState* window_state_2 =
-      ::ash::wm::GetWindowState(widget2->GetNativeWindow());
+  WindowState* window_state_2 = WindowState::Get(widget2->GetNativeWindow());
   window_state_2->OnWMEvent(&pin_event);
   EXPECT_TRUE(window_state_2->IsPinned());
   EXPECT_TRUE(GetScreenPinningController()->IsPinned());
@@ -499,8 +498,7 @@ TEST_F(ClientControlledStateTest, TrustedPinnedBasic) {
 
   // Two windows cannot be trusted-pinned simultaneously.
   auto widget2 = CreateTestWidget();
-  WindowState* window_state_2 =
-      ::ash::wm::GetWindowState(widget2->GetNativeWindow());
+  WindowState* window_state_2 = WindowState::Get(widget2->GetNativeWindow());
   window_state_2->OnWMEvent(&trusted_pin_event);
   EXPECT_TRUE(window_state_2->IsTrustedPinned());
   EXPECT_TRUE(GetScreenPinningController()->IsPinned());
@@ -532,7 +530,7 @@ TEST_F(ClientControlledStateTest, MoveWindowToDisplay) {
   const int64_t second_display_id = screen->GetAllDisplays()[1].id();
   EXPECT_EQ(first_display_id, screen->GetDisplayNearestWindow(window()).id());
 
-  MoveWindowToDisplay(window(), second_display_id);
+  window_util::MoveWindowToDisplay(window(), second_display_id);
 
   // Make sure that the boundsChange request has correct destination
   // information.
@@ -554,31 +552,43 @@ TEST_F(ClientControlledStateTest, MoveWindowToDisplayOutOfBounds) {
   const int64_t second_display_id = screen->GetAllDisplays()[1].id();
   EXPECT_EQ(first_display_id, screen->GetDisplayNearestWindow(window()).id());
 
-  MoveWindowToDisplay(window(), second_display_id);
+  window_util::MoveWindowToDisplay(window(), second_display_id);
 
   // Make sure that the boundsChange request has correct destination
   // information.
   EXPECT_EQ(second_display_id, delegate()->display_id());
   // The bounds is constrained by
-  // |wm::AdjustBoundsToEnsureMinimumWindowVisibility| in the secondary
+  // |AdjustBoundsToEnsureMinimumWindowVisibility| in the secondary
   // display.
   EXPECT_EQ(gfx::Rect(475, 0, 100, 200), delegate()->requested_bounds());
 }
 
 TEST_F(ClientControlledStateTest, HandleBoundsEventsUpdatesPipRestoreBounds) {
-  state()->EnterNextState(window_state(), ash::WindowStateType::kPip);
+  state()->EnterNextState(window_state(), WindowStateType::kPip);
 
   EXPECT_TRUE(window_state()->IsPip());
 
   state()->set_bounds_locally(true);
-  wm::SetBoundsEvent event(gfx::Rect(0, 0, 50, 50));
+  SetBoundsWMEvent event(gfx::Rect(0, 0, 50, 50));
   window_state()->OnWMEvent(&event);
   state()->set_bounds_locally(false);
 
-  EXPECT_TRUE(window_state()->HasRestoreBounds());
-  EXPECT_EQ(gfx::Rect(0, 0, 50, 50),
-            window_state()->GetRestoreBoundsInParent());
+  EXPECT_TRUE(PipPositioner::HasSnapFraction(window_state()));
 }
 
-}  // namespace wm
+// Make sure disconnecting primary notifies the display id change.
+TEST_F(ClientControlledStateTest, DisconnectPrimary) {
+  UpdateDisplay("500x500,500x500");
+  SwapPrimaryDisplay();
+  auto* screen = display::Screen::GetScreen();
+  auto old_primary_id = screen->GetPrimaryDisplay().id();
+  EXPECT_EQ(old_primary_id, window_state()->GetDisplay().id());
+  gfx::Rect bounds = window()->bounds();
+
+  UpdateDisplay("500x500");
+  ASSERT_NE(old_primary_id, screen->GetPrimaryDisplay().id());
+  EXPECT_EQ(delegate()->display_id(), screen->GetPrimaryDisplay().id());
+  EXPECT_EQ(bounds, delegate()->requested_bounds());
+}
+
 }  // namespace ash

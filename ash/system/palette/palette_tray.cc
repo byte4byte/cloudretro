@@ -8,21 +8,21 @@
 
 #include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/stylus_utils.h"
 #include "ash/public/cpp/system_tray_client.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/palette/palette_tool_manager.h"
 #include "ash/system/palette/palette_utils.h"
 #include "ash/system/palette/palette_welcome_bubble.h"
 #include "ash/system/tray/system_menu_button.h"
 #include "ash/system/tray/tray_bubble_wrapper.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_container.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
@@ -66,9 +66,6 @@ constexpr int kPalettePaddingOnBottom = 2;
 // Margins between the title view and the edges around it (dp).
 constexpr int kPaddingBetweenTitleAndLeftEdge = 12;
 constexpr int kPaddingBetweenTitleAndSeparator = 3;
-
-// Color of the separator.
-const SkColor kPaletteSeparatorColor = SkColorSetARGB(0x1E, 0x00, 0x00, 0x00);
 
 // Returns true if the |palette_tray| is on an internal display or on every
 // display if requested from the command line.
@@ -180,11 +177,9 @@ PaletteTray::PaletteTray(Shelf* shelf)
       palette_tool_manager_(std::make_unique<PaletteToolManager>(this)),
       welcome_bubble_(std::make_unique<PaletteWelcomeBubble>(this)),
       stylus_event_handler_(std::make_unique<StylusEventHandler>(this)),
-      scoped_session_observer_(this),
-      weak_factory_(this) {
+      scoped_session_observer_(this) {
   PaletteTool::RegisterToolInstances(palette_tool_manager_.get());
 
-  SetInkDropMode(InkDropMode::ON);
   SetLayoutManager(std::make_unique<views::FillLayout>());
   icon_ = new views::ImageView();
   icon_->set_tooltip_text(
@@ -209,18 +204,17 @@ PaletteTray::~PaletteTray() {
 
 // static
 void PaletteTray::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kHasSeenStylus, false,
-                                PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(prefs::kHasSeenStylus, false);
 }
 
 // static
 void PaletteTray::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       prefs::kEnableStylusTools, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterBooleanPref(
       prefs::kLaunchPaletteOnEjectEvent, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+      user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 }
 
 bool PaletteTray::ContainsPointInScreen(const gfx::Point& point) {
@@ -477,8 +471,7 @@ void PaletteTray::ShowBubble(bool show_by_click) {
   init_params.parent_window = GetBubbleWindowContainer();
   init_params.anchor_view = GetBubbleAnchor();
   init_params.shelf_alignment = shelf()->alignment();
-  init_params.min_width = kPaletteWidth;
-  init_params.max_width = kPaletteWidth;
+  init_params.preferred_width = kPaletteWidth;
   init_params.close_on_deactivate = true;
   init_params.show_by_click = show_by_click;
 
@@ -500,7 +493,9 @@ void PaletteTray::ShowBubble(bool show_by_click) {
 
   // Add horizontal separator between the title and tools.
   auto* separator = new views::Separator();
-  separator->SetColor(kPaletteSeparatorColor);
+  separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kSeparator,
+      AshColorProvider::AshColorMode::kLight));
   separator->SetBorder(views::CreateEmptyBorder(gfx::Insets(
       kPaddingBetweenTitleAndSeparator, 0, kMenuSeparatorVerticalPadding, 0)));
   bubble_view->AddChildView(separator);
@@ -554,7 +549,7 @@ void PaletteTray::UpdateTrayIcon() {
   icon_->SetImage(CreateVectorIcon(
       palette_tool_manager_->GetActiveTrayIcon(
           palette_tool_manager_->GetActiveTool(PaletteGroup::MODE)),
-      kTrayIconSize, kShelfIconColor));
+      kTrayIconSize, ShelfConfig::Get()->shelf_icon_color()));
 }
 
 void PaletteTray::OnPaletteEnabledPrefChanged() {
@@ -562,7 +557,7 @@ void PaletteTray::OnPaletteEnabledPrefChanged() {
       prefs::kEnableStylusTools);
 
   if (!is_palette_enabled_) {
-    SetVisible(false);
+    SetVisiblePreferred(false);
     palette_tool_manager_->DisableActiveTool(PaletteGroup::MODE);
   } else {
     UpdateIconVisibility();
@@ -595,9 +590,13 @@ bool PaletteTray::HasSeenStylus() {
 }
 
 void PaletteTray::UpdateIconVisibility() {
-  SetVisible(HasSeenStylus() && is_palette_enabled_ &&
-             stylus_utils::HasStylusInput() && ShouldShowOnDisplay(this) &&
-             palette_utils::IsInUserSession());
+  bool visible_preferred = HasSeenStylus() && is_palette_enabled_ &&
+                           stylus_utils::HasStylusInput() &&
+                           ShouldShowOnDisplay(this) &&
+                           palette_utils::IsInUserSession();
+  SetVisiblePreferred(visible_preferred);
+  if (visible_preferred)
+    UpdateLayout();
 }
 
 }  // namespace ash

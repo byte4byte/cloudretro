@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.infobar;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
@@ -28,17 +26,18 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.datareduction.DataReductionPromoUtils;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.tab.SadTab;
+import org.chromium.chrome.browser.tab.TabTestUtils;
+import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
+import org.chromium.chrome.browser.ui.messages.infobar.InfoBar;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.InfoBarUtil;
-import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
 import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
@@ -60,10 +59,8 @@ public class InfoBarTest {
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
             new ChromeActivityTestRule<>(ChromeActivity.class);
 
-    private static final long MAX_TIMEOUT = scaleTimeout(2000);
+    private static final long MAX_TIMEOUT = 2000L;
     private static final int CHECK_INTERVAL = 500;
-    private static final String GEOLOCATION_PAGE =
-            "/chrome/test/data/geolocation/geolocation_on_load.html";
     private static final String POPUP_PAGE =
             "/chrome/test/data/popup_blocker/popup-window-open.html";
     private static final String HELLO_WORLD_URL = UrlUtils.encodeHtmlDataUri("<html>"
@@ -121,6 +118,11 @@ public class InfoBarTest {
         });
     }
 
+    private TabWebContentsDelegateAndroid getTabWebContentsDelegate() {
+        return TabTestUtils.getTabWebContentsDelegate(
+                mActivityTestRule.getActivity().getActivityTab());
+    }
+
     @Before
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
@@ -141,7 +143,7 @@ public class InfoBarTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         if (mTestServer != null) {
             mTestServer.stopAndDestroyServer();
         }
@@ -234,7 +236,7 @@ public class InfoBarTest {
     @MediumTest
     @Feature({"Browser", "Main"})
     @DisabledTest(message = "crbug.com/593003")
-    public void testInfoBarForPopUp() throws InterruptedException, TimeoutException {
+    public void testInfoBarForPopUp() throws TimeoutException {
         mActivityTestRule.loadUrl(mTestServer.getURL(POPUP_PAGE));
         mListener.addInfoBarAnimationFinished("InfoBar not added");
 
@@ -245,7 +247,6 @@ public class InfoBarTest {
         InfoBarUtil.clickPrimaryButton(infoBars.get(0));
         mListener.removeInfoBarAnimationFinished("InfoBar not removed.");
         Assert.assertEquals("Wrong infobar count", 0, infoBars.size());
-        Assert.assertNotNull(infoBars.get(0).getSnackbarManager());
 
         // A second load should not show the infobar.
         mActivityTestRule.loadUrl(mTestServer.getURL(POPUP_PAGE));
@@ -253,46 +254,16 @@ public class InfoBarTest {
     }
 
     /**
-     * Verify Geolocation creates an InfoBar.
-     *
-     * TODO(timloh): Remove this once we only use modals for permission prompts.
+     * Verify Popups create an InfoBar and that it's destroyed when navigating back.
      */
     @Test
     @MediumTest
-    @DisableFeatures(ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
-    @Feature({"Browser", "Main"})
-    @RetryOnFailure
-    public void testInfoBarForGeolocation() throws InterruptedException, TimeoutException {
-        LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
-        mActivityTestRule.loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
-        mListener.addInfoBarAnimationFinished("InfoBar not added");
-
-        // Make sure it has OK/Cancel buttons.
-        List<InfoBar> infoBars = mActivityTestRule.getInfoBars();
-        Assert.assertEquals("Wrong infobar count", 1, infoBars.size());
-        Assert.assertTrue(InfoBarUtil.hasPrimaryButton(infoBars.get(0)));
-        Assert.assertTrue(InfoBarUtil.hasSecondaryButton(infoBars.get(0)));
-
-        mActivityTestRule.loadUrl(HELLO_WORLD_URL);
-        mListener.removeInfoBarAnimationFinished("InfoBar not removed.");
-        Assert.assertTrue("Wrong infobar count", mActivityTestRule.getInfoBars().isEmpty());
-    }
-
-    /**
-     * Verify Geolocation creates an InfoBar and that it's destroyed when navigating back.
-     *
-     * TODO(timloh): Use a different InfoBar type once we only use modals for permission prompts.
-     */
-    @Test
-    @MediumTest
-    @DisableFeatures(ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Browser"})
     @RetryOnFailure
-    public void testInfoBarForGeolocationDisappearsOnBack()
-            throws InterruptedException, TimeoutException {
+    public void testInfoBarForGeolocationDisappearsOnBack() throws TimeoutException {
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
         mActivityTestRule.loadUrl(HELLO_WORLD_URL);
-        mActivityTestRule.loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
+        mActivityTestRule.loadUrl(mTestServer.getURL(POPUP_PAGE));
         mListener.addInfoBarAnimationFinished("InfoBar not added.");
 
         Assert.assertEquals("Wrong infobar count", 1, mActivityTestRule.getInfoBars().size());
@@ -493,16 +464,13 @@ public class InfoBarTest {
     @MediumTest
     @Feature({"Browser", "Main"})
     @RetryOnFailure
-    public void testInfoBarForHungRenderer() throws InterruptedException, TimeoutException {
+    public void testInfoBarForHungRenderer() throws TimeoutException {
         mActivityTestRule.loadUrl(HELLO_WORLD_URL);
 
         // Fake an unresponsive renderer signal.
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
             CommandLine.getInstance().appendSwitch(ChromeSwitches.ENABLE_HUNG_RENDERER_INFOBAR);
-            mActivityTestRule.getActivity()
-                    .getActivityTab()
-                    .getTabWebContentsDelegateAndroid()
-                    .rendererUnresponsive();
+            getTabWebContentsDelegate().rendererUnresponsive();
         });
         mListener.addInfoBarAnimationFinished("InfoBar not added");
 
@@ -513,12 +481,8 @@ public class InfoBarTest {
         Assert.assertTrue(InfoBarUtil.hasSecondaryButton(infoBars.get(0)));
 
         // Fake a responsive renderer signal.
-        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
-            mActivityTestRule.getActivity()
-                    .getActivityTab()
-                    .getTabWebContentsDelegateAndroid()
-                    .rendererResponsive();
-        });
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT,
+                () -> { getTabWebContentsDelegate().rendererResponsive(); });
         mListener.removeInfoBarAnimationFinished("InfoBar not removed.");
         Assert.assertTrue("Wrong infobar count", mActivityTestRule.getInfoBars().isEmpty());
     }
@@ -530,17 +494,13 @@ public class InfoBarTest {
     @MediumTest
     @Feature({"Browser", "Main"})
     @RetryOnFailure
-    public void testInfoBarForHungRendererCanKillRenderer()
-            throws InterruptedException, TimeoutException {
+    public void testInfoBarForHungRendererCanKillRenderer() throws TimeoutException {
         mActivityTestRule.loadUrl(HELLO_WORLD_URL);
 
         // Fake an unresponsive renderer signal.
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
             CommandLine.getInstance().appendSwitch(ChromeSwitches.ENABLE_HUNG_RENDERER_INFOBAR);
-            mActivityTestRule.getActivity()
-                    .getActivityTab()
-                    .getTabWebContentsDelegateAndroid()
-                    .rendererUnresponsive();
+            getTabWebContentsDelegate().rendererUnresponsive();
         });
         mListener.addInfoBarAnimationFinished("InfoBar not added");
 
@@ -567,19 +527,15 @@ public class InfoBarTest {
 
     /**
      * Verify InfoBarContainers swap the WebContents they are monitoring properly.
-     *
-     * TODO(timloh): Use a different InfoBar type once we only use modals for permission prompts.
      */
     @Test
     @MediumTest
-    @DisableFeatures(ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Browser", "Main"})
     @RetryOnFailure
-    public void testInfoBarContainerSwapsWebContents()
-            throws InterruptedException, TimeoutException {
+    public void testInfoBarContainerSwapsWebContents() throws TimeoutException {
         // Add an infobar.
         LocationSettingsTestUtil.setSystemLocationSettingEnabled(true);
-        mActivityTestRule.loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
+        mActivityTestRule.loadUrl(mTestServer.getURL(POPUP_PAGE));
         mListener.addInfoBarAnimationFinished("InfoBar not added");
         Assert.assertEquals("Wrong infobar count", 1, mActivityTestRule.getInfoBars().size());
 
@@ -588,8 +544,8 @@ public class InfoBarTest {
         mActivityTestRule.getInfoBarContainer().addAnimationListener(removeListener);
         PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
             WebContents newContents = WebContentsFactory.createWebContents(false, false);
-            mActivityTestRule.getActivity().getActivityTab().swapWebContents(
-                    newContents, false, false);
+            TabTestUtils.swapWebContents(
+                    mActivityTestRule.getActivity().getActivityTab(), newContents, false, false);
         });
         mActivityTestRule.loadUrl(HELLO_WORLD_URL);
         removeListener.removeInfoBarAnimationFinished("InfoBar not removed.");
@@ -598,7 +554,7 @@ public class InfoBarTest {
         // Revisiting the original page should make the InfoBar reappear.
         InfoBarTestAnimationListener addListener = new InfoBarTestAnimationListener();
         mActivityTestRule.getInfoBarContainer().addAnimationListener(addListener);
-        mActivityTestRule.loadUrl(mTestServer.getURL(GEOLOCATION_PAGE));
+        mActivityTestRule.loadUrl(mTestServer.getURL(POPUP_PAGE));
         addListener.addInfoBarAnimationFinished("InfoBar not added");
         Assert.assertEquals("Wrong infobar count", 1, mActivityTestRule.getInfoBars().size());
     }

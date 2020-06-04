@@ -6,106 +6,186 @@
 
 #include <utility>
 
+#include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
-#include "content/public/browser/browser_thread.h"
+#include "base/task/thread_pool.h"
+#include "base/time/time.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/skia_util.h"
 
-// Refcounted class that stores compressed JPEG data.
-class ThumbnailImage::ThumbnailData
-    : public base::RefCountedThreadSafe<ThumbnailData> {
- public:
-  static gfx::ImageSkia ToImageSkia(
-      scoped_refptr<ThumbnailData> representation) {
-    const auto& data = representation->data_;
-    gfx::ImageSkia result = gfx::ImageSkia::CreateFrom1xBitmap(
-        *gfx::JPEGCodec::Decode(data.data(), data.size()));
-    result.MakeThreadSafe();
-    return result;
-  }
+void ThumbnailImage::Observer::OnThumbnailImageAvailable(
+    gfx::ImageSkia thumbnail_image) {}
 
-  static scoped_refptr<ThumbnailData> FromSkBitmap(SkBitmap bitmap) {
-    constexpr int kCompressionQuality = 97;
-    std::vector<uint8_t> data;
-    const bool result =
-        gfx::JPEGCodec::Encode(bitmap, kCompressionQuality, &data);
-    DCHECK(result);
-    return scoped_refptr<ThumbnailData>(new ThumbnailData(std::move(data)));
-  }
+void ThumbnailImage::Observer::OnCompressedThumbnailDataAvailable(
+    CompressedThumbnailData thumbnail_data) {}
 
-  size_t size() const { return data_.size(); }
-
- private:
-  friend base::RefCountedThreadSafe<ThumbnailData>;
-
-  explicit ThumbnailData(std::vector<uint8_t>&& data)
-      : data_(std::move(data)) {}
-
-  ~ThumbnailData() = default;
-
-  std::vector<uint8_t> data_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThumbnailData);
-};
-
-ThumbnailImage::ThumbnailImage() = default;
-ThumbnailImage::~ThumbnailImage() = default;
-ThumbnailImage::ThumbnailImage(const ThumbnailImage& other) = default;
-ThumbnailImage::ThumbnailImage(ThumbnailImage&& other) = default;
-ThumbnailImage& ThumbnailImage::operator=(const ThumbnailImage& other) =
-    default;
-ThumbnailImage& ThumbnailImage::operator=(ThumbnailImage&& other) = default;
-
-gfx::ImageSkia ThumbnailImage::AsImageSkia() const {
-  return ThumbnailData::ToImageSkia(image_representation_);
+base::Optional<gfx::Size> ThumbnailImage::Observer::GetThumbnailSizeHint()
+    const {
+  return base::nullopt;
 }
 
-bool ThumbnailImage::AsImageSkiaAsync(AsImageSkiaCallback callback) const {
-  if (!HasData())
-    return false;
+ThumbnailImage::Delegate::~Delegate() {
+  if (thumbnail_)
+    thumbnail_->delegate_ = nullptr;
+}
 
-  base::PostTaskWithTraitsAndReplyWithResult(
+ThumbnailImage::ThumbnailImage(Delegate* delegate) : delegate_(delegate) {
+  DETACH_FROM_SEQUENCE(sequence_checker_);
+  DCHECK(delegate_);
+  DCHECK(!delegate_->thumbnail_);
+  delegate_->thumbnail_ = this;
+}
+
+ThumbnailImage::~ThumbnailImage() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (delegate_)
+    delegate_->thumbnail_ = nullptr;
+}
+
+void ThumbnailImage::AddObserver(Observer* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(observer);
+  if (!observers_.HasObserver(observer)) {
+    const bool is_first_observer = !observers_.might_have_observers();
+    observers_.AddObserver(observer);
+    if (is_first_observer && delegate_)
+      delegate_->ThumbnailImageBeingObservedChanged(true);
+  }
+}
+
+void ThumbnailImage::RemoveObserver(Observer* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(observer);
+  if (observers_.HasObserver(observer)) {
+    observers_.RemoveObserver(observer);
+    if (delegate_ && !observers_.might_have_observers())
+      delegate_->ThumbnailImageBeingObservedChanged(false);
+  }
+}
+
+bool ThumbnailImage::HasObserver(const Observer* observer) const {
+  return observers_.HasObserver(observer);
+}
+
+void ThumbnailImage::AssignSkBitmap(SkBitmap bitmap) {
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
       {base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::BindOnce(&ThumbnailData::ToImageSkia, image_representation_),
-      std::move(callback));
-  return true;
+      base::BindOnce(&ThumbnailImage::CompressBitmap, std::move(bitmap)),
+      base::BindOnce(&ThumbnailImage::AssignJPEGData,
+                     weak_ptr_factory_.GetWeakPtr(), base::TimeTicks::Now()));
 }
 
-bool ThumbnailImage::HasData() const {
-  return static_cast<bool>(image_representation_);
+void ThumbnailImage::RequestThumbnailImage() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  ConvertJPEGDataToImageSkiaAndNotifyObservers();
 }
 
-size_t ThumbnailImage::GetStorageSize() const {
-  return image_representation_ ? image_representation_->size() : 0;
+void ThumbnailImage::RequestCompressedThumbnailData() {
+  if (data_)
+    NotifyCompressedDataObservers(data_);
 }
 
-bool ThumbnailImage::BackedBySameObjectAs(const ThumbnailImage& other) const {
-  return image_representation_.get() == other.image_representation_.get();
+void ThumbnailImage::AssignJPEGData(base::TimeTicks assign_sk_bitmap_time,
+                                    std::vector<uint8_t> data) {
+  data_ = base::MakeRefCounted<base::RefCountedData<std::vector<uint8_t>>>(
+      std::move(data));
+  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+      "Tab.Preview.TimeToNotifyObserversAfterCaptureReceived",
+      base::TimeTicks::Now() - assign_sk_bitmap_time,
+      base::TimeDelta::FromMicroseconds(100),
+      base::TimeDelta::FromMilliseconds(100), 50);
+  NotifyCompressedDataObservers(data_);
+  ConvertJPEGDataToImageSkiaAndNotifyObservers();
+}
+
+bool ThumbnailImage::ConvertJPEGDataToImageSkiaAndNotifyObservers() {
+  if (!data_) {
+    if (async_operation_finished_callback_)
+      async_operation_finished_callback_.Run();
+    return false;
+  }
+  return base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&ThumbnailImage::UncompressImage, data_),
+      base::BindOnce(&ThumbnailImage::NotifyUncompressedDataObservers,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void ThumbnailImage::NotifyUncompressedDataObservers(gfx::ImageSkia image) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (async_operation_finished_callback_)
+    async_operation_finished_callback_.Run();
+  for (auto& observer : observers_) {
+    auto size_hint = observer.GetThumbnailSizeHint();
+    observer.OnThumbnailImageAvailable(
+        size_hint ? CropPreviewImage(image, *size_hint) : image);
+  }
+}
+
+void ThumbnailImage::NotifyCompressedDataObservers(
+    CompressedThumbnailData data) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  for (auto& observer : observers_)
+    observer.OnCompressedThumbnailDataAvailable(data);
 }
 
 // static
-ThumbnailImage ThumbnailImage::FromSkBitmap(SkBitmap bitmap) {
-  ThumbnailImage result;
-  result.image_representation_ = ThumbnailData::FromSkBitmap(bitmap);
+std::vector<uint8_t> ThumbnailImage::CompressBitmap(SkBitmap bitmap) {
+  constexpr int kCompressionQuality = 97;
+  std::vector<uint8_t> data;
+  const bool result =
+      gfx::JPEGCodec::Encode(bitmap, kCompressionQuality, &data);
+  DCHECK(result);
+  return data;
+}
+
+// static
+gfx::ImageSkia ThumbnailImage::UncompressImage(
+    CompressedThumbnailData compressed) {
+  gfx::ImageSkia result =
+      gfx::ImageSkia::CreateFrom1xBitmap(*gfx::JPEGCodec::Decode(
+          compressed->data.data(), compressed->data.size()));
+  result.MakeThreadSafe();
   return result;
 }
 
 // static
-void ThumbnailImage::FromSkBitmapAsync(SkBitmap bitmap,
-                                       CreateThumbnailCallback callback) {
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE,
-      {base::TaskPriority::USER_VISIBLE,
-       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::BindOnce(&ThumbnailData::FromSkBitmap, bitmap),
-      base::BindOnce(
-          [](CreateThumbnailCallback callback,
-             scoped_refptr<ThumbnailData> representation) {
-            ThumbnailImage result;
-            result.image_representation_ = representation;
-            std::move(callback).Run(result);
-          },
-          std::move(callback)));
+gfx::ImageSkia ThumbnailImage::CropPreviewImage(
+    const gfx::ImageSkia& source_image,
+    const gfx::Size& minimum_size) {
+  DCHECK(!source_image.isNull());
+  DCHECK(!source_image.size().IsEmpty());
+  DCHECK(!minimum_size.IsEmpty());
+  const float desired_aspect =
+      float{minimum_size.width()} / minimum_size.height();
+  const float source_aspect =
+      float{source_image.width()} / float{source_image.height()};
+
+  if (source_aspect == desired_aspect ||
+      source_image.width() < minimum_size.width() ||
+      source_image.height() < minimum_size.height()) {
+    return source_image;
+  }
+
+  gfx::Rect clip_rect;
+  if (source_aspect > desired_aspect) {
+    // Wider than tall, clip horizontally: we center the smaller
+    // thumbnail in the wider screen.
+    const int new_width = source_image.height() * desired_aspect;
+    const int x_offset = (source_image.width() - new_width) / 2;
+    clip_rect = {x_offset, 0, new_width, source_image.height()};
+  } else {
+    // Taller than wide; clip vertically.
+    const int new_height = source_image.width() / desired_aspect;
+    clip_rect = {0, 0, source_image.width(), new_height};
+  }
+
+  SkBitmap cropped;
+  source_image.bitmap()->extractSubset(&cropped, gfx::RectToSkIRect(clip_rect));
+  return gfx::ImageSkia::CreateFrom1xBitmap(cropped);
 }

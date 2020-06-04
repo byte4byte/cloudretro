@@ -4,8 +4,9 @@
 
 #include "chrome/browser/payments/ssl_validity_checker.h"
 
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "components/payments/core/native_error_strings.h"
@@ -48,8 +49,8 @@ std::string SslValidityChecker::GetInvalidSslCertificateErrorMessage(
     case security_state::NONE:
       level = "NONE";
       break;
-    case security_state::HTTP_SHOW_WARNING:
-      level = "HTTP_SHOW_WARNING";
+    case security_state::WARNING:
+      level = "WARNING";
       break;
     case security_state::DANGEROUS:
       level = "DANGEROUS";

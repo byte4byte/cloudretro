@@ -44,7 +44,7 @@ bool NeedsManualSignin() {
 
 namespace remoting {
 
-FtlServicesPlayground::FtlServicesPlayground() : weak_factory_(this) {}
+FtlServicesPlayground::FtlServicesPlayground() {}
 
 FtlServicesPlayground::~FtlServicesPlayground() = default;
 
@@ -116,7 +116,7 @@ void FtlServicesPlayground::ResetServices(base::OnceClosure on_done) {
 
   message_subscription_.reset();
   messaging_client_ = std::make_unique<FtlMessagingClient>(
-      token_getter_.get(), registration_manager_.get());
+      token_getter_.get(), registration_manager_.get(), &signaling_tracker_);
   message_subscription_ = messaging_client_->RegisterMessageCallback(
       base::BindRepeating(&FtlServicesPlayground::OnMessageReceived,
                           weak_factory_.GetWeakPtr()));

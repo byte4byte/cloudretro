@@ -12,16 +12,17 @@ import android.util.SparseArray;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.compositor.layouts.content.TitleBitmapFactory;
-import org.chromium.chrome.browser.favicon.FaviconHelper;
-import org.chromium.chrome.browser.favicon.FaviconHelper.DefaultFaviconHelper;
-import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabFavicon;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper.DefaultFaviconHelper;
+import org.chromium.chrome.browser.ui.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.ResourceManager;
@@ -64,8 +65,9 @@ public class LayerTitleCache implements TitleCache {
                 res.getDimensionPixelSize(R.dimen.tab_title_favicon_start_padding);
         final int faviconEndPaddingPx =
                 res.getDimensionPixelSize(R.dimen.tab_title_favicon_end_padding);
-        mNativeLayerTitleCache = nativeInit(fadeWidthPx, faviconStartPaddingPx, faviconEndPaddingPx,
-                R.drawable.spinner, R.drawable.spinner_white);
+        mNativeLayerTitleCache = LayerTitleCacheJni.get().init(LayerTitleCache.this, fadeWidthPx,
+                faviconStartPaddingPx, faviconEndPaddingPx, R.drawable.spinner,
+                R.drawable.spinner_white);
         mFaviconSize = res.getDimensionPixelSize(R.dimen.compositor_tab_title_favicon_size);
         mStandardTitleBitmapFactory = new TitleBitmapFactory(context, false);
         mDarkTitleBitmapFactory = new TitleBitmapFactory(context, true);
@@ -85,7 +87,7 @@ public class LayerTitleCache implements TitleCache {
      */
     public void shutDown() {
         if (mNativeLayerTitleCache == 0) return;
-        nativeDestroy(mNativeLayerTitleCache);
+        LayerTitleCacheJni.get().destroy(mNativeLayerTitleCache);
         mNativeLayerTitleCache = 0;
     }
 
@@ -124,13 +126,13 @@ public class LayerTitleCache implements TitleCache {
     private String getUpdatedTitleInternal(Tab tab, String titleString,
             boolean fetchFaviconFromHistory) {
         final int tabId = tab.getId();
-        boolean isHTSEnabled = !DeviceFormFactor.isNonMultiDisplayContextOnTablet(tab.getActivity())
+        boolean isHTSEnabled = !DeviceFormFactor.isNonMultiDisplayContextOnTablet(tab.getContext())
                 && ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID);
         boolean isDarkTheme = tab.isIncognito() && !isHTSEnabled;
         Bitmap originalFavicon = TabFavicon.getBitmap(tab);
         if (originalFavicon == null) {
             originalFavicon = mDefaultFaviconHelper.getDefaultFaviconBitmap(
-                    mContext, tab.getUrl(), !isDarkTheme);
+                    mContext.getResources(), tab.getUrlString(), !isDarkTheme);
         }
 
         TitleBitmapFactory titleBitmapFactory =
@@ -151,8 +153,8 @@ public class LayerTitleCache implements TitleCache {
             boolean isRtl = tabTitle != null
                     && LocalizationUtils.getFirstStrongCharacterDirection(tabTitle)
                             == LocalizationUtils.RIGHT_TO_LEFT;
-            nativeUpdateLayer(mNativeLayerTitleCache, tabId, title.getTitleResId(),
-                    title.getFaviconResId(), isDarkTheme, isRtl);
+            LayerTitleCacheJni.get().updateLayer(mNativeLayerTitleCache, LayerTitleCache.this,
+                    tabId, title.getTitleResId(), title.getFaviconResId(), isDarkTheme, isRtl);
         }
         return titleString;
     }
@@ -161,15 +163,12 @@ public class LayerTitleCache implements TitleCache {
         if (mFaviconHelper == null) mFaviconHelper = new FaviconHelper();
 
         // Since tab#getProfile() is not available by this time, we will use whatever last used
-        // profile. This should be normal profile since fetching favicons should normally happen on
-        // a cold start. Return otherwise.
-        if (Profile.getLastUsedProfile().hasOffTheRecordProfile()) return;
-
-        mFaviconHelper.getLocalFaviconImageForURL(
-                Profile.getLastUsedProfile(),
-                tab.getUrl(),
-                mFaviconSize,
-                new FaviconImageCallback() {
+        // profile.
+        // TODO (https://crbug.com/1048632): Use the current profile (i.e., regular profile or
+        // incognito profile) instead of always using regular profile. It works correctly now, but
+        // it is not safe.
+        mFaviconHelper.getLocalFaviconImageForURL(Profile.getLastUsedRegularProfile(),
+                tab.getUrlString(), mFaviconSize, new FaviconImageCallback() {
                     @Override
                     public void onFaviconAvailable(Bitmap favicon, String iconUrl) {
                         updateFaviconFromHistory(tab, favicon);
@@ -185,7 +184,7 @@ public class LayerTitleCache implements TitleCache {
     private String getTitleForTab(Tab tab, String defaultTitle) {
         String title = tab.getTitle();
         if (TextUtils.isEmpty(title)) {
-            title = tab.getUrl();
+            title = tab.getUrlString();
             if (TextUtils.isEmpty(title)) {
                 title = defaultTitle;
                 if (TextUtils.isEmpty(title)) {
@@ -205,7 +204,8 @@ public class LayerTitleCache implements TitleCache {
         if (!title.updateFaviconFromHistory(faviconBitmap)) return;
 
         if (mNativeLayerTitleCache != 0) {
-            nativeUpdateFavicon(mNativeLayerTitleCache, tabId, title.getFaviconResId());
+            LayerTitleCacheJni.get().updateFavicon(
+                    mNativeLayerTitleCache, LayerTitleCache.this, tabId, title.getFaviconResId());
         }
     }
 
@@ -216,7 +216,8 @@ public class LayerTitleCache implements TitleCache {
         title.unregister();
         mTitles.remove(tabId);
         if (mNativeLayerTitleCache == 0) return;
-        nativeUpdateLayer(mNativeLayerTitleCache, tabId, -1, -1, false, false);
+        LayerTitleCacheJni.get().updateLayer(
+                mNativeLayerTitleCache, LayerTitleCache.this, tabId, -1, -1, false, false);
     }
 
     @Override
@@ -233,7 +234,8 @@ public class LayerTitleCache implements TitleCache {
         if (title != null) mTitles.put(exceptId, title);
 
         if (mNativeLayerTitleCache == 0) return;
-        nativeClearExcept(mNativeLayerTitleCache, exceptId);
+        LayerTitleCacheJni.get().clearExcept(
+                mNativeLayerTitleCache, LayerTitleCache.this, exceptId);
     }
 
     private class Title {
@@ -282,12 +284,15 @@ public class LayerTitleCache implements TitleCache {
         }
     }
 
-    private native long nativeInit(int fadeWidth, int faviconStartlPadding, int faviconEndPadding,
-            int spinnerResId, int spinnerIncognitoResId);
-    private static native void nativeDestroy(long nativeLayerTitleCache);
-    private native void nativeClearExcept(long nativeLayerTitleCache, int exceptId);
-    private native void nativeUpdateLayer(long nativeLayerTitleCache, int tabId, int titleResId,
-            int faviconResId, boolean isIncognito, boolean isRtl);
-    private native void nativeUpdateFavicon(long nativeLayerTitleCache, int tabId,
-            int faviconResId);
+    @NativeMethods
+    interface Natives {
+        long init(LayerTitleCache caller, int fadeWidth, int faviconStartlPadding,
+                int faviconEndPadding, int spinnerResId, int spinnerIncognitoResId);
+        void destroy(long nativeLayerTitleCache);
+        void clearExcept(long nativeLayerTitleCache, LayerTitleCache caller, int exceptId);
+        void updateLayer(long nativeLayerTitleCache, LayerTitleCache caller, int tabId,
+                int titleResId, int faviconResId, boolean isIncognito, boolean isRtl);
+        void updateFavicon(
+                long nativeLayerTitleCache, LayerTitleCache caller, int tabId, int faviconResId);
+    }
 }

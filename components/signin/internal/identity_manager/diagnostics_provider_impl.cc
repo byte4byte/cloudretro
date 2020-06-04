@@ -6,9 +6,9 @@
 
 #include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 
-namespace identity {
+namespace signin {
 
 DiagnosticsProviderImpl::DiagnosticsProviderImpl(
     ProfileOAuth2TokenService* profile_oauth2_token_service,
@@ -21,7 +21,7 @@ DiagnosticsProviderImpl::DiagnosticsProviderImpl(
 
 DiagnosticsProviderImpl::~DiagnosticsProviderImpl() {}
 
-OAuth2TokenServiceDelegate::LoadCredentialsState
+signin::LoadCredentialsState
 DiagnosticsProviderImpl::GetDetailedStateOfLoadingOfRefreshTokens() const {
   DCHECK(profile_oauth2_token_service_->GetDelegate());
   return profile_oauth2_token_service_->GetDelegate()->load_credentials_state();
@@ -41,4 +41,4 @@ base::TimeDelta DiagnosticsProviderImpl::GetDelayBeforeMakingCookieRequests()
   return gaia_cookie_manager_service_->GetBackoffEntry()->GetTimeUntilRelease();
 }
 
-}  // namespace identity
+}  // namespace signin

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGPhysicalContainerFragment_h
-#define NGPhysicalContainerFragment_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PHYSICAL_CONTAINER_FRAGMENT_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PHYSICAL_CONTAINER_FRAGMENT_H_
 
 #include "base/containers/span.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -17,6 +17,7 @@
 namespace blink {
 
 class NGContainerFragmentBuilder;
+class NGFragmentItem;
 struct NGPhysicalOutOfFlowPositionedNode;
 enum class NGOutlineType;
 
@@ -84,7 +85,7 @@ class CORE_EXPORT NGPhysicalContainerFragment : public NGPhysicalFragment {
 
   ~NGPhysicalContainerFragment();
 
-  NGBreakToken* BreakToken() const { return break_token_.get(); }
+  const NGBreakToken* BreakToken() const { return break_token_.get(); }
 
   // Returns the children of |this|.
   //
@@ -101,7 +102,17 @@ class CORE_EXPORT NGPhysicalContainerFragment : public NGPhysicalFragment {
     return PostLayoutChildLinkList(num_children_, buffer_);
   }
 
-  bool HasFloatingDescendants() const { return has_floating_descendants_; }
+  // Returns true if we have any floating descendants which need to be
+  // traversed during the float paint phase.
+  bool HasFloatingDescendantsForPaint() const {
+    return has_floating_descendants_for_paint_;
+  }
+
+  // Returns true if we have any adjoining-object descendants (floats, or
+  // inline-level OOF-positioned objects).
+  bool HasAdjoiningObjectDescendants() const {
+    return has_adjoining_object_descendants_;
+  }
 
   bool HasOrthogonalFlowRoots() const { return has_orthogonal_flow_roots_; }
 
@@ -139,6 +150,19 @@ class CORE_EXPORT NGPhysicalContainerFragment : public NGPhysicalFragment {
                               NGFragmentType,
                               unsigned sub_type);
 
+  void AddScrollableOverflowForInlineChild(
+      const NGPhysicalBoxFragment& container,
+      const ComputedStyle& container_style,
+      const NGFragmentItem& line,
+      bool has_hanging,
+      const NGInlineCursor& cursor,
+      PhysicalRect* overflow) const;
+
+  static void AdjustScrollableOverflowForHanging(
+      const PhysicalRect& rect,
+      const WritingMode container_writing_mode,
+      PhysicalRect* overflow);
+
   void AddOutlineRectsForNormalChildren(
       Vector<PhysicalRect>* outline_rects,
       const PhysicalOffset& additional_offset,
@@ -153,7 +177,7 @@ class CORE_EXPORT NGPhysicalContainerFragment : public NGPhysicalFragment {
 
   static bool DependsOnPercentageBlockSize(const NGContainerFragmentBuilder&);
 
-  scoped_refptr<NGBreakToken> break_token_;
+  scoped_refptr<const NGBreakToken> break_token_;
   const std::unique_ptr<Vector<NGPhysicalOutOfFlowPositionedNode>>
       oof_positioned_descendants_;
 
@@ -172,4 +196,4 @@ struct DowncastTraits<NGPhysicalContainerFragment> {
 
 }  // namespace blink
 
-#endif  // NGPhysicalContainerFragment_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PHYSICAL_CONTAINER_FRAGMENT_H_

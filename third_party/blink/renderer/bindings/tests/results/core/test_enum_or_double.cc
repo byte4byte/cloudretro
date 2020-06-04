@@ -44,7 +44,7 @@ const String& TestEnumOrDouble::GetAsTestEnum() const {
 void TestEnumOrDouble::SetTestEnum(const String& value) {
   DCHECK(IsNull());
   NonThrowableExceptionState exception_state;
-  const char* kValidValues[] = {
+  const char* const kValidValues[] = {
       "",
       "EnumValue1",
       "EnumValue2",
@@ -68,7 +68,7 @@ TestEnumOrDouble::TestEnumOrDouble(const TestEnumOrDouble&) = default;
 TestEnumOrDouble::~TestEnumOrDouble() = default;
 TestEnumOrDouble& TestEnumOrDouble::operator=(const TestEnumOrDouble&) = default;
 
-void TestEnumOrDouble::Trace(blink::Visitor* visitor) {
+void TestEnumOrDouble::Trace(Visitor* visitor) {
 }
 
 void V8TestEnumOrDouble::ToImpl(
@@ -95,7 +95,7 @@ void V8TestEnumOrDouble::ToImpl(
     V8StringResource<> cpp_value = v8_value;
     if (!cpp_value.Prepare(exception_state))
       return;
-    const char* kValidValues[] = {
+    const char* const kValidValues[] = {
         "",
         "EnumValue1",
         "EnumValue2",
@@ -130,3 +130,4 @@ TestEnumOrDouble NativeValueTraits<TestEnumOrDouble>::NativeValue(
 }
 
 }  // namespace blink
+

@@ -11,35 +11,43 @@
 
 #include "base/macros.h"
 #include "content/renderer/render_frame_impl.h"
-#include "content/shell/test_runner/test_runner_export.h"
+#include "content/shell/common/web_test/blink_test.mojom.h"
 #include "content/shell/test_runner/web_frame_test_client.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
+#include "ui/accessibility/ax_event.h"
 
 namespace content {
-class RenderViewImpl;
-}  // namespace content
-
-namespace test_runner {
-class WebTestInterfaces;
+class BlinkTestRunner;
+class WebViewTestProxy;
+class WebWidgetTestProxy;
 
 // WebFrameTestProxy is used during running web tests instead of a
 // RenderFrameImpl to inject test-only behaviour by overriding methods in the
 // base class.
-class TEST_RUNNER_EXPORT WebFrameTestProxy : public content::RenderFrameImpl {
+class WebFrameTestProxy : public RenderFrameImpl,
+                          public mojom::BlinkTestControl {
  public:
-  template <typename... Args>
-  explicit WebFrameTestProxy(Args&&... args)
-      : RenderFrameImpl(std::forward<Args>(args)...) {}
+  explicit WebFrameTestProxy(RenderFrameImpl::CreateParams params);
   ~WebFrameTestProxy() override;
 
-  void Initialize(WebTestInterfaces* interfaces,
-                  content::RenderViewImpl* render_view_for_frame);
-
   // RenderFrameImpl overrides.
+  void Initialize() override;
   void UpdateAllLifecyclePhasesAndCompositeForTesting() override;
+
+  // Reset state between tests.
+  void Reset();
+
+  // Returns a frame name that can be used in the output of web tests
+  // (the name is derived from the frame's unique name).
+  std::string GetFrameNameForWebTests();
+
+  // Returns the test-subclass of RenderWidget for the local root of this frame.
+  WebWidgetTestProxy* GetLocalRootWebWidgetTestProxy();
 
   // WebLocalFrameClient implementation.
   blink::WebPlugin* CreatePlugin(const blink::WebPluginParams& params) override;
@@ -47,34 +55,17 @@ class TEST_RUNNER_EXPORT WebFrameTestProxy : public content::RenderFrameImpl {
                               const blink::WebString& source_name,
                               unsigned source_line,
                               const blink::WebString& stack_trace) override;
-  void DownloadURL(const blink::WebURLRequest& request,
-                   blink::WebLocalFrameClient::CrossOriginRedirects
-                       cross_origin_redirect_behavior,
-                   mojo::ScopedMessagePipeHandle blob_url_token) override;
-  void DidReceiveTitle(const blink::WebString& title,
-                       blink::WebTextDirection direction) override;
-  void DidChangeIcon(blink::WebIconURL::Type icon_type) override;
-  void DidFailLoad(const blink::WebURLError& error,
-                   blink::WebHistoryCommitType commit_type) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   void DidChangeSelection(bool is_selection_empty) override;
   void DidChangeContents() override;
   blink::WebEffectiveConnectionType GetEffectiveConnectionType() override;
-  void RunModalAlertDialog(const blink::WebString& message) override;
-  bool RunModalConfirmDialog(const blink::WebString& message) override;
-  bool RunModalPromptDialog(const blink::WebString& message,
-                            const blink::WebString& default_value,
-                            blink::WebString* actual_value) override;
-  bool RunModalBeforeUnloadDialog(bool is_reload) override;
   void ShowContextMenu(
       const blink::WebContextMenuData& context_menu_data) override;
   void DidDispatchPingLoader(const blink::WebURL& url) override;
   void WillSendRequest(blink::WebURLRequest& request) override;
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo> info) override;
-  void PostAccessibilityEvent(const blink::WebAXObject& object,
-                              ax::mojom::Event event,
-                              ax::mojom::EventFrom event_from) override;
+  void PostAccessibilityEvent(const ui::AXEvent& event) override;
   void MarkWebAXObjectDirty(const blink::WebAXObject& object,
                             bool subtree) override;
   void CheckIfAudioSinkExistsAndIsAuthorized(
@@ -83,11 +74,34 @@ class TEST_RUNNER_EXPORT WebFrameTestProxy : public content::RenderFrameImpl {
   void DidClearWindowObject() override;
 
  private:
-  std::unique_ptr<WebFrameTestClient> test_client_;
+  // mojom::BlinkTestControl implementation.
+  void CaptureDump(CaptureDumpCallback callback) override;
+  void CompositeWithRaster(CompositeWithRasterCallback callback) override;
+  void DumpFrameLayout(DumpFrameLayoutCallback callback) override;
+  void SetTestConfiguration(mojom::ShellTestConfigurationPtr config) override;
+  void ReplicateTestConfiguration(
+      mojom::ShellTestConfigurationPtr config) override;
+  void SetupRendererProcessForNonTestWindow() override;
+  void ResetRendererAfterWebTest() override;
+  void FinishTestInMainWindow() override;
+  void LayoutDumpCompleted(const std::string& completed_layout_dump) override;
+  void ReplyBluetoothManualChooserEvents(
+      const std::vector<std::string>& events) override;
+
+  void BindReceiver(
+      mojo::PendingAssociatedReceiver<mojom::BlinkTestControl> receiver);
+
+  BlinkTestRunner* blink_test_runner();
+
+  WebViewTestProxy* const web_view_test_proxy_;
+  WebFrameTestClient test_client_;
+
+  mojo::AssociatedReceiver<mojom::BlinkTestControl>
+      blink_test_control_receiver_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebFrameTestProxy);
 };
 
-}  // namespace test_runner
+}  // namespace content
 
 #endif  // CONTENT_SHELL_TEST_RUNNER_WEB_FRAME_TEST_PROXY_H_

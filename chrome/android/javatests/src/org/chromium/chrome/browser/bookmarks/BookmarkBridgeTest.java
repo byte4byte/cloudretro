@@ -18,8 +18,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
 import org.chromium.chrome.test.util.BookmarkTestUtil;
@@ -48,11 +48,11 @@ public class BookmarkBridgeTest {
     private BookmarkId mDesktopNode;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Profile profile = Profile.getLastUsedProfile();
+            Profile profile = Profile.getLastUsedRegularProfile();
             mBookmarkBridge = new BookmarkBridge(profile);
-            mBookmarkBridge.loadEmptyPartnerBookmarkShimForTesting();
+            mBookmarkBridge.loadFakePartnerBookmarkShimForTesting();
         });
 
         BookmarkTestUtil.waitForBookmarkModelLoaded();
@@ -67,7 +67,7 @@ public class BookmarkBridgeTest {
     @SmallTest
     @UiThreadTest
     @Feature({"Bookmark"})
-    public void testAddBookmarksAndFolders() throws Throwable {
+    public void testAddBookmarksAndFolders() {
         BookmarkId bookmarkA = mBookmarkBridge.addBookmark(mDesktopNode, 0, "a", "http://a.com");
         verifyBookmark(bookmarkA, "a", "http://a.com/", false, mDesktopNode);
         BookmarkId bookmarkB = mBookmarkBridge.addBookmark(mOtherNode, 0, "b", "http://b.com");
@@ -100,7 +100,7 @@ public class BookmarkBridgeTest {
     @SmallTest
     @UiThreadTest
     @Feature({"Bookmark"})
-    public void testGetAllFoldersWithDepths() throws Throwable {
+    public void testGetAllFoldersWithDepths() {
         BookmarkId folderA = mBookmarkBridge.addFolder(mMobileNode, 0, "a");
         BookmarkId folderB = mBookmarkBridge.addFolder(mDesktopNode, 0, "b");
         BookmarkId folderC = mBookmarkBridge.addFolder(mOtherNode, 0, "c");
@@ -137,7 +137,7 @@ public class BookmarkBridgeTest {
     @SmallTest
     @UiThreadTest
     @Feature({"Bookmark"})
-    public void testGetMoveDestinations() throws Throwable {
+    public void testGetMoveDestinations() {
         BookmarkId folderA = mBookmarkBridge.addFolder(mMobileNode, 0, "a");
         BookmarkId folderB = mBookmarkBridge.addFolder(mDesktopNode, 0, "b");
         BookmarkId folderC = mBookmarkBridge.addFolder(mOtherNode, 0, "c");
@@ -265,5 +265,53 @@ public class BookmarkBridgeTest {
             newOrder[i] = bIds.get(i).getId();
         }
         return newOrder;
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @Feature({"Bookmark"})
+    public void testSearchPartner() {
+        List<BookmarkId> expectedSearchResults = new ArrayList<>();
+        expectedSearchResults.add(new BookmarkId(
+                1, 1)); // Partner bookmark with ID 1: "Partner Bookmark A", http://a.com
+        expectedSearchResults.add(new BookmarkId(
+                2, 1)); // Partner bookmark with ID 2: "Partner Bookmark B", http://b.com
+        List<BookmarkId> searchResults = mBookmarkBridge.searchBookmarks("pArTnER BookMARK", 100);
+        Assert.assertEquals("Expected search results would yield partner bookmark with "
+                        + "case-insensitive title match",
+                expectedSearchResults, searchResults);
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @Feature({"Bookmark"})
+    public void testSearchFolder() {
+        List<BookmarkId> expectedSearchResults = new ArrayList<>();
+        expectedSearchResults.add(mBookmarkBridge.addFolder(mMobileNode, 0, "FooBar"));
+        List<BookmarkId> searchResults = mBookmarkBridge.searchBookmarks("oba", 100);
+        Assert.assertEquals("Expected search results would yield case-insensitive match of "
+                        + "part of title",
+                expectedSearchResults, searchResults);
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @Feature({"Bookmark"})
+    public void testSearch_MaxResults() {
+        List<BookmarkId> expectedSearchResults = new ArrayList<>();
+        expectedSearchResults.add(mBookmarkBridge.addFolder(mMobileNode, 0, "FooBar"));
+        expectedSearchResults.add(mBookmarkBridge.addFolder(mMobileNode, 1, "BazQuux"));
+        expectedSearchResults.add(new BookmarkId(
+                1, 1)); // Partner bookmark with ID 1: "Partner Bookmark A", http://a.com
+
+        List<BookmarkId> searchResults = mBookmarkBridge.searchBookmarks("a", 3);
+        Assert.assertEquals(
+                "Expected search results size to be 3 (maximum size)", 3, searchResults.size());
+        Assert.assertEquals("Expected that user (non-partner) bookmarks would get priority "
+                        + "over partner bookmarks",
+                expectedSearchResults, searchResults);
     }
 }

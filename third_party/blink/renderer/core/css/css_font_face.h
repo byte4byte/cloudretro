@@ -45,9 +45,7 @@ class FontDescription;
 class RemoteFontFaceSource;
 class SimpleFontData;
 
-class CORE_EXPORT CSSFontFace final
-    : public GarbageCollectedFinalized<CSSFontFace> {
-
+class CORE_EXPORT CSSFontFace final : public GarbageCollected<CSSFontFace> {
  public:
   CSSFontFace(FontFace* font_face, Vector<UnicodeRange>& ranges)
       : ranges_(base::AdoptRef(new UnicodeRangeSet(ranges))),
@@ -82,9 +80,13 @@ class CORE_EXPORT CSSFontFace final
   void Load();
   void Load(const FontDescription&);
 
+  // Recalculate the font loading timeline period for the font face.
+  // https://drafts.csswg.org/css-fonts-4/#font-display-timeline
+  void UpdatePeriod();
+
   bool HadBlankText() { return IsValid() && sources_.front()->HadBlankText(); }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   void SetLoadStatus(FontFace::LoadStatusType);

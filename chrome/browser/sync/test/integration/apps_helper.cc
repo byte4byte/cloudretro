@@ -7,6 +7,8 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/sync_app_helper.h"
@@ -46,7 +48,7 @@ bool AllProfilesHaveSameApps() {
   return true;
 }
 
-std::string InstallApp(Profile* profile, int index) {
+std::string InstallHostedApp(Profile* profile, int index) {
   return SyncExtensionHelper::GetInstance()->InstallExtension(
       profile,
       CreateFakeAppName(index),
@@ -60,10 +62,10 @@ std::string InstallPlatformApp(Profile* profile, int index) {
       extensions::Manifest::TYPE_PLATFORM_APP);
 }
 
-std::string InstallAppForAllProfiles(int index) {
+std::string InstallHostedAppForAllProfiles(int index) {
   std::string extension_id;
   for (auto* profile : test()->GetAllProfiles()) {
-    extension_id = InstallApp(profile, index);
+    extension_id = InstallHostedApp(profile, index);
   }
   return extension_id;
 }
@@ -105,6 +107,16 @@ bool IsIncognitoEnabled(Profile* profile, int index) {
 
 void InstallAppsPendingForSync(Profile* profile) {
   SyncExtensionHelper::GetInstance()->InstallExtensionsPendingForSync(profile);
+  WaitForAppService(profile);
+}
+
+void WaitForAppService(Profile* profile) {
+  // The App Service is a Mojo service, and Mojo calls are asynchronous
+  // (because they are potentially IPC calls). When the tests install and
+  // uninstall apps, they may need to pump the run loop so that those async
+  // calls settle.
+  apps::AppServiceProxyFactory::GetForProfile(profile)
+      ->FlushMojoCallsForTesting();
 }
 
 syncer::StringOrdinal GetPageOrdinalForApp(Profile* profile,
@@ -186,11 +198,9 @@ AppsMatchChecker::~AppsMatchChecker() {
                     content::NotificationService::AllSources());
 }
 
-std::string AppsMatchChecker::GetDebugMessage() const {
-  return "Waiting for apps to match";
-}
+bool AppsMatchChecker::IsExitConditionSatisfied(std::ostream* os) {
+  *os << "Waiting for apps to match";
 
-bool AppsMatchChecker::IsExitConditionSatisfied() {
   auto it = profiles_.begin();
   Profile* profile0 = *it;
   ++it;
@@ -263,4 +273,3 @@ void AppsMatchChecker::Observe(int type,
   DCHECK_EQ(chrome::NOTIFICATION_APP_LAUNCHER_REORDERED, type);
   CheckExitCondition();
 }
-

@@ -5,16 +5,21 @@
 #include "media/capabilities/video_decode_stats_db_impl.h"
 
 #include <memory>
+#include <string>
 #include <tuple>
 
 #include "base/bind.h"
+#include "base/debug/alias.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequence_checker.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
 #include "media/base/media_switches.h"
@@ -26,15 +31,22 @@ using ProtoDecodeStatsEntry = leveldb_proto::ProtoDatabase<DecodeStatsProto>;
 
 namespace {
 
-// Avoid changing client name. Used in UMA.
-// See comments in components/leveldb_proto/leveldb_database.h
-const char kDatabaseClientName[] = "VideoDecodeStatsDB";
+// Timeout threshold for DB operations. See OnOperationTimeout().
+// NOTE: Used by UmaHistogramOpTime. Change the name if you change the time.
+static constexpr base::TimeDelta kPendingOpTimeout =
+    base::TimeDelta::FromSeconds(30);
 
 const int kMaxFramesPerBufferDefault = 2500;
 
 const int kMaxDaysToKeepStatsDefault = 30;
 
 const bool kEnableUnweightedEntriesDefault = false;
+
+void UmaHistogramOpTime(const std::string& op_name, base::TimeDelta duration) {
+  base::UmaHistogramCustomMicrosecondsTimes(
+      "Media.VideoDecodeStatsDB.OpTiming." + op_name, duration,
+      base::TimeDelta::FromMilliseconds(1), kPendingOpTimeout, 50);
+}
 
 }  // namespace
 
@@ -46,6 +58,41 @@ const char VideoDecodeStatsDBImpl::kMaxDaysToKeepStatsParamName[] =
 
 const char VideoDecodeStatsDBImpl::kEnableUnweightedEntriesParamName[] =
     "db_enable_unweighted_entries";
+
+VideoDecodeStatsDBImpl::PendingOperation::PendingOperation(
+    std::string uma_str,
+    std::unique_ptr<base::CancelableOnceClosure> timeout_closure)
+    : uma_str_(uma_str),
+      timeout_closure_(std::move(timeout_closure)),
+      start_ticks_(base::TimeTicks::Now()) {
+  DVLOG(3) << __func__ << " Started " << uma_str_;
+}
+
+VideoDecodeStatsDBImpl::PendingOperation::~PendingOperation() {
+  // Destroying a pending operation that hasn't timed out yet implies the
+  // operation has completed.
+  if (timeout_closure_ && !timeout_closure_->IsCancelled()) {
+    base::TimeDelta op_duration = base::TimeTicks::Now() - start_ticks_;
+    UmaHistogramOpTime(uma_str_, op_duration);
+    DVLOG(3) << __func__ << " Completed " << uma_str_ << " ("
+             << op_duration.InMilliseconds() << ")";
+
+    // Ensure the timeout doesn't fire. Destruction should cancel the callback
+    // implicitly, but that's not a documented contract, so just taking the safe
+    // route.
+    timeout_closure_->Cancel();
+  }
+}
+
+void VideoDecodeStatsDBImpl::PendingOperation::OnTimeout() {
+  UmaHistogramOpTime(uma_str_, kPendingOpTimeout);
+  LOG(WARNING) << " Timeout performing " << uma_str_
+               << " operation on VideoDecodeStatsDB";
+
+  // Cancel the closure to ensure we don't double report the task as completed
+  // in ~PendingOperation().
+  timeout_closure_->Cancel();
+}
 
 // static
 int VideoDecodeStatsDBImpl::GetMaxFramesPerBuffer() {
@@ -70,37 +117,70 @@ bool VideoDecodeStatsDBImpl::GetEnableUnweightedEntries() {
 
 // static
 std::unique_ptr<VideoDecodeStatsDBImpl> VideoDecodeStatsDBImpl::Create(
-    base::FilePath db_dir) {
+    base::FilePath db_dir,
+    leveldb_proto::ProtoDatabaseProvider* db_provider) {
   DVLOG(2) << __func__ << " db_dir:" << db_dir;
 
-  auto proto_db =
-      leveldb_proto::ProtoDatabaseProvider::CreateUniqueDB<DecodeStatsProto>(
-          base::CreateSequencedTaskRunnerWithTraits(
-              {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-               base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}));
+  auto proto_db = db_provider->GetDB<DecodeStatsProto>(
+      leveldb_proto::ProtoDbType::VIDEO_DECODE_STATS_DB, db_dir,
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}));
 
-  return base::WrapUnique(
-      new VideoDecodeStatsDBImpl(std::move(proto_db), db_dir));
+  return base::WrapUnique(new VideoDecodeStatsDBImpl(std::move(proto_db)));
 }
 
 constexpr char VideoDecodeStatsDBImpl::kDefaultWriteTime[];
 
 VideoDecodeStatsDBImpl::VideoDecodeStatsDBImpl(
-    std::unique_ptr<leveldb_proto::ProtoDatabase<DecodeStatsProto>> db,
-    const base::FilePath& db_dir)
-    : db_(std::move(db)),
-      db_dir_(db_dir),
-      wall_clock_(base::DefaultClock::GetInstance()) {
+    std::unique_ptr<leveldb_proto::ProtoDatabase<DecodeStatsProto>> db)
+    : db_(std::move(db)), wall_clock_(base::DefaultClock::GetInstance()) {
   bool time_parsed =
       base::Time::FromString(kDefaultWriteTime, &default_write_time_);
   DCHECK(time_parsed);
 
   DCHECK(db_);
-  DCHECK(!db_dir_.empty());
 }
 
 VideoDecodeStatsDBImpl::~VideoDecodeStatsDBImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
+
+VideoDecodeStatsDBImpl::PendingOpId VideoDecodeStatsDBImpl::StartPendingOp(
+    std::string uma_str) {
+  PendingOpId op_id = next_op_id_++;
+
+  auto timeout_closure = std::make_unique<base::CancelableOnceClosure>(
+      base::BindOnce(&VideoDecodeStatsDBImpl::OnPendingOpTimeout,
+                     weak_ptr_factory_.GetWeakPtr(), op_id));
+
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, timeout_closure->callback(), kPendingOpTimeout);
+
+  pending_ops_.emplace(op_id, std::make_unique<PendingOperation>(
+                                  uma_str, std::move(timeout_closure)));
+
+  return op_id;
+}
+
+void VideoDecodeStatsDBImpl::CompletePendingOp(PendingOpId op_id) {
+  // Destructing the PendingOperation will trigger UMA for completion timing.
+  int count = pending_ops_.erase(op_id);
+
+  // No big deal, but very unusual. Timeout is very generous, so tasks that
+  // timeout are generally assumed to be permanently hung.
+  if (!count)
+    DVLOG(2) << __func__ << " DB operation completed after timeout.";
+}
+
+void VideoDecodeStatsDBImpl::OnPendingOpTimeout(PendingOpId op_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  auto it = pending_ops_.find(op_id);
+  DCHECK(it != pending_ops_.end());
+
+  it->second->OnTimeout();
+  pending_ops_.erase(it);
 }
 
 void VideoDecodeStatsDBImpl::Initialize(InitializeCB init_cb) {
@@ -112,14 +192,19 @@ void VideoDecodeStatsDBImpl::Initialize(InitializeCB init_cb) {
   // case our whole DB will be less than 35K, so we aren't worried about
   // spamming the cache.
   // TODO(chcunningham): Keep an eye on the size as the table evolves.
-  db_->Init(kDatabaseClientName, db_dir_, leveldb_proto::CreateSimpleOptions(),
-            base::BindOnce(&VideoDecodeStatsDBImpl::OnInit,
-                           weak_ptr_factory_.GetWeakPtr(), std::move(init_cb)));
+  db_->Init(base::BindOnce(&VideoDecodeStatsDBImpl::OnInit,
+                           weak_ptr_factory_.GetWeakPtr(),
+                           StartPendingOp("Initialize"), std::move(init_cb)));
 }
 
-void VideoDecodeStatsDBImpl::OnInit(InitializeCB init_cb, bool success) {
+void VideoDecodeStatsDBImpl::OnInit(PendingOpId op_id,
+                                    InitializeCB init_cb,
+                                    leveldb_proto::Enums::InitStatus status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_NE(status, leveldb_proto::Enums::InitStatus::kInvalidOperation);
+  bool success = status == leveldb_proto::Enums::InitStatus::kOK;
   DVLOG(2) << __func__ << (success ? " succeeded" : " FAILED!");
+  CompletePendingOp(op_id);
   UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Initialize",
                         success);
 
@@ -147,10 +232,11 @@ void VideoDecodeStatsDBImpl::AppendDecodeStats(
   DVLOG(3) << __func__ << " Reading key " << key.ToLogString()
            << " from DB with intent to update with " << entry.ToLogString();
 
-  db_->GetEntry(key.Serialize(),
-                base::BindOnce(&VideoDecodeStatsDBImpl::WriteUpdatedEntry,
-                               weak_ptr_factory_.GetWeakPtr(), key, entry,
-                               std::move(append_done_cb)));
+  db_->GetEntry(
+      key.Serialize(),
+      base::BindOnce(&VideoDecodeStatsDBImpl::WriteUpdatedEntry,
+                     weak_ptr_factory_.GetWeakPtr(), StartPendingOp("Read"),
+                     key, entry, std::move(append_done_cb)));
 }
 
 void VideoDecodeStatsDBImpl::GetDecodeStats(const VideoDescKey& key,
@@ -163,11 +249,44 @@ void VideoDecodeStatsDBImpl::GetDecodeStats(const VideoDescKey& key,
   db_->GetEntry(
       key.Serialize(),
       base::BindOnce(&VideoDecodeStatsDBImpl::OnGotDecodeStats,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(get_stats_cb)));
+                     weak_ptr_factory_.GetWeakPtr(), StartPendingOp("Read"),
+                     std::move(get_stats_cb)));
 }
 
-bool VideoDecodeStatsDBImpl::AreStatsExpired(
+bool VideoDecodeStatsDBImpl::AreStatsUsable(
     const DecodeStatsProto* const stats_proto) {
+  // CHECK FOR CORRUPTION
+  // We've observed this in a tiny fraction of reports, but the consequences can
+  // lead to crashes due floating point math exceptions. http://crbug.com/982009
+
+  bool are_stats_valid =
+      // All frame counts should be capped by |frames_decoded|.
+      stats_proto->frames_dropped() <= stats_proto->frames_decoded() &&
+      stats_proto->frames_power_efficient() <= stats_proto->frames_decoded() &&
+
+      // You can't drop or power-efficiently decode more than 100% of frames.
+      stats_proto->unweighted_average_frames_dropped() <= 1 &&
+      stats_proto->unweighted_average_frames_efficient() <= 1 &&
+
+      // |last_write_date| represents base::Time::ToJsTime(), a number of msec
+      // since the epoch, so it should never be negative (zero is valid, as a
+      // default for this field, indicating the last write was made before we
+      // added time stamping). The converted time should also never be in the
+      // future.
+      stats_proto->last_write_date() >= 0 &&
+      base::Time::FromJsTime(stats_proto->last_write_date()) <=
+          wall_clock_->Now();
+
+  UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Validate",
+                        are_stats_valid);
+
+  if (!are_stats_valid)
+    return false;
+
+  // CHECK FOR EXPIRATION
+  // Avoid keeping old data forever so users aren't stuck with predictions after
+  // upgrading their machines (e.g. driver updates or new hardware).
+
   double last_write_date = stats_proto->last_write_date();
   if (last_write_date == 0) {
     // Set a default time if the write date is zero (no write since proto was
@@ -178,11 +297,12 @@ bool VideoDecodeStatsDBImpl::AreStatsExpired(
   const int kMaxDaysToKeepStats = GetMaxDaysToKeepStats();
   DCHECK_GT(kMaxDaysToKeepStats, 0);
 
-  return wall_clock_->Now() - base::Time::FromJsTime(last_write_date) >
+  return wall_clock_->Now() - base::Time::FromJsTime(last_write_date) <=
          base::TimeDelta::FromDays(kMaxDaysToKeepStats);
 }
 
 void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
+    PendingOpId op_id,
     const VideoDescKey& key,
     const DecodeStatsEntry& new_entry,
     AppendDecodeStatsCB append_done_cb,
@@ -190,6 +310,7 @@ void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
     std::unique_ptr<DecodeStatsProto> stats_proto) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(IsInitialized());
+  CompletePendingOp(op_id);
 
   // Note: outcome of "Write" operation logged in OnEntryUpdated().
   UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Read",
@@ -202,14 +323,25 @@ void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
     return;
   }
 
-  if (!stats_proto || AreStatsExpired(stats_proto.get())) {
+  if (!stats_proto || !AreStatsUsable(stats_proto.get())) {
     // Default instance will have all zeros for numeric types.
     stats_proto.reset(new DecodeStatsProto());
   }
 
+  // Debug alias the various counts so we can get them in dumps to catch
+  // lingering crashes in http://crbug.com/982009
   uint64_t old_frames_decoded = stats_proto->frames_decoded();
   uint64_t old_frames_dropped = stats_proto->frames_dropped();
   uint64_t old_frames_power_efficient = stats_proto->frames_power_efficient();
+  uint64_t new_frames_decoded = new_entry.frames_decoded;
+  uint64_t new_frames_dropped = new_entry.frames_dropped;
+  uint64_t new_frames_power_efficient = new_entry.frames_power_efficient;
+  base::debug::Alias(&old_frames_decoded);
+  base::debug::Alias(&old_frames_dropped);
+  base::debug::Alias(&old_frames_power_efficient);
+  base::debug::Alias(&new_frames_decoded);
+  base::debug::Alias(&new_frames_dropped);
+  base::debug::Alias(&new_frames_power_efficient);
 
   const uint64_t kMaxFramesPerBuffer = GetMaxFramesPerBuffer();
   DCHECK_GT(kMaxFramesPerBuffer, 0UL);
@@ -222,6 +354,10 @@ void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
     new_entry_efficient_ratio =
         static_cast<double>(new_entry.frames_power_efficient) /
         new_entry.frames_decoded;
+  } else {
+    // Callers shouldn't ask DB to save empty records. See
+    // VideoDecodeStatsRecorder.
+    NOTREACHED() << __func__ << " saving empty stats record";
   }
 
   if (old_frames_decoded + new_entry.frames_decoded > kMaxFramesPerBuffer) {
@@ -232,15 +368,27 @@ void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
         static_cast<double>(new_entry.frames_decoded) / kMaxFramesPerBuffer,
         1.0);
 
-    double old_dropped_ratio =
-        static_cast<double>(old_frames_dropped) / old_frames_decoded;
-    double old_efficient_ratio =
-        static_cast<double>(old_frames_power_efficient) / old_frames_decoded;
+    double old_dropped_ratio = 0;
+    double old_efficient_ratio = 0;
+    if (old_frames_decoded) {
+      old_dropped_ratio =
+          static_cast<double>(old_frames_dropped) / old_frames_decoded;
+      old_efficient_ratio =
+          static_cast<double>(old_frames_power_efficient) / old_frames_decoded;
+    }
 
     double agg_dropped_ratio = fill_ratio * new_entry_dropped_ratio +
                                (1 - fill_ratio) * old_dropped_ratio;
     double agg_efficient_ratio = fill_ratio * new_entry_efficient_ratio +
                                  (1 - fill_ratio) * old_efficient_ratio;
+
+    // Debug alias the various counts so we can get them in dumps to catch
+    // lingering crashes in http://crbug.com/982009
+    base::debug::Alias(&fill_ratio);
+    base::debug::Alias(&old_dropped_ratio);
+    base::debug::Alias(&old_efficient_ratio);
+    base::debug::Alias(&agg_dropped_ratio);
+    base::debug::Alias(&agg_efficient_ratio);
 
     stats_proto->set_frames_decoded(kMaxFramesPerBuffer);
     stats_proto->set_frames_dropped(
@@ -290,36 +438,46 @@ void VideoDecodeStatsDBImpl::WriteUpdatedEntry(
   // Update the time stamp for the current write.
   stats_proto->set_last_write_date(wall_clock_->Now().ToJsTime());
 
+  // Make sure we never write bogus stats into the DB! While its possible the DB
+  // may experience some corruption (disk), we should have detected that above
+  // and discarded any bad data prior to this upcoming save.
+  DCHECK(AreStatsUsable(stats_proto.get()));
+
   // Push the update to the DB.
   using DBType = leveldb_proto::ProtoDatabase<DecodeStatsProto>;
   std::unique_ptr<DBType::KeyEntryVector> entries =
       std::make_unique<DBType::KeyEntryVector>();
   entries->emplace_back(key.Serialize(), *stats_proto);
-  db_->UpdateEntries(std::move(entries),
-                     std::make_unique<leveldb_proto::KeyVector>(),
-                     base::BindOnce(&VideoDecodeStatsDBImpl::OnEntryUpdated,
-                                    weak_ptr_factory_.GetWeakPtr(),
-                                    std::move(append_done_cb)));
+  db_->UpdateEntries(
+      std::move(entries), std::make_unique<leveldb_proto::KeyVector>(),
+      base::BindOnce(&VideoDecodeStatsDBImpl::OnEntryUpdated,
+                     weak_ptr_factory_.GetWeakPtr(), StartPendingOp("Write"),
+                     std::move(append_done_cb)));
 }
 
-void VideoDecodeStatsDBImpl::OnEntryUpdated(AppendDecodeStatsCB append_done_cb,
+void VideoDecodeStatsDBImpl::OnEntryUpdated(PendingOpId op_id,
+                                            AppendDecodeStatsCB append_done_cb,
                                             bool success) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Write", success);
   DVLOG(3) << __func__ << " update " << (success ? "succeeded" : "FAILED!");
+  CompletePendingOp(op_id);
+  UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Write", success);
   std::move(append_done_cb).Run(success);
 }
 
 void VideoDecodeStatsDBImpl::OnGotDecodeStats(
+    PendingOpId op_id,
     GetDecodeStatsCB get_stats_cb,
     bool success,
     std::unique_ptr<DecodeStatsProto> stats_proto) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DVLOG(3) << __func__ << " get " << (success ? "succeeded" : "FAILED!");
+  CompletePendingOp(op_id);
   UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Read", success);
 
   std::unique_ptr<DecodeStatsEntry> entry;
 
-  if (stats_proto && !AreStatsExpired(stats_proto.get())) {
+  if (stats_proto && AreStatsUsable(stats_proto.get())) {
     DCHECK(success);
 
     if (GetEnableUnweightedEntries()) {
@@ -377,15 +535,19 @@ void VideoDecodeStatsDBImpl::ClearStats(base::OnceClosure clear_done_cb) {
 
   db_->LoadKeys(
       base::BindOnce(&VideoDecodeStatsDBImpl::OnLoadAllKeysForClearing,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(clear_done_cb)));
+                     weak_ptr_factory_.GetWeakPtr(), StartPendingOp("LoadKeys"),
+                     std::move(clear_done_cb)));
 }
 
 void VideoDecodeStatsDBImpl::OnLoadAllKeysForClearing(
+    PendingOpId op_id,
     base::OnceClosure clear_done_cb,
     bool success,
     std::unique_ptr<std::vector<std::string>> keys) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(2) << __func__ << (success ? " succeeded" : " FAILED!");
+
+  CompletePendingOp(op_id);
 
   UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.LoadKeys", success);
 
@@ -395,7 +557,7 @@ void VideoDecodeStatsDBImpl::OnLoadAllKeysForClearing(
         std::make_unique<ProtoDecodeStatsEntry::KeyEntryVector>(),
         std::move(keys) /* keys_to_remove */,
         base::BindOnce(&VideoDecodeStatsDBImpl::OnStatsCleared,
-                       weak_ptr_factory_.GetWeakPtr(),
+                       weak_ptr_factory_.GetWeakPtr(), StartPendingOp("Clear"),
                        std::move(clear_done_cb)));
   } else {
     // Fail silently. See comment in OnStatsCleared().
@@ -403,12 +565,15 @@ void VideoDecodeStatsDBImpl::OnLoadAllKeysForClearing(
   }
 }
 
-void VideoDecodeStatsDBImpl::OnStatsCleared(base::OnceClosure clear_done_cb,
+void VideoDecodeStatsDBImpl::OnStatsCleared(PendingOpId op_id,
+                                            base::OnceClosure clear_done_cb,
                                             bool success) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(2) << __func__ << (success ? " succeeded" : " FAILED!");
 
-  UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Destroy", success);
+  CompletePendingOp(op_id);
+
+  UMA_HISTOGRAM_BOOLEAN("Media.VideoDecodeStatsDB.OpSuccess.Clear", success);
 
   // We don't pass success to |clear_done_cb|. Clearing is best effort and
   // there is no additional action for callers to take in case of failure.

@@ -5,9 +5,10 @@
 package org.chromium.chrome.browser.browserservices.trustedwebactivityui.splashscreen;
 
 import android.graphics.Bitmap;
-import android.support.annotation.Nullable;
-import android.support.customtabs.CustomTabsSessionToken;
 import android.util.ArrayMap;
+
+import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsSessionToken;
 
 import java.util.Collections;
 import java.util.Map;
@@ -17,7 +18,7 @@ import javax.inject.Singleton;
 
 /**
  * Stores the splash images received from TWA clients between the call to
- * {@link android.support.customtabs.CustomTabsService#receiveFile} and a Trusted Web Activity
+ * {@link androidx.browser.customtabs.CustomTabsService#receiveFile} and a Trusted Web Activity
  * claiming the image.
  *
  * This class is thread-safe.

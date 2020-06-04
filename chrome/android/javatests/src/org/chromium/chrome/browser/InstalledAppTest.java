@@ -17,6 +17,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
@@ -81,7 +82,7 @@ public class InstalledAppTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         mTab.removeObserver(mUpdateWaiter);
         mTestServer.stopAndDestroyServer();
     }

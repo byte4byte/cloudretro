@@ -5,14 +5,13 @@
 #include "chrome/browser/android/explore_sites/explore_sites_service_impl.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/test/bind_test_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/test_mock_time_task_runner.h"
-#include "chrome/browser/android/chrome_feature_list.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/android/explore_sites/catalog.pb.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -46,9 +45,10 @@ class ExploreSitesServiceImplTest : public testing::Test {
 
   void SetUp() override {
     std::unique_ptr<ExploreSitesStore> store =
-        std::make_unique<ExploreSitesStore>(task_runner_);
+        std::make_unique<ExploreSitesStore>(
+            task_environment_.GetMainThreadTaskRunner());
     auto history_stats_reporter =
-        std::make_unique<HistoryStatisticsReporter>(nullptr, nullptr, nullptr);
+        std::make_unique<HistoryStatisticsReporter>(nullptr, nullptr);
     service_ = std::make_unique<ExploreSitesServiceImpl>(
         std::move(store),
         std::make_unique<TestURLLoaderFactoryGetter>(
@@ -103,7 +103,7 @@ class ExploreSitesServiceImplTest : public testing::Test {
 
   std::string bad_test_data() { return bad_test_data_; }
 
-  void PumpLoop() { task_runner_->RunUntilIdle(); }
+  void PumpLoop() { task_environment_.RunUntilIdle(); }
 
   std::string CreateTestDataProto();
   std::string CreateMostlyValidTestDataProto();
@@ -151,8 +151,9 @@ class ExploreSitesServiceImplTest : public testing::Test {
       test_shared_url_loader_factory_;
   network::ResourceRequest last_resource_request_;
   std::unique_ptr<base::HistogramTester> histogram_tester_;
-  base::MessageLoopForIO message_loop_;
-  scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO,
+      base::test::SingleThreadTaskEnvironment::TimeSource::MOCK_TIME};
 
   DISALLOW_COPY_AND_ASSIGN(ExploreSitesServiceImplTest);
 };
@@ -162,10 +163,7 @@ ExploreSitesServiceImplTest::ExploreSitesServiceImplTest()
       callback_count_(0),
       test_shared_url_loader_factory_(
           base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-              &test_url_loader_factory_)),
-      task_runner_(new base::TestMockTimeTaskRunner) {
-  message_loop_.SetTaskRunner(task_runner_);
-}
+              &test_url_loader_factory_)) {}
 
 // Called by tests - response_data is the data we want to go back as the
 // response from the network.

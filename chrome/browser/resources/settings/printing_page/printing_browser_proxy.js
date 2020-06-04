@@ -7,7 +7,10 @@
  * interact with the browser. Used on operating system that is not Chrome OS.
  */
 
-cr.define('settings', function() {
+// clang-format off
+import {addSingletonGetter} from 'chrome://resources/js/cr.m.js';
+// clang-format on
+
   /** @interface */
   class PrintingBrowserProxy {
     /**
@@ -17,19 +20,13 @@ cr.define('settings', function() {
   }
 
   /**
-   * @implements {settings.PrintingBrowserProxy}
+   * @implements {PrintingBrowserProxy}
    */
-  class PrintingBrowserProxyImpl {
+  export class PrintingBrowserProxyImpl {
     /** @override */
     openSystemPrintDialog() {
       chrome.send('openSystemPrintDialog');
     }
   }
 
-  cr.addSingletonGetter(PrintingBrowserProxyImpl);
-
-  return {
-    PrintingBrowserProxy: PrintingBrowserProxy,
-    PrintingBrowserProxyImpl: PrintingBrowserProxyImpl,
-  };
-});
+  addSingletonGetter(PrintingBrowserProxyImpl);

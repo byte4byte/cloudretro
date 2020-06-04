@@ -29,9 +29,6 @@ class TestPasswordManagerClient
   TestPasswordManagerClient();
   ~TestPasswordManagerClient() override;
 
-  // PasswordManagerClient:
-  MOCK_METHOD0(OnCredentialManagerUsed, bool());
-
   // PromptUserTo*Ptr functions allow to both override PromptUserTo* methods
   // and expect calls.
   MOCK_METHOD1(PromptUserToSavePasswordPtr, void(PasswordFormManagerForUI*));
@@ -50,7 +47,7 @@ class TestPasswordManagerClient
  private:
   // PasswordManagerClient:
   PrefService* GetPrefs() const override;
-  PasswordStore* GetPasswordStore() const override;
+  PasswordStore* GetProfilePasswordStore() const override;
   const PasswordManager* GetPasswordManager() const override;
   const GURL& GetLastCommittedEntryURL() const override;
   // Stores |manager| into |manager_|. Save() should be

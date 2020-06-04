@@ -7,10 +7,10 @@
 
 #include <memory>
 
+#include "chrome/browser/ui/autofill/payments/save_card_bubble_controller.h"
 #include "chrome/browser/ui/autofill/payments/save_card_bubble_view.h"
 #include "chrome/browser/ui/sync/bubble_sync_promo_delegate.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_bubble_delegate_view.h"
-#include "components/autofill/core/browser/ui/payments/save_card_bubble_controller.h"
 #include "components/signin/public/base/signin_metrics.h"
 
 namespace content {
@@ -30,7 +30,6 @@ class SaveCardBubbleViews : public SaveCardBubbleView,
  public:
   // Bubble will be anchored to |anchor_view|.
   SaveCardBubbleViews(views::View* anchor_view,
-                      const gfx::Point& anchor_point,
                       content::WebContents* web_contents,
                       SaveCardBubbleController* controller);
 
@@ -38,13 +37,6 @@ class SaveCardBubbleViews : public SaveCardBubbleView,
 
   // SaveCardBubbleView:
   void Hide() override;
-
-  // views::BubbleDialogDelegateView:
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
-  std::unique_ptr<views::View> CreateFootnoteView() override;
-  bool Accept() override;
-  bool Cancel() override;
-  bool Close() override;
 
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
@@ -88,11 +80,14 @@ class SaveCardBubbleViews : public SaveCardBubbleView,
 
   SaveCardBubbleController* controller() const { return controller_; }
 
-  // Attributes IDs to the DialogClientView and its buttons.
-  void AssignIdsToDialogClientView();
+  // Attributes IDs to the dialog's DialogDelegate-supplied buttons.
+  void AssignIdsToDialogButtons();
 
   // views::BubbleDialogDelegateView:
   void Init() override;
+
+  void OnDialogAccepted();
+  void OnDialogCancelled();
 
   std::unique_ptr<SyncPromoDelegate> sync_promo_delegate_;
 

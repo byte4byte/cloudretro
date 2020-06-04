@@ -20,25 +20,25 @@
 namespace web {
 
 CookieNotificationBridge::CookieNotificationBridge() {
-  id<NSObject> observer = [[NSNotificationCenter defaultCenter]
+  id<NSObject> registration = [[NSNotificationCenter defaultCenter]
       addObserverForName:NSHTTPCookieManagerCookiesChangedNotification
                   object:[NSHTTPCookieStorage sharedHTTPCookieStorage]
                    queue:nil
               usingBlock:^(NSNotification* notification) {
                 OnNotificationReceived(notification);
               }];
-  observer_ = observer;
+  registration_ = registration;
 }
 
 CookieNotificationBridge::~CookieNotificationBridge() {
-  [[NSNotificationCenter defaultCenter] removeObserver:observer_];
+  [[NSNotificationCenter defaultCenter] removeObserver:registration_];
 }
 
 void CookieNotificationBridge::OnNotificationReceived(
     NSNotification* notification) {
   DCHECK([[notification name]
       isEqualToString:NSHTTPCookieManagerCookiesChangedNotification]);
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {web::WebThread::IO},
       base::BindOnce(&net::CookieStoreIOS::NotifySystemCookiesChanged));
 }

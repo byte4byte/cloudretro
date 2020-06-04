@@ -91,6 +91,12 @@ fdio_spawn_action_t FdioSpawnActionAddHandle(uint32_t id, zx_handle_t handle) {
   return action;
 }
 
+fdio_spawn_action_t FdioSpawnActionSetName(const char* name) {
+  fdio_spawn_action_t action = FdioSpawnAction(FDIO_SPAWN_ACTION_SET_NAME);
+  action.name.data = name;
+  return action;
+}
+
 }  // namespace
 
 // static
@@ -145,7 +151,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   // |clear_environment|, |environment| or |current_directory| are set then we
   // construct a new (possibly empty) environment, otherwise we let fdio_spawn()
   // clone the caller's environment into the new process.
-  uint32_t spawn_flags = FDIO_SPAWN_CLONE_LDSVC | options.spawn_flags;
+  uint32_t spawn_flags = FDIO_SPAWN_DEFAULT_LDSVC | options.spawn_flags;
 
   EnvironmentMap environ_modifications = options.environment;
   if (!options.current_directory.empty()) {
@@ -204,6 +210,15 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   for (const auto& src_target : options.fds_to_remap) {
     spawn_actions.push_back(
         FdioSpawnActionCloneFd(src_target.first, src_target.second));
+  }
+
+  // If |process_name_suffix| is specified then set process name as
+  // "<file_name><suffix>", otherwise leave the default value.
+  std::string process_name;
+  if (!options.process_name_suffix.empty()) {
+    process_name = base::FilePath(argv[0]).BaseName().value() +
+                   options.process_name_suffix;
+    spawn_actions.push_back(FdioSpawnActionSetName(process_name.c_str()));
   }
 
   zx::process process_handle;

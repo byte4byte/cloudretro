@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/files/file.h"
 #include "base/run_loop.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -43,7 +43,7 @@ class FileSystemProviderQueueTest : public testing::Test {
   FileSystemProviderQueueTest() {}
   ~FileSystemProviderQueueTest() override {}
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 TEST_F(FileSystemProviderQueueTest, NewToken) {
@@ -59,13 +59,13 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_OneAtOnce) {
   int first_counter = 0;
   int first_abort_counter = 0;
   queue.Enqueue(first_token,
-                base::Bind(&OnRun, &first_counter, &first_abort_counter));
+                base::BindOnce(&OnRun, &first_counter, &first_abort_counter));
 
   const size_t second_token = queue.NewToken();
   int second_counter = 0;
   int second_abort_counter = 0;
   queue.Enqueue(second_token,
-                base::Bind(&OnRun, &second_counter, &second_abort_counter));
+                base::BindOnce(&OnRun, &second_counter, &second_abort_counter));
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
@@ -85,7 +85,7 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_OneAtOnce) {
   int third_counter = 0;
   int third_abort_counter = 0;
   queue.Enqueue(third_token,
-                base::Bind(&OnRun, &third_counter, &third_abort_counter));
+                base::BindOnce(&OnRun, &third_counter, &third_abort_counter));
 
   // The second task is still running, so the third one is blocked.
   base::RunLoop().RunUntilIdle();
@@ -114,19 +114,19 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_MultipleAtOnce) {
   int first_counter = 0;
   int first_abort_counter = 0;
   queue.Enqueue(first_token,
-                base::Bind(&OnRun, &first_counter, &first_abort_counter));
+                base::BindOnce(&OnRun, &first_counter, &first_abort_counter));
 
   const size_t second_token = queue.NewToken();
   int second_counter = 0;
   int second_abort_counter = 0;
   queue.Enqueue(second_token,
-                base::Bind(&OnRun, &second_counter, &second_abort_counter));
+                base::BindOnce(&OnRun, &second_counter, &second_abort_counter));
 
   const size_t third_token = queue.NewToken();
   int third_counter = 0;
   int third_abort_counter = 0;
   queue.Enqueue(third_token,
-                base::Bind(&OnRun, &third_counter, &third_abort_counter));
+                base::BindOnce(&OnRun, &third_counter, &third_abort_counter));
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);
@@ -256,13 +256,13 @@ TEST_F(FileSystemProviderQueueTest, Enqueue_Abort) {
   int first_counter = 0;
   int first_abort_counter = 0;
   queue.Enqueue(first_token,
-                base::Bind(&OnRun, &first_counter, &first_abort_counter));
+                base::BindOnce(&OnRun, &first_counter, &first_abort_counter));
 
   const size_t second_token = queue.NewToken();
   int second_counter = 0;
   int second_abort_counter = 0;
   queue.Enqueue(second_token,
-                base::Bind(&OnRun, &second_counter, &second_abort_counter));
+                base::BindOnce(&OnRun, &second_counter, &second_abort_counter));
 
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, first_counter);

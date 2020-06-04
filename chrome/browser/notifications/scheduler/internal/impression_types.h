@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_IMPRESSION_TYPES_H_
 #define CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_IMPRESSION_TYPES_H_
 
-#include <deque>
 #include <map>
 #include <string>
 
+#include "base/containers/circular_deque.h"
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
@@ -25,6 +25,8 @@ namespace notifications {
 // an impression result, which may affect notification exposure.
 // 4. The impression is deleted after it expires.
 struct Impression {
+  using ImpressionResultMap = std::map<UserFeedback, ImpressionResult>;
+  using CustomData = std::map<std::string, std::string>;
   Impression();
   Impression(SchedulerClientType type,
              const std::string& guid,
@@ -50,9 +52,6 @@ struct Impression {
   // rate.
   bool integrated = false;
 
-  // The task start time when this impression is generated.
-  SchedulerTaskTime task_start_time = SchedulerTaskTime::kUnknown;
-
   // The unique identifier of the notification.
   std::string guid;
 
@@ -62,7 +61,11 @@ struct Impression {
   SchedulerClientType type = SchedulerClientType::kUnknown;
 
   // Used to override default impression result.
-  std::map<UserFeedback, ImpressionResult> impression_mapping;
+  ImpressionResultMap impression_mapping;
+
+  // Custom data associated with a notification. Send back to the client when
+  // the user interacts with the notification.
+  CustomData custom_data;
 };
 
 // Contains details about supression and recovery after suppression expired.
@@ -91,7 +94,7 @@ struct SuppressionInfo {
 // to the user and the history of user interactions to a particular notification
 // client.
 struct ClientState {
-  using Impressions = std::deque<Impression>;
+  using Impressions = base::circular_deque<Impression>;
   ClientState();
   explicit ClientState(const ClientState& other);
   ~ClientState();
@@ -110,6 +113,17 @@ struct ClientState {
 
   // Suppression details, no value if there is currently no suppression.
   base::Optional<SuppressionInfo> suppression_info;
+
+  // The number of negative events caused by concecutive dismiss or not helpful
+  // button clicking in all time. Persisted in protodb.
+  size_t negative_events_count;
+
+  // Timestamp of last negative event occurred. Persisted in protodb.
+  base::Optional<base::Time> last_negative_event_ts;
+
+  // Timestamp of last shown notification.
+  // Persisted in protodb.
+  base::Optional<base::Time> last_shown_ts;
 };
 
 }  // namespace notifications

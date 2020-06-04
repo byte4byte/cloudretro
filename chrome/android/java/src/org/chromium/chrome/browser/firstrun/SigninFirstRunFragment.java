@@ -4,17 +4,18 @@
 
 package org.chromium.chrome.browser.firstrun;
 
-import android.app.Fragment;
 import android.content.Context;
 import android.os.Bundle;
+
+import androidx.fragment.app.Fragment;
 
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.cards.SignInPromo;
-import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninFragmentBase;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.components.signin.ChildAccountStatus;
+import org.chromium.components.signin.metrics.SigninAccessPoint;
 
 /** A {@link Fragment} to handle sign-in within the first run experience. */
 public class SigninFirstRunFragment extends SigninFragmentBase implements FirstRunFragment {

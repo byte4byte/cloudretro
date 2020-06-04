@@ -6,16 +6,12 @@ package org.chromium.chrome.browser.keyboard_accessory.sheet_tabs;
 
 import static org.chromium.ui.base.LocalizationUtils.isLayoutRtl;
 
+import android.content.Context;
+import android.content.res.Resources;
 import android.content.res.TypedArray;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.support.annotation.Nullable;
-import android.support.v4.view.ViewCompat;
-import android.support.v7.content.res.AppCompatResources;
-import android.support.v7.widget.RecyclerView;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.View;
@@ -23,12 +19,21 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
+import androidx.core.view.ViewCompat;
+import androidx.recyclerview.widget.RecyclerView;
+
+import org.chromium.base.Callback;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.FooterCommand;
 import org.chromium.chrome.browser.keyboard_accessory.data.UserInfoField;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabModel.AccessorySheetDataPiece;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabViewBinder.ElementViewHolder;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.ui.favicon.FaviconUtils;
+import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
 import org.chromium.ui.HorizontalListDividerDrawable;
 import org.chromium.ui.modelutil.ListModel;
 
@@ -148,11 +153,10 @@ class PasswordAccessorySheetViewBinder {
             bindTextView(password, info.getFields().get(1));
 
             // Set the default icon for username, then try to get a better one.
-            setIconForBitmap(username, null);
-            if (info.getFaviconProvider() != null) {
-                info.getFaviconProvider().fetchFavicon(
-                        mIconSize, icon -> setIconForBitmap(username, icon));
-            }
+            FaviconHelper faviconHelper = new FaviconHelper(username.getContext());
+            setIconForBitmap(username, faviconHelper.getDefaultIcon(info.getOrigin()));
+            faviconHelper.fetchFavicon(info.getOrigin(), icon -> setIconForBitmap(username, icon));
+
             ViewCompat.setPaddingRelative(username, mPadding, 0, mPadding, 0);
             // Passwords have no icon, so increase the offset.
             ViewCompat.setPaddingRelative(password, 2 * mPadding + mIconSize, 0, mPadding, 0);
@@ -181,19 +185,55 @@ class PasswordAccessorySheetViewBinder {
             return suggestionBackground;
         }
 
-        private void setIconForBitmap(TextView text, @Nullable Bitmap favicon) {
-            Drawable icon;
-            if (favicon == null) {
-                icon = AppCompatResources.getDrawable(
-                        itemView.getContext(), R.drawable.ic_globe_36dp);
-            } else {
-                icon = new BitmapDrawable(itemView.getContext().getResources(), favicon);
-            }
-            if (icon != null) { // AppCompatResources.getDrawable is @Nullable.
+        private void setIconForBitmap(TextView text, @Nullable Drawable icon) {
+            if (icon != null) {
                 icon.setBounds(0, 0, mIconSize, mIconSize);
             }
             text.setCompoundDrawablePadding(mPadding);
             text.setCompoundDrawablesRelative(icon, null, null, null);
+        }
+    }
+
+    /**
+     * Provides default favicons and helps to fetch and set favicons. It automatically discards
+     * out-of-date responses which are common for recycled ViewHolder.
+     */
+    static class FaviconHelper {
+        private final Resources mResources;
+        private final RoundedIconGenerator mIconGenerator;
+        private final int mDesiredSize;
+
+        /**
+         * Creates a new helper.
+         * @param context The {@link Context} used to fetch resources and create Drawables.
+         */
+        FaviconHelper(Context context) {
+            mResources = context.getResources();
+            mDesiredSize = mResources.getDimensionPixelSize(
+                    R.dimen.keyboard_accessory_suggestion_icon_size);
+            mIconGenerator = FaviconUtils.createCircularIconGenerator(mResources);
+        }
+
+        Drawable getDefaultIcon(String origin) {
+            return FaviconUtils.getIconDrawableWithoutFilter(null, origin,
+                    R.color.default_favicon_background_color, mIconGenerator, mResources,
+                    mDesiredSize);
+        }
+
+        /**
+         * Resets favicon in case the container is recycled. Then queries a favicon for the origin.
+         * @param origin The origin URL of the favicon.
+         * @param setIconCallback Callback called with fetched icons. May be called with null.
+         */
+        void fetchFavicon(String origin, Callback<Drawable> setIconCallback) {
+            final LargeIconBridge mIconBridge =
+                    new LargeIconBridge(Profile.getLastUsedRegularProfile());
+            mIconBridge.getLargeIconForStringUrl(origin, mDesiredSize,
+                    (icon, fallbackColor, isFallbackColorDefault, iconType) -> {
+                        Drawable drawable = FaviconUtils.getIconDrawableWithoutFilter(icon, origin,
+                                fallbackColor, mIconGenerator, mResources, mDesiredSize);
+                        setIconCallback.onResult(drawable);
+                    });
         }
     }
 

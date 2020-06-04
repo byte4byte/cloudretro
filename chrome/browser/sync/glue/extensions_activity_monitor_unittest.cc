@@ -16,7 +16,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/sync/base/extensions_activity.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,7 +52,7 @@ template <class T>
 void FireBookmarksApiEvent(
     const scoped_refptr<Extension>& extension, int repeats) {
   scoped_refptr<T> bookmarks_function(new T());
-  bookmarks_function->set_name(T::function_name());
+  bookmarks_function->SetName(T::function_name());
   for (int i = 0; i < repeats; i++) {
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_BOOKMARKS_API_INVOKED,
@@ -72,7 +72,7 @@ class SyncChromeExtensionsActivityMonitorTest : public testing::Test {
   ~SyncChromeExtensionsActivityMonitorTest() override {}
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
  protected:
   ExtensionsActivityMonitor monitor_;

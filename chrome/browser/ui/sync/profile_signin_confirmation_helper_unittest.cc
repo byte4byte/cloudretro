@@ -11,6 +11,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -30,7 +31,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -62,12 +63,13 @@ void GetValueAndQuit(T* result, const base::Closure& quit, T actual) {
   quit.Run();
 }
 
-template<typename T>
+template <typename T>
 T GetCallbackResult(
-    const base::Callback<void(const base::Callback<void(T)>&)>& callback) {
+    const base::Callback<void(base::OnceCallback<void(T)>)>& callback) {
   T result = false;
   base::RunLoop loop;
-  callback.Run(base::Bind(&GetValueAndQuit<T>, &result, loop.QuitClosure()));
+  callback.Run(
+      base::BindOnce(&GetValueAndQuit<T>, &result, loop.QuitClosure()));
   loop.Run();
   return result;
 }
@@ -130,14 +132,19 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
   }
 
   void SetUp() override {
+    ASSERT_TRUE(profile_dir_.CreateUniqueTempDir());
+
     // Create the profile.
     TestingProfile::Builder builder;
+    builder.SetPath(profile_dir_.GetPath());
     user_prefs_ = new TestingPrefStoreWithCustomReadError;
     sync_preferences::TestingPrefServiceSyncable* pref_service =
         new sync_preferences::TestingPrefServiceSyncable(
-            new TestingPrefStore(), new TestingPrefStore(), user_prefs_,
-            new TestingPrefStore(), new user_prefs::PrefRegistrySyncable(),
-            new PrefNotifierImpl());
+            /*managed_prefs=*/new TestingPrefStore(),
+            /*supervised_user_prefs=*/new TestingPrefStore(),
+            /*extension_prefs=*/new TestingPrefStore(), user_prefs_,
+            /*recommended_prefs=*/new TestingPrefStore(),
+            new user_prefs::PrefRegistrySyncable(), new PrefNotifierImpl());
     RegisterUserProfilePrefs(pref_service->registry());
     builder.SetPrefService(
         base::WrapUnique<sync_preferences::PrefServiceSyncable>(pref_service));
@@ -167,7 +174,8 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
   }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
+  base::ScopedTempDir profile_dir_;
+  content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
   TestingPrefStoreWithCustomReadError* user_prefs_;
   BookmarkModel* model_;

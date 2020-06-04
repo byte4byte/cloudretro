@@ -5,15 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PORTAL_PORTAL_HOST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PORTAL_PORTAL_HOST_H_
 
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
-class Document;
+struct BlinkTransferableMessage;
 class ExecutionContext;
 class LocalDOMWindow;
 class ScriptValue;
@@ -38,8 +38,6 @@ class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
   ExecutionContext* GetExecutionContext() const override;
   PortalHost* ToPortalHost() override;
 
-  Document* GetDocument() const;
-
   // Called immediately before dispatching the onactivate event.
   void OnPortalActivated();
 
@@ -47,7 +45,7 @@ class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
   void postMessage(ScriptState* script_state,
                    const ScriptValue& message,
                    const String& target_origin,
-                   Vector<ScriptValue>& transfer,
+                   HeapVector<ScriptValue>& transfer,
                    ExceptionState& exception_state);
   void postMessage(ScriptState* script_state,
                    const ScriptValue& message,
@@ -65,7 +63,7 @@ class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
  private:
   mojom::blink::PortalHost& GetPortalHostInterface();
 
-  mojom::blink::PortalHostAssociatedPtr portal_host_ptr_;
+  mojo::AssociatedRemote<mojom::blink::PortalHost> portal_host_;
 };
 
 }  // namespace blink

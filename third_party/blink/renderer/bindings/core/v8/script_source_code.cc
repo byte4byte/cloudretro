@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
+#include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
 
 namespace blink {
 
@@ -103,7 +104,7 @@ ScriptSourceCode::ScriptSourceCode(const String& source,
 
 ScriptSourceCode::~ScriptSourceCode() = default;
 
-void ScriptSourceCode::Trace(blink::Visitor* visitor) {
+void ScriptSourceCode::Trace(Visitor* visitor) {
   visitor->Trace(cache_handler_);
   visitor->Trace(streamer_);
 }

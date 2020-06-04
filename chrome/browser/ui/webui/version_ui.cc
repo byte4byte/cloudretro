@@ -12,9 +12,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/localized_string.h"
 #include "chrome/browser/ui/webui/version_handler.h"
 #include "chrome/browser/ui/webui/version_util_win.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -28,6 +28,7 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/user_agent.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "v8/include/v8-version-string.h"
 
 #if defined(OS_ANDROID)
@@ -55,9 +56,8 @@ namespace {
 WebUIDataSource* CreateVersionUIDataSource() {
   WebUIDataSource* html_source =
       WebUIDataSource::Create(chrome::kChromeUIVersionHost);
-
-  // Localized strings.
-  static constexpr LocalizedString kStrings[] = {
+  // These localized strings are used to label version details.
+  static constexpr webui::LocalizedString kStrings[] = {
     {version_ui::kTitle, IDS_VERSION_UI_TITLE},
     {version_ui::kApplicationLabel, IDS_PRODUCT_NAME},
     {version_ui::kCompany, IDS_ABOUT_VERSION_COMPANY_NAME},
@@ -80,8 +80,44 @@ WebUIDataSource* CreateVersionUIDataSource() {
     {version_ui::kGmsName, IDS_VERSION_UI_GMS},
 #endif  // OS_ANDROID
   };
-  AddLocalizedStringsBulk(html_source, kStrings, base::size(kStrings));
+  AddLocalizedStringsBulk(html_source, kStrings);
 
+  VersionUI::AddVersionDetailStrings(html_source);
+
+  html_source->UseStringsJs();
+  html_source->AddResourcePath(version_ui::kVersionJS, IDR_VERSION_UI_JS);
+  html_source->AddResourcePath(version_ui::kAboutVersionCSS,
+                               IDR_VERSION_UI_CSS);
+  html_source->SetDefaultResource(IDR_VERSION_UI_HTML);
+  return html_source;
+}
+
+}  // namespace
+
+VersionUI::VersionUI(content::WebUI* web_ui)
+    : content::WebUIController(web_ui) {
+  Profile* profile = Profile::FromWebUI(web_ui);
+
+#if defined(OS_CHROMEOS)
+  web_ui->AddMessageHandler(std::make_unique<VersionHandlerChromeOS>());
+#elif defined(OS_WIN)
+  web_ui->AddMessageHandler(std::make_unique<VersionHandlerWindows>());
+#else
+  web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
+#endif
+
+#if !defined(OS_ANDROID)
+  // Set up the chrome://theme/ source.
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
+#endif
+
+  WebUIDataSource::Add(profile, CreateVersionUIDataSource());
+}
+
+VersionUI::~VersionUI() {}
+
+// static
+void VersionUI::AddVersionDetailStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(version_ui::kOfficial,
                                   version_info::IsOfficialBuild()
                                       ? IDS_VERSION_UI_OFFICIAL
@@ -149,36 +185,6 @@ WebUIDataSource* CreateVersionUIDataSource() {
                          version_utils::win::GetCohortVersionInfo());
 #endif  // defined(OS_WIN)
 
-  html_source->AddString(version_ui::kSanitizer, version_info::GetSanitizerList());
-
-  html_source->SetJsonPath("strings.js");
-  html_source->AddResourcePath(version_ui::kVersionJS, IDR_VERSION_UI_JS);
-  html_source->AddResourcePath(version_ui::kAboutVersionCSS,
-                               IDR_VERSION_UI_CSS);
-  html_source->SetDefaultResource(IDR_VERSION_UI_HTML);
-  return html_source;
+  html_source->AddString(version_ui::kSanitizer,
+                         version_info::GetSanitizerList());
 }
-
-}  // namespace
-
-VersionUI::VersionUI(content::WebUI* web_ui)
-    : content::WebUIController(web_ui) {
-  Profile* profile = Profile::FromWebUI(web_ui);
-
-#if defined(OS_CHROMEOS)
-  web_ui->AddMessageHandler(std::make_unique<VersionHandlerChromeOS>());
-#elif defined(OS_WIN)
-  web_ui->AddMessageHandler(std::make_unique<VersionHandlerWindows>());
-#else
-  web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
-#endif
-
-#if !defined(OS_ANDROID)
-  // Set up the chrome://theme/ source.
-  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
-#endif
-
-  WebUIDataSource::Add(profile, CreateVersionUIDataSource());
-}
-
-VersionUI::~VersionUI() {}

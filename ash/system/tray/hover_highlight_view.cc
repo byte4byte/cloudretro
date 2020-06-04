@@ -4,12 +4,17 @@
 
 #include "ash/system/tray/hover_highlight_view.h"
 
+#include <string>
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/strings/grit/ash_strings.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tri_view.h"
+#include "ash/system/tray/unfocusable_label.h"
 #include "ash/system/tray/view_click_listener.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/border.h"
@@ -77,7 +82,7 @@ void HoverHighlightView::SetSubText(const base::string16& sub_text) {
   DCHECK(!sub_text.empty());
 
   if (!sub_text_label_) {
-    sub_text_label_ = TrayPopupUtils::CreateDefaultLabel();
+    sub_text_label_ = TrayPopupUtils::CreateUnfocusableLabel();
     tri_view_->AddView(TriView::Container::CENTER, sub_text_label_);
   }
 
@@ -94,33 +99,10 @@ void HoverHighlightView::AddIconAndLabel(const gfx::ImageSkia& image,
                     TrayPopupItemStyle::FontStyle::DETAILED_VIEW_LABEL);
 }
 
-void HoverHighlightView::AddIconAndLabels(const gfx::ImageSkia& image,
-                                          const base::string16& text,
-                                          const base::string16& sub_text) {
-  DoAddIconAndLabels(image, text,
-                     TrayPopupItemStyle::FontStyle::DETAILED_VIEW_LABEL,
-                     sub_text);
-}
-
-void HoverHighlightView::AddIconAndLabelForDefaultView(
-    const gfx::ImageSkia& image,
-    const base::string16& text) {
-  DoAddIconAndLabel(image, text,
-                    TrayPopupItemStyle::FontStyle::DEFAULT_VIEW_LABEL);
-}
-
 void HoverHighlightView::DoAddIconAndLabel(
     const gfx::ImageSkia& image,
     const base::string16& text,
     TrayPopupItemStyle::FontStyle font_style) {
-  DoAddIconAndLabels(image, text, font_style, base::string16());
-}
-
-void HoverHighlightView::DoAddIconAndLabels(
-    const gfx::ImageSkia& image,
-    const base::string16& text,
-    TrayPopupItemStyle::FontStyle font_style,
-    const base::string16& sub_text) {
   DCHECK(!is_populated_);
   is_populated_ = true;
 
@@ -133,7 +115,7 @@ void HoverHighlightView::DoAddIconAndLabels(
   left_icon_->SetEnabled(GetEnabled());
   tri_view_->AddView(TriView::Container::START, left_icon_);
 
-  text_label_ = TrayPopupUtils::CreateDefaultLabel();
+  text_label_ = TrayPopupUtils::CreateUnfocusableLabel();
   text_label_->SetText(text);
   text_label_->SetEnabled(GetEnabled());
   TrayPopupItemStyle style(font_style, use_unified_theme_);
@@ -144,10 +126,6 @@ void HoverHighlightView::DoAddIconAndLabels(
   tri_view_->SetContainerBorder(
       TriView::Container::CENTER,
       views::CreateEmptyBorder(0, 0, 0, kTrayPopupLabelRightPadding));
-
-  if (!sub_text.empty())
-    SetSubText(sub_text);
-
   tri_view_->SetContainerVisible(TriView::Container::END, false);
 
   SetAccessibleName(text);
@@ -161,7 +139,7 @@ void HoverHighlightView::AddLabelRow(const base::string16& text) {
   tri_view_ = TrayPopupUtils::CreateDefaultRowView();
   AddChildView(tri_view_);
 
-  text_label_ = TrayPopupUtils::CreateDefaultLabel();
+  text_label_ = TrayPopupUtils::CreateUnfocusableLabel();
   text_label_->SetText(text);
 
   TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::DETAILED_VIEW_LABEL,
@@ -179,7 +157,7 @@ void HoverHighlightView::SetExpandable(bool expandable) {
   }
 }
 
-void HoverHighlightView::SetAccessiblityState(
+void HoverHighlightView::SetAccessibilityState(
     AccessibilityState accessibility_state) {
   accessibility_state_ = accessibility_state;
   if (accessibility_state_ != AccessibilityState::DEFAULT)
@@ -213,7 +191,21 @@ bool HoverHighlightView::PerformAction(const ui::Event& event) {
 }
 
 void HoverHighlightView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  ActionableView::GetAccessibleNodeData(node_data);
+  if (right_view_ && right_view_->GetVisible() &&
+      std::string(right_view_->GetClassName()).find("Button") !=
+          std::string::npos) {
+    // Allow selection of sub-components.
+    node_data->role = ax::mojom::Role::kGenericContainer;
+
+    // Include "press search plus space to activate" when announcing.
+    node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kClick);
+
+    node_data->SetName(GetAccessibleName());
+    node_data->SetDescription(
+        l10n_util::GetStringUTF16(IDS_ASH_A11Y_ROLE_BUTTON));
+  } else {
+    ActionableView::GetAccessibleNodeData(node_data);
+  }
 
   ax::mojom::CheckedState checked_state;
 

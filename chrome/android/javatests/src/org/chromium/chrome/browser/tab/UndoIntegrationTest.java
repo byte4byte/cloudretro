@@ -19,10 +19,10 @@ import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.content_public.browser.test.util.Criteria;
@@ -64,7 +64,6 @@ public class UndoIntegrationTest {
 
     /**
      * Test that a tab that is closing can't open other windows.
-     * @throws InterruptedException
      * @throws TimeoutException
      */
     @Test
@@ -72,7 +71,7 @@ public class UndoIntegrationTest {
     @LargeTest
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @RetryOnFailure
-    public void testAddNewContentsFromClosingTab() throws InterruptedException, TimeoutException {
+    public void testAddNewContentsFromClosingTab() throws TimeoutException {
         mActivityTestRule.loadUrl(WINDOW_OPEN_BUTTON_URL);
 
         final TabModel model =

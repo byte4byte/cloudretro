@@ -68,7 +68,9 @@ class DeviceCloudPolicyStoreChromeOS
 
   // Called on completion on the policy validation prior to storing policy.
   // Starts the actual store operation.
-  void OnPolicyToStoreValidated(DeviceCloudPolicyValidator* validator);
+  // |is_initial| is whether the policy store is for the initial installation.
+  void OnPolicyToStoreValidated(bool is_initial,
+                                DeviceCloudPolicyValidator* validator);
 
   // Handles store completion operations updates status.
   void OnPolicyStored();
@@ -92,7 +94,7 @@ class DeviceCloudPolicyStoreChromeOS
 
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
 
-  base::WeakPtrFactory<DeviceCloudPolicyStoreChromeOS> weak_factory_;
+  base::WeakPtrFactory<DeviceCloudPolicyStoreChromeOS> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DeviceCloudPolicyStoreChromeOS);
 };

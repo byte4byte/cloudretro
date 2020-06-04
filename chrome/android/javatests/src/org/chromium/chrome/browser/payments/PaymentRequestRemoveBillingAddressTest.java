@@ -18,15 +18,14 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
-import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -45,7 +44,7 @@ public class PaymentRequestRemoveBillingAddressTest implements MainActivityStart
             new PaymentRequestTestRule("payment_request_no_shipping_test.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {
+    public void onMainActivityStarted() throws TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
         helper.setProfile(new AutofillProfile("", "https://example.com", true, "Jane Smith",
                 "Google", "1600 Amphitheatre Pkwy", "CA", "Mountain View", "", "94043", "", "US",
@@ -55,7 +54,7 @@ public class PaymentRequestRemoveBillingAddressTest implements MainActivityStart
                 "US", "515-543-5555", "jon.doe@google.com", "en-US"));
         helper.setCreditCard(new CreditCard("", "https://example.com", true, true, "Alice",
                 "4111111111111111", "1111", "1", "2050", "visa", R.drawable.visa_card,
-                CardType.UNKNOWN, billingAddressId, "" /* serverId */));
+                billingAddressId, "" /* serverId */));
         helper.deleteProfile(billingAddressId);
     }
 
@@ -66,7 +65,7 @@ public class PaymentRequestRemoveBillingAddressTest implements MainActivityStart
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testPayWithCard() throws InterruptedException, TimeoutException {
+    public void testPayWithCard() throws TimeoutException {
         mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyForInput());
 
         // Expand the payment section.

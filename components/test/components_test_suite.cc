@@ -27,6 +27,7 @@
 #include "components/test/ios_components_test_initializer.h"
 #else
 #include "content/public/common/content_client.h"
+#include "content/public/common/network_service_util.h"
 #include "content/public/test/content_test_suite_base.h"
 #include "content/public/test/test_content_client_initializer.h"
 #include "content/public/test/unittest_test_suite.h"
@@ -41,8 +42,8 @@ namespace {
 
 // Not using kExtensionScheme and kChromeSearchScheme to avoid the dependency
 // to extensions and chrome/common.
-const char* const kNonWildcardDomainNonPortSchemes[] = {"chrome-extension",
-                                                        "chrome-search"};
+const char* const kNonWildcardDomainNonPortSchemes[] = {
+    "chrome-extension", "chrome-search", "chrome", "chrome-untrusted"};
 
 class ComponentsTestSuite : public base::TestSuite {
  public:
@@ -54,17 +55,28 @@ class ComponentsTestSuite : public base::TestSuite {
 
     mojo::core::Init();
 
-    // Before registering any schemes, clear GURL's internal state.
-    url::Shutdown();
+    // These schemes need to be added globally to pass tests of
+    // autocomplete_input_unittest.cc and content_settings_pattern*
+    // TODO(https://crbug.com/1047702): Move this scheme initialization into the
+    //    individual tests that need these schemes.
+    url::AddStandardScheme("chrome-extension", url::SCHEME_WITH_HOST);
+    url::AddStandardScheme("chrome-search", url::SCHEME_WITH_HOST);
+    url::AddStandardScheme("chrome-distiller", url::SCHEME_WITH_HOST);
 
 #if !defined(OS_IOS)
     gl::GLSurfaceTestSupport::InitializeOneOff();
+
+    content::ForceInProcessNetworkService(true);
 
     // Setup content scheme statics.
     {
       content::ContentClient content_client;
       content::ContentTestSuiteBase::RegisterContentSchemes(&content_client);
     }
+#else
+    url::AddStandardScheme("chrome", url::SCHEME_WITH_HOST);
+    url::AddStandardScheme("devtools", url::SCHEME_WITH_HOST);
+
 #endif
 
     ui::RegisterPathProvider();
@@ -83,13 +95,6 @@ class ComponentsTestSuite : public base::TestSuite {
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
         pak_path.AppendASCII("components_tests_resources.pak"),
         ui::SCALE_FACTOR_NONE);
-
-    // These schemes need to be added globally to pass tests of
-    // autocomplete_input_unittest.cc and content_settings_pattern*
-    url::AddStandardScheme("chrome", url::SCHEME_WITH_HOST);
-    url::AddStandardScheme("chrome-extension", url::SCHEME_WITH_HOST);
-    url::AddStandardScheme("devtools", url::SCHEME_WITH_HOST);
-    url::AddStandardScheme("chrome-search", url::SCHEME_WITH_HOST);
 
     ContentSettingsPattern::SetNonWildcardDomainNonPortSchemes(
         kNonWildcardDomainNonPortSchemes,
@@ -159,6 +164,6 @@ base::RunTestSuiteCallback GetLaunchCallback(int argc, char** argv) {
   return base::BindOnce(&content::UnitTestTestSuite::Run,
                         std::move(test_suite));
 #else
-  return base::Bind(&base::TestSuite::Run, std::move(test_suite));
+  return base::BindOnce(&base::TestSuite::Run, std::move(test_suite));
 #endif
 }

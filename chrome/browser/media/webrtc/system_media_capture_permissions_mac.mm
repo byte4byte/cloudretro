@@ -22,15 +22,20 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "chrome/browser/media/webrtc/media_authorization_wrapper_mac.h"
+#include "chrome/common/chrome_features.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/media_switches.h"
+#include "ui/base/cocoa/permissions_utils.h"
 
 namespace system_media_permissions {
 
@@ -52,7 +57,7 @@ class MediaAuthorizationWrapperImpl : public MediaAuthorizationWrapper {
 
   NSInteger AuthorizationStatusForMediaType(NSString* media_type) final {
     if (@available(macOS 10.14, *)) {
-      AVCaptureDevice* target = [AVCaptureDevice class];
+      Class target = [AVCaptureDevice class];
       SEL selector = @selector(authorizationStatusForMediaType:);
       NSInteger auth_status = 0;
       if ([target respondsToSelector:selector]) {
@@ -73,22 +78,21 @@ class MediaAuthorizationWrapperImpl : public MediaAuthorizationWrapper {
                                  base::RepeatingClosure callback,
                                  const base::TaskTraits& traits) final {
     if (@available(macOS 10.14, *)) {
-      AVCaptureDevice* target = [AVCaptureDevice class];
+      Class target = [AVCaptureDevice class];
       SEL selector = @selector(requestAccessForMediaType:completionHandler:);
       if ([target respondsToSelector:selector]) {
         [target performSelector:selector
                      withObject:media_type
                      withObject:^(BOOL granted) {
-                       base::PostTaskWithTraits(FROM_HERE, traits,
-                                                std::move(callback));
+                       base::PostTask(FROM_HERE, traits, std::move(callback));
                      }];
       } else {
         DLOG(WARNING) << "requestAccessForMediaType could not be executed";
-        base::PostTaskWithTraits(FROM_HERE, traits, std::move(callback));
+        base::PostTask(FROM_HERE, traits, std::move(callback));
       }
     } else {
       NOTREACHED();
-      base::PostTaskWithTraits(FROM_HERE, traits, std::move(callback));
+      base::PostTask(FROM_HERE, traits, std::move(callback));
     }
   }
 
@@ -146,7 +150,7 @@ void RequestSystemMediaCapturePermission(NSString* media_type,
                                          base::RepeatingClosure callback,
                                          const base::TaskTraits& traits) {
   if (UsingFakeMediaDevices()) {
-    base::PostTaskWithTraits(FROM_HERE, traits, std::move(callback));
+    base::PostTask(FROM_HERE, traits, std::move(callback));
     return;
   }
 
@@ -158,8 +162,23 @@ void RequestSystemMediaCapturePermission(NSString* media_type,
     // Should never happen since for pre-10.14 system permissions don't exist
     // and checking them in CheckSystemAudioCapturePermission() will always
     // return allowed, and this function should not be called.
-    base::PostTaskWithTraits(FROM_HERE, traits, std::move(callback));
+    base::PostTask(FROM_HERE, traits, std::move(callback));
   }
+}
+
+// Heuristic to check screen capture permission on macOS 10.15.
+// Screen Capture is considered allowed if the name of at least one normal
+// or dock window running on another process is visible.
+// See https://crbug.com/993692.
+bool IsScreenCaptureAllowed() {
+  if (@available(macOS 10.15, *)) {
+    if (!base::FeatureList::IsEnabled(
+            features::kMacSystemScreenCapturePermissionCheck)) {
+      return true;
+    }
+  }
+
+  return ui::IsScreenCaptureAllowed();
 }
 
 }  // namespace
@@ -170,6 +189,11 @@ SystemPermission CheckSystemAudioCapturePermission() {
 
 SystemPermission CheckSystemVideoCapturePermission() {
   return CheckSystemMediaCapturePermission(AVMediaTypeVideo);
+}
+
+SystemPermission CheckSystemScreenCapturePermission() {
+  return IsScreenCaptureAllowed() ? SystemPermission::kAllowed
+                                  : SystemPermission::kDenied;
 }
 
 void RequestSystemAudioCapturePermisson(base::OnceClosure callback,

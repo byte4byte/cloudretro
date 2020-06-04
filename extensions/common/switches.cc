@@ -30,17 +30,10 @@ const char kDisableDesktopCaptureAudio[] =
 const char kEnableExperimentalExtensionApis[] =
     "enable-experimental-extension-apis";
 
-// Enables extensions to hide bookmarks UI elements.
-const char kEnableOverrideBookmarksUI[] = "enable-override-bookmarks-ui";
-
 // Disable the net::URLRequestThrottlerManager functionality for
 // requests originating from extensions.
 const char kDisableExtensionsHttpThrottling[] =
     "disable-extensions-http-throttling";
-
-// Allows the ErrorConsole to collect runtime and manifest errors, and display
-// them in the chrome:extensions page.
-const char kErrorConsole[] = "error-console";
 
 // Marks a renderer as extension process.
 const char kExtensionProcess[] = "extension-process";
@@ -65,12 +58,6 @@ const char kLoadApps[] = "load-apps";
 
 // Comma-separated list of paths to extensions to load at startup.
 const char kLoadExtension[] = "load-extension";
-
-#if defined(CHROMIUM_BUILD)
-// Should we prompt the user before allowing external extensions to install?
-// This flag is available on Chromium for testing purposes.
-const char kPromptForExternalExtensions[] = "prompt-for-external-extensions";
-#endif
 
 // Set the parameters for ExtensionURLLoaderThrottleBrowserTest.
 const char kSetExtensionThrottleTestParams[] =

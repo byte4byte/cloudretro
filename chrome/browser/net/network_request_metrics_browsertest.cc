@@ -28,8 +28,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/resource_load_info.mojom.h"
-#include "content/public/common/resource_type.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/base/filename_util.h"
@@ -38,6 +36,7 @@
 #include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/loader/resource_load_info.mojom.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
@@ -83,8 +82,9 @@ class WaitForMainFrameResourceObserver : public content::WebContentsObserver {
   void ResourceLoadComplete(
       RenderFrameHost* render_frame_host,
       const content::GlobalRequestID& request_id,
-      const content::mojom::ResourceLoadInfo& resource_load_info) override {
-    EXPECT_EQ(ResourceType::kMainFrame, resource_load_info.resource_type);
+      const blink::mojom::ResourceLoadInfo& resource_load_info) override {
+    EXPECT_EQ(network::mojom::RequestDestination::kDocument,
+              resource_load_info.request_destination);
     EXPECT_EQ(net::OK, resource_load_info.net_error);
     run_loop_.Quit();
   }
@@ -133,11 +133,9 @@ class NetworkRequestMetricsBrowserTest
                                   subresource_path.c_str());
       case RequestType::kImage:
         return base::StringPrintf("<img src='%s'>", subresource_path.c_str());
-        break;
       case RequestType::kScript:
         return base::StringPrintf("<script src='%s'></script>",
                                   subresource_path.c_str());
-        break;
       case RequestType::kMainFrame:
         NOTREACHED();
     }
@@ -356,8 +354,8 @@ class NetworkRequestMetricsBrowserTest
 };
 
 // Testing before headers / during body is most interesting in the frame case,
-// as it checks the before and after commit case, which with browser-side
-// navigations / PlzNavigate, follow very different paths.
+// as it checks the before and after commit case, which follow very different
+// paths.
 IN_PROC_BROWSER_TEST_P(NetworkRequestMetricsBrowserTest,
                        NetErrorBeforeHeaders) {
   TestNavigationObserver navigation_observer(active_web_contents(), 1);
@@ -609,7 +607,7 @@ IN_PROC_BROWSER_TEST_P(NetworkRequestMetricsBrowserTest, FileURLSuccess) {
                   NetworkAccessed::kNoNetworkAccessed);
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          NetworkRequestMetricsBrowserTest,
                          testing::Values(RequestType::kMainFrame,
                                          RequestType::kSubFrame,

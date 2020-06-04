@@ -7,6 +7,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -27,6 +28,14 @@ DataSaverSiteBreakdownMetricsObserver::OnCommit(
     content::NavigationHandle* navigation_handle,
     ukm::SourceId source_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  Profile* profile = Profile::FromBrowserContext(
+      navigation_handle->GetWebContents()->GetBrowserContext());
+  // Skip if Lite mode is not enabled.
+  if (!profile || !data_reduction_proxy::DataReductionProxySettings::
+                      IsDataSaverEnabledByUser(profile->IsOffTheRecord(),
+                                               profile->GetPrefs())) {
+    return STOP_OBSERVING;
+  }
 
   // This BrowserContext is valid for the lifetime of
   // DataReductionProxyMetricsObserver. BrowserContext is always valid and
@@ -41,6 +50,10 @@ DataSaverSiteBreakdownMetricsObserver::OnCommit(
   committed_host_ = navigation_handle->GetWebContents()
                         ->GetLastCommittedURL()
                         .HostNoBrackets();
+  committed_origin_ = navigation_handle->GetWebContents()
+                          ->GetLastCommittedURL()
+                          .GetOrigin()
+                          .spec();
   return CONTINUE_OBSERVING;
 }
 
@@ -56,6 +69,7 @@ void DataSaverSiteBreakdownMetricsObserver::OnResourceDataUseObserved(
   if (data_reduction_proxy_settings &&
       data_reduction_proxy_settings->data_reduction_proxy_service()) {
     DCHECK(!committed_host_.empty());
+    DCHECK(!committed_origin_.empty());
     int64_t received_data_length = 0;
     int64_t data_reduction_proxy_bytes_saved = 0;
     for (auto const& resource : resources) {
@@ -74,6 +88,14 @@ void DataSaverSiteBreakdownMetricsObserver::OnResourceDataUseObserved(
             (resource->data_reduction_proxy_compression_ratio_estimate - 1.0);
       }
     }
+    double origin_save_data_savings =
+        data_reduction_proxy_settings->data_reduction_proxy_service()
+            ->GetSaveDataSavingsPercentEstimate(committed_origin_);
+    if (origin_save_data_savings) {
+      data_reduction_proxy_bytes_saved +=
+          received_data_length * origin_save_data_savings / 100;
+    }
+
     data_reduction_proxy_settings->data_reduction_proxy_service()
         ->UpdateDataUseForHost(
             received_data_length,

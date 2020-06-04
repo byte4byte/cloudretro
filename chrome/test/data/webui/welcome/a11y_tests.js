@@ -7,9 +7,9 @@ GEN_INCLUDE([
   '//chrome/test/data/webui/a11y/accessibility_test.js',
   '//chrome/test/data/webui/polymer_browser_test_base.js',
 ]);
-GEN('#include "chrome/browser/ui/webui/welcome/nux_helper.h"');
+GEN('#include "chrome/browser/ui/webui/welcome/helpers.h"');
 
-OnboardingA11y = class extends PolymerTest {
+WelcomeA11y = class extends PolymerTest {
   /** @override */
   get browsePreload() {
     return 'chrome://welcome/';
@@ -17,16 +17,30 @@ OnboardingA11y = class extends PolymerTest {
 
   /** @override */
   get featureList() {
-    return {enabled: ['nux::kNuxOnboardingForceEnabled']};
+    return {enabled: ['welcome::kForceEnabled']};
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return [
+      '//third_party/mocha/mocha.js',
+      '//chrome/test/data/webui/mocha_adapter.js',
+      '//ui/webui/resources/js/util.js',
+    ];
   }
 };
 
-AccessibilityTest.define('OnboardingA11y', {
+AccessibilityTest.define('WelcomeA11y', {
   // Must be unique within the test fixture and cannot have spaces.
-  name: 'OnboardingFlow',
+  name: 'WelcomeFlow',
 
   // Optional. Configuration for axe-core. Can be used to disable a test.
-  axeOptions: {},
+  axeOptions: {
+    'rules': {
+      // TODO(crbug.com/761461): enable after addressing flaky tests.
+      'color-contrast': {enabled: false},
+    }
+  },
 
   // Optional. Filter on failures. Use this for individual false positives.
   violationFilter: {},

@@ -9,6 +9,9 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/observer_list_types.h"
+#include "base/strings/string16.h"
+#include "components/autofill/core/common/gaia_id_hash.h"
 
 namespace autofill {
 struct PasswordForm;
@@ -23,8 +26,6 @@ struct InteractionsStats;
 // indirection allows caching of identical requests from PFM on the same origin,
 // as well as easier testing (no need to mock the whole PasswordStore when
 // testing a PFM).
-// TODO(crbug.com/621355): Actually modify the API to support fetching in the
-// FormFetcher instance.
 class FormFetcher {
  public:
   // State of waiting for a response from a PasswordStore. There might be
@@ -32,10 +33,8 @@ class FormFetcher {
   enum class State { WAITING, NOT_WAITING };
 
   // API to be implemented by classes which want the results from FormFetcher.
-  class Consumer {
+  class Consumer : public base::CheckedObserver {
    public:
-    virtual ~Consumer() = default;
-
     // FormFetcher calls this method every time the state changes from WAITING
     // to NOT_WAITING. It is now safe for consumers to call the accessor
     // functions for matches.
@@ -54,6 +53,12 @@ class FormFetcher {
   // Call this to stop |consumer| from receiving updates from |this|.
   virtual void RemoveConsumer(Consumer* consumer) = 0;
 
+  // Fetches stored matching logins. In addition the statistics is fetched on
+  // platforms with the password bubble. This is called automatically during
+  // construction and can be called manually later as well to cause an update
+  // of the cached credentials.
+  virtual void Fetch() = 0;
+
   // Returns the current state of the FormFetcher
   virtual State GetState() const = 0;
 
@@ -71,16 +76,28 @@ class FormFetcher {
   virtual std::vector<const autofill::PasswordForm*> GetFederatedMatches()
       const = 0;
 
-  // Blacklisted matches obtained from the backend. Valid only if GetState()
-  // returns NOT_WAITING.
-  virtual std::vector<const autofill::PasswordForm*> GetBlacklistedMatches()
+  // Whether there are blacklisted matches in the backend. Valid only if
+  // GetState() returns NOT_WAITING.
+  virtual bool IsBlacklisted() const = 0;
+
+  // Whether moving the credentials with |username| from the
+  // local store to the account store for the user with
+  // |destination| GaiaIdHash is blocked. This is relevant only for account
+  // store users.
+  virtual bool IsMovingBlocked(const autofill::GaiaIdHash& destination,
+                               const base::string16& username) const = 0;
+
+  // Non-federated matches obtained from the backend that have the same scheme
+  // of this form.
+  virtual const std::vector<const autofill::PasswordForm*>&
+  GetAllRelevantMatches() const = 0;
+
+  // Nonblacklisted matches obtained from the backend.
+  virtual const std::vector<const autofill::PasswordForm*>& GetBestMatches()
       const = 0;
 
-  // Fetches stored matching logins. In addition the statistics is fetched on
-  // platforms with the password bubble. This is called automatically during
-  // construction and can be called manually later as well to cause an update
-  // of the cached credentials.
-  virtual void Fetch() = 0;
+  // Pointer to a preferred entry in the vector returned by GetBestMatches().
+  virtual const autofill::PasswordForm* GetPreferredMatch() const = 0;
 
   // Creates a copy of |*this| with contains the same credentials without the
   // need for calling Fetch().

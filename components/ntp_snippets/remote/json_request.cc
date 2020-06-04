@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -61,6 +62,11 @@ bool IsSendingUserClassEnabled() {
   return variations::GetVariationParamByFeatureAsBool(
       ntp_snippets::kArticleSuggestionsFeature, kSendUserClassName,
       /*default_value=*/true);
+}
+
+bool IsSendingOptionalImagesCapabilityEnabled() {
+  return base::FeatureList::IsEnabled(
+      ntp_snippets::kOptionalImagesEnabledFeature);
 }
 
 // Translate the BCP 47 |language_code| into a posix locale string.
@@ -184,10 +190,11 @@ void JsonRequest::OnSimpleLoaderComplete(
              /*error_details=*/base::StringPrintf(" %d", response_code));
   } else {
     last_response_string_ = std::move(*response_body);
-    parse_json_callback_.Run(
-        last_response_string_,
-        base::Bind(&JsonRequest::OnJsonParsed, weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&JsonRequest::OnJsonError, weak_ptr_factory_.GetWeakPtr()));
+    parse_json_callback_.Run(last_response_string_,
+                             base::BindOnce(&JsonRequest::OnJsonParsed,
+                                            weak_ptr_factory_.GetWeakPtr()),
+                             base::BindOnce(&JsonRequest::OnJsonError,
+                                            weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -223,9 +230,7 @@ std::unique_ptr<JsonRequest> JsonRequest::Builder::Build() const {
 }
 
 JsonRequest::Builder& JsonRequest::Builder::SetAuthentication(
-    const std::string& account_id,
     const std::string& auth_header) {
-  obfuscated_gaia_id_ = account_id;
   auth_header_ = auth_header;
   return *this;
 }
@@ -272,11 +277,19 @@ JsonRequest::Builder& JsonRequest::Builder::SetUserClassifier(
   return *this;
 }
 
+JsonRequest::Builder& JsonRequest::Builder::SetOptionalImagesCapability(
+    bool supports_optional_images) {
+  if (supports_optional_images && IsSendingOptionalImagesCapabilityEnabled()) {
+    display_capability_ = "CAPABILITY_OPTIONAL_IMAGES";
+  }
+  return *this;
+}
+
 std::unique_ptr<network::ResourceRequest>
 JsonRequest::Builder::BuildResourceRequest() const {
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url_;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader("Content-Type",
                                       "application/json; charset=UTF-8");
@@ -312,6 +325,10 @@ std::string JsonRequest::Builder::BuildBody() const {
     request->SetString("userActivenessClass", user_class_);
   }
 
+  if (!display_capability_.empty()) {
+    request->SetString("displayCapability", display_capability_);
+  }
+
   language::UrlLanguageHistogram::LanguageInfo ui_language;
   language::UrlLanguageHistogram::LanguageInfo other_top_language;
   PrepareLanguages(&ui_language, &other_top_language);
@@ -335,8 +352,7 @@ std::string JsonRequest::Builder::BuildBody() const {
     exclusive_category_parameters.SetInteger("numSuggestions",
                                              params_.count_to_fetch);
     base::ListValue category_parameters;
-    category_parameters.GetList().push_back(
-        std::move(exclusive_category_parameters));
+    category_parameters.Append(std::move(exclusive_category_parameters));
     request->SetKey("categoryParameters", std::move(category_parameters));
   }
 

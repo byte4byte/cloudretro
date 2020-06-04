@@ -44,8 +44,8 @@
 #include "chromeos/network/onc/onc_utils.h"
 #include "chromeos/network/tether_constants.h"
 #include "components/arc/arc_service_manager.h"
-#include "components/arc/common/net.mojom.h"
 #include "components/arc/metrics/arc_metrics_constants.h"
+#include "components/arc/mojom/net.mojom.h"
 #include "components/arc/session/arc_bridge_service.h"
 #include "components/arc/session/connection_holder.h"
 #include "components/session_manager/core/session_manager.h"
@@ -244,7 +244,7 @@ void SystemTrayClient::ShowChromeSlow() {
 
 void SystemTrayClient::ShowIMESettings() {
   base::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
-  ShowSettingsSubPageForActiveUser(chrome::kLanguageOptionsSubPage);
+  ShowSettingsSubPageForActiveUser(chrome::kOsLanguagesDetailsSubPage);
 }
 
 void SystemTrayClient::ShowConnectedDevicesSettings() {
@@ -271,7 +271,15 @@ void SystemTrayClient::ShowAccessibilityHelp() {
 
 void SystemTrayClient::ShowAccessibilitySettings() {
   base::RecordAction(base::UserMetricsAction("ShowAccessibilitySettings"));
-  ShowSettingsSubPageForActiveUser(chrome::kAccessibilitySubPage);
+  ShowSettingsSubPageForActiveUser(chrome::kOsAccessibilitySubPage);
+}
+
+void SystemTrayClient::ShowGestureEducationHelp() {
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  base::RecordAction(base::UserMetricsAction("ShowGestureEducationHelp"));
+  ShowSingletonTab(displayer.browser(),
+                   GURL(chrome::kChromeOSGestureEducationHelpURL));
 }
 
 void SystemTrayClient::ShowPaletteHelp() {
@@ -300,8 +308,10 @@ void SystemTrayClient::ShowEnterpriseInfo() {
     return;
   }
 
-  // Otherwise show enterprise special settings subpage.
-  chrome::ShowManagementPageForProfile(ProfileManager::GetActiveUserProfile());
+  // Otherwise show enterprise management info page.
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      ProfileManager::GetActiveUserProfile());
+  chrome::ShowEnterpriseManagementPageInTabbedBrowser(displayer.browser());
 }
 
 void SystemTrayClient::ShowNetworkConfigure(const std::string& network_id) {

@@ -247,3 +247,78 @@ testcase.formatDialogNameInvalid = async () => {
   // Check that a name without invalid characters succeeds.
   await checkSuccess(appId, 'Nice name', 'vfat');
 };
+
+/**
+ * Tests opening the format dialog from the gear menu.
+ */
+testcase.formatDialogGearMenu = async () => {
+  await sendTestMessage({name: 'mountFakeUsb'});
+  const appId = await setupFormatDialogTest();
+
+  // Focus the directory tree.
+  chrome.test.assertTrue(
+      !!await remoteCall.callRemoteTestUtil(
+          'focus', appId, ['#directory-tree']),
+      'focus failed: #directory-tree');
+
+  // Navigate to the USB via the directory tree.
+  await navigateWithDirectoryTree(appId, '/fake-usb');
+
+  // Click on the gear menu button.
+  await remoteCall.waitAndClickElement(appId, '#gear-button:not([hidden])');
+
+  // Click on the format menu item.
+  await remoteCall.waitAndClickElement(
+      appId, '#gear-menu-format:not([disabled]):not([hidden])');
+
+  // Check the format dialog is open and the title is correct
+  const title = await remoteCall.waitForElement(
+      appId, ['files-format-dialog', 'cr-dialog[open] div[slot="title"]']);
+  chrome.test.assertEq('Format fake-usb', title.text.trim());
+
+  // Click cancel button.
+  const cancelButtonQuery = ['files-format-dialog', 'cr-button#cancel'];
+  await remoteCall.waitAndClickElement(appId, cancelButtonQuery);
+
+  // Check the dialog is closed.
+  await remoteCall.waitForElement(
+      appId, ['files-format-dialog', 'cr-dialog:not([open])']);
+
+  // Focus the file list.
+  await remoteCall.callRemoteTestUtil('focus', appId, ['#file-list']);
+
+  // Click an item in the list.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'selectFile', appId, [ENTRIES.hello.nameText]));
+
+  // Click on the gear menu button.
+  await remoteCall.waitAndClickElement(appId, '#gear-button:not([hidden])');
+
+  // Click on the format menu item.
+  await remoteCall.waitAndClickElement(
+      appId, '#gear-menu-format:not([disabled]):not([hidden])');
+
+  // Check the format dialog is open and the title is correct
+  const title2 = await remoteCall.waitForElement(
+      appId, ['files-format-dialog', 'cr-dialog[open] div[slot="title"]']);
+  chrome.test.assertEq('Format fake-usb', title2.text.trim());
+
+  // Click cancel button.
+  await remoteCall.waitAndClickElement(appId, cancelButtonQuery);
+
+  // Click on the gear menu button.
+  await remoteCall.waitAndClickElement(appId, '#gear-button:not([hidden])');
+
+  // Ensure the format menu item has appeared.
+  await remoteCall.waitForElement(
+      appId, '#gear-menu-format:not([disabled]):not([hidden])');
+
+  // Unmount the USB.
+  await sendTestMessage({name: 'unmountUsb'});
+
+  // Ensure the file manager has navigated back to My files.
+  await remoteCall.waitUntilCurrentDirectoryIsChanged(appId, '/My files');
+
+  // Ensure the format menu item has disappeared.
+  await remoteCall.waitForElement(appId, '#gear-menu-format[disabled][hidden]');
+};

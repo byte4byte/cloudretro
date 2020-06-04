@@ -5,6 +5,8 @@
 #include "ui/events/blink/event_with_callback.h"
 
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
+#include "third_party/blink/public/common/input/web_input_event_attribution.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/blink/did_overscroll_params.h"
 #include "ui/events/blink/web_input_event_traits.h"
@@ -19,7 +21,7 @@ EventWithCallback::EventWithCallback(
     const LatencyInfo& latency,
     base::TimeTicks timestamp_now,
     InputHandlerProxy::EventDispositionCallback callback)
-    : event_(WebInputEventTraits::Clone(*event)),
+    : event_(event->Clone()),
       latency_(latency),
       creation_timestamp_(timestamp_now),
       last_coalesced_timestamp_(timestamp_now) {
@@ -46,8 +48,16 @@ bool EventWithCallback::CanCoalesceWith(const EventWithCallback& other) const {
   return CanCoalesce(other.event(), event());
 }
 
+void EventWithCallback::SetScrollbarManipulationHandledOnCompositorThread() {
+  for (auto& original_event : original_events_)
+    original_event.event_->SetScrollbarManipulationHandledOnCompositorThread();
+}
+
 void EventWithCallback::CoalesceWith(EventWithCallback* other,
                                      base::TimeTicks timestamp_now) {
+  TRACE_EVENT2("input", "EventWithCallback::CoalesceWith", "traceId",
+               latency_.trace_id(), "coalescedTraceId",
+               other->latency_.trace_id());
   // |other| should be a newer event than |this|.
   if (other->latency_.trace_id() >= 0 && latency_.trace_id() >= 0)
     DCHECK_GT(other->latency_.trace_id(), latency_.trace_id());
@@ -62,7 +72,7 @@ void EventWithCallback::CoalesceWith(EventWithCallback* other,
   // since it will represent the longest latency. If it's a GestureScrollUpdate
   // event, also update the old event's last timestamp and scroll delta using
   // the newer event's latency info.
-  if (event_->GetType() == WebInputEvent::kGestureScrollUpdate)
+  if (event_->GetType() == WebInputEvent::Type::kGestureScrollUpdate)
     latency_.CoalesceScrollUpdateWith(other->latency_);
   other->latency_ = latency_;
   other->latency_.set_coalesced();
@@ -83,7 +93,8 @@ static bool HandledOnCompositorThread(
 void EventWithCallback::RunCallbacks(
     InputHandlerProxy::EventDisposition disposition,
     const LatencyInfo& latency,
-    std::unique_ptr<DidOverscrollParams> did_overscroll_params) {
+    std::unique_ptr<DidOverscrollParams> did_overscroll_params,
+    const blink::WebInputEventAttribution& attribution) {
   // |original_events_| could be empty if this is the scroll event extracted
   // from the matrix multiplication.
   if (original_events_.size() == 0)
@@ -94,16 +105,22 @@ void EventWithCallback::RunCallbacks(
       .Run(disposition, std::move(original_events_.front().event_), latency,
            did_overscroll_params
                ? std::make_unique<DidOverscrollParams>(*did_overscroll_params)
-               : nullptr);
+               : nullptr,
+           attribution);
   original_events_.pop_front();
 
   // If the event was handled on compositor thread, ack other events with
   // coalesced latency to avoid redundant tracking. If not, the event should
   // be handle on main thread, use the original latency instead.
+  //
+  // We overwrite the trace_id to ensure proper flow events along the critical
+  // path.
   bool handled = HandledOnCompositorThread(disposition);
   for (auto& coalesced_event : original_events_) {
     if (handled) {
+      int64_t original_trace_id = coalesced_event.latency_.trace_id();
       coalesced_event.latency_ = latency;
+      coalesced_event.latency_.set_trace_id(original_trace_id);
       coalesced_event.latency_.set_coalesced();
     }
     std::move(coalesced_event.callback_)
@@ -111,7 +128,8 @@ void EventWithCallback::RunCallbacks(
              coalesced_event.latency_,
              did_overscroll_params
                  ? std::make_unique<DidOverscrollParams>(*did_overscroll_params)
-                 : nullptr);
+                 : nullptr,
+             attribution);
   }
 }
 

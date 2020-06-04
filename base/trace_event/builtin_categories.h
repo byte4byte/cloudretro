@@ -15,6 +15,9 @@
 // your code and you get a static assert, this is the right place to register
 // the name. If the name is going to be used only for testing, please add it to
 // |kIgnoredCategoriesForTesting| instead.
+//
+// Prefer to use '_' to separate word of category name, like content_capture.
+//
 // Parameter |X| must be a *macro* that takes a single |name| string argument,
 // denoting a category name.
 #define INTERNAL_TRACE_LIST_BUILTIN_CATEGORIES(X)                        \
@@ -27,22 +30,30 @@
   X("accessibility")                                                     \
   X("AccountFetcherService")                                             \
   X("android_webview")                                                   \
+  X("aogh")                                                              \
   X("audio")                                                             \
   X("base")                                                              \
   X("benchmark")                                                         \
   X("blink")                                                             \
+  X("blink.bindings")                                                    \
   X("blink.animations")                                                  \
   X("blink.console")                                                     \
   X("blink_gc")                                                          \
   X("blink.net")                                                         \
   X("blink_style")                                                       \
   X("blink.user_timing")                                                 \
+  X("blink.worker")                                                      \
   X("Blob")                                                              \
   X("browser")                                                           \
   X("browsing_data")                                                     \
   X("CacheStorage")                                                      \
+  X("Calculators")                                                       \
+  X("CameraStream")                                                      \
   X("camera")                                                            \
+  X("cast_app")                                                          \
   X("cast_perf_test")                                                    \
+  X("cast.mdns")                                                         \
+  X("cast.mdns.socket")                                                  \
   X("cast.stream")                                                       \
   X("cc")                                                                \
   X("cc.debug")                                                          \
@@ -51,9 +62,11 @@
   X("cma")                                                               \
   X("compositor")                                                        \
   X("content")                                                           \
+  X("content_capture")                                                   \
   X("devtools")                                                          \
   X("devtools.timeline")                                                 \
   X("devtools.timeline.async")                                           \
+  X("disk_cache")                                                        \
   X("download")                                                          \
   X("download_service")                                                  \
   X("drm")                                                               \
@@ -85,6 +98,7 @@
   X("latencyInfo")                                                       \
   X("leveldb")                                                           \
   X("loading")                                                           \
+  X("log")                                                               \
   X("login")                                                             \
   X("media")                                                             \
   X("media_router")                                                      \
@@ -100,11 +114,14 @@
   X("omnibox")                                                           \
   X("oobe")                                                              \
   X("ozone")                                                             \
+  X("passwords")                                                         \
   X("p2p")                                                               \
   X("page-serialization")                                                \
   X("pepper")                                                            \
+  X("PlatformMalloc")                                                    \
   X("ppapi")                                                             \
   X("ppapi proxy")                                                       \
+  X("print")                                                             \
   X("rail")                                                              \
   X("renderer")                                                          \
   X("renderer_host")                                                     \
@@ -115,11 +132,15 @@
   X("sequence_manager")                                                  \
   X("service_manager")                                                   \
   X("ServiceWorker")                                                     \
+  X("sharing")                                                           \
   X("shell")                                                             \
   X("shortcut_viewer")                                                   \
   X("shutdown")                                                          \
   X("SiteEngagement")                                                    \
   X("skia")                                                              \
+  X("sql")                                                               \
+  X("stadia_media")                                                      \
+  X("stadia_rtc")                                                        \
   X("startup")                                                           \
   X("sync")                                                              \
   X("sync_lock_contention")                                              \
@@ -137,10 +158,12 @@
   X("vk")                                                                \
   X("wayland")                                                           \
   X("webaudio")                                                          \
+  X("weblayer")                                                          \
   X("WebCore")                                                           \
   X("webrtc")                                                            \
   X("xr")                                                                \
   X(TRACE_DISABLED_BY_DEFAULT("animation-worklet"))                      \
+  X(TRACE_DISABLED_BY_DEFAULT("audio"))                                  \
   X(TRACE_DISABLED_BY_DEFAULT("audio-worklet"))                          \
   X(TRACE_DISABLED_BY_DEFAULT("blink.debug"))                            \
   X(TRACE_DISABLED_BY_DEFAULT("blink.debug.display_lock"))               \
@@ -163,6 +186,7 @@
   X(TRACE_DISABLED_BY_DEFAULT("devtools.screenshot"))                    \
   X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"))                      \
   X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.frame"))                \
+  X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.inputs"))               \
   X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking")) \
   X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.layers"))               \
   X(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.picture"))              \
@@ -171,13 +195,16 @@
   X(TRACE_DISABLED_BY_DEFAULT("gpu_cmd_queue"))                          \
   X(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"))                               \
   X(TRACE_DISABLED_BY_DEFAULT("gpu.debug"))                              \
-  X(TRACE_DISABLED_BY_DEFAULT("gpu_decoder"))                            \
+  X(TRACE_DISABLED_BY_DEFAULT("gpu.decoder"))                            \
   X(TRACE_DISABLED_BY_DEFAULT("gpu.device"))                             \
   X(TRACE_DISABLED_BY_DEFAULT("gpu.service"))                            \
-  X(TRACE_DISABLED_BY_DEFAULT("ipc.flow"))                               \
+  X(TRACE_DISABLED_BY_DEFAULT("histogram_samples"))                      \
+  X(TRACE_DISABLED_BY_DEFAULT("java-heap-profiler"))                     \
   X(TRACE_DISABLED_BY_DEFAULT("layer-element"))                          \
+  X(TRACE_DISABLED_BY_DEFAULT("layout_shift.debug"))                     \
   X(TRACE_DISABLED_BY_DEFAULT("lifecycles"))                             \
   X(TRACE_DISABLED_BY_DEFAULT("loading"))                                \
+  X(TRACE_DISABLED_BY_DEFAULT("mediastream"))                            \
   X(TRACE_DISABLED_BY_DEFAULT("memory-infra"))                           \
   X(TRACE_DISABLED_BY_DEFAULT("memory-infra.v8.code_stats"))             \
   X(TRACE_DISABLED_BY_DEFAULT("net"))                                    \
@@ -197,6 +224,7 @@
   X(TRACE_DISABLED_BY_DEFAULT("thread_pool_diagnostics"))                \
   X(TRACE_DISABLED_BY_DEFAULT("toplevel.flow"))                          \
   X(TRACE_DISABLED_BY_DEFAULT("toplevel.ipc"))                           \
+  X(TRACE_DISABLED_BY_DEFAULT("user_action_samples"))                    \
   X(TRACE_DISABLED_BY_DEFAULT("v8.compile"))                             \
   X(TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler"))                        \
   X(TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler.hires"))                  \
@@ -216,6 +244,7 @@
   X(TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"))                    \
   X(TRACE_DISABLED_BY_DEFAULT("viz.surface_lifetime"))                   \
   X(TRACE_DISABLED_BY_DEFAULT("viz.triangles"))                          \
+  X(TRACE_DISABLED_BY_DEFAULT("webaudio.audionode"))                     \
   X(TRACE_DISABLED_BY_DEFAULT("worker.scheduler"))
 
 #define INTERNAL_TRACE_INIT_CATEGORY_NAME(name) name,

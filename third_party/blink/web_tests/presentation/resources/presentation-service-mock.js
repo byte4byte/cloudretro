@@ -14,8 +14,8 @@ class PresentationServiceMock {
     this.controllerConnectionPtr_ = null;
     this.receiverConnectionRequest_ = null;
 
-    this.interceptor_ = new MojoInterfaceInterceptor(
-        blink.mojom.PresentationService.name);
+    this.interceptor_ =
+        new MojoInterfaceInterceptor(blink.mojom.PresentationService.name);
     this.interceptor_.oninterfacerequest =
         e => this.bindingSet_.addBinding(this, e.handle);
     this.interceptor_.start();
@@ -55,8 +55,8 @@ class PresentationServiceMock {
     return {
       result: {
         presentationInfo: {url: urls[0], id: 'fakePresentationId'},
-        connectionPtr: receiver_ptr,
-        connectionRequest: mojo.makeRequest(controller_ptr),
+        connectionRemote: receiver_ptr,
+        connectionReceiver: mojo.makeRequest(controller_ptr),
       },
       error: null,
     };
@@ -70,8 +70,8 @@ class PresentationServiceMock {
     return {
       result: {
         presentationInfo: {url: urls[0], id: 'fakePresentationId'},
-        connectionPtr: receiver_ptr,
-        connectionRequest: mojo.makeRequest(controller_ptr),
+        connectionRemote: receiver_ptr,
+        connectionReceiver: mojo.makeRequest(controller_ptr),
       },
       error: null,
     };

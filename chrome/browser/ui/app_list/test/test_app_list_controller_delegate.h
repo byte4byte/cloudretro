@@ -18,15 +18,15 @@ class TestAppListControllerDelegate : public AppListControllerDelegate {
 
   int64_t GetAppListDisplayId() override;
   void DismissView() override;
+  gfx::NativeWindow GetAppListWindow() override;
   bool IsAppPinned(const std::string& app_id) override;
   void PinApp(const std::string& app_id) override;
   void UnpinApp(const std::string& app_id) override;
   Pinnable GetPinnable(const std::string& app_id) override;
   bool IsAppOpen(const std::string& app_id) const override;
-  bool CanDoShowAppInfoFlow() override;
   void DoShowAppInfoFlow(Profile* profile,
                          const std::string& extension_id) override;
-  void CreateNewWindow(Profile* profile, bool incognito) override;
+  void CreateNewWindow(bool incognito) override;
   void OpenURL(Profile* profile,
                const GURL& url,
                ui::PageTransition transition,

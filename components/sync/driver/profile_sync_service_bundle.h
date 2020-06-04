@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "components/invalidation/impl/fake_invalidation_service.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/driver/profile_sync_service.h"
@@ -42,19 +41,15 @@ class ProfileSyncServiceBundle {
 
   // Accessors
 
-  network::TestURLLoaderFactory* url_loader_factory() {
-    return &test_url_loader_factory_;
-  }
-
   sync_preferences::TestingPrefServiceSyncable* pref_service() {
     return &pref_service_;
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return &identity_test_env_;
   }
 
-  identity::IdentityManager* identity_manager() {
+  signin::IdentityManager* identity_manager() {
     return identity_test_env_.identity_manager();
   }
 
@@ -66,16 +61,11 @@ class ProfileSyncServiceBundle {
     return identity_provider_.get();
   }
 
-  invalidation::FakeInvalidationService* fake_invalidation_service() {
-    return &fake_invalidation_service_;
-  }
-
  private:
   sync_preferences::TestingPrefServiceSyncable pref_service_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  signin::IdentityTestEnvironment identity_test_env_;
   testing::NiceMock<SyncApiComponentFactoryMock> component_factory_;
   std::unique_ptr<invalidation::ProfileIdentityProvider> identity_provider_;
-  invalidation::FakeInvalidationService fake_invalidation_service_;
   network::TestURLLoaderFactory test_url_loader_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceBundle);

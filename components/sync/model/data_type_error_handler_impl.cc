@@ -11,7 +11,7 @@ namespace syncer {
 
 DataTypeErrorHandlerImpl::DataTypeErrorHandlerImpl(
     const scoped_refptr<base::SequencedTaskRunner>& ui_thread,
-    const base::Closure& dump_stack,
+    const base::RepeatingClosure& dump_stack,
     const ErrorCallback& sync_callback)
     : ui_thread_(ui_thread),
       dump_stack_(dump_stack),
@@ -22,10 +22,8 @@ DataTypeErrorHandlerImpl::~DataTypeErrorHandlerImpl() {}
 void DataTypeErrorHandlerImpl::OnUnrecoverableError(const SyncError& error) {
   if (!dump_stack_.is_null())
     dump_stack_.Run();
-  // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
   UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeRunFailures2",
-                            ModelTypeToHistogramInt(error.model_type()),
-                            static_cast<int>(ModelType::NUM_ENTRIES));
+                            ModelTypeHistogramValue(error.model_type()));
   ui_thread_->PostTask(error.location(), base::BindOnce(sync_callback_, error));
 }
 

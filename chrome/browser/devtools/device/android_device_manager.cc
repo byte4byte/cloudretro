@@ -12,12 +12,14 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/devtools/device/usb/usb_device_manager_helper.h"
 #include "chrome/browser/devtools/device/usb/usb_device_provider.h"
@@ -170,7 +172,7 @@ class HttpRequest {
 
       result = socket_->Write(
           request_.get(), request_->BytesRemaining(),
-          base::Bind(&HttpRequest::DoSendRequest, base::Unretained(this)),
+          base::BindOnce(&HttpRequest::DoSendRequest, base::Unretained(this)),
           kAndroidDeviceManagerTrafficAnnotation);
     }
   }
@@ -210,9 +212,8 @@ class HttpRequest {
     response_buffer_ = base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
     result = socket_->Read(
-        response_buffer_.get(),
-        kBufferSize,
-        base::Bind(&HttpRequest::OnResponseData, base::Unretained(this)));
+        response_buffer_.get(), kBufferSize,
+        base::BindOnce(&HttpRequest::OnResponseData, base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       OnResponseData(result);
   }
@@ -273,7 +274,7 @@ class HttpRequest {
 
       result = socket_->Read(
           response_buffer_.get(), kBufferSize,
-          base::Bind(&HttpRequest::OnResponseData, base::Unretained(this)));
+          base::BindOnce(&HttpRequest::OnResponseData, base::Unretained(this)));
     } while (result != net::ERR_IO_PENDING);
   }
 
@@ -381,8 +382,8 @@ class DevicesRequest : public base::RefCountedThreadSafe<DevicesRequest> {
 
 void OnCountDevices(const base::Callback<void(int)>& callback,
                     int device_count) {
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           base::BindOnce(callback, device_count));
+  base::PostTask(FROM_HERE, {BrowserThread::UI},
+                 base::BindOnce(callback, device_count));
 }
 
 }  // namespace
@@ -516,7 +517,7 @@ AndroidDeviceManager::HandlerThread::HandlerThread() {
   instance_ = this;
   thread_ = new base::Thread(kDevToolsAdbBridgeThreadName);
   base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
+  options.message_pump_type = base::MessagePumpType::IO;
   if (!thread_->StartWithOptions(options)) {
     delete thread_;
     thread_ = nullptr;
@@ -540,7 +541,7 @@ AndroidDeviceManager::HandlerThread::~HandlerThread() {
   if (!thread_)
     return;
   // Shut down thread on a thread other than UI so it can join a thread.
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&HandlerThread::StopThread, thread_));
@@ -574,7 +575,7 @@ void AndroidDeviceManager::CountDevices(
 }
 
 void AndroidDeviceManager::set_usb_device_manager_for_test(
-    device::mojom::UsbDeviceManagerPtrInfo fake_usb_manager) {
+    mojo::PendingRemote<device::mojom::UsbDeviceManager> fake_usb_manager) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   handler_thread_->message_loop()->PostTask(
       FROM_HERE,

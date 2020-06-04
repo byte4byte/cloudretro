@@ -4,8 +4,8 @@
 
 #include "chrome/installer/util/google_update_settings.h"
 
-#include <windows.h>
 #include <stddef.h>
+#include <windows.h>
 
 #include <memory>
 
@@ -17,6 +17,7 @@
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "base/win/shlwapi.h"  // For SHDeleteKey.
+#include "build/branding_buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/install_static/test/scoped_install_details.h"
@@ -244,26 +245,7 @@ TEST_F(GoogleUpdateSettingsTest, UpdateGoogleUpdateApKey) {
     L"1.1-dev-full"
   };
   static_assert(base::size(full) == base::size(plain), "bad full array size");
-  const wchar_t* const multifail[] = {
-    L"-multifail",
-    L"1.1-multifail",
-    L"1.1-dev-multifail"
-  };
-  static_assert(base::size(multifail) == base::size(plain),
-                "bad multifail array size");
-  const wchar_t* const multifail_full[] = {
-    L"-multifail-full",
-    L"1.1-multifail-full",
-    L"1.1-dev-multifail-full"
-  };
-  static_assert(base::size(multifail_full) == base::size(plain),
-                "bad multifail_full array size");
-  const wchar_t* const* input_arrays[] = {
-    plain,
-    full,
-    multifail,
-    multifail_full
-  };
+  const wchar_t* const* input_arrays[] = {plain, full};
   ChannelInfo v;
   for (const installer::ArchiveType archive_type : archive_types) {
     for (const int result : results) {
@@ -283,8 +265,7 @@ TEST_F(GoogleUpdateSettingsTest, UpdateGoogleUpdateApKey) {
       for (const wchar_t* const* inputs : input_arrays) {
         if (archive_type == installer::UNKNOWN_ARCHIVE_TYPE) {
           // "-full" is untouched if the archive type is unknown.
-          // "-multifail" is unconditionally removed.
-          if (inputs == full || inputs == multifail_full)
+          if (inputs == full)
             outputs = full;
           else
             outputs = plain;
@@ -454,7 +435,7 @@ TEST_F(GoogleUpdateSettingsTest, GetAppUpdatePolicyNoOverride) {
   EXPECT_FALSE(is_overridden);
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 // Test that the default override is returned if no app-specific override is
 // present.
@@ -661,7 +642,7 @@ TEST_F(GoogleUpdateSettingsTest, UpdatesDisabledByTimeout) {
   EXPECT_TRUE(GoogleUpdateSettings::AreAutoupdatesEnabled());
 }
 
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperSystem) {
   TestExperimentsLabelHelper(SYSTEM_INSTALL);

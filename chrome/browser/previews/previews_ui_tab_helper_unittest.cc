@@ -18,7 +18,7 @@
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/previews/previews_https_notification_infobar_decider.h"
-#include "chrome/browser/previews/previews_lite_page_navigation_throttle.h"
+#include "chrome/browser/previews/previews_lite_page_redirect_url_loader_interceptor.h"
 #include "chrome/browser/previews/previews_service.h"
 #include "chrome/browser/previews/previews_service_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -26,18 +26,19 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_store.h"
+#include "components/data_reduction_proxy/core/browser/data_store_impl.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/proto/data_store.pb.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
-#include "components/optimization_guide/optimization_guide_features.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/previews/content/previews_user_data.h"
 #include "components/previews/core/previews_features.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/common/previews_state.h"
@@ -71,30 +72,12 @@ class PreviewsUITabHelperUnitTest : public ChromeRenderViewHostTestHarness {
     content::RenderFrameHostTester::For(main_rfh())
         ->InitializeRenderFrameIfNeeded();
 
-    drp_test_context_ =
-        data_reduction_proxy::DataReductionProxyTestContext::Builder()
-            .WithMockConfig()
-            .SkipSettingsInitialization()
-            .Build();
-
-    auto* data_reduction_proxy_settings =
-        DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-            web_contents()->GetBrowserContext());
-
-    PrefRegistrySimple* registry =
-        drp_test_context_->pref_service()->registry();
-    registry->RegisterDictionaryPref(proxy_config::prefs::kProxy);
-    data_reduction_proxy_settings->InitDataReductionProxySettings(
-        drp_test_context_->io_data(), drp_test_context_->pref_service(),
-        profile(), base::MakeRefCounted<network::TestSharedURLLoaderFactory>(),
-        base::WrapUnique(new data_reduction_proxy::DataStore()),
-        base::ThreadTaskRunnerHandle::Get(),
-        base::ThreadTaskRunnerHandle::Get());
-  }
-
-  void TearDown() override {
-    drp_test_context_->DestroySettings();
-    ChromeRenderViewHostTestHarness::TearDown();
+    DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile())
+        ->InitDataReductionProxySettings(
+            profile(),
+            std::make_unique<data_reduction_proxy::DataStoreImpl>(
+                profile()->GetPath()),
+            task_environment()->GetMainThreadTaskRunner());
   }
 
   void SetCommittedPreviewsType(previews::PreviewsType previews_type) {
@@ -106,9 +89,7 @@ class PreviewsUITabHelperUnitTest : public ChromeRenderViewHostTestHarness {
     previews_user_data->SetCommittedPreviewsType(previews_type);
   }
 
-  void SimulateWillProcessResponse() {
-    SimulateCommit();
-  }
+  void SimulateWillProcessResponse() { SimulateCommit(); }
 
   void SimulateCommit() {
     test_handle_->set_has_committed(true);
@@ -127,10 +108,6 @@ class PreviewsUITabHelperUnitTest : public ChromeRenderViewHostTestHarness {
     return ui_tab_helper->CreatePreviewsUserDataForNavigationHandle(
         test_handle_.get(), page_id);
   }
-
- protected:
-  std::unique_ptr<data_reduction_proxy::DataReductionProxyTestContext>
-      drp_test_context_;
 
  private:
   std::unique_ptr<content::MockNavigationHandle> test_handle_;
@@ -243,8 +220,7 @@ TEST_F(PreviewsUITabHelperUnitTest, CreateOfflineUI) {
                   ->DataUsageMapForTesting()
                   .empty());
 
-  drp_test_context_->pref_service()->SetBoolean("data_usage_reporting.enabled",
-                                                true);
+  profile()->GetPrefs()->SetBoolean("data_usage_reporting.enabled", true);
   base::RunLoop().RunUntilIdle();
 
   SetCommittedPreviewsType(previews::PreviewsType::OFFLINE);
@@ -342,14 +318,14 @@ TEST_F(PreviewsUITabHelperUnitTest, TestPreviewsCallbackCalledNonOptOut) {
   EXPECT_FALSE(on_dismiss_value.value());
 }
 
-TEST_F(PreviewsUITabHelperUnitTest, TestReloadWithoutPreviewsLitePageRedirect) {
+TEST_F(PreviewsUITabHelperUnitTest,
+       TestReloadWithoutPreviewsLitePageRedirectRedirect) {
   SimulateWillProcessResponse();
   CallDidFinishNavigation();
   base::RunLoop().RunUntilIdle();
 
   GURL original_url("https://porgs.com");
-  GURL previews_url =
-      PreviewsLitePageNavigationThrottle::GetPreviewsURLForURL(original_url);
+  GURL previews_url = previews::GetLitePageRedirectURLForURL(original_url);
   content::WebContentsTester::For(web_contents())
       ->NavigateAndCommit(previews_url);
 
@@ -376,13 +352,9 @@ TEST_F(PreviewsUITabHelperUnitTest, TestReloadWithoutPreviewsDeferAllScript) {
   EXPECT_TRUE(transition_type & ui::PAGE_TRANSITION_RELOAD);
 }
 
-TEST_F(PreviewsUITabHelperUnitTest, TestInfoBarShownOnHintsFetcherEnabled) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {optimization_guide::features::kOptimizationHintsFetching}, {});
-
+TEST_F(PreviewsUITabHelperUnitTest, TestInfoBarShownOnlyWhenNotSeen) {
   data_reduction_proxy::DataReductionProxySettings::
-      SetDataSaverEnabledForTesting(drp_test_context_->pref_service(), true);
+      SetDataSaverEnabledForTesting(profile()->GetPrefs(), true);
 
   PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
       Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
@@ -395,21 +367,4 @@ TEST_F(PreviewsUITabHelperUnitTest, TestInfoBarShownOnHintsFetcherEnabled) {
   GURL test_url("https://tribbles.com");
   content::WebContentsTester::For(web_contents())->NavigateAndCommit(test_url);
   EXPECT_FALSE(decider->NeedsToNotifyUser());
-}
-
-TEST_F(PreviewsUITabHelperUnitTest, TestInfoBarNotShownOnHintsFetcherDisabled) {
-  data_reduction_proxy::DataReductionProxySettings::
-      SetDataSaverEnabledForTesting(drp_test_context_->pref_service(), true);
-
-  PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
-
-  PreviewsHTTPSNotificationInfoBarDecider* decider =
-      previews_service->previews_https_notification_infobar_decider();
-
-  EXPECT_TRUE(decider->NeedsToNotifyUser());
-
-  GURL test_url("https://tribbles.com");
-  content::WebContentsTester::For(web_contents())->NavigateAndCommit(test_url);
-  EXPECT_TRUE(decider->NeedsToNotifyUser());
 }

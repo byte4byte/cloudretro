@@ -6,7 +6,7 @@
 #define IOS_WEB_PUBLIC_TEST_FAKES_TEST_WEB_STATE_OBSERVER_H_
 
 #include "ios/web/public/test/fakes/test_web_state_observer_util.h"
-#include "ios/web/public/web_state/web_state_observer.h"
+#include "ios/web/public/web_state_observer.h"
 
 namespace web {
 
@@ -39,10 +39,6 @@ class TestWebStateObserver : public WebStateObserver {
   // Arguments passed to |LoadProgressChanged|.
   web::TestChangeLoadingProgressInfo* change_loading_progress_info() {
     return change_loading_progress_info_.get();
-  }
-  // Arguments passed to |NavigationItemsPruned|.
-  web::TestNavigationItemsPrunedInfo* navigation_items_pruned_info() {
-    return navigation_items_pruned_info_.get();
   }
   // Arguments passed to |TitleWasSet|.
   web::TestTitleWasSetInfo* title_was_set_info() {
@@ -90,8 +86,6 @@ class TestWebStateObserver : public WebStateObserver {
   void PageLoaded(WebState* web_state,
                   PageLoadCompletionStatus load_completion_status) override;
   void LoadProgressChanged(WebState* web_state, double progress) override;
-  void NavigationItemsPruned(WebState* web_state,
-                             size_t pruned_item_count) override;
   void DidStartNavigation(WebState* web_state,
                           NavigationContext* context) override;
   void DidFinishNavigation(WebState* web_state,
@@ -118,8 +112,6 @@ class TestWebStateObserver : public WebStateObserver {
   std::unique_ptr<web::TestLoadPageInfo> load_page_info_;
   std::unique_ptr<web::TestChangeLoadingProgressInfo>
       change_loading_progress_info_;
-  std::unique_ptr<web::TestNavigationItemsPrunedInfo>
-      navigation_items_pruned_info_;
   std::unique_ptr<web::TestDidStartNavigationInfo> did_start_navigation_info_;
   std::unique_ptr<web::TestDidFinishNavigationInfo> did_finish_navigation_info_;
   std::unique_ptr<web::TestTitleWasSetInfo> title_was_set_info_;

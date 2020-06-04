@@ -135,7 +135,9 @@ suite('Multidevice', function() {
 
   test('clicking SmartLock item routes to SmartLock subpage', function() {
     multideviceSubpage.$$('#smartLockItem').$$('.link-wrapper').click();
-    assertEquals(settings.getCurrentRoute(), settings.routes.SMART_LOCK);
+    assertEquals(
+        settings.Router.getInstance().getCurrentRoute(),
+        settings.routes.SMART_LOCK);
   });
 
   test('AndroidMessages item shows button when not set up', function() {
@@ -168,7 +170,7 @@ suite('Multidevice', function() {
       });
 
   test(
-      'AndroidMessages set up button is disabled when prohibited by policy',
+      'AndroidMessages toggle is disabled when prohibited by policy',
       function() {
         // Verify that setup button is disabled when prohibited by policy.
         multideviceSubpage.pageContentData =
@@ -181,9 +183,7 @@ suite('Multidevice', function() {
 
         let setUpButton =
             multideviceSubpage.$$('#messagesItem > [slot=feature-controller]');
-        assertTrue(!!setUpButton);
-        assertTrue(setUpButton.tagName.includes('BUTTON'));
-        assertTrue(setUpButton.disabled);
+        assertFalse(!!setUpButton);
 
         // Verify that setup button is not disabled when feature is enabled.
         setAndroidSmsPairingComplete(false);

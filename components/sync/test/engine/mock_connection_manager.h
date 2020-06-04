@@ -39,17 +39,19 @@ class MockConnectionManager : public ServerConnectionManager {
     virtual ~MidCommitObserver() {}
   };
 
-  MockConnectionManager(syncable::Directory*, CancelationSignal* signal);
+  explicit MockConnectionManager(syncable::Directory*);
   ~MockConnectionManager() override;
 
   // Overridden ServerConnectionManager functions.
-  bool PostBufferToPath(PostBufferParams*,
+  bool PostBufferToPath(const std::string& buffer_in,
                         const std::string& path,
-                        const std::string& access_token) override;
+                        const std::string& access_token,
+                        std::string* buffer_out,
+                        HttpResponse* http_response) override;
 
   // Control of commit response.
   // NOTE: Commit callback is invoked only once then reset.
-  void SetMidCommitCallback(const base::Closure& callback);
+  void SetMidCommitCallback(base::OnceClosure callback);
   void SetMidCommitObserver(MidCommitObserver* observer);
 
   // Set this if you want commit to perform commit time rename. Will request
@@ -365,16 +367,11 @@ class MockConnectionManager : public ServerConnectionManager {
 
   // The updates we'll return to the next request.
   std::list<sync_pb::GetUpdatesResponse> update_queue_;
-  base::Closure mid_commit_callback_;
+  base::OnceClosure mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
 
   // The keystore key we return for a GetUpdates with need_encryption_key set.
   std::string keystore_key_;
-
-  // The AUTHENTICATE response we'll return for auth requests.
-  sync_pb::AuthenticateResponse auth_response_;
-  // What we use to determine if we should return SUCCESS or BAD_AUTH_TOKEN.
-  std::string valid_access_token_;
 
   // Whether we are faking a server mandating clients to throttle requests.
   // Protected by |response_code_override_lock_|.

@@ -29,12 +29,6 @@ public final class EventConstants {
     public static final String DOWNLOAD_HOME_OPENED = "download_home_opened";
 
     /**
-     * The user triggered pull to refresh. Used to help determine when to show the Chrome Home
-     * in-product help.
-     */
-    public static final String PULL_TO_REFRESH = "pull_to_refresh";
-
-    /**
      * Screenshot is taken with Chrome in the foreground.
      */
     public static final String SCREENSHOT_TAKEN_CHROME_IN_FOREGROUND =
@@ -156,6 +150,15 @@ public final class EventConstants {
 
     /** The Explore Sites tile was tapped. */
     public static final String EXPLORE_SITES_TILE_TAPPED = "explore_sites_tile_tapped";
+
+    /** User has finished drop-to-merge to create a group. */
+    public static final String TAB_DRAG_AND_DROP_TO_GROUP = "tab_drag_and_drop_to_group";
+
+    /** User has tapped on Identity Disc. */
+    public static final String IDENTITY_DISC_USED = "identity_disc_used";
+
+    /** User has used Ephemeral Tab i.e. opened and browsed the content. */
+    public static final String EPHEMERAL_TAB_USED = "ephemeral_tab_used";
 
     /**
      * Do not instantiate.

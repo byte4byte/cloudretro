@@ -9,6 +9,7 @@
 
 #include "base/bind_helpers.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -240,6 +241,35 @@ void CloudPolicyValidatorBase::ValidateAgainstCurrentPolicy(
   ValidateDeviceId(expected_device_id, device_id_option);
 }
 
+// static
+bool CloudPolicyValidatorBase::VerifySignature(const std::string& data,
+                                               const std::string& key,
+                                               const std::string& signature,
+                                               SignatureType signature_type) {
+  crypto::SignatureVerifier verifier;
+  crypto::SignatureVerifier::SignatureAlgorithm algorithm;
+  switch (signature_type) {
+    case SHA1:
+      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA1;
+      break;
+    case SHA256:
+      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA256;
+      break;
+    default:
+      NOTREACHED() << "Invalid signature type: " << signature_type;
+      return false;
+  }
+
+  if (!verifier.VerifyInit(algorithm,
+                           base::as_bytes(base::make_span(signature)),
+                           base::as_bytes(base::make_span(key)))) {
+    DLOG(ERROR) << "Invalid verification signature/key format";
+    return false;
+  }
+  verifier.VerifyUpdate(base::as_bytes(base::make_span(data)));
+  return verifier.VerifyFinal();
+}
+
 CloudPolicyValidatorBase::CloudPolicyValidatorBase(
     std::unique_ptr<em::PolicyFetchResponse> policy_response,
     scoped_refptr<base::SequencedTaskRunner> background_task_runner)
@@ -260,34 +290,35 @@ CloudPolicyValidatorBase::CloudPolicyValidatorBase(
 // static
 void CloudPolicyValidatorBase::PostValidationTask(
     std::unique_ptr<CloudPolicyValidatorBase> validator,
-    const base::Closure& completion_callback) {
+    base::OnceClosure completion_callback) {
   const auto task_runner = validator->background_task_runner_;
   task_runner->PostTask(
       FROM_HERE,
       base::BindOnce(&CloudPolicyValidatorBase::PerformValidation,
                      std::move(validator), base::ThreadTaskRunnerHandle::Get(),
-                     completion_callback));
+                     std::move(completion_callback)));
 }
 
 // static
 void CloudPolicyValidatorBase::PerformValidation(
     std::unique_ptr<CloudPolicyValidatorBase> self,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const base::Closure& completion_callback) {
+    base::OnceClosure completion_callback) {
   // Run the validation activities on this thread.
   self->RunValidation();
 
   // Report completion on |task_runner|.
   task_runner->PostTask(
-      FROM_HERE, base::BindOnce(&CloudPolicyValidatorBase::ReportCompletion,
-                                std::move(self), completion_callback));
+      FROM_HERE,
+      base::BindOnce(&CloudPolicyValidatorBase::ReportCompletion,
+                     std::move(self), std::move(completion_callback)));
 }
 
 // static
 void CloudPolicyValidatorBase::ReportCompletion(
     std::unique_ptr<CloudPolicyValidatorBase> self,
-    const base::Closure& completion_callback) {
-  completion_callback.Run();
+    base::OnceClosure completion_callback) {
+  std::move(completion_callback).Run();
 }
 
 void CloudPolicyValidatorBase::RunValidation() {
@@ -609,35 +640,6 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckDomain() {
   }
 
   return VALIDATION_OK;
-}
-
-// static
-bool CloudPolicyValidatorBase::VerifySignature(const std::string& data,
-                                               const std::string& key,
-                                               const std::string& signature,
-                                               SignatureType signature_type) {
-  crypto::SignatureVerifier verifier;
-  crypto::SignatureVerifier::SignatureAlgorithm algorithm;
-  switch (signature_type) {
-    case SHA1:
-      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA1;
-      break;
-    case SHA256:
-      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA256;
-      break;
-    default:
-      NOTREACHED() << "Invalid signature type: " << signature_type;
-      return false;
-  }
-
-  if (!verifier.VerifyInit(algorithm,
-                           base::as_bytes(base::make_span(signature)),
-                           base::as_bytes(base::make_span(key)))) {
-    DLOG(ERROR) << "Invalid verification signature/key format";
-    return false;
-  }
-  verifier.VerifyUpdate(base::as_bytes(base::make_span(data)));
-  return verifier.VerifyFinal();
 }
 
 template class CloudPolicyValidator<em::CloudPolicySettings>;

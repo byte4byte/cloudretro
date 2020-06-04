@@ -11,15 +11,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/resource_request_incident.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/proto/csd.pb.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/site_instance.h"
 #include "crypto/sha2.h"
 #include "net/url_request/url_request.h"
+#include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
 #include "url/gurl.h"
 
 namespace {
@@ -73,10 +73,9 @@ class ResourceRequestDetectorClient
       OnResultCallback callback) {
     auto client = base::WrapRefCounted(new ResourceRequestDetectorClient(
         std::move(database_manager), std::move(callback)));
-    base::PostTaskWithTraits(
-        FROM_HERE, {content::BrowserThread::IO},
-        base::BindOnce(&ResourceRequestDetectorClient::StartCheck, client,
-                       resource_url));
+    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
+                   base::BindOnce(&ResourceRequestDetectorClient::StartCheck,
+                                  client, resource_url));
   }
 
  private:
@@ -113,7 +112,7 @@ class ResourceRequestDetectorClient
           new ResourceRequestIncidentMessage());
       incident_data->set_type(ResourceRequestIncidentMessage::TYPE_PATTERN);
       incident_data->set_digest(threat_hash);
-      base::PostTaskWithTraits(
+      base::PostTask(
           FROM_HERE, {content::BrowserThread::UI},
           base::BindOnce(std::move(callback_), std::move(incident_data)));
     }
@@ -127,19 +126,6 @@ class ResourceRequestDetectorClient
 };
 
 }  // namespace
-
-// static
-ResourceRequestInfo ResourceRequestDetector::GetRequestInfo(
-    const net::URLRequest* request) {
-  ResourceRequestInfo info;
-  info.url = request->url();
-  content::ResourceRequestInfo* request_info =
-      content::ResourceRequestInfo::ForRequest(request);
-  info.resource_type = request_info->GetResourceType();
-  content::ResourceRequestInfo::GetRenderFrameForRequest(
-      request, &info.render_process_id, &info.render_frame_id);
-  return info;
-}
 
 ResourceRequestDetector::ResourceRequestDetector(
     scoped_refptr<SafeBrowsingDatabaseManager> database_manager,
@@ -157,9 +143,9 @@ void ResourceRequestDetector::ProcessResourceRequest(
   if (!request->url.SchemeIsHTTPOrHTTPS())
     return;
 
-  if (request->resource_type == content::ResourceType::kSubFrame ||
-      request->resource_type == content::ResourceType::kScript ||
-      request->resource_type == content::ResourceType::kObject) {
+  if (request->resource_type == blink::mojom::ResourceType::kSubFrame ||
+      request->resource_type == blink::mojom::ResourceType::kScript ||
+      request->resource_type == blink::mojom::ResourceType::kObject) {
     ResourceRequestDetectorClient::Start(
         request->url, database_manager_,
         base::BindOnce(&ResourceRequestDetector::ReportIncidentOnUIThread,

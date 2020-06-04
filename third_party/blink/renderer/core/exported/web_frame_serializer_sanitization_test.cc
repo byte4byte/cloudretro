@@ -31,7 +31,6 @@
 #include "third_party/blink/public/web/web_frame_serializer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
@@ -69,9 +68,7 @@ class WebFrameSerializerSanitizationTest : public testing::Test {
   WebFrameSerializerSanitizationTest() { helper_.Initialize(); }
 
   ~WebFrameSerializerSanitizationTest() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
   String GenerateMHTMLFromHtml(const String& url, const String& file_name) {
@@ -92,36 +89,40 @@ class WebFrameSerializerSanitizationTest : public testing::Test {
     RegisterMockedFileURLLoad(parsed_url, file_path, mime_type);
     frame_test_helpers::LoadFrame(MainFrameImpl(), url.Utf8().c_str());
     MainFrameImpl()->GetFrame()->View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+        DocumentUpdateReason::kTest);
     MainFrameImpl()->GetFrame()->GetDocument()->UpdateStyleAndLayoutTree();
     test::RunPendingTasks();
   }
 
-  ShadowRoot* SetShadowContent(TreeScope& scope,
-                               const char* host,
-                               ShadowRootType shadow_type,
-                               const char* shadow_content,
-                               bool delegates_focus = false) {
+  ShadowRoot* SetShadowContent(
+      TreeScope& scope,
+      const char* host,
+      ShadowRootType shadow_type,
+      const char* shadow_content,
+      FocusDelegation focus_delegation = FocusDelegation::kNone) {
     Element* host_element = scope.getElementById(AtomicString::FromUTF8(host));
     ShadowRoot* shadow_root;
     if (shadow_type == ShadowRootType::V0) {
-      DCHECK(!delegates_focus);
+      DCHECK_EQ(focus_delegation, FocusDelegation::kNone);
       shadow_root = &host_element->CreateV0ShadowRootForTesting();
     } else {
-      shadow_root =
-          &host_element->AttachShadowRootInternal(shadow_type, delegates_focus);
+      shadow_root = &host_element->AttachShadowRootInternal(shadow_type,
+                                                            focus_delegation);
     }
-    shadow_root->SetDelegatesFocus(delegates_focus);
-    shadow_root->SetInnerHTMLFromString(String::FromUTF8(shadow_content),
-                                        ASSERT_NO_EXCEPTION);
+    shadow_root->SetDelegatesFocus(focus_delegation ==
+                                   FocusDelegation::kDelegateFocus);
+    shadow_root->setInnerHTML(String::FromUTF8(shadow_content),
+                              ASSERT_NO_EXCEPTION);
     scope.GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+        DocumentUpdateReason::kTest);
     return shadow_root;
   }
 
   void RegisterMockedFileURLLoad(const KURL& url,
                                  const String& file_path,
                                  const String& mime_type = "image/png") {
+    // TODO(crbug.com/751425): We should use the mock functionality
+    // via |helper_|.
     url_test_helpers::RegisterMockedURLLoad(
         url, test::CoreTestDataPath(file_path.Utf8().c_str()), mime_type);
   }
@@ -227,8 +228,17 @@ TEST_F(WebFrameSerializerSanitizationTest, ImageLoadedFromSrcsetForHiDPI) {
   String mhtml =
       GenerateMHTMLFromHtml("http://www.test.com", "img_srcset.html");
 
-  // srcset attribute should be skipped.
+  // srcset and sizes attributes should be skipped.
   EXPECT_EQ(WTF::kNotFound, mhtml.Find("srcset="));
+  EXPECT_EQ(WTF::kNotFound, mhtml.Find("sizes="));
+
+  // src attribute with original URL should be preserved.
+  EXPECT_EQ(2,
+            MatchSubstring(mhtml, "src=3D\"http://www.test.com/1x.png\"", 34));
+
+  // The image resource for original URL should be attached.
+  EXPECT_NE(WTF::kNotFound,
+            mhtml.Find("Content-Location: http://www.test.com/1x.png"));
 
   // Width and height attributes should be set when none is present in <img>.
   EXPECT_NE(WTF::kNotFound,
@@ -248,8 +258,17 @@ TEST_F(WebFrameSerializerSanitizationTest, ImageLoadedFromSrcForNormalDPI) {
   String mhtml =
       GenerateMHTMLFromHtml("http://www.test.com", "img_srcset.html");
 
-  // srcset attribute should be skipped.
+  // srcset and sizes attributes should be skipped.
   EXPECT_EQ(WTF::kNotFound, mhtml.Find("srcset="));
+  EXPECT_EQ(WTF::kNotFound, mhtml.Find("sizes="));
+
+  // src attribute with original URL should be preserved.
+  EXPECT_EQ(2,
+            MatchSubstring(mhtml, "src=3D\"http://www.test.com/1x.png\"", 34));
+
+  // The image resource for original URL should be attached.
+  EXPECT_NE(WTF::kNotFound,
+            mhtml.Find("Content-Location: http://www.test.com/1x.png"));
 
   // New width and height attributes should not be set.
   EXPECT_NE(WTF::kNotFound, mhtml.Find("id=3D\"i1\">"));
@@ -320,9 +339,9 @@ TEST_F(WebFrameSerializerSanitizationTest, ShadowDOM) {
   LoadFrame("http://www.test.com", "shadow_dom.html", "text/html");
   Document* document = MainFrameImpl()->GetFrame()->GetDocument();
   SetShadowContent(*document, "h1", ShadowRootType::V0, "V0 shadow");
-  ShadowRoot* shadowRoot =
-      SetShadowContent(*document, "h2", ShadowRootType::kOpen,
-                       "Parent shadow\n<p id=\"h3\">Foo</p>", true);
+  ShadowRoot* shadowRoot = SetShadowContent(
+      *document, "h2", ShadowRootType::kOpen,
+      "Parent shadow\n<p id=\"h3\">Foo</p>", FocusDelegation::kDelegateFocus);
   SetShadowContent(*shadowRoot, "h3", ShadowRootType::kClosed, "Nested shadow");
   String mhtml = WebFrameSerializerTestHelper::GenerateMHTML(MainFrameImpl());
 

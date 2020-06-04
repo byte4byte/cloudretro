@@ -48,11 +48,6 @@ class RendererTask : public Task,
   // can update their favicons.
   virtual void UpdateFavicon() = 0;
 
-  // An overridable method that will be called when the event
-  // WebContentsObserver::DidNavigateMainFrame() occurs, so that we can update
-  // their Rappor sample name when a navigation takes place.
-  virtual void UpdateRapporSampleName();
-
   // task_manager::Task:
   void Activate() override;
   void Refresh(const base::TimeDelta& update_interval,
@@ -66,7 +61,7 @@ class RendererTask : public Task,
   int64_t GetV8MemoryAllocated() const override;
   int64_t GetV8MemoryUsed() const override;
   bool ReportsWebCacheStats() const override;
-  blink::WebCache::ResourceTypeStats GetWebCacheStats() const override;
+  blink::WebCacheResourceTypeStats GetWebCacheStats() const override;
 
   // favicon::FaviconDriverObserver:
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
@@ -129,7 +124,7 @@ class RendererTask : public Task,
   int64_t v8_memory_used_;
 
   // The WebKit resource cache statistics for this renderer.
-  blink::WebCache::ResourceTypeStats webcache_stats_;
+  blink::WebCacheResourceTypeStats webcache_stats_;
 
   // The profile name associated with the browser context of the render view
   // host.

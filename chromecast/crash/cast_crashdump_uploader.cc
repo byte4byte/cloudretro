@@ -6,6 +6,8 @@
 
 #include <sys/stat.h>
 
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
 // TODO(slan): Find a replacement for LibcurlWrapper in Chromium to remove the
 // breakpad dependency.
@@ -51,6 +53,12 @@ CastCrashdumpUploader::~CastCrashdumpUploader() {
 
 bool CastCrashdumpUploader::AddAttachment(const std::string& label,
                                           const std::string& filename) {
+  int64_t file_size = 0;
+  if (!base::GetFileSize(base::FilePath(filename), &file_size)) {
+    LOG(WARNING) << "file size of " << filename << " not readable";
+    return false;
+  }
+  LOG(INFO) << "file size of " << filename << ": " << file_size;
   attachments_[label] = filename;
   return true;
 }
@@ -109,7 +117,7 @@ bool CastCrashdumpUploader::Upload(std::string* response) {
 
   LOG(INFO) << "Sending request to " << data_.crash_server;
 
-  int http_status_code;
+  long http_status_code;
   std::string http_header_data;
   return http_layer_->SendRequest(data_.crash_server,
                                   parameters_,

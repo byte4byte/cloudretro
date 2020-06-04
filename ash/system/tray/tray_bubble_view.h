@@ -11,7 +11,7 @@
 #include "ash/public/cpp/shelf_types.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
@@ -83,9 +83,9 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
     AnchorMode anchor_mode = AnchorMode::kView;
     // Only used if anchor_mode == AnchorMode::kRect.
     gfx::Rect anchor_rect;
-    ShelfAlignment shelf_alignment = SHELF_ALIGNMENT_BOTTOM;
-    int min_width = 0;
-    int max_width = 0;
+    bool is_anchored_to_status_area = true;
+    ShelfAlignment shelf_alignment = ShelfAlignment::kBottom;
+    int preferred_width = 0;
     int max_height = 0;
     bool close_on_deactivate = true;
     // Indicates whether tray bubble view is shown by click on the tray view.
@@ -95,6 +95,8 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
     base::Optional<int> corner_radius;
     base::Optional<gfx::Insets> insets;
     bool has_shadow = true;
+    // Use half opaque widget instead of fully opaque.
+    bool translucent = false;
   };
 
   explicit TrayBubbleView(const InitParams& init_params);
@@ -117,7 +119,7 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
   void SetBottomPadding(int padding);
 
   // Sets the bubble width.
-  void SetWidth(int width);
+  void SetPreferredWidth(int width);
 
   // Returns the border insets. Called by TrayEventFilter.
   gfx::Insets GetBorderInsets() const;
@@ -143,6 +145,10 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
   // area.
   virtual bool IsAnchoredToStatusArea() const;
 
+  // Stops rerouting key events to this view. If this view is not currently
+  // rerouting events, then this function will be idempotent.
+  void StopReroutingEvents();
+
   Delegate* delegate() { return delegate_; }
 
   void set_gesture_dragging(bool dragging) { is_gesture_dragging_ = dragging; }
@@ -160,6 +166,7 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
                                 views::Widget* bubble_widget) const override;
   void OnWidgetClosing(views::Widget* widget) override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
+  ui::LayerType GetLayerType() const override;
 
   // Overridden from views::View.
   gfx::Size CalculatePreferredSize() const override;
@@ -174,13 +181,10 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
 
  protected:
   // Overridden from views::BubbleDialogDelegateView.
-  int GetDialogButtons() const override;
   ax::mojom::Role GetAccessibleWindowRole() override;
 
   // Overridden from views::View.
   void ChildPreferredSizeChanged(View* child) override;
-  void ViewHierarchyChanged(
-      const views::ViewHierarchyChangedDetails& details) override;
 
   // Changes the insets from the bubble border. These were initially set using
   // the InitParams.insets, but may need to be reset programmatically.
@@ -209,9 +213,6 @@ class ASH_EXPORT TrayBubbleView : public views::BubbleDialogDelegateView,
   };
 
   void CloseBubbleView();
-
-  // Focus the default item if no item is focused.
-  void FocusDefaultIfNeeded();
 
   InitParams params_;
   views::BoxLayout* layout_;

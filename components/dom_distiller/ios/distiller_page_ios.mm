@@ -19,10 +19,10 @@
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/deprecated/crw_js_injection_manager.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/web_state/web_state_observer.h"
-#import "ios/web/public/web_state/web_state_policy_decider.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/navigation/web_state_policy_decider.h"
+#import "ios/web/public/web_state.h"
+#include "ios/web/public/web_state_observer.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -119,16 +119,19 @@ class DistillerPageMediaBlocker : public web::WebStatePolicyDecider {
       : web::WebStatePolicyDecider(web_state),
         main_frame_navigation_blocked_(false) {}
 
-  bool ShouldAllowResponse(NSURLResponse* response,
-                           bool for_main_frame) override {
+  void ShouldAllowResponse(
+      NSURLResponse* response,
+      bool for_main_frame,
+      base::OnceCallback<void(PolicyDecision)> callback) override {
     if ([response.MIMEType hasPrefix:@"audio/"] ||
         [response.MIMEType hasPrefix:@"video/"]) {
       if (for_main_frame) {
         main_frame_navigation_blocked_ = true;
       }
-      return NO;
+      std::move(callback).Run(PolicyDecision::Cancel());
+      return;
     }
-    return YES;
+    std::move(callback).Run(PolicyDecision::Allow());
   }
 
   bool main_frame_navigation_blocked() const {

@@ -29,9 +29,7 @@ void ParseMediaMetadataDone(
 
 }  // namespace
 
-MediaParser::MediaParser(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref)
-    : service_ref_(std::move(service_ref)) {}
+MediaParser::MediaParser() = default;
 
 MediaParser::~MediaParser() = default;
 
@@ -39,14 +37,14 @@ void MediaParser::ParseMediaMetadata(
     const std::string& mime_type,
     int64_t total_size,
     bool get_attached_images,
-    chrome::mojom::MediaDataSourcePtr media_data_source,
+    mojo::PendingRemote<chrome::mojom::MediaDataSource> media_data_source,
     ParseMediaMetadataCallback callback) {
   auto source =
       std::make_unique<IPCDataSource>(std::move(media_data_source), total_size);
   MediaMetadataParser* parser = new MediaMetadataParser(
       std::move(source), mime_type, get_attached_images);
-  parser->Start(base::Bind(&ParseMediaMetadataDone, base::Passed(&callback),
-                           base::Owned(parser)));
+  parser->Start(base::BindOnce(&ParseMediaMetadataDone, std::move(callback),
+                               base::Owned(parser)));
 }
 
 void MediaParser::CheckMediaFile(base::TimeDelta decode_time,

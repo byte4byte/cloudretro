@@ -12,7 +12,7 @@
 
 #include "base/command_line.h"
 #include "base/strings/string16.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_io_thread.h"
 #include "build/build_config.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -20,14 +20,10 @@
 #include "content/public/common/page_state.h"
 #include "content/public/test/mock_render_thread.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/web_frame.h"
-
-namespace base {
-class FieldTrialList;
-}
 
 namespace blink {
 namespace scheduler {
@@ -48,11 +44,11 @@ class ContentBrowserClient;
 class ContentClient;
 class ContentRendererClient;
 class CompositorDependencies;
-class MockRenderProcess;
 class PageState;
 class RendererMainPlatformDelegate;
 class RendererBlinkPlatformImpl;
 class RendererBlinkPlatformImplTestOverrideImpl;
+class RenderProcess;
 class RenderView;
 struct VisualProperties;
 
@@ -79,7 +75,10 @@ class RenderViewTest : public testing::Test {
         blink_platform_impl_;
   };
 
-  RenderViewTest();
+  // If |hook_render_frame_creation| is true then the RenderViewTest will hook
+  // the RenderFrame creation so a TestRenderFrame is always created. If it is
+  // false the subclass is responsible for hooking the create function.
+  explicit RenderViewTest(bool hook_render_frame_creation = true);
   ~RenderViewTest() override;
 
  protected:
@@ -180,9 +179,12 @@ class RenderViewTest : public testing::Test {
                                          const std::string& new_value);
 
   // These are all methods from RenderViewImpl that we expose to testing code.
-  bool OnMessageReceived(const IPC::Message& msg);
   void OnSameDocumentNavigation(blink::WebLocalFrame* frame,
                                 bool is_new_navigation);
+
+  // Enables to use zoom for device scale.
+  void SetUseZoomForDSFEnabled(bool zoom_for_dsf);
+
   blink::WebWidget* GetWebWidget();
 
   // Allows a subclass to override the various content client implementations.
@@ -191,7 +193,7 @@ class RenderViewTest : public testing::Test {
   virtual ContentRendererClient* CreateContentRendererClient();
 
   // Allows a subclass to customize the initial size of the RenderView.
-  virtual std::unique_ptr<VisualProperties> InitialVisualProperties();
+  virtual VisualProperties InitialVisualProperties();
 
   // Override this to change the CompositorDependencies for the test.
   virtual std::unique_ptr<CompositorDependencies>
@@ -205,10 +207,10 @@ class RenderViewTest : public testing::Test {
   // Install a fake URL loader factory for the RenderFrameImpl.
   void CreateFakeWebURLLoaderFactory();
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<CompositorDependencies> compositor_deps_;
-  std::unique_ptr<MockRenderProcess> mock_process_;
+  std::unique_ptr<RenderProcess> process_;
   // We use a naked pointer because we don't want to expose RenderViewImpl in
   // the embedder's namespace.
   RenderView* view_ = nullptr;
@@ -222,12 +224,11 @@ class RenderViewTest : public testing::Test {
   std::unique_ptr<RendererMainPlatformDelegate> platform_;
   std::unique_ptr<MainFunctionParams> params_;
   std::unique_ptr<base::CommandLine> command_line_;
-  std::unique_ptr<base::FieldTrialList> field_trial_list_;
 
   // For Mojo.
   std::unique_ptr<base::TestIOThread> test_io_thread_;
   std::unique_ptr<mojo::core::ScopedIPCSupport> ipc_support_;
-  service_manager::BinderRegistry binder_registry_;
+  mojo::BinderMap binders_;
 
 #if defined(OS_MACOSX)
   std::unique_ptr<base::mac::ScopedNSAutoreleasePool> autorelease_pool_;

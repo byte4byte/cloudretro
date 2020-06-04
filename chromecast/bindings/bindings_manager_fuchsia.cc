@@ -22,7 +22,7 @@ BindingsManagerFuchsia::~BindingsManagerFuchsia() = default;
 void BindingsManagerFuchsia::AddBinding(base::StringPiece binding_name,
                                         base::StringPiece binding_script) {
   bindings_[binding_name.as_string()] =
-      cr_fuchsia::MemBufferFromString(binding_script);
+      cr_fuchsia::MemBufferFromString(binding_script, "cast-binding-script");
 }
 
 void BindingsManagerFuchsia::GetAll(GetAllCallback callback) {
@@ -42,8 +42,8 @@ void BindingsManagerFuchsia::GetAll(GetAllCallback callback) {
 void BindingsManagerFuchsia::Connect(
     std::string port_name,
     fidl::InterfaceHandle<::fuchsia::web::MessagePort> message_port) {
-  OnPortConnected(port_name,
-                  cr_fuchsia::MessagePortFromFidl(std::move(message_port)));
+  OnPortConnected(
+      port_name, cr_fuchsia::BlinkMessagePortFromFidl(std::move(message_port)));
 }
 
 }  // namespace bindings

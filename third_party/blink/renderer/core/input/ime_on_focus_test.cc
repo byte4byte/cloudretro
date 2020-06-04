@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -46,9 +45,7 @@ class ImeOnFocusTest : public testing::Test {
   ImeOnFocusTest() : base_url_("http://www.test.com/") {}
 
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
  protected:
@@ -66,7 +63,7 @@ class ImeOnFocusTest : public testing::Test {
 };
 
 void ImeOnFocusTest::SendGestureTap(WebView* web_view, IntPoint client_point) {
-  WebGestureEvent web_gesture_event(WebInputEvent::kGestureTap,
+  WebGestureEvent web_gesture_event(WebInputEvent::Type::kGestureTap,
                                     WebInputEvent::kNoModifiers,
                                     WebInputEvent::GetStaticTimeStampForTests(),
                                     WebGestureDevice::kTouchscreen);

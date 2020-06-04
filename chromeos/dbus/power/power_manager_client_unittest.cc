@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/unguessable_token.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
 #include "dbus/mock_bus.h"
@@ -96,6 +96,9 @@ class TestObserver : public PowerManagerClient::Observer {
   const base::UnguessableToken& block_suspend_token() const {
     return block_suspend_token_;
   }
+  int32_t ambient_color_temperature() const {
+    return ambient_color_temperature_;
+  }
 
   void set_should_block_suspend(bool take_callback) {
     should_block_suspend_ = take_callback;
@@ -135,6 +138,9 @@ class TestObserver : public PowerManagerClient::Observer {
     if (run_unblock_suspend_immediately_)
       CHECK(UnblockSuspend());
   }
+  void AmbientColorChanged(const int32_t color_temperature) override {
+    ambient_color_temperature_ = color_temperature;
+  }
 
  private:
   PowerManagerClient* client_;  // Not owned.
@@ -157,13 +163,15 @@ class TestObserver : public PowerManagerClient::Observer {
   // When non-empty, the token for the outstanding block-suspend registration.
   base::UnguessableToken block_suspend_token_;
 
+  // Ambient color temperature
+  int32_t ambient_color_temperature_ = 0;
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
 // Stub implementation of PowerManagerClient::RenderProcessManagerDelegate.
 class TestDelegate : public PowerManagerClient::RenderProcessManagerDelegate {
  public:
-  explicit TestDelegate(PowerManagerClient* client) : weak_ptr_factory_(this) {
+  explicit TestDelegate(PowerManagerClient* client) {
     client->SetRenderProcessManagerDelegate(weak_ptr_factory_.GetWeakPtr());
   }
   ~TestDelegate() override = default;
@@ -180,7 +188,7 @@ class TestDelegate : public PowerManagerClient::RenderProcessManagerDelegate {
   int num_suspend_imminent_ = 0;
   int num_suspend_done_ = 0;
 
-  base::WeakPtrFactory<TestDelegate> weak_ptr_factory_;
+  base::WeakPtrFactory<TestDelegate> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestDelegate);
 };
@@ -211,10 +219,10 @@ class PowerManagerClientTest : public testing::Test {
 
     EXPECT_CALL(*bus_, GetDBusTaskRunner())
         .WillRepeatedly(
-            Return(scoped_task_environment_.GetMainThreadTaskRunner().get()));
+            Return(task_environment_.GetMainThreadTaskRunner().get()));
     EXPECT_CALL(*bus_, GetOriginTaskRunner())
         .WillRepeatedly(
-            Return(scoped_task_environment_.GetMainThreadTaskRunner().get()));
+            Return(task_environment_.GetMainThreadTaskRunner().get()));
 
     // Save |client_|'s signal and name-owner-changed callbacks.
     EXPECT_CALL(*proxy_, DoConnectToSignal(kInterface, _, _, _))
@@ -241,6 +249,11 @@ class PowerManagerClientTest : public testing::Test {
         *proxy_,
         DoCallMethod(HasMember(power_manager::kGetPowerSupplyPropertiesMethod),
                      _, _));
+    // Init will test for the presence of an ambient light sensor.
+    EXPECT_CALL(
+        *proxy_,
+        DoCallMethod(HasMember(power_manager::kHasAmbientColorDeviceMethod), _,
+                     _));
 
     PowerManagerClient::Initialize(bus_.get());
     client_ = PowerManagerClient::Get();
@@ -297,7 +310,7 @@ class PowerManagerClientTest : public testing::Test {
   static const int kSuspendDelayId = 100;
   static const int kDarkSuspendDelayId = 200;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
   // Mock bus and proxy for simulating calls to powerd.
   scoped_refptr<dbus::MockBus> bus_;
@@ -323,7 +336,7 @@ class PowerManagerClientTest : public testing::Test {
     CHECK_EQ(interface_name, power_manager::kPowerManagerInterface);
     signal_callbacks_[signal_name] = signal_callback;
 
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(*on_connected_callback), interface_name,
                        signal_name, true /* success */));
@@ -344,7 +357,7 @@ class PowerManagerClientTest : public testing::Test {
         dbus::Response::FromMethodCall(method_call));
     CHECK(dbus::MessageWriter(response.get()).AppendProtoAsArrayOfBytes(proto));
 
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&RunResponseCallback, std::move(*callback),
                                   std::move(response)));
   }
@@ -585,6 +598,19 @@ TEST_F(PowerManagerClientTest, SyncCallbackWithMultipleObservers) {
   ExpectSuspendReadiness(kHandleSuspendReadiness, kSuspendId, kSuspendDelayId);
   EXPECT_TRUE(observer2.UnblockSuspend());
   EmitSuspendDoneSignal(kSuspendId);
+}
+
+// Tests that observers are notified about changes in ambient color temperature.
+TEST_F(PowerManagerClientTest, ChangeAmbientColorTemperature) {
+  TestObserver observer(client_);
+
+  constexpr int32_t kTemperature = 6500;
+  dbus::Signal signal(kInterface,
+                      power_manager::kAmbientColorTemperatureChangedSignal);
+  dbus::MessageWriter(&signal).AppendInt32(kTemperature);
+  EmitSignal(&signal);
+
+  EXPECT_EQ(kTemperature, observer.ambient_color_temperature());
 }
 
 }  // namespace chromeos

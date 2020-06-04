@@ -2,25 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import imp
-import os
-
-THIS_DIR = os.path.abspath(os.path.dirname(__file__))
-
-config = imp.load_source('signing.config', os.path.join(THIS_DIR,
-                                                        'config.py.in'))
+from . import config
 
 
 class TestConfig(config.CodeSignConfig):
 
     def __init__(self,
                  identity='[IDENTITY]',
-                 keychain='[KEYCHAIN]',
+                 installer_identity='[INSTALLER-IDENTITY]',
                  notary_user='[NOTARY-USER]',
                  notary_password='[NOTARY-PASSWORD]',
                  notary_asc_provider=None):
-        super(TestConfig, self).__init__(identity, keychain, notary_user,
-                                         notary_password, notary_asc_provider)
+        super(TestConfig,
+              self).__init__(identity, installer_identity, notary_user,
+                             notary_password, notary_asc_provider)
+
+    @staticmethod
+    def is_chrome_branded():
+        return True
 
     @property
     def app_product(self):
@@ -39,13 +38,16 @@ class TestConfig(config.CodeSignConfig):
         return 'test.signing.bundle_id'
 
     @property
-    def optional_parts(self):
-        return set()
-
-    @property
     def provisioning_profile_basename(self):
         return 'provisiontest'
 
     @property
     def run_spctl_assess(self):
         return True
+
+
+class TestConfigNonChromeBranded(TestConfig):
+
+    @staticmethod
+    def is_chrome_branded():
+        return False

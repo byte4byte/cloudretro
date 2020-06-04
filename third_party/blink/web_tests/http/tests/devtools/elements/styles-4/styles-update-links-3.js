@@ -44,11 +44,11 @@
     function testDisableProperty(next) {
       var treeItem = ElementsTestRunner.getMatchedStylePropertyTreeItem('border');
       ElementsTestRunner.waitForStyleApplied(onPropertyDisabled);
-      treeItem._toggleEnabled({target: {checked: false}, consume: function() {}});
+      treeItem._toggleDisabled(true);
 
-      function onPropertyDisabled() {
+      async function onPropertyDisabled() {
         TestRunner.addResult('\n\n#### AFTER PROPERTY DISABLED ####\n\n');
-        ElementsTestRunner.dumpSelectedElementStyles(true, false, true);
+        await ElementsTestRunner.dumpSelectedElementStyles(true, false, true);
         var rules = ElementsTestRunner.getMatchedRules();
         ElementsTestRunner.validateRuleRanges('container', rules, next);
       }

@@ -20,16 +20,24 @@ constexpr int kHoursADay = 24;
 
 }  // namespace
 
-FakePredictor::FakePredictor() {
+RecurrencePredictor::RecurrencePredictor(const std::string& model_identifier)
+    : model_identifier_(model_identifier) {}
+
+FakePredictor::FakePredictor(const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {
   // The fake predictor should only be used for testing, not in production.
   // Record an error so we know if it is being used.
-  LogConfigurationError(ConfigurationError::kFakePredictorUsed);
+  LogInitializationStatus(model_identifier_,
+                          InitializationStatus::kFakePredictorUsed);
 }
 
-FakePredictor::FakePredictor(const FakePredictorConfig& config) {
+FakePredictor::FakePredictor(const FakePredictorConfig& config,
+                             const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {
   // The fake predictor should only be used for testing, not in production.
   // Record an error so we know if it is being used.
-  LogConfigurationError(ConfigurationError::kFakePredictorUsed);
+  LogInitializationStatus(model_identifier_,
+                          InitializationStatus::kFakePredictorUsed);
 }
 
 FakePredictor::~FakePredictor() = default;
@@ -67,7 +75,8 @@ void FakePredictor::ToProto(RecurrencePredictorProto* proto) const {
 
 void FakePredictor::FromProto(const RecurrencePredictorProto& proto) {
   if (!proto.has_fake_predictor()) {
-    LogSerializationError(SerializationError::kFakePredictorLoadingError);
+    LogSerializationStatus(model_identifier_,
+                           SerializationStatus::kFakePredictorLoadingError);
     return;
   }
 
@@ -75,13 +84,14 @@ void FakePredictor::FromProto(const RecurrencePredictorProto& proto) {
     counts_[pair.first] = pair.second;
 }
 
-DefaultPredictor::DefaultPredictor(const DefaultPredictorConfig& config) {}
+DefaultPredictor::DefaultPredictor(const DefaultPredictorConfig& config,
+                                   const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {}
 DefaultPredictor::~DefaultPredictor() {}
 
 void DefaultPredictor::Train(unsigned int target, unsigned int condition) {}
 
 std::map<unsigned int, float> DefaultPredictor::Rank(unsigned int condition) {
-  LogUsageError(UsageError::kInvalidRankCall);
   NOTREACHED();
   return {};
 }
@@ -95,9 +105,13 @@ void DefaultPredictor::ToProto(RecurrencePredictorProto* proto) const {}
 
 void DefaultPredictor::FromProto(const RecurrencePredictorProto& proto) {}
 
-ConditionalFrequencyPredictor::ConditionalFrequencyPredictor() = default;
 ConditionalFrequencyPredictor::ConditionalFrequencyPredictor(
-    const ConditionalFrequencyPredictorConfig& config) {}
+    const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {}
+ConditionalFrequencyPredictor::ConditionalFrequencyPredictor(
+    const ConditionalFrequencyPredictorConfig& config,
+    const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {}
 ConditionalFrequencyPredictor::~ConditionalFrequencyPredictor() = default;
 
 ConditionalFrequencyPredictor::Events::Events() = default;
@@ -198,7 +212,9 @@ void ConditionalFrequencyPredictor::ToProto(
 void ConditionalFrequencyPredictor::FromProto(
     const RecurrencePredictorProto& proto) {
   if (!proto.has_conditional_frequency_predictor()) {
-    // TODO(921444): Add error metrics for new predictors.
+    LogSerializationStatus(
+        model_identifier_,
+        SerializationStatus::kConditionalFrequencyPredictorLoadingError);
     return;
   }
 
@@ -209,8 +225,10 @@ void ConditionalFrequencyPredictor::FromProto(
   }
 }
 
-FrecencyPredictor::FrecencyPredictor(const FrecencyPredictorConfig& config)
-    : decay_coeff_(config.decay_coeff()) {}
+FrecencyPredictor::FrecencyPredictor(const FrecencyPredictorConfig& config,
+                                     const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier),
+      decay_coeff_(config.decay_coeff()) {}
 FrecencyPredictor::~FrecencyPredictor() = default;
 
 const char FrecencyPredictor::kPredictorName[] = "FrecencyPredictor";
@@ -226,10 +244,17 @@ void FrecencyPredictor::Train(unsigned int target, unsigned int condition) {
 }
 
 std::map<unsigned int, float> FrecencyPredictor::Rank(unsigned int condition) {
-  std::map<unsigned int, float> result;
+  float total = 0.0f;
   for (auto& pair : targets_) {
     DecayScore(&pair.second);
-    result[pair.first] = pair.second.last_score;
+    total += pair.second.last_score;
+  }
+  if (total == 0.0f)
+    return {};
+
+  std::map<unsigned int, float> result;
+  for (auto& pair : targets_) {
+    result[pair.first] = pair.second.last_score / total;
   }
   return result;
 }
@@ -262,7 +287,8 @@ void FrecencyPredictor::ToProto(RecurrencePredictorProto* proto) const {
 
 void FrecencyPredictor::FromProto(const RecurrencePredictorProto& proto) {
   if (!proto.has_frecency_predictor()) {
-    LogSerializationError(SerializationError::kFrecencyPredictorLoadingError);
+    LogSerializationStatus(model_identifier_,
+                           SerializationStatus::kFrecencyPredictorLoadingError);
     return;
   }
   const auto& predictor = proto.frecency_predictor();
@@ -286,8 +312,10 @@ void FrecencyPredictor::DecayScore(TargetData* data) {
   }
 }
 
-HourBinPredictor::HourBinPredictor(const HourBinPredictorConfig& config)
-    : weekly_decay_coeff_(config.weekly_decay_coeff()) {
+HourBinPredictor::HourBinPredictor(const HourBinPredictorConfig& config,
+                                   const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier),
+      weekly_decay_coeff_(config.weekly_decay_coeff()) {
   for (const auto& pair : config.bin_weights())
     bin_weights_[pair.bin()] = pair.weight();
 
@@ -367,8 +395,11 @@ void HourBinPredictor::ToProto(RecurrencePredictorProto* proto) const {
 }
 
 void HourBinPredictor::FromProto(const RecurrencePredictorProto& proto) {
-  if (!proto.has_hour_bin_predictor())
+  if (!proto.has_hour_bin_predictor()) {
+    LogSerializationStatus(model_identifier_,
+                           SerializationStatus::kHourBinPredictorLoadingError);
     return;
+  }
 
   proto_ = proto.hour_bin_predictor();
   if (ShouldDecay())
@@ -411,7 +442,12 @@ void HourBinPredictor::DecayAll() {
   }
 }
 
-MarkovPredictor::MarkovPredictor(const MarkovPredictorConfig& config) {}
+MarkovPredictor::MarkovPredictor(const MarkovPredictorConfig& config,
+                                 const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {
+  frequencies_ =
+      std::make_unique<ConditionalFrequencyPredictor>(model_identifier);
+}
 MarkovPredictor::~MarkovPredictor() = default;
 
 const char MarkovPredictor::kPredictorName[] = "MarkovPredictor";
@@ -421,42 +457,45 @@ const char* MarkovPredictor::GetPredictorName() const {
 
 void MarkovPredictor::Train(unsigned int target, unsigned int condition) {
   if (previous_target_)
-    frequencies_.Train(target, previous_target_.value());
+    frequencies_->Train(target, previous_target_.value());
   previous_target_ = target;
 }
 
 std::map<unsigned int, float> MarkovPredictor::Rank(unsigned int condition) {
   if (previous_target_)
-    return frequencies_.Rank(previous_target_.value());
+    return frequencies_->Rank(previous_target_.value());
   return std::map<unsigned int, float>();
 }
 
 void MarkovPredictor::Cleanup(const std::vector<unsigned int>& valid_targets) {
-  frequencies_.CleanupConditions(valid_targets);
-  frequencies_.Cleanup(valid_targets);
+  frequencies_->CleanupConditions(valid_targets);
+  frequencies_->Cleanup(valid_targets);
 }
 
 void MarkovPredictor::ToProto(RecurrencePredictorProto* proto) const {
   auto* predictor = proto->mutable_markov_predictor();
-  frequencies_.ToProto(predictor->mutable_frequencies());
+  frequencies_->ToProto(predictor->mutable_frequencies());
 }
 
 void MarkovPredictor::FromProto(const RecurrencePredictorProto& proto) {
   if (!proto.has_markov_predictor()) {
-    // TODO(921444): Update error metrics for new predictors and add reporting
-    // here.
+    LogSerializationStatus(model_identifier_,
+                           SerializationStatus::kMarkovPredictorLoadingError);
     return;
   }
 
-  frequencies_.FromProto(proto.markov_predictor().frequencies());
+  frequencies_->FromProto(proto.markov_predictor().frequencies());
 }
 
 ExponentialWeightsEnsemble::ExponentialWeightsEnsemble(
-    const ExponentialWeightsEnsembleConfig& config)
-    : learning_rate_(config.learning_rate()) {
+    const ExponentialWeightsEnsembleConfig& config,
+    const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier),
+      learning_rate_(config.learning_rate()) {
   for (int i = 0; i < config.predictors_size(); ++i) {
     predictors_.push_back(
-        {MakePredictor(config.predictors(i)), 1.0f / config.predictors_size()});
+        {MakePredictor(config.predictors(i), model_identifier_),
+         1.0f / config.predictors_size()});
   }
 }
 
@@ -470,9 +509,8 @@ const char* ExponentialWeightsEnsemble::GetPredictorName() const {
 
 void ExponentialWeightsEnsemble::Train(unsigned int target,
                                        unsigned int condition) {
-  for (auto& predictor_weight : predictors_)
-    predictor_weight.first->Train(target, condition);
-
+  // Update predictor weights. Do this before training the constituent
+  // predictors to avoid biasing towards fast-adjusting predictors.
   for (auto& predictor_weight : predictors_) {
     const auto& ranks = predictor_weight.first->Rank(condition);
 
@@ -499,6 +537,10 @@ void ExponentialWeightsEnsemble::Train(unsigned int target,
   for (auto& predictor_weight : predictors_) {
     predictor_weight.second /= total_weight;
   }
+
+  // Train constituent predictors.
+  for (auto& predictor_weight : predictors_)
+    predictor_weight.first->Train(target, condition);
 }
 
 std::map<unsigned int, float> ExponentialWeightsEnsemble::Rank(
@@ -529,7 +571,9 @@ void ExponentialWeightsEnsemble::ToProto(
 void ExponentialWeightsEnsemble::FromProto(
     const RecurrencePredictorProto& proto) {
   if (!proto.has_exponential_weights_ensemble()) {
-    // TODO(921444): Add error metrics for new predictors.
+    LogSerializationStatus(
+        model_identifier_,
+        SerializationStatus::kExponentialWeightsEnsembleLoadingError);
     return;
   }
   const auto& ensemble = proto.exponential_weights_ensemble();
@@ -541,6 +585,66 @@ void ExponentialWeightsEnsemble::FromProto(
     predictors_[i].first->FromProto(ensemble.predictors(i));
     predictors_[i].second = ensemble.weights(i);
   }
+}
+
+FrequencyPredictor::FrequencyPredictor(const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {}
+
+FrequencyPredictor::FrequencyPredictor(const FrequencyPredictorConfig& config,
+                                       const std::string& model_identifier)
+    : RecurrencePredictor(model_identifier) {}
+
+FrequencyPredictor::~FrequencyPredictor() = default;
+
+const char FrequencyPredictor::kPredictorName[] = "FrequencyPredictor";
+const char* FrequencyPredictor::GetPredictorName() const {
+  return kPredictorName;
+}
+
+void FrequencyPredictor::Train(unsigned int target, unsigned int condition) {
+  counts_[target] += 1.0f;
+}
+
+std::map<unsigned int, float> FrequencyPredictor::Rank(unsigned int condition) {
+  float total = 0.0f;
+  for (const auto& pair : counts_)
+    total += pair.second;
+
+  std::map<unsigned int, float> result;
+  for (const auto& pair : counts_)
+    result[pair.first] = pair.second / total;
+  return result;
+}
+
+void FrequencyPredictor::Cleanup(
+    const std::vector<unsigned int>& valid_targets) {
+  std::map<unsigned int, int> new_counts;
+
+  for (unsigned int id : valid_targets) {
+    const auto& it = counts_.find(id);
+    if (it != counts_.end())
+      new_counts[id] = it->second;
+  }
+
+  counts_.swap(new_counts);
+}
+
+void FrequencyPredictor::ToProto(RecurrencePredictorProto* proto) const {
+  auto* counts = proto->mutable_frequency_predictor()->mutable_counts();
+  for (auto& pair : counts_)
+    (*counts)[pair.first] = pair.second;
+}
+
+void FrequencyPredictor::FromProto(const RecurrencePredictorProto& proto) {
+  if (!proto.has_frequency_predictor()) {
+    LogSerializationStatus(
+        model_identifier_,
+        SerializationStatus::kFrequencyPredictorLoadingError);
+    return;
+  }
+
+  for (const auto& pair : proto.frequency_predictor().counts())
+    counts_[pair.first] = pair.second;
 }
 
 }  // namespace app_list

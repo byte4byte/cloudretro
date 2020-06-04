@@ -16,6 +16,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "components/gcm_driver/crypto/gcm_encryption_result.h"
 #include "components/gcm_driver/fake_gcm_client_factory.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
@@ -38,6 +39,14 @@ class FakeGCMProfileService::CustomFakeGCMDriver
   void OnDispatchMessage(const std::string& app_id,
                          const IncomingMessage& message);
 
+  // GCMDriver overrides:
+  void EncryptMessage(const std::string& app_id,
+                      const std::string& authorized_entity,
+                      const std::string& p256dh,
+                      const std::string& auth_secret,
+                      const std::string& message,
+                      EncryptMessageCallback callback) override;
+
  protected:
   // FakeGCMDriver overrides:
   void RegisterImpl(const std::string& app_id,
@@ -53,6 +62,7 @@ class FakeGCMProfileService::CustomFakeGCMDriver
   void GetToken(const std::string& app_id,
                 const std::string& authorized_entity,
                 const std::string& scope,
+                base::TimeDelta time_to_live,
                 const std::map<std::string, std::string>& options,
                 GetTokenCallback callback) override;
   void DeleteToken(const std::string& app_id,
@@ -152,6 +162,17 @@ void FakeGCMProfileService::CustomFakeGCMDriver::SendImpl(
                      app_id, receiver_id, message));
 }
 
+void FakeGCMProfileService::CustomFakeGCMDriver::EncryptMessage(
+    const std::string& app_id,
+    const std::string& authorized_entity,
+    const std::string& p256dh,
+    const std::string& auth_secret,
+    const std::string& message,
+    EncryptMessageCallback callback) {
+  // Pretend that message has been encrypted.
+  std::move(callback).Run(GCMEncryptionResult::ENCRYPTED_DRAFT_08, message);
+}
+
 void FakeGCMProfileService::CustomFakeGCMDriver::DoSend(
     const std::string& app_id,
     const std::string& receiver_id,
@@ -167,13 +188,15 @@ void FakeGCMProfileService::CustomFakeGCMDriver::GetToken(
     const std::string& app_id,
     const std::string& authorized_entity,
     const std::string& scope,
+    base::TimeDelta time_to_live,
     const std::map<std::string, std::string>& options,
     GetTokenCallback callback) {
   if (service_->is_offline_)
     return;  // Drop request.
 
   instance_id::FakeGCMDriverForInstanceID::GetToken(
-      app_id, authorized_entity, scope, options, std::move(callback));
+      app_id, authorized_entity, scope, time_to_live, options,
+      std::move(callback));
 }
 
 void FakeGCMProfileService::CustomFakeGCMDriver::DeleteToken(

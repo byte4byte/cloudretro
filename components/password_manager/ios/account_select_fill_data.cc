@@ -30,7 +30,7 @@ void AccountSelectFillData::Add(
   auto iter_ok = forms_.insert(std::make_pair(form_data.name, FormInfo()));
   FormInfo& form_info = iter_ok.first->second;
   form_info.origin = form_data.origin;
-  form_info.action = form_data.action;
+  form_info.name = form_data.name;
   form_info.username_element = form_data.username_field.name;
   form_info.password_element = form_data.password_field.name;
 
@@ -43,10 +43,9 @@ void AccountSelectFillData::Add(
                           form_data.preferred_realm});
 
   for (const auto& username_password_and_realm : form_data.additional_logins) {
-    const base::string16& username = username_password_and_realm.first;
-    const base::string16& password =
-        username_password_and_realm.second.password;
-    const std::string& realm = username_password_and_realm.second.realm;
+    const base::string16& username = username_password_and_realm.username;
+    const base::string16& password = username_password_and_realm.password;
+    const std::string& realm = username_password_and_realm.realm;
     credentials_.push_back({username, password, realm});
   }
 }
@@ -102,7 +101,7 @@ std::unique_ptr<FillData> AccountSelectFillData::GetFillData(
   const Credential& credential = *it;
   auto result = std::make_unique<FillData>();
   result->origin = last_requested_form_->origin;
-  result->action = last_requested_form_->action;
+  result->name = last_requested_form_->name;
   result->username_element = last_requested_form_->username_element;
   result->username_value = credential.username;
   result->password_element = last_requested_password_field_.empty()

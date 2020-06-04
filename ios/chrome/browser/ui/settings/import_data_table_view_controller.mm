@@ -62,8 +62,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:style];
   if (self) {
     _delegate = delegate;
     _fromEmail = [fromEmail copy];
@@ -128,7 +127,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [[TableViewTextItem alloc] initWithType:ItemTypeFooter];
   item.text = l10n_util::GetNSStringF(IDS_IOS_OPTIONS_IMPORT_DATA_HEADER,
                                       base::SysNSStringToUTF16(_fromEmail));
-  item.textColor = UIColor.blackColor;
   return item;
 }
 

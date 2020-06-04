@@ -22,9 +22,15 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -33,14 +39,12 @@
 #include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/language/language_model_manager_factory.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
@@ -57,7 +61,11 @@
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_desktop_util.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
 #include "chrome/browser/sharing/click_to_call/click_to_call_context_menu_observer.h"
+#include "chrome/browser/sharing/click_to_call/click_to_call_metrics.h"
 #include "chrome/browser/sharing/click_to_call/click_to_call_utils.h"
+#include "chrome/browser/sharing/features.h"
+#include "chrome/browser/sharing/shared_clipboard/shared_clipboard_context_menu_observer.h"
+#include "chrome/browser/sharing/shared_clipboard/shared_clipboard_utils.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
@@ -69,10 +77,13 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/exclusive_access/keyboard_lock_controller.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
+#include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/foreign_session_handler.h"
+#include "chrome/browser/ui/webui/history/foreign_session_handler.h"
+#include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_provider_base.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
@@ -114,7 +125,6 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/guest_mode.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
@@ -128,21 +138,24 @@
 #include "content/public/common/url_utils.h"
 #include "extensions/buildflags/buildflags.h"
 #include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "net/base/escape.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/blink/public/common/context_menu_data/edit_flags.h"
+#include "third_party/blink/public/common/context_menu_data/input_field_type.h"
+#include "third_party/blink/public/common/context_menu_data/media_type.h"
+#include "third_party/blink/public/mojom/frame/media_player_action.mojom.h"
 #include "third_party/blink/public/public_buildflags.h"
-#include "third_party/blink/public/web/web_context_menu_data.h"
-#include "third_party/blink/public/web/web_media_player_action.h"
-#include "third_party/blink/public/web/web_plugin_action.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/emoji/emoji_panel_helper.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/models/image_model.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/text_elider.h"
@@ -153,10 +166,9 @@
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
@@ -167,9 +179,13 @@
 #include "extensions/common/extension.h"
 #endif
 
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "chrome/browser/plugins/chrome_plugin_service_filter.h"
+#endif
+
 #if BUILDFLAG(ENABLE_PRINTING)
 #include "chrome/browser/printing/print_view_manager_common.h"
-#include "components/printing/common/print_messages.h"
+#include "components/printing/common/print.mojom.h"
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
@@ -177,7 +193,7 @@
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #endif  // BUILDFLAG(ENABLE_PRINTING)
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #endif
@@ -186,12 +202,13 @@
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/intent_helper/open_with_menu.h"
 #include "chrome/browser/chromeos/arc/intent_helper/start_smart_selection_action_menu.h"
+#include "chrome/browser/renderer_context_menu/quick_answers_menu_observer.h"
 #endif
 
 using base::UserMetricsAction;
+using blink::ContextMenuDataEditFlags;
+using blink::ContextMenuDataMediaType;
 using blink::WebContextMenuData;
-using blink::WebMediaPlayerAction;
-using blink::WebPluginAction;
 using blink::WebString;
 using blink::WebURL;
 using content::BrowserContext;
@@ -354,13 +371,16 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET, 105},
        {IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_SINGLE_DEVICE, 106},
        {IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_MULTIPLE_DEVICES, 107},
+       {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_SINGLE_DEVICE, 108},
+       {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_MULTIPLE_DEVICES, 109},
+       {IDC_CONTENT_CONTEXT_GENERATE_QR_CODE, 110},
        // To add new items:
        //   - Add one more line above this comment block, using the UMA value
        //     from the line below this comment block.
        //   - Increment the UMA value in that latter line.
        //   - Add the new item to the RenderViewContextMenuItem enum in
        //     tools/metrics/histograms/enums.xml.
-       {0, 108}});
+       {0, 111}});
 
   // These UMA values are for the the ContextMenuOptionDesktop enum, used for
   // the ContextMenu.SelectedOptionDesktop histograms.
@@ -456,18 +476,6 @@ bool IsCommandForOpenLink(int id) {
           id <= IDC_OPEN_LINK_IN_PROFILE_LAST);
 }
 
-// Usually a new tab is expected where this function is used,
-// however users should be able to open a tab in background
-// or in a new window.
-WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
-    int event_flags) {
-  WindowOpenDisposition disposition =
-      ui::DispositionFromEventFlags(event_flags);
-  return disposition == WindowOpenDisposition::CURRENT_TAB
-             ? WindowOpenDisposition::NEW_FOREGROUND_TAB
-             : disposition;
-}
-
 // Returns the preference of the profile represented by the |context|.
 PrefService* GetPrefs(content::BrowserContext* context) {
   return user_prefs::UserPrefs::Get(context);
@@ -518,21 +526,10 @@ void AddAvatarToLastMenuItem(const gfx::Image& icon,
   gfx::Image sized_icon = profiles::GetSizedAvatarIcon(
       icon, true /* is_rectangle */, target_dip_width, target_dip_height,
       profiles::SHAPE_CIRCLE);
-  menu->SetIcon(menu->GetItemCount() - 1, sized_icon);
+  menu->SetIcon(menu->GetItemCount() - 1,
+                ui::ImageModel::FromImage(sized_icon));
 }
 #endif  // !defined(OS_CHROMEOS)
-
-// Adds Google icon to the last added menu item. Used for Google-powered
-// services like translate and search.
-void AddGoogleIconToLastMenuItem(ui::SimpleMenuModel* menu) {
-#if defined(GOOGLE_CHROME_BUILD)
-  if (base::FeatureList::IsEnabled(features::kGoogleBrandedContextMenu)) {
-    menu->SetIcon(
-        menu->GetItemCount() - 1,
-        ui::ResourceBundle::GetSharedInstance().GetImageNamed(IDR_GOOGLE_ICON));
-  }
-#endif  // defined(GOOGLE_CHROME_BUILD)
-}
 
 void OnProfileCreated(const GURL& link_url,
                       const content::Referrer& referrer,
@@ -549,12 +546,12 @@ void OnProfileCreated(const GURL& link_url,
 }
 
 bool DoesInputFieldTypeSupportEmoji(
-    blink::WebContextMenuData::InputFieldType text_input_type) {
+    blink::ContextMenuDataInputFieldType text_input_type) {
   // Disable emoji for input types that definitely do not support emoji.
   switch (text_input_type) {
-    case blink::WebContextMenuData::kInputFieldTypeNumber:
-    case blink::WebContextMenuData::kInputFieldTypeTelephone:
-    case blink::WebContextMenuData::kInputFieldTypeOther:
+    case blink::ContextMenuDataInputFieldType::kNumber:
+    case blink::ContextMenuDataInputFieldType::kTelephone:
+    case blink::ContextMenuDataInputFieldType::kOther:
       return false;
     default:
       return true;
@@ -571,19 +568,12 @@ bool RenderViewContextMenu::IsDevToolsURL(const GURL& url) {
 // static
 void RenderViewContextMenu::AddSpellCheckServiceItem(ui::SimpleMenuModel* menu,
                                                      bool is_checked) {
-  // When the Google branding experiment is enabled, we want to show an icon
-  // next to this item, but we can't show icons on check items.  So when the
-  // item is enabled show it as checked, and otherwise add it as a normal item
-  // (instead of a check item) so that, if necessary, we can add the Google
-  // icon.  (If the experiment is off, there's no harm in adding this as a
-  // normal item, as it will look identical to an unchecked check item.)
   if (is_checked) {
     menu->AddCheckItemWithStringId(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
                                    IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE);
   } else {
     menu->AddItemWithStringId(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
                               IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE);
-    AddGoogleIconToLastMenuItem(menu);
   }
 }
 
@@ -637,19 +627,19 @@ bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     return true;
 
   switch (params.media_type) {
-    case WebContextMenuData::kMediaTypeImage:
+    case ContextMenuDataMediaType::kImage:
       if (contexts.Contains(MenuItem::IMAGE) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
       break;
 
-    case WebContextMenuData::kMediaTypeVideo:
+    case ContextMenuDataMediaType::kVideo:
       if (contexts.Contains(MenuItem::VIDEO) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
       break;
 
-    case WebContextMenuData::kMediaTypeAudio:
+    case ContextMenuDataMediaType::kAudio:
       if (contexts.Contains(MenuItem::AUDIO) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
@@ -663,7 +653,7 @@ bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
   // other contexts apply (except for FRAME, which is included in PAGE for
   // backwards compatibility).
   if (!has_link && !has_selection && !params.is_editable &&
-      params.media_type == WebContextMenuData::kMediaTypeNone &&
+      params.media_type == ContextMenuDataMediaType::kNone &&
       contexts.Contains(MenuItem::PAGE))
     return true;
 
@@ -685,10 +675,8 @@ bool RenderViewContextMenu::MenuItemMatchesParams(
 
 void RenderViewContextMenu::AppendAllExtensionItems() {
   extension_items_.Clear();
-  extensions::ExtensionService* service =
-      extensions::ExtensionSystem::Get(browser_context_)->extension_service();
-  if (!service)
-    return;  // In unit-tests, we may not have an ExtensionService.
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser_context_);
 
   MenuManager* menu_manager = MenuManager::Get(browser_context_);
   if (!menu_manager)
@@ -704,8 +692,8 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   std::map<base::string16, std::vector<const Extension*>>
       title_to_extensions_map;
   for (auto iter = ids.begin(); iter != ids.end(); ++iter) {
-    const Extension* extension =
-        service->GetExtensionById(iter->extension_id, false);
+    const Extension* extension = registry->GetExtensionById(
+        iter->extension_id, extensions::ExtensionRegistry::ENABLED);
     // Platform apps have their context menus created directly in
     // AppendPlatformAppItems.
     if (extension && !extension->is_platform_app()) {
@@ -794,12 +782,14 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
   if (url.is_empty() || !url.is_valid())
     return;
 
-  ui::ScopedClipboardWriter scw(ui::ClipboardType::kCopyPaste);
+  ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
   scw.WriteText(FormatURLForClipboard(url));
 }
 
 void RenderViewContextMenu::InitMenu() {
   RenderViewContextMenuBase::InitMenu();
+
+  AppendQuickAnswersItems();
 
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_PASSWORD)) {
@@ -811,7 +801,7 @@ void RenderViewContextMenu::InitMenu() {
 
   if (content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_LINK)) {
     AppendLinkItems();
-    if (params_.media_type != WebContextMenuData::kMediaTypeNone)
+    if (params_.media_type != ContextMenuDataMediaType::kNone)
       menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
@@ -856,6 +846,9 @@ void RenderViewContextMenu::InitMenu() {
     DCHECK(!editable);
     AppendCopyItem();
   }
+
+  if (!content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_LINK))
+    AppendSharingItems();
 
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_SEARCH_PROVIDER) &&
@@ -1023,7 +1016,7 @@ void RenderViewContextMenu::RecordUsedItem(int id) {
         "ContextMenu.SelectedOptionDesktop.MisspelledWord", enum_id,
         GetUmaValueMax(UmaEnumIdLookupType::ContextSpecificEnumId));
   } else if (!params_.selection_text.empty() &&
-             params_.media_type == blink::WebContextMenuData::kMediaTypeNone) {
+             params_.media_type == ContextMenuDataMediaType::kNone) {
     // Probably just text.
     UMA_HISTOGRAM_EXACT_LINEAR(
         "ContextMenu.SelectedOptionDesktop.SelectedText", enum_id,
@@ -1146,7 +1139,7 @@ void RenderViewContextMenu::AppendDevtoolsForUnpackedExtensions() {
 void RenderViewContextMenu::AppendLinkItems() {
   if (!params_.link_url.is_empty()) {
     const Browser* browser = GetBrowser();
-    const bool in_app = browser && browser->is_app();
+    const bool in_app = browser && browser->deprecated_is_app();
     WebContents* active_web_contents =
         browser ? browser->tab_strip_model()->GetActiveWebContents() : nullptr;
 
@@ -1249,27 +1242,28 @@ void RenderViewContextMenu::AppendLinkItems() {
       }
     }
 #endif  // !defined(OS_CHROMEOS)
+
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+
     if (browser && send_tab_to_self::ShouldOfferFeatureForLink(
                        active_web_contents, params_.link_url)) {
       send_tab_to_self::RecordSendTabToSelfClickResult(
           send_tab_to_self::kLinkMenu, SendTabToSelfClickResult::kShowItem);
-      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
       if (send_tab_to_self::GetValidDeviceCount(GetBrowser()->profile()) == 1) {
 #if defined(OS_MACOSX)
-        menu_model_.AddItem(
-            IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET,
-            l10n_util::GetStringFUTF16(
-                IDS_LINK_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-                base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                    GetBrowser()->profile()))));
+        menu_model_.AddItem(IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET,
+                            l10n_util::GetStringFUTF16(
+                                IDS_LINK_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
+                                send_tab_to_self::GetSingleTargetDeviceName(
+                                    GetBrowser()->profile())));
 #else
         menu_model_.AddItemWithIcon(
             IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET,
             l10n_util::GetStringFUTF16(
                 IDS_LINK_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-                base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                    GetBrowser()->profile()))),
-            *send_tab_to_self::GetImageSkia());
+                send_tab_to_self::GetSingleTargetDeviceName(
+                    GetBrowser()->profile())),
+            ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
         send_tab_to_self::RecordSendTabToSelfClickResult(
             send_tab_to_self::kLinkMenu,
@@ -1290,22 +1284,12 @@ void RenderViewContextMenu::AppendLinkItems() {
         menu_model_.AddSubMenuWithStringIdAndIcon(
             IDC_CONTENT_LINK_SEND_TAB_TO_SELF, IDS_LINK_MENU_SEND_TAB_TO_SELF,
             send_tab_to_self_sub_menu_model_.get(),
-            *send_tab_to_self::GetImageSkia());
+            ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
       }
     }
 
-    // Context menu item for click to call.
-    if (active_web_contents &&
-        ShouldOfferClickToCall(active_web_contents->GetBrowserContext(),
-                               params_.link_url)) {
-      if (!click_to_call_context_menu_observer_) {
-        click_to_call_context_menu_observer_ =
-            std::make_unique<ClickToCallContextMenuObserver>(this);
-        observers_.AddObserver(click_to_call_context_menu_observer_.get());
-      }
-      click_to_call_context_menu_observer_->InitMenu(params_);
-    }
+    AppendClickToCallItem();
 
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
@@ -1319,7 +1303,7 @@ void RenderViewContextMenu::AppendLinkItems() {
           IDS_CONTENT_CONTEXT_COPYLINKLOCATION);
 
   if (params_.source_type == ui::MENU_SOURCE_TOUCH &&
-      params_.media_type != WebContextMenuData::kMediaTypeImage &&
+      params_.media_type != ContextMenuDataMediaType::kImage &&
       !params_.link_text.empty()) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYLINKTEXT,
                                     IDS_CONTENT_CONTEXT_COPYLINKTEXT);
@@ -1332,6 +1316,18 @@ void RenderViewContextMenu::AppendOpenWithLinkItems() {
       std::make_unique<arc::OpenWithMenu>(browser_context_, this);
   observers_.AddObserver(open_with_menu_observer_.get());
   open_with_menu_observer_->InitMenu(params_);
+#endif
+}
+
+void RenderViewContextMenu::AppendQuickAnswersItems() {
+#if defined(OS_CHROMEOS)
+  if (!quick_answers_menu_observer_) {
+    quick_answers_menu_observer_ =
+        std::make_unique<QuickAnswersMenuObserver>(this);
+  }
+
+  observers_.AddObserver(quick_answers_menu_observer_.get());
+  quick_answers_menu_observer_->InitMenu(params_);
 #endif
 }
 
@@ -1348,34 +1344,38 @@ void RenderViewContextMenu::AppendSmartSelectionActionItems() {
 }
 
 void RenderViewContextMenu::AppendOpenInBookmarkAppLinkItems() {
-  const Extension* pwa = extensions::util::GetInstalledPwaForUrl(
-      browser_context_, params_.link_url);
-  if (!pwa)
+  Profile* const profile = Profile::FromBrowserContext(browser_context_);
+
+  base::Optional<web_app::AppId> app_id =
+      web_app::FindInstalledAppWithUrlInScope(profile, params_.link_url);
+  if (!app_id)
     return;
 
   int open_in_app_string_id;
   const Browser* browser = GetBrowser();
   if (browser && browser->app_name() ==
-                     web_app::GenerateApplicationNameFromAppId(pwa->id())) {
+                     web_app::GenerateApplicationNameFromAppId(*app_id)) {
     open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP_SAMEAPP;
   } else {
     open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP;
   }
 
+  auto* provider = web_app::WebAppProviderBase::GetProviderBase(profile);
   menu_model_.AddItem(
       IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP,
-      l10n_util::GetStringFUTF16(open_in_app_string_id,
-                                 base::UTF8ToUTF16(pwa->short_name())));
+      l10n_util::GetStringFUTF16(
+          open_in_app_string_id,
+          base::UTF8ToUTF16(provider->registrar().GetAppShortName(*app_id))));
 
   MenuManager* menu_manager = MenuManager::Get(browser_context_);
-  gfx::Image icon = menu_manager->GetIconForExtension(pwa->id());
-  menu_model_.SetIcon(menu_model_.GetItemCount() - 1, icon);
+  // TODO(crbug.com/1052707): Use AppIconManager to read PWA icons.
+  gfx::Image icon = menu_manager->GetIconForExtension(*app_id);
+  menu_model_.SetIcon(menu_model_.GetItemCount() - 1,
+                      ui::ImageModel::FromImage(icon));
 }
 
 void RenderViewContextMenu::AppendImageItems() {
-  if (!params_.has_image_contents &&
-      base::FeatureList::IsEnabled(
-          features::kLoadBrokenImagesFromContextMenu)) {
+  if (!params_.has_image_contents) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_LOAD_IMAGE,
                                     IDS_CONTENT_CONTEXT_LOAD_IMAGE);
   }
@@ -1405,8 +1405,6 @@ void RenderViewContextMenu::AppendSearchWebForImageItems() {
       IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE,
       l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE,
                                  provider->short_name()));
-  if (provider->image_url_ref().HasGoogleBaseURLs(service->search_terms_data()))
-    AddGoogleIconToLastMenuItem(&menu_model_);
 }
 
 void RenderViewContextMenu::AppendAudioItems() {
@@ -1483,28 +1481,31 @@ void RenderViewContextMenu::AppendPageItems() {
                                   IDS_CONTENT_CONTEXT_SAVEPAGEAS);
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
   AppendMediaRouterItem();
+
+  // Send-Tab-To-Self (user's other devices), page level.
+  bool send_tab_to_self_menu_present = false;
   if (GetBrowser() &&
       send_tab_to_self::ShouldOfferFeature(
           GetBrowser()->tab_strip_model()->GetActiveWebContents())) {
     send_tab_to_self::RecordSendTabToSelfClickResult(
         send_tab_to_self::kContentMenu, SendTabToSelfClickResult::kShowItem);
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+    send_tab_to_self_menu_present = true;
     if (send_tab_to_self::GetValidDeviceCount(GetBrowser()->profile()) == 1) {
 #if defined(OS_MACOSX)
-      menu_model_.AddItem(
-          IDC_SEND_TAB_TO_SELF_SINGLE_TARGET,
-          l10n_util::GetStringFUTF16(
-              IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-              base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                  GetBrowser()->profile()))));
+      menu_model_.AddItem(IDC_SEND_TAB_TO_SELF_SINGLE_TARGET,
+                          l10n_util::GetStringFUTF16(
+                              IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
+                              send_tab_to_self::GetSingleTargetDeviceName(
+                                  GetBrowser()->profile())));
 #else
       menu_model_.AddItemWithIcon(
           IDC_SEND_TAB_TO_SELF_SINGLE_TARGET,
           l10n_util::GetStringFUTF16(
               IDS_CONTEXT_MENU_SEND_TAB_TO_SELF_SINGLE_TARGET,
-              base::UTF8ToUTF16(send_tab_to_self::GetSingleTargetDeviceName(
-                  GetBrowser()->profile()))),
-          *send_tab_to_self::GetImageSkia());
+              send_tab_to_self::GetSingleTargetDeviceName(
+                  GetBrowser()->profile())),
+          ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
       send_tab_to_self::RecordSendTabToSelfClickResult(
           send_tab_to_self::kContentMenu,
@@ -1524,12 +1525,36 @@ void RenderViewContextMenu::AppendPageItems() {
       menu_model_.AddSubMenuWithStringIdAndIcon(
           IDC_SEND_TAB_TO_SELF, IDS_CONTEXT_MENU_SEND_TAB_TO_SELF,
           send_tab_to_self_sub_menu_model_.get(),
-          *send_tab_to_self::GetImageSkia());
+          ui::ImageModel::FromVectorIcon(kSendTabToSelfIcon));
 #endif
     }
+  }
+
+  // Context menu item for QR Code Generator.
+  if (IsQRCodeGeneratorEnabled()) {
+    // This is presented alongside the send-tab-to-self items, though each may
+    // be present without the other due to feature experimentation. Therefore we
+    // may or may not need to create a new separator.
+    if (!send_tab_to_self_menu_present)
+      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+
+#if defined(OS_MACOSX)
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_GENERATE_QR_CODE,
+                                    IDS_CONTEXT_MENU_GENERATE_QR_CODE_PAGE);
+#else
+    menu_model_.AddItemWithStringIdAndIcon(
+        IDC_CONTENT_CONTEXT_GENERATE_QR_CODE,
+        IDS_CONTEXT_MENU_GENERATE_QR_CODE_PAGE,
+        ui::ImageModel::FromVectorIcon(kQrcodeGeneratorIcon));
+#endif
 
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  } else if (send_tab_to_self_menu_present) {
+    // Close out sharing section if send-tab-to-self was present but QR
+    // generator was not.
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
+
   if (TranslateService::IsTranslatableURL(params_.page_url)) {
     std::unique_ptr<translate::TranslatePrefs> prefs(
         ChromeTranslateClient::CreateTranslatePrefs(
@@ -1545,7 +1570,6 @@ void RenderViewContextMenu::AppendPageItems() {
       menu_model_.AddItem(
           IDC_CONTENT_CONTEXT_TRANSLATE,
           l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_TRANSLATE, language));
-      AddGoogleIconToLastMenuItem(&menu_model_);
     }
   }
 }
@@ -1576,7 +1600,7 @@ void RenderViewContextMenu::AppendCopyItem() {
 
 void RenderViewContextMenu::AppendPrintItem() {
   if (GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
-      (params_.media_type == WebContextMenuData::kMediaTypeNone ||
+      (params_.media_type == ContextMenuDataMediaType::kNone ||
        params_.media_flags & WebContextMenuData::kMediaCanPrint) &&
       params_.misspelled_word.empty()) {
     menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
@@ -1612,13 +1636,9 @@ void RenderViewContextMenu::AppendSearchProvider() {
                      base::ASCIIToUTF16(" "), &params_.selection_text);
 
   AutocompleteMatch match;
-  AutocompleteClassifierFactory::GetForProfile(GetProfile())->Classify(
-      params_.selection_text,
-      false,
-      false,
-      metrics::OmniboxEventProto::INVALID_SPEC,
-      &match,
-      NULL);
+  AutocompleteClassifierFactory::GetForProfile(GetProfile())
+      ->Classify(params_.selection_text, false, false,
+                 metrics::OmniboxEventProto::INVALID_SPEC, &match, nullptr);
   selection_navigation_url_ = match.destination_url;
   if (!selection_navigation_url_.is_valid())
     return;
@@ -1637,12 +1657,6 @@ void RenderViewContextMenu::AppendSearchProvider() {
         l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFOR,
                                    default_provider->short_name(),
                                    printable_selection_text));
-    TemplateURLService* service =
-        TemplateURLServiceFactory::GetForProfile(GetProfile());
-    if (default_provider->url_ref().HasGoogleBaseURLs(
-            service->search_terms_data())) {
-      AddGoogleIconToLastMenuItem(&menu_model_);
-    }
   } else {
     if ((selection_navigation_url_ != params_.link_url) &&
         ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
@@ -1805,6 +1819,64 @@ void RenderViewContextMenu::AppendPictureInPictureItem() {
                                          IDS_CONTENT_CONTEXT_PICTUREINPICTURE);
 }
 
+void RenderViewContextMenu::AppendSharingItems() {
+  int items_initial = menu_model_.GetItemCount();
+  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  // Check if the starting separator got added.
+  int items_before_sharing = menu_model_.GetItemCount();
+  bool starting_separator_added = items_before_sharing > items_initial;
+
+  AppendClickToCallItem();
+  AppendSharedClipboardItem();
+
+  // Add an ending separator if there are sharing items, otherwise remove the
+  // starting separator iff we added one above.
+  int sharing_items = menu_model_.GetItemCount() - items_before_sharing;
+  if (sharing_items > 0)
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  else if (starting_separator_added)
+    menu_model_.RemoveItemAt(items_initial);
+}
+
+void RenderViewContextMenu::AppendClickToCallItem() {
+  SharingClickToCallEntryPoint entry_point;
+  base::Optional<std::string> phone_number;
+  std::string selection_text;
+  if (ShouldOfferClickToCallForURL(browser_context_, params_.link_url)) {
+    entry_point = SharingClickToCallEntryPoint::kRightClickLink;
+    phone_number = GetUnescapedURLContent(params_.link_url);
+  } else if (!params_.selection_text.empty()) {
+    entry_point = SharingClickToCallEntryPoint::kRightClickSelection;
+    selection_text = base::UTF16ToUTF8(params_.selection_text);
+    phone_number =
+        ExtractPhoneNumberForClickToCall(browser_context_, selection_text);
+  }
+
+  if (!phone_number || phone_number->empty())
+    return;
+
+  if (!click_to_call_context_menu_observer_) {
+    click_to_call_context_menu_observer_ =
+        std::make_unique<ClickToCallContextMenuObserver>(this);
+    observers_.AddObserver(click_to_call_context_menu_observer_.get());
+  }
+
+  click_to_call_context_menu_observer_->BuildMenu(*phone_number, selection_text,
+                                                  entry_point);
+}
+
+void RenderViewContextMenu::AppendSharedClipboardItem() {
+  if (!ShouldOfferSharedClipboard(browser_context_, params_.selection_text))
+    return;
+
+  if (!shared_clipboard_context_menu_observer_) {
+    shared_clipboard_context_menu_observer_ =
+        std::make_unique<SharedClipboardContextMenuObserver>(this);
+    observers_.AddObserver(shared_clipboard_context_menu_observer_.get());
+  }
+  shared_clipboard_context_menu_observer_->InitMenu(params_);
+}
+
 // Menu delegate functions -----------------------------------------------------
 
 bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
@@ -1952,16 +2024,16 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
              params_.frame_url.GetOrigin() != chrome::kChromeUIPrintURL;
 
     case IDC_CONTENT_CONTEXT_UNDO:
-      return !!(params_.edit_flags & WebContextMenuData::kCanUndo);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanUndo);
 
     case IDC_CONTENT_CONTEXT_REDO:
-      return !!(params_.edit_flags & WebContextMenuData::kCanRedo);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanRedo);
 
     case IDC_CONTENT_CONTEXT_CUT:
-      return !!(params_.edit_flags & WebContextMenuData::kCanCut);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanCut);
 
     case IDC_CONTENT_CONTEXT_COPY:
-      return !!(params_.edit_flags & WebContextMenuData::kCanCopy);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanCopy);
 
     case IDC_CONTENT_CONTEXT_PASTE:
       return IsPasteEnabled();
@@ -1970,10 +2042,10 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsPasteAndMatchStyleEnabled();
 
     case IDC_CONTENT_CONTEXT_DELETE:
-      return !!(params_.edit_flags & WebContextMenuData::kCanDelete);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanDelete);
 
     case IDC_CONTENT_CONTEXT_SELECTALL:
-      return !!(params_.edit_flags & WebContextMenuData::kCanSelectAll);
+      return !!(params_.edit_flags & ContextMenuDataEditFlags::kCanSelectAll);
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
       return IsOpenLinkOTREnabled();
@@ -1989,9 +2061,12 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_SEND_TAB_TO_SELF_SINGLE_TARGET:
       return true;
 
+    case IDC_CONTENT_CONTEXT_GENERATE_QR_CODE:
+      return IsQRCodeGeneratorEnabled();
+
     case IDC_CONTENT_LINK_SEND_TAB_TO_SELF:
     case IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET:
-      return send_tab_to_self::IsContentRequirementsMet(
+      return send_tab_to_self::AreContentRequirementsMet(
           params_.link_url, GetBrowser()->profile());
 
     case IDC_CHECK_SPELLING_WHILE_TYPING:
@@ -2153,10 +2228,9 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB:
-      OpenURLWithExtraHeaders(
-          params_.src_url, GetDocumentURL(params_),
-          WindowOpenDisposition::NEW_BACKGROUND_TAB, ui::PAGE_TRANSITION_LINK,
-          data_reduction_proxy::chrome_proxy_pass_through_header(), false);
+      OpenURLWithExtraHeaders(params_.src_url, GetDocumentURL(params_),
+                              WindowOpenDisposition::NEW_BACKGROUND_TAB,
+                              ui::PAGE_TRANSITION_LINK, std::string(), false);
       break;
 
     case IDC_CONTENT_CONTEXT_LOAD_IMAGE:
@@ -2221,9 +2295,19 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           send_tab_to_self::kLinkMenu, SendTabToSelfClickResult::kClickItem);
       break;
 
+    case IDC_CONTENT_CONTEXT_GENERATE_QR_CODE: {
+      auto* web_contents =
+          GetBrowser()->tab_strip_model()->GetActiveWebContents();
+      auto* bubble_controller =
+          qrcode_generator::QRCodeGeneratorBubbleController::Get(web_contents);
+      NavigationEntry* entry =
+          embedder_web_contents_->GetController().GetLastCommittedEntry();
+      bubble_controller->ShowBubble(entry->GetURL());
+      break;
+    }
+
     case IDC_RELOAD:
-      embedder_web_contents_->GetController().Reload(
-          content::ReloadType::NORMAL, true);
+      chrome::Reload(GetBrowser(), WindowOpenDisposition::CURRENT_TAB);
       break;
 
     case IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP:
@@ -2263,10 +2347,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
-      // We always obey the cache here.
-      // TODO(evanm): Perhaps we could allow shift-clicking the menu item to do
-      // a cache-ignoring reload of the frame.
-      source_web_contents_->ReloadFocusedFrame(false);
+      source_web_contents_->ReloadFocusedFrame();
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
@@ -2309,7 +2390,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
     case IDC_CONTENT_CONTEXT_GOTOURL:
       OpenURL(selection_navigation_url_, GURL(),
-              ForceNewTabDispositionFromEventFlags(event_flags),
+              ui::DispositionFromEventFlags(
+                  event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB),
               ui::PAGE_TRANSITION_LINK);
       break;
 
@@ -2331,8 +2413,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           GetBrowser(),
           password_manager::ManagePasswordsReferrer::kPasswordContextMenu);
       password_manager::metrics_util::LogContextOfShowAllSavedPasswordsAccepted(
-          password_manager::metrics_util::
-              SHOW_ALL_SAVED_PASSWORDS_CONTEXT_CONTEXT_MENU);
+          password_manager::metrics_util::ShowAllSavedPasswordsContext::
+              kContextMenu);
       break;
 
     case IDC_CONTENT_CONTEXT_PICTUREINPICTURE:
@@ -2379,7 +2461,6 @@ void RenderViewContextMenu::AddAccessibilityLabelsServiceItem(bool is_checked) {
         l10n_util::GetStringUTF16(
             IDS_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_MENU_OPTION),
         &accessibility_labels_submenu_model_);
-    AddGoogleIconToLastMenuItem(&menu_model_);
   }
 }
 
@@ -2431,7 +2512,7 @@ bool RenderViewContextMenu::IsViewSourceEnabled() const {
           source_web_contents_)) {
     return false;
   }
-  return (params_.media_type != WebContextMenuData::kMediaTypePlugin) &&
+  return (params_.media_type != ContextMenuDataMediaType::kPlugin) &&
          embedder_web_contents_->GetController().CanViewSource();
 }
 
@@ -2468,7 +2549,8 @@ bool RenderViewContextMenu::IsTranslateEnabled() const {
   // target languages are identical.  This is to give a way to user to
   // translate a page that might contains text fragments in a different
   // language.
-  return ((params_.edit_flags & WebContextMenuData::kCanTranslate) != 0) &&
+  return ((params_.edit_flags & ContextMenuDataEditFlags::kCanTranslate) !=
+          0) &&
          !original_lang.empty() &&  // Did we receive the page language yet?
          !chrome_translate_client->GetLanguageState().IsPageTranslated() &&
          !embedder_web_contents_->GetInterstitialPage() &&
@@ -2544,33 +2626,48 @@ bool RenderViewContextMenu::IsSavePageEnabled() const {
 }
 
 bool RenderViewContextMenu::IsPasteEnabled() const {
-  if (!(params_.edit_flags & WebContextMenuData::kCanPaste))
+  if (!(params_.edit_flags & ContextMenuDataEditFlags::kCanPaste))
     return false;
 
   std::vector<base::string16> types;
   bool ignore;
   ui::Clipboard::GetForCurrentThread()->ReadAvailableTypes(
-      ui::ClipboardType::kCopyPaste, &types, &ignore);
+      ui::ClipboardBuffer::kCopyPaste, &types, &ignore);
   return !types.empty();
 }
 
 bool RenderViewContextMenu::IsPasteAndMatchStyleEnabled() const {
-  if (!(params_.edit_flags & WebContextMenuData::kCanPaste))
+  if (!(params_.edit_flags & ContextMenuDataEditFlags::kCanPaste))
     return false;
 
   return ui::Clipboard::GetForCurrentThread()->IsFormatAvailable(
       ui::ClipboardFormatType::GetPlainTextType(),
-      ui::ClipboardType::kCopyPaste);
+      ui::ClipboardBuffer::kCopyPaste);
 }
 
 bool RenderViewContextMenu::IsPrintPreviewEnabled() const {
-  if (params_.media_type != WebContextMenuData::kMediaTypeNone &&
+  if (params_.media_type != ContextMenuDataMediaType::kNone &&
       !(params_.media_flags & WebContextMenuData::kMediaCanPrint)) {
     return false;
   }
 
   Browser* browser = GetBrowser();
   return browser && chrome::CanPrint(browser);
+}
+
+bool RenderViewContextMenu::IsQRCodeGeneratorEnabled() const {
+  if (!GetBrowser())
+    return false;
+
+  if (!base::FeatureList::IsEnabled(kSharingQRCodeGenerator))
+    return false;
+
+  NavigationEntry* entry =
+      embedder_web_contents_->GetController().GetLastCommittedEntry();
+  if (!entry || !content::IsSavableURL(entry->GetURL()))
+    return false;
+
+  return true;
 }
 
 bool RenderViewContextMenu::IsRouteMediaEnabled() const {
@@ -2608,20 +2705,22 @@ bool RenderViewContextMenu::IsOpenLinkOTREnabled() const {
 }
 
 void RenderViewContextMenu::ExecOpenBookmarkApp() {
-  const Extension* pwa = extensions::util::GetInstalledPwaForUrl(
-      browser_context_, params_.link_url);
-  // |pwa| could be null if it has been uninstalled since the user
+  base::Optional<web_app::AppId> app_id =
+      web_app::FindInstalledAppWithUrlInScope(
+          Profile::FromBrowserContext(browser_context_), params_.link_url);
+  // |app_id| could be nullopt if it has been uninstalled since the user
   // opened the context menu.
-  if (!pwa)
+  if (!app_id)
     return;
 
-  AppLaunchParams launch_params(
-      GetProfile(), pwa->id(),
-      extensions::LaunchContainer::kLaunchContainerWindow,
+  apps::AppLaunchParams launch_params(
+      *app_id, apps::mojom::LaunchContainer::kLaunchContainerWindow,
       WindowOpenDisposition::CURRENT_TAB,
-      extensions::AppLaunchSource::kSourceContextMenu);
+      apps::mojom::AppLaunchSource::kSourceContextMenu);
   launch_params.override_url = params_.link_url;
-  OpenApplication(launch_params);
+  apps::AppServiceProxyFactory::GetForProfile(GetProfile())
+      ->BrowserAppLauncher()
+      .LaunchAppWithParams(launch_params);
 }
 
 void RenderViewContextMenu::ExecProtocolHandler(int event_flags,
@@ -2633,8 +2732,8 @@ void RenderViewContextMenu::ExecProtocolHandler(int event_flags,
 
   base::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.ContextMenu_Open"));
-  WindowOpenDisposition disposition =
-      ForceNewTabDispositionFromEventFlags(event_flags);
+  WindowOpenDisposition disposition = ui::DispositionFromEventFlags(
+      event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   OpenURL(handlers[handler_index].TranslateUrl(params_.link_url),
           GetDocumentURL(params_),
           disposition,
@@ -2665,8 +2764,7 @@ void RenderViewContextMenu::ExecOpenLinkInProfile(int profile_index) {
   profiles::SwitchToProfile(
       profile_path, false,
       base::Bind(OnProfileCreated, params_.link_url,
-                 CreateReferrer(params_.link_url, params_)),
-      ProfileMetrics::SWITCH_PROFILE_CONTEXT_MENU);
+                 CreateReferrer(params_.link_url, params_)));
 }
 
 void RenderViewContextMenu::ExecInspectElement() {
@@ -2734,8 +2832,8 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
 void RenderViewContextMenu::ExecSaveAs() {
   bool is_large_data_url = params_.has_image_contents &&
       params_.src_url.is_empty();
-  if (params_.media_type == WebContextMenuData::kMediaTypeCanvas ||
-      (params_.media_type == WebContextMenuData::kMediaTypeImage &&
+  if (params_.media_type == ContextMenuDataMediaType::kCanvas ||
+      (params_.media_type == ContextMenuDataMediaType::kImage &&
        is_large_data_url)) {
     RenderFrameHost* frame_host = GetRenderFrameHost();
     if (frame_host)
@@ -2744,16 +2842,7 @@ void RenderViewContextMenu::ExecSaveAs() {
     RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
     const GURL& url = params_.src_url;
     content::Referrer referrer = CreateReferrer(url, params_);
-
     std::string headers;
-    DataReductionProxyChromeSettings* settings =
-        DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
-            browser_context_);
-    if (params_.media_type == WebContextMenuData::kMediaTypeImage && settings &&
-        settings->CanUseDataReductionProxy(params_.src_url)) {
-      headers = data_reduction_proxy::chrome_proxy_pass_through_header();
-    }
-
     source_web_contents_->SaveFrameWithHeaders(url, referrer, headers,
                                                params_.suggested_filename);
   }
@@ -2770,7 +2859,7 @@ void RenderViewContextMenu::ExecExitFullscreen() {
 }
 
 void RenderViewContextMenu::ExecCopyLinkText() {
-  ui::ScopedClipboardWriter scw(ui::ClipboardType::kCopyPaste);
+  ui::ScopedClipboardWriter scw(ui::ClipboardBuffer::kCopyPaste);
   scw.WriteText(params_.link_text);
 }
 
@@ -2795,7 +2884,7 @@ void RenderViewContextMenu::ExecLoadImage() {
   RenderFrameHost* render_frame_host = GetRenderFrameHost();
   if (!render_frame_host)
     return;
-  chrome::mojom::ChromeRenderFrameAssociatedPtr chrome_render_frame;
+  mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> chrome_render_frame;
   render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(
       &chrome_render_frame);
   chrome_render_frame->RequestReloadImageForContextNode();
@@ -2808,9 +2897,9 @@ void RenderViewContextMenu::ExecPlayPause() {
   else
     base::RecordAction(UserMetricsAction("MediaContextMenu_Pause"));
 
-  MediaPlayerActionAt(
-      gfx::Point(params_.x, params_.y),
-      WebMediaPlayerAction(WebMediaPlayerAction::Type::kPlay, play));
+  MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                      blink::mojom::MediaPlayerAction(
+                          blink::mojom::MediaPlayerActionType::kPlay, play));
 }
 
 void RenderViewContextMenu::ExecMute() {
@@ -2820,39 +2909,38 @@ void RenderViewContextMenu::ExecMute() {
   else
     base::RecordAction(UserMetricsAction("MediaContextMenu_Unmute"));
 
-  MediaPlayerActionAt(
-      gfx::Point(params_.x, params_.y),
-      WebMediaPlayerAction(WebMediaPlayerAction::Type::kMute, mute));
+  MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                      blink::mojom::MediaPlayerAction(
+                          blink::mojom::MediaPlayerActionType::kMute, mute));
 }
 
 void RenderViewContextMenu::ExecLoop() {
   base::RecordAction(UserMetricsAction("MediaContextMenu_Loop"));
-  MediaPlayerActionAt(
-      gfx::Point(params_.x, params_.y),
-      WebMediaPlayerAction(WebMediaPlayerAction::Type::kLoop,
-                           !IsCommandIdChecked(IDC_CONTENT_CONTEXT_LOOP)));
+  MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                      blink::mojom::MediaPlayerAction(
+                          blink::mojom::MediaPlayerActionType::kLoop,
+                          !IsCommandIdChecked(IDC_CONTENT_CONTEXT_LOOP)));
 }
 
 void RenderViewContextMenu::ExecControls() {
   base::RecordAction(UserMetricsAction("MediaContextMenu_Controls"));
-  MediaPlayerActionAt(
-      gfx::Point(params_.x, params_.y),
-      WebMediaPlayerAction(WebMediaPlayerAction::Type::kControls,
-                           !IsCommandIdChecked(IDC_CONTENT_CONTEXT_CONTROLS)));
+  MediaPlayerActionAt(gfx::Point(params_.x, params_.y),
+                      blink::mojom::MediaPlayerAction(
+                          blink::mojom::MediaPlayerActionType::kControls,
+                          !IsCommandIdChecked(IDC_CONTENT_CONTEXT_CONTROLS)));
 }
 
 void RenderViewContextMenu::ExecRotateCW() {
   base::RecordAction(UserMetricsAction("PluginContextMenu_RotateClockwise"));
   PluginActionAt(gfx::Point(params_.x, params_.y),
-                 WebPluginAction(WebPluginAction::kRotate90Clockwise, true));
+                 blink::mojom::PluginActionType::kRotate90Clockwise);
 }
 
 void RenderViewContextMenu::ExecRotateCCW() {
   base::RecordAction(
       UserMetricsAction("PluginContextMenu_RotateCounterclockwise"));
-  PluginActionAt(
-      gfx::Point(params_.x, params_.y),
-      WebPluginAction(WebPluginAction::kRotate90Counterclockwise, true));
+  PluginActionAt(gfx::Point(params_.x, params_.y),
+                 blink::mojom::PluginActionType::kRotate90Counterclockwise);
 }
 
 void RenderViewContextMenu::ExecReloadPackagedApp() {
@@ -2876,17 +2964,18 @@ void RenderViewContextMenu::ExecRestartPackagedApp() {
 
 void RenderViewContextMenu::ExecPrint() {
 #if BUILDFLAG(ENABLE_PRINTING)
-  if (params_.media_type != WebContextMenuData::kMediaTypeNone) {
-    RenderFrameHost* render_frame_host = GetRenderFrameHost();
-    if (render_frame_host) {
-      render_frame_host->Send(new PrintMsg_PrintNodeUnderContextMenu(
-          render_frame_host->GetRoutingID()));
+  if (params_.media_type != ContextMenuDataMediaType::kNone) {
+    RenderFrameHost* rfh = GetRenderFrameHost();
+    if (rfh) {
+      mojo::AssociatedRemote<printing::mojom::PrintRenderFrame> remote;
+      rfh->GetRemoteAssociatedInterfaces()->GetInterface(&remote);
+      remote->PrintNodeUnderContextMenu();
     }
     return;
   }
 
   printing::StartPrint(
-      source_web_contents_,
+      source_web_contents_, mojo::NullAssociatedRemote(),
       GetPrefs(browser_context_)->GetBoolean(prefs::kPrintPreviewDisabled),
       !params_.selection_text.empty());
 #endif  // BUILDFLAG(ENABLE_PRINTING)
@@ -2902,7 +2991,8 @@ void RenderViewContextMenu::ExecRouteMedia() {
   if (!dialog_controller)
     return;
 
-  dialog_controller->ShowMediaRouterDialog();
+  dialog_controller->ShowMediaRouterDialog(
+      media_router::MediaRouterDialogOpenOrigin::CONTEXTUAL_MENU);
   media_router::MediaRouterMetrics::RecordMediaRouterDialogOrigin(
       media_router::MediaRouterDialogOpenOrigin::CONTEXTUAL_MENU);
 }
@@ -2937,8 +3027,8 @@ void RenderViewContextMenu::ExecTranslate() {
 }
 
 void RenderViewContextMenu::ExecLanguageSettings(int event_flags) {
-  WindowOpenDisposition disposition =
-      ForceNewTabDispositionFromEventFlags(event_flags);
+  WindowOpenDisposition disposition = ui::DispositionFromEventFlags(
+      event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   GURL url = chrome::GetSettingsUrl(chrome::kLanguageOptionsSubPage);
   OpenURL(url, GURL(), disposition, ui::PAGE_TRANSITION_LINK);
 }
@@ -2946,8 +3036,8 @@ void RenderViewContextMenu::ExecLanguageSettings(int event_flags) {
 void RenderViewContextMenu::ExecProtocolHandlerSettings(int event_flags) {
   base::RecordAction(
       UserMetricsAction("RegisterProtocolHandler.ContextMenu_Settings"));
-  WindowOpenDisposition disposition =
-      ForceNewTabDispositionFromEventFlags(event_flags);
+  WindowOpenDisposition disposition = ui::DispositionFromEventFlags(
+      event_flags, WindowOpenDisposition::NEW_FOREGROUND_TAB);
   GURL url = chrome::GetSettingsUrl(chrome::kHandlerSettingsSubPage);
   OpenURL(url, GURL(), disposition, ui::PAGE_TRANSITION_LINK);
 }
@@ -2969,13 +3059,14 @@ void RenderViewContextMenu::ExecPictureInPicture() {
 
   MediaPlayerActionAt(
       gfx::Point(params_.x, params_.y),
-      WebMediaPlayerAction(WebMediaPlayerAction::Type::kPictureInPicture,
-                           !picture_in_picture_active));
+      blink::mojom::MediaPlayerAction(
+          blink::mojom::MediaPlayerActionType::kPictureInPicture,
+          !picture_in_picture_active));
 }
 
 void RenderViewContextMenu::MediaPlayerActionAt(
     const gfx::Point& location,
-    const WebMediaPlayerAction& action) {
+    const blink::mojom::MediaPlayerAction& action) {
   RenderFrameHost* frame_host = GetRenderFrameHost();
   if (frame_host)
     frame_host->ExecuteMediaPlayerActionAtLocation(location, action);
@@ -2983,9 +3074,9 @@ void RenderViewContextMenu::MediaPlayerActionAt(
 
 void RenderViewContextMenu::PluginActionAt(
     const gfx::Point& location,
-    const WebPluginAction& action) {
-  source_web_contents_->GetRenderViewHost()->
-      ExecutePluginActionAtLocation(location, action);
+    blink::mojom::PluginActionType plugin_action) {
+  source_web_contents_->GetRenderViewHost()->ExecutePluginActionAtLocation(
+      location, plugin_action);
 }
 
 Browser* RenderViewContextMenu::GetBrowser() const {

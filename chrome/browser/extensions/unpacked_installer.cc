@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
@@ -23,15 +24,15 @@
 #include "components/sync/model/string_ordinal.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/browser/api/declarative_net_request/ruleset_source.h"
+#include "extensions/browser/api/declarative_net_request/index_helper.h"
 #include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/path_util.h"
 #include "extensions/browser/policy_check.h"
 #include "extensions/browser/preload_check_group.h"
 #include "extensions/browser/requirements_checker.h"
-#include "extensions/common/api/declarative_net_request/dnr_manifest_data.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -63,11 +64,11 @@ void MaybeCleanupMetadataFolder(const base::FilePath& extension_path) {
   const std::vector<base::FilePath> reserved_filepaths =
       file_util::GetReservedMetadataFilePaths(extension_path);
   for (const auto& file : reserved_filepaths)
-    base::DeleteFile(file, false /*recursive*/);
+    base::DeleteFile(file, true /*recursive*/);
 
   const base::FilePath& metadata_dir = extension_path.Append(kMetadataFolder);
   if (base::IsDirectoryEmpty(metadata_dir))
-    base::DeleteFile(metadata_dir, true /*recursive*/);
+    base::DeleteFileRecursively(metadata_dir);
 }
 
 }  // namespace
@@ -125,7 +126,7 @@ bool UnpackedInstaller::LoadFromCommandLine(const base::FilePath& path_in,
   }
 
   if (only_allow_apps && !extension()->is_platform_app()) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     // Avoid crashing for users with hijacked shortcuts.
     return true;
 #else
@@ -168,10 +169,11 @@ void UnpackedInstaller::StartInstallChecks() {
       const std::vector<SharedModuleInfo::ImportInfo>& imports =
           SharedModuleInfo::GetImports(extension());
       std::vector<SharedModuleInfo::ImportInfo>::const_iterator i;
+      ExtensionRegistry* registry = ExtensionRegistry::Get(service->profile());
       for (i = imports.begin(); i != imports.end(); ++i) {
         base::Version version_required(i->minimum_version);
-        const Extension* imported_module =
-            service->GetExtensionById(i->extension_id, true);
+        const Extension* imported_module = registry->GetExtensionById(
+            i->extension_id, ExtensionRegistry::EVERYTHING);
         if (!imported_module) {
           ReportExtensionLoadError(kImportMissing);
           return;
@@ -265,23 +267,18 @@ bool UnpackedInstaller::LoadExtension(Manifest::Location location,
 bool UnpackedInstaller::IndexAndPersistRulesIfNeeded(std::string* error) {
   DCHECK(extension());
 
-  if (!declarative_net_request::DNRManifestData::HasRuleset(*extension())) {
-    // The extension did not provide a ruleset.
-    return true;
-  }
-
-  // TODO(crbug.com/761107): Change this so that we don't need to parse JSON
-  // in the browser process.
-  auto ruleset_source =
-      declarative_net_request::RulesetSource::CreateStatic(*extension());
-  declarative_net_request::IndexAndPersistJSONRulesetResult result =
-      ruleset_source.IndexAndPersistJSONRulesetUnsafe();
-  if (!result.success) {
-    *error = std::move(result.error);
+  // TODO(crbug.com/761107): IndexStaticRulesetsUnsafe will read and parse JSON
+  // synchronously. Change this so that we don't need to parse JSON in the
+  // browser process.
+  declarative_net_request::IndexHelper::Result result =
+      declarative_net_request::IndexHelper::IndexStaticRulesetsUnsafe(
+          *extension());
+  if (result.error) {
+    *error = std::move(*result.error);
     return false;
   }
 
-  dnr_ruleset_checksum_ = result.ruleset_checksum;
+  ruleset_checksums_ = std::move(result.ruleset_checksums);
   if (!result.warnings.empty())
     extension_->AddInstallWarnings(std::move(result.warnings));
 
@@ -300,8 +297,9 @@ bool UnpackedInstaller::IsLoadingUnpackedAllowed() const {
 void UnpackedInstaller::GetAbsolutePath() {
   extension_path_ = base::MakeAbsoluteFilePath(extension_path_);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  // Set priority explicitly to avoid unwanted task priority inheritance.
+  base::PostTask(
+      FROM_HERE, {BrowserThread::UI, base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&UnpackedInstaller::CheckExtensionFileAccess, this));
 }
 
@@ -323,16 +321,18 @@ void UnpackedInstaller::CheckExtensionFileAccess() {
 void UnpackedInstaller::LoadWithFileAccess(int flags) {
   std::string error;
   if (!LoadExtension(Manifest::UNPACKED, flags, &error)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&UnpackedInstaller::ReportExtensionLoadError, this,
-                       error));
+    // Set priority explicitly to avoid unwanted task priority inheritance.
+    base::PostTask(FROM_HERE,
+                   {BrowserThread::UI, base::TaskPriority::USER_BLOCKING},
+                   base::BindOnce(&UnpackedInstaller::ReportExtensionLoadError,
+                                  this, error));
     return;
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&UnpackedInstaller::StartInstallChecks, this));
+  // Set priority explicitly to avoid unwanted task priority inheritance.
+  base::PostTask(FROM_HERE,
+                 {BrowserThread::UI, base::TaskPriority::USER_BLOCKING},
+                 base::BindOnce(&UnpackedInstaller::StartInstallChecks, this));
 }
 
 void UnpackedInstaller::ReportExtensionLoadError(const std::string &error) {
@@ -361,7 +361,7 @@ void UnpackedInstaller::InstallExtension() {
 
   service_weak_->OnExtensionInstalled(extension(), syncer::StringOrdinal(),
                                       kInstallFlagInstallImmediately,
-                                      dnr_ruleset_checksum_);
+                                      ruleset_checksums_);
 
   if (!callback_.is_null())
     std::move(callback_).Run(extension(), extension_path_, std::string());

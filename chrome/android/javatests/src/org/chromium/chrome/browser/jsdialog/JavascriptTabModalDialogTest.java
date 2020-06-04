@@ -30,10 +30,11 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.components.javascript_dialogs.JavascriptTabModalDialog;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
@@ -64,7 +65,7 @@ public class JavascriptTabModalDialogTest {
     private ChromeTabbedActivity mActivity;
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() {
         mActivityTestRule.startMainActivityWithURL(EMPTY_PAGE);
         mActivity = mActivityTestRule.getActivity();
     }
@@ -76,8 +77,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialog() throws TimeoutException, ExecutionException {
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("alert('Hello Android!');");
 
@@ -95,8 +95,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialogWithTwoClicks()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialogWithTwoClicks() throws TimeoutException, ExecutionException {
         OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("alert('Hello Android');");
         JavascriptTabModalDialog jsDialog = getCurrentDialog();
@@ -119,8 +118,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testConfirmModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testConfirmModalDialog() throws TimeoutException, ExecutionException {
         OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("confirm('Android');");
 
@@ -156,8 +154,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testPromptModalDialog()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testPromptModalDialog() throws TimeoutException, ExecutionException {
         final String promptText = "Hello Android!";
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog("prompt('Android', 'default');");
@@ -183,8 +180,7 @@ public class JavascriptTabModalDialogTest {
     @Test
     @MediumTest
     @Feature({"Browser", "Main"})
-    public void testAlertModalDialogMessageFocus()
-            throws InterruptedException, TimeoutException, ExecutionException {
+    public void testAlertModalDialogMessageFocus() throws TimeoutException, ExecutionException {
         assertScrollViewFocusabilityInAlertDialog("alert('Short message!');", false);
 
         // Test on landscape mode so that the message is long enough to make scroll view scrollable
@@ -197,9 +193,8 @@ public class JavascriptTabModalDialogTest {
         mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
     }
 
-    private void assertScrollViewFocusabilityInAlertDialog(
-            final String jsAlertScript, final boolean expectedFocusability)
-            throws InterruptedException, TimeoutException, ExecutionException {
+    private void assertScrollViewFocusabilityInAlertDialog(final String jsAlertScript,
+            final boolean expectedFocusability) throws TimeoutException, ExecutionException {
         final OnEvaluateJavaScriptResultHelper scriptEvent =
                 executeJavaScriptAndWaitForDialog(jsAlertScript);
 

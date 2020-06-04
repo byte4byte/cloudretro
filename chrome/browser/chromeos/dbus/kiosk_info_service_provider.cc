@@ -15,7 +15,7 @@
 
 namespace chromeos {
 
-KioskInfoService::KioskInfoService() : weak_ptr_factory_(this) {}
+KioskInfoService::KioskInfoService() {}
 
 KioskInfoService::~KioskInfoService() = default;
 
@@ -26,8 +26,8 @@ void KioskInfoService::Start(
       kKioskAppServiceGetRequiredPlatformVersionMethod,
       base::Bind(&KioskInfoService::GetKioskAppRequiredPlatformVersion,
                  weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&KioskInfoService::OnExported,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&KioskInfoService::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void KioskInfoService::OnExported(const std::string& interface_name,
@@ -45,7 +45,7 @@ void KioskInfoService::GetKioskAppRequiredPlatformVersion(
   dbus::MessageWriter writer(response.get());
   writer.AppendString(
       KioskAppManager::Get()->GetAutoLaunchAppRequiredPlatformVersion());
-  response_sender.Run(std::move(response));
+  std::move(response_sender).Run(std::move(response));
 }
 
 }  // namespace chromeos

@@ -42,7 +42,7 @@ class CORE_EXPORT FontBuilder {
   STACK_ALLOCATED();
 
  public:
-  FontBuilder(const Document*);
+  explicit FontBuilder(Document*);
 
   void SetInitial(float effective_zoom);
 
@@ -72,15 +72,15 @@ class CORE_EXPORT FontBuilder {
   void SetVariantNumeric(const FontVariantNumeric&);
   void SetTextRendering(TextRenderingMode);
   void SetKerning(FontDescription::Kerning);
+  void SetFontOpticalSizing(OpticalSizing);
   void SetFontSmoothing(FontSmoothingMode);
   void SetVariationSettings(scoped_refptr<FontVariationSettings>);
 
   // FIXME: These need to just vend a Font object eventually.
   void UpdateFontDescription(FontDescription&,
                              FontOrientation = FontOrientation::kHorizontal);
-  void CreateFont(FontSelector*, ComputedStyle&);
-
-  void CreateFontForDocument(FontSelector*, ComputedStyle&);
+  void CreateFont(ComputedStyle&);
+  void CreateFontForDocument(ComputedStyle&);
 
   bool FontDirty() const { return flags_; }
 
@@ -114,6 +114,7 @@ class CORE_EXPORT FontBuilder {
   static FontDescription::Kerning InitialKerning() {
     return FontDescription::kAutoKerning;
   }
+  static OpticalSizing InitialFontOpticalSizing() { return kAutoOpticalSizing; }
   static FontSmoothingMode InitialFontSmoothing() { return kAutoSmoothing; }
 
   static FontSelectionValue InitialStretch() { return NormalWidthValue(); }
@@ -137,7 +138,7 @@ class CORE_EXPORT FontBuilder {
                                          float effective_zoom,
                                          float specified_size);
 
-  Member<const Document> document_;
+  Document* document_;
   FontDescription font_description_;
 
   enum class PropertySetFlag {
@@ -156,6 +157,7 @@ class CORE_EXPORT FontBuilder {
     kVariationSettings,
     kTextRendering,
     kKerning,
+    kFontOpticalSizing,
     kFontSmoothing,
 
     kEffectiveZoom,

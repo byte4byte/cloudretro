@@ -4,7 +4,6 @@
 
 #include "chrome/browser/download/download_completion_blocker.h"
 
-#include "base/logging.h"
 
 DownloadCompletionBlocker::DownloadCompletionBlocker()
   : is_complete_(false) {
@@ -21,7 +20,7 @@ void DownloadCompletionBlocker::CompleteDownload() {
 
   if (callback_.is_null())
     return;
-  callback_.Run();
+  std::move(callback_).Run();
   // |callback_| may delete |this|, so do not rely on |this| after running
   // |callback_|!
 }

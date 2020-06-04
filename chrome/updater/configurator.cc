@@ -7,10 +7,10 @@
 #include <utility>
 #include "base/version.h"
 #include "build/build_config.h"
+#include "chrome/updater/external_constants.h"
 #include "chrome/updater/patcher.h"
 #include "chrome/updater/prefs.h"
 #include "chrome/updater/unzipper.h"
-#include "chrome/updater/updater_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/update_client/network.h"
 #include "components/update_client/patcher.h"
@@ -21,6 +21,10 @@
 
 #if defined(OS_WIN)
 #include "chrome/updater/win/net/network.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "chrome/updater/mac/net/network.h"
 #endif
 
 namespace {
@@ -35,6 +39,7 @@ namespace updater {
 
 Configurator::Configurator()
     : pref_service_(CreatePrefService()),
+      external_constants_(CreateExternalConstants()),
       unzip_factory_(base::MakeRefCounted<UnzipperFactory>()),
       patch_factory_(base::MakeRefCounted<PatcherFactory>()) {}
 Configurator::~Configurator() = default;
@@ -56,7 +61,7 @@ int Configurator::UpdateDelay() const {
 }
 
 std::vector<GURL> Configurator::UpdateUrl() const {
-  return std::vector<GURL>{GURL(kUpdaterJSONDefaultUrl)};
+  return external_constants_->UpdateURL();
 }
 
 std::vector<GURL> Configurator::PingUrl() const {
@@ -98,14 +103,10 @@ std::string Configurator::GetDownloadPreference() const {
 
 scoped_refptr<update_client::NetworkFetcherFactory>
 Configurator::GetNetworkFetcherFactory() {
-#if defined(OS_WIN)
   if (!network_fetcher_factory_) {
     network_fetcher_factory_ = base::MakeRefCounted<NetworkFetcherFactory>();
   }
   return network_fetcher_factory_;
-#else
-  return nullptr;
-#endif
 }
 
 scoped_refptr<update_client::UnzipperFactory>
@@ -130,7 +131,7 @@ bool Configurator::EnabledBackgroundDownloader() const {
 }
 
 bool Configurator::EnabledCupSigning() const {
-  return true;
+  return external_constants_->UseCUP();
 }
 
 PrefService* Configurator::GetPrefService() const {
@@ -146,22 +147,9 @@ bool Configurator::IsPerUserInstall() const {
   return true;
 }
 
-std::vector<uint8_t> Configurator::GetRunActionKeyHash() const {
-  return {};
-}
-
-std::string Configurator::GetAppGuid() const {
-  return {};
-}
-
 std::unique_ptr<update_client::ProtocolHandlerFactory>
 Configurator::GetProtocolHandlerFactory() const {
   return std::make_unique<update_client::ProtocolHandlerFactoryJSON>();
-}
-
-update_client::RecoveryCRXElevator Configurator::GetRecoveryCRXElevator()
-    const {
-  return {};
 }
 
 }  // namespace updater

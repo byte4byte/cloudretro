@@ -68,15 +68,9 @@ class AcceleratorTest : public AshTestBase, public OverviewObserver {
     AshTestBase::SetUp();
 
     Shell::Get()->overview_controller()->AddObserver(this);
-
-    chromeos::shill_clients::InitializeFakes();
-    chromeos::NetworkHandler::Initialize();
   }
 
   void TearDown() override {
-    chromeos::NetworkHandler::Shutdown();
-    chromeos::shill_clients::Shutdown();
-
     Shell::Get()->overview_controller()->RemoveObserver(this);
 
     AshTestBase::TearDown();
@@ -185,7 +179,7 @@ TEST_F(AcceleratorTest, NonRepeatableNeedingWindowActions) {
   EXPECT_FALSE(wm::IsActiveWindow(window_2));
 
   // Test TOGGLE_FULLSCREEN.
-  wm::WindowState* active_window_state = wm::GetActiveWindowState();
+  WindowState* active_window_state = WindowState::ForActiveWindow();
   EXPECT_FALSE(active_window_state->IsFullscreen());
   SendKeyPressSync(ui::VKEY_MEDIA_LAUNCH_APP2, false, false, false);
   EXPECT_TRUE(active_window_state->IsFullscreen());

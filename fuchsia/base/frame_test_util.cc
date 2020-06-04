@@ -33,7 +33,7 @@ base::Optional<base::Value> ExecuteJavaScript(fuchsia::web::Frame* frame,
   base::RunLoop run_loop;
   ResultReceiver<fuchsia::web::Frame_ExecuteJavaScript_Result> result(
       run_loop.QuitClosure());
-  frame->ExecuteJavaScript({"*"}, MemBufferFromString(script),
+  frame->ExecuteJavaScript({"*"}, MemBufferFromString(script, "test"),
                            CallbackToFitFunction(result.GetReceiveCallback()));
   run_loop.Run();
 
@@ -46,6 +46,12 @@ base::Optional<base::Value> ExecuteJavaScript(fuchsia::web::Frame* frame,
   }
 
   return base::JSONReader::Read(result_json);
+}
+
+fuchsia::web::LoadUrlParams CreateLoadUrlParamsWithUserActivation() {
+  fuchsia::web::LoadUrlParams load_url_params;
+  load_url_params.set_was_user_activated(true);
+  return load_url_params;
 }
 
 }  // namespace cr_fuchsia

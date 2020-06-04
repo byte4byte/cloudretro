@@ -10,7 +10,6 @@
 #include "base/stl_util.h"
 #include "content/browser/webauth/virtual_discovery.h"
 #include "content/browser/webauth/virtual_fido_discovery_factory.h"
-#include "content/public/common/content_switches.h"
 #include "device/fido/fido_discovery_factory.h"
 
 namespace content {
@@ -26,27 +25,16 @@ AuthenticatorEnvironmentImpl* AuthenticatorEnvironmentImpl::GetInstance() {
   return environment.get();
 }
 
-AuthenticatorEnvironmentImpl::AuthenticatorEnvironmentImpl() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebAuthTestingAPI)) {
-    discovery_factory_ = std::make_unique<VirtualFidoDiscoveryFactory>();
-  } else {
-    discovery_factory_ = std::make_unique<device::FidoDiscoveryFactory>();
-  }
-}
+AuthenticatorEnvironmentImpl::AuthenticatorEnvironmentImpl() = default;
 
 AuthenticatorEnvironmentImpl::~AuthenticatorEnvironmentImpl() = default;
 
-device::FidoDiscoveryFactory* AuthenticatorEnvironmentImpl::GetFactory(
-    FrameTreeNode* node) {
+device::FidoDiscoveryFactory*
+AuthenticatorEnvironmentImpl::GetDiscoveryFactoryOverride(FrameTreeNode* node) {
   auto* factory = GetVirtualFactoryFor(node);
   if (factory)
     return factory;
-  return discovery_factory_.get();
-}
-
-device::FidoDiscoveryFactory* AuthenticatorEnvironmentImpl::GetFactory() {
-  return discovery_factory_.get();
+  return replaced_discovery_factory_.get();
 }
 
 void AuthenticatorEnvironmentImpl::EnableVirtualAuthenticatorFor(
@@ -98,7 +86,7 @@ void AuthenticatorEnvironmentImpl::OnDiscoveryDestroyed(
 
 void AuthenticatorEnvironmentImpl::ReplaceDefaultDiscoveryFactoryForTesting(
     std::unique_ptr<device::FidoDiscoveryFactory> factory) {
-  discovery_factory_ = std::move(factory);
+  replaced_discovery_factory_ = std::move(factory);
 }
 
 void AuthenticatorEnvironmentImpl::OnFrameTreeNodeDestroyed(

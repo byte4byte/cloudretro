@@ -17,10 +17,12 @@
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -117,10 +119,9 @@ class AvailabilityChecker {
   // Don't call this directly, but use Start().
   explicit AvailabilityChecker(ResponseCallback callback)
       : callback_(std::move(callback)),
-        background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+        background_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
-        watcher_(new base::FilePathWatcher()),
-        weak_ptr_factory_(this) {
+        watcher_(new base::FilePathWatcher()) {
     auto watch_callback = base::BindRepeating(
         &AvailabilityChecker::OnFilePathChanged,
         base::SequencedTaskRunnerHandle::Get(), weak_ptr_factory_.GetWeakPtr());
@@ -208,7 +209,7 @@ class AvailabilityChecker {
   ResponseCallback callback_;
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
   std::unique_ptr<base::FilePathWatcher> watcher_;
-  base::WeakPtrFactory<AvailabilityChecker> weak_ptr_factory_;
+  base::WeakPtrFactory<AvailabilityChecker> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AvailabilityChecker);
 };
@@ -235,7 +236,7 @@ void GetAvailableUpdateModes(
     // For enterprise-managed devices, always honor the device setting.
     CrosSettings* const cros_settings = CrosSettings::Get();
     switch (cros_settings->PrepareTrustedValues(
-        base::BindRepeating(&GetAvailableUpdateModes, callback, timeout))) {
+        base::BindOnce(&GetAvailableUpdateModes, callback, timeout))) {
       case CrosSettingsProvider::TEMPORARILY_UNTRUSTED:
         // Retry happens via the callback registered above.
         return;

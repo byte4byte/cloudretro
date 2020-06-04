@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.exportPath('cloudprint');
+import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
+import {Destination, DestinationOrigin} from './data/destination.js';
+import {Invitation} from './data/invitation.js';
+import {NativeLayer} from './native_layer.js';
 
 /**
  * Event types dispatched by the cloudprint interface.
  * @enum {string}
  */
-cloudprint.CloudPrintInterfaceEventType = {
+export const CloudPrintInterfaceEventType = {
   INVITES_DONE: 'cloudprint.CloudPrintInterface.INVITES_DONE',
   INVITES_FAILED: 'cloudprint.CloudPrintInterface.INVITES_FAILED',
   PRINTER_DONE: 'cloudprint.CloudPrintInterface.PRINTER_DONE',
@@ -26,112 +29,124 @@ cloudprint.CloudPrintInterfaceEventType = {
  *   status: number,
  *   errorCode: number,
  *   message: string,
- *   origin: !print_preview.DestinationOrigin,
+ *   origin: !DestinationOrigin,
+ *   account: ?string,
  * }}
  */
-cloudprint.CloudPrintInterfaceErrorEventDetail;
+export let CloudPrintInterfaceErrorEventDetail;
 
 /**
  * @typedef {{
  *   user: string,
- *   origin: !print_preview.DestinationOrigin,
- *   printers: (!Array<!print_preview.Destination>|undefined),
+ *   origin: !DestinationOrigin,
+ *   printers: (!Array<!Destination>|undefined),
  *   searchDone: boolean,
  * }}
  */
-cloudprint.CloudPrintInterfaceSearchDoneDetail;
+export let CloudPrintInterfaceSearchDoneDetail;
 
 /**
  * @typedef {{
  *   destinationId: string,
- *   origin: !print_preview.DestinationOrigin,
+ *   origin: !DestinationOrigin,
  * }}
  */
-cloudprint.CloudPrintInterfacePrinterFailedDetail;
+export let CloudPrintInterfacePrinterFailedDetail;
 
 /**
  * @typedef {{
- *   invitations: !Array<!print_preview.Invitation>,
+ *   invitations: !Array<!Invitation>,
  *   user: string,
  * }}
  */
-cloudprint.CloudPrintInterfaceInvitesDoneDetail;
+export let CloudPrintInterfaceInvitesDoneDetail;
 
 /**
  * @typedef {{
- *   invitation: !print_preview.Invitation,
- *   printer: ?print_preview.Destination,
+ *   invitation: !Invitation,
+ *   printer: ?Destination,
  *   accept: boolean,
  *   user: string,
  * }}
  */
-cloudprint.CloudPrintInterfaceProcessInviteDetail;
+export let CloudPrintInterfaceProcessInviteDetail;
 
-cr.define('cloudprint', function() {
-  /** @interface */
-  class CloudPrintInterface {
-    /**
-     * @return {boolean} Whether a search for cloud destinations is in progress.
-     */
-    isCloudDestinationSearchInProgress() {}
+/** @interface */
+export class CloudPrintInterface {
+  /** @return {boolean} Whether cookie destinations are disabled. */
+  areCookieDestinationsDisabled() {}
 
-    /** @return {!cr.EventTarget} The event target for this interface. */
-    getEventTarget() {}
+  /**
+   * @param {string} baseUrl Base part of the Google Cloud Print service URL
+   *     with no trailing slash. For example,
+   *     'https://www.google.com/cloudprint'.
+   * @param {!NativeLayer} nativeLayer Native layer used to get
+   *     Auth2 tokens.
+   * @param {boolean} isInAppKioskMode Whether the print preview is in App
+   *     Kiosk mode.
+   * @param {string} uiLocale The UI locale.
+   */
+  configure(baseUrl, nativeLayer, isInAppKioskMode, uiLocale) {}
 
-    /**
-     * Sends Google Cloud Print search API request.
-     * @param {?string=} opt_account Account the search is sent for. When
-     *      null or omitted, the search is done on behalf of the primary user.
-     * @param {print_preview.DestinationOrigin=} opt_origin When specified,
-     *     searches destinations for {@code opt_origin} only, otherwise starts
-     *     searches for all origins.
-     */
-    search(opt_account, opt_origin) {}
+  /** @return {boolean} Whether the interface has been configured. */
+  isConfigured() {}
 
-    /**
-     * Sets the currently active users.
-     * @param {!Array<string>} users
-     */
-    setUsers(users) {}
+  /**
+   * @return {boolean} Whether a search for cloud destinations is in progress.
+   */
+  isCloudDestinationSearchInProgress() {}
 
-    /**
-     * Sends Google Cloud Print printer sharing invitations API requests.
-     * @param {string} account Account the request is sent for.
-     */
-    invites(account) {}
+  /** @return {!EventTarget} The event target for this interface. */
+  getEventTarget() {}
 
-    /**
-     * Accepts or rejects printer sharing invitation.
-     * @param {!print_preview.Invitation} invitation Invitation to process.
-     * @param {boolean} accept Whether to accept this invitation.
-     */
-    processInvite(invitation, accept) {}
+  /**
+   * Sends Google Cloud Print search API request.
+   * @param {?string=} opt_account Account the search is sent for. When
+   *      null or omitted, the search is done on behalf of the primary user.
+   * @param {DestinationOrigin=} opt_origin When specified,
+   *     searches destinations for {@code opt_origin} only, otherwise starts
+   *     searches for all origins.
+   */
+  search(opt_account, opt_origin) {}
 
-    /**
-     * Sends a Google Cloud Print submit API request.
-     * @param {!print_preview.Destination} destination Cloud destination to
-     *     print to.
-     * @param {string} printTicket The print ticket to print.
-     * @param {string} documentTitle Title of the document.
-     * @param {string} data Base64 encoded data of the document.
-     */
-    submit(destination, printTicket, documentTitle, data) {}
+  /**
+   * Sets the currently active users.
+   * @param {!Array<string>} users
+   */
+  setUsers(users) {}
 
-    /**
-     * Sends a Google Cloud Print printer API request.
-     * @param {string} printerId ID of the printer to lookup.
-     * @param {!print_preview.DestinationOrigin} origin Origin of the printer.
-     * @param {string=} account Account this printer is registered for. When
-     *     provided for COOKIES {@code origin}, and users sessions are still not
-     *     known, will be checked against the response (both success and failure
-     *     to get printer) and, if the active user account is not the one
-     *     requested, {@code account} is activated and printer request reissued.
-     */
-    printer(printerId, origin, account) {}
-  }
+  /**
+   * Sends Google Cloud Print printer sharing invitations API requests.
+   * @param {string} account Account the request is sent for.
+   */
+  invites(account) {}
 
-  // Export
-  return {
-    CloudPrintInterface: CloudPrintInterface,
-  };
-});
+  /**
+   * Accepts or rejects printer sharing invitation.
+   * @param {!Invitation} invitation Invitation to process.
+   * @param {boolean} accept Whether to accept this invitation.
+   */
+  processInvite(invitation, accept) {}
+
+  /**
+   * Sends a Google Cloud Print submit API request.
+   * @param {!Destination} destination Cloud destination to
+   *     print to.
+   * @param {string} printTicket The print ticket to print.
+   * @param {string} documentTitle Title of the document.
+   * @param {string} data Base64 encoded data of the document.
+   */
+  submit(destination, printTicket, documentTitle, data) {}
+
+  /**
+   * Sends a Google Cloud Print printer API request.
+   * @param {string} printerId ID of the printer to lookup.
+   * @param {!DestinationOrigin} origin Origin of the printer.
+   * @param {string=} account Account this printer is registered for. When
+   *     provided for COOKIES {@code origin}, and users sessions are still not
+   *     known, will be checked against the response (both success and failure
+   *     to get printer) and, if the active user account is not the one
+   *     requested, {@code account} is activated and printer request reissued.
+   */
+  printer(printerId, origin, account) {}
+}

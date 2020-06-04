@@ -10,6 +10,7 @@
 #include "base/process/process_info.h"
 #include "base/strings/string_split.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -82,8 +83,7 @@ SingleLogFileLogSource::SingleLogFileLogSource(SupportedSource source_type)
       source_type_(source_type),
       log_file_dir_path_(kDefaultSystemLogDirPath),
       num_bytes_read_(0),
-      file_inode_(0),
-      weak_ptr_factory_(this) {}
+      file_inode_(0) {}
 
 SingleLogFileLogSource::~SingleLogFileLogSource() {}
 
@@ -99,9 +99,8 @@ void SingleLogFileLogSource::Fetch(SysLogsSourceCallback callback) {
 
   auto response = std::make_unique<SystemLogsResponse>();
   auto* response_ptr = response.get();
-  base::PostTaskWithTraitsAndReply(
-      FROM_HERE,
-      base::TaskTraits(base::MayBlock(), base::TaskPriority::BEST_EFFORT),
+  base::ThreadPool::PostTaskAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&SingleLogFileLogSource::ReadFile,
                      weak_ptr_factory_.GetWeakPtr(),
                      kMaxNumAllowedLogRotationsDuringFileRead, response_ptr),

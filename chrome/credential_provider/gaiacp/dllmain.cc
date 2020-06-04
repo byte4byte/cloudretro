@@ -24,6 +24,7 @@
 #include "base/win/current_module.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
+#include "build/branding_buildflags.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #include "chrome/credential_provider/gaiacp/gaia_credential.h"
@@ -37,8 +38,8 @@
 #include "chrome/credential_provider/gaiacp/os_user_manager.h"
 #include "chrome/credential_provider/gaiacp/reauth_credential.h"
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
-#include "components/crash/content/app/crash_switches.h"
-#include "components/crash/content/app/run_as_crashpad_handler_win.h"
+#include "components/crash/core/app/crash_switches.h"
+#include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "content/public/common/content_switches.h"
 
 using credential_provider::putHR;
@@ -57,12 +58,10 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstance,
   return _AtlModule.DllMain(hinstance, reason, reserved);
 }
 
-using namespace ATL;
-
 // Used to determine whether the DLL can be unloaded by OLE.
 STDAPI DllCanUnloadNow(void) {
   HRESULT hr = _AtlModule.DllCanUnloadNow();
-  LOGFN(INFO) << "hr=" << putHR(hr);
+  LOGFN(VERBOSE) << "hr=" << putHR(hr);
   return hr;
 }
 
@@ -70,10 +69,12 @@ STDAPI DllCanUnloadNow(void) {
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
   // Check to see if the credential provider has crashed too much recently.
   // If it has then do not allow it to create any credential providers.
-  if (!credential_provider::VerifyStartupSentinel()) {
+  if (!credential_provider::WriteToStartupSentinel()) {
     LOGFN(ERROR) << "Disabled due to previous unsuccessful starts";
     return E_NOTIMPL;
   }
+
+  _AtlModule.InitializeCrashReporting();
 
   HRESULT hr = _AtlModule.DllGetClassObject(rclsid, riid, ppv);
 
@@ -89,17 +90,17 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
 // DllRegisterServer - Adds entries to the system registry.
 STDAPI DllRegisterServer(void) {
   HRESULT hr = credential_provider::CGaiaCredentialBase::OnDllRegisterServer();
-  LOGFN(INFO) << "CGaiaCredential::OnDllRegisterServer hr=" << putHR(hr);
+  LOGFN(VERBOSE) << "CGaiaCredential::OnDllRegisterServer hr=" << putHR(hr);
 
   if (SUCCEEDED(hr)) {
     // Registers object.  FALSE means don't register typelib.  The default
     // behaviour is assume the typelib has ID 1.  But in this case grit can't
     // be forced to use an ID of 1 when writing the rc file.
     hr = _AtlModule.DllRegisterServer(FALSE);
-    LOGFN(INFO) << "_AtlModule.DllRegisterServer hr=" << putHR(hr);
+    LOGFN(VERBOSE) << "_AtlModule.DllRegisterServer hr=" << putHR(hr);
   }
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Register with Google Update.
   if (SUCCEEDED(hr)) {
     base::win::RegKey key(HKEY_LOCAL_MACHINE,
@@ -119,14 +120,14 @@ STDAPI DllRegisterServer(void) {
       }
     }
   }
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   return hr;
 }
 
 // DllUnregisterServer - Removes entries from the system registry.
 STDAPI DllUnregisterServer(void) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   // Unregister with Google Update.
   base::win::RegKey key(HKEY_LOCAL_MACHINE, L"", DELETE | KEY_WOW64_32KEY);
   LONG sts = key.DeleteKey(credential_provider::kRegUpdaterClientsAppPath);
@@ -138,54 +139,68 @@ STDAPI DllUnregisterServer(void) {
 
   HRESULT hr =
       credential_provider::CGaiaCredentialBase::OnDllUnregisterServer();
-  LOGFN(INFO) << "CGaiaCredential::OnDllUnregisterServer hr=" << putHR(hr);
+  LOGFN(VERBOSE) << "CGaiaCredential::OnDllUnregisterServer hr=" << putHR(hr);
   all_succeeded &= SUCCEEDED(hr);
 
   hr = _AtlModule.DllUnregisterServer(FALSE);
-  LOGFN(INFO) << "_AtlModule.DllUnregisterServer hr=" << putHR(hr);
+  LOGFN(VERBOSE) << "_AtlModule.DllUnregisterServer hr=" << putHR(hr);
   all_succeeded &= SUCCEEDED(hr);
 
   return all_succeeded ? S_OK : E_FAIL;
 }
 
 // This entry point is called via rundll32.  See
-// CGaiaCredential::ForkSaveAccountInfoStub() for details.
-void CALLBACK SaveAccountInfoW(HWND /*hwnd*/,
-                               HINSTANCE /*hinst*/,
-                               wchar_t* /*pszCmdLine*/,
-                               int /*show*/) {
-  LOGFN(INFO);
+// CGaiaCredential::ForkPerformPostSigninActionsStub() for details.
+void CALLBACK PerformPostSigninActionsW(HWND /*hwnd*/,
+                                        HINSTANCE /*hinst*/,
+                                        wchar_t* /*pszCmdLine*/,
+                                        int /*show*/) {
+  LOGFN(VERBOSE);
+
+  _AtlModule.InitializeCrashReporting();
+
   HANDLE hStdin = ::GetStdHandle(STD_INPUT_HANDLE);  // No need to close.
   if (hStdin == INVALID_HANDLE_VALUE) {
-    LOGFN(INFO) << "No stdin";
+    LOGFN(VERBOSE) << "No stdin";
     return;
   }
 
-  char buffer[credential_provider::CGaiaCredentialBase::kAccountInfoBufferSize];
-  DWORD buffer_len_bytes = static_cast<DWORD>(sizeof(buffer));  // In bytes.
-  if (!::ReadFile(hStdin, buffer, buffer_len_bytes, &buffer_len_bytes,
+  // First, read the buffer size.
+  DWORD buffer_size = 0;
+  DWORD bytes_read = 0;
+  if (!::ReadFile(hStdin, &buffer_size, sizeof(buffer_size), &bytes_read,
                   nullptr)) {
+    HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+    LOGFN(ERROR) << "ReadFile for buffer size failed. hr=" << putHR(hr);
+    return;
+  }
+
+  // For security, we check for a max of 1 MB buffer size.
+  const DWORD kMaxBufferSizeAllowed = 1024 * 1024;  // 1MB
+  if (!buffer_size || buffer_size > kMaxBufferSizeAllowed) {
+    LOGFN(ERROR) << "Invalid buffer size.";
+    return;
+  }
+
+  // Second, read the buffer.
+  std::vector<char> buffer(buffer_size, 0);
+  if (!::ReadFile(hStdin, buffer.data(), buffer.size(), &bytes_read, nullptr)) {
     HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
     LOGFN(ERROR) << "ReadFile hr=" << putHR(hr);
     return;
   }
-  buffer[buffer_len_bytes] = 0;
   // Don't log |buffer| since it contains sensitive info like password.
 
   HRESULT hr = S_OK;
   base::Optional<base::Value> properties =
-      base::JSONReader::Read(buffer, base::JSON_ALLOW_TRAILING_COMMAS);
+      base::JSONReader::Read(buffer.data(), base::JSON_ALLOW_TRAILING_COMMAS);
 
-  credential_provider::SecurelyClearBuffer(buffer, base::size(buffer));
+  credential_provider::SecurelyClearBuffer(buffer.data(), buffer.size());
 
   if (!properties || !properties->is_dict()) {
-    LOGFN(ERROR) << "base::JSONReader::Read failed length=" << buffer_len_bytes;
-    hr = E_FAIL;
+    LOGFN(ERROR) << "base::JSONReader::Read failed length=" << buffer.size();
+    return;
   }
-
-  hr = credential_provider::CGaiaCredentialBase::SaveAccountInfo(*properties);
-  if (FAILED(hr))
-    LOGFN(ERROR) << "SaveAccountInfoW hr=" << putHR(hr);
 
   // Make sure COM is initialized in this thread. This thread must be
   // initialized as an MTA or the call to enroll with MDM causes a crash in COM.
@@ -194,19 +209,16 @@ void CALLBACK SaveAccountInfoW(HWND /*hwnd*/,
   if (!com_initializer.Succeeded()) {
     HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
     LOGFN(ERROR) << "ScopedCOMInitializer failed hr=" << putHR(hr);
-  } else {
-    // Try to enroll the machine to MDM here. MDM requires a user to be signed
-    // on to an interactive session to succeed and when we call this function
-    // the user should have been successfully signed on at that point and able
-    // to finish the enrollment.
-    HRESULT hr = credential_provider::EnrollToGoogleMdmIfNeeded(*properties);
-    if (FAILED(hr))
-      LOGFN(ERROR) << "EnrollToGoogleMdmIfNeeded hr=" << putHR(hr);
   }
+
+  hr = credential_provider::CGaiaCredentialBase::PerformPostSigninActions(
+      *properties, com_initializer.Succeeded());
+  if (FAILED(hr))
+    LOGFN(ERROR) << "PerformPostSigninActions hr=" << putHR(hr);
 
   credential_provider::SecurelyClearDictionaryValue(&properties);
 
-  LOGFN(INFO) << "Done";
+  LOGFN(VERBOSE) << "Done";
 }
 
 void CALLBACK RunAsCrashpadHandlerW(HWND /*hwnd*/,

@@ -118,6 +118,14 @@ system will keep blocking until that text appears.
 You can add as many `@WAIT-FOR:` directives as you want, the test won't finish
 until all strings appear.
 
+You may also want to execute script and then capture a dump. Rather than use
+`setTimeout` and `@WAIT-FOR:`, consider using the `@EXECUTE-AND-WAIT-FOR:`
+directive. This directive expects a javascript function that returns a string to
+wait for. If a string is not returned, the tree dumper will not wait.
+`@EXECUTE-AND-WAIT-FOR:` directives are executed in order, after the document is
+ready and all `@WAIT-FOR:` strings have been found.
+Example: `@EXECUTE-AND-WAIT-FOR: foo()`
+
 Or, you may need to write an event test that keeps dumping events until a
 specific event line. In this case, use `@RUN-UNTIL-EVENT` with a substring that
 should occur in the event log, e.g.,
@@ -147,12 +155,23 @@ then run the test with the `--generate-accessibility-test-expectations`
 argument, for example:
 ```
   out/Debug/content_browsertests \
-    --generate-accessibility-test-expectations
-    --gtest_filter="DumpAccessibilityTreeTest.AccessibilityAriaAtomic/*"
+    --generate-accessibility-test-expectations \
+    --gtest_filter="All/DumpAccessibilityTreeTest.AccessibilityAriaAtomic/*"
 ```
 This will replace the `-expected-*.txt` file with the current output. It's
 a great way to rebaseline a bunch of tests after making a change. Please
 manually check the diff, of course!
+
+The * is a wildcard and will match any substring, in this case all platforms.
+To run on a single platform, replace the wildcard, e.g.:
+```
+  --gtest_filter="All/DumpAccessibilityTreeTest.AccessibilityAriaAtomic/linux"
+```
+
+For more information, see the detailed help with:
+```
+  out/Debug/content_browsertests --gtest_help
+```
 
 ## Adding a new test:
 
@@ -178,3 +197,8 @@ accessibility event - one you're unlikely to generate in your test. It uses
 that event to know when to "stop" dumping events. There isn't currently a
 way to test events that occur after some delay, just ones that happen as
 a direct result of calling `go()`.
+
+### Duplicate Events on UIA
+Windows will "translate" some IA2 events to UIA, and it is not
+possible to turn this feature off. Therefore as our UIA behavior is in addition
+to IA2, we will receive duplicated events for Focus, MenuOpened and MenuClosed.

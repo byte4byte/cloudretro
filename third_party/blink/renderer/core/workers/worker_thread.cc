@@ -36,10 +36,12 @@
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
+#include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
 #include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/inspector/worker_inspector_controller.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
+#include "third_party/blink/renderer/core/loader/worker_resource_timing_notifier_impl.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
@@ -48,7 +50,8 @@
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/worker_resource_timing_notifier.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -71,6 +74,18 @@ namespace {
 // TODO(nhiroki): Adjust the delay based on UMA.
 constexpr base::TimeDelta kForcibleTerminationDelay =
     base::TimeDelta::FromSeconds(2);
+
+void TerminateThreadsInSet(HashSet<WorkerThread*> threads) {
+  for (WorkerThread* thread : threads)
+    thread->TerminateForTesting();
+
+  for (WorkerThread* thread : threads)
+    thread->WaitForShutdownForTesting();
+
+  // Destruct base::Thread and join the underlying system threads.
+  for (WorkerThread* thread : threads)
+    thread->ClearWorkerBackingThread();
+}
 
 }  // namespace
 
@@ -113,7 +128,7 @@ class WorkerThread::RefCountedWaitableEvent
 // A class that is passed into V8 Interrupt and via a PostTask. Once both have
 // run this object will be destroyed in
 // PauseOrFreezeWithInterruptDataOnWorkerThread. The V8 API only takes a raw ptr
-// otherwise this could have been done with base::Bind and ref counted objects.
+// otherwise this could have been done with WTF::Bind and ref counted objects.
 class WorkerThread::InterruptData {
  public:
   InterruptData(WorkerThread* worker_thread, mojom::FrameLifecycleState state)
@@ -136,8 +151,11 @@ class WorkerThread::InterruptData {
 };
 
 WorkerThread::~WorkerThread() {
+  DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   MutexLocker lock(ThreadSetMutex());
-  DCHECK(WorkerThreads().Contains(this));
+  DCHECK(InitializingWorkerThreads().Contains(this) ||
+         WorkerThreads().Contains(this));
+  InitializingWorkerThreads().erase(this);
   WorkerThreads().erase(this);
 
   DCHECK(child_threads_.IsEmpty());
@@ -151,12 +169,8 @@ WorkerThread::~WorkerThread() {
 void WorkerThread::Start(
     std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
     const base::Optional<WorkerBackingThreadStartupData>& thread_startup_data,
-    std::unique_ptr<WorkerDevToolsParams> devtools_params,
-    ParentExecutionContextTaskRunners* parent_execution_context_task_runners) {
+    std::unique_ptr<WorkerDevToolsParams> devtools_params) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
-  DCHECK(!parent_execution_context_task_runners_);
-  parent_execution_context_task_runners_ =
-      parent_execution_context_task_runners;
   devtools_worker_token_ = devtools_params->devtools_worker_token;
 
   // Synchronously initialize the per-global-scope scheduler to prevent someone
@@ -167,7 +181,10 @@ void WorkerThread::Start(
       CrossThreadBindOnce(&WorkerThread::InitializeSchedulerOnWorkerThread,
                           CrossThreadUnretained(this),
                           CrossThreadUnretained(&waitable_event)));
-  waitable_event.Wait();
+  {
+    base::ScopedAllowBaseSyncPrimitives allow_wait;
+    waitable_event.Wait();
+  }
 
   inspector_task_runner_ =
       InspectorTaskRunner::Create(GetTaskRunner(TaskType::kInternalInspector));
@@ -195,8 +212,9 @@ void WorkerThread::EvaluateClassicScript(
 
 void WorkerThread::FetchAndRunClassicScript(
     const KURL& script_url,
-    const FetchClientSettingsObjectSnapshot& outside_settings_object,
-    WorkerResourceTimingNotifier& outside_resource_timing_notifier,
+    std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
+        outside_settings_object_data,
+    WorkerResourceTimingNotifier* outside_resource_timing_notifier,
     const v8_inspector::V8StackTraceId& stack_id) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   PostCrossThreadTask(
@@ -204,25 +222,27 @@ void WorkerThread::FetchAndRunClassicScript(
       CrossThreadBindOnce(
           &WorkerThread::FetchAndRunClassicScriptOnWorkerThread,
           CrossThreadUnretained(this), script_url,
-          WTF::Passed(outside_settings_object.CopyData()),
-          WrapCrossThreadPersistent(&outside_resource_timing_notifier),
+          WTF::Passed(std::move(outside_settings_object_data)),
+          WrapCrossThreadPersistent(outside_resource_timing_notifier),
           stack_id));
 }
 
 void WorkerThread::FetchAndRunModuleScript(
     const KURL& script_url,
-    const FetchClientSettingsObjectSnapshot& outside_settings_object,
-    WorkerResourceTimingNotifier& outside_resource_timing_notifier,
-    network::mojom::CredentialsMode credentials_mode) {
+    std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
+        outside_settings_object_data,
+    WorkerResourceTimingNotifier* outside_resource_timing_notifier,
+    network::mojom::CredentialsMode credentials_mode,
+    RejectCoepUnsafeNone reject_coep_unsafe_none) {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   PostCrossThreadTask(
       *GetTaskRunner(TaskType::kDOMManipulation), FROM_HERE,
       CrossThreadBindOnce(
           &WorkerThread::FetchAndRunModuleScriptOnWorkerThread,
           CrossThreadUnretained(this), script_url,
-          WTF::Passed(outside_settings_object.CopyData()),
-          WrapCrossThreadPersistent(&outside_resource_timing_notifier),
-          credentials_mode));
+          WTF::Passed(std::move(outside_settings_object_data)),
+          WrapCrossThreadPersistent(outside_resource_timing_notifier),
+          credentials_mode, reject_coep_unsafe_none.value()));
 }
 
 void WorkerThread::Pause() {
@@ -285,21 +305,12 @@ void WorkerThread::TerminateAllWorkersForTesting() {
 
   // Keep this lock to prevent WorkerThread instances from being destroyed.
   MutexLocker lock(ThreadSetMutex());
-  HashSet<WorkerThread*> threads = WorkerThreads();
-
-  for (WorkerThread* thread : threads) {
-    thread->TerminateForTesting();
-  }
-
-  for (WorkerThread* thread : threads)
-    thread->WaitForShutdownForTesting();
-
-  // Destruct base::Thread and join the underlying system threads.
-  for (WorkerThread* thread : threads)
-    thread->ClearWorkerBackingThread();
+  TerminateThreadsInSet(InitializingWorkerThreads());
+  TerminateThreadsInSet(WorkerThreads());
 }
 
-void WorkerThread::WillProcessTask(const base::PendingTask& pending_task) {
+void WorkerThread::WillProcessTask(const base::PendingTask& pending_task,
+                                   bool was_blocked_or_low_priority) {
   DCHECK(IsCurrentThread());
 
   // No tasks should get executed after we have closed.
@@ -329,7 +340,14 @@ void WorkerThread::DidProcessTask(const base::PendingTask& pending_task) {
     // This WorkerThread will eventually be requested to terminate.
     GetWorkerReportingProxy().DidCloseWorkerGlobalScope();
 
-    // Stop further worker tasks to run after this point.
+    // Stop further worker tasks to run after this point based on the spec:
+    // https://html.spec.whatwg.org/C/#close-a-worker
+    //
+    // "To close a worker, given a workerGlobal, run these steps:"
+    // Step 1: "Discard any tasks that have been added to workerGlobal's event
+    // loop's task queues."
+    // Step 2: "Set workerGlobal's closing flag to true. (This prevents any
+    // further tasks from being queued.)"
     PrepareForShutdownOnWorkerThread();
   } else if (IsForciblyTerminated()) {
     // The script has been terminated forcibly, which means we need to
@@ -370,7 +388,12 @@ WorkerInspectorController* WorkerThread::GetWorkerInspectorController() {
 
 unsigned WorkerThread::WorkerThreadCount() {
   MutexLocker lock(ThreadSetMutex());
-  return WorkerThreads().size();
+  return InitializingWorkerThreads().size() + WorkerThreads().size();
+}
+
+HashSet<WorkerThread*>& WorkerThread::InitializingWorkerThreads() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(HashSet<WorkerThread*>, threads, ());
+  return threads;
 }
 
 HashSet<WorkerThread*>& WorkerThread::WorkerThreads() {
@@ -401,6 +424,7 @@ bool WorkerThread::IsForciblyTerminated() {
 
 void WorkerThread::WaitForShutdownForTesting() {
   DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
+  base::ScopedAllowBaseSyncPrimitives allow_wait;
   shutdown_event_->Wait();
 }
 
@@ -433,20 +457,32 @@ void WorkerThread::ChildThreadTerminatedOnWorkerThread(WorkerThread* child) {
 }
 
 WorkerThread::WorkerThread(WorkerReportingProxy& worker_reporting_proxy)
+    : WorkerThread(worker_reporting_proxy, Thread::Current()->GetTaskRunner()) {
+}
+
+WorkerThread::WorkerThread(WorkerReportingProxy& worker_reporting_proxy,
+                           scoped_refptr<base::SingleThreadTaskRunner>
+                               parent_thread_default_task_runner)
     : time_origin_(base::TimeTicks::Now()),
       worker_thread_id_(GetNextWorkerThreadId()),
       forcible_termination_delay_(kForcibleTerminationDelay),
       worker_reporting_proxy_(worker_reporting_proxy),
+      parent_thread_default_task_runner_(
+          std::move(parent_thread_default_task_runner)),
       shutdown_event_(RefCountedWaitableEvent::Create()) {
+  DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   MutexLocker lock(ThreadSetMutex());
-  WorkerThreads().insert(this);
+  InitializingWorkerThreads().insert(this);
 }
 
 void WorkerThread::ScheduleToTerminateScriptExecution() {
+  DCHECK_CALLED_ON_VALID_THREAD(parent_thread_checker_);
   DCHECK(!forcible_termination_task_handle_.IsActive());
+  // It's safe to post a task bound with |this| to the parent thread default
+  // task runner because this task is canceled on the destructor of this
+  // class on the parent thread.
   forcible_termination_task_handle_ = PostDelayedCancellableTask(
-      *parent_execution_context_task_runners_->Get(TaskType::kInternalDefault),
-      FROM_HERE,
+      *parent_thread_default_task_runner_, FROM_HERE,
       WTF::Bind(&WorkerThread::EnsureScriptExecutionTerminates,
                 WTF::Unretained(this), ExitCode::kAsyncForciblyTerminated),
       forcible_termination_delay_);
@@ -517,6 +553,7 @@ void WorkerThread::InitializeOnWorkerThread(
   DCHECK(IsCurrentThread());
   worker_reporting_proxy_.WillInitializeWorkerContext();
   {
+    TRACE_EVENT0("blink.worker", "WorkerThread::InitializeWorkerContext");
     MutexLocker lock(mutex_);
     DCHECK_EQ(ThreadState::kNotStarted, thread_state_);
 
@@ -534,6 +571,7 @@ void WorkerThread::InitializeOnWorkerThread(
     const KURL url_for_debugger = global_scope_creation_params->script_url;
 
     console_message_storage_ = MakeGarbageCollected<ConsoleMessageStorage>();
+    inspector_issue_storage_ = MakeGarbageCollected<InspectorIssueStorage>();
     global_scope_ =
         CreateWorkerGlobalScope(std::move(global_scope_creation_params));
     worker_reporting_proxy_.DidCreateWorkerGlobalScope(GlobalScope());
@@ -550,7 +588,6 @@ void WorkerThread::InitializeOnWorkerThread(
       debugger->WorkerThreadCreated(this);
 
     GlobalScope()->ScriptController()->Initialize(url_for_debugger);
-    worker_reporting_proxy_.DidInitializeWorkerContext();
     v8::HandleScope handle_scope(GetIsolate());
     Platform::Current()->WorkerContextCreated(
         GlobalScope()->ScriptController()->GetContext());
@@ -565,6 +602,14 @@ void WorkerThread::InitializeOnWorkerThread(
     // PerformShutdownOnWorkerThread() will be called soon.
     PrepareForShutdownOnWorkerThread();
     return;
+  }
+
+  {
+    MutexLocker lock(ThreadSetMutex());
+    DCHECK(InitializingWorkerThreads().Contains(this));
+    DCHECK(!WorkerThreads().Contains(this));
+    InitializingWorkerThreads().erase(this);
+    WorkerThreads().insert(this);
   }
 
   // It is important that no code is run on the Isolate between
@@ -598,7 +643,10 @@ void WorkerThread::FetchAndRunClassicScriptOnWorkerThread(
         outside_settings_object,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
     const v8_inspector::V8StackTraceId& stack_id) {
-  DCHECK(outside_resource_timing_notifier);
+  if (!outside_resource_timing_notifier) {
+    outside_resource_timing_notifier =
+        MakeGarbageCollected<NullWorkerResourceTimingNotifier>();
+  }
   To<WorkerGlobalScope>(GlobalScope())
       ->FetchAndRunClassicScript(
           script_url,
@@ -612,8 +660,12 @@ void WorkerThread::FetchAndRunModuleScriptOnWorkerThread(
     std::unique_ptr<CrossThreadFetchClientSettingsObjectData>
         outside_settings_object,
     WorkerResourceTimingNotifier* outside_resource_timing_notifier,
-    network::mojom::CredentialsMode credentials_mode) {
-  DCHECK(outside_resource_timing_notifier);
+    network::mojom::CredentialsMode credentials_mode,
+    bool reject_coep_unsafe_none) {
+  if (!outside_resource_timing_notifier) {
+    outside_resource_timing_notifier =
+        MakeGarbageCollected<NullWorkerResourceTimingNotifier>();
+  }
   // Worklets have a different code path to import module scripts.
   // TODO(nhiroki): Consider excluding this code path from WorkerThread like
   // Worklets.
@@ -622,7 +674,8 @@ void WorkerThread::FetchAndRunModuleScriptOnWorkerThread(
           script_url,
           *MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
               std::move(outside_settings_object)),
-          *outside_resource_timing_notifier, credentials_mode);
+          *outside_resource_timing_notifier, credentials_mode,
+          RejectCoepUnsafeNone(reject_coep_unsafe_none));
 }
 
 void WorkerThread::PrepareForShutdownOnWorkerThread() {
@@ -683,6 +736,7 @@ void WorkerThread::PerformShutdownOnWorkerThread() {
   global_scope_ = nullptr;
 
   console_message_storage_.Clear();
+  inspector_issue_storage_.Clear();
 
   if (IsOwningBackingThread())
     GetWorkerBackingThread().ShutdownOnBackingThread();
@@ -762,6 +816,7 @@ void WorkerThread::PauseOrFreezeOnWorkerThread(
          state == mojom::FrameLifecycleState::kPaused);
   pause_or_freeze_count_++;
   GlobalScope()->SetLifecycleState(state);
+  GlobalScope()->SetDefersLoadingForResourceFetchers(true);
 
   // If already paused return early.
   if (pause_or_freeze_count_ > 1)
@@ -780,6 +835,7 @@ void WorkerThread::PauseOrFreezeOnWorkerThread(
         &nested_runner_, nested_runner.get());
     nested_runner->Run();
   }
+  GlobalScope()->SetDefersLoadingForResourceFetchers(false);
   GlobalScope()->SetLifecycleState(mojom::FrameLifecycleState::kRunning);
 }
 

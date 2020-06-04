@@ -18,9 +18,12 @@
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
 #include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 
 class AccountId;
@@ -57,6 +60,9 @@ class UserSelectionScreen
 
   void HandleGetUsers();
   void CheckUserStatus(const AccountId& account_id);
+  void HandleFocusPod(const AccountId& account_id);
+  void HandleNoPodFocused();
+  void OnBeforeShow();
 
   // Build list of users and send it to the webui.
   virtual void SendUserList();
@@ -92,10 +98,6 @@ class UserSelectionScreen
                          const std::string& secret,
                          const std::string& key_label) override;
 
-  // BaseScreen implementation:
-  void Show() override;
-  void Hide() override;
-
   // Fills |user_dict| with information about |user|.
   static void FillUserDictionary(
       const user_manager::User* user,
@@ -122,6 +124,10 @@ class UserSelectionScreen
   void SetUsersLoaded(bool loaded);
 
  protected:
+  // BaseScreen:
+  void ShowImpl() override;
+  void HideImpl() override;
+
   UserBoardView* view_ = nullptr;
 
   // Map from public session account IDs to recommended locales set by policy.
@@ -139,6 +145,7 @@ class UserSelectionScreen
 
   void OnUserStatusChecked(const AccountId& account_id,
                            TokenHandleUtil::TokenHandleStatus status);
+  void OnAllowedInputMethodsChanged();
 
   LoginDisplayWebUIHandler* handler_ = nullptr;
 
@@ -163,7 +170,14 @@ class UserSelectionScreen
 
   user_manager::UserList users_to_send_;
 
-  base::WeakPtrFactory<UserSelectionScreen> weak_factory_;
+  AccountId focused_pod_account_id_;
+  // Input Method Engine state used at the user selection screen.
+  scoped_refptr<input_method::InputMethodManager::State> ime_state_;
+
+  std::unique_ptr<CrosSettings::ObserverSubscription>
+      allowed_input_methods_subscription_;
+
+  base::WeakPtrFactory<UserSelectionScreen> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UserSelectionScreen);
 };

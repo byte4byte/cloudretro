@@ -5,7 +5,9 @@
 #include <memory>
 #include <vector>
 
+#include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/app_list/app_list_controller_impl.h"
+#include "ash/app_list/app_list_metrics.h"
 #include "ash/app_list/model/search/search_model.h"
 #include "ash/app_list/test/app_list_test_helper.h"
 #include "ash/app_list/test/app_list_test_model.h"
@@ -22,9 +24,12 @@
 #include "ash/public/cpp/app_list/app_list_types.h"
 #include "ash/public/cpp/shelf_item_delegate.h"
 #include "ash/public/cpp/shelf_model.h"
+#include "ash/shelf/home_button.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_navigation_widget.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_view_test_api.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -71,27 +76,32 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
   ~AppListAppLaunchedMetricTest() override = default;
 
   void SetUp() override {
-    app_list::AppListView::SetShortAnimationForTesting(true);
+    AppListView::SetShortAnimationForTesting(true);
     AshTestBase::SetUp();
 
     search_model_ = Shell::Get()->app_list_controller()->GetSearchModel();
 
-    app_list_test_model_ = static_cast<app_list::test::AppListTestModel*>(
+    app_list_test_model_ = static_cast<test::AppListTestModel*>(
         Shell::Get()->app_list_controller()->GetModel());
+
+    shelf_test_api_ = std::make_unique<ShelfViewTestAPI>(
+        GetPrimaryShelf()->GetShelfViewForTesting());
   }
 
   void TearDown() override {
     AshTestBase::TearDown();
-    app_list::AppListView::SetShortAnimationForTesting(false);
+    AppListView::SetShortAnimationForTesting(false);
   }
 
  protected:
   void CreateAndClickShelfItem() {
-    // Add shelf item to be launched.
+    // Add shelf item to be launched. Waits for the shelf view's bounds
+    // animations to end.
     ShelfItem shelf_item;
-    shelf_item.id = ash::ShelfID("app_id");
+    shelf_item.id = ShelfID("app_id");
     shelf_item.type = TYPE_BROWSER_SHORTCUT;
     ShelfModel::Get()->Add(shelf_item);
+    shelf_test_api_->RunMessageLoopUntilAnimationsDone();
 
     // The TestShelfItemDelegate will simulate a window activation after the
     // shelf item is clicked.
@@ -103,10 +113,8 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
 
   void ClickShelfItem() {
     // Get location of the shelf item.
-    ShelfViewTestAPI shelf_test_api(
-        GetPrimaryShelf()->GetShelfViewForTesting());
-    ShelfView* shelf_view = shelf_test_api.shelf_view();
-    const views::ViewModel* view_model = shelf_view->view_model_for_test();
+    const views::ViewModel* view_model =
+        GetPrimaryShelf()->GetShelfViewForTesting()->view_model_for_test();
     gfx::Point center = view_model->view_at(kBrowserAppIndexOnShelf)
                             ->GetBoundsInScreen()
                             .CenterPoint();
@@ -121,13 +129,13 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
   void PopulateAndLaunchSearchBoxTileItem() {
     // Populate 4 tile items.
     for (size_t i = 0; i < 4; i++) {
-      auto search_result = std::make_unique<app_list::SearchResult>();
-      search_result->set_display_type(ash::SearchResultDisplayType::kTile);
+      auto search_result = std::make_unique<SearchResult>();
+      search_result->set_display_type(SearchResultDisplayType::kTile);
       search_model_->results()->Add(std::move(search_result));
     }
     GetAppListTestHelper()->WaitUntilIdle();
 
-    app_list::SearchResultContainerView* search_result_container_view =
+    SearchResultContainerView* search_result_container_view =
         Shell::Get()
             ->app_list_controller()
             ->presenter()
@@ -135,7 +143,7 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
             ->app_list_main_view()
             ->contents_view()
             ->search_results_page_view()
-            ->result_container_views()[1];
+            ->result_container_views()[0];
 
     // Request focus on the first tile item view.
     search_result_container_view->GetFirstResultView()->RequestFocus();
@@ -147,14 +155,14 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
   void PopulateAndLaunchSuggestionChip() {
     // Populate 4 suggestion chips.
     for (size_t i = 0; i < 4; i++) {
-      auto search_result_chip = std::make_unique<app_list::SearchResult>();
-      search_result_chip->set_display_type(
-          ash::SearchResultDisplayType::kRecommendation);
+      auto search_result_chip = std::make_unique<SearchResult>();
+      search_result_chip->set_display_type(SearchResultDisplayType::kTile);
+      search_result_chip->set_is_recommendation(true);
       search_model_->results()->Add(std::move(search_result_chip));
     }
     GetAppListTestHelper()->WaitUntilIdle();
 
-    app_list::SearchResultContainerView* suggestions_container_ =
+    SearchResultContainerView* suggestions_container_ =
         Shell::Get()
             ->app_list_controller()
             ->presenter()
@@ -176,7 +184,7 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
     // Populate apps in the root app grid.
     app_list_test_model_->PopulateApps(4);
 
-    app_list::AppListView::TestApi test_api(
+    AppListView::TestApi test_api(
         Shell::Get()->app_list_controller()->presenter()->GetView());
 
     // Focus the first item in the root app grid.
@@ -187,8 +195,9 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
   }
 
  private:
-  app_list::SearchModel* search_model_ = nullptr;
-  app_list::test::AppListTestModel* app_list_test_model_ = nullptr;
+  SearchModel* search_model_ = nullptr;
+  test::AppListTestModel* app_list_test_model_ = nullptr;
+  std::unique_ptr<ShelfViewTestAPI> shelf_test_api_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListAppLaunchedMetricTest);
 };
@@ -199,11 +208,11 @@ TEST_F(AppListAppLaunchedMetricTest, HalfLaunchFromShelf) {
   base::HistogramTester histogram_tester;
 
   GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplayId());
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kPeeking);
+  GetAppListTestHelper()->CheckState(AppListViewState::kPeeking);
 
   // Press a letter key, the AppListView should transition to kHalf.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_H, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kHalf);
+  GetAppListTestHelper()->CheckState(AppListViewState::kHalf);
 
   CreateAndClickShelfItem();
   GetAppListTestHelper()->WaitUntilIdle();
@@ -219,11 +228,11 @@ TEST_F(AppListAppLaunchedMetricTest, HalfLaunchFromSearchBox) {
   base::HistogramTester histogram_tester;
 
   GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplayId());
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kPeeking);
+  GetAppListTestHelper()->CheckState(AppListViewState::kPeeking);
 
   // Press a letter key, the AppListView should transition to kHalf.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_H, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kHalf);
+  GetAppListTestHelper()->CheckState(AppListViewState::kHalf);
 
   PopulateAndLaunchSearchBoxTileItem();
 
@@ -241,11 +250,11 @@ TEST_F(AppListAppLaunchedMetricTest, FullscreenSearchLaunchFromSearchBox) {
 
   // Press search + shift to transition to kFullscreenAllApps.
   generator->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH, ui::EF_SHIFT_DOWN);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   // Press a letter key, the AppListView should transition to kFullscreenSearch.
   generator->PressKey(ui::KeyboardCode::VKEY_H, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenSearch);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenSearch);
 
   PopulateAndLaunchSearchBoxTileItem();
 
@@ -264,11 +273,11 @@ TEST_F(AppListAppLaunchedMetricTest, FullscreenSearchLaunchFromShelf) {
 
   // Press search + shift to transition to kFullscreenAllApps.
   generator->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH, ui::EF_SHIFT_DOWN);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   // Press a letter key, the AppListView should transition to kFullscreenSearch.
   generator->PressKey(ui::KeyboardCode::VKEY_H, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenSearch);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenSearch);
 
   CreateAndClickShelfItem();
 
@@ -286,7 +295,7 @@ TEST_F(AppListAppLaunchedMetricTest, FullscreenAllAppsLaunchFromChip) {
   // Press search + shift to transition to kFullscreenAllApps.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH,
                                 ui::EF_SHIFT_DOWN);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   PopulateAndLaunchSuggestionChip();
 
@@ -304,7 +313,7 @@ TEST_F(AppListAppLaunchedMetricTest, FullscreenAllAppsLaunchFromGrid) {
   // Press search + shift to transition to kFullscreenAllApps.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH,
                                 ui::EF_SHIFT_DOWN);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   PopulateAndLaunchAppInGrid();
 
@@ -322,7 +331,7 @@ TEST_F(AppListAppLaunchedMetricTest, FullscreenAllAppsLaunchFromShelf) {
   // Press search + shift to transition to kFullscreenAllApps.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH,
                                 ui::EF_SHIFT_DOWN);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   CreateAndClickShelfItem();
 
@@ -338,7 +347,7 @@ TEST_F(AppListAppLaunchedMetricTest, PeekingLaunchFromShelf) {
   base::HistogramTester histogram_tester;
 
   GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplayId());
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kPeeking);
+  GetAppListTestHelper()->CheckState(AppListViewState::kPeeking);
 
   CreateAndClickShelfItem();
 
@@ -354,7 +363,7 @@ TEST_F(AppListAppLaunchedMetricTest, PeekingLaunchFromChip) {
   base::HistogramTester histogram_tester;
 
   GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplayId());
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kPeeking);
+  GetAppListTestHelper()->CheckState(AppListViewState::kPeeking);
 
   PopulateAndLaunchSuggestionChip();
 
@@ -369,7 +378,7 @@ TEST_F(AppListAppLaunchedMetricTest, PeekingLaunchFromChip) {
 TEST_F(AppListAppLaunchedMetricTest, ClosedLaunchFromShelf) {
   base::HistogramTester histogram_tester;
 
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kClosed);
+  GetAppListTestHelper()->CheckState(AppListViewState::kClosed);
 
   CreateAndClickShelfItem();
 
@@ -380,11 +389,11 @@ TEST_F(AppListAppLaunchedMetricTest, ClosedLaunchFromShelf) {
 
   // Open the launcher to peeking.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kPeeking);
+  GetAppListTestHelper()->CheckState(AppListViewState::kPeeking);
 
   // Close launcher back to closed.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_BROWSER_SEARCH, 0);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kClosed);
+  GetAppListTestHelper()->CheckState(AppListViewState::kClosed);
 
   ClickShelfItem();
 
@@ -400,7 +409,7 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherAllAppsLaunchFromShelf) {
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   base::HistogramTester histogram_tester;
 
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   CreateAndClickShelfItem();
 
@@ -417,7 +426,7 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherAllAppsLaunchFromGrid) {
 
   // Enable tablet mode.
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   PopulateAndLaunchAppInGrid();
 
@@ -435,7 +444,7 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherAllAppsLaunchFromChip) {
   GetAppListTestHelper()->WaitUntilIdle();
   // Enable tablet mode.
   Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenAllApps);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenAllApps);
 
   PopulateAndLaunchSuggestionChip();
 
@@ -457,7 +466,7 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherSearchLaunchFromShelf) {
   // Press a letter key, the AppListView should transition to kFullscreenSearch.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_H, 0);
   GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenSearch);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenSearch);
 
   CreateAndClickShelfItem();
 
@@ -479,7 +488,7 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherSearchLaunchFromSearchBox) {
   // Press a letter key, the AppListView should transition to kFullscreenSearch.
   GetEventGenerator()->PressKey(ui::KeyboardCode::VKEY_H, 0);
   GetAppListTestHelper()->WaitUntilIdle();
-  GetAppListTestHelper()->CheckState(ash::AppListViewState::kFullscreenSearch);
+  GetAppListTestHelper()->CheckState(AppListViewState::kFullscreenSearch);
 
   // Populate search box with tile items and launch a tile item.
   PopulateAndLaunchSearchBoxTileItem();
@@ -488,6 +497,84 @@ TEST_F(AppListAppLaunchedMetricTest, HomecherSearchLaunchFromSearchBox) {
       "Apps.AppListAppLaunchedV2.HomecherSearch",
       AppListLaunchedFrom::kLaunchedFromSearchBox,
       1 /* Number of times launched from search box */);
+}
+
+class AppListShowSourceMetricTest : public AshTestBase {
+ public:
+  AppListShowSourceMetricTest() = default;
+  ~AppListShowSourceMetricTest() override = default;
+
+ protected:
+  void ClickHomeButton() {
+    HomeButton* home_button =
+        GetPrimaryShelf()->navigation_widget()->GetHomeButton();
+    gfx::Point center = home_button->GetCenterPoint();
+    views::View::ConvertPointToScreen(home_button, &center);
+    GetEventGenerator()->MoveMouseTo(center);
+    GetEventGenerator()->ClickLeftButton();
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(AppListShowSourceMetricTest);
+};
+
+// In tablet mode, test that AppListShowSource metric is only recorded when
+// pressing home button when not already home. Any presses on the home button
+// when already home should do nothing.
+TEST_F(AppListShowSourceMetricTest, TabletInAppToHome) {
+  base::HistogramTester histogram_tester;
+
+  // Enable accessibility feature that forces home button to be shown even with
+  // kHideShelfControlsInTabletMode enabled.
+  // TODO(https://crbug.com/1050544) Use the a11y feature specific to showing
+  // navigation buttons in tablet mode once it lands.
+  Shell::Get()->accessibility_controller()->SetAutoclickEnabled(true);
+
+  std::unique_ptr<views::Widget> widget = CreateTestWidget();
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+
+  ClickHomeButton();
+  histogram_tester.ExpectBucketCount(
+      kAppListToggleMethodHistogram, kShelfButton,
+      1 /* Number of times app list is shown with a shelf button */);
+  histogram_tester.ExpectBucketCount(
+      kAppListToggleMethodHistogram, kTabletMode,
+      0 /* Number of times app list is shown by tablet mode transition */);
+
+  GetAppListTestHelper()->CheckVisibility(true);
+
+  // Ensure that any subsequent clicks while already at home do not count as
+  // showing the app list.
+  ClickHomeButton();
+  histogram_tester.ExpectBucketCount(
+      kAppListToggleMethodHistogram, kShelfButton,
+      1 /* Number of times app list shown with a shelf button */);
+  histogram_tester.ExpectTotalCount(kAppListToggleMethodHistogram, 1);
+}
+
+// Ensure that app list is not recorded as shown when going to tablet mode with
+// a window open.
+TEST_F(AppListShowSourceMetricTest, TabletModeWithWindowOpen) {
+  base::HistogramTester histogram_tester;
+
+  std::unique_ptr<views::Widget> widget = CreateTestWidget();
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  GetAppListTestHelper()->CheckVisibility(false);
+
+  // Ensure that no AppListShowSource metric was recoreded.
+  histogram_tester.ExpectTotalCount(kAppListToggleMethodHistogram, 0);
+}
+
+// Ensure that app list is recorded as shown when going to tablet mode with no
+// other windows open.
+TEST_F(AppListShowSourceMetricTest, TabletModeWithNoWindowOpen) {
+  base::HistogramTester histogram_tester;
+
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
+  GetAppListTestHelper()->CheckVisibility(true);
+
+  histogram_tester.ExpectBucketCount(
+      kAppListToggleMethodHistogram, kTabletMode,
+      1 /* Number of times app list shown after entering tablet mode */);
 }
 
 }  // namespace ash

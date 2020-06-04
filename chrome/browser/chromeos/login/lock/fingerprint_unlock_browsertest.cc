@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 
-#include "base/test/simple_test_clock.cc"
+#include "base/test/simple_test_clock.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
@@ -61,8 +61,8 @@ class FingerprintUnlockTest : public InProcessBrowserTest {
   void EnrollFingerprint() {
     FakeBiodClient::Get()->StartEnrollSession(
         "test-user", std::string(),
-        base::BindRepeating(&FingerprintUnlockTest::OnStartSession,
-                            base::Unretained(this)));
+        base::BindOnce(&FingerprintUnlockTest::OnStartSession,
+                       base::Unretained(this)));
     if (!fingerprint_session_started_) {
       base::RunLoop run_loop;
       fingerprint_session_callback_ = run_loop.QuitClosure();
@@ -201,9 +201,6 @@ IN_PROC_BROWSER_TEST_F(FingerprintUnlockTest, FingerprintTimedOutTest) {
             session_manager::SessionManager::Get()->session_state());
   EXPECT_EQ(0, FakeSessionManagerClient::Get()
                    ->notify_lock_screen_dismissed_call_count());
-
-  // Auth Error button should be visible as fingerprint has expired.
-  EXPECT_TRUE(tester.IsAuthErrorBubbleShown());
 }
 
 IN_PROC_BROWSER_TEST_F(FingerprintUnlockTest, TimeoutIncludesSuspendedTime) {
@@ -230,9 +227,6 @@ IN_PROC_BROWSER_TEST_F(FingerprintUnlockTest, TimeoutIncludesSuspendedTime) {
             session_manager::SessionManager::Get()->session_state());
   EXPECT_EQ(0, FakeSessionManagerClient::Get()
                    ->notify_lock_screen_dismissed_call_count());
-
-  // Auth Error button should be visible as fingerprint has expired.
-  EXPECT_TRUE(tester.IsAuthErrorBubbleShown());
 }
 
 }  // namespace chromeos

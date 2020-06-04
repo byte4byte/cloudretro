@@ -15,16 +15,17 @@
 #include "base/memory/weak_ptr.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "google_apis/gaia/core_account_id.h"
 
 namespace enterprise_management {
 class DeviceManagementResponse;
 }
 
-namespace identity {
+namespace signin {
 class AccessTokenFetcher;
 class IdentityManager;
 struct AccessTokenInfo;
-}  // namespace identity
+}  // namespace signin
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -35,7 +36,7 @@ class GoogleServiceAuthError;
 namespace policy {
 
 // Interacts with the device management service and determines whether Android
-// management is enabled for the user or not. Uses the OAuth2TokenService to
+// management is enabled for the user or not. Uses the IdentityManager to
 // acquire access tokens for the device management.
 class AndroidManagementClient {
  public:
@@ -52,12 +53,12 @@ class AndroidManagementClient {
   AndroidManagementClient(
       DeviceManagementService* service,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      const std::string& account_id,
-      identity::IdentityManager* identity_manager);
+      const CoreAccountId& account_id,
+      signin::IdentityManager* identity_manager);
   ~AndroidManagementClient();
 
   // Starts sending of check Android management request to DM server, issues
-  // access token if neccessary. |callback| is called on check Android
+  // access token if necessary. |callback| is called on check Android
   // management completion.
   void StartCheckAndroidManagement(const StatusCallback& callback);
 
@@ -67,7 +68,7 @@ class AndroidManagementClient {
 
  private:
   void OnAccessTokenFetchComplete(GoogleServiceAuthError error,
-                                  identity::AccessTokenInfo token_info);
+                                  signin::AccessTokenInfo token_info);
 
   // Requests an access token.
   void RequestAccessToken();
@@ -88,14 +89,14 @@ class AndroidManagementClient {
   std::unique_ptr<DeviceManagementService::Job> request_job_;
 
   // The account ID that will be used for the access token fetch.
-  const std::string account_id_;
+  const CoreAccountId account_id_;
 
-  identity::IdentityManager* identity_manager_;
-  std::unique_ptr<identity::AccessTokenFetcher> access_token_fetcher_;
+  signin::IdentityManager* identity_manager_;
+  std::unique_ptr<signin::AccessTokenFetcher> access_token_fetcher_;
 
   StatusCallback callback_;
 
-  base::WeakPtrFactory<AndroidManagementClient> weak_ptr_factory_;
+  base::WeakPtrFactory<AndroidManagementClient> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AndroidManagementClient);
 };

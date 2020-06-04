@@ -20,8 +20,10 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/network_isolation_key.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/http/http_auth.h"
@@ -60,7 +62,7 @@ class TestingProfileWithNetworkContext : public TestingProfile {
   explicit TestingProfileWithNetworkContext(
       network::NetworkService* network_service) {
     auto network_context = std::make_unique<network::NetworkContext>(
-        network_service, mojo::MakeRequest(&network_context_ptr_),
+        network_service, network_context_remote_.BindNewPipeAndPassReceiver(),
         network::mojom::NetworkContextParams::New());
     network_context_ = network_context.get();
     SetNetworkContext(std::move(network_context));
@@ -69,7 +71,7 @@ class TestingProfileWithNetworkContext : public TestingProfile {
   network::NetworkContext* network_context() { return network_context_; }
 
  private:
-  network::mojom::NetworkContextPtr network_context_ptr_;
+  mojo::Remote<network::mojom::NetworkContext> network_context_remote_;
   network::NetworkContext* network_context_;
 };
 
@@ -105,11 +107,11 @@ class ProfileAuthDataTest : public testing::Test {
                               const std::string& proxy_auth_password,
                               const std::string& cookie_value);
 
-  net::HttpAuthCache* GetProxyAuth(network::NetworkContext* network_context);
+  net::HttpAuthCache* GetAuthCache(network::NetworkContext* network_context);
   network::mojom::CookieManager* GetCookies(
       content::BrowserContext* browser_context);
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   network::NetworkService* network_service_;
   TestingProfileWithNetworkContext login_browser_context_;
@@ -167,9 +169,10 @@ net::CookieList ProfileAuthDataTest::GetUserCookies() {
 
 void ProfileAuthDataTest::VerifyTransferredUserProxyAuthEntry() {
   net::HttpAuthCache::Entry* entry =
-      GetProxyAuth(user_browser_context_.network_context())
-          ->Lookup(GURL(kProxyAuthURL), kProxyAuthRealm,
-                   net::HttpAuth::AUTH_SCHEME_BASIC);
+      GetAuthCache(user_browser_context_.network_context())
+          ->Lookup(GURL(kProxyAuthURL), net::HttpAuth::AUTH_PROXY,
+                   kProxyAuthRealm, net::HttpAuth::AUTH_SCHEME_BASIC,
+                   net::NetworkIsolationKey());
   ASSERT_TRUE(entry);
   EXPECT_EQ(base::ASCIIToUTF16(kProxyAuthPassword1),
             entry->credentials().password());
@@ -202,9 +205,10 @@ void ProfileAuthDataTest::PopulateBrowserContext(
     TestingProfileWithNetworkContext* browser_context,
     const std::string& proxy_auth_password,
     const std::string& cookie_value) {
-  GetProxyAuth(browser_context->network_context())
-      ->Add(GURL(kProxyAuthURL), kProxyAuthRealm,
-            net::HttpAuth::AUTH_SCHEME_BASIC, kProxyAuthChallenge,
+  GetAuthCache(browser_context->network_context())
+      ->Add(GURL(kProxyAuthURL), net::HttpAuth::AUTH_PROXY, kProxyAuthRealm,
+            net::HttpAuth::AUTH_SCHEME_BASIC, net::NetworkIsolationKey(),
+            kProxyAuthChallenge,
             net::AuthCredentials(base::string16(),
                                  base::ASCIIToUTF16(proxy_auth_password)),
             std::string());
@@ -224,24 +228,24 @@ void ProfileAuthDataTest::PopulateBrowserContext(
           kSAMLIdPCookieDomainWithWildcard, std::string(), base::Time(),
           base::Time(), base::Time(), true, false,
           net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT),
-      "https", options, base::DoNothing());
+      GURL(kSAMLIdPCookieURL), options, base::DoNothing());
 
   cookies->SetCanonicalCookie(
       *net::CanonicalCookie::CreateSanitizedCookie(
           GURL(kSAMLIdPCookieURL), kCookieName, cookie_value, std::string(),
           std::string(), base::Time(), base::Time(), base::Time(), true, false,
           net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT),
-      "https", options, base::DoNothing());
+      GURL(kSAMLIdPCookieURL), options, base::DoNothing());
 
   cookies->SetCanonicalCookie(
       *net::CanonicalCookie::CreateSanitizedCookie(
           GURL(kGAIACookieURL), kCookieName, cookie_value, std::string(),
           std::string(), base::Time(), base::Time(), base::Time(), true, false,
           net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT),
-      "https", options, base::DoNothing());
+      GURL(kGAIACookieURL), options, base::DoNothing());
 }
 
-net::HttpAuthCache* ProfileAuthDataTest::GetProxyAuth(
+net::HttpAuthCache* ProfileAuthDataTest::GetAuthCache(
     network::NetworkContext* network_context) {
   return network_context->url_request_context()
       ->http_transaction_factory()

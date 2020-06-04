@@ -5,8 +5,10 @@
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 
 #include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/multi_user_window_manager.h"
 #include "ash/public/cpp/resources/grit/ash_public_unscaled_resources.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "chrome/browser/ui/ash/window_properties.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -16,7 +18,7 @@
 #include "chrome/browser/ui/settings_window_manager_observer_chromeos.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
-#include "chrome/browser/ui/web_applications/system_web_app_ui_utils_chromeos.h"
+#include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -25,6 +27,21 @@
 #include "url/gurl.h"
 
 namespace chrome {
+
+namespace {
+
+// This method handles the case of resurfacing the user's OS Settings
+// standalone window that may be at the time located on another user's desktop.
+void ShowSettingsOnCurrentDesktop(Browser* browser) {
+  auto* window_manager = MultiUserWindowManagerHelper::GetWindowManager();
+  if (window_manager && browser) {
+    window_manager->ShowWindowForUser(browser->window()->GetNativeWindow(),
+                                      window_manager->CurrentAccountId());
+    browser->window()->Show();
+  }
+}
+
+}  // namespace
 
 // static
 SettingsWindowManager* SettingsWindowManager::GetInstance() {
@@ -54,6 +71,7 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
     bool did_create;
     Browser* browser = web_app::LaunchSystemWebApp(
         profile, web_app::SystemAppType::SETTINGS, gurl, &did_create);
+    ShowSettingsOnCurrentDesktop(browser);
     // Only notify if we created a new browser.
     if (!did_create || !browser)
       return;
@@ -130,14 +148,19 @@ Browser* SettingsWindowManager::FindBrowserForProfile(Profile* profile) {
 }
 
 bool SettingsWindowManager::IsSettingsBrowser(Browser* browser) const {
+  DCHECK(browser);
+
   Profile* profile = browser->profile();
   if (web_app::SystemWebAppManager::IsEnabled()) {
+    if (!browser->app_controller() || !browser->app_controller()->HasAppId())
+      return false;
+
     // TODO(calamity): Determine whether, during startup, we need to wait for
     // app install and then provide a valid answer here.
     base::Optional<std::string> settings_app_id =
         web_app::GetAppIdForSystemWebApp(profile,
                                          web_app::SystemAppType::SETTINGS);
-    return settings_app_id && browser->app_controller() &&
+    return settings_app_id &&
            browser->app_controller()->GetAppId() == settings_app_id.value();
   } else {
     auto iter = settings_session_map_.find(profile);

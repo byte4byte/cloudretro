@@ -4,16 +4,19 @@
 
 #include "android_webview/browser/aw_autofill_client.h"
 
+#include <utility>
+
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_contents.h"
 #include "android_webview/browser/aw_form_database_service.h"
-#include "android_webview/native_jni/AwAutofillClient_jni.h"
+#include "android_webview/browser_jni_headers/AwAutofillClient_jni.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/ui/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -36,7 +39,7 @@ using content::WebContents;
 namespace android_webview {
 
 AwAutofillClient::~AwAutofillClient() {
-  HideAutofillPopup();
+  HideAutofillPopup(autofill::PopupHidingReason::kTabGone);
 }
 
 void AwAutofillClient::SetSaveFormData(bool enabled) {
@@ -66,7 +69,7 @@ syncer::SyncService* AwAutofillClient::GetSyncService() {
   return nullptr;
 }
 
-identity::IdentityManager* AwAutofillClient::GetIdentityManager() {
+signin::IdentityManager* AwAutofillClient::GetIdentityManager() {
   return nullptr;
 }
 
@@ -123,7 +126,7 @@ void AwAutofillClient::ShowLocalCardMigrationDialog(
 }
 
 void AwAutofillClient::ConfirmMigrateLocalCardToCloud(
-    std::unique_ptr<base::DictionaryValue> legal_message,
+    const autofill::LegalMessageLines& legal_message_lines,
     const std::string& user_email,
     const std::vector<autofill::MigratableCreditCard>& migratable_credit_cards,
     LocalCardMigrationCallback start_migrating_cards_callback) {
@@ -136,14 +139,6 @@ void AwAutofillClient::ShowLocalCardMigrationResults(
     const std::vector<autofill::MigratableCreditCard>& migratable_credit_cards,
     MigrationDeleteCardCallback delete_local_card_callback) {
   NOTIMPLEMENTED();
-}
-
-void AwAutofillClient::ConfirmSaveAutofillProfile(
-    const autofill::AutofillProfile& profile,
-    base::OnceClosure callback) {
-  // Since there is no confirmation needed to save an Autofill Profile,
-  // running |callback| will proceed with saving |profile|.
-  std::move(callback).Run();
 }
 
 void AwAutofillClient::ConfirmSaveCreditCardLocally(
@@ -167,7 +162,7 @@ void AwAutofillClient::ConfirmExpirationDateFixFlow(
 
 void AwAutofillClient::ConfirmSaveCreditCardToCloud(
     const autofill::CreditCard& card,
-    std::unique_ptr<base::DictionaryValue> legal_message,
+    const autofill::LegalMessageLines& legal_message_lines,
     SaveCreditCardOptions options,
     UploadSaveCardPromptCallback callback) {
   NOTIMPLEMENTED();
@@ -187,7 +182,7 @@ bool AwAutofillClient::HasCreditCardScanFeature() {
   return false;
 }
 
-void AwAutofillClient::ScanCreditCard(const CreditCardScanCallback& callback) {
+void AwAutofillClient::ScanCreditCard(CreditCardScanCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -219,7 +214,23 @@ void AwAutofillClient::UpdateAutofillPopupDataListValues(
   // See crrev.com/18102002 if need to implement.
 }
 
-void AwAutofillClient::HideAutofillPopup() {
+base::span<const autofill::Suggestion> AwAutofillClient::GetPopupSuggestions()
+    const {
+  NOTIMPLEMENTED();
+  return base::span<const autofill::Suggestion>();
+}
+
+void AwAutofillClient::PinPopupView() {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::UpdatePopup(
+    const std::vector<autofill::Suggestion>& suggestions,
+    autofill::PopupType popup_type) {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::HideAutofillPopup(autofill::PopupHidingReason reason) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -253,13 +264,12 @@ bool AwAutofillClient::IsContextSecure() {
     return false;
 
   ssl_status = navigation_entry->GetSSL();
-  // Note: The implementation below is a copy of the one in
-  // ChromeAutofillClient::IsContextSecure, and should be kept in sync
-  // until crbug.com/505388 gets implemented.
+  // Note: As of crbug.com/701018, Chrome relies on SecurityStateTabHelper to
+  // determine whether the page is secure, but WebView has no equivalent class.
+
   return navigation_entry->GetURL().SchemeIsCryptographic() &&
          ssl_status.certificate &&
-         (!net::IsCertStatusError(ssl_status.cert_status) ||
-          net::IsCertStatusMinorError(ssl_status.cert_status)) &&
+         !net::IsCertStatusError(ssl_status.cert_status) &&
          !(ssl_status.content_status &
            content::SSLStatus::RAN_INSECURE_CONTENT);
 }

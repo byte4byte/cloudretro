@@ -13,7 +13,7 @@ import android.view.View;
 import android.widget.ImageView;
 
 import org.chromium.chrome.download.R;
-import org.chromium.ui.widget.RoundedCornerImageView;
+import org.chromium.components.browser_ui.widget.RoundedCornerImageView;
 
 /** Helper class that adds foreground drawable support to {@code RoundedCornerImageView}. */
 public class ForegroundRoundedCornerImageView extends RoundedCornerImageView {

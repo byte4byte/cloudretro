@@ -5,12 +5,15 @@
 #import "ios/chrome/browser/ui/download/download_manager_view_controller.h"
 
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
+#include "ios/chrome/browser/download/download_manager_metric_names.h"
 #include "ios/chrome/browser/ui/download/download_manager_animation_constants.h"
 #import "ios/chrome/browser/ui/download/download_manager_state_view.h"
 #import "ios/chrome/browser/ui/download/radial_progress_view.h"
-#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/images/branded_image_provider.h"
@@ -100,9 +103,6 @@ NSString* GetSizeString(long long size_in_bytes) {
 // self.closeButton or to self.actionButton (when visible).
 @property(nonatomic) NSLayoutConstraint* statusLabelTrailingConstraint;
 
-// UILayoutGuide for action button. Used in delegate callbacks.
-@property(nonatomic) UILayoutGuide* actionButtonGuide;
-
 // UILayoutGuide for adding bottom margin to Download Manager view.
 @property(nonatomic) UILayoutGuide* bottomMarginGuide;
 
@@ -127,7 +127,6 @@ NSString* GetSizeString(long long size_in_bytes) {
 @synthesize installDriveControlsRowTrailingConstraint =
     _installDriveControlsRowTrailingConstraint;
 @synthesize statusLabelTrailingConstraint = _statusLabelTrailingConstraint;
-@synthesize actionButtonGuide = _actionButtonGuide;
 @synthesize bottomMarginGuide = _bottomMarginGuide;
 
 #pragma mark - UIViewController overrides
@@ -148,8 +147,6 @@ NSString* GetSizeString(long long size_in_bytes) {
   [self.installDriveControlsRow addSubview:self.installDriveLabel];
   [self.installDriveControlsRow addSubview:self.horizontalLine];
 
-  self.actionButtonGuide = [[UILayoutGuide alloc] init];
-  [self.view addLayoutGuide:self.actionButtonGuide];
   self.bottomMarginGuide = [[UILayoutGuide alloc] init];
   [self.view addLayoutGuide:self.bottomMarginGuide];
 }
@@ -309,9 +306,6 @@ NSString* GetSizeString(long long size_in_bytes) {
         constraintEqualToAnchor:installDriveRow.trailingAnchor],
   ]];
 
-  // constraint actionButtonGuide to action button.
-  AddSameConstraints(self.actionButtonGuide, actionButton);
-
   [self updateConstraintsForTraitCollection:self.traitCollection];
 
   _addedConstraints = YES;
@@ -419,8 +413,10 @@ NSString* GetSizeString(long long size_in_bytes) {
     _closeButton.exclusiveTouch = YES;
     _closeButton.accessibilityLabel = l10n_util::GetNSString(IDS_CLOSE);
 
-    UIImage* image = [UIImage imageNamed:@"download_close"];
+    UIImage* image = [[UIImage imageNamed:@"download_close"]
+        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     [_closeButton setImage:image forState:UIControlStateNormal];
+    _closeButton.tintColor = [UIColor colorNamed:kToolbarButtonColor];
 
     [_closeButton addTarget:self
                      action:@selector(didTapCloseButton)
@@ -433,8 +429,8 @@ NSString* GetSizeString(long long size_in_bytes) {
   if (!_stateIcon) {
     _stateIcon = [[DownloadManagerStateView alloc] initWithFrame:CGRectZero];
     _stateIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    _stateIcon.downloadColor = [MDCPalette bluePalette].tint600;
-    _stateIcon.documentColor = [MDCPalette greyPalette].tint700;
+    _stateIcon.downloadColor = [UIColor colorNamed:kBlueColor];
+    _stateIcon.documentColor = [UIColor colorNamed:kGrey400Color];
     [self updateStateIcon];
   }
   return _stateIcon;
@@ -461,7 +457,7 @@ NSString* GetSizeString(long long size_in_bytes) {
     _actionButton.translatesAutoresizingMaskIntoConstraints = NO;
     _actionButton.exclusiveTouch = YES;
     _actionButton.titleLabel.font = [MDCTypography buttonFont];
-    [_actionButton setTitleColor:[MDCPalette bluePalette].tint600
+    [_actionButton setTitleColor:[UIColor colorNamed:kBlueColor]
                         forState:UIControlStateNormal];
 
     [_actionButton addTarget:self
@@ -478,7 +474,7 @@ NSString* GetSizeString(long long size_in_bytes) {
     _installDriveButton.translatesAutoresizingMaskIntoConstraints = NO;
     _installDriveButton.exclusiveTouch = YES;
     _installDriveButton.titleLabel.font = [MDCTypography buttonFont];
-    [_installDriveButton setTitleColor:[MDCPalette bluePalette].tint600
+    [_installDriveButton setTitleColor:[UIColor colorNamed:kBlueColor]
                               forState:UIControlStateNormal];
 
     [_installDriveButton addTarget:self
@@ -519,8 +515,8 @@ NSString* GetSizeString(long long size_in_bytes) {
     _progressView = [[RadialProgressView alloc] initWithFrame:CGRectZero];
     _progressView.translatesAutoresizingMaskIntoConstraints = NO;
     _progressView.lineWidth = 2;
-    _progressView.progressTintColor = [MDCPalette bluePalette].tint600;
-    _progressView.trackTintColor = [MDCPalette greyPalette].tint300;
+    _progressView.progressTintColor = [UIColor colorNamed:kBlueColor];
+    _progressView.trackTintColor = [UIColor colorNamed:kBlueHaloColor];
     [self updateProgressView];
   }
   return _progressView;
@@ -530,7 +526,7 @@ NSString* GetSizeString(long long size_in_bytes) {
   if (!_horizontalLine) {
     _horizontalLine = [[UIView alloc] init];
     _horizontalLine.translatesAutoresizingMaskIntoConstraints = NO;
-    _horizontalLine.backgroundColor = [MDCPalette greyPalette].tint300;
+    _horizontalLine.backgroundColor = [UIColor colorNamed:kSeparatorColor];
   }
   return _horizontalLine;
 }
@@ -559,11 +555,9 @@ NSString* GetSizeString(long long size_in_bytes) {
       break;
     }
     case kDownloadManagerStateSucceeded: {
-      SEL selector = @selector
-          (downloadManagerViewController:presentOpenInMenuWithLayoutGuide:);
+      SEL selector = @selector(presentOpenInForDownloadManagerViewController:);
       if ([_delegate respondsToSelector:selector]) {
-        [_delegate downloadManagerViewController:self
-                presentOpenInMenuWithLayoutGuide:self.actionButtonGuide];
+        [_delegate presentOpenInForDownloadManagerViewController:self];
       }
       break;
     }
@@ -578,6 +572,10 @@ NSString* GetSizeString(long long size_in_bytes) {
 }
 
 - (void)didTapInstallDriveButton {
+  base::UmaHistogramEnumeration(
+      "Download.IOSDownloadFileUIGoogleDrive",
+      DownloadFileUIGoogleDrive::GoogleDriveInstallStarted,
+      DownloadFileUIGoogleDrive::Count);
   SEL selector = @selector(installDriveForDownloadManagerViewController:);
   if ([_delegate respondsToSelector:selector]) {
     [_delegate installDriveForDownloadManagerViewController:self];
@@ -615,7 +613,9 @@ NSString* GetSizeString(long long size_in_bytes) {
           ? @"background_regular"
           : @"background_compact";
 
-  UIImage* image = [UIImage imageNamed:imageName];
+  UIImage* image = [UIImage imageNamed:imageName
+                              inBundle:nil
+         compatibleWithTraitCollection:traitCollection];
   UIEdgeInsets insets = UIEdgeInsetsMake(
       kTopShadowHeight, kLeftRightShadowHeight, 0, kLeftRightShadowHeight);
 

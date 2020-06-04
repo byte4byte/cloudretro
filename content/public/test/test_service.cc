@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/run_loop.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "services/service_manager/sandbox/sandbox.h"
 
 namespace content {
 
@@ -31,9 +31,9 @@ void TestService::OnBindInterface(
   registry_.BindInterface(interface_name, std::move(interface_pipe));
 }
 
-void TestService::Create(mojom::TestServiceRequest request) {
-  DCHECK(!binding_.is_bound());
-  binding_.Bind(std::move(request));
+void TestService::Create(mojo::PendingReceiver<mojom::TestService> receiver) {
+  DCHECK(!receiver_.is_bound());
+  receiver_.Bind(std::move(receiver));
 }
 
 void TestService::DoSomething(DoSomethingCallback callback) {
@@ -57,9 +57,26 @@ void TestService::GetRequestorName(GetRequestorNameCallback callback) {
   std::move(callback).Run(requestor_name_);
 }
 
-void TestService::CreateSharedBuffer(const std::string& message,
-                                     CreateSharedBufferCallback callback) {
+void TestService::CreateReadOnlySharedMemoryRegion(
+    const std::string& message,
+    CreateReadOnlySharedMemoryRegionCallback callback) {
   NOTREACHED();
+}
+
+void TestService::CreateWritableSharedMemoryRegion(
+    const std::string& message,
+    CreateWritableSharedMemoryRegionCallback callback) {
+  NOTREACHED();
+}
+
+void TestService::CreateUnsafeSharedMemoryRegion(
+    const std::string& message,
+    CreateUnsafeSharedMemoryRegionCallback callback) {
+  NOTREACHED();
+}
+
+void TestService::IsProcessSandboxed(IsProcessSandboxedCallback callback) {
+  std::move(callback).Run(service_manager::Sandbox::IsProcessSandboxed());
 }
 
 }  // namespace content

@@ -2,10 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings_autofill_section', function() {
+// clang-format off
+import 'chrome://settings/settings.js';
+import {AutofillManagerImpl, CountryDetailManagerImpl} from 'chrome://settings/lazy_load.js';
+import {createAddressEntry, createEmptyAddressEntry, TestAutofillManager} from 'chrome://test/settings/passwords_and_autofill_fake_data.js';
+import {eventToPromise} from 'chrome://test/test_util.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// clang-format on
+
   /**
    * Test implementation.
-   * @implements {settings.address.CountryDetailManager}
+   * @implements {CountryDetailManager}
    * @constructor
    */
   function CountryDetailManagerTestImpl() {}
@@ -58,14 +66,14 @@ cr.define('settings_autofill_section', function() {
    */
   function createAutofillSection(addresses, prefValues) {
     // Override the AutofillManagerImpl for testing.
-    this.autofillManager = new TestAutofillManager();
-    this.autofillManager.data.addresses = addresses;
-    AutofillManagerImpl.instance_ = this.autofillManager;
+    const autofillManager = new TestAutofillManager();
+    autofillManager.data.addresses = addresses;
+    AutofillManagerImpl.instance_ = autofillManager;
 
     const section = document.createElement('settings-autofill-section');
     section.prefs = {autofill: prefValues};
     document.body.appendChild(section);
-    Polymer.dom.flush();
+    flush();
 
     return section;
   }
@@ -81,7 +89,7 @@ cr.define('settings_autofill_section', function() {
       const section = document.createElement('settings-address-edit-dialog');
       section.address = address;
       document.body.appendChild(section);
-      test_util.eventToPromise('on-update-address-wrapper', section)
+      eventToPromise('on-update-address-wrapper', section)
           .then(function() {
             resolve(section);
           });
@@ -97,7 +105,7 @@ cr.define('settings_autofill_section', function() {
 
       assertFalse(!!section.$$('#autofillExtensionIndicator'));
       section.set('prefs.autofill.profile_enabled.extensionId', 'test-id');
-      Polymer.dom.flush();
+      flush();
 
       assertTrue(!!section.$$('#autofillExtensionIndicator'));
     });
@@ -105,7 +113,7 @@ cr.define('settings_autofill_section', function() {
 
   suite('AutofillSectionAddressTests', function() {
     suiteSetup(function() {
-      settings.address.CountryDetailManagerImpl.instance_ =
+      CountryDetailManagerImpl.instance_ =
           new CountryDetailManagerTestImpl();
     });
 
@@ -153,11 +161,11 @@ cr.define('settings_autofill_section', function() {
 
     test('verifyAddressCount', function() {
       const addresses = [
-        FakeDataMaker.addressEntry(),
-        FakeDataMaker.addressEntry(),
-        FakeDataMaker.addressEntry(),
-        FakeDataMaker.addressEntry(),
-        FakeDataMaker.addressEntry(),
+        createAddressEntry(),
+        createAddressEntry(),
+        createAddressEntry(),
+        createAddressEntry(),
+        createAddressEntry(),
       ];
 
       const section =
@@ -182,7 +190,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyAddressFields', function() {
-      const address = FakeDataMaker.addressEntry();
+      const address = createAddressEntry();
       const section = createAutofillSection([address], {});
       const addressList = section.$.addressList;
       const row = addressList.children[0];
@@ -203,7 +211,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyAddressRowButtonIsDropdownWhenLocal', function() {
-      const address = FakeDataMaker.addressEntry();
+      const address = createAddressEntry();
       address.metadata.isLocal = true;
       const section = createAutofillSection([address], {});
       const addressList = section.$.addressList;
@@ -216,7 +224,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyAddressRowButtonIsOutlinkWhenRemote', function() {
-      const address = FakeDataMaker.addressEntry();
+      const address = createAddressEntry();
       address.metadata.isLocal = false;
       const section = createAutofillSection([address], {});
       const addressList = section.$.addressList;
@@ -229,7 +237,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyAddAddressDialog', function() {
-      return createAddressDialog(FakeDataMaker.emptyAddressEntry())
+      return createAddressDialog(createEmptyAddressEntry())
           .then(function(dialog) {
             const title = dialog.$$('[slot=title]');
             assertEquals(
@@ -240,7 +248,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyEditAddressDialog', function() {
-      return createAddressDialog(FakeDataMaker.addressEntry())
+      return createAddressDialog(createAddressEntry())
           .then(function(dialog) {
             const title = dialog.$$('[slot=title]');
             assertEquals(
@@ -252,21 +260,21 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyCountryIsSaved', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       return createAddressDialog(address).then(function(dialog) {
         const countrySelect = dialog.$$('select');
         assertEquals('', countrySelect.value);
         assertEquals(undefined, address.countryCode);
         countrySelect.value = 'US';
         countrySelect.dispatchEvent(new CustomEvent('change'));
-        Polymer.dom.flush();
+        flush();
         assertEquals('US', countrySelect.value);
         assertEquals('US', address.countryCode);
       });
     });
 
     test('verifyPhoneAndEmailAreSaved', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       return createAddressDialog(address).then(function(dialog) {
         assertEquals('', dialog.$.phoneInput.value);
         assertFalse(!!(address.phoneNumbers && address.phoneNumbers[0]));
@@ -293,7 +301,7 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyPhoneAndEmailAreRemoved', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
 
       const phoneNumber = '(555) 555-5555';
       const emailAddress = 'no-reply@chromium.org';
@@ -322,7 +330,7 @@ cr.define('settings_autofill_section', function() {
     // save button is enabled, then it will clear the field and verify that the
     // save button is disabled. Test passes after all elements have been tested.
     test('verifySaveIsNotClickableIfAllInputFieldsAreEmpty', function() {
-      return createAddressDialog(FakeDataMaker.emptyAddressEntry())
+      return createAddressDialog(createEmptyAddressEntry())
           .then(function(dialog) {
             const saveButton = dialog.$.saveButton;
             const testElements =
@@ -366,7 +374,7 @@ cr.define('settings_autofill_section', function() {
         countrySelect.dispatchEvent(new CustomEvent('change'));
       };
 
-      return createAddressDialog(FakeDataMaker.emptyAddressEntry())
+      return createAddressDialog(createEmptyAddressEntry())
           .then(function(d) {
             dialog = d;
             assertTrue(dialog.$.saveButton.disabled);
@@ -389,7 +397,7 @@ cr.define('settings_autofill_section', function() {
 
     // Test will timeout if save-address event is not fired.
     test('verifyDefaultCountryIsAppliedWhenSaving', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       address.fullNames = ['Name'];
       return createAddressDialog(address).then(function(dialog) {
         return expectEvent(dialog, 'save-address', function() {
@@ -404,15 +412,15 @@ cr.define('settings_autofill_section', function() {
     });
 
     test('verifyCancelDoesNotSaveAddress', function(done) {
-      createAddressDialog(FakeDataMaker.addressEntry())
+      createAddressDialog(createAddressEntry())
           .then(function(dialog) {
-            test_util.eventToPromise('save-address', dialog).then(function() {
+            eventToPromise('save-address', dialog).then(function() {
               // Fail the test because the save event should not be called when
               // cancel is clicked.
               assertTrue(false);
             });
 
-            test_util.eventToPromise('close', dialog).then(function() {
+            eventToPromise('close', dialog).then(function() {
               // Test is |done| in a timeout in order to ensure that
               // 'save-address' is NOT fired after this test.
               window.setTimeout(done, 100);
@@ -425,7 +433,7 @@ cr.define('settings_autofill_section', function() {
 
   suite('AutofillSectionAddressLocaleTests', function() {
     suiteSetup(function() {
-      settings.address.CountryDetailManagerImpl.instance_ =
+      CountryDetailManagerImpl.instance_ =
           new CountryDetailManagerTestImpl();
     });
 
@@ -435,7 +443,7 @@ cr.define('settings_autofill_section', function() {
 
     // US address has 3 fields on the same line.
     test('verifyEditingUSAddress', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       const company_enabled = loadTimeData.getBoolean('EnableCompanyName');
       address.fullNames = ['Name'];
       address.companyName = 'Organization';
@@ -499,7 +507,7 @@ cr.define('settings_autofill_section', function() {
 
     // GB address has 1 field per line for all lines that change.
     test('verifyEditingGBAddress', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       const company_enabled = loadTimeData.getBoolean('EnableCompanyName');
 
       address.fullNames = ['Name'];
@@ -568,7 +576,7 @@ cr.define('settings_autofill_section', function() {
     // IL address has 2 fields on the same line and is an RTL locale.
     // RTL locale shouldn't affect this test.
     test('verifyEditingILAddress', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       const company_enabled = loadTimeData.getBoolean('EnableCompanyName');
 
       address.fullNames = ['Name'];
@@ -632,7 +640,7 @@ cr.define('settings_autofill_section', function() {
     // US has an extra field 'State'. Validate that this field is
     // persisted when switching to IL then back to US.
     test('verifyAddressPersistanceWhenSwitchingCountries', function() {
-      const address = FakeDataMaker.emptyAddressEntry();
+      const address = createEmptyAddressEntry();
       const company_enabled = loadTimeData.getBoolean('EnableCompanyName');
       address.countryCode = 'US';
 
@@ -665,12 +673,13 @@ cr.define('settings_autofill_section', function() {
               return expectEvent(
                   dialog, 'on-update-address-wrapper', function() {
                     // IL:
-                    rows = dialog.$.dialog.querySelectorAll('.address-row');
+                    const rows =
+                        dialog.$.dialog.querySelectorAll('.address-row');
                     assertEquals(company_enabled ? 6 : 5, rows.length);
 
                     // City, Postal code
-                    row = rows[company_enabled ? 3 : 2];
-                    cols = row.querySelectorAll('.address-column');
+                    const row = rows[company_enabled ? 3 : 2];
+                    const cols = row.querySelectorAll('.address-column');
                     assertEquals(2, cols.length);
                     assertEquals(city, cols[0].value);
                     assertEquals(zip, cols[1].value);
@@ -685,8 +694,8 @@ cr.define('settings_autofill_section', function() {
               assertEquals(company_enabled ? 6 : 5, rows.length);
 
               // City, State, ZIP code
-              row = rows[company_enabled ? 3 : 2];
-              cols = row.querySelectorAll('.address-column');
+              const row = rows[company_enabled ? 3 : 2];
+              const cols = row.querySelectorAll('.address-column');
               assertEquals(3, cols.length);
               assertEquals(city, cols[0].value);
               assertEquals(state, cols[1].value);
@@ -695,4 +704,3 @@ cr.define('settings_autofill_section', function() {
       });
     });
   });
-});

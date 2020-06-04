@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.init;
 
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -32,7 +31,6 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.components.variations.firstrun.VariationsSeedFetcher;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
@@ -50,9 +48,10 @@ public class AsyncInitTaskRunnerTest {
 
     private VariationsSeedFetcher mVariationsSeedFetcher;
 
-    public AsyncInitTaskRunnerTest() throws ProcessInitException {
+    public AsyncInitTaskRunnerTest() {
+        LibraryLoader.getInstance().setLibraryProcessType(LibraryProcessType.PROCESS_BROWSER);
         mLoader = spy(LibraryLoader.getInstance());
-        doNothing().when(mLoader).ensureInitialized(anyInt());
+        doNothing().when(mLoader).ensureInitialized();
         LibraryLoader.setLibraryLoaderForTesting(mLoader);
         mVariationsSeedFetcher = mock(VariationsSeedFetcher.class);
         VariationsSeedFetcher.setVariationsSeedFetcherForTesting(mVariationsSeedFetcher);
@@ -65,7 +64,7 @@ public class AsyncInitTaskRunnerTest {
                 mLatch.countDown();
             }
             @Override
-            protected void onFailure() {
+            protected void onFailure(Exception failureCause) {
                 mLatch.countDown();
             }
             @Override
@@ -79,45 +78,43 @@ public class AsyncInitTaskRunnerTest {
     }
 
     @After
-    public void tearDown() throws InterruptedException {
+    public void tearDown() {
         PostTask.resetPrenativeThreadPoolExecutorForTesting();
     }
 
     @Test
-    public void libraryLoaderOnlyTest()
-            throws InterruptedException, ProcessInitException, ExecutionException {
+    public void libraryLoaderOnlyTest() throws InterruptedException {
         mRunner.startBackgroundTasks(false, false);
 
         Robolectric.flushBackgroundThreadScheduler();
         Robolectric.flushForegroundThreadScheduler();
         assertTrue(mLatch.await(0, TimeUnit.SECONDS));
-        verify(mLoader).ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        verify(mLoader).ensureInitialized();
         verify(mRunner).onSuccess();
         verify(mVariationsSeedFetcher, never()).fetchSeed(anyString(), anyString(), anyString());
     }
 
     @Test
-    public void libraryLoaderFailTest() throws InterruptedException, ProcessInitException {
-        doThrow(new ProcessInitException(LoaderErrors.LOADER_ERROR_NATIVE_LIBRARY_LOAD_FAILED))
-                .when(mLoader)
-                .ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+    public void libraryLoaderFailTest() throws InterruptedException {
+        Exception failureCause = new ProcessInitException(LoaderErrors.NATIVE_LIBRARY_LOAD_FAILED);
+        doThrow(failureCause).when(mLoader).ensureInitialized();
         mRunner.startBackgroundTasks(false, false);
 
         Robolectric.flushBackgroundThreadScheduler();
         Robolectric.flushForegroundThreadScheduler();
         assertTrue(mLatch.await(0, TimeUnit.SECONDS));
-        verify(mRunner).onFailure();
+        verify(mRunner).onFailure(failureCause);
         verify(mVariationsSeedFetcher, never()).fetchSeed(anyString(), anyString(), anyString());
     }
 
     @Test
-    public void fetchVariationsTest() throws InterruptedException, ProcessInitException {
+    public void fetchVariationsTest() throws InterruptedException {
         mRunner.startBackgroundTasks(false, true);
 
         Robolectric.flushBackgroundThreadScheduler();
         Robolectric.flushForegroundThreadScheduler();
         assertTrue(mLatch.await(0, TimeUnit.SECONDS));
-        verify(mLoader).ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        verify(mLoader).ensureInitialized();
         verify(mRunner).onSuccess();
         verify(mVariationsSeedFetcher).fetchSeed(anyString(), anyString(), anyString());
     }

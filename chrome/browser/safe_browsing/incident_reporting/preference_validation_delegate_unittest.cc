@@ -17,7 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/mock_incident_receiver.h"
-#include "components/safe_browsing/proto/csd.pb.h"
+#include "components/safe_browsing/core/proto/csd.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -147,8 +147,8 @@ class PreferenceValidationDelegateValues
       }
       case Value::Type::LIST: {
         Value value(base::Value::Type::LIST);
-        value.GetList().emplace_back(22);
-        value.GetList().emplace_back(47);
+        value.Append(22);
+        value.Append(47);
         return value;
       }
       default:

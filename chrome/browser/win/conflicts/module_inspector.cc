@@ -10,14 +10,14 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/win/conflicts/module_info_util.h"
+#include "chrome/browser/win/util_win_service.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/services/util_win/public/mojom/constants.mojom.h"
 #include "content/public/browser/browser_thread.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace {
 
@@ -81,18 +81,16 @@ constexpr base::Feature ModuleInspector::kWinOOPInspectModuleFeature;
 constexpr base::TimeDelta ModuleInspector::kFlushInspectionResultsTimerTimeout;
 
 ModuleInspector::ModuleInspector(
-    const OnModuleInspectedCallback& on_module_inspected_callback,
-    std::unique_ptr<service_manager::Connector> connector)
+    const OnModuleInspectedCallback& on_module_inspected_callback)
     : on_module_inspected_callback_(on_module_inspected_callback),
       is_after_startup_(false),
-      connector_(std::move(connector)),
-      inspection_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      inspection_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
       path_mapping_(GetPathMapping()),
-      cache_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      cache_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::BLOCK_SHUTDOWN})),
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
       inspection_results_cache_read_(false),
       flush_inspection_results_timer_(
           FROM_HERE,
@@ -103,9 +101,7 @@ ModuleInspector::ModuleInspector(
       has_new_inspection_results_(false),
       connection_error_retry_count_(kConnectionErrorRetryCount),
       background_inspection_disabled_(
-          base::FeatureList::IsEnabled(kDisableBackgroundModuleInspection)),
-      test_connector_(nullptr),
-      weak_ptr_factory_(this) {
+          base::FeatureList::IsEnabled(kDisableBackgroundModuleInspection)) {
   // Use BEST_EFFORT as those will only run after startup is finished.
   content::BrowserThread::PostBestEffortTask(
       FROM_HERE, base::SequencedTaskRunnerHandle::Get(),
@@ -132,7 +128,7 @@ void ModuleInspector::IncreaseInspectionPriority() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Create a task runner with higher priority so that future inspections are
   // done faster.
-  inspection_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+  inspection_task_runner_ = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
 
@@ -165,22 +161,15 @@ base::FilePath ModuleInspector::GetInspectionResultsCachePath() {
   return user_data_dir.Append(L"Module Info Cache");
 }
 
-void ModuleInspector::SetModuleInspectionResultForTesting(
-    const ModuleInfoKey& module_key,
-    ModuleInspectionResult inspection_result) {
-  AddInspectionResultToCache(module_key, inspection_result,
-                             &inspection_results_cache_);
-}
-
 void ModuleInspector::EnsureUtilWinServiceBound() {
   DCHECK(base::FeatureList::IsEnabled(kWinOOPInspectModuleFeature));
 
-  // Use the |test_connector_| if set.
-  service_manager::Connector* connector =
-      test_connector_ ? test_connector_ : connector_.get();
+  if (test_remote_util_win_ || remote_util_win_)
+    return;
 
-  connector->BindInterface(chrome::mojom::kUtilWinServiceName, &util_win_ptr_);
-  util_win_ptr_.set_connection_error_handler(
+  remote_util_win_ = LaunchUtilWinServiceInstance();
+  remote_util_win_.reset_on_idle_timeout(base::TimeDelta::FromSeconds(5));
+  remote_util_win_.set_disconnect_handler(
       base::BindOnce(&ModuleInspector::OnUtilWinServiceConnectionError,
                      base::Unretained(this)));
 
@@ -225,8 +214,8 @@ void ModuleInspector::OnUtilWinServiceConnectionError() {
 
   ReportConnectionError(true);
 
-  // Reset the pointer to the service.
-  util_win_ptr_ = nullptr;
+  // Disconnect from the service.
+  remote_util_win_.reset();
 
   // Restart inspection for the current module, only if the retry limit wasn't
   // reached.
@@ -258,13 +247,12 @@ void ModuleInspector::StartInspectingModule() {
   if (base::FeatureList::IsEnabled(kWinOOPInspectModuleFeature)) {
     EnsureUtilWinServiceBound();
 
-    // An unbound InterfacePtr at this point means the service is not available.
-    // This is only possible during shutdown. In this case, just dropping the
-    // request and stop processing new modules is fine.
-    if (!util_win_ptr_)
-      return;
+    // Use the test UtilWin remote if it exists.
+    chrome::mojom::UtilWin* util_win = test_remote_util_win_
+                                           ? test_remote_util_win_.get()
+                                           : remote_util_win_.get();
 
-    util_win_ptr_->InspectModule(
+    util_win->InspectModule(
         module_key.module_path,
         base::BindOnce(&ModuleInspector::OnModuleNewlyInspected,
                        weak_ptr_factory_.GetWeakPtr(), module_key));
@@ -317,13 +305,6 @@ void ModuleInspector::OnInspectionFinished(
   queue_.pop();
 
   on_module_inspected_callback_.Run(module_key, std::move(inspection_result));
-
-  // Free the pointer to the UtilWin service to clean up the utility process
-  // when it is no longer needed. While this code is only ever needed in the
-  // case the WinOOPInspectModule feature is enabled, it's faster to check the
-  // value of the pointer than to check the feature status.
-  if (queue_.empty() && util_win_ptr_)
-    util_win_ptr_ = nullptr;
 
   // Continue the work.
   if (!queue_.empty())

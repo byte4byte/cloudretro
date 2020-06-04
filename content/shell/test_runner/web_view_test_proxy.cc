@@ -7,26 +7,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "content/renderer/compositor/layer_tree_view.h"
+#include "content/shell/common/web_test/web_test_string_util.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/mock_screen_orientation_client.h"
-#include "content/shell/test_runner/test_common.h"
 #include "content/shell/test_runner/test_interfaces.h"
 #include "content/shell/test_runner/test_runner.h"
-#include "content/shell/test_runner/web_test_delegate.h"
-#include "content/shell/test_runner/web_test_interfaces.h"
-#include "content/shell/test_runner/web_widget_test_proxy.h"
+#include "content/shell/test_runner/web_frame_test_proxy.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_print_params.h"
 #include "third_party/blink/public/web/web_view.h"
 
-namespace test_runner {
+namespace content {
 
-void WebViewTestProxy::Initialize(WebTestInterfaces* interfaces,
-                                  std::unique_ptr<WebTestDelegate> delegate) {
-  delegate_ = std::move(delegate);
-  test_interfaces_ = interfaces->GetTestInterfaces();
+void WebViewTestProxy::Initialize(TestInterfaces* interfaces) {
+  test_interfaces_ = interfaces;
   test_interfaces()->WindowOpened(this);
 }
 
@@ -36,21 +32,23 @@ blink::WebView* WebViewTestProxy::CreateView(
     const blink::WebWindowFeatures& features,
     const blink::WebString& frame_name,
     blink::WebNavigationPolicy policy,
-    blink::WebSandboxFlags sandbox_flags,
+    network::mojom::WebSandboxFlags sandbox_flags,
     const blink::FeaturePolicy::FeatureState& opener_feature_state,
     const blink::SessionStorageNamespaceId& session_storage_namespace_id) {
-  if (GetTestRunner()->shouldDumpNavigationPolicy()) {
-    delegate()->PrintMessage("Default policy for createView for '" +
-                             URLDescription(request.Url()) + "' is '" +
-                             WebNavigationPolicyToString(policy) + "'\n");
+  if (GetTestRunner()->ShouldDumpNavigationPolicy()) {
+    blink_test_runner()->PrintMessage(
+        "Default policy for createView for '" +
+        web_test_string_util::URLDescription(request.Url()) + "' is '" +
+        web_test_string_util::WebNavigationPolicyToString(policy) + "'\n");
   }
 
-  if (!GetTestRunner()->canOpenWindows())
+  if (!GetTestRunner()->CanOpenWindows())
     return nullptr;
 
-  if (GetTestRunner()->shouldDumpCreateView()) {
-    delegate()->PrintMessage(std::string("createView(") +
-                             URLDescription(request.Url()) + ")\n");
+  if (GetTestRunner()->ShouldDumpCreateView()) {
+    blink_test_runner()->PrintMessage(
+        std::string("createView(") +
+        web_test_string_util::URLDescription(request.Url()) + ")\n");
   }
   return RenderViewImpl::CreateView(creator, request, features, frame_name,
                                     policy, sandbox_flags, opener_feature_state,
@@ -58,7 +56,10 @@ blink::WebView* WebViewTestProxy::CreateView(
 }
 
 void WebViewTestProxy::PrintPage(blink::WebLocalFrame* frame) {
-  blink::WebSize page_size_in_pixels = GetWidget()->GetWebWidget()->Size();
+  // This is using the main frame for the size, but maybe it should be using the
+  // frame's size.
+  blink::WebSize page_size_in_pixels =
+      GetMainRenderFrame()->GetLocalRootRenderWidget()->GetWebWidget()->Size();
   if (page_size_in_pixels.IsEmpty())
     return;
   blink::WebPrintParams print_params(page_size_in_pixels);
@@ -71,57 +72,37 @@ blink::WebString WebViewTestProxy::AcceptLanguages() {
 }
 
 void WebViewTestProxy::DidFocus(blink::WebLocalFrame* calling_frame) {
-  GetTestRunner()->SetFocus(webview(), true);
+  GetTestRunner()->SetFocus(GetWebView(), true);
   RenderViewImpl::DidFocus(calling_frame);
 }
 
-blink::WebScreenInfo WebViewTestProxy::GetScreenInfo() {
-  blink::WebScreenInfo info = RenderViewImpl::GetScreenInfo();
-
-  MockScreenOrientationClient* mock_client =
-      GetTestRunner()->getMockScreenOrientationClient();
-
-  if (!mock_client->IsDisabled()) {
-    // Override screen orientation information with mock data.
-    info.orientation_type = mock_client->CurrentOrientationType();
-    info.orientation_angle = mock_client->CurrentOrientationAngle();
-  }
-
-  return info;
-}
-
 void WebViewTestProxy::Reset() {
-  // TODO(https://crbug.com/961499): There is a race condition where Reset()
-  // can be called after GetWidget() has been nulled, but before this is
-  // destructed.
-  if (!GetWidget())
-    return;
   accessibility_controller_.Reset();
-  // text_input_controller_ doesn't have any state to reset.
+  // |text_input_controller_| doesn't have any state to reset.
   view_test_runner_.Reset();
-  static_cast<WebWidgetTestProxy*>(GetWidget())->Reset();
 
-  for (blink::WebFrame* frame = webview()->MainFrame(); frame;
+  for (blink::WebFrame* frame = GetWebView()->MainFrame(); frame;
        frame = frame->TraverseNext()) {
-    if (frame->IsWebLocalFrame())
-      delegate_->GetWebWidgetTestProxy(frame->ToWebLocalFrame())->Reset();
+    if (frame->IsWebLocalFrame()) {
+      RenderFrame* render_frame =
+          RenderFrame::FromWebFrame(frame->ToWebLocalFrame());
+      auto* frame_proxy = static_cast<WebFrameTestProxy*>(render_frame);
+      frame_proxy->Reset();
+    }
   }
 }
 
-void WebViewTestProxy::BindTo(blink::WebLocalFrame* frame) {
+void WebViewTestProxy::Install(blink::WebLocalFrame* frame) {
   accessibility_controller_.Install(frame);
   text_input_controller_.Install(frame);
-  view_test_runner_.Install(frame);
 }
 
 WebViewTestProxy::~WebViewTestProxy() {
   test_interfaces_->WindowClosed(this);
-  if (test_interfaces_->GetDelegate() == delegate_.get())
-    test_interfaces_->SetDelegate(nullptr);
 }
 
 TestRunner* WebViewTestProxy::GetTestRunner() {
   return test_interfaces()->GetTestRunner();
 }
 
-}  // namespace test_runner
+}  // namespace content

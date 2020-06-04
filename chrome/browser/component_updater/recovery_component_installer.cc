@@ -20,6 +20,8 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "build/branding_buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
 #if defined(OS_MACOSX)
 #include "base/mac/authorization_util.h"
@@ -49,7 +51,7 @@ using content::BrowserThread;
 
 namespace component_updater {
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #if defined(OS_WIN) || defined(OS_MACOSX)
 
 namespace {
@@ -232,7 +234,7 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
   base::Process process = base::Process::Open(pid);
 #endif
   // This task joins a process, hence .WithBaseSyncPrimitives().
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
@@ -241,7 +243,7 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
 }
 
 void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
@@ -268,6 +270,7 @@ class RecoveryComponentInstaller : public update_client::CrxInstaller {
 
   void Install(const base::FilePath& unpack_path,
                const std::string& public_key,
+               std::unique_ptr<InstallParams> install_params,
                Callback callback) override;
 
   bool GetInstalledFile(const std::string& file,
@@ -276,7 +279,7 @@ class RecoveryComponentInstaller : public update_client::CrxInstaller {
   bool Uninstall() override;
 
  private:
-  ~RecoveryComponentInstaller() override {}
+  ~RecoveryComponentInstaller() override = default;
 
   bool DoInstall(const base::FilePath& unpack_path);
 
@@ -304,6 +307,7 @@ void RecoveryRegisterHelper(ComponentUpdateService* cus, PrefService* prefs) {
   recovery.version = version;
   recovery.pk_hash.assign(kRecoverySha2Hash,
                           &kRecoverySha2Hash[sizeof(kRecoverySha2Hash)]);
+  recovery.app_id = update_client::GetCrxIdFromPublicKeyHash(recovery.pk_hash);
   recovery.supports_group_policy_enable_component_updates = true;
   recovery.requires_network_encryption = false;
   recovery.crx_format_requirement =
@@ -346,10 +350,9 @@ void WaitForInstallToComplete(base::Process process,
     if (installer_exit_code == EXIT_CODE_ELEVATION_NEEDED) {
       RecordRecoveryComponentUMAEvent(RCE_ELEVATION_NEEDED);
 
-      base::PostTaskWithTraits(
-          FROM_HERE, {BrowserThread::UI},
-          base::BindOnce(&SetPrefsForElevatedRecoveryInstall, installer_folder,
-                         prefs));
+      base::PostTask(FROM_HERE, {BrowserThread::UI},
+                     base::BindOnce(&SetPrefsForElevatedRecoveryInstall,
+                                    installer_folder, prefs));
     } else if (installer_exit_code == EXIT_CODE_RECOVERY_SUCCEEDED) {
       RecordRecoveryComponentUMAEvent(RCE_SUCCEEDED);
     } else if (installer_exit_code == EXIT_CODE_RECOVERY_SKIPPED) {
@@ -375,7 +378,7 @@ bool RecoveryComponentInstaller::RunInstallCommand(
 
   // Let worker pool thread wait for us so we don't block Chrome shutdown.
   // This task joins a process, hence .WithBaseSyncPrimitives().
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
@@ -406,6 +409,7 @@ bool SetPosixExecutablePermission(const base::FilePath& path) {
 void RecoveryComponentInstaller::Install(
     const base::FilePath& unpack_path,
     const std::string& /*public_key*/,
+    std::unique_ptr<InstallParams> /*install_params*/,
     update_client::CrxInstaller::Callback callback) {
   auto result = update_client::InstallFunctionWrapper(
       base::BindOnce(&RecoveryComponentInstaller::DoInstall,
@@ -437,7 +441,7 @@ bool RecoveryComponentInstaller::DoInstall(
   if (!base::PathExists(path) && !base::CreateDirectory(path))
     return false;
   path = path.AppendASCII(version.GetString());
-  if (base::PathExists(path) && !base::DeleteFile(path, true))
+  if (base::PathExists(path) && !base::DeleteFileRecursively(path))
     return false;
   if (!base::Move(unpack_path, path)) {
     DVLOG(1) << "Recovery component move failed.";
@@ -470,7 +474,7 @@ bool RecoveryComponentInstaller::DoInstall(
 
   current_version_ = version;
   if (prefs_) {
-    base::PostTaskWithTraits(
+    base::PostTask(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&RecoveryUpdateVersionHelper, version, prefs_));
   }
@@ -488,24 +492,22 @@ bool RecoveryComponentInstaller::Uninstall() {
 }
 
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 void RegisterRecoveryComponent(ComponentUpdateService* cus,
                                PrefService* prefs) {
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #if defined(OS_WIN) || defined(OS_MACOSX)
   if (SimulatingElevatedRecovery()) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&SimulateElevatedRecoveryHelper, prefs));
+    base::PostTask(FROM_HERE, {BrowserThread::UI},
+                   base::BindOnce(&SimulateElevatedRecoveryHelper, prefs));
   }
 
   // We delay execute the registration because we are not required in
   // the critical path during browser startup.
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&RecoveryRegisterHelper, cus, prefs),
-      base::TimeDelta::FromSeconds(6));
+  base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
+                        base::BindOnce(&RecoveryRegisterHelper, cus, prefs),
+                        base::TimeDelta::FromSeconds(6));
 #endif
 #endif
 }
@@ -520,7 +522,7 @@ void RegisterPrefsForRecoveryComponent(PrefRegistrySimple* registry) {
 void AcceptedElevatedRecoveryInstall(PrefService* prefs) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #if defined(OS_WIN) || defined(OS_MACOSX)
   ElevatedInstallRecoveryComponent(
       prefs->GetFilePath(prefs::kRecoveryComponentUnpackPath));

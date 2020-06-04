@@ -30,8 +30,7 @@ DeviceLocalAccountPolicyProvider::DeviceLocalAccountPolicyProvider(
       service_(service),
       chrome_policy_overrides_(std::move(chrome_policy_overrides)),
       store_initialized_(false),
-      waiting_for_policy_refresh_(false),
-      weak_factory_(this) {
+      waiting_for_policy_refresh_(false) {
   service_->AddObserver(this);
   UpdateFromBroker();
 }
@@ -68,16 +67,6 @@ DeviceLocalAccountPolicyProvider::Create(
                                  POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
                                  POLICY_SOURCE_DEVICE_LOCAL_ACCOUNT_OVERRIDE,
                                  std::make_unique<base::Value>(true), nullptr);
-  } else if (type == DeviceLocalAccount::TYPE_KIOSK_APP) {
-    chrome_policy_overrides = std::make_unique<PolicyMap>();
-
-    // Temporary allow CRX2.
-    // See https://crbug.com/960428.
-    // TODO(crbug.com/740715): remove in M77.
-    chrome_policy_overrides->Set(key::kExtensionAllowInsecureUpdates,
-                                 POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                                 POLICY_SOURCE_DEVICE_LOCAL_ACCOUNT_OVERRIDE,
-                                 std::make_unique<base::Value>(true), nullptr);
   }
 
   std::unique_ptr<DeviceLocalAccountPolicyProvider> provider(
@@ -106,8 +95,8 @@ void DeviceLocalAccountPolicyProvider::RefreshPolicies() {
   if (broker && broker->core()->service()) {
     waiting_for_policy_refresh_ = true;
     broker->core()->service()->RefreshPolicy(
-        base::Bind(&DeviceLocalAccountPolicyProvider::ReportPolicyRefresh,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&DeviceLocalAccountPolicyProvider::ReportPolicyRefresh,
+                       weak_factory_.GetWeakPtr()));
   } else {
     UpdateFromBroker();
   }

@@ -144,7 +144,7 @@ class TimeZoneResolver::TimeZoneResolverImpl : public base::PowerObserver {
   std::unique_ptr<TZRequest> request_;
 
   base::WeakPtrFactory<TimeZoneResolver::TimeZoneResolverImpl>
-      weak_ptr_factory_;
+      weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TimeZoneResolverImpl);
 };
@@ -155,7 +155,7 @@ namespace {
 class TZRequest {
  public:
   explicit TZRequest(TimeZoneResolver::TimeZoneResolverImpl* resolver)
-      : resolver_(resolver), weak_ptr_factory_(this) {}
+      : resolver_(resolver) {}
 
   ~TZRequest();
 
@@ -179,7 +179,7 @@ class TZRequest {
 
   TimeZoneResolver::TimeZoneResolverImpl* const resolver_;
 
-  base::WeakPtrFactory<TZRequest> weak_ptr_factory_;
+  base::WeakPtrFactory<TZRequest> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TZRequest);
 };
@@ -192,13 +192,13 @@ void TZRequest::StartRequestOnNetworkAvailable() {
       base::TimeDelta::FromSeconds(kRefreshTimeZoneTimeoutSeconds),
       resolver_->ShouldSendWiFiGeolocationData(),
       resolver_->ShouldSendCellularGeolocationData(),
-      base::Bind(&TZRequest::OnLocationResolved, AsWeakPtr()));
+      base::BindOnce(&TZRequest::OnLocationResolved, AsWeakPtr()));
 }
 
 void TZRequest::Start() {
   // call to chromeos::DelayNetworkCall
   resolver_->delay_network_call().Run(
-      base::Bind(&TZRequest::StartRequestOnNetworkAvailable, AsWeakPtr()));
+      base::BindOnce(&TZRequest::StartRequestOnNetworkAvailable, AsWeakPtr()));
 }
 
 void TZRequest::OnLocationResolved(const Geoposition& position,
@@ -222,9 +222,8 @@ void TZRequest::OnLocationResolved(const Geoposition& position,
   }
 
   resolver_->timezone_provider()->RequestTimezone(
-      position,
-      timeout - elapsed,
-      base::Bind(&TZRequest::OnTimezoneResolved, AsWeakPtr()));
+      position, timeout - elapsed,
+      base::BindOnce(&TZRequest::OnTimezoneResolved, AsWeakPtr()));
 
   // Prevent |on_request_finished| from firing here.
   base::OnceClosure unused = on_request_finished.Release();
@@ -266,8 +265,7 @@ TimeZoneResolver::TimeZoneResolverImpl::TimeZoneResolverImpl(
           SimpleGeolocationProvider::DefaultGeolocationProviderURL()),
       timezone_provider_(resolver->shared_url_loader_factory(),
                          DefaultTimezoneProviderURL()),
-      requests_count_(0),
-      weak_ptr_factory_(this) {
+      requests_count_(0) {
   DCHECK(!resolver_->apply_timezone().is_null());
   DCHECK(!resolver_->delay_network_call().is_null());
 
@@ -342,8 +340,8 @@ void TimeZoneResolver::TimeZoneResolverImpl::ScheduleRequest() {
   refresh_timer_.Stop();
   refresh_timer_.Start(
       FROM_HERE, interval,
-      base::Bind(&TimeZoneResolver::TimeZoneResolverImpl::CreateNewRequest,
-                 AsWeakPtr()));
+      base::BindOnce(&TimeZoneResolver::TimeZoneResolverImpl::CreateNewRequest,
+                     AsWeakPtr()));
 }
 
 void TimeZoneResolver::TimeZoneResolverImpl::CreateNewRequest() {

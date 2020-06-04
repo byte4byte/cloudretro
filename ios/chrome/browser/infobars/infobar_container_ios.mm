@@ -4,7 +4,8 @@
 
 #include "ios/chrome/browser/infobars/infobar_container_ios.h"
 
-#include "ios/chrome/browser/infobars/infobar.h"
+#include "base/metrics/histogram_macros.h"
+#include "ios/chrome/browser/infobars/infobar_ios.h"
 #import "ios/chrome/browser/ui/infobars/infobar_container_consumer.h"
 #import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/infobars/infobar_ui_delegate.h"
@@ -24,18 +25,34 @@ InfoBarContainerIOS::~InfoBarContainerIOS() {
   RemoveAllInfoBarsForDestruction();
 }
 
+void InfoBarContainerIOS::ChangeInfoBarManager(
+    infobars::InfoBarManager* infobar_manager) {
+  [consumer_ infobarManagerWillChange];
+  InfoBarContainer::ChangeInfoBarManager(infobar_manager);
+  info_bar_manager_ = infobar_manager;
+}
+
 void InfoBarContainerIOS::PlatformSpecificAddInfoBar(infobars::InfoBar* infobar,
                                                      size_t position) {
   InfoBarIOS* infobar_ios = static_cast<InfoBarIOS*>(infobar);
   id<InfobarUIDelegate> delegate = infobar_ios->InfobarUIDelegate();
 
+  // Record the number of multiple Infobars being presented at the same time.
+  // This doesn't differentiate between "Messages" or legacy Infobars.
+  if (info_bar_manager_ && info_bar_manager_->infobar_count() > 0) {
+    int kMaxValue = 10;
+    UMA_HISTOGRAM_EXACT_LINEAR("Mobile.Messages.ConcurrentPresented",
+                               info_bar_manager_->infobar_count(), kMaxValue);
+  }
+
   if ([delegate isPresented]) {
     // Only InfobarUIReboot Infobars should be presented using the non legacy
     // consumer.
     DCHECK(IsInfobarUIRebootEnabled());
-    [consumer_ addInfoBarWithDelegate:delegate];
+    [consumer_ addInfoBarWithDelegate:delegate
+                           skipBanner:infobar_ios->skip_banner()];
   } else {
-    [legacyConsumer_ addInfoBarWithDelegate:delegate];
+    [legacyConsumer_ addInfoBarWithDelegate:delegate skipBanner:NO];
   }
 }
 

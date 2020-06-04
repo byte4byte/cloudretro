@@ -4,11 +4,12 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.url.GURL;
+import org.chromium.url.URI;
 
-import java.net.URI;
 import java.net.URISyntaxException;
 
 /** URI utilities. */
@@ -31,7 +32,9 @@ public class UriUtils {
      *
      * @param method The payment method name to parse.
      * @return The parsed URI payment method name or null if not valid.
+     * @deprecated org.chromium.url.URI class was deprecated.
      */
+    @Deprecated
     @Nullable
     public static URI parseUriFromString(String method) {
         URI uri;
@@ -52,6 +55,24 @@ public class UriUtils {
     }
 
     /**
+     * Returns false for invalid URL format or a relative URI.
+     *
+     * @param url The payment method name.
+     * @return TRUE if given url is valid and not a relative URI.
+     */
+    public static boolean isURLValid(GURL url) {
+        if (url == null) return false;
+        if (!url.isValid()) return false;
+        if (url.getScheme().isEmpty()) return false;
+        if (!UrlConstants.HTTPS_SCHEME.equals(url.getScheme())
+                && !UrlConstants.HTTP_SCHEME.equals(url.getScheme())) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Returns the origin part of the given URI.
      *
      * @param uri The input URI for which the origin needs to be returned. Should not be null.
@@ -59,18 +80,7 @@ public class UriUtils {
      */
     public static URI getOrigin(URI uri) {
         assert uri != null;
-
-        String originString = uri.resolve("/").toString();
-
-        // Strip the trailing slash.
-        if (!originString.isEmpty() && originString.charAt(originString.length() - 1) == '/') {
-            originString = originString.substring(0, originString.length() - 1);
-        }
-
-        URI origin = parseUriFromString(originString);
-        assert origin != null;
-
-        return origin;
+        return uri.getOrigin();
     }
 
     private UriUtils() {}

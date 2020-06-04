@@ -7,14 +7,15 @@
  */
 class PanelButton extends HTMLElement {
   constructor() {
-    PanelButton.createElement_.call(super());
+    super();
+    this.createElement_();
   }
 
   /**
    * Creates a PanelButton.
    * @private
    */
-  static createElement_() {
+  createElement_() {
     const template = document.createElement('template');
     template.innerHTML = PanelButton.html_();
     const fragment = template.content.cloneNode(true);
@@ -23,45 +24,13 @@ class PanelButton extends HTMLElement {
 
   /**
    * Get the custom element template string.
-   * TODO(crbug.com/947388) Replace 'button' to WebUI's 'cr-button'.
    * @private
    * @return {string}
    */
   static html_() {
     return `<style>
-              cr-icon-button {
+              cr-icon-button, cr-button {
                 margin-inline-start: 0px;
-              }
-
-              :host([data-category='pause']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMyc+CiAgICAgICAgPGxpbmUgeDE9JzE\
-                  1JyB5MT0nMTInIHgyPScxNScgeTI9JzI0Jy8+CiAgICAgICAgPGxpbmUgeDE\
-                  9JzIxJyB5MT0nMTInIHgyPScyMScgeTI9JzI0Jy8+CiAgICA8L2c+Cjwvc3Z\
-                  nPg==') no-repeat center;
-              }
-
-              :host([data-category='cancel']),
-              :host([data-category='dismiss']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMic+CiAgICAgICAgPGxpbmUgeDE9JzE\
-                  yJyB5MT0nMTInIHgyPScyNCcgeTI9JzI0Jy8+CiAgICAgICAgPGxpbmUgeDE\
-                  9JzI0JyB5MT0nMTInIHgyPScxMicgeTI9JzI0Jy8+CiAgICA8L2c+Cjwvc3Z\
-                  nPg==') no-repeat center;
-              }
-
-              :host([data-category='expand']),
-              :host([data-category='collapse']) {
-                background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR\
-                  0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczNnB4JyBoZWlnaHQ\
-                  9JzM2cHgnIHZpZXdCb3g9JzAgMCAzNiAzNic+CiAgICA8ZyBzdHJva2U9JyM\
-                  1RjYzNjgnIHN0cm9rZS13aWR0aD0nMic+CiAgICAgICAgPHBhdGggZmlsbD0\
-                  ibm9uZSIgZD0nTTEyLDIxbDYsLTYgNiw2Jy8+CiAgICA8L2c+Cjwvc3ZnPg=='
-                  ) no-repeat center;
               }
 
               @keyframes setcollapse {
@@ -89,12 +58,62 @@ class PanelButton extends HTMLElement {
               :host([data-category='collapse']) {
                   animation: setcollapse 200ms forwards;
               }
+
               :host {
-                  width: 36px;
-                  position: relative;
+                flex-shrink: 0;
+                position: relative;
+              }
+
+              :host(:not([data-category='dismiss'])) {
+                width: 36px;
+              }
+
+              :host([data-category='dismiss']) #icon {
+                display: none;
+              }
+
+              :host(:not([data-category='dismiss'])) #dismiss {
+                display: none;
               }
             </style>
-            <cr-icon-button></cr-icon-button>`;
+            <cr-button id='dismiss'>$i18n{DRIVE_WELCOME_DISMISS}</cr-button>
+            <cr-icon-button id='icon'></cr-icon-button>`;
+  }
+
+  /**
+   * Registers this instance to listen to these attribute changes.
+   * @private
+   */
+  static get observedAttributes() {
+    return [
+      'data-category',
+    ];
+  }
+
+  /**
+   * Callback triggered by the browser when our attribute values change.
+   * @param {string} name Attribute that's changed.
+   * @param {?string} oldValue Old value of the attribute.
+   * @param {?string} newValue New value of the attribute.
+   * @private
+   */
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (oldValue === newValue) {
+      return;
+    }
+    /** @type {Element} */
+    const iconButton = this.shadowRoot.querySelector('cr-icon-button');
+    if (name === 'data-category') {
+      switch (newValue) {
+        case 'cancel':
+          iconButton.setAttribute('iron-icon', 'cr:clear');
+          break;
+        case 'collapse':
+        case 'expand':
+          iconButton.setAttribute('iron-icon', 'cr:expand-less');
+          break;
+      }
+    }
   }
 }
 

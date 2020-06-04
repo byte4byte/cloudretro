@@ -45,7 +45,7 @@ class StylePropertyMapIterationSource final
     return true;
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     visitor->Trace(values_);
     PairIterable<String, CSSStyleValueVector>::IterationSource::Trace(visitor);
   }
@@ -62,7 +62,8 @@ CSSStyleValue* StylePropertyMapReadOnlyMainThread::get(
     const ExecutionContext* execution_context,
     const String& property_name,
     ExceptionState& exception_state) const {
-  base::Optional<CSSPropertyName> name = CSSPropertyName::From(property_name);
+  base::Optional<CSSPropertyName> name =
+      CSSPropertyName::From(execution_context, property_name);
 
   if (!name) {
     exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
@@ -73,10 +74,9 @@ CSSStyleValue* StylePropertyMapReadOnlyMainThread::get(
   if (property.IsShorthand())
     return GetShorthandProperty(property);
 
-  const CSSValue* value =
-      (name->IsCustomProperty())
-          ? GetCustomProperty(*execution_context, name->ToAtomicString())
-          : GetProperty(name->Id());
+  const CSSValue* value = (name->IsCustomProperty())
+                              ? GetCustomProperty(name->ToAtomicString())
+                              : GetProperty(name->Id());
   if (!value)
     return nullptr;
 
@@ -95,7 +95,8 @@ CSSStyleValueVector StylePropertyMapReadOnlyMainThread::getAll(
     const ExecutionContext* execution_context,
     const String& property_name,
     ExceptionState& exception_state) const {
-  base::Optional<CSSPropertyName> name = CSSPropertyName::From(property_name);
+  base::Optional<CSSPropertyName> name =
+      CSSPropertyName::From(execution_context, property_name);
 
   if (!name) {
     exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
@@ -110,10 +111,9 @@ CSSStyleValueVector StylePropertyMapReadOnlyMainThread::getAll(
     return values;
   }
 
-  const CSSValue* value =
-      (name->IsCustomProperty())
-          ? GetCustomProperty(*execution_context, name->ToAtomicString())
-          : GetProperty(name->Id());
+  const CSSValue* value = (name->IsCustomProperty())
+                              ? GetCustomProperty(name->ToAtomicString())
+                              : GetProperty(name->Id());
   if (!value)
     return CSSStyleValueVector();
 
@@ -127,41 +127,14 @@ bool StylePropertyMapReadOnlyMainThread::has(
   return !getAll(execution_context, property_name, exception_state).IsEmpty();
 }
 
-const CSSValue* StylePropertyMapReadOnlyMainThread::GetCustomProperty(
-    const ExecutionContext& execution_context,
-    const AtomicString& property_name) const {
-  const CSSValue* value = GetCustomProperty(property_name);
-
-  const auto* document = DynamicTo<Document>(execution_context);
-  if (!document)
-    return value;
-
-  return PropertyRegistry::ParseIfRegistered(*document, property_name, value);
-}
-
 StylePropertyMapReadOnlyMainThread::IterationSource*
 StylePropertyMapReadOnlyMainThread::StartIteration(ScriptState* script_state,
                                                    ExceptionState&) {
   HeapVector<StylePropertyMapReadOnlyMainThread::StylePropertyMapEntry> result;
 
-  const ExecutionContext& execution_context =
-      *ExecutionContext::From(script_state);
-
-  ForEachProperty([&result, &execution_context](const CSSPropertyName& name,
-                                                const CSSValue& css_value) {
-    const CSSValue* value = &css_value;
-
-    // TODO(andruud): Refactor this. ForEachProperty should yield the correct,
-    // already-parsed value in the first place.
-    if (name.IsCustomProperty()) {
-      const auto* document = DynamicTo<Document>(execution_context);
-      if (document) {
-        value = PropertyRegistry::ParseIfRegistered(
-            *document, name.ToAtomicString(), value);
-      }
-    }
-
-    auto values = StyleValueFactory::CssValueToStyleValueVector(name, *value);
+  ForEachProperty([&result](const CSSPropertyName& name,
+                            const CSSValue& value) {
+    auto values = StyleValueFactory::CssValueToStyleValueVector(name, value);
     result.emplace_back(name.ToAtomicString(), std::move(values));
   });
 
@@ -174,7 +147,7 @@ CSSStyleValue* StylePropertyMapReadOnlyMainThread::GetShorthandProperty(
   const auto serialization = SerializationForShorthand(property);
   if (serialization.IsEmpty())
     return nullptr;
-  return CSSUnsupportedStyleValue::Create(
+  return MakeGarbageCollected<CSSUnsupportedStyleValue>(
       CSSPropertyName(property.PropertyID()), serialization);
 }
 

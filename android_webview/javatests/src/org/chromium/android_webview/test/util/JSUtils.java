@@ -4,15 +4,12 @@
 
 package org.chromium.android_webview.test.util;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.app.Instrumentation;
 
 import org.junit.Assert;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content_public.browser.test.util.WebContentsUtils;
@@ -21,7 +18,7 @@ import org.chromium.content_public.browser.test.util.WebContentsUtils;
  * Collection of functions for JavaScript-based interactions with a page.
  */
 public class JSUtils {
-    private static final long WAIT_TIMEOUT_MS = scaleTimeout(2000);
+    private static final long WAIT_TIMEOUT_MS = 2000L;
     private static final int CHECK_INTERVAL = 100;
 
     private static String createScriptToClickNode(String nodeId) {
@@ -34,21 +31,18 @@ public class JSUtils {
     public static void clickOnLinkUsingJs(final Instrumentation instrumentation,
             final AwContents awContents,
             final OnEvaluateJavaScriptResultHelper onEvaluateJavaScriptResultHelper,
-            final String linkId) throws Exception {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    String linkIsNotNull = executeJavaScriptAndWaitForResult(instrumentation,
-                            awContents, onEvaluateJavaScriptResultHelper,
-                            "document.getElementById('" + linkId + "') != null");
-                    return linkIsNotNull.equals("true");
-                } catch (Throwable t) {
-                    t.printStackTrace();
-                    Assert.fail("Failed to check if DOM is loaded: " + t.toString());
-                    return false;
-                }
+            final String linkId) {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            String linkIsNotNull = null;
+            try {
+                linkIsNotNull = executeJavaScriptAndWaitForResult(instrumentation, awContents,
+                        onEvaluateJavaScriptResultHelper,
+                        "document.getElementById('" + linkId + "') != null");
+            } catch (Throwable t) {
+                t.printStackTrace();
+                Assert.fail("Failed to check if DOM is loaded: " + t.toString());
             }
+            Assert.assertEquals("true", linkIsNotNull);
         }, WAIT_TIMEOUT_MS, CHECK_INTERVAL);
 
         // clang-format off

@@ -4,17 +4,17 @@
 
 package org.chromium.chrome.browser.autofill_assistant;
 
+import android.content.Context;
+
 import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.snackbar.Snackbar;
-import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
 
 /**
  * A simple UNDO snackbar with a delay.
  */
 class AssistantSnackbar {
-    private static final int DELAY_MS = 5_000;
-
     interface Callback {
         /**
          * Called once the snackbar is gone, after the delay has passed or after the user clicked
@@ -26,7 +26,8 @@ class AssistantSnackbar {
     }
 
     /** Shows the snackbar and reports the result to {@code callback}. */
-    static SnackbarController show(ChromeActivity activity, String message, Callback callback) {
+    static SnackbarController show(Context context, SnackbarManager snackbarManager, int delayMs,
+            String message, Callback callback) {
         SnackbarController controller = new SnackbarController() {
             @Override
             public void onAction(Object actionData) {
@@ -41,10 +42,10 @@ class AssistantSnackbar {
         Snackbar snackBar =
                 Snackbar.make(message, controller, Snackbar.TYPE_ACTION,
                                 Snackbar.UMA_AUTOFILL_ASSISTANT_STOP_UNDO)
-                        .setAction(activity.getString(R.string.undo), /* actionData= */ null);
+                        .setAction(context.getString(R.string.undo), /* actionData= */ null);
         snackBar.setSingleLine(false);
-        snackBar.setDuration(DELAY_MS);
-        activity.getSnackbarManager().showSnackbar(snackBar);
+        snackBar.setDuration(delayMs);
+        snackbarManager.showSnackbar(snackBar);
         return controller;
     }
 }

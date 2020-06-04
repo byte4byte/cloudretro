@@ -9,6 +9,7 @@
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/client_native_pixmap.h"
 #include "ui/gl/gl_image_native_pixmap.h"
+#include "ui/gl/test/gl_image_bind_test_template.h"
 #include "ui/gl/test/gl_image_test_template.h"
 #include "ui/ozone/public/client_native_pixmap_factory_ozone.h"
 #include "ui/ozone/public/ozone_platform.h"
@@ -38,7 +39,8 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
                                             nullptr, size, format, usage);
     DCHECK(pixmap) << "Offending format: " << gfx::BufferFormatToString(format);
     if (usage == gfx::BufferUsage::GPU_READ_CPU_READ_WRITE ||
-        usage == gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE) {
+        usage == gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE ||
+        usage == gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE) {
       auto client_pixmap = client_native_pixmap_factory_->ImportFromHandle(
           pixmap->ExportHandle(), size, format, usage);
       bool mapped = client_pixmap->Map();
@@ -90,11 +92,13 @@ INSTANTIATE_TYPED_TEST_SUITE_P(GLImageNativePixmapScanoutBGRA,
 
 using GLImageScanoutTypeDisabled = testing::Types<
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT,
-                                    gfx::BufferFormat::RGBX_1010102>>;
+                                    gfx::BufferFormat::RGBA_1010102>,
+    GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT,
+                                    gfx::BufferFormat::BGRA_1010102>>;
 
-// This test is disabled since we need mesa support for XR30/XB30 that is not
+// This test is disabled since we need mesa support for AB30 that is not
 // available on many boards yet.
-INSTANTIATE_TYPED_TEST_SUITE_P(DISABLED_GLImageNativePixmapScanoutRGBX,
+INSTANTIATE_TYPED_TEST_SUITE_P(DISABLED_GLImageNativePixmapScanoutRGBA,
                                GLImageTest,
                                GLImageScanoutTypeDisabled);
 
@@ -110,15 +114,21 @@ using GLImageBindTestTypes = testing::Types<
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::BGRA_8888>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
-                                    gfx::BufferFormat::RGBX_1010102>,
+                                    gfx::BufferFormat::RGBA_1010102>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::R_8>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::YVU_420>,
+    GLImageNativePixmapTestDelegate<
+        gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+        gfx::BufferFormat::YVU_420>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::YUV_420_BIPLANAR>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
                                     gfx::BufferFormat::YUV_420_BIPLANAR>,
+    GLImageNativePixmapTestDelegate<
+        gfx::BufferUsage::SCANOUT_VEA_READ_CAMERA_AND_CPU_READ_WRITE,
+        gfx::BufferFormat::YUV_420_BIPLANAR>,
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
                                     gfx::BufferFormat::P010>>;
 

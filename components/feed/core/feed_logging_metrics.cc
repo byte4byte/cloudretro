@@ -16,6 +16,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "components/feed/core/feed_scheduler_host.h"
 #include "ui/base/mojom/window_open_disposition.mojom.h"
 
 namespace feed {
@@ -62,7 +63,8 @@ const char kHistogramArticlesUsageTimeLocal[] =
     "NewTabPage.ContentSuggestions.UsageTimeLocal";
 
 // Values correspond to
-// third_party/feed/src/src/main/java/com/google/android/libraries/feed/host/
+// third_party/feed_library/src/
+//   src/main/java/com/google/android/libraries/feed/host/
 // logging/SpinnerType.java, enums.xml and histograms.xml.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -76,7 +78,8 @@ enum class SpinnerType {
 };
 
 // Values correspond to
-// third_party/feed/src/src/main/java/com/google/android/libraries/feed/host/
+// third_party/feed_library/src/
+//   src/main/java/com/google/android/libraries/feed/host/
 // logging/Task.java.
 enum class TaskType {
   KUnknown = 0,
@@ -116,7 +119,8 @@ enum class TaskType {
 };
 
 // Values correspond to
-// third_party/feed/src/main/proto/search/now/ui/action/feed_action.proto.
+// third_party/feed_library/src/
+//   main/proto/search/now/ui/action/feed_action.proto.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class ElementType {
@@ -476,9 +480,13 @@ void RecordElementTimeUMA(const char* base_name,
 
 FeedLoggingMetrics::FeedLoggingMetrics(
     HistoryURLCheckCallback history_url_check_callback,
-    base::Clock* clock)
+    base::Clock* clock,
+    FeedSchedulerHost* scheduler_host)
     : history_url_check_callback_(std::move(history_url_check_callback)),
-      clock_(clock) {}
+      clock_(clock),
+      scheduler_host_(scheduler_host) {
+  DCHECK(scheduler_host_);
+}
 
 FeedLoggingMetrics::~FeedLoggingMetrics() = default;
 
@@ -612,6 +620,10 @@ void FeedLoggingMetrics::OnMoreButtonShown(int position) {
 }
 
 void FeedLoggingMetrics::OnMoreButtonClicked(int position) {
+  // Inform the user classifier that a suggestion was consumed
+  // (https://crbug.com/992517).
+  scheduler_host_->OnSuggestionConsumed();
+
   // The "more" card can appear in addition to the actual suggestions, so add
   // one extra bucket to this histogram.
   UMA_HISTOGRAM_EXACT_LINEAR(
@@ -688,9 +700,10 @@ void FeedLoggingMetrics::OnVisualElementViewed(int element_type,
 
 void FeedLoggingMetrics::OnInternalError(int internal_error) {
   // TODO(https://crbug.com/935602): The max value here is fragile, figure out
-  // some way to test the @IntDef size.
+  // some way to test the @IntDef size. For now the count needs to be kept in
+  // sync with InternalFeedError.java and enums.xml.
   UMA_HISTOGRAM_ENUMERATION("ContentSuggestions.Feed.InternalError",
-                            internal_error, 13);
+                            internal_error, 18);
 }
 
 void FeedLoggingMetrics::OnTokenCompleted(bool was_synthetic,

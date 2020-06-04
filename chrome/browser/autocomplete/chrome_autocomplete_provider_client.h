@@ -13,6 +13,7 @@ class Profile;
 
 namespace content {
 class StoragePartition;
+class WebContents;
 }
 
 namespace unified_consent {
@@ -49,9 +50,6 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   std::string GetEmbedderRepresentationOfAboutScheme() const override;
   std::vector<base::string16> GetBuiltinURLs() override;
   std::vector<base::string16> GetBuiltinsToProvideAsUserTypes() override;
-  // GetCurrentVisitTimestamp is only implemented for desktop users. For mobile
-  // users, the function returns base::Time().
-  base::Time GetCurrentVisitTimestamp() const override;
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override;
 
@@ -85,6 +83,12 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   bool StrippedURLsAreEqual(const GURL& url1,
                             const GURL& url2,
                             const AutocompleteInput* input) const;
+
+  // Performs a comparison of |stripped_url| to the stripped last committed
+  // URL of |web_contents|, using the internal cache to avoid repeatedly
+  // re-stripping the URL.
+  bool IsStrippedURLEqualToWebContentsURL(const GURL& stripped_url,
+                                          content::WebContents* web_contents);
 
  private:
   Profile* profile_;

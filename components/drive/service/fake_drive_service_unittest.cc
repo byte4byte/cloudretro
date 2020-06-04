@@ -19,7 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/drive/file_system_core_util.h"
 #include "components/drive/service/test_util.h"
 #include "google_apis/drive/drive_api_parser.h"
@@ -227,7 +227,7 @@ class FakeDriveServiceTest : public testing::Test {
     return about_resource->largest_change_id();
   }
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   FakeDriveService fake_service_;
 };
 
@@ -1185,12 +1185,11 @@ TEST_F(FakeDriveServiceTest, DownloadFile_ExistingFile) {
   base::FilePath output_file_path;
   test_util::TestGetContentCallback get_content_callback;
   fake_service_.DownloadFile(
-      kOutputFilePath,
-      "2_file_resource_id",
+      kOutputFilePath, "2_file_resource_id",
       test_util::CreateCopyResultCallback(&error, &output_file_path),
       get_content_callback.callback(),
-      base::Bind(&test_util::AppendProgressCallbackResult,
-                 &download_progress_values));
+      base::BindRepeating(&test_util::AppendProgressCallbackResult,
+                          &download_progress_values));
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(HTTP_SUCCESS, error);
@@ -2026,12 +2025,10 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_ExistingFile) {
   entry.reset();
   std::vector<test_util::ProgressInfo> upload_progress_values;
   fake_service_.ResumeUpload(
-      upload_location,
-      0, contents.size() / 2, contents.size(), "text/plain",
-      local_file_path,
-      test_util::CreateCopyResultCallback(&response, &entry),
-      base::Bind(&test_util::AppendProgressCallbackResult,
-                 &upload_progress_values));
+      upload_location, 0, contents.size() / 2, contents.size(), "text/plain",
+      local_file_path, test_util::CreateCopyResultCallback(&response, &entry),
+      base::BindRepeating(&test_util::AppendProgressCallbackResult,
+                          &upload_progress_values));
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(HTTP_RESUME_INCOMPLETE, response.code);
@@ -2044,12 +2041,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_ExistingFile) {
 
   upload_progress_values.clear();
   fake_service_.ResumeUpload(
-      upload_location,
-      contents.size() / 2, contents.size(), contents.size(), "text/plain",
-      local_file_path,
+      upload_location, contents.size() / 2, contents.size(), contents.size(),
+      "text/plain", local_file_path,
       test_util::CreateCopyResultCallback(&response, &entry),
-      base::Bind(&test_util::AppendProgressCallbackResult,
-                 &upload_progress_values));
+      base::BindRepeating(&test_util::AppendProgressCallbackResult,
+                          &upload_progress_values));
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(HTTP_SUCCESS, response.code);
@@ -2091,12 +2087,10 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
   std::unique_ptr<FileResource> entry;
   std::vector<test_util::ProgressInfo> upload_progress_values;
   fake_service_.ResumeUpload(
-      upload_location,
-      0, contents.size() / 2, contents.size(), "test/foo",
-      local_file_path,
-      test_util::CreateCopyResultCallback(&response, &entry),
-      base::Bind(&test_util::AppendProgressCallbackResult,
-                 &upload_progress_values));
+      upload_location, 0, contents.size() / 2, contents.size(), "test/foo",
+      local_file_path, test_util::CreateCopyResultCallback(&response, &entry),
+      base::BindRepeating(&test_util::AppendProgressCallbackResult,
+                          &upload_progress_values));
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(HTTP_RESUME_INCOMPLETE, response.code);
@@ -2109,12 +2103,11 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
 
   upload_progress_values.clear();
   fake_service_.ResumeUpload(
-      upload_location,
-      contents.size() / 2, contents.size(), contents.size(), "test/foo",
-      local_file_path,
+      upload_location, contents.size() / 2, contents.size(), contents.size(),
+      "test/foo", local_file_path,
       test_util::CreateCopyResultCallback(&response, &entry),
-      base::Bind(&test_util::AppendProgressCallbackResult,
-                 &upload_progress_values));
+      base::BindRepeating(&test_util::AppendProgressCallbackResult,
+                          &upload_progress_values));
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(HTTP_CREATED, response.code);

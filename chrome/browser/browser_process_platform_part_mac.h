@@ -9,8 +9,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "chrome/browser/apps/app_shim/app_shim_host_manager_mac.h"
+#include "chrome/browser/apps/app_shim/app_shim_listener.h"
 #include "chrome/browser/browser_process_platform_part_base.h"
+
+namespace apps {
+class AppShimManager;
+}  // namespace apps
 
 class BrowserProcessPlatformPart : public BrowserProcessPlatformPartBase {
  public:
@@ -22,11 +26,14 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartBase {
   void AttemptExit(bool try_to_quit_application) override;
   void PreMainMessageLoopRun() override;
 
-  AppShimHostManager* app_shim_host_manager();
+  AppShimListener* app_shim_listener();
+  apps::AppShimManager* app_shim_manager();
 
  private:
+  std::unique_ptr<apps::AppShimManager> app_shim_manager_;
+
   // Hosts the IPC channel factory that App Shims connect to on Mac.
-  scoped_refptr<AppShimHostManager> app_shim_host_manager_;
+  scoped_refptr<AppShimListener> app_shim_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessPlatformPart);
 };

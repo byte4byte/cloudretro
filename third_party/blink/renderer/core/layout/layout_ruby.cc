@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_ruby.h"
 
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
@@ -93,7 +94,7 @@ void LayoutRubyAsInline::AddChild(LayoutObject* child,
   // (The LayoutRubyRun object will handle the details)
   LayoutRubyRun* last_run = LastRubyRun(this);
   if (!last_run || last_run->HasRubyText()) {
-    last_run = LayoutRubyRun::StaticCreateRubyRun(this);
+    last_run = LayoutRubyRun::StaticCreateRubyRun(this, *ContainingBlock());
     LayoutInline::AddChild(last_run, before_child);
   }
   last_run->AddChild(child);
@@ -158,7 +159,7 @@ void LayoutRubyAsBlock::AddChild(LayoutObject* child,
   // (The LayoutRubyRun object will handle the details)
   LayoutRubyRun* last_run = LastRubyRun(this);
   if (!last_run || last_run->HasRubyText()) {
-    last_run = LayoutRubyRun::StaticCreateRubyRun(this);
+    last_run = LayoutRubyRun::StaticCreateRubyRun(this, *this);
     LayoutBlockFlow::AddChild(last_run, before_child);
   }
   last_run->AddChild(child);

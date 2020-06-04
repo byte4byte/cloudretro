@@ -10,9 +10,9 @@
 #include "components/pdf/browser/pdf_web_contents_helper_client.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/referrer_type_converters.h"
+#include "ui/base/pointer/touch_editing_controller.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/point_f.h"
-#include "ui/strings/grit/ui_strings.h"
 
 namespace pdf {
 
@@ -31,7 +31,7 @@ PDFWebContentsHelper::PDFWebContentsHelper(
     content::WebContents* web_contents,
     std::unique_ptr<PDFWebContentsHelperClient> client)
     : content::WebContentsObserver(web_contents),
-      pdf_service_bindings_(web_contents, this),
+      pdf_service_receivers_(web_contents, this),
       client_(std::move(client)) {}
 
 PDFWebContentsHelper::~PDFWebContentsHelper() {
@@ -42,8 +42,10 @@ PDFWebContentsHelper::~PDFWebContentsHelper() {
   touch_selection_controller_client_manager_->RemoveObserver(this);
 }
 
-void PDFWebContentsHelper::SetListener(mojom::PdfListenerPtr listener) {
-  remote_pdf_client_ = std::move(listener);
+void PDFWebContentsHelper::SetListener(
+    mojo::PendingRemote<mojom::PdfListener> listener) {
+  remote_pdf_client_.reset();
+  remote_pdf_client_.Bind(std::move(listener));
 }
 
 gfx::PointF PDFWebContentsHelper::ConvertHelper(const gfx::PointF& point_f,
@@ -92,12 +94,18 @@ void PDFWebContentsHelper::DidScroll() {
   if (touch_selection_controller_client_manager_) {
     gfx::SelectionBound start;
     gfx::SelectionBound end;
-    start.SetEdgeTop(ConvertToRoot(selection_left_));
-    start.SetEdgeBottom(ConvertToRoot(gfx::PointF(
+    start.SetEdgeStart(ConvertToRoot(selection_left_));
+    start.SetEdgeEnd(ConvertToRoot(gfx::PointF(
         selection_left_.x(), selection_left_.y() + selection_left_height_)));
-    end.SetEdgeTop(ConvertToRoot(selection_right_));
-    end.SetEdgeBottom(ConvertToRoot(gfx::PointF(
+    end.SetEdgeStart(ConvertToRoot(selection_right_));
+    end.SetEdgeEnd(ConvertToRoot(gfx::PointF(
         selection_right_.x(), selection_right_.y() + selection_right_height_)));
+
+    // TouchSelectionControllerClientAura needs these visible edges of selection
+    // to show the quick menu and context menu. Set the visible edges by the
+    // edges of |start| and |end|.
+    start.SetVisibleEdge(start.edge_start(), start.edge_end());
+    end.SetVisibleEdge(end.edge_start(), end.edge_end());
 
     // Don't do left/right comparison after setting type.
     // TODO(wjmaclean): When PDFium supports editing, we'll need to detect
@@ -162,7 +170,7 @@ bool PDFWebContentsHelper::IsCommandIdEnabled(int command_id) const {
   bool readable = true;
 
   switch (command_id) {
-    case IDS_APP_COPY:
+    case ui::TouchEditable::kCopy:
       return readable && has_selection_;
       // TODO(wjmaclean): add logic for cut/paste as the information required
       // from PDFium becomes available.
@@ -174,7 +182,7 @@ void PDFWebContentsHelper::ExecuteCommand(int command_id, int event_flags) {
   // TODO(wjmaclean, dsinclair): Need to communicate to PDFium to accept
   // cut/paste commands.
   switch (command_id) {
-    case IDS_APP_COPY:
+    case ui::TouchEditable::kCopy:
       web_contents()->Copy();
       break;
   }

@@ -51,7 +51,7 @@ std::unique_ptr<base::win::ScopedCOMInitializer> CreateComInitializer(
 // from within StartWithType.
 struct AutoThread::StartupData {
   // Fields describing the desired thread behaviour.
-  base::MessagePump::Type loop_type;
+  base::MessagePumpType pump_type;
 
   // Used to receive the AutoThreadTaskRunner for the thread.
   scoped_refptr<AutoThreadTaskRunner> task_runner;
@@ -59,8 +59,8 @@ struct AutoThread::StartupData {
   // Used to synchronize thread startup.
   base::WaitableEvent event;
 
-  explicit StartupData(base::MessagePump::Type type)
-      : loop_type(type),
+  explicit StartupData(base::MessagePumpType type)
+      : pump_type(type),
         event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
               base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 };
@@ -69,7 +69,7 @@ struct AutoThread::StartupData {
 scoped_refptr<AutoThreadTaskRunner> AutoThread::CreateWithType(
     const char* name,
     scoped_refptr<AutoThreadTaskRunner> joiner,
-    base::MessagePump::Type type) {
+    base::MessagePumpType type) {
   AutoThread* thread = new AutoThread(name, joiner.get());
   scoped_refptr<AutoThreadTaskRunner> task_runner = thread->StartWithType(type);
   if (!task_runner.get())
@@ -80,7 +80,7 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::CreateWithType(
 // static
 scoped_refptr<AutoThreadTaskRunner> AutoThread::Create(
     const char* name, scoped_refptr<AutoThreadTaskRunner> joiner) {
-  return CreateWithType(name, joiner, base::MessagePump::Type::DEFAULT);
+  return CreateWithType(name, joiner, base::MessagePumpType::DEFAULT);
 }
 
 #if defined(OS_WIN)
@@ -88,12 +88,12 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::Create(
 scoped_refptr<AutoThreadTaskRunner> AutoThread::CreateWithLoopAndComInitTypes(
     const char* name,
     scoped_refptr<AutoThreadTaskRunner> joiner,
-    base::MessagePump::Type loop_type,
+    base::MessagePumpType pump_type,
     ComInitType com_init_type) {
   AutoThread* thread = new AutoThread(name, joiner.get());
   thread->SetComInitType(com_init_type);
   scoped_refptr<AutoThreadTaskRunner> task_runner =
-      thread->StartWithType(loop_type);
+      thread->StartWithType(pump_type);
   if (!task_runner.get())
     delete thread;
   return task_runner;
@@ -101,25 +101,25 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::CreateWithLoopAndComInitTypes(
 #endif
 
 AutoThread::AutoThread(const char* name)
-  : startup_data_(NULL),
+    : startup_data_(nullptr),
 #if defined(OS_WIN)
-    com_init_type_(COM_INIT_NONE),
+      com_init_type_(COM_INIT_NONE),
 #endif
-    thread_(),
-    name_(name),
-    was_quit_properly_(false) {
+      thread_(),
+      name_(name),
+      was_quit_properly_(false) {
   thread_checker_.DetachFromThread();
 }
 
 AutoThread::AutoThread(const char* name, AutoThreadTaskRunner* joiner)
-  : startup_data_(NULL),
+    : startup_data_(nullptr),
 #if defined(OS_WIN)
-    com_init_type_(COM_INIT_NONE),
+      com_init_type_(COM_INIT_NONE),
 #endif
-    thread_(),
-    name_(name),
-    was_quit_properly_(false),
-    joiner_(joiner) {
+      thread_(),
+      name_(name),
+      was_quit_properly_(false),
+      joiner_(joiner) {
   thread_checker_.DetachFromThread();
 }
 
@@ -135,10 +135,10 @@ AutoThread::~AutoThread() {
 }
 
 scoped_refptr<AutoThreadTaskRunner> AutoThread::StartWithType(
-    base::MessagePump::Type type) {
+    base::MessagePumpType type) {
   DCHECK(thread_.is_null());
 #if defined(OS_WIN)
-  DCHECK(com_init_type_ != COM_INIT_STA || type == base::MessagePump::Type::UI);
+  DCHECK(com_init_type_ != COM_INIT_STA || type == base::MessagePumpType::UI);
 #endif
 
   StartupData startup_data(type);
@@ -146,8 +146,8 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::StartWithType(
 
   if (!base::PlatformThread::Create(0, this, &thread_)) {
     DLOG(ERROR) << "failed to create thread";
-    startup_data_ = NULL;
-    return NULL;
+    startup_data_ = nullptr;
+    return nullptr;
   }
 
   // Wait for the thread to start and initialize single_thread_task_executor
@@ -159,8 +159,8 @@ scoped_refptr<AutoThreadTaskRunner> AutoThread::StartWithType(
   base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_wait;
   startup_data.event.Wait();
 
-  // set it to NULL so we don't keep a pointer to some object on the stack.
-  startup_data_ = NULL;
+  // set it to null so we don't keep a pointer to some object on the stack.
+  startup_data_ = nullptr;
 
   DCHECK(startup_data.task_runner.get());
   return startup_data.task_runner;
@@ -173,10 +173,10 @@ void AutoThread::SetComInitType(ComInitType com_init_type) {
 }
 #endif
 
-void AutoThread::QuitThread(const base::Closure& quit_when_idle_closure) {
+void AutoThread::QuitThread(base::OnceClosure quit_when_idle_closure) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  quit_when_idle_closure.Run();
+  std::move(quit_when_idle_closure).Run();
   was_quit_properly_ = true;
 
   if (joiner_.get()) {
@@ -195,7 +195,7 @@ void AutoThread::ThreadMain() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   base::SingleThreadTaskExecutor single_thread_task_executor(
-      startup_data_->loop_type);
+      startup_data_->pump_type);
   base::RunLoop run_loop;
 
   // Complete the initialization of our AutoThread object.
@@ -206,8 +206,8 @@ void AutoThread::ThreadMain() {
   // no more references to it remain.
   startup_data_->task_runner = new AutoThreadTaskRunner(
       single_thread_task_executor.task_runner(),
-      base::Bind(&AutoThread::QuitThread, base::Unretained(this),
-                 run_loop.QuitWhenIdleClosure()));
+      base::BindOnce(&AutoThread::QuitThread, base::Unretained(this),
+                     run_loop.QuitWhenIdleClosure()));
 
   startup_data_->event.Signal();
   // startup_data_ can't be touched anymore since the starting thread is now
@@ -216,7 +216,7 @@ void AutoThread::ThreadMain() {
 #if defined(OS_POSIX) && !defined(OS_NACL)
   // Allow threads running a MessageLoopForIO to use FileDescriptorWatcher.
   std::unique_ptr<base::FileDescriptorWatcher> file_descriptor_watcher;
-  if (single_thread_task_executor.type() == base::MessagePump::Type::IO) {
+  if (single_thread_task_executor.type() == base::MessagePumpType::IO) {
     file_descriptor_watcher.reset(new base::FileDescriptorWatcher(
         single_thread_task_executor.task_runner()));
   }

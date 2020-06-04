@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
@@ -179,6 +180,11 @@ class AwPermissionManager::PendingRequest {
     }
     DCHECK(!IsCompleted());
     results[result->second] = status;
+    if (type == PermissionType::MIDI_SYSEX &&
+        status == PermissionStatus::GRANTED) {
+      content::ChildProcessSecurityPolicy::GetInstance()
+          ->GrantSendMidiSysExMessage(render_process_id);
+    }
     resolved_permissions_.insert(type);
   }
 
@@ -222,7 +228,7 @@ class AwPermissionManager::PendingRequest {
 };
 
 AwPermissionManager::AwPermissionManager()
-    : result_cache_(new LastRequestResultCache), weak_ptr_factory_(this) {}
+    : result_cache_(new LastRequestResultCache) {}
 
 AwPermissionManager::~AwPermissionManager() {
   CancelPermissionRequests();
@@ -323,12 +329,17 @@ int AwPermissionManager::RequestPermissions(
       case PermissionType::BACKGROUND_SYNC:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
-      case PermissionType::CLIPBOARD_READ:
-      case PermissionType::CLIPBOARD_WRITE:
+      case PermissionType::CLIPBOARD_READ_WRITE:
+      case PermissionType::CLIPBOARD_SANITIZED_WRITE:
       case PermissionType::PAYMENT_HANDLER:
       case PermissionType::BACKGROUND_FETCH:
       case PermissionType::IDLE_DETECTION:
       case PermissionType::PERIODIC_BACKGROUND_SYNC:
+      case PermissionType::NFC:
+      case PermissionType::VR:
+      case PermissionType::AR:
+      case PermissionType::STORAGE_ACCESS_GRANT:
+      case PermissionType::CAMERA_PAN_TILT_ZOOM:
         NOTIMPLEMENTED() << "RequestPermissions is not implemented for "
                          << static_cast<int>(permissions[i]);
         pending_request_raw->SetPermissionStatus(permissions[i],
@@ -524,12 +535,17 @@ void AwPermissionManager::CancelPermissionRequest(int request_id) {
       case PermissionType::BACKGROUND_SYNC:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
-      case PermissionType::CLIPBOARD_READ:
-      case PermissionType::CLIPBOARD_WRITE:
+      case PermissionType::CLIPBOARD_READ_WRITE:
+      case PermissionType::CLIPBOARD_SANITIZED_WRITE:
       case PermissionType::PAYMENT_HANDLER:
       case PermissionType::BACKGROUND_FETCH:
       case PermissionType::IDLE_DETECTION:
       case PermissionType::PERIODIC_BACKGROUND_SYNC:
+      case PermissionType::NFC:
+      case PermissionType::VR:
+      case PermissionType::AR:
+      case PermissionType::STORAGE_ACCESS_GRANT:
+      case PermissionType::CAMERA_PAN_TILT_ZOOM:
         NOTIMPLEMENTED() << "CancelPermission not implemented for "
                          << static_cast<int>(permission);
         break;

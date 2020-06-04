@@ -13,8 +13,9 @@
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/components/webui/web_ui_url_constants.h"
 #include "ios/web/public/thread/web_thread.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "ios/web/public/webui/web_ui_ios.h"
 #include "ios/web/webui/url_data_manager_ios_backend.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -24,7 +25,6 @@
 #error "This file requires ARC support."
 #endif
 
-namespace ios {
 namespace {
 // All ChromeBrowserState will store a dummy base::SupportsUserData::Data
 // object with this key. It can be used to check that a web::BrowserState
@@ -95,5 +95,3 @@ void ChromeBrowserState::UpdateCorsExemptHeader(
     network::mojom::NetworkContextParams* params) {
   variations::UpdateCorsExemptHeaderForVariations(params);
 }
-
-}  // namespace ios

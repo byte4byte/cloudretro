@@ -9,7 +9,8 @@ import android.content.res.Resources;
 import android.graphics.RectF;
 import android.os.SystemClock;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
@@ -25,12 +26,12 @@ import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.TabStripSceneLayer;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.ResourceManager;
 
@@ -156,8 +157,8 @@ public class StripLayoutHelperManager implements SceneOverlay {
         mModelSelectorButton.setVisible(false);
         // Pressed resources are the same as the unpressed resources.
         mModelSelectorButton.setResources(R.drawable.btn_tabstrip_switch_normal,
-                R.drawable.btn_tabstrip_switch_normal, R.drawable.btn_tabstrip_switch_incognito,
-                R.drawable.btn_tabstrip_switch_incognito);
+                R.drawable.btn_tabstrip_switch_normal, R.drawable.location_bar_incognito_badge,
+                R.drawable.location_bar_incognito_badge);
         mModelSelectorButton.setY(MODEL_SELECTOR_BUTTON_Y_OFFSET_DP);
 
         Resources res = context.getResources();

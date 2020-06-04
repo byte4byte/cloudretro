@@ -93,6 +93,7 @@ class LayoutSVGShape : public LayoutSVGModelObject {
     return rare_data_->non_scaling_stroke_transform_;
   }
 
+  AffineTransform ComputeRootTransform() const;
   AffineTransform ComputeNonScalingStrokeTransform() const;
   AffineTransform LocalSVGTransform() const final { return local_transform_; }
 
@@ -101,6 +102,7 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   }
 
   float StrokeWidth() const;
+  float StrokeWidthForMarkerUnits() const;
 
   virtual ShapeGeometryCodePath GeometryCodePath() const {
     return kPathGeometry;
@@ -130,7 +132,7 @@ class LayoutSVGShape : public LayoutSVGModelObject {
 
   float VisualRectOutsetForRasterEffects() const override;
 
-  void ClearPath() { path_.reset(); }
+  void ClearPath();
   void CreatePath();
 
   // Update (cached) shape data and the (object) bounding box.
@@ -179,7 +181,6 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   FloatRect ApproximateStrokeBoundingBox(const FloatRect& shape_bounds) const;
   FloatRect CalculateNonScalingStrokeBoundingBox() const;
   void UpdateNonScalingStrokeData();
-  bool UpdateLocalTransform();
 
  private:
   AffineTransform local_transform_;
@@ -189,6 +190,7 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   // into removing it.
   std::unique_ptr<Path> path_;
   mutable std::unique_ptr<LayoutSVGShapeRareData> rare_data_;
+  std::unique_ptr<Path> stroke_path_cache_;
 
   StrokeGeometryClass geometry_class_;
   bool needs_boundaries_update_ : 1;

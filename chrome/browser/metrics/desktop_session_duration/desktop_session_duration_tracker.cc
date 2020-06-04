@@ -38,8 +38,8 @@ DesktopSessionDurationTracker* DesktopSessionDurationTracker::Get() {
 
 void DesktopSessionDurationTracker::StartTimer(base::TimeDelta duration) {
   timer_.Start(FROM_HERE, duration,
-               base::Bind(&DesktopSessionDurationTracker::OnTimerFired,
-                          weak_factory_.GetWeakPtr()));
+               base::BindOnce(&DesktopSessionDurationTracker::OnTimerFired,
+                              weak_factory_.GetWeakPtr()));
 }
 
 void DesktopSessionDurationTracker::OnVisibilityChanged(
@@ -156,7 +156,7 @@ void DesktopSessionDurationTracker::EndSession(
     delta = base::TimeDelta();
 
   for (Observer& observer : observer_list_)
-    observer.OnSessionEnded(delta);
+    observer.OnSessionEnded(delta, session_start_ + delta);
 
   DVLOG(4) << "Logging session length of " << delta.InSeconds() << " seconds.";
 

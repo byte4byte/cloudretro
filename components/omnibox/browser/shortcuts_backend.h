@@ -21,6 +21,7 @@
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -38,7 +39,6 @@ void PopulateShortcutsBackendWithTestData(
     size_t db_size);
 
 namespace history {
-class HistoryService;
 class ShortcutsDatabase;
 }  // namespace history
 
@@ -102,6 +102,7 @@ class ShortcutsBackend : public RefcountedKeyedService,
       TestShortcutData* db,
       size_t db_size);
   FRIEND_TEST_ALL_PREFIXES(ShortcutsBackendTest, EntitySuggestionTest);
+  FRIEND_TEST_ALL_PREFIXES(ShortcutsBackendTest, MatchCoreDescriptionTest);
 
   enum CurrentState {
     NOT_INITIALIZED,  // Backend created but not initialized.
@@ -168,7 +169,7 @@ class ShortcutsBackend : public RefcountedKeyedService,
   GuidMap guid_map_;
 
   ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
-      history_service_observer_;
+      history_service_observer_{this};
 
   scoped_refptr<base::SequencedTaskRunner> main_runner_;
   scoped_refptr<base::SequencedTaskRunner> db_runner_;

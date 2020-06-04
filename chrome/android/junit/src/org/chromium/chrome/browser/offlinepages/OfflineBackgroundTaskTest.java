@@ -20,7 +20,6 @@ import android.os.Bundle;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -41,11 +40,10 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.DeviceConditions;
 import org.chromium.chrome.browser.ShadowDeviceConditions;
-import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
-import org.chromium.chrome.test.support.DisableHistogramsRule;
 import org.chromium.components.background_task_scheduler.BackgroundTask;
 import org.chromium.components.background_task_scheduler.BackgroundTaskScheduler;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
+import org.chromium.components.background_task_scheduler.NativeBackgroundTask;
 import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskInfo;
 import org.chromium.components.background_task_scheduler.TaskParameters;
@@ -62,19 +60,19 @@ public class OfflineBackgroundTaskTest {
     private static final boolean POWER_CONNECTED = true;
     private static final boolean POWER_SAVE_MODE_ON = true;
     private static final boolean METERED = true;
+    private static final boolean SCREEN_ON_AND_UNLOCKED = true;
     private static final int MINIMUM_BATTERY_LEVEL = 33;
     private static final String IS_LOW_END_DEVICE_SWITCH =
             "--" + BaseSwitches.ENABLE_LOW_END_DEVICE_MODE;
 
-    @Rule
-    public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
 
     private Bundle mTaskExtras;
     private long mTestTime;
     private TriggerConditions mTriggerConditions =
             new TriggerConditions(!REQUIRE_POWER, MINIMUM_BATTERY_LEVEL, REQUIRE_UNMETERED);
     private DeviceConditions mDeviceConditions = new DeviceConditions(!POWER_CONNECTED,
-            MINIMUM_BATTERY_LEVEL + 5, ConnectionType.CONNECTION_3G, !POWER_SAVE_MODE_ON, !METERED);
+            MINIMUM_BATTERY_LEVEL + 5, ConnectionType.CONNECTION_3G, !POWER_SAVE_MODE_ON, !METERED,
+            SCREEN_ON_AND_UNLOCKED);
     private Activity mTestActivity;
 
     @Mock
@@ -90,7 +88,7 @@ public class OfflineBackgroundTaskTest {
     private ArgumentCaptor<TaskInfo> mTaskInfo;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
         BackgroundTaskSchedulerFactory.setSchedulerForTesting(mTaskScheduler);
         doReturn(true)
@@ -117,7 +115,7 @@ public class OfflineBackgroundTaskTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         // Clean up static state for subsequent Robolectric tests.
         CommandLine.reset();
         SysUtils.resetForTesting();
@@ -134,9 +132,9 @@ public class OfflineBackgroundTaskTest {
     @Feature({"OfflinePages"})
     public void testCheckConditions_BatteryConditions_LowBattery_NoPower() {
         // Setup low battery conditions with no power connected.
-        DeviceConditions deviceConditionsLowBattery =
-                new DeviceConditions(!POWER_CONNECTED, MINIMUM_BATTERY_LEVEL - 1,
-                        ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON, !METERED);
+        DeviceConditions deviceConditionsLowBattery = new DeviceConditions(!POWER_CONNECTED,
+                MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON,
+                !METERED, SCREEN_ON_AND_UNLOCKED);
         ShadowDeviceConditions.setCurrentConditions(deviceConditionsLowBattery);
 
         // Verify that conditions for processing are not met.
@@ -159,9 +157,9 @@ public class OfflineBackgroundTaskTest {
     @Feature({"OfflinePages"})
     public void testCheckConditions_BatteryConditions_LowBattery_WithPower() {
         // Set battery percentage below minimum level, but connect power.
-        DeviceConditions deviceConditionsPowerConnected =
-                new DeviceConditions(POWER_CONNECTED, MINIMUM_BATTERY_LEVEL - 1,
-                        ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON, !METERED);
+        DeviceConditions deviceConditionsPowerConnected = new DeviceConditions(POWER_CONNECTED,
+                MINIMUM_BATTERY_LEVEL - 1, ConnectionType.CONNECTION_WIFI, !POWER_SAVE_MODE_ON,
+                !METERED, SCREEN_ON_AND_UNLOCKED);
         ShadowDeviceConditions.setCurrentConditions(deviceConditionsPowerConnected);
 
         // Now verify that same battery level, with power connected, will pass the conditions.

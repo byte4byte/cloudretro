@@ -11,23 +11,22 @@ import static org.hamcrest.Matchers.instanceOf;
 import android.annotation.TargetApi;
 import android.os.Build;
 import android.os.SystemClock;
-import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.contrib.RecyclerViewActions;
 import android.support.test.filters.SmallTest;
-import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.RecyclerView;
-import android.view.View;
+
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.params.ParameterAnnotations;
 import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.CommandLineFlags;
@@ -35,19 +34,19 @@ import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.night_mode.NightModeTestUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.night_mode.ChromeNightModeTestUtils;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
-import org.chromium.chrome.test.util.RenderTestRule;
+import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.ui.test.util.NightModeTestUtils;
 
 import java.util.ArrayList;
 
@@ -86,8 +85,7 @@ public class ExploreSitesPageTest {
             new ChromeActivityTestRule<>(ChromeActivity.class);
 
     @Rule
-    public RenderTestRule mRenderTestRule =
-            new RenderTestRule("chrome/test/data/android/render_tests");
+    public ChromeRenderTestRule mRenderTestRule = new ChromeRenderTestRule();
 
     private Tab mTab;
     private RecyclerView mRecyclerView;
@@ -95,17 +93,17 @@ public class ExploreSitesPageTest {
 
     @BeforeClass
     public static void setUpBeforeActivityLaunched() {
-        NightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
+        ChromeNightModeTestUtils.setUpNightModeBeforeChromeActivityLaunched();
     }
 
     @ParameterAnnotations.UseMethodParameterBefore(NightModeTestUtils.NightModeParams.class)
     public void setupNightMode(boolean nightModeEnabled) {
-        NightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
+        ChromeNightModeTestUtils.setUpNightModeForChromeActivity(nightModeEnabled);
         mRenderTestRule.setNightModeEnabled(nightModeEnabled);
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         ExploreSitesBridge.setCatalogForTesting(getTestingCatalog());
         mActivityTestRule.startMainActivityWithURL("about:blank");
 
@@ -119,13 +117,13 @@ public class ExploreSitesPageTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void tearDown() {
         ExploreSitesBridge.setCatalogForTesting(null);
     }
 
     @AfterClass
     public static void tearDownAfterActivityDestroyed() {
-        NightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
+        ChromeNightModeTestUtils.tearDownNightModeAfterChromeActivityDestroyed();
     }
 
     private int getFirstVisiblePosition() {
@@ -180,30 +178,28 @@ public class ExploreSitesPageTest {
     @SmallTest
     @CommandLineFlags.
     Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
-            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile"
-                    + "/denseVariation/titleBottom"})
-    @Feature({"ExploreSites"})
-    public void
-    testInitialLayout_DenseTitleBottom() throws Exception {
-        // Ensure that the DenseTitleBottomView has loaded without crashing
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/denseVariation/"
+                    + "titleBottom"})
+    @Feature({"ExploreSites", "RenderTest"})
+    @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
+    public void testInitialLayout_DenseTitleBottom(boolean nightModeEnabled) throws Exception {
         Assert.assertEquals(
                 DenseVariation.DENSE_TITLE_BOTTOM, ExploreSitesBridge.getDenseVariation());
-        // TODO(angelii): Add render test once layout is finalized.
+        mRenderTestRule.render(mRecyclerView, "initial_layout_dense_title_bottom");
     }
 
     @Test
     @SmallTest
     @CommandLineFlags.
     Add({"enable-features=ExploreSites<FakeStudyName", "force-fieldtrials=FakeStudyName/Enabled",
-            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile"
-                    + "/denseVariation/titleRight"})
-    @Feature({"ExploreSites"})
-    public void
-    testInitialLayout_DenseTitleRight() throws Exception {
-        // Ensure that the DenseTitleRightView has loaded without crashing
+            "force-fieldtrial-params=FakeStudyName.Enabled:variation/mostLikelyTile/denseVariation/"
+                + "titleRight"})
+    @Feature({"ExploreSites", "RenderTest"})
+    @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
+    public void testInitialLayout_DenseTitleRight(boolean nightModeEnabled) throws Exception {
         Assert.assertEquals(
                 DenseVariation.DENSE_TITLE_RIGHT, ExploreSitesBridge.getDenseVariation());
-        // TODO(angelii): Add render test once layout is finalized.
+        mRenderTestRule.render(mRecyclerView, "initial_layout_dense_title_right");
     }
 
     @Test
@@ -227,48 +223,19 @@ public class ExploreSitesPageTest {
 
     @Test
     @SmallTest
-    @Feature({"ExploreSites", "RenderTest"})
+    @Feature({"ExploreSites"})
     @Features.EnableFeatures(ChromeFeatureList.EXPLORE_SITES)
-    @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
-    public void testFocusRetention_WithBack(boolean nightModeEnabled) throws Exception {
-        Assume.assumeTrue(FeatureUtilities.isNoTouchModeEnabled());
-
-        InstrumentationRegistry.getInstrumentation().setInTouchMode(false);
-
-        final int defaultScrollPosition = mEsp.initialScrollPositionForTests();
-        Assert.assertEquals(defaultScrollPosition, getFocusedCategoryPosition());
-        Assert.assertEquals(0, getFocusedTileIndex());
-
-        // Change the focus from default so that we can verify it stays the same after navigation.
-        focusDifferentCard();
-
-        int focusedCategory = getFocusedCategoryPosition();
-        int focusedTile = getFocusedTileIndex();
-        Assert.assertNotEquals(defaultScrollPosition, focusedCategory);
-        Assert.assertNotEquals(0, focusedTile);
-
-        mRenderTestRule.render(mRecyclerView, "recycler_layout_focus");
+    public void testRecordTimestamp() {
+        int histogramCount =
+                RecordHistogram.getHistogramTotalCountForTesting("ExploreSites.NavBackTime");
 
         mActivityTestRule.loadUrl("about:blank");
-
         navigateBackToESP();
 
-        mRenderTestRule.render(mRecyclerView, "recycler_layout_focus_back");
-        Assert.assertEquals(focusedCategory, getFocusedCategoryPosition());
-        Assert.assertEquals(focusedTile, getFocusedTileIndex());
-    }
+        int newHistogramCount =
+                RecordHistogram.getHistogramTotalCountForTesting("ExploreSites.NavBackTime");
 
-    private void focusDifferentCard() {
-        TestThreadUtils.runOnUiThreadBlocking(() -> {
-            ExploreSitesCategoryCardView cardView = null;
-            for (int i = 0; i < mRecyclerView.getChildCount(); i++) {
-                cardView = (ExploreSitesCategoryCardView) mRecyclerView.getChildAt(i);
-                if (!cardView.hasFocus()) {
-                    cardView.getTileViewAt(2).requestFocus();
-                    break;
-                }
-            }
-        });
+        Assert.assertEquals(histogramCount + 1, newHistogramCount);
     }
 
     private void navigateBackToESP() {
@@ -277,17 +244,6 @@ public class ExploreSitesPageTest {
         waitForEspLoaded(mTab);
         mEsp = (ExploreSitesPage) mTab.getNativePage();
         mRecyclerView = mEsp.getView().findViewById(R.id.explore_sites_category_recycler);
-    }
-
-    private int getFocusedCategoryPosition() {
-        View focusedView = mRecyclerView.getFocusedChild();
-        return mRecyclerView.getLayoutManager().getPosition(focusedView);
-    }
-
-    private int getFocusedTileIndex() {
-        ExploreSitesCategoryCardView focusedView =
-                (ExploreSitesCategoryCardView) mRecyclerView.getFocusedChild();
-        return focusedView.getFocusedTileIndex(-1);
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)

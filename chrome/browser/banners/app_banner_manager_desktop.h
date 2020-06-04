@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/banners/app_banner_manager.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/app_registrar_observer.h"
@@ -23,6 +24,7 @@ enum class InstallResultCode;
 }
 
 namespace banners {
+class TestAppBannerManagerDesktop;
 
 // Manages web app banners for desktop platforms.
 class AppBannerManagerDesktop
@@ -32,14 +34,25 @@ class AppBannerManagerDesktop
  public:
   ~AppBannerManagerDesktop() override;
 
+  static void CreateForWebContents(content::WebContents* web_contents);
   using content::WebContentsUserData<AppBannerManagerDesktop>::FromWebContents;
 
   // Turn off triggering on engagement notifications or navigates, for testing
   // purposes only.
   static void DisableTriggeringForTesting();
+  virtual TestAppBannerManagerDesktop*
+  AsTestAppBannerManagerDesktopForTesting();
+
+  // AppBannerManager overrides.
+  bool IsExternallyInstalledWebApp() override;
 
  protected:
   explicit AppBannerManagerDesktop(content::WebContents* web_contents);
+
+  using CreateAppBannerManagerForTesting =
+      std::unique_ptr<AppBannerManagerDesktop> (*)(content::WebContents*);
+  static CreateAppBannerManagerForTesting
+      override_app_banner_manager_desktop_for_testing_;
 
   // AppBannerManager overrides.
   base::WeakPtr<AppBannerManager> GetWeakPtr() override;
@@ -56,11 +69,11 @@ class AppBannerManagerDesktop
   friend class content::WebContentsUserData<AppBannerManagerDesktop>;
   friend class FakeAppBannerManagerDesktop;
 
+  web_app::AppRegistrar& registrar();
+
   // AppBannerManager overrides.
-  bool IsWebAppConsideredInstalled(content::WebContents* web_contents,
-                                   const GURL& validated_url,
-                                   const GURL& start_url,
-                                   const GURL& manifest_url) override;
+  bool IsWebAppConsideredInstalled() override;
+  bool ShouldAllowWebAppReplacementInstall() override;
   void ShowBannerUi(WebappInstallSource install_source) override;
 
   // content::WebContentsObserver override.
@@ -82,7 +95,7 @@ class AppBannerManagerDesktop
   extensions::ExtensionRegistry* extension_registry_;
 
   ScopedObserver<web_app::AppRegistrar, web_app::AppRegistrarObserver>
-      registrar_observer_;
+      registrar_observer_{this};
 
   base::WeakPtrFactory<AppBannerManagerDesktop> weak_factory_{this};
 

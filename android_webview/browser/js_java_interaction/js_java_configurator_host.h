@@ -5,15 +5,10 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_JS_JAVA_INTERACTION_JS_JAVA_CONFIGURATOR_HOST_H_
 #define ANDROID_WEBVIEW_BROWSER_JS_JAVA_INTERACTION_JS_JAVA_CONFIGURATOR_HOST_H_
 
-#include <string>
-#include <vector>
-
 #include "android_webview/common/js_java_interaction/interfaces.mojom.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/strings/string16.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "net/proxy_resolution/proxy_bypass_rules.h"
-#include "services/network/public/mojom/proxy_config.mojom.h"
-#include "url/origin.h"
 
 namespace content {
 class RenderFrameHost;
@@ -21,8 +16,12 @@ class RenderFrameHost;
 
 namespace android_webview {
 
-// This class is 1:1 with WebContents, when SetJsApiService is called, it stores
-// the information in this class and send them to renderer side
+struct JsObject;
+
+class JsToJavaMessaging;
+
+// This class is 1:1 with WebContents, when AddWebMessageListener() is called,
+// it stores the information in this class and send them to renderer side
 // JsJavaConfigurator if there is any. When RenderFrameCreated() gets called, it
 // needs to configure that new RenderFrame with the information stores in this
 // class.
@@ -31,25 +30,33 @@ class JsJavaConfiguratorHost : public content::WebContentsObserver {
   explicit JsJavaConfiguratorHost(content::WebContents* web_contents);
   ~JsJavaConfiguratorHost() override;
 
-  base::android::ScopedJavaLocalRef<jstring> SetJsApiService(
+  // Native side AddWebMessageListener, returns an error message if the
+  // parameters didn't pass necessary checks.
+  base::android::ScopedJavaLocalRef<jstring> AddWebMessageListener(
       JNIEnv* env,
-      bool need_to_inject_js_object,
+      const base::android::JavaParamRef<jobject>& listener,
       const base::android::JavaParamRef<jstring>& js_object_name,
       const base::android::JavaParamRef<jobjectArray>& allowed_origin_rules);
 
-  bool IsOriginAllowedForOnPostMessage(const url::Origin& origin);
+  void RemoveWebMessageListener(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jstring>& js_object_name);
+
+  base::android::ScopedJavaLocalRef<jobjectArray> GetJsObjectsInfo(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jclass>& clazz);
 
   // content::WebContentsObserver implementations
   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
 
  private:
   void NotifyFrame(content::RenderFrameHost* render_frame_host);
 
-  bool need_to_inject_js_object_ = false;
-  std::string js_object_name_;
-  // We use ProxyBypassRules because it has the functionality that suitable
-  // here, but it is not for proxy bypass.
-  net::ProxyBypassRules allowed_origin_rules_;
+  std::vector<JsObject> js_objects_;
+  std::map<content::RenderFrameHost*,
+           std::vector<std::unique_ptr<JsToJavaMessaging>>>
+      js_to_java_messagings_;
 
   DISALLOW_COPY_AND_ASSIGN(JsJavaConfiguratorHost);
 };

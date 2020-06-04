@@ -28,12 +28,13 @@ void OnFailedDisconnectionFromPreviousHost(
 }  // namespace
 
 NetworkConnectionHandlerTetherDelegate::Callbacks::Callbacks(
-    const base::Closure& success_callback,
+    base::OnceClosure success_callback,
     const network_handler::StringResultCallback& error_callback)
-    : success_callback(success_callback), error_callback(error_callback) {}
+    : success_callback(std::move(success_callback)),
+      error_callback(error_callback) {}
 
-NetworkConnectionHandlerTetherDelegate::Callbacks::Callbacks(
-    const Callbacks& other) = default;
+NetworkConnectionHandlerTetherDelegate::Callbacks::Callbacks(Callbacks&&) =
+    default;
 
 NetworkConnectionHandlerTetherDelegate::Callbacks::~Callbacks() = default;
 
@@ -45,8 +46,7 @@ NetworkConnectionHandlerTetherDelegate::NetworkConnectionHandlerTetherDelegate(
     : network_connection_handler_(network_connection_handler),
       active_host_(active_host),
       tether_connector_(tether_connector),
-      tether_disconnector_(tether_disconnector),
-      weak_ptr_factory_(this) {
+      tether_disconnector_(tether_disconnector) {
   network_connection_handler_->SetTetherDelegate(this);
 }
 
@@ -64,15 +64,15 @@ NetworkConnectionHandlerTetherDelegate::
 
 void NetworkConnectionHandlerTetherDelegate::DisconnectFromNetwork(
     const std::string& tether_network_guid,
-    const base::Closure& success_callback,
+    base::OnceClosure success_callback,
     const network_handler::StringResultCallback& error_callback) {
   int request_num = next_request_num_++;
   request_num_to_callbacks_map_.emplace(
-      request_num, Callbacks(success_callback, error_callback));
+      request_num, Callbacks(std::move(success_callback), error_callback));
   tether_disconnector_->DisconnectFromNetwork(
       tether_network_guid,
-      base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestSuccess,
-                 weak_ptr_factory_.GetWeakPtr(), request_num),
+      base::BindOnce(&NetworkConnectionHandlerTetherDelegate::OnRequestSuccess,
+                     weak_ptr_factory_.GetWeakPtr(), request_num),
       base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestError,
                  weak_ptr_factory_.GetWeakPtr(), request_num),
       TetherSessionCompletionLogger::SessionCompletionReason::
@@ -81,7 +81,7 @@ void NetworkConnectionHandlerTetherDelegate::DisconnectFromNetwork(
 
 void NetworkConnectionHandlerTetherDelegate::ConnectToNetwork(
     const std::string& tether_network_guid,
-    const base::Closure& success_callback,
+    base::OnceClosure success_callback,
     const network_handler::StringResultCallback& error_callback) {
   if (active_host_->GetActiveHostStatus() ==
       ActiveHost::ActiveHostStatus::CONNECTED) {
@@ -107,18 +107,19 @@ void NetworkConnectionHandlerTetherDelegate::ConnectToNetwork(
 
   int request_num = next_request_num_++;
   request_num_to_callbacks_map_.emplace(
-      request_num, Callbacks(success_callback, error_callback));
+      request_num, Callbacks(std::move(success_callback), error_callback));
   tether_connector_->ConnectToNetwork(
       tether_network_guid,
-      base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestSuccess,
-                 weak_ptr_factory_.GetWeakPtr(), request_num),
+      base::BindOnce(&NetworkConnectionHandlerTetherDelegate::OnRequestSuccess,
+                     weak_ptr_factory_.GetWeakPtr(), request_num),
       base::Bind(&NetworkConnectionHandlerTetherDelegate::OnRequestError,
                  weak_ptr_factory_.GetWeakPtr(), request_num));
 }
 
 void NetworkConnectionHandlerTetherDelegate::OnRequestSuccess(int request_num) {
   DCHECK(base::Contains(request_num_to_callbacks_map_, request_num));
-  request_num_to_callbacks_map_.at(request_num).success_callback.Run();
+  std::move(request_num_to_callbacks_map_.at(request_num).success_callback)
+      .Run();
   request_num_to_callbacks_map_.erase(request_num);
 }
 

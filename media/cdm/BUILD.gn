@@ -6,9 +6,7 @@ import("//media/media_options.gni")
 
 if (enable_library_cdms) {
   source_set("cdm_api") {
-    sources = [
-      "api/content_decryption_module.h",
-    ]
+    sources = [ "api/content_decryption_module.h" ]
   }
 }
 
@@ -23,6 +21,7 @@ source_set("cdm") {
     "//media/base/android",
 
     "//media/filters",
+    "//media/fuchsia/cdm",
   ]
 
   sources = [
@@ -36,13 +35,6 @@ source_set("cdm") {
     "cdm_context_ref_impl.h",
     "cenc_decryptor.cc",
     "cenc_decryptor.h",
-
-    # TODO(crbug.com/676224): Move this to |enable_library_cdms| block below
-    # when EnabledIf attribute is supported in mojom.
-    "cdm_proxy.cc",
-    "cdm_proxy.h",
-    "cdm_proxy_context.cc",
-    "cdm_proxy_context.h",
     "cenc_utils.cc",
     "cenc_utils.h",
     "default_cdm_factory.cc",
@@ -113,6 +105,7 @@ static_library("cdm_paths") {
   ]
   deps = [
     "//base",
+    "//media:media_buildflags",
   ]
 }
 
@@ -148,6 +141,7 @@ source_set("unit_tests") {
   if (enable_library_cdms) {
     sources += [
       "cdm_adapter_unittest.cc",
+      "cdm_paths_unittest.cc",
       "external_clear_key_test_helper.cc",
       "external_clear_key_test_helper.h",
       "mock_helpers.cc",

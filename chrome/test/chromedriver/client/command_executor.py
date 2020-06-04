@@ -4,7 +4,15 @@
 
 import httplib
 import json
+import os
+import sys
 from urlparse import urlparse
+
+_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+_PARENT_DIR = os.path.join(_THIS_DIR, os.pardir)
+sys.path.insert(1, _PARENT_DIR)
+import util
+sys.path.remove(_PARENT_DIR)
 
 class _Method(object):
   GET = 'GET'
@@ -170,6 +178,27 @@ class Command(object):
       _Method.POST, '/session/:sessionId/reporting/generate_test_report')
   ADD_VIRTUAL_AUTHENTICATOR = (
       _Method.POST, '/session/:sessionId/webauthn/authenticator')
+  REMOVE_VIRTUAL_AUTHENTICATOR = (
+      _Method.DELETE,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId')
+  ADD_CREDENTIAL = (
+      _Method.POST,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credential')
+  GET_CREDENTIALS = (
+      _Method.GET,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials')
+  REMOVE_CREDENTIAL = (
+      _Method.DELETE,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials/'
+      ':credentialId')
+  REMOVE_ALL_CREDENTIALS = (
+      _Method.DELETE,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/credentials')
+  SET_USER_VERIFIED = (
+      _Method.POST,
+      '/session/:sessionId/webauthn/authenticator/:authenticatorId/uv')
+  SET_PERMISSION = (
+      _Method.POST, '/session/:sessionId/permissions')
 
   # Custom Chrome commands.
   IS_LOADING = (_Method.GET, '/session/:sessionId/is_loading')
@@ -178,11 +207,16 @@ class CommandExecutor(object):
   def __init__(self, server_url):
     self._server_url = server_url
     parsed_url = urlparse(server_url)
+    timeout = 10
+    # see https://crbug.com/1045241: short timeout seems to introduce flakiness
+    if util.IsMac() or util.IsWindows():
+      timeout = 30
     self._http_client = httplib.HTTPConnection(
-        parsed_url.hostname, parsed_url.port, timeout=30)
+      parsed_url.hostname, parsed_url.port, timeout=timeout)
 
-  def Execute(self, command, params):
-    url_parts = command[1].split('/')
+  @staticmethod
+  def CreatePath(template_url_path, params):
+    url_parts = template_url_path.split('/')
     substituted_parts = []
     for part in url_parts:
       if part.startswith(':'):
@@ -191,11 +225,14 @@ class CommandExecutor(object):
         del params[key]
       else:
         substituted_parts += [part]
+    return '/'.join(substituted_parts)
 
+  def Execute(self, command, params):
+    url_path = self.CreatePath(command[1], params)
     body = None
     if command[0] == _Method.POST:
       body = json.dumps(params)
-    self._http_client.request(command[0], '/'.join(substituted_parts), body)
+    self._http_client.request(command[0], url_path, body)
     response = self._http_client.getresponse()
 
     if response.status == 303:

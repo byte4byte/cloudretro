@@ -40,7 +40,6 @@ constexpr char kReadOnlyOption[] = "ro";
 constexpr char kReadWriteOption[] = "rw";
 constexpr char kRemountOption[] = "remount";
 constexpr char kMountLabelOption[] = "mountlabel";
-constexpr char kLazyUnmountOption[] = "lazy";
 
 // Checks if retrieved media type is in boundaries of DeviceMediaType.
 bool IsValidMediaType(uint32_t type) {
@@ -142,7 +141,7 @@ bool ReadMountEntryFromDbus(dbus::MessageReader* reader, MountEntry* entry) {
 // The CrosDisksClient implementation.
 class CrosDisksClientImpl : public CrosDisksClient {
  public:
-  CrosDisksClientImpl() : proxy_(nullptr), weak_ptr_factory_(this) {}
+  CrosDisksClientImpl() : proxy_(nullptr) {}
 
   // CrosDisksClient override.
   void AddObserver(Observer* observer) override {
@@ -178,7 +177,6 @@ class CrosDisksClientImpl : public CrosDisksClient {
 
   // CrosDisksClient override.
   void Unmount(const std::string& device_path,
-               UnmountOptions options,
                UnmountCallback callback) override {
     dbus::MethodCall method_call(cros_disks::kCrosDisksInterface,
                                  cros_disks::kUnmount);
@@ -186,9 +184,6 @@ class CrosDisksClientImpl : public CrosDisksClient {
     writer.AppendString(device_path);
 
     std::vector<std::string> unmount_options;
-    if (options == UNMOUNT_OPTIONS_LAZY)
-      unmount_options.push_back(kLazyUnmountOption);
-
     writer.AppendArrayOfStrings(unmount_options);
     proxy_->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
                        base::BindOnce(&CrosDisksClientImpl::OnUnmount,
@@ -224,6 +219,7 @@ class CrosDisksClientImpl : public CrosDisksClient {
               const std::string& filesystem,
               const std::string& label,
               VoidDBusMethodCallback callback) override {
+    format_start_time_[device_path] = base::TimeTicks::Now();
     dbus::MethodCall method_call(cros_disks::kCrosDisksInterface,
                                  cros_disks::kFormat);
     dbus::MessageWriter writer(&method_call);
@@ -481,6 +477,17 @@ class CrosDisksClientImpl : public CrosDisksClient {
       return;
     }
 
+    if (base::Contains(format_start_time_, device_path)) {
+      base::UmaHistogramMediumTimes(
+          "CrosDisksClient.FormatTime",
+          base::TimeTicks::Now() - format_start_time_[device_path]);
+      format_start_time_.erase(device_path);
+    }
+
+    base::UmaHistogramEnumeration("CrosDisksClient.FormatCompletedError",
+                                  static_cast<FormatError>(error_code),
+                                  FORMAT_ERROR_COUNT);
+
     for (auto& observer : observer_list_) {
       observer.OnFormatCompleted(static_cast<FormatError>(error_code),
                                  device_path);
@@ -513,11 +520,13 @@ class CrosDisksClientImpl : public CrosDisksClient {
 
   dbus::ObjectProxy* proxy_;
 
-  base::ObserverList<Observer>::Unchecked observer_list_;
+  base::ObserverList<Observer> observer_list_;
+
+  std::unordered_map<std::string, base::TimeTicks> format_start_time_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<CrosDisksClientImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<CrosDisksClientImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CrosDisksClientImpl);
 };

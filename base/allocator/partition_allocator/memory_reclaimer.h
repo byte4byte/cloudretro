@@ -8,9 +8,9 @@
 #include <memory>
 #include <set>
 
+#include "base/allocator/partition_allocator/partition_alloc_forward.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
@@ -20,15 +20,6 @@
 #include "base/timer/timer.h"
 
 namespace base {
-
-namespace internal {
-
-struct PartitionRootBase;
-
-BASE_EXPORT extern const Feature kNoPartitionAllocDecommit;
-BASE_EXPORT extern const Feature kPartitionAllocPeriodicDecommit;
-
-}  // namespace internal
 
 // Posts and handles memory reclaim tasks for PartitionAlloc.
 //
@@ -45,16 +36,20 @@ class BASE_EXPORT PartitionAllocMemoryReclaimer {
 
   // Internal. Do not use.
   // Registers a partition to be tracked by the reclaimer.
-  void RegisterPartition(internal::PartitionRootBase* partition);
+  void RegisterPartition(
+      internal::PartitionRootBase<internal::ThreadSafe>* partition);
+  void RegisterPartition(
+      internal::PartitionRootBase<internal::NotThreadSafe>* partition);
   // Internal. Do not use.
   // Unregisters a partition to be tracked by the reclaimer.
-  void UnregisterPartition(internal::PartitionRootBase* partition);
+  void UnregisterPartition(
+      internal::PartitionRootBase<internal::ThreadSafe>* partition);
+  void UnregisterPartition(
+      internal::PartitionRootBase<internal::NotThreadSafe>* partition);
   // Starts the periodic reclaim. Should be called once.
   void Start(scoped_refptr<SequencedTaskRunner> task_runner);
   // Triggers an explicit reclaim now.
   void Reclaim();
-  // Triggers a reclaim. Do not add new callers.
-  void DeprecatedReclaim();
 
   static constexpr TimeDelta kStatsRecordingTimeDelta =
       TimeDelta::FromMinutes(5);
@@ -73,7 +68,10 @@ class BASE_EXPORT PartitionAllocMemoryReclaimer {
   std::unique_ptr<RepeatingTimer> timer_;
 
   Lock lock_;
-  std::set<internal::PartitionRootBase*> partitions_ GUARDED_BY(lock_);
+  std::set<internal::PartitionRootBase<internal::ThreadSafe>*>
+      thread_safe_partitions_ GUARDED_BY(lock_);
+  std::set<internal::PartitionRootBase<internal::NotThreadSafe>*>
+      thread_unsafe_partitions_ GUARDED_BY(lock_);
 
   friend class NoDestructor<PartitionAllocMemoryReclaimer>;
   friend class PartitionAllocMemoryReclaimerTest;

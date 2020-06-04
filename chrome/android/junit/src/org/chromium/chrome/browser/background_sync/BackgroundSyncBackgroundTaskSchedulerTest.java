@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verify;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -26,40 +27,37 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.background_sync.BackgroundSyncBackgroundTaskScheduler.BackgroundSyncTask;
-import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
-import org.chromium.chrome.test.support.DisableHistogramsRule;
+import org.chromium.chrome.browser.background_task_scheduler.ChromeBackgroundTaskFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.components.background_task_scheduler.BackgroundTaskScheduler;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
 import org.chromium.components.background_task_scheduler.TaskIds;
 import org.chromium.components.background_task_scheduler.TaskInfo;
 
-import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 
 /** Unit tests for BackgroundSyncBackgroundTaskScheduler. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
+@Features.EnableFeatures(ChromeFeatureList.BACKGROUND_TASK_SCHEDULER_FOR_BACKGROUND_SYNC)
 public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Rule
-    public DisableHistogramsRule mDisableHistogramsRule = new DisableHistogramsRule();
-
+    public TestRule mFeaturesProcessorRule = new Features.JUnitProcessor();
     @Mock
     private BackgroundTaskScheduler mTaskScheduler;
     @Captor
     ArgumentCaptor<TaskInfo> mTaskInfo;
 
-    private static final long ONE_DAY_IN_MILLISECONDS = TimeUnit.DAYS.toMillis(1);
-    private static final long ONE_WEEK_IN_MILLISECONDS = TimeUnit.DAYS.toMillis(7);
+    private static final int ONE_DAY_IN_MILLISECONDS = (int) TimeUnit.DAYS.toMillis(1);
+    private static final int ONE_WEEK_IN_MILLISECONDS = (int) TimeUnit.DAYS.toMillis(7);
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
         BackgroundTaskSchedulerFactory.setSchedulerForTesting(mTaskScheduler);
-        HashMap<String, Boolean> features = new HashMap<String, Boolean>();
-        features.put(ChromeFeatureList.BACKGROUND_TASK_SCHEDULER_FOR_BACKGROUND_SYNC, true);
-        ChromeFeatureList.setTestFeatures(features);
+        ChromeBackgroundTaskFactory.setAsDefault();
         doReturn(true)
                 .when(mTaskScheduler)
                 .schedule(eq(ContextUtils.getApplicationContext()), mTaskInfo.capture());
@@ -68,13 +66,11 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     private void verifyFixedTaskInfoValues(
             TaskInfo info, @BackgroundSyncBackgroundTaskScheduler.BackgroundSyncTask int taskType) {
         int taskId = BackgroundSyncBackgroundTaskScheduler.getAppropriateTaskId(taskType);
-        Class<? extends NativeBackgroundTask> taskClass =
-                BackgroundSyncBackgroundTaskScheduler.getAppropriateTaskClass(taskType);
 
         assertEquals(taskId, info.getTaskId());
-        assertEquals(taskClass, info.getBackgroundTaskClass());
         assertTrue(info.isPersisted());
         assertFalse(info.isPeriodic());
+        assertTrue(info.getOneOffInfo().expiresAfterWindowEndTime());
         assertEquals(TaskInfo.NetworkType.ANY, info.getRequiredNetworkType());
 
         long expectedSoonestDelayTime = info.getExtras().getLong(
@@ -84,10 +80,9 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
 
     @Test
     @Feature({"BackgroundSync"})
-    public void testLaunchBrowserIfStopped() {
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
+    public void testScheduleOneOffTask() {
+        BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
                 BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ true,
                 /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
@@ -104,8 +99,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Feature({"BackgroundSync"})
     public void testSchedulePeriodicSyncWakeUpTask() {
         BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
-                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS,
-                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
+                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP,
+                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
 
@@ -120,9 +115,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Test
     @Feature({"BackgroundSync"})
     public void testCancelOneShotTask() {
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
+        BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
                 BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ true,
                 /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
@@ -143,8 +137,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Feature({"BackgroundSync"})
     public void testCancelPeriodicSyncWakeUpTask() {
         BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
-                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS,
-                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
+                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP,
+                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
 
@@ -162,10 +156,9 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
 
     @Test
     @Feature({"BackgroundSync"})
-    public void testLaunchBrowserCalledTwice() {
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
+    public void testScheduleOneOffTaskCalledTwice() {
+        BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
                 BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ true,
                 /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
@@ -173,9 +166,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
         TaskInfo taskInfo = mTaskInfo.getValue();
         assertEquals(ONE_DAY_IN_MILLISECONDS, taskInfo.getOneOffInfo().getWindowStartTimeMs());
 
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
+        BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
                 BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ true,
                 /* minDelayMs= */ ONE_WEEK_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
@@ -188,8 +180,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Feature({"BackgroundSync"})
     public void testSchedulePeriodicSyncTaskTwice() {
         BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
-                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS,
-                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
+                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP,
+                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
 
@@ -197,8 +189,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
         assertEquals(ONE_DAY_IN_MILLISECONDS, taskInfo.getOneOffInfo().getWindowStartTimeMs());
 
         BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
-                /* minDelayMs= */ ONE_WEEK_IN_MILLISECONDS,
-                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
+                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP,
+                /* minDelayMs= */ ONE_WEEK_IN_MILLISECONDS);
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
 
@@ -208,15 +200,12 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
 
     @Test
     @Feature({"BackgroundSync"})
-    public void testLaunchBrowserThenCancel() {
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
+    public void testScheduleOneShotSyncWakeUpThenCancel() {
+        BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
                 BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ true,
                 /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
-        BackgroundSyncBackgroundTaskScheduler.getInstance().launchBrowserIfStopped(
-                BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP,
-                /* shouldLaunch= */ false,
-                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
+        BackgroundSyncBackgroundTaskScheduler.getInstance().cancelOneOffTask(
+                BackgroundSyncTask.ONE_SHOT_SYNC_CHROME_WAKE_UP);
 
         verify(mTaskScheduler, times(1))
                 .schedule(eq(ContextUtils.getApplicationContext()), eq(mTaskInfo.getValue()));
@@ -229,8 +218,8 @@ public class BackgroundSyncBackgroundTaskSchedulerTest {
     @Feature({"BackgroundSync"})
     public void schedulePeriodicSyncWakeUpTaskThenCancel() {
         BackgroundSyncBackgroundTaskScheduler.getInstance().scheduleOneOffTask(
-                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS,
-                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
+                BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP,
+                /* minDelayMs= */ ONE_DAY_IN_MILLISECONDS);
         BackgroundSyncBackgroundTaskScheduler.getInstance().cancelOneOffTask(
                 BackgroundSyncTask.PERIODIC_SYNC_CHROME_WAKE_UP);
         verify(mTaskScheduler, times(1))

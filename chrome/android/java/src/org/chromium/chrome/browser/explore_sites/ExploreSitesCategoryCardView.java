@@ -14,7 +14,8 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -22,7 +23,7 @@ import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegate;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.tile.TileGridLayout;
-import org.chromium.chrome.browser.widget.RoundedIconGenerator;
+import org.chromium.components.browser_ui.widget.RoundedIconGenerator;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.modelutil.PropertyKey;
@@ -178,7 +179,6 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
                         createInteractionDelegate(model);
                 view.setOnClickListener(interactionDelegate);
                 view.setOnCreateContextMenuListener(interactionDelegate);
-                ContextMenuManager.registerViewForTouchlessContextMenu(view, interactionDelegate);
                 view.setOnFocusChangeListener(interactionDelegate);
             }
         }
@@ -294,8 +294,9 @@ public class ExploreSitesCategoryCardView extends LinearLayout {
     public void recordTileIndexClick(int cardIndex, int tileIndex) {
         // TODO(petewil): Should I get the number of sites in this category from the model instead
         // of using MAX_TILE_COUNT?
-        RecordHistogram.recordLinearCountHistogram("ExploreSites.SiteTilesClickIndex",
-                cardIndex * mMaxTileCount + tileIndex, 1, 100, 100);
+        RecordHistogram.recordLinearCountHistogram("ExploreSites.SiteTilesClickIndex2",
+                cardIndex * ExploreSitesPage.MAX_TILE_COUNT_ALL_VARIATIONS + tileIndex, 1, 100,
+                100);
     }
 
     /**

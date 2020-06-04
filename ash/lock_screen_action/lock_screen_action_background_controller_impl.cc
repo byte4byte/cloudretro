@@ -7,7 +7,6 @@
 #include "ash/lock_screen_action/lock_screen_action_background_view.h"
 #include "base/bind.h"
 #include "ui/aura/window.h"
-#include "ui/views/widget/widget.h"
 
 namespace ash {
 
@@ -19,8 +18,7 @@ constexpr char kLockScreenActionBackgroundWidgetName[] =
 }  // namespace
 
 LockScreenActionBackgroundControllerImpl::
-    LockScreenActionBackgroundControllerImpl()
-    : widget_observer_(this), weak_ptr_factory_(this) {}
+    LockScreenActionBackgroundControllerImpl() = default;
 
 LockScreenActionBackgroundControllerImpl::
     ~LockScreenActionBackgroundControllerImpl() {
@@ -101,13 +99,13 @@ views::Widget* LockScreenActionBackgroundControllerImpl::CreateWidget() {
 
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.name = kLockScreenActionBackgroundWidgetName;
   params.parent = parent_window_;
   params.delegate = contents_view_;
 
   views::Widget* widget = new views::Widget();
-  widget->Init(params);
+  widget->Init(std::move(params));
   widget->SetVisibilityChangedAnimationsEnabled(false);
   widget_observer_.Add(widget);
 

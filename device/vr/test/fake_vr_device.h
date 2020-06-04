@@ -7,8 +7,8 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "device/vr/public/cpp/vr_device_provider.h"
 #include "device/vr/vr_device_base.h"
-#include "device/vr/vr_device_provider.h"
 #include "device/vr/vr_export.h"
 
 namespace device {
@@ -38,8 +38,6 @@ class DEVICE_VR_EXPORT FakeVRDevice : public VRDeviceBase,
   mojom::VREyeParametersPtr InitEye(float fov, float offset, uint32_t size);
 
   mojom::VRPosePtr pose_;
-
-  mojo::Binding<mojom::XRSessionController> controller_binding_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeVRDevice);
 };

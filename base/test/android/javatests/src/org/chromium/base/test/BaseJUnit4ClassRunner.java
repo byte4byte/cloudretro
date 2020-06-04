@@ -6,10 +6,11 @@ package org.chromium.base.test;
 
 import android.app.Application;
 import android.content.Context;
-import android.support.annotation.CallSuper;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.internal.runner.junit4.AndroidJUnit4ClassRunner;
 import android.support.test.internal.util.AndroidRunnerParams;
+
+import androidx.annotation.CallSuper;
 
 import org.junit.rules.MethodRule;
 import org.junit.rules.RuleChain;
@@ -224,7 +225,6 @@ public class BaseJUnit4ClassRunner extends AndroidJUnit4ClassRunner {
         if (BaseChromiumAndroidJUnitRunner.shouldListTests(
                     InstrumentationRegistry.getArguments())) {
             for (Description child : getDescription().getChildren()) {
-                notifier.fireTestStarted(child);
                 notifier.fireTestFinished(child);
             }
             return;

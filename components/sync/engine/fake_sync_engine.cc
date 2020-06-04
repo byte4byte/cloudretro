@@ -4,17 +4,15 @@
 
 #include "components/sync/engine/fake_sync_engine.h"
 
+#include <utility>
+
 #include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/sync_engine_host.h"
 #include "components/sync/model/model_type_controller_delegate.h"
 
 namespace syncer {
-namespace {
 
-const char kTestCacheGuid[] = "test-guid";
-const char kTestBirthday[] = "1";
-
-}  // namespace
+constexpr char FakeSyncEngine::kTestBirthday[];
 
 FakeSyncEngine::FakeSyncEngine() {}
 FakeSyncEngine::~FakeSyncEngine() {}
@@ -24,7 +22,7 @@ void FakeSyncEngine::Initialize(InitParams params) {
   initialized_ = success;
   params.host->OnEngineInitialized(ModelTypeSet(), WeakHandle<JsBackend>(),
                                    WeakHandle<DataTypeDebugInfoListener>(),
-                                   kTestCacheGuid, kTestBirthday,
+                                   kTestBirthday,
                                    /*bag_of_chips=*/"", success);
 }
 
@@ -45,6 +43,12 @@ void FakeSyncEngine::StartSyncingWithServer() {}
 void FakeSyncEngine::SetEncryptionPassphrase(const std::string& passphrase) {}
 
 void FakeSyncEngine::SetDecryptionPassphrase(const std::string& passphrase) {}
+
+void FakeSyncEngine::AddTrustedVaultDecryptionKeys(
+    const std::vector<std::vector<uint8_t>>& keys,
+    base::OnceClosure done_cb) {
+  std::move(done_cb).Run();
+}
 
 void FakeSyncEngine::StopSyncingForShutdown() {}
 
@@ -75,8 +79,8 @@ UserShare* FakeSyncEngine::GetUserShare() const {
   return nullptr;
 }
 
-SyncStatus FakeSyncEngine::GetDetailedStatus() {
-  return SyncStatus();
+const SyncStatus& FakeSyncEngine::GetDetailedStatus() const {
+  return default_sync_status_;
 }
 
 void FakeSyncEngine::HasUnsyncedItemsForTest(
@@ -100,12 +104,14 @@ void FakeSyncEngine::set_fail_initial_download(bool should_fail) {
 
 void FakeSyncEngine::OnCookieJarChanged(bool account_mismatch,
                                         bool empty_jar,
-                                        const base::Closure& callback) {
+                                        base::OnceClosure callback) {
   if (!callback.is_null()) {
-    callback.Run();
+    std::move(callback).Run();
   }
 }
 
 void FakeSyncEngine::SetInvalidationsForSessionsEnabled(bool enabled) {}
+
+void FakeSyncEngine::GetNigoriNodeForDebugging(AllNodesCallback callback) {}
 
 }  // namespace syncer

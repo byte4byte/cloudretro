@@ -2,20 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/buildflag_header.gni")
-
-if (is_android) {
-  import("//build/config/android/rules.gni")
-}
-
 group("scheduler") {
-  deps = [
-    ":factory",
-  ]
+  deps = [ ":factory" ]
 
-  public_deps = [
-    "//chrome/browser/notifications/scheduler/public",
-  ]
+  public_deps = [ "//chrome/browser/notifications/scheduler/public" ]
 }
 
 # The embedder can depend on this target to get the internal library.
@@ -41,5 +31,6 @@ group("unit_tests") {
   testonly = true
   deps = [
     "//chrome/browser/notifications/scheduler/internal:unit_tests",
+    "//chrome/browser/notifications/scheduler/public:unit_tests",
   ]
 }

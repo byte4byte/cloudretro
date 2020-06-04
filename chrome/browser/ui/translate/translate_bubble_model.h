@@ -30,6 +30,7 @@ class TranslateBubbleModel {
     // The view state when the detailed settings is shown. This view appears
     // when the user click a link 'Advanced' on other views.
     VIEW_STATE_ADVANCED,
+
     // The view state for TAB ui when the source language combobox is shown.
     // This view appears when the user selects "Page is not in {source
     // language}"
@@ -80,9 +81,17 @@ class TranslateBubbleModel {
   // is closed due to focus loss.
   virtual void DeclineTranslation() = 0;
 
+  // Returns if the user doesn't want to have the page translated in the
+  // current page's language.
+  virtual bool ShouldNeverTranslateLanguage() = 0;
+
   // Sets the value if the user doesn't want to have the page translated in the
   // current page's language.
   virtual void SetNeverTranslateLanguage(bool value) = 0;
+
+  // Returns if the user doesn't want to have the page translated the
+  // current page's domain.
+  virtual bool ShouldNeverTranslateSite() = 0;
 
   // Sets the value if the user doesn't want to have the page translated the
   // current page's domain.

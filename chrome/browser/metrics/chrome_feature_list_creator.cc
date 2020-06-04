@@ -41,6 +41,7 @@
 #include "components/variations/pref_names.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/variations_crash_keys.h"
+#include "content/public/common/content_switch_dependent_feature_overrides.h"
 #include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -89,11 +90,6 @@ ChromeFeatureListCreator::TakeChromeBrowserPolicyConnector() {
   return std::move(browser_policy_connector_);
 }
 
-std::unique_ptr<prefs::InProcessPrefServiceFactory>
-ChromeFeatureListCreator::TakePrefServiceFactory() {
-  return std::move(pref_service_factory_);
-}
-
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 std::unique_ptr<installer::MasterPreferences>
 ChromeFeatureListCreator::TakeMasterPrefs() {
@@ -120,15 +116,9 @@ void ChromeFeatureListCreator::CreatePrefService() {
       std::make_unique<policy::ChromeBrowserPolicyConnector>();
 #endif  // defined(OS_CHROMEOS)
 
-  pref_service_factory_ =
-      std::make_unique<prefs::InProcessPrefServiceFactory>();
-  auto delegate = pref_service_factory_->CreateDelegate();
-  delegate->InitPrefRegistry(pref_registry.get());
-
   local_state_ = chrome_prefs::CreateLocalState(
       local_state_file, browser_policy_connector_->GetPolicyService(),
-      std::move(pref_registry), false, std::move(delegate),
-      browser_policy_connector_.get());
+      std::move(pref_registry), false, browser_policy_connector_.get());
 
 // TODO(asvitkine): This is done here so that the pref is set before
 // VariationsService queries the locale. This should potentially be moved to
@@ -199,12 +189,10 @@ void ChromeFeatureListCreator::SetupFieldTrials() {
   variations_service->SetupFieldTrials(
       cc::switches::kEnableGpuBenchmarking, switches::kEnableFeatures,
       switches::kDisableFeatures, unforceable_field_trials, variation_ids,
+      content::GetSwitchDependentFeatureOverrides(
+          *base::CommandLine::ForCurrentProcess()),
       std::move(feature_list), browser_field_trials_.get());
   variations::InitCrashKeys();
-
-  // Initialize FieldTrialSynchronizer system, which is used to synchronize
-  // field trial state with child process.
-  field_trial_synchronizer_ = base::MakeRefCounted<FieldTrialSynchronizer>();
 }
 
 void ChromeFeatureListCreator::CreateMetricsServices() {

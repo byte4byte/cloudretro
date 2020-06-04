@@ -14,7 +14,7 @@
 #include "components/signin/public/base/signin_pref_names.h"
 #include "google_apis/gaia/core_account_id.h"
 
-namespace identity {
+namespace signin {
 
 PrimaryAccountMutatorImpl::PrimaryAccountMutatorImpl(
     AccountTrackerService* account_tracker,
@@ -52,12 +52,17 @@ bool PrimaryAccountMutatorImpl::SetPrimaryAccount(
 }
 
 #if defined(OS_CHROMEOS)
-bool PrimaryAccountMutatorImpl::SetPrimaryAccountAndUpdateAccountInfo(
-    const std::string& gaia_id,
-    const std::string& email) {
-  CoreAccountId account_id = account_tracker_->SeedAccountInfo(gaia_id, email);
-  SetPrimaryAccount(account_id);
-  return true;
+void PrimaryAccountMutatorImpl::RevokeSyncConsent() {
+  primary_account_manager_->RevokeSyncConsent();
+}
+
+void PrimaryAccountMutatorImpl::SetUnconsentedPrimaryAccount(
+    const CoreAccountId& account_id) {
+  // On Chrome OS the UPA can only be set once and never removed or changed.
+  DCHECK(!account_id.empty());
+  DCHECK(!primary_account_manager_->HasUnconsentedPrimaryAccount());
+  AccountInfo account_info = account_tracker_->GetAccountInfo(account_id);
+  primary_account_manager_->SetUnconsentedPrimaryAccountInfo(account_info);
 }
 #endif
 
@@ -87,4 +92,4 @@ bool PrimaryAccountMutatorImpl::ClearPrimaryAccount(
 }
 #endif
 
-}  // namespace identity
+}  // namespace signin

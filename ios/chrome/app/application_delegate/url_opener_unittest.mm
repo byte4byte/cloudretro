@@ -6,18 +6,18 @@
 
 #import <Foundation/Foundation.h>
 
+#include "base/logging.h"
 #include "ios/chrome/app/application_delegate/app_state.h"
 #include "ios/chrome/app/application_delegate/mock_tab_opener.h"
 #include "ios/chrome/app/application_delegate/startup_information.h"
 #include "ios/chrome/app/startup/chrome_app_startup_parameters.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
-#import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/main/test/stub_browser_interface.h"
 #import "ios/chrome/browser/ui/main/test/stub_browser_interface_provider.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/chrome/test/base/scoped_block_swizzler.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
+#include "net/base/mac/url_conversions.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -65,7 +65,7 @@ enum class ExternalFilesLoadedInWebStateFeature {
 
 class URLOpenerTest : public PlatformTest {
  private:
-  web::TestWebThreadBundle thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
 };
 
 TEST_F(URLOpenerTest, HandleOpenURL) {
@@ -207,30 +207,21 @@ TEST_F(URLOpenerTest, VerifyLaunchOptions) {
 
   id startupInformationMock =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];
+  [[[startupInformationMock expect] andReturnValue:@NO] isPresentingFirstRunUI];
+  [[startupInformationMock expect] resetFirstUserActionRecorder];
+  __block ChromeAppStartupParameters* params = nil;
+  [[startupInformationMock expect]
+      setStartupParameters:[OCMArg checkWithBlock:^(
+                                       ChromeAppStartupParameters* p) {
+        params = p;
+        EXPECT_NSEQ(net::NSURLWithGURL(p.completeURL), url);
+        EXPECT_EQ(p.callerApp, CALLER_APP_APPLE_MOBILESAFARI);
+        return YES;
+      }]];
+  [[[startupInformationMock expect] andReturn:params] startupParameters];
 
   id appStateMock = [OCMockObject mockForClass:[AppState class]];
-  [[appStateMock expect] launchFromURLHandled:YES];
-
-  __block BOOL hasBeenCalled = NO;
-
-  id implementation_block = ^BOOL(
-      id self, NSURL* urlArg, BOOL applicationActive, NSDictionary* options,
-      id<TabOpening> tabOpener, id<StartupInformation> startupInformation) {
-    hasBeenCalled = YES;
-    EXPECT_NSEQ([url absoluteString], [urlArg absoluteString]);
-    EXPECT_NSEQ(@"com.apple.mobilesafari",
-                options[UIApplicationOpenURLOptionsSourceApplicationKey]);
-    EXPECT_EQ(startupInformationMock, startupInformation);
-    EXPECT_EQ(tabOpenerMock, tabOpener);
-    return YES;
-  };
-  ScopedBlockSwizzler URL_opening_openURL_swizzler([URLOpener class],
-                                                   @selector(openURL:
-                                                        applicationActive:
-                                                                  options:
-                                                                tabOpener:
-                                                       startupInformation:),
-                                                   implementation_block);
+  [[appStateMock expect] launchFromURLHandled:NO];
 
   // Action.
   [URLOpener handleLaunchOptions:launchOptions
@@ -240,7 +231,6 @@ TEST_F(URLOpenerTest, VerifyLaunchOptions) {
                         appState:appStateMock];
 
   // Test.
-  EXPECT_TRUE(hasBeenCalled);
   EXPECT_OCMOCK_VERIFY(startupInformationMock);
 }
 
@@ -270,18 +260,37 @@ TEST_F(URLOpenerTest, VerifyLaunchOptionsWithNoSourceApplication) {
     UIApplicationLaunchOptionsURLKey : url,
   };
 
-  // Creates a mock with no stub. This test will pass only if we don't use these
-  // objects.
+  MockTabOpener* tabOpenerMock = [[MockTabOpener alloc] init];
+
   id startupInformationMock =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];
+  [[[startupInformationMock expect] andReturnValue:@NO] isPresentingFirstRunUI];
+  __block ChromeAppStartupParameters* params = nil;
+  [[startupInformationMock expect]
+      setStartupParameters:[OCMArg checkWithBlock:^(
+                                       ChromeAppStartupParameters* p) {
+        params = p;
+        EXPECT_NSEQ(net::NSURLWithGURL(p.completeURL), url);
+        EXPECT_EQ(p.callerApp, CALLER_APP_NOT_AVAILABLE);
+        return YES;
+      }]];
+#if DCHECK_IS_ON()
+  // This function is called in a DCHECK.
+  [[[startupInformationMock expect] andReturn:params] startupParameters];
+#endif
+
   id appStateMock = [OCMockObject mockForClass:[AppState class]];
+  [[appStateMock expect] launchFromURLHandled:YES];
 
   // Action.
   [URLOpener handleLaunchOptions:launchOptions
                applicationActive:YES
-                       tabOpener:nil
+                       tabOpener:tabOpenerMock
               startupInformation:startupInformationMock
                         appState:appStateMock];
+
+  // Test.
+  EXPECT_OCMOCK_VERIFY(startupInformationMock);
 }
 
 // Tests that -handleApplication set startup parameters as expected with no url.
@@ -319,30 +328,13 @@ TEST_F(URLOpenerTest, VerifyLaunchOptionsWithBadURL) {
 
   id startupInformationMock =
       [OCMockObject mockForProtocol:@protocol(StartupInformation)];
+  [[startupInformationMock expect] resetFirstUserActionRecorder];
+  [[[startupInformationMock expect] andReturnValue:@NO] isPresentingFirstRunUI];
+  [[startupInformationMock expect] setStartupParameters:[OCMArg isNil]];
+  [[[startupInformationMock expect] andReturn:nil] startupParameters];
 
   id appStateMock = [OCMockObject mockForClass:[AppState class]];
-  [[appStateMock expect] launchFromURLHandled:YES];
-
-  __block BOOL hasBeenCalled = NO;
-
-  id implementation_block = ^BOOL(
-      id self, NSURL* urlArg, BOOL applicationActive, NSDictionary* options,
-      id<TabOpening> tabOpener, id<StartupInformation> startupInformation) {
-    hasBeenCalled = YES;
-    EXPECT_NSEQ([url absoluteString], [urlArg absoluteString]);
-    EXPECT_NSEQ(@"com.apple.mobilesafari",
-                options[UIApplicationOpenURLOptionsSourceApplicationKey]);
-    EXPECT_EQ(startupInformationMock, startupInformation);
-    EXPECT_EQ(tabOpenerMock, tabOpener);
-    return YES;
-  };
-  ScopedBlockSwizzler URL_opening_openURL_swizzler([URLOpener class],
-                                                   @selector(openURL:
-                                                        applicationActive:
-                                                                  options:
-                                                                tabOpener:
-                                                       startupInformation:),
-                                                   implementation_block);
+  [[appStateMock expect] launchFromURLHandled:NO];
 
   // Action.
   [URLOpener handleLaunchOptions:launchOptions
@@ -352,6 +344,5 @@ TEST_F(URLOpenerTest, VerifyLaunchOptionsWithBadURL) {
                         appState:appStateMock];
 
   // Test.
-  EXPECT_TRUE(hasBeenCalled);
   EXPECT_OCMOCK_VERIFY(startupInformationMock);
 }

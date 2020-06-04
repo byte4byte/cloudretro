@@ -11,9 +11,11 @@
 #include "base/format_macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #include "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/web/image_fetch_tab_helper.h"
@@ -31,18 +33,21 @@
 @property(nonatomic, weak) UIViewController* baseViewController;
 // Alert coordinator to give feedback to the user.
 @property(nonatomic, strong) AlertCoordinator* alertCoordinator;
+@property(nonatomic, readonly) Browser* browser;
 @end
 
 @implementation ImageSaver
 
 @synthesize alertCoordinator = _alertCoordinator;
 @synthesize baseViewController = _baseViewController;
+@synthesize browser = _browser;
 
-- (instancetype)initWithBaseViewController:
-    (UIViewController*)baseViewController {
+- (instancetype)initWithBaseViewController:(UIViewController*)baseViewController
+                                   browser:(Browser*)browser {
   self = [super init];
   if (self) {
     _baseViewController = baseViewController;
+    _browser = browser;
   }
   return self;
 }
@@ -124,7 +129,7 @@
 - (void)saveImage:(NSData*)data
     withFileExtension:(NSString*)fileExtension
            completion:(void (^)(BOOL, NSError*))completion {
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -145,12 +150,13 @@
           return;
         }
 
-        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-          [PHAssetChangeRequest
-              creationRequestForAssetFromImageAtFileURL:fileURL];
-        }
+        [[PHPhotoLibrary sharedPhotoLibrary]
+            performChanges:^{
+              [PHAssetChangeRequest
+                  creationRequestForAssetFromImageAtFileURL:fileURL];
+            }
             completionHandler:^(BOOL success, NSError* error) {
-              base::PostTaskWithTraits(
+              base::ThreadPool::PostTask(
                   FROM_HERE,
                   {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                    base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -201,6 +207,7 @@
 
   self.alertCoordinator = [[AlertCoordinator alloc]
       initWithBaseViewController:self.baseViewController
+                         browser:_browser
                            title:title
                          message:message];
 
@@ -234,6 +241,7 @@
 
     self.alertCoordinator = [[AlertCoordinator alloc]
         initWithBaseViewController:self.baseViewController
+                           browser:_browser
                              title:title
                            message:errorContent];
     [self.alertCoordinator addItemWithTitle:l10n_util::GetNSString(IDS_OK)

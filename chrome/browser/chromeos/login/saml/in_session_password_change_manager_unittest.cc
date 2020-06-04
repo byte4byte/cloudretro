@@ -7,7 +7,7 @@
 #include "ash/public/cpp/session/session_activation_observer.h"
 #include "ash/public/cpp/session/session_controller.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -21,7 +21,7 @@
 #include "chromeos/login/auth/saml_password_attributes.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_names.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -94,9 +94,9 @@ class InSessionPasswordChangeManagerTest : public testing::Test {
     EXPECT_FALSE(Notification().has_value());
   }
 
-  content::TestBrowserThreadBundle test_environment_{
-      base::test::ScopedTaskEnvironment::MainThreadType::UI,
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME_AND_NOW};
+  content::BrowserTaskEnvironment test_environment_{
+      base::test::TaskEnvironment::MainThreadType::UI,
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   TestingProfileManager profile_manager_{TestingBrowserProcess::GetGlobal()};
   TestingProfile* profile_;
 
@@ -130,7 +130,7 @@ TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_AlreadyExpired) {
 
   // Notification is shown immediately since password has expired.
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password is expired"), Notification()->title());
+  EXPECT_EQ(utf16("Password change overdue"), Notification()->title());
 }
 
 TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_WillSoonExpire) {
@@ -139,8 +139,7 @@ TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_WillSoonExpire) {
 
   // Notification is shown immediately since password will soon expire.
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password expires in less than 7 days"),
-            Notification()->title());
+  EXPECT_EQ(utf16("Password expires in 7 days"), Notification()->title());
 }
 
 TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_WillEventuallyExpire) {
@@ -153,8 +152,7 @@ TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_WillEventuallyExpire) {
   // But, it will be shown once we are in the advance warning window:
   test_environment_.FastForwardBy(kOneYear + kOneHour);
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password expires in less than 14 days"),
-            Notification()->title());
+  EXPECT_EQ(utf16("Password expires in 14 days"), Notification()->title());
 }
 
 TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_DeleteExpirationTime) {
@@ -176,8 +174,7 @@ TEST_F(InSessionPasswordChangeManagerTest, MaybeShow_PasswordChanged) {
 
   // Notification is shown immediately since password will soon expire.
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password expires in less than 7 days"),
-            Notification()->title());
+  EXPECT_EQ(utf16("Password expires in 7 days"), Notification()->title());
 
   // Password is changed and notification is dismissed.
   SamlPasswordAttributes::DeleteFromPrefs(profile_->GetPrefs());
@@ -221,25 +218,23 @@ TEST_F(InSessionPasswordChangeManagerTest, TimePasses_NoUserActionTaken) {
   // But the next day, the notification is shown.
   test_environment_.FastForwardBy(kOneDay);
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password expires in less than 14 days"),
-            Notification()->title());
+  EXPECT_EQ(utf16("Password expires in 14 days"), Notification()->title());
   EXPECT_EQ(utf16("Choose a new one now"), Notification()->message());
 
   // As time passes, the notification updates each day.
   test_environment_.FastForwardBy(kAdvanceWarningTime / 2);
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password expires in less than 7 days"),
-            Notification()->title());
+  EXPECT_EQ(utf16("Password expires in 7 days"), Notification()->title());
   EXPECT_EQ(utf16("Choose a new one now"), Notification()->message());
 
   test_environment_.FastForwardBy(kAdvanceWarningTime / 2);
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password is expired"), Notification()->title());
+  EXPECT_EQ(utf16("Password change overdue"), Notification()->title());
   EXPECT_EQ(utf16("Choose a new one now"), Notification()->message());
 
   test_environment_.FastForwardBy(kOneYear);
   EXPECT_TRUE(Notification().has_value());
-  EXPECT_EQ(utf16("Password is expired"), Notification()->title());
+  EXPECT_EQ(utf16("Password change overdue"), Notification()->title());
   EXPECT_EQ(utf16("Choose a new one now"), Notification()->message());
 }
 

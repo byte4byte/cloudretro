@@ -10,8 +10,9 @@ source_set("appearance") {
     "appearance_customization.mm",
   ]
   deps = [
+    "//ios/chrome/browser/ui/settings:settings_root",
     "//ios/chrome/browser/ui/table_view",
-    "//ios/chrome/common/colors",
+    "//ios/chrome/common/ui/colors",
   ]
   configs += [ "//build/config/compiler:enable_arc" ]
 }

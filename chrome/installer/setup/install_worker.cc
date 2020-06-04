@@ -7,8 +7,6 @@
 
 #include "chrome/installer/setup/install_worker.h"
 
-#include <windows.h>
-
 #include <atlsecurity.h>
 #include <oaidl.h>
 #include <sddl.h>
@@ -16,12 +14,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+#include <windows.h>
 #include <wrl/client.h>
 
 #include <memory>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -33,10 +33,11 @@
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "build/branding_buildflags.h"
+#include "chrome/install_static/buildflags.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/install_static/install_modes.h"
 #include "chrome/install_static/install_util.h"
-#include "chrome/installer/setup/install_service_work_item.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
@@ -47,6 +48,7 @@
 #include "chrome/installer/util/firewall_manager_win.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "chrome/installer/util/install_service_work_item.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/l10n_string_util.h"
@@ -125,23 +127,12 @@ void AddInstallerCopyTasks(const InstallerState& installer_state,
 // the case for new installs only. Updates and overinstalls leave the rule
 // in-place on rollback since a previous install of Chrome will be used in that
 // case.
-bool AddFirewallRulesCallback(bool system_level,
-                              const base::FilePath& chrome_path,
-                              bool remove_on_rollback,
+bool AddFirewallRulesCallback(const base::FilePath& chrome_path,
                               const CallbackWorkItem& work_item) {
-  // There is no work to do on rollback if this is not a new install.
-  if (work_item.IsRollback() && !remove_on_rollback)
-    return true;
-
   std::unique_ptr<FirewallManager> manager =
       FirewallManager::Create(chrome_path);
   if (!manager) {
     LOG(ERROR) << "Failed creating a FirewallManager. Continuing with install.";
-    return true;
-  }
-
-  if (work_item.IsRollback()) {
-    manager->RemoveFirewallRules();
     return true;
   }
 
@@ -154,15 +145,29 @@ bool AddFirewallRulesCallback(bool system_level,
   return true;
 }
 
+// A callback invoked by |work_item| that removes firewall rules on rollback
+// if this is a new install.
+void RemoveFirewallRulesCallback(const base::FilePath& chrome_path,
+                                 const CallbackWorkItem& work_item) {
+  std::unique_ptr<FirewallManager> manager =
+      FirewallManager::Create(chrome_path);
+  if (!manager) {
+    LOG(ERROR) << "Failed creating a FirewallManager. Continuing rollback.";
+    return;
+  }
+
+  manager->RemoveFirewallRules();
+}
+
 // Adds work items to |list| to create firewall rules.
 void AddFirewallRulesWorkItems(const InstallerState& installer_state,
                                bool is_new_install,
                                WorkItemList* list) {
-  list->AddCallbackWorkItem(
-      base::Bind(&AddFirewallRulesCallback,
-                 installer_state.system_install(),
-                 installer_state.target_path().Append(kChromeExe),
-                 is_new_install));
+  base::FilePath chrome_path = installer_state.target_path().Append(kChromeExe);
+  WorkItem* item = list->AddCallbackWorkItem(
+      base::BindOnce(&AddFirewallRulesCallback, chrome_path),
+      base::BindOnce(&RemoveFirewallRulesCallback, chrome_path));
+  item->set_rollback_enabled(is_new_install);
 }
 
 // Probes COM machinery to get an instance of notification_helper.exe's
@@ -170,16 +175,9 @@ void AddFirewallRulesWorkItems(const InstallerState& installer_state,
 //
 // This is required so that COM purges its cache of the path to the binary,
 // which changes on updates.
-//
-// This callback unconditionally returns true since an install should not be
-// aborted if the probe fails.
 bool ProbeNotificationActivatorCallback(const CLSID& toast_activator_clsid,
                                         const CallbackWorkItem& work_item) {
   DCHECK(toast_activator_clsid != CLSID_NULL);
-
-  // Noop on rollback.
-  if (work_item.IsRollback())
-    return true;
 
   Microsoft::WRL::ComPtr<IUnknown> notification_activator;
   HRESULT hr =
@@ -189,6 +187,7 @@ bool ProbeNotificationActivatorCallback(const CLSID& toast_activator_clsid,
   if (hr != REGDB_E_CLASSNOTREG) {
     LOG(ERROR) << "Unexpected result creating NotificationActivator; hr=0x"
                << std::hex << hr;
+    return false;
   }
 
   return true;
@@ -384,53 +383,7 @@ bool AddAclToPath(const base::FilePath& path,
   return AddAclToPath(path, converted_trustees, access_mask, ace_flags);
 }
 
-// Migrates consent for the collection of usage statistics from the binaries to
-// Chrome when migrating multi-install Chrome to single-install.
-void AddMigrateUsageStatsWorkItems(const InstallerState& installer_state,
-                                   WorkItemList* install_list) {
-  // This operation only applies to modes that once supported multi-install.
-  if (install_static::InstallDetails::Get().supported_multi_install())
-    return;
-
-  // Bail out if an existing multi-install Chrome is not being migrated to
-  // single-install.
-  if (!installer_state.is_migrating_to_single())
-    return;
-
-  // Nothing to do if the binaries aren't actually installed.
-  if (!AreBinariesInstalled(installer_state))
-    return;
-
-  // Delete any stale value in Chrome's ClientStateMedium key. A new value, if
-  // found, will be written to the ClientState key below.
-  if (installer_state.system_install()) {
-    install_list->AddDeleteRegValueWorkItem(
-        installer_state.root_key(),
-        install_static::GetClientStateMediumKeyPath(), KEY_WOW64_64KEY,
-        google_update::kRegUsageStatsField);
-  }
-
-  google_update::Tristate consent =
-      GoogleUpdateSettings::GetCollectStatsConsentForBinaries();
-  if (consent == google_update::TRISTATE_NONE) {
-    VLOG(1) << "No consent value found to migrate to single-install.";
-    // Delete any stale value in Chrome's ClientState key.
-    install_list->AddDeleteRegValueWorkItem(
-        installer_state.root_key(), install_static::GetClientStateKeyPath(),
-        KEY_WOW64_64KEY, google_update::kRegUsageStatsField);
-    return;
-  }
-
-  VLOG(1) << "Migrating usage stats consent from multi- to single-install.";
-
-  // Write consent to Chrome's ClientState key.
-  install_list->AddSetRegValueWorkItem(
-      installer_state.root_key(), install_static::GetClientStateKeyPath(),
-      KEY_WOW64_32KEY, google_update::kRegUsageStatsField,
-      static_cast<DWORD>(consent), true);
-}
-
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // Adds work items to register the Elevation Service with Windows. Only for
 // system level installs.
 void AddElevationServiceWorkItems(const base::FilePath& elevation_service_path,
@@ -503,7 +456,47 @@ void AddElevationServiceWorkItems(const base::FilePath& elevation_service_path,
                                WorkItem::kWow64Default, L"",
                                elevation_service_path.value(), true);
 }
-#endif  // defined(GOOGLE_CHROME_BUILD
+
+// Adds work items to add or remove the "store-dmtoken" command to Chrome's
+// version key. This method is a no-op if this is anything other than
+// system-level Chrome. The command is used when enrolling Chrome browser
+// instances into enterprise management. |new_version| is the version currently
+// being installed -- can be empty on uninstall.
+void AddEnterpriseEnrollmentWorkItems(const InstallerState& installer_state,
+                                      const base::FilePath& setup_path,
+                                      const base::Version& new_version,
+                                      WorkItemList* install_list) {
+  if (!installer_state.system_install())
+    return;
+
+  const HKEY root_key = installer_state.root_key();
+  const base::string16 cmd_key(GetCommandKey(kCmdStoreDMToken));
+
+  if (installer_state.operation() == InstallerState::UNINSTALL) {
+    install_list->AddDeleteRegKeyWorkItem(root_key, cmd_key, KEY_WOW64_32KEY)
+        ->set_log_message("Removing store DM token command");
+  } else {
+    // Register a command to allow Chrome to request Google Update to run
+    // setup.exe --store-dmtoken=<token>, which will store the specified token
+    // in the registry.
+    base::CommandLine cmd_line(
+        installer_state.GetInstallerDirectory(new_version)
+            .Append(setup_path.BaseName()));
+    cmd_line.AppendSwitchASCII(switches::kStoreDMToken, "%1");
+    cmd_line.AppendSwitch(switches::kSystemLevel);
+    cmd_line.AppendSwitch(switches::kVerboseLogging);
+    InstallUtil::AppendModeSwitch(&cmd_line);
+
+    AppCommand cmd(cmd_line.GetCommandLineString());
+    // TODO(alito): For now setting this command as web accessible is required
+    // by Google Update.  Could revisit this should Google Update change the
+    // way permissions are handled for commands.
+    cmd.set_is_web_accessible(true);
+    cmd.AddWorkItems(root_key, cmd_key, install_list);
+  }
+}
+
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 }  // namespace
 
@@ -833,13 +826,14 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
   // installs. This is ordinarily done by Google Update prior to running
   // Chrome's installer. Do it here as well so that the key exists for manual
   // installs.
-  if (install_static::kUseGoogleUpdateIntegration &&
-      installer_state.system_install()) {
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+  if (installer_state.system_install()) {
     const base::string16 path = install_static::GetClientStateMediumKeyPath();
     post_install_task_list
         ->AddCreateRegKeyWorkItem(HKEY_LOCAL_MACHINE, path, KEY_WOW64_32KEY)
         ->set_best_effort(true);
   }
+#endif
 
   return true;
 }
@@ -863,11 +857,10 @@ void AddInstallWorkItems(const InstallationState& original_state,
 
   // Set permissions early on both temp and target, since moved files may not
   // inherit permissions.
-  WorkItem* add_ac_acl_to_install =
-      install_list->AddCallbackWorkItem(base::BindRepeating(
+  WorkItem* add_ac_acl_to_install = install_list->AddCallbackWorkItem(
+      base::BindOnce(
           [](const base::FilePath& target_path, const base::FilePath& temp_path,
              const CallbackWorkItem& work_item) {
-            DCHECK(!work_item.IsRollback());
             std::vector<const wchar_t*> sids = {
                 kChromeInstallFilesCapabilitySid,
                 kLpacChromeInstallFilesCapabilitySid};
@@ -883,7 +876,8 @@ void AddInstallWorkItems(const InstallationState& original_state,
                                       success);
             return success;
           },
-          target_path, temp_path));
+          target_path, temp_path),
+      base::DoNothing());
   add_ac_acl_to_install->set_best_effort(true);
   add_ac_acl_to_install->set_rollback_enabled(false);
 
@@ -894,16 +888,17 @@ void AddInstallWorkItems(const InstallationState& original_state,
 
   if (installer_state.system_install()) {
     WorkItem* add_acl_to_histogram_storage_dir_work_item =
-        install_list->AddCallbackWorkItem(base::Bind(
-            [](const base::FilePath& histogram_storage_dir,
-               const CallbackWorkItem& work_item) {
-              DCHECK(!work_item.IsRollback());
-              return AddAclToPath(histogram_storage_dir,
-                                  ATL::Sids::AuthenticatedUser(),
-                                  FILE_GENERIC_READ | FILE_DELETE_CHILD,
-                                  CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
-            },
-            histogram_storage_dir));
+        install_list->AddCallbackWorkItem(
+            base::BindOnce(
+                [](const base::FilePath& histogram_storage_dir,
+                   const CallbackWorkItem& work_item) {
+                  return AddAclToPath(
+                      histogram_storage_dir, ATL::Sids::AuthenticatedUser(),
+                      FILE_GENERIC_READ | FILE_DELETE_CHILD,
+                      CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
+                },
+                histogram_storage_dir),
+            base::DoNothing());
     add_acl_to_histogram_storage_dir_work_item->set_best_effort(true);
     add_acl_to_histogram_storage_dir_work_item->set_rollback_enabled(false);
   }
@@ -932,10 +927,10 @@ void AddInstallWorkItems(const InstallationState& original_state,
   AddActiveSetupWorkItems(installer_state, new_version, install_list);
 
   AddOsUpgradeWorkItems(installer_state, setup_path, new_version, install_list);
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   AddEnterpriseEnrollmentWorkItems(installer_state, setup_path, new_version,
                                    install_list);
-#endif  // defined(GOOGLE_CHROME_BUILD
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING
   AddFirewallRulesWorkItems(installer_state, current_version == nullptr,
                             install_list);
 
@@ -945,18 +940,15 @@ void AddInstallWorkItems(const InstallationState& original_state,
       installer_state.root_key(),
       GetNotificationHelperPath(target_path, new_version), install_list);
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (installer_state.system_install()) {
     AddElevationServiceWorkItems(
         GetElevationServicePath(target_path, new_version), install_list);
   }
-#endif  // defined(GOOGLE_CHROME_BUILD
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING
 
   InstallUtil::AddUpdateDowngradeVersionItem(
       installer_state.root_key(), current_version, new_version, install_list);
-
-  // Migrate usagestats back to Chrome.
-  AddMigrateUsageStatsWorkItems(installer_state, install_list);
 
   AddUpdateBrandCodeWorkItem(installer_state, install_list);
 
@@ -992,9 +984,12 @@ void AddNativeNotificationWorkItems(
                                 KEY_WOW64_64KEY);
 
   // Force COM to flush its cache containing the path to the old handler.
-  list->AddCallbackWorkItem(
-      base::BindRepeating(&ProbeNotificationActivatorCallback,
-                          install_static::GetToastActivatorClsid()));
+  WorkItem* item = list->AddCallbackWorkItem(
+      base::BindOnce(&ProbeNotificationActivatorCallback,
+                     install_static::GetToastActivatorClsid()),
+      base::BindOnce(base::IgnoreResult(&ProbeNotificationActivatorCallback),
+                     install_static::GetToastActivatorClsid()));
+  item->set_best_effort(true);
 
   base::string16 toast_activator_server_path =
       toast_activator_reg_path + L"\\LocalServer32";
@@ -1135,41 +1130,5 @@ void AddOsUpgradeWorkItems(const InstallerState& installer_state,
     cmd.AddWorkItems(installer_state.root_key(), cmd_key, install_list);
   }
 }
-
-#if defined(GOOGLE_CHROME_BUILD)
-void AddEnterpriseEnrollmentWorkItems(const InstallerState& installer_state,
-                                      const base::FilePath& setup_path,
-                                      const base::Version& new_version,
-                                      WorkItemList* install_list) {
-  if (!installer_state.system_install())
-    return;
-
-  const HKEY root_key = installer_state.root_key();
-  const base::string16 cmd_key(GetCommandKey(kCmdStoreDMToken));
-
-  if (installer_state.operation() == InstallerState::UNINSTALL) {
-    install_list->AddDeleteRegKeyWorkItem(root_key, cmd_key, KEY_WOW64_32KEY)
-        ->set_log_message("Removing store DM token command");
-  } else {
-    // Register a command to allow Chrome to request Google Update to run
-    // setup.exe --store-dmtoken=<token>, which will store the specifed token in
-    // the registry.
-    base::CommandLine cmd_line(
-        installer_state.GetInstallerDirectory(new_version)
-            .Append(setup_path.BaseName()));
-    cmd_line.AppendSwitchASCII(switches::kStoreDMToken, "%1");
-    cmd_line.AppendSwitch(switches::kSystemLevel);
-    cmd_line.AppendSwitch(switches::kVerboseLogging);
-    InstallUtil::AppendModeSwitch(&cmd_line);
-
-    AppCommand cmd(cmd_line.GetCommandLineString());
-    // TODO(alito): For now setting this command as web accessible is required
-    // by Google Update.  Could revisit this should Google Update change the
-    // way permissions are handled for commands.
-    cmd.set_is_web_accessible(true);
-    cmd.AddWorkItems(root_key, cmd_key, install_list);
-  }
-}
-#endif  // defined(GOOGLE_CHROME_BUILD
 
 }  // namespace installer

@@ -11,6 +11,7 @@
 #include "components/autofill/ios/form_util/form_activity_observer.h"
 #include "components/autofill/ios/form_util/form_activity_params.h"
 #include "ios/web/public/js_messaging/web_frame.h"
+#import "ios/web/public/ui/crw_web_view_proxy.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -39,7 +40,7 @@ FormActivityTabHelper* FormActivityTabHelper::GetOrCreateForWebState(
 FormActivityTabHelper::FormActivityTabHelper(web::WebState* web_state)
     : web_state_(web_state) {
   web_state_->AddObserver(this);
-  web_state_->AddScriptCommandCallback(
+  subscription_ = web_state_->AddScriptCommandCallback(
       base::BindRepeating(&FormActivityTabHelper::OnFormCommand,
                           base::Unretained(this)),
       kCommandPrefix);
@@ -48,7 +49,6 @@ FormActivityTabHelper::FormActivityTabHelper(web::WebState* web_state)
 FormActivityTabHelper::~FormActivityTabHelper() {
   if (web_state_) {
     web_state_->RemoveObserver(this);
-    web_state_->RemoveScriptCommandCallback(kCommandPrefix);
     web_state_ = nullptr;
   }
 }
@@ -131,7 +131,6 @@ bool FormActivityTabHelper::FormSubmissionHandler(
 
 void FormActivityTabHelper::WebStateDestroyed(web::WebState* web_state) {
   DCHECK_EQ(web_state_, web_state);
-  web_state_->RemoveScriptCommandCallback(kCommandPrefix);
   web_state_->RemoveObserver(this);
   web_state_ = nullptr;
 }

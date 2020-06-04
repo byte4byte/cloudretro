@@ -12,17 +12,17 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/engagement/site_engagement_observer.h"
 #include "chrome/browser/installable/installable_logging.h"
 #include "chrome/browser/installable/installable_manager.h"
-#include "chrome/browser/web_applications/components/web_app_helpers.h"
+#include "chrome/browser/web_applications/components/web_app_id.h"
 #include "content/public/browser/media_player_id.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/blink/public/common/manifest/web_display_mode.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/app_banner/app_banner.mojom.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom-forward.h"
 #include "url/gurl.h"
 
 enum class WebappInstallSource;
@@ -46,21 +46,15 @@ namespace banners {
 // whether the site is already installed (and on Android, divert the flow to a
 // native app banner if requested). The second call completes the checking for a
 // web app banner (checking manifest validity, service worker, and icon).
+//
+// TODO(https://crbug.com/930612): Refactor this into several simpler classes.
 class AppBannerManager : public content::WebContentsObserver,
                          public blink::mojom::AppBannerService,
                          public SiteEngagementObserver {
  public:
   class Observer : public base::CheckedObserver {
    public:
-    Observer();
-    ~Observer() override;
-
-    void ObserveAppBannerManager(AppBannerManager* manager);
-
     virtual void OnInstallableWebAppStatusUpdated() = 0;
-
-   private:
-    ScopedObserver<AppBannerManager, Observer> scoped_observer_{this};
   };
 
   // A StatusReporter handles the reporting of |InstallableStatusCode|s.
@@ -128,13 +122,18 @@ class AppBannerManager : public content::WebContentsObserver,
   static void SetTotalEngagementToTrigger(double engagement);
 
   // TODO(https://crbug.com/930612): Move |GetInstallableAppName| and
-  // |IsWebContentsInstallable| out into a more general purpose installability
-  // check class.
+  // |IsExternallyInstalledWebApp| out into a more general purpose
+  // installability check class.
 
   // Returns the app name if the current page is installable, otherwise returns
   // the empty string.
   static base::string16 GetInstallableWebAppName(
       content::WebContents* web_contents);
+
+  // Returns whether the page that would currently be installed by the
+  // "Install PWA" or "Create Shortcut" actions would replace an installed app
+  // with an External install source. Returns false if unknown.
+  virtual bool IsExternallyInstalledWebApp();
 
   // Returns whether installability checks satisfy promotion requirements
   // (e.g. having a service worker fetch event) or have passed previously within
@@ -153,7 +152,7 @@ class AppBannerManager : public content::WebContentsObserver,
   // redundant for the beforeinstallprompt event's promise being resolved, but
   // is required by the install event spec.
   // This is virtual for testing.
-  virtual void OnInstall(blink::WebDisplayMode display);
+  virtual void OnInstall(blink::mojom::DisplayMode display);
 
   // Sends a message to the renderer that the user accepted the banner.
   void SendBannerAccepted();
@@ -166,14 +165,11 @@ class AppBannerManager : public content::WebContentsObserver,
 
   virtual base::WeakPtr<AppBannerManager> GetWeakPtr() = 0;
 
-  // Used by test subclasses that replace the existing AppBannerManager
-  // instance. The observer list must be transferred over to avoid dangling
-  // pointers in the observers.
-  void MigrateObserverListForTesting(content::WebContents* web_contents);
-
   // Returns whether the site can call "event.prompt()" to prompt the user to
   // install the site.
   bool IsPromptAvailableForTesting() const;
+
+  InstallableWebAppCheckResult GetInstallableWebAppCheckResultForTesting();
 
  protected:
   explicit AppBannerManager(content::WebContents* web_contents);
@@ -183,9 +179,6 @@ class AppBannerManager : public content::WebContentsObserver,
   // been shown too recently, or if the app has already been installed.
   // GetAppIdentifier() must return a valid value for this method to work.
   bool CheckIfShouldShowBanner();
-
-  // Returns whether the site is already installed as a web app.
-  bool CheckIfInstalled();
 
   // Returns whether the site would prefer a related application be installed
   // instead of the PWA or a related application is already installed.
@@ -218,13 +211,14 @@ class AppBannerManager : public content::WebContentsObserver,
   virtual bool IsRelatedAppInstalled(
       const blink::Manifest::RelatedApplication& related_app) const = 0;
 
-  // Returns true if the web app at |start_url| has already been installed, or
+  // Returns whether the current page is already installed as a web app, or
   // should be considered installed. On Android, we rely on a heuristic that
   // may yield false negatives or false positives (crbug.com/786268).
-  virtual bool IsWebAppConsideredInstalled(content::WebContents* web_contents,
-                                           const GURL& validated_url,
-                                           const GURL& start_url,
-                                           const GURL& manifest_url);
+  virtual bool IsWebAppConsideredInstalled();
+
+  // Returns whether the installed web app at the current page can be
+  // overwritten with a new app install for the current page.
+  virtual bool ShouldAllowWebAppReplacementInstall();
 
   // Callback invoked by the InstallableManager once it has fetched the page's
   // manifest.
@@ -248,9 +242,8 @@ class AppBannerManager : public content::WebContentsObserver,
   virtual void OnDidPerformInstallableWebAppCheck(
       const InstallableData& result);
 
-  // Records that a banner was shown. The |event_name| corresponds to the RAPPOR
-  // metric being recorded.
-  void RecordDidShowBanner(const std::string& event_name);
+  // Records that a banner was shown.
+  void RecordDidShowBanner();
 
   // Reports |code| via a UMA histogram or logs it to the console.
   void ReportStatus(InstallableStatusCode code);
@@ -283,7 +276,6 @@ class AppBannerManager : public content::WebContentsObserver,
   virtual void UpdateState(State state);
 
   // content::WebContentsObserver overrides.
-  void DidStartNavigation(content::NavigationHandle* handle) override;
   void DidFinishNavigation(content::NavigationHandle* handle) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
@@ -307,6 +299,8 @@ class AppBannerManager : public content::WebContentsObserver,
   State state() const { return state_; }
   bool IsRunning() const;
 
+  void SetInstallableWebAppCheckResult(InstallableWebAppCheckResult result);
+
   // The URL for which the banner check is being conducted.
   GURL validated_url_;
 
@@ -321,6 +315,9 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // The primary icon object.
   SkBitmap primary_icon_;
+
+  // Whether or not the primary icon is maskable.
+  bool has_maskable_primary_icon_;
 
   // The current banner pipeline state for this page load.
   State state_;
@@ -340,7 +337,7 @@ class AppBannerManager : public content::WebContentsObserver,
   // intention to show a prompt. The renderer will send a message back with the
   // opportunity to cancel.
   virtual void OnBannerPromptReply(
-      blink::mojom::AppBannerControllerPtr controller,
+      mojo::Remote<blink::mojom::AppBannerController> controller,
       blink::mojom::AppBannerPromptReply reply);
 
   // Does the non-platform specific parts of showing the app banner.
@@ -358,8 +355,6 @@ class AppBannerManager : public content::WebContentsObserver,
   // Returns a status code based on the current state, to log when terminating.
   InstallableStatusCode TerminationCode() const;
 
-  void SetInstallableWebAppCheckResult(InstallableWebAppCheckResult result);
-
   // Fetches the data required to display a banner for the current page.
   InstallableManager* manager_;
 
@@ -368,9 +363,8 @@ class AppBannerManager : public content::WebContentsObserver,
   // background will appear when the tab is reactivated.
   std::vector<content::MediaPlayerId> active_media_players_;
 
-  // Mojo bindings and interface pointers.
-  mojo::Binding<blink::mojom::AppBannerService> binding_;
-  blink::mojom::AppBannerEventPtr event_;
+  mojo::Receiver<blink::mojom::AppBannerService> receiver_{this};
+  mojo::Remote<blink::mojom::AppBannerEvent> event_;
 
   // If a banner is requested before the page has finished loading, defer
   // triggering the pipeline until the load is complete.

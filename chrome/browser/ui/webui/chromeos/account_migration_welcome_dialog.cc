@@ -7,7 +7,6 @@
 #include <string>
 
 #include "base/json/json_writer.h"
-#include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
@@ -64,8 +63,7 @@ AccountMigrationWelcomeDialog* AccountMigrationWelcomeDialog::Show(
 void AccountMigrationWelcomeDialog::AdjustWidgetInitParams(
     views::Widget::InitParams* params) {
   params->z_order = ui::ZOrderLevel::kNormal;
-  params->type = views::Widget::InitParams::Type::TYPE_WINDOW_FRAMELESS;
-  params->shadow_type = views::Widget::InitParams::ShadowType::SHADOW_TYPE_DROP;
+  params->shadow_type = views::Widget::InitParams::ShadowType::kDrop;
   params->shadow_elevation = wm::kShadowElevationActiveWindow;
 }
 
@@ -86,6 +84,10 @@ std::string AccountMigrationWelcomeDialog::GetDialogArgs() const {
 }
 
 bool AccountMigrationWelcomeDialog::ShouldShowDialogTitle() const {
+  return false;
+}
+
+bool AccountMigrationWelcomeDialog::ShouldShowCloseButton() const {
   return false;
 }
 

@@ -32,14 +32,14 @@ TouchObserverHud::TouchObserverHud(aura::Window* initial_root,
 
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.accept_events = false;
   params.bounds = display.bounds();
   params.parent =
       Shell::GetContainer(root_window_, kShellWindowId_OverlayContainer);
   params.name = widget_name;
-  widget_->Init(params);
+  widget_->Init(std::move(params));
   widget_->SetContentsView(content);
   widget_->StackAtTop();
   widget_->Show();

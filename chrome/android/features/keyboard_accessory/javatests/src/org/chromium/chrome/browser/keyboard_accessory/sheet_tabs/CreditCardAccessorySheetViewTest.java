@@ -10,13 +10,14 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.Assert.assertThat;
 
-import android.support.annotation.IdRes;
 import android.support.test.filters.MediumTest;
-import android.support.v7.widget.RecyclerView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.annotation.IdRes;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.junit.After;
 import org.junit.Before;
@@ -25,7 +26,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.keyboard_accessory.AccessoryTabType;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData;
@@ -139,7 +140,33 @@ public class CreditCardAccessorySheetViewTest {
 
     @Test
     @MediumTest
-    public void testEmptyChipsAreNotVisible() throws ExecutionException {
+    public void testAddingUnselectableFieldsRendersUnclickabeChips() {
+        assertThat(mView.get().getChildCount(), is(0));
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            UserInfo infoWithUnclickableField = new UserInfo("", false);
+            infoWithUnclickableField.addField(
+                    new UserInfoField("4111111111111111", "4111111111111111", "", false, null));
+            infoWithUnclickableField.addField(new UserInfoField("", "", "month", false, null));
+            infoWithUnclickableField.addField(new UserInfoField("", "", "year", false, null));
+            infoWithUnclickableField.addField(new UserInfoField("", "", "name", false, null));
+            mModel.add(new AccessorySheetDataPiece(
+                    infoWithUnclickableField, AccessorySheetDataPiece.Type.CREDIT_CARD_INFO));
+            mModel.add(new AccessorySheetDataPiece(
+                    new KeyboardAccessoryData.FooterCommand("Manage credit cards", null),
+                    AccessorySheetDataPiece.Type.FOOTER_COMMAND));
+        });
+
+        CriteriaHelper.pollUiThread(Criteria.equals(2, () -> mView.get().getChildCount()));
+
+        assertThat(getChipText(R.id.cc_number), is("4111111111111111"));
+        assertThat(findChipView(R.id.cc_number).isShown(), is(true));
+        assertThat(findChipView(R.id.cc_number).isEnabled(), is(false));
+    }
+
+    @Test
+    @MediumTest
+    public void testEmptyChipsAreNotVisible() {
         final AtomicBoolean clicked = new AtomicBoolean();
         assertThat(mView.get().getChildCount(), is(0));
 
@@ -158,9 +185,32 @@ public class CreditCardAccessorySheetViewTest {
         assertThat(findChipView(R.id.cardholder).isShown(), is(false));
     }
 
+    @Test
+    @MediumTest
+    public void testRendersWarning() {
+        final String kWarning = "Insecure, so filling is no.";
+        assertThat(mView.get().getChildCount(), is(0));
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            mModel.add(new AccessorySheetDataPiece(kWarning, AccessorySheetDataPiece.Type.WARNING));
+            mModel.add(new AccessorySheetDataPiece(
+                    new KeyboardAccessoryData.FooterCommand("Manage credit cards", null),
+                    AccessorySheetDataPiece.Type.FOOTER_COMMAND));
+        });
+
+        CriteriaHelper.pollUiThread(Criteria.equals(2, () -> mView.get().getChildCount()));
+
+        assertThat(mView.get().getChildAt(0), instanceOf(LinearLayout.class));
+        LinearLayout warning = (LinearLayout) mView.get().getChildAt(0);
+        assertThat(warning.findViewById(R.id.tab_title), instanceOf(TextView.class));
+        TextView warningText = warning.findViewById(R.id.tab_title);
+        assertThat(warningText.isShown(), is(true));
+        assertThat(warningText.getText(), is(kWarning));
+    }
+
     private UserInfo createInfo(
             String number, String month, String year, String name, AtomicBoolean clickRecorder) {
-        UserInfo info = new UserInfo("", null);
+        UserInfo info = new UserInfo("", false);
         info.addField(
                 new UserInfoField(number, number, "", false, item -> clickRecorder.set(true)));
         info.addField(new UserInfoField(month, month, "", false, item -> clickRecorder.set(true)));

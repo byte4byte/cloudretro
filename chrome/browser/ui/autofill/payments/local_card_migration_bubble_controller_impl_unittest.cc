@@ -11,13 +11,16 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "chrome/browser/ui/autofill/payments/local_card_migration_bubble.h"
+#include "chrome/browser/ui/autofill/test/test_autofill_bubble_handler.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
 #include "content/public/test/mock_navigation_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,25 +62,6 @@ class TestLocalCardMigrationBubbleControllerImpl
   base::TimeDelta elapsed_;
 };
 
-class TestLocalCardMigrationBubble final : public LocalCardMigrationBubble {
-  void Hide() override {}
-};
-
-class LocalCardMigrationBubbleTestBrowserWindow : public TestBrowserWindow {
- public:
-  LocalCardMigrationBubble* ShowLocalCardMigrationBubble(
-      content::WebContents* contents,
-      LocalCardMigrationBubbleController* controller,
-      bool user_gesture) override {
-    test_local_card_migration_bubble_.reset(new TestLocalCardMigrationBubble());
-    return test_local_card_migration_bubble_.get();
-  }
-
- private:
-  std::unique_ptr<TestLocalCardMigrationBubble>
-      test_local_card_migration_bubble_;
-};
-
 }  // namespace
 
 class LocalCardMigrationBubbleControllerImplTest
@@ -91,10 +75,6 @@ class LocalCardMigrationBubbleControllerImplTest
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     TestLocalCardMigrationBubbleControllerImpl::CreateForTesting(web_contents);
-  }
-
-  std::unique_ptr<BrowserWindow> CreateBrowserWindow() override {
-    return std::make_unique<LocalCardMigrationBubbleTestBrowserWindow>();
   }
 
  protected:
@@ -294,6 +274,25 @@ TEST_F(LocalCardMigrationBubbleControllerImplTest,
       ElementsAre(
           Bucket(AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_REQUESTED, 1),
           Bucket(AutofillMetrics::LOCAL_CARD_MIGRATION_BUBBLE_SHOWN, 1)));
+}
+
+// Ensures the bubble should still stick around even if the time since bubble
+// showing is longer than kCardBubbleSurviveNavigationTime (5 seconds) when the
+// feature is enabled.
+TEST_F(LocalCardMigrationBubbleControllerImplTest,
+       StickyBubble_ShouldNotDismissUponNavigation) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kAutofillEnableStickyPaymentsBubble);
+
+  ShowBubble();
+  base::HistogramTester histogram_tester;
+  controller()->set_elapsed(base::TimeDelta::FromSeconds(10));
+  controller()->SimulateNavigation();
+
+  histogram_tester.ExpectTotalCount(
+      "Autofill.LocalCardMigrationBubbleOffer.FirstShow", 0);
+  EXPECT_NE(nullptr, controller()->local_card_migration_bubble_view());
 }
 
 }  // namespace autofill

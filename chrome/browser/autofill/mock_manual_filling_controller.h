@@ -28,8 +28,9 @@ class MockManualFillingController
                     const autofill::UserInfo::Field&));
   MOCK_CONST_METHOD1(OnOptionSelected,
                      void(autofill::AccessoryAction selected_action));
-  MOCK_METHOD2(GetFavicon,
-               void(int, base::OnceCallback<void(const gfx::Image&)>));
+  MOCK_CONST_METHOD2(OnToggleChanged,
+                     void(autofill::AccessoryAction toggled_action,
+                          bool enabled));
   MOCK_CONST_METHOD0(container_view, gfx::NativeView());
 
  private:

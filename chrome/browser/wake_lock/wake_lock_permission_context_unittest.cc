@@ -6,7 +6,7 @@
 
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/common/content_settings.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -16,7 +16,7 @@ class WakeLockPermissionContextTests : public testing::Test {
   TestingProfile* profile() { return &profile_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
 };
 
@@ -25,8 +25,8 @@ TEST_F(WakeLockPermissionContextTests, InsecureOriginsAreRejected) {
   GURL secure_url("https://www.example.com");
 
   const ContentSettingsType kWakeLockTypes[] = {
-      CONTENT_SETTINGS_TYPE_WAKE_LOCK_SCREEN,
-      CONTENT_SETTINGS_TYPE_WAKE_LOCK_SYSTEM};
+      ContentSettingsType::WAKE_LOCK_SCREEN,
+      ContentSettingsType::WAKE_LOCK_SYSTEM};
 
   for (const auto& content_settings_type : kWakeLockTypes) {
     WakeLockPermissionContext permission_context(profile(),
@@ -46,7 +46,7 @@ TEST_F(WakeLockPermissionContextTests, InsecureOriginsAreRejected) {
 
 TEST_F(WakeLockPermissionContextTests, TestScreenLockPermissionRequest) {
   WakeLockPermissionContext permission_context(
-      profile(), CONTENT_SETTINGS_TYPE_WAKE_LOCK_SCREEN);
+      profile(), ContentSettingsType::WAKE_LOCK_SCREEN);
   GURL url("https://www.example.com");
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             permission_context
@@ -56,7 +56,7 @@ TEST_F(WakeLockPermissionContextTests, TestScreenLockPermissionRequest) {
 
 TEST_F(WakeLockPermissionContextTests, TestSystemLockPermissionRequest) {
   WakeLockPermissionContext permission_context(
-      profile(), CONTENT_SETTINGS_TYPE_WAKE_LOCK_SYSTEM);
+      profile(), ContentSettingsType::WAKE_LOCK_SYSTEM);
   GURL url("https://www.example.com");
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             permission_context

@@ -8,6 +8,7 @@
 
 #include "base/debug/stack_trace.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
@@ -27,13 +28,32 @@
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/vector_icons.h"
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/browser/ui/media_router/internal/vector_icons/vector_icons.h"
 #endif
 
 namespace media_router {
 
 namespace {
+
+// A view that represents the primary icon for a sink issue. This class is used
+// to ensure its color is kept in sync with current theme.
+class SinkIssueIconView : public views::ImageView {
+ public:
+  SinkIssueIconView() {
+    SetBorder(views::CreateEmptyBorder(kPrimaryIconBorder));
+  }
+  ~SinkIssueIconView() override = default;
+
+  // views::ImageView:
+  void OnThemeChanged() override {
+    views::ImageView::OnThemeChanged();
+    const SkColor icon_color = GetNativeTheme()->GetSystemColor(
+        ui::NativeTheme::kColorId_DefaultIconColor);
+    SetImage(gfx::CreateVectorIcon(::vector_icons::kInfoOutlineIcon,
+                                   kPrimaryIconSize, icon_color));
+  }
+};
 
 gfx::ImageSkia CreateSinkIcon(SinkIconType icon_type, bool enabled = true) {
   const gfx::VectorIcon* vector_icon;
@@ -52,14 +72,14 @@ gfx::ImageSkia CreateSinkIcon(SinkIconType icon_type, bool enabled = true) {
       break;
 // Use proprietary icons only in Chrome builds. The default TV icon is used
 // instead for these sink types in Chromium builds.
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     case SinkIconType::MEETING:
       vector_icon = &vector_icons::kMeetIcon;
       break;
     case SinkIconType::HANGOUT:
       vector_icon = &vector_icons::kHangoutIcon;
       break;
-#endif  // defined(GOOGLE_CHROME_BUILD)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
     case SinkIconType::CAST:
     case SinkIconType::GENERIC:
     default:
@@ -78,8 +98,7 @@ std::unique_ptr<views::ImageView> CreatePrimaryIconView(
     const gfx::ImageSkia& image) {
   auto icon_view = std::make_unique<views::ImageView>();
   icon_view->SetImage(image);
-  icon_view->SetBorder(
-      views::CreateEmptyBorder(gfx::Insets(kPrimaryIconBorderWidth)));
+  icon_view->SetBorder(views::CreateEmptyBorder(kPrimaryIconBorder));
   return icon_view;
 }
 
@@ -93,11 +112,7 @@ std::unique_ptr<views::View> CreatePrimaryIconForSink(
     return CreatePrimaryIconView(gfx::CreateVectorIcon(
         kGenericStopIcon, kPrimaryIconSize, gfx::kGoogleBlue500));
   } else if (sink.issue) {
-    const SkColor icon_color =
-        ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
-            ui::NativeTheme::kColorId_DefaultIconColor);
-    return CreatePrimaryIconView(gfx::CreateVectorIcon(
-        ::vector_icons::kInfoOutlineIcon, kPrimaryIconSize, icon_color));
+    return std::make_unique<SinkIssueIconView>();
   } else if (sink.state == UIMediaSinkState::CONNECTING ||
              sink.state == UIMediaSinkState::DISCONNECTING) {
     return CreateThrobber();
@@ -183,7 +198,7 @@ void CastDialogSinkButton::OnEnabledChanged() {
     return;
 
   SkColor background_color = GetNativeTheme()->GetSystemColor(
-      ui::NativeTheme::kColorId_ProminentButtonColor);
+      ui::NativeTheme::kColorId_DialogBackground);
   if (GetEnabled()) {
     SetTitleTextStyle(views::style::STYLE_PRIMARY, background_color);
     if (saved_status_text_)

@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('settings', function() {
+// clang-format off
+import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+// clang-format on
+
   /** @interface */
-  class ChromeCleanupProxy {
+  export class ChromeCleanupProxy {
     /**
      * Registers the current ChromeCleanupHandler as an observer of
      * ChromeCleanerController events.
@@ -57,9 +60,9 @@ cr.define('settings', function() {
   }
 
   /**
-   * @implements {settings.ChromeCleanupProxy}
+   * @implements {ChromeCleanupProxy}
    */
-  class ChromeCleanupProxyImpl {
+  export class ChromeCleanupProxyImpl {
     /** @override */
     registerChromeCleanerObserver() {
       chrome.send('registerChromeCleanerObserver');
@@ -92,19 +95,13 @@ cr.define('settings', function() {
 
     /** @override */
     getMoreItemsPluralString(numHiddenItems) {
-      return cr.sendWithPromise('getMoreItemsPluralString', numHiddenItems);
+      return sendWithPromise('getMoreItemsPluralString', numHiddenItems);
     }
 
     /** @override */
     getItemsToRemovePluralString(numItems) {
-      return cr.sendWithPromise('getItemsToRemovePluralString', numItems);
+      return sendWithPromise('getItemsToRemovePluralString', numItems);
     }
   }
 
-  cr.addSingletonGetter(ChromeCleanupProxyImpl);
-
-  return {
-    ChromeCleanupProxy: ChromeCleanupProxy,
-    ChromeCleanupProxyImpl: ChromeCleanupProxyImpl,
-  };
-});
+  addSingletonGetter(ChromeCleanupProxyImpl);

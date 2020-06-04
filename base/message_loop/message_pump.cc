@@ -4,6 +4,7 @@
 
 #include "base/message_loop/message_pump.h"
 
+#include "base/logging.h"
 #include "base/message_loop/message_pump_default.h"
 #include "base/message_loop/message_pump_for_io.h"
 #include "base/message_loop/message_pump_for_ui.h"
@@ -39,9 +40,9 @@ bool MessagePump::IsMessagePumpForUIFactoryOveridden() {
 }
 
 // static
-std::unique_ptr<MessagePump> MessagePump::Create(Type type) {
+std::unique_ptr<MessagePump> MessagePump::Create(MessagePumpType type) {
   switch (type) {
-    case Type::UI:
+    case MessagePumpType::UI:
       if (message_pump_for_ui_factory_)
         return message_pump_for_ui_factory_();
 #if defined(OS_IOS) || defined(OS_MACOSX)
@@ -55,32 +56,32 @@ std::unique_ptr<MessagePump> MessagePump::Create(Type type) {
       return std::make_unique<MessagePumpForUI>();
 #endif
 
-    case Type::IO:
+    case MessagePumpType::IO:
       return std::make_unique<MessagePumpForIO>();
 
 #if defined(OS_ANDROID)
-    case Type::JAVA:
+    case MessagePumpType::JAVA:
       return std::make_unique<MessagePumpForUI>();
 #endif
 
 #if defined(OS_MACOSX)
-    case Type::NS_RUNLOOP:
+    case MessagePumpType::NS_RUNLOOP:
       return std::make_unique<MessagePumpNSRunLoop>();
 #endif
 
 #if defined(OS_WIN)
-    case Type::UI_WITH_WM_QUIT_SUPPORT: {
+    case MessagePumpType::UI_WITH_WM_QUIT_SUPPORT: {
       auto pump = std::make_unique<MessagePumpForUI>();
       pump->EnableWmQuit();
       return pump;
     }
 #endif  // defined(OS_WIN)
 
-    case Type::CUSTOM:
+    case MessagePumpType::CUSTOM:
       NOTREACHED();
       return nullptr;
 
-    case Type::DEFAULT:
+    case MessagePumpType::DEFAULT:
 #if defined(OS_IOS)
       // On iOS, a native runloop is always required to pump system work.
       return std::make_unique<MessagePumpCFRunLoop>();

@@ -13,10 +13,9 @@
 #include "media/base/audio_decoder.h"
 #include "media/base/cdm_factory.h"
 #include "media/filters/android/media_codec_audio_decoder.h"
-#include "media/mojo/interfaces/media_drm_storage.mojom.h"
-#include "media/mojo/interfaces/provision_fetcher.mojom.h"
+#include "media/mojo/mojom/media_drm_storage.mojom.h"
+#include "media/mojo/mojom/provision_fetcher.mojom.h"
 #include "media/mojo/services/android_mojo_util.h"
-#include "services/service_manager/public/cpp/connect.h"
 
 using media::android_mojo_util::CreateProvisionFetcher;
 using media::android_mojo_util::CreateMediaDrmStorage;
@@ -35,16 +34,16 @@ std::unique_ptr<AudioDecoder> AndroidMojoMediaClient::CreateAudioDecoder(
 }
 
 std::unique_ptr<CdmFactory> AndroidMojoMediaClient::CreateCdmFactory(
-    service_manager::mojom::InterfaceProvider* host_interfaces) {
-  if (!host_interfaces) {
+    mojom::FrameInterfaceFactory* frame_interfaces) {
+  if (!frame_interfaces) {
     NOTREACHED() << "Host interfaces should be provided when using CDM with "
                  << "AndroidMojoMediaClient";
     return nullptr;
   }
 
   return std::make_unique<AndroidCdmFactory>(
-      base::Bind(&CreateProvisionFetcher, host_interfaces),
-      base::Bind(&CreateMediaDrmStorage, host_interfaces));
+      base::BindRepeating(&CreateProvisionFetcher, frame_interfaces),
+      base::BindRepeating(&CreateMediaDrmStorage, frame_interfaces));
 }
 
 }  // namespace media

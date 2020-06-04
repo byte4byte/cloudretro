@@ -26,7 +26,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_set.h"
 
@@ -72,9 +71,7 @@ void AppShortcutManager::RegisterProfilePrefs(
 }
 
 AppShortcutManager::AppShortcutManager(Profile* profile)
-    : profile_(profile),
-      is_profile_attributes_storage_observer_(false),
-      extension_registry_observer_(this) {
+    : profile_(profile), is_profile_attributes_storage_observer_(false) {
   // Use of g_browser_process requires that we are either on the UI thread, or
   // there are no threads initialized (such as in unit tests).
   DCHECK(!content::BrowserThread::IsThreadInitialized(
@@ -130,14 +127,16 @@ void AppShortcutManager::OnExtensionUninstalled(
     content::BrowserContext* browser_context,
     const Extension* extension,
     extensions::UninstallReason reason) {
-  web_app::DeleteAllShortcuts(profile_, extension);
+  // Bookmark apps are handled in
+  // web_app::AppShortcutManager::OnWebAppWillBeUninstalled()
+  if (!extension->from_bookmark())
+    web_app::DeleteAllShortcuts(profile_, extension);
 }
 
 void AppShortcutManager::OnProfileWillBeRemoved(
     const base::FilePath& profile_path) {
   if (profile_path != profile_->GetPath())
     return;
-
   web_app::internals::GetShortcutIOTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(&web_app::internals::DeleteAllShortcutsForProfile,
@@ -167,7 +166,7 @@ void AppShortcutManager::UpdateShortcutsForAllAppsIfNeeded() {
   if (last_version >= kCurrentAppShortcutsVersion)
     return;
 
-  base::PostDelayedTaskWithTraits(
+  base::PostDelayedTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&AppShortcutManager::UpdateShortcutsForAllAppsNow,
                      weak_ptr_factory_.GetWeakPtr()),

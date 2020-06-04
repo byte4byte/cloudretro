@@ -30,6 +30,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_util.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace {
 
@@ -83,7 +84,7 @@ void ParseJsonOnBlockingPool(
 // Returns response headers as a string. Returns a warning message if
 // |response_head| does not contain a valid response. Used only for debugging.
 std::string GetResponseHeadersAsString(
-    const network::ResourceResponseHead& response_head) {
+    const network::mojom::URLResponseHead& response_head) {
   // Check that response code indicates response headers are valid (i.e. not
   // malformed) before we retrieve the headers.
   if (response_head.headers->response_code() == -1)
@@ -249,43 +250,42 @@ void GenerateMultipartBody(MultipartType multipart_type,
 
 UrlFetchRequestBase::UrlFetchRequestBase(
     RequestSender* sender,
-    const ProgressCallback& upload_progress_callback,
-    const ProgressCallback& download_progress_callback)
+    ProgressCallback upload_progress_callback,
+    ProgressCallback download_progress_callback)
     : re_authenticate_count_(0),
       sender_(sender),
       upload_progress_callback_(upload_progress_callback),
       download_progress_callback_(download_progress_callback),
-      response_content_length_(-1),
-      weak_ptr_factory_(this) {}
+      response_content_length_(-1) {}
 
 UrlFetchRequestBase::~UrlFetchRequestBase() {}
 
 void UrlFetchRequestBase::Start(const std::string& access_token,
                                 const std::string& custom_user_agent,
-                                const ReAuthenticateCallback& callback) {
+                                ReAuthenticateCallback callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(!access_token.empty());
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
   DCHECK(re_authenticate_callback_.is_null());
-  Prepare(base::Bind(&UrlFetchRequestBase::StartAfterPrepare,
-                     weak_ptr_factory_.GetWeakPtr(), access_token,
-                     custom_user_agent, callback));
+  Prepare(base::BindOnce(&UrlFetchRequestBase::StartAfterPrepare,
+                         weak_ptr_factory_.GetWeakPtr(), access_token,
+                         custom_user_agent, std::move(callback)));
 }
 
-void UrlFetchRequestBase::Prepare(const PrepareCallback& callback) {
+void UrlFetchRequestBase::Prepare(PrepareCallback callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
-  callback.Run(HTTP_SUCCESS);
+  std::move(callback).Run(HTTP_SUCCESS);
 }
 
 void UrlFetchRequestBase::StartAfterPrepare(
     const std::string& access_token,
     const std::string& custom_user_agent,
-    const ReAuthenticateCallback& callback,
+    ReAuthenticateCallback callback,
     DriveApiErrorCode code) {
   DCHECK(CalledOnValidThread());
   DCHECK(!access_token.empty());
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
   DCHECK(re_authenticate_callback_.is_null());
 
   const GURL url = GetURL();
@@ -316,8 +316,8 @@ void UrlFetchRequestBase::StartAfterPrepare(
   auto request = std::make_unique<network::ResourceRequest>();
   request->url = url;
   request->method = GetRequestType();
-  request->load_flags = net::LOAD_DO_NOT_SEND_COOKIES |
-                        net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DISABLE_CACHE;
+  request->load_flags = net::LOAD_DISABLE_CACHE;
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   // Add request headers.
   // Note that SetHeader clears the current headers and sets it to the passed-in
@@ -378,24 +378,22 @@ void UrlFetchRequestBase::StartAfterPrepare(
   url_loader_->DownloadAsStream(sender_->url_loader_factory(), this);
 }
 
-void UrlFetchRequestBase::OnDownloadProgress(
-    const ProgressCallback& progress_callback,
-    uint64_t current) {
+void UrlFetchRequestBase::OnDownloadProgress(ProgressCallback progress_callback,
+                                             uint64_t current) {
   progress_callback.Run(static_cast<int64_t>(current),
                         response_content_length_);
 }
 
-void UrlFetchRequestBase::OnUploadProgress(
-    const ProgressCallback& progress_callback,
-    uint64_t position,
-    uint64_t total) {
+void UrlFetchRequestBase::OnUploadProgress(ProgressCallback progress_callback,
+                                           uint64_t position,
+                                           uint64_t total) {
   progress_callback.Run(static_cast<int64_t>(position),
                         static_cast<int64_t>(total));
 }
 
 void UrlFetchRequestBase::OnResponseStarted(
     const GURL& final_url,
-    const network::ResourceResponseHead& response_head) {
+    const network::mojom::URLResponseHead& response_head) {
   DVLOG(1) << "Response headers:\n"
            << GetResponseHeadersAsString(response_head);
   response_content_length_ = response_head.content_length;
@@ -481,7 +479,7 @@ void UrlFetchRequestBase::OnComplete(bool success) {
 
 void UrlFetchRequestBase::OnOutputFileClosed(bool success) {
   DCHECK(download_data_);
-  const network::ResourceResponseHead* response_info;
+  const network::mojom::URLResponseHead* response_info;
   if (url_loader_) {
     response_info = url_loader_->ResponseInfo();
     if (response_info) {
@@ -601,7 +599,7 @@ EntryActionRequest::EntryActionRequest(RequestSender* sender,
 EntryActionRequest::~EntryActionRequest() {}
 
 void EntryActionRequest::ProcessURLFetchResults(
-    const network::ResourceResponseHead* response_head,
+    const network::mojom::URLResponseHead* response_head,
     base::FilePath response_file,
     std::string response_body) {
   callback_.Run(GetErrorCode());
@@ -631,7 +629,7 @@ InitiateUploadRequestBase::InitiateUploadRequestBase(
 InitiateUploadRequestBase::~InitiateUploadRequestBase() {}
 
 void InitiateUploadRequestBase::ProcessURLFetchResults(
-    const network::ResourceResponseHead* response_head,
+    const network::mojom::URLResponseHead* response_head,
     base::FilePath response_file,
     std::string response_body) {
   std::string upload_location;
@@ -682,10 +680,9 @@ UploadRangeResponse::~UploadRangeResponse() {
 UploadRangeRequestBase::UploadRangeRequestBase(
     RequestSender* sender,
     const GURL& upload_url,
-    const ProgressCallback& progress_callback)
+    ProgressCallback progress_callback)
     : UrlFetchRequestBase(sender, progress_callback, ProgressCallback()),
-      upload_url_(upload_url),
-      weak_ptr_factory_(this) {}
+      upload_url_(upload_url) {}
 
 UploadRangeRequestBase::~UploadRangeRequestBase() {}
 
@@ -700,7 +697,7 @@ std::string UploadRangeRequestBase::GetRequestType() const {
 }
 
 void UploadRangeRequestBase::ProcessURLFetchResults(
-    const network::ResourceResponseHead* response_head,
+    const network::mojom::URLResponseHead* response_head,
     base::FilePath response_file,
     std::string response_body) {
   DriveApiErrorCode code = GetErrorCode();
@@ -787,7 +784,7 @@ ResumeUploadRequestBase::ResumeUploadRequestBase(
     int64_t content_length,
     const std::string& content_type,
     const base::FilePath& local_file_path,
-    const ProgressCallback& progress_callback)
+    ProgressCallback progress_callback)
     : UploadRangeRequestBase(sender, upload_location, progress_callback),
       start_position_(start_position),
       end_position_(end_position),
@@ -873,19 +870,18 @@ MultipartUploadRequestBase::MultipartUploadRequestBase(
     const std::string& content_type,
     int64_t content_length,
     const base::FilePath& local_file_path,
-    const FileResourceCallback& callback,
-    const ProgressCallback& progress_callback)
+    FileResourceCallback callback,
+    ProgressCallback progress_callback)
     : blocking_task_runner_(blocking_task_runner),
       metadata_json_(metadata_json),
       content_type_(content_type),
       local_path_(local_file_path),
-      callback_(callback),
-      progress_callback_(progress_callback),
-      weak_ptr_factory_(this) {
+      callback_(std::move(callback)),
+      progress_callback_(progress_callback) {
   DCHECK(!content_type.empty());
   DCHECK_GE(content_length, 0);
   DCHECK(!local_file_path.empty());
-  DCHECK(!callback.is_null());
+  DCHECK(!callback_.is_null());
 }
 
 MultipartUploadRequestBase::~MultipartUploadRequestBase() {
@@ -896,34 +892,35 @@ std::vector<std::string> MultipartUploadRequestBase::GetExtraRequestHeaders()
   return std::vector<std::string>();
 }
 
-void MultipartUploadRequestBase::Prepare(const PrepareCallback& callback) {
+void MultipartUploadRequestBase::Prepare(PrepareCallback callback) {
   // If the request is cancelled, the request instance will be deleted in
   // |UrlFetchRequestBase::Cancel| and OnPrepareUploadContent won't be called.
   std::string* const upload_content_type = new std::string();
   std::string* const upload_content_data = new std::string();
   PostTaskAndReplyWithResult(
       blocking_task_runner_.get(), FROM_HERE,
-      base::Bind(&GetMultipartContent, boundary_, metadata_json_, content_type_,
-                 local_path_, base::Unretained(upload_content_type),
-                 base::Unretained(upload_content_data)),
-      base::Bind(&MultipartUploadRequestBase::OnPrepareUploadContent,
-                 weak_ptr_factory_.GetWeakPtr(), callback,
-                 base::Owned(upload_content_type),
-                 base::Owned(upload_content_data)));
+      base::BindOnce(&GetMultipartContent, boundary_, metadata_json_,
+                     content_type_, local_path_,
+                     base::Unretained(upload_content_type),
+                     base::Unretained(upload_content_data)),
+      base::BindOnce(&MultipartUploadRequestBase::OnPrepareUploadContent,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback),
+                     base::Owned(upload_content_type),
+                     base::Owned(upload_content_data)));
 }
 
 void MultipartUploadRequestBase::OnPrepareUploadContent(
-    const PrepareCallback& callback,
+    PrepareCallback callback,
     std::string* upload_content_type,
     std::string* upload_content_data,
     bool result) {
   if (!result) {
-    callback.Run(DRIVE_FILE_ERROR);
+    std::move(callback).Run(DRIVE_FILE_ERROR);
     return;
   }
   upload_content_type_.swap(*upload_content_type);
   upload_content_data_.swap(*upload_content_data);
-  callback.Run(HTTP_SUCCESS);
+  std::move(callback).Run(HTTP_SUCCESS);
 }
 
 void MultipartUploadRequestBase::SetBoundaryForTesting(
@@ -943,7 +940,7 @@ bool MultipartUploadRequestBase::GetContentData(
 void MultipartUploadRequestBase::NotifyResult(
     DriveApiErrorCode code,
     const std::string& body,
-    const base::Closure& notify_complete_callback) {
+    base::OnceClosure notify_complete_callback) {
   // The upload is successfully done. Parse the response which should be
   // the entry's metadata.
   if (code == HTTP_CREATED || code == HTTP_SUCCESS) {
@@ -951,15 +948,15 @@ void MultipartUploadRequestBase::NotifyResult(
         blocking_task_runner_.get(), body,
         base::BindOnce(&MultipartUploadRequestBase::OnDataParsed,
                        weak_ptr_factory_.GetWeakPtr(), code,
-                       notify_complete_callback));
+                       std::move(notify_complete_callback)));
   } else {
     NotifyError(MapJsonError(code, body));
-    notify_complete_callback.Run();
+    std::move(notify_complete_callback).Run();
   }
 }
 
 void MultipartUploadRequestBase::NotifyError(DriveApiErrorCode code) {
-  callback_.Run(code, std::unique_ptr<FileResource>());
+  std::move(callback_).Run(code, std::unique_ptr<FileResource>());
 }
 
 void MultipartUploadRequestBase::NotifyUploadProgress(int64_t current,
@@ -970,14 +967,15 @@ void MultipartUploadRequestBase::NotifyUploadProgress(int64_t current,
 
 void MultipartUploadRequestBase::OnDataParsed(
     DriveApiErrorCode code,
-    const base::Closure& notify_complete_callback,
+    base::OnceClosure notify_complete_callback,
     std::unique_ptr<base::Value> value) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (value)
-    callback_.Run(code, google_apis::FileResource::CreateFrom(*value));
+    std::move(callback_).Run(code,
+                             google_apis::FileResource::CreateFrom(*value));
   else
     NotifyError(DRIVE_PARSE_ERROR);
-  notify_complete_callback.Run();
+  std::move(notify_complete_callback).Run();
 }
 
 //============================ DownloadFileRequestBase =========================
@@ -986,7 +984,7 @@ DownloadFileRequestBase::DownloadFileRequestBase(
     RequestSender* sender,
     const DownloadActionCallback& download_action_callback,
     const GetContentCallback& get_content_callback,
-    const ProgressCallback& progress_callback,
+    ProgressCallback progress_callback,
     const GURL& download_url,
     const base::FilePath& output_file_path)
     : UrlFetchRequestBase(sender, ProgressCallback(), progress_callback),
@@ -1015,7 +1013,7 @@ void DownloadFileRequestBase::GetOutputFilePath(
 }
 
 void DownloadFileRequestBase::ProcessURLFetchResults(
-    const network::ResourceResponseHead* response_head,
+    const network::mojom::URLResponseHead* response_head,
     base::FilePath response_file,
     std::string response_body) {
   download_action_callback_.Run(GetErrorCode(), response_file);

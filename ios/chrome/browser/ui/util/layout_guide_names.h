@@ -15,11 +15,18 @@ typedef NSString GuideName;
 
 // A guide that is constrained to match the frame of the tab's content area.
 extern GuideName* const kContentAreaGuide;
+// A guide that is constrained to match the frame of the primary toolbar. This
+// follows the frame of the primary toolbar even when that frame shrinks due to
+// fullscreen. It does not include the tab strip on iPad.
+extern GuideName* const kPrimaryToolbarGuide;
 // A guide that is constrained to match the frame of the secondary toolbar.
 extern GuideName* const kSecondaryToolbarGuide;
 // A guide that is constrained to match the frame the secondary toolbar would
 // have if fullscreen was disabled.
 extern GuideName* const kSecondaryToolbarNoFullscreenGuide;
+// A guide that is constrainted to match the frame of the displayedBadge in the
+// Badge View.
+extern GuideName* const kBadgeOverflowMenuGuide;
 // A guide that is constrained to match the frame of the omnibox.
 extern GuideName* const kOmniboxGuide;
 // A guide that is constrained to match the frame of the leading image view in
@@ -32,8 +39,8 @@ extern GuideName* const kOmniboxTextFieldGuide;
 extern GuideName* const kBackButtonGuide;
 // A guide that is constrained to match the frame of the forward button's image.
 extern GuideName* const kForwardButtonGuide;
-// A guide that is constrained to match the frame of the Search button.
-extern GuideName* const kSearchButtonGuide;
+// A guide that is constrained to match the frame of the NewTab button.
+extern GuideName* const kNewTabButtonGuide;
 // A guide that is constrained to match the frame of the TabSwitcher button's
 // image.
 extern GuideName* const kTabSwitcherGuide;

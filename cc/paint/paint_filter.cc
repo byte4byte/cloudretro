@@ -11,6 +11,7 @@
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkMath.h"
 #include "third_party/skia/include/effects/SkAlphaThresholdFilter.h"
+#include "third_party/skia/include/effects/SkArithmeticImageFilter.h"
 #include "third_party/skia/include/effects/SkColorFilterImageFilter.h"
 #include "third_party/skia/include/effects/SkComposeImageFilter.h"
 #include "third_party/skia/include/effects/SkImageSource.h"
@@ -800,8 +801,8 @@ bool MergePaintFilter::operator==(const MergePaintFilter& other) const {
 }
 
 MorphologyPaintFilter::MorphologyPaintFilter(MorphType morph_type,
-                                             int radius_x,
-                                             int radius_y,
+                                             float radius_x,
+                                             float radius_y,
                                              sk_sp<PaintFilter> input,
                                              const CropRect* crop_rect)
     : PaintFilter(kType, crop_rect, HasDiscardableImages(input)),

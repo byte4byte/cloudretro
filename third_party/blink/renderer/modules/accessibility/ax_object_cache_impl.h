@@ -29,22 +29,28 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_ACCESSIBILITY_AX_OBJECT_CACHE_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_ACCESSIBILITY_AX_OBJECT_CACHE_IMPL_H_
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
 #include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
+#include "third_party/blink/public/web/web_ax_enums.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache_base.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "ui/accessibility/ax_enums.mojom-blink.h"
+#include "ui/accessibility/ax_enums.mojom-blink-forward.h"
 
 namespace blink {
 
@@ -56,16 +62,13 @@ class LocalFrameView;
 // This class should only be used from inside the accessibility directory.
 class MODULES_EXPORT AXObjectCacheImpl
     : public AXObjectCacheBase,
-      public mojom::blink::PermissionObserver,
-      public LocalFrameView::LifecycleNotificationObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(AXObjectCacheImpl);
-
+      public mojom::blink::PermissionObserver {
  public:
   static AXObjectCache* Create(Document&);
 
   explicit AXObjectCacheImpl(Document&);
   ~AXObjectCacheImpl() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   Document& GetDocument() { return *document_; }
   AXObject* FocusedObject();
@@ -115,9 +118,8 @@ class MODULES_EXPORT AXObjectCacheImpl
   void UpdateCacheAfterNodeIsAttached(Node*) override;
   void DidInsertChildrenOfNode(Node*) override;
 
-  bool HandleAttributeChanged(const QualifiedName& attr_name,
+  void HandleAttributeChanged(const QualifiedName& attr_name,
                               Element*) override;
-  void HandleAutofillStateChanged(Element*, bool) override;
   void HandleValidationMessageVisibilityChanged(
       const Element* form_control) override;
   void HandleFocusedUIElementChanged(Element* old_focused_element,
@@ -128,9 +130,9 @@ class MODULES_EXPORT AXObjectCacheImpl
   void HandleScaleAndLocationChanged(Document*) override;
   void HandleTextMarkerDataAdded(Node* start, Node* end) override;
   void HandleValueChanged(Node*) override;
-  void HandleUpdateActiveMenuOption(LayoutMenuList*, int option_index) override;
-  void DidShowMenuListPopup(LayoutMenuList*) override;
-  void DidHideMenuListPopup(LayoutMenuList*) override;
+  void HandleUpdateActiveMenuOption(LayoutObject*, int option_index) override;
+  void DidShowMenuListPopup(LayoutObject*) override;
+  void DidHideMenuListPopup(LayoutObject*) override;
   void HandleLoadComplete(Document*) override;
   void HandleLayoutComplete(Document*) override;
   void HandleClicked(Node*) override;
@@ -142,7 +144,7 @@ class MODULES_EXPORT AXObjectCacheImpl
                              const LayoutRect&) override;
 
   void InlineTextBoxesUpdated(LineLayoutItem) override;
-  void ProcessUpdatesAfterLayout(Document&) override;
+  void ProcessDeferredAccessibilityEvents(Document&) override;
 
   // Called when the scroll offset changes.
   void HandleScrollPositionChanged(LocalFrameView*) override;
@@ -165,7 +167,7 @@ class MODULES_EXPORT AXObjectCacheImpl
   AXObject* Root();
 
   // used for objects without backing elements
-  AXObject* GetOrCreate(ax::mojom::Role);
+  AXObject* GetOrCreate(ax::mojom::blink::Role);
   AXObject* GetOrCreate(AccessibleNode*);
   AXObject* GetOrCreate(LayoutObject*) override;
   AXObject* GetOrCreate(const Node*);
@@ -194,6 +196,8 @@ class MODULES_EXPORT AXObjectCacheImpl
   void HandleRoleChangeIfNotEditableWithCleanLayout(Node*);
   void HandleAriaExpandedChangeWithCleanLayout(Node*);
   void HandleAriaSelectedChangedWithCleanLayout(Node*);
+  void HandleNodeLostFocusWithCleanLayout(Node*);
+  void HandleNodeGainedFocusWithCleanLayout(Node*);
 
   bool InlineTextBoxAccessibilityEnabled();
 
@@ -205,9 +209,9 @@ class MODULES_EXPORT AXObjectCacheImpl
   // values are cached as long as the modification count hasn't changed.
   int ModificationCount() const { return modification_count_; }
 
-  void PostNotification(LayoutObject*, ax::mojom::Event);
+  void PostNotification(LayoutObject*, ax::mojom::blink::Event);
   void PostNotification(Node*, ax::mojom::Event);
-  void PostNotification(AXObject*, ax::mojom::Event);
+  void PostNotification(AXObject*, ax::mojom::blink::Event);
   void MarkAXObjectDirty(AXObject*, bool subtree);
   void MarkElementDirty(const Element*, bool subtree);
 
@@ -235,6 +239,16 @@ class MODULES_EXPORT AXObjectCacheImpl
                       const Vector<String>& id_vector,
                       HeapVector<Member<AXObject>>& owned_children);
 
+  // Given an object that has explicitly set elements for aria-owns, update the
+  // internal state to reflect the new set of children owned by this object.
+  // Note that |owned_children| will be the AXObjects corresponding to the
+  // elements in |attr_associated_elements|. These elements are validated -
+  // exist in the DOM, and are a descendant of a shadow including ancestor.
+  void UpdateAriaOwnsFromAttrAssociatedElements(
+      const AXObject* owner,
+      const HeapVector<Member<Element>>& attr_associated_elements,
+      HeapVector<Member<AXObject>>& owned_children);
+
   bool MayHaveHTMLLabel(const HTMLElement& elem);
 
   // Synchronously returns whether or not we currently have permission to
@@ -250,46 +264,59 @@ class MODULES_EXPORT AXObjectCacheImpl
   // For built-in HTML form validation messages.
   AXObject* ValidationMessageObjectIfInvalid();
 
-  // LifecycleNotificationObserver overrides.
-  void WillStartLifecycleUpdate(const LocalFrameView&) override;
-  void DidFinishLifecycleUpdate(const LocalFrameView&) override;
-
   void set_is_handling_action(bool value) { is_handling_action_ = value; }
+
+  WebAXAutofillState GetAutofillState(AXID id) const;
+  void SetAutofillState(AXID id, WebAXAutofillState state);
 
  protected:
   void PostPlatformNotification(
-      AXObject*,
-      ax::mojom::Event,
-      ax::mojom::EventFrom event_from = ax::mojom::EventFrom::kNone);
+      AXObject* obj,
+      ax::mojom::blink::Event event_type,
+      ax::mojom::blink::EventFrom event_from =
+          ax::mojom::blink::EventFrom::kNone,
+      const BlinkAXEventIntentsSet& event_intents = BlinkAXEventIntentsSet());
   void LabelChangedWithCleanLayout(Element*);
+
+  // Returns a reference to the set of currently active event intents.
+  BlinkAXEventIntentsSet& ActiveEventIntents() override {
+    return active_event_intents_;
+  }
 
   AXObject* CreateFromRenderer(LayoutObject*);
   AXObject* CreateFromNode(Node*);
   AXObject* CreateFromInlineTextBox(AbstractInlineTextBox*);
 
  private:
-  struct AXEventParams : public GarbageCollectedFinalized<AXEventParams> {
+  struct AXEventParams final : public GarbageCollected<AXEventParams> {
     AXEventParams(AXObject* target,
-                  ax::mojom::Event event_type,
-                  ax::mojom::EventFrom event_from)
-        : target(target), event_type(event_type), event_from(event_from) {}
+                  ax::mojom::blink::Event event_type,
+                  ax::mojom::blink::EventFrom event_from,
+                  const BlinkAXEventIntentsSet& intents)
+        : target(target), event_type(event_type), event_from(event_from) {
+      std::copy(intents.begin(), intents.end(), event_intents.begin());
+    }
     Member<AXObject> target;
-    ax::mojom::Event event_type;
-    ax::mojom::EventFrom event_from;
+    ax::mojom::blink::Event event_type;
+    ax::mojom::blink::EventFrom event_from;
+    BlinkAXEventIntentsSet event_intents;
 
     void Trace(Visitor* visitor) { visitor->Trace(target); }
   };
 
-  struct TreeUpdateParams : public GarbageCollectedFinalized<TreeUpdateParams> {
-    TreeUpdateParams(Node* node, base::OnceClosure callback)
-        : node(node), callback(std::move(callback)) {}
+  struct TreeUpdateParams final : public GarbageCollected<TreeUpdateParams> {
+    TreeUpdateParams(Node* node,
+                     ax::mojom::blink::EventFrom event_from,
+                     base::OnceClosure callback)
+        : node(node), event_from(event_from), callback(std::move(callback)) {}
     WeakMember<Node> node;
+    ax::mojom::blink::EventFrom event_from;
     base::OnceClosure callback;
 
     void Trace(Visitor* visitor) { visitor->Trace(node); }
   };
 
-  ax::mojom::EventFrom ComputeEventFrom();
+  ax::mojom::blink::EventFrom ComputeEventFrom();
 
   Member<Document> document_;
   HeapHashMap<AXID, Member<AXObject>> objects_;
@@ -317,10 +344,15 @@ class MODULES_EXPORT AXObjectCacheImpl
 #endif
 
   HeapVector<Member<AXEventParams>> notifications_to_post_;
-  void PostNotificationsAfterLayout(Document*);
 
-  // ContextLifecycleObserver overrides.
-  void ContextDestroyed(ExecutionContext*) override;
+  void ProcessUpdates(Document&);
+  void PostNotifications(Document&);
+
+  // Get the currently focused Node element.
+  Node* FocusedElement();
+
+  // GetOrCreate the focusable AXObject for a specific Node.
+  AXObject* GetOrCreateFocusedObjectFromNode(Node*);
 
   AXObject* FocusedImageMapUIElement(HTMLAreaElement*);
 
@@ -370,13 +402,23 @@ class MODULES_EXPORT AXObjectCacheImpl
   void HandleAttributeChangedWithCleanLayout(const QualifiedName& attr_name,
                                              Element* element);
 
+  void ScheduleVisualUpdate();
+  void FireTreeUpdatedEventImmediately(Node* node,
+                                       base::OnceClosure callback,
+                                       ax::mojom::blink::EventFrom event_from);
+  void FireAXEventImmediately(AXObject* obj,
+                              ax::mojom::blink::Event event_type,
+                              ax::mojom::blink::EventFrom event_from,
+                              const BlinkAXEventIntentsSet& event_intents);
+
   // Whether the user has granted permission for the user to install event
   // listeners for accessibility events using the AOM.
   mojom::PermissionStatus accessibility_event_permission_;
   // The permission service, enabling us to check for event listener
   // permission.
-  mojom::blink::PermissionServicePtr permission_service_;
-  mojo::Binding<mojom::blink::PermissionObserver> permission_observer_binding_;
+  HeapMojoRemote<mojom::blink::PermissionService> permission_service_;
+  HeapMojoReceiver<mojom::blink::PermissionObserver, AXObjectCacheImpl>
+      permission_observer_receiver_;
 
   // The main document, plus any page popups.
   HeapHashSet<WeakMember<Document>> documents_;
@@ -385,15 +427,24 @@ class MODULES_EXPORT AXObjectCacheImpl
 
   bool is_handling_action_ = false;
 
+  // Maps ids to their object's autofill state.
+  HashMap<AXID, WebAXAutofillState> autofill_state_map_;
+
+  // A set of currently active event intents.
+  BlinkAXEventIntentsSet active_event_intents_;
+
   DISALLOW_COPY_AND_ASSIGN(AXObjectCacheImpl);
 };
 
 // This is the only subclass of AXObjectCache.
-DEFINE_TYPE_CASTS(AXObjectCacheImpl, AXObjectCache, cache, true, true);
+template <>
+struct DowncastTraits<AXObjectCacheImpl> {
+  static bool AllowFrom(const AXObjectCache& cache) { return true; }
+};
 
 // This will let you know if aria-hidden was explicitly set to false.
 bool IsNodeAriaVisible(Node*);
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_ACCESSIBILITY_AX_OBJECT_CACHE_IMPL_H_

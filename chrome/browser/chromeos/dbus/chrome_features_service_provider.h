@@ -65,14 +65,20 @@ class ChromeFeaturesServiceProvider
                         dbus::ExportedObject::ResponseSender response_sender);
   void IsCrostiniEnabled(dbus::MethodCall* method_call,
                          dbus::ExportedObject::ResponseSender response_sender);
+  void IsCryptohomeDistributedModelEnabled(
+      dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
   void IsPluginVmEnabled(dbus::MethodCall* method_call,
                          dbus::ExportedObject::ResponseSender response_sender);
   void IsUsbguardEnabled(dbus::MethodCall* method_call,
                          dbus::ExportedObject::ResponseSender response_sender);
+  void IsVmManagementCliAllowed(
+      dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
 
   // Keep this last so that all weak pointers will be invalidated at the
   // beginning of destruction.
-  base::WeakPtrFactory<ChromeFeaturesServiceProvider> weak_ptr_factory_;
+  base::WeakPtrFactory<ChromeFeaturesServiceProvider> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeFeaturesServiceProvider);
 };

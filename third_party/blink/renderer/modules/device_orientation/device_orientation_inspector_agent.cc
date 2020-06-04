@@ -21,13 +21,13 @@ DeviceOrientationInspectorAgent::DeviceOrientationInspectorAgent(
     InspectedFrames* inspected_frames)
     : inspected_frames_(inspected_frames),
       sensor_agent_(MakeGarbageCollected<SensorInspectorAgent>(
-          inspected_frames->Root()->GetDocument())),
+          inspected_frames->Root()->DomWindow())),
       enabled_(&agent_state_, /*default_value=*/false),
       alpha_(&agent_state_, /*default_value=*/0.0),
       beta_(&agent_state_, /*default_value=*/0.0),
       gamma_(&agent_state_, /*default_value=*/0.0) {}
 
-void DeviceOrientationInspectorAgent::Trace(blink::Visitor* visitor) {
+void DeviceOrientationInspectorAgent::Trace(Visitor* visitor) {
   visitor->Trace(inspected_frames_);
   visitor->Trace(sensor_agent_);
   InspectorBaseAgent::Trace(visitor);
@@ -51,7 +51,7 @@ Response DeviceOrientationInspectorAgent::setDeviceOrientationOverride(
         DeviceOrientationData::Create(alpha, beta, gamma, false));
   }
   sensor_agent_->SetOrientationSensorOverride(alpha, beta, gamma);
-  return Response::OK();
+  return Response::Success();
 }
 
 Response DeviceOrientationInspectorAgent::clearDeviceOrientationOverride() {
@@ -63,7 +63,7 @@ Response DeviceOrientationInspectorAgent::disable() {
   if (Controller())
     Controller()->ClearOverride();
   sensor_agent_->Disable();
-  return Response::OK();
+  return Response::Success();
 }
 
 void DeviceOrientationInspectorAgent::Restore() {

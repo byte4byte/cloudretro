@@ -6,7 +6,8 @@
  * The methods to expose to the client.
  */
 const METHOD_LIST = [
-  'logOut', 'getInstalledArcApps', 'requestClose', 'notifySupervisionEnabled'
+  'logOut', 'getInstalledArcApps', 'requestClose', 'notifySupervisionEnabled',
+  'setCloseOnEscape'
 ];
 
 /**
@@ -28,7 +29,8 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
   constructor(webviewElement, targetURL, originURLPrefix) {
     super(webviewElement, METHOD_LIST, targetURL, originURLPrefix);
 
-    this.proxy_ = addSupervision.mojom.AddSupervisionHandler.getProxy();
+    this.addSupervisionHandler_ =
+        addSupervision.mojom.AddSupervisionHandler.getRemote();
 
     this.registerMethod('logOut', this.logOut.bind(this));
     this.registerMethod(
@@ -36,6 +38,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
     this.registerMethod('requestClose', this.requestClose.bind(this));
     this.registerMethod(
         'notifySupervisionEnabled', this.notifySupervisionEnabled.bind(this));
+    this.registerMethod('setCloseOnEscape', this.setCloseOnEscape.bind(this));
   }
 
   /**
@@ -43,7 +46,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * @param {!Array} unused Placeholder unused empty parameter.
    */
   logOut(unused) {
-    return this.proxy_.logOut();
+    return this.addSupervisionHandler_.logOut();
   }
 
   /**
@@ -54,7 +57,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    *     apps installed on the device.
    */
   getInstalledArcApps(unused) {
-    return this.proxy_.getInstalledArcApps();
+    return this.addSupervisionHandler_.getInstalledArcApps();
   }
 
   /**
@@ -67,7 +70,7 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * resolve with boolean result indicating whether the dialog was closed.
    */
   requestClose(unused) {
-    return this.proxy_.requestClose();
+    return this.addSupervisionHandler_.requestClose();
   }
 
   /**
@@ -75,6 +78,17 @@ class AddSupervisionAPIServer extends PostMessageAPIServer {
    * @param {!Array} unused Placeholder unused empty parameter.
    */
   notifySupervisionEnabled(unused) {
-    return this.proxy_.notifySupervisionEnabled();
+    return this.addSupervisionHandler_.notifySupervisionEnabled();
+  }
+
+  /**
+   * Configures whether the Add Supervision dialog should close when
+   * the user presses the Escape key.
+   * @param {!Array} params Param 0 is a <boolean> that denotes whether the
+   * dialog should close.
+   */
+  setCloseOnEscape(params) {
+    const enabled = params[0];
+    return this.addSupervisionHandler_.setCloseOnEscape(enabled);
   }
 }

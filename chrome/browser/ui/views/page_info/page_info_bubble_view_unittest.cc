@@ -10,34 +10,37 @@
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/lookalikes/safety_tips/safety_tip_ui.h"
-#include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/hover_button.h"
 #include "chrome/browser/ui/views/page_info/chosen_object_view.h"
+#include "chrome/browser/ui/views/page_info/page_info_hover_button.h"
 #include "chrome/browser/ui/views/page_info/permission_selector_row.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/views/chrome_test_views_delegate.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/permissions/permission_uma_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/ssl_status.h"
-#include "content/public/test/browser_side_navigation_test_utils.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/navigation_simulator.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_contents_factory.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "net/cert/cert_status_flags.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/cert_test_util.h"
+#include "net/test/test_certificate_data.h"
 #include "net/test/test_data_directory.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/device/public/cpp/test/fake_usb_device_manager.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
@@ -76,7 +79,6 @@ class PageInfoBubbleViewTestApi {
     views::View* anchor_view = nullptr;
     view_ = new PageInfoBubbleView(
         anchor_view, gfx::Rect(), parent_, profile_, web_contents_, GURL(kUrl),
-        security_state::NONE, security_state::VisibleSecurityState(),
         base::BindOnce(&PageInfoBubbleViewTestApi::OnPageInfoBubbleClosed,
                        base::Unretained(this), run_loop_.QuitClosure()));
   }
@@ -87,6 +89,9 @@ class PageInfoBubbleViewTestApi {
   views::Widget::ClosedReason closed_reason() const { return *closed_reason_; }
 
   base::string16 GetWindowTitle() { return view_->GetWindowTitle(); }
+  PageInfoUI::SecurityDescriptionType GetSecurityDescriptionType() {
+    return view_->GetSecurityDescriptionType();
+  }
 
   PermissionSelectorRow* GetPermissionSelectorAt(int index) {
     return view_->selector_rows_[index].get();
@@ -126,6 +131,12 @@ class PageInfoBubbleViewTestApi {
       view_->presenter_->OnSitePermissionChanged(info.type, info.setting);
     }
     CreateView();
+  }
+
+  base::string16 GetCertificateButtonSubtitleText() const {
+    EXPECT_TRUE(view_->certificate_button_);
+    EXPECT_TRUE(view_->certificate_button_->subtitle());
+    return view_->certificate_button_->subtitle()->GetText();
   }
 
   void WaitForBubbleClose() { run_loop_.Run(); }
@@ -169,7 +180,7 @@ class ScopedWebContentsTestHelper {
   content::WebContents* web_contents() { return web_contents_; }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile_;
   content::TestWebContentsFactory factory_;
   content::WebContents* web_contents_;  // Weak. Owned by factory_.
@@ -183,66 +194,31 @@ class PageInfoBubbleViewTest : public testing::Test {
 
   // testing::Test:
   void SetUp() override {
-    views_helper_.test_views_delegate()->set_layout_provider(
-        ChromeLayoutProvider::CreateLayoutProvider());
     views::Widget::InitParams parent_params;
     parent_params.context = views_helper_.GetContext();
     parent_window_ = new views::Widget();
-    parent_window_->Init(parent_params);
+    parent_window_->Init(std::move(parent_params));
 
     content::WebContents* web_contents = web_contents_helper_.web_contents();
-    TabSpecificContentSettings::CreateForWebContents(web_contents);
-    api_.reset(new test::PageInfoBubbleViewTestApi(
+    api_ = std::make_unique<test::PageInfoBubbleViewTestApi>(
         parent_window_->GetNativeView(), web_contents_helper_.profile(),
-        web_contents));
+        web_contents);
   }
 
-  void TearDown() override { parent_window_->CloseNow(); }
+  void TearDown() override {
+    parent_window_->CloseNow();
+  }
 
  protected:
   ScopedWebContentsTestHelper web_contents_helper_;
-  views::ScopedViewsTestHelper views_helper_;
+  views::ScopedViewsTestHelper views_helper_{
+      std::make_unique<ChromeTestViewsDelegate<>>()};
 
   views::Widget* parent_window_ = nullptr;  // Weak. Owned by the NativeWidget.
   std::unique_ptr<test::PageInfoBubbleViewTestApi> api_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PageInfoBubbleViewTest);
-};
-
-class SafetyTipPageInfoBubbleViewTest : public testing::Test {
- public:
-  SafetyTipPageInfoBubbleViewTest() {}
-
-  // testing::Test:
-  void SetUp() override {
-    views_helper_.test_views_delegate()->set_layout_provider(
-        ChromeLayoutProvider::CreateLayoutProvider());
-    views::Widget::InitParams parent_params;
-    parent_params.context = views_helper_.GetContext();
-    parent_window_ = new views::Widget();
-    parent_window_->Init(parent_params);
-
-    content::WebContents* web_contents = web_contents_helper_.web_contents();
-    TabSpecificContentSettings::CreateForWebContents(web_contents);
-
-    bubble_ = CreateSafetyTipBubbleForTesting(
-        parent_window_->GetNativeView(), web_contents,
-        safety_tips::SafetyTipType::kBadReputation,
-        GURL("https://www.fakegoogle.tld"), GURL("https://www.google.com"));
-  }
-
-  void TearDown() override { parent_window_->CloseNow(); }
-
- protected:
-  ScopedWebContentsTestHelper web_contents_helper_;
-  views::ScopedViewsTestHelper views_helper_;
-
-  PageInfoBubbleViewBase* bubble_ = nullptr;
-  views::Widget* parent_window_ = nullptr;  // Weak. Owned by the NativeWidget.
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SafetyTipPageInfoBubbleViewTest);
 };
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -264,7 +240,7 @@ class FlashContentSettingsChangeWaiter : public content_settings::Observer {
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const std::string& resource_identifier) override {
-    if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
+    if (content_type == ContentSettingsType::PLUGINS)
       Proceed();
   }
 
@@ -302,7 +278,7 @@ TEST_F(PageInfoBubbleViewTest, NotificationPermissionRevokeUkm) {
       origin_queried_waiter.QuitClosure());
 
   PermissionInfoList list(1);
-  list.back().type = CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
+  list.back().type = ContentSettingsType::NOTIFICATIONS;
   list.back().source = content_settings::SETTING_SOURCE_USER;
   list.back().is_incognito = false;
 
@@ -320,12 +296,11 @@ TEST_F(PageInfoBubbleViewTest, NotificationPermissionRevokeUkm) {
 
   ukm_recorder.ExpectEntrySourceHasUrl(entry, origin_url);
   EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "Source"),
-            static_cast<int64_t>(PermissionSourceUI::OIB));
+            static_cast<int64_t>(permissions::PermissionSourceUI::OIB));
   EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "PermissionType"),
-            static_cast<int64_t>(
-                ContentSettingsType::CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
+            static_cast<int64_t>(ContentSettingsType::NOTIFICATIONS));
   EXPECT_EQ(*ukm_recorder.GetEntryMetric(entry, "Action"),
-            static_cast<int64_t>(PermissionAction::REVOKED));
+            static_cast<int64_t>(permissions::PermissionAction::REVOKED));
 }
 
 // Test UI construction and reconstruction via
@@ -344,7 +319,7 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfo) {
       /* no_db= */ false));
 
   PermissionInfoList list(1);
-  list.back().type = CONTENT_SETTINGS_TYPE_GEOLOCATION;
+  list.back().type = ContentSettingsType::GEOLOCATION;
   list.back().source = content_settings::SETTING_SOURCE_USER;
   list.back().is_incognito = false;
   list.back().setting = CONTENT_SETTING_BLOCK;
@@ -401,11 +376,11 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
 
   // Connect the UsbChooserContext with FakeUsbDeviceManager.
   device::FakeUsbDeviceManager usb_device_manager;
-  device::mojom::UsbDeviceManagerPtr device_manager_ptr;
-  usb_device_manager.AddBinding(mojo::MakeRequest(&device_manager_ptr));
+  mojo::PendingRemote<device::mojom::UsbDeviceManager> usb_manager;
+  usb_device_manager.AddReceiver(usb_manager.InitWithNewPipeAndPassReceiver());
   UsbChooserContext* store =
       UsbChooserContextFactory::GetForProfile(web_contents_helper_.profile());
-  store->SetDeviceManagerForTesting(std::move(device_manager_ptr));
+  store->SetDeviceManagerForTesting(std::move(usb_manager));
 
   auto device_info = usb_device_manager.CreateAndAddDevice(
       0, 0, "Google", "Gizmo", "1234567890");
@@ -506,10 +481,11 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUserAndPolicyUsbDevices) {
 
   // Connect the UsbChooserContext with FakeUsbDeviceManager.
   device::FakeUsbDeviceManager usb_device_manager;
-  device::mojom::UsbDeviceManagerPtr device_manager_ptr;
-  usb_device_manager.AddBinding(mojo::MakeRequest(&device_manager_ptr));
+  mojo::PendingRemote<device::mojom::UsbDeviceManager> device_manager;
+  usb_device_manager.AddReceiver(
+      device_manager.InitWithNewPipeAndPassReceiver());
   UsbChooserContext* store = UsbChooserContextFactory::GetForProfile(profile);
-  store->SetDeviceManagerForTesting(std::move(device_manager_ptr));
+  store->SetDeviceManagerForTesting(std::move(device_manager));
 
   auto device_info = usb_device_manager.CreateAndAddDevice(
       0, 0, "Google", "Gizmo", "1234567890");
@@ -585,7 +561,7 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoForUsbGuard) {
   // This test creates settings that are left at their defaults, leading to zero
   // checked options, and checks that the text on the MenuButtons is right.
   PermissionInfoList list(1);
-  list.back().type = CONTENT_SETTINGS_TYPE_USB_GUARD;
+  list.back().type = ContentSettingsType::USB_GUARD;
   list.back().source = content_settings::SETTING_SOURCE_USER;
   list.back().is_incognito = false;
   list.back().setting = CONTENT_SETTING_ASK;
@@ -661,8 +637,7 @@ TEST_F(PageInfoBubbleViewTest, UpdatingSiteDataRetainsLayout) {
 #if BUILDFLAG(ENABLE_PLUGINS)
 TEST_F(PageInfoBubbleViewTest, ChangingFlashSettingForSiteIsRemembered) {
   Profile* profile = web_contents_helper_.profile();
-  ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
-      profile, profile->GetResourceContext());
+  ChromePluginServiceFilter::GetInstance()->RegisterProfile(profile);
   FlashContentSettingsChangeWaiter waiter(profile);
 
   const GURL url(kUrl);
@@ -670,18 +645,18 @@ TEST_F(PageInfoBubbleViewTest, ChangingFlashSettingForSiteIsRemembered) {
       HostContentSettingsMapFactory::GetForProfile(profile);
   // Make sure the site being tested doesn't already have this marker set.
   EXPECT_EQ(nullptr,
-            map->GetWebsiteSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+            map->GetWebsiteSetting(url, url, ContentSettingsType::PLUGINS_DATA,
                                    std::string(), nullptr));
   EXPECT_EQ(0u, api_->permissions_view()->children().size());
 
   // Change the Flash setting.
-  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+  map->SetContentSettingDefaultScope(url, url, ContentSettingsType::PLUGINS,
                                      std::string(), CONTENT_SETTING_ALLOW);
   waiter.Wait();
 
   // Check that this site has now been marked for displaying Flash always.
   EXPECT_NE(nullptr,
-            map->GetWebsiteSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
+            map->GetWebsiteSetting(url, url, ContentSettingsType::PLUGINS_DATA,
                                    std::string(), nullptr));
 
   // Check the Flash permission is now showing since it's non-default.
@@ -691,7 +666,7 @@ TEST_F(PageInfoBubbleViewTest, ChangingFlashSettingForSiteIsRemembered) {
   EXPECT_EQ(base::ASCIIToUTF16("Flash"), label->GetText());
 
   // Change the Flash setting back to the default.
-  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+  map->SetContentSettingDefaultScope(url, url, ContentSettingsType::PLUGINS,
                                      std::string(), CONTENT_SETTING_DEFAULT);
   EXPECT_EQ(kViewsPerPermissionRow, children.size());
 
@@ -705,7 +680,6 @@ TEST_F(PageInfoBubbleViewTest, ChangingFlashSettingForSiteIsRemembered) {
 // Tests opening the bubble between navigation start and finish. The bubble
 // should be updated to reflect the secure state after the navigation commits.
 TEST_F(PageInfoBubbleViewTest, OpenPageInfoBubbleAfterNavigationStart) {
-  content::BrowserSideNavigationSetUp();
   SecurityStateTabHelper::CreateForWebContents(
       web_contents_helper_.web_contents());
   std::unique_ptr<content::NavigationSimulator> navigation =
@@ -716,6 +690,8 @@ TEST_F(PageInfoBubbleViewTest, OpenPageInfoBubbleAfterNavigationStart) {
   api_->CreateView();
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_PAGE_INFO_NOT_SECURE_SUMMARY),
             api_->GetWindowTitle());
+  EXPECT_EQ(PageInfoUI::SecurityDescriptionType::CONNECTION,
+            api_->GetSecurityDescriptionType());
 
   // Set up a test SSLInfo so that Page Info sees the connection as secure.
   uint16_t cipher_suite = 0xc02f;  // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
@@ -734,6 +710,8 @@ TEST_F(PageInfoBubbleViewTest, OpenPageInfoBubbleAfterNavigationStart) {
   navigation->Commit();
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURE_SUMMARY),
             api_->GetWindowTitle());
+  EXPECT_EQ(PageInfoUI::SecurityDescriptionType::CONNECTION,
+            api_->GetSecurityDescriptionType());
 }
 
 TEST_F(PageInfoBubbleViewTest, EnsureCloseCallback) {
@@ -745,6 +723,81 @@ TEST_F(PageInfoBubbleViewTest, EnsureCloseCallback) {
             api_->closed_reason());
 }
 
-TEST_F(SafetyTipPageInfoBubbleViewTest, OpenAndClose) {
-  // This test just opens and closes the bubble.
+TEST_F(PageInfoBubbleViewTest, CertificateButtonShowsEvCertDetails) {
+  SecurityStateTabHelper::CreateForWebContents(
+      web_contents_helper_.web_contents());
+  std::unique_ptr<content::NavigationSimulator> navigation =
+      content::NavigationSimulator::CreateRendererInitiated(
+          GURL(kSecureUrl),
+          web_contents_helper_.web_contents()->GetMainFrame());
+  navigation->Start();
+  api_->CreateView();
+
+  // Set up a test SSLInfo so that Page Info sees the connection as secure and
+  // using an EV certificate.
+  uint16_t cipher_suite = 0xc02f;  // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  int connection_status = 0;
+  net::SSLConnectionStatusSetCipherSuite(cipher_suite, &connection_status);
+  net::SSLConnectionStatusSetVersion(net::SSL_CONNECTION_VERSION_TLS1_2,
+                                     &connection_status);
+  net::SSLInfo ssl_info;
+  ssl_info.connection_status = connection_status;
+  ssl_info.cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "ev_test.pem");
+  ASSERT_TRUE(ssl_info.cert);
+  ssl_info.cert_status = net::CERT_STATUS_IS_EV;
+
+  navigation->SetSSLInfo(ssl_info);
+
+  navigation->Commit();
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURE_SUMMARY),
+            api_->GetWindowTitle());
+
+  // The certificate button subtitle should show the EV certificate organization
+  // name and country of incorporation.
+  EXPECT_EQ(l10n_util::GetStringFUTF16(
+                IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_VERIFIED,
+                base::UTF8ToUTF16("Test Org"), base::UTF8ToUTF16("US")),
+            api_->GetCertificateButtonSubtitleText());
+}
+
+// Regression test for crbug.com/1069113. Test cert includes country and state
+// but not locality.
+TEST_F(PageInfoBubbleViewTest, EvDetailsShowForCertWithStateButNoLocality) {
+  SecurityStateTabHelper::CreateForWebContents(
+      web_contents_helper_.web_contents());
+  std::unique_ptr<content::NavigationSimulator> navigation =
+      content::NavigationSimulator::CreateRendererInitiated(
+          GURL(kSecureUrl),
+          web_contents_helper_.web_contents()->GetMainFrame());
+  navigation->Start();
+  api_->CreateView();
+
+  // Set up a test SSLInfo so that Page Info sees the connection as secure and
+  // using an EV certificate.
+  uint16_t cipher_suite = 0xc02f;  // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  int connection_status = 0;
+  net::SSLConnectionStatusSetCipherSuite(cipher_suite, &connection_status);
+  net::SSLConnectionStatusSetVersion(net::SSL_CONNECTION_VERSION_TLS1_2,
+                                     &connection_status);
+  net::SSLInfo ssl_info;
+  ssl_info.connection_status = connection_status;
+  ssl_info.cert = net::ImportCertFromFile(net::GetTestCertsDirectory(),
+                                          "ev_test_state_only.pem");
+  ASSERT_TRUE(ssl_info.cert);
+
+  ssl_info.cert_status = net::CERT_STATUS_IS_EV;
+
+  navigation->SetSSLInfo(ssl_info);
+
+  navigation->Commit();
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURE_SUMMARY),
+            api_->GetWindowTitle());
+
+  // The certificate button subtitle should show the EV certificate organization
+  // name and country of incorporation.
+  EXPECT_EQ(l10n_util::GetStringFUTF16(
+                IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_VERIFIED,
+                base::UTF8ToUTF16("Test Org"), base::UTF8ToUTF16("US")),
+            api_->GetCertificateButtonSubtitleText());
 }

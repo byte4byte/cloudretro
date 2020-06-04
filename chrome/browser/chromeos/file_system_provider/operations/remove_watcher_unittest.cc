@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h"
 #include "chrome/common/extensions/api/file_system_provider_internal.h"
 #include "extensions/browser/event_router.h"
-#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/file_system/async_file_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -57,7 +57,7 @@ TEST_F(FileSystemProviderOperationsRemoveWatcherTest, Execute) {
 
   RemoveWatcher remove_watcher(
       NULL, file_system_info_, base::FilePath(kEntryPath), true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   remove_watcher.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -90,7 +90,7 @@ TEST_F(FileSystemProviderOperationsRemoveWatcherTest, Execute_NoListener) {
 
   RemoveWatcher remove_watcher(
       NULL, file_system_info_, base::FilePath(kEntryPath), true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   remove_watcher.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -104,7 +104,7 @@ TEST_F(FileSystemProviderOperationsRemoveWatcherTest, OnSuccess) {
 
   RemoveWatcher remove_watcher(
       NULL, file_system_info_, base::FilePath(kEntryPath), true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   remove_watcher.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));
@@ -124,7 +124,7 @@ TEST_F(FileSystemProviderOperationsRemoveWatcherTest, OnError) {
 
   RemoveWatcher remove_watcher(
       NULL, file_system_info_, base::FilePath(kEntryPath), true /* recursive */,
-      base::Bind(&util::LogStatusCallback, &callback_log));
+      base::BindOnce(&util::LogStatusCallback, &callback_log));
   remove_watcher.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
                  base::Unretained(&dispatcher)));

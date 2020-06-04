@@ -21,8 +21,8 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_util.h"
 #include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/browsing_data/counters/cache_counter.h"
@@ -37,12 +37,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/browsing_data/content/browsing_data_helper.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/prefs/pref_service.h"
@@ -67,7 +67,7 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "media/base/media_switches.h"
-#include "media/mojo/interfaces/media_types.mojom.h"
+#include "media/mojo/mojom/media_types.mojom.h"
 #include "media/mojo/services/video_decode_perf_history.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/dns/mock_host_resolver.h"
@@ -257,27 +257,24 @@ std::string GetCookiesTreeModelInfo(const CookieTreeNode* root) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
 // Sets the APISID Gaia cookie, which is monitored by the AccountReconcilor.
 bool SetGaiaCookieForProfile(Profile* profile) {
-  GURL google_url = GaiaUrls::GetInstance()->google_url();
-  net::CanonicalCookie cookie("APISID", std::string(), "." + google_url.host(),
-                              "/", base::Time(), base::Time(), base::Time(),
-                              false, false, net::CookieSameSite::NO_RESTRICTION,
-                              net::COOKIE_PRIORITY_DEFAULT);
-
+  GURL google_url = GaiaUrls::GetInstance()->secure_google_url();
+  net::CanonicalCookie cookie(
+      "SAPISID", std::string(), "." + google_url.host(), "/", base::Time(),
+      base::Time(), base::Time(), true /* secure */, false /* httponly */,
+      net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT);
   bool success = false;
   base::RunLoop loop;
   base::OnceCallback<void(net::CanonicalCookie::CookieInclusionStatus)>
       callback = base::BindLambdaForTesting(
           [&success, &loop](net::CanonicalCookie::CookieInclusionStatus s) {
-            success =
-                (s == net::CanonicalCookie::CookieInclusionStatus::INCLUDE);
+            success = s.IsInclude();
             loop.Quit();
           });
   network::mojom::CookieManager* cookie_manager =
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetCookieManagerForBrowserProcess();
-  net::CookieOptions options;
-  options.set_include_httponly();
-  cookie_manager->SetCanonicalCookie(cookie, "https", options,
+  cookie_manager->SetCanonicalCookie(cookie, google_url,
+                                     net::CookieOptions::MakeAllInclusive(),
                                      std::move(callback));
   loop.Run();
   return success;
@@ -525,8 +522,6 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
     Profile* profile = GetBrowser()->profile();
     content::StoragePartition* storage_partition =
         content::BrowserContext::GetDefaultStoragePartition(profile);
-    content::IndexedDBContext* indexed_db_context =
-        storage_partition->GetIndexedDBContext();
     content::ServiceWorkerContext* service_worker_context =
         storage_partition->GetServiceWorkerContext();
     content::CacheStorageContext* cache_storage_context =
@@ -534,18 +529,21 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
     storage::FileSystemContext* file_system_context =
         storage_partition->GetFileSystemContext();
     auto container = std::make_unique<LocalDataContainer>(
-        new BrowsingDataCookieHelper(storage_partition),
-        new BrowsingDataDatabaseHelper(profile),
-        new BrowsingDataLocalStorageHelper(profile),
+        new browsing_data::CookieHelper(storage_partition),
+        new browsing_data::DatabaseHelper(profile),
+        new browsing_data::LocalStorageHelper(profile),
         /*session_storage_helper=*/nullptr,
-        new BrowsingDataAppCacheHelper(storage_partition->GetAppCacheService()),
-        new BrowsingDataIndexedDBHelper(indexed_db_context),
-        BrowsingDataFileSystemHelper::Create(file_system_context),
+        new browsing_data::AppCacheHelper(
+            storage_partition->GetAppCacheService()),
+        new browsing_data::IndexedDBHelper(storage_partition),
+        browsing_data::FileSystemHelper::Create(
+            file_system_context,
+            browsing_data_file_system_util::GetAdditionalFileSystemTypes()),
         BrowsingDataQuotaHelper::Create(profile),
-        new BrowsingDataServiceWorkerHelper(service_worker_context),
-        new BrowsingDataSharedWorkerHelper(storage_partition,
-                                           profile->GetResourceContext()),
-        new BrowsingDataCacheStorageHelper(cache_storage_context),
+        new browsing_data::ServiceWorkerHelper(service_worker_context),
+        new browsing_data::SharedWorkerHelper(storage_partition,
+                                              profile->GetResourceContext()),
+        new browsing_data::CacheStorageHelper(cache_storage_context),
         BrowsingDataFlashLSOHelper::Create(profile),
         BrowsingDataMediaLicenseHelper::Create(file_system_context));
     base::RunLoop run_loop;
@@ -581,18 +579,15 @@ class DiceBrowsingDataRemoverBrowserTest
     auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
     if (is_primary) {
       DCHECK(!identity_manager->HasPrimaryAccount());
-      return identity::MakePrimaryAccountAvailable(identity_manager,
-                                                   account_id + "@gmail.com");
+      return signin::MakePrimaryAccountAvailable(identity_manager,
+                                                 account_id + "@gmail.com");
     }
     auto account_info =
-        identity::MakeAccountAvailable(identity_manager, account_id);
+        signin::MakeAccountAvailable(identity_manager, account_id);
     DCHECK(
         identity_manager->HasAccountWithRefreshToken(account_info.account_id));
     return account_info;
   }
-
- private:
-  ScopedAccountConsistencyDice dice_;
 };
 #endif
 
@@ -627,7 +622,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowsingDataRemoverBrowserTest, SyncToken) {
   // Clear cookies.
   RemoveAndWait(content::BrowsingDataRemover::DATA_TYPE_COOKIES);
   // Check that the Sync account was not removed and Sync was paused.
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   EXPECT_TRUE(
       identity_manager->HasAccountWithRefreshToken(primary_account.account_id));
@@ -685,7 +680,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowsingDataRemoverBrowserTest, SyncTokenError) {
   AccountInfo primary_account =
       AddAccountToProfile(kAccountId, profile, /*is_primary=*/true);
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-  identity::UpdatePersistentErrorOfRefreshTokenForAccount(
+  signin::UpdatePersistentErrorOfRefreshTokenForAccount(
       identity_manager, primary_account.account_id,
       GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
           GoogleServiceAuthError::InvalidGaiaCredentialsReason::
@@ -937,16 +932,24 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, VerifyNQECacheCleared) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
-                       ExternalProtocolHandlerPrefs) {
+                       ExternalProtocolHandlerPerOriginPrefs) {
   Profile* profile = GetBrowser()->profile();
-  base::DictionaryValue prefs;
-  prefs.SetBoolean("tel", false);
-  profile->GetPrefs()->Set(prefs::kExcludedSchemes, prefs);
+  url::Origin test_origin = url::Origin::Create(GURL("https://example.test/"));
+  const std::string serialized_test_origin = test_origin.Serialize();
+  base::DictionaryValue origin_pref;
+  origin_pref.SetKey(serialized_test_origin,
+                     base::Value(base::Value::Type::DICTIONARY));
+  base::Value* allowed_protocols_for_origin =
+      origin_pref.FindDictKey(serialized_test_origin);
+  allowed_protocols_for_origin->SetBoolKey("tel", true);
+  profile->GetPrefs()->Set(prefs::kProtocolHandlerPerOriginAllowedProtocols,
+                           origin_pref);
   ExternalProtocolHandler::BlockState block_state =
-      ExternalProtocolHandler::GetBlockState("tel", profile);
+      ExternalProtocolHandler::GetBlockState("tel", &test_origin, profile);
   ASSERT_EQ(ExternalProtocolHandler::DONT_BLOCK, block_state);
   RemoveAndWait(ChromeBrowsingDataRemoverDelegate::DATA_TYPE_SITE_DATA);
-  block_state = ExternalProtocolHandler::GetBlockState("tel", profile);
+  block_state =
+      ExternalProtocolHandler::GetBlockState("tel", &test_origin, profile);
   ASSERT_EQ(ExternalProtocolHandler::UNKNOWN, block_state);
 }
 
@@ -956,7 +959,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, HistoryDeletion) {
   // Create a new tab to avoid confusion from having a NTP navigation entry.
   ui_test_utils::NavigateToURLWithDisposition(
       GetBrowser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
   EXPECT_FALSE(HasDataForType(kType));
   SetDataForType(kType);
   EXPECT_TRUE(HasDataForType(kType));
@@ -1311,10 +1314,18 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
   // payment handler, content settings, autofill, ...?
 }
 
+// PRE_StorageRemovedFromDisk fails on Chrome OS. http://crbug.com/1035156.
+#if defined(OS_CHROMEOS)
+#define MAYBE_PRE_StorageRemovedFromDisk DISABLED_PRE_StorageRemovedFromDisk
+#define MAYBE_StorageRemovedFromDisk DISABLED_StorageRemovedFromDisk
+#else
+#define MAYBE_PRE_StorageRemovedFromDisk PRE_StorageRemovedFromDisk
+#define MAYBE_StorageRemovedFromDisk StorageRemovedFromDisk
+#endif
 // Restart after creating the data to ensure that everything was written to
 // disk.
 IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
-                       PRE_StorageRemovedFromDisk) {
+                       MAYBE_PRE_StorageRemovedFromDisk) {
   EXPECT_EQ(1, GetSiteDataCount());
   // Expect all datatypes from above except SessionStorage. SessionStorage is
   // not supported by the CookieTreeModel yet.
@@ -1329,7 +1340,8 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
 
 // Check if any data remains after a deletion and a Chrome restart to force
 // all writes to be finished.
-IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest, StorageRemovedFromDisk) {
+IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
+                       MAYBE_StorageRemovedFromDisk) {
   // Deletions should remove all traces of browsing data from disk
   // but there are a few bugs that need to be fixed.
   // Any addition to this list must have an associated TODO().
@@ -1374,7 +1386,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
   // not supported by the CookieTreeModel yet.
   ExpectCookieTreeModelCount(kSessionOnlyStorageTestTypes.size() - 1);
   HostContentSettingsMapFactory::GetForProfile(GetBrowser()->profile())
-      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
+      ->SetDefaultContentSetting(ContentSettingsType::COOKIES,
                                  CONTENT_SETTING_SESSION_ONLY);
 }
 
@@ -1392,6 +1404,6 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataRemoverBrowserTest,
 
 // Some storage backend use a different code path for full deletions and
 // partial deletions, so we need to test both.
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
+INSTANTIATE_TEST_SUITE_P(All,
                          BrowsingDataRemoverBrowserTestP,
                          ::testing::Values(base::Time(), kLastHour));

@@ -372,17 +372,6 @@ var availableTests = [
             TetheringState: "NotDetected"
           }
         }, {
-          Connectable: true,
-          ConnectionState: ConnectionStateType.CONNECTED,
-          GUID: 'stub_wimax_guid',
-          Name: 'wimax',
-          Priority: 0,
-          Source: 'User',
-          Type: NetworkType.WI_MAX,
-          WiMAX: {
-            SignalStrength: 40
-          }
-        }, {
           ConnectionState: ConnectionStateType.CONNECTED,
           GUID: 'stub_vpn1_guid',
           Name: 'vpn1',
@@ -466,31 +455,38 @@ var availableTests = [
         }], result);
       }));
   },
-  function enabledNetworkTypes() {
-    // Note: We call getEnabledNetworkTypes twice after each enable/dsiable
-    // to ensure that Chrome has processed the command (since enable/disable
-    // are 'synchronous' even though the action of enabling/disabling is not).
-    chrome.networkingPrivate.getEnabledNetworkTypes(
-        callbackPass(function(types) {
-          assertTrue(types.indexOf('WiFi') >= 0);
-          chrome.networkingPrivate.disableNetworkType('WiFi');
-          chrome.networkingPrivate.getEnabledNetworkTypes(
-              callbackPass(function(types) {
-                chrome.networkingPrivate.getEnabledNetworkTypes(
-                    callbackPass(function(types) {
-                      assertFalse(types.indexOf('WiFi') >= 0);
-                      chrome.networkingPrivate.enableNetworkType('WiFi');
-                      chrome.networkingPrivate.getEnabledNetworkTypes(
-                          callbackPass(function(types) {
-                            chrome.networkingPrivate.getEnabledNetworkTypes(
-                                callbackPass(function(types) {
-                                  assertTrue(types.indexOf('WiFi') >= 0);
-                                }));
-                          }));
-                    }));
-              }));
-        }));
+  function enabledNetworkTypesDisable() {
+    chrome.networkingPrivate.getEnabledNetworkTypes(function(types) {
+      assertTrue(types.indexOf('WiFi') >= 0);
+      var listener = callbackPass(function() {
+        chrome.networkingPrivate.onDeviceStateListChanged.removeListener(
+          listener);
+        chrome.networkingPrivate.getEnabledNetworkTypes(
+          callbackPass(function(types2) {
+            assertFalse(types2.indexOf('WiFi') >= 0);
+          }));
+      });
+      chrome.networkingPrivate.onDeviceStateListChanged.addListener(listener);
+      chrome.networkingPrivate.disableNetworkType('WiFi');
+    });
   },
+
+  function enabledNetworkTypesEnable() {
+    chrome.networkingPrivate.getEnabledNetworkTypes(function(types) {
+      assertFalse(types.indexOf('WiFi') >= 0);
+      var listener = callbackPass(function() {
+        chrome.networkingPrivate.onDeviceStateListChanged.removeListener(
+          listener);
+        chrome.networkingPrivate.getEnabledNetworkTypes(
+          callbackPass(function(types2) {
+            assertTrue(types2.indexOf('WiFi') >= 0);
+          }));
+      });
+      chrome.networkingPrivate.onDeviceStateListChanged.addListener(listener);
+      chrome.networkingPrivate.enableNetworkType('WiFi');
+    });
+  },
+
   function getDeviceStates() {
     chrome.networkingPrivate.getDeviceStates(callbackPass(function(result) {
       assertEq([
@@ -500,7 +496,6 @@ var availableTests = [
         {State: 'Uninitialized', SIMPresent: true,
          SIMLockStatus: {LockEnabled: true, LockType: '', RetriesLeft: 3},
          Type: 'Cellular' },
-        {State: 'Disabled', Type: 'WiMAX'},
       ],
                result);
     }));
@@ -509,7 +504,6 @@ var availableTests = [
     // Connected or Connecting networks should be listed first, sorted by type.
     var expected = ['stub_ethernet_guid',
                     'stub_wifi1_guid',
-                    'stub_wimax_guid',
                     'stub_vpn1_guid',
                     'stub_vpn2_guid',
                     'stub_wifi2_guid'];
@@ -653,7 +647,6 @@ var availableTests = [
             Type: {
               Active: 'Direct',
               Effective: 'UserPolicy',
-              UserEditable: false,
               UserPolicy: 'Direct'
             }
           },
@@ -848,7 +841,6 @@ var availableTests = [
     // Connecting to wifi2 should set wifi1 to offline. Connected or Connecting
     // networks should be listed first, sorted by type.
     var expected = ['stub_ethernet_guid',
-                    'stub_wimax_guid',
                     'stub_vpn1_guid',
                     'stub_wifi2_guid',
                     'stub_wifi1_guid',

@@ -5,7 +5,7 @@
 #include "ash/system/ime_menu/ime_menu_tray.h"
 
 #include "ash/accessibility/accessibility_controller_impl.h"
-#include "ash/ime/ime_controller.h"
+#include "ash/ime/ime_controller_impl.h"
 #include "ash/keyboard/keyboard_controller_impl.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/keyboard/virtual_keyboard_controller.h"
@@ -17,12 +17,12 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/style/ash_color_provider.h"
 #include "ash/system/ime_menu/ime_list_view.h"
 #include "ash/system/model/system_tray_model.h"
 #include "ash/system/tray/detailed_view_delegate.h"
 #include "ash/system/tray/system_menu_button.h"
 #include "ash/system/tray/system_tray_notifier.h"
-#include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_container.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
@@ -127,8 +127,11 @@ class ImeTitleView : public views::View, public views::ButtonListener {
  public:
   explicit ImeTitleView(bool show_settings_button) : settings_button_(nullptr) {
     SetBorder(views::CreatePaddedBorder(
-        views::CreateSolidSidedBorder(0, 0, kMenuSeparatorWidth, 0,
-                                      kMenuSeparatorColor),
+        views::CreateSolidSidedBorder(
+            0, 0, kMenuSeparatorWidth, 0,
+            AshColorProvider::Get()->GetContentLayerColor(
+                AshColorProvider::ContentLayerType::kSeparator,
+                AshColorProvider::AshColorMode::kLight)),
         gfx::Insets(kMenuSeparatorVerticalPadding - kMenuSeparatorWidth, 0)));
     auto box_layout = std::make_unique<views::BoxLayout>(
         views::BoxLayout::Orientation::kHorizontal);
@@ -200,14 +203,14 @@ class ImeButtonsView : public views::View, public views::ButtonListener {
     // The |keyset| will be used for drawing input view keyset in IME
     // extensions. ImeMenuTray::ShowKeyboardWithKeyset() will deal with
     // the |keyset| string to generate the right input view url.
-    using chromeos::input_method::mojom::ImeKeyset;
-    ImeKeyset keyset = ImeKeyset::kNone;
+    chromeos::input_method::ImeKeyset keyset =
+        chromeos::input_method::ImeKeyset::kNone;
     if (sender == emoji_button_)
-      keyset = ImeKeyset::kEmoji;
+      keyset = chromeos::input_method::ImeKeyset::kEmoji;
     else if (sender == voice_button_)
-      keyset = ImeKeyset::kVoice;
+      keyset = chromeos::input_method::ImeKeyset::kVoice;
     else if (sender == handwriting_button_)
-      keyset = ImeKeyset::kHandwriting;
+      keyset = chromeos::input_method::ImeKeyset::kHandwriting;
     else
       NOTREACHED();
 
@@ -230,8 +233,11 @@ class ImeButtonsView : public views::View, public views::ButtonListener {
     box_layout->set_minimum_cross_axis_size(kTrayPopupItemMinHeight);
     SetLayoutManager(std::move(box_layout));
     SetBorder(views::CreatePaddedBorder(
-        views::CreateSolidSidedBorder(kMenuSeparatorWidth, 0, 0, 0,
-                                      kMenuSeparatorColor),
+        views::CreateSolidSidedBorder(
+            kMenuSeparatorWidth, 0, 0, 0,
+            AshColorProvider::Get()->GetContentLayerColor(
+                AshColorProvider::ContentLayerType::kSeparator,
+                AshColorProvider::AshColorMode::kLight)),
         gfx::Insets(kMenuSeparatorVerticalPadding - kMenuSeparatorWidth,
                     kMenuExtraMarginFromLeftEdge)));
 
@@ -292,10 +298,6 @@ class ImeMenuListView : public ImeListView {
     // DetailedViewDelegate:
     void TransitionToMainView(bool restore_focus) override {}
     void CloseBubble() override {}
-    SkColor GetBackgroundColor(ui::NativeTheme* native_theme) override {
-      return native_theme->GetSystemColor(
-          ui::NativeTheme::kColorId_BubbleBackground);
-    }
     bool IsOverflowIndicatorEnabled() const override { return true; }
 
    private:
@@ -331,10 +333,8 @@ ImeMenuTray::ImeMenuTray(Shelf* shelf)
       show_bubble_after_keyboard_hidden_(false),
       is_emoji_enabled_(false),
       is_handwriting_enabled_(false),
-      is_voice_enabled_(false),
-      weak_ptr_factory_(this) {
+      is_voice_enabled_(false) {
   DCHECK(ime_controller_);
-  SetInkDropMode(InkDropMode::ON);
   CreateLabel();
   SystemTrayNotifier* tray_notifier = Shell::Get()->system_tray_notifier();
   tray_notifier->AddIMEObserver(this);
@@ -362,8 +362,7 @@ void ImeMenuTray::ShowImeMenuBubbleInternal(bool show_by_click) {
   init_params.parent_window = GetBubbleWindowContainer();
   init_params.anchor_view = GetBubbleAnchor();
   init_params.shelf_alignment = shelf()->alignment();
-  init_params.min_width = kTrayMenuWidth;
-  init_params.max_width = kTrayMenuWidth;
+  init_params.preferred_width = kTrayMenuWidth;
   init_params.close_on_deactivate = true;
   init_params.show_by_click = show_by_click;
 
@@ -391,7 +390,7 @@ void ImeMenuTray::ShowImeMenuBubbleInternal(bool show_by_click) {
 }
 
 void ImeMenuTray::ShowKeyboardWithKeyset(
-    chromeos::input_method::mojom::ImeKeyset keyset) {
+    chromeos::input_method::ImeKeyset keyset) {
   CloseBubble();
 
   Shell::Get()
@@ -489,7 +488,7 @@ void ImeMenuTray::OnIMERefresh() {
 }
 
 void ImeMenuTray::OnIMEMenuActivationChanged(bool is_activated) {
-  SetVisible(is_activated);
+  SetVisiblePreferred(is_activated);
   if (is_activated)
     UpdateTrayLabel();
   else
@@ -526,14 +525,16 @@ void ImeMenuTray::OnKeyboardSuppressionChanged(bool suppressed) {
 }
 
 void ImeMenuTray::UpdateTrayLabel() {
-  const mojom::ImeInfo& current_ime = ime_controller_->current_ime();
+  const ImeInfo& current_ime = ime_controller_->current_ime();
 
   // For ARC IMEs, we use the globe icon instead of the short name of the active
   // IME.
   if (chromeos::extension_ime_util::IsArcIME(current_ime.id)) {
     CreateImageView();
-    image_view_->SetImage(
-        gfx::CreateVectorIcon(kShelfGlobeIcon, kTrayIconColor));
+    image_view_->SetImage(gfx::CreateVectorIcon(
+        kShelfGlobeIcon, AshColorProvider::Get()->GetContentLayerColor(
+                             AshColorProvider::ContentLayerType::kIconPrimary,
+                             AshColorProvider::AshColorMode::kDark)));
     return;
   }
 

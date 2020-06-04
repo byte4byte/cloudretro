@@ -14,9 +14,9 @@
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "mojo/public/cpp/bindings/strong_binding_set.h"
+#include "mojo/public/cpp/bindings/unique_receiver_set.h"
 #include "services/network/cookie_settings.h"
-#include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "services/network/public/mojom/cookie_manager.mojom-forward.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom.h"
 
 class Profile;
@@ -48,18 +48,20 @@ class ChromeExtensionCookies
   static ChromeExtensionCookies* Get(content::BrowserContext* context);
 
   // Creates a RestrictedCookieManager for a chrome-extension:// URL
-  // with origin |origin|, bound to |request|. Whether this will use disk
+  // with origin |origin|, bound to |receiver|. Whether this will use disk
   // storage or not depends on the Profile |this| was created for.
   void CreateRestrictedCookieManager(
       const url::Origin& origin,
-      network::mojom::RestrictedCookieManagerRequest request);
+      const net::SiteForCookies& site_for_cookies,
+      const url::Origin& top_frame_origin,
+      mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver);
 
   // Deletes all cookies matching the host of |origin|.
   void ClearCookies(const GURL& origin);
 
   // Test-only method to get the raw underlying test store. This can only be
   // called when the UI thread and the IO thread are actually the same thread
-  // (e.g. if TestBrowserThreadBundle is in use).
+  // (e.g. if BrowserTaskEnvironment is in use).
   net::CookieStore* GetCookieStoreForTesting();
 
  private:
@@ -74,7 +76,10 @@ class ChromeExtensionCookies
 
     void CreateRestrictedCookieManager(
         const url::Origin& origin,
-        network::mojom::RestrictedCookieManagerRequest request);
+        const net::SiteForCookies& site_for_cookies,
+        const url::Origin& top_frame_origin,
+        mojo::PendingReceiver<network::mojom::RestrictedCookieManager>
+            receiver);
     void ClearCookies(const GURL& origin);
 
     void OnContentSettingChanged(ContentSettingsForOneType settings);
@@ -96,7 +101,7 @@ class ChromeExtensionCookies
     // |network_cookie_settings_| conversion.
     network::mojom::CookieManagerParamsPtr mojo_cookie_settings_;
 
-    mojo::StrongBindingSet<network::mojom::RestrictedCookieManager>
+    mojo::UniqueReceiverSet<network::mojom::RestrictedCookieManager>
         restricted_cookie_managers_;
 
     DISALLOW_COPY_AND_ASSIGN(IOData);
@@ -125,8 +130,9 @@ class ChromeExtensionCookies
 
   // Cookie config Chrome-side.
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
-  ScopedObserver<content_settings::CookieSettings, ChromeExtensionCookies>
-      cookie_settings_observer_;
+  ScopedObserver<content_settings::CookieSettings,
+                 content_settings::CookieSettings::Observer>
+      cookie_settings_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeExtensionCookies);
 };

@@ -18,14 +18,21 @@
 #include "chrome/browser/media/cast_remoting_connector.h"
 #include "chrome/browser/media/router/route_message_observer.h"
 #include "chrome/common/media_router/media_route.h"
+#include "chrome/common/media_router/media_route_provider_helper.h"
 #include "chrome/common/media_router/media_sink.h"
 #include "chrome/common/media_router/media_source.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
+#include "chrome/common/media_router/mojom/media_router.mojom.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sessions/core/session_id.h"
 #include "content/public/browser/presentation_service_delegate.h"
 #include "media/base/flinging_controller.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/common/media_router/mojom/media_controller.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#endif  // !defined(OS_ANDROID)
 
 namespace content {
 class WebContents;
@@ -42,9 +49,6 @@ class MediaRoutesObserver;
 class MediaSinksObserver;
 class PresentationConnectionStateObserver;
 class RouteRequestResult;
-#if !defined(OS_ANDROID)
-class MediaRouteController;
-#endif  // !defined(OS_ANDROID)
 
 // Type of callback used in |CreateRoute()|, |JoinRoute()|, and
 // |ConnectRouteByRouteId()|. Callback is invoked when the route request either
@@ -53,11 +57,6 @@ class MediaRouteController;
 using MediaRouteResponseCallback =
     base::OnceCallback<void(mojom::RoutePresentationConnectionPtr connection,
                             const RouteRequestResult& result)>;
-
-// Type of callback used for |SearchSinks()| to return the sink ID of the
-// newly-found sink. The sink ID will be the empty string if no sink was found.
-using MediaSinkSearchResponseCallback =
-    base::OnceCallback<void(const MediaSink::Id& sink_id)>;
 
 // Subscription object returned by calling
 // |AddPresentationConnectionStateChangedCallback|. See the method comments for
@@ -161,17 +160,6 @@ class MediaRouter : public KeyedService {
   // approriate to be done at construction.
   virtual void OnUserGesture() = 0;
 
-  // Searches for a MediaSink using |search_input| and |domain| as criteria.
-  // |domain| is the hosted domain of the user's signed-in identity, or empty if
-  // the user has no domain or is not signed in.  |sink_callback| will be called
-  // either with the ID of the new sink when it is found or with an empty string
-  // if no sink was found.
-  virtual void SearchSinks(const MediaSink::Id& sink_id,
-                           const MediaSource::Id& source_id,
-                           const std::string& search_input,
-                           const std::string& domain,
-                           MediaSinkSearchResponseCallback sink_callback) = 0;
-
   // Adds |callback| to listen for state changes for presentation connected to
   // |route_id|. The returned Subscription object is owned by the caller.
   // |callback| will be invoked whenever there are state changes, until the
@@ -196,10 +184,13 @@ class MediaRouter : public KeyedService {
       const MediaRoute::Id& route_id) = 0;
 
 #if !defined(OS_ANDROID)
-  // Returns a controller for sending media commands to a route. Returns a
-  // nullptr if no MediaRoute exists for the given |route_id|.
-  virtual scoped_refptr<MediaRouteController> GetRouteController(
-      const MediaRoute::Id& route_id) = 0;
+  // Binds |controller| for sending media commands to a route. The controller
+  // will notify |observer| whenever there is a change to the status of the
+  // media. It may invalidate bindings from previous calls to this method.
+  virtual void GetMediaController(
+      const MediaRoute::Id& route_id,
+      mojo::PendingReceiver<mojom::MediaController> controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer) = 0;
 #endif  // !defined(OS_ANDROID)
 
   // Registers/Unregisters a CastRemotingConnector with the |tab_id|. For a
@@ -210,9 +201,17 @@ class MediaRouter : public KeyedService {
       CastRemotingConnector* remoting_source) = 0;
   virtual void UnregisterRemotingSource(SessionID tab_id) = 0;
 
-  // Returns media router state as a JSON string represented by base::Vaule.
-  // Used by media-router-internals page.
+  // Returns media router state as a JSON string represented by base::Value.
+  // Includes known sinks and sink compatibility with media sources.
+  // Used by chrome://media-router-internals.
   virtual base::Value GetState() const = 0;
+
+  // Returns the media route provider state for |provider_id| via |callback|.
+  // Includes details about routes/sessions owned by the MRP.
+  // Used by chrome://media-router-internals.
+  virtual void GetProviderState(
+      MediaRouteProviderId provider_id,
+      mojom::MediaRouteProvider::GetStateCallback callback) const = 0;
 
  private:
   friend class IssuesObserver;
@@ -220,9 +219,6 @@ class MediaRouter : public KeyedService {
   friend class MediaRoutesObserver;
   friend class PresentationConnectionStateObserver;
   friend class RouteMessageObserver;
-#if !defined(OS_ANDROID)
-  friend class MediaRouteController;
-#endif  // !defined(OS_ANDROID)
 
   // The following functions are called by friend Observer classes above.
 
@@ -267,14 +263,6 @@ class MediaRouter : public KeyedService {
   // stop receiving further updates.
   virtual void UnregisterRouteMessageObserver(
       RouteMessageObserver* observer) = 0;
-
-#if !defined(OS_ANDROID)
-  // Removes the MediaRouteController for |route_id| from the list of
-  // controllers held by |this|. Called by MediaRouteController when it is
-  // invalidated.
-  virtual void DetachRouteController(const MediaRoute::Id& route_id,
-                                     MediaRouteController* controller) = 0;
-#endif  // !defined(OS_ANDROID)
 };
 
 }  // namespace media_router

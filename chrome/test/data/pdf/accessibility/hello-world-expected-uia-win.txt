@@ -1,4 +1,5 @@
-group
-++group
-++++region Name='Page 1'
-++++++group
+Pane
+++Document Name='PDF document containing 1 page'
+++++Group Name='Page 1'
+++++++Group IsControlElement=false
+++++++++Text Name='Hello, world!'

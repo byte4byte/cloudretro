@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/power/auto_screen_brightness/metrics_reporter.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/common/pref_names.h"
@@ -29,6 +29,8 @@ constexpr std::array<const char*, MetricsReporter::kNumberDeviceClasses>
         prefs::kAutoScreenBrightnessMetricsUnsupportedAlsUserAdjustmentCount,
         prefs::kAutoScreenBrightnessMetricsAtlasUserAdjustmentCount,
         prefs::kAutoScreenBrightnessMetricsEveUserAdjustmentCount,
+        prefs::kAutoScreenBrightnessMetricsNocturneUserAdjustmentCount,
+        prefs::kAutoScreenBrightnessMetricsKohakuUserAdjustmentCount,
 };
 
 // Histograms corresponding to UserAdjustment values.
@@ -39,6 +41,8 @@ constexpr std::array<const char*, MetricsReporter::kNumberDeviceClasses>
         MetricsReporter::kUnsupportedAlsUserAdjustmentName,
         MetricsReporter::kAtlasUserAdjustmentName,
         MetricsReporter::kEveUserAdjustmentName,
+        MetricsReporter::kNocturneUserAdjustmentName,
+        MetricsReporter::kKohakuUserAdjustmentName,
 };
 
 }  // namespace
@@ -49,6 +53,8 @@ constexpr char MetricsReporter::kSupportedAlsUserAdjustmentName[];
 constexpr char MetricsReporter::kUnsupportedAlsUserAdjustmentName[];
 constexpr char MetricsReporter::kAtlasUserAdjustmentName[];
 constexpr char MetricsReporter::kEveUserAdjustmentName[];
+constexpr char MetricsReporter::kNocturneUserAdjustmentName[];
+constexpr char MetricsReporter::kKohakuUserAdjustmentName[];
 
 constexpr int MetricsReporter::kNumberDeviceClasses;
 

@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
-#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -40,8 +40,10 @@ class SecurityStatePageLoadMetricsObserver
       security_state::SecurityLevel level);
   static std::string GetEngagementFinalHistogramNameForTesting(
       security_state::SecurityLevel level);
-  static std::string GetPageEndReasonHistogramNameForTesting(
+  static std::string GetSecurityLevelPageEndReasonHistogramNameForTesting(
       security_state::SecurityLevel level);
+  static std::string GetSafetyTipPageEndReasonHistogramNameForTesting(
+      security_state::SafetyTipStatus safety_tip_status);
 
   explicit SecurityStatePageLoadMetricsObserver(
       SiteEngagementService* engagement_service);
@@ -54,8 +56,7 @@ class SecurityStatePageLoadMetricsObserver
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                          ukm::SourceId source_id) override;
   void OnComplete(
-      const page_load_metrics::mojom::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+      const page_load_metrics::mojom::PageLoadTiming& timing) override;
 
   // content::WebContentsObserver:
   void DidChangeVisibleSecurityState() override;

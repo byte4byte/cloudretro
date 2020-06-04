@@ -5,6 +5,8 @@
 #ifndef UI_VIEWS_CONTROLS_PROGRESS_BAR_H_
 #define UI_VIEWS_CONTROLS_PROGRESS_BAR_H_
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/optional.h"
@@ -28,23 +30,25 @@ class VIEWS_EXPORT ProgressBar : public View, public gfx::AnimationDelegate {
                        bool allow_round_corner = true);
   ~ProgressBar() override;
 
-  // Overridden from View:
+  // View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   gfx::Size CalculatePreferredSize() const override;
+  void VisibilityChanged(View* starting_from, bool is_visible) override;
+  void AddedToWidget() override;
   void OnPaint(gfx::Canvas* canvas) override;
 
-  double current_value() const { return current_value_; }
-
+  double GetValue() const;
   // Sets the current value. Values outside of the display range of 0.0-1.0 will
   // be displayed with an infinite loading animation.
   void SetValue(double value);
 
   // The color of the progress portion.
   SkColor GetForegroundColor() const;
-  void set_foreground_color(SkColor color) { foreground_color_ = color; }
+  void SetForegroundColor(SkColor color);
+
   // The color of the portion that displays potential progress.
   SkColor GetBackgroundColor() const;
-  void set_background_color(SkColor color) { background_color_ = color; }
+  void SetBackgroundColor(SkColor color);
 
  protected:
   int preferred_height() const { return preferred_height_; }
@@ -56,6 +60,9 @@ class VIEWS_EXPORT ProgressBar : public View, public gfx::AnimationDelegate {
 
   bool IsIndeterminate();
   void OnPaintIndeterminate(gfx::Canvas* canvas);
+
+  // Fire an accessibility event if visible and the progress has changed.
+  void MaybeNotifyAccessibilityValueChanged();
 
   // Current progress to display, should be in the range 0.0 to 1.0.
   double current_value_ = 0.0;
@@ -69,6 +76,8 @@ class VIEWS_EXPORT ProgressBar : public View, public gfx::AnimationDelegate {
   base::Optional<SkColor> background_color_;
 
   std::unique_ptr<gfx::LinearAnimation> indeterminate_bar_animation_;
+
+  int last_announced_percentage_ = -1;
 
   DISALLOW_COPY_AND_ASSIGN(ProgressBar);
 };

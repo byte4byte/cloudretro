@@ -46,9 +46,26 @@ class TestNavigationObserver {
                                   MessageLoopRunner::QuitMode quit_mode =
                                       MessageLoopRunner::QuitMode::IMMEDIATE);
 
+  // Create and register a new TestNavigationObserver that will wait for
+  // a navigation with |target_error|.
+  explicit TestNavigationObserver(WebContents* web_contents,
+                                  net::Error target_error,
+                                  MessageLoopRunner::QuitMode quit_mode =
+                                      MessageLoopRunner::QuitMode::IMMEDIATE);
+
   virtual ~TestNavigationObserver();
 
   void set_wait_event(WaitEvent event) { wait_event_ = event; }
+
+  // If set to true, last_*() calls will only be set on navigation finished
+  // events regarding the |target_url_| (as passed to the constructor).
+  // If this is not set, it is possible that between the time a navigation to
+  // |target_url_| finishes and the time  Wait() returns, another navigation
+  // finishes which overwrites the values the last_* accessors return. This only
+  // has an effect if a |target_url_| is set.
+  void set_ignore_other_urls(bool ignore_other_urls) {
+    ignore_other_urls_ = ignore_other_urls;
+  }
 
   // Runs a nested run loop and blocks until the expected number of navigations
   // stop loading or |target_url| has loaded.
@@ -92,6 +109,7 @@ class TestNavigationObserver {
   TestNavigationObserver(WebContents* web_contents,
                          int number_of_navigations,
                          const GURL& target_url,
+                         net::Error target_error,
                          MessageLoopRunner::QuitMode quit_mode =
                              MessageLoopRunner::QuitMode::IMMEDIATE);
 
@@ -112,6 +130,10 @@ class TestNavigationObserver {
   // The event that once triggered will quit the run loop.
   WaitEvent wait_event_;
 
+  // Ignore URLs other than |target_url| when receiving a navigation finished
+  // event.
+  bool ignore_other_urls_ = false;
+
   // If true the navigation has started.
   bool navigation_started_;
 
@@ -123,6 +145,9 @@ class TestNavigationObserver {
 
   // The URL to wait for.
   const GURL target_url_;
+
+  // The error to wait for.
+  net::Error target_error_;
 
   // The url of the navigation that last committed.
   GURL last_navigation_url_;
@@ -143,7 +168,7 @@ class TestNavigationObserver {
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
 
   // Callback invoked on WebContents creation.
-  base::Callback<void(WebContents*)> web_contents_created_callback_;
+  base::RepeatingCallback<void(WebContents*)> web_contents_created_callback_;
 
   // Living TestWebContentsObservers created by this observer.
   std::set<std::unique_ptr<TestWebContentsObserver>, base::UniquePtrComparator>

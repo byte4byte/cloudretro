@@ -8,11 +8,13 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "chrome/browser/ui/autofill/payments/save_card_bubble_controller.h"
 #include "chrome/browser/ui/autofill/payments/save_card_ui.h"
+#include "chrome/browser/ui/autofill/payments/save_payment_icon_controller.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/sync_utils.h"
-#include "components/autofill/core/browser/ui/payments/save_card_bubble_controller.h"
 #include "components/security_state/core/security_state.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -28,6 +30,7 @@ enum class BubbleType;
 // Omnibox icon.
 class SaveCardBubbleControllerImpl
     : public SaveCardBubbleController,
+      public SavePaymentIconController,
       public content::WebContentsObserver,
       public content::WebContentsUserData<SaveCardBubbleControllerImpl> {
  public:
@@ -57,9 +60,9 @@ class SaveCardBubbleControllerImpl
 
   // Sets up the controller and offers to upload the |card| to Google Payments.
   // |save_card_prompt_callback| will be invoked once the user makes a decision
-  // with respect to the offer-to-save prompt. The contents of |legal_message|
-  // will be displayed in the bubble. A textfield confirming the cardholder name
-  // will appear in the bubble if
+  // with respect to the offer-to-save prompt. The contents of
+  // |legal_message_lines| will be displayed in the bubble. A textfield
+  // confirming the cardholder name will appear in the bubble if
   // |options.should_request_name_from_user| is true. A pair of
   // dropdowns for entering the expiration date will appear in the bubble if
   // |options.should_request_expiration_date_from_user| is
@@ -71,14 +74,14 @@ class SaveCardBubbleControllerImpl
   // dynamic change form.
   void OfferUploadSave(
       const CreditCard& card,
-      std::unique_ptr<base::DictionaryValue> legal_message,
+      const LegalMessageLines& legal_message_lines,
       AutofillClient::SaveCreditCardOptions options,
       AutofillClient::UploadSaveCardPromptCallback save_card_prompt_callback);
 
   // Sets up the controller for the sign in promo and shows the bubble.
   // This bubble is only shown after a local save is accepted and if
   // |ShouldShowSignInPromo()| returns true.
-  void ShowBubbleForSignInPromo();
+  void MaybeShowBubbleForSignInPromo();
 
   // Exists for testing purposes only. (Otherwise shown through ReshowBubble())
   // Sets up the controller for the Manage Cards view. This displays the card
@@ -99,13 +102,11 @@ class SaveCardBubbleControllerImpl
   void ShowBubbleForSaveCardFailureForTesting();
 
   void HideBubble();
+  // TODO(crbug.com/932818): Maybe move sign in promo completely out of this
+  // class, and merge with password sign in promo.
+  void HideBubbleForSignInPromo();
+
   void ReshowBubble();
-
-  // Returns true if Omnibox save credit card icon should be visible.
-  bool IsIconVisible() const;
-
-  // Returns nullptr if no bubble is currently shown.
-  SaveCardBubbleView* save_card_bubble_view() const;
 
   // SaveCardBubbleController:
   base::string16 GetWindowTitle() const override;
@@ -115,6 +116,7 @@ class SaveCardBubbleControllerImpl
   const AccountInfo& GetAccountInfo() const override;
   Profile* GetProfile() const override;
   const CreditCard& GetCard() const override;
+  SaveCardBubbleView* GetSaveCardBubbleView() const override;
   bool ShouldRequestNameFromUser() const override;
   bool ShouldRequestExpirationDateFromUser() const override;
 
@@ -127,7 +129,6 @@ class SaveCardBubbleControllerImpl
   //    to the server -- this should change.
   // TODO(crbug.com/864702): Don't show promo if user is a butter user.
   bool ShouldShowSignInPromo() const override;
-  bool ShouldShowCardSavedAnimation() const override;
   void OnSyncPromoAccepted(const AccountInfo& account,
                            signin_metrics::AccessPoint access_point,
                            bool is_default_promo_account) override;
@@ -137,11 +138,19 @@ class SaveCardBubbleControllerImpl
   void OnLegalMessageLinkClicked(const GURL& url) override;
   void OnManageCardsClicked() override;
   void OnBubbleClosed() override;
-  void OnAnimationEnded() override;
   const LegalMessageLines& GetLegalMessageLines() const override;
   bool IsUploadSave() const override;
   BubbleType GetBubbleType() const override;
   AutofillSyncSigninState GetSyncState() const override;
+
+  // SavePaymentIconController:
+  base::string16 GetSavePaymentIconTooltipText() const override;
+  bool ShouldShowSavingCardAnimation() const override;
+  bool ShouldShowCardSavedLabelAnimation() const override;
+  bool ShouldShowSaveFailureBadge() const override;
+  void OnAnimationEnded() override;
+  bool IsIconVisible() const override;
+  SaveCardBubbleView* GetSaveBubbleView() const override;
 
  protected:
   explicit SaveCardBubbleControllerImpl(content::WebContents* web_contents);
@@ -179,14 +188,11 @@ class SaveCardBubbleControllerImpl
     observer_for_testing_ = observer;
   }
 
-  // The web_contents associated with this controller.
-  content::WebContents* web_contents_;
-
   // Should outlive this object.
   PersonalDataManager* personal_data_manager_;
 
-  // Is true only if the card saved animation should be shown.
-  bool should_show_card_saved_animation_ = false;
+  // Is true only if the [Card saved] label animation should be shown.
+  bool should_show_card_saved_label_animation_ = false;
 
   // Weak reference. Will be nullptr if no bubble is currently shown.
   SaveCardBubbleView* save_card_bubble_view_ = nullptr;

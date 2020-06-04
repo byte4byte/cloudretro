@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "base/threading/thread.h"
@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
 
   base::Thread ipc_thread("IPC thread");
   ipc_thread.StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
 
   mojo::core::Init();
   mojo::core::ScopedIPCSupport ipc_support(
@@ -23,6 +23,6 @@ int main(int argc, char** argv) {
       mojo::core::ScopedIPCSupport::ShutdownPolicy::CLEAN);
 
   return base::LaunchUnitTests(
-      argc, argv, base::Bind(&base::TestSuite::Run,
-                             base::Unretained(&test_suite)));
+      argc, argv,
+      base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
 }

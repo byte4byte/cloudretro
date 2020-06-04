@@ -14,7 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/sync/base/hash_util.h"
+#include "components/sync/base/client_tag_hash.h"
 #include "components/sync/engine/model_type_processor.h"
 #include "components/sync/engine/non_blocking_sync_common.h"
 #include "components/sync/model/entity_data.h"
@@ -301,20 +301,19 @@ sync_pb::SessionSpecifics RecentTabsBuilderTestHelper::BuildTabSpecifics(
   return specifics;
 }
 
-std::unique_ptr<syncer::UpdateResponseData>
-RecentTabsBuilderTestHelper::BuildUpdateResponseData(
+syncer::UpdateResponseData RecentTabsBuilderTestHelper::BuildUpdateResponseData(
     const sync_pb::SessionSpecifics& specifics,
     base::Time timestamp) {
-  auto entity = std::make_unique<syncer::EntityData>();
-  *entity->specifics.mutable_session() = specifics;
-  entity->creation_time = timestamp;
-  entity->modification_time = timestamp;
-  entity->client_tag_hash = syncer::GenerateSyncableHash(
+  syncer::EntityData entity;
+  *entity.specifics.mutable_session() = specifics;
+  entity.creation_time = timestamp;
+  entity.modification_time = timestamp;
+  entity.client_tag_hash = syncer::ClientTagHash::FromUnhashed(
       syncer::SESSIONS, sync_sessions::SessionStore::GetClientTag(specifics));
-  entity->id = entity->client_tag_hash;
+  entity.id = entity.client_tag_hash.value();
 
-  auto update = std::make_unique<syncer::UpdateResponseData>();
-  update->entity = std::move(entity);
-  update->response_version = ++next_response_version_;
+  syncer::UpdateResponseData update;
+  update.entity = std::move(entity);
+  update.response_version = ++next_response_version_;
   return update;
 }

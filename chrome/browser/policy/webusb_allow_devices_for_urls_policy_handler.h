@@ -32,7 +32,7 @@ class WebUsbAllowDevicesForUrlsPolicyHandler
 #endif  // defined(OS_CHROMEOS)
 
   WebUsbAllowDevicesForUrlsPolicyHandler(const char* policy_name,
-                                         const char* pref_path,
+                                         const char* pref_name,
                                          const Schema& chrome_schema);
   ~WebUsbAllowDevicesForUrlsPolicyHandler() override;
 
@@ -44,7 +44,7 @@ class WebUsbAllowDevicesForUrlsPolicyHandler
 
  private:
   // The name of the pref to apply the policy to.
-  const char* pref_path_;
+  const char* pref_name_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUsbAllowDevicesForUrlsPolicyHandler);
 };

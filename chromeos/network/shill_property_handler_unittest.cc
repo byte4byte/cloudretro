@@ -15,7 +15,7 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill/shill_clients.h"
 #include "chromeos/dbus/shill/shill_device_client.h"
@@ -159,8 +159,8 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
 class ShillPropertyHandlerTest : public testing::Test {
  public:
   ShillPropertyHandlerTest()
-      : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+      : task_environment_(
+            base::test::SingleThreadTaskEnvironment::MainThreadType::UI),
         manager_test_(NULL),
         device_test_(NULL),
         service_test_(NULL),
@@ -258,8 +258,6 @@ class ShillPropertyHandlerTest : public testing::Test {
     return (type == shill::kTypeEthernet ||
             type == shill::kTypeEthernetEap ||
             type == shill::kTypeWifi ||
-            type == shill::kTypeWimax ||
-            type == shill::kTypeBluetooth ||
             type == shill::kTypeCellular ||
             type == shill::kTypeVPN);
   }
@@ -277,7 +275,7 @@ class ShillPropertyHandlerTest : public testing::Test {
     AddService(shill::kTypeCellular, "stub_cellular1", shill::kStateIdle);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<TestListener> listener_;
   std::unique_ptr<internal::ShillPropertyHandler> shill_property_handler_;
   ShillManagerClient::TestInterface* manager_test_;
@@ -324,10 +322,41 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
   // Enable the technology.
   listener_->reset_list_updates();
   ShillManagerClient::Get()->EnableTechnology(
-      shill::kTypeWifi, base::DoNothing(), base::Bind(&ErrorCallbackFunction));
+      shill::kTypeWifi, base::DoNothing(),
+      base::BindOnce(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->technology_list_updates());
   EXPECT_TRUE(shill_property_handler_->IsTechnologyEnabled(shill::kTypeWifi));
+
+  EXPECT_EQ(0, listener_->errors());
+}
+
+TEST_F(ShillPropertyHandlerTest,
+       ShillPropertyHandlerTechnologyChangedTransitions) {
+  listener_->reset_list_updates();
+  manager_test_->AddTechnology(shill::kTypeWifi, /*enabled=*/true);
+
+  // Disabling WiFi transitions from Disabling -> Disabled.
+  shill_property_handler_->SetTechnologyEnabled(
+      shill::kTypeWifi, /*enabled=*/false, base::DoNothing());
+  EXPECT_TRUE(shill_property_handler_->IsTechnologyDisabling(shill::kTypeWifi));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, listener_->technology_list_updates());
+  EXPECT_FALSE(
+      shill_property_handler_->IsTechnologyDisabling(shill::kTypeWifi));
+  EXPECT_TRUE(shill_property_handler_->IsTechnologyAvailable(shill::kTypeWifi));
+
+  // Enable the technology.
+  listener_->reset_list_updates();
+  shill_property_handler_->SetTechnologyEnabled(
+      shill::kTypeWifi, /*enabled=*/true, base::DoNothing());
+  EXPECT_TRUE(shill_property_handler_->IsTechnologyEnabling(shill::kTypeWifi));
+  EXPECT_FALSE(
+      shill_property_handler_->IsTechnologyDisabling(shill::kTypeWifi));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, listener_->technology_list_updates());
+  EXPECT_TRUE(shill_property_handler_->IsTechnologyEnabled(shill::kTypeWifi));
+  EXPECT_FALSE(shill_property_handler_->IsTechnologyEnabling(shill::kTypeWifi));
 
   EXPECT_EQ(0, listener_->errors());
 }
@@ -377,7 +406,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   base::Value scan_interval(3);
   ShillServiceClient::Get()->SetProperty(
       dbus::ObjectPath(kTestServicePath), shill::kScanIntervalProperty,
-      scan_interval, base::DoNothing(), base::Bind(&ErrorCallbackFunction));
+      scan_interval, base::DoNothing(), base::BindOnce(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   // Property change triggers an update (but not a service list update).
   EXPECT_EQ(1, listener_->property_updates(
@@ -389,7 +418,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   ShillServiceClient::Get()->SetProperty(
       dbus::ObjectPath(kTestServicePath), shill::kStateProperty,
       base::Value(shill::kStateReady), base::DoNothing(),
-      base::Bind(&ErrorCallbackFunction));
+      base::BindOnce(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->list_updates(shill::kServiceCompleteListProperty));
 
@@ -412,21 +441,21 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   base::Value ip_address("192.168.1.1");
   ShillIPConfigClient::Get()->SetProperty(dbus::ObjectPath(kTestIPConfigPath),
                                           shill::kAddressProperty, ip_address,
-                                          EmptyVoidDBusMethodCallback());
+                                          base::DoNothing());
   base::ListValue dns_servers;
   dns_servers.AppendString("192.168.1.100");
   dns_servers.AppendString("192.168.1.101");
-  ShillIPConfigClient::Get()->SetProperty(
-      dbus::ObjectPath(kTestIPConfigPath), shill::kNameServersProperty,
-      dns_servers, EmptyVoidDBusMethodCallback());
+  ShillIPConfigClient::Get()->SetProperty(dbus::ObjectPath(kTestIPConfigPath),
+                                          shill::kNameServersProperty,
+                                          dns_servers, base::DoNothing());
   base::Value prefixlen(8);
   ShillIPConfigClient::Get()->SetProperty(dbus::ObjectPath(kTestIPConfigPath),
                                           shill::kPrefixlenProperty, prefixlen,
-                                          EmptyVoidDBusMethodCallback());
+                                          base::DoNothing());
   base::Value gateway("192.0.0.1");
   ShillIPConfigClient::Get()->SetProperty(dbus::ObjectPath(kTestIPConfigPath),
                                           shill::kGatewayProperty, gateway,
-                                          EmptyVoidDBusMethodCallback());
+                                          base::DoNothing());
   base::RunLoop().RunUntilIdle();
 
   // Add a service with an empty ipconfig and then update
@@ -440,7 +469,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   ShillServiceClient::Get()->SetProperty(
       dbus::ObjectPath(kTestServicePath1), shill::kIPConfigProperty,
       base::Value(kTestIPConfigPath), base::DoNothing(),
-      base::Bind(&ErrorCallbackFunction));
+      base::BindOnce(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   // IPConfig property change on the service should trigger an IPConfigs update.
   EXPECT_EQ(1, listener_->property_updates(

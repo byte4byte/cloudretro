@@ -4,24 +4,31 @@
 
 package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
+import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQualifiers.APP_CONTEXT;
+
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.support.annotation.Nullable;
-import android.support.annotation.UiThread;
 import android.text.TextUtils;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.UiThread;
+import androidx.annotation.VisibleForTesting;
+import androidx.browser.trusted.Token;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.browserservices.Origin;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.Origin;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.inject.Singleton;
 
 import dagger.Lazy;
@@ -40,6 +47,7 @@ public class TrustedWebActivityPermissionManager {
     private static final String TAG = "TwaPermissionManager";
 
     private final TrustedWebActivityPermissionStore mStore;
+    private final PackageManager mPackageManager;
 
     // Use a Lazy instance so we don't instantiate it on Android versions pre-O.
     private final Lazy<NotificationChannelPreserver> mPermissionPreserver;
@@ -49,20 +57,27 @@ public class TrustedWebActivityPermissionManager {
     }
 
     @Inject
-    public TrustedWebActivityPermissionManager(TrustedWebActivityPermissionStore store,
+    public TrustedWebActivityPermissionManager(@Named(APP_CONTEXT) Context context,
+            TrustedWebActivityPermissionStore store,
             Lazy<NotificationChannelPreserver> preserver) {
+        mPackageManager = context.getPackageManager();
         mStore = store;
         mPermissionPreserver = preserver;
     }
 
-    InstalledWebappBridge.Permission[] getNotificationPermissions() {
+    InstalledWebappBridge.Permission[] getPermissions(@ContentSettingsType int type) {
         List<InstalledWebappBridge.Permission> permissions = new ArrayList<>();
         for (String originAsString : mStore.getStoredOrigins()) {
-            Origin origin = new Origin(originAsString);
-            Boolean enabled = mStore.areNotificationsEnabled(origin);
+            Origin origin = Origin.create(originAsString);
+            assert origin
+                    != null : "Found unparsable Origins in the Permission Store : "
+                              + originAsString;
+            if (origin == null) continue;
+
+            Boolean enabled = mStore.arePermissionEnabled(type, origin);
 
             if (enabled == null) {
-                Log.w(TAG, "%s is known but has no notification permission.", origin);
+                Log.w(TAG, "%s is known but has no permission set.", origin);
                 continue;
             }
 
@@ -76,7 +91,21 @@ public class TrustedWebActivityPermissionManager {
     }
 
     @UiThread
-    void register(Origin origin, String packageName, boolean notificationsEnabled) {
+    public void addDelegateApp(Origin origin, String packageName) {
+        Token token = Token.create(packageName, mPackageManager);
+        if (token == null) return;
+        mStore.addDelegateApp(origin, token);
+    }
+
+    @UiThread
+    @Nullable
+    public Set<Token> getAllDelegateApps(Origin origin) {
+        return mStore.getAllDelegateApps(origin);
+    }
+
+    @UiThread
+    public void updatePermission(
+            Origin origin, String packageName, @ContentSettingsType int type, boolean enabled) {
         // TODO(peconn): Only trigger if this is for the first time?
 
         String appName = getAppNameForPackage(packageName);
@@ -87,11 +116,13 @@ public class TrustedWebActivityPermissionManager {
         // notification permission could flicker from SET -> UNSET -> SET. This way we transition
         // straight from the channel's permission to the app's permission.
         boolean stateChanged =
-                mStore.setStateForOrigin(origin, packageName, appName, notificationsEnabled);
+                mStore.setStateForOrigin(origin, packageName, appName, type, enabled);
 
-        NotificationChannelPreserver.deleteChannelIfNeeded(mPermissionPreserver, origin);
+        if (type == ContentSettingsType.NOTIFICATIONS) {
+            NotificationChannelPreserver.deleteChannelIfNeeded(mPermissionPreserver, origin);
+        }
 
-        if (stateChanged) InstalledWebappBridge.notifyPermissionsChange();
+        if (stateChanged) InstalledWebappBridge.notifyPermissionsChange(type);
     }
 
     @UiThread
@@ -100,7 +131,8 @@ public class TrustedWebActivityPermissionManager {
 
         NotificationChannelPreserver.restoreChannelIfNeeded(mPermissionPreserver, origin);
 
-        InstalledWebappBridge.notifyPermissionsChange();
+        InstalledWebappBridge.notifyPermissionsChange(ContentSettingsType.NOTIFICATIONS);
+        InstalledWebappBridge.notifyPermissionsChange(ContentSettingsType.GEOLOCATION);
     }
 
     /**
@@ -109,13 +141,13 @@ public class TrustedWebActivityPermissionManager {
      */
     @Nullable
     public String getDelegateAppName(Origin origin) {
-        return mStore.getAppName(origin);
+        return mStore.getDelegateAppName(origin);
     }
 
     /** Returns the package of the app that will handle permission delegation for the origin. */
     @Nullable
     public String getDelegatePackageName(Origin origin) {
-        return mStore.getPackageName(origin);
+        return mStore.getDelegatePackageName(origin);
     }
 
     /** Gets all the origins that we delegate permissions for. */

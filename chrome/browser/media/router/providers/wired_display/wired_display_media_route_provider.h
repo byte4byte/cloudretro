@@ -17,9 +17,11 @@
 #include "chrome/browser/media/router/discovery/media_sink_discovery_metrics.h"
 #include "chrome/browser/media/router/providers/wired_display/wired_display_presentation_receiver.h"
 #include "chrome/common/media_router/media_route_provider_helper.h"
-#include "chrome/common/media_router/media_status.h"
-#include "chrome/common/media_router/mojo/media_router.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "chrome/common/media_router/mojom/media_router.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "ui/display/display.h"
 #include "ui/display/display_observer.h"
 
@@ -41,9 +43,10 @@ class WiredDisplayMediaRouteProvider : public mojom::MediaRouteProvider,
 
   static std::string GetRouteDescription(const std::string& media_source);
 
-  WiredDisplayMediaRouteProvider(mojom::MediaRouteProviderRequest request,
-                                 mojom::MediaRouterPtr media_router,
-                                 Profile* profile);
+  WiredDisplayMediaRouteProvider(
+      mojo::PendingReceiver<mojom::MediaRouteProvider> receiver,
+      mojo::PendingRemote<mojom::MediaRouter> media_router,
+      Profile* profile);
   ~WiredDisplayMediaRouteProvider() override;
 
   // mojom::MediaRouteProvider:
@@ -85,18 +88,15 @@ class WiredDisplayMediaRouteProvider : public mojom::MediaRouteProvider,
   void DetachRoute(const std::string& route_id) override;
   void EnableMdnsDiscovery() override;
   void UpdateMediaSinks(const std::string& media_source) override;
-  void SearchSinks(const std::string& sink_id,
-                   const std::string& media_source,
-                   mojom::SinkSearchCriteriaPtr search_criteria,
-                   SearchSinksCallback callback) override;
   void ProvideSinks(
       const std::string& provider_name,
       const std::vector<media_router::MediaSinkInternal>& sinks) override;
   void CreateMediaRouteController(
       const std::string& route_id,
-      mojom::MediaControllerRequest media_controller,
-      mojom::MediaStatusObserverPtr observer,
+      mojo::PendingReceiver<mojom::MediaController> media_controller,
+      mojo::PendingRemote<mojom::MediaStatusObserver> observer,
       CreateMediaRouteControllerCallback callback) override;
+  void GetState(GetStateCallback callback) override;
 
   // display::DisplayObserver:
   void OnDidProcessDisplayChanges() override;
@@ -124,7 +124,7 @@ class WiredDisplayMediaRouteProvider : public mojom::MediaRouteProvider,
 
     void SetMojoConnections(
         mojo::PendingReceiver<mojom::MediaController> media_controller,
-        mojom::MediaStatusObserverPtr observer);
+        mojo::PendingRemote<mojom::MediaStatusObserver> observer);
 
     // Resets the Mojo connections to media controller and status observer.
     void ResetMojoConnections();
@@ -143,14 +143,14 @@ class WiredDisplayMediaRouteProvider : public mojom::MediaRouteProvider,
    private:
     MediaRoute route_;
     std::unique_ptr<WiredDisplayPresentationReceiver> receiver_;
-    MediaStatus status_;
+    mojom::MediaStatusPtr status_;
 
-    // |media_controller_request| is retained but not used.
+    // |media_controller_receiver_| is retained but not used.
     mojo::PendingReceiver<mojom::MediaController> media_controller_receiver_;
 
     // |media_status_observer|, when set, gets notified whenever |status|
     // changes.
-    mojom::MediaStatusObserverPtr media_status_observer_;
+    mojo::Remote<mojom::MediaStatusObserver> media_status_observer_;
 
     DISALLOW_COPY_AND_ASSIGN(Presentation);
   };
@@ -188,11 +188,11 @@ class WiredDisplayMediaRouteProvider : public mojom::MediaRouteProvider,
   // primary display.
   std::vector<display::Display> GetAvailableDisplays() const;
 
-  // Binds |this| to the Mojo request passed into the ctor.
-  mojo::Binding<mojom::MediaRouteProvider> binding_;
+  // Binds |this| to the Mojo receiver passed into the ctor.
+  mojo::Receiver<mojom::MediaRouteProvider> receiver_;
 
-  // Mojo pointer to the Media Router.
-  mojom::MediaRouterPtr media_router_;
+  // Mojo remote to the Media Router.
+  mojo::Remote<mojom::MediaRouter> media_router_;
 
   // Presentation profiles are created based on this original profile. This
   // profile is not owned by |this|.

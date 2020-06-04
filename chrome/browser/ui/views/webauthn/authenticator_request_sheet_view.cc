@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/views/webauthn/authenticator_request_sheet_view.h"
 
+#include <utility>
+
 #include "chrome/browser/ui/views/accessibility/non_accessible_image_view.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/webauthn/authenticator_request_sheet_model.h"
 #include "chrome/browser/webauthn/authenticator_request_dialog_model.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -27,10 +30,8 @@ namespace {
 // Fixed height of the illustration shown in the top half of the sheet.
 constexpr int kIllustrationHeight = 148;
 
-// Foreground/background color, and the height of the progress bar style
-// activity indicator shown at the top of some sheets.
-constexpr SkColor kActivityIndicateFgColor = SkColorSetRGB(0xf2, 0x99, 0x00);
-constexpr SkColor kActivityIndicateBkColor = SkColorSetRGB(0xf6, 0xe6, 0xc8);
+// Height of the progress bar style activity indicator shown at the top of some
+// sheets.
 constexpr int kActivityIndicatorHeight = 4;
 
 using ImageColorScheme = AuthenticatorRequestSheetModel::ImageColorScheme;
@@ -41,9 +42,7 @@ using views::BoxLayout;
 
 AuthenticatorRequestSheetView::AuthenticatorRequestSheetView(
     std::unique_ptr<AuthenticatorRequestSheetModel> model)
-    : model_(std::move(model)),
-      in_dark_mode_(
-          ui::NativeTheme::GetInstanceForNativeUi()->SystemDarkModeEnabled()) {}
+    : model_(std::move(model)) {}
 
 AuthenticatorRequestSheetView::~AuthenticatorRequestSheetView() = default;
 
@@ -101,8 +100,7 @@ AuthenticatorRequestSheetView::CreateIllustrationWithOverlays() {
     auto activity_indicator = std::make_unique<views::ProgressBar>(
         kActivityIndicatorHeight, false /* allow_round_corner */);
     activity_indicator->SetValue(-1 /* inifinite animation */);
-    activity_indicator->set_foreground_color(kActivityIndicateFgColor);
-    activity_indicator->set_background_color(kActivityIndicateBkColor);
+    activity_indicator->SetBackgroundColor(SK_ColorTRANSPARENT);
     activity_indicator->SetPreferredSize(
         gfx::Size(illustration_width, kActivityIndicatorHeight));
     activity_indicator->SizeToPreferredSize();
@@ -112,7 +110,8 @@ AuthenticatorRequestSheetView::CreateIllustrationWithOverlays() {
   if (model()->IsBackButtonVisible()) {
     auto back_arrow = views::CreateVectorImageButton(this);
     back_arrow->SetFocusForPlatform();
-    back_arrow->SetAccessibleName(l10n_util::GetStringUTF16(IDS_BACK_BUTTON));
+    back_arrow->SetAccessibleName(l10n_util::GetStringUTF16(
+        IDS_BACK_BUTTON_AUTHENTICATOR_REQUEST_DIALOG));
 
     // Position the back button so that there is the standard amount of padding
     // between the top/left side of the back button and the dialog borders.
@@ -173,11 +172,10 @@ AuthenticatorRequestSheetView::CreateContentsBelowIllustration() {
     label_container->AddChildView(description_label.release());
   }
 
-  base::Optional<base::string16> additional_desciption =
-      model()->GetAdditionalDescription();
-  if (additional_desciption) {
+  base::string16 additional_desciption = model()->GetAdditionalDescription();
+  if (!additional_desciption.empty()) {
     auto label = std::make_unique<views::Label>(
-        std::move(*additional_desciption),
+        std::move(additional_desciption),
         views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
     label->SetMultiLine(true);
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -195,25 +193,29 @@ AuthenticatorRequestSheetView::CreateContentsBelowIllustration() {
     contents_layout->SetFlexForView(step_specific_content_, 1);
   }
 
+  base::string16 error = model()->GetError();
+  if (!error.empty()) {
+    auto error_label = std::make_unique<views::Label>(
+        std::move(error), views::style::CONTEXT_LABEL, STYLE_RED);
+    error_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    error_label->SetMultiLine(true);
+    error_label_ = contents->AddChildView(std::move(error_label));
+  }
+
   return contents;
 }
 
 void AuthenticatorRequestSheetView::OnThemeChanged() {
-  ui::NativeTheme* theme = GetNativeTheme();
-  if (theme != ui::NativeTheme::GetInstanceForNativeUi())
-    return;
-  bool in_dark_mode = theme->SystemDarkModeEnabled();
-  if (in_dark_mode == in_dark_mode_)
-    return;
-  in_dark_mode_ = in_dark_mode;
+  views::View::OnThemeChanged();
   UpdateIconImageFromModel();
 }
 
 void AuthenticatorRequestSheetView::UpdateIconImageFromModel() {
-  gfx::IconDescription icon_description(
-      model()->GetStepIllustration(in_dark_mode_ ? ImageColorScheme::kDark
-                                                 : ImageColorScheme::kLight),
-      0 /* automatic dip_size */, SK_ColorBLACK, base::TimeDelta(),
-      gfx::kNoneIcon);
+  if (!step_illustration_)
+    return;
+
+  gfx::IconDescription icon_description(model()->GetStepIllustration(
+      GetNativeTheme()->ShouldUseDarkColors() ? ImageColorScheme::kDark
+                                              : ImageColorScheme::kLight));
   step_illustration_->SetImage(gfx::CreateVectorIcon(icon_description));
 }

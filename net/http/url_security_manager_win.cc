@@ -7,6 +7,7 @@
 #include <urlmon.h>
 #include <wrl/client.h>
 
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,7 +27,7 @@
 
 namespace net {
 
-class URLSecurityManagerWin : public URLSecurityManagerWhitelist {
+class URLSecurityManagerWin : public URLSecurityManagerAllowlist {
  public:
   URLSecurityManagerWin();
   ~URLSecurityManagerWin() override;
@@ -47,8 +48,8 @@ URLSecurityManagerWin::~URLSecurityManagerWin() {}
 
 bool URLSecurityManagerWin::CanUseDefaultCredentials(
     const GURL& auth_origin) const {
-  if (HasDefaultWhitelist())
-    return URLSecurityManagerWhitelist::CanUseDefaultCredentials(auth_origin);
+  if (HasDefaultAllowlist())
+    return URLSecurityManagerAllowlist::CanUseDefaultCredentials(auth_origin);
   if (!const_cast<URLSecurityManagerWin*>(this)->EnsureSystemSecurityManager())
     return false;
 

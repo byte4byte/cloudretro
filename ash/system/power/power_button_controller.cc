@@ -63,7 +63,7 @@ std::unique_ptr<views::Widget> CreateMenuWidget() {
   auto menu_widget = std::make_unique<views::Widget>();
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+  params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.z_order = ui::ZOrderLevel::kFloatingWindow;
   params.accept_events = true;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -71,7 +71,7 @@ std::unique_ptr<views::Widget> CreateMenuWidget() {
   params.layer_type = ui::LAYER_SOLID_COLOR;
   params.parent = Shell::GetPrimaryRootWindow()->GetChildById(
       kShellWindowId_PowerMenuContainer);
-  menu_widget->Init(params);
+  menu_widget->Init(std::move(params));
 
   gfx::Rect widget_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
@@ -104,8 +104,7 @@ PowerButtonController::PowerButtonController(
     : backlights_forced_off_setter_(backlights_forced_off_setter),
       lock_state_controller_(Shell::Get()->lock_state_controller()),
       tick_clock_(base::DefaultTickClock::GetInstance()),
-      backlights_forced_off_observer_(this),
-      weak_factory_(this) {
+      backlights_forced_off_observer_(this) {
   ProcessCommandLine();
   display_controller_ = std::make_unique<PowerButtonDisplayController>(
       backlights_forced_off_setter_, tick_clock_);
@@ -432,7 +431,8 @@ void PowerButtonController::StartPowerMenuAnimation() {
   // Avoid a distracting deactivation animation on the formerly-active
   // window when the menu is activated.
   views::Widget* active_toplevel_widget =
-      views::Widget::GetTopLevelWidgetForNativeView(wm::GetActiveWindow());
+      views::Widget::GetTopLevelWidgetForNativeView(
+          window_util::GetActiveWindow());
   active_window_paint_as_active_lock_ =
       active_toplevel_widget ? active_toplevel_widget->LockPaintAsActive()
                              : nullptr;

@@ -54,26 +54,27 @@ std::unique_ptr<WebUsbAllowDevicesForUrlsPolicyHandler>
 WebUsbAllowDevicesForUrlsPolicyHandler::CreateForDevicePolicy(
     const Schema& chrome_schema) {
   return std::make_unique<WebUsbAllowDevicesForUrlsPolicyHandler>(
-      key::kDeviceWebUsbAllowDevicesForUrls,
-      prefs::kDeviceWebUsbAllowDevicesForUrls, chrome_schema);
+      key::kDeviceLoginScreenWebUsbAllowDevicesForUrls,
+      prefs::kDeviceLoginScreenWebUsbAllowDevicesForUrls, chrome_schema);
 }
 
 // static
 void WebUsbAllowDevicesForUrlsPolicyHandler::RegisterPrefs(
     PrefRegistrySimple* registry) {
-  registry->RegisterListPref(prefs::kDeviceWebUsbAllowDevicesForUrls);
+  registry->RegisterListPref(
+      prefs::kDeviceLoginScreenWebUsbAllowDevicesForUrls);
 }
 #endif  // defined(OS_CHROMEOS)
 
 WebUsbAllowDevicesForUrlsPolicyHandler::WebUsbAllowDevicesForUrlsPolicyHandler(
     const char* policy_name,
-    const char* pref_path,
+    const char* pref_name,
     const Schema& chrome_schema)
     : SchemaValidatingPolicyHandler(
           policy_name,
           chrome_schema.GetKnownProperty(policy_name),
           SchemaOnErrorStrategy::SCHEMA_ALLOW_UNKNOWN),
-      pref_path_(pref_path) {}
+      pref_name_(pref_name) {}
 
 WebUsbAllowDevicesForUrlsPolicyHandler::
     ~WebUsbAllowDevicesForUrlsPolicyHandler() {}
@@ -211,7 +212,7 @@ void WebUsbAllowDevicesForUrlsPolicyHandler::ApplyPolicySettings(
   if (!value || !value->is_list())
     return;
 
-  prefs->SetValue(pref_path_,
+  prefs->SetValue(pref_name_,
                   base::Value::FromUniquePtrValue(std::move(value)));
 }
 

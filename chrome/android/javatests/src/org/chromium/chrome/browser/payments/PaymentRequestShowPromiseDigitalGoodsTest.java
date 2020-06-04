@@ -16,10 +16,13 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppSpeed;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.ui.DisableAnimationsTestRule;
+import org.chromium.ui.test.util.DisableAnimationsTestRule;
 
 import java.util.concurrent.TimeoutException;
 
@@ -38,7 +41,7 @@ public class PaymentRequestShowPromiseDigitalGoodsTest implements MainActivitySt
             new PaymentRequestTestRule("show_promise/digital_goods.html", this);
 
     @Override
-    public void onMainActivityStarted() throws InterruptedException, TimeoutException {}
+    public void onMainActivityStarted() {}
 
     // The initial total in digital_goods.js is 99.99 while the final total is 1.00. Transaction
     // amount metrics must record the final total rather than the initial one. The final total falls
@@ -48,9 +51,8 @@ public class PaymentRequestShowPromiseDigitalGoodsTest implements MainActivitySt
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testDigitalGoodsFastApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.IMMEDIATE_RESPONSE);
+    public void testDigitalGoodsFastApp() throws TimeoutException {
+        mRule.addPaymentAppFactory("basic-card", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
         mRule.openPage();
         mRule.executeJavaScriptAndWaitForResult("create();");
         mRule.triggerUIAndWait(mRule.getReadyToPay());
@@ -71,9 +73,9 @@ public class PaymentRequestShowPromiseDigitalGoodsTest implements MainActivitySt
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testDigitalGoodsSlowApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.DELAYED_RESPONSE, PaymentRequestTestRule.DELAYED_CREATION);
+    public void testDigitalGoodsSlowApp() throws TimeoutException {
+        mRule.addPaymentAppFactory(
+                "basic-card", AppPresence.HAVE_APPS, FactorySpeed.SLOW_FACTORY, AppSpeed.SLOW_APP);
         mRule.openPage();
         mRule.executeJavaScriptAndWaitForResult("create();");
         mRule.triggerUIAndWait(mRule.getReadyToPay());
@@ -94,9 +96,8 @@ public class PaymentRequestShowPromiseDigitalGoodsTest implements MainActivitySt
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testSkipUIFastApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.IMMEDIATE_RESPONSE);
+    public void testSkipUIFastApp() throws TimeoutException {
+        mRule.addPaymentAppFactory("basic-card", AppPresence.HAVE_APPS, FactorySpeed.FAST_FACTORY);
         mRule.openPage();
         mRule.executeJavaScriptAndWaitForResult("create();");
         mRule.enableSkipUIForBasicCard();
@@ -109,9 +110,9 @@ public class PaymentRequestShowPromiseDigitalGoodsTest implements MainActivitySt
     @Test
     @MediumTest
     @Feature({"Payments"})
-    public void testSkipUISlowApp() throws InterruptedException, TimeoutException {
-        mRule.installPaymentApp("basic-card", PaymentRequestTestRule.HAVE_INSTRUMENTS,
-                PaymentRequestTestRule.DELAYED_RESPONSE, PaymentRequestTestRule.DELAYED_CREATION);
+    public void testSkipUISlowApp() throws TimeoutException {
+        mRule.addPaymentAppFactory(
+                "basic-card", AppPresence.HAVE_APPS, FactorySpeed.SLOW_FACTORY, AppSpeed.SLOW_APP);
         mRule.openPage();
         mRule.executeJavaScriptAndWaitForResult("create();");
         mRule.enableSkipUIForBasicCard();

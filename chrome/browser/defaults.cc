@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "chrome/browser/defaults.h"
+
+#include "build/branding_buildflags.h"
+#include "build/build_config.h"
 
 namespace browser_defaults {
 
@@ -27,17 +29,15 @@ const bool kAlwaysOpenIncognitoWindow = false;
 const bool kAlwaysCreateTabbedBrowserOnSessionRestore = true;
 #endif
 
-#if defined(GOOGLE_CHROME_BUILD)
 #if defined(OS_CHROMEOS)
 const bool kShowHelpMenuItemIcon = true;
 #else
 const bool kShowHelpMenuItemIcon = false;
 #endif
-#endif
 
 const bool kDownloadPageHasShowInFolder = true;
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
 const bool kSyncAutoStarts = true;
 #else
 const bool kSyncAutoStarts = false;

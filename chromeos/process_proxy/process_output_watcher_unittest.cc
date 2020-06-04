@@ -16,11 +16,12 @@
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 
 namespace chromeos {
@@ -110,7 +111,7 @@ class ProcessOutputWatcherTest : public testing::Test {
 
   void OnRead(ProcessOutputType type,
               const std::string& output,
-              const base::Closure& ack_callback) {
+              base::OnceClosure ack_callback) {
     ASSERT_FALSE(failed_);
     // There may be an EXIT signal sent during test tear down (which is sent
     // by process output watcher when master end of test pseudo-terminal is
@@ -124,14 +125,14 @@ class ProcessOutputWatcherTest : public testing::Test {
     failed_ = !expectations_.CheckExpectations(output, type);
     if (failed_ || expectations_.IsDone()) {
       ASSERT_FALSE(test_case_done_callback_.is_null());
-      scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-          FROM_HERE, test_case_done_callback_);
+      task_environment_.GetMainThreadTaskRunner()->PostTask(
+          FROM_HERE, std::move(test_case_done_callback_));
       test_case_done_callback_.Reset();
     }
 
     ASSERT_FALSE(ack_callback.is_null());
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(FROM_HERE,
-                                                                 ack_callback);
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
+        FROM_HERE, std::move(ack_callback));
   }
 
  protected:
@@ -146,16 +147,15 @@ class ProcessOutputWatcherTest : public testing::Test {
     ASSERT_FALSE(output_watch_thread_started_);
     output_watch_thread_.reset(new base::Thread("ProcessOutpuWatchThread"));
     output_watch_thread_started_ = output_watch_thread_->StartWithOptions(
-        base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+        base::Thread::Options(base::MessagePumpType::IO, 0));
     ASSERT_TRUE(output_watch_thread_started_);
 
     int pt_pipe[2];
     ASSERT_FALSE(HANDLE_EINTR(pipe(pt_pipe)));
 
-    std::unique_ptr<ProcessOutputWatcher> crosh_watcher(
-        new ProcessOutputWatcher(pt_pipe[0],
-                                 base::Bind(&ProcessOutputWatcherTest::OnRead,
-                                            base::Unretained(this))));
+    auto crosh_watcher = std::make_unique<ProcessOutputWatcher>(
+        pt_pipe[0], base::BindRepeating(&ProcessOutputWatcherTest::OnRead,
+                                        base::Unretained(this)));
 
     output_watch_thread_->task_runner()->PostTask(
         FROM_HERE, base::BindOnce(&ProcessOutputWatcher::Start,
@@ -191,8 +191,8 @@ class ProcessOutputWatcherTest : public testing::Test {
   }
 
  private:
-  base::Closure test_case_done_callback_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::OnceClosure test_case_done_callback_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<base::Thread> output_watch_thread_;
   bool output_watch_thread_started_;
   bool failed_;

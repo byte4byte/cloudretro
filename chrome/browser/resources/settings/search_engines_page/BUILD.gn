@@ -3,49 +3,12 @@
 # found in the LICENSE file.
 
 import("//third_party/closure_compiler/compile_js.gni")
+import("//tools/polymer/polymer.gni")
+import("//ui/webui/resources/tools/js_modulizer.gni")
+import("../settings.gni")
 
 js_type_check("closure_compile") {
-  deps = [
-    ":omnibox_extension_entry",
-    ":search_engine_dialog",
-    ":search_engine_entry",
-    ":search_engines_browser_proxy",
-    ":search_engines_list",
-    ":search_engines_page",
-  ]
-}
-
-js_library("search_engine_dialog") {
-  deps = [
-    ":search_engines_browser_proxy",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:load_time_data",
-    "//ui/webui/resources/js:web_ui_listener_behavior",
-  ]
-}
-
-js_library("search_engine_entry") {
-  deps = [
-    ":search_engines_browser_proxy",
-    "//ui/webui/resources/cr_elements/cr_action_menu:cr_action_menu",
-    "//ui/webui/resources/js:assert",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:icon",
-    "//ui/webui/resources/js/cr/ui:focus_row_behavior",
-    "//ui/webui/resources/js/cr/ui:focus_without_ink",
-  ]
-}
-
-js_library("omnibox_extension_entry") {
-  deps = [
-    ":search_engines_browser_proxy",
-    "..:extension_control_browser_proxy",
-    "//ui/webui/resources/cr_elements/cr_action_menu:cr_action_menu",
-    "//ui/webui/resources/js:assert",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:icon",
-    "//ui/webui/resources/js/cr/ui:focus_row_behavior",
-  ]
+  deps = [ ":search_engines_browser_proxy" ]
 }
 
 js_library("search_engines_browser_proxy") {
@@ -55,21 +18,124 @@ js_library("search_engines_browser_proxy") {
   ]
 }
 
+js_type_check("closure_compile_module") {
+  is_polymer3 = true
+  closure_flags = settings_closure_flags
+  deps = [
+    ":omnibox_extension_entry",
+    ":search_engine_dialog",
+    ":search_engine_entry",
+    ":search_engines_browser_proxy.m",
+    ":search_engines_list",
+    ":search_engines_page",
+  ]
+}
+
+js_library("omnibox_extension_entry") {
+  deps = [
+    ":search_engines_browser_proxy.m",
+    "..:extension_control_browser_proxy.m",
+    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/cr_elements/cr_action_menu:cr_action_menu.m",
+    "//ui/webui/resources/js:assert.m",
+    "//ui/webui/resources/js/cr/ui:focus_row_behavior.m",
+  ]
+}
+
+js_library("search_engine_dialog") {
+  deps = [
+    ":search_engines_browser_proxy.m",
+    "..:i18n_setup.m",
+    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/cr_elements/cr_dialog:cr_dialog.m",
+    "//ui/webui/resources/js:web_ui_listener_behavior.m",
+  ]
+}
+
+js_library("search_engine_entry") {
+  deps = [
+    ":search_engines_browser_proxy.m",
+    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/cr_elements/cr_action_menu:cr_action_menu.m",
+    "//ui/webui/resources/js:assert.m",
+    "//ui/webui/resources/js/cr/ui:focus_row_behavior.m",
+  ]
+}
+
+js_library("search_engines_browser_proxy.m") {
+  sources = [ "$root_gen_dir/chrome/browser/resources/settings/search_engines_page/search_engines_browser_proxy.m.js" ]
+  deps = [ "//ui/webui/resources/js:cr.m" ]
+  extra_deps = [ ":modulize" ]
+}
+
 js_library("search_engines_list") {
   deps = [
-    ":search_engines_browser_proxy",
-    "//ui/webui/resources/js:cr",
+    ":search_engines_browser_proxy.m",
+    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
   ]
 }
 
 js_library("search_engines_page") {
   deps = [
-    ":search_engines_browser_proxy",
-    "..:global_scroll_target_behavior",
-    "//third_party/polymer/v1_0/components-chromium/iron-resizable-behavior:iron-resizable-behavior-extracted",
-    "//ui/webui/resources/js:assert",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:load_time_data",
-    "//ui/webui/resources/js/cr/ui:focus_without_ink",
+    ":search_engines_browser_proxy.m",
+    "..:global_scroll_target_behavior.m",
+    "..:settings_routes.m",
+    "//third_party/polymer/v3_0/components-chromium/iron-list",
+    "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    "//ui/webui/resources/js:assert.m",
+    "//ui/webui/resources/js:web_ui_listener_behavior.m",
   ]
+}
+
+group("polymer3_elements") {
+  public_deps = [
+    ":modulize",
+    ":omnibox_extension_entry_module",
+    ":search_engine_dialog_module",
+    ":search_engine_entry_css_module",
+    ":search_engine_entry_module",
+    ":search_engines_list_module",
+    ":search_engines_page_module",
+  ]
+}
+
+polymer_modulizer("omnibox_extension_entry") {
+  js_file = "omnibox_extension_entry.js"
+  html_file = "omnibox_extension_entry.html"
+  html_type = "v3-ready"
+}
+
+polymer_modulizer("search_engine_dialog") {
+  js_file = "search_engine_dialog.js"
+  html_file = "search_engine_dialog.html"
+  html_type = "v3-ready"
+}
+
+polymer_modulizer("search_engine_entry") {
+  js_file = "search_engine_entry.js"
+  html_file = "search_engine_entry.html"
+  html_type = "v3-ready"
+}
+
+polymer_modulizer("search_engine_entry_css") {
+  js_file = "search_engine_entry_css.js"
+  html_file = "search_engine_entry_css.html"
+  html_type = "v3-ready"
+}
+
+polymer_modulizer("search_engines_list") {
+  js_file = "search_engines_list.js"
+  html_file = "search_engines_list.html"
+  html_type = "v3-ready"
+}
+
+polymer_modulizer("search_engines_page") {
+  js_file = "search_engines_page.js"
+  html_file = "search_engines_page.html"
+  html_type = "v3-ready"
+}
+
+js_modulizer("modulize") {
+  input_files = [ "search_engines_browser_proxy.js" ]
+  namespace_rewrites = settings_namespace_rewrites
 }

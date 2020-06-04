@@ -5,6 +5,7 @@
 #include "chrome/test/media_router/media_router_ui_for_test.h"
 
 #include "base/bind.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
@@ -16,6 +17,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/geometry/point.h"
 
 namespace media_router {
@@ -107,7 +109,8 @@ void MediaRouterUiForTest::TearDown() {
 }
 
 void MediaRouterUiForTest::ShowDialog() {
-  dialog_controller_->ShowMediaRouterDialog();
+  dialog_controller_->ShowMediaRouterDialog(
+      MediaRouterDialogOpenOrigin::TOOLBAR);
   base::RunLoop().RunUntilIdle();
 }
 

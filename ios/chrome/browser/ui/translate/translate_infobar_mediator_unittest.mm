@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/chrome/browser/ui/translate/translate_infobar_mediator.h"
+#import "ios/chrome/browser/ui/translate/legacy_translate_infobar_mediator.h"
 
 #include <memory>
 
@@ -24,7 +24,7 @@
 #import "ios/web/public/deprecated/crw_test_js_injection_receiver.h"
 #import "ios/web/public/test/fakes/test_navigation_manager.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
-#include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest_mac.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -81,11 +81,13 @@ class TranslateInfobarMediatorTest : public PlatformTest {
             niceMockForProtocol:@protocol(TestSelectionHandlerProtocol)]),
         notification_handler_([OCMockObject
             niceMockForProtocol:@protocol(TranslateNotificationHandler)]),
-        mediator_([[TranslateInfobarMediator alloc]
+        mediator_([[LegacyTranslateInfobarMediator alloc]
             initWithSelectionHandler:selection_handler_
                  notificationHandler:notification_handler_]) {
     CreateTranslateClient();
   }
+
+  ~TranslateInfobarMediatorTest() override { [mediator_ disconnect]; }
 
   WebStateList* web_state_list() { return web_state_list_.get(); }
 
@@ -93,7 +95,7 @@ class TranslateInfobarMediatorTest : public PlatformTest {
 
   id notification_handler() { return notification_handler_; }
 
-  TranslateInfobarMediator* mediator() { return mediator_; }
+  LegacyTranslateInfobarMediator* mediator() { return mediator_; }
 
   void CreateTranslateClient() {
     auto web_state = std::make_unique<web::TestWebState>();
@@ -136,14 +138,14 @@ class TranslateInfobarMediatorTest : public PlatformTest {
   }
 
  private:
-  web::TestWebThreadBundle web_thread_bundle_;
+  web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> browser_state_;
   FakeWebStateListDelegate web_state_list_delegate_;
   std::unique_ptr<WebStateList> web_state_list_;
   MockTranslateInfoBarDelegateFactory delegate_factory_;
   id selection_handler_;
   id notification_handler_;
-  TranslateInfobarMediator* mediator_;
+  LegacyTranslateInfobarMediator* mediator_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslateInfobarMediatorTest);
 };
@@ -158,7 +160,7 @@ TEST_F(TranslateInfobarMediatorTest, InstallHandlers) {
   EXPECT_EQ(nil, translate_client->translate_option_selection_handler());
   EXPECT_EQ(nil, translate_client->translate_notification_handler());
 
-  TranslateInfobarMediator* translate_infobar_mediator = mediator();
+  LegacyTranslateInfobarMediator* translate_infobar_mediator = mediator();
   translate_infobar_mediator.webStateList = web_state_list();
 
   EXPECT_EQ(selection_handler(),
@@ -189,7 +191,7 @@ TEST_F(TranslateInfobarMediatorTest, TranslateOptionMenuItems) {
   EXPECT_CALL(*GetDelegate(), ShouldAlwaysTranslate())
       .WillOnce(testing::Return(true));
 
-  TranslateInfobarMediator* translate_infobar_mediator = mediator();
+  LegacyTranslateInfobarMediator* translate_infobar_mediator = mediator();
   translate_infobar_mediator.type =
       TranslatePopupMenuTypeTranslateOptionSelection;
   translate_infobar_mediator.infobarDelegate = GetDelegate();
@@ -241,7 +243,7 @@ TEST_F(TranslateInfobarMediatorTest, LanguageSelectionMenuItems) {
   EXPECT_CALL(*GetDelegate(), language_name_at(2))
       .WillOnce(testing::Return(base::UTF8ToUTF16("French")));
 
-  TranslateInfobarMediator* translate_infobar_mediator = mediator();
+  LegacyTranslateInfobarMediator* translate_infobar_mediator = mediator();
   translate_infobar_mediator.type = TranslatePopupMenuTypeLanguageSelection;
   translate_infobar_mediator.infobarDelegate = GetDelegate();
   translate_infobar_mediator.unavailableLanguageIndex = 1;

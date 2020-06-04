@@ -82,9 +82,6 @@ const base::Feature kTranslateRecentTarget{"TranslateRecentTarget",
 const base::Feature kTranslateUI{"TranslateUI",
                                  base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kTranslateMobileManualTrigger{
-    "TranslateAndroidManualTrigger", base::FEATURE_ENABLED_BY_DEFAULT};
-
 DenialTimeUpdate::DenialTimeUpdate(PrefService* prefs,
                                    const std::string& language,
                                    size_t max_denial_count)
@@ -254,7 +251,7 @@ void TranslatePrefs::RemoveFromLanguageList(const std::string& input_language) {
     // data so that Chrome won't try to translate to it next time Translate is
     // triggered.
     if (chrome_language == GetRecentTargetLanguage())
-      SetRecentTargetLanguage("");
+      ResetRecentTargetLanguage();
 
     languages.erase(it);
     PurgeUnsupportedLanguagesInLanguageFamily(chrome_language, &languages);
@@ -366,6 +363,11 @@ void TranslatePrefs::RearrangeLanguage(
 
     UpdateLanguageList(languages);
   }
+}
+
+void TranslatePrefs::SetLanguageOrder(
+    const std::vector<std::string>& new_order) {
+  UpdateLanguageList(new_order);
 }
 
 // static
@@ -787,6 +789,10 @@ void TranslatePrefs::SetRecentTargetLanguage(
   prefs_->SetString(kPrefTranslateRecentTarget, target_language);
 }
 
+void TranslatePrefs::ResetRecentTargetLanguage() {
+  SetRecentTargetLanguage("");
+}
+
 std::string TranslatePrefs::GetRecentTargetLanguage() const {
   return prefs_->GetString(kPrefTranslateRecentTarget);
 }
@@ -854,7 +860,7 @@ void TranslatePrefs::RegisterProfilePrefs(
 }
 
 void TranslatePrefs::MigrateSitesBlacklist() {
-  // Migration should only be neccessary once but there could still be old
+  // Migration should only be necessary once but there could still be old
   // Chrome instances that sync the old preference, so do it once per
   // startup.
   static bool migrated = false;

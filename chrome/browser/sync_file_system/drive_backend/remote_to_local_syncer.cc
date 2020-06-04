@@ -11,11 +11,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
@@ -31,7 +32,7 @@
 #include "components/drive/service/drive_service_interface.h"
 #include "extensions/common/extension.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/common/file_system/file_system_util.h"
 
 namespace sync_file_system {
 namespace drive_backend {
@@ -399,9 +400,8 @@ void RemoteToLocalSyncer::HandleMissingRemoteMetadata(
 
   drive_service()->GetFileResource(
       dirty_tracker_->file_id(),
-      base::Bind(&RemoteToLocalSyncer::DidGetRemoteMetadata,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&token)));
+      base::BindOnce(&RemoteToLocalSyncer::DidGetRemoteMetadata,
+                     weak_ptr_factory_.GetWeakPtr(), base::Passed(&token)));
 }
 
 void RemoteToLocalSyncer::DidGetRemoteMetadata(

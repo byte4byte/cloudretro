@@ -5,15 +5,15 @@
 #include "content/shell/test_runner/text_input_controller.h"
 
 #include "base/macros.h"
-#include "content/shell/test_runner/web_test_delegate.h"
+#include "content/shell/renderer/web_test/blink_test_runner.h"
 #include "content/shell/test_runner/web_view_test_proxy.h"
 #include "gin/arguments.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
-#include "third_party/blink/public/platform/web_keyboard_event.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_ime_text_span.h"
@@ -25,7 +25,7 @@
 #include "ui/events/base_event_utils.h"
 #include "v8/include/v8.h"
 
-namespace test_runner {
+namespace content {
 
 class TextInputControllerBindings
     : public gin::Wrappable<TextInputControllerBindings> {
@@ -274,11 +274,14 @@ void TextInputController::SetMarkedText(const std::string& text,
     ime_text_span.end_offset = start + length;
   }
   ime_text_span.thickness = ui::mojom::ImeTextSpanThickness::kThick;
+  ime_text_span.underline_style = ui::mojom::ImeTextSpanUnderlineStyle::kSolid;
   ime_text_spans.push_back(ime_text_span);
   if (start + length < static_cast<int>(web_text.length())) {
     ime_text_span.start_offset = ime_text_span.end_offset;
     ime_text_span.end_offset = web_text.length();
     ime_text_span.thickness = ui::mojom::ImeTextSpanThickness::kThin;
+    ime_text_span.underline_style =
+        ui::mojom::ImeTextSpanUnderlineStyle::kSolid;
     ime_text_spans.push_back(ime_text_span);
   }
 
@@ -368,7 +371,7 @@ std::vector<int> TextInputController::FirstRectForCharacterRange(
 void TextInputController::SetComposition(const std::string& text) {
   // Sends a keydown event with key code = 0xE5 to emulate input method
   // behavior.
-  blink::WebKeyboardEvent key_down(blink::WebInputEvent::kRawKeyDown,
+  blink::WebKeyboardEvent key_down(blink::WebInputEvent::Type::kRawKeyDown,
                                    blink::WebInputEvent::kNoModifiers,
                                    ui::EventTimeForNow());
 
@@ -385,7 +388,8 @@ void TextInputController::SetComposition(const std::string& text) {
   std::vector<blink::WebImeTextSpan> ime_text_spans;
   ime_text_spans.push_back(blink::WebImeTextSpan(
       blink::WebImeTextSpan::Type::kComposition, 0, textLength,
-      ui::mojom::ImeTextSpanThickness::kThin, SK_ColorTRANSPARENT));
+      ui::mojom::ImeTextSpanThickness::kThin,
+      ui::mojom::ImeTextSpanUnderlineStyle::kSolid, SK_ColorTRANSPARENT));
   if (auto* controller = GetInputMethodController()) {
     controller->SetComposition(
         newText, blink::WebVector<blink::WebImeTextSpan>(ime_text_spans),
@@ -398,12 +402,12 @@ void TextInputController::ForceTextInputStateUpdate() {
   CHECK(view()->MainFrame()->IsWebLocalFrame())
       << "WebView does not have a local main frame and"
          " cannot handle input method controller tasks.";
-  web_view_test_proxy_->delegate()->ForceTextInputStateUpdate(
+  web_view_test_proxy_->blink_test_runner()->ForceTextInputStateUpdate(
       view()->MainFrame()->ToWebLocalFrame());
 }
 
 blink::WebView* TextInputController::view() {
-  return web_view_test_proxy_->webview();
+  return web_view_test_proxy_->GetWebView();
 }
 
 blink::WebInputMethodController*
@@ -423,4 +427,4 @@ TextInputController::GetInputMethodController() {
       ->GetActiveWebInputMethodController();
 }
 
-}  // namespace test_runner
+}  // namespace content

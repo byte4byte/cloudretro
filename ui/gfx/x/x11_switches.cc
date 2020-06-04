@@ -7,10 +7,11 @@
 
 namespace switches {
 
-#if !defined(OS_CHROMEOS)
 // Which X11 display to connect to. Emulates the GTK+ "--display=" command line
 // argument.
 const char kX11Display[] = "display";
-#endif
+
+// Disables MIT-SHM extension.
+const char kNoXshm[] = "no-xshm";
 
 }  // namespace switches

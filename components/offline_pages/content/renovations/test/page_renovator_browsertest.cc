@@ -62,10 +62,10 @@ const char kTestRenovationScript[] =
       var node = document.getElementById('always');
       node.parentNode.removeChild(node);
     }
-    var map_renovations = {'foo':foo, 'bar':bar, 'always':always};
+    var mapRenovations = {'foo':foo, 'bar':bar, 'always':always};
     function run_renovations(idlist) {
       for (var id of idlist) {
-        map_renovations[id]();
+        mapRenovations[id]();
       }
     })*";
 
@@ -155,7 +155,7 @@ void PageRenovatorBrowserTest::SetUpOnMainThread() {
 
 void PageRenovatorBrowserTest::Navigate(const std::string& test_page_path) {
   GURL url = test_server_.GetURL(test_page_path);
-  content::NavigateToURL(shell(), url);
+  EXPECT_TRUE(content::NavigateToURL(shell(), url));
   render_frame_ = shell()->web_contents()->GetMainFrame();
 }
 
@@ -192,9 +192,8 @@ void PageRenovatorBrowserTest::InitializeWithRealRenovations(
 }
 
 void PageRenovatorBrowserTest::QuitRunLoop() {
-  base::Closure quit_task =
-      content::GetDeferredQuitTaskForRunLoop(run_loop_.get());
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, quit_task);
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 content::GetDeferredQuitTaskForRunLoop(run_loop_.get()));
 }
 
 #if defined(OS_WIN)

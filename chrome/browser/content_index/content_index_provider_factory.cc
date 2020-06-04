@@ -5,6 +5,8 @@
 #include "chrome/browser/content_index/content_index_provider_factory.h"
 
 #include "chrome/browser/content_index/content_index_provider_impl.h"
+#include "chrome/browser/engagement/site_engagement_service_factory.h"
+#include "chrome/browser/metrics/ukm_background_recorder_service.h"
 #include "chrome/browser/offline_items_collection/offline_content_aggregator_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +29,8 @@ ContentIndexProviderFactory::ContentIndexProviderFactory()
           "ContentIndexProvider",
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(OfflineContentAggregatorFactory::GetInstance());
+  DependsOn(ukm::UkmBackgroundRecorderFactory::GetInstance());
+  DependsOn(SiteEngagementServiceFactory::GetInstance());
 }
 
 ContentIndexProviderFactory::~ContentIndexProviderFactory() = default;

@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -23,7 +22,7 @@ class PLATFORM_EXPORT ClientHintsPreferences {
  public:
   class Context {
    public:
-    virtual void CountClientHints(mojom::WebClientHintsType) = 0;
+    virtual void CountClientHints(network::mojom::WebClientHintsType) = 0;
     virtual void CountPersistentClientHintHeaders() = 0;
 
    protected:
@@ -42,10 +41,10 @@ class PLATFORM_EXPORT ClientHintsPreferences {
                                          const KURL&,
                                          Context*);
 
-  bool ShouldSend(mojom::WebClientHintsType type) const {
+  bool ShouldSend(network::mojom::WebClientHintsType type) const {
     return enabled_hints_.IsEnabled(type);
   }
-  void SetShouldSendForTesting(mojom::WebClientHintsType type) {
+  void SetShouldSendForTesting(network::mojom::WebClientHintsType type) {
     enabled_hints_.SetIsEnabled(type, true);
   }
 

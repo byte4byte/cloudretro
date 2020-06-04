@@ -34,8 +34,7 @@ ClientVideoDispatcher::ClientVideoDispatcher(VideoStub* video_stub,
                                              ClientStub* client_stub)
     : ChannelDispatcherBase(kVideoChannelName),
       video_stub_(video_stub),
-      client_stub_(client_stub),
-      weak_factory_(this) {}
+      client_stub_(client_stub) {}
 
 ClientVideoDispatcher::~ClientVideoDispatcher() = default;
 
@@ -110,7 +109,7 @@ void ClientVideoDispatcher::OnPacketDone(
   while (!pending_frames_.empty() && pending_frames_.front().done) {
     VideoAck ack_message;
     ack_message.set_frame_id(pending_frames_.front().frame_id);
-    message_pipe()->Send(&ack_message, base::Closure());
+    message_pipe()->Send(&ack_message, {});
     pending_frames_.pop_front();
   }
 }

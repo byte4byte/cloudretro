@@ -12,14 +12,15 @@
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/db/util.h"
-#include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/core/db/util.h"
+#include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
 #include "components/subresource_filter/content/browser/subresource_filter_safe_browsing_activation_throttle.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/blink/public/common/navigation/triggering_event_info.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
-#include "third_party/blink/public/web/web_triggering_event_info.h"
 
 namespace {
 
@@ -123,6 +124,20 @@ void SafeBrowsingTriggeredPopupBlocker::DidFinishNavigation(
   if (level == SubresourceFilterLevel::ENFORCE) {
     current_page_data_->set_is_triggered(true);
     LogAction(Action::kEnforcedSite);
+    // When a page is restored from back-forward cache, we don't get
+    // OnSafeBrowsingChecksComplete callback, so |level| will always
+    // be empty.
+    // To work around this, we disable back-forward cache if the original
+    // page load had abusive enforcement - this means that not doing checks on
+    // back-forward navigation is fine as it's guaranteed that
+    // the original page load didn't have enforcement.
+    // Note that it's possible for the safe browsing list to update while
+    // the page is in the cache, the risk of this is mininal due to
+    // having a time limit for how long pages are allowed to be in the
+    // cache.
+    content::BackForwardCache::DisableForRenderFrameHost(
+        navigation_handle->GetRenderFrameHost(),
+        "SafeBrowsingTriggeredPopupBlocker");
   } else if (level == SubresourceFilterLevel::WARN) {
     web_contents()->GetMainFrame()->AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kWarning, kAbusiveWarnMessage);
@@ -133,25 +148,21 @@ void SafeBrowsingTriggeredPopupBlocker::DidFinishNavigation(
 
 // This method will always be called before the DidFinishNavigation associated
 // with this handle.
+// The exception is a navigation restoring a page from back-forward cache --
+// in that case don't issue any requests, therefore we don't get any
+// safe browsing callbacks. See the comment above for the mitigation.
 void SafeBrowsingTriggeredPopupBlocker::OnSafeBrowsingChecksComplete(
     content::NavigationHandle* navigation_handle,
-    const SafeBrowsingCheckResults& results) {
+    const subresource_filter::SubresourceFilterSafeBrowsingClient::CheckResult&
+        result) {
   DCHECK(navigation_handle->IsInMainFrame());
   base::Optional<safe_browsing::SubresourceFilterLevel> match_level;
-  base::Optional<size_t> match_index;
-  for (size_t i = 0u; i < results.size(); ++i) {
-    const auto& result = results[i];
-    if (result.threat_type !=
-        safe_browsing::SBThreatType::SB_THREAT_TYPE_SUBRESOURCE_FILTER)
-      continue;
-
+  if (result.threat_type ==
+      safe_browsing::SBThreatType::SB_THREAT_TYPE_SUBRESOURCE_FILTER) {
     auto abusive = result.threat_metadata.subresource_filter_match.find(
         safe_browsing::SubresourceFilterType::ABUSIVE);
-    if (abusive != result.threat_metadata.subresource_filter_match.end() &&
-        (!match_level.has_value() || match_level.value() < abusive->second)) {
+    if (abusive != result.threat_metadata.subresource_filter_match.end())
       match_level = abusive->second;
-      match_index = i;
-    }
   }
 
   if (match_level.has_value()) {

@@ -95,7 +95,8 @@ struct SessionContext {
 }  // namespace
 
 class ChromotingSession::Core : public ClientUserInterface,
-                                public protocol::ClipboardStub {
+                                public protocol::ClipboardStub,
+                                public protocol::KeyboardLayoutStub {
  public:
   Core(ChromotingClientRuntime* runtime,
        std::unique_ptr<ClientTelemetryLogger> logger,
@@ -134,9 +135,13 @@ class ChromotingSession::Core : public ClientUserInterface,
                       const webrtc::DesktopVector& dpi) override;
   protocol::ClipboardStub* GetClipboardStub() override;
   protocol::CursorShapeStub* GetCursorShapeStub() override;
+  protocol::KeyboardLayoutStub* GetKeyboardLayoutStub() override;
 
-  // CursorShapeStub implementation.
+  // ClipboardStub implementation.
   void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
+
+  // KeyboardLayoutStub implementation.
+  void SetKeyboardLayout(const protocol::KeyboardLayout& layout) override;
 
   base::WeakPtr<Core> GetWeakPtr();
 
@@ -203,7 +208,7 @@ class ChromotingSession::Core : public ClientUserInterface,
   // |weak_ptr_| in GetWeakPtr() so that its copies are still invalidated once
   // InvalidateWeakPtrs() is called.
   base::WeakPtr<Core> weak_ptr_;
-  base::WeakPtrFactory<Core> weak_factory_;
+  base::WeakPtrFactory<Core> weak_factory_{this};
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
@@ -212,8 +217,7 @@ ChromotingSession::Core::Core(ChromotingClientRuntime* runtime,
                               std::unique_ptr<SessionContext> session_context)
     : runtime_(runtime),
       logger_(std::move(logger)),
-      session_context_(std::move(session_context)),
-      weak_factory_(this) {
+      session_context_(std::move(session_context)) {
   DCHECK(ui_task_runner()->BelongsToCurrentThread());
   DCHECK(runtime_);
   DCHECK(logger_);
@@ -446,8 +450,17 @@ protocol::CursorShapeStub* ChromotingSession::Core::GetCursorShapeStub() {
   return session_context_->cursor_shape_stub.get();
 }
 
+protocol::KeyboardLayoutStub* ChromotingSession::Core::GetKeyboardLayoutStub() {
+  return this;
+}
+
 void ChromotingSession::Core::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
+  NOTIMPLEMENTED();
+}
+
+void ChromotingSession::Core::SetKeyboardLayout(
+    const protocol::KeyboardLayout& layout) {
   NOTIMPLEMENTED();
 }
 
@@ -485,6 +498,15 @@ void ChromotingSession::Core::Invalidate() {
 
 void ChromotingSession::Core::ConnectOnNetworkThread() {
   DCHECK(network_task_runner()->BelongsToCurrentThread());
+
+  if (session_context_->info.host_ftl_id.empty()) {
+    // Simulate a CONNECTING state to make sure it doesn't skew telemetry.
+    OnConnectionState(protocol::ConnectionToHost::State::CONNECTING,
+                      protocol::OK);
+    OnConnectionState(protocol::ConnectionToHost::State::FAILED,
+                      protocol::INCOMPATIBLE_PROTOCOL);
+    return;
+  }
 
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
@@ -547,11 +569,9 @@ void ChromotingSession::Core::ConnectOnNetworkThread() {
   client_auth_config.fetch_secret_callback =
       base::BindRepeating(&Core::FetchSecret, GetWeakPtr());
 
-  std::string signaling_id = session_context_->info.host_ftl_id.empty()
-                                 ? session_context_->info.host_jid
-                                 : session_context_->info.host_ftl_id;
   client_->Start(signaling_.get(), client_auth_config, transport_context,
-                 signaling_id, session_context_->info.capabilities);
+                 session_context_->info.host_ftl_id,
+                 session_context_->info.capabilities);
 }
 
 void ChromotingSession::Core::LogPerfStats() {

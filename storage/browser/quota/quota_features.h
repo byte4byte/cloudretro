@@ -21,6 +21,14 @@ extern const base::FeatureParam<double> kPerHostRatio;
 COMPONENT_EXPORT(STORAGE_BROWSER)
 extern const base::Feature kStaticHostQuota;
 
+COMPONENT_EXPORT(STORAGE_BROWSER)
+extern const base::Feature kQuotaUnlimitedPoolSize;
+
+COMPONENT_EXPORT(STORAGE_BROWSER)
+extern const base::Feature kIncognitoDynamicQuota;
+extern const base::FeatureParam<double> kIncognitoQuotaRatioLowerBound;
+extern const base::FeatureParam<double> kIncognitoQuotaRatioUpperBound;
+
 }  // namespace features
 
 }  // namespace storage

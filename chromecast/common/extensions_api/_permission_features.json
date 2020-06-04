@@ -17,9 +17,18 @@
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
     "location": "component"
   },
+  "commandLinePrivate": {
+    "channel": "stable",
+    "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
+    "location": "component"
+  },
   "history": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
+  },
+  "loginState": {
+    "channel": "stable",
+    "extension_types": ["login_screen_extension", "extension"]
   },
   "settingsPrivate": {
     "channel": "stable",
@@ -67,5 +76,9 @@
   "tabs": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
+  },
+  "loginState": {
+    "channel": "stable",
+    "extension_types": ["extension"]
   }
 }

@@ -23,15 +23,8 @@ CrFocusRowBehaviorTest.prototype = {
     ...PolymerTest.prototype.extraLibraries,
     '//ui/webui/resources/js/util.js',
     'cr_focus_row_behavior_test.js',
-    'settings/test_util.js',
+    'test_util.js',
   ],
-
-  /** @override */
-  setUp: function() {
-    PolymerTest.prototype.setUp.call(this);
-    // We aren't loading the main document.
-    this.accessibilityAuditConfig.ignoreSelectors('humanLangMissing', 'html');
-  },
 };
 
 TEST_F('CrFocusRowBehaviorTest', 'FocusTest', function() {

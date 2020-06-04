@@ -11,12 +11,20 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
-#include "chrome/browser/android/signin/signin_manager_delegate.h"
-#include "components/prefs/pref_change_registrar.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_member.h"
-#include "components/signin/public/identity_manager/identity_manager.h"
 
-class SigninClient;
+namespace policy {
+class UserCloudPolicyManager;
+class UserPolicySigninService;
+}  // namespace policy
+
+namespace signin {
+class IdentityManager;
+}
+
+struct CoreAccountInfo;
+class Profile;
 
 // Android wrapper of Chrome's C++ identity management code which provides
 // access from the Java layer. Note that on Android, there's only a single
@@ -26,56 +34,84 @@ class SigninClient;
 //
 // This class implements parts of the sign-in flow, to make sure that policy
 // is available before sign-in completes.
-class SigninManagerAndroid : public identity::IdentityManager::Observer {
+class SigninManagerAndroid : public KeyedService {
  public:
-  SigninManagerAndroid(
-      SigninClient* signin_client,
-      PrefService* local_state_prefs_service,
-      identity::IdentityManager* identity_manager,
-      std::unique_ptr<SigninManagerDelegate> signin_manager_delegate);
+  SigninManagerAndroid(Profile* profile,
+                       signin::IdentityManager* identity_manager);
 
   ~SigninManagerAndroid() override;
 
-  void Shutdown();
+  void Shutdown() override;
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
-  // Indicates that the user has made the choice to sign-in. |username|
-  // contains the email address of the account to use as primary.
-  void OnSignInCompleted(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj,
-                         const base::android::JavaParamRef<jstring>& username);
+  jboolean IsSigninAllowedByPolicy(JNIEnv* env) const;
 
-  void SignOut(JNIEnv* env,
-               const base::android::JavaParamRef<jobject>& obj,
-               jint signoutReason);
+  jboolean IsForceSigninEnabled(JNIEnv* env);
 
-  void LogInSignedInUser(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj);
-
-  void ClearLastSignedInUser(JNIEnv* env,
-                             const base::android::JavaParamRef<jobject>& obj);
-
-  jboolean IsSigninAllowedByPolicy(
+  // Registers a CloudPolicyClient for fetching policy for a user and fetches
+  // the policy if necessary.
+  void FetchAndApplyCloudPolicy(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj) const;
+      const base::android::JavaParamRef<jobject>& j_account_info,
+      const base::android::JavaParamRef<jobject>& j_callback);
 
-  jboolean IsForceSigninEnabled(
+  void StopApplyingCloudPolicy(JNIEnv* env);
+
+  void IsAccountManaged(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
+      const base::android::JavaParamRef<jobject>& j_account_info,
+      const base::android::JavaParamRef<jobject>& j_callback);
 
-  jboolean IsSignedInOnNative(JNIEnv* env,
-                              const base::android::JavaParamRef<jobject>& obj);
+  base::android::ScopedJavaLocalRef<jstring> GetManagementDomain(JNIEnv* env);
 
-  // identity::IdentityManager::Observer implementation.
-  void OnPrimaryAccountCleared(
-      const CoreAccountInfo& previous_primary_account_info) override;
+  // Delete all data for this profile.
+  void WipeProfileData(JNIEnv* env,
+                       const base::android::JavaParamRef<jobject>& j_callback);
+
+  // Delete service worker caches for google.<eTLD>.
+  void WipeGoogleServiceWorkerCaches(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& j_callback);
 
  private:
+  friend class SigninManagerAndroidTest;
+  FRIEND_TEST_ALL_PREFIXES(SigninManagerAndroidTest,
+                           DeleteGoogleServiceWorkerCaches);
+
   void OnSigninAllowedPrefChanged() const;
   bool IsSigninAllowed() const;
 
-  SigninClient* signin_client_;
+  struct ManagementCredentials {
+    ManagementCredentials(const std::string& dm_token,
+                          const std::string& client_id)
+        : dm_token(dm_token), client_id(client_id) {}
+    const std::string dm_token;
+    const std::string client_id;
+  };
+
+  using RegisterPolicyWithAccountCallback = base::OnceCallback<void(
+      const base::Optional<ManagementCredentials>& credentials)>;
+
+  // If required registers for policy with given account. callback will be
+  // called with credentials if the account is managed.
+  void RegisterPolicyWithAccount(const CoreAccountInfo& account,
+                                 RegisterPolicyWithAccountCallback callback);
+
+  void OnPolicyRegisterDone(
+      const CoreAccountInfo& account_id,
+      base::OnceCallback<void()> policy_callback,
+      const base::Optional<ManagementCredentials>& credentials);
+
+  void FetchPolicyBeforeSignIn(const CoreAccountInfo& account_id,
+                               base::OnceCallback<void()> policy_callback,
+                               const ManagementCredentials& credentials);
+
+  static void WipeData(Profile* profile,
+                       bool all_data,
+                       base::OnceClosure callback);
+
+  Profile* const profile_ = nullptr;
 
   // Handler for prefs::kSigninAllowed set in user's profile.
   BooleanPrefMember signin_allowed_;
@@ -84,14 +120,16 @@ class SigninManagerAndroid : public identity::IdentityManager::Observer {
   // State, not in user prefs.
   BooleanPrefMember force_browser_signin_;
 
-  identity::IdentityManager* identity_manager_;
-
-  std::unique_ptr<SigninManagerDelegate> signin_manager_delegate_;
+  signin::IdentityManager* const identity_manager_ = nullptr;
+  policy::UserCloudPolicyManager* const user_cloud_policy_manager_ = nullptr;
+  policy::UserPolicySigninService* const user_policy_signin_service_ = nullptr;
 
   // Java-side SigninManager object.
   base::android::ScopedJavaGlobalRef<jobject> java_signin_manager_;
 
   base::ThreadChecker thread_checker_;
+
+  base::WeakPtrFactory<SigninManagerAndroid> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninManagerAndroid);
 };

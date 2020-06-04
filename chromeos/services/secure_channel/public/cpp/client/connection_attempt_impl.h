@@ -8,7 +8,9 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/services/secure_channel/public/cpp/client/connection_attempt.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace chromeos {
 
@@ -20,10 +22,12 @@ class ConnectionAttemptImpl : public ConnectionAttempt,
  public:
   class Factory {
    public:
-    static Factory* Get();
+    static std::unique_ptr<ConnectionAttemptImpl> Create();
     static void SetFactoryForTesting(Factory* test_factory);
+
+   protected:
     virtual ~Factory();
-    virtual std::unique_ptr<ConnectionAttemptImpl> BuildInstance();
+    virtual std::unique_ptr<ConnectionAttemptImpl> CreateInstance() = 0;
 
    private:
     static Factory* test_factory_;
@@ -31,7 +35,7 @@ class ConnectionAttemptImpl : public ConnectionAttempt,
 
   ~ConnectionAttemptImpl() override;
 
-  mojom::ConnectionDelegatePtr GenerateInterfacePtr();
+  mojo::PendingRemote<mojom::ConnectionDelegate> GenerateRemote();
 
  protected:
   ConnectionAttemptImpl();
@@ -39,14 +43,14 @@ class ConnectionAttemptImpl : public ConnectionAttempt,
   // mojom::ConnectionDelegate:
   void OnConnectionAttemptFailure(
       mojom::ConnectionAttemptFailureReason reason) override;
-  void OnConnection(
-      mojom::ChannelPtr channel,
-      mojom::MessageReceiverRequest message_receiver_request) override;
+  void OnConnection(mojo::PendingRemote<mojom::Channel> channel,
+                    mojo::PendingReceiver<mojom::MessageReceiver>
+                        message_receiver_receiver) override;
 
  private:
-  mojo::Binding<mojom::ConnectionDelegate> binding_;
+  mojo::Receiver<mojom::ConnectionDelegate> receiver_{this};
 
-  base::WeakPtrFactory<ConnectionAttemptImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<ConnectionAttemptImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ConnectionAttemptImpl);
 };

@@ -14,12 +14,14 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop_current.h"
+#include "base/metrics/field_trial.h"
 #include "base/process/process.h"
 #include "build/build_config.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_host_resolver.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "net/base/ip_address.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/test_root_certs.h"
 #include "net/dns/mock_host_resolver.h"
@@ -71,7 +73,8 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
       public base::MessageLoopCurrent::DestructionObserver {
  public:
   NetworkServiceTestImpl()
-      : memory_pressure_listener_(
+      : test_host_resolver_(new TestHostResolver()),
+        memory_pressure_listener_(
             base::DoNothing(),
             base::BindRepeating(&NetworkServiceTestHelper::
                                     NetworkServiceTestImpl::OnMemoryPressure,
@@ -101,21 +104,33 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
   // network::mojom::NetworkServiceTest:
   void AddRules(std::vector<network::mojom::RulePtr> rules,
                 AddRulesCallback callback) override {
-    auto* host_resolver = test_host_resolver_.host_resolver();
+    // test_host_resolver_ may be empty if
+    // SetAllowNetworkAccessToHostResolutions was invoked.
+    DCHECK(test_host_resolver_);
+    auto* host_resolver = test_host_resolver_->host_resolver();
     for (const auto& rule : rules) {
       switch (rule->resolver_type) {
         case network::mojom::ResolverType::kResolverTypeFail:
           host_resolver->AddSimulatedFailure(rule->host_pattern);
           break;
-        case network::mojom::ResolverType::kResolverTypeIPLiteral:
-          host_resolver->AddIPLiteralRule(rule->host_pattern, rule->replacement,
-                                          std::string());
+        case network::mojom::ResolverType::kResolverTypeFailTimeout:
+          host_resolver->AddSimulatedTimeoutFailure(rule->host_pattern);
           break;
+        case network::mojom::ResolverType::kResolverTypeIPLiteral: {
+          net::IPAddress ip_address;
+          DCHECK(ip_address.AssignFromIPLiteral(rule->replacement));
+          host_resolver->AddRuleWithFlags(rule->host_pattern, rule->replacement,
+                                          rule->host_resolver_flags,
+                                          rule->canonical_name);
+          break;
+        }
         case network::mojom::ResolverType::kResolverTypeDirectLookup:
           host_resolver->AllowDirectLookup(rule->host_pattern);
           break;
         default:
-          host_resolver->AddRule(rule->host_pattern, rule->replacement);
+          host_resolver->AddRuleWithFlags(rule->host_pattern, rule->replacement,
+                                          rule->host_resolver_flags,
+                                          rule->canonical_name);
           break;
       }
     }
@@ -124,7 +139,7 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
 
   void SimulateNetworkChange(network::mojom::ConnectionType type,
                              SimulateNetworkChangeCallback callback) override {
-    DCHECK(net::NetworkChangeNotifier::HasNetworkChangeNotifier());
+    DCHECK(!net::NetworkChangeNotifier::CreateIfNeeded());
     net::NetworkChangeNotifier::NotifyObserversOfNetworkChangeForTests(
         net::NetworkChangeNotifier::ConnectionType(type));
     std::move(callback).Run();
@@ -165,19 +180,10 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
     std::move(callback).Run();
   }
 
-  void SetShouldRequireCT(ShouldRequireCT required,
-                          SetShouldRequireCTCallback callback) override {
-    if (required == NetworkServiceTest::ShouldRequireCT::RESET) {
-      net::TransportSecurityState::SetShouldRequireCTForTesting(nullptr);
-      std::move(callback).Run();
-      return;
-    }
-
-    bool ct = true;
-    if (NetworkServiceTest::ShouldRequireCT::DONT_REQUIRE == required)
-      ct = false;
-
-    net::TransportSecurityState::SetShouldRequireCTForTesting(&ct);
+  void SetRequireCT(RequireCT required,
+                    SetRequireCTCallback callback) override {
+    net::TransportSecurityState::SetRequireCTForTesting(
+        required == NetworkServiceTest::RequireCT::REQUIRE);
     std::move(callback).Run();
   }
 
@@ -191,6 +197,12 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
     } else {
       transport_security_state_source_.reset();
     }
+    std::move(callback).Run();
+  }
+
+  void SetAllowNetworkAccessToHostResolutions(
+      SetAllowNetworkAccessToHostResolutionsCallback callback) override {
+    test_host_resolver_.reset();
     std::move(callback).Run();
   }
 
@@ -225,8 +237,18 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
     std::move(callback).Run(value);
   }
 
-  void BindRequest(network::mojom::NetworkServiceTestRequest request) {
-    bindings_.AddBinding(this, std::move(request));
+  void Log(const std::string& message, LogCallback callback) override {
+    LOG(ERROR) << message;
+    std::move(callback).Run();
+  }
+
+  void ActivateFieldTrial(const std::string& field_trial_name) override {
+    base::FieldTrialList::FindFullName(field_trial_name);
+  }
+
+  void BindReceiver(
+      mojo::PendingReceiver<network::mojom::NetworkServiceTest> receiver) {
+    receivers_.Add(this, std::move(receiver));
     if (!registered_as_destruction_observer_) {
       base::MessageLoopCurrentForIO::Get()->AddDestructionObserver(this);
       registered_as_destruction_observer_ = true;
@@ -236,7 +258,7 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
   // base::MessageLoopCurrent::DestructionObserver:
   void WillDestroyCurrentMessageLoop() override {
     // Needs to be called on the IO thread.
-    bindings_.CloseAllBindings();
+    receivers_.Clear();
   }
 
  private:
@@ -246,8 +268,8 @@ class NetworkServiceTestHelper::NetworkServiceTestImpl
   }
 
   bool registered_as_destruction_observer_ = false;
-  mojo::BindingSet<network::mojom::NetworkServiceTest> bindings_;
-  TestHostResolver test_host_resolver_;
+  mojo::ReceiverSet<network::mojom::NetworkServiceTest> receivers_;
+  std::unique_ptr<TestHostResolver> test_host_resolver_;
   std::unique_ptr<net::MockCertVerifier> mock_cert_verifier_;
   std::unique_ptr<net::ScopedTransportSecurityStateSource>
       transport_security_state_source_;
@@ -266,18 +288,15 @@ NetworkServiceTestHelper::~NetworkServiceTestHelper() = default;
 
 void NetworkServiceTestHelper::RegisterNetworkBinders(
     service_manager::BinderRegistry* registry) {
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
-
-  registry->AddInterface(
-      base::Bind(&NetworkServiceTestHelper::BindNetworkServiceTestRequest,
-                 base::Unretained(this)));
+  registry->AddInterface(base::BindRepeating(
+      &NetworkServiceTestHelper::BindNetworkServiceTestReceiver,
+      base::Unretained(this)));
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   service_manager::SandboxType sandbox_type =
       service_manager::SandboxTypeFromCommandLine(*command_line);
   if (IsUnsandboxedSandboxType(sandbox_type) ||
-      sandbox_type == service_manager::SANDBOX_TYPE_NETWORK) {
+      sandbox_type == service_manager::SandboxType::kNetwork) {
     // Register the EmbeddedTestServer's certs, so that any SSL connections to
     // it succeed. Only do this when file I/O is allowed in the current process.
 #if defined(OS_ANDROID)
@@ -296,9 +315,9 @@ void NetworkServiceTestHelper::RegisterNetworkBinders(
   }
 }
 
-void NetworkServiceTestHelper::BindNetworkServiceTestRequest(
-    network::mojom::NetworkServiceTestRequest request) {
-  network_service_test_impl_->BindRequest(std::move(request));
+void NetworkServiceTestHelper::BindNetworkServiceTestReceiver(
+    mojo::PendingReceiver<network::mojom::NetworkServiceTest> receiver) {
+  network_service_test_impl_->BindReceiver(std::move(receiver));
 }
 
 }  // namespace content

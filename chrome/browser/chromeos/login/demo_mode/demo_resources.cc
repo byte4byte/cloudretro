@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/path_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -45,7 +45,7 @@ base::FilePath DemoResources::GetPreInstalledPath() {
 }
 
 DemoResources::DemoResources(DemoSession::DemoModeConfig config)
-    : config_(config), weak_ptr_factory_(this) {
+    : config_(config) {
   DCHECK_NE(config_, DemoSession::DemoModeConfig::kNone);
 }
 
@@ -97,7 +97,7 @@ void DemoResources::EnsureLoaded(base::OnceClosure load_callback) {
   // CrOSComponentManager.
   DCHECK(cros_component_manager);
 
-  g_browser_process->platform_part()->cros_component_manager()->Load(
+  cros_component_manager->Load(
       kDemoModeResourcesComponentName,
       component_updater::CrOSComponentManager::MountPolicy::kMount,
       component_updater::CrOSComponentManager::UpdatePolicy::kDontForce,

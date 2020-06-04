@@ -216,6 +216,12 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
           'reg_mandatory_key_name'
     return self.config['win_config'][platform][key]
 
+  def _GetOmaUriPath(self, policy):
+    product = 'googlechrome' if self.config['build'] == 'chrome' else 'chromium'
+    group = '~' + policy['group'] if 'group' in policy else ''
+    return '.\\Device\\Vendor\\MSFT\\Policy\\Config\\Chrome~Policy~%s%s\\%s' % (
+        product, group, policy['name'])
+
   def _AddListExampleAndroidLinux(self, parent, policy):
     '''Adds an example value for Android/Linux of a 'list' policy to a DOM node.
 
@@ -267,13 +273,13 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     examples = self._AddStyledElement(parent, 'dl', ['dd dl'])
     if self.IsPolicySupportedOnWindows(policy):
       self._AddListExampleWindowsChromeOS(examples, policy, True)
-    if self.IsPolicySupportedOnPlatform(
+    if self.IsPolicyOrItemSupportedOnPlatform(
         policy, 'chrome_os', management='active_directory'):
       self._AddListExampleWindowsChromeOS(examples, policy, False)
-    if (self.IsPolicySupportedOnPlatform(policy, 'android') or
-        self.IsPolicySupportedOnPlatform(policy, 'linux')):
+    if (self.IsPolicyOrItemSupportedOnPlatform(policy, 'android') or
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux')):
       self._AddListExampleAndroidLinux(examples, policy)
-    if self.IsPolicySupportedOnPlatform(policy, 'mac'):
+    if self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac'):
       self._AddListExampleMac(examples, policy)
 
   def _PythonObjectToPlist(self, obj, indent=''):
@@ -390,14 +396,54 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     examples = self._AddStyledElement(parent, 'dl', ['dd dl'])
     if self.IsPolicySupportedOnWindows(policy):
       self._AddDictionaryExampleWindowsChromeOS(examples, policy, True)
-    if self.IsPolicySupportedOnPlatform(
+    if self.IsPolicyOrItemSupportedOnPlatform(
         policy, 'chrome_os', management='active_directory'):
       self._AddDictionaryExampleWindowsChromeOS(examples, policy, False)
-    if (self.IsPolicySupportedOnPlatform(policy, 'android') or
-        self.IsPolicySupportedOnPlatform(policy, 'linux')):
+    if (self.IsPolicyOrItemSupportedOnPlatform(policy, 'android') or
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux')):
       self._AddDictionaryExampleAndroidLinux(examples, policy)
-    if self.IsPolicySupportedOnPlatform(policy, 'mac'):
+    if self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac'):
       self._AddDictionaryExampleMac(examples, policy)
+
+  def _AddIntuneExample(self, parent, policy):
+    example_value = policy['example_value']
+    policy_type = policy['type']
+
+    container = self._AddStyledElement(parent, 'dl', [])
+    self.AddElement(container, 'dt', {}, 'Windows (Intune):')
+
+    if policy_type == 'main':
+      self._AddStyledElement(
+          container,
+          'dd', ['.monospace', '.pre-wrap'],
+          text='<enabled/>' if example_value else '<disabled/>')
+      return
+
+    self._AddStyledElement(
+        container, 'dd', ['.monospace', '.pre-wrap'], text='<enabled/>')
+    if policy_type == 'list':
+      values = [
+          '%s&#xF000;%s' % (index, value)
+          for index, value in enumerate(example_value, start=1)
+      ]
+      self._AddStyledElement(
+          container,
+          'dd', ['.monospace', '.pre-wrap'],
+          text='<data id="%s" value="%s"/>' % (policy['name'] + 'Desc',
+                                               '&#xF000;'.join(values)))
+      return
+    elif policy_type == 'int' or policy_type == 'int-enum':
+      self._AddStyledElement(
+          container,
+          'dd', ['.monospace', '.pre-wrap'],
+          text='<data id="%s" value="%s"/>' % (policy['name'], example_value))
+    else:
+      self._AddStyledElement(
+          container,
+          'dd', ['.monospace', '.pre-wrap'],
+          text='<data id="%s" value="%s"/>' % (policy['name'],
+                                               json.dumps(example_value)[1:-1]))
+      return
 
   def _AddExample(self, parent, policy):
     '''Adds the HTML DOM representation of the example value of a policy to
@@ -419,17 +465,17 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     if policy_type == 'main':
       pieces = []
       if self.IsPolicySupportedOnWindows(policy) or \
-         self.IsPolicySupportedOnPlatform(policy, 'chrome_os',
+         self.IsPolicyOrItemSupportedOnPlatform(policy, 'chrome_os',
                                           management='active_directory'):
         value = '0x00000001' if example_value else '0x00000000'
         pieces.append(value + ' (Windows)')
-      if self.IsPolicySupportedOnPlatform(policy, 'linux'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux'):
         value = 'true' if example_value else 'false'
         pieces.append(value + ' (Linux)')
-      if self.IsPolicySupportedOnPlatform(policy, 'android'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'android'):
         value = 'true' if example_value else 'false'
         pieces.append(value + ' (Android)')
-      if self.IsPolicySupportedOnPlatform(policy, 'mac'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac'):
         value = '<true />' if example_value else '<false />'
         pieces.append(value + ' (Mac)')
       self.AddText(parent, ', '.join(pieces))
@@ -438,14 +484,14 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     elif policy_type in ('int', 'int-enum'):
       pieces = []
       if self.IsPolicySupportedOnWindows(policy) or \
-         self.IsPolicySupportedOnPlatform(policy, 'chrome_os',
+         self.IsPolicyOrItemSupportedOnPlatform(policy, 'chrome_os',
                                           management='active_directory'):
         pieces.append('0x%08x (Windows)' % example_value)
-      if self.IsPolicySupportedOnPlatform(policy, 'linux'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux'):
         pieces.append('%d (Linux)' % example_value)
-      if self.IsPolicySupportedOnPlatform(policy, 'android'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'android'):
         pieces.append('%d (Android)' % example_value)
-      if self.IsPolicySupportedOnPlatform(policy, 'mac'):
+      if self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac'):
         pieces.append('%d (Mac)' % example_value)
       self.AddText(parent, ', '.join(pieces))
     elif policy_type == 'string-enum':
@@ -456,6 +502,9 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       self._AddDictionaryExample(parent, policy)
     else:
       raise Exception('Unknown policy type: ' + policy_type)
+
+    if self.IsPolicySupportedOnWindows(policy):
+      self._AddIntuneExample(parent, policy)
 
   def _AddPolicyAttribute(self,
                           dl,
@@ -542,14 +591,14 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     data_type = [self._TYPE_MAP[policy['type']]]
     qualified_types = []
     is_complex_policy = False
-    if (self.IsPolicySupportedOnPlatform(policy, 'android') and
+    if (self.IsPolicyOrItemSupportedOnPlatform(policy, 'android') and
         self._RESTRICTION_TYPE_MAP.get(policy['type'], None)):
       qualified_types.append(
           'Android:%s' % self._RESTRICTION_TYPE_MAP[policy['type']])
       if policy['type'] in ('dict', 'external', 'list'):
         is_complex_policy = True
     if ((self.IsPolicySupportedOnWindows(policy) or
-         self.IsPolicySupportedOnPlatform(
+         self.IsPolicyOrItemSupportedOnPlatform(
              policy, 'chrome_os', management='active_directory')) and
         self._REG_TYPE_MAP.get(policy['type'], None)):
       qualified_types.append('Windows:%s' % self._REG_TYPE_MAP[policy['type']])
@@ -562,22 +611,28 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
             '(%s)' % self.GetLocalizedMessage('complex_policies_on_windows'))
     self._AddPolicyAttribute(dl, 'data_type', ' '.join(data_type))
     if self.IsPolicySupportedOnWindows(policy):
-      key_name = self._GetRegistryKeyName(policy, True)
+      registry_key_name = self._GetRegistryKeyName(policy, True)
       self._AddPolicyAttribute(dl, 'win_reg_loc',
-                               key_name + '\\' + policy['name'], ['.monospace'])
-    if self.IsPolicySupportedOnPlatform(
+                               registry_key_name + '\\' + policy['name'],
+                               ['.monospace'])
+      self._AddPolicyAttribute(dl, 'oma_uri', self._GetOmaUriPath(policy),
+                               ['.monospace'])
+
+    if self.IsPolicyOrItemSupportedOnPlatform(
         policy, 'chrome_os', management='active_directory'):
       key_name = self._GetRegistryKeyName(policy, False)
       self._AddPolicyAttribute(dl, 'chrome_os_reg_loc',
                                key_name + '\\' + policy['name'], ['.monospace'])
-    if (self.IsPolicySupportedOnPlatform(policy, 'linux') or
-        self.IsPolicySupportedOnPlatform(policy, 'mac')):
+    if (self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux') or
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac')):
       self._AddPolicyAttribute(dl, 'mac_linux_pref_name', policy['name'],
                                ['.monospace'])
-    if self.IsPolicySupportedOnPlatform(policy, 'android', product='chrome'):
+    if self.IsPolicyOrItemSupportedOnPlatform(
+        policy, 'android', product='chrome'):
       self._AddPolicyAttribute(dl, 'android_restriction_name', policy['name'],
                                ['.monospace'])
-    if self.IsPolicySupportedOnPlatform(policy, 'android', product='webview'):
+    if self.IsPolicyOrItemSupportedOnPlatform(
+        policy, 'android', product='webview'):
       restriction_prefix = self.config['android_webview_restriction_prefix']
       self._AddPolicyAttribute(dl, 'android_webview_restriction_name',
                                restriction_prefix + policy['name'],
@@ -605,10 +660,10 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       dd = self._AddPolicyAttribute(dl, 'url_schema')
       self._AddTextWithLinks(dd, policy['url_schema'])
     if (self.IsPolicySupportedOnWindows(policy) or
-        self.IsPolicySupportedOnPlatform(policy, 'linux') or
-        self.IsPolicySupportedOnPlatform(policy, 'android') or
-        self.IsPolicySupportedOnPlatform(policy, 'mac') or
-        self.IsPolicySupportedOnPlatform(
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'linux') or
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'android') or
+        self.IsPolicyOrItemSupportedOnPlatform(policy, 'mac') or
+        self.IsPolicyOrItemSupportedOnPlatform(
             policy, 'chrome_os', management='active_directory')):
       # Don't add an example for Google cloud managed ChromeOS policies.
       dd = self._AddPolicyAttribute(dl, 'example_value')
@@ -771,6 +826,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
         'chrome_os': self.config['os_name'],
         'android': 'Android',
         'win7': 'Windows 7',
+        'ios': 'iOS',
     }
     # Human-readable names of supported products.
     self._PRODUCT_MAP = {

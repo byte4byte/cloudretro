@@ -21,10 +21,14 @@ const char kGLImplementationDisabledName[] = "disabled";
 const char kANGLEImplementationDefaultName[]  = "default";
 const char kANGLEImplementationD3D9Name[]     = "d3d9";
 const char kANGLEImplementationD3D11Name[]    = "d3d11";
+const char kANGLEImplementationD3D11on12Name[] = "d3d11on12";
 const char kANGLEImplementationOpenGLName[]   = "gl";
+const char kANGLEImplementationOpenGLEGLName[] = "gl-egl";
 const char kANGLEImplementationOpenGLESName[] = "gles";
+const char kANGLEImplementationOpenGLESEGLName[] = "gles-egl";
 const char kANGLEImplementationNullName[] = "null";
 const char kANGLEImplementationVulkanName[] = "vulkan";
+const char kANGLEImplementationSwiftShaderName[] = "swiftshader";
 
 // Special switches for "NULL"/stub driver implementations.
 const char kANGLEImplementationD3D11NULLName[] = "d3d11-null";
@@ -50,6 +54,10 @@ const char kDisableES3GLContext[]           = "disable-es3-gl-context";
 // This isn't guaranteed to work everywhere, so it's test-only.
 const char kDisableES3GLContextForTesting[] =
     "disable-es3-gl-context-for-testing";
+
+// Disable workarounds for various GPU driver bugs.
+const char kDisableGpuDriverBugWorkarounds[] =
+    "disable-gpu-driver-bug-workarounds";
 
 // Stop the GPU from synchronizing presentation with vblank.
 const char kDisableGpuVsync[]               = "disable-gpu-vsync";
@@ -123,19 +131,21 @@ const char kEnableSwapBuffersWithBounds[] = "enable-swap-buffers-with-bounds";
 // Disables DirectComposition surface.
 const char kDisableDirectComposition[] = "disable-direct-composition";
 
-// Enables using DirectComposition layers, even if hardware overlays aren't
-// supported.
-const char kEnableDirectCompositionLayers[] =
-    "enable-direct-composition-layers";
+// Enables using DirectComposition video overlays, even if hardware overlays
+// aren't supported.
+const char kEnableDirectCompositionVideoOverlays[] =
+    "enable-direct-composition-video-overlays";
 
-// Disables using DirectComposition layers.
-const char kDisableDirectCompositionLayers[] =
-    "disable-direct-composition-layers";
+// Disables using DirectComposition video overlays, even if hardware overlays
+// are supported.
+const char kDisableDirectCompositionVideoOverlays[] =
+    "disable-direct-composition-video-overlays";
 
 // This is the list of switches passed from this file that are passed from the
 // GpuProcessHost to the GPU Process. Add your switch to this list if you need
 // to read it in the GPU process, else don't add it.
 const char* const kGLSwitchesCopiedFromGpuProcessHost[] = {
+    kDisableGpuDriverBugWorkarounds,
     kDisableGpuVsync,
     kDisableD3D11,
     kDisableES3GLContext,
@@ -149,8 +159,8 @@ const char* const kGLSwitchesCopiedFromGpuProcessHost[] = {
     kUseANGLE,
     kEnableSwapBuffersWithBounds,
     kDisableDirectComposition,
-    kEnableDirectCompositionLayers,
-    kDisableDirectCompositionLayers,
+    kEnableDirectCompositionVideoOverlays,
+    kDisableDirectCompositionVideoOverlays,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
     base::size(kGLSwitchesCopiedFromGpuProcessHost);
@@ -164,8 +174,14 @@ namespace features {
 const base::Feature kDirectCompositionComplexOverlays{
     "DirectCompositionComplexOverlays", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Use IDXGIOutput::WaitForVBlank() to drive begin frames.
 const base::Feature kDirectCompositionGpuVSync{
-    "DirectCompositionGpuVSync", base::FEATURE_DISABLED_BY_DEFAULT};
+    "DirectCompositionGpuVSync", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Use presentation feedback event queries (must be enabled) to limit latency.
+const base::Feature kDirectCompositionLowLatencyPresentation{
+    "DirectCompositionLowLatencyPresentation",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Allow using overlays for non-root render passes.
 const base::Feature kDirectCompositionNonrootOverlays{
@@ -175,6 +191,11 @@ const base::Feature kDirectCompositionNonrootOverlays{
 const base::Feature kDirectCompositionPreferNV12Overlays{
     "DirectCompositionPreferNV12Overlays", base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Use per-present event queries to issue presentation feedback to clients.
+// Also needs DirectCompositionGpuVSync.
+const base::Feature kDirectCompositionPresentationFeedback{
+    "DirectCompositionPresentationFeedback", base::FEATURE_ENABLED_BY_DEFAULT};
+
 // Use decode swap chain created from compatible video decoder buffers.
 const base::Feature kDirectCompositionUseNV12DecodeSwapChain{
     "DirectCompositionUseNV12DecodeSwapChain",
@@ -183,12 +204,6 @@ const base::Feature kDirectCompositionUseNV12DecodeSwapChain{
 // Default to using ANGLE's OpenGL backend
 const base::Feature kDefaultANGLEOpenGL{"DefaultANGLEOpenGL",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Use swap chain frame statistics for GLSurface presentation feedback.  Also
-// forces direct composition root surface to always use a swap chain instead of
-// an IDCompositionSurface.
-const base::Feature kSwapChainFrameStatistics{
-    "SwapChainFrameStatistics", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Track current program's shaders at glUseProgram() call for crash report
 // purpose. Only effective on Windows because the attached shaders may only

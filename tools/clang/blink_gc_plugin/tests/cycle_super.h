@@ -14,11 +14,12 @@ class D;
 // This contains a leaking cycle:
 // D -per-> C -sup-> B -sup-> A -ref-> D
 
-class A : public GarbageCollectedFinalized<A> {
-public:
-    virtual void Trace(Visitor*);
-private:
-    RefPtr<D> m_d;
+class A : public GarbageCollected<A> {
+ public:
+  virtual void Trace(Visitor*);
+
+ private:
+  scoped_refptr<D> m_d;
 };
 
 class B : public A {

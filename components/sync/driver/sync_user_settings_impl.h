@@ -38,14 +38,24 @@ class SyncUserSettingsImpl : public SyncUserSettings {
   void SetSyncAllowedByPlatform(bool allowed) override;
 
   bool IsFirstSetupComplete() const override;
-  void SetFirstSetupComplete() override;
+  void SetFirstSetupComplete(SyncFirstSetupCompleteSource source) override;
 
   bool IsSyncEverythingEnabled() const override;
   UserSelectableTypeSet GetSelectedTypes() const override;
   void SetSelectedTypes(bool sync_everything,
                         UserSelectableTypeSet types) override;
   UserSelectableTypeSet GetRegisteredSelectableTypes() const override;
-  UserSelectableTypeSet GetForcedTypes() const override;
+
+#if defined(OS_CHROMEOS)
+  bool IsSyncAllOsTypesEnabled() const override;
+  UserSelectableOsTypeSet GetSelectedOsTypes() const override;
+  void SetSelectedOsTypes(bool sync_all_os_types,
+                          UserSelectableOsTypeSet types) override;
+  UserSelectableOsTypeSet GetRegisteredSelectableOsTypes() const override;
+
+  bool IsOsSyncFeatureEnabled() const override;
+  void SetOsSyncFeatureEnabled(bool enabled) override;
+#endif
 
   bool IsEncryptEverythingAllowed() const override;
   bool IsEncryptEverythingEnabled() const override;
@@ -53,7 +63,9 @@ class SyncUserSettingsImpl : public SyncUserSettings {
 
   ModelTypeSet GetEncryptedDataTypes() const override;
   bool IsPassphraseRequired() const override;
-  bool IsPassphraseRequiredForDecryption() const override;
+  bool IsPassphraseRequiredForPreferredDataTypes() const override;
+  bool IsTrustedVaultKeyRequired() const override;
+  bool IsTrustedVaultKeyRequiredForPreferredDataTypes() const override;
   bool IsUsingSecondaryPassphrase() const override;
   base::Time GetExplicitPassphraseTime() const override;
   PassphraseType GetPassphraseType() const override;

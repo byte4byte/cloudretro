@@ -2,16 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
 dictionary GPURenderPassDepthStencilAttachmentDescriptor {
     required GPUTextureView attachment;
 
-    required GPULoadOp depthLoadOp;
+    required (GPULoadOp or float) depthLoadValue;
     required GPUStoreOp depthStoreOp;
-    required float clearDepth;
 
-    required GPULoadOp stencilLoadOp;
+    required (GPULoadOp or GPUStencilValue) stencilLoadValue;
     required GPUStoreOp stencilStoreOp;
-    unsigned long clearStencil = 0;
 };

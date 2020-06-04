@@ -17,10 +17,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
+#include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/input_service.mojom.h"
 
 namespace chromeos {
@@ -38,6 +40,7 @@ class HIDDetectionScreen : public BaseScreen,
   using DeviceMap = std::map<std::string, InputDeviceInfoPtr>;
 
   HIDDetectionScreen(HIDDetectionView* view,
+                     CoreOobeView* core_oobe_view,
                      const base::RepeatingClosure& exit_callback);
   ~HIDDetectionScreen() override;
 
@@ -52,12 +55,19 @@ class HIDDetectionScreen : public BaseScreen,
   // otherwise.
   void CheckIsScreenRequired(const base::Callback<void(bool)>& on_check_done);
 
+  // Allows tests to override how this class binds InputDeviceManager receivers.
+  using InputDeviceManagerBinder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<device::mojom::InputDeviceManager>)>;
+  static void OverrideInputDeviceManagerBinderForTesting(
+      InputDeviceManagerBinder binder);
+
  private:
   friend class HIDDetectionScreenTest;
 
   // BaseScreen implementation:
-  void Show() override;
-  void Hide() override;
+  void ShowImpl() override;
+  void HideImpl() override;
+  void OnUserAction(const std::string& action_id) override;
 
   // device::BluetoothDevice::PairingDelegate implementation:
   void RequestPinCode(device::BluetoothDevice* device) override;
@@ -186,21 +196,27 @@ class HIDDetectionScreen : public BaseScreen,
   // keyboard device.
   void SendKeyboardDeviceNotification();
 
-  // Helper method. Sets device name or placeholder if the name is empty.
+  // Helper methods. Sets device name or placeholder if the name is empty.
   void SetKeyboardDeviceName(const std::string& name);
+  void SetPointingDeviceName(const std::string& name);
 
   scoped_refptr<device::BluetoothAdapter> GetAdapterForTesting();
   void SetAdapterInitialPoweredForTesting(bool powered);
 
   HIDDetectionView* view_;
+
+  // CoreOobeView is necessary for starting/stopping the demo mode detection
+  CoreOobeView* core_oobe_view_ = nullptr;
+
   base::RepeatingClosure exit_callback_;
 
   // Default bluetooth adapter, used for all operations.
   scoped_refptr<device::BluetoothAdapter> adapter_;
 
-  device::mojom::InputDeviceManagerPtr input_device_manager_;
+  mojo::Remote<device::mojom::InputDeviceManager> input_device_manager_;
 
-  mojo::AssociatedBinding<device::mojom::InputDeviceManagerClient> binding_;
+  mojo::AssociatedReceiver<device::mojom::InputDeviceManagerClient> receiver_{
+      this};
 
   // Save the connected input devices.
   DeviceMap devices_;
@@ -213,13 +229,14 @@ class HIDDetectionScreen : public BaseScreen,
   // Current pointing device, if any. Device name is kept in screen context.
   std::string pointing_device_id_;
   bool mouse_is_pairing_ = false;
-  device::mojom::InputDeviceType pointing_device_connect_type_ =
+  device::mojom::InputDeviceType pointing_device_type_ =
       device::mojom::InputDeviceType::TYPE_UNKNOWN;
+  std::string pointing_device_name_;
 
   // Current keyboard device, if any. Device name is kept in screen context.
   std::string keyboard_device_id_;
   bool keyboard_is_pairing_ = false;
-  device::mojom::InputDeviceType keyboard_device_connect_type_ =
+  device::mojom::InputDeviceType keyboard_type_ =
       device::mojom::InputDeviceType::TYPE_UNKNOWN;
   std::string keyboard_device_name_;
 
@@ -230,9 +247,7 @@ class HIDDetectionScreen : public BaseScreen,
 
   bool devices_enumerated_ = false;
 
-  bool showing_ = false;
-
-  base::WeakPtrFactory<HIDDetectionScreen> weak_ptr_factory_;
+  base::WeakPtrFactory<HIDDetectionScreen> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(HIDDetectionScreen);
 };

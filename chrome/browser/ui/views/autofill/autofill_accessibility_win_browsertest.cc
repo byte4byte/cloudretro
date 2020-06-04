@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
 #include "base/win/scoped_variant.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -95,7 +94,7 @@ IN_PROC_BROWSER_TEST_F(AutofillAccessibilityWinBrowserTest,
   // The autofill popup of the form input element has not shown yet. The form
   // input element is the controller for the checkbox as indicated by the form
   // input element's |aria-controls| attribute.
-  UiaGetPropertyValueVtArrayVtUnknownValidate(
+  content::UiaGetPropertyValueVtArrayVtUnknownValidate(
       UIA_ControllerForPropertyId,
       FindAccessibilityNode(GetWebContents(), find_criteria), {"checkbox"});
 
@@ -109,16 +108,20 @@ IN_PROC_BROWSER_TEST_F(AutofillAccessibilityWinBrowserTest,
   ShowDropdown("datalist");
   control_waiter->Wait();
 
+  // The focus should remain on the input element.
+  EXPECT_EQ(content::GetFocusedAccessibilityNodeInfo(GetWebContents()).role,
+            ax::mojom::Role::kTextFieldWithComboBox);
+
   // The autofill popup of the form input element is showing. The form input
   // element is the controller for the checkbox and autofill popup as
   // indicated by the form input element's |aria-controls| attribute and the
   // existing popup.
-  UiaGetPropertyValueVtArrayVtUnknownValidate(
+  content::UiaGetPropertyValueVtArrayVtUnknownValidate(
       UIA_ControllerForPropertyId,
       FindAccessibilityNode(GetWebContents(), find_criteria),
       {"checkbox", "Autofill"});
 
-  control_waiter.reset(new UiaAccessibilityEventWaiter(info));
+  control_waiter = std::make_unique<UiaAccessibilityEventWaiter>(info);
   // Hide popup and wait for UIA_ControllerForPropertyId event.
   SendKeyToPage(GetWebContents(), ui::DomKey::TAB);
   control_waiter->Wait();
@@ -126,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(AutofillAccessibilityWinBrowserTest,
   // The autofill popup of the form input element is hidden. The form
   // input element is the controller for the checkbox as indicated by the form
   // input element's |aria-controls| attribute.
-  UiaGetPropertyValueVtArrayVtUnknownValidate(
+  content::UiaGetPropertyValueVtArrayVtUnknownValidate(
       UIA_ControllerForPropertyId,
       FindAccessibilityNode(GetWebContents(), find_criteria), {"checkbox"});
 }

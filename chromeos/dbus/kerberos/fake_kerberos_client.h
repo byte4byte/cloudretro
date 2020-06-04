@@ -7,8 +7,10 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+#include "base/optional.h"
 #include "chromeos/dbus/kerberos/kerberos_client.h"
 #include "chromeos/dbus/kerberos/kerberos_service.pb.h"
 #include "dbus/object_proxy.h"
@@ -16,7 +18,8 @@
 namespace chromeos {
 
 class COMPONENT_EXPORT(CHROMEOS_DBUS) FakeKerberosClient
-    : public KerberosClient {
+    : public KerberosClient,
+      public KerberosClient::TestInterface {
  public:
   FakeKerberosClient();
   ~FakeKerberosClient() override;
@@ -43,8 +46,19 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) FakeKerberosClient
       KerberosFilesChangedCallback callback) override;
   void ConnectToKerberosTicketExpiringSignal(
       KerberosTicketExpiringCallback callback) override;
+  KerberosClient::TestInterface* GetTestInterface() override;
+
+  // KerberosClient::TestInterface:
+  void SetTaskDelay(base::TimeDelta delay) override;
+  void StartRecordingFunctionCalls() override;
+  std::string StopRecordingAndGetRecordedFunctionCalls() override;
+  std::size_t GetNumberOfAccounts() const override;
+  void SetSimulatedNumberOfNetworkFailures(int number_of_failures) override;
 
  private:
+  using RepeatedAccountField =
+      google::protobuf::RepeatedPtrField<kerberos::Account>;
+
   struct AccountData {
     // User principal (user@EXAMPLE.COM) that identifies this account.
     std::string principal_name;
@@ -72,13 +86,34 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) FakeKerberosClient
     bool operator!=(const AccountData& other) const;
   };
 
+  enum class WhatToRemove { kNothing, kPassword, kAccount };
+
+  // Determines what data to remove, depending on |mode| and |data|.
+  static WhatToRemove DetermineWhatToRemove(kerberos::ClearMode mode,
+                                            const AccountData& data);
+
   // Returns the AccountData for |principal_name| if available or nullptr
   // otherwise.
   AccountData* GetAccountData(const std::string& principal_name);
 
-  // Maps principal name (user@REALM.COM) to account data.
-  using AccountsMap = std::vector<AccountData>;
-  AccountsMap accounts_;
+  // Appends |function_name| to |recorded_function_calls_| if the latter is set.
+  void MaybeRecordFunctionCallForTesting(const char* function_name);
+
+  // Maps the list of account data into the given proto repeated field.
+  void MapAccountData(RepeatedAccountField* accounts);
+
+  // List of account data.
+  std::vector<AccountData> accounts_;
+
+  // For recording which methods have been called (for testing).
+  base::Optional<std::string> recorded_function_calls_;
+
+  // Fake delay for any asynchronous operation.
+  base::TimeDelta task_delay_ = base::TimeDelta::FromMilliseconds(100);
+
+  // The simulated number of network failures on |AcquireKerberosTgt()| (for
+  // testing).
+  int simulated_number_of_network_failures_ = 0;
 
   KerberosFilesChangedCallback kerberos_files_changed_callback_;
   KerberosTicketExpiringCallback kerberos_ticket_expiring_callback_;

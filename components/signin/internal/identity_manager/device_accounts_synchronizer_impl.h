@@ -5,27 +5,35 @@
 #ifndef COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_DEVICE_ACCOUNTS_SYNCHRONIZER_IMPL_H_
 #define COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_DEVICE_ACCOUNTS_SYNCHRONIZER_IMPL_H_
 
+#include "build/build_config.h"
 #include "components/signin/public/identity_manager/device_accounts_synchronizer.h"
 
-class OAuth2TokenServiceDelegate;
+class ProfileOAuth2TokenServiceDelegate;
 
-namespace identity {
+namespace signin {
 
 // Concrete implementation of DeviceAccountsSynchronizer interface.
 class DeviceAccountsSynchronizerImpl : public DeviceAccountsSynchronizer {
  public:
   explicit DeviceAccountsSynchronizerImpl(
-      OAuth2TokenServiceDelegate* token_service_delegate);
+      ProfileOAuth2TokenServiceDelegate* token_service_delegate);
   ~DeviceAccountsSynchronizerImpl() override;
 
   // DeviceAccountsSynchronizer implementation.
+#if defined(OS_ANDROID)
+  void ReloadAllAccountsFromSystemWithPrimaryAccount(
+      const base::Optional<CoreAccountId>& primary_account_id) override;
+#endif
+
+#if defined(OS_IOS)
   void ReloadAllAccountsFromSystem() override;
   void ReloadAccountFromSystem(const CoreAccountId& account_id) override;
+#endif
 
  private:
-  OAuth2TokenServiceDelegate* token_service_delegate_ = nullptr;
+  ProfileOAuth2TokenServiceDelegate* token_service_delegate_ = nullptr;
 };
 
-}  // namespace identity
+}  // namespace signin
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_DEVICE_ACCOUNTS_SYNCHRONIZER_IMPL_H_

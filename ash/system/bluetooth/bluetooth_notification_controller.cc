@@ -17,6 +17,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -36,6 +37,8 @@ namespace ash {
 namespace {
 
 const char kNotifierBluetooth[] = "ash.bluetooth";
+const char kPairedNotificationPrefix[] =
+    "cros_bluetooth_device_paired_notification_id-";
 
 // The BluetoothPairingNotificationDelegate handles user interaction with the
 // pairing notification and sending the confirmation, rejection or cancellation
@@ -128,10 +131,6 @@ const char
     BluetoothNotificationController::kBluetoothDevicePairingNotificationId[] =
         "cros_bluetooth_device_pairing_notification_id";
 
-const char
-    BluetoothNotificationController::kBluetoothDevicePairedNotificationId[] =
-        "cros_bluetooth_device_paired_notification_id";
-
 // This class handles opening the Bluetooth Settings UI when the user clicks
 // on the Paired Notification.
 class BluetoothNotificationController::BluetoothPairedNotificationDelegate
@@ -155,8 +154,8 @@ class BluetoothNotificationController::BluetoothPairedNotificationDelegate
 
 BluetoothNotificationController::BluetoothNotificationController(
     message_center::MessageCenter* message_center)
-    : message_center_(message_center), weak_ptr_factory_(this) {
-  BluetoothAdapterFactory::GetAdapter(
+    : message_center_(message_center) {
+  BluetoothAdapterFactory::Get()->GetAdapter(
       base::BindOnce(&BluetoothNotificationController::OnGetAdapter,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -165,7 +164,7 @@ BluetoothNotificationController::~BluetoothNotificationController() {
   if (adapter_.get()) {
     adapter_->RemoveObserver(this);
     adapter_->RemovePairingDelegate(this);
-    adapter_ = NULL;
+    adapter_.reset();
   }
 }
 
@@ -267,6 +266,12 @@ void BluetoothNotificationController::AuthorizePairing(
   NotifyPairing(device, message, true);
 }
 
+// static
+std::string BluetoothNotificationController::GetPairedNotificationId(
+    const BluetoothDevice* device) {
+  return kPairedNotificationPrefix + base::ToLowerASCII(device->GetAddress());
+}
+
 void BluetoothNotificationController::OnGetAdapter(
     scoped_refptr<BluetoothAdapter> adapter) {
   DCHECK(!adapter_.get());
@@ -293,7 +298,7 @@ void BluetoothNotificationController::OnGetAdapter(
 void BluetoothNotificationController::NotifyAdapterDiscoverable() {
   message_center::RichNotificationData optional;
 
-  std::unique_ptr<Notification> notification = ash::CreateSystemNotification(
+  std::unique_ptr<Notification> notification = CreateSystemNotification(
       message_center::NOTIFICATION_TYPE_SIMPLE,
       kBluetoothDeviceDiscoverableNotificationId, base::string16() /* title */,
       l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_DISCOVERABLE,
@@ -319,7 +324,7 @@ void BluetoothNotificationController::NotifyPairing(
         l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_REJECT)));
   }
 
-  std::unique_ptr<Notification> notification = ash::CreateSystemNotification(
+  std::unique_ptr<Notification> notification = CreateSystemNotification(
       message_center::NOTIFICATION_TYPE_SIMPLE,
       kBluetoothDevicePairingNotificationId, base::string16() /* title */,
       message, base::string16() /* display source */, GURL(),
@@ -345,9 +350,9 @@ void BluetoothNotificationController::NotifyPairedDevice(
                                         false /* by_user */);
   }
 
-  std::unique_ptr<Notification> notification = ash::CreateSystemNotification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      kBluetoothDevicePairedNotificationId, base::string16() /* title */,
+  std::unique_ptr<Notification> notification = CreateSystemNotification(
+      message_center::NOTIFICATION_TYPE_SIMPLE, GetPairedNotificationId(device),
+      base::string16() /* title */,
       l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_BLUETOOTH_PAIRED,
                                  device->GetNameForDisplay()),
       base::string16() /* display source */, GURL(),

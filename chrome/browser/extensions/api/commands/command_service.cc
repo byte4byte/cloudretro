@@ -19,7 +19,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/accelerator_utils.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
-#include "chrome/common/extensions/manifest_handlers/ui_overrides_handler.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -27,7 +26,6 @@
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/feature_switch.h"
@@ -71,14 +69,6 @@ bool IsForCurrentPlatform(const std::string& key) {
                           base::CompareCase::SENSITIVE);
 }
 
-std::string StripCurrentPlatform(const std::string& key) {
-  DCHECK(IsForCurrentPlatform(key));
-  std::string result = key;
-  base::ReplaceFirstSubstringAfterOffset(
-      &result, 0, Command::CommandPlatform() + ":", base::StringPiece());
-  return result;
-}
-
 // Merge |suggested_key_prefs| into the saved preferences for the extension. We
 // merge rather than overwrite to preserve existing was_assigned preferences.
 void MergeSuggestedKeyPrefs(
@@ -109,8 +99,7 @@ void CommandService::RegisterProfilePrefs(
 }
 
 CommandService::CommandService(content::BrowserContext* context)
-    : profile_(Profile::FromBrowserContext(context)),
-      extension_registry_observer_(this) {
+    : profile_(Profile::FromBrowserContext(context)) {
   ExtensionFunctionRegistry::GetInstance()
       .RegisterFunction<GetAllCommandsFunction>();
 
@@ -118,6 +107,8 @@ CommandService::CommandService(content::BrowserContext* context)
 }
 
 CommandService::~CommandService() {
+  for (auto& observer : observers_)
+    observer.OnCommandServiceDestroying();
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<CommandService>>::
@@ -132,39 +123,6 @@ CommandService::GetFactoryInstance() {
 // static
 CommandService* CommandService::Get(content::BrowserContext* context) {
   return BrowserContextKeyedAPIFactory<CommandService>::Get(context);
-}
-
-// static
-bool CommandService::RemovesBookmarkShortcut(const Extension* extension) {
-  return UIOverrides::RemovesBookmarkShortcut(extension) &&
-      (extension->permissions_data()->HasAPIPermission(
-          APIPermission::kBookmarkManagerPrivate) ||
-       FeatureSwitch::enable_override_bookmarks_ui()->IsEnabled());
-}
-
-// static
-bool CommandService::RemovesBookmarkOpenPagesShortcut(
-    const Extension* extension) {
-  return UIOverrides::RemovesBookmarkOpenPagesShortcut(extension) &&
-      (extension->permissions_data()->HasAPIPermission(
-          APIPermission::kBookmarkManagerPrivate) ||
-       FeatureSwitch::enable_override_bookmarks_ui()->IsEnabled());
-}
-
-bool CommandService::GetBrowserActionCommand(const std::string& extension_id,
-                                             QueryType type,
-                                             Command* command,
-                                             bool* active) const {
-  return GetExtensionActionCommand(extension_id, type, command, active,
-                                   Command::Type::kBrowserAction);
-}
-
-bool CommandService::GetPageActionCommand(const std::string& extension_id,
-                                          QueryType type,
-                                          Command* command,
-                                          bool* active) const {
-  return GetExtensionActionCommand(extension_id, type, command, active,
-                                   Command::Type::kPageAction);
 }
 
 bool CommandService::GetNamedCommands(const std::string& extension_id,
@@ -194,7 +152,7 @@ bool CommandService::GetNamedCommands(const std::string& extension_id,
     if (scope != ANY_SCOPE && ((scope == GLOBAL) != saved_command.global()))
       continue;
 
-    if (type != SUGGESTED && shortcut_assigned.key_code() != ui::VKEY_UNKNOWN)
+    if (shortcut_assigned.key_code() != ui::VKEY_UNKNOWN)
       command.set_accelerator(shortcut_assigned);
     command.set_global(saved_command.global());
 
@@ -272,19 +230,9 @@ bool CommandService::AddKeybindingPref(
                          std::move(suggested_key_prefs));
 
   // Fetch the newly-updated command, and notify the observers.
-  for (auto& observer : observers_) {
-    observer.OnExtensionCommandAdded(
-        extension_id, FindCommandByName(extension_id, command_name));
-  }
-
-  // TODO(devlin): Deprecate this notification in favor of the observers.
-  std::pair<const std::string, const std::string> details =
-      std::make_pair(extension_id, command_name);
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED,
-      content::Source<Profile>(profile_),
-      content::Details<std::pair<const std::string, const std::string> >(
-          &details));
+  Command command = FindCommandByName(extension_id, command_name);
+  for (auto& observer : observers_)
+    observer.OnExtensionCommandAdded(extension_id, command);
 
   return true;
 }
@@ -377,58 +325,6 @@ Command CommandService::FindCommandByName(const std::string& extension_id,
   return Command();
 }
 
-bool CommandService::GetSuggestedExtensionCommand(
-    const std::string& extension_id,
-    const ui::Accelerator& accelerator,
-    Command* command) const {
-  const Extension* extension =
-      ExtensionRegistry::Get(profile_)
-          ->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
-  CHECK(extension);
-
-  Command prospective_command;
-  CommandMap command_map;
-  if (GetBrowserActionCommand(extension_id,
-                              CommandService::SUGGESTED,
-                              &prospective_command,
-                              nullptr) &&
-      accelerator == prospective_command.accelerator()) {
-    if (command)
-      *command = prospective_command;
-    return true;
-  } else if (GetPageActionCommand(extension_id,
-                                  CommandService::SUGGESTED,
-                                  &prospective_command,
-                                  nullptr) &&
-             accelerator == prospective_command.accelerator()) {
-    if (command)
-      *command = prospective_command;
-    return true;
-  } else if (GetNamedCommands(extension_id,
-                              CommandService::SUGGESTED,
-                              CommandService::REGULAR,
-                              &command_map)) {
-    for (CommandMap::const_iterator it = command_map.begin();
-         it != command_map.end();
-         ++it) {
-      if (accelerator == it->second.accelerator()) {
-        if (command)
-          *command = it->second;
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool CommandService::RequestsBookmarkShortcutOverride(
-    const Extension* extension) const {
-  return RemovesBookmarkShortcut(extension) &&
-         GetSuggestedExtensionCommand(
-             extension->id(),
-             chrome::GetPrimaryChromeAcceleratorForBookmarkPage(), nullptr);
-}
-
 void CommandService::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
@@ -469,13 +365,15 @@ void CommandService::RemoveRelinquishedKeybindings(const Extension* extension) {
     }
   }
 
+  // TODO(https://crbug.com/1067130): Extensions shouldn't be able to specify
+  // commands for actions they don't have, so we should just be able to query
+  // for a single action type.
   Command existing_browser_action_command;
   const Command* new_browser_action_command =
       CommandsInfo::GetBrowserActionCommand(extension);
-  if (GetBrowserActionCommand(extension->id(),
-                              CommandService::ACTIVE,
-                              &existing_browser_action_command,
-                              NULL) &&
+  if (GetExtensionActionCommand(extension->id(), ActionInfo::TYPE_BROWSER,
+                                CommandService::ACTIVE,
+                                &existing_browser_action_command, nullptr) &&
       // The browser action command may be defaulted to an unassigned
       // accelerator if a browser action is specified by the extension but a
       // keybinding is not declared. See
@@ -484,21 +382,18 @@ void CommandService::RemoveRelinquishedKeybindings(const Extension* extension) {
        new_browser_action_command->accelerator().key_code() ==
            ui::VKEY_UNKNOWN) &&
       !IsCommandShortcutUserModified(
-          extension,
-          existing_browser_action_command.command_name())) {
+          extension, existing_browser_action_command.command_name())) {
     RemoveKeybindingPrefs(extension->id(),
                           existing_browser_action_command.command_name());
   }
 
   Command existing_page_action_command;
-  if (GetPageActionCommand(extension->id(),
-                           CommandService::ACTIVE,
-                           &existing_page_action_command,
-                           NULL) &&
+  if (GetExtensionActionCommand(extension->id(), ActionInfo::TYPE_PAGE,
+                                CommandService::ACTIVE,
+                                &existing_page_action_command, nullptr) &&
       !CommandsInfo::GetPageActionCommand(extension) &&
       !IsCommandShortcutUserModified(
-          extension,
-          existing_page_action_command.command_name())) {
+          extension, existing_page_action_command.command_name())) {
     RemoveKeybindingPrefs(extension->id(),
                           existing_page_action_command.command_name());
   }
@@ -554,7 +449,6 @@ bool CommandService::CanAutoAssign(const Command &command,
     return true;
 
   if (command.global()) {
-    using namespace extensions;
     if (command.command_name() == manifest_values::kBrowserActionCommandEvent ||
         command.command_name() == manifest_values::kPageActionCommandEvent)
       return false;  // Browser and page actions are not global in nature.
@@ -575,22 +469,10 @@ bool CommandService::CanAutoAssign(const Command &command,
       return false;
     return (command.accelerator().key_code() >= ui::VKEY_0 &&
             command.accelerator().key_code() <= ui::VKEY_9);
-  } else {
-    // Not a global command, check if Chrome shortcut and whether
-    // we can override it.
-    if (command.accelerator() ==
-            chrome::GetPrimaryChromeAcceleratorForBookmarkPage() &&
-        CommandService::RemovesBookmarkShortcut(extension)) {
-      // If this check fails it either means we have an API to override a
-      // key that isn't a ChromeAccelerator (and the API can therefore be
-      // deprecated) or the IsChromeAccelerator isn't consistently
-      // returning true for all accelerators.
-      DCHECK(chrome::IsChromeAccelerator(command.accelerator(), profile_));
-      return true;
-    }
-
-    return !chrome::IsChromeAccelerator(command.accelerator(), profile_);
   }
+
+  // Not a global command, check if the command is a Chrome shortcut.
+  return !chrome::IsChromeAccelerator(command.accelerator());
 }
 
 void CommandService::UpdateExtensionSuggestedCommandPrefs(
@@ -657,6 +539,7 @@ void CommandService::RemoveDefunctExtensionSuggestedCommandPrefs(
         current_prefs->DeepCopy());
     const CommandMap* named_commands =
         CommandsInfo::GetNamedCommands(extension);
+
     const Command* browser_action_command =
         CommandsInfo::GetBrowserActionCommand(extension);
     for (base::DictionaryValue::Iterator it(*current_prefs);
@@ -716,50 +599,6 @@ bool CommandService::IsCommandShortcutUserModified(
       active_command.accelerator().key_code() != ui::VKEY_UNKNOWN;
 }
 
-bool CommandService::IsKeybindingChanging(const Extension* extension,
-                                          const std::string& command_name) {
-  // Get the new assigned command, if any.
-  Command new_command;
-  if (command_name == manifest_values::kBrowserActionCommandEvent) {
-    new_command = *CommandsInfo::GetBrowserActionCommand(extension);
-  } else if (command_name == manifest_values::kPageActionCommandEvent) {
-    new_command = *CommandsInfo::GetPageActionCommand(extension);
-  } else {  // This is a named command.
-    const CommandMap* named_commands =
-        CommandsInfo::GetNamedCommands(extension);
-    if (named_commands) {
-      auto loc = named_commands->find(command_name);
-      if (loc != named_commands->end())
-        new_command = loc->second;
-    }
-  }
-
-  return Command::StringToAccelerator(
-      GetSuggestedKeyPref(extension, command_name), command_name) !=
-      new_command.accelerator();
-}
-
-std::string CommandService::GetSuggestedKeyPref(
-    const Extension* extension,
-    const std::string& command_name) {
-  // Get the previous suggested key, if any.
-  ui::Accelerator suggested_key;
-  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(profile_);
-  const base::DictionaryValue* commands_prefs = NULL;
-  if (extension_prefs->ReadPrefAsDictionary(extension->id(),
-                                            kCommands,
-                                            &commands_prefs)) {
-    const base::DictionaryValue* suggested_key_prefs = NULL;
-    std::string suggested_key;
-    if (commands_prefs->GetDictionary(command_name, &suggested_key_prefs) &&
-        suggested_key_prefs->GetString(kSuggestedKey, &suggested_key)) {
-      return suggested_key;
-    }
-  }
-
-  return std::string();
-}
-
 void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
                                            const std::string& command_name) {
   DictionaryPrefUpdate updater(profile_->GetPrefs(),
@@ -798,14 +637,6 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
        it != keys_to_remove.end(); ++it) {
     std::string key = *it;
     bindings->Remove(key, NULL);
-
-    // TODO(devlin): Deprecate this notification in favor of the observers.
-    ExtensionCommandRemovedDetails details(extension_id, command_name,
-                                           StripCurrentPlatform(key));
-    content::NotificationService::current()->Notify(
-        extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
-        content::Source<Profile>(profile_),
-        content::Details<ExtensionCommandRemovedDetails>(&details));
   }
 
   for (const Command& removed_command : removed_commands) {
@@ -814,12 +645,11 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
   }
 }
 
-bool CommandService::GetExtensionActionCommand(
-    const std::string& extension_id,
-    QueryType query_type,
-    Command* command,
-    bool* active,
-    Command::Type action_type) const {
+bool CommandService::GetExtensionActionCommand(const std::string& extension_id,
+                                               ActionInfo::Type action_type,
+                                               QueryType query_type,
+                                               Command* command,
+                                               bool* active) const {
   const ExtensionSet& extensions =
       ExtensionRegistry::Get(profile_)->enabled_extensions();
   const Extension* extension = extensions.GetByID(extension_id);
@@ -830,14 +660,14 @@ bool CommandService::GetExtensionActionCommand(
 
   const Command* requested_command = NULL;
   switch (action_type) {
-    case Command::Type::kBrowserAction:
+    case ActionInfo::TYPE_BROWSER:
       requested_command = CommandsInfo::GetBrowserActionCommand(extension);
       break;
-    case Command::Type::kPageAction:
+    case ActionInfo::TYPE_PAGE:
       requested_command = CommandsInfo::GetPageActionCommand(extension);
       break;
-    case Command::Type::kNamed:
-      NOTREACHED();
+    case ActionInfo::TYPE_ACTION:
+      // TODO(devlin): Add support for the "action" key.
       return false;
   }
   if (!requested_command)
@@ -848,22 +678,14 @@ bool CommandService::GetExtensionActionCommand(
       FindCommandByName(extension_id, requested_command->command_name());
   ui::Accelerator shortcut_assigned = saved_command.accelerator();
 
-  if (active) {
-    if (query_type == SUGGESTED) {
-      *active =
-          (requested_command->accelerator().key_code() != ui::VKEY_UNKNOWN &&
-           requested_command->accelerator() == shortcut_assigned);
-    } else {
-      *active = (shortcut_assigned.key_code() != ui::VKEY_UNKNOWN);
-    }
-  }
+  if (active)
+    *active = (shortcut_assigned.key_code() != ui::VKEY_UNKNOWN);
 
   if (query_type == ACTIVE && shortcut_assigned.key_code() == ui::VKEY_UNKNOWN)
     return false;
 
   *command = *requested_command;
-  if (query_type != SUGGESTED &&
-      shortcut_assigned.key_code() != ui::VKEY_UNKNOWN)
+  if (shortcut_assigned.key_code() != ui::VKEY_UNKNOWN)
     command->set_accelerator(shortcut_assigned);
 
   return true;

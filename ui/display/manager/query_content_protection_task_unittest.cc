@@ -74,14 +74,14 @@ TEST_F(QueryContentProtectionTaskTest, QueryInternalDisplay) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
   EXPECT_EQ(Status::SUCCESS, response_->status);
   EXPECT_EQ(DISPLAY_CONNECTION_TYPE_INTERNAL, response_->connection_mask);
-  EXPECT_EQ(0u, response_->protection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
 }
 
 TEST_F(QueryContentProtectionTaskTest, QueryUnknownDisplay) {
@@ -92,14 +92,14 @@ TEST_F(QueryContentProtectionTaskTest, QueryUnknownDisplay) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
   EXPECT_EQ(Status::FAILURE, response_->status);
   EXPECT_EQ(DISPLAY_CONNECTION_TYPE_UNKNOWN, response_->connection_mask);
-  EXPECT_EQ(0u, response_->protection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
 }
 
 TEST_F(QueryContentProtectionTaskTest, QueryDisplayThatCannotGetHdcp) {
@@ -111,8 +111,8 @@ TEST_F(QueryContentProtectionTaskTest, QueryDisplayThatCannotGetHdcp) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
@@ -128,14 +128,14 @@ TEST_F(QueryContentProtectionTaskTest, QueryDisplayWithHdcpDisabled) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
   EXPECT_EQ(Status::SUCCESS, response_->status);
   EXPECT_EQ(DISPLAY_CONNECTION_TYPE_HDMI, response_->connection_mask);
-  EXPECT_EQ(0u, response_->protection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
 }
 
 TEST_F(QueryContentProtectionTaskTest, QueryDisplayWithHdcpEnabled) {
@@ -147,8 +147,8 @@ TEST_F(QueryContentProtectionTaskTest, QueryDisplayWithHdcpEnabled) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
@@ -166,14 +166,14 @@ TEST_F(QueryContentProtectionTaskTest, QueryInMultiDisplayMode) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
   EXPECT_EQ(Status::SUCCESS, response_->status);
   EXPECT_EQ(DISPLAY_CONNECTION_TYPE_HDMI, response_->connection_mask);
-  EXPECT_EQ(0u, response_->protection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
 }
 
 TEST_F(QueryContentProtectionTaskTest, QueryInMirroringMode) {
@@ -185,8 +185,8 @@ TEST_F(QueryContentProtectionTaskTest, QueryInMirroringMode) {
 
   QueryContentProtectionTask task(
       &layout_manager, &display_delegate_, 1,
-      base::Bind(&QueryContentProtectionTaskTest::ResponseCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
   task.Run();
 
   ASSERT_TRUE(response_);
@@ -194,7 +194,63 @@ TEST_F(QueryContentProtectionTaskTest, QueryInMirroringMode) {
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI |
                                   DISPLAY_CONNECTION_TYPE_DVI),
             response_->connection_mask);
-  EXPECT_EQ(0u, response_->protection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
+}
+
+TEST_F(QueryContentProtectionTaskTest, QueryAnalogDisplay) {
+  std::vector<std::unique_ptr<DisplaySnapshot>> displays;
+  displays.push_back(CreateDisplaySnapshot(1, DISPLAY_CONNECTION_TYPE_VGA));
+  TestDisplayLayoutManager layout_manager(std::move(displays),
+                                          MULTIPLE_DISPLAY_STATE_SINGLE);
+
+  QueryContentProtectionTask task(
+      &layout_manager, &display_delegate_, 1,
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
+  task.Run();
+
+  ASSERT_TRUE(response_);
+  EXPECT_EQ(Status::SUCCESS, response_->status);
+  EXPECT_EQ(DISPLAY_CONNECTION_TYPE_VGA, response_->connection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
+}
+
+TEST_F(QueryContentProtectionTaskTest, QueryAnalogDisplayMirror) {
+  std::vector<std::unique_ptr<DisplaySnapshot>> displays;
+  displays.push_back(CreateDisplaySnapshot(1, DISPLAY_CONNECTION_TYPE_HDMI));
+  displays.push_back(CreateDisplaySnapshot(2, DISPLAY_CONNECTION_TYPE_VGA));
+  TestDisplayLayoutManager layout_manager(std::move(displays),
+                                          MULTIPLE_DISPLAY_STATE_MULTI_MIRROR);
+
+  display_delegate_.set_hdcp_state(HDCP_STATE_ENABLED);
+
+  QueryContentProtectionTask task1(
+      &layout_manager, &display_delegate_, 1,
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
+  task1.Run();
+
+  ASSERT_TRUE(response_);
+  EXPECT_EQ(Status::SUCCESS, response_->status);
+  EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI |
+                                  DISPLAY_CONNECTION_TYPE_VGA),
+            response_->connection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
+
+  response_.reset();
+
+  QueryContentProtectionTask task2(
+      &layout_manager, &display_delegate_, 2,
+      base::BindOnce(&QueryContentProtectionTaskTest::ResponseCallback,
+                     base::Unretained(this)));
+  task2.Run();
+
+  ASSERT_TRUE(response_);
+  EXPECT_EQ(Status::SUCCESS, response_->status);
+  EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI |
+                                  DISPLAY_CONNECTION_TYPE_VGA),
+            response_->connection_mask);
+  EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE, response_->protection_mask);
 }
 
 }  // namespace test

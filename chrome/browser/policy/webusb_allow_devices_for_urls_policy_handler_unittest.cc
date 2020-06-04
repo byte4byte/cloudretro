@@ -212,7 +212,7 @@ constexpr char InvalidPolicyNoUrls[] = R"(
 std::string GetPolicyName(PolicyType policy_type) {
 #if defined(OS_CHROMEOS)
   if (policy_type == PolicyType::kDevice)
-    return key::kDeviceWebUsbAllowDevicesForUrls;
+    return key::kDeviceLoginScreenWebUsbAllowDevicesForUrls;
 #endif  // defined(OS_CHROMEOS)
   return key::kWebUsbAllowDevicesForUrls;
 }
@@ -220,7 +220,7 @@ std::string GetPolicyName(PolicyType policy_type) {
 std::string GetPrefName(PolicyType policy_type) {
 #if defined(OS_CHROMEOS)
   if (policy_type == PolicyType::kDevice)
-    return prefs::kDeviceWebUsbAllowDevicesForUrls;
+    return prefs::kDeviceLoginScreenWebUsbAllowDevicesForUrls;
 #endif  // defined(OS_CHROMEOS)
   return prefs::kManagedWebUsbAllowDevicesForUrls;
 }
@@ -753,7 +753,7 @@ TEST_P(WebUsbAllowDevicesForUrlsPolicyHandlerTest, ApplyPolicySettingsNoUrls) {
 
 // For ChromeOS this test is parameterized to test user and device policy. For
 // other operating systems, this test just tests the user policy.
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          WebUsbAllowDevicesForUrlsPolicyHandlerTest,
 #if defined(OS_CHROMEOS)
                          testing::Values(PolicyType::kUser, PolicyType::kDevice)

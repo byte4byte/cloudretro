@@ -39,12 +39,12 @@
 // personalized suggestions.
 class SuggestionDeletionHandler {
  public:
-  typedef base::Callback<void(bool, SuggestionDeletionHandler*)>
+  typedef base::OnceCallback<void(bool, SuggestionDeletionHandler*)>
       DeletionCompletedCallback;
 
   SuggestionDeletionHandler(AutocompleteProviderClient* client,
                             const std::string& deletion_url,
-                            const DeletionCompletedCallback& callback);
+                            DeletionCompletedCallback callback);
 
   ~SuggestionDeletionHandler();
 
@@ -62,8 +62,8 @@ class SuggestionDeletionHandler {
 SuggestionDeletionHandler::SuggestionDeletionHandler(
     AutocompleteProviderClient* client,
     const std::string& deletion_url,
-    const DeletionCompletedCallback& callback)
-    : callback_(callback) {
+    DeletionCompletedCallback callback)
+    : callback_(std::move(callback)) {
   GURL url(deletion_url);
   DCHECK(url.is_valid());
 
@@ -127,7 +127,7 @@ void SuggestionDeletionHandler::OnURLLoadComplete(
   const bool ok = source->NetError() == net::OK &&
                   (source->ResponseInfo() && source->ResponseInfo()->headers &&
                    source->ResponseInfo()->headers->response_code() == 200);
-  callback_.Run(ok, this);
+  std::move(callback_).Run(ok, this);
 }
 
 // BaseSearchProvider ---------------------------------------------------------
@@ -205,13 +205,24 @@ void BaseSearchProvider::AppendSuggestClientToAdditionalQueryParams(
   }
 }
 
+// static
+bool BaseSearchProvider::IsNTPPage(
+    metrics::OmniboxEventProto::PageClassification classification) {
+  using OEP = metrics::OmniboxEventProto;
+  return (classification == OEP::NTP) ||
+         (classification == OEP::OBSOLETE_INSTANT_NTP) ||
+         (classification == OEP::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS) ||
+         (classification == OEP::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS) ||
+         (classification == OEP::NTP_REALBOX);
+}
+
 void BaseSearchProvider::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.deletable);
   if (!match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey).empty()) {
     deletion_handlers_.push_back(std::make_unique<SuggestionDeletionHandler>(
         client(), match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey),
-        base::BindRepeating(&BaseSearchProvider::OnDeletionComplete,
-                            base::Unretained(this))));
+        base::BindOnce(&BaseSearchProvider::OnDeletionComplete,
+                       base::Unretained(this))));
   }
 
   const TemplateURL* template_url =
@@ -257,16 +268,6 @@ const char BaseSearchProvider::kFalse[] = "false";
 BaseSearchProvider::~BaseSearchProvider() {}
 
 // static
-bool BaseSearchProvider::IsNTPPage(
-    metrics::OmniboxEventProto::PageClassification classification) {
-  using OEP = metrics::OmniboxEventProto;
-  return (classification == OEP::NTP) ||
-         (classification == OEP::OBSOLETE_INSTANT_NTP) ||
-         (classification == OEP::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS) ||
-         (classification == OEP::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS);
-}
-
-// static
 AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
     AutocompleteProvider* autocomplete_provider,
     const AutocompleteInput& input,
@@ -286,6 +287,7 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   match.image_url = suggestion.image_url();
   match.contents = suggestion.match_contents();
   match.contents_class = suggestion.match_contents_class();
+  match.suggestion_group_id = suggestion.suggestion_group_id();
   match.answer = suggestion.answer();
   match.subtype_identifier = suggestion.subtype_identifier();
   if (suggestion.type() == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
@@ -444,7 +446,8 @@ void BaseSearchProvider::SetDeletionURL(const std::string& deletion_url,
     return;
 
   TemplateURLService* template_url_service = client_->GetTemplateURLService();
-  if (!template_url_service)
+  if (!template_url_service ||
+      !template_url_service->GetDefaultSearchProvider())
     return;
   GURL url =
       template_url_service->GetDefaultSearchProvider()->GenerateSearchURL(

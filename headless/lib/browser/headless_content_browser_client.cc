@@ -11,9 +11,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/i18n/rtl.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "build/build_config.h"
+#include "components/embedder_support/switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/client_certificate_delegate.h"
@@ -21,27 +24,24 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_names.mojom.h"
 #include "headless/app/headless_shell_switches.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_browser_main_parts.h"
 #include "headless/lib/browser/headless_devtools_manager_delegate.h"
-#include "headless/lib/browser/headless_overlay_manifests.h"
 #include "headless/lib/browser/headless_quota_permission_context.h"
 #include "headless/lib/headless_macros.h"
 #include "net/base/url_util.h"
 #include "net/ssl/client_cert_identity.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/service_manager/sandbox/switches.h"
-#include "storage/browser/quota/quota_settings.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/switches.h"
 
 #if defined(HEADLESS_USE_BREAKPAD)
 #include "base/debug/leak_annotations.h"
-#include "components/crash/content/app/breakpad_linux.h"
 #include "components/crash/content/browser/crash_handler_host_linux.h"
+#include "components/crash/core/app/breakpad_linux.h"
 #include "content/public/common/content_descriptors.h"
 #endif  // defined(HEADLESS_USE_BREAKPAD)
 
@@ -144,30 +144,9 @@ HeadlessContentBrowserClient::GetDevToolsManagerDelegate() {
   return new HeadlessDevToolsManagerDelegate(browser_->GetWeakPtr());
 }
 
-base::Optional<service_manager::Manifest>
-HeadlessContentBrowserClient::GetServiceManifestOverlay(
-    base::StringPiece name) {
-  if (name == content::mojom::kBrowserServiceName)
-    return GetHeadlessContentBrowserOverlayManifest();
-
-  if (name == content::mojom::kPackagedServicesServiceName)
-    return GetHeadlessContentPackagedServicesOverlayManifest();
-
-  return base::nullopt;
-}
-
 scoped_refptr<content::QuotaPermissionContext>
 HeadlessContentBrowserClient::CreateQuotaPermissionContext() {
   return new HeadlessQuotaPermissionContext();
-}
-
-void HeadlessContentBrowserClient::GetQuotaSettings(
-    content::BrowserContext* context,
-    content::StoragePartition* partition,
-    ::storage::OptionalQuotaSettingsCallback callback) {
-  ::storage::GetNominalDynamicSettings(
-      partition->GetPath(), context->IsOffTheRecord(),
-      ::storage::GetDefaultDiskInfoHelper(), std::move(callback));
 }
 
 content::GeneratedCodeCacheSettings
@@ -212,6 +191,9 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->AppendSwitch(::switches::kEnableCrashReporter);
 #endif  // defined(HEADLESS_USE_BREAKPAD)
 
+  if (old_command_line.HasSwitch(switches::kExportTaggedPDF))
+    command_line->AppendSwitch(switches::kExportTaggedPDF);
+
   // If we're spawning a renderer, then override the language switch.
   std::string process_type =
       command_line->GetSwitchValueASCII(::switches::kProcessType);
@@ -232,6 +214,15 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
                                         languages[0].as_string());
       }
     }
+
+    // Please keep this in alphabetical order.
+    static const char* const kSwitchNames[] = {
+        embedder_support::kOriginTrialDisabledFeatures,
+        embedder_support::kOriginTrialDisabledTokens,
+        embedder_support::kOriginTrialPublicKey,
+    };
+    command_line->CopySwitchesFrom(old_command_line, kSwitchNames,
+                                   base::size(kSwitchNames));
   }
 
   if (append_command_line_flags_callback_) {
@@ -259,6 +250,10 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
 #endif
 }
 
+std::string HeadlessContentBrowserClient::GetApplicationLocale() {
+  return base::i18n::GetConfiguredLocale();
+}
+
 std::string HeadlessContentBrowserClient::GetAcceptLangs(
     content::BrowserContext* context) {
   return browser_->options()->accept_language;
@@ -271,20 +266,19 @@ void HeadlessContentBrowserClient::AllowCertificateError(
     const GURL& request_url,
     bool is_main_frame_request,
     bool strict_enforcement,
-    bool expired_previous_decision,
-    const base::Callback<void(content::CertificateRequestResultType)>&
-        callback) {
+    base::OnceCallback<void(content::CertificateRequestResultType)> callback) {
   if (!callback.is_null()) {
     // If --allow-insecure-localhost is specified, and the request
     // was for localhost, then the error was not fatal.
     bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
         ::switches::kAllowInsecureLocalhost);
     if (allow_localhost && net::IsLocalhost(request_url)) {
-      callback.Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CONTINUE);
+      std::move(callback).Run(
+          content::CERTIFICATE_REQUEST_RESULT_TYPE_CONTINUE);
       return;
     }
 
-    callback.Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_DENY);
+    std::move(callback).Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_DENY);
   }
 }
 
@@ -306,7 +300,7 @@ bool HeadlessContentBrowserClient::ShouldEnableStrictSiteIsolation() {
   return browser_->options()->site_per_process;
 }
 
-::network::mojom::NetworkContextPtr
+mojo::Remote<::network::mojom::NetworkContext>
 HeadlessContentBrowserClient::CreateNetworkContext(
     content::BrowserContext* context,
     bool in_memory,

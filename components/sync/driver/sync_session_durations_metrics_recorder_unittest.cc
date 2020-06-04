@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/timer/timer.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/driver/test_sync_service.h"
@@ -31,7 +31,7 @@ class SyncSessionDurationsMetricsRecorderTest : public testing::Test {
   void EnableSync() {
     identity_test_env_.MakePrimaryAccountAvailable("foo@gmail.com");
     sync_service_.SetIsAuthenticatedAccountPrimary(true);
-    sync_service_.SetDisableReasons(SyncService::DISABLE_REASON_NONE);
+    sync_service_.SetDisableReasons(SyncService::DisableReasonSet());
   }
 
   void SetInvalidCredentialsAuthError() {
@@ -70,9 +70,9 @@ class SyncSessionDurationsMetricsRecorderTest : public testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   network::TestURLLoaderFactory test_url_loader_factory_;
-  identity::IdentityTestEnvironment identity_test_env_;
+  signin::IdentityTestEnvironment identity_test_env_;
   TestSyncService sync_service_;
   const base::TimeDelta session_time_;
 

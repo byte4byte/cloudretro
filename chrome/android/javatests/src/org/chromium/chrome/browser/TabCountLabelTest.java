@@ -19,6 +19,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.toolbar.TabSwitcherDrawable;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -57,7 +58,7 @@ public class TabCountLabelTest {
     @Feature({"Browser", "Main"})
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     @RetryOnFailure
-    public void testTabCountLabel() throws InterruptedException {
+    public void testTabCountLabel() {
         final int tabCount = mActivityTestRule.getActivity().getCurrentTabModel().getCount();
         tabCountLabelCheck("Initial state", tabCount);
         ChromeTabUtils.newTabFromMenu(

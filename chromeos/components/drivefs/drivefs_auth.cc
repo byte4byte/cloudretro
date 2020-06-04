@@ -6,9 +6,12 @@
 
 #include "base/bind.h"
 #include "components/account_id/account_id.h"
-#include "services/identity/public/mojom/constants.mojom.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/consent_level.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace drivefs {
 
@@ -23,10 +26,9 @@ DriveFsAuth::DriveFsAuth(const base::Clock* clock,
     : clock_(clock),
       profile_path_(profile_path),
       timer_(std::move(timer)),
-      delegate_(delegate),
-      weak_ptr_factory_(this) {}
+      delegate_(delegate) {}
 
-DriveFsAuth::~DriveFsAuth() {}
+DriveFsAuth::~DriveFsAuth() = default;
 
 base::Optional<std::string> DriveFsAuth::GetCachedAccessToken() {
   const auto& token = GetOrResetCachedToken(true);
@@ -51,34 +53,32 @@ void DriveFsAuth::GetAccessToken(
     return;
   }
 
+  signin::IdentityManager* identity_manager = delegate_->GetIdentityManager();
+  if (!identity_manager) {
+    std::move(callback).Run(mojom::AccessTokenStatus::kAuthError, "");
+    return;
+  }
   get_access_token_callback_ = std::move(callback);
-  timer_->Start(FROM_HERE, base::TimeDelta::FromSeconds(30),
-                base::BindOnce(&DriveFsAuth::AuthTimeout,
-                               weak_ptr_factory_.GetWeakPtr()));
-  GetIdentityAccessor().GetPrimaryAccountWhenAvailable(base::BindOnce(
-      &DriveFsAuth::AccountReady, weak_ptr_factory_.GetWeakPtr()));
-}
-
-void DriveFsAuth::AccountReady(const CoreAccountId& account_id,
-                               const std::string& gaia,
-                               const std::string& email,
-                               const identity::AccountState& state) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  weak_ptr_factory_.InvalidateWeakPtrs();
-  timer_->Stop();
-  GetIdentityAccessor().GetAccessToken(
-      account_id, {"https://www.googleapis.com/auth/drive"},
-      kIdentityConsumerId,
-      base::BindOnce(&DriveFsAuth::GotChromeAccessToken,
-                     base::Unretained(this)));
+  // Timer is cancelled when it is destroyed, so use base::Unretained().
+  timer_->Start(
+      FROM_HERE, base::TimeDelta::FromSeconds(30),
+      base::BindOnce(&DriveFsAuth::AuthTimeout, base::Unretained(this)));
+  std::set<std::string> scopes({"https://www.googleapis.com/auth/drive"});
+  access_token_fetcher_ =
+      std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
+          kIdentityConsumerId, identity_manager, scopes,
+          base::BindOnce(&DriveFsAuth::GotChromeAccessToken,
+                         base::Unretained(this)),
+          signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
+          signin::ConsentLevel::kNotRequired);
 }
 
 void DriveFsAuth::GotChromeAccessToken(
-    const base::Optional<std::string>& access_token,
-    base::Time expiration_time,
-    const GoogleServiceAuthError& error) {
+    GoogleServiceAuthError error,
+    signin::AccessTokenInfo access_token_info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!access_token) {
+  timer_->Stop();
+  if (error.state() != GoogleServiceAuthError::NONE) {
     std::move(get_access_token_callback_)
         .Run(error.IsPersistentError()
                  ? mojom::AccessTokenStatus::kAuthError
@@ -86,9 +86,9 @@ void DriveFsAuth::GotChromeAccessToken(
              "");
     return;
   }
-  UpdateCachedToken(*access_token, expiration_time);
+  UpdateCachedToken(access_token_info.token, access_token_info.expiration_time);
   std::move(get_access_token_callback_)
-      .Run(mojom::AccessTokenStatus::kSuccess, *access_token);
+      .Run(mojom::AccessTokenStatus::kSuccess, access_token_info.token);
 }
 
 const std::string& DriveFsAuth::GetOrResetCachedToken(bool use_cached) {
@@ -106,18 +106,9 @@ void DriveFsAuth::UpdateCachedToken(const std::string& token,
 
 void DriveFsAuth::AuthTimeout() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  weak_ptr_factory_.InvalidateWeakPtrs();
+  access_token_fetcher_.reset();
   std::move(get_access_token_callback_)
       .Run(mojom::AccessTokenStatus::kAuthError, "");
-}
-
-identity::mojom::IdentityAccessor& DriveFsAuth::GetIdentityAccessor() {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!identity_accessor_) {
-    delegate_->GetConnector()->BindInterface(
-        identity::mojom::kServiceName, mojo::MakeRequest(&identity_accessor_));
-  }
-  return *identity_accessor_;
 }
 
 }  // namespace drivefs

@@ -10,19 +10,23 @@ import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.provider.Browser;
-import android.support.annotation.Nullable;
-import android.support.customtabs.CustomTabsIntent;
+
+import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsIntent;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browserservices.BrowserServicesMetrics;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
+import org.chromium.chrome.browser.payments.PaymentRequestImpl;
+import org.chromium.chrome.browser.payments.handler.PaymentHandlerCoordinator;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParams;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
@@ -35,6 +39,7 @@ import org.chromium.content_public.common.Referrer;
 import org.chromium.content_public.common.ResourceRequestBody;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.mojom.WindowOpenDisposition;
+import org.chromium.url.GURL;
 import org.chromium.webapk.lib.client.WebApkIdentityServiceClient;
 import org.chromium.webapk.lib.client.WebApkNavigationClient;
 import org.chromium.webapk.lib.client.WebApkValidator;
@@ -67,21 +72,28 @@ public class ServiceTabLauncher {
      * @param postData       Post-data to include in the tab URL's request body.
      */
     @CalledByNative
-    public static void launchTab(final int requestId, boolean incognito, String url,
-            int disposition, String referrerUrl, int referrerPolicy, String extraHeaders,
+    public static void launchTab(final int requestId, boolean incognito, GURL url, int disposition,
+            String referrerUrl, int referrerPolicy, String extraHeaders,
             ResourceRequestBody postData) {
         // Open popup window in custom tab.
         // Note that this is used by PaymentRequestEvent.openWindow().
         if (disposition == WindowOpenDisposition.NEW_POPUP) {
-            if (!createPopupCustomTab(requestId, url, incognito)) {
+            boolean success = false;
+            if (PaymentHandlerCoordinator.isEnabled()) {
+                success = PaymentRequestImpl.openPaymentHandlerWindow(url,
+                        (webContents) -> onWebContentsForRequestAvailable(requestId, webContents));
+            } else {
+                success = createPopupCustomTab(requestId, url.getSpec(), incognito);
+            }
+            if (!success) {
                 PostTask.postTask(UiThreadTaskTraits.DEFAULT,
                         () -> onWebContentsForRequestAvailable(requestId, null));
             }
             return;
         }
 
-        dispatchLaunch(
-                requestId, incognito, url, referrerUrl, referrerPolicy, extraHeaders, postData);
+        dispatchLaunch(requestId, incognito, url.getSpec(), referrerUrl, referrerPolicy,
+                extraHeaders, postData);
     }
 
     /** Dispatches the launch event. */
@@ -100,18 +112,17 @@ public class ServiceTabLauncher {
         if (webApkPackageName != null) {
             final List<ResolveInfo> resolveInfosFinal = resolveInfos;
             WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback callback =
-                    doesBrowserBackWebApk -> {
-                        if (doesBrowserBackWebApk) {
-                            Intent intent = WebApkNavigationClient.createLaunchWebApkIntent(
-                                    webApkPackageName, url, true /* forceNavigation */);
-                            intent.putExtra(
-                                    ShortcutHelper.EXTRA_SOURCE, ShortcutSource.NOTIFICATION);
-                            ContextUtils.getApplicationContext().startActivity(intent);
-                            return;
-                        }
-                        launchTabOrWebapp(requestId, incognito, url, referrerUrl,
-                                referrerPolicy, extraHeaders, postData, resolveInfosFinal);
-                    };
+                    (doesBrowserBackWebApk, browserPackageName) -> {
+                if (doesBrowserBackWebApk) {
+                    Intent intent = WebApkNavigationClient.createLaunchWebApkIntent(
+                            webApkPackageName, url, true /* forceNavigation */);
+                    intent.putExtra(ShortcutHelper.EXTRA_SOURCE, ShortcutSource.NOTIFICATION);
+                    ContextUtils.getApplicationContext().startActivity(intent);
+                    return;
+                }
+                launchTabOrWebapp(requestId, incognito, url, referrerUrl, referrerPolicy,
+                        extraHeaders, postData, resolveInfosFinal);
+            };
             ChromeWebApkHost.checkChromeBacksWebApkAsync(webApkPackageName, callback);
             return;
         }
@@ -214,9 +225,11 @@ public class ServiceTabLauncher {
      */
     public static void onWebContentsForRequestAvailable(
             int requestId, @Nullable WebContents webContents) {
-        nativeOnWebContentsForRequestAvailable(requestId, webContents);
+        ServiceTabLauncherJni.get().onWebContentsForRequestAvailable(requestId, webContents);
     }
 
-    private static native void nativeOnWebContentsForRequestAvailable(
-            int requestId, WebContents webContents);
+    @NativeMethods
+    interface Natives {
+        void onWebContentsForRequestAvailable(int requestId, WebContents webContents);
+    }
 }

@@ -5,7 +5,7 @@
 #ifndef IOS_WEB_PUBLIC_TEST_FAKES_CRW_FAKE_WEB_STATE_POLICY_DECIDER_H_
 #define IOS_WEB_PUBLIC_TEST_FAKES_CRW_FAKE_WEB_STATE_POLICY_DECIDER_H_
 
-#import "ios/web/public/web_state/web_state_policy_decider_bridge.h"
+#import "ios/web/public/navigation/web_state_policy_decider_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -24,8 +24,9 @@ struct FakeShouldAllowRequestInfo {
   WebStatePolicyDecider::RequestInfo request_info;
 };
 
-// Arguments passed to |shouldAllowResponse:forMainFrame:|.
-struct FakeShouldAllowResponseInfo {
+// Arguments passed to
+// |decidePolicyForNavigationResponse:forMainFrame:completionHandler:|.
+struct FakeDecidePolicyForNavigationResponseInfo {
   NSURLResponse* response = nil;
   BOOL for_main_frame = NO;
 };
@@ -37,9 +38,10 @@ struct FakeShouldAllowResponseInfo {
 // Arguments passed to |shouldAllowRequest:requestInfo:|.
 @property(nonatomic, readonly)
     web::FakeShouldAllowRequestInfo* shouldAllowRequestInfo;
-// Arguments passed to |shouldAllowResponse:forMainFrame:|.
-@property(nonatomic, readonly)
-    web::FakeShouldAllowResponseInfo* shouldAllowResponseInfo;
+// Arguments passed to
+// |decidePolicyForNavigationResponse:forMainFrame:completionHandler:|.
+@property(nonatomic, readonly) web::FakeDecidePolicyForNavigationResponseInfo*
+    decidePolicyForNavigationResponseInfo;
 
 @end
 

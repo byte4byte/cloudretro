@@ -74,21 +74,21 @@ AutoUpdater::~AutoUpdater() {
 }
 
 struct ProvidedFileSystem::AddWatcherInQueueArgs {
-  AddWatcherInQueueArgs(size_t token,
-                        const GURL& origin,
-                        const base::FilePath& entry_path,
-                        bool recursive,
-                        bool persistent,
-                        storage::AsyncFileUtil::StatusCallback callback,
-                        const storage::WatcherManager::NotificationCallback&
-                            notification_callback)
+  AddWatcherInQueueArgs(
+      size_t token,
+      const GURL& origin,
+      const base::FilePath& entry_path,
+      bool recursive,
+      bool persistent,
+      storage::AsyncFileUtil::StatusCallback callback,
+      storage::WatcherManager::NotificationCallback notification_callback)
       : token(token),
         origin(origin),
         entry_path(entry_path),
         recursive(recursive),
         persistent(persistent),
         callback(std::move(callback)),
-        notification_callback(notification_callback) {}
+        notification_callback(std::move(notification_callback)) {}
   ~AddWatcherInQueueArgs() {}
   AddWatcherInQueueArgs(AddWatcherInQueueArgs&&) = default;
 
@@ -143,8 +143,7 @@ ProvidedFileSystem::ProvidedFileSystem(
           new RequestManager(profile,
                              file_system_info.provider_id().GetExtensionId(),
                              notification_manager_.get())),
-      watcher_queue_(1),
-      weak_ptr_factory_(this) {
+      watcher_queue_(1) {
   DCHECK_EQ(ProviderId::EXTENSION, file_system_info.provider_id().GetType());
 }
 
@@ -462,8 +461,7 @@ AbortCallback ProvidedFileSystem::AddWatcher(
     bool recursive,
     bool persistent,
     storage::AsyncFileUtil::StatusCallback callback,
-    const storage::WatcherManager::NotificationCallback&
-        notification_callback) {
+    storage::WatcherManager::NotificationCallback notification_callback) {
   const size_t token = watcher_queue_.NewToken();
   watcher_queue_.Enqueue(
       token,
@@ -471,7 +469,7 @@ AbortCallback ProvidedFileSystem::AddWatcher(
                      base::Unretained(this),  // Outlived by the queue.
                      AddWatcherInQueueArgs(token, origin, entry_path, recursive,
                                            persistent, std::move(callback),
-                                           notification_callback)));
+                                           std::move(notification_callback))));
   return AbortCallback();
 }
 
@@ -545,9 +543,9 @@ void ProvidedFileSystem::Abort(int operation_request_id) {
           ABORT, std::unique_ptr<RequestManager::HandlerInterface>(
                      new operations::Abort(
                          event_router_, file_system_info_, operation_request_id,
-                         base::Bind(&ProvidedFileSystem::OnAbortCompleted,
-                                    weak_ptr_factory_.GetWeakPtr(),
-                                    operation_request_id))))) {
+                         base::BindOnce(&ProvidedFileSystem::OnAbortCompleted,
+                                        weak_ptr_factory_.GetWeakPtr(),
+                                        operation_request_id))))) {
     // If the aborting event is not handled, then the operation should simply
     // be not aborted. Instead we'll wait until it completes.
     LOG(ERROR) << "Failed to create an abort request.";

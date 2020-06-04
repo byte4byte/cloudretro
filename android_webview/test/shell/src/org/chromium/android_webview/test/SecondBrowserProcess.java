@@ -12,7 +12,7 @@ import android.os.Parcel;
 import android.os.Process;
 
 import org.chromium.android_webview.AwBrowserProcess;
-import org.chromium.android_webview.AwResource;
+import org.chromium.android_webview.common.AwResource;
 import org.chromium.android_webview.shell.R;
 
 /**
@@ -49,7 +49,7 @@ public class SecondBrowserProcess extends Service {
         return START_STICKY;
     }
 
-    private void startBrowserProcess() throws Exception {
+    private void startBrowserProcess() {
         AwResource.setResources(this.getResources());
         AwResource.setConfigKeySystemUuidMapping(R.array.config_key_system_uuid_mapping);
         AwBrowserProcess.loadLibrary(null);

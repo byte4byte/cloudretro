@@ -29,6 +29,7 @@
 #include "components/autofill/core/common/password_form_generation_data.h"
 #include "components/autofill/ios/browser/autofill_util.h"
 #import "components/autofill/ios/form_util/form_activity_observer_bridge.h"
+#include "components/autofill/ios/form_util/form_activity_params.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_generation_frame_helper.h"
@@ -40,11 +41,12 @@
 #import "components/password_manager/ios/password_suggestion_helper.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/driver/sync_service.h"
+#import "components/ukm/ios/ukm_url_recorder.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/infobars/infobar.h"
+#include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #import "ios/chrome/browser/infobars/infobar_type.h"
-#import "ios/chrome/browser/metrics/ukm_url_recorder.h"
+#import "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/passwords/credential_manager.h"
 #import "ios/chrome/browser/passwords/ios_chrome_save_password_infobar_delegate.h"
 #import "ios/chrome/browser/passwords/ios_chrome_update_password_infobar_delegate.h"
@@ -55,17 +57,18 @@
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #import "ios/chrome/browser/ui/alert_coordinator/action_sheet_coordinator.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/password_breach_commands.h"
 #import "ios/chrome/browser/ui/infobars/coordinators/infobar_password_coordinator.h"
 #import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/browser/web/tab_id_tab_helper.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/common/origin_util.h"
+#include "ios/web/common/url_scheme_util.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #include "ios/web/public/js_messaging/web_frame.h"
 #include "ios/web/public/js_messaging/web_frame_util.h"
-#include "ios/web/public/url_scheme_util.h"
-#import "ios/web/public/web_state/web_state.h"
+#include "ios/web/public/navigation/navigation_context.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
@@ -74,6 +77,7 @@
 #error "This file requires ARC support."
 #endif
 
+using autofill::FormActivityObserverBridge;
 using autofill::FormData;
 using autofill::PasswordFormGenerationData;
 using autofill::PasswordForm;
@@ -81,6 +85,8 @@ using base::SysNSStringToUTF16;
 using base::SysUTF16ToNSString;
 using l10n_util::GetNSString;
 using l10n_util::GetNSStringF;
+using password_manager::metrics_util::LogPasswordDropdownShown;
+using password_manager::metrics_util::PasswordDropdownState;
 using password_manager::AccountSelectFillData;
 using password_manager::FillData;
 using password_manager::GetPageURLAndCheckTrustLevel;
@@ -96,18 +102,6 @@ namespace {
 // Types of password infobars to display.
 enum class PasswordInfoBarType { SAVE, UPDATE };
 
-// Types of password suggestion in the keyboard accessory. Used for metrics
-// collection.
-enum class PasswordSuggestionType {
-  // Credentials are listed.
-  CREDENTIALS = 0,
-  // "Show All" is listed.
-  SHOW_ALL = 1,
-  // "Suggest Password" is listed.
-  SUGGESTED = 2,
-  COUNT = 3,
-};
-
 // Password is considered not generated when user edits it below 4 characters.
 constexpr int kMinimumLengthForEditedPassword = 4;
 
@@ -116,16 +110,6 @@ constexpr int kNotifyAutoSigninDuration = 3;  // seconds
 
 // The string ' •••' appended to the username in the suggestion.
 NSString* const kSuggestionSuffix = @" ••••••••";
-
-void LogSuggestionClicked(PasswordSuggestionType type) {
-  UMA_HISTOGRAM_ENUMERATION("PasswordManager.SuggestionClicked", type,
-                            PasswordSuggestionType::COUNT);
-}
-
-void LogSuggestionShown(PasswordSuggestionType type) {
-  UMA_HISTOGRAM_ENUMERATION("PasswordManager.SuggestionShown", type,
-                            PasswordSuggestionType::COUNT);
-}
 }  // namespace
 
 @interface PasswordController ()<PasswordSuggestionHelperDelegate>
@@ -155,7 +139,9 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 
 @end
 
-@interface PasswordController ()<FormSuggestionProvider, PasswordFormFiller>
+@interface PasswordController () <FormSuggestionProvider,
+                                  PasswordFormFiller,
+                                  FormActivityObserver>
 
 // Informs the |_passwordManager| of the password forms (if any were present)
 // that have been found on the page.
@@ -170,7 +156,12 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 // is prompted to update the password. If |type| is SAVE, the user is prompted
 // to save the password.
 - (void)showInfoBarForForm:(std::unique_ptr<PasswordFormManagerForUI>)form
-               infoBarType:(PasswordInfoBarType)type;
+               infoBarType:(PasswordInfoBarType)type
+                    manual:(BOOL)manual;
+
+// Removes infobar for given |type| if it exists. If it is not found the
+// request is silently ignored (because that use case is expected).
+- (void)removeInfoBarOfType:(PasswordInfoBarType)type manual:(BOOL)manual;
 
 // Hides auto sign-in notification. Removes the view from superview and destroys
 // the controller.
@@ -193,6 +184,9 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   // Bridge to observe WebState from Objective-C.
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
 
+  // Bridge to observe form activity in |_webState|.
+  std::unique_ptr<FormActivityObserverBridge> _formActivityObserverBridge;
+
   // Timer for hiding "Signing in as ..." notification.
   base::OneShotTimer _notifyAutoSigninTimer;
 
@@ -202,11 +196,13 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 
   // Form data for password generation on this page.
   std::map<base::string16, PasswordFormGenerationData> _formGenerationData;
+
+  NSString* _lastTypedfieldIdentifier;
+  NSString* _lastTypedValue;
 }
 
 - (instancetype)initWithWebState:(web::WebState*)webState {
-  self = [self initWithWebState:webState
-                         client:nullptr];
+  self = [self initWithWebState:webState client:nullptr];
   return self;
 }
 
@@ -220,6 +216,8 @@ void LogSuggestionShown(PasswordSuggestionType type) {
     _webStateObserverBridge =
         std::make_unique<web::WebStateObserverBridge>(self);
     _webState->AddObserver(_webStateObserverBridge.get());
+    _formActivityObserverBridge =
+        std::make_unique<FormActivityObserverBridge>(_webState, self);
     _formHelper =
         [[PasswordFormHelper alloc] initWithWebState:webState delegate:self];
     _suggestionHelper =
@@ -231,8 +229,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
     _passwordManager.reset(new PasswordManager(_passwordManagerClient.get()));
     _passwordManagerDriver.reset(new IOSChromePasswordManagerDriver(self));
 
-    if (features::IsAutomaticPasswordGenerationEnabled() &&
-        !_passwordManagerClient->IsIncognito()) {
+    if (!_passwordManagerClient->IsIncognito()) {
       _passwordGenerationHelper.reset(new PasswordGenerationFrameHelper(
           _passwordManagerClient.get(), _passwordManagerDriver.get()));
     }
@@ -298,6 +295,24 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   [self hideAutosigninNotification];
 }
 
+- (void)webState:(web::WebState*)webState
+    didFinishNavigation:(web::NavigationContext*)navigation {
+  DCHECK_EQ(_webState, webState);
+  if (!navigation->HasCommitted() || navigation->IsSameDocument())
+    return;
+
+  if (!GetPageURLAndCheckTrustLevel(webState, nullptr))
+    return;
+
+  // On non-iOS platforms navigations initiated by link click are excluded from
+  // navigations which might be form submssions. On iOS there is no easy way to
+  // check that the navigation is link initiated, so it is skipped. It should
+  // not be so important since it is unlikely that the user clicks on a link
+  // after filling password form w/o submitting it.
+  self.passwordManager->DidNavigateMainFrame(
+      /*form_may_be_submitted=*/navigation->IsRendererInitiated());
+}
+
 - (void)webState:(web::WebState*)webState didLoadPageWithSuccess:(BOOL)success {
   DCHECK_EQ(_webState, webState);
   // Clear per-page state.
@@ -312,10 +327,6 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   if (!web::UrlHasWebScheme(pageURL))
     return;
 
-  // Notify the password manager that the page loaded so it can clear its own
-  // per-page state.
-  self.passwordManager->DidNavigateMainFrame(/*form_may_be_submitted=*/true);
-
   if (!webState->ContentIsHTML()) {
     // If the current page is not HTML, it does not contain any HTML forms.
     [self didFinishPasswordFormExtraction:std::vector<autofill::FormData>()];
@@ -329,6 +340,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   if (_webState) {
     _webState->RemoveObserver(_webStateObserverBridge.get());
     _webStateObserverBridge.reset();
+    _formActivityObserverBridge.reset();
     _webState = nullptr;
   }
   _passwordManagerDriver.reset();
@@ -337,6 +349,8 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   _credentialManager.reset();
   _formGenerationData.clear();
   _isPasswordGenerated = NO;
+  _lastTypedfieldIdentifier = nil;
+  _lastTypedValue = nil;
 }
 
 #pragma mark - FormSuggestionProvider
@@ -356,6 +370,8 @@ void LogSuggestionShown(PasswordSuggestionType type) {
                                   webState:(web::WebState*)webState
                          completionHandler:
                              (SuggestionsAvailableCompletion)completion {
+  if (!GetPageURLAndCheckTrustLevel(webState, nullptr))
+    return;
   [self.suggestionHelper
       checkIfSuggestionsAvailableForForm:formName
                          fieldIdentifier:fieldIdentifier
@@ -390,11 +406,16 @@ void LogSuggestionShown(PasswordSuggestionType type) {
     }
   }
 
-  if (self.isPasswordGenerated) {
-    // Always update, in case, for example, that username has been edited.
-    self.passwordManager->UpdateGeneratedPasswordOnUserInput(
-        SysNSStringToUTF16(formName), SysNSStringToUTF16(fieldIdentifier),
-        SysNSStringToUTF16(typedValue));
+  if (![fieldIdentifier isEqualToString:_lastTypedfieldIdentifier] ||
+      ![typedValue isEqualToString:_lastTypedValue]) {
+    // This method is called multiple times for the same user keystroke. Inform
+    // only once the keystroke.
+    _lastTypedfieldIdentifier = fieldIdentifier;
+    _lastTypedValue = typedValue;
+
+    self.passwordManager->UpdateStateOnUserInput(
+        self.passwordManagerDriver, SysNSStringToUTF16(formName),
+        SysNSStringToUTF16(fieldIdentifier), SysNSStringToUTF16(typedValue));
   }
 }
 
@@ -406,14 +427,25 @@ void LogSuggestionShown(PasswordSuggestionType type) {
                            frameID:(NSString*)frameID
                           webState:(web::WebState*)webState
                  completionHandler:(SuggestionsReadyCompletion)completion {
-  DCHECK(GetPageURLAndCheckTrustLevel(webState, nullptr));
+  if (!GetPageURLAndCheckTrustLevel(webState, nullptr))
+    return;
   NSArray<FormSuggestion*>* rawSuggestions =
       [self.suggestionHelper retrieveSuggestionsWithFormName:formName
                                              fieldIdentifier:fieldIdentifier
                                                    fieldType:fieldType];
 
   NSMutableArray<FormSuggestion*>* suggestions = [NSMutableArray array];
+  bool isPasswordField = [fieldType isEqual:@"password"];
   for (FormSuggestion* rawSuggestion in rawSuggestions) {
+    // 1) If this is a focus event or the field is empty show all suggestions.
+    // Otherwise:
+    // 2) If this is a username field then show only credentials with matching
+    // prefixes. 3) If this is a password field then show suggestions only if
+    // the field is empty.
+    if (![type isEqual:@"focus"] && typedValue.length > 0 &&
+        (isPasswordField || ![rawSuggestion.value hasPrefix:typedValue])) {
+      continue;
+    }
     [suggestions
         addObject:[FormSuggestion
                       suggestionWithValue:
@@ -423,8 +455,9 @@ void LogSuggestionShown(PasswordSuggestionType type) {
                                      icon:nil
                                identifier:0]];
   }
+  base::Optional<PasswordDropdownState> suggestion_state;
   if (suggestions.count) {
-    LogSuggestionShown(PasswordSuggestionType::CREDENTIALS);
+    suggestion_state = PasswordDropdownState::kStandard;
   }
 
   if ([self canGeneratePasswordForForm:formName
@@ -440,7 +473,12 @@ void LogSuggestionShown(PasswordSuggestionType type) {
                                icon:nil
                          identifier:autofill::
                                         POPUP_ITEM_ID_GENERATE_PASSWORD_ENTRY]];
-    LogSuggestionShown(PasswordSuggestionType::SUGGESTED);
+    suggestion_state = PasswordDropdownState::kStandardGenerate;
+  }
+
+  if (suggestion_state) {
+    LogPasswordDropdownShown(*suggestion_state,
+                             _passwordManagerClient->IsIncognito());
   }
 
   completion([suggestions copy], self);
@@ -456,7 +494,10 @@ void LogSuggestionShown(PasswordSuggestionType type) {
       // Navigate to the settings list.
       [self.delegate displaySavedPasswordList];
       completion();
-      LogSuggestionClicked(PasswordSuggestionType::SHOW_ALL);
+      password_manager::metrics_util::LogPasswordDropdownItemSelected(
+          password_manager::metrics_util::PasswordDropdownSelectedOption::
+              kShowAll,
+          _passwordManagerClient->IsIncognito());
       return;
     }
     case autofill::POPUP_ITEM_ID_GENERATE_PASSWORD_ENTRY: {
@@ -464,11 +505,17 @@ void LogSuggestionShown(PasswordSuggestionType type) {
       // whether user injects a generated password or cancels.
       [self generatePasswordForFormName:formName
                         fieldIdentifier:fieldIdentifier];
-      LogSuggestionClicked(PasswordSuggestionType::SUGGESTED);
+      password_manager::metrics_util::LogPasswordDropdownItemSelected(
+          password_manager::metrics_util::PasswordDropdownSelectedOption::
+              kGenerate,
+          _passwordManagerClient->IsIncognito());
       return;
     }
     default: {
-      LogSuggestionClicked(PasswordSuggestionType::CREDENTIALS);
+      password_manager::metrics_util::LogPasswordDropdownItemSelected(
+          password_manager::metrics_util::PasswordDropdownSelectedOption::
+              kPassword,
+          _passwordManagerClient->IsIncognito());
       DCHECK([suggestion.value hasSuffix:kSuggestionSuffix]);
       NSString* username = [suggestion.value
           substringToIndex:suggestion.value.length - kSuggestionSuffix.length];
@@ -495,8 +542,8 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   return _webState;
 }
 
-- (ios::ChromeBrowserState*)browserState {
-  return _webState ? ios::ChromeBrowserState::FromBrowserState(
+- (ChromeBrowserState*)browserState {
+  return _webState ? ChromeBrowserState::FromBrowserState(
                          _webState->GetBrowserState())
                    : nullptr;
 }
@@ -510,15 +557,24 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 }
 
 - (void)showSavePasswordInfoBar:
-    (std::unique_ptr<PasswordFormManagerForUI>)formToSave {
+            (std::unique_ptr<PasswordFormManagerForUI>)formToSave
+                         manual:(BOOL)manual {
   [self showInfoBarForForm:std::move(formToSave)
-               infoBarType:PasswordInfoBarType::SAVE];
+               infoBarType:PasswordInfoBarType::SAVE
+                    manual:manual];
 }
 
 - (void)showUpdatePasswordInfoBar:
-    (std::unique_ptr<PasswordFormManagerForUI>)formToUpdate {
+            (std::unique_ptr<PasswordFormManagerForUI>)formToUpdate
+                           manual:(BOOL)manual {
   [self showInfoBarForForm:std::move(formToUpdate)
-               infoBarType:PasswordInfoBarType::UPDATE];
+               infoBarType:PasswordInfoBarType::UPDATE
+                    manual:manual];
+}
+
+- (void)removePasswordInfoBarManualFallback:(BOOL)manual {
+  [self removeInfoBarOfType:PasswordInfoBarType::SAVE manual:manual];
+  [self removeInfoBarOfType:PasswordInfoBarType::UPDATE manual:manual];
 }
 
 // Shows auto sign-in notification and schedules hiding it after 3 seconds.
@@ -561,6 +617,11 @@ void LogSuggestionShown(PasswordSuggestionType type) {
       }));
 }
 
+- (void)showPasswordBreachForLeakType:(CredentialLeakType)leakType
+                                  URL:(const GURL&)URL {
+  [self.dispatcher showPasswordBreachForLeakType:leakType URL:URL];
+}
+
 #pragma mark - PasswordManagerDriverDelegate
 
 - (void)fillPasswordForm:(const autofill::PasswordFormFillData&)formData
@@ -587,18 +648,14 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 - (void)formHelper:(PasswordFormHelper*)formHelper
      didSubmitForm:(const FormData&)form
        inMainFrame:(BOOL)inMainFrame {
-  // TODO(crbug.com/949519): remove using PasswordForm completely when the old
-  // parser is gone.
-  PasswordForm password_form;
-  password_form.form_data = form;
   if (inMainFrame) {
     self.passwordManager->OnPasswordFormSubmitted(self.passwordManagerDriver,
-                                                  password_form);
+                                                  form);
   } else {
     // Show a save prompt immediately because for iframes it is very hard to
     // figure out correctness of password forms submission.
-    self.passwordManager->OnPasswordFormSubmittedNoChecks(
-        self.passwordManagerDriver, password_form);
+    self.passwordManager->OnPasswordFormSubmittedNoChecksForiOS(
+        self.passwordManagerDriver, form);
   }
 }
 
@@ -616,19 +673,13 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   if (!self.passwordManager)
     return;
 
-  // TODO(crbug.com/949519): remove using PasswordForm completely when the old
-  // parser is gone.
-  std::vector<PasswordForm> password_forms(forms.size());
-  for (size_t i = 0; i < forms.size(); ++i)
-    password_forms[i].form_data = forms[i];
-
-  if (!password_forms.empty()) {
+  if (!forms.empty()) {
     [self.suggestionHelper updateStateOnPasswordFormExtracted];
 
     // Invoke the password manager callback to autofill password forms
     // on the loaded page.
     self.passwordManager->OnPasswordFormsParsed(self.passwordManagerDriver,
-                                                password_forms);
+                                                forms);
   } else {
     [self onNoSavedCredentials];
   }
@@ -639,7 +690,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   // and OnPasswordFormsRendered(). Bling has to improvised a bit on the
   // ordering of these two calls.
   self.passwordManager->OnPasswordFormsRendered(self.passwordManagerDriver,
-                                                password_forms, true);
+                                                forms, true);
 }
 
 - (void)findPasswordFormsAndSendThemToPasswordStore {
@@ -652,8 +703,48 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   }];
 }
 
+- (InfoBarIOS*)findInfobarOfType:(InfobarType)infobarType manual:(BOOL)manual {
+  infobars::InfoBarManager* infoBarManager =
+      InfoBarManagerImpl::FromWebState(_webState);
+
+  size_t count = infoBarManager->infobar_count();
+  for (size_t i = 0; i < count; i++) {
+    InfoBarIOS* infobar =
+        static_cast<InfoBarIOS*>(infoBarManager->infobar_at(i));
+    if (infobar->InfobarUIDelegate().infobarType == infobarType &&
+        infobar->skip_banner() == manual)
+      return infobar;
+  }
+
+  return nil;
+}
+
+- (void)removeInfoBarOfType:(PasswordInfoBarType)type manual:(BOOL)manual {
+  if (!IsInfobarUIRebootEnabled())
+    return;
+
+  InfoBarIOS* infobar = nil;
+  switch (type) {
+    case PasswordInfoBarType::SAVE: {
+      infobar = [self findInfobarOfType:InfobarType::kInfobarTypePasswordSave
+                                 manual:manual];
+      break;
+    }
+    case PasswordInfoBarType::UPDATE: {
+      infobar = [self findInfobarOfType:InfobarType::kInfobarTypePasswordUpdate
+                                 manual:manual];
+      break;
+    }
+  }
+
+  if (infobar) {
+    InfoBarManagerImpl::FromWebState(_webState)->RemoveInfoBar(infobar);
+  }
+}
+
 - (void)showInfoBarForForm:(std::unique_ptr<PasswordFormManagerForUI>)form
-               infoBarType:(PasswordInfoBarType)type {
+               infoBarType:(PasswordInfoBarType)type
+                    manual:(BOOL)manual {
   if (!_webState)
     return;
 
@@ -673,13 +764,24 @@ void LogSuggestionShown(PasswordSuggestionType type) {
       delegate->set_dispatcher(self.dispatcher);
 
       if (IsInfobarUIRebootEnabled()) {
-        InfobarPasswordCoordinator* coordinator =
-            [[InfobarPasswordCoordinator alloc]
-                initWithInfoBarDelegate:delegate.get()
-                                   type:InfobarType::kInfobarTypePasswordSave];
-        infoBarManager->AddInfoBar(
-            std::make_unique<InfoBarIOS>(coordinator, std::move(delegate)));
-      } else {
+        std::unique_ptr<InfoBarIOS> infobar;
+        // If manual save, skip showing banner.
+        bool skip_banner = manual;
+        if (IsInfobarOverlayUIEnabled()) {
+          infobar = std::make_unique<InfoBarIOS>(
+              InfobarType::kInfobarTypePasswordSave, std::move(delegate),
+              skip_banner);
+        } else {
+          InfobarPasswordCoordinator* coordinator = [[InfobarPasswordCoordinator
+              alloc]
+              initWithInfoBarDelegate:delegate.get()
+                                 type:InfobarType::kInfobarTypePasswordSave];
+          infobar = std::make_unique<InfoBarIOS>(
+              coordinator, std::move(delegate), skip_banner);
+        }
+        infoBarManager->AddInfoBar(std::move(infobar),
+                                   /*replace_existing=*/true);
+      } else if (!manual) {
         IOSPasswordInfoBarController* controller =
             [[IOSPasswordInfoBarController alloc]
                 initWithInfoBarDelegate:delegate.get()];
@@ -697,10 +799,12 @@ void LogSuggestionShown(PasswordSuggestionType type) {
             alloc]
             initWithInfoBarDelegate:delegate.get()
                                type:InfobarType::kInfobarTypePasswordUpdate];
-        infoBarManager->AddInfoBar(
-            std::make_unique<InfoBarIOS>(coordinator, std::move(delegate)));
-
-      } else {
+        // If manual save, skip showing banner.
+        std::unique_ptr<InfoBarIOS> infobar = std::make_unique<InfoBarIOS>(
+            coordinator, std::move(delegate), /*skip_banner=*/manual);
+        infoBarManager->AddInfoBar(std::move(infobar),
+                                   /*replace_existing=*/true);
+      } else if (!manual) {
         IOSChromeUpdatePasswordInfoBarDelegate::Create(
             isSyncUser, infoBarManager, std::move(form),
             self.baseViewController, self.dispatcher);
@@ -720,8 +824,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
 - (BOOL)canGeneratePasswordForForm:(NSString*)formName
                    fieldIdentifier:(NSString*)fieldIdentifier
                          fieldType:(NSString*)fieldType {
-  if (!features::IsAutomaticPasswordGenerationEnabled() ||
-      _passwordManagerClient->IsIncognito() ||
+  if (_passwordManagerClient->IsIncognito() ||
       !_passwordManagerDriver->GetPasswordGenerationHelper()
            ->IsGenerationEnabled(
                /*log_debug_data*/ true))
@@ -759,7 +862,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   // TODO(crbug.com/886583): pass correct |max_length|.
   base::string16 generatedPassword =
       _passwordGenerationHelper->GeneratePassword([self lastCommittedURL], 0, 0,
-                                                  0, nullptr);
+                                                  0);
 
   self.generatedPotentialPassword = SysUTF16ToNSString(generatedPassword);
 
@@ -772,6 +875,7 @@ void LogSuggestionShown(PasswordSuggestionType type) {
   // TODO(crbug.com/886583): add eg tests
   self.actionSheetCoordinator = [[ActionSheetCoordinator alloc]
       initWithBaseViewController:self.baseViewController
+                         browser:self.browser
                            title:@""
                          message:@""
                             rect:self.baseViewController.view.frame
@@ -883,6 +987,28 @@ void LogSuggestionShown(PasswordSuggestionType type) {
           confirmPasswordIdentifier:confirmPasswordIdentifier
                   generatedPassword:generatedPassword
                   completionHandler:generatedPasswordInjected];
+}
+
+#pragma mark - FormActivityObserver
+
+- (void)webState:(web::WebState*)webState
+    didRegisterFormActivity:(const autofill::FormActivityParams&)params
+                    inFrame:(web::WebFrame*)frame {
+  DCHECK_EQ(_webState, webState);
+
+  if (!GetPageURLAndCheckTrustLevel(webState, nullptr))
+    return;
+
+  if (!frame || !frame->CanCallJavaScriptFunction())
+    return;
+
+  // Return early if |params| is not complete or if forms are not changed.
+  if (params.input_missing || params.type != "form_changed")
+    return;
+
+  // If there's a change in password forms on a page, they should be parsed
+  // again.
+  [self findPasswordFormsAndSendThemToPasswordStore];
 }
 
 @end

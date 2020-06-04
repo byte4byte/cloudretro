@@ -19,8 +19,9 @@
 #include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
+#include "components/crash/core/common/breakpad_running_ios.h"
 #include "ios/chrome/browser/chrome_paths.h"
-#include "ios/chrome/browser/crash_report/crash_report_flags.h"
 #import "ios/chrome/browser/crash_report/crash_report_user_application_state.h"
 #import "ios/chrome/browser/crash_report/main_thread_freeze_detector.h"
 
@@ -35,6 +36,8 @@
 
 namespace breakpad_helper {
 
+NSString* const kBreadcrumbsProductDataKey = @"breadcrumbs";
+
 namespace {
 
 // Key in NSUserDefaults for a Boolean value that stores whether to upload
@@ -46,17 +49,18 @@ NSString* const kCrashedInBackground = @"crashed_in_background";
 NSString* const kFreeDiskInKB = @"free_disk_in_kb";
 NSString* const kFreeMemoryInKB = @"free_memory_in_kb";
 NSString* const kMemoryWarningInProgress = @"memory_warning_in_progress";
+NSString* const kHangReport = @"hang-report";
 NSString* const kMemoryWarningCount = @"memory_warning_count";
 NSString* const kUptimeAtRestoreInMs = @"uptime_at_restore_in_ms";
 NSString* const kUploadedInRecoveryMode = @"uploaded_in_recovery_mode";
-NSString* const kBVCPresentingActiveViewController =
-    @"bvc_presenting_active_vc";
+NSString* const kGridToVisibleTabAnimation = @"grid_to_visible_tab_animation";
 
 // Multiple state information are combined into one CrachReportMultiParameter
 // to save limited and finite number of ReportParameters.
 // These are the values grouped in the user_application_state parameter.
 NSString* const kOrientationState = @"orient";
 NSString* const kHorizontalSizeClass = @"sizeclass";
+NSString* const kUserInterfaceStyle = @"user_interface_style";
 NSString* const kSignedIn = @"signIn";
 NSString* const kIsShowingPDF = @"pdf";
 NSString* const kVideoPlaying = @"avplay";
@@ -64,9 +68,6 @@ NSString* const kIncognitoTabCount = @"OTRTabs";
 NSString* const kRegularTabCount = @"regTabs";
 NSString* const kDestroyingAndRebuildingIncognitoBrowserState =
     @"destroyingAndRebuildingOTR";
-
-// Whether the crash reporter is enabled.
-bool g_crash_reporter_enabled = false;
 
 void DeleteAllReportsInDirectory(base::FilePath directory) {
   base::FileEnumerator enumerator(directory, false,
@@ -123,11 +124,11 @@ void UploadResultHandler(NSString* report_id, NSError* error) {
 }  // namespace
 
 void Start(const std::string& channel_name) {
-  DCHECK(!g_crash_reporter_enabled);
+  DCHECK(!crash_reporter::IsBreakpadRunning());
   [[BreakpadController sharedInstance] start:YES];
   [[MainThreadFreezeDetector sharedInstance] start];
   logging::SetLogMessageHandler(&FatalMessageHandler);
-  g_crash_reporter_enabled = true;
+  crash_reporter::SetBreakpadRunning(true);
   // Register channel information.
   if (channel_name.length()) {
     AddReportParameter(@"channel", base::SysUTF8ToNSString(channel_name), true);
@@ -148,10 +149,10 @@ void SetEnabled(bool enabled) {
   // It is necessary to always call |MainThreadFreezeDetector setEnabled| as
   // the function will update its preference based on finch.
   [[MainThreadFreezeDetector sharedInstance] setEnabled:enabled];
-  if (g_crash_reporter_enabled == enabled)
+  if (crash_reporter::IsBreakpadRunning() == enabled)
     return;
-  g_crash_reporter_enabled = enabled;
-  if (g_crash_reporter_enabled) {
+  crash_reporter::SetBreakpadRunning(enabled);
+  if (enabled) {
     [[BreakpadController sharedInstance] start:NO];
   } else {
     [[BreakpadController sharedInstance] stop];
@@ -159,7 +160,7 @@ void SetEnabled(bool enabled) {
 }
 
 void SetBreakpadUploadingEnabled(bool enabled) {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   if (enabled) {
     static dispatch_once_t once_token;
@@ -180,11 +181,8 @@ void SetUserEnabledUploading(bool uploading_enabled) {
 }
 
 void SetUploadingEnabled(bool enabled) {
-  if (enabled &&
-      [UIApplication sharedApplication].applicationState ==
-          UIApplicationStateInactive &&
-      !base::FeatureList::IsEnabled(
-          crash_report::kBreakpadNoDelayInitialUpload)) {
+  if (enabled && [UIApplication sharedApplication].applicationState ==
+                     UIApplicationStateInactive) {
     return;
   }
   if ([MainThreadFreezeDetector sharedInstance].canUploadBreakpadCrashReports) {
@@ -205,13 +203,13 @@ bool UserEnabledUploading() {
 void CleanupCrashReports() {
   base::FilePath crash_directory;
   base::PathService::Get(ios::DIR_CRASH_DUMPS, &crash_directory);
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&DeleteAllReportsInDirectory, crash_directory));
 }
 
 void AddReportParameter(NSString* key, NSString* value, bool async) {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   if (async) {
     [[BreakpadController sharedInstance] addUploadParameter:value forKey:key];
@@ -246,7 +244,7 @@ bool HasReportToUpload() {
 }
 
 void RemoveReportParameter(NSString* key) {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   [[BreakpadController sharedInstance] removeUploadParameterForKey:key];
 }
@@ -275,6 +273,13 @@ void SetMemoryWarningInProgress(bool value) {
     AddReportParameter(kMemoryWarningInProgress, @"yes", true);
   else
     RemoveReportParameter(kMemoryWarningInProgress);
+}
+
+void SetHangReport(bool value) {
+  if (value)
+    AddReportParameter(kHangReport, @"yes", false);
+  else
+    RemoveReportParameter(kHangReport);
 }
 
 void SetCurrentFreeMemoryInKB(int value) {
@@ -311,6 +316,12 @@ void SetCurrentHorizontalSizeClass(int horizontalSizeClass) {
       withValue:horizontalSizeClass];
 }
 
+void SetCurrentUserInterfaceStyle(int userInterfaceStyle) {
+  [[CrashReportUserApplicationState sharedInstance]
+       setValue:kUserInterfaceStyle
+      withValue:userInterfaceStyle];
+}
+
 void SetCurrentlySignedIn(bool signedIn) {
   if (signedIn) {
     [[CrashReportUserApplicationState sharedInstance] setValue:kSignedIn
@@ -341,18 +352,24 @@ void SetDestroyingAndRebuildingIncognitoBrowserState(bool in_progress) {
   }
 }
 
-void SetBVCPresentingActiveViewController(NSString* active_view_controller,
-                                          NSString* presenting_view_controller,
-                                          NSString* parent_view_controller) {
-  NSString* formatted_value = [NSString
-      stringWithFormat:@"{activeVC:%@, presentingVC:%@, parentVC:%@}",
-                       active_view_controller, presenting_view_controller,
-                       parent_view_controller];
-  AddReportParameter(kBVCPresentingActiveViewController, formatted_value, true);
+void SetGridToVisibleTabAnimation(NSString* to_view_controller,
+                                  NSString* presenting_view_controller,
+                                  NSString* presented_view_controller,
+                                  NSString* parent_view_controller) {
+  NSString* formatted_value =
+      [NSString stringWithFormat:
+                    @"{toVC:%@, presentingVC:%@, presentedVC:%@, parentVC:%@}",
+                    to_view_controller, presenting_view_controller,
+                    presented_view_controller, parent_view_controller];
+  AddReportParameter(kGridToVisibleTabAnimation, formatted_value, true);
 }
 
-void RemoveBVCPresentingActiveViewController() {
-  RemoveReportParameter(kBVCPresentingActiveViewController);
+void RemoveGridToVisibleTabAnimation() {
+  RemoveReportParameter(kGridToVisibleTabAnimation);
+}
+
+void SetBreadcrumbEvents(NSString* breadcrumbs) {
+  AddReportParameter(kBreadcrumbsProductDataKey, breadcrumbs, /*async=*/true);
 }
 
 void MediaStreamPlaybackDidStart() {
@@ -370,7 +387,7 @@ void MediaStreamPlaybackDidStop() {
 // process uptime at crash and process uptime at restore is smaller than X
 // seconds and find insta-crashers.
 void WillStartCrashRestoration() {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   // We use gettimeofday and BREAKPAD_PROCESS_START_TIME to compute the
   // uptime to stay as close as possible as how breakpad computes the
@@ -401,7 +418,7 @@ void WillStartCrashRestoration() {
 }
 
 void StartUploadingReportsInRecoveryMode() {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   [[BreakpadController sharedInstance] stop];
   [[BreakpadController sharedInstance] setParametersToAddAtUploadTime:@{
@@ -413,7 +430,7 @@ void StartUploadingReportsInRecoveryMode() {
 }
 
 void RestoreDefaultConfiguration() {
-  if (!g_crash_reporter_enabled)
+  if (!crash_reporter::IsBreakpadRunning())
     return;
   [[BreakpadController sharedInstance] stop];
   [[BreakpadController sharedInstance] resetConfiguration];

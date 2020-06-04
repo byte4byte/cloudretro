@@ -105,8 +105,8 @@ void ReadaheadFileStreamReader::ReadFromSourceIfNeeded() {
       base::MakeRefCounted<net::IOBuffer>(kBufferSize);
   int result = source_->Read(
       buf.get(), kBufferSize,
-      base::Bind(&ReadaheadFileStreamReader::OnFinishReadFromSource,
-                 weak_factory_.GetWeakPtr(), base::RetainedRef(buf)));
+      base::BindOnce(&ReadaheadFileStreamReader::OnFinishReadFromSource,
+                     weak_factory_.GetWeakPtr(), base::RetainedRef(buf)));
 
   if (result != net::ERR_IO_PENDING)
     OnFinishReadFromSource(buf.get(), result);
@@ -137,7 +137,7 @@ void ReadaheadFileStreamReader::OnFinishReadFromSource(net::IOBuffer* buf,
     // Free the pending callback before running it, as the callback often
     // dispatches another read.
     scoped_refptr<net::DrainableIOBuffer> sink = pending_sink_buffer_;
-    pending_sink_buffer_ = NULL;
+    pending_sink_buffer_.reset();
     std::move(pending_read_callback_)
         .Run(FinishReadFromCacheOrStoredError(sink.get()));
   }

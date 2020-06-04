@@ -16,7 +16,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "storage/browser/fileapi/file_system_url.h"
+#include "storage/browser/file_system/file_system_url.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
@@ -29,8 +29,8 @@ void OnResolveToContentUrlOnUIThread(
     ArcDocumentsProviderRoot::ResolveToContentUrlCallback callback,
     const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(std::move(callback), url));
+  base::PostTask(FROM_HERE, {BrowserThread::IO},
+                 base::BindOnce(std::move(callback), url));
 }
 
 void ResolveToContentUrlOnUIThread(
@@ -62,10 +62,10 @@ void ResolveToContentUrlOnUIThread(
 ArcDocumentsProviderFileStreamReader::ArcDocumentsProviderFileStreamReader(
     const storage::FileSystemURL& url,
     int64_t offset)
-    : offset_(offset), content_url_resolved_(false), weak_ptr_factory_(this) {
+    : offset_(offset), content_url_resolved_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &ResolveToContentUrlOnUIThread, url,

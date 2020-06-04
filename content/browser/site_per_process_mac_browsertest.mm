@@ -33,16 +33,18 @@ class TextInputClientMacHelper {
 
   void WaitForStringFromRange(RenderWidgetHost* rwh, const gfx::Range& range) {
     GetStringFromRangeForRenderWidget(
-        rwh, range, base::Bind(&TextInputClientMacHelper::OnResult,
-                               base::Unretained(this)));
+        rwh, range,
+        base::BindOnce(&TextInputClientMacHelper::OnResult,
+                       base::Unretained(this)));
     loop_runner_ = new MessageLoopRunner();
     loop_runner_->Run();
   }
 
   void WaitForStringAtPoint(RenderWidgetHost* rwh, const gfx::Point& point) {
     GetStringAtPointForRenderWidget(
-        rwh, point, base::Bind(&TextInputClientMacHelper::OnResult,
-                               base::Unretained(this)));
+        rwh, point,
+        base::BindOnce(&TextInputClientMacHelper::OnResult,
+                       base::Unretained(this)));
     loop_runner_ = new MessageLoopRunner();
     loop_runner_->Run();
   }
@@ -52,10 +54,9 @@ class TextInputClientMacHelper {
  private:
   void OnResult(const std::string& string, const gfx::Point& point) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      base::PostTaskWithTraits(
-          FROM_HERE, {BrowserThread::UI},
-          base::BindOnce(&TextInputClientMacHelper::OnResult,
-                         base::Unretained(this), string, point));
+      base::PostTask(FROM_HERE, {BrowserThread::UI},
+                     base::BindOnce(&TextInputClientMacHelper::OnResult,
+                                    base::Unretained(this), string, point));
       return;
     }
     word_ = string;
@@ -153,16 +154,20 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMacBrowserTest,
       child_iframe_node->current_frame_host()->GetRenderWidgetHost();
 
   InputEventAckWaiter gesture_scroll_begin_ack_observer(
-      child_rwh, base::BindRepeating([](InputEventAckSource, InputEventAckState,
+      child_rwh, base::BindRepeating([](blink::mojom::InputEventResultSource,
+                                        blink::mojom::InputEventResultState,
                                         const blink::WebInputEvent& event) {
-        return event.GetType() == blink::WebInputEvent::kGestureScrollBegin &&
+        return event.GetType() ==
+                   blink::WebInputEvent::Type::kGestureScrollBegin &&
                !static_cast<const blink::WebGestureEvent&>(event)
                     .data.scroll_begin.synthetic;
       }));
   InputEventAckWaiter gesture_scroll_end_ack_observer(
-      child_rwh, base::BindRepeating([](InputEventAckSource, InputEventAckState,
+      child_rwh, base::BindRepeating([](blink::mojom::InputEventResultSource,
+                                        blink::mojom::InputEventResultState,
                                         const blink::WebInputEvent& event) {
-        return event.GetType() == blink::WebInputEvent::kGestureScrollEnd &&
+        return event.GetType() ==
+                   blink::WebInputEvent::Type::kGestureScrollEnd &&
                !static_cast<const blink::WebGestureEvent&>(event)
                     .data.scroll_end.synthetic;
       }));
@@ -171,10 +176,11 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMacBrowserTest,
       static_cast<RenderWidgetHostViewBase*>(child_rwh->GetView());
 
   blink::WebMouseWheelEvent scroll_event(
-      blink::WebInputEvent::kMouseWheel, blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::Type::kMouseWheel,
+      blink::WebInputEvent::kNoModifiers,
       blink::WebInputEvent::GetStaticTimeStampForTests());
   scroll_event.SetPositionInWidget(1, 1);
-  scroll_event.has_precise_scrolling_deltas = true;
+  scroll_event.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
   scroll_event.delta_x = 0.0f;
 
   // Have the RWHVCF process a sequence of touchpad scroll events that contain
@@ -267,7 +273,7 @@ void SendMacTouchpadPinchSequenceWithExpectedTarget(
   // isn't sent until the first PinchUpdate.
 
   InputEventAckWaiter waiter(expected_target->GetRenderWidgetHost(),
-                             blink::WebInputEvent::kGesturePinchBegin);
+                             blink::WebInputEvent::Type::kGesturePinchBegin);
   NSEvent* pinchUpdateEvent =
       MockGestureEvent(NSEventTypeMagnify, 0.25, gesture_point.x(),
                        gesture_point.y(), NSEventPhaseChanged);
@@ -305,7 +311,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMacBrowserTest,
   // surface information required for event hit testing is ready.
   auto* rwhv_child =
       static_cast<RenderWidgetHostViewBase*>(child_frame_host->GetView());
-  WaitForHitTestDataOrChildSurfaceReady(child_frame_host);
+  WaitForHitTestData(child_frame_host);
 
   // All touches & gestures are sent to the main frame's view, and should be
   // routed appropriately from there.

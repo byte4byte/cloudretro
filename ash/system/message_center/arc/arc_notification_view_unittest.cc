@@ -89,13 +89,13 @@ class ArcNotificationViewTest : public AshTestBase {
 
     views::Widget::InitParams init_params(
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-    init_params.context = CurrentContext();
+    init_params.context = GetContext();
     init_params.parent = Shell::GetPrimaryRootWindow()->GetChildById(
         desks_util::GetActiveDeskContainerId());
     init_params.ownership =
         views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     views::Widget* widget = new views::Widget();
-    widget->Init(init_params);
+    widget->Init(std::move(init_params));
     widget->SetContentsView(notification_view_.get());
     widget->SetSize(notification_view_->GetPreferredSize());
     widget->Show();

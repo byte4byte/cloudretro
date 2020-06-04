@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/video/gpu_arc_video_service_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "dbus/bus.h"
@@ -18,7 +18,7 @@
 
 namespace chromeos {
 
-LibvdaServiceProvider::LibvdaServiceProvider() : weak_ptr_factory_(this) {}
+LibvdaServiceProvider::LibvdaServiceProvider() {}
 
 LibvdaServiceProvider::~LibvdaServiceProvider() = default;
 
@@ -28,8 +28,8 @@ void LibvdaServiceProvider::Start(
       libvda::kLibvdaServiceInterface, libvda::kProvideMojoConnectionMethod,
       base::BindRepeating(&LibvdaServiceProvider::ProvideMojoConnection,
                           weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&LibvdaServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&LibvdaServiceProvider::OnExported,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void LibvdaServiceProvider::OnExported(const std::string& interface_name,
@@ -44,8 +44,10 @@ void LibvdaServiceProvider::ProvideMojoConnection(
     dbus::ExportedObject::ResponseSender response_sender) {
   arc::ArcSessionManager* arc_session_manager = arc::ArcSessionManager::Get();
   if (!arc_session_manager) {
-    response_sender.Run(dbus::ErrorResponse::FromMethodCall(
-        method_call, DBUS_ERROR_FAILED, "Could not find ARC session manager"));
+    std::move(response_sender)
+        .Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, DBUS_ERROR_FAILED,
+            "Could not find ARC session manager"));
     return;
   }
   // LibvdaService will return the GpuArcVideoServiceHost instance that
@@ -71,7 +73,7 @@ void LibvdaServiceProvider::OnBootstrapVideoAcceleratorFactoryCallback(
   dbus::MessageWriter writer(response.get());
   writer.AppendFileDescriptor(fd.get());
   writer.AppendString(pipe_name);
-  response_sender.Run(std::move(response));
+  std::move(response_sender).Run(std::move(response));
 }
 
 }  // namespace chromeos

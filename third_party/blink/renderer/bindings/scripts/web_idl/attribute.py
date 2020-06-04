@@ -2,22 +2,27 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import exceptions
-from .common import WithCodeGeneratorInfo
-from .common import WithComponent
-from .common import WithDebugInfo
-from .common import WithExposure
-from .common import WithExtendedAttributes
-from .common import WithIdentifier
-from .idl_member import IdlMember
+from .code_generator_info import CodeGeneratorInfo
+from .composition_parts import WithCodeGeneratorInfo
+from .composition_parts import WithComponent
+from .composition_parts import WithDebugInfo
+from .composition_parts import WithExposure
+from .composition_parts import WithExtendedAttributes
+from .composition_parts import WithIdentifier
+from .composition_parts import WithOwner
+from .composition_parts import WithOwnerMixin
+from .exposure import Exposure
 from .idl_type import IdlType
+from .make_copy import make_copy
 
 
-class Attribute(IdlMember):
+class Attribute(WithIdentifier, WithExtendedAttributes, WithCodeGeneratorInfo,
+                WithExposure, WithOwner, WithOwnerMixin, WithComponent,
+                WithDebugInfo):
     """https://heycam.github.io/webidl/#idl-attributes"""
 
-    class IR(WithIdentifier, WithExtendedAttributes, WithExposure,
-             WithCodeGeneratorInfo, WithComponent, WithDebugInfo):
+    class IR(WithIdentifier, WithExtendedAttributes, WithCodeGeneratorInfo,
+             WithExposure, WithOwnerMixin, WithComponent, WithDebugInfo):
         def __init__(self,
                      identifier,
                      idl_type,
@@ -25,8 +30,6 @@ class Attribute(IdlMember):
                      is_readonly=False,
                      does_inherit_getter=False,
                      extended_attributes=None,
-                     exposures=None,
-                     code_generator_info=None,
                      component=None,
                      debug_info=None):
             assert isinstance(idl_type, IdlType)
@@ -36,8 +39,9 @@ class Attribute(IdlMember):
 
             WithIdentifier.__init__(self, identifier)
             WithExtendedAttributes.__init__(self, extended_attributes)
-            WithExposure.__init__(self, exposures)
-            WithCodeGeneratorInfo.__init__(self, code_generator_info)
+            WithCodeGeneratorInfo.__init__(self)
+            WithExposure.__init__(self)
+            WithOwnerMixin.__init__(self)
             WithComponent.__init__(self, component)
             WithDebugInfo.__init__(self, debug_info)
 
@@ -46,35 +50,43 @@ class Attribute(IdlMember):
             self.is_readonly = is_readonly
             self.does_inherit_getter = does_inherit_getter
 
+    def __init__(self, ir, owner):
+        assert isinstance(ir, Attribute.IR)
+
+        ir = make_copy(ir)
+        WithIdentifier.__init__(self, ir)
+        WithExtendedAttributes.__init__(self, ir, readonly=True)
+        WithCodeGeneratorInfo.__init__(self, ir, readonly=True)
+        WithExposure.__init__(self, ir, readonly=True)
+        WithOwner.__init__(self, owner)
+        WithOwnerMixin.__init__(self, ir)
+        WithComponent.__init__(self, ir, readonly=True)
+        WithDebugInfo.__init__(self, ir)
+
+        self._idl_type = ir.idl_type
+        self._is_static = ir.is_static
+        self._is_readonly = ir.is_readonly
+        self._does_inherit_getter = ir.does_inherit_getter
+
     @property
     def idl_type(self):
-        """
-        Returns type of this attribute.
-        @return IdlType
-        """
-        raise exceptions.NotImplementedError()
+        """Returns the type."""
+        return self._idl_type
 
     @property
     def is_static(self):
-        """
-        Returns True if this attriute is static.
-        @return bool
-        """
-        raise exceptions.NotImplementedError()
+        """Returns True if this attriute is static."""
+        return self._is_static
 
     @property
     def is_readonly(self):
-        """
-        Returns True if this attribute is read only.
-        @return bool
-        """
-        raise exceptions.NotImplementedError()
+        """Returns True if this attribute is read only."""
+        return self._is_readonly
 
     @property
     def does_inherit_getter(self):
         """
-        Returns True if |self| inherits its getter.
+        Returns True if this attribute inherits its getter.
         https://heycam.github.io/webidl/#dfn-inherit-getter
-        @return bool
         """
-        raise exceptions.NotImplementedError()
+        return self._does_inherit_getter

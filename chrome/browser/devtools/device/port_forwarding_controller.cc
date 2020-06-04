@@ -28,10 +28,12 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
+#include "net/dns/public/resolve_error_info.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/tcp_client_socket.h"
@@ -153,20 +155,22 @@ class PortForwardingHostResolver : public network::ResolveHostClientBase {
                              const std::string& host,
                              int port,
                              ResolveHostCallback resolve_host_callback)
-      : binding_(this),
-        resolve_host_callback_(std::move(resolve_host_callback)) {
+      : resolve_host_callback_(std::move(resolve_host_callback)) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    DCHECK(!binding_);
+    DCHECK(!receiver_.is_bound());
 
-    network::mojom::ResolveHostClientPtr client_ptr;
-    binding_.Bind(mojo::MakeRequest(&client_ptr));
-    binding_.set_connection_error_handler(
-        base::BindOnce(&PortForwardingHostResolver::OnComplete,
-                       base::Unretained(this), net::ERR_FAILED, base::nullopt));
     net::HostPortPair host_port_pair(host, port);
+    // Use a transient NetworkIsolationKey, as there's no need to share cached
+    // DNS results from this request with anything else.
     content::BrowserContext::GetDefaultStoragePartition(profile)
         ->GetNetworkContext()
-        ->ResolveHost(host_port_pair, nullptr, std::move(client_ptr));
+        ->ResolveHost(host_port_pair,
+                      net::NetworkIsolationKey::CreateTransient(), nullptr,
+                      receiver_.BindNewPipeAndPassRemote());
+    receiver_.set_disconnect_handler(
+        base::BindOnce(&PortForwardingHostResolver::OnComplete,
+                       base::Unretained(this), net::ERR_NAME_NOT_RESOLVED,
+                       net::ResolveErrorInfo(net::ERR_FAILED), base::nullopt));
   }
 
  private:
@@ -177,6 +181,7 @@ class PortForwardingHostResolver : public network::ResolveHostClientBase {
   // network::mojom::ResolveHostClient:
   void OnComplete(
       int result,
+      const net::ResolveErrorInfo& resolve_error_info,
       const base::Optional<net::AddressList>& resolved_addresses) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -190,7 +195,7 @@ class PortForwardingHostResolver : public network::ResolveHostClientBase {
     delete this;
   }
 
-  mojo::Binding<network::mojom::ResolveHostClient> binding_;
+  mojo::Receiver<network::mojom::ResolveHostClient> receiver_{this};
   ResolveHostCallback resolve_host_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PortForwardingHostResolver);
@@ -231,9 +236,9 @@ class SocketTunnel {
         adb_thread_runner_(base::ThreadTaskRunnerHandle::Get()) {
     ResolveHostCallback resolve_host_callback = base::BindOnce(
         &SocketTunnel::OnResolveHostComplete, base::Unretained(this));
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             base::BindOnce(&ResolveHost, profile, host, port,
-                                            std::move(resolve_host_callback)));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(&ResolveHost, profile, host, port,
+                                  std::move(resolve_host_callback)));
   }
 
   void OnResolveHostComplete(net::AddressList resolved_addresses) {
@@ -255,7 +260,7 @@ class SocketTunnel {
     host_socket_.reset(new net::TCPClientSocket(resolved_addresses, nullptr,
                                                 nullptr, net::NetLogSource()));
     int result = host_socket_->Connect(
-        base::Bind(&SocketTunnel::OnConnected, base::Unretained(this)));
+        base::BindOnce(&SocketTunnel::OnConnected, base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       OnConnected(result);
   }
@@ -283,11 +288,10 @@ class SocketTunnel {
 
     scoped_refptr<net::IOBuffer> buffer =
         base::MakeRefCounted<net::IOBuffer>(kBufferSize);
-    int result = from->Read(
-        buffer.get(),
-        kBufferSize,
-        base::Bind(
-            &SocketTunnel::OnRead, base::Unretained(this), from, to, buffer));
+    int result =
+        from->Read(buffer.get(), kBufferSize,
+                   base::BindOnce(&SocketTunnel::OnRead, base::Unretained(this),
+                                  from, to, buffer));
     if (result != net::ERR_IO_PENDING)
       OnRead(from, to, std::move(buffer), result);
   }
@@ -308,10 +312,11 @@ class SocketTunnel {
         base::MakeRefCounted<net::DrainableIOBuffer>(std::move(buffer), total);
 
     ++pending_writes_;
-    result = to->Write(drainable.get(), total,
-                       base::Bind(&SocketTunnel::OnWritten,
-                                  base::Unretained(this), drainable, from, to),
-                       kPortForwardingControllerTrafficAnnotation);
+    result =
+        to->Write(drainable.get(), total,
+                  base::BindOnce(&SocketTunnel::OnWritten,
+                                 base::Unretained(this), drainable, from, to),
+                  kPortForwardingControllerTrafficAnnotation);
     if (result != net::ERR_IO_PENDING)
       OnWritten(drainable, from, to, result);
   }
@@ -333,8 +338,8 @@ class SocketTunnel {
       ++pending_writes_;
       result =
           to->Write(drainable.get(), drainable->BytesRemaining(),
-                    base::Bind(&SocketTunnel::OnWritten, base::Unretained(this),
-                               drainable, from, to),
+                    base::BindOnce(&SocketTunnel::OnWritten,
+                                   base::Unretained(this), drainable, from, to),
                     kPortForwardingControllerTrafficAnnotation);
       if (result != net::ERR_IO_PENDING)
         OnWritten(drainable, from, to, result);

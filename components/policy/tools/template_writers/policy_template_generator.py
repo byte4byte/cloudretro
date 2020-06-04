@@ -60,6 +60,7 @@ class PolicyTemplateGenerator:
     for key in self._messages.keys():
       self._messages[key]['text'] = self._ImportMessage(
           self._messages[key]['text'])
+    self._AddGroups(self._policy_data['policy_definitions'])
     self._AddAtomicGroups(self._policy_data['policy_definitions'],
                           self._policy_data['policy_atomic_group_definitions'])
     self._policy_data[
@@ -112,6 +113,7 @@ class PolicyTemplateGenerator:
         product, platform = {
             'android': ('chrome', 'android'),
             'webview_android': ('webview', 'android'),
+            'ios': ('chrome', 'ios'),
             'chrome_os': ('chrome_os', 'chrome_os'),
             'chrome_frame': ('chrome_frame', 'win'),
         }[product_platform_part]
@@ -147,6 +149,8 @@ class PolicyTemplateGenerator:
       # Iterate through all the items of an enum-type policy, and add captions.
       for item in policy['items']:
         item['caption'] = self._ImportMessage(item['caption'])
+      if 'supported_on' in item:
+        item['supported_on'] = self._ProcessSupportedOn(item['supported_on'])
     if not IsGroupOrAtomicGroup(policy):
       if not 'label' in policy:
         # If 'label' is not specified, then it defaults to 'caption':
@@ -179,6 +183,25 @@ class PolicyTemplateGenerator:
     # Create a copy, so that writers can't screw up subsequent writers.
     policy_data_copy = copy.deepcopy(self._policy_data)
     return template_writer.WriteTemplate(policy_data_copy)
+
+
+  def _AddGroups(self, policy_list):
+    '''Adds a 'group' field, which is set to be the group's name, to the
+       policies that are part of a group.
+
+    Args:
+      policy_list: A list of policies and groups whose policies will have a
+      'group' field added.
+    '''
+    groups = [policy for policy in policy_list if policy['type'] == 'group']
+    policy_lookup = {
+        policy['name']: policy
+        for policy in policy_list
+        if not IsGroupOrAtomicGroup(policy)
+    }
+    for group in groups:
+      for policy_name in group['policies']:
+        policy_lookup[policy_name]['group'] = group['name']
 
   def _AddAtomicGroups(self, policy_list, policy_atomic_groups):
     '''Adds an 'atomic_group' field to the policies that are part of an atomic

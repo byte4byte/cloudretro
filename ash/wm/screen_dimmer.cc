@@ -49,8 +49,8 @@ void ScreenDimmer::SetDimming(bool should_dim) {
 aura::Window::Windows ScreenDimmer::GetAllContainers() {
   return container_ == Container::ROOT
              ? Shell::GetAllRootWindows()
-             : wm::GetContainersFromAllRootWindows(
-                   ash::kShellWindowId_LockScreenContainersContainer);
+             : GetContainersForAllRootWindows(
+                   kShellWindowId_LockScreenContainersContainer);
 }
 
 void ScreenDimmer::OnRootWindowAdded(aura::Window* root_window) {

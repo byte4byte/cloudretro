@@ -24,7 +24,7 @@ class TestingPrefServiceSyncable;
 }
 
 // This class is the implementation of ChromeBrowserState used for testing.
-class TestChromeBrowserState : public ios::ChromeBrowserState {
+class TestChromeBrowserState : public ChromeBrowserState {
  public:
   typedef std::vector<
       std::pair<BrowserStateKeyedServiceFactory*,
@@ -44,10 +44,11 @@ class TestChromeBrowserState : public ios::ChromeBrowserState {
 
   // ChromeBrowserState:
   scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
-  ios::ChromeBrowserState* GetOriginalChromeBrowserState() override;
+  ChromeBrowserState* GetOriginalChromeBrowserState() override;
   bool HasOffTheRecordChromeBrowserState() const override;
-  ios::ChromeBrowserState* GetOffTheRecordChromeBrowserState() override;
+  ChromeBrowserState* GetOffTheRecordChromeBrowserState() override;
   PrefProxyConfigTracker* GetProxyConfigTracker() override;
+  BrowserStatePolicyConnector* GetPolicyConnector() override;
   PrefService* GetPrefs() override;
   PrefService* GetOffTheRecordPrefs() override;
   ChromeBrowserStateIOData* GetIOData() override;
@@ -55,8 +56,6 @@ class TestChromeBrowserState : public ios::ChromeBrowserState {
                                    const base::Closure& completion) override;
   net::URLRequestContextGetter* CreateRequestContext(
       ProtocolHandlerMap* protocol_handlers) override;
-  net::URLRequestContextGetter* CreateIsolatedRequestContext(
-      const base::FilePath& partition_path) override;
 
   // This method is defined as empty following the paradigm of
   // TestingProfile::DestroyOffTheRecordProfile().

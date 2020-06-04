@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "chromeos/dbus/concierge/service.pb.h"
+#include "chromeos/dbus/concierge/concierge_service.pb.h"
 
 // This file contains simple C++ types (enums and Plain-Old-Data structs).
 // Importantly, #include'ing this file will not depend on eventually executing
@@ -43,7 +43,7 @@ enum class CrostiniResult {
   INSTALL_LINUX_PACKAGE_FAILED = 17,
   BLOCKING_OPERATION_ALREADY_ACTIVE = 18,
   UNINSTALL_PACKAGE_FAILED = 19,
-  // SSHFS_MOUNT_ERROR = 20,
+  SSHFS_MOUNT_ERROR = 20,
   OFFLINE_WHEN_UPGRADE_REQUIRED = 21,
   LOAD_COMPONENT_FAILED = 22,
   // PERMISSION_BROKER_ERROR = 23,
@@ -60,6 +60,21 @@ enum class CrostiniResult {
   NOT_ALLOWED = 34,
   CONTAINER_EXPORT_IMPORT_FAILED_SPACE = 35,
   GET_CONTAINER_SSH_KEYS_FAILED = 36,
+  CONTAINER_EXPORT_IMPORT_CANCELLED = 37,
+  RESTART_ABORTED = 38,
+  RESTART_FAILED_VM_STOPPED = 39,
+  UPGRADE_CONTAINER_STARTED = 40,
+  UPGRADE_CONTAINER_ALREADY_RUNNING = 41,
+  UPGRADE_CONTAINER_NOT_SUPPORTED = 42,
+  UPGRADE_CONTAINER_ALREADY_UPGRADED = 43,
+  UPGRADE_CONTAINER_FAILED = 44,
+  CANCEL_UPGRADE_CONTAINER_FAILED = 45,
+  CONCIERGE_START_FAILED = 46,
+  CONTAINER_CONFIGURATION_FAILED = 47,
+  LOAD_COMPONENT_UPDATE_IN_PROGRESS = 48,
+  NEVER_FINISHED = 49,
+  CONTAINER_SETUP_FAILED = 50,
+  kMaxValue = CONTAINER_SETUP_FAILED,
 };
 
 enum class InstallLinuxPackageProgressStatus {
@@ -97,9 +112,22 @@ enum class ImportContainerProgressStatus {
   FAILURE_SPACE,
 };
 
+enum class UpgradeContainerProgressStatus {
+  SUCCEEDED,
+  FAILED,
+  UPGRADING,
+};
+
+enum class ContainerVersion {
+  UNKNOWN,
+  STRETCH,
+  BUSTER,
+};
+
 struct VmInfo {
   VmState state;
   vm_tools::concierge::VmInfo info;
+  bool usb_devices_shared = false;
 };
 
 struct StreamingExportStatus {
@@ -110,14 +138,21 @@ struct StreamingExportStatus {
 };
 
 struct ContainerInfo {
-  ContainerInfo(std::string name, std::string username, std::string homedir);
+  ContainerInfo(std::string name,
+                std::string username,
+                std::string homedir,
+                std::string ipv4_address);
   ~ContainerInfo();
+  ContainerInfo(ContainerInfo&&);
   ContainerInfo(const ContainerInfo&);
+  ContainerInfo& operator=(ContainerInfo&&);
+  ContainerInfo& operator=(const ContainerInfo&);
 
   std::string name;
   std::string username;
   base::FilePath homedir;
   bool sshfs_mounted = false;
+  std::string ipv4_address;
 };
 
 // Return type when getting app icons from within a container.
@@ -130,7 +165,10 @@ struct Icon {
 
 struct LinuxPackageInfo {
   LinuxPackageInfo();
+  LinuxPackageInfo(LinuxPackageInfo&&);
   LinuxPackageInfo(const LinuxPackageInfo&);
+  LinuxPackageInfo& operator=(LinuxPackageInfo&&);
+  LinuxPackageInfo& operator=(const LinuxPackageInfo&);
   ~LinuxPackageInfo();
 
   bool success;
@@ -147,6 +185,50 @@ struct LinuxPackageInfo {
   std::string description;
 };
 
+constexpr char kCrostiniCorruptionHistogram[] = "Crostini.FilesystemCorruption";
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class CorruptionStates {
+  MOUNT_FAILED = 0,
+  MOUNT_ROLLED_BACK = 1,
+  OTHER_CORRUPTION = 2,
+  kMaxValue = OTHER_CORRUPTION,
+};
+
+// Dialog types used by CrostiniDialogStatusObserver.
+enum class DialogType {
+  INSTALLER,
+  UPGRADER,
+  REMOVER,
+};
+
+constexpr char kUpgradeDialogEventHistogram[] = "Crostini.UpgradeDialogEvent";
+
+enum class UpgradeDialogEvent {
+  kDialogShown = 0,
+  kUpgradeSuccess = 1,
+  kUpgradeCanceled = 2,
+  kUpgradeFailed = 3,
+  kNotStarted = 4,
+  kDidBackup = 5,
+  kBackupSucceeded = 6,
+  kBackupFailed = 7,
+  kDidRestore = 8,
+  kRestoreSucceeded = 9,
+  kRestoreFailed = 10,
+  kMaxValue = kRestoreFailed,
+};
+
 }  // namespace crostini
+
+enum class ContainerOsVersion {
+  kUnknown = 0,
+  kDebianStretch = 1,
+  kDebianBuster = 2,
+  kDebianOther = 3,
+  kOtherOs = 4,
+  kMaxValue = kOtherOs,
+};
 
 #endif  // CHROME_BROWSER_CHROMEOS_CROSTINI_CROSTINI_SIMPLE_TYPES_H_

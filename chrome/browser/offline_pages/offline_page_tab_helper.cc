@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/check.h"
 #include "base/guid.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
@@ -19,8 +19,10 @@
 #include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_key.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
+#include "components/offline_pages/core/offline_page_client_policy.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_page_item_utils.h"
 #include "components/offline_pages/core/offline_page_model.h"
@@ -29,6 +31,7 @@
 #include "components/offline_pages/core/prefetch/offline_metrics_collector.h"
 #include "components/offline_pages/core/prefetch/prefetch_service.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
+#include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -98,8 +101,7 @@ bool OfflinePageTabHelper::LoadedOfflinePageInfo::IsValid() const {
 
 OfflinePageTabHelper::OfflinePageTabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      mhtml_page_notifier_bindings_(web_contents, this),
-      weak_ptr_factory_(this) {
+      mhtml_page_notifier_receivers_(web_contents, this) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -113,7 +115,7 @@ void OfflinePageTabHelper::NotifyMhtmlPageLoadAttempted(
     MHTMLLoadResult load_result,
     const GURL& main_frame_url,
     base::Time date) {
-  if (mhtml_page_notifier_bindings_.GetCurrentTargetFrame() !=
+  if (mhtml_page_notifier_receivers_.GetCurrentTargetFrame() !=
       web_contents()->GetMainFrame()) {
     return;
   }
@@ -162,19 +164,8 @@ void OfflinePageTabHelper::DidStartNavigation(
   if (!navigation_handle->IsInMainFrame())
     return;
 
-  // This is a new navigation so we can invalidate any previously scheduled
-  // operations.
-  weak_ptr_factory_.InvalidateWeakPtrs();
-  reloading_url_on_net_error_ = false;
-
   // The provisional offline info can be cleared no matter how.
   provisional_offline_info_.Clear();
-
-  // If not a fragment navigation, clear the cached offline info.
-  if (offline_info_.offline_page.get() &&
-      !navigation_handle->IsSameDocument()) {
-    offline_info_.Clear();
-  }
 
   // Report any attempted navigation as indication that browser is in use.
   // This doesn't have to be a successful navigation.
@@ -194,6 +185,20 @@ void OfflinePageTabHelper::DidFinishNavigation(
 
   if (navigation_handle->IsSameDocument())
     return;
+
+  if (offline_info_.IsValid()) {
+    // Do not store the offline page we are navigating away from in bfcache.
+    // If we managed to establish a network connection, we should reload the
+    // full page on back navigation. If not, offline page is fast to load,
+    // so back-forward cache is not going to be useful here.
+    content::BackForwardCache::DisableForRenderFrameHost(
+        navigation_handle->GetPreviousRenderFrameHostId(), "OfflinePage");
+  }
+
+  // This is a new navigation so we can invalidate any previously scheduled
+  // operations.
+  weak_ptr_factory_.InvalidateWeakPtrs();
+  reloading_url_on_net_error_ = false;
 
   FinalizeOfflineInfo(navigation_handle);
   provisional_offline_info_.Clear();
@@ -266,7 +271,7 @@ void OfflinePageTabHelper::ReportPrefetchMetrics(
 
   if (offline_page()) {
     // Report prefetch usage.
-    if (policy_controller_.IsSuggested(offline_page()->client_id.name_space))
+    if (GetPolicy(offline_page()->client_id.name_space).is_suggested)
       metrics_collector->OnPrefetchedPageOpened();
     // Note that navigation to offline page may happen even if network is
     // connected. For the purposes of collecting offline usage statistics,
@@ -394,7 +399,7 @@ OfflinePageTrustedState OfflinePageTabHelper::GetTrustedStateForTest() const {
 
 void OfflinePageTabHelper::SetCurrentTargetFrameForTest(
     content::RenderFrameHost* render_frame_host) {
-  mhtml_page_notifier_bindings_.SetCurrentTargetFrameForTesting(
+  mhtml_page_notifier_receivers_.SetCurrentTargetFrameForTesting(
       render_frame_host);
 }
 

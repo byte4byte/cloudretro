@@ -4,10 +4,14 @@
 
 #include "chrome/services/cups_proxy/fake_cups_proxy_service_delegate.h"
 
-namespace chromeos {
-namespace printing {
+namespace cups_proxy {
 
-std::vector<chromeos::Printer> FakeCupsProxyServiceDelegate::GetPrinters() {
+bool FakeCupsProxyServiceDelegate::IsPrinterAccessAllowed() const {
+  return true;
+}
+
+std::vector<chromeos::Printer> FakeCupsProxyServiceDelegate::GetPrinters(
+    chromeos::PrinterClass printer_class) {
   return {};
 }
 
@@ -16,17 +20,21 @@ base::Optional<chromeos::Printer> FakeCupsProxyServiceDelegate::GetPrinter(
   return base::nullopt;
 }
 
-bool FakeCupsProxyServiceDelegate::IsPrinterInstalled(const Printer& printer) {
+bool FakeCupsProxyServiceDelegate::IsPrinterInstalled(
+    const chromeos::Printer& printer) {
   return false;
 }
+
+void FakeCupsProxyServiceDelegate::PrinterInstalled(
+    const chromeos::Printer& printer) {}
 
 scoped_refptr<base::SingleThreadTaskRunner>
 FakeCupsProxyServiceDelegate::GetIOTaskRunner() {
   return nullptr;
 }
 
-void FakeCupsProxyServiceDelegate::SetupPrinter(const Printer& printer,
-                                                PrinterSetupCallback cb) {}
+void FakeCupsProxyServiceDelegate::SetupPrinter(
+    const chromeos::Printer& printer,
+    SetupPrinterCallback cb) {}
 
-}  // namespace printing
-}  // namespace chromeos
+}  // namespace cups_proxy

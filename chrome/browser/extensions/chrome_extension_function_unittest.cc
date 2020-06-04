@@ -31,7 +31,7 @@ void FailCallback(bool* did_respond,
   *did_respond = true;
 }
 
-class ValidationFunction : public UIThreadExtensionFunction {
+class ValidationFunction : public ExtensionFunction {
  public:
   explicit ValidationFunction(bool should_succeed)
       : should_succeed_(should_succeed), did_respond_(false) {
@@ -55,7 +55,7 @@ class ValidationFunction : public UIThreadExtensionFunction {
 
 using ChromeExtensionFunctionUnitTest = ExtensionServiceTestBase;
 
-#if defined(OS_WIN) || defined(CHROMEOS)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
 #define MAYBE_SimpleFunctionTest DISABLED_SimpleFunctionTest
 #else
 #define MAYBE_SimpleFunctionTest SimpleFunctionTest

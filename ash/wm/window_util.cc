@@ -8,6 +8,7 @@
 
 #include "ash/public/cpp/app_types.h"
 #include "ash/public/cpp/ash_constants.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/tablet_mode_observer.h"
 #include "ash/public/cpp/window_properties.h"
@@ -17,6 +18,10 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
+#include "ash/wm/mru_window_tracker.h"
+#include "ash/wm/overview/overview_controller.h"
+#include "ash/wm/overview/overview_session.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_positioning_utils.h"
@@ -41,26 +46,11 @@
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/easy_resize_window_targeter.h"
 #include "ui/wm/core/window_animations.h"
-#include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
 namespace ash {
-namespace wm {
-
+namespace window_util {
 namespace {
-
-// Moves |window| to the given |root| window's corresponding container, if it is
-// not already in the same root window. Returns true if |window| was moved.
-bool MoveWindowToRoot(aura::Window* window, aura::Window* root) {
-  if (!root || root == window->GetRootWindow())
-    return false;
-  aura::Window* container = RootWindowController::ForWindow(root)->GetContainer(
-      window->parent()->id());
-  if (!container)
-    return false;
-  container->AddChild(window);
-  return true;
-}
 
 // This window targeter reserves space for the portion of the resize handles
 // that extend within a top level window.
@@ -91,7 +81,7 @@ class InteriorResizeHandleTargeter : public aura::WindowTargeter {
 
   bool ShouldUseExtendedBounds(const aura::Window* target) const override {
     // Fullscreen/maximized windows can't be drag-resized.
-    const WindowState* window_state = GetWindowState(window());
+    const WindowState* window_state = WindowState::Get(window());
     if (window_state && window_state->IsMaximizedOrFullscreenOrPinned())
       return false;
     // The shrunken hit region only applies to children of |window()|.
@@ -104,30 +94,9 @@ class InteriorResizeHandleTargeter : public aura::WindowTargeter {
 
 }  // namespace
 
-// TODO(beng): replace many of these functions with the corewm versions.
-void ActivateWindow(aura::Window* window) {
-  ::wm::ActivateWindow(window);
-}
-
-void DeactivateWindow(aura::Window* window) {
-  ::wm::DeactivateWindow(window);
-}
-
-bool IsActiveWindow(aura::Window* window) {
-  return ::wm::IsActiveWindow(window);
-}
-
 aura::Window* GetActiveWindow() {
   return ::wm::GetActivationClient(Shell::GetPrimaryRootWindow())
       ->GetActiveWindow();
-}
-
-aura::Window* GetActivatableWindow(aura::Window* window) {
-  return ::wm::GetActivatableWindow(window);
-}
-
-bool CanActivateWindow(aura::Window* window) {
-  return ::wm::CanActivateWindow(window);
 }
 
 aura::Window* GetFocusedWindow() {
@@ -159,12 +128,12 @@ bool IsWindowUserPositionable(aura::Window* window) {
 }
 
 void PinWindow(aura::Window* window, bool trusted) {
-  wm::WMEvent event(trusted ? wm::WM_EVENT_TRUSTED_PIN : wm::WM_EVENT_PIN);
-  wm::GetWindowState(window)->OnWMEvent(&event);
+  WMEvent event(trusted ? WM_EVENT_TRUSTED_PIN : WM_EVENT_PIN);
+  WindowState::Get(window)->OnWMEvent(&event);
 }
 
 void SetAutoHideShelf(aura::Window* window, bool autohide) {
-  wm::GetWindowState(window)->set_autohide_shelf_when_maximized_or_fullscreen(
+  WindowState::Get(window)->set_autohide_shelf_when_maximized_or_fullscreen(
       autohide);
   for (aura::Window* root_window : Shell::GetAllRootWindows())
     Shelf::ForWindow(root_window)->UpdateVisibilityState();
@@ -172,7 +141,14 @@ void SetAutoHideShelf(aura::Window* window, bool autohide) {
 
 bool MoveWindowToDisplay(aura::Window* window, int64_t display_id) {
   DCHECK(window);
-  WindowState* window_state = GetWindowState(window);
+
+  aura::Window* root = Shell::GetRootWindowForDisplayId(display_id);
+  if (!root || root == window->GetRootWindow()) {
+    NOTREACHED();
+    return false;
+  }
+
+  WindowState* window_state = WindowState::Get(window);
   if (window_state->allow_set_bounds_direct()) {
     display::Display display;
     if (!display::Screen::GetScreen()->GetDisplayWithDisplayId(display_id,
@@ -181,29 +157,27 @@ bool MoveWindowToDisplay(aura::Window* window, int64_t display_id) {
     gfx::Rect bounds = window->bounds();
     gfx::Rect work_area_in_display(display.size());
     work_area_in_display.Inset(display.GetWorkAreaInsets());
-    wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_display,
-                                                    &bounds);
-    wm::SetBoundsEvent event(bounds, display_id);
+    AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_display, &bounds);
+    SetBoundsWMEvent event(bounds, display_id);
     window_state->OnWMEvent(&event);
     return true;
   }
-  aura::Window* root = Shell::GetRootWindowForDisplayId(display_id);
+
+  // Moves |window| to the given |root| window's corresponding container.
+  aura::Window* container = RootWindowController::ForWindow(root)->GetContainer(
+      window->parent()->id());
+  if (!container)
+    return false;
+
   // Update restore bounds to target root window.
   if (window_state->HasRestoreBounds()) {
     gfx::Rect restore_bounds = window_state->GetRestoreBoundsInParent();
     ::wm::ConvertRectToScreen(root, &restore_bounds);
     window_state->SetRestoreBoundsInScreen(restore_bounds);
   }
-  return root && MoveWindowToRoot(window, root);
-}
 
-bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
-  DCHECK(window);
-  views::View* target = static_cast<views::View*>(event.target());
-  if (!target)
-    return false;
-  aura::Window* root = target->GetWidget()->GetNativeView()->GetRootWindow();
-  return root && MoveWindowToRoot(window, root);
+  container->AddChild(window);
+  return true;
 }
 
 int GetNonClientComponent(aura::Window* window, const gfx::Point& location) {
@@ -218,11 +192,6 @@ void SetChildrenUseExtendedHitRegionForWindow(aura::Window* window) {
                            -kResizeOutsideBoundsSize);
   gfx::Insets touch_extend =
       mouse_extend.Scale(kResizeOutsideBoundsScaleForTouch);
-  // TODO: EasyResizeWindowTargeter makes it so children get events outside
-  // their bounds. This only works in mash when mash is providing the non-client
-  // frame. Mus needs to support an api for the WindowManager that enables
-  // events to be dispatched to windows outside the windows bounds that this
-  // function calls into. http://crbug.com/679056.
   window->SetEventTargeter(std::make_unique<::wm::EasyResizeWindowTargeter>(
       mouse_extend, touch_extend));
 }
@@ -235,10 +204,6 @@ void CloseWidgetForWindow(aura::Window* window) {
 
 void InstallResizeHandleWindowTargeterForWindow(aura::Window* window) {
   window->SetEventTargeter(std::make_unique<InteriorResizeHandleTargeter>());
-  // For Mash, ServerWindows will override the event targeter with a
-  // ServerWindowTargeter, so make sure it knows about the resize insets.
-  window->SetProperty(aura::client::kResizeHandleInset,
-                      kResizeInsideBoundsSize);
 }
 
 bool IsDraggingTabs(const aura::Window* window) {
@@ -250,7 +215,7 @@ bool ShouldExcludeForCycleList(const aura::Window* window) {
   // - non user positionable windows, such as extension popups.
   // - windows being dragged
   // - pip windows
-  const wm::WindowState* state = wm::GetWindowState(window);
+  const WindowState* state = WindowState::Get(window);
   if (!state->IsUserPositionable() || state->is_dragged() || state->IsPip())
     return true;
 
@@ -275,7 +240,8 @@ bool ShouldExcludeForOverview(const aura::Window* window) {
   // overview mode. The default snap position is the position where the window
   // was first snapped. See |default_snap_position_| in SplitViewController for
   // more detail.
-  auto* split_view_controller = Shell::Get()->split_view_controller();
+  auto* split_view_controller =
+      SplitViewController::Get(Shell::GetPrimaryRootWindow());
   if (split_view_controller->InTabletSplitViewMode() &&
       window == split_view_controller->GetDefaultSnappedWindow()) {
     return true;
@@ -297,8 +263,8 @@ void RemoveTransientDescendants(std::vector<aura::Window*>* out_window_list) {
   }
 }
 
-void HideAndMaybeMinimizeWithoutAnimation(std::vector<aura::Window*> windows,
-                                          bool minimize) {
+void MinimizeAndHideWithoutAnimation(
+    const std::vector<aura::Window*>& windows) {
   for (auto* window : windows) {
     ScopedAnimationDisabler disable(window);
 
@@ -306,8 +272,7 @@ void HideAndMaybeMinimizeWithoutAnimation(std::vector<aura::Window*> windows,
     // minimization. We minimize ARC windows first so they receive occlusion
     // updates before losing focus from being hidden. See crbug.com/910304.
     // TODO(oshima): Investigate better way to handle ARC apps immediately.
-    if (minimize)
-      wm::GetWindowState(window)->Minimize();
+    WindowState::Get(window)->Minimize();
 
     window->Hide();
   }
@@ -323,5 +288,122 @@ void HideAndMaybeMinimizeWithoutAnimation(std::vector<aura::Window*> windows,
   }
 }
 
-}  // namespace wm
+aura::Window* GetRootWindowAt(const gfx::Point& point_in_screen) {
+  const display::Display& display =
+      display::Screen::GetScreen()->GetDisplayNearestPoint(point_in_screen);
+  DCHECK(display.is_valid());
+  RootWindowController* root_window_controller =
+      Shell::GetRootWindowControllerWithDisplayId(display.id());
+  return root_window_controller ? root_window_controller->GetRootWindow()
+                                : nullptr;
+}
+
+aura::Window* GetRootWindowMatching(const gfx::Rect& rect_in_screen) {
+  const display::Display& display =
+      display::Screen::GetScreen()->GetDisplayMatching(rect_in_screen);
+  RootWindowController* root_window_controller =
+      Shell::GetRootWindowControllerWithDisplayId(display.id());
+  return root_window_controller ? root_window_controller->GetRootWindow()
+                                : nullptr;
+}
+
+bool IsArcWindow(const aura::Window* window) {
+  return window->GetProperty(aura::client::kAppType) ==
+         static_cast<int>(ash::AppType::ARC_APP);
+}
+
+bool IsArcPipWindow(const aura::Window* window) {
+  return IsArcWindow(window) && WindowState::Get(window)->IsPip();
+}
+
+void ExpandArcPipWindow() {
+  auto* pip_container = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                                            kShellWindowId_PipContainer);
+  if (!pip_container)
+    return;
+
+  auto pip_window_iter =
+      std::find_if(pip_container->children().begin(),
+                   pip_container->children().end(), IsArcPipWindow);
+  if (pip_window_iter == pip_container->children().end())
+    return;
+
+  auto* window_state = WindowState::Get(*pip_window_iter);
+  window_state->Restore();
+}
+
+bool IsAnyWindowDragged() {
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  if (overview_controller->InOverviewSession() &&
+      overview_controller->overview_session()
+          ->GetCurrentDraggedOverviewItem()) {
+    return true;
+  }
+
+  for (aura::Window* window :
+       Shell::Get()->mru_window_tracker()->BuildMruWindowList(kActiveDesk)) {
+    if (WindowState::Get(window)->is_dragged())
+      return true;
+  }
+  return false;
+}
+
+aura::Window* GetTopWindow() {
+  MruWindowTracker::WindowList windows =
+      Shell::Get()->mru_window_tracker()->BuildWindowForCycleList(kActiveDesk);
+
+  return windows.empty() ? nullptr : windows[0];
+}
+
+bool ShouldMinimizeTopWindowOnBack() {
+  if (!features::IsSwipingFromLeftEdgeToGoBackEnabled())
+    return false;
+
+  Shell* shell = Shell::Get();
+  if (!shell->tablet_mode_controller()->InTabletMode())
+    return false;
+
+  aura::Window* window = GetTopWindow();
+  if (!window)
+    return false;
+
+  // Do not minimize the window if it is in overview. This can avoid unnecessary
+  // window minimize animation.
+  OverviewController* overview_controller = Shell::Get()->overview_controller();
+  if (overview_controller->InOverviewSession() &&
+      overview_controller->overview_session()->IsWindowInOverview(window)) {
+    return false;
+  }
+
+  // ARC and crostini apps will handle the back event that follows on the client
+  // side and will minimize/close the window there.
+  const int app_type = window->GetProperty(aura::client::kAppType);
+  if (app_type == static_cast<int>(AppType::ARC_APP) ||
+      app_type == static_cast<int>(AppType::CROSTINI_APP)) {
+    return false;
+  }
+
+  // Use the value of |kMinimizeOnBackKey| if it is provided. It can be provided
+  // by windows with custom web contents.
+  bool* can_minimize_on_back_key = window->GetProperty(kMinimizeOnBackKey);
+  if (can_minimize_on_back_key)
+    return *can_minimize_on_back_key;
+
+  // Minimize the window if it is at the bottom page.
+  return !shell->shell_delegate()->CanGoBack(window);
+}
+
+void SendBackKeyEvent(aura::Window* root_window) {
+  // Send up event as well as down event as ARC++ clients expect this
+  // sequence.
+  // TODO: Investigate if we should be using the current modifiers.
+  ui::KeyEvent press_key_event(ui::ET_KEY_PRESSED, ui::VKEY_BROWSER_BACK,
+                               ui::EF_NONE);
+  ignore_result(root_window->GetHost()->SendEventToSink(&press_key_event));
+  ui::KeyEvent release_key_event(ui::ET_KEY_RELEASED, ui::VKEY_BROWSER_BACK,
+                                 ui::EF_NONE);
+  ignore_result(root_window->GetHost()->SendEventToSink(&release_key_event));
+}
+
+}  // namespace window_util
 }  // namespace ash

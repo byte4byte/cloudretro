@@ -20,6 +20,7 @@
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
+#include "ui/display/test/display_manager_test_api.h"
 #include "ui/wm/public/activation_client.h"
 
 class WindowSizerAshTest : public ChromeAshTestBase {
@@ -113,7 +114,7 @@ std::unique_ptr<Browser> CreateTestBrowser(aura::Window* window,
   std::unique_ptr<Browser> browser =
       chrome::CreateBrowserWithAuraTestWindowForParams(base::WrapUnique(window),
                                                        params);
-  if (!browser->is_type_popup()) {
+  if (browser->is_type_normal()) {
     browser->window()->GetNativeWindow()->SetProperty(
         ash::kWindowPositionManagedTypeKey, true);
   }
@@ -482,10 +483,11 @@ TEST_F(WindowSizerAshTest, PlaceNewWindowsOnMultipleDisplays) {
   UpdateDisplay("1600x1200,1600x1200");
   display::Display primary_display =
       display::Screen::GetScreen()->GetPrimaryDisplay();
-  display::Display second_display = display_manager()->GetSecondaryDisplay();
+  display::Display second_display =
+      display::test::DisplayManagerTestApi(display_manager())
+          .GetSecondaryDisplay();
   gfx::Rect primary_bounds = primary_display.bounds();
   gfx::Rect secondary_bounds = second_display.bounds();
-
 
   // Create browser windows that are used as reference.
   Browser::CreateParams params(&profile_, true);
@@ -567,7 +569,7 @@ TEST_F(WindowSizerAshTest, TestShowState) {
   UpdateDisplay("1600x1200");
 
   // Creating a browser & window to play with.
-  Browser::CreateParams params(Browser::TYPE_TABBED, &profile_, true);
+  Browser::CreateParams params(Browser::TYPE_NORMAL, &profile_, true);
   auto browser = CreateWindowlessBrowser(params);
 
   // Create also a popup browser since that behaves different.
@@ -614,7 +616,7 @@ TEST_F(WindowSizerAshTest, TestShowState) {
 }
 
 TEST_F(WindowSizerAshTest, TestShowStateOnTinyScreen) {
-  Browser::CreateParams params(Browser::TYPE_TABBED, &profile_, true);
+  Browser::CreateParams params(Browser::TYPE_NORMAL, &profile_, true);
   auto browser = CreateWindowlessBrowser(params);
 
   // In smaller screen resolutions we default to maximized if there is no other
@@ -632,7 +634,7 @@ TEST_F(WindowSizerAshTest, TestShowStateDefaults) {
   UpdateDisplay("1600x1200");
   // Creating a browser & window to play with.
 
-  Browser::CreateParams params(Browser::TYPE_TABBED, &profile_, true);
+  Browser::CreateParams params(Browser::TYPE_NORMAL, &profile_, true);
   auto browser = CreateWindowlessBrowser(params);
 
   // Create also a popup browser since that behaves slightly different for
@@ -696,7 +698,7 @@ TEST_F(WindowSizerAshTest, DefaultStateBecomesMaximized) {
   ui::WindowShowState show_state = ui::SHOW_STATE_DEFAULT;
   gfx::Rect bounds;
   WindowSizer::GetBrowserWindowBoundsAndShowState(
-      std::string(), specified_bounds, browser.get(), &bounds, &show_state);
+      specified_bounds, browser.get(), &bounds, &show_state);
   // The window should start maximized with its restore bounds shrunken.
   EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, show_state);
   EXPECT_NE(display_bounds.ToString(), bounds.ToString());
@@ -706,7 +708,7 @@ TEST_F(WindowSizerAshTest, DefaultStateBecomesMaximized) {
   specified_bounds.Inset(100, 100);
   show_state = ui::SHOW_STATE_DEFAULT;
   WindowSizer::GetBrowserWindowBoundsAndShowState(
-      std::string(), specified_bounds, browser.get(), &bounds, &show_state);
+      specified_bounds, browser.get(), &bounds, &show_state);
   // The window should start in default state.
   EXPECT_EQ(ui::SHOW_STATE_DEFAULT, show_state);
   EXPECT_EQ(specified_bounds.ToString(), bounds.ToString());
@@ -724,19 +726,21 @@ TEST_F(WindowSizerAshTest, DefaultBoundsInTargetDisplay) {
   EXPECT_EQ(first_root, ash::Shell::GetRootWindowForNewWindows());
   gfx::Rect bounds;
   ui::WindowShowState show_state;
-  WindowSizer::GetBrowserWindowBoundsAndShowState(std::string(), gfx::Rect(),
-                                                  NULL, &bounds, &show_state);
+  WindowSizer::GetBrowserWindowBoundsAndShowState(gfx::Rect(), nullptr, &bounds,
+                                                  &show_state);
   EXPECT_TRUE(first_root->GetBoundsInScreen().Contains(bounds));
 
   {
     // When the second display is active new windows are placed there.
     aura::Window* second_root = ash::Shell::GetAllRootWindows()[1];
-    int64_t second_display_id = display_manager()->GetSecondaryDisplay().id();
+    int64_t second_display_id =
+        display::test::DisplayManagerTestApi(display_manager())
+            .GetSecondaryDisplay()
+            .id();
     display::Screen::GetScreen()->SetDisplayForNewWindows(second_display_id);
     gfx::Rect bounds;
     ui::WindowShowState show_state;
     WindowSizer::GetBrowserWindowBoundsAndShowState(
-        std::string(),
         gfx::Rect(),
         NULL,
         &bounds,

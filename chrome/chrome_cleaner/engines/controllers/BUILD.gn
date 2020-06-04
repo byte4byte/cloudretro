@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# Nothing outside //chrome/chrome_cleaner can depend on these targets.
+visibility = [ "//chrome/chrome_cleaner/*" ]
+
 source_set("common") {
   sources = [
     "scanner_impl.cc",
@@ -17,10 +20,10 @@ source_set("common") {
     "//chrome/chrome_cleaner/engines/broker:common",
     "//chrome/chrome_cleaner/engines/broker:interface_metadata_observer",
     "//chrome/chrome_cleaner/engines/common",
-    "//chrome/chrome_cleaner/mojom:engine_sandbox_interface",
     "//chrome/chrome_cleaner/ipc:mojo_task_runner",
     "//chrome/chrome_cleaner/ipc:sandbox",
     "//chrome/chrome_cleaner/logging:common",
+    "//chrome/chrome_cleaner/mojom:engine_sandbox_interface",
     "//chrome/chrome_cleaner/os:common_os",
     "//chrome/chrome_cleaner/proto:shared_pup_enums_proto",
     "//chrome/chrome_cleaner/proto:uwe_matcher_proto",
@@ -91,9 +94,7 @@ source_set("scanner_controller") {
 }
 
 source_set("facade_interface_header") {
-  sources = [
-    "engine_facade_interface.h",
-  ]
+  sources = [ "engine_facade_interface.h" ]
 
   deps = [
     "//base",
@@ -175,7 +176,6 @@ source_set("unittest_sources") {
     "//chrome/chrome_cleaner/engines/common",
     "//chrome/chrome_cleaner/engines/target:common",
     "//chrome/chrome_cleaner/engines/target:test_engine_delegate",
-    "//chrome/chrome_cleaner/mojom:mojo_sandbox_hooks_test_interface",
     "//chrome/chrome_cleaner/ipc:chrome_prompt_ipc",
     "//chrome/chrome_cleaner/ipc:mock_chrome_prompt_ipc",
     "//chrome/chrome_cleaner/ipc:mojo_task_runner",
@@ -183,6 +183,7 @@ source_set("unittest_sources") {
     "//chrome/chrome_cleaner/logging:common",
     "//chrome/chrome_cleaner/logging:mock_logging_service",
     "//chrome/chrome_cleaner/logging/proto:removal_status_proto",
+    "//chrome/chrome_cleaner/mojom:mojo_sandbox_hooks_test_interface",
     "//chrome/chrome_cleaner/os:cleaner_os",
     "//chrome/chrome_cleaner/os:common_os",
     "//chrome/chrome_cleaner/os:file_remover_api",
@@ -205,7 +206,6 @@ source_set("unittest_sources") {
     "//chrome/chrome_cleaner/test:test_uws_catalog",
     "//chrome/chrome_cleaner/ui:cleaner_ui",
     "//chrome/chrome_cleaner/zip_archiver:common",
-    "//components/chrome_cleaner/public/mojom",
     "//components/chrome_cleaner/test:test_name_helper",
     "//sandbox/win:sandbox",
     "//testing/gmock",

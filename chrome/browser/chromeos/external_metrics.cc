@@ -19,6 +19,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/metrics/serialization/metric_sample.h"
@@ -95,7 +96,7 @@ void ExternalMetrics::RecordActionUI(const std::string& action_string) {
 }
 
 void ExternalMetrics::RecordAction(const std::string& action) {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&ExternalMetrics::RecordActionUI, this, action));
 }
@@ -105,7 +106,7 @@ void ExternalMetrics::RecordCrashUI(const std::string& crash_kind) {
 }
 
 void ExternalMetrics::RecordCrash(const std::string& crash_kind) {
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&ExternalMetrics::RecordCrashUI, this, crash_kind));
 }
@@ -176,7 +177,7 @@ void ExternalMetrics::CollectEventsAndReschedule() {
 }
 
 void ExternalMetrics::ScheduleCollector() {
-  base::PostDelayedTaskWithTraits(
+  base::ThreadPool::PostDelayedTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&chromeos::ExternalMetrics::CollectEventsAndReschedule,
                      this),

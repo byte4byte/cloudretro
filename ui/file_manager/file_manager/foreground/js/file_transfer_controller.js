@@ -11,7 +11,7 @@
 const DRAG_AND_DROP_GLOBAL_DATA = '__drag_and_drop_global_data';
 
 /**
- * @typedef {{file:File, externalFileUrl:string}}
+ * @typedef {{file:?File, externalFileUrl:string}}
  */
 let FileAsyncData;
 
@@ -20,8 +20,6 @@ class FileTransferController {
    * @param {!Document} doc Owning document.
    * @param {!ListContainer} listContainer List container.
    * @param {!DirectoryTree} directoryTree Directory tree.
-   * @param {!MultiProfileShareDialog} multiProfileShareDialog Share dialog to
-   *     be used to share files from another profile.
    * @param {function(boolean, !Array<string>): !Promise<boolean>}
    *     confirmationCallback called when operation requires user's
    *     confirmation. The operation will be executed if the return value
@@ -36,9 +34,9 @@ class FileTransferController {
    * @param {!FileSelectionHandler} selectionHandler Selection handler.
    */
   constructor(
-      doc, listContainer, directoryTree, multiProfileShareDialog,
-      confirmationCallback, progressCenter, fileOperationManager, metadataModel,
-      thumbnailModel, directoryModel, volumeManager, selectionHandler) {
+      doc, listContainer, directoryTree, confirmationCallback, progressCenter,
+      fileOperationManager, metadataModel, thumbnailModel, directoryModel,
+      volumeManager, selectionHandler) {
     /**
      * @private {!Document}
      * @const
@@ -86,12 +84,6 @@ class FileTransferController {
      * @const
      */
     this.selectionHandler_ = selectionHandler;
-
-    /**
-     * @private {!MultiProfileShareDialog}
-     * @const
-     */
-    this.multiProfileShareDialog_ = multiProfileShareDialog;
 
     /**
      * @private {function(boolean, !Array<string>):
@@ -149,14 +141,14 @@ class FileTransferController {
      * @const
      */
     this.copyCommand_ = /** @type {!cr.ui.Command} */ (
-        queryRequiredElement('command#copy', this.document_));
+        queryRequiredElement('command#copy', assert(this.document_.body)));
 
     /**
      * @private {!cr.ui.Command}
      * @const
      */
     this.cutCommand_ = /** @type {!cr.ui.Command} */ (
-        queryRequiredElement('command#cut', this.document_));
+        queryRequiredElement('command#cut', assert(this.document_.body)));
 
     /**
      * @private {DirectoryEntry|FilesAppDirEntry}
@@ -271,7 +263,7 @@ class FileTransferController {
   /**
    * Write the current selection to system clipboard.
    *
-   * @param {!ClipboardData} clipboardData ClipboardData from the event.
+   * @param {DataTransfer} clipboardData DataTransfer from the event.
    * @param {string} effectAllowed Value must be valid for the
    *     |clipboardData.effectAllowed| property.
    * @private
@@ -299,7 +291,7 @@ class FileTransferController {
 
   /**
    * Appends copy or cut information of |entries| to |clipboardData|.
-   * @param {!ClipboardData} clipboardData ClipboardData from the event.
+   * @param {DataTransfer} clipboardData DataTransfer from the event.
    * @param {string} effectAllowed Value must be valid for the
    *     |clipboardData.effectAllowed| property.
    * @param {!VolumeInfo} sourceVolumeInfo
@@ -327,7 +319,7 @@ class FileTransferController {
 
   /**
    * Appends uri-list of |entries| to |clipboardData|.
-   * @param {!ClipboardData} clipboardData ClipboardData from the event.
+   * @param {DataTransfer} clipboardData ClipboardData from the event.
    * @param {!Array<!Entry>} entries
    * @private
    */
@@ -340,7 +332,7 @@ class FileTransferController {
         continue;
       }
       if (this.selectedAsyncData_[url].file) {
-        clipboardData.items.add(this.selectedAsyncData_[url].file);
+        clipboardData.items.add(assert(this.selectedAsyncData_[url].file));
       }
       if (!externalFileUrl) {
         externalFileUrl = this.selectedAsyncData_[url].externalFileUrl;
@@ -375,7 +367,7 @@ class FileTransferController {
    * Extracts source root URL from the |clipboardData| or |dragAndDropData|
    * object.
    *
-   * @param {!ClipboardData} clipboardData DataTransfer object from the event.
+   * @param {!DataTransfer} clipboardData DataTransfer object from the event.
    * @param {Object<string>} dragAndDropData The drag and drop data from
    *     getDragAndDropGlobalData_().
    * @return {string} URL or an empty string (if unknown).
@@ -397,7 +389,7 @@ class FileTransferController {
   }
 
   /**
-   * @param {!ClipboardData} clipboardData DataTransfer object from the event.
+   * @param {!DataTransfer} clipboardData DataTransfer object from the event.
    * @return {boolean} Returns true when missing some file contents.
    * @private
    */
@@ -411,84 +403,6 @@ class FileTransferController {
       }
     }
     return data === 'true';
-  }
-
-  /**
-   * Obtains entries that need to share with me.
-   * The method also observers child entries of the given entries.
-   * @param {Array<Entry>} entries Entries.
-   * @return {!Promise<Array<Entry>>} Promise to be fulfilled with the entries
-   *    that need to share.
-   * @private
-   */
-  getMultiProfileShareEntries_(entries) {
-    // Utility function to concat arrays.
-    const concatArrays = arrays => {
-      return Array.prototype.concat.apply([], arrays);
-    };
-
-    // Call processEntry for each item of entries.
-    const processEntries = entries => {
-      const files = entries.filter(entry => {
-        return entry.isFile;
-      });
-      const dirs = entries.filter(entry => {
-        return !entry.isFile;
-      });
-      const promises = dirs.map(processDirectoryEntry);
-      if (files.length > 0) {
-        promises.push(processFileEntries(files));
-      }
-      return Promise.all(promises).then(concatArrays);
-    };
-
-    // Check all file entries and keeps only those need sharing operation.
-    const processFileEntries = entries => {
-      return new Promise(callback => {
-               // Do not use metadata cache here because the urls come from the
-               // different profile.
-               chrome.fileManagerPrivate.getEntryProperties(
-                   entries, ['hosted', 'sharedWithMe'], callback);
-             })
-          .then(metadatas => {
-            return entries.filter((entry, i) => {
-              const metadata = metadatas[i];
-              return metadata && metadata.hosted && !metadata.sharedWithMe;
-            });
-          });
-    };
-
-    // Check child entries.
-    const processDirectoryEntry = entry => {
-      return readEntries(entry.createReader());
-    };
-
-    // Read entries from DirectoryReader and call processEntries for the chunk
-    // of entries.
-    const readEntries = reader => {
-      return new Promise(reader.readEntries.bind(reader))
-          .then(
-              entries => {
-                if (entries.length > 0) {
-                  return Promise
-                      .all([processEntries(entries), readEntries(reader)])
-                      .then(concatArrays);
-                } else {
-                  return [];
-                }
-              },
-              error => {
-                console.warn('Error happens while reading directory.', error);
-                return [];
-              });
-    };
-
-    // Filter entries that is owned by the current user, and call
-    // processEntries.
-    return processEntries(entries.filter(entry => {
-      // If the volumeInfo is found, the entry belongs to the current user.
-      return !this.volumeManager_.getVolumeInfo(/** @type {!Entry} */ (entry));
-    }));
   }
 
   /**
@@ -528,7 +442,7 @@ class FileTransferController {
    * Queue up a file copy operation based on the current system clipboard and
    * drag-and-drop global object.
    *
-   * @param {!ClipboardData} clipboardData System data transfer object.
+   * @param {!DataTransfer} clipboardData System data transfer object.
    * @param {DirectoryEntry=} opt_destinationEntry Paste destination.
    * @param {string=} opt_effect Desired drop/paste effect. Could be
    *     'move'|'copy' (default is copy). Ignored if conflicts with
@@ -539,55 +453,31 @@ class FileTransferController {
     const pastePlan =
         this.preparePaste(clipboardData, opt_destinationEntry, opt_effect);
 
-    return util.URLsToEntries(pastePlan.sourceURLs).then(entriesResult => {
-      const sourceEntries = entriesResult.entries;
-      const destinationEntry = pastePlan.destinationEntry;
-      const destinationLocationInfo =
-          this.volumeManager_.getLocationInfo(destinationEntry);
+    return FileTransferController.URLsToEntriesWithAccess(pastePlan.sourceURLs)
+        .then(entriesResult => {
+          const sourceEntries = entriesResult.entries;
 
-      const destinationIsOutsideOfDrive =
-          VolumeManagerCommon.getVolumeTypeFromRootType(
-              destinationLocationInfo.rootType) !==
-          VolumeManagerCommon.VolumeType.DRIVE;
-
-      // Disallow transferring hosted files from Shared Drives to outside of
-      // Drive. This is because hosted files aren't 'real' files, so it doesn't
-      // make sense to allow a 'local' copy (e.g. in Downloads, or on a USB),
-      // where the file can't be accessed offline (or necessarily accessed at
-      // all) by the person who tries to open it. In future, block this for all
-      // hosted files, regardless of their source. For now, to maintain
-      // backwards-compatibility, just block this for hosted files stored in a
-      // Shared Drive.
-      if (sourceEntries.some(
-              entry =>
-                  util.isSharedDriveEntry(entry) && FileType.isHosted(entry)) &&
-          destinationIsOutsideOfDrive) {
-        // For now, just don't execute the paste.
-        // TODO(sashab): Display a warning message, and disallow drag-drop
-        // operations.
-        return null;
-      }
-
-      if (sourceEntries.length == 0) {
-        // This can happen when copied files were deleted before pasting them.
-        // We execute the plan as-is, so as to share the post-copy logic.
-        // This is basically same as getting empty by filtering same-directory
-        // entries.
-        return Promise.resolve(this.executePaste(pastePlan));
-      }
-      const confirmationType = pastePlan.getConfirmationType(sourceEntries);
-      if (confirmationType == FileTransferController.ConfirmationType.NONE) {
-        return Promise.resolve(this.executePaste(pastePlan));
-      }
-      const messages =
-          pastePlan.getConfirmationMessages(confirmationType, sourceEntries);
-      this.confirmationCallback_(pastePlan.isMove, messages)
-          .then(userApproved => {
-            if (userApproved) {
-              this.executePaste(pastePlan);
-            }
-          });
-    });
+          if (sourceEntries.length == 0) {
+            // This can happen when copied files were deleted before pasting
+            // them. We execute the plan as-is, so as to share the post-copy
+            // logic. This is basically same as getting empty by filtering
+            // same-directory entries.
+            return Promise.resolve(this.executePaste(pastePlan));
+          }
+          const confirmationType = pastePlan.getConfirmationType(sourceEntries);
+          if (confirmationType ==
+              FileTransferController.ConfirmationType.NONE) {
+            return Promise.resolve(this.executePaste(pastePlan));
+          }
+          const messages = pastePlan.getConfirmationMessages(
+              confirmationType, sourceEntries);
+          this.confirmationCallback_(pastePlan.isMove, messages)
+              .then(userApproved => {
+                if (userApproved) {
+                  this.executePaste(pastePlan);
+                }
+              });
+        });
   }
 
   /**
@@ -619,7 +509,6 @@ class FileTransferController {
               })
         .then(/**
                * @param {!Array<Entry>} filteredEntries
-               * @return {!Promise<Array<Entry>>}
                */
               filteredEntries => {
                 entries = filteredEntries;
@@ -652,70 +541,28 @@ class FileTransferController {
                 } else {
                   item.sourceMessage = entries.length.toString();
                 }
-                // TODO(crbug.com/947388) Use VolumeManager/getLocationInfo
-                // for i18n translations of the path name.
-                let destinationName = null;
-                if (destinationEntry instanceof VolumeEntry) {
-                  destinationName = destinationEntry.name;
+                // Store the destination name for display in messages.
+                const destinationLocationInfo =
+                    this.volumeManager_.getLocationInfo(destinationEntry);
+                const destinationName = util.getEntryLabel(
+                    destinationLocationInfo, destinationEntry);
+                // Root of removable volumes can result in an empty string,
+                // so use the filesystem name in that case.
+                if (destinationName === '') {
+                  if (destinationLocationInfo) {
+                    item.destinationMessage =
+                        util.getRootTypeLabel(destinationLocationInfo);
+                  }
                 } else {
-                  destinationName = destinationEntry.fullPath;
-                }
-                if (destinationName) {
-                  item.destinationMessage = destinationName.replace(/^\//, '');
-                  item.subMessage =
-                      strf('TO_FOLDER_NAME', item.destinationMessage);
+                  item.destinationMessage = destinationName;
                 }
                 this.progressCenter_.updateItem(item);
-                // Check if cross share is needed or not.
-                return this.getMultiProfileShareEntries_(entries);
-              })
-        .then(/**
-               * @param {Array<Entry>} inShareEntries
-               * @return {!Promise<Array<Entry>>|!Promise<null>}
-               */
-              inShareEntries => {
-                shareEntries = inShareEntries;
-                if (shareEntries.length === 0) {
-                  return Promise.resolve(null);
-                }
-                return this.multiProfileShareDialog_
-                    .showMultiProfileShareDialog(shareEntries.length > 1);
-              })
-        .then(
-            /**
-             * @param {?string} dialogResult
-             * @return {!Promise<undefined>|undefined}
-             */
-            dialogResult => {
-              if (dialogResult === null) {
-                return;
-              }  // No dialog was shown, skip this step.
-              if (dialogResult === 'cancel') {
-                return Promise.reject('ABORT');
-              }
-              // Do cross share.
-              // TODO(hirono): Make the loop cancellable.
-              const requestDriveShare = index => {
-                if (index >= shareEntries.length) {
-                  return;
-                }
-                return new Promise(fulfill => {
-                         chrome.fileManagerPrivate.requestDriveShare(
-                             shareEntries[index], assert(dialogResult), () => {
-                               // TODO(hirono): Check chrome.runtime.lastError
-                               // here.
-                               fulfill();
-                             });
-                       })
-                    .then(requestDriveShare.bind(null, index + 1));
-              };
-              return requestDriveShare(0);
-            })
-        .then(() => {
-          // Start the pasting operation.
-          this.fileOperationManager_.paste(
-              entries, destinationEntry, toMove, taskId);
-          this.pendingTaskIds.splice(this.pendingTaskIds.indexOf(taskId), 1);
+
+                // Start the pasting operation.
+                this.fileOperationManager_.paste(
+                    entries, destinationEntry, toMove, taskId);
+                this.pendingTaskIds.splice(
+                    this.pendingTaskIds.indexOf(taskId), 1);
         })
         .catch(error => {
           if (error !== 'ABORT') {
@@ -772,12 +619,13 @@ class FileTransferController {
   /**
    * Renders a drag-and-drop thumbnail.
    *
-   * @return {!Element} Element containing the thumbnail.
+   * @return {!HTMLElement} Element containing the thumbnail.
    * @private
    */
   renderThumbnail_() {
     const length = this.selectionHandler_.selection.entries.length;
-    const container = this.document_.querySelector('#drag-container');
+    const container = /** @type {HTMLElement} */ (
+        this.document_.body.querySelector('#drag-container'));
     const contents = this.document_.createElement('div');
     contents.className = 'drag-contents';
     container.appendChild(contents);
@@ -884,7 +732,7 @@ class FileTransferController {
       return;
     }
 
-    const dt = event.dataTransfer;
+    const dt = /** @type {DragEvent} */ (event).dataTransfer;
     const canCopy = this.canCopyOrDrag();
     const canCut = this.canCutOrDrag();
     if (canCopy || canCut) {
@@ -901,7 +749,13 @@ class FileTransferController {
     }
 
     const dragThumbnail = this.renderThumbnail_();
-    dt.setDragImage(dragThumbnail, 0, 0);
+    let yOffset = 0;
+    // Position the drag image above the start point for touch intiated drag.
+    if (this.touching_) {
+      const thumbNailExtent = dragThumbnail.getBoundingClientRect();
+      yOffset = thumbNailExtent.height;
+    }
+    dt.setDragImage(dragThumbnail, 0, yOffset);
 
     window[DRAG_AND_DROP_GLOBAL_DATA] = {
       sourceRootURL: dt.getData('fs/sourceRootURL'),
@@ -919,7 +773,7 @@ class FileTransferController {
     // This should be removed after the bug is fixed.
     this.touching_ = false;
 
-    const container = this.document_.querySelector('#drag-container');
+    const container = this.document_.body.querySelector('#drag-container');
     container.textContent = '';
     this.clearDropTarget_();
     delete window[DRAG_AND_DROP_GLOBAL_DATA];
@@ -1067,7 +921,7 @@ class FileTransferController {
    * Sets the drop target.
    *
    * @param {Element} domElement Target of the drop.
-   * @param {!ClipboardData} clipboardData Data transfer object.
+   * @param {!DataTransfer} clipboardData Data transfer object.
    * @param {!DirectoryEntry|!FakeEntry} destinationEntry Destination entry.
    * @private
    */
@@ -1142,6 +996,19 @@ class FileTransferController {
   }
 
   /**
+   * addEventListener only accepts callback that receives base class Event,
+   * this forces clipboard event handlers to cast event to ClipboardEvent to
+   * be able to use |clipboard| member.
+   * @param {Event} event
+   * @return {!DataTransfer}
+   * @private
+   */
+  getClipboardData_(event) {
+    const clipboardEvent = /** @type {ClipboardEvent} */ (event);
+    return assert(clipboardEvent.clipboardData);
+  }
+
+  /**
    * @return {boolean} Returns false if {@code <input type="text"> or
    *     <cr-input>} element is currently active. Otherwise, returns true.
    * @private
@@ -1167,7 +1034,7 @@ class FileTransferController {
 
     event.preventDefault();
 
-    const clipboardData = assert(event.clipboardData);
+    const clipboardData = this.getClipboardData_(event);
     const effectAllowed = isMove ? 'move' : 'copy';
 
     // If current focus is on DirectoryTree, write selected item of
@@ -1187,7 +1054,7 @@ class FileTransferController {
   /**
    * Performs cut or copy operation dispatched from directory tree.
    * @param {!DirectoryTree} directoryTree
-   * @param {!ClipboardData} clipboardData
+   * @param {!DataTransfer} clipboardData
    * @param {string} effectAllowed
    */
   cutOrCopyFromDirectoryTree(directoryTree, clipboardData, effectAllowed) {
@@ -1207,7 +1074,7 @@ class FileTransferController {
     const missingFileContents =
         volumeInfo.volumeType === VolumeManagerCommon.VolumeType.DRIVE &&
         this.volumeManager_.getDriveConnectionState().type ===
-            VolumeManagerCommon.DriveConnectionType.OFFLINE;
+            chrome.fileManagerPrivate.DriveConnectionStateType.OFFLINE;
 
     this.appendCutOrCopyInfo_(
         clipboardData, effectAllowed, volumeInfo, [entry], missingFileContents);
@@ -1300,11 +1167,11 @@ class FileTransferController {
 
     // Need to update here since 'beforepaste' doesn't fire.
     if (!this.isDocumentWideEvent_() ||
-        !this.canPasteOrDrop_(assert(event.clipboardData), destination)) {
+        !this.canPasteOrDrop_(this.getClipboardData_(event), destination)) {
       return;
     }
     event.preventDefault();
-    this.paste(assert(event.clipboardData), destination).then(effect => {
+    this.paste(this.getClipboardData_(event), destination).then(effect => {
       // On cut, we clear the clipboard after the file is pasted/moved so we
       // don't try to move/delete the original file again.
       if (effect === 'move') {
@@ -1326,14 +1193,14 @@ class FileTransferController {
     }
     // queryCommandEnabled returns true if event.defaultPrevented is true.
     if (this.canPasteOrDrop_(
-            assert(event.clipboardData),
+            this.getClipboardData_(event),
             this.directoryModel_.getCurrentDirEntry())) {
       event.preventDefault();
     }
   }
 
   /**
-   * @param {ClipboardData} clipboardData Clipboard data object.
+   * @param {DataTransfer} clipboardData Data transfer object.
    * @param {DirectoryEntry|FilesAppEntry} destinationEntry Destination
    *    entry.
    * @return {boolean} Returns true if items stored in {@code clipboardData} can
@@ -1360,18 +1227,38 @@ class FileTransferController {
       return false;  // Unsupported type of content.
     }
 
-    // Copying between different sources requires all files to be available.
+    const sourceUrls = (clipboardData.getData('fs/sources') || '').split('\n');
     if (this.getSourceRootURL_(
             clipboardData, this.getDragAndDropGlobalData_()) !==
-            destinationLocationInfo.volumeInfo.fileSystem.root.toURL() &&
-        this.isMissingFileContents_(clipboardData)) {
-      return false;
+        destinationLocationInfo.volumeInfo.fileSystem.root.toURL()) {
+      // Copying between different sources requires all files to be available.
+      if (this.isMissingFileContents_(clipboardData)) {
+        return false;
+      }
+
+      // Block transferring hosted files between different sources in order to
+      // prevent hosted files from being transferred outside of Drive. This is
+      // done because hosted files aren't 'real' files, so it doesn't make sense
+      // to allow a 'local' copy (e.g. in Downloads, or on a USB), where the
+      // file can't be accessed offline (or necessarily accessed at all) by the
+      // person who tries to open it. It also blocks copying hosted files to
+      // other profiles, as the files would need to be shared in Drive first.
+      if (sourceUrls.some(
+              source => FileType.getTypeForName(source).type === 'hosted')) {
+        return false;
+      }
     }
 
-    const sourceUrls = (clipboardData.getData('fs/sources') || '').split('\n');
     // If the destination is sub-tree of any of the sources paste isn't allowed.
-    const destinationUrl = destinationEntry.toURL();
-    if (sourceUrls.some(source => destinationUrl.startsWith(source))) {
+    const addTrailingSlash = s => {
+      if (!s.endsWith('/')) {
+        s += '/';
+      }
+      return s;
+    };
+    const destinationUrl = addTrailingSlash(destinationEntry.toURL());
+    if (sourceUrls.some(
+            source => destinationUrl.startsWith(addTrailingSlash(source)))) {
       return false;
     }
 
@@ -1402,7 +1289,7 @@ class FileTransferController {
     let result;
     this.simulateCommand_('paste', event => {
       result =
-          this.canPasteOrDrop_(assert(event.clipboardData), destinationEntry);
+          this.canPasteOrDrop_(this.getClipboardData_(event), destinationEntry);
     });
     return result;
   }
@@ -1415,7 +1302,7 @@ class FileTransferController {
    * @private
    */
   simulateCommand_(command, handler) {
-    const iframe = this.document_.querySelector('#command-dispatcher');
+    const iframe = this.document_.body.querySelector('#command-dispatcher');
     const doc = iframe.contentDocument;
     doc.addEventListener(command, handler);
     doc.execCommand(command);
@@ -1763,7 +1650,8 @@ FileTransferController.PastePlan = class {
  * them, which is essential when pasting files from a different profile.
  *
  * @param {!Array<string>} urls Urls to be converted.
- * @return {Promise<!Array<string>>}
+ * @return {Promise} Promise fulfilled with the object that has entries property
+ *     and failureUrls property. The promise is never rejected.
  */
 FileTransferController.URLsToEntriesWithAccess = urls => {
   return new Promise((resolve, reject) => {

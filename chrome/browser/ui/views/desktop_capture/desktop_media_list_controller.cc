@@ -70,7 +70,8 @@ void DesktopMediaListController::OnSourceSelectionChanged() {
 }
 
 void DesktopMediaListController::AcceptSource() {
-  dialog_->AcceptSource();
+  if (GetSelection())
+    dialog_->AcceptSource();
 }
 
 void DesktopMediaListController::AcceptSpecificSource(
@@ -91,10 +92,6 @@ void DesktopMediaListController::SetThumbnailSize(const gfx::Size& size) {
   media_list_->SetThumbnailSize(size);
 }
 
-views::View* DesktopMediaListController::GetViewForInitialFocus() {
-  return view_;
-}
-
 void DesktopMediaListController::OnSourceAdded(DesktopMediaList* list,
                                                int index) {
   if (view_) {
@@ -107,10 +104,11 @@ void DesktopMediaListController::OnSourceAdded(DesktopMediaList* list,
           switches::kAutoSelectDesktopCaptureSource);
   const DesktopMediaList::Source& source = GetSource(index);
   if (autoselect_source.empty() ||
-      base::ASCIIToUTF16(autoselect_source) != source.name) {
+      source.name.find(base::ASCIIToUTF16(autoselect_source)) ==
+          base::string16::npos) {
     return;
   }
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&DesktopMediaListController::AcceptSpecificSource,
                      weak_factory_.GetWeakPtr(), source.id));

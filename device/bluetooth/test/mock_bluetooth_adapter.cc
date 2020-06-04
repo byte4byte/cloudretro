@@ -43,6 +43,10 @@ void MockBluetoothAdapter::Shutdown() {
 }
 #endif
 
+base::WeakPtr<BluetoothAdapter> MockBluetoothAdapter::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 bool MockBluetoothAdapter::SetPoweredImpl(bool powered) {
   return false;
 }
@@ -56,25 +60,7 @@ void MockBluetoothAdapter::StartScanWithFilter(
 void MockBluetoothAdapter::UpdateFilter(
     std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
     DiscoverySessionResultCallback callback) {
-  StartScanWithFilter_(discovery_filter.get(), callback);
-}
-
-void MockBluetoothAdapter::RemoveDiscoverySession(
-    BluetoothDiscoveryFilter* discovery_filter,
-    const base::Closure& callback,
-    DiscoverySessionErrorCallback error_callback) {
-  RemoveDiscoverySession_(discovery_filter, callback, error_callback);
-}
-
-void MockBluetoothAdapter::SetDiscoveryFilter(
-    std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
-    const base::Closure& callback,
-    DiscoverySessionErrorCallback error_callback) {
-  if (discovery_filter.get()) {
-    SetDiscoveryFilterRaw(discovery_filter.get(), callback, error_callback);
-    return;
-  }
-  SetDiscoveryFilterRaw(nullptr, callback, error_callback);
+  UpdateFilter_(discovery_filter.get(), callback);
 }
 
 void MockBluetoothAdapter::AddMockDevice(

@@ -285,7 +285,10 @@ void WebRtcRemoteEventLogManager::EnableForBrowserContext(
   DCHECK(network_connection_tracker_)
       << "SetNetworkConnectionTracker not called.";
   DCHECK(log_file_writer_factory_) << "SetLogFileWriterFactory() not called.";
-  DCHECK(!BrowserContextEnabled(browser_context_id)) << "Already enabled.";
+
+  if (BrowserContextEnabled(browser_context_id)) {
+    return;
+  }
 
   const base::FilePath remote_bound_logs_dir =
       GetRemoteBoundWebRtcEventLogsDir(browser_context_dir);
@@ -542,8 +545,8 @@ void WebRtcRemoteEventLogManager::GetHistory(
 
   if (!BrowserContextEnabled(browser_context_id)) {
     LOG(ERROR) << "Unknown |browser_context_id|.";
-    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                             base::BindOnce(std::move(reply), history));
+    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                   base::BindOnce(std::move(reply), history));
     return;
   }
 
@@ -591,8 +594,8 @@ void WebRtcRemoteEventLogManager::GetHistory(
   };
   std::sort(history.begin(), history.end(), cmp);
 
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(std::move(reply), history));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(std::move(reply), history));
 }
 
 void WebRtcRemoteEventLogManager::RemovePendingLogsForNotEnabledBrowserContext(
@@ -602,7 +605,7 @@ void WebRtcRemoteEventLogManager::RemovePendingLogsForNotEnabledBrowserContext(
   DCHECK(!BrowserContextEnabled(browser_context_id));
   const base::FilePath remote_bound_logs_dir =
       GetRemoteBoundWebRtcEventLogsDir(browser_context_dir);
-  if (!base::DeleteFile(remote_bound_logs_dir, /*recursive=*/true)) {
+  if (!base::DeleteFileRecursively(remote_bound_logs_dir)) {
     LOG(ERROR) << "Failed to delete  `" << remote_bound_logs_dir << ".";
   }
 }
@@ -664,17 +667,16 @@ void WebRtcRemoteEventLogManager::SetWebRtcEventLogUploaderFactoryForTesting(
 void WebRtcRemoteEventLogManager::UploadConditionsHoldForTesting(
     base::OnceCallback<void(bool)> callback) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindOnce(std::move(callback), UploadConditionsHold()));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(std::move(callback), UploadConditionsHold()));
 }
 
 void WebRtcRemoteEventLogManager::ShutDownForTesting(base::OnceClosure reply) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   weak_ptr_factory_->InvalidateWeakPtrs();
   weak_ptr_factory_.reset();
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(std::move(reply)));
+  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
+                 base::BindOnce(std::move(reply)));
 }
 
 bool WebRtcRemoteEventLogManager::AreLogParametersValid(

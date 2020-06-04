@@ -27,10 +27,11 @@ namespace android {
 
 namespace {
 
-base::AtExitManager* g_at_exit_manager = NULL;
+base::AtExitManager* g_at_exit_manager = nullptr;
 const char* g_library_version_number = "";
-LibraryLoadedHook* g_registration_callback = NULL;
-NativeInitializationHook* g_native_initialization_hook = NULL;
+LibraryLoadedHook* g_registration_callback = nullptr;
+NativeInitializationHook* g_native_initialization_hook = nullptr;
+NonMainDexJniRegistrationHook* g_jni_registration_hook = nullptr;
 
 // The amount of time, in milliseconds, that it took to load the shared
 // libraries in the renderer. Set in
@@ -49,7 +50,6 @@ bool IsUsingOrderfileOptimization() {
 
 static void JNI_LibraryLoader_RecordRendererLibraryLoadTime(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller,
     jlong library_load_time_ms) {
   g_renderer_library_load_time_ms = library_load_time_ms;
 }
@@ -57,6 +57,12 @@ static void JNI_LibraryLoader_RecordRendererLibraryLoadTime(
 void SetNativeInitializationHook(
     NativeInitializationHook native_initialization_hook) {
   g_native_initialization_hook = native_initialization_hook;
+}
+
+void SetNonMainDexJniRegistrationHook(
+    NonMainDexJniRegistrationHook jni_registration_hook) {
+  DCHECK(!g_jni_registration_hook);
+  g_jni_registration_hook = jni_registration_hook;
 }
 
 void RecordLibraryLoaderRendererHistograms() {
@@ -72,7 +78,6 @@ void SetLibraryLoadedHook(LibraryLoadedHook* func) {
 
 static jboolean JNI_LibraryLoader_LibraryLoaded(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller,
     jint library_process_type) {
 #if BUILDFLAG(ORDERFILE_INSTRUMENTATION)
   orderfile::StartDelayedDump();
@@ -100,10 +105,16 @@ static jboolean JNI_LibraryLoader_LibraryLoaded(
   return true;
 }
 
+static void JNI_LibraryLoader_RegisterNonMainDexJni(JNIEnv* env) {
+  if (g_jni_registration_hook) {
+    g_jni_registration_hook();
+  }
+}
+
 void LibraryLoaderExitHook() {
   if (g_at_exit_manager) {
     delete g_at_exit_manager;
-    g_at_exit_manager = NULL;
+    g_at_exit_manager = nullptr;
   }
 }
 
@@ -111,9 +122,7 @@ void SetVersionNumber(const char* version_number) {
   g_library_version_number = strdup(version_number);
 }
 
-ScopedJavaLocalRef<jstring> JNI_LibraryLoader_GetVersionNumber(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller) {
+ScopedJavaLocalRef<jstring> JNI_LibraryLoader_GetVersionNumber(JNIEnv* env) {
   return ConvertUTF8ToJavaString(env, g_library_version_number);
 }
 

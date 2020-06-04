@@ -5,30 +5,21 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_SCHEDULER_UTILS_H_
 #define CHROME_BROWSER_NOTIFICATIONS_SCHEDULER_INTERNAL_SCHEDULER_UTILS_H_
 
-#include <deque>
 #include <map>
 #include <memory>
+#include <string>
 
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "chrome/browser/notifications/scheduler/public/notification_scheduler_types.h"
+#include "chrome/browser/notifications/scheduler/public/schedule_service_utils.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace notifications {
 
 struct ClientState;
 struct SchedulerConfig;
-
-// Retrieves the time stamp of a certain hour at a certain day from today.
-// |hour| must be in the range of [0, 23].
-// |today| is a timestamp to define today, usually caller can directly pass in
-// the current system time.
-// |day_delta| is the different between the output date and today.
-// Returns false if the conversion is failed.
-bool ToLocalHour(int hour,
-                 const base::Time& today,
-                 int day_delta,
-                 base::Time* out);
 
 // Calculates the notifications shown today from impression data.
 void NotificationsShownToday(

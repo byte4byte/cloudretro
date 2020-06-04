@@ -34,7 +34,8 @@ bool IsSafeBrowsingWarningDisplayedInWebView(WKWebView* web_view) {
 }
 
 bool RequiresContentFilterBlockingWorkaround() {
-  if (!GetWebClient()->IsSlimNavigationManagerEnabled())
+  // This is fixed in iOS13 beta 7.
+  if (@available(iOS 13, *))
     return false;
 
   if (@available(iOS 12.2, *))

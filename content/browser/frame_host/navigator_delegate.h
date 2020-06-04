@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_FRAME_HOST_NAVIGATOR_DELEGATE_H_
 
 #include "base/strings/string16.h"
+#include "content/public/browser/allow_service_worker_result.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_throttle.h"
@@ -16,6 +17,10 @@
 
 class GURL;
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
+
+namespace blink {
+struct UserAgentOverride;
+}  // namespace blink
 
 namespace content {
 
@@ -50,8 +55,7 @@ class CONTENT_EXPORT NavigatorDelegate {
   // Document load in |render_frame_host| failed.
   virtual void DidFailLoadWithError(RenderFrameHostImpl* render_frame_host,
                                     const GURL& url,
-                                    int error_code,
-                                    const base::string16& error_description) {}
+                                    int error_code) {}
 
   // Handles post-navigation tasks in navigation BEFORE the entry has been
   // committed to the NavigationController.
@@ -91,12 +95,8 @@ class CONTENT_EXPORT NavigatorDelegate {
   // different process between the load start and commit.
   virtual bool ShouldTransferNavigation(bool is_main_frame_navigation);
 
-  // Returns whether URLs for aborted browser-initiated navigations should be
-  // preserved in the omnibox.  Defaults to false.
-  virtual bool ShouldPreserveAbortedURLs();
-
-  // Returns the overriden user agent string if it's set.
-  virtual const std::string& GetUserAgentOverride() = 0;
+  // Returns the overridden user agent string if it's set.
+  virtual const blink::UserAgentOverride& GetUserAgentOverride() = 0;
 
   // Returns whether we should override the user agent in new tabs, e.g., for
   // Android Webview's popup window when current entry.
@@ -122,7 +122,6 @@ class CONTENT_EXPORT NavigatorDelegate {
   virtual std::vector<std::unique_ptr<NavigationThrottle>>
   CreateThrottlesForNavigation(NavigationHandle* navigation_handle);
 
-  // PlzNavigate
   // Called at the start of the navigation to get opaque data the embedder
   // wants to see passed to the corresponding URLRequest on the IO thread.
   // In the case of a navigation to an interstitial, no call will be made to the
@@ -130,11 +129,13 @@ class CONTENT_EXPORT NavigatorDelegate {
   virtual std::unique_ptr<NavigationUIData> GetNavigationUIData(
       NavigationHandle* navigation_handle);
 
-  // Whether the delegate is displaying an interstitial page over the current
-  // page.
-  virtual bool ShowingInterstitialPage() = 0;
+  // Called when a navigation accessed ServiceWorker to check if it should be
+  // handled by the ServiceWorker or not.
+  virtual void OnServiceWorkerAccessed(NavigationHandle* navigation,
+                                       const GURL& scope,
+                                       AllowServiceWorkerResult allowed) {}
 };
 
-}  // namspace content
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_FRAME_HOST_NAVIGATOR_DELEGATE_H_

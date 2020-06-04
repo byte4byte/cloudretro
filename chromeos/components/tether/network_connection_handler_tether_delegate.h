@@ -36,22 +36,22 @@ class NetworkConnectionHandlerTetherDelegate
   // NetworkConnectionHandler::TetherDelegate:
   void DisconnectFromNetwork(
       const std::string& tether_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback) override;
   void ConnectToNetwork(
       const std::string& tether_network_guid,
-      const base::Closure& success_callback,
+      base::OnceClosure success_callback,
       const network_handler::StringResultCallback& error_callback) override;
 
  private:
   struct Callbacks {
    public:
-    Callbacks(const base::Closure& success_callback,
+    Callbacks(base::OnceClosure success_callback,
               const network_handler::StringResultCallback& error_callback);
-    Callbacks(const Callbacks& other);
+    Callbacks(Callbacks&&);
     ~Callbacks();
 
-    base::Closure success_callback;
+    base::OnceClosure success_callback;
     network_handler::StringResultCallback error_callback;
   };
 
@@ -69,7 +69,7 @@ class NetworkConnectionHandlerTetherDelegate
   std::unordered_map<int, Callbacks> request_num_to_callbacks_map_;
 
   base::WeakPtrFactory<NetworkConnectionHandlerTetherDelegate>
-      weak_ptr_factory_;
+      weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectionHandlerTetherDelegate);
 };

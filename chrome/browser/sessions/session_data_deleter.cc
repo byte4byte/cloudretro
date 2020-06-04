@@ -8,19 +8,26 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/storage_usage_info.h"
+#include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/cookies/cookie_util.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "storage/browser/quota/special_storage_policy.h"
 
 namespace {
@@ -37,7 +44,8 @@ class SessionDataDeleter
   SessionDataDeleter(storage::SpecialStoragePolicy* storage_policy,
                      bool delete_only_by_session_only_policy);
 
-  void Run(content::StoragePartition* storage_partition);
+  void Run(content::StoragePartition* storage_partition,
+           HostContentSettingsMap* host_content_settings_map);
 
  private:
   friend class base::RefCountedThreadSafe<SessionDataDeleter>;
@@ -49,7 +57,7 @@ class SessionDataDeleter
   void DeleteSessionOnlyOriginCookies(
       const std::vector<net::CanonicalCookie>& cookies);
 
-  network::mojom::CookieManagerPtr cookie_manager_;
+  mojo::Remote<network::mojom::CookieManager> cookie_manager_;
   scoped_refptr<storage::SpecialStoragePolicy> storage_policy_;
   const bool delete_only_by_session_only_policy_;
 
@@ -63,7 +71,9 @@ SessionDataDeleter::SessionDataDeleter(
       delete_only_by_session_only_policy_(delete_only_by_session_only_policy) {
 }
 
-void SessionDataDeleter::Run(content::StoragePartition* storage_partition) {
+void SessionDataDeleter::Run(
+    content::StoragePartition* storage_partition,
+    HostContentSettingsMap* host_content_settings_map) {
   if (storage_policy_.get() && storage_policy_->HasSessionOnlyOrigins()) {
     // Cookies are not origin scoped, so they are handled separately.
     const uint32_t removal_mask =
@@ -78,7 +88,7 @@ void SessionDataDeleter::Run(content::StoragePartition* storage_partition) {
   }
 
   storage_partition->GetNetworkContext()->GetCookieManager(
-      mojo::MakeRequest(&cookie_manager_));
+      cookie_manager_.BindNewPipeAndPassReceiver());
 
   if (!delete_only_by_session_only_policy_) {
     network::mojom::CookieDeletionFilterPtr filter(
@@ -89,19 +99,26 @@ void SessionDataDeleter::Run(content::StoragePartition* storage_partition) {
         std::move(filter),
         // Fire and forget
         network::mojom::CookieManager::DeleteCookiesCallback());
+
+    // If the feature policy feature is enabled, delete the client hint
+    // preferences
+    if (base::FeatureList::IsEnabled(features::kFeaturePolicyForClientHints)) {
+      host_content_settings_map->ClearSettingsForOneType(
+          ContentSettingsType::CLIENT_HINTS);
+    }
   }
 
   if (!storage_policy_.get() || !storage_policy_->HasSessionOnlyOrigins())
     return;
 
-  cookie_manager_->GetAllCookies(
-      base::Bind(&SessionDataDeleter::DeleteSessionOnlyOriginCookies, this));
+  cookie_manager_->GetAllCookies(base::BindOnce(
+      &SessionDataDeleter::DeleteSessionOnlyOriginCookies, this));
   // Note that from this point on |*this| is kept alive by scoped_refptr<>
   // references automatically taken by |Bind()|, so when the last callback
   // created by Bind() is released (after execution of that function), the
   // object will be deleted.  This may result in any callbacks passed to
   // |*cookie_manager_.get()| methods not being executed because of the
-  // destruction of the CookieManagerPtr, but the model of the
+  // destruction of the mojo::Remote<CookieManager>, but the model of the
   // SessionDataDeleter is "fire-and-forget" and all such callbacks are
   // empty, so that is ok.  Mojo guarantees that all messages pushed onto a
   // pipe will be executed by the server side of the pipe even if the client
@@ -146,5 +163,6 @@ void DeleteSessionOnlyData(Profile* profile) {
   scoped_refptr<SessionDataDeleter> deleter(
       new SessionDataDeleter(profile->GetSpecialStoragePolicy(),
                              startup_pref_type == SessionStartupPref::LAST));
-  deleter->Run(Profile::GetDefaultStoragePartition(profile));
+  deleter->Run(Profile::GetDefaultStoragePartition(profile),
+               HostContentSettingsMapFactory::GetForProfile(profile));
 }

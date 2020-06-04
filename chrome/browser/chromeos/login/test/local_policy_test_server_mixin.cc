@@ -8,6 +8,7 @@
 
 #include "base/guid.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
@@ -27,7 +28,7 @@ base::Value GetDefaultConfig() {
   base::Value config(base::Value::Type::DICTIONARY);
 
   base::Value managed_users(base::Value::Type::LIST);
-  managed_users.GetList().emplace_back("*");
+  managed_users.Append("*");
   config.SetKey("managed_users", std::move(managed_users));
 
   config.SetKey("robot_api_auth_code",
@@ -51,11 +52,16 @@ void LocalPolicyTestServerMixin::SetUp() {
                                       policy::PolicyBuilder::kFakeDeviceId,
                                       {} /* state_keys */);
 
-  ASSERT_TRUE(policy_test_server_->SetSigningKeyAndSignature(
-      policy::PolicyBuilder::CreateTestSigningKey().get(),
-      policy::PolicyBuilder::GetTestSigningKeySignature()));
+  if (!canned_signing_keys_enabled_) {
+    CHECK(policy_test_server_->SetSigningKeyAndSignature(
+        policy::PolicyBuilder::CreateTestSigningKey().get(),
+        policy::PolicyBuilder::GetTestSigningKeySignature()));
+  }
 
-  ASSERT_TRUE(policy_test_server_->Start());
+  if (automatic_rotation_of_signing_keys_enabled_)
+    policy_test_server_->EnableAutomaticRotationOfSigningKeys();
+
+  CHECK(policy_test_server_->Start());
 }
 
 void LocalPolicyTestServerMixin::SetUpCommandLine(
@@ -63,25 +69,6 @@ void LocalPolicyTestServerMixin::SetUpCommandLine(
   // Specify device management server URL.
   command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                   policy_test_server_->GetServiceURL().spec());
-}
-
-void LocalPolicyTestServerMixin::ExpectAvailableLicenseCount(int perpetual,
-                                                             int annual,
-                                                             int kiosk) {
-  base::Value licenses(base::Value::Type::DICTIONARY);
-  if (perpetual >= 0) {
-    licenses.SetKey("perpetual", base::Value(perpetual));
-  }
-  if (annual >= 0) {
-    licenses.SetKey("annual", base::Value(annual));
-  }
-  if (kiosk >= 0) {
-    licenses.SetKey("kiosk", base::Value(kiosk));
-  }
-  DCHECK(licenses.DictSize() > 0);
-
-  server_config_.SetKey("available_licenses", std::move(licenses));
-  policy_test_server_->SetConfig(server_config_);
 }
 
 void LocalPolicyTestServerMixin::ExpectTokenEnrollment(
@@ -136,7 +123,7 @@ bool LocalPolicyTestServerMixin::UpdateUserPolicy(
   // username is set in policy responses, even if the request does not contain
   // username field.
   base::Value managed_users_list(base::Value::Type::LIST);
-  managed_users_list.GetList().emplace_back("*");
+  managed_users_list.Append("*");
   server_config_.SetKey("managed_users", std::move(managed_users_list));
   server_config_.SetKey("policy_user", base::Value(policy_user));
   server_config_.SetKey("current_key_index", base::Value(0));
@@ -159,7 +146,7 @@ bool LocalPolicyTestServerMixin::UpdateUserPolicy(
   policy_type_dict.SetKey("recommended", recommended_policy.Clone());
 
   base::Value managed_users_list(base::Value::Type::LIST);
-  managed_users_list.GetList().emplace_back("*");
+  managed_users_list.Append("*");
 
   server_config_.SetKey(policy::dm_protocol::kChromeUserPolicyType,
                         std::move(policy_type_dict));
@@ -255,6 +242,16 @@ void LocalPolicyTestServerMixin::ConfigureFakeStatisticsForZeroTouch(
                                 test::kTestSerialNumber);
   provider->SetMachineStatistic(system::kHardwareClassKey,
                                 test::kTestHardwareClass);
+}
+
+void LocalPolicyTestServerMixin::EnableCannedSigningKeys() {
+  DCHECK(!policy_test_server_);
+  canned_signing_keys_enabled_ = true;
+}
+
+void LocalPolicyTestServerMixin::EnableAutomaticRotationOfSigningKeys() {
+  DCHECK(!policy_test_server_);
+  automatic_rotation_of_signing_keys_enabled_ = true;
 }
 
 LocalPolicyTestServerMixin::~LocalPolicyTestServerMixin() = default;

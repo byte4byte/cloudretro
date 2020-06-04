@@ -20,6 +20,7 @@
 #include "third_party/icu/source/i18n/unicode/datefmt.h"
 #include "third_party/icu/source/i18n/unicode/dtptngen.h"
 #include "third_party/icu/source/i18n/unicode/smpdtfmt.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/insets.h"
@@ -38,9 +39,6 @@ namespace {
 // Amount of slop to add into the timer to make sure we're into the next minute
 // when the timer goes off.
 const int kTimerSlopSeconds = 1;
-
-// Text color of the vertical clock minutes.
-const SkColor kVerticalClockMinuteColor = SkColorSetRGB(0xBA, 0xBA, 0xBA);
 
 // Padding between the left edge of the shelf and the left edge of the vertical
 // clock.
@@ -72,6 +70,12 @@ TimeView::~TimeView() {
 }
 
 void TimeView::UpdateClockLayout(ClockLayout clock_layout) {
+  // Do nothing if the layout hasn't changed.
+  if (((clock_layout == ClockLayout::HORIZONTAL_CLOCK) ? horizontal_label_
+                                                       : vertical_label_hours_)
+          ->parent() == this)
+    return;
+
   SetBorder(views::NullBorder());
   if (clock_layout == ClockLayout::HORIZONTAL_CLOCK) {
     RemoveChildView(vertical_label_hours_.get());
@@ -223,9 +227,6 @@ void TimeView::SetupLabels() {
   SetupLabel(vertical_label_hours_.get());
   vertical_label_minutes_.reset(new views::Label());
   SetupLabel(vertical_label_minutes_.get());
-  // TODO(estade): this should use the NativeTheme's secondary text color. See
-  // crbug.com/687791
-  vertical_label_minutes_->SetEnabledColor(kVerticalClockMinuteColor);
   // Pull the minutes up closer to the hours by using a negative top border.
   vertical_label_minutes_->SetBorder(
       views::CreateEmptyBorder(kVerticalClockMinutesTopOffset, 0, 0, 0));

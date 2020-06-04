@@ -16,9 +16,7 @@
 
 namespace ash {
 
-namespace wm {
 class WindowState;
-}  // namespace wm
 
 // Computes resting and dragging positions for PIP windows. Note that this
 // class uses only Screen coordinates.
@@ -45,7 +43,29 @@ class ASH_EXPORT PipPositioner {
   // change. For example, if the shelf is changed from auto-hidden to always
   // shown, the PIP window should move up to not intersect it.
   static gfx::Rect GetPositionAfterMovementAreaChange(
-      wm::WindowState* window_state);
+      WindowState* window_state);
+
+  // Moves the PIP window along the movement area to the given snap fraction.
+  // The fraction is defined in a clockwise fashion against the PIP movement
+  // area.
+  //
+  //            0   1
+  //          4 +---+ 1
+  //            |   |
+  //          3 +---+ 2
+  //            3   2
+  //
+  static gfx::Rect GetSnapFractionAppliedBounds(WindowState* window_state);
+
+  // Calculates the PIP snap fraction.
+  static void ClearSnapFraction(WindowState* window_state);
+
+  // Returns whether the PIP window has the snap fraction or not.
+  static bool HasSnapFraction(WindowState* window_state);
+
+  // Saves the current PIP snap fraction.
+  static void SaveSnapFraction(WindowState* window_state,
+                               const gfx::Rect& bounds);
 
  private:
   friend class PipPositionerDisplayTest;

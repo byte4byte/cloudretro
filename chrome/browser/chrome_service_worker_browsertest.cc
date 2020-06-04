@@ -19,7 +19,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -29,6 +28,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_chrome_web_ui_controller_factory.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/browser/tab_specific_content_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/favicon/content/content_favicon_driver.h"
@@ -135,7 +135,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
-      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
+      base::BindOnce(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
   run_loop.Run();
 
   // Leave the Service Worker registered, and make sure that the browser can
@@ -161,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
-      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
+      base::BindOnce(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
   run_loop.Run();
 
   ui_test_utils::NavigateToURL(incognito,
@@ -178,7 +178,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
   InitializeServer();
 
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+      ->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT,
                                  CONTENT_SETTING_BLOCK);
 
   base::RunLoop run_loop;
@@ -187,7 +187,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
-      base::Bind(&ExpectResultAndRun<bool>, false, run_loop.QuitClosure()));
+      base::BindOnce(&ExpectResultAndRun<bool>, false, run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -207,7 +207,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
   GetServiceWorkerContext()->StopAllServiceWorkersForOrigin(
       embedded_test_server()->base_url());
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+      ->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT,
                                  CONTENT_SETTING_BLOCK);
 
   const base::string16 expected_title2 = base::ASCIIToUTF16("Done");
@@ -220,8 +220,9 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
-              IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+  EXPECT_TRUE(content_settings::TabSpecificContentSettings::FromWebContents(
+                  web_contents)
+                  ->IsContentBlocked(ContentSettingsType::JAVASCRIPT));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
@@ -237,7 +238,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
   msg.owned_encoded_message = blink::EncodeStringMessage(message_data);
   msg.encoded_message = msg.owned_encoded_message;
 
-  base::PostTaskWithTraits(
+  base::PostTask(
       FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(
           &content::ServiceWorkerContext::StartServiceWorkerAndDispatchMessage,
@@ -245,31 +246,6 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
           embedded_test_server()->GetURL("/scope/"), std::move(msg),
           base::BindRepeating(&ExpectResultAndRun<bool>, true,
                               run_loop.QuitClosure())));
-
-  run_loop.Run();
-}
-
-IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
-                       StartServiceWorkerForLongRunningMessage) {
-  base::RunLoop run_loop;
-  blink::TransferableMessage msg;
-  const base::string16 message_data = base::UTF8ToUTF16("testMessage");
-
-  WriteFile(FILE_PATH_LITERAL("sw.js"), "self.onfetch = function(e) {};");
-  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
-  InitializeServer();
-  NavigateToPageAndWaitForReadyTitle("/test.html");
-  msg.owned_encoded_message = blink::EncodeStringMessage(message_data);
-  msg.encoded_message = msg.owned_encoded_message;
-
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindOnce(&content::ServiceWorkerContext::
-                         StartServiceWorkerAndDispatchLongRunningMessage,
-                     base::Unretained(GetServiceWorkerContext()),
-                     embedded_test_server()->GetURL("/scope/"), std::move(msg),
-                     base::BindRepeating(&ExpectResultAndRun<bool>, true,
-                                         run_loop.QuitClosure())));
 
   run_loop.Run();
 }
@@ -380,11 +356,11 @@ class ChromeServiceWorkerFetchTest : public ChromeServiceWorkerTest {
 
 class FaviconUpdateWaiter : public favicon::FaviconDriverObserver {
  public:
-  explicit FaviconUpdateWaiter(content::WebContents* web_contents)
-      : updated_(false), scoped_observer_(this) {
+  explicit FaviconUpdateWaiter(content::WebContents* web_contents) {
     scoped_observer_.Add(
         favicon::ContentFaviconDriver::FromWebContents(web_contents));
   }
+  ~FaviconUpdateWaiter() override = default;
 
   void Wait() {
     if (updated_)
@@ -406,8 +382,9 @@ class FaviconUpdateWaiter : public favicon::FaviconDriverObserver {
       std::move(quit_closure_).Run();
   }
 
-  bool updated_;
-  ScopedObserver<favicon::FaviconDriver, FaviconUpdateWaiter> scoped_observer_;
+  bool updated_ = false;
+  ScopedObserver<favicon::FaviconDriver, favicon::FaviconDriverObserver>
+      scoped_observer_{this};
   base::OnceClosure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconUpdateWaiter);
@@ -481,7 +458,7 @@ class ChromeServiceWorkerLinkFetchTest : public ChromeServiceWorkerFetchTest {
   std::string GetManifestAndIssuedRequests() {
     base::RunLoop run_loop;
     browser()->tab_strip_model()->GetActiveWebContents()->GetManifest(
-        base::Bind(&ManifestCallbackAndRun, run_loop.QuitClosure()));
+        base::BindOnce(&ManifestCallbackAndRun, run_loop.QuitClosure()));
     run_loop.Run();
     return ExecuteScriptAndExtractString(
         "if (issuedRequests.length != 0) reportRequests();"
@@ -691,7 +668,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/sw.js"), options,
-      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
+      base::BindOnce(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
   run_loop.Run();
   RunNavigationHintTest("/scope/",
                         content::StartServiceWorkerForNavigationHintResult::
@@ -721,12 +698,11 @@ class StaticURLDataSource : public content::URLDataSource {
 
   // content::URLDataSource:
   std::string GetSource() override { return source_; }
-  void StartDataRequest(
-      const std::string& path,
-      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const GotDataCallback& callback) override {
+  void StartDataRequest(const GURL& url,
+                        const content::WebContents::Getter& wc_getter,
+                        GotDataCallback callback) override {
     std::string data(content_);
-    callback.Run(base::RefCountedString::TakeString(&data));
+    std::move(callback).Run(base::RefCountedString::TakeString(&data));
   }
   std::string GetMimeType(const std::string& path) override {
     return "application/javascript";

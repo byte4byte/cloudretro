@@ -25,12 +25,22 @@
 
 namespace syncer {
 namespace syncable {
+namespace {
+
+bool CanDecryptUsingDefaultKey(const Cryptographer& cryptographer,
+                               const sync_pb::EncryptedData& encrypted) {
+  return !encrypted.key_name().empty() &&
+         encrypted.key_name() == cryptographer.GetDefaultEncryptionKeyName();
+}
+
+}  // namespace
 
 bool ProcessUnsyncedChangesForEncryption(WriteTransaction* const trans) {
   NigoriHandler* nigori_handler = trans->directory()->GetNigoriHandler();
   ModelTypeSet encrypted_types = nigori_handler->GetEncryptedTypes(trans);
-  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
-  DCHECK(cryptographer->is_ready());
+  const Cryptographer* cryptographer =
+      trans->directory()->GetCryptographer(trans);
+  DCHECK(cryptographer->CanEncrypt());
 
   // Get list of all datatypes with unsynced changes. It's possible that our
   // local changes need to be encrypted if encryption for that datatype was
@@ -97,7 +107,8 @@ bool SpecificsNeedsEncryption(ModelTypeSet encrypted_types,
 bool VerifyDataTypeEncryptionForTest(BaseTransaction* const trans,
                                      ModelType type,
                                      bool is_encrypted) {
-  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
+  const Cryptographer* cryptographer =
+      trans->directory()->GetCryptographer(trans);
   if (type == PASSWORDS || type == WIFI_CONFIGURATIONS || IsControlType(type)) {
     NOTREACHED();
     return true;
@@ -137,7 +148,7 @@ bool VerifyDataTypeEncryptionForTest(BaseTransaction* const trans,
       if (specifics.has_encrypted()) {
         if (child.GetNonUniqueName() != kEncryptedString)
           return false;
-        if (!cryptographer->CanDecryptUsingDefaultKey(specifics.encrypted()))
+        if (!CanDecryptUsingDefaultKey(*cryptographer, specifics.encrypted()))
           return false;
       }
     }
@@ -151,7 +162,8 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
                                const sync_pb::EntitySpecifics& new_specifics,
                                syncable::MutableEntry* entry) {
   NigoriHandler* nigori_handler = trans->directory()->GetNigoriHandler();
-  Cryptographer* cryptographer = trans->directory()->GetCryptographer(trans);
+  const Cryptographer* cryptographer =
+      trans->directory()->GetCryptographer(trans);
   ModelType type = GetModelTypeFromSpecifics(new_specifics);
   DCHECK_GE(type, FIRST_REAL_MODEL_TYPE);
   const sync_pb::EntitySpecifics& old_specifics = entry->GetSpecifics();
@@ -166,10 +178,14 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
     NOTREACHED() << "New specifics already has an encrypted blob.";
     return false;
   }
-  if ((!SpecificsNeedsEncryption(encrypted_types, new_specifics) &&
-       !was_encrypted) ||
-      !cryptographer || !cryptographer->is_initialized()) {
-    // No encryption required or we are unable to encrypt.
+  if (!SpecificsNeedsEncryption(encrypted_types, new_specifics) &&
+      !was_encrypted) {
+    // No encryption required.
+    generated_specifics.CopyFrom(new_specifics);
+  } else if (!cryptographer || !cryptographer->CanEncrypt()) {
+    // We are currently unable to encrypt, so store unencrypted. The data will
+    // be reencrypted when the encryption key becomes available, via
+    // SyncEncryptionHandlerImpl::ReEncryptEverything().
     generated_specifics.CopyFrom(new_specifics);
   } else {
     // Encrypt new_specifics into generated_specifics.
@@ -213,8 +229,7 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
     DVLOG(2) << "Specifics of type " << ModelTypeToString(type)
              << " already match, dropping change.";
     UMA_HISTOGRAM_ENUMERATION("Sync.ModelTypeRedundantPut",
-                              ModelTypeToHistogramInt(type),
-                              static_cast<int>(ModelType::NUM_ENTRIES));
+                              ModelTypeHistogramValue(type));
     return true;
   }
 
@@ -228,7 +243,7 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
           generated_specifics.mutable_bookmark();
       if (!entry->GetIsDir())
         bookmark_specifics->set_url(kEncryptedString);
-      bookmark_specifics->set_title(kEncryptedString);
+      bookmark_specifics->set_legacy_canonicalized_title(kEncryptedString);
     }
   }
 
@@ -250,7 +265,7 @@ void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
                                     bool encrypt_everything,
                                     sync_pb::NigoriSpecifics* nigori) {
   nigori->set_encrypt_everything(encrypt_everything);
-  static_assert(46 == ModelType::NUM_ENTRIES,
+  static_assert(41 == ModelType::NUM_ENTRIES,
                 "If adding an encryptable type, update handling below.");
   nigori->set_encrypt_bookmarks(encrypted_types.Has(BOOKMARKS));
   nigori->set_encrypt_preferences(encrypted_types.Has(PREFERENCES));
@@ -267,19 +282,16 @@ void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
   nigori->set_encrypt_app_settings(encrypted_types.Has(APP_SETTINGS));
   nigori->set_encrypt_extension_settings(
       encrypted_types.Has(EXTENSION_SETTINGS));
-  nigori->set_encrypt_app_notifications(
-      encrypted_types.Has(DEPRECATED_APP_NOTIFICATIONS));
   nigori->set_encrypt_dictionary(encrypted_types.Has(DICTIONARY));
   nigori->set_encrypt_favicon_images(encrypted_types.Has(FAVICON_IMAGES));
   nigori->set_encrypt_favicon_tracking(encrypted_types.Has(FAVICON_TRACKING));
-  nigori->set_encrypt_articles(encrypted_types.Has(DEPRECATED_ARTICLES));
   nigori->set_encrypt_app_list(encrypted_types.Has(APP_LIST));
   nigori->set_encrypt_arc_package(encrypted_types.Has(ARC_PACKAGE));
   nigori->set_encrypt_printers(encrypted_types.Has(PRINTERS));
   nigori->set_encrypt_reading_list(encrypted_types.Has(READING_LIST));
-  nigori->set_encrypt_mountain_shares(encrypted_types.Has(MOUNTAIN_SHARES));
   nigori->set_encrypt_send_tab_to_self(encrypted_types.Has(SEND_TAB_TO_SELF));
   nigori->set_encrypt_web_apps(encrypted_types.Has(WEB_APPS));
+  nigori->set_encrypt_os_preferences(encrypted_types.Has(OS_PREFERENCES));
 }
 
 ModelTypeSet GetEncryptedTypesFromNigori(
@@ -288,7 +300,7 @@ ModelTypeSet GetEncryptedTypesFromNigori(
     return ModelTypeSet::All();
 
   ModelTypeSet encrypted_types;
-  static_assert(46 == ModelType::NUM_ENTRIES,
+  static_assert(41 == ModelType::NUM_ENTRIES,
                 "If adding an encryptable type, update handling below.");
   if (nigori.encrypt_bookmarks())
     encrypted_types.Put(BOOKMARKS);
@@ -316,16 +328,12 @@ ModelTypeSet GetEncryptedTypesFromNigori(
     encrypted_types.Put(APP_SETTINGS);
   if (nigori.encrypt_extension_settings())
     encrypted_types.Put(EXTENSION_SETTINGS);
-  if (nigori.encrypt_app_notifications())
-    encrypted_types.Put(DEPRECATED_APP_NOTIFICATIONS);
   if (nigori.encrypt_dictionary())
     encrypted_types.Put(DICTIONARY);
   if (nigori.encrypt_favicon_images())
     encrypted_types.Put(FAVICON_IMAGES);
   if (nigori.encrypt_favicon_tracking())
     encrypted_types.Put(FAVICON_TRACKING);
-  if (nigori.encrypt_articles())
-    encrypted_types.Put(DEPRECATED_ARTICLES);
   if (nigori.encrypt_app_list())
     encrypted_types.Put(APP_LIST);
   if (nigori.encrypt_arc_package())
@@ -334,12 +342,12 @@ ModelTypeSet GetEncryptedTypesFromNigori(
     encrypted_types.Put(PRINTERS);
   if (nigori.encrypt_reading_list())
     encrypted_types.Put(READING_LIST);
-  if (nigori.encrypt_mountain_shares())
-    encrypted_types.Put(MOUNTAIN_SHARES);
   if (nigori.encrypt_send_tab_to_self())
     encrypted_types.Put(SEND_TAB_TO_SELF);
   if (nigori.encrypt_web_apps())
     encrypted_types.Put(WEB_APPS);
+  if (nigori.encrypt_os_preferences())
+    encrypted_types.Put(OS_PREFERENCES);
   return encrypted_types;
 }
 

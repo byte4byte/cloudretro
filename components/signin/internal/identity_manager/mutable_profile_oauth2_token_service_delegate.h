@@ -5,7 +5,9 @@
 #ifndef COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_MUTABLE_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_H_
 #define COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_MUTABLE_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_H_
 
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -14,10 +16,10 @@
 #include "base/threading/thread_checker.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
-#include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "net/base/backoff_entry.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
 
@@ -26,7 +28,7 @@ class SigninClient;
 class TokenWebData;
 
 class MutableProfileOAuth2TokenServiceDelegate
-    : public OAuth2TokenServiceDelegate,
+    : public ProfileOAuth2TokenServiceDelegate,
       public WebDataServiceConsumer,
       public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
@@ -39,13 +41,12 @@ class MutableProfileOAuth2TokenServiceDelegate
       scoped_refptr<TokenWebData> token_web_data,
       signin::AccountConsistencyMethod account_consistency,
       bool revoke_all_tokens_on_load,
-      bool can_revoke_credentials,
       FixRequestErrorCallback fix_request_error_callback);
   ~MutableProfileOAuth2TokenServiceDelegate() override;
 
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
-  // Overridden from OAuth2TokenServiceDelegate.
+  // Overridden from ProfileOAuth2TokenServiceDelegate.
   std::unique_ptr<OAuth2AccessTokenFetcher> CreateAccessTokenFetcher(
       const CoreAccountId& account_id,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
@@ -69,14 +70,14 @@ class MutableProfileOAuth2TokenServiceDelegate
                          const std::string& refresh_token) override;
   void RevokeAllCredentials() override;
   void RevokeCredentials(const CoreAccountId& account_id) override;
-  void ExtractCredentials(OAuth2TokenService* to_service,
+  void ExtractCredentials(ProfileOAuth2TokenService* to_service,
                           const CoreAccountId& account_id) override;
   void Shutdown() override;
 
   // Overridden from NetworkConnectionTracker::NetworkConnectionObserver.
   void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
-  // Overridden from OAuth2TokenServiceDelegate.
+  // Overridden from ProfileOAuth2TokenServiceDelegate.
   const net::BackoffEntry* BackoffEntry() const override;
 
   bool FixRequestErrorIfPossible() override;
@@ -110,6 +111,8 @@ class MutableProfileOAuth2TokenServiceDelegate
                            RevokeOnUpdate);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            DelayedRevoke);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
+                           DiceMigrationWithMissingHostedDomain);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            DiceMigrationHostedDomainPrimaryAccount);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
@@ -187,6 +190,11 @@ class MutableProfileOAuth2TokenServiceDelegate
   void RevokeCredentialsImpl(const CoreAccountId& account_id,
                              bool revoke_on_server);
 
+  // If the Dice migration happened before the tokens could be migrated, delete
+  // all the tokens. This is only called if the tokens could not be loaded
+  // successfully.
+  void MaybeDeletePreDiceTokens();
+
   // Maps the |account_id| of accounts known to ProfileOAuth2TokenService
   // to information about the account.
   typedef std::map<CoreAccountId, AccountStatus> AccountStatusMap;
@@ -221,11 +229,6 @@ class MutableProfileOAuth2TokenServiceDelegate
   // completely removed, and the primary account will be kept in authentication
   // error state.
   const bool revoke_all_tokens_on_load_;
-
-  // Supervised users cannot revoke credentials.
-  // TODO(droger): remove this when supervised users are no longer supported on
-  // any platform.
-  const bool can_revoke_credentials_;
 
   // Callback function that attempts to correct request errors.  Best effort
   // only.  Returns true if the error was fixed and retry should be reattempted.

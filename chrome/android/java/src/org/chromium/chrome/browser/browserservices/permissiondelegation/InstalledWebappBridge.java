@@ -5,8 +5,10 @@
 package org.chromium.chrome.browser.browserservices.permissiondelegation;
 
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.browser.browserservices.Origin;
-import org.chromium.chrome.browser.preferences.website.ContentSettingValues;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.embedder_support.util.Origin;
 
 /**
  * Provides Trusted Web Activity Client App permissions for native. The C++ counterpart is the
@@ -39,10 +41,11 @@ public class InstalledWebappBridge {
         }
     }
 
-    public static void notifyPermissionsChange() {
+    public static void notifyPermissionsChange(@ContentSettingsType int type) {
         if (sNativeInstalledWebappProvider == 0) return;
 
-        nativeNotifyPermissionsChange(sNativeInstalledWebappProvider);
+        InstalledWebappBridgeJni.get().notifyPermissionsChange(
+                sNativeInstalledWebappProvider, type);
     }
 
     @CalledByNative
@@ -51,8 +54,8 @@ public class InstalledWebappBridge {
     }
 
     @CalledByNative
-    private static Permission[] getNotificationPermissions() {
-        return TrustedWebActivityPermissionManager.get().getNotificationPermissions();
+    private static Permission[] getPermissions(@ContentSettingsType int type) {
+        return TrustedWebActivityPermissionManager.get().getPermissions(type);
     }
 
     @CalledByNative
@@ -65,5 +68,8 @@ public class InstalledWebappBridge {
         return permission.setting;
     }
 
-    private static native void nativeNotifyPermissionsChange(long provider);
+    @NativeMethods
+    interface Natives {
+        void notifyPermissionsChange(long provider, int type);
+    }
 }

@@ -36,7 +36,6 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   // Shows the bubble and automatically closes it after a short time period if
   // |reason| is AUTOMATIC.
   static void ShowBubble(content::WebContents* web_contents,
-                         const gfx::Point& anchor_point,
                          DisplayReason reason);
 
   // If the bubble is being shown for the given |web_contents|, refreshes it.
@@ -58,6 +57,7 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest,
                            BubbleSuppressingExtensionRefreshesExistingBubble);
   FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest, FocusPreventsClose);
+  FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest, AnchorPositionsInFullscreen);
 
   // Returns true if we can reuse the existing bubble for the given
   // |web_contents|.
@@ -82,12 +82,11 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
     std::unique_ptr<const extensions::IconImage> icon_image;
   };
 
-  // Constructs ZoomBubbleView. Anchors the bubble to |anchor_view| when it is
-  // not nullptr or alternatively, to |anchor_point|. The bubble will auto-close
-  // when |reason| is AUTOMATIC. If |immersive_mode_controller_| is present, the
-  // bubble will auto-close when the top-of-window views are revealed.
+  // Constructs ZoomBubbleView. Anchors the bubble to |anchor_view|, which must
+  // not be nullptr. The bubble will auto-close when |reason| is AUTOMATIC. If
+  // |immersive_mode_controller_| is present, the bubble will auto-close when
+  // the top-of-window views are revealed.
   ZoomBubbleView(views::View* anchor_view,
-                 const gfx::Point& anchor_point,
                  content::WebContents* web_contents,
                  DisplayReason reason,
                  ImmersiveModeController* immersive_mode_controller);
@@ -95,7 +94,6 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
 
   // LocationBarBubbleDelegateView:
   base::string16 GetAccessibleWindowTitle() const override;
-  int GetDialogButtons() const override;
   void OnFocus() override;
   void OnBlur() override;
   void OnGestureEvent(ui::GestureEvent* event) override;
@@ -105,16 +103,15 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   void Init() override;
   void WindowClosing() override;
   void CloseBubble() override;
-  void Layout() override;
 
-  // views::ButtonListener:
+  // views::ButtonListener
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // ImmersiveModeController::Observer:
+  // ImmersiveModeController::Observer
   void OnImmersiveRevealStarted() override;
   void OnImmersiveModeControllerDestroyed() override;
 
-  // extensions::IconImage::Observer:
+  // extensions::IconImage::Observer
   void OnExtensionIconImageChanged(extensions::IconImage* /* image */) override;
 
   // Sets information about the extension that initiated the zoom change.

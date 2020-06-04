@@ -221,26 +221,8 @@ bool SchemaTypeToValueType(const std::string& schema_type,
                                  kSchemaTypesToValueTypesEnd, value_type);
 }
 
-bool StrategyAllowInvalidOnTopLevel(SchemaOnErrorStrategy strategy) {
-  return strategy == SCHEMA_ALLOW_INVALID ||
-         strategy == SCHEMA_ALLOW_INVALID_TOPLEVEL ||
-         strategy == SCHEMA_ALLOW_INVALID_TOPLEVEL_AND_ALLOW_UNKNOWN;
-}
-
-bool StrategyAllowUnknownOnTopLevel(SchemaOnErrorStrategy strategy) {
+bool StrategyAllowUnknown(SchemaOnErrorStrategy strategy) {
   return strategy != SCHEMA_STRICT;
-}
-
-SchemaOnErrorStrategy StrategyForNextLevel(SchemaOnErrorStrategy strategy) {
-  static SchemaOnErrorStrategy next_level_strategy[] = {
-      SCHEMA_STRICT,         // SCHEMA_STRICT
-      SCHEMA_STRICT,         // SCHEMA_ALLOW_UNKNOWN_TOPLEVEL
-      SCHEMA_ALLOW_UNKNOWN,  // SCHEMA_ALLOW_UNKNOWN
-      SCHEMA_STRICT,         // SCHEMA_ALLOW_INVALID_TOPLEVEL
-      SCHEMA_ALLOW_UNKNOWN,  // SCHEMA_ALLOW_INVALID_TOPLEVEL_AND_ALLOW_UNKNOWN
-      SCHEMA_ALLOW_INVALID,  // SCHEMA_ALLOW_INVALID
-  };
-  return next_level_strategy[static_cast<int>(strategy)];
 }
 
 void SchemaErrorFound(std::string* error_path,
@@ -1230,28 +1212,23 @@ bool Schema::Validate(const base::Value& value,
         // Unknown property was detected.
         SchemaErrorFound(error_path, error,
                          "Unknown property: " + dict_item.first);
-        if (!StrategyAllowUnknownOnTopLevel(strategy))
+        if (!StrategyAllowUnknown(strategy))
           return false;
       } else {
-        bool all_subschemas_are_valid = true;
         for (const auto& subschema : schema_list) {
           std::string new_error;
           const bool validation_result = subschema.Validate(
-              dict_item.second, StrategyForNextLevel(strategy), error_path,
-              &new_error);
+              dict_item.second, strategy, error_path, &new_error);
           if (!new_error.empty()) {
             AddDictKeyPrefixToPath(dict_item.first, error_path);
             *error = std::move(new_error);
           }
           if (!validation_result) {
             // Invalid property was detected.
-            all_subschemas_are_valid = false;
-            if (!StrategyAllowInvalidOnTopLevel(strategy))
-              return false;
+            return false;
           }
         }
-        if (all_subschemas_are_valid)
-          present_properties.insert(dict_item.first);
+        present_properties.insert(dict_item.first);
       }
     }
 
@@ -1268,13 +1245,13 @@ bool Schema::Validate(const base::Value& value,
     for (size_t index = 0; index < value.GetList().size(); ++index) {
       const base::Value& list_item = value.GetList()[index];
       std::string new_error;
-      const bool validation_result = GetItems().Validate(
-          list_item, StrategyForNextLevel(strategy), error_path, &new_error);
+      const bool validation_result =
+          GetItems().Validate(list_item, strategy, error_path, &new_error);
       if (!new_error.empty()) {
         AddListIndexPrefixToPath(index, error_path);
         *error = std::move(new_error);
       }
-      if (!validation_result && !StrategyAllowInvalidOnTopLevel(strategy))
+      if (!validation_result)
         return false;  // Invalid list item was detected.
     }
   } else if (value.is_int()) {
@@ -1325,31 +1302,24 @@ bool Schema::Normalize(base::Value* value,
         // Unknown property was detected.
         SchemaErrorFound(error_path, error,
                          "Unknown property: " + dict_item.first);
-        if (!StrategyAllowUnknownOnTopLevel(strategy))
+        if (!StrategyAllowUnknown(strategy))
           return false;
         drop_list.push_back(dict_item.first);
       } else {
-        bool all_subschemas_are_valid = true;
         for (const auto& subschema : schema_list) {
           std::string new_error;
           const bool normalization_result = subschema.Normalize(
-              &dict_item.second, StrategyForNextLevel(strategy), error_path,
-              &new_error, changed);
+              &dict_item.second, strategy, error_path, &new_error, changed);
           if (!new_error.empty()) {
             AddDictKeyPrefixToPath(dict_item.first, error_path);
             *error = std::move(new_error);
           }
           if (!normalization_result) {
             // Invalid property was detected.
-            all_subschemas_are_valid = false;
-            if (!StrategyAllowInvalidOnTopLevel(strategy))
-              return false;
-            drop_list.push_back(dict_item.first);
-            break;
+            return false;
           }
         }
-        if (all_subschemas_are_valid)
-          present_properties.insert(dict_item.first);
+        present_properties.insert(dict_item.first);
       }
     }
 
@@ -1369,7 +1339,7 @@ bool Schema::Normalize(base::Value* value,
       value->RemoveKey(drop_key);
     return true;
   } else if (value->is_list()) {
-    base::Value::ListStorage& list = value->GetList();
+    base::Value::ListStorage list = value->TakeList();
     // Instead of removing invalid list items afterwards, we push valid items
     // forward in the list by overriding invalid items. The next free position
     // is indicated by |write_index|, which gets increased for every valid item.
@@ -1378,17 +1348,15 @@ bool Schema::Normalize(base::Value* value,
     for (size_t index = 0; index < list.size(); ++index) {
       base::Value& list_item = list[index];
       std::string new_error;
-      const bool normalization_result =
-          GetItems().Normalize(&list_item, StrategyForNextLevel(strategy),
-                               error_path, &new_error, changed);
+      const bool normalization_result = GetItems().Normalize(
+          &list_item, strategy, error_path, &new_error, changed);
       if (!new_error.empty()) {
         AddListIndexPrefixToPath(index, error_path);
         *error = new_error;
       }
       if (!normalization_result) {
         // Invalid list item was detected.
-        if (!StrategyAllowInvalidOnTopLevel(strategy))
-          return false;
+        return false;
       } else {
         if (write_index != index)
           list[write_index] = std::move(list_item);
@@ -1398,6 +1366,7 @@ bool Schema::Normalize(base::Value* value,
     if (changed && write_index < list.size())
       *changed = true;
     list.resize(write_index);
+    *value = base::Value(std::move(list));
     return true;
   }
 
@@ -1415,9 +1384,9 @@ void Schema::MaskSensitiveValues(base::Value* value) const {
 Schema Schema::Parse(const std::string& content, std::string* error) {
   // Validate as a generic JSON schema, and ignore unknown attributes; they
   // may become used in a future version of the schema format.
-  std::unique_ptr<base::Value> dict = Schema::ParseToDictAndValidate(
+  base::Optional<base::Value> dict = Schema::ParseToDictAndValidate(
       content, kSchemaOptionsIgnoreUnknownAttributes, error);
-  if (!dict)
+  if (!dict.has_value())
     return Schema();
 
   // Validate the main type.
@@ -1429,8 +1398,8 @@ Schema Schema::Parse(const std::string& content, std::string* error) {
   }
 
   // Checks for invalid attributes at the top-level.
-  if (dict->FindKey(schema::kAdditionalProperties) ||
-      dict->FindKey(schema::kPatternProperties)) {
+  if (dict.value().FindKey(schema::kAdditionalProperties) ||
+      dict.value().FindKey(schema::kPatternProperties)) {
     *error =
         "\"additionalProperties\" and \"patternProperties\" are not "
         "supported at the main schema.";
@@ -1438,29 +1407,31 @@ Schema Schema::Parse(const std::string& content, std::string* error) {
   }
 
   scoped_refptr<const InternalStorage> storage =
-      InternalStorage::ParseSchema(*dict, error);
+      InternalStorage::ParseSchema(dict.value(), error);
   if (!storage)
     return Schema();
   return Schema(storage, storage->root_node());
 }
 
 // static
-std::unique_ptr<base::Value> Schema::ParseToDictAndValidate(
+base::Optional<base::Value> Schema::ParseToDictAndValidate(
     const std::string& schema,
     int validator_options,
     std::string* error) {
-  base::JSONParserOptions json_options = base::JSON_ALLOW_TRAILING_COMMAS;
-  std::unique_ptr<base::Value> json =
-      base::JSONReader::ReadAndReturnErrorDeprecated(schema, json_options,
-                                                     nullptr, error);
-  if (!json)
-    return nullptr;
-  if (!json->is_dict()) {
+  base::JSONReader::ValueWithError value_with_error =
+      base::JSONReader::ReadAndReturnValueWithError(
+          schema, base::JSONParserOptions::JSON_ALLOW_TRAILING_COMMAS);
+  *error = value_with_error.error_message;
+
+  if (!value_with_error.value)
+    return base::nullopt;
+  base::Value json = std::move(value_with_error.value.value());
+  if (!json.is_dict()) {
     *error = "Schema must be a JSON object";
-    return nullptr;
+    return base::nullopt;
   }
-  if (!IsValidSchema(*json, validator_options, error))
-    return nullptr;
+  if (!IsValidSchema(json, validator_options, error))
+    return base::nullopt;
   return json;
 }
 

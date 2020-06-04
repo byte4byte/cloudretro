@@ -4,14 +4,13 @@
 
 package org.chromium.chrome.browser.webapps;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
 import android.content.Intent;
 import android.net.Uri;
-import android.support.customtabs.TrustedWebUtils;
 import android.support.test.InstrumentationRegistry;
 import android.view.View;
 import android.view.ViewGroup;
+
+import androidx.browser.customtabs.TrustedWebUtils;
 
 import org.junit.Assert;
 import org.junit.runner.Description;
@@ -21,13 +20,14 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
-import org.chromium.chrome.browser.tab.TabBrowserControlsState;
+import org.chromium.chrome.browser.tab.TabBrowserControlsConstraintsHelper;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
+import org.chromium.content_public.common.BrowserControlsState;
 
 /**
  * Custom {@link ChromeActivityTestRule} for tests using {@link WebappActivity}.
@@ -37,7 +37,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
     public static final String WEBAPP_NAME = "webapp name";
     public static final String WEBAPP_SHORT_NAME = "webapp short name";
 
-    private static final long STARTUP_TIMEOUT = scaleTimeout(10000);
+    private static final long STARTUP_TIMEOUT = 15000L;
 
     // Empty 192x192 image generated with:
     // ShortcutHelper.encodeBitmapAsString(Bitmap.createBitmap(192, 192, Bitmap.Config.ARGB_4444));
@@ -121,8 +121,9 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
                 // runnable.
                 callback.waitForCallback(0);
 
-                TestThreadUtils.runOnUiThreadBlocking(
-                        () -> { callback.getStorage().updateFromShortcutIntent(createIntent()); });
+                TestThreadUtils.runOnUiThreadBlocking(() -> {
+                    callback.getStorage().updateFromWebappInfo(WebappInfo.create(createIntent()));
+                });
 
                 base.evaluate();
 
@@ -137,29 +138,33 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
     /**
      * Starts up the WebappActivity and sets up the test observer.
      */
-    public final void startWebappActivity() throws Exception {
+    public final void startWebappActivity() {
         startWebappActivity(createIntent());
     }
 
     /**
      * Starts up the WebappActivity with a specific Intent and sets up the test observer.
      */
-    public final void startWebappActivity(Intent intent) throws Exception {
+    public final void startWebappActivity(Intent intent) {
         launchActivity(intent);
         waitUntilIdle();
     }
 
     public static void assertToolbarShowState(ChromeActivity activity, boolean showState) {
-        Assert.assertEquals(showState,
-                TestThreadUtils.runOnUiThreadBlockingNoException(
-                        () -> TabBrowserControlsState.get(activity.getActivityTab()).canShow()));
+        @BrowserControlsState
+        int expectedState = showState ? BrowserControlsState.SHOWN : BrowserControlsState.HIDDEN;
+        Assert.assertEquals(expectedState,
+                (int) TestThreadUtils.runOnUiThreadBlockingNoException(
+                        ()
+                                -> TabBrowserControlsConstraintsHelper.getConstraints(
+                                        activity.getActivityTab())));
     }
 
     /**
      * Executing window.open() through a click on a link, as it needs user gesture to avoid Chrome
      * blocking it as a popup.
      */
-    static public void jsWindowOpen(ChromeActivity activity, String url) throws Exception {
+    public static void jsWindowOpen(ChromeActivity activity, String url) throws Exception {
         String injectedHtml = String.format("var aTag = document.createElement('testId');"
                         + "aTag.id = 'testId';"
                         + "aTag.innerHTML = 'Click Me!';"
@@ -200,7 +205,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
      * Starts up the WebappActivity and sets up the test observer.
      * Wait till Splashscreen full loaded.
      */
-    public final ViewGroup startWebappActivityAndWaitForSplashScreen() throws Exception {
+    public final ViewGroup startWebappActivityAndWaitForSplashScreen() {
         return startWebappActivityAndWaitForSplashScreen(createIntent());
     }
 
@@ -209,8 +214,7 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
      * Wait till Splashscreen full loaded.
      * Intent url is modified to one that takes more time to load.
      */
-    public final ViewGroup startWebappActivityAndWaitForSplashScreen(Intent intent)
-            throws Exception {
+    public final ViewGroup startWebappActivityAndWaitForSplashScreen(Intent intent) {
         // Reset the url to one that takes more time to load.
         // This is to make sure splash screen won't disappear during test.
         intent.putExtra(ShortcutHelper.EXTRA_URL, getTestServer().getURL("/slow?2"));
@@ -224,7 +228,8 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
                 // We also wait till the splash screen has finished initializing.
                 if (getActivity().getActivityTab() == null) return false;
 
-                View splashScreen = getActivity().getSplashScreenForTests();
+                View splashScreen =
+                        getActivity().getSplashControllerForTests().getSplashScreenForTests();
                 if (splashScreen == null) return false;
 
                 return (!(splashScreen instanceof ViewGroup)
@@ -233,10 +238,9 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
         }, STARTUP_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
 
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        View splashScreen = getActivity().getSplashScreenForTests();
-        if (splashScreen == null) {
-            Assert.fail("No splash screen available.");
-        }
+        View splashScreen = getActivity().getSplashControllerForTests().getSplashScreenForTests();
+        Assert.assertNotNull("No splash screen available.", splashScreen);
+
         // TODO(pkotwicz): Change return type in order to accommodate new-style WebAPKs.
         // (crbug.com/958288)
         return (splashScreen instanceof ViewGroup) ? (ViewGroup) splashScreen : null;
@@ -246,15 +250,19 @@ public class WebappActivityTestRule extends ChromeActivityTestRule<WebappActivit
      * Waits for the splash screen to be hidden.
      */
     public void waitUntilSplashscreenHides() {
+        waitUntilSplashHides(getActivity());
+    }
+
+    public static void waitUntilSplashHides(WebappActivity activity) {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return !isSplashScreenVisible();
+                return activity.getSplashControllerForTests().wasSplashScreenHiddenForTests();
             }
         }, STARTUP_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
     public boolean isSplashScreenVisible() {
-        return getActivity().getSplashScreenForTests() != null;
+        return getActivity().getSplashControllerForTests().getSplashScreenForTests() != null;
     }
 }

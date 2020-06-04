@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <array>
 #include <map>
+#include <set>
 
 #include "components/policy/core/common/policy_merger.h"
 #include "components/policy/core/common/policy_pref_names.h"
@@ -11,17 +13,23 @@
 
 namespace policy {
 
-const char* const kDictionaryPoliciesToMerge[] = {
+namespace {
+
+constexpr std::array<const char*, 7> kDictionaryPoliciesToMerge{
     key::kContentPackManualBehaviorURLs,
     key::kExtensionSettings,
     key::kDeviceLoginScreenPowerManagement,
     key::kKeyPermissions,
     key::kPowerManagementIdleSettings,
     key::kScreenBrightnessPercent,
-    key::kScreenLockDelays};
+    key::kScreenLockDelays,
+};
 
-bool UseConflictValueInMerging(const PolicyMap::Entry& conflict,
-                               const PolicyMap::Entry& policy) {
+}  // namespace
+
+// static
+bool PolicyMerger::ConflictCanBeMerged(const PolicyMap::Entry& conflict,
+                                       const PolicyMap::Entry& policy) {
   // On desktop, the user cloud policy potentially comes from a different
   // domain than e.g. GPO policy or machine-level cloud policy, so prevent
   // merging user cloud policy with other policy sources.
@@ -38,7 +46,7 @@ PolicyMerger::PolicyMerger() = default;
 PolicyMerger::~PolicyMerger() = default;
 
 PolicyListMerger::PolicyListMerger(
-    const std::set<std::string> policies_to_merge)
+    base::flat_set<std::string> policies_to_merge)
     : policies_to_merge_(std::move(policies_to_merge)) {}
 PolicyListMerger::~PolicyListMerger() = default;
 
@@ -91,7 +99,7 @@ void PolicyListMerger::DoMerge(PolicyMap::Entry* policy) const {
   // Concatenates the values from accepted conflicting sources to the policy
   // value while avoiding duplicates.
   for (const auto& it : policy->conflicts) {
-    if (!UseConflictValueInMerging(it, *policy)) {
+    if (!PolicyMerger::ConflictCanBeMerged(it, *policy)) {
       continue;
     }
 
@@ -109,20 +117,20 @@ void PolicyListMerger::DoMerge(PolicyMap::Entry* policy) const {
   if (value_changed) {
     base::ListValue* new_value = new base::ListValue();
     for (const base::Value* it : merged_values)
-      new_value->GetList().emplace_back(it->Clone());
+      new_value->Append(it->Clone());
 
     policy->value.reset(new_value);
   }
   policy->ClearConflicts();
-  policy->AddConflictingPolicy(new_conflict);
+  policy->AddConflictingPolicy(std::move(new_conflict));
   policy->source = POLICY_SOURCE_MERGED;
 }
 
 PolicyDictionaryMerger::PolicyDictionaryMerger(
-    std::set<std::string> policies_to_merge)
+    base::flat_set<std::string> policies_to_merge)
     : policies_to_merge_(std::move(policies_to_merge)),
-      allowed_policies_(std::begin(kDictionaryPoliciesToMerge),
-                        std::end(kDictionaryPoliciesToMerge)) {}
+      allowed_policies_(kDictionaryPoliciesToMerge.begin(),
+                        kDictionaryPoliciesToMerge.end()) {}
 PolicyDictionaryMerger::~PolicyDictionaryMerger() = default;
 
 void PolicyDictionaryMerger::Merge(PolicyMap::PolicyMapType* policies) const {
@@ -134,7 +142,7 @@ void PolicyDictionaryMerger::Merge(PolicyMap::PolicyMapType* policies) const {
 }
 
 void PolicyDictionaryMerger::SetAllowedPoliciesForTesting(
-    std::set<std::string> allowed_policies) {
+    base::flat_set<std::string> allowed_policies) {
   allowed_policies_ = std::move(allowed_policies);
 }
 
@@ -182,7 +190,7 @@ void PolicyDictionaryMerger::DoMerge(PolicyMap::Entry* policy) const {
 
   // Merges all the keys from the policies from different sources.
   for (const auto* it : policies) {
-    if (it != policy && !UseConflictValueInMerging(*it, *policy))
+    if (it != policy && !PolicyMerger::ConflictCanBeMerged(*it, *policy))
       continue;
 
     base::DictionaryValue* dict = nullptr;
@@ -204,7 +212,7 @@ void PolicyDictionaryMerger::DoMerge(PolicyMap::Entry* policy) const {
     policy->value = base::Value::ToUniquePtrValue(std::move(merged_dictionary));
 
   policy->ClearConflicts();
-  policy->AddConflictingPolicy(new_conflict);
+  policy->AddConflictingPolicy(std::move(new_conflict));
   policy->source = POLICY_SOURCE_MERGED;
 }
 

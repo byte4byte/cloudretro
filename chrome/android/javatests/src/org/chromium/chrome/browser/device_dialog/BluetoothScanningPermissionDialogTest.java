@@ -16,15 +16,15 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.annotations.JCaller;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.content_public.browser.bluetooth_scanning.Event;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -51,8 +51,7 @@ public class BluetoothScanningPermissionDialogTest {
     private class TestBluetoothScanningPermissionDialogJni
             implements BluetoothScanningPermissionDialog.Natives {
         @Override
-        public void onDialogFinished(@JCaller BluetoothScanningPermissionDialog self,
-                long nativeBluetoothScanningPromptAndroid, int eventType) {
+        public void onDialogFinished(long nativeBluetoothScanningPromptAndroid, int eventType) {
             mFinishedEventType = eventType;
         }
     }
@@ -77,7 +76,7 @@ public class BluetoothScanningPermissionDialogTest {
 
     @Test
     @LargeTest
-    public void testAddDevice() throws InterruptedException {
+    public void testAddDevice() {
         Dialog dialog = mPermissionDialog.getDialogForTesting();
 
         final ListView items = (ListView) dialog.findViewById(R.id.items);
@@ -122,7 +121,6 @@ public class BluetoothScanningPermissionDialogTest {
 
         dialog.cancel();
 
-        CriteriaHelper.pollUiThread(Criteria.equals(
-                BluetoothScanningPermissionEvent.CANCELED, () -> mFinishedEventType));
+        CriteriaHelper.pollUiThread(Criteria.equals(Event.CANCELED, () -> mFinishedEventType));
     }
 }

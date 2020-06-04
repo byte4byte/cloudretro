@@ -16,6 +16,7 @@ namespace blink {
 
 class KURL;
 class Modulator;
+class ModuleScriptCreationParams;
 
 // ValueWrapperSyntheticModuleScript is a module script
 // (https://html.spec.whatwg.org/C/#module-script) that default-exports a single
@@ -24,16 +25,52 @@ class Modulator;
 class CORE_EXPORT ValueWrapperSyntheticModuleScript final
     : public ModuleScript {
  public:
+  static ValueWrapperSyntheticModuleScript*
+  CreateCSSWrapperSyntheticModuleScript(
+      const base::Optional<ModuleScriptCreationParams>& params,
+      Modulator* settings_object);
+
+  static ValueWrapperSyntheticModuleScript*
+  CreateJSONWrapperSyntheticModuleScript(
+      const base::Optional<ModuleScriptCreationParams>& params,
+      Modulator* settings_object);
+
+  static ValueWrapperSyntheticModuleScript* CreateWithDefaultExport(
+      v8::Local<v8::Value> value,
+      Modulator* settings_object,
+      const KURL& source_url,
+      const KURL& base_url,
+      const ScriptFetchOptions& fetch_options,
+      const TextPosition& start_position = TextPosition::MinimumPosition());
+
+  static ValueWrapperSyntheticModuleScript* CreateWithError(
+      v8::Local<v8::Value> value,
+      Modulator* settings_object,
+      const KURL& source_url,
+      const KURL& base_url,
+      const ScriptFetchOptions& fetch_options,
+      v8::Local<v8::Value> error,
+      const TextPosition& start_position = TextPosition::MinimumPosition());
+
   ValueWrapperSyntheticModuleScript(Modulator* settings_object,
-                                    ModuleRecord record,
+                                    v8::Local<v8::Module> record,
                                     const KURL& source_url,
                                     const KURL& base_url,
                                     const ScriptFetchOptions& fetch_options,
                                     v8::Local<v8::Value> value,
                                     const TextPosition& start_position);
 
-  String InlineSourceTextForCSP() const override;
-  void Trace(blink::Visitor* visitor) override;
+  // <specdef
+  // href="https://heycam.github.io/webidl/#synthetic-module-record">
+  // An abstract operation that will be performed upon evaluation of the module,
+  // taking the Synthetic Module Record as its sole argument. These will usually
+  // set up the exported values, by using SetSyntheticModuleExport. They must
+  // not modify [[ExportNames]]. They may return an abrupt completion.
+  static v8::MaybeLocal<v8::Value> EvaluationSteps(
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Module> module);
+
+  void Trace(Visitor* visitor) override;
 
  private:
   TraceWrapperV8Reference<v8::Value> export_value_;

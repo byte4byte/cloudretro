@@ -25,10 +25,7 @@ class ImportLockDialogView : public views::DialogDelegateView {
   gfx::Size CalculatePreferredSize() const override;
 
   // views::DialogDelegate:
-  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   base::string16 GetWindowTitle() const override;
-  bool Accept() override;
-  bool Cancel() override;
 
   // views::WidgetDelegate:
   bool ShouldShowCloseButton() const override;

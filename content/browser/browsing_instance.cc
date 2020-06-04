@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_or_resource_context.h"
@@ -99,6 +100,25 @@ void BrowsingInstance::GetSiteAndLockForURL(const GURL& url,
   *site_url = GetSiteForURL(url);
   *lock_url =
       SiteInstanceImpl::DetermineProcessLockURL(isolation_context_, url);
+}
+
+bool BrowsingInstance::TrySettingDefaultSiteInstance(
+    SiteInstanceImpl* site_instance,
+    const GURL& url) {
+  DCHECK(!site_instance->HasSite());
+  const GURL site_url = GetSiteForURL(url);
+  if (default_site_instance_ ||
+      !SiteInstanceImpl::CanBePlacedInDefaultSiteInstance(isolation_context_,
+                                                          url, site_url)) {
+    return false;
+  }
+
+  // Note: |default_site_instance_| must be set before SetSite() call to
+  // properly trigger default SiteInstance behavior inside that method.
+  default_site_instance_ = site_instance;
+  site_instance->SetSite(SiteInstanceImpl::GetDefaultSiteURL());
+  site_url_set_.insert(site_url);
+  return true;
 }
 
 scoped_refptr<SiteInstanceImpl> BrowsingInstance::GetSiteInstanceForURLHelper(
@@ -197,6 +217,11 @@ BrowsingInstance::~BrowsingInstance() {
   DCHECK(!default_site_instance_);
   if (default_process_)
     default_process_->RemoveObserver(this);
+
+  // Remove any origin isolation opt-ins related to this instance.
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  policy->RemoveOptInIsolatedOriginsForBrowsingInstance(isolation_context_);
 }
 
 GURL BrowsingInstance::GetSiteForURL(const GURL& url) const {

@@ -44,7 +44,7 @@ class ASH_EXPORT WindowResizer {
   static const int kBoundsChangeDirection_Horizontal;
   static const int kBoundsChangeDirection_Vertical;
 
-  explicit WindowResizer(wm::WindowState* window_state);
+  explicit WindowResizer(WindowState* window_state);
   virtual ~WindowResizer();
 
   // Returns a bitmask of the kBoundsChange_ values.
@@ -56,7 +56,7 @@ class ASH_EXPORT WindowResizer {
   // Invoked to drag/move/resize the window. |location| is in the coordinates
   // of the window supplied to the constructor. |event_flags| is the event
   // flags from the event.
-  virtual void Drag(const gfx::Point& location, int event_flags) = 0;
+  virtual void Drag(const gfx::PointF& location, int event_flags) = 0;
 
   // Invoked to complete the drag.
   virtual void CompleteDrag() = 0;
@@ -71,7 +71,7 @@ class ASH_EXPORT WindowResizer {
   aura::Window* GetTarget() const;
 
   // See comment for |DragDetails::initial_location_in_parent|.
-  const gfx::Point& GetInitialLocation() const {
+  const gfx::PointF& GetInitialLocation() const {
     return window_state_->drag_details()->initial_location_in_parent;
   }
 
@@ -79,7 +79,7 @@ class ASH_EXPORT WindowResizer {
   const DragDetails& details() const { return *window_state_->drag_details(); }
 
  protected:
-  gfx::Rect CalculateBoundsForDrag(const gfx::Point& location);
+  gfx::Rect CalculateBoundsForDrag(const gfx::PointF& location);
 
   static bool IsBottomEdge(int component);
 
@@ -88,7 +88,7 @@ class ASH_EXPORT WindowResizer {
   void SetBoundsDuringResize(const gfx::Rect& bounds);
 
   // WindowState of the drag target.
-  wm::WindowState* window_state_;
+  WindowState* window_state_;
 
  private:
   // In case of touch resizing, adjusts deltas so that the border is positioned
@@ -123,7 +123,7 @@ class ASH_EXPORT WindowResizer {
 // |window| should not be resized nor dragged.
 ASH_EXPORT std::unique_ptr<WindowResizer> CreateWindowResizer(
     aura::Window* window,
-    const gfx::Point& point_in_parent,
+    const gfx::PointF& point_in_parent,
     int window_component,
     ::wm::WindowMoveSource source);
 

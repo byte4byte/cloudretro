@@ -5,11 +5,12 @@
 #include "chromeos/services/assistant/platform/network_provider_impl.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "base/bind.h"
+#include "chromeos/services/assistant/public/cpp/assistant_client.h"
 #include "chromeos/services/network_config/public/mojom/constants.mojom.h"
 #include "chromeos/services/network_config/public/mojom/cros_network_config.mojom-forward.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 using ConnectionStatus = assistant_client::NetworkProvider::ConnectionStatus;
 using NetworkStatePropertiesPtr =
@@ -20,22 +21,22 @@ using ConnectionStateType =
 namespace chromeos {
 namespace assistant {
 
-NetworkProviderImpl::NetworkProviderImpl(service_manager::Connector* connector)
-    : connection_status_(ConnectionStatus::UNKNOWN), binding_(this) {
-  // |connector| can be null for the unittests
-  if (connector)
-    Init(connector);
+NetworkProviderImpl::NetworkProviderImpl()
+    : connection_status_(ConnectionStatus::UNKNOWN) {
+  AssistantClient::Get()->RequestNetworkConfig(
+      cros_network_config_remote_.BindNewPipeAndPassReceiver());
+  cros_network_config_remote_->AddObserver(
+      receiver_.BindNewPipeAndPassRemote());
+  cros_network_config_remote_->GetNetworkStateList(
+      network_config::mojom::NetworkFilter::New(
+          network_config::mojom::FilterType::kActive,
+          network_config::mojom::NetworkType::kAll,
+          network_config::mojom::kNoLimit),
+      base::BindOnce(&NetworkProviderImpl::OnActiveNetworksChanged,
+                     base::Unretained(this)));
 }
 
 NetworkProviderImpl::~NetworkProviderImpl() = default;
-
-network_config::mojom::CrosNetworkConfigObserverPtr
-NetworkProviderImpl::BindAndGetPtr() {
-  DCHECK(!binding_.is_bound());
-  network_config::mojom::CrosNetworkConfigObserverPtr observer_ptr;
-  binding_.Bind(mojo::MakeRequest(&observer_ptr));
-  return observer_ptr;
-}
 
 void NetworkProviderImpl::OnActiveNetworksChanged(
     std::vector<network_config::mojom::NetworkStatePropertiesPtr> networks) {
@@ -48,29 +49,6 @@ void NetworkProviderImpl::OnActiveNetworksChanged(
     connection_status_ = ConnectionStatus::CONNECTED;
   else
     connection_status_ = ConnectionStatus::DISCONNECTED_FROM_INTERNET;
-}
-
-void NetworkProviderImpl::Init(service_manager::Connector* connector) {
-  BindCrosNetworkConfig(connector);
-  AddAndFireCrosNetworkConfigObserver();
-}
-
-void NetworkProviderImpl::BindCrosNetworkConfig(
-    service_manager::Connector* connector) {
-  DCHECK(!cros_network_config_ptr_.is_bound());
-  connector->BindInterface(chromeos::network_config::mojom::kServiceName,
-                           &cros_network_config_ptr_);
-}
-
-void NetworkProviderImpl::AddAndFireCrosNetworkConfigObserver() {
-  cros_network_config_ptr_->AddObserver(BindAndGetPtr());
-  cros_network_config_ptr_->GetNetworkStateList(
-      network_config::mojom::NetworkFilter::New(
-          network_config::mojom::FilterType::kActive,
-          network_config::mojom::NetworkType::kAll,
-          network_config::mojom::kNoLimit),
-      base::BindOnce(&NetworkProviderImpl::OnActiveNetworksChanged,
-                     base::Unretained(this)));
 }
 
 ConnectionStatus NetworkProviderImpl::GetConnectionStatus() {

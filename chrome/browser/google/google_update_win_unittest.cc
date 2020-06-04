@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 
 #include <memory>
+#include <string>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
@@ -18,6 +19,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_command_line.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/test/test_simple_task_runner.h"
@@ -25,6 +27,7 @@
 #include "base/version.h"
 #include "base/win/atl.h"
 #include "base/win/registry.h"
+#include "chrome/browser/google/switches.h"
 #include "chrome/common/chrome_version.h"
 #include "chrome/install_static/test/scoped_install_details.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -34,6 +37,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/win/atl_module.h"
 
+using ::testing::_;
+using ::testing::AllOfArray;
 using ::testing::DoAll;
 using ::testing::HasSubstr;
 using ::testing::InSequence;
@@ -44,7 +49,6 @@ using ::testing::SetArgPointee;
 using ::testing::StrEq;
 using ::testing::StrictMock;
 using ::testing::Values;
-using ::testing::_;
 
 namespace {
 
@@ -684,6 +688,9 @@ TEST_P(GoogleUpdateWinTest, InvalidInstallDirectory) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            CANNOT_UPGRADE_CHROME_IN_THIS_DIRECTORY);
 }
 
 // Test the case where the GoogleUpdate class can't be created for an update
@@ -698,6 +705,9 @@ TEST_P(GoogleUpdateWinTest, NoGoogleUpdateForCheck) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND);
 }
 
 // Test the case where the GoogleUpdate class can't be created for an upgrade.
@@ -711,6 +721,9 @@ TEST_P(GoogleUpdateWinTest, NoGoogleUpdateForUpgrade) {
   BeginUpdateCheck(std::string(), true, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND);
 }
 
 // Test the case where the GoogleUpdate class returns an error when an update
@@ -728,6 +741,10 @@ TEST_P(GoogleUpdateWinTest, FailUpdateCheck) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            GOOGLE_UPDATE_ONDEMAND_CLASS_REPORTED_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->hresult, E_FAIL);
 }
 
 // Test the case where the GoogleUpdate class reports that updates are disabled
@@ -753,6 +770,8 @@ TEST_P(GoogleUpdateWinTest, UpdatesDisabledByPolicy) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_DISABLED_BY_POLICY);
 }
 
 // Test the case where the GoogleUpdate class reports that manual updates are
@@ -779,6 +798,9 @@ TEST_P(GoogleUpdateWinTest, ManualUpdatesDisabledByPolicy) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY);
 }
 
 // Test an update check where no update is available.
@@ -800,6 +822,9 @@ TEST_P(GoogleUpdateWinTest, UpdateCheckNoUpdate) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_NO_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->new_version, STRING16_LITERAL(""));
 }
 
 // Test an update check where an update is available.
@@ -821,6 +846,9 @@ TEST_P(GoogleUpdateWinTest, UpdateCheckUpdateAvailable) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_NO_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->new_version, new_version_);
 }
 
 // Test a successful upgrade.
@@ -866,6 +894,9 @@ TEST_P(GoogleUpdateWinTest, UpdateInstalled) {
   BeginUpdateCheck(std::string(), true, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_NO_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->new_version, new_version_);
 }
 
 // Test a failed upgrade where Google Update reports that the installer failed.
@@ -917,6 +948,12 @@ TEST_P(GoogleUpdateWinTest, UpdateFailed) {
   BeginUpdateCheck(std::string(), true, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_ERROR_UPDATING);
+  EXPECT_EQ(GetLastUpdateState()->new_version, new_version_);
+  EXPECT_EQ(GetLastUpdateState()->hresult, GOOPDATEINSTALL_E_INSTALLER_FAILED);
+  ASSERT_TRUE(GetLastUpdateState()->installer_exit_code);
+  EXPECT_EQ(GetLastUpdateState()->installer_exit_code.value(), kInstallerError);
 }
 
 // Test that a retry after a USING_EXTERNAL_UPDATER failure succeeds.
@@ -958,6 +995,9 @@ TEST_P(GoogleUpdateWinTest, RetryAfterExternalUpdaterError) {
   BeginUpdateCheck(std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_NO_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->new_version, STRING16_LITERAL(""));
 }
 
 TEST_P(GoogleUpdateWinTest, UpdateInstalledMultipleDelegates) {
@@ -1020,6 +1060,75 @@ TEST_P(GoogleUpdateWinTest, UpdateInstalledMultipleDelegates) {
   BeginUpdateCheck(std::string(), true, 0,
                    mock_update_check_delegate_2.AsWeakPtr());
   task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_NO_ERROR);
+  EXPECT_EQ(GetLastUpdateState()->new_version, new_version_);
+}
+
+// Test the case where the GoogleUpdate class responds with error provided
+// via the command line with specified hresult and GoogleUpdateErrorCode.
+TEST_P(GoogleUpdateWinTest, SimulateHresultWithErrorCode) {
+  base::test::ScopedCommandLine commandline;
+  // Simulate GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND (3).
+  commandline.GetProcessCommandLine()->AppendSwitchASCII(
+      switches::kSimulateUpdateErrorCode, "3");
+  // Simulate WININET_E_INCORRECT_HANDLE_TYPE (0x80072ef2).
+  commandline.GetProcessCommandLine()->AppendSwitchASCII(
+      switches::kSimulateUpdateHresult, "0x80072ef2");
+
+  // Expect the appropriate error when the on-demand class cannot be created.
+  EXPECT_CALL(mock_update_check_delegate_,
+              OnError(GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND,
+                      AllOfArray({HasSubstr(L"error code 3:"),
+                                  HasSubstr(L"0x80072EF2")}),
+                      _));
+  BeginUpdateCheck(std::string(), false, 0,
+                   mock_update_check_delegate_.AsWeakPtr());
+  task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code,
+            GOOGLE_UPDATE_ONDEMAND_CLASS_NOT_FOUND);
+}
+
+// Test the case where the GoogleUpdate class responds with error provided
+// via the command line with a specific hresult.
+TEST_P(GoogleUpdateWinTest, SimulateHresultOnly) {
+  base::test::ScopedCommandLine commandline;
+  // Simulate WININET_E_INCORRECT_HANDLE_TYPE (0x80072ef2).
+  commandline.GetProcessCommandLine()->AppendSwitchASCII(
+      switches::kSimulateUpdateHresult, "0x80072ef2");
+
+  // Expect the appropriate error when the on-demand class cannot be created.
+  EXPECT_CALL(mock_update_check_delegate_,
+              OnError(GOOGLE_UPDATE_ERROR_UPDATING,
+                      AllOfArray({HasSubstr(L"error code 7:"),
+                                  HasSubstr(L"0x80072EF2")}),
+                      _));
+  BeginUpdateCheck(std::string(), false, 0,
+                   mock_update_check_delegate_.AsWeakPtr());
+  task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_ERROR_UPDATING);
+}
+
+// Test the case where the GoogleUpdate class responds with error provided
+// via the command line without specific hresult.
+TEST_P(GoogleUpdateWinTest, SimulateHresultDefault) {
+  base::test::ScopedCommandLine commandline;
+  commandline.GetProcessCommandLine()->AppendSwitch(
+      switches::kSimulateUpdateHresult);
+
+  // Expect the appropriate error when the on-demand class cannot be created.
+  EXPECT_CALL(mock_update_check_delegate_,
+              OnError(GOOGLE_UPDATE_ERROR_UPDATING,
+                      AllOfArray({HasSubstr(L"error code 7:"),
+                                  HasSubstr(L"0x80004005")}),
+                      _));
+  BeginUpdateCheck(std::string(), false, 0,
+                   mock_update_check_delegate_.AsWeakPtr());
+  task_runner_->RunUntilIdle();
+  ASSERT_TRUE(GetLastUpdateState());
+  EXPECT_EQ(GetLastUpdateState()->error_code, GOOGLE_UPDATE_ERROR_UPDATING);
 }
 
 INSTANTIATE_TEST_SUITE_P(UserLevel, GoogleUpdateWinTest, Values(false));

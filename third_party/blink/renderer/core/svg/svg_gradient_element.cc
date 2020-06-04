@@ -67,7 +67,7 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tag_name,
   AddToPropertyMap(gradient_units_);
 }
 
-void SVGGradientElement::Trace(blink::Visitor* visitor) {
+void SVGGradientElement::Trace(Visitor* visitor) {
   visitor->Trace(gradient_transform_);
   visitor->Trace(spread_method_);
   visitor->Trace(gradient_units_);
@@ -81,7 +81,7 @@ void SVGGradientElement::BuildPendingResource() {
   if (!isConnected())
     return;
   Element* target = ObserveTarget(target_id_observer_, *this);
-  if (auto* gradient = ToSVGGradientElementOrNull(target))
+  if (auto* gradient = DynamicTo<SVGGradientElement>(target))
     AddReferenceTo(gradient);
 
   InvalidateGradient(layout_invalidation_reason::kSvgResourceInvalidated);
@@ -146,10 +146,8 @@ void SVGGradientElement::RemovedFrom(ContainerNode& root_parent) {
 void SVGGradientElement::ChildrenChanged(const ChildrenChange& change) {
   SVGElement::ChildrenChanged(change);
 
-  if (change.by_parser)
-    return;
-
-  InvalidateGradient(layout_invalidation_reason::kChildChanged);
+  if (!change.ByParser())
+    InvalidateGradient(layout_invalidation_reason::kChildChanged);
 }
 
 void SVGGradientElement::InvalidateGradient(
@@ -160,7 +158,7 @@ void SVGGradientElement::InvalidateGradient(
 
 void SVGGradientElement::InvalidateDependentGradients() {
   NotifyIncomingReferences([](SVGElement& element) {
-    if (auto* gradient = ToSVGGradientElementOrNull(element)) {
+    if (auto* gradient = DynamicTo<SVGGradientElement>(element)) {
       gradient->InvalidateGradient(
           layout_invalidation_reason::kSvgResourceInvalidated);
     }
@@ -190,7 +188,7 @@ void SVGGradientElement::CollectCommonAttributes(
 
 const SVGGradientElement* SVGGradientElement::ReferencedElement() const {
   // Respect xlink:href, take attributes from referenced element.
-  return ToSVGGradientElementOrNull(
+  return DynamicTo<SVGGradientElement>(
       TargetElementFromIRIString(HrefString(), GetTreeScope()));
 }
 

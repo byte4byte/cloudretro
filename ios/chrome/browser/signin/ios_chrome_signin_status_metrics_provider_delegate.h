@@ -11,9 +11,7 @@
 #include "components/signin/core/browser/signin_status_metrics_provider_delegate.h"
 #include "ios/chrome/browser/signin/identity_manager_factory_observer.h"
 
-namespace ios {
 class ChromeBrowserState;
-}
 
 class IOSChromeSigninStatusMetricsProviderDelegate
     : public SigninStatusMetricsProviderDelegate,
@@ -26,15 +24,15 @@ class IOSChromeSigninStatusMetricsProviderDelegate
   // SigninStatusMetricsProviderDelegate implementation.
   void Initialize() override;
   AccountsStatus GetStatusOfAllAccounts() override;
-  std::vector<identity::IdentityManager*> GetIdentityManagersForAllAccounts()
+  std::vector<signin::IdentityManager*> GetIdentityManagersForAllAccounts()
       override;
 
   // IdentityManagerFactoryObserver implementation.
-  void IdentityManagerCreated(identity::IdentityManager* manager) override;
-  void IdentityManagerShutdown(identity::IdentityManager* manager) override;
+  void IdentityManagerCreated(signin::IdentityManager* manager) override;
+  void IdentityManagerShutdown(signin::IdentityManager* manager) override;
 
   // Returns the loaded ChromeBrowserState instances.
-  std::vector<ios::ChromeBrowserState*> GetLoadedChromeBrowserStates();
+  std::vector<ChromeBrowserState*> GetLoadedChromeBrowserStates();
 
   DISALLOW_COPY_AND_ASSIGN(IOSChromeSigninStatusMetricsProviderDelegate);
 };

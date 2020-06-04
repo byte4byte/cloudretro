@@ -13,20 +13,24 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/crostini/crostini_manager.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chromeos/components/drivefs/drivefs_host_observer.h"
 #include "chromeos/dbus/seneschal/seneschal_service.pb.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-class Profile;
-
 namespace guest_os {
 
+using SuccessCallback =
+    base::OnceCallback<void(bool success, const std::string& failure_reason)>;
+
 struct SharedPathInfo {
-  explicit SharedPathInfo(const std::string& vm_name);
+  explicit SharedPathInfo(std::unique_ptr<base::FilePathWatcher> watcher,
+                          const std::string& vm_name);
   SharedPathInfo(SharedPathInfo&&);
   ~SharedPathInfo();
 
@@ -41,28 +45,27 @@ class GuestOsSharePath : public KeyedService,
                          public drivefs::DriveFsHostObserver {
  public:
   using SharePathCallback =
-      base::OnceCallback<void(const base::FilePath&, bool, std::string)>;
-  using MountEventSeneschalCallback =
+      base::OnceCallback<void(const base::FilePath&, bool, const std::string&)>;
+  using SeneschalCallback =
       base::RepeatingCallback<void(const std::string& operation,
                                    const base::FilePath& cros_path,
                                    const base::FilePath& container_path,
                                    bool result,
-                                   std::string failure_reason)>;
+                                   const std::string& failure_reason)>;
   class Observer {
    public:
     virtual void OnUnshare(const std::string& vm_name,
                            const base::FilePath& path) = 0;
   };
 
-  // Migrates from crostini.shared_paths to crostini.paths_shared_to_vms which
-  // supports multi VM sharing.
-  // TODO(crbug.com/946273): Remove crostini.shared_paths and migration code
-  // after M77.
-  static void MigratePersistedPathsToMultiVM(PrefService* profile_prefs);
-
   static GuestOsSharePath* GetForProfile(Profile* profile);
   explicit GuestOsSharePath(Profile* profile);
   ~GuestOsSharePath() override;
+
+  // KeyedService:
+  // FilePathWatchers are removed in Shutdown to ensure they are all destroyed
+  // before the service.
+  void Shutdown() override;
 
   // Observer receives unshare events.
   void AddObserver(Observer* obs);
@@ -81,7 +84,7 @@ class GuestOsSharePath : public KeyedService,
   void SharePaths(const std::string& vm_name,
                   std::vector<base::FilePath> paths,
                   bool persist,
-                  base::OnceCallback<void(bool, std::string)> callback);
+                  SuccessCallback callback);
 
   // Unshare specified |path| with |vm_name|.  If |unpersist| is set, the path
   // is removed from prefs, and will not be shared at container startup.
@@ -89,7 +92,7 @@ class GuestOsSharePath : public KeyedService,
   void UnsharePath(const std::string& vm_name,
                    const base::FilePath& path,
                    bool unpersist,
-                   base::OnceCallback<void(bool, std::string)> callback);
+                   SuccessCallback callback);
 
   // Returns true the first time it is called on this service.
   bool GetAndSetFirstForSession();
@@ -100,9 +103,8 @@ class GuestOsSharePath : public KeyedService,
 
   // Share all paths configured in prefs for the specified VM.
   // Called at container startup.  Callback is invoked once complete.
-  void SharePersistedPaths(
-      const std::string& vm_name,
-      base::OnceCallback<void(bool, std::string)> callback);
+  void SharePersistedPaths(const std::string& vm_name,
+                           SuccessCallback callback);
 
   // Save |path| into prefs for |vm_name|.
   void RegisterPersistedPath(const std::string& vm_name,
@@ -129,14 +131,9 @@ class GuestOsSharePath : public KeyedService,
   // Visible for testing.
   void PathDeleted(const base::FilePath& path);
 
-  // Don't run file watchers for tests.
-  void set_no_file_watchers_for_testing() {
-    no_file_watchers_for_testing_ = true;
-  }
-  // Allow seneschal callback for mount events to be overridden for testing.
-  void set_mount_event_seneschal_callback_for_testing(
-      MountEventSeneschalCallback callback) {
-    mount_event_seneschal_callback_ = std::move(callback);
+  // Allow seneschal callback to be overridden for testing.
+  void set_seneschal_callback_for_testing(SeneschalCallback callback) {
+    seneschal_callback_ = std::move(callback);
   }
 
  private:
@@ -145,31 +142,28 @@ class GuestOsSharePath : public KeyedService,
                               bool persist,
                               SharePathCallback callback);
 
-  void CallSeneschalUnsharePath(
-      const std::string& vm_name,
-      const base::FilePath& path,
-      base::OnceCallback<void(bool, std::string)> callback);
+  void CallSeneschalUnsharePath(const std::string& vm_name,
+                                const base::FilePath& path,
+                                SuccessCallback callback);
 
-  void StartFileWatcher(const base::FilePath& path);
+  void OnFileWatcherDeleted(const base::FilePath& path);
 
-  // Callback for FilePathWatcher.
-  void OnFileChanged(const base::FilePath& path, bool error);
-
-  // Blocking function to check if a path is deleted.
-  void CheckIfPathDeleted(const base::FilePath& path);
+  void OnVolumeMountCheck(const base::FilePath& path, bool mount_exists);
 
   // Returns info for specified path or nullptr if not found.
   SharedPathInfo* FindSharedPathInfo(const base::FilePath& path);
 
   Profile* profile_;
-  scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner_;
+  // Task runner for FilePathWatchers to be created, run, and be destroyed on.
+  scoped_refptr<base::SequencedTaskRunner> file_watcher_task_runner_;
   bool first_for_session_ = true;
 
-  // Allow callback for mount event to be overidden for testing.
-  MountEventSeneschalCallback mount_event_seneschal_callback_;
+  // Allow seneschal callback to be overridden for testing.
+  SeneschalCallback seneschal_callback_;
   base::ObserverList<Observer>::Unchecked observers_;
   std::map<base::FilePath, SharedPathInfo> shared_paths_;
-  bool no_file_watchers_for_testing_ = false;
+
+  base::WeakPtrFactory<GuestOsSharePath> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(GuestOsSharePath);
 };  // class

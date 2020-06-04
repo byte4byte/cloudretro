@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "ios/web/public/web_state/web_state_observer_bridge.h"
-
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state_observer_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,15 +24,6 @@ void WebStateObserverBridge::WasShown(web::WebState* web_state) {
 void WebStateObserverBridge::WasHidden(web::WebState* web_state) {
   if ([observer_ respondsToSelector:@selector(webStateWasHidden:)]) {
     [observer_ webStateWasHidden:web_state];
-  }
-}
-
-void WebStateObserverBridge::NavigationItemsPruned(web::WebState* web_state,
-                                                   size_t pruned_item_count) {
-  SEL selector = @selector(webState:didPruneNavigationItemsWithCount:);
-  if ([observer_ respondsToSelector:selector]) {
-    [observer_ webState:web_state
-        didPruneNavigationItemsWithCount:pruned_item_count];
   }
 }
 

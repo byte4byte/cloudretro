@@ -336,8 +336,9 @@ void WalkAXTreeDepthFirst(const AXNode* node,
   if (IsLeaf(node) && update.has_tree_data) {
     int start_selection = 0;
     int end_selection = 0;
-    if (update.tree_data.sel_anchor_object_id == node->id()) {
-      start_selection = update.tree_data.sel_anchor_offset;
+    AXTree::Selection unignored_selection = tree->GetUnignoredSelection();
+    if (unignored_selection.anchor_object_id == node->id()) {
+      start_selection = unignored_selection.anchor_offset;
       config->should_select_leaf = true;
     }
 
@@ -346,8 +347,8 @@ void WalkAXTreeDepthFirst(const AXNode* node,
           static_cast<int32_t>(GetText(node, config->show_password).length());
     }
 
-    if (update.tree_data.sel_focus_object_id == node->id()) {
-      end_selection = update.tree_data.sel_focus_offset;
+    if (unignored_selection.focus_object_id == node->id()) {
+      end_selection = unignored_selection.focus_offset;
       config->should_select_leaf = false;
     }
     if (end_selection > 0)
@@ -372,6 +373,11 @@ AssistantNode::~AssistantNode() = default;
 
 AssistantTree::AssistantTree() = default;
 AssistantTree::~AssistantTree() = default;
+
+AssistantTree::AssistantTree(const AssistantTree& other) {
+  for (const auto& node : other.nodes)
+    nodes.emplace_back(std::make_unique<AssistantNode>(*node));
+}
 
 std::unique_ptr<AssistantTree> CreateAssistantTree(const AXTreeUpdate& update,
                                                    bool show_password) {
@@ -425,6 +431,7 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
       return kAXSpinnerClassname;
     case ax::mojom::Role::kButton:
     case ax::mojom::Role::kMenuButton:
+    case ax::mojom::Role::kPdfActionableHighlight:
       return kAXButtonClassname;
     case ax::mojom::Role::kCheckBox:
     case ax::mojom::Role::kSwitch:
@@ -458,6 +465,8 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
     case ax::mojom::Role::kMenuItemCheckBox:
     case ax::mojom::Role::kMenuItemRadio:
       return kAXMenuItemClassname;
+    case ax::mojom::Role::kStaticText:
+      return kAXTextViewClassname;
     default:
       return kAXViewClassname;
   }

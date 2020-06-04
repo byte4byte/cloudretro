@@ -20,8 +20,8 @@
 #include "chrome/common/url_constants.h"
 #include "components/strings/grit/components_strings.h"
 #include "extensions/browser/extension_prefs.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
@@ -100,14 +100,13 @@ ExtensionMessageBubbleController::ExtensionMessageBubbleController(
       delegate_(delegate),
       initialized_(false),
       is_highlighting_(false),
-      is_active_bubble_(false),
-      extension_registry_observer_(this),
-      browser_list_observer_(this) {
+      is_active_bubble_(false) {
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_->profile()));
-  browser_list_observer_.Add(BrowserList::GetInstance());
+  BrowserList::AddObserver(this);
 }
 
 ExtensionMessageBubbleController::~ExtensionMessageBubbleController() {
+  BrowserList::RemoveObserver(this);
   if (is_active_bubble_)
     model_->set_has_active_bubble(false);
   if (is_highlighting_)
@@ -256,10 +255,12 @@ void ExtensionMessageBubbleController::OnLinkClicked() {
   // perform our cleanup here before opening the new tab.
   OnClose();
   if (!g_should_ignore_learn_more_for_testing) {
-    browser_->OpenURL(content::OpenURLParams(
-        delegate_->GetLearnMoreUrl(), content::Referrer(),
-        WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
-        false));
+    GURL learn_more_url = delegate_->GetLearnMoreUrl();
+    DCHECK(learn_more_url.is_valid());
+    browser_->OpenURL(
+        content::OpenURLParams(learn_more_url, content::Referrer(),
+                               WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                               ui::PAGE_TRANSITION_LINK, false));
   }
   // Warning: |this| may be deleted here!
 }

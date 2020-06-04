@@ -8,15 +8,15 @@
 #include <memory>
 
 #include "android_webview/browser/aw_render_process_gone_delegate.h"
+#include "android_webview/browser_jni_headers/AwBrowserProcess_jni.h"
 #include "android_webview/common/aw_descriptors.h"
-#include "android_webview/native_jni/AwBrowserProcess_jni.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
-#include "components/crash/content/app/crashpad.h"
 #include "components/crash/content/browser/crash_metrics_reporter_android.h"
+#include "components/crash/core/app/crashpad.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
@@ -128,10 +128,10 @@ void AwBrowserTerminator::OnChildExit(
   std::vector<ScopedJavaGlobalRef<jobject>> java_web_contents;
   GetJavaWebContentsForRenderProcess(rph, &java_web_contents);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI, base::TaskPriority::HIGHEST},
-      base::BindOnce(OnRenderProcessGone, java_web_contents, info.pid,
-                     info.is_crashed()));
+  base::PostTask(FROM_HERE,
+                 {content::BrowserThread::UI, base::TaskPriority::HIGHEST},
+                 base::BindOnce(OnRenderProcessGone, java_web_contents,
+                                info.pid, info.is_crashed()));
 }
 
 }  // namespace android_webview

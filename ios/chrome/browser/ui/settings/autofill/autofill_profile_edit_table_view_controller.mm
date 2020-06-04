@@ -18,6 +18,7 @@
 #import "ios/chrome/browser/ui/autofill/cells/autofill_edit_item.h"
 #include "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/settings/autofill/autofill_constants.h"
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -28,8 +29,6 @@
 #error "This file requires ARC support."
 #endif
 
-NSString* const kAutofillProfileEditTableViewId =
-    @"kAutofillProfileEditTableViewId";
 
 namespace {
 using ::AutofillTypeFromAutofillUIType;
@@ -99,8 +98,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
                                : UITableViewStyleGrouped;
-  self = [super initWithTableViewStyle:style
-                           appBarStyle:ChromeTableViewControllerStyleNoAppBar];
+  self = [super initWithStyle:style];
   if (self) {
     _personalDataManager = dataManager;
     _autofillProfile = profile;
@@ -204,6 +202,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
         autofill::AutofillType(field.autofillType), locale));
     item.autofillUIType = AutofillUITypeFromAutofillType(field.autofillType);
     item.textFieldEnabled = self.tableView.editing;
+    item.hideIcon = !self.tableView.editing;
     item.autoCapitalizationType = field.autoCapitalizationType;
     item.returnKeyType = field.returnKeyType;
     item.keyboardType = field.keyboardType;
@@ -237,10 +236,22 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
   }
 }
 
+#pragma mark - UITableViewDelegate
+
 - (BOOL)tableView:(UITableView*)tableView
     canEditRowAtIndexPath:(NSIndexPath*)indexPath {
-  // Items in this collection view are not deletable, so should not be seen
-  // as editable by the table view.
+  // If we don't allow the edit of the cell, the selection of the cell isn't
+  // forwarded.
+  return YES;
+}
+
+- (UITableViewCellEditingStyle)tableView:(UITableView*)tableView
+           editingStyleForRowAtIndexPath:(NSIndexPath*)indexPath {
+  return UITableViewCellEditingStyleNone;
+}
+
+- (BOOL)tableView:(UITableView*)tableview
+    shouldIndentWhileEditingRowAtIndexPath:(NSIndexPath*)indexPath {
   return NO;
 }
 

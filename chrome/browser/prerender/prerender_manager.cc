@@ -14,12 +14,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/check_op.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
@@ -30,7 +31,6 @@
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/loading_predictor.h"
@@ -52,10 +52,7 @@
 #include "chrome/common/prerender_types.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -81,10 +78,16 @@ namespace prerender {
 namespace {
 
 // Time interval at which periodic cleanups are performed.
-const int kPeriodicCleanupIntervalMs = 1000;
+constexpr base::TimeDelta kPeriodicCleanupInterval =
+    base::TimeDelta::FromMilliseconds(1000);
+
+// Time interval after which OnCloseWebContentsDeleter will schedule a
+// WebContents for deletion.
+constexpr base::TimeDelta kDeleteWithExtremePrejudice =
+    base::TimeDelta::FromSeconds(3);
 
 // Length of prerender history, for display in chrome://net-internals
-const int kHistoryLength = 100;
+constexpr int kHistoryLength = 100;
 
 // Check if |extra_headers| requested via chrome::NavigateParams::extra_headers
 // are the same as what the HTTP server saw when serving prerendered contents.
@@ -111,36 +114,24 @@ class PrerenderManager::OnCloseWebContentsDeleter
  public:
   OnCloseWebContentsDeleter(PrerenderManager* manager,
                             std::unique_ptr<WebContents> tab)
-      : manager_(manager), tab_(std::move(tab)), suppressed_dialog_(false) {
+      : manager_(manager), tab_(std::move(tab)) {
     tab_->SetDelegate(this);
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(
             &OnCloseWebContentsDeleter::ScheduleWebContentsForDeletion,
-            AsWeakPtr(), true),
-        base::TimeDelta::FromSeconds(kDeleteWithExtremePrejudiceSeconds));
+            AsWeakPtr(), /*timeout=*/true),
+        kDeleteWithExtremePrejudice);
   }
 
   void CloseContents(WebContents* source) override {
     DCHECK_EQ(tab_.get(), source);
-    ScheduleWebContentsForDeletion(false);
-  }
-
-  bool ShouldSuppressDialogs(WebContents* source) override {
-    // Use this as a proxy for getting statistics on how often we fail to honor
-    // the beforeunload event.
-    DCHECK_EQ(tab_.get(), source);
-    suppressed_dialog_ = true;
-    return true;
+    ScheduleWebContentsForDeletion(/*timeout=*/false);
   }
 
  private:
-  static const int kDeleteWithExtremePrejudiceSeconds = 3;
-
   void ScheduleWebContentsForDeletion(bool timeout) {
     UMA_HISTOGRAM_BOOLEAN("Prerender.TabContentsDeleterTimeout", timeout);
-    UMA_HISTOGRAM_BOOLEAN("Prerender.TabContentsDeleterSuppressedDialog",
-                          suppressed_dialog_);
     tab_->SetDelegate(nullptr);
     manager_->ScheduleDeleteOldWebContents(std::move(tab_), this);
     // |this| is deleted at this point.
@@ -148,16 +139,44 @@ class PrerenderManager::OnCloseWebContentsDeleter
 
   PrerenderManager* const manager_;
   std::unique_ptr<WebContents> tab_;
-  bool suppressed_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(OnCloseWebContentsDeleter);
 };
 
-PrerenderManagerObserver::~PrerenderManagerObserver() {}
+PrerenderManagerObserver::~PrerenderManagerObserver() = default;
 
 // static
 PrerenderManager::PrerenderManagerMode PrerenderManager::mode_ =
     PRERENDER_MODE_NOSTATE_PREFETCH;
+
+// static
+bool PrerenderManager::MaybeUsePrerenderedPage(
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    bool* loaded) {
+  DCHECK(loaded) << "|loaded| cannot be null";
+  auto* manager = PrerenderManagerFactory::GetForBrowserContext(profile);
+
+  // Getting the load status before MaybeUsePrerenderedPage() b/c it resets.
+  *loaded = false;
+  auto contents = manager->GetAllPrerenderingContents();
+  for (content::WebContents* content : contents) {
+    auto* prerender_contents = manager->GetPrerenderContents(content);
+    if (prerender_contents->prerender_url() == url &&
+        prerender_contents->has_finished_loading()) {
+      *loaded = true;
+      break;
+    }
+  }
+  if (!*loaded)
+    return false;
+
+  PrerenderManager::Params params(
+      /*uses_post=*/false, /*extra_headers=*/std::string(),
+      /*should_replace_current_entry=*/false, web_contents);
+  return manager->MaybeUsePrerenderedPage(url, &params);
+}
 
 struct PrerenderManager::NavigationRecord {
   NavigationRecord(const GURL& url, base::TimeTicks time, Origin origin)
@@ -172,28 +191,17 @@ struct PrerenderManager::NavigationRecord {
 PrerenderManager::PrerenderManager(Profile* profile)
     : profile_(profile),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
-      prerender_history_(new PrerenderHistory(kHistoryLength)),
-      histograms_(new PrerenderHistograms()),
-      profile_network_bytes_(0),
-      last_recorded_profile_network_bytes_(0),
-      tick_clock_(base::DefaultTickClock::GetInstance()),
-      page_load_metric_observer_disabled_(false) {
+      prerender_history_(std::make_unique<PrerenderHistory>(kHistoryLength)),
+      histograms_(std::make_unique<PrerenderHistograms>()),
+      tick_clock_(base::DefaultTickClock::GetInstance()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   last_prerender_start_time_ =
       GetCurrentTimeTicks() -
       base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
-
-  notification_registrar_.Add(
-      this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-      content::Source<Profile>(profile_));
-
-  MediaCaptureDevicesDispatcher::GetInstance()->AddObserver(this);
 }
 
 PrerenderManager::~PrerenderManager() {
-  MediaCaptureDevicesDispatcher::GetInstance()->RemoveObserver(this);
-
   // The earlier call to KeyedService::Shutdown() should have
   // emptied these vectors already.
   DCHECK(active_prerenders_.empty());
@@ -205,7 +213,7 @@ PrerenderManager::~PrerenderManager() {
 }
 
 void PrerenderManager::Shutdown() {
-  DestroyAllContents(FINAL_STATUS_MANAGER_SHUTDOWN);
+  DestroyAllContents(FINAL_STATUS_PROFILE_DESTROYED);
   on_close_web_contents_deleters_.clear();
   profile_ = nullptr;
 
@@ -240,9 +248,8 @@ PrerenderManager::AddPrerenderFromLinkRelPrerender(
       origin = ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN;
     }
     // TODO(ajwong): This does not correctly handle storage for isolated apps.
-    session_storage_namespace =
-        source_web_contents->GetController()
-            .GetDefaultSessionStorageNamespace();
+    session_storage_namespace = source_web_contents->GetController()
+                                    .GetDefaultSessionStorageNamespace();
   }
   return AddPrerenderWithPreconnectFallback(origin, url, referrer,
                                             initiator_origin, gfx::Rect(size),
@@ -309,7 +316,7 @@ void PrerenderManager::CancelAllPrerenders() {
 
 PrerenderManager::Params::Params(NavigateParams* params,
                                  content::WebContents* contents_being_navigated)
-    : uses_post(params->uses_post),
+    : uses_post(!!params->post_data),
       extra_headers(params->extra_headers),
       should_replace_current_entry(params->should_replace_current_entry),
       contents_being_navigated(contents_being_navigated) {}
@@ -346,8 +353,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(const GURL& url,
   // namespace.
   // TODO(ajwong): This doesn't handle isolated apps correctly.
   PrerenderData* prerender_data = FindPrerenderData(
-      url,
-      web_contents->GetController().GetDefaultSessionStorageNamespace());
+      url, web_contents->GetController().GetDefaultSessionStorageNamespace());
   if (!prerender_data)
     return false;
   DCHECK(prerender_data->contents());
@@ -385,55 +391,12 @@ WebContents* PrerenderManager::SwapInternal(const GURL& url,
     return nullptr;
   }
 
-  if (WebContents* new_web_contents =
-      prerender_data->contents()->prerender_contents()) {
-    if (web_contents == new_web_contents)
-      return nullptr;  // Do not swap in to ourself.
-
-    // We cannot swap in if there is no last committed entry, because we would
-    // show a blank page under an existing entry from the current tab.  Even if
-    // there is a pending entry, it may not commit.
-    // TODO(creis): If there is a pending navigation and no last committed
-    // entry, we might be able to transfer the network request instead.
-    if (!new_web_contents->GetController().CanPruneAllButLastCommitted()) {
-      // Abort this prerender so it is not used later. http://crbug.com/292121
-      prerender_data->contents()->Destroy(FINAL_STATUS_NAVIGATION_UNCOMMITTED);
-      return nullptr;
-    }
-  }
-
-  // Do not swap if the target WebContents is not the only WebContents in its
-  // current BrowsingInstance.
-  if (web_contents->GetSiteInstance()->GetRelatedActiveContentsCount() != 1u) {
-    DCHECK_GT(
-        web_contents->GetSiteInstance()->GetRelatedActiveContentsCount(), 1u);
-    prerender_data->contents()->Destroy(
-        FINAL_STATUS_NON_EMPTY_BROWSING_INSTANCE);
-    return nullptr;
-  }
-
-  // Do not use the prerendered version if there is an opener object.
-  if (web_contents->HasOpener()) {
-    prerender_data->contents()->Destroy(FINAL_STATUS_WINDOW_OPENER);
-    return nullptr;
-  }
-
-  // Do not swap in the prerender if the current WebContents is being captured.
-  if (web_contents->IsBeingCaptured()) {
-    prerender_data->contents()->Destroy(FINAL_STATUS_PAGE_BEING_CAPTURED);
-    return nullptr;
-  }
+  WebContents* prerender_web_contents =
+      prerender_data->contents()->prerender_contents();
+  if (prerender_web_contents && web_contents == prerender_web_contents)
+    return nullptr;  // Do not swap in to ourself.
 
   DCHECK(prerender_data->contents()->prerendering_has_started());
-
-  // Don't use prerendered pages if debugger is attached to the tab.
-  // See http://crbug.com/98541
-  if (content::DevToolsAgentHost::IsDebuggerAttached(web_contents)) {
-    histograms_->RecordFinalStatus(prerender_data->contents()->origin(),
-                                   FINAL_STATUS_DEVTOOLS_ATTACHED);
-    prerender_data->contents()->Destroy(FINAL_STATUS_DEVTOOLS_ATTACHED);
-    return nullptr;
-  }
 
   // At this point, we've determined that we will use the prerender.
   content::RenderProcessHost* process_host =
@@ -461,8 +424,8 @@ WebContents* PrerenderManager::SwapInternal(const GURL& url,
       &web_contents->GetController(), should_replace_current_entry);
   WebContents* raw_new_web_contents = new_web_contents.get();
   std::unique_ptr<content::WebContents> old_web_contents =
-      web_contents->GetDelegate()->SwapWebContents(
-          web_contents, std::move(new_web_contents), true,
+      core_tab_helper->SwapWebContents(
+          std::move(new_web_contents), true,
           prerender_contents->has_finished_loading());
   prerender_contents->CommitHistory(raw_new_web_contents);
 
@@ -474,7 +437,7 @@ WebContents* PrerenderManager::SwapInternal(const GURL& url,
   DCHECK(prerender_tab_helper);
   prerender_tab_helper->PrerenderSwappedIn();
 
-  if (old_web_contents->NeedToFireBeforeUnload()) {
+  if (old_web_contents->NeedToFireBeforeUnloadOrUnload()) {
     // Schedule the delete to occur after the tab has run its unload handlers.
     // TODO(davidben): Honor the beforeunload event. http://crbug.com/304932
     WebContents* old_web_contents_ptr = old_web_contents.get();
@@ -540,8 +503,8 @@ bool PrerenderManager::IsWebContentsPrerendering(
 bool PrerenderManager::HasPrerenderedUrl(
     GURL url,
     content::WebContents* web_contents) const {
-  content::SessionStorageNamespace* session_storage_namespace = web_contents->
-      GetController().GetDefaultSessionStorageNamespace();
+  content::SessionStorageNamespace* session_storage_namespace =
+      web_contents->GetController().GetDefaultSessionStorageNamespace();
 
   for (const auto& prerender_data : active_prerenders_) {
     PrerenderContents* prerender_contents = prerender_data->contents();
@@ -560,8 +523,9 @@ bool PrerenderManager::HasPrerenderedAndFinishedLoadingUrl(
   for (const auto& prerender_data : active_prerenders_) {
     PrerenderContents* prerender_contents = prerender_data->contents();
     if (prerender_contents->Matches(url, session_storage_namespace) &&
-        prerender_contents->has_finished_loading())
+        prerender_contents->has_finished_loading()) {
       return true;
+    }
   }
   return false;
 }
@@ -624,6 +588,21 @@ std::vector<WebContents*> PrerenderManager::GetAllPrerenderingContents() const {
   return result;
 }
 
+std::vector<WebContents*>
+PrerenderManager::GetAllNoStatePrefetchingContentsForTesting() const {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  std::vector<WebContents*> result;
+
+  for (const auto& prerender : active_prerenders_) {
+    WebContents* contents = prerender->contents()->prerender_contents();
+    if (contents && prerender->contents()->prerender_mode() == PREFETCH_ONLY) {
+      result.push_back(contents);
+    }
+  }
+
+  return result;
+}
+
 bool PrerenderManager::HasRecentlyBeenNavigatedTo(Origin origin,
                                                   const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -644,8 +623,8 @@ std::unique_ptr<base::DictionaryValue> PrerenderManager::CopyAsValue() const {
   auto dict_value = std::make_unique<base::DictionaryValue>();
   dict_value->Set("history", prerender_history_->CopyEntriesAsValue());
   dict_value->Set("active", GetActivePrerendersAsValue());
-  dict_value->SetBoolean("enabled",
-      GetPredictionStatus() == NetworkPredictionStatus::ENABLED);
+  dict_value->SetBoolean(
+      "enabled", GetPredictionStatus() == NetworkPredictionStatus::ENABLED);
   std::string disabled_note;
   if (GetPredictionStatus() == NetworkPredictionStatus::DISABLED_ALWAYS)
     disabled_note = "Disabled by user setting";
@@ -694,13 +673,11 @@ PrerenderManager::PrerenderData::PrerenderData(
     base::TimeTicks expiry_time)
     : manager_(manager),
       contents_(std::move(contents)),
-      handle_count_(0),
       expiry_time_(expiry_time) {
   DCHECK(contents_);
 }
 
-PrerenderManager::PrerenderData::~PrerenderData() {
-}
+PrerenderManager::PrerenderData::~PrerenderData() = default;
 
 void PrerenderManager::PrerenderData::OnHandleCreated(PrerenderHandle* handle) {
   DCHECK(contents_);
@@ -765,13 +742,8 @@ void PrerenderManager::MaybePreconnect(Origin origin,
     return;
   }
 
-  // Currently, the fallback is only enabled for prerenders initiated by
-  // omnibox.
-  if (origin != ORIGIN_OMNIBOX)
-    return;
-
-  auto* loading_predictor = predictors::LoadingPredictorFactory::GetForProfile(
-      Profile::FromBrowserContext(profile_));
+  auto* loading_predictor =
+      predictors::LoadingPredictorFactory::GetForProfile(profile_);
   if (loading_predictor) {
     loading_predictor->PrepareForPageLoad(
         url_arg, predictors::HintOrigin::OMNIBOX_PRERENDER_FALLBACK, true);
@@ -852,8 +824,8 @@ PrerenderManager::AddPrerenderWithPreconnectFallback(
   // TODO(ppi): Check whether there are usually enough render processes
   // available on Android. If not, kill an existing renderers so that we can
   // create a new one.
-  if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost(
-          profile_, url) &&
+  if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost(profile_,
+                                                                    url) &&
       !content::RenderProcessHost::run_renderer_in_process()) {
     SkipPrerenderContentsAndMaybePreconnect(url, origin,
                                             FINAL_STATUS_TOO_MANY_PROCESSES);
@@ -880,15 +852,26 @@ PrerenderManager::AddPrerenderWithPreconnectFallback(
     return nullptr;
   }
 
-  // If this is GWS, and we are in the holdback, fall back to preconnect
-  // instead of prefetch. Record the status as holdback, so we can analyze via
-  // UKM.
+  // If this is GWS and we are in the holdback, skip the prefetch. Record the
+  // status as holdback, so we can analyze via UKM.
   if (origin == ORIGIN_GWS_PRERENDER &&
       base::FeatureList::IsEnabled(kGWSPrefetchHoldback)) {
     // Set the holdback status on the prefetch entry.
     SetPrefetchFinalStatusForUrl(url, FINAL_STATUS_GWS_HOLDBACK);
     SkipPrerenderContentsAndMaybePreconnect(url, origin,
                                             FINAL_STATUS_GWS_HOLDBACK);
+    return nullptr;
+  }
+
+  // If this is Navigation predictor and we are in the holdback, skip the
+  // prefetch. Record the status as holdback, so we can analyze via UKM.
+  if (origin == ORIGIN_NAVIGATION_PREDICTOR &&
+      base::FeatureList::IsEnabled(kNavigationPredictorPrefetchHoldback)) {
+    // Set the holdback status on the prefetch entry.
+    SetPrefetchFinalStatusForUrl(url,
+                                 FINAL_STATUS_NAVIGATION_PREDICTOR_HOLDBACK);
+    SkipPrerenderContentsAndMaybePreconnect(
+        url, origin, FINAL_STATUS_NAVIGATION_PREDICTOR_HOLDBACK);
     return nullptr;
   }
 
@@ -931,10 +914,9 @@ void PrerenderManager::StartSchedulingPeriodicCleanups() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (repeating_timer_.IsRunning())
     return;
-  repeating_timer_.Start(FROM_HERE,
-      base::TimeDelta::FromMilliseconds(kPeriodicCleanupIntervalMs),
-      this,
-      &PrerenderManager::PeriodicCleanup);
+
+  repeating_timer_.Start(FROM_HERE, kPeriodicCleanupInterval, this,
+                         &PrerenderManager::PeriodicCleanup);
 }
 
 void PrerenderManager::StopSchedulingPeriodicCleanups() {
@@ -958,10 +940,6 @@ void PrerenderManager::PeriodicCleanup() {
   for (auto* contents : prerender_contents)
     contents->DestroyWhenUsingTooManyResources();
 
-  // Measure how long the resource checks took. http://crbug.com/305419.
-  UMA_HISTOGRAM_TIMES("Prerender.PeriodicCleanupResourceCheckTime",
-                      resource_timer.Elapsed());
-
   base::ElapsedTimer cleanup_timer;
 
   // Perform deferred cleanup work.
@@ -973,10 +951,6 @@ void PrerenderManager::PeriodicCleanup() {
   DeleteToDeletePrerenders();
 
   CleanUpOldNavigations(&prefetches_, base::TimeDelta::FromMinutes(30));
-
-  // Measure how long a the various cleanup tasks took. http://crbug.com/305419.
-  UMA_HISTOGRAM_TIMES("Prerender.PeriodicCleanupDeleteContentsTime",
-                      cleanup_timer.Elapsed());
 }
 
 void PrerenderManager::PostCleanupTask() {
@@ -1078,12 +1052,16 @@ PrerenderManager::FindIteratorForPrerenderContents(
 
 bool PrerenderManager::DoesRateLimitAllowPrerender(Origin origin) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // Allow navigation predictor to manage its own rate limit.
+  if (origin == ORIGIN_NAVIGATION_PREDICTOR)
+    return true;
   base::TimeDelta elapsed_time =
       GetCurrentTimeTicks() - last_prerender_start_time_;
   if (!config_.rate_limit_enabled)
     return true;
   return elapsed_time >=
-      base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
+         base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
 }
 
 void PrerenderManager::DeleteOldWebContents() {
@@ -1179,8 +1157,7 @@ void PrerenderManager::ScheduleDeleteOldWebContents(
 
 void PrerenderManager::AddToHistory(PrerenderContents* contents) {
   PrerenderHistory::Entry entry(contents->prerender_url(),
-                                contents->final_status(),
-                                contents->origin(),
+                                contents->final_status(), contents->origin(),
                                 base::Time::Now());
   prerender_history_->AddEntry(entry);
 }
@@ -1216,38 +1193,13 @@ void PrerenderManager::SkipPrerenderContentsAndMaybePreconnect(
   if (final_status == FINAL_STATUS_LOW_END_DEVICE ||
       final_status == FINAL_STATUS_CELLULAR_NETWORK ||
       final_status == FINAL_STATUS_DUPLICATE ||
-      final_status == FINAL_STATUS_TOO_MANY_PROCESSES ||
-      final_status == FINAL_STATUS_GWS_HOLDBACK) {
+      final_status == FINAL_STATUS_TOO_MANY_PROCESSES) {
     MaybePreconnect(origin, url);
   }
 
   static_assert(
-      FINAL_STATUS_MAX == FINAL_STATUS_UNKNOWN + 1,
+      FINAL_STATUS_MAX == FINAL_STATUS_NAVIGATION_PREDICTOR_HOLDBACK + 1,
       "Consider whether a failed prerender should fallback to preconnect");
-}
-
-void PrerenderManager::Observe(int type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
-
-  DestroyAllContents(FINAL_STATUS_PROFILE_DESTROYED);
-  on_close_web_contents_deleters_.clear();
-}
-
-void PrerenderManager::OnCreatingAudioStream(int render_process_id,
-                                             int render_frame_id) {
-  content::RenderFrameHost* render_frame_host =
-      content::RenderFrameHost::FromID(render_process_id, render_frame_id);
-  WebContents* tab = WebContents::FromRenderFrameHost(render_frame_host);
-  if (!tab)
-    return;
-
-  PrerenderContents* prerender_contents = GetPrerenderContents(tab);
-  if (!prerender_contents)
-    return;
-
-  prerender_contents->Destroy(FINAL_STATUS_CREATING_AUDIO_STREAM);
 }
 
 void PrerenderManager::RecordNetworkBytesConsumed(Origin origin,
@@ -1302,9 +1254,8 @@ void PrerenderManager::AddProfileNetworkBytesIfEnabled(int64_t bytes) {
 void PrerenderManager::AddPrerenderProcessHost(
     content::RenderProcessHost* process_host) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(prerender_process_hosts_.find(process_host) ==
-         prerender_process_hosts_.end());
-  prerender_process_hosts_.insert(process_host);
+  bool inserted = prerender_process_hosts_.insert(process_host).second;
+  DCHECK(inserted);
   process_host->AddObserver(this);
 }
 
@@ -1313,8 +1264,7 @@ bool PrerenderManager::MayReuseProcessHost(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Isolate prerender processes to make the resource monitoring check more
   // accurate.
-  return (prerender_process_hosts_.find(process_host) ==
-          prerender_process_hosts_.end());
+  return !base::Contains(prerender_process_hosts_, process_host);
 }
 
 void PrerenderManager::RenderProcessHostDestroyed(

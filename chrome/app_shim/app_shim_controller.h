@@ -5,17 +5,27 @@
 #ifndef CHROME_APP_SHIM_APP_SHIM_CONTROLLER_H_
 #define CHROME_APP_SHIM_APP_SHIM_CONTROLLER_H_
 
+#include <vector>
+
 #import <AppKit/AppKit.h>
 
 #include "base/files/file_path.h"
 #include "base/mac/scoped_nsobject.h"
 #include "chrome/common/mac/app_shim.mojom.h"
-#include "chrome/common/mac/app_shim_param_traits.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/platform/named_platform_channel.h"
 #include "mojo/public/cpp/system/isolated_connection.h"
+#include "url/gurl.h"
+
+namespace apps {
+class MachBootstrapAcceptorTest;
+}
 
 @class AppShimDelegate;
+@class ProfileMenuTarget;
 
 // The AppShimController is responsible for launching and maintaining the
 // connection with the main Chrome process, and generally controls the lifetime
@@ -30,8 +40,9 @@ class AppShimController : public chrome::mojom::AppShim {
     base::FilePath user_data_dir;
     // The relative path of the profile.
     base::FilePath profile_dir;
-    std::string app_mode_id;
-    base::string16 app_mode_name;
+    std::string app_id;
+    base::string16 app_name;
+    GURL app_url;
   };
 
   explicit AppShimController(const Params& params);
@@ -39,71 +50,123 @@ class AppShimController : public chrome::mojom::AppShim {
 
   chrome::mojom::AppShimHost* host() const { return host_.get(); }
 
-  // Called when the app is activated, e.g. by clicking on it in the dock, by
-  // dropping a file on the dock icon, or by Cmd+Tabbing to it.
-  // Returns whether the message was sent.
-  bool SendFocusApp(apps::AppShimFocusType focus_type,
-                    const std::vector<base::FilePath>& files);
+  // Called by AppShimDelegate in response to receiving the notification
+  // -[NSApplicationDelegate applicationDidFinishLaunching:]. This kicks off
+  // the initialization process (connecting to Chrome, etc).
+  void OnAppFinishedLaunching();
+
+  // Called by AppShimDelegate in response a file being opened. If this occurs
+  // before OnDidFinishLaunching, then the argument is the files that triggered
+  // the launch of the app.
+  void OpenFiles(const std::vector<base::FilePath>& files);
+
+  // Called when a profile is selected from the profiles NSMenu.
+  void ProfileMenuItemSelected(uint32_t index);
 
  private:
   friend class TestShimClient;
+  friend class apps::MachBootstrapAcceptorTest;
 
-  // Create a channel from the Mojo |endpoint| and send a LaunchApp message.
-  void CreateChannelAndSendLaunchApp(mojo::PlatformChannelEndpoint endpoint);
+  // The state of initialization.
+  enum class InitState {
+    // Waiting for OnAppFinishedLaunching to be called.
+    kWaitingForAppToFinishLaunch,
+    // Waiting for PollForChromeReady to connect to the browser process.
+    kWaitingForChromeReady,
+    // Has sent OnShimConnected to the browser process, waiting for the
+    // response.
+    kHasSentOnShimConnected,
+    // Has received the OnShimConnected response from the browser, initializaton
+    // is now complete.
+    kHasReceivedOnShimConnectedResponse,
+  };
+
+  // Init step 1 after OnAppFinishedLaunching. Find a running instance of Chrome
+  // to connect to, or launch Chrome if none is found.
+  void FindOrLaunchChrome();
+
+  // Init step 2: Poll for the mach server exposed by Chrome's AppShimListener
+  // to be initialized. Once it has, proceed to SendBootstrapOnShimConnected.
+  // If |time_until_timeout| runs out, quit the app shim.
+  void PollForChromeReady(const base::TimeDelta& time_until_timeout);
+
+  // Init step 3: Reinterpret |endpoint| as a mojom::AppShimHostBootstrap, and
+  // send the OnShimConnected message.
+  void SendBootstrapOnShimConnected(mojo::PlatformChannelEndpoint endpoint);
+
+  // Init step 4 (the last): The browser response to OnShimConnected. On
+  // success, this will initialize |shim_receiver_|, through which |this| will
+  // be controlled by the browser. On failure, the app will quit.
+  void OnShimConnectedResponse(
+      chrome::mojom::AppShimLaunchResult result,
+      mojo::PendingReceiver<chrome::mojom::AppShim> app_shim_receiver);
 
   // Builds main menu bar items.
   void SetUpMenu();
   void ChannelError(uint32_t custom_reason, const std::string& description);
   void BootstrapChannelError(uint32_t custom_reason,
                              const std::string& description);
-  void LaunchAppDone(apps::AppShimLaunchResult result,
-                     chrome::mojom::AppShimRequest app_shim_request);
 
   // chrome::mojom::AppShim implementation.
   void CreateRemoteCocoaApplication(
-      remote_cocoa::mojom::ApplicationAssociatedRequest request) override;
+      mojo::PendingAssociatedReceiver<remote_cocoa::mojom::Application>
+          receiver) override;
   void CreateCommandDispatcherForWidget(uint64_t widget_id) override;
-  void Hide() override;
   void SetBadgeLabel(const std::string& badge_label) override;
-  void UnhideWithoutActivation() override;
-  void SetUserAttention(apps::AppShimAttentionType attention_type) override;
+  void SetUserAttention(
+      chrome::mojom::AppShimAttentionType attention_type) override;
+  void UpdateProfileMenu(std::vector<chrome::mojom::ProfileMenuItemPtr>
+                             profile_menu_items) override;
 
-  // Terminates the app shim process.
-  void Close();
-
-  // Returns the connection to the AppShimHostManager in the browser. Returns
-  // an invalid endpoint if it is not available yet.
-  mojo::PlatformChannelEndpoint GetBrowserEndpoint();
-
-  // Sets up a connection to the AppShimHostManager at the given Mach
-  // endpoint name.
+  // Helper function to set up a connection to the AppShimListener at the given
+  // Mach endpoint name.
   static mojo::PlatformChannelEndpoint ConnectToBrowser(
       const mojo::NamedPlatformChannel::ServerName& server_name);
 
-  // Connects to Chrome and sends a LaunchApp message.
-  void InitBootstrapPipe(mojo::PlatformChannelEndpoint endpoint);
-
-  // Find a running instance of Chrome and set |chrome_running_app_| to it. If
-  // none exists, launch Chrome, and set |chrome_running_app_|.
-  void FindOrLaunchChrome();
-
-  // Check to see if Chrome's AppShimHostManager has been initialized. If it
-  // has, then connect.
-  void PollForChromeReady(const base::TimeDelta& time_until_timeout);
+  // Helper function to search for the Chrome instance holding
+  // chrome::kSingletonLockFilename in the specified |user_data_dir|.
+  static base::scoped_nsobject<NSRunningApplication>
+  FindChromeFromSingletonLock(const base::FilePath& user_data_dir);
 
   const Params params_;
-  base::scoped_nsobject<NSRunningApplication> chrome_running_app_;
+
+  // Populated by OpenFiles if it was called before OnAppFinishedLaunching
+  // was called.
+  std::vector<base::FilePath> launch_files_;
+
+  // This is the Chrome process that this app is committed to connecting to.
+  // The app will quit if this process is terminated before the mojo connection
+  // is established.
+  // This process is determined by either:
+  // - The pid specified to the app's command line (if it exists).
+  // - The pid specified in the chrome::kSingletonLockFilename file.
+  base::scoped_nsobject<NSRunningApplication> chrome_to_connect_to_;
+
+  // The Chrome process that was launched by this app in FindOrLaunchChrome.
+  // Note that the app is not compelled to connect to this process (consider the
+  // case where multiple apps launch at the same time, and all launch their own
+  // Chrome -- only one will grab the chrome::kSingletonLockFilename, and all
+  // apps should connect to that).
+  base::scoped_nsobject<NSRunningApplication> chrome_launched_by_app_;
 
   mojo::IsolatedConnection bootstrap_mojo_connection_;
-  chrome::mojom::AppShimHostBootstrapPtr host_bootstrap_;
+  mojo::Remote<chrome::mojom::AppShimHostBootstrap> host_bootstrap_;
 
-  mojo::Binding<chrome::mojom::AppShim> shim_binding_;
-  chrome::mojom::AppShimHostPtr host_;
-  chrome::mojom::AppShimHostRequest host_request_;
+  mojo::Receiver<chrome::mojom::AppShim> shim_receiver_{this};
+  mojo::Remote<chrome::mojom::AppShimHost> host_;
+  mojo::PendingReceiver<chrome::mojom::AppShimHost> host_receiver_;
 
   base::scoped_nsobject<AppShimDelegate> delegate_;
-  bool launch_app_done_;
-  NSInteger attention_request_id_;
+
+  InitState init_state_ = InitState::kWaitingForAppToFinishLaunch;
+
+  // The target for NSMenuItems in the profile menu.
+  base::scoped_nsobject<ProfileMenuTarget> profile_menu_target_;
+
+  // The items in the profile menu.
+  std::vector<chrome::mojom::ProfileMenuItemPtr> profile_menu_items_;
+
+  NSInteger attention_request_id_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(AppShimController);
 };

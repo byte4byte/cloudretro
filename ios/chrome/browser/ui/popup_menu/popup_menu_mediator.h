@@ -17,7 +17,9 @@ namespace feature_engagement {
 class Tracker;
 }
 @protocol BrowserCommands;
+class OverlayPresenter;
 @protocol PopupMenuConsumer;
+class PrefService;
 class ReadingListModel;
 class TemplateURLService;
 class WebStateList;
@@ -39,6 +41,10 @@ class WebStateList;
 // The WebStateList that this mediator listens for any changes on the current
 // WebState.
 @property(nonatomic, assign) WebStateList* webStateList;
+// The overlay presenter for OverlayModality::kWebContentArea.  This mediator
+// listens for overlay presentation events to determine whether the "Read Later"
+// button should be enabled.
+@property(nonatomic, assign) OverlayPresenter* webContentAreaOverlayPresenter;
 // The consumer to be configured with this mediator.
 @property(nonatomic, strong) id<PopupMenuConsumer> popupMenu;
 // Dispatcher.
@@ -49,6 +55,8 @@ class WebStateList;
 @property(nonatomic, assign) feature_engagement::Tracker* engagementTracker;
 // The bookmarks model to know if the page is bookmarked.
 @property(nonatomic, assign) bookmarks::BookmarkModel* bookmarkModel;
+// Pref service to retrieve preference values.
+@property(nonatomic, assign) PrefService* prefService;
 // The template url service to use for checking whether search by image is
 // available.
 @property(nonatomic, assign) TemplateURLService* templateURLService;

@@ -23,8 +23,9 @@ import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.browser.ActivityTabProvider.ActivityTabTabObserver;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.SceneChangeObserver;
+import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabSelectionType;
+import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -101,7 +102,7 @@ public class ActivityTabProviderTest {
     @Test
     @SmallTest
     @Feature({"ActivityTabObserver"})
-    public void testTriggerOnAddObserver() throws InterruptedException, TimeoutException {
+    public void testTriggerOnAddObserver() throws TimeoutException {
         CallbackHelper helper = new CallbackHelper();
         mProvider.addObserverAndTrigger((tab, hint) -> helper.notifyCalled());
         helper.waitForCallback(0);
@@ -117,7 +118,7 @@ public class ActivityTabProviderTest {
     @SmallTest
     @Feature({"ActivityTabObserver"})
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
-    public void testTriggerWithTabSwitcher() throws InterruptedException, TimeoutException {
+    public void testTriggerWithTabSwitcher() throws TimeoutException {
         assertEquals("The activity tab should be the model's selected tab.", getModelSelectedTab(),
                 mActivityTab);
 
@@ -142,7 +143,7 @@ public class ActivityTabProviderTest {
     @LargeTest
     @Feature({"ActivityTabObserver"})
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
-    public void testTriggerHintWithTabSwitcher() throws InterruptedException, TimeoutException {
+    public void testTriggerHintWithTabSwitcher() throws TimeoutException {
         assertEquals("The hint should not yet have triggered.", 0,
                 mActivityTabChangedHintHelper.getCallCount());
 
@@ -165,7 +166,7 @@ public class ActivityTabProviderTest {
     @Test
     @SmallTest
     @Feature({"ActivityTabObserver"})
-    public void testTriggerWithTabSelection() throws InterruptedException, TimeoutException {
+    public void testTriggerWithTabSelection() throws TimeoutException {
         Tab startingTab = getModelSelectedTab();
 
         ChromeTabUtils.fullyLoadUrlInNewTab(InstrumentationRegistry.getInstrumentation(), mActivity,
@@ -192,7 +193,7 @@ public class ActivityTabProviderTest {
     @Test
     @SmallTest
     @Feature({"ActivityTabObserver"})
-    public void testTriggerOnLastTabClosed() throws InterruptedException, TimeoutException {
+    public void testTriggerOnLastTabClosed() throws TimeoutException {
         int callCount = mActivityTabChangedHelper.getCallCount();
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { mActivity.getTabModelSelector().closeTab(getModelSelectedTab()); });
@@ -210,7 +211,7 @@ public class ActivityTabProviderTest {
     @Test
     @SmallTest
     @Feature({"ActivityTabObserver"})
-    public void testCorrectTabAfterTabClosed() throws InterruptedException, TimeoutException {
+    public void testCorrectTabAfterTabClosed() {
         Tab startingTab = getModelSelectedTab();
 
         ChromeTabUtils.fullyLoadUrlInNewTab(InstrumentationRegistry.getInstrumentation(), mActivity,
@@ -233,7 +234,7 @@ public class ActivityTabProviderTest {
     @Test
     @SmallTest
     @Feature({"ActivityTabObserver"})
-    public void testActivityTabTabObserver() throws InterruptedException, TimeoutException {
+    public void testActivityTabTabObserver() {
         Tab startingTab = getModelSelectedTab();
 
         TestActivityTabTabObserver tabObserver = new TestActivityTabTabObserver(mProvider);
@@ -255,8 +256,7 @@ public class ActivityTabProviderTest {
      * Enter or exit the tab switcher with animations and wait for the scene to change.
      * @param inSwitcher Whether to enter or exit the tab switcher.
      */
-    private void setTabSwitcherModeAndWait(boolean inSwitcher)
-            throws InterruptedException, TimeoutException {
+    private void setTabSwitcherModeAndWait(boolean inSwitcher) throws TimeoutException {
         final CallbackHelper sceneChangeHelper = new CallbackHelper();
         SceneChangeObserver observer = new SceneChangeObserver() {
             @Override

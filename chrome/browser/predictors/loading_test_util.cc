@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 
-#include "content/public/browser/resource_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
@@ -31,11 +30,17 @@ MockResourcePrefetchPredictor::MockResourcePrefetchPredictor(
 MockResourcePrefetchPredictor::~MockResourcePrefetchPredictor() = default;
 
 void InitializeRedirectStat(RedirectStat* redirect,
-                            const std::string& url,
+                            const GURL& url,
                             int number_of_hits,
                             int number_of_misses,
-                            int consecutive_misses) {
-  redirect->set_url(url);
+                            int consecutive_misses,
+                            bool include_scheme,
+                            bool include_port) {
+  redirect->set_url(url.host());
+  if (include_scheme)
+    redirect->set_url_scheme(url.scheme());
+  if (include_port)
+    redirect->set_url_port(url.EffectiveIntPort());
   redirect->set_number_of_hits(number_of_hits);
   redirect->set_number_of_misses(number_of_misses);
   redirect->set_consecutive_misses(consecutive_misses);
@@ -67,6 +72,9 @@ RedirectData CreateRedirectData(const std::string& primary_key,
 }
 
 OriginData CreateOriginData(const std::string& host, uint64_t last_visit_time) {
+  // |host| should not contain the scheme.
+  EXPECT_EQ(std::string::npos, host.find("https://"));
+  EXPECT_EQ(std::string::npos, host.find("http://"));
   OriginData data;
   data.set_host(host);
   data.set_last_visit_time(last_visit_time);
@@ -74,9 +82,11 @@ OriginData CreateOriginData(const std::string& host, uint64_t last_visit_time) {
 }
 
 NavigationID CreateNavigationID(SessionID tab_id,
-                                const std::string& main_frame_url) {
+                                const std::string& main_frame_url,
+                                ukm::SourceId ukm_source_id) {
   NavigationID navigation_id;
   navigation_id.tab_id = tab_id;
+  navigation_id.ukm_source_id = ukm_source_id;
   navigation_id.main_frame_url = GURL(main_frame_url);
   navigation_id.creation_time = base::TimeTicks::Now();
   return navigation_id;
@@ -85,55 +95,57 @@ NavigationID CreateNavigationID(SessionID tab_id,
 PageRequestSummary CreatePageRequestSummary(
     const std::string& main_frame_url,
     const std::string& initial_url,
-    const std::vector<content::mojom::ResourceLoadInfoPtr>&
-        resource_load_infos) {
-  GURL main_frame_gurl(main_frame_url);
-  PageRequestSummary summary(main_frame_gurl);
+    const std::vector<blink::mojom::ResourceLoadInfoPtr>& resource_load_infos) {
+  NavigationID navigation_id;
+  navigation_id.main_frame_url = GURL(main_frame_url);
+  PageRequestSummary summary(navigation_id);
   summary.initial_url = GURL(initial_url);
   for (const auto& resource_load_info : resource_load_infos)
-    summary.UpdateOrAddToOrigins(*resource_load_info);
+    summary.UpdateOrAddResource(*resource_load_info);
   return summary;
 }
 
-content::mojom::ResourceLoadInfoPtr CreateResourceLoadInfo(
+blink::mojom::ResourceLoadInfoPtr CreateResourceLoadInfo(
     const std::string& url,
-    content::ResourceType resource_type,
+    network::mojom::RequestDestination request_destination,
     bool always_access_network) {
-  auto resource_load_info = content::mojom::ResourceLoadInfo::New();
-  resource_load_info->url = GURL(url);
+  auto resource_load_info = blink::mojom::ResourceLoadInfo::New();
+  resource_load_info->final_url = GURL(url);
   resource_load_info->original_url = GURL(url);
   resource_load_info->method = "GET";
-  resource_load_info->resource_type = resource_type;
-  resource_load_info->network_info = content::mojom::CommonNetworkInfo::New(
+  resource_load_info->request_destination = request_destination;
+  resource_load_info->network_info = blink::mojom::CommonNetworkInfo::New(
       true, always_access_network, base::nullopt);
   resource_load_info->request_priority = net::HIGHEST;
   return resource_load_info;
 }
 
-content::mojom::ResourceLoadInfoPtr CreateLowPriorityResourceLoadInfo(
+blink::mojom::ResourceLoadInfoPtr CreateLowPriorityResourceLoadInfo(
     const std::string& url,
-    content::ResourceType resource_type) {
-  auto resource_load_info = CreateResourceLoadInfo(url, resource_type, false);
+    network::mojom::RequestDestination request_destination) {
+  auto resource_load_info =
+      CreateResourceLoadInfo(url, request_destination, false);
   resource_load_info->request_priority = net::LOWEST;
   return resource_load_info;
 }
 
-content::mojom::ResourceLoadInfoPtr CreateResourceLoadInfoWithRedirects(
+blink::mojom::ResourceLoadInfoPtr CreateResourceLoadInfoWithRedirects(
     const std::vector<std::string>& redirect_chain,
-    content::ResourceType resource_type) {
-  auto resource_load_info = content::mojom::ResourceLoadInfo::New();
-  resource_load_info->url = GURL(redirect_chain.back());
+    network::mojom::RequestDestination request_destination) {
+  auto resource_load_info = blink::mojom::ResourceLoadInfo::New();
+  resource_load_info->final_url = GURL(redirect_chain.back());
   resource_load_info->original_url = GURL(redirect_chain.front());
   resource_load_info->method = "GET";
-  resource_load_info->resource_type = resource_type;
+  resource_load_info->request_destination = request_destination;
   resource_load_info->request_priority = net::HIGHEST;
   auto common_network_info =
-      content::mojom::CommonNetworkInfo::New(true, false, base::nullopt);
+      blink::mojom::CommonNetworkInfo::New(true, false, base::nullopt);
   resource_load_info->network_info = common_network_info.Clone();
   for (size_t i = 0; i + 1 < redirect_chain.size(); ++i) {
     resource_load_info->redirect_info_chain.push_back(
-        content::mojom::RedirectInfo::New(GURL(redirect_chain[i]),
-                                          common_network_info.Clone()));
+        blink::mojom::RedirectInfo::New(
+            url::Origin::Create(GURL(redirect_chain[i])),
+            common_network_info.Clone()));
   }
   return resource_load_info;
 }
@@ -168,7 +180,8 @@ std::ostream& operator<<(std::ostream& os, const RedirectData& data) {
 }
 
 std::ostream& operator<<(std::ostream& os, const RedirectStat& redirect) {
-  return os << "[" << redirect.url() << "," << redirect.number_of_hits() << ","
+  return os << "[" << redirect.url() << "," << redirect.url_scheme() << ","
+            << redirect.url_port() << "," << redirect.number_of_hits() << ","
             << redirect.number_of_misses() << ","
             << redirect.consecutive_misses() << "]";
 }
@@ -209,7 +222,8 @@ std::ostream& operator<<(std::ostream& os, const NavigationID& navigation_id) {
 
 std::ostream& operator<<(std::ostream& os, const PreconnectRequest& request) {
   return os << "[" << request.origin << "," << request.num_sockets << ","
-            << request.allow_credentials << "]";
+            << request.allow_credentials << ","
+            << request.network_isolation_key.ToDebugString() << "]";
 }
 
 std::ostream& operator<<(std::ostream& os,
@@ -237,7 +251,8 @@ bool operator==(const RedirectData& lhs, const RedirectData& rhs) {
 }
 
 bool operator==(const RedirectStat& lhs, const RedirectStat& rhs) {
-  return lhs.url() == rhs.url() &&
+  return lhs.url() == rhs.url() && lhs.url_scheme() == rhs.url_scheme() &&
+         lhs.url_port() == rhs.url_port() &&
          lhs.number_of_hits() == rhs.number_of_hits() &&
          lhs.number_of_misses() == rhs.number_of_misses() &&
          lhs.consecutive_misses() == rhs.consecutive_misses();
@@ -245,8 +260,8 @@ bool operator==(const RedirectStat& lhs, const RedirectStat& rhs) {
 
 bool operator==(const PageRequestSummary& lhs, const PageRequestSummary& rhs) {
   return lhs.main_frame_url == rhs.main_frame_url &&
-         lhs.initial_url == rhs.initial_url &&
-         lhs.origins == rhs.origins;
+         lhs.initial_url == rhs.initial_url && lhs.origins == rhs.origins &&
+         lhs.subresource_urls == rhs.subresource_urls;
 }
 
 bool operator==(const OriginRequestSummary& lhs,
@@ -281,7 +296,8 @@ bool operator==(const OriginStat& lhs, const OriginStat& rhs) {
 
 bool operator==(const PreconnectRequest& lhs, const PreconnectRequest& rhs) {
   return lhs.origin == rhs.origin && lhs.num_sockets == rhs.num_sockets &&
-         lhs.allow_credentials == rhs.allow_credentials;
+         lhs.allow_credentials == rhs.allow_credentials &&
+         lhs.network_isolation_key == rhs.network_isolation_key;
 }
 
 bool operator==(const PreconnectPrediction& lhs,
@@ -290,9 +306,16 @@ bool operator==(const PreconnectPrediction& lhs,
          lhs.requests == rhs.requests;
 }
 
+bool operator==(const OptimizationGuidePrediction& lhs,
+                const OptimizationGuidePrediction& rhs) {
+  return lhs.decision == rhs.decision &&
+         lhs.preconnect_prediction == rhs.preconnect_prediction &&
+         lhs.predicted_subresources == rhs.predicted_subresources;
+}
+
 }  // namespace predictors
 
-namespace content {
+namespace blink {
 namespace mojom {
 
 std::ostream& operator<<(std::ostream& os, const CommonNetworkInfo& info) {
@@ -301,9 +324,10 @@ std::ostream& operator<<(std::ostream& os, const CommonNetworkInfo& info) {
 }
 
 std::ostream& operator<<(std::ostream& os, const ResourceLoadInfo& info) {
-  return os << "[" << info.url.spec() << ","
-            << static_cast<int>(info.resource_type) << "," << info.mime_type
-            << "," << info.method << "," << *info.network_info << "]";
+  return os << "[" << info.original_url.spec() << ","
+            << static_cast<int>(info.request_destination) << ","
+            << info.mime_type << "," << info.method << "," << *info.network_info
+            << "]";
 }
 
 bool operator==(const CommonNetworkInfo& lhs, const CommonNetworkInfo& rhs) {
@@ -312,10 +336,11 @@ bool operator==(const CommonNetworkInfo& lhs, const CommonNetworkInfo& rhs) {
 }
 
 bool operator==(const ResourceLoadInfo& lhs, const ResourceLoadInfo& rhs) {
-  return lhs.url == rhs.url && lhs.resource_type == rhs.resource_type &&
+  return lhs.original_url == rhs.original_url &&
+         lhs.request_destination == rhs.request_destination &&
          lhs.mime_type == rhs.mime_type && lhs.method == rhs.method &&
          *lhs.network_info == *rhs.network_info;
 }
 
 }  // namespace mojom
-}  // namespace content
+}  // namespace blink

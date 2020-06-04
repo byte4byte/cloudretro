@@ -10,13 +10,14 @@
 #include <memory>
 #include <utility>
 
+#include "ash/public/cpp/ime_controller.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "chrome/browser/chromeos/input_method/mock_assistive_window_controller.h"
 #include "chrome/browser/chromeos/input_method/mock_candidate_window_controller.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_engine.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -26,7 +27,6 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "content/public/test/test_service_manager_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -53,8 +53,8 @@ const char kExtensionId2[] = "11111111111111111111111111111111";
 // Returns true if |descriptors| contain |target|.
 bool Contain(const InputMethodDescriptors& descriptors,
              const InputMethodDescriptor& target) {
-  for (size_t i = 0; i < descriptors.size(); ++i) {
-    if (descriptors[i].id() == target.id())
+  for (const auto& descriptor : descriptors) {
+    if (descriptor.id() == target.id())
       return true;
   }
   return false;
@@ -73,7 +73,7 @@ class TestObserver : public InputMethodManager::Observer,
         input_method_extension_removed_count_(0),
         input_method_menu_item_changed_count_(0),
         last_show_message_(false) {}
-  ~TestObserver() override {}
+  ~TestObserver() override = default;
 
   void InputMethodChanged(InputMethodManager* manager,
                           Profile* /* profile */,
@@ -113,7 +113,7 @@ class TestCandidateWindowObserver
         candidate_window_closed_count_(0) {
   }
 
-  ~TestCandidateWindowObserver() override {}
+  ~TestCandidateWindowObserver() override = default;
 
   void CandidateWindowOpened(InputMethodManager* manager) override {
     ++candidate_window_opened_count_;
@@ -135,8 +135,8 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
   InputMethodManagerImplTest()
       : delegate_(nullptr),
         candidate_window_controller_(nullptr),
-        keyboard_(nullptr) {
-  }
+        assistive_window_controller_(nullptr),
+        keyboard_(nullptr) {}
 
   ~InputMethodManagerImplTest() override = default;
 
@@ -147,6 +147,9 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     manager_.reset(new InputMethodManagerImpl(
         std::unique_ptr<InputMethodDelegate>(delegate_), false));
     manager_->GetInputMethodUtil()->UpdateHardwareLayoutCache();
+    assistive_window_controller_ = new MockAssistiveWindowController;
+    manager_->SetAssistiveWindowControllerForTesting(
+        assistive_window_controller_);
     candidate_window_controller_ = new MockCandidateWindowController;
     manager_->SetCandidateWindowControllerForTesting(
         candidate_window_controller_);
@@ -168,17 +171,18 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
   }
 
   void TearDown() override {
+    // Needs to destroyed before ash::Shell keyboard.
+    chrome_keyboard_controller_client_test_helper_.reset();
+
     BrowserWithTestWindowTest::TearDown();
 
     ui::ShutdownInputMethodForTesting();
 
     delegate_ = nullptr;
     candidate_window_controller_ = nullptr;
+    assistive_window_controller_ = nullptr;
     keyboard_ = nullptr;
     manager_.reset();
-
-    // Needs to destroyed after ash::Shell keyboard.
-    chrome_keyboard_controller_client_test_helper_.reset();
   }
 
   scoped_refptr<InputMethodManagerImpl::StateImpl> GetActiveIMEState() {
@@ -208,9 +212,9 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     manager_->SetState(state);
 
     std::vector<std::string> layouts;
-    layouts.push_back("us");
+    layouts.emplace_back("us");
     std::vector<std::string> languages;
-    languages.push_back("en-US");
+    languages.emplace_back("en-US");
 
     // Note, for production, these SetEngineHandler are called when
     // IMEEngineHandlerInterface is initialized via
@@ -229,92 +233,92 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     ComponentExtensionEngine ext_xkb_engine_us;
     ext_xkb_engine_us.engine_id = "xkb:us::eng";
     ext_xkb_engine_us.display_name = "xkb:us::eng";
-    ext_xkb_engine_us.language_codes.push_back("en-US");
-    ext_xkb_engine_us.layouts.push_back("us");
+    ext_xkb_engine_us.language_codes.emplace_back("en-US");
+    ext_xkb_engine_us.layouts.emplace_back("us");
     ext_xkb.engines.push_back(ext_xkb_engine_us);
 
     ComponentExtensionEngine ext_xkb_engine_intl;
     ext_xkb_engine_intl.engine_id = "xkb:us:intl:eng";
     ext_xkb_engine_intl.display_name = "xkb:us:intl:eng";
-    ext_xkb_engine_intl.language_codes.push_back("en-US");
-    ext_xkb_engine_intl.layouts.push_back("us(intl)");
+    ext_xkb_engine_intl.language_codes.emplace_back("en-US");
+    ext_xkb_engine_intl.layouts.emplace_back("us(intl)");
     ext_xkb.engines.push_back(ext_xkb_engine_intl);
 
     ComponentExtensionEngine ext_xkb_engine_altgr_intl;
     ext_xkb_engine_altgr_intl.engine_id = "xkb:us:altgr-intl:eng";
     ext_xkb_engine_altgr_intl.display_name = "xkb:us:altgr-intl:eng";
-    ext_xkb_engine_altgr_intl.language_codes.push_back("en-US");
-    ext_xkb_engine_altgr_intl.layouts.push_back("us(altgr-intl)");
+    ext_xkb_engine_altgr_intl.language_codes.emplace_back("en-US");
+    ext_xkb_engine_altgr_intl.layouts.emplace_back("us(altgr-intl)");
     ext_xkb.engines.push_back(ext_xkb_engine_altgr_intl);
 
     ComponentExtensionEngine ext_xkb_engine_dvorak;
     ext_xkb_engine_dvorak.engine_id = "xkb:us:dvorak:eng";
     ext_xkb_engine_dvorak.display_name = "xkb:us:dvorak:eng";
-    ext_xkb_engine_dvorak.language_codes.push_back("en-US");
-    ext_xkb_engine_dvorak.layouts.push_back("us(dvorak)");
+    ext_xkb_engine_dvorak.language_codes.emplace_back("en-US");
+    ext_xkb_engine_dvorak.layouts.emplace_back("us(dvorak)");
     ext_xkb.engines.push_back(ext_xkb_engine_dvorak);
 
     ComponentExtensionEngine ext_xkb_engine_dvp;
     ext_xkb_engine_dvp.engine_id = "xkb:us:dvp:eng";
     ext_xkb_engine_dvp.display_name = "xkb:us:dvp:eng";
-    ext_xkb_engine_dvp.language_codes.push_back("en-US");
-    ext_xkb_engine_dvp.layouts.push_back("us(dvp)");
+    ext_xkb_engine_dvp.language_codes.emplace_back("en-US");
+    ext_xkb_engine_dvp.layouts.emplace_back("us(dvp)");
     ext_xkb.engines.push_back(ext_xkb_engine_dvp);
 
     ComponentExtensionEngine ext_xkb_engine_colemak;
     ext_xkb_engine_colemak.engine_id = "xkb:us:colemak:eng";
     ext_xkb_engine_colemak.display_name = "xkb:us:colemak:eng";
-    ext_xkb_engine_colemak.language_codes.push_back("en-US");
-    ext_xkb_engine_colemak.layouts.push_back("us(colemak)");
+    ext_xkb_engine_colemak.language_codes.emplace_back("en-US");
+    ext_xkb_engine_colemak.layouts.emplace_back("us(colemak)");
     ext_xkb.engines.push_back(ext_xkb_engine_colemak);
 
     ComponentExtensionEngine ext_xkb_engine_workman;
     ext_xkb_engine_workman.engine_id = "xkb:us:workman:eng";
     ext_xkb_engine_workman.display_name = "xkb:us:workman:eng";
-    ext_xkb_engine_workman.language_codes.push_back("en-US");
-    ext_xkb_engine_workman.layouts.push_back("us(workman)");
+    ext_xkb_engine_workman.language_codes.emplace_back("en-US");
+    ext_xkb_engine_workman.layouts.emplace_back("us(workman)");
     ext_xkb.engines.push_back(ext_xkb_engine_workman);
 
     ComponentExtensionEngine ext_xkb_engine_workman_intl;
     ext_xkb_engine_workman_intl.engine_id = "xkb:us:workman-intl:eng";
     ext_xkb_engine_workman_intl.display_name = "xkb:us:workman-intl:eng";
-    ext_xkb_engine_workman_intl.language_codes.push_back("en-US");
-    ext_xkb_engine_workman_intl.layouts.push_back("us(workman-intl)");
+    ext_xkb_engine_workman_intl.language_codes.emplace_back("en-US");
+    ext_xkb_engine_workman_intl.layouts.emplace_back("us(workman-intl)");
     ext_xkb.engines.push_back(ext_xkb_engine_workman_intl);
 
     ComponentExtensionEngine ext_xkb_engine_fr;
     ext_xkb_engine_fr.engine_id = "xkb:fr::fra";
     ext_xkb_engine_fr.display_name = "xkb:fr::fra";
-    ext_xkb_engine_fr.language_codes.push_back("fr");
-    ext_xkb_engine_fr.layouts.push_back("fr");
+    ext_xkb_engine_fr.language_codes.emplace_back("fr");
+    ext_xkb_engine_fr.layouts.emplace_back("fr");
     ext_xkb.engines.push_back(ext_xkb_engine_fr);
 
     ComponentExtensionEngine ext_xkb_engine_se;
     ext_xkb_engine_se.engine_id = "xkb:se::swe";
     ext_xkb_engine_se.display_name = "xkb:se::swe";
-    ext_xkb_engine_se.language_codes.push_back("sv");
-    ext_xkb_engine_se.layouts.push_back("se");
+    ext_xkb_engine_se.language_codes.emplace_back("sv");
+    ext_xkb_engine_se.layouts.emplace_back("se");
     ext_xkb.engines.push_back(ext_xkb_engine_se);
 
     ComponentExtensionEngine ext_xkb_engine_jp;
     ext_xkb_engine_jp.engine_id = "xkb:jp::jpn";
     ext_xkb_engine_jp.display_name = "xkb:jp::jpn";
-    ext_xkb_engine_jp.language_codes.push_back("ja");
-    ext_xkb_engine_jp.layouts.push_back("jp");
+    ext_xkb_engine_jp.language_codes.emplace_back("ja");
+    ext_xkb_engine_jp.layouts.emplace_back("jp");
     ext_xkb.engines.push_back(ext_xkb_engine_jp);
 
     ComponentExtensionEngine ext_xkb_engine_ru;
     ext_xkb_engine_ru.engine_id = "xkb:ru::rus";
     ext_xkb_engine_ru.display_name = "xkb:ru::rus";
-    ext_xkb_engine_ru.language_codes.push_back("ru");
-    ext_xkb_engine_ru.layouts.push_back("ru");
+    ext_xkb_engine_ru.language_codes.emplace_back("ru");
+    ext_xkb_engine_ru.layouts.emplace_back("ru");
     ext_xkb.engines.push_back(ext_xkb_engine_ru);
 
     ComponentExtensionEngine ext_xkb_engine_hu;
     ext_xkb_engine_hu.engine_id = "xkb:hu::hun";
     ext_xkb_engine_hu.display_name = "xkb:hu::hun";
-    ext_xkb_engine_hu.language_codes.push_back("hu");
-    ext_xkb_engine_hu.layouts.push_back("hu");
+    ext_xkb_engine_hu.language_codes.emplace_back("hu");
+    ext_xkb_engine_hu.layouts.emplace_back("hu");
     ext_xkb.engines.push_back(ext_xkb_engine_hu);
 
     ime_list_.push_back(ext_xkb);
@@ -327,15 +331,15 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     ComponentExtensionEngine ext1_engine1;
     ext1_engine1.engine_id = "nacl_mozc_us";
     ext1_engine1.display_name = "ext1_engine_1_display_name";
-    ext1_engine1.language_codes.push_back("ja");
-    ext1_engine1.layouts.push_back("us");
+    ext1_engine1.language_codes.emplace_back("ja");
+    ext1_engine1.layouts.emplace_back("us");
     ext1.engines.push_back(ext1_engine1);
 
     ComponentExtensionEngine ext1_engine2;
     ext1_engine2.engine_id = "nacl_mozc_jp";
     ext1_engine2.display_name = "ext1_engine_1_display_name";
-    ext1_engine2.language_codes.push_back("ja");
-    ext1_engine2.layouts.push_back("jp");
+    ext1_engine2.language_codes.emplace_back("ja");
+    ext1_engine2.layouts.emplace_back("jp");
     ext1.engines.push_back(ext1_engine2);
 
     ime_list_.push_back(ext1);
@@ -348,26 +352,26 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     ComponentExtensionEngine ext2_engine1;
     ext2_engine1.engine_id = kExt2Engine1Id;
     ext2_engine1.display_name = "ext2_engine_1_display_name";
-    ext2_engine1.language_codes.push_back("en");
-    ext2_engine1.layouts.push_back("us");
+    ext2_engine1.language_codes.emplace_back("en");
+    ext2_engine1.layouts.emplace_back("us");
     ext2.engines.push_back(ext2_engine1);
 
     ComponentExtensionEngine ext2_engine2;
     ext2_engine2.engine_id = kExt2Engine2Id;
     ext2_engine2.display_name = "ext2_engine_2_display_name";
-    ext2_engine2.language_codes.push_back("en");
-    ext2_engine2.layouts.push_back("us(dvorak)");
+    ext2_engine2.language_codes.emplace_back("en");
+    ext2_engine2.layouts.emplace_back("us(dvorak)");
     ext2.engines.push_back(ext2_engine2);
 
     ime_list_.push_back(ext2);
   }
 
-  content::TestServiceManagerContext service_manager_context_;
   std::unique_ptr<ChromeKeyboardControllerClientTestHelper>
       chrome_keyboard_controller_client_test_helper_;
   std::unique_ptr<InputMethodManagerImpl> manager_;
   FakeInputMethodDelegate* delegate_;
   MockCandidateWindowController* candidate_window_controller_;
+  MockAssistiveWindowController* assistive_window_controller_;
   std::unique_ptr<MockInputMethodEngine> mock_engine_handler_;
   FakeImeKeyboard* keyboard_;
   MockComponentExtIMEManagerDelegate* mock_delegate_;
@@ -403,7 +407,7 @@ TEST_F(InputMethodManagerImplTest, TestObserver) {
   // For http://crbug.com/19655#c11 - (3). browser_state_monitor_unittest.cc is
   // also for the scenario.
   std::vector<std::string> keyboard_layouts;
-  keyboard_layouts.push_back("xkb:us::eng");
+  keyboard_layouts.emplace_back("xkb:us::eng");
 
   TestObserver observer;
   InitComponentExtension();
@@ -428,7 +432,7 @@ TEST_F(InputMethodManagerImplTest, TestObserver) {
 
   // The observer is always notified even when the same input method ID is
   // passed to ChangeInputMethod() more than twice.
-  // TODO(komatsu): Revisit if this is neccessary.
+  // TODO(komatsu): Revisit if this is necessary.
   EXPECT_EQ(3, observer.input_method_changed_count_);
 
   // If the same input method ID is passed, PropertyChanged() is not
@@ -698,7 +702,7 @@ TEST_F(InputMethodManagerImplTest, TestEnableImes) {
   manager_->SetUISessionState(InputMethodManager::STATE_BROWSER_SCREEN);
   std::vector<std::string> ids;
   ids.push_back(ImeIdFromEngineId(kExt2Engine1Id));
-  ids.push_back("mozc-dv");
+  ids.emplace_back("mozc-dv");
   EXPECT_TRUE(manager_->GetActiveIMEState()->ReplaceEnabledInputMethods(ids));
   EXPECT_EQ(1, observer.input_method_changed_count_);
   EXPECT_EQ(ImeIdFromEngineId(ids[0]),
@@ -713,8 +717,8 @@ TEST_F(InputMethodManagerImplTest, TestEnableUnknownIds) {
   manager_->AddObserver(&observer);
   manager_->SetUISessionState(InputMethodManager::STATE_BROWSER_SCREEN);
   std::vector<std::string> ids;
-  ids.push_back("xkb:tl::tlh");  // Klingon, which is not supported.
-  ids.push_back("unknown-super-cool-ime");
+  ids.emplace_back("xkb:tl::tlh");  // Klingon, which is not supported.
+  ids.emplace_back("unknown-super-cool-ime");
   EXPECT_FALSE(manager_->GetActiveIMEState()->ReplaceEnabledInputMethods(ids));
 
   // TODO(yusukes): Should we fall back to the hardware keyboard layout in this
@@ -1093,9 +1097,9 @@ TEST_F(InputMethodManagerImplTest, TestAddRemoveExtensionInputMethods) {
 
   // Add two Extension IMEs.
   std::vector<std::string> layouts;
-  layouts.push_back("us");
+  layouts.emplace_back("us");
   std::vector<std::string> languages;
-  languages.push_back("en-US");
+  languages.emplace_back("en-US");
 
   const std::string ext1_id =
       extension_ime_util::GetInputMethodID(kExtensionId1, "engine_id");
@@ -1181,9 +1185,9 @@ TEST_F(InputMethodManagerImplTest, TestAddExtensionInputThenLockScreen) {
 
   // Add an Extension IME.
   std::vector<std::string> layouts;
-  layouts.push_back("us(dvorak)");
+  layouts.emplace_back("us(dvorak)");
   std::vector<std::string> languages;
-  languages.push_back("en-US");
+  languages.emplace_back("en-US");
 
   const std::string ext_id =
       extension_ime_util::GetInputMethodID(kExtensionId1, "engine_id");
@@ -1288,12 +1292,12 @@ TEST_F(InputMethodManagerImplTest,
 
 TEST_F(InputMethodManagerImplTest, MigrateInputMethodTest) {
   std::vector<std::string> input_method_ids;
-  input_method_ids.push_back("xkb:us::eng");
-  input_method_ids.push_back("xkb:fr::fra");
+  input_method_ids.emplace_back("xkb:us::eng");
+  input_method_ids.emplace_back("xkb:fr::fra");
   input_method_ids.push_back(ImeIdFromEngineId("xkb:us::eng"));
-  input_method_ids.push_back("xkb:fr::fra");
+  input_method_ids.emplace_back("xkb:fr::fra");
   input_method_ids.push_back(ImeIdFromEngineId("xkb:us::eng"));
-  input_method_ids.push_back("_comp_ime_asdf_pinyin");
+  input_method_ids.emplace_back("_comp_ime_asdf_pinyin");
   input_method_ids.push_back(ImeIdFromEngineId(kPinyinImeId));
 
   manager_->MigrateInputMethods(&input_method_ids);
@@ -1308,20 +1312,23 @@ TEST_F(InputMethodManagerImplTest, MigrateInputMethodTest) {
 
 TEST_F(InputMethodManagerImplTest, OverrideKeyboardUrlRefWithKeyset) {
   InitComponentExtension();
+
   const GURL inputview_url(
       "chrome-extension://"
       "inputview.html#id=us.compact.qwerty&language=en-US&passwordLayout=us."
       "compact.qwerty&name=keyboard_us");
   GetActiveIMEState()->input_view_url = inputview_url;
-  EXPECT_EQ(inputview_url, GetActiveIMEState()->GetInputViewUrl());
+  EXPECT_THAT(GetActiveIMEState()->GetInputViewUrl().spec(),
+              ::testing::StartsWith(inputview_url.spec()));
 
   // Override the keyboard url ref with 'emoji'.
   const GURL overridden_url_emoji(
       "chrome-extension://"
       "inputview.html#id=us.compact.qwerty.emoji&language=en-US&passwordLayout="
       "us.compact.qwerty&name=keyboard_us");
-  manager_->OverrideKeyboardKeyset(mojom::ImeKeyset::kEmoji);
-  EXPECT_EQ(overridden_url_emoji, GetActiveIMEState()->GetInputViewUrl());
+  manager_->OverrideKeyboardKeyset(chromeos::input_method::ImeKeyset::kEmoji);
+  EXPECT_THAT(GetActiveIMEState()->GetInputViewUrl().spec(),
+              ::testing::StartsWith(overridden_url_emoji.spec()));
 
   // Override the keyboard url ref with 'hwt'.
   GetActiveIMEState()->input_view_url = inputview_url;
@@ -1329,8 +1336,10 @@ TEST_F(InputMethodManagerImplTest, OverrideKeyboardUrlRefWithKeyset) {
       "chrome-extension://"
       "inputview.html#id=us.compact.qwerty.hwt&language=en-US&passwordLayout="
       "us.compact.qwerty&name=keyboard_us");
-  manager_->OverrideKeyboardKeyset(mojom::ImeKeyset::kHandwriting);
-  EXPECT_EQ(overridden_url_hwt, GetActiveIMEState()->GetInputViewUrl());
+  manager_->OverrideKeyboardKeyset(
+      chromeos::input_method::ImeKeyset::kHandwriting);
+  EXPECT_THAT(GetActiveIMEState()->GetInputViewUrl().spec(),
+              ::testing::StartsWith(overridden_url_hwt.spec()));
 
   // Override the keyboard url ref with 'voice'.
   GetActiveIMEState()->input_view_url = inputview_url;
@@ -1338,8 +1347,9 @@ TEST_F(InputMethodManagerImplTest, OverrideKeyboardUrlRefWithKeyset) {
       "chrome-extension://"
       "inputview.html#id=us.compact.qwerty.voice&language=en-US"
       "&passwordLayout=us.compact.qwerty&name=keyboard_us");
-  manager_->OverrideKeyboardKeyset(mojom::ImeKeyset::kVoice);
-  EXPECT_EQ(overridden_url_voice, GetActiveIMEState()->GetInputViewUrl());
+  manager_->OverrideKeyboardKeyset(chromeos::input_method::ImeKeyset::kVoice);
+  EXPECT_THAT(GetActiveIMEState()->GetInputViewUrl().spec(),
+              ::testing::StartsWith(overridden_url_voice.spec()));
 }
 
 TEST_F(InputMethodManagerImplTest, OverrideDefaultKeyboardUrlRef) {
@@ -1349,7 +1359,7 @@ TEST_F(InputMethodManagerImplTest, OverrideDefaultKeyboardUrlRef) {
 
   EXPECT_EQ(default_url, GetActiveIMEState()->GetInputViewUrl());
 
-  manager_->OverrideKeyboardKeyset(mojom::ImeKeyset::kEmoji);
+  manager_->OverrideKeyboardKeyset(chromeos::input_method::ImeKeyset::kEmoji);
   EXPECT_EQ(default_url, GetActiveIMEState()->GetInputViewUrl());
 }
 
@@ -1465,9 +1475,9 @@ TEST_F(InputMethodManagerImplTest, SetLoginDefaultWithAllowedKeyboardLayouts) {
 // Verifies that the combination of InputMethodManagerImpl and
 // ImeControllerClient sends the correct data to ash.
 TEST_F(InputMethodManagerImplTest, IntegrationWithAsh) {
-  TestImeController ime_controller;  // Mojo interface to ash.
+  TestImeController ime_controller;
   ImeControllerClient ime_controller_client(manager_.get());
-  ime_controller_client.InitForTesting(ime_controller.CreateInterfacePtr());
+  ime_controller_client.Init();
 
   // Setup 3 IMEs.
   InitComponentExtension();
@@ -1477,7 +1487,6 @@ TEST_F(InputMethodManagerImplTest, IntegrationWithAsh) {
   ids.push_back(ImeIdFromEngineId(kExt2Engine2Id));
   ids.push_back(ImeIdFromEngineId(kExt2Engine1Id));
   manager_->GetActiveIMEState()->ReplaceEnabledInputMethods(ids);
-  ime_controller_client.FlushMojoForTesting();
 
   // Ash received the IMEs.
   ASSERT_EQ(3u, ime_controller.available_imes_.size());
@@ -1485,7 +1494,6 @@ TEST_F(InputMethodManagerImplTest, IntegrationWithAsh) {
 
   // Switch to Mozc.
   manager_->GetActiveIMEState()->SwitchToNextInputMethod();
-  ime_controller_client.FlushMojoForTesting();
   EXPECT_EQ(ImeIdFromEngineId(ids[1]), ime_controller.current_ime_id_);
 
   // Lock the screen.
@@ -1494,20 +1502,17 @@ TEST_F(InputMethodManagerImplTest, IntegrationWithAsh) {
   manager_->SetState(saved_ime_state->Clone());
   manager_->GetActiveIMEState()->EnableLockScreenLayouts();
   manager_->SetUISessionState(InputMethodManager::STATE_LOCK_SCREEN);
-  ime_controller_client.FlushMojoForTesting();
   EXPECT_EQ(2u, ime_controller.available_imes_.size());  // Qwerty+Dvorak.
   EXPECT_EQ(ImeIdFromEngineId("xkb:us:dvorak:eng"),
             ime_controller.current_ime_id_);
 
   manager_->GetActiveIMEState()->SwitchToNextInputMethod();
-  ime_controller_client.FlushMojoForTesting();
   EXPECT_EQ(ImeIdFromEngineId("xkb:us::eng"),  // The hardware keyboard layout.
             ime_controller.current_ime_id_);
 
   // Unlock screen. The original state, pinyin-dv, is restored.
   manager_->SetState(saved_ime_state);
   manager_->SetUISessionState(InputMethodManager::STATE_BROWSER_SCREEN);
-  ime_controller_client.FlushMojoForTesting();
   ASSERT_EQ(3u, ime_controller.available_imes_.size());  // Dvorak and 2 IMEs.
   EXPECT_EQ(ImeIdFromEngineId(ids[1]), ime_controller.current_ime_id_);
 }

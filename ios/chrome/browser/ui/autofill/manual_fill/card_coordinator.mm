@@ -10,17 +10,19 @@
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
 #import "components/autofill/ios/browser/personal_data_manager_observer_bridge.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/ui/autofill/manual_fill/card_list_delegate.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/card_mediator.h"
 #import "ios/chrome/browser/ui/autofill/manual_fill/card_view_controller.h"
-#import "ios/chrome/browser/ui/autofill/manual_fill/full_card_requester.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_card_mediator.h"
+#import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_full_card_requester.h"
 #import "ios/chrome/browser/ui/autofill/manual_fill/manual_fill_injection_handler.h"
+#import "ios/chrome/browser/ui/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/web/public/js_messaging/web_frame.h"
-#include "ios/web/public/js_messaging/web_frame_util.h"
-#import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -54,20 +56,22 @@
 // FallbackCoordinatorDelegate)
 @dynamic delegate;
 
-- (instancetype)
-initWithBaseViewController:(UIViewController*)viewController
-              browserState:(ios::ChromeBrowserState*)browserState
-              webStateList:(WebStateList*)webStateList
-          injectionHandler:(ManualFillInjectionHandler*)injectionHandler {
+- (instancetype)initWithBaseViewController:(UIViewController*)viewController
+                                   browser:(Browser*)browser
+                          injectionHandler:
+                              (ManualFillInjectionHandler*)injectionHandler {
   self = [super initWithBaseViewController:viewController
-                              browserState:browserState
+                                   browser:browser
                           injectionHandler:injectionHandler];
   if (self) {
     _cardViewController = [[CardViewController alloc] init];
     _cardViewController.contentInsetsAlwaysEqualToSafeArea = YES;
 
+    // Service must use regular browser state, even if the Browser has an
+    // OTR browser state.
     _personalDataManager =
-        autofill::PersonalDataManagerFactory::GetForBrowserState(browserState);
+        autofill::PersonalDataManagerFactory::GetForBrowserState(
+            super.browser->GetBrowserState()->GetOriginalChromeBrowserState());
     DCHECK(_personalDataManager);
 
     _personalDataManagerObserver.reset(
@@ -77,14 +81,19 @@ initWithBaseViewController:(UIViewController*)viewController
     std::vector<autofill::CreditCard*> cards =
         _personalDataManager->GetCreditCards();
 
-    _cardMediator = [[ManualFillCardMediator alloc] initWithCards:cards];
+    CommandDispatcher* dispatcher = super.browser->GetCommandDispatcher();
+    id<BrowserCoordinatorCommands> handler =
+        HandlerForProtocol(dispatcher, BrowserCoordinatorCommands);
+    _cardMediator = [[ManualFillCardMediator alloc] initWithCards:cards
+                                                          handler:handler];
     _cardMediator.navigationDelegate = self;
-    _cardMediator.contentDelegate = self.manualFillInjectionHandler;
+    _cardMediator.contentInjector = super.injectionHandler;
     _cardMediator.consumer = _cardViewController;
 
     _cardRequester = [[ManualFillFullCardRequester alloc]
-        initWithBrowserState:browserState
-                webStateList:webStateList
+        initWithBrowserState:super.browser->GetBrowserState()
+                                 ->GetOriginalChromeBrowserState()
+                webStateList:super.browser->GetWebStateList()
               resultDelegate:_cardMediator];
   }
   return self;

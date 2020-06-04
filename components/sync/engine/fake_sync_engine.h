@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
@@ -23,6 +24,8 @@ namespace syncer {
 // behavior.
 class FakeSyncEngine : public SyncEngine {
  public:
+  static constexpr char kTestBirthday[] = "1";
+
   FakeSyncEngine();
   ~FakeSyncEngine() override;
 
@@ -44,6 +47,10 @@ class FakeSyncEngine : public SyncEngine {
   void SetEncryptionPassphrase(const std::string& passphrase) override;
 
   void SetDecryptionPassphrase(const std::string& passphrase) override;
+
+  void AddTrustedVaultDecryptionKeys(
+      const std::vector<std::vector<uint8_t>>& keys,
+      base::OnceClosure done_cb) override;
 
   void StopSyncingForShutdown() override;
 
@@ -69,7 +76,7 @@ class FakeSyncEngine : public SyncEngine {
 
   UserShare* GetUserShare() const override;
 
-  SyncStatus GetDetailedStatus() override;
+  const SyncStatus& GetDetailedStatus() const override;
 
   void HasUnsyncedItemsForTest(
       base::OnceCallback<void(bool)> cb) const override;
@@ -86,14 +93,15 @@ class FakeSyncEngine : public SyncEngine {
 
   void OnCookieJarChanged(bool account_mismatch,
                           bool empty_jar,
-                          const base::Closure& callback) override;
+                          base::OnceClosure callback) override;
   void SetInvalidationsForSessionsEnabled(bool enabled) override;
-
+  void GetNigoriNodeForDebugging(AllNodesCallback callback) override;
   void set_fail_initial_download(bool should_fail);
 
  private:
   bool fail_initial_download_ = false;
   bool initialized_ = false;
+  const SyncStatus default_sync_status_;
 };
 
 }  // namespace syncer
